@@ -261,7 +261,7 @@
         const _runSecondary = () => {
             renderBirthdaySection().catch(e => console.warn('renderBirthdaySection failed:', e));
             renderRefillReminders().catch(e => console.warn('renderRefillReminders failed:', e));
-            renderPendingCpsIntakes().catch(e => console.warn('renderPendingCpsIntakes failed:', e));
+            (window.app.renderPendingCpsIntakes || (() => Promise.resolve()))().catch(e => console.warn('renderPendingCpsIntakes failed:', e));
             Promise.all([
                 dispatchBirthdayTriggers(),
                 dispatchProactiveEventInvites(),
@@ -293,7 +293,7 @@
         // Show Special Program progress popup (once per session, for participating agents)
         // Deferred so it doesn't block the calendar paint.
         setTimeout(() => {
-            checkSpecialProgramPopup().catch(e => console.warn('Special Program popup failed:', e));
+            (window.app.checkSpecialProgramPopup || (() => Promise.resolve()))().catch(e => console.warn('Special Program popup failed:', e));
         }, 100);
     };
 
@@ -4333,7 +4333,7 @@
             // Run upload and OCR in PARALLEL so the user only waits once.
             // Upload always happens silently. OCR result triggers the review
             // modal if any extractable fields differ from the existing prospect.
-            const uploadPromise = _uploadCpsFormFile(file, prospectId)
+            const uploadPromise = (window.app._uploadCpsFormFile || (() => Promise.resolve(null)))(file, prospectId)
                 .then(url => {
                     if (url) UI.toast.success('CPS form uploaded to prospect profile');
                     else UI.toast.error('Upload failed — please retry');
@@ -4353,7 +4353,7 @@
     // Used by the "Upload CPS" Actions-panel button.
     const _scanAndApplyToProspect = async (file, prospectId) => {
         // Show OCR-only spinner on top of any open view
-        _showCpsScanOverlay('Reading Form…', `
+        (window.app._showCpsScanOverlay || (() => {}))('Reading Form…', `
             <div style="text-align:center; padding:20px 0;">
                 <i class="fas fa-spinner fa-spin" style="font-size:36px; color:#7c3aed; margin-bottom:14px;"></i>
                 <p style="color:var(--gray-600); margin:0;">Reading the form, please wait…</p>
@@ -4395,9 +4395,9 @@
                 current,
                 rawText: res.raw_text || '',
             };
-            renderCpsScanReview();
+            (window.app.renderCpsScanReview || (() => {}))();
         } catch (err) {
-            _hideCpsScanOverlay();
+            (window.app._hideCpsScanOverlay || (() => {}))();
             console.warn('OCR failed for Upload CPS:', err);
             UI.toast.info('Photo saved. Could not auto-read fields — please edit manually.');
         }
@@ -4589,7 +4589,7 @@
                         bodyEl.style.display = 'block';
                         if (bodyEl.dataset.loaded === 'false') {
                             bodyEl.dataset.loaded = 'true';
-                            await switchProspectTab(tab, prospectId, null, bodyEl);
+                            await (window.app.switchProspectTab || (() => {}))(tab, prospectId, null, bodyEl);
                         }
                     }
                 }
@@ -4972,7 +4972,7 @@
                             bodyEl.style.display = 'block';
                             if (bodyEl.dataset.loaded === 'false') {
                                 bodyEl.dataset.loaded = 'true';
-                                await switchProspectTab(tab, prospectId, null, bodyEl);
+                                await (window.app.switchProspectTab || (() => {}))(tab, prospectId, null, bodyEl);
                             }
                         }
                     }
@@ -5080,7 +5080,7 @@
                         bodyEl.style.display = 'block';
                         if (bodyEl.dataset.loaded === 'false') {
                             bodyEl.dataset.loaded = 'true';
-                            await switchProspectTab(tab, prospectId, null, bodyEl);
+                            await (window.app.switchProspectTab || (() => {}))(tab, prospectId, null, bodyEl);
                         }
                     }
                 }

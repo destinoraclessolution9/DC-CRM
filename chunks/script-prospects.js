@@ -9683,7 +9683,6 @@ const viewInactiveProspects = (agentId) => {
         saveCustomer,
         openAddPurchaseModal,
         savePurchase,
-        found,
         _setDelivery,
         updatePurchaseDelivery,
         updateConversionDelivery,
@@ -9766,5 +9765,10 @@ const viewInactiveProspects = (agentId) => {
         viewInactiveProspects,
         EXPORT_WARN_THRESHOLD,
         EXPORT_HARD_LIMIT,
+        // Previously missing from export list (caught by audit 2026-06-06):
+        deleteNote,
+        showAgentProfile,
+        deactivateAgent,
+        openAddSolutionModal,
     });
 })();

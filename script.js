@@ -1132,10 +1132,22 @@ const appLogic = (() => {
     // Loaded eagerly at startup on mobile; lazily on desktop for mobile views.
     // initMobileApp(), renderMobileBottomNav() etc. registered via Object.assign.
 
-    // isMobile and applyMobileClass stay in script.js (called from init)
+    // isMobile and applyMobileClass stay in script.js — both called early in init
+    // before the mobile chunk has a chance to load on desktop.
     // ==================== PHASE 14: MOBILE FUNCTIONS ====================
 
     const isMobile = () => window.innerWidth <= 768;
+    // Applies/removes the is-mobile body class. Defined here so init() can call it
+    // immediately. The mobile chunk redefines it with the full version (which also
+    // calls closeMobileDrawer); this stub handles the common early-boot path.
+    const applyMobileClass = () => {
+        if (isMobile()) {
+            document.body.classList.add('is-mobile');
+        } else {
+            document.body.classList.remove('is-mobile');
+            (window.app.closeMobileDrawer || (() => {}))();
+        }
+    };
     Object.assign(window._crmUtils, { isMobile });
 
 
@@ -1334,14 +1346,14 @@ const appLogic = (() => {
 
         // Map Level 1-14 to visible nav IDs (suffix after 'nav-')
         // Order in array = display order in nav (first item leftmost / top).
-        const _l12 = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'documents', 'settings', 'fude', 'milestones'];
+        const _l12 = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'documents', 'knowledge', 'settings', 'fude', 'milestones'];
         const levelPermissions = {
-            1: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'purchases_history', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'noticeboard', 'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser', 'stock-take', 'boss-report', 'org-chart'],
-            2: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'import', 'integrations', 'settings', 'fude', 'milestones', 'noticeboard', 'custom_fields', 'org-chart'],
-            3: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'settings', 'fude'],
-            4: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'settings', 'fude'],
+            1: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'purchases_history', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'knowledge', 'import', 'integrations', 'settings', 'fude', 'milestones', 'noticeboard', 'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser', 'stock-take', 'boss-report', 'org-chart'],
+            2: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'knowledge', 'import', 'integrations', 'settings', 'fude', 'milestones', 'noticeboard', 'custom_fields', 'org-chart'],
+            3: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'knowledge', 'settings', 'fude'],
+            4: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'knowledge', 'settings', 'fude'],
             5: _l12, 6: _l12, 7: _l12, 8: _l12, 9: _l12, 10: _l12,
-            11: ['calendar', 'prospects', 'referrals', 'promotions', 'cases', 'settings', 'fude', 'milestones'],
+            11: ['calendar', 'prospects', 'referrals', 'promotions', 'cases', 'knowledge', 'settings', 'fude', 'milestones'],
             12: ['noticeboard', 'fude', 'milestones', 'prospects', 'referrals'],          // 传福大使
             13: ['noticeboard', 'fude', 'milestones', 'prospects'],                       // 改命客户
             14: ['noticeboard', 'fude', 'milestones', 'prospects'],                       // 准传福大使
@@ -1360,7 +1372,7 @@ const appLogic = (() => {
         // List of all nav item suffixes
         const allNavIds = [
             'calendar', 'pipeline', 'protection', 'agents', 'prospects', 'referrals',
-            'cases', 'documents', 'import', 'promotions', 'marketing-automation', 'marketing-lists',
+            'cases', 'documents', 'knowledge', 'import', 'promotions', 'marketing-automation', 'marketing-lists',
             'performance', 'reports', 'risk', 'admin',
             'integrations', 'settings', 'milestones', 'fude', 'noticeboard',
             'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser',
@@ -3069,6 +3081,10 @@ function _wireLoginBtn() {
     window._appState = {
         // ── Auth / user ──────────────────────────────────────────────────
         get cu()  { return _currentUser; },
+        // Setter for test injection (ci/browser-test.js) and future admin impersonation.
+        // Production auth still goes through Auth.login() → the login handler sets
+        // _currentUser directly; this setter is an alternate path.
+        set cu(v) { _currentUser = v; },
         get ial() { return !!(_currentUser && (isSystemAdmin(_currentUser) || isMarketingManager(_currentUser))); },
 
         // ── Navigation ───────────────────────────────────────────────────
@@ -3177,6 +3193,404 @@ function _wireLoginBtn() {
     // ========== LEVEL 13/14: 福德 VIEW + STORY + REWARD CRUD ==========
     // [CHUNK: fude] ~3217 lines extracted to chunks/script-fude.js
     const showFudeView = async (vp) => (window.app.showFudeView || (() => {}))(vp);
+
+    // Placeholder for unimplemented features — shows a "coming soon" toast.
+    // Referenced by buttons that haven't been wired up yet (app.todo('Feature Name')).
+    const todo = (name) => UI.toast.warning(`${name || 'This feature'} is coming soon.`);
+
+    // ── Stub forwarding functions for chunk-implemented features ─────────────
+    // These must be defined in the IIFE scope so `return { showRoadmap, ... }` doesn't
+    // throw ReferenceError on load. The fude / referrals / prospects chunks override
+    // window.app with their real implementations via Object.assign after loading.
+    const showRoadmap             = (...a) => (window.app.showRoadmap             || todo.bind(null, 'Roadmap'))(...a);
+    const exportRelationshipTree  = (...a) => (window.app.exportRelationshipTree  || todo.bind(null, 'Export Tree'))(...a);
+    const changeLeaderboardPeriod = (...a) => (window.app.changeLeaderboardPeriod || todo.bind(null, 'Leaderboard'))(...a);
+    const uploadProspectDocument  = (...a) => (window.app.uploadProspectDocument  || todo.bind(null, 'Upload Doc'))(...a);
+
+
+
+
+
+    // ── Auto-generated forwarding stubs (ci/patch-stubs.js, 2026-06-06) ─────────
+    // Every name in the return statement must be defined in the IIFE scope.
+    // Pattern: async so the stub always returns a Promise (safe for .catch() chains).
+    // Identity check prevents infinite recursion: after Object.assign, window.app.fn
+    // IS this stub. Once a chunk overrides it, window.app.fn !== stub → real fn runs.
+    const handleProspectDrag = async (...a) => { const _r = window.app.handleProspectDrag; if (_r && _r !== handleProspectDrag) return _r(...a); };
+    const handleStageDrop = async (...a) => { const _r = window.app.handleStageDrop; if (_r && _r !== handleStageDrop) return _r(...a); };
+    const closeDealWon = async (...a) => { const _r = window.app.closeDealWon; if (_r && _r !== closeDealWon) return _r(...a); };
+    const closeDealLost = async (...a) => { const _r = window.app.closeDealLost; if (_r && _r !== closeDealLost) return _r(...a); };
+    const calculateDealValue = async (...a) => { const _r = window.app.calculateDealValue; if (_r && _r !== calculateDealValue) return _r(...a); };
+    const showProspectsView = async (...a) => { const _r = window.app.showProspectsView; if (_r && _r !== showProspectsView) return _r(...a); };
+    const showProspectsViewSmart = async (...a) => { const _r = window.app.showProspectsViewSmart; if (_r && _r !== showProspectsViewSmart) return _r(...a); };
+    const zoomCpsPhoto = async (...a) => { const _r = window.app.zoomCpsPhoto; if (_r && _r !== zoomCpsPhoto) return _r(...a); };
+    const openProspectModal = async (...a) => { const _r = window.app.openProspectModal; if (_r && _r !== openProspectModal) return _r(...a); };
+    const editProspect = async (...a) => { const _r = window.app.editProspect; if (_r && _r !== editProspect) return _r(...a); };
+    const downloadProspectVCard = async (...a) => { const _r = window.app.downloadProspectVCard; if (_r && _r !== downloadProspectVCard) return _r(...a); };
+    const saveProspect = async (...a) => { const _r = window.app.saveProspect; if (_r && _r !== saveProspect) return _r(...a); };
+    const openProspectGradePicker = async (...a) => { const _r = window.app.openProspectGradePicker; if (_r && _r !== openProspectGradePicker) return _r(...a); };
+    const setProspectGrade = async (...a) => { const _r = window.app.setProspectGrade; if (_r && _r !== setProspectGrade) return _r(...a); };
+    const filterProspects = async (...a) => { const _r = window.app.filterProspects; if (_r && _r !== filterProspects) return _r(...a); };
+    const prospectPageNav = async (...a) => { const _r = window.app.prospectPageNav; if (_r && _r !== prospectPageNav) return _r(...a); };
+    const customerPageNav = async (...a) => { const _r = window.app.customerPageNav; if (_r && _r !== customerPageNav) return _r(...a); };
+    const exportData = async (...a) => { const _r = window.app.exportData; if (_r && _r !== exportData) return _r(...a); };
+    const sortProspects = async (...a) => { const _r = window.app.sortProspects; if (_r && _r !== sortProspects) return _r(...a); };
+    const sortProspectsBySelect = async (...a) => { const _r = window.app.sortProspectsBySelect; if (_r && _r !== sortProspectsBySelect) return _r(...a); };
+    const toggleProspectView = async (...a) => { const _r = window.app.toggleProspectView; if (_r && _r !== toggleProspectView) return _r(...a); };
+    const toggleProspectSelect = async (...a) => { const _r = window.app.toggleProspectSelect; if (_r && _r !== toggleProspectSelect) return _r(...a); };
+    const toggleProspectSelectAll = async (...a) => { const _r = window.app.toggleProspectSelectAll; if (_r && _r !== toggleProspectSelectAll) return _r(...a); };
+    const clearProspectSelection = async (...a) => { const _r = window.app.clearProspectSelection; if (_r && _r !== clearProspectSelection) return _r(...a); };
+    const updateProspectBulkBar = async (...a) => { const _r = window.app.updateProspectBulkBar; if (_r && _r !== updateProspectBulkBar) return _r(...a); };
+    const bulkDeleteProspects = async (...a) => { const _r = window.app.bulkDeleteProspects; if (_r && _r !== bulkDeleteProspects) return _r(...a); };
+    const bulkReassignProspects = async (...a) => { const _r = window.app.bulkReassignProspects; if (_r && _r !== bulkReassignProspects) return _r(...a); };
+    const confirmBulkReassign = async (...a) => { const _r = window.app.confirmBulkReassign; if (_r && _r !== confirmBulkReassign) return _r(...a); };
+    const toggleProspectFilters = async (...a) => { const _r = window.app.toggleProspectFilters; if (_r && _r !== toggleProspectFilters) return _r(...a); };
+    const updateProspectFilterBadge = async (...a) => { const _r = window.app.updateProspectFilterBadge; if (_r && _r !== updateProspectFilterBadge) return _r(...a); };
+    const switchProspectTab = async (...a) => { const _r = window.app.switchProspectTab; if (_r && _r !== switchProspectTab) return _r(...a); };
+    const toggleAccordion = async (...a) => { const _r = window.app.toggleAccordion; if (_r && _r !== toggleAccordion) return _r(...a); };
+    const toggleCustomerAccordion = async (...a) => { const _r = window.app.toggleCustomerAccordion; if (_r && _r !== toggleCustomerAccordion) return _r(...a); };
+    const switchCustomerProfileTab = async (...a) => { const _r = window.app.switchCustomerProfileTab; if (_r && _r !== switchCustomerProfileTab) return _r(...a); };
+    const addNote = async (...a) => { const _r = window.app.addNote; if (_r && _r !== addNote) return _r(...a); };
+    const deleteNote = async (...a) => { const _r = window.app.deleteNote; if (_r && _r !== deleteNote) return _r(...a); };
+    const attachActivityPhoto = async (...a) => { const _r = window.app.attachActivityPhoto; if (_r && _r !== attachActivityPhoto) return _r(...a); };
+    const viewActivityPhotos = async (...a) => { const _r = window.app.viewActivityPhotos; if (_r && _r !== viewActivityPhotos) return _r(...a); };
+    const saveActivityPhoto = async (...a) => { const _r = window.app.saveActivityPhoto; if (_r && _r !== saveActivityPhoto) return _r(...a); };
+    const removeActivityPhoto = async (...a) => { const _r = window.app.removeActivityPhoto; if (_r && _r !== removeActivityPhoto) return _r(...a); };
+    const attachAppraisalForm = async (...a) => { const _r = window.app.attachAppraisalForm; if (_r && _r !== attachAppraisalForm) return _r(...a); };
+    const saveAppraisalForm = async (...a) => { const _r = window.app.saveAppraisalForm; if (_r && _r !== saveAppraisalForm) return _r(...a); };
+    const removeAppraisalForm = async (...a) => { const _r = window.app.removeAppraisalForm; if (_r && _r !== removeAppraisalForm) return _r(...a); };
+    const uploadAPUForm = async (...a) => { const _r = window.app.uploadAPUForm; if (_r && _r !== uploadAPUForm) return _r(...a); };
+    const saveAPUForm = async (...a) => { const _r = window.app.saveAPUForm; if (_r && _r !== saveAPUForm) return _r(...a); };
+    const removeAPUForm = async (...a) => { const _r = window.app.removeAPUForm; if (_r && _r !== removeAPUForm) return _r(...a); };
+    const recordSalesClosure = async (...a) => { const _r = window.app.recordSalesClosure; if (_r && _r !== recordSalesClosure) return _r(...a); };
+    const toggleNextAction = async (...a) => { const _r = window.app.toggleNextAction; if (_r && _r !== toggleNextAction) return _r(...a); };
+    const toggleNextActionItem = async (...a) => { const _r = window.app.toggleNextActionItem; if (_r && _r !== toggleNextActionItem) return _r(...a); };
+    const saveClosingRecord = async (...a) => { const _r = window.app.saveClosingRecord; if (_r && _r !== saveClosingRecord) return _r(...a); };
+    const submitClosingRecord = async (...a) => { const _r = window.app.submitClosingRecord; if (_r && _r !== submitClosingRecord) return _r(...a); };
+    const addPrePurchaseRow = async (...a) => { const _r = window.app.addPrePurchaseRow; if (_r && _r !== addPrePurchaseRow) return _r(...a); };
+    const addPrePurchaseAttachment = async (...a) => { const _r = window.app.addPrePurchaseAttachment; if (_r && _r !== addPrePurchaseAttachment) return _r(...a); };
+    const deletePrePurchaseRecord = async (...a) => { const _r = window.app.deletePrePurchaseRecord; if (_r && _r !== deletePrePurchaseRecord) return _r(...a); };
+    const addProductPurchaseRow = async (...a) => { const _r = window.app.addProductPurchaseRow; if (_r && _r !== addProductPurchaseRow) return _r(...a); };
+    const addProductPurchaseAttachment = async (...a) => { const _r = window.app.addProductPurchaseAttachment; if (_r && _r !== addProductPurchaseAttachment) return _r(...a); };
+    const deleteProductPurchaseRecord = async (...a) => { const _r = window.app.deleteProductPurchaseRecord; if (_r && _r !== deleteProductPurchaseRecord) return _r(...a); };
+    const openFengShuiAuditModal = async (...a) => { const _r = window.app.openFengShuiAuditModal; if (_r && _r !== openFengShuiAuditModal) return _r(...a); };
+    const saveFengShuiAudit = async (...a) => { const _r = window.app.saveFengShuiAudit; if (_r && _r !== saveFengShuiAudit) return _r(...a); };
+    const deleteFengShuiAudit = async (...a) => { const _r = window.app.deleteFengShuiAudit; if (_r && _r !== deleteFengShuiAudit) return _r(...a); };
+    const uploadFengShuiFile = async (...a) => { const _r = window.app.uploadFengShuiFile; if (_r && _r !== uploadFengShuiFile) return _r(...a); };
+    const removeFengShuiFile = async (...a) => { const _r = window.app.removeFengShuiFile; if (_r && _r !== removeFengShuiFile) return _r(...a); };
+    const uploadFengShuiPhotos = async (...a) => { const _r = window.app.uploadFengShuiPhotos; if (_r && _r !== uploadFengShuiPhotos) return _r(...a); };
+    const removeFengShuiPhoto = async (...a) => { const _r = window.app.removeFengShuiPhoto; if (_r && _r !== removeFengShuiPhoto) return _r(...a); };
+    const updateFengShuiPhotoRemark = async (...a) => { const _r = window.app.updateFengShuiPhotoRemark; if (_r && _r !== updateFengShuiPhotoRemark) return _r(...a); };
+    const openFengShuiPhotosModal = async (...a) => { const _r = window.app.openFengShuiPhotosModal; if (_r && _r !== openFengShuiPhotosModal) return _r(...a); };
+    const openFengShuiSitePhotosModal = async (...a) => { const _r = window.app.openFengShuiSitePhotosModal; if (_r && _r !== openFengShuiSitePhotosModal) return _r(...a); };
+    const addFengShuiSiteReview = async (...a) => { const _r = window.app.addFengShuiSiteReview; if (_r && _r !== addFengShuiSiteReview) return _r(...a); };
+    const updateFengShuiSiteReviewField = async (...a) => { const _r = window.app.updateFengShuiSiteReviewField; if (_r && _r !== updateFengShuiSiteReviewField) return _r(...a); };
+    const uploadFengShuiSitePhotos = async (...a) => { const _r = window.app.uploadFengShuiSitePhotos; if (_r && _r !== uploadFengShuiSitePhotos) return _r(...a); };
+    const removeFengShuiSitePhoto = async (...a) => { const _r = window.app.removeFengShuiSitePhoto; if (_r && _r !== removeFengShuiSitePhoto) return _r(...a); };
+    const removeFengShuiSiteReview = async (...a) => { const _r = window.app.removeFengShuiSiteReview; if (_r && _r !== removeFengShuiSiteReview) return _r(...a); };
+    const approveClosingRecord = async (...a) => { const _r = window.app.approveClosingRecord; if (_r && _r !== approveClosingRecord) return _r(...a); };
+    const archiveAndNewClosingRecord = async (...a) => { const _r = window.app.archiveAndNewClosingRecord; if (_r && _r !== archiveAndNewClosingRecord) return _r(...a); };
+    const saveClosingHistoryEntry = async (...a) => { const _r = window.app.saveClosingHistoryEntry; if (_r && _r !== saveClosingHistoryEntry) return _r(...a); };
+    const uploadHistoryInvoice = async (...a) => { const _r = window.app.uploadHistoryInvoice; if (_r && _r !== uploadHistoryInvoice) return _r(...a); };
+    const saveClosingDeliveryStatus = async (...a) => { const _r = window.app.saveClosingDeliveryStatus; if (_r && _r !== saveClosingDeliveryStatus) return _r(...a); };
+    const rejectClosingRecord = async (...a) => { const _r = window.app.rejectClosingRecord; if (_r && _r !== rejectClosingRecord) return _r(...a); };
+    const savePurchasesHistoryRow = async (...a) => { const _r = window.app.savePurchasesHistoryRow; if (_r && _r !== savePurchasesHistoryRow) return _r(...a); };
+    const phSetFilter = async (...a) => { const _r = window.app.phSetFilter; if (_r && _r !== phSetFilter) return _r(...a); };
+    const phSetPage = async (...a) => { const _r = window.app.phSetPage; if (_r && _r !== phSetPage) return _r(...a); };
+    const refreshPurchasesHistory = async (...a) => { const _r = window.app.refreshPurchasesHistory; if (_r && _r !== refreshPurchasesHistory) return _r(...a); };
+    const extendProtection = async (...a) => { const _r = window.app.extendProtection; if (_r && _r !== extendProtection) return _r(...a); };
+    const transferProspect = async (...a) => { const _r = window.app.transferProspect; if (_r && _r !== transferProspect) return _r(...a); };
+    const reassignProspect = async (...a) => { const _r = window.app.reassignProspect; if (_r && _r !== reassignProspect) return _r(...a); };
+    const quickReassign = async (...a) => { const _r = window.app.quickReassign; if (_r && _r !== quickReassign) return _r(...a); };
+    const openReviveProspectModal = async (...a) => { const _r = window.app.openReviveProspectModal; if (_r && _r !== openReviveProspectModal) return _r(...a); };
+    const saveReviveProspect = async (...a) => { const _r = window.app.saveReviveProspect; if (_r && _r !== saveReviveProspect) return _r(...a); };
+    const convertToCustomer = async (...a) => { const _r = window.app.convertToCustomer; if (_r && _r !== convertToCustomer) return _r(...a); };
+    const confirmConvertToCustomer = async (...a) => { const _r = window.app.confirmConvertToCustomer; if (_r && _r !== confirmConvertToCustomer) return _r(...a); };
+    const requestProspectConversion = async (...a) => { const _r = window.app.requestProspectConversion; if (_r && _r !== requestProspectConversion) return _r(...a); };
+    const showConversionApprovalModal = async (...a) => { const _r = window.app.showConversionApprovalModal; if (_r && _r !== showConversionApprovalModal) return _r(...a); };
+    const approveProspectConversion = async (...a) => { const _r = window.app.approveProspectConversion; if (_r && _r !== approveProspectConversion) return _r(...a); };
+    const rejectProspectConversion = async (...a) => { const _r = window.app.rejectProspectConversion; if (_r && _r !== rejectProspectConversion) return _r(...a); };
+    const renderApprovalQueue = async (...a) => { const _r = window.app.renderApprovalQueue; if (_r && _r !== renderApprovalQueue) return _r(...a); };
+    const showApprovalDetail = async (...a) => { const _r = window.app.showApprovalDetail; if (_r && _r !== showApprovalDetail) return _r(...a); };
+    const approveQueueEntry = async (...a) => { const _r = window.app.approveQueueEntry; if (_r && _r !== approveQueueEntry) return _r(...a); };
+    const rejectQueueEntry = async (...a) => { const _r = window.app.rejectQueueEntry; if (_r && _r !== rejectQueueEntry) return _r(...a); };
+    const confirmRejectQueueEntry = async (...a) => { const _r = window.app.confirmRejectQueueEntry; if (_r && _r !== confirmRejectQueueEntry) return _r(...a); };
+    const deleteProspect = async (...a) => { const _r = window.app.deleteProspect; if (_r && _r !== deleteProspect) return _r(...a); };
+    const confirmDeleteProspect = async (...a) => { const _r = window.app.confirmDeleteProspect; if (_r && _r !== confirmDeleteProspect) return _r(...a); };
+    const renderProspectsTable = async (...a) => { const _r = window.app.renderProspectsTable; if (_r && _r !== renderProspectsTable) return _r(...a); };
+    const switchCustomerTab = async (...a) => { const _r = window.app.switchCustomerTab; if (_r && _r !== switchCustomerTab) return _r(...a); };
+    const showCustomersView = async (...a) => { const _r = window.app.showCustomersView; if (_r && _r !== showCustomersView) return _r(...a); };
+    const renderCustomersTable = async (...a) => { const _r = window.app.renderCustomersTable; if (_r && _r !== renderCustomersTable) return _r(...a); };
+    const openAddCustomerModal = async (...a) => { const _r = window.app.openAddCustomerModal; if (_r && _r !== openAddCustomerModal) return _r(...a); };
+    const saveCustomer = async (...a) => { const _r = window.app.saveCustomer; if (_r && _r !== saveCustomer) return _r(...a); };
+    const filterCustomers = async (...a) => { const _r = window.app.filterCustomers; if (_r && _r !== filterCustomers) return _r(...a); };
+    const renderBasicBankTab = async (...a) => { const _r = window.app.renderBasicBankTab; if (_r && _r !== renderBasicBankTab) return _r(...a); };
+    const renderPlatformIdsTab = async (...a) => { const _r = window.app.renderPlatformIdsTab; if (_r && _r !== renderPlatformIdsTab) return _r(...a); };
+    const renderPurchaseHistoryTab = async (...a) => { const _r = window.app.renderPurchaseHistoryTab; if (_r && _r !== renderPurchaseHistoryTab) return _r(...a); };
+    const renderReferralsTab = async (...a) => { const _r = window.app.renderReferralsTab; if (_r && _r !== renderReferralsTab) return _r(...a); };
+    const openCustomerReferralModal = async (...a) => { const _r = window.app.openCustomerReferralModal; if (_r && _r !== openCustomerReferralModal) return _r(...a); };
+    const saveCustomerReferral = async (...a) => { const _r = window.app.saveCustomerReferral; if (_r && _r !== saveCustomerReferral) return _r(...a); };
+    const viewReferralDetail = async (...a) => { const _r = window.app.viewReferralDetail; if (_r && _r !== viewReferralDetail) return _r(...a); };
+    const editReferral = async (...a) => { const _r = window.app.editReferral; if (_r && _r !== editReferral) return _r(...a); };
+    const saveEditReferral = async (...a) => { const _r = window.app.saveEditReferral; if (_r && _r !== saveEditReferral) return _r(...a); };
+    const openEditPlatformIdsModal = async (...a) => { const _r = window.app.openEditPlatformIdsModal; if (_r && _r !== openEditPlatformIdsModal) return _r(...a); };
+    const savePlatformIds = async (...a) => { const _r = window.app.savePlatformIds; if (_r && _r !== savePlatformIds) return _r(...a); };
+    const uploadPaymentProof = async (...a) => { const _r = window.app.uploadPaymentProof; if (_r && _r !== uploadPaymentProof) return _r(...a); };
+    const savePaymentProof = async (...a) => { const _r = window.app.savePaymentProof; if (_r && _r !== savePaymentProof) return _r(...a); };
+    const renderEventHistory = async (...a) => { const _r = window.app.renderEventHistory; if (_r && _r !== renderEventHistory) return _r(...a); };
+    const renderAgentEligibility = async (...a) => { const _r = window.app.renderAgentEligibility; if (_r && _r !== renderAgentEligibility) return _r(...a); };
+    const openAddPurchaseModal = async (...a) => { const _r = window.app.openAddPurchaseModal; if (_r && _r !== openAddPurchaseModal) return _r(...a); };
+    const savePurchase = async (...a) => { const _r = window.app.savePurchase; if (_r && _r !== savePurchase) return _r(...a); };
+    const updatePurchaseDelivery = async (...a) => { const _r = window.app.updatePurchaseDelivery; if (_r && _r !== updatePurchaseDelivery) return _r(...a); };
+    const updateConversionDelivery = async (...a) => { const _r = window.app.updateConversionDelivery; if (_r && _r !== updateConversionDelivery) return _r(...a); };
+    const _setDelivery = async (...a) => { const _r = window.app._setDelivery; if (_r && _r !== _setDelivery) return _r(...a); };
+    const copyToClipboard = async (...a) => { const _r = window.app.copyToClipboard; if (_r && _r !== copyToClipboard) return _r(...a); };
+    const openUploadRedemptionImageModal = async (...a) => { const _r = window.app.openUploadRedemptionImageModal; if (_r && _r !== openUploadRedemptionImageModal) return _r(...a); };
+    const saveRedemptionImage = async (...a) => { const _r = window.app.saveRedemptionImage; if (_r && _r !== saveRedemptionImage) return _r(...a); };
+    const openUploadDocumentModal = async (...a) => { const _r = window.app.openUploadDocumentModal; if (_r && _r !== openUploadDocumentModal) return _r(...a); };
+    const saveDocument = async (...a) => { const _r = window.app.saveDocument; if (_r && _r !== saveDocument) return _r(...a); };
+    const openRecruitModal = async (...a) => { const _r = window.app.openRecruitModal; if (_r && _r !== openRecruitModal) return _r(...a); };
+    const submitRecruitmentApproval = async (...a) => { const _r = window.app.submitRecruitmentApproval; if (_r && _r !== submitRecruitmentApproval) return _r(...a); };
+    const switchProfileTab = async (...a) => { const _r = window.app.switchProfileTab; if (_r && _r !== switchProfileTab) return _r(...a); };
+    const renderAgentsTable = async (...a) => { const _r = window.app.renderAgentsTable; if (_r && _r !== renderAgentsTable) return _r(...a); };
+    const showAgentProfile = async (...a) => { const _r = window.app.showAgentProfile; if (_r && _r !== showAgentProfile) return _r(...a); };
+    const openAddAgentModal = async (...a) => { const _r = window.app.openAddAgentModal; if (_r && _r !== openAddAgentModal) return _r(...a); };
+    const openEditAgentModal = async (...a) => { const _r = window.app.openEditAgentModal; if (_r && _r !== openEditAgentModal) return _r(...a); };
+    const saveAgent = async (...a) => { const _r = window.app.saveAgent; if (_r && _r !== saveAgent) return _r(...a); };
+    const openAssignUplineModal = async (...a) => { const _r = window.app.openAssignUplineModal; if (_r && _r !== openAssignUplineModal) return _r(...a); };
+    const saveUplineAssignment = async (...a) => { const _r = window.app.saveUplineAssignment; if (_r && _r !== saveUplineAssignment) return _r(...a); };
+    const generatePassword = async (...a) => { const _r = window.app.generatePassword; if (_r && _r !== generatePassword) return _r(...a); };
+    const submitForcePasswordChange = async (...a) => { const _r = window.app.submitForcePasswordChange; if (_r && _r !== submitForcePasswordChange) return _r(...a); };
+    const selfChangePassword = async (...a) => { const _r = window.app.selfChangePassword; if (_r && _r !== selfChangePassword) return _r(...a); };
+    const saveSelfPreferredName = async (...a) => { const _r = window.app.saveSelfPreferredName; if (_r && _r !== saveSelfPreferredName) return _r(...a); };
+    const showSettingsView = async (...a) => { const _r = window.app.showSettingsView; if (_r && _r !== showSettingsView) return _r(...a); };
+    const showPhoneDupesModal = async (...a) => { const _r = window.app.showPhoneDupesModal; if (_r && _r !== showPhoneDupesModal) return _r(...a); };
+    const refreshPhoneDupes = async (...a) => { const _r = window.app.refreshPhoneDupes; if (_r && _r !== refreshPhoneDupes) return _r(...a); };
+    const dedupeEditPhone = async (...a) => { const _r = window.app.dedupeEditPhone; if (_r && _r !== dedupeEditPhone) return _r(...a); };
+    const dedupeClearPhone = async (...a) => { const _r = window.app.dedupeClearPhone; if (_r && _r !== dedupeClearPhone) return _r(...a); };
+    const dedupeClearEmail = async (...a) => { const _r = window.app.dedupeClearEmail; if (_r && _r !== dedupeClearEmail) return _r(...a); };
+    const dedupeDeleteProspect = async (...a) => { const _r = window.app.dedupeDeleteProspect; if (_r && _r !== dedupeDeleteProspect) return _r(...a); };
+    const verifyAndPreparePhoneConstraint = async (...a) => { const _r = window.app.verifyAndPreparePhoneConstraint; if (_r && _r !== verifyAndPreparePhoneConstraint) return _r(...a); };
+    const refreshPushNotificationStatus = async (...a) => { const _r = window.app.refreshPushNotificationStatus; if (_r && _r !== refreshPushNotificationStatus) return _r(...a); };
+    const enablePushNotifications = async (...a) => { const _r = window.app.enablePushNotifications; if (_r && _r !== enablePushNotifications) return _r(...a); };
+    const disablePushNotifications = async (...a) => { const _r = window.app.disablePushNotifications; if (_r && _r !== disablePushNotifications) return _r(...a); };
+    const sendTestPushNotification = async (...a) => { const _r = window.app.sendTestPushNotification; if (_r && _r !== sendTestPushNotification) return _r(...a); };
+    const loadNotificationPreferences = async (...a) => { const _r = window.app.loadNotificationPreferences; if (_r && _r !== loadNotificationPreferences) return _r(...a); };
+    const saveNotificationPreferences = async (...a) => { const _r = window.app.saveNotificationPreferences; if (_r && _r !== saveNotificationPreferences) return _r(...a); };
+    const onReminderCheckboxChange = async (...a) => { const _r = window.app.onReminderCheckboxChange; if (_r && _r !== onReminderCheckboxChange) return _r(...a); };
+    const openResetPasswordModal = async (...a) => { const _r = window.app.openResetPasswordModal; if (_r && _r !== openResetPasswordModal) return _r(...a); };
+    const executePasswordReset = async (...a) => { const _r = window.app.executePasswordReset; if (_r && _r !== executePasswordReset) return _r(...a); };
+    const deleteAgent = async (...a) => { const _r = window.app.deleteAgent; if (_r && _r !== deleteAgent) return _r(...a); };
+    const confirmDeleteAgent = async (...a) => { const _r = window.app.confirmDeleteAgent; if (_r && _r !== confirmDeleteAgent) return _r(...a); };
+    const renewLicense = async (...a) => { const _r = window.app.renewLicense; if (_r && _r !== renewLicense) return _r(...a); };
+    const executeRenewal = async (...a) => { const _r = window.app.executeRenewal; if (_r && _r !== executeRenewal) return _r(...a); };
+    const sendRenewalReminder = async (...a) => { const _r = window.app.sendRenewalReminder; if (_r && _r !== sendRenewalReminder) return _r(...a); };
+    const toggleNotifPanel = async (...a) => { const _r = window.app.toggleNotifPanel; if (_r && _r !== toggleNotifPanel) return _r(...a); };
+    const updateAgentTargets = async (...a) => { const _r = window.app.updateAgentTargets; if (_r && _r !== updateAgentTargets) return _r(...a); };
+    const saveAgentTargets = async (...a) => { const _r = window.app.saveAgentTargets; if (_r && _r !== saveAgentTargets) return _r(...a); };
+    const deactivateAgent = async (...a) => { const _r = window.app.deactivateAgent; if (_r && _r !== deactivateAgent) return _r(...a); };
+    const resetAgentPassword = async (...a) => { const _r = window.app.resetAgentPassword; if (_r && _r !== resetAgentPassword) return _r(...a); };
+    const assignProspectToAgent = async (...a) => { const _r = window.app.assignProspectToAgent; if (_r && _r !== assignProspectToAgent) return _r(...a); };
+    const viewInactiveProspects = async (...a) => { const _r = window.app.viewInactiveProspects; if (_r && _r !== viewInactiveProspects) return _r(...a); };
+    const renderCustomerHistory = async (...a) => { const _r = window.app.renderCustomerHistory; if (_r && _r !== renderCustomerHistory) return _r(...a); };
+    const confirmDelete = async (...a) => { const _r = window.app.confirmDelete; if (_r && _r !== confirmDelete) return _r(...a); };
+    const executeDelete = async (...a) => { const _r = window.app.executeDelete; if (_r && _r !== executeDelete) return _r(...a); };
+    const openAddTagModal = async (...a) => { const _r = window.app.openAddTagModal; if (_r && _r !== openAddTagModal) return _r(...a); };
+    const addTagToEntity = async (...a) => { const _r = window.app.addTagToEntity; if (_r && _r !== addTagToEntity) return _r(...a); };
+    const removeTagFromCustomer = async (...a) => { const _r = window.app.removeTagFromCustomer; if (_r && _r !== removeTagFromCustomer) return _r(...a); };
+    const removeTagFromProspect = async (...a) => { const _r = window.app.removeTagFromProspect; if (_r && _r !== removeTagFromProspect) return _r(...a); };
+    const openAddSolutionModal = async (...a) => { const _r = window.app.openAddSolutionModal; if (_r && _r !== openAddSolutionModal) return _r(...a); };
+    const saveSolution = async (...a) => { const _r = window.app.saveSolution; if (_r && _r !== saveSolution) return _r(...a); };
+    const openEditSolutionModal = async (...a) => { const _r = window.app.openEditSolutionModal; if (_r && _r !== openEditSolutionModal) return _r(...a); };
+    const saveSolutionEdit = async (...a) => { const _r = window.app.saveSolutionEdit; if (_r && _r !== saveSolutionEdit) return _r(...a); };
+    const deleteSolution = async (...a) => { const _r = window.app.deleteSolution; if (_r && _r !== deleteSolution) return _r(...a); };
+    const renderPendingSolutionsWidget = async (...a) => { const _r = window.app.renderPendingSolutionsWidget; if (_r && _r !== renderPendingSolutionsWidget) return _r(...a); };
+    const showPipelineView = async (...a) => { const _r = window.app.showPipelineView; if (_r && _r !== showPipelineView) return _r(...a); };
+    const refreshPipeline = async (...a) => { const _r = window.app.refreshPipeline; if (_r && _r !== refreshPipeline) return _r(...a); };
+    const setPipelineFilter = async (...a) => { const _r = window.app.setPipelineFilter; if (_r && _r !== setPipelineFilter) return _r(...a); };
+    const addToFocusList = async (...a) => { const _r = window.app.addToFocusList; if (_r && _r !== addToFocusList) return _r(...a); };
+    const removeFromFocusList = async (...a) => { const _r = window.app.removeFromFocusList; if (_r && _r !== removeFromFocusList) return _r(...a); };
+    const editFocusAmount = async (...a) => { const _r = window.app.editFocusAmount; if (_r && _r !== editFocusAmount) return _r(...a); };
+    const editFocusAction = async (...a) => { const _r = window.app.editFocusAction; if (_r && _r !== editFocusAction) return _r(...a); };
+    const resetFocusField = async (...a) => { const _r = window.app.resetFocusField; if (_r && _r !== resetFocusField) return _r(...a); };
+    const showProspectMenu = async (...a) => { const _r = window.app.showProspectMenu; if (_r && _r !== showProspectMenu) return _r(...a); };
+    const showComments = async (...a) => { const _r = window.app.showComments; if (_r && _r !== showComments) return _r(...a); };
+    const openPipelineConfigModal = async (...a) => { const _r = window.app.openPipelineConfigModal; if (_r && _r !== openPipelineConfigModal) return _r(...a); };
+    const savePipelineConfig = async (...a) => { const _r = window.app.savePipelineConfig; if (_r && _r !== savePipelineConfig) return _r(...a); };
+    const savePipelineRules = async (...a) => { const _r = window.app.savePipelineRules; if (_r && _r !== savePipelineRules) return _r(...a); };
+    const addPipelineCategory = async (...a) => { const _r = window.app.addPipelineCategory; if (_r && _r !== addPipelineCategory) return _r(...a); };
+    const deletePipelineCategory = async (...a) => { const _r = window.app.deletePipelineCategory; if (_r && _r !== deletePipelineCategory) return _r(...a); };
+    const addPipelineWeight = async (...a) => { const _r = window.app.addPipelineWeight; if (_r && _r !== addPipelineWeight) return _r(...a); };
+    const deletePipelineWeight = async (...a) => { const _r = window.app.deletePipelineWeight; if (_r && _r !== deletePipelineWeight) return _r(...a); };
+    const addPipelineDecay = async (...a) => { const _r = window.app.addPipelineDecay; if (_r && _r !== addPipelineDecay) return _r(...a); };
+    const deletePipelineDecay = async (...a) => { const _r = window.app.deletePipelineDecay; if (_r && _r !== deletePipelineDecay) return _r(...a); };
+    const addPipelineBooster = async (...a) => { const _r = window.app.addPipelineBooster; if (_r && _r !== addPipelineBooster) return _r(...a); };
+    const deletePipelineBooster = async (...a) => { const _r = window.app.deletePipelineBooster; if (_r && _r !== deletePipelineBooster) return _r(...a); };
+    const setAgentPackageAmount = async (...a) => { const _r = window.app.setAgentPackageAmount; if (_r && _r !== setAgentPackageAmount) return _r(...a); };
+    const showPipelineConfigHistory = async (...a) => { const _r = window.app.showPipelineConfigHistory; if (_r && _r !== showPipelineConfigHistory) return _r(...a); };
+    const rollbackPipelineConfig = async (...a) => { const _r = window.app.rollbackPipelineConfig; if (_r && _r !== rollbackPipelineConfig) return _r(...a); };
+    const showPipelineExplain = async (...a) => { const _r = window.app.showPipelineExplain; if (_r && _r !== showPipelineExplain) return _r(...a); };
+    const addPipelineNote = async (...a) => { const _r = window.app.addPipelineNote; if (_r && _r !== addPipelineNote) return _r(...a); };
+    const renderManualPriority = async (...a) => { const _r = window.app.renderManualPriority; if (_r && _r !== renderManualPriority) return _r(...a); };
+    const renderRecentOverrides = async (...a) => { const _r = window.app.renderRecentOverrides; if (_r && _r !== renderRecentOverrides) return _r(...a); };
+    const handleDragStart = async (...a) => { const _r = window.app.handleDragStart; if (_r && _r !== handleDragStart) return _r(...a); };
+    const handleDragOver = async (...a) => { const _r = window.app.handleDragOver; if (_r && _r !== handleDragOver) return _r(...a); };
+    const handleDrop = async (...a) => { const _r = window.app.handleDrop; if (_r && _r !== handleDrop) return _r(...a); };
+    const saveManualOrder = async (...a) => { const _r = window.app.saveManualOrder; if (_r && _r !== saveManualOrder) return _r(...a); };
+    const switchFocusMonth = async (...a) => { const _r = window.app.switchFocusMonth; if (_r && _r !== switchFocusMonth) return _r(...a); };
+    const openExpiredSearchModal = async (...a) => { const _r = window.app.openExpiredSearchModal; if (_r && _r !== openExpiredSearchModal) return _r(...a); };
+    const switchExpiredTab = async (...a) => { const _r = window.app.switchExpiredTab; if (_r && _r !== switchExpiredTab) return _r(...a); };
+    const filterExpiredSearch = async (...a) => { const _r = window.app.filterExpiredSearch; if (_r && _r !== filterExpiredSearch) return _r(...a); };
+    const reAddFromArchive = async (...a) => { const _r = window.app.reAddFromArchive; if (_r && _r !== reAddFromArchive) return _r(...a); };
+    const changeFocusTargetProduct = async (...a) => { const _r = window.app.changeFocusTargetProduct; if (_r && _r !== changeFocusTargetProduct) return _r(...a); };
+    const changeFocusTargetDetail = async (...a) => { const _r = window.app.changeFocusTargetDetail; if (_r && _r !== changeFocusTargetDetail) return _r(...a); };
+    const toggleAgentFocusSection = async (...a) => { const _r = window.app.toggleAgentFocusSection; if (_r && _r !== toggleAgentFocusSection) return _r(...a); };
+    const openBoostModal = async (...a) => { const _r = window.app.openBoostModal; if (_r && _r !== openBoostModal) return _r(...a); };
+    const submitBoost = async (...a) => { const _r = window.app.submitBoost; if (_r && _r !== submitBoost) return _r(...a); };
+    const openHistoryModal = async (...a) => { const _r = window.app.openHistoryModal; if (_r && _r !== openHistoryModal) return _r(...a); };
+    const loadOverrideHistory = async (...a) => { const _r = window.app.loadOverrideHistory; if (_r && _r !== loadOverrideHistory) return _r(...a); };
+    const viewJustification = async (...a) => { const _r = window.app.viewJustification; if (_r && _r !== viewJustification) return _r(...a); };
+    const openSendBirthdayWish = async (...a) => { const _r = window.app.openSendBirthdayWish; if (_r && _r !== openSendBirthdayWish) return _r(...a); };
+    const executeSendBirthdayWish = async (...a) => { const _r = window.app.executeSendBirthdayWish; if (_r && _r !== executeSendBirthdayWish) return _r(...a); };
+    const openPrepareGiftModal = async (...a) => { const _r = window.app.openPrepareGiftModal; if (_r && _r !== openPrepareGiftModal) return _r(...a); };
+    const logBirthdayGift = async (...a) => { const _r = window.app.logBirthdayGift; if (_r && _r !== logBirthdayGift) return _r(...a); };
+    const openImportWizard = async (...a) => { const _r = window.app.openImportWizard; if (_r && _r !== openImportWizard) return _r(...a); };
+    const renderImportStep = async (...a) => { const _r = window.app.renderImportStep; if (_r && _r !== renderImportStep) return _r(...a); };
+    const importNextStep = async (...a) => { const _r = window.app.importNextStep; if (_r && _r !== importNextStep) return _r(...a); };
+    const importPrevStep = async (...a) => { const _r = window.app.importPrevStep; if (_r && _r !== importPrevStep) return _r(...a); };
+    const updateImportType = async (...a) => { const _r = window.app.updateImportType; if (_r && _r !== updateImportType) return _r(...a); };
+    const autoMapFields = async (...a) => { const _r = window.app.autoMapFields; if (_r && _r !== autoMapFields) return _r(...a); };
+    const clearMapping = async (...a) => { const _r = window.app.clearMapping; if (_r && _r !== clearMapping) return _r(...a); };
+    const downloadErrorReport = async (...a) => { const _r = window.app.downloadErrorReport; if (_r && _r !== downloadErrorReport) return _r(...a); };
+    const startImport = async (...a) => { const _r = window.app.startImport; if (_r && _r !== startImport) return _r(...a); };
+    const viewImportDetails = async (...a) => { const _r = window.app.viewImportDetails; if (_r && _r !== viewImportDetails) return _r(...a); };
+    const downloadImportLog = async (...a) => { const _r = window.app.downloadImportLog; if (_r && _r !== downloadImportLog) return _r(...a); };
+    const openTemplatesModal = async (...a) => { const _r = window.app.openTemplatesModal; if (_r && _r !== openTemplatesModal) return _r(...a); };
+    const downloadTemplate = async (...a) => { const _r = window.app.downloadTemplate; if (_r && _r !== downloadTemplate) return _r(...a); };
+    const showImportHistory = async (...a) => { const _r = window.app.showImportHistory; if (_r && _r !== showImportHistory) return _r(...a); };
+    const handleImportFileDrop = async (...a) => { const _r = window.app.handleImportFileDrop; if (_r && _r !== handleImportFileDrop) return _r(...a); };
+    const handleImportFileSelect = async (...a) => { const _r = window.app.handleImportFileSelect; if (_r && _r !== handleImportFileSelect) return _r(...a); };
+    const exportMarketingList = async (...a) => { const _r = window.app.exportMarketingList; if (_r && _r !== exportMarketingList) return _r(...a); };
+    const openImportWizardForType = async (...a) => { const _r = window.app.openImportWizardForType; if (_r && _r !== openImportWizardForType) return _r(...a); };
+    const renderTeamSummaryCards = async (...a) => { const _r = window.app.renderTeamSummaryCards; if (_r && _r !== renderTeamSummaryCards) return _r(...a); };
+    const renderAgentPerformanceRows = async (...a) => { const _r = window.app.renderAgentPerformanceRows; if (_r && _r !== renderAgentPerformanceRows) return _r(...a); };
+    const renderInactiveProspectsRows = async (...a) => { const _r = window.app.renderInactiveProspectsRows; if (_r && _r !== renderInactiveProspectsRows) return _r(...a); };
+    const renderReassignmentHistory = async (...a) => { const _r = window.app.renderReassignmentHistory; if (_r && _r !== renderReassignmentHistory) return _r(...a); };
+    const openReassignModal = async (...a) => { const _r = window.app.openReassignModal; if (_r && _r !== openReassignModal) return _r(...a); };
+    const confirmReassignment = async (...a) => { const _r = window.app.confirmReassignment; if (_r && _r !== confirmReassignment) return _r(...a); };
+    const executeConfirmedReassignment = async (...a) => { const _r = window.app.executeConfirmedReassignment; if (_r && _r !== executeConfirmedReassignment) return _r(...a); };
+    const executeConfirmedQuickReassign = async (...a) => { const _r = window.app.executeConfirmedQuickReassign; if (_r && _r !== executeConfirmedQuickReassign) return _r(...a); };
+    const executeConfirmedBulkReassign = async (...a) => { const _r = window.app.executeConfirmedBulkReassign; if (_r && _r !== executeConfirmedBulkReassign) return _r(...a); };
+    const executeConfirmedBulkReassignment = async (...a) => { const _r = window.app.executeConfirmedBulkReassignment; if (_r && _r !== executeConfirmedBulkReassignment) return _r(...a); };
+    const cancelPendingReassign = async (...a) => { const _r = window.app.cancelPendingReassign; if (_r && _r !== cancelPendingReassign) return _r(...a); };
+    const bulkReassign = async (...a) => { const _r = window.app.bulkReassign; if (_r && _r !== bulkReassign) return _r(...a); };
+    const confirmBulkReassignment = async (...a) => { const _r = window.app.confirmBulkReassignment; if (_r && _r !== confirmBulkReassignment) return _r(...a); };
+    const refreshFollowupStats = async (...a) => { const _r = window.app.refreshFollowupStats; if (_r && _r !== refreshFollowupStats) return _r(...a); };
+    const exportFollowupReport = async (...a) => { const _r = window.app.exportFollowupReport; if (_r && _r !== exportFollowupReport) return _r(...a); };
+    const configureAlerts = async (...a) => { const _r = window.app.configureAlerts; if (_r && _r !== configureAlerts) return _r(...a); };
+    const saveAlertConfig = async (...a) => { const _r = window.app.saveAlertConfig; if (_r && _r !== saveAlertConfig) return _r(...a); };
+    const viewAgentDetails = async (...a) => { const _r = window.app.viewAgentDetails; if (_r && _r !== viewAgentDetails) return _r(...a); };
+    const contactProspect = async (...a) => { const _r = window.app.contactProspect; if (_r && _r !== contactProspect) return _r(...a); };
+    const openAttendeeOutcomeModal = async (...a) => { const _r = window.app.openAttendeeOutcomeModal; if (_r && _r !== openAttendeeOutcomeModal) return _r(...a); };
+    const openAttendeeNotesModal = async (...a) => { const _r = window.app.openAttendeeNotesModal; if (_r && _r !== openAttendeeNotesModal) return _r(...a); };
+    const saveAttendeeNote = async (...a) => { const _r = window.app.saveAttendeeNote; if (_r && _r !== saveAttendeeNote) return _r(...a); };
+    const addScoreToProspect = async (...a) => { const _r = window.app.addScoreToProspect; if (_r && _r !== addScoreToProspect) return _r(...a); };
+    const addScoreToCustomer = async (...a) => { const _r = window.app.addScoreToCustomer; if (_r && _r !== addScoreToCustomer) return _r(...a); };
+    const applyActivityScoring = async (...a) => { const _r = window.app.applyActivityScoring; if (_r && _r !== applyActivityScoring) return _r(...a); };
+    const openScoreAdjustmentModal = async (...a) => { const _r = window.app.openScoreAdjustmentModal; if (_r && _r !== openScoreAdjustmentModal) return _r(...a); };
+    const confirmScoreAdjustment = async (...a) => { const _r = window.app.confirmScoreAdjustment; if (_r && _r !== confirmScoreAdjustment) return _r(...a); };
+    const autoExtendProtection = async (...a) => { const _r = window.app.autoExtendProtection; if (_r && _r !== autoExtendProtection) return _r(...a); };
+    const openLatestMeetupNotes = async (...a) => { const _r = window.app.openLatestMeetupNotes; if (_r && _r !== openLatestMeetupNotes) return _r(...a); };
+    const openEditPotentialModal = async (...a) => { const _r = window.app.openEditPotentialModal; if (_r && _r !== openEditPotentialModal) return _r(...a); };
+    const savePotential = async (...a) => { const _r = window.app.savePotential; if (_r && _r !== savePotential) return _r(...a); };
+    const sendBirthdayWish = async (...a) => { const _r = window.app.sendBirthdayWish; if (_r && _r !== sendBirthdayWish) return _r(...a); };
+    const scheduleBirthdayFollowup = async (...a) => { const _r = window.app.scheduleBirthdayFollowup; if (_r && _r !== scheduleBirthdayFollowup) return _r(...a); };
+    const executeBirthdayAction = async (...a) => { const _r = window.app.executeBirthdayAction; if (_r && _r !== executeBirthdayAction) return _r(...a); };
+    const openKPITargetsModal = async (...a) => { const _r = window.app.openKPITargetsModal; if (_r && _r !== openKPITargetsModal) return _r(...a); };
+    const saveKPITargets = async (...a) => { const _r = window.app.saveKPITargets; if (_r && _r !== saveKPITargets) return _r(...a); };
+    const renderKPITargetComparison = async (...a) => { const _r = window.app.renderKPITargetComparison; if (_r && _r !== renderKPITargetComparison) return _r(...a); };
+    const calculateCustomerHealthScore = async (...a) => { const _r = window.app.calculateCustomerHealthScore; if (_r && _r !== calculateCustomerHealthScore) return _r(...a); };
+    const renderHealthBadge = async (...a) => { const _r = window.app.renderHealthBadge; if (_r && _r !== renderHealthBadge) return _r(...a); };
+    const renderQuickHealthBadge = async (...a) => { const _r = window.app.renderQuickHealthBadge; if (_r && _r !== renderQuickHealthBadge) return _r(...a); };
+    const openAddSlotModal = async (...a) => { const _r = window.app.openAddSlotModal; if (_r && _r !== openAddSlotModal) return _r(...a); };
+    const saveBookingSlot = async (...a) => { const _r = window.app.saveBookingSlot; if (_r && _r !== saveBookingSlot) return _r(...a); };
+    const deleteBookingSlot = async (...a) => { const _r = window.app.deleteBookingSlot; if (_r && _r !== deleteBookingSlot) return _r(...a); };
+    const toggleSlotActive = async (...a) => { const _r = window.app.toggleSlotActive; if (_r && _r !== toggleSlotActive) return _r(...a); };
+    const copyBookingLink = async (...a) => { const _r = window.app.copyBookingLink; if (_r && _r !== copyBookingLink) return _r(...a); };
+    const openShareBookingLinkModal = async (...a) => { const _r = window.app.openShareBookingLinkModal; if (_r && _r !== openShareBookingLinkModal) return _r(...a); };
+    const updateShareLinkPreview = async (...a) => { const _r = window.app.updateShareLinkPreview; if (_r && _r !== updateShareLinkPreview) return _r(...a); };
+    const copySmartBookingLink = async (...a) => { const _r = window.app.copySmartBookingLink; if (_r && _r !== copySmartBookingLink) return _r(...a); };
+    const confirmBookingAppointment = async (...a) => { const _r = window.app.confirmBookingAppointment; if (_r && _r !== confirmBookingAppointment) return _r(...a); };
+    const cancelBookingAppointment = async (...a) => { const _r = window.app.cancelBookingAppointment; if (_r && _r !== cancelBookingAppointment) return _r(...a); };
+    const openShareCpsIntakeLinkModal = async (...a) => { const _r = window.app.openShareCpsIntakeLinkModal; if (_r && _r !== openShareCpsIntakeLinkModal) return _r(...a); };
+    const saveCpsIntakeLink = async (...a) => { const _r = window.app.saveCpsIntakeLink; if (_r && _r !== saveCpsIntakeLink) return _r(...a); };
+    const copyCpsIntakeLink = async (...a) => { const _r = window.app.copyCpsIntakeLink; if (_r && _r !== copyCpsIntakeLink) return _r(...a); };
+    const shareCpsIntakeWhatsApp = async (...a) => { const _r = window.app.shareCpsIntakeWhatsApp; if (_r && _r !== shareCpsIntakeWhatsApp) return _r(...a); };
+    const renderPendingCpsIntakes = async (...a) => { const _r = window.app.renderPendingCpsIntakes; if (_r && _r !== renderPendingCpsIntakes) return _r(...a); };
+    const rejectCpsIntake = async (...a) => { const _r = window.app.rejectCpsIntake; if (_r && _r !== rejectCpsIntake) return _r(...a); };
+    const scanCpsForm = async (...a) => { const _r = window.app.scanCpsForm; if (_r && _r !== scanCpsForm) return _r(...a); };
+    const handleCpsScanFile = async (...a) => { const _r = window.app.handleCpsScanFile; if (_r && _r !== handleCpsScanFile) return _r(...a); };
+    const renderCpsScanReview = async (...a) => { const _r = window.app.renderCpsScanReview; if (_r && _r !== renderCpsScanReview) return _r(...a); };
+    const toggleCpsScanAll = async (...a) => { const _r = window.app.toggleCpsScanAll; if (_r && _r !== toggleCpsScanAll) return _r(...a); };
+    const applyCpsScanSelection = async (...a) => { const _r = window.app.applyCpsScanSelection; if (_r && _r !== applyCpsScanSelection) return _r(...a); };
+    const _hideCpsScanOverlay = async (...a) => { const _r = window.app._hideCpsScanOverlay; if (_r && _r !== _hideCpsScanOverlay) return _r(...a); };
+    const _uploadCpsFormFile = async (...a) => { const _r = window.app._uploadCpsFormFile; if (_r && _r !== _uploadCpsFormFile) return _r(...a); };
+    const openCpsPasteModal = async (...a) => { const _r = window.app.openCpsPasteModal; if (_r && _r !== openCpsPasteModal) return _r(...a); };
+    const parseCpsPastedText = async (...a) => { const _r = window.app.parseCpsPastedText; if (_r && _r !== parseCpsPastedText) return _r(...a); };
+    const toggleActivityNoticeboardFields = async (...a) => { const _r = window.app.toggleActivityNoticeboardFields; if (_r && _r !== toggleActivityNoticeboardFields) return _r(...a); };
+    const markMilestoneCompleted = async (...a) => { const _r = window.app.markMilestoneCompleted; if (_r && _r !== markMilestoneCompleted) return _r(...a); };
+    const openStoryDetail = async (...a) => { const _r = window.app.openStoryDetail; if (_r && _r !== openStoryDetail) return _r(...a); };
+    const openHighlightModal = async (...a) => { const _r = window.app.openHighlightModal; if (_r && _r !== openHighlightModal) return _r(...a); };
+    const saveHighlight = async (...a) => { const _r = window.app.saveHighlight; if (_r && _r !== saveHighlight) return _r(...a); };
+    const deleteHighlight = async (...a) => { const _r = window.app.deleteHighlight; if (_r && _r !== deleteHighlight) return _r(...a); };
+    const confirmDeleteHighlight = async (...a) => { const _r = window.app.confirmDeleteHighlight; if (_r && _r !== confirmDeleteHighlight) return _r(...a); };
+    const resetMilestone = async (...a) => { const _r = window.app.resetMilestone; if (_r && _r !== resetMilestone) return _r(...a); };
+    const syncFudiSummary = async (...a) => { const _r = window.app.syncFudiSummary; if (_r && _r !== syncFudiSummary) return _r(...a); };
+    const openRewardModal = async (...a) => { const _r = window.app.openRewardModal; if (_r && _r !== openRewardModal) return _r(...a); };
+    const saveReward = async (...a) => { const _r = window.app.saveReward; if (_r && _r !== saveReward) return _r(...a); };
+    const deleteReward = async (...a) => { const _r = window.app.deleteReward; if (_r && _r !== deleteReward) return _r(...a); };
+    const confirmDeleteReward = async (...a) => { const _r = window.app.confirmDeleteReward; if (_r && _r !== confirmDeleteReward) return _r(...a); };
+    const openQuarterlyTargetsModal = async (...a) => { const _r = window.app.openQuarterlyTargetsModal; if (_r && _r !== openQuarterlyTargetsModal) return _r(...a); };
+    const saveQuarterlyTargets = async (...a) => { const _r = window.app.saveQuarterlyTargets; if (_r && _r !== saveQuarterlyTargets) return _r(...a); };
+    const openSpecialProgramModal = async (...a) => { const _r = window.app.openSpecialProgramModal; if (_r && _r !== openSpecialProgramModal) return _r(...a); };
+    const saveSpecialProgram = async (...a) => { const _r = window.app.saveSpecialProgram; if (_r && _r !== saveSpecialProgram) return _r(...a); };
+    const deleteSpecialProgram = async (...a) => { const _r = window.app.deleteSpecialProgram; if (_r && _r !== deleteSpecialProgram) return _r(...a); };
+    const confirmDeleteSpecialProgram = async (...a) => { const _r = window.app.confirmDeleteSpecialProgram; if (_r && _r !== confirmDeleteSpecialProgram) return _r(...a); };
+    const openActionPlanModal = async (...a) => { const _r = window.app.openActionPlanModal; if (_r && _r !== openActionPlanModal) return _r(...a); };
+    const addPlanItemRow = async (...a) => { const _r = window.app.addPlanItemRow; if (_r && _r !== addPlanItemRow) return _r(...a); };
+    const saveActionPlan = async (...a) => { const _r = window.app.saveActionPlan; if (_r && _r !== saveActionPlan) return _r(...a); };
+    const updatePlanCheck = async (...a) => { const _r = window.app.updatePlanCheck; if (_r && _r !== updatePlanCheck) return _r(...a); };
+    const sendPlanReminder = async (...a) => { const _r = window.app.sendPlanReminder; if (_r && _r !== sendPlanReminder) return _r(...a); };
+    const showActionPlanHistory = async (...a) => { const _r = window.app.showActionPlanHistory; if (_r && _r !== showActionPlanHistory) return _r(...a); };
+    const initActionPlanReminder = async (...a) => { const _r = window.app.initActionPlanReminder; if (_r && _r !== initActionPlanReminder) return _r(...a); };
+    const renderRefillReminders = async (...a) => { const _r = window.app.renderRefillReminders; if (_r && _r !== renderRefillReminders) return _r(...a); };
+    const checkRefillReminderTable = async (...a) => { const _r = window.app.checkRefillReminderTable; if (_r && _r !== checkRefillReminderTable) return _r(...a); };
+    const showRefillMigrationModal = async (...a) => { const _r = window.app.showRefillMigrationModal; if (_r && _r !== showRefillMigrationModal) return _r(...a); };
+    const sendRefillWhatsApp = async (...a) => { const _r = window.app.sendRefillWhatsApp; if (_r && _r !== sendRefillWhatsApp) return _r(...a); };
+    const sendDescriptionInvite = async (...a) => { const _r = window.app.sendDescriptionInvite; if (_r && _r !== sendDescriptionInvite) return _r(...a); };
+    const dismissRefillReminder = async (...a) => { const _r = window.app.dismissRefillReminder; if (_r && _r !== dismissRefillReminder) return _r(...a); };
+    const viewRefillProspect = async (...a) => { const _r = window.app.viewRefillProspect; if (_r && _r !== viewRefillProspect) return _r(...a); };
+    const applyFilters = async (...a) => { const _r = window.app.applyFilters; if (_r && _r !== applyFilters) return _r(...a); };
+    const clearFilters = async (...a) => { const _r = window.app.clearFilters; if (_r && _r !== clearFilters) return _r(...a); };
+    const updateConditionOperator = async (...a) => { const _r = window.app.updateConditionOperator; if (_r && _r !== updateConditionOperator) return _r(...a); };
+    const updateConditionValue = async (...a) => { const _r = window.app.updateConditionValue; if (_r && _r !== updateConditionValue) return _r(...a); };
+    const updateGroupLogic = async (...a) => { const _r = window.app.updateGroupLogic; if (_r && _r !== updateGroupLogic) return _r(...a); };
+    const deleteFile = async (...a) => { const _r = window.app.deleteFile; if (_r && _r !== deleteFile) return _r(...a); };
+    const _confirmDeleteFile = async (...a) => { const _r = window.app._confirmDeleteFile; if (_r && _r !== _confirmDeleteFile) return _r(...a); };
+    const showProfile = async (...a) => { const _r = window.app.showProfile; if (_r && _r !== showProfile) return _r(...a); };
+    const exportKPIDashboard = async (...a) => { const _r = window.app.exportKPIDashboard; if (_r && _r !== exportKPIDashboard) return _r(...a); };
+    const renderFormsTab = async (...a) => { const _r = window.app.renderFormsTab; if (_r && _r !== renderFormsTab) return _r(...a); };
+    const cfSearchProspects = async (...a) => { const _r = window.app.cfSearchProspects; if (_r && _r !== cfSearchProspects) return _r(...a); };
+    const cfClearSignature = async (...a) => { const _r = window.app.cfClearSignature; if (_r && _r !== cfClearSignature) return _r(...a); };
+    const openCustomerSurveyModal = async (...a) => { const _r = window.app.openCustomerSurveyModal; if (_r && _r !== openCustomerSurveyModal) return _r(...a); };
+    const saveCustomerSurvey = async (...a) => { const _r = window.app.saveCustomerSurvey; if (_r && _r !== saveCustomerSurvey) return _r(...a); };
+    const openCpsAnalysisModal = async (...a) => { const _r = window.app.openCpsAnalysisModal; if (_r && _r !== openCpsAnalysisModal) return _r(...a); };
+    const saveCpsAnalysis = async (...a) => { const _r = window.app.saveCpsAnalysis; if (_r && _r !== saveCpsAnalysis) return _r(...a); };
+    const openApuAppraisalModal = async (...a) => { const _r = window.app.openApuAppraisalModal; if (_r && _r !== openApuAppraisalModal) return _r(...a); };
+    const saveApuAppraisal = async (...a) => { const _r = window.app.saveApuAppraisal; if (_r && _r !== saveApuAppraisal) return _r(...a); };
+    const openDestinyBlueprintModal = async (...a) => { const _r = window.app.openDestinyBlueprintModal; if (_r && _r !== openDestinyBlueprintModal) return _r(...a); };
+    const openDestinyBlueprintInTab = async (...a) => { const _r = window.app.openDestinyBlueprintInTab; if (_r && _r !== openDestinyBlueprintInTab) return _r(...a); };
+    const saveDestinyBlueprint = async (...a) => { const _r = window.app.saveDestinyBlueprint; if (_r && _r !== saveDestinyBlueprint) return _r(...a); };
 
     return {
         init,

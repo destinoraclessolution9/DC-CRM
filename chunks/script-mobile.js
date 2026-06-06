@@ -2296,6 +2296,7 @@
         renderMobileDrawer,
         openMobileDrawer,
         closeMobileDrawer,
+        // applyMobileClass is defined in script.js (called early in init before chunk loads)
         toggleMobileNav,
         renderMobileBottomNav,
         updateBottomNavActive,

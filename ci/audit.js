@@ -26,6 +26,9 @@ const chunkFiles = fs.readdirSync(chunkDir)
 
 let issues   = 0;
 let exported = 0;
+// Collect all function names exported by chunks so the return-key check
+// can exempt them (they reach window.app via Object.assign, not IIFE scope).
+const allChunkExports = new Set();
 
 chunkFiles.forEach(cf => {
   const src  = fs.readFileSync(path.join(chunkDir, cf), 'utf8');
@@ -37,6 +40,7 @@ chunkFiles.forEach(cf => {
 
   const keys = [...m[1].matchAll(/([a-zA-Z_$][a-zA-Z0-9_$]*),/g)].map(x => x[1]);
   exported += keys.length;
+  keys.forEach(k => allChunkExports.add(k));
 
   keys.forEach(fn => {
     const eFn    = escRe(fn);
@@ -69,13 +73,39 @@ scriptLines.forEach(l => {
   if (m2) defined.add(m2[1]);
 });
 
-const returnSection = scriptLines.slice(39000).join('\n');
+// Find the IIFE's main return object — identified by being the `    return {` whose
+// next few lines contain `        init,` (distinguishes it from inner-function returns).
+let returnObjStart = -1;
+for (let i = 0; i < scriptLines.length - 5; i++) {
+  if (/^    return \{/.test(scriptLines[i]) &&
+      scriptLines.slice(i + 1, i + 6).some(l => /^        init,/.test(l))) {
+    returnObjStart = i;
+    break;
+  }
+}
+// Scan forward to the closing `    };` (semicolon required).
+// Bare `    }` also appears inside the return for catch/finally blocks.
+let returnObjEnd = returnObjStart;
+for (let i = returnObjStart + 1; i < scriptLines.length; i++) {
+  if (/^    \};\s*$/.test(scriptLines[i])) { returnObjEnd = i; break; }
+}
+const returnSection = returnObjStart >= 0
+  ? scriptLines.slice(returnObjStart, returnObjEnd + 1).join('\n')
+  : '';
 const retKeys = [...returnSection.matchAll(/^        ([a-zA-Z_$][a-zA-Z0-9_$]*),\s*$/gm)]
   .map(m => m[1]);
 
 // Known browser-global names resolved via window scope (not IIFE-local)
 const WINDOW_GLOBALS = new Set(['UI', 'AppDataStore', 'supabase']);
 
+// A return key is OK if it is:
+//   (a) locally defined in the IIFE scope (defined set), OR
+//   (b) a well-known browser global
+// NOTE: being in allChunkExports is NOT sufficient — the IIFE return statement is
+// evaluated synchronously at load time. Chunk functions only land in window.app via
+// Object.assign AFTER their script tag executes (lazy). A return key that is only
+// in a chunk and not locally stubbed will throw ReferenceError at startup.
+// Therefore we do NOT exempt allChunkExports here.
 const missingRet = retKeys.filter(k => !defined.has(k) && !WINDOW_GLOBALS.has(k));
 if (missingRet.length) {
   console.error('RETURN  keys in return object not defined in script.js scope:');

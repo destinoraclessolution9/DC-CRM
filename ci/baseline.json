@@ -1,9 +1,9 @@
 {
-  "generated": "2026-06-05T22:05:22.337Z",
+  "generated": "2026-06-06T01:32:39.578Z",
   "script": {
-    "lines": 4179,
-    "hash": "3647606f",
-    "definedCount": 223,
+    "lines": 4492,
+    "hash": "7a99d49a",
+    "definedCount": 505,
     "stateVars": [
       "_currentView",
       "_currentUser",
@@ -1315,7 +1315,7 @@
     },
     {
       "file": "script-mobile.js",
-      "lines": 2328,
+      "lines": 2329,
       "exports": [
         "addCustomerNote",
         "deleteCustomerNote",
@@ -1491,7 +1491,7 @@
     },
     {
       "file": "script-prospects.js",
-      "lines": 9770,
+      "lines": 9775,
       "exports": [
         "sortProspects",
         "showProspectsView",
@@ -1725,7 +1725,11 @@
         "sendRenewalReminder",
         "viewInactiveProspects",
         "EXPORT_WARN_THRESHOLD",
-        "EXPORT_HARD_LIMIT"
+        "EXPORT_HARD_LIMIT",
+        "deleteNote",
+        "showAgentProfile",
+        "deactivateAgent",
+        "openAddSolutionModal"
       ]
     },
     {
