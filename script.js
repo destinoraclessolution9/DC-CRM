@@ -2619,6 +2619,8 @@ function _wireLoginBtn() {
         'order_form_extract':   { src: 'chunks/script-order-form-extract.min.js', minLevel: null, exactLevels: null },
         // Phase 6A: Journey System — 5-year automated follow-up (2026-06-06)
         'journey':              { src: 'chunks/script-journey.min.js',    minLevel: null, exactLevels: null },
+        // Modal-bound chunks (not tied to a view — underscore prefix prevents nav matching)
+        '_activities':          { src: 'chunks/script-activities.min.js', minLevel: null, exactLevels: null },
     };
 
     // Eager chunk loader — after login, actually execute every chunk the
@@ -2659,7 +2661,7 @@ function _wireLoginBtn() {
             const s = document.createElement('script');
             const manifest = window.__ASSET_MANIFEST || {};
             s.src = manifest[src] || src;
-            s.async = false;
+            s.async = true;
             s.onload = resolve;
             s.onerror = (e) => { console.warn('[chunk] failed to load', src, e); resolve(); };
             document.body.appendChild(s);
@@ -3654,6 +3656,10 @@ function _wireLoginBtn() {
         calculateDealValue,
 
         // Phase 2 Activity Modal — implemented by chunks/script-activities.js
+        // Self-loading stub: eager-loader covers this after login, but if called
+        // before it finishes (e.g. user clicks calendar cell immediately), the
+        // stub loads the chunk then re-invokes the now-real function.
+        openActivityModal: (...args) => _loadChunkOnce('chunks/script-activities.min.js').then(() => window.app.openActivityModal(...args)),
 
         // Phase 3 Prospect Management Functions
         showProspectsView,
