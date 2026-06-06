@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-06T02:02:33.925Z",
+  "generated": "2026-06-06T02:16:04.658Z",
   "script": {
     "lines": 4593,
     "hash": "afa41198",
@@ -1492,7 +1492,7 @@
     },
     {
       "file": "script-prospects.js",
-      "lines": 9774,
+      "lines": 9769,
       "exports": [
         "sortProspects",
         "showProspectsView",
@@ -1678,13 +1678,8 @@
         "renderPerformanceTargets",
         "renderCustomerHistory",
         "showAgentDetail",
-        "renderCustomerHistory",
         "renewLicense",
         "executeRenewal",
-        "calculateDaysDiff",
-        "renderFollowupStats",
-        "renderCurrentAssignments",
-        "renderPerformanceTargets",
         "generatePassword",
         "openAddAgentModal",
         "openEditAgentModal",
