@@ -11,6 +11,8 @@
 (() => {
     const _state = window._appState;
     const esc    = (s) => window._crmUtils.escapeHtml(s);
+    const escapeHtml = esc;
+    const getVisibleUserIds = (u) => window._crmUtils.getVisibleUserIds(u);
     // ── Chunk-local state (documents view only) ──
     let _currentFolder = null;
     let _viewMode = 'list';

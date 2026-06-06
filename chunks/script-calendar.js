@@ -9,6 +9,8 @@
     const _state = window._appState;
     const _utils = window._crmUtils;
     const esc    = (...a) => _utils.escapeHtml(...a);
+    const escapeHtml = esc;
+    const getVisibleUserIds = (u) => _utils.getVisibleUserIds(u);
     // _filters is an object; alias by reference so in-place mutations are shared.
     const _filters = _state.flt;
     const isMobile   = () => _utils.isMobile();

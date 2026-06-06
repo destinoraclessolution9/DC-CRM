@@ -9,6 +9,8 @@
     const _state = window._appState;
     const _utils = window._crmUtils;
     const esc     = (...a) => _utils.escapeHtml(...a);
+    const escapeHtml = esc;
+    const getVisibleUserIds = (u) => _utils.getVisibleUserIds(u);
     const isSystemAdmin        = (u) => _utils.isSystemAdmin(u || _state.cu);
     const isMarketingManager   = (u) => _utils.isMarketingManager(u || _state.cu);
     const isAgent              = (u) => _utils.isAgent(u || _state.cu);
