@@ -1,7 +1,7 @@
 /**
  * CRM Lazy Chunk: Standalone Order Form Extract + History Viewer
- *   Tab A — Scan: capture/upload photo → Gemini OCR → display all fields
- *   Tab B — History: searchable table of all past order form scans
+ *   Tab A — Scan: capture/upload photo → Gemini OCR → CRM cross-reference → display all fields
+ *   Tab B — History: searchable table of all past order form scans with collection status toggle
  * Loaded lazily by navigateTo('order_form_extract').
  */
 (() => {
@@ -76,23 +76,195 @@
         ? `<span style="display:inline-block;padding:1px 6px;border-radius:10px;background:${_confColor(c)}1a;color:${_confColor(c)};font-size:10px;font-weight:600;text-transform:uppercase;">${c}</span>`
         : '';
 
+    const _crmBadge = () =>
+        `<span style="display:inline-block;padding:1px 6px;border-radius:10px;background:#dbeafe;color:#1d4ed8;font-size:10px;font-weight:600;">✓ CRM</span>`;
+
     const _formTypeLabel = (t) => ({ A: 'Template A', B: 'Template B', C: 'Template C' }[t] || (t || '—'));
 
+    const _statusBadge = (s) => s === 'collected'
+        ? `<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:#dcfce7;color:#15803d;font-size:11px;font-weight:600;"><i class="fas fa-check-circle"></i> Collected</span>`
+        : `<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:#fef9c3;color:#92400e;font-size:11px;font-weight:600;"><i class="fas fa-clock"></i> Pending</span>`;
+
     // ── Module state ───────────────────────────────────────────────────────
-    let _ofeResult     = null;
-    let _ofeAllRows    = [];   // cached history rows
-    let _ofeHistPage   = 0;
-    let _ofeHistSearch = '';
-    const _HIST_PAGE_SIZE = 50;
+    let _ofeResult          = null;
+    let _ofeCrmRef          = null;   // cross-reference result from _ofeCrmCrossRef()
+    let _ofeAttachId        = null;   // saved prospect_attachments.id for current scan
+    let _ofeAllRows         = [];     // cached history rows
+    let _ofeHistPage        = 0;
+    let _ofeHistSearch      = '';
+    const _HIST_PAGE_SIZE   = 50;
+
+    // ══════════════════════════════════════════════════════════════════════
+    // CRM Cross-Reference — runs after OCR to look up customer, agent, product
+    // ══════════════════════════════════════════════════════════════════════
+    const _ofeCrmCrossRef = async (fields) => {
+        const sb = window.supabase || window.supabaseClient;
+        if (!sb) return null;
+
+        const result = { customer: null, agent: null, product: null };
+
+        await Promise.all([
+            // 1. Customer lookup — try phone first (most reliable), then name
+            (async () => {
+                const phone = (fields.customer_phone || '').replace(/\D/g, '');
+                const name  = (fields.customer_name  || '').trim();
+                if (!phone && !name) return;
+
+                let orClause = '';
+                if (phone && name) orClause = `phone.ilike.%${phone}%,full_name.ilike.%${name}%`;
+                else if (phone)    orClause = `phone.ilike.%${phone}%`;
+                else               orClause = `full_name.ilike.%${name}%`;
+
+                const { data } = await sb
+                    .from('prospects')
+                    .select('id, full_name, phone, ic_number, status')
+                    .or(orClause)
+                    .limit(5)
+                    .catch(() => ({ data: null }));
+
+                if (data && data.length > 0) result.customer = data[0];
+            })(),
+
+            // 2. Agent lookup — by agent_code exact match OR consultant name search
+            (async () => {
+                const code = (fields.agent_code || '').trim();
+                const consultantName = (fields.consultant || '').trim();
+                if (!code && !consultantName) return;
+
+                let orClause = '';
+                if (code && consultantName) orClause = `agent_code.eq.${code},name.ilike.%${consultantName}%`;
+                else if (consultantName)    orClause = `name.ilike.%${consultantName}%`;
+                else if (code)              orClause = `agent_code.eq.${code}`;
+
+                if (orClause) {
+                    const { data } = await sb
+                        .from('users')
+                        .select('id, name, email, role, agent_code')
+                        .or(orClause)
+                        .limit(3)
+                        .catch(() => ({ data: null }));
+
+                    if (data && data.length > 0) {
+                        // Prefer exact agent_code match if multiple results
+                        const exact = code
+                            ? data.find(u => String(u.agent_code || '') === code)
+                            : null;
+                        result.agent = exact || data[0];
+                    }
+                }
+            })(),
+
+            // 3. Product lookup — fuzzy match against products table (same source as activity modal)
+            (async () => {
+                const scanned = (fields.product_name || '').trim().toLowerCase();
+                if (!scanned) return;
+
+                const products = await window.AppDataStore.getAll('products').catch(() => []);
+                if (!products || !products.length) return;
+
+                let best = null;
+                let bestScore = 0;
+                for (const p of products) {
+                    const pn = (p.name || '').toLowerCase();
+                    if (pn === scanned) { best = p; break; }
+                    if (pn.includes(scanned) || scanned.includes(pn)) {
+                        const score = Math.min(pn.length, scanned.length) / Math.max(pn.length, scanned.length);
+                        if (score > bestScore) { best = p; bestScore = score; }
+                    }
+                }
+                if (best) result.product = best;
+            })(),
+        ]);
+
+        return result;
+    };
+
+    // ── Render CRM verification panel (injected below field cards) ──────────
+    const _ofeRenderCrmPanel = (ref, fields) => {
+        if (!ref) return '';
+
+        const custHtml = ref.customer
+            ? `<div style="display:flex;align-items:center;gap:8px;">
+                <i class="fas fa-user-check" style="color:#15803d;"></i>
+                <div>
+                    <span style="font-weight:600;color:#166534;">${esc(ref.customer.full_name)}</span>
+                    <span style="margin-left:6px;font-size:10px;padding:1px 6px;border-radius:10px;background:${ref.customer.status === 'customer' ? '#dbeafe' : '#dcfce7'};color:${ref.customer.status === 'customer' ? '#1d4ed8' : '#15803d'};">${esc(ref.customer.status || 'prospect')}</span>
+                    <div style="font-size:11px;color:#4ade80;margin-top:1px;">${esc(ref.customer.phone || ref.customer.ic_number || '')}</div>
+                </div>
+               </div>`
+            : `<span style="color:#b45309;font-size:12px;"><i class="fas fa-exclamation-triangle"></i> Not found in CRM — will need to create or search manually</span>`;
+
+        const agentHtml = ref.agent
+            ? `<div style="display:flex;align-items:center;gap:8px;">
+                <i class="fas fa-id-badge" style="color:#1d4ed8;"></i>
+                <span style="font-weight:600;color:#1e40af;">${esc(ref.agent.name)}</span>
+                ${fields.agent_code ? `<span style="font-size:11px;color:#93c5fd;">Code: ${esc(fields.agent_code)}</span>` : ''}
+               </div>`
+            : `<span style="color:#9ca3af;font-size:12px;">Agent code "${esc(fields.agent_code || fields.consultant || '—')}" not found</span>`;
+
+        const productHtml = ref.product
+            ? `<div style="display:flex;align-items:center;gap:8px;">
+                <i class="fas fa-gem" style="color:#7c3aed;"></i>
+                <span style="font-weight:600;color:#5b21b6;">${esc(ref.product.name)}</span>
+                ${ref.product.name.toLowerCase() !== (fields.product_name || '').toLowerCase()
+                    ? `<span style="font-size:10px;color:#a78bfa;">(OCR: ${esc(fields.product_name)})</span>` : ''}
+               </div>`
+            : `<span style="color:#9ca3af;font-size:12px;">"${esc(fields.product_name || '—')}" not matched in product catalog</span>`;
+
+        return `
+            <div id="ofe-crm-panel" style="background:var(--surface,#fff);border:1px solid var(--border,#e2e8f0);border-radius:10px;margin-bottom:12px;overflow:hidden;">
+                <div style="padding:9px 14px;background:var(--gray-50,#f8fafc);border-bottom:1px solid var(--border,#e2e8f0);font-weight:600;font-size:12px;color:var(--gray-600);display:flex;align-items:center;gap:7px;text-transform:uppercase;letter-spacing:.4px;">
+                    <i class="fas fa-search-plus" style="color:#6366f1;font-size:11px;"></i>CRM Cross-Reference
+                </div>
+                <div style="padding:12px 14px;display:flex;flex-direction:column;gap:10px;">
+                    <div style="display:flex;align-items:flex-start;gap:10px;">
+                        <span style="min-width:60px;font-size:11px;color:var(--gray-400);text-transform:uppercase;letter-spacing:.4px;padding-top:2px;">Customer</span>
+                        <div>${custHtml}</div>
+                    </div>
+                    <div style="display:flex;align-items:flex-start;gap:10px;">
+                        <span style="min-width:60px;font-size:11px;color:var(--gray-400);text-transform:uppercase;letter-spacing:.4px;padding-top:2px;">Agent</span>
+                        <div>${agentHtml}</div>
+                    </div>
+                    <div style="display:flex;align-items:flex-start;gap:10px;">
+                        <span style="min-width:60px;font-size:11px;color:var(--gray-400);text-transform:uppercase;letter-spacing:.4px;padding-top:2px;">Product</span>
+                        <div>${productHtml}</div>
+                    </div>
+                </div>
+            </div>`;
+    };
+
+    // ── Collection status panel (shown in scan result) ──────────────────────
+    const _ofeCollectionStatusPanel = (attachId, status) => `
+        <div id="ofe-status-panel" style="background:var(--surface,#fff);border:1px solid var(--border,#e2e8f0);border-radius:10px;margin-bottom:12px;overflow:hidden;">
+            <div style="padding:9px 14px;background:var(--gray-50,#f8fafc);border-bottom:1px solid var(--border,#e2e8f0);font-weight:600;font-size:12px;color:var(--gray-600);display:flex;align-items:center;gap:7px;text-transform:uppercase;letter-spacing:.4px;">
+                <i class="fas fa-tasks" style="color:#6366f1;font-size:11px;"></i>Collection Status
+            </div>
+            <div style="padding:12px 14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <div id="ofe-status-badge">${_statusBadge(status || 'pending')}</div>
+                <div style="display:flex;gap:8px;">
+                    <button class="btn secondary" style="padding:5px 12px;font-size:12px;${(status || 'pending') === 'pending' ? 'opacity:0.4;' : ''}"
+                        onclick="app.ofeSetStatus('pending')" id="ofe-btn-pending">
+                        <i class="fas fa-clock"></i> Pending
+                    </button>
+                    <button class="btn primary" style="padding:5px 12px;font-size:12px;${(status || 'pending') === 'collected' ? 'opacity:0.4;' : ''}"
+                        onclick="app.ofeSetStatus('collected')" id="ofe-btn-collected">
+                        <i class="fas fa-check-circle"></i> Mark Collected
+                    </button>
+                </div>
+                ${!attachId ? `<span style="font-size:11px;color:var(--gray-400);">Status saved once closing activity is created</span>` : ''}
+            </div>
+        </div>`;
 
     // ══════════════════════════════════════════════════════════════════════
     // Page shell — tabs: Scan | History
     // ══════════════════════════════════════════════════════════════════════
     const showOrderFormExtractView = async (viewport) => {
-        _ofeResult = null;
-        _ofeAllRows = [];
-        _ofeHistPage = 0;
-        _ofeHistSearch = '';
+        _ofeResult      = null;
+        _ofeCrmRef      = null;
+        _ofeAttachId    = null;
+        _ofeAllRows     = [];
+        _ofeHistPage    = 0;
+        _ofeHistSearch  = '';
         viewport.innerHTML = `
             <div class="view-header" style="padding:20px 24px 0;">
                 <h2 class="view-title" style="display:flex;align-items:center;gap:8px;">
@@ -148,35 +320,32 @@
 
     // ── Tab switch ─────────────────────────────────────────────────────────
     const ofeShowTab = (tab) => {
-        const scanPane    = document.getElementById('ofe-pane-scan');
-        const histPane    = document.getElementById('ofe-pane-history');
-        const tabScan     = document.getElementById('ofe-tab-scan');
-        const tabHist     = document.getElementById('ofe-tab-history');
+        const scanPane = document.getElementById('ofe-pane-scan');
+        const histPane = document.getElementById('ofe-pane-history');
+        const tabScan  = document.getElementById('ofe-tab-scan');
+        const tabHist  = document.getElementById('ofe-tab-history');
         if (!scanPane || !histPane) return;
 
-        const active   = 'color:var(--primary,#6366f1);border-bottom:2px solid var(--primary,#6366f1);margin-bottom:-2px;';
-        const inactive = 'color:var(--gray-500);border-bottom:2px solid transparent;margin-bottom:-2px;';
-
         if (tab === 'history') {
-            scanPane.style.display  = 'none';
-            histPane.style.display  = '';
-            tabScan.style.color     = 'var(--gray-500)';
+            scanPane.style.display = 'none';
+            histPane.style.display = '';
+            tabScan.style.color = 'var(--gray-500)';
             tabScan.style.borderBottom = '2px solid transparent';
-            tabHist.style.color     = 'var(--primary,#6366f1)';
+            tabHist.style.color = 'var(--primary,#6366f1)';
             tabHist.style.borderBottom = '2px solid var(--primary,#6366f1)';
             if (_ofeAllRows.length === 0) _ofeLoadHistory();
         } else {
-            histPane.style.display  = 'none';
-            scanPane.style.display  = '';
-            tabHist.style.color     = 'var(--gray-500)';
+            histPane.style.display = 'none';
+            scanPane.style.display = '';
+            tabHist.style.color = 'var(--gray-500)';
             tabHist.style.borderBottom = '2px solid transparent';
-            tabScan.style.color     = 'var(--primary,#6366f1)';
+            tabScan.style.color = 'var(--primary,#6366f1)';
             tabScan.style.borderBottom = '2px solid var(--primary,#6366f1)';
         }
     };
 
     // ══════════════════════════════════════════════════════════════════════
-    // Option B — History Viewer
+    // History Viewer
     // ══════════════════════════════════════════════════════════════════════
     const _ofeLoadHistory = async () => {
         const el = document.getElementById('ofe-history-content');
@@ -187,15 +356,28 @@
             const sb = window.supabase || window.supabaseClient;
             if (!sb) throw new Error('Supabase not available');
 
-            const { data, error } = await sb
+            // Try with collection_status — fall back gracefully if column not yet migrated (code 42703)
+            let fetchData, fetchErr;
+            ({ data: fetchData, error: fetchErr } = await sb
                 .from('prospect_attachments')
-                .select('id, prospect_id, file_url, filename, metadata, scanned_at, scan_confidence')
+                .select('id, prospect_id, file_url, filename, metadata, scanned_at, scan_confidence, collection_status')
                 .eq('attachment_type', 'order_form')
                 .order('scanned_at', { ascending: false })
-                .limit(500);
+                .limit(500));
 
-            if (error) throw error;
-            _ofeAllRows = data || [];
+            if (fetchErr && fetchErr.code === '42703') {
+                // collection_status column not yet migrated — query without it
+                ({ data: fetchData, error: fetchErr } = await sb
+                    .from('prospect_attachments')
+                    .select('id, prospect_id, file_url, filename, metadata, scanned_at, scan_confidence')
+                    .eq('attachment_type', 'order_form')
+                    .order('scanned_at', { ascending: false })
+                    .limit(500));
+                fetchData = (fetchData || []).map(r => ({ ...r, collection_status: null }));
+            }
+
+            if (fetchErr) throw fetchErr;
+            _ofeAllRows = fetchData || [];
             _ofeHistPage = 0;
             _ofeRenderHistory();
 
@@ -226,10 +408,10 @@
             })
             : _ofeAllRows;
 
-        const total   = filtered.length;
-        const start   = _ofeHistPage * _HIST_PAGE_SIZE;
+        const total    = filtered.length;
+        const start    = _ofeHistPage * _HIST_PAGE_SIZE;
         const pageRows = filtered.slice(start, start + _HIST_PAGE_SIZE);
-        const pages   = Math.ceil(total / _HIST_PAGE_SIZE);
+        const pages    = Math.ceil(total / _HIST_PAGE_SIZE);
 
         const _fmt = (iso) => {
             if (!iso) return '—';
@@ -243,7 +425,6 @@
         const rowsHtml = pageRows.map((r, idx) => {
             const m   = r.metadata || {};
             const f   = m.fields   || {};
-            const c   = m.confidence || {};
             const rid = esc(r.id);
             const confPct = r.scan_confidence != null
                 ? Math.round(r.scan_confidence * 100) + '%'
@@ -256,7 +437,8 @@
             const amountDisp = (amount !== '—') ? 'RM ' + esc(String(amount)) : '—';
             const template  = _formTypeLabel(m.form_type || f.form_type);
             const date      = _fmt(r.scanned_at);
-            const bgRow = (start + idx) % 2 === 0 ? 'var(--surface,#fff)' : 'var(--gray-50,#f8fafc)';
+            const status    = r.collection_status || 'pending';
+            const bgRow     = (start + idx) % 2 === 0 ? 'var(--surface,#fff)' : 'var(--gray-50,#f8fafc)';
 
             return `<tr id="ofe-row-${rid}" style="background:${bgRow};cursor:pointer;" onclick="app.ofeHistToggleRow('${rid}')">
                 <td style="padding:10px 12px;font-size:12px;color:var(--gray-500);white-space:nowrap;">${esc(date)}</td>
@@ -266,6 +448,14 @@
                 <td style="padding:10px 12px;font-size:12px;color:var(--gray-700);">${esc(product)}</td>
                 <td style="padding:10px 12px;font-size:12px;font-weight:600;">${amountDisp}</td>
                 <td style="padding:10px 12px;font-size:12px;font-weight:700;color:${r.scan_confidence != null ? confColor : 'var(--gray-400)'};">${confPct}</td>
+                <td style="padding:10px 12px;" onclick="event.stopPropagation()">
+                    <button onclick="app.ofeHistToggleStatus('${rid}', '${status}')"
+                        style="padding:3px 10px;font-size:11px;border:none;border-radius:10px;cursor:pointer;font-weight:600;
+                               background:${status === 'collected' ? '#dcfce7' : '#fef9c3'};
+                               color:${status === 'collected' ? '#15803d' : '#92400e'};">
+                        ${status === 'collected' ? '<i class="fas fa-check-circle"></i> Collected' : '<i class="fas fa-clock"></i> Pending'}
+                    </button>
+                </td>
                 <td style="padding:10px 12px;text-align:center;">
                     ${r.file_url
                         ? `<button class="btn secondary" style="padding:3px 10px;font-size:11px;" onclick="event.stopPropagation();window._openAttachment && window._openAttachment('${esc(r.file_url)}')"><i class="fas fa-image"></i></button>`
@@ -273,7 +463,7 @@
                 </td>
             </tr>
             <tr id="ofe-expand-${rid}" style="display:none;">
-                <td colspan="8" style="padding:0;border-bottom:2px solid var(--border,#e2e8f0);">
+                <td colspan="9" style="padding:0;border-bottom:2px solid var(--border,#e2e8f0);">
                     <div id="ofe-expand-body-${rid}" style="padding:16px 20px;background:var(--gray-50,#f8fafc);">
                     </div>
                 </td>
@@ -290,6 +480,10 @@
                 </div>
             </div>` : '';
 
+        // Status filter summary
+        const pendingCount   = _ofeAllRows.filter(r => (r.collection_status || 'pending') === 'pending').length;
+        const collectedCount = _ofeAllRows.filter(r => r.collection_status === 'collected').length;
+
         el.innerHTML = `
             <!-- Toolbar -->
             <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
@@ -300,7 +494,8 @@
                         oninput="app.ofeHistSearch(this.value)"
                         style="width:100%;padding:8px 10px 8px 32px;border:1px solid var(--border,#e2e8f0);border-radius:8px;font-size:13px;box-sizing:border-box;">
                 </div>
-                <span style="font-size:13px;color:var(--gray-500);">${total} record${total !== 1 ? 's' : ''}</span>
+                <span style="font-size:12px;background:#fef9c3;color:#92400e;padding:3px 10px;border-radius:10px;font-weight:600;"><i class="fas fa-clock"></i> ${pendingCount} pending</span>
+                <span style="font-size:12px;background:#dcfce7;color:#15803d;padding:3px 10px;border-radius:10px;font-weight:600;"><i class="fas fa-check-circle"></i> ${collectedCount} collected</span>
                 <button class="btn secondary" style="padding:6px 12px;font-size:12px;margin-left:auto;" onclick="app.ofeRefreshHistory()">
                     <i class="fas fa-sync-alt"></i> Refresh
                 </button>
@@ -313,7 +508,7 @@
                            ${q ? 'No scans match your search.' : 'No order forms have been scanned yet.'}
                        </div>`
                     : `<div style="overflow-x:auto;">
-                        <table style="width:100%;border-collapse:collapse;min-width:680px;">
+                        <table style="width:100%;border-collapse:collapse;min-width:780px;">
                             <thead>
                                 <tr style="background:var(--gray-50,#f8fafc);border-bottom:2px solid var(--border,#e2e8f0);text-align:left;">
                                     <th style="padding:10px 12px;font-size:11px;color:var(--gray-500);text-transform:uppercase;letter-spacing:.4px;white-space:nowrap;">Scanned At</th>
@@ -323,6 +518,7 @@
                                     <th style="padding:10px 12px;font-size:11px;color:var(--gray-500);text-transform:uppercase;letter-spacing:.4px;">Product</th>
                                     <th style="padding:10px 12px;font-size:11px;color:var(--gray-500);text-transform:uppercase;letter-spacing:.4px;">Amount</th>
                                     <th style="padding:10px 12px;font-size:11px;color:var(--gray-500);text-transform:uppercase;letter-spacing:.4px;">Conf.</th>
+                                    <th style="padding:10px 12px;font-size:11px;color:var(--gray-500);text-transform:uppercase;letter-spacing:.4px;">Status</th>
                                     <th style="padding:10px 12px;width:52px;"></th>
                                 </tr>
                             </thead>
@@ -335,6 +531,32 @@
         `;
     };
 
+    // Toggle a history row's collection_status
+    const ofeHistToggleStatus = async (id, currentStatus) => {
+        const newStatus = currentStatus === 'collected' ? 'pending' : 'collected';
+        const sb = window.supabase || window.supabaseClient;
+        if (!sb) { UI.toast.error('Supabase not available'); return; }
+
+        try {
+            const { error } = await sb
+                .from('prospect_attachments')
+                .update({ collection_status: newStatus })
+                .eq('id', id);
+            if (error) {
+                if (error.code === '42703') { UI.toast.info('Status tracking requires a DB migration — ask your admin to apply it.'); return; }
+                throw error;
+            }
+
+            // Update local cache
+            const row = _ofeAllRows.find(r => String(r.id) === String(id));
+            if (row) row.collection_status = newStatus;
+            _ofeRenderHistory();
+            UI.toast.success(`Marked as ${newStatus}`);
+        } catch (err) {
+            UI.toast.error('Could not update status: ' + (err.message || String(err)));
+        }
+    };
+
     // Expand/collapse a row to show the full field card inline
     const ofeHistToggleRow = (id) => {
         const expRow  = document.getElementById(`ofe-expand-${id}`);
@@ -344,16 +566,15 @@
         expRow.style.display = isOpen ? 'none' : '';
         if (!isOpen && expBody) {
             const record = _ofeAllRows.find(r => String(r.id) === String(id));
-            if (record) {
-                expBody.innerHTML = _ofeFieldCard(record);
-            }
+            if (record) expBody.innerHTML = _ofeFieldCard(record);
         }
     };
 
     const _ofeFieldCard = (record) => {
-        const m   = record.metadata || {};
-        const fields = m.fields || {};
+        const m          = record.metadata || {};
+        const fields     = m.fields || {};
         const confidence = m.confidence || {};
+        const status     = record.collection_status || 'pending';
 
         const confValues = Object.values(confidence)
             .map(c => c === 'high' ? 1 : c === 'medium' ? 0.6 : c === 'low' ? 0.3 : null)
@@ -389,15 +610,25 @@
             : `<div style="width:100%;aspect-ratio:3/4;background:var(--gray-100);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--gray-300);margin-bottom:10px;font-size:28px;">
                    <i class="fas fa-image"></i></div>`;
 
+        const rid = esc(record.id);
         return `<div style="display:grid;grid-template-columns:200px 1fr;gap:16px;align-items:start;">
             <div>
                 ${photoHtml}
-                <div style="background:var(--surface,#fff);border:1px solid var(--border,#e2e8f0);border-radius:8px;padding:12px;font-size:12px;">
+                <div style="background:var(--surface,#fff);border:1px solid var(--border,#e2e8f0);border-radius:8px;padding:12px;font-size:12px;margin-bottom:8px;">
                     <div style="font-size:10px;color:var(--gray-400);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px;">Template</div>
                     <div style="font-weight:600;color:var(--gray-900);margin-bottom:10px;">${esc(_formTypeLabel(m.form_type || fields.form_type))}</div>
                     ${meanConf !== null ? `
                     <div style="font-size:10px;color:var(--gray-400);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px;">Avg Confidence</div>
                     <div style="font-weight:700;font-size:18px;color:${confGaugeColor};">${meanConf}%</div>` : ''}
+                </div>
+                <!-- Status toggle in card view -->
+                <div style="background:var(--surface,#fff);border:1px solid var(--border,#e2e8f0);border-radius:8px;padding:10px 12px;">
+                    <div style="font-size:10px;color:var(--gray-400);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">Collection Status</div>
+                    <div style="margin-bottom:8px;">${_statusBadge(status)}</div>
+                    <button onclick="app.ofeHistToggleStatus('${rid}','${status}')"
+                        style="width:100%;padding:5px;font-size:11px;border:1px solid var(--border,#e2e8f0);border-radius:6px;cursor:pointer;background:var(--gray-50);font-weight:600;color:var(--gray-600);">
+                        ${status === 'collected' ? '<i class="fas fa-undo"></i> Reset to Pending' : '<i class="fas fa-check"></i> Mark Collected'}
+                    </button>
                 </div>
             </div>
             <div style="max-height:400px;overflow-y:auto;">
@@ -406,7 +637,6 @@
         </div>`;
     };
 
-    // Public handlers called from inline HTML
     const ofeHistSearch = (val) => {
         _ofeHistSearch = val || '';
         _ofeHistPage = 0;
@@ -426,10 +656,10 @@
     };
 
     // ══════════════════════════════════════════════════════════════════════
-    // Option C — Create Closing Activity from scan result
+    // Create Closing Activity from scan result
     // ══════════════════════════════════════════════════════════════════════
-    let _ofeLinkedProspect = null;   // { id, name, entityType }
-    let _ofeClosTimer = null;
+    let _ofeLinkedProspect = null;
+    let _ofeClosTimer      = null;
 
     const _ofeMapPayment = (type, method) => {
         const t = (type   || '').toLowerCase();
@@ -456,26 +686,54 @@
         if (!resultEl) return;
         _ofeLinkedProspect = null;
 
-        const product   = fields.product_name || '';
-        const amount    = _ofeCleanNum(fields.amount_total_due || fields.amount_unit_price);
-        const payment   = _ofeMapPayment(fields.payment_type, fields.payment_method);
-        const prn       = fields.prn_number || '';
-        const colDate   = fields.order_date || '';
-        const isPop     = payment === 'POP';
-        const popAmt    = _ofeCleanNum(fields.installment_monthly);
-        const popTen    = fields.installment_tenure_months || '';
-        const popDown   = _ofeCleanNum(fields.amount_down_payment);
+        const product  = fields.product_name || '';
+        const amount   = _ofeCleanNum(fields.amount_total_due || fields.amount_unit_price);
+        const payment  = _ofeMapPayment(fields.payment_type, fields.payment_method);
+        const prn      = fields.prn_number || '';
+        const colDate  = fields.order_date || '';
+        const isPop    = payment === 'POP';
+        const popAmt   = _ofeCleanNum(fields.installment_monthly);
+        const popTen   = fields.installment_tenure_months || '';
+        const popDown  = _ofeCleanNum(fields.amount_down_payment);
+
+        // Pre-fill prospect from CRM cross-reference if found
+        const crmCustomer = _ofeCrmRef && _ofeCrmRef.customer;
+        const crmProduct  = _ofeCrmRef && _ofeCrmRef.product ? _ofeCrmRef.product.name : product;
 
         const fieldRows = [
-            product   ? `<tr><td style="color:var(--gray-500);width:44%;padding:4px 8px;font-size:12px;">Product</td><td style="font-size:12px;font-weight:500;padding:4px 8px;">${esc(product)}</td></tr>` : '',
-            amount    ? `<tr><td style="color:var(--gray-500);width:44%;padding:4px 8px;font-size:12px;">Amount</td><td style="font-size:12px;font-weight:600;color:#10b981;padding:4px 8px;">RM ${esc(String(amount))}</td></tr>` : '',
-            payment   ? `<tr><td style="color:var(--gray-500);width:44%;padding:4px 8px;font-size:12px;">Payment</td><td style="font-size:12px;padding:4px 8px;">${esc(payment)}</td></tr>` : '',
-            prn       ? `<tr><td style="color:var(--gray-500);width:44%;padding:4px 8px;font-size:12px;">PRN / Invoice</td><td style="font-size:12px;font-family:monospace;padding:4px 8px;">${esc(prn)}</td></tr>` : '',
-            colDate   ? `<tr><td style="color:var(--gray-500);width:44%;padding:4px 8px;font-size:12px;">Collection Date</td><td style="font-size:12px;padding:4px 8px;">${esc(colDate)}</td></tr>` : '',
+            crmProduct ? `<tr><td style="color:var(--gray-500);width:44%;padding:4px 8px;font-size:12px;">Product</td><td style="font-size:12px;font-weight:500;padding:4px 8px;">${esc(crmProduct)} ${crmProduct !== product ? _crmBadge() : ''}</td></tr>` : '',
+            amount     ? `<tr><td style="color:var(--gray-500);width:44%;padding:4px 8px;font-size:12px;">Amount</td><td style="font-size:12px;font-weight:600;color:#10b981;padding:4px 8px;">RM ${esc(String(amount))}</td></tr>` : '',
+            payment    ? `<tr><td style="color:var(--gray-500);width:44%;padding:4px 8px;font-size:12px;">Payment</td><td style="font-size:12px;padding:4px 8px;">${esc(payment)}</td></tr>` : '',
+            prn        ? `<tr><td style="color:var(--gray-500);width:44%;padding:4px 8px;font-size:12px;">PRN / Invoice</td><td style="font-size:12px;font-family:monospace;padding:4px 8px;">${esc(prn)}</td></tr>` : '',
+            colDate    ? `<tr><td style="color:var(--gray-500);width:44%;padding:4px 8px;font-size:12px;">Collection Date</td><td style="font-size:12px;padding:4px 8px;">${esc(colDate)}</td></tr>` : '',
             isPop && popAmt  ? `<tr><td style="color:var(--gray-500);width:44%;padding:4px 8px;font-size:12px;">Monthly (POP)</td><td style="font-size:12px;padding:4px 8px;">RM ${esc(String(popAmt))}</td></tr>` : '',
             isPop && popTen  ? `<tr><td style="color:var(--gray-500);width:44%;padding:4px 8px;font-size:12px;">Tenure</td><td style="font-size:12px;padding:4px 8px;">${esc(String(popTen))} months</td></tr>` : '',
             isPop && popDown ? `<tr><td style="color:var(--gray-500);width:44%;padding:4px 8px;font-size:12px;">Down Payment</td><td style="font-size:12px;padding:4px 8px;">RM ${esc(String(popDown))}</td></tr>` : '',
         ].filter(Boolean).join('');
+
+        // If CRM matched a customer, auto-populate the prospect
+        const step1Display = crmCustomer ? 'none' : '';
+        const step2Display = crmCustomer ? '' : 'none';
+
+        if (crmCustomer) {
+            _ofeLinkedProspect = {
+                id:         crmCustomer.id,
+                name:       crmCustomer.full_name,
+                entityType: (crmCustomer.status === 'customer' || crmCustomer.status === 'Customer') ? 'customer' : 'prospect',
+            };
+        }
+
+        const crmBadgeHtml = crmCustomer ? `
+            <div id="ofe-clos-badge" style="margin-bottom:14px;">
+                <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:10px;">
+                    <i class="fas fa-user-check" style="color:#15803d;font-size:16px;"></i>
+                    <div>
+                        <div style="font-size:13px;font-weight:600;color:#166534;">${esc(crmCustomer.full_name)} ${_crmBadge()}</div>
+                        <div style="font-size:11px;color:#4ade80;text-transform:capitalize;">${esc(_ofeLinkedProspect.entityType)} · auto-matched from CRM</div>
+                    </div>
+                    <button onclick="app.ofeClosClear()" style="margin-left:auto;background:none;border:none;color:#15803d;cursor:pointer;font-size:12px;">Change</button>
+                </div>
+            </div>` : `<div id="ofe-clos-badge" style="margin-bottom:14px;display:none;"></div>`;
 
         const panelHtml = `
             <div id="ofe-closing-panel" style="margin-top:24px;background:var(--surface,#fff);border:1px solid var(--border,#e2e8f0);border-radius:12px;overflow:hidden;">
@@ -484,8 +742,7 @@
                     <span style="font-weight:600;color:var(--gray-700);font-size:14px;">Create Closing Activity</span>
                 </div>
                 <div style="padding:16px 18px;">
-                    <!-- Step 1: Prospect search -->
-                    <div id="ofe-clos-step1">
+                    <div id="ofe-clos-step1" style="display:${step1Display};">
                         <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--gray-500);margin-bottom:8px;">Step 1 — Find Prospect</div>
                         <div style="position:relative;">
                             <i class="fas fa-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--gray-400);font-size:13px;pointer-events:none;"></i>
@@ -495,9 +752,8 @@
                         </div>
                         <div id="ofe-clos-results" style="margin-top:6px;"></div>
                     </div>
-                    <!-- Step 2 + 3: Review & Save (hidden until prospect selected) -->
-                    <div id="ofe-clos-step2" style="display:none;">
-                        <div id="ofe-clos-badge" style="margin-bottom:14px;"></div>
+                    <div id="ofe-clos-step2" style="display:${step2Display};">
+                        ${crmBadgeHtml}
                         <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--gray-500);margin-bottom:6px;">Step 2 — Fields to Save</div>
                         <div style="background:var(--gray-50,#f8fafc);border:1px solid var(--border,#e2e8f0);border-radius:8px;margin-bottom:14px;overflow:hidden;">
                             ${fieldRows
@@ -594,16 +850,20 @@
                     <div style="font-size:11px;color:#4ade80;text-transform:capitalize;">${esc(entityType)}</div>
                 </div>
             </div>`;
+        badge.style.display = '';
     };
 
     const ofeClosClear = () => {
         _ofeLinkedProspect = null;
+        clearTimeout(_ofeClosTimer);
         const step1 = document.getElementById('ofe-clos-step1');
         const step2 = document.getElementById('ofe-clos-step2');
+        const badge = document.getElementById('ofe-clos-badge');
         const srch  = document.getElementById('ofe-clos-search');
         const res   = document.getElementById('ofe-clos-results');
         if (step1) step1.style.display = '';
         if (step2) step2.style.display = 'none';
+        if (badge) badge.style.display = 'none';
         if (srch)  srch.value = '';
         if (res)   res.innerHTML = '';
     };
@@ -612,11 +872,12 @@
         if (!_ofeLinkedProspect) { UI.toast.error('Please select a prospect first.'); return; }
         if (!_ofeResult) { UI.toast.error('No scan result to save.'); return; }
 
-        const fields  = _ofeResult.fields || {};
-        const actType = document.querySelector('input[name="ofe-clos-type"]:checked')?.value || 'FTF';
-        const today   = new Date().toISOString().split('T')[0];
+        const fields   = _ofeResult.fields || {};
+        const actType  = document.querySelector('input[name="ofe-clos-type"]:checked')?.value || 'FTF';
+        const today    = new Date().toISOString().split('T')[0];
 
-        const product  = fields.product_name || null;
+        // Use CRM-verified product name if available
+        const product  = (_ofeCrmRef && _ofeCrmRef.product ? _ofeCrmRef.product.name : null) || fields.product_name || null;
         const amount   = _ofeCleanNum(fields.amount_total_due || fields.amount_unit_price);
         const payment  = _ofeMapPayment(fields.payment_type, fields.payment_method);
         const prn      = fields.prn_number || null;
@@ -654,6 +915,49 @@
 
         try {
             await window.AppDataStore.create('activities', activity);
+
+            // Also save the attachment with collection_status = 'pending' so it appears in History
+            const sb = window.supabase || window.supabaseClient;
+            if (sb && !_ofeAttachId) {
+                try {
+                    const confidence = _ofeResult.confidence || {};
+                    const confValues = Object.values(confidence)
+                        .map(c => c === 'high' ? 1.0 : c === 'medium' ? 0.6 : c === 'low' ? 0.3 : null)
+                        .filter(v => v !== null);
+                    const meanConf = confValues.length
+                        ? Math.round((confValues.reduce((a, b) => a + b, 0) / confValues.length) * 100) / 100
+                        : null;
+
+                    const { data: att } = await sb.from('prospect_attachments').insert({
+                        prospect_id:       _ofeLinkedProspect.entityType === 'prospect' ? _ofeLinkedProspect.id : null,
+                        customer_id:       _ofeLinkedProspect.entityType === 'customer' ? _ofeLinkedProspect.id : null,
+                        attachment_type:   'order_form',
+                        filename:          `order_form_${prn || today}.jpg`,
+                        metadata: {
+                            form_type:   _ofeResult.form_type || fields.form_type || 'unknown',
+                            prn_number:  prn,
+                            fields,
+                            confidence,
+                            raw_text:    _ofeResult.raw_text || '',
+                            crm_ref: {
+                                customer_id:   _ofeCrmRef?.customer?.id || null,
+                                agent_id:      _ofeCrmRef?.agent?.id || null,
+                                product_name:  _ofeCrmRef?.product?.name || null,
+                            },
+                        },
+                        scanned_at:        new Date().toISOString(),
+                        scan_confidence:   meanConf,
+                        collection_status: 'pending',
+                    }).select('id').single().catch(() => ({ data: null }));
+
+                    if (att) _ofeAttachId = att.id;
+                } catch (_) { /* graceful — attachment save failure shouldn't block activity */ }
+            }
+
+            // Update collection status panel if visible
+            const statusBadge = document.getElementById('ofe-status-badge');
+            if (statusBadge) statusBadge.innerHTML = _statusBadge('pending');
+
             UI.toast.success(`✓ Closing activity created for ${_ofeLinkedProspect.name}`);
             const panel = document.getElementById('ofe-closing-panel');
             if (panel) panel.innerHTML = `
@@ -662,6 +966,7 @@
                     <div>
                         <div style="font-weight:600;color:#166534;font-size:14px;">Closing activity saved!</div>
                         <div style="font-size:12px;color:#4ade80;margin-top:2px;">Linked to <strong>${esc(_ofeLinkedProspect.name)}</strong> · ${esc(actType)} · ${product ? esc(product) : 'no product'}</div>
+                        <div style="font-size:11px;color:#86efac;margin-top:3px;">Now mark as <strong>Collected</strong> in the status panel above once all data is verified.</div>
                     </div>
                 </div>`;
             _ofeLinkedProspect = null;
@@ -671,8 +976,40 @@
         }
     };
 
+    // ── Set collection status for current scan ─────────────────────────────
+    const ofeSetStatus = async (newStatus) => {
+        // Update badge immediately
+        const badge   = document.getElementById('ofe-status-badge');
+        const btnP    = document.getElementById('ofe-btn-pending');
+        const btnC    = document.getElementById('ofe-btn-collected');
+        if (badge) badge.innerHTML = _statusBadge(newStatus);
+        if (btnP)  btnP.style.opacity  = newStatus === 'pending'   ? '0.4' : '1';
+        if (btnC)  btnC.style.opacity  = newStatus === 'collected' ? '0.4' : '1';
+
+        if (!_ofeAttachId) {
+            UI.toast.info('Status will apply when closing activity is saved.');
+            return;
+        }
+
+        const sb = window.supabase || window.supabaseClient;
+        if (!sb) return;
+        try {
+            const { error } = await sb
+                .from('prospect_attachments')
+                .update({ collection_status: newStatus })
+                .eq('id', _ofeAttachId);
+            if (error) {
+                if (error.code === '42703') { UI.toast.info('Status tracking requires a DB migration — ask your admin to apply it.'); return; }
+                throw error;
+            }
+            UI.toast.success(`Marked as ${newStatus}`);
+        } catch (err) {
+            UI.toast.error('Could not update status: ' + (err.message || String(err)));
+        }
+    };
+
     // ══════════════════════════════════════════════════════════════════════
-    // Option A — Scan tab handlers (unchanged)
+    // Scan tab — file handler + render
     // ══════════════════════════════════════════════════════════════════════
     const ofeHandleFile = async (input) => {
         const file = input?.files?.[0];
@@ -688,8 +1025,10 @@
             return;
         }
 
-        _ofeResult = null;
-        clearTimeout(_ofeClosTimer);   // cancel any stale prospect search from last scan
+        _ofeResult   = null;
+        _ofeCrmRef   = null;
+        _ofeAttachId = null;
+        clearTimeout(_ofeClosTimer);
         if (input) input.value = '';
 
         const statusEl = document.getElementById('ofe-status');
@@ -727,6 +1066,11 @@
             if (!res || res.ok === false) throw new Error(res?.detail || res?.error || 'OCR failed');
 
             _ofeResult = res;
+
+            // Run CRM cross-reference in parallel with render
+            setStatus('#e0f2fe', '#0369a1', '<i class="fas fa-search"></i> Cross-referencing with CRM…');
+            _ofeCrmRef = await _ofeCrmCrossRef(res.fields || {});
+
             if (statusEl) statusEl.innerHTML = '';
             _ofeRenderScanResult(res, previewUrl);
             _ofeRenderClosingPanel(res.fields || {}, res.confidence || {});
@@ -760,14 +1104,34 @@
             : null;
         const confGaugeColor = meanConf >= 80 ? '#10b981' : meanConf >= 50 ? '#f59e0b' : '#ef4444';
 
+        // Build field rows — show CRM-verified value with badge for key fields
+        const crmOverrides = {};
+        if (_ofeCrmRef) {
+            if (_ofeCrmRef.customer) {
+                crmOverrides.customer_name  = { val: _ofeCrmRef.customer.full_name, crm: true };
+                crmOverrides.customer_phone = { val: _ofeCrmRef.customer.phone, crm: true };
+            }
+            if (_ofeCrmRef.agent) {
+                crmOverrides.consultant = { val: _ofeCrmRef.agent.name, crm: true };
+            }
+            if (_ofeCrmRef.product) {
+                crmOverrides.product_name = { val: _ofeCrmRef.product.name, crm: true };
+            }
+        }
+
         const groupsHtml = FIELD_GROUPS.map(({ title, icon, fields: fList }) => {
             const rows = fList.map(([key, label]) => {
-                const val = fields[key];
-                if (val == null || String(val).trim() === '') return '';
+                const raw = fields[key];
+                const override = crmOverrides[key];
+                const displayVal = override ? override.val : raw;
+                if (displayVal == null || String(displayVal).trim() === '') return '';
                 const conf = confidence[key];
+                const crmTag = override ? ` ${_crmBadge()}` : '';
+                const rawNote = (override && raw && raw !== override.val)
+                    ? `<span style="font-size:10px;color:var(--gray-400);margin-left:4px;">(OCR: ${esc(String(raw))})</span>` : '';
                 return `<tr style="border-bottom:1px solid var(--gray-100,#f1f5f9);">
                     <td style="padding:7px 12px;color:var(--gray-500);font-size:12px;white-space:nowrap;width:42%;vertical-align:top;">${esc(label)}</td>
-                    <td style="padding:7px 12px;color:var(--gray-900);font-size:13px;font-weight:500;word-break:break-word;">${esc(String(val))} ${_confBadge(conf)}</td>
+                    <td style="padding:7px 12px;color:var(--gray-900);font-size:13px;font-weight:500;word-break:break-word;">${esc(String(displayVal))}${crmTag}${rawNote} ${override ? '' : _confBadge(conf)}</td>
                 </tr>`;
             }).join('');
             if (!rows) return '';
@@ -795,6 +1159,8 @@
                     </div>
                 </div>
                 <div>
+                    ${_ofeRenderCrmPanel(_ofeCrmRef, fields)}
+                    ${_ofeCollectionStatusPanel(_ofeAttachId, 'pending')}
                     ${groupsHtml || '<div style="color:var(--gray-500);padding:24px;text-align:center;border:1px dashed var(--border,#e2e8f0);border-radius:10px;">No fields could be extracted — try a clearer photo or select the template manually.</div>'}
                 </div>
             </div>
@@ -809,7 +1175,9 @@
         ofeHistSearch,
         ofeHistPage,
         ofeRefreshHistory,
-        // Option C
+        ofeHistToggleStatus,
+        ofeSetStatus,
+        // Closing Activity
         ofeClosSearch,
         ofeClosSelect,
         ofeClosClear,
