@@ -8,3 +8,4 @@
 | Day | Date | Fire | Follows | Likes | Drafts | Posted | Blocks | Followers |
 |--|--|--|--|--|--|--|--|--|
 | 0 | 2026-06-04 | — | (pre-activation) | | | | | 2 |
+| 1 | 2026-06-05 | 08:00 | 0/10 (SKIP) | 0/20 (SKIP) | 0/2 (SKIP) | 0 | Chrome MCP not connected | — |

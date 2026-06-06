@@ -1,9 +1,9 @@
 {
   "$schema": "outreach-protocol.md",
   "started_on": "2026-06-05",
-  "current_day": 0,
-  "next_day": 1,
-  "next_fire_iso": "2026-06-05T08:00:00+08:00",
+  "current_day": 1,
+  "next_day": 2,
+  "next_fire_iso": "2026-06-06T13:00:00+08:00",
   "drift_minutes_per_day": 43,
   "tier": {
     "current": "ramp-1",
@@ -51,6 +51,6 @@
   "blocks_seen": [],
   "comment_approval_mode": "draft_only",
   "comment_approval_note": "Engine NEVER posts comments automatically. It only DRAFTS them in the daily report. User reviews and approves; comments are posted in the next interactive session.",
-  "last_fire_iso": null,
-  "last_report_path": null
+  "last_fire_iso": "2026-06-05T08:00:09+08:00",
+  "last_report_path": "marketing/instagram/daily-reports/2026-06-05.md"
 }
