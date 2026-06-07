@@ -932,8 +932,9 @@
         const bujishuItems = opts.bujishu || [];
         const formulaItems = opts.formula || [];
         const events = opts.events || [];
-        const parsedOpp = opts.parsedOpp || parseSelectedItems(a.opportunity_potential || '');
-        const parsedNA = opts.parsedNA || parseSelectedItems(a.next_action || '');
+        const _parseSelectedItems = (window.app && window.app.parseSelectedItems) || ((t) => ({ selected: [], remarks: t || '' }));
+        const parsedOpp = opts.parsedOpp || _parseSelectedItems(a.opportunity_potential || '');
+        const parsedNA = opts.parsedNA || _parseSelectedItems(a.next_action || '');
 
         const cb = (name, value, group, selectedArr) => {
             const checked = selectedArr.includes(value) ? 'checked' : '';

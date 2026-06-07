@@ -1937,6 +1937,11 @@ const contactProspect = async (prospectId) => { await (window.app.openActivityMo
 
 // Phase 13: seed demo data
 
+// --- Helper to check if a user exists (outer scope so it can be exported) ---
+const userExists = async (userId) => {
+    const user = await AppDataStore.getById('users', userId);
+    return !!user;
+};
 
 const initImportDemoData = async () => {
 // Clear demo data if requested (optional)
@@ -1951,12 +1956,6 @@ if (window.location.search.includes('resetDemo=true')) {
     }
     UI.toast.info('Demo data cleared.');
 }
-
-// --- Helper to check if a user exists ---
-const userExists = async (userId) => {
-    const user = await AppDataStore.getById('users', userId);
-    return !!user;
-};
 
 // --- Import Jobs ---
 const importJobs = await AppDataStore.getAll('import_jobs');

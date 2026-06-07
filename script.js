@@ -2181,8 +2181,8 @@ function _wireLoginBtn() {
         // Fire-and-forget: these don't affect what the first view renders.
         // Decoupled from navigateTo so the user sees the first screen without
         // waiting for expireOldOverrides (N writes) or AI model bootstrap.
-        expireOldOverrides().catch(e => console.warn('expireOldOverrides failed:', e));
-        initAIAnalytics().catch(e => console.warn('initAIAnalytics failed:', e));
+        (typeof expireOldOverrides === 'function' ? expireOldOverrides() : Promise.resolve()).catch(e => console.warn('expireOldOverrides failed:', e));
+        (typeof initAIAnalytics === 'function' ? initAIAnalytics() : Promise.resolve()).catch(e => console.warn('initAIAnalytics failed:', e));
 
         // L13 (Customer) and L14 (Referrer) land on 福德; everyone else on calendar
         const _initLevel = (() => {
