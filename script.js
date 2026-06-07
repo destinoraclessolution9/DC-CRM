@@ -1833,12 +1833,17 @@ function _wireLoginBtn() {
             // On mobile, _bgInit only runs for existing sessions (init() exits early
             // for fresh logins). Replicate the same mobile setup here so the bottom
             // nav and home view are ready before we navigate.
+            // Wrapped in its own try/catch so a chunk-load failure never aborts login.
             if (isMobile()) {
-                await window._loadChunk('chunks/script-mobile.min.js');
-                await (window.app.renderMobileBottomNav || (() => {}))();
-                (window.app.initSwipeActions || (() => {}))();
-                await (window.app.initPullToRefresh || (() => {}))();
-                await window._loadChunk('chunks/script-features2.min.js');
+                try {
+                    await window._loadChunk('chunks/script-mobile.min.js');
+                    await (window.app.renderMobileBottomNav || (() => {}))();
+                    (window.app.initSwipeActions || (() => {}))();
+                    await (window.app.initPullToRefresh || (() => {}))();
+                    await window._loadChunk('chunks/script-features2.min.js');
+                } catch (mobileErr) {
+                    console.warn('[mobile-init] setup failed on fresh login:', mobileErr);
+                }
             }
 
             // Force password change on first login
