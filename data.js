@@ -1295,7 +1295,12 @@ class DataStore {
         // use getByIdFull() which always does a network fetch with select=*.
         const cachedTable = this._cacheGet(tableName);
         if (cachedTable) {
-            return cachedTable.find(r => String(r.id) === String(id)) || null;
+            const found = cachedTable.find(r => String(r.id) === String(id));
+            if (found) return found;
+            // Not found in cache — the cache may be a partial agent-scoped
+            // snapshot (e.g. primed by loadCalendarDashboard RPC). Fall through
+            // to Supabase so we don't false-positive a "Deleted" warning for
+            // a record that exists but was excluded from the filtered cache.
         }
 
         // Tier 2 — stale-while-revalidate. When the in-memory cache has
