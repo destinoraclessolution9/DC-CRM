@@ -1830,12 +1830,24 @@ function _wireLoginBtn() {
             // _autoSubscribePush lives in the activities lazy chunk — call via window.app
             window.app?._autoSubscribePush?.();
 
+            // On mobile, _bgInit only runs for existing sessions (init() exits early
+            // for fresh logins). Replicate the same mobile setup here so the bottom
+            // nav and home view are ready before we navigate.
+            if (isMobile()) {
+                await window._loadChunk('chunks/script-mobile.min.js');
+                await (window.app.renderMobileBottomNav || (() => {}))();
+                (window.app.initSwipeActions || (() => {}))();
+                await (window.app.initPullToRefresh || (() => {}))();
+                await window._loadChunk('chunks/script-features2.min.js');
+            }
+
             // Force password change on first login
             if (profile.force_password_change) {
                 await navigateTo('settings');
                 (window.app.showForcePasswordChangeModal || (() => {}))();
             } else {
-                await navigateTo('calendar');
+                // Mobile default is 'home'; desktop is 'calendar' — matches init() logic
+                await navigateTo(isMobile() ? 'home' : 'calendar');
             }
         } catch (err) {
             console.error('Login error:', err);
