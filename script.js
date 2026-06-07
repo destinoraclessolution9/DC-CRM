@@ -1830,11 +1830,19 @@ function _wireLoginBtn() {
             // _autoSubscribePush lives in the activities lazy chunk — call via window.app
             window.app?._autoSubscribePush?.();
 
-            // On mobile, _bgInit only runs for existing sessions (init() exits early
-            // for fresh logins). Replicate the same mobile setup here so the bottom
-            // nav and home view are ready before we navigate.
-            // Wrapped in its own try/catch so a chunk-load failure never aborts login.
-            if (isMobile()) {
+            // Force password change on first login
+            if (profile.force_password_change) {
+                await navigateTo('settings');
+                (window.app.showForcePasswordChangeModal || (() => {}))();
+            } else if (isMobile()) {
+                // Mobile fresh-login path: load chunks, wire up the shell, then
+                // directly render the home view. Bypass navigateTo/_withViewTransition
+                // to avoid any silent-swallow on first paint.
+                // 1. Remove boot skeleton immediately so the user never sees it after auth.
+                document.getElementById('boot-skeleton-grid')?.remove();
+                const _vp = document.getElementById('content-viewport');
+                if (_vp) _vp.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:60vh;flex-direction:column;gap:12px;color:var(--primary,#800020)"><i class="fas fa-circle-notch fa-spin" style="font-size:28px"></i><span style="font-size:14px;opacity:.7">Loading…</span></div>';
+                // 2. Load mobile chunk and wire the shell.
                 try {
                     await window._loadChunk('chunks/script-mobile.min.js');
                     await (window.app.renderMobileBottomNav || (() => {}))();
@@ -1842,17 +1850,22 @@ function _wireLoginBtn() {
                     await (window.app.initPullToRefresh || (() => {}))();
                     await window._loadChunk('chunks/script-features2.min.js');
                 } catch (mobileErr) {
-                    console.warn('[mobile-init] setup failed on fresh login:', mobileErr);
+                    console.warn('[mobile-init] chunk load failed on fresh login:', mobileErr);
                 }
-            }
-
-            // Force password change on first login
-            if (profile.force_password_change) {
-                await navigateTo('settings');
-                (window.app.showForcePasswordChangeModal || (() => {}))();
+                // 3. Render home view directly, then let navigateTo take over for
+                //    future navigation (sets _currentView, updates nav highlight, etc.)
+                try {
+                    if (window.app.showMobileHomeView && _vp) {
+                        await window.app.showMobileHomeView(_vp);
+                    }
+                    await navigateTo('home'); // sets _currentView + bottom-nav highlight
+                } catch (navErr) {
+                    console.warn('[mobile-init] home view render failed:', navErr);
+                    // Last resort: full navigateTo with reload
+                    try { await navigateTo('home'); } catch (_) {}
+                }
             } else {
-                // Mobile default is 'home'; desktop is 'calendar' — matches init() logic
-                await navigateTo(isMobile() ? 'home' : 'calendar');
+                await navigateTo('calendar');
             }
         } catch (err) {
             console.error('Login error:', err);
