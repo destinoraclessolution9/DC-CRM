@@ -2023,6 +2023,17 @@
                     rangeStart, monthEnd, html, grid, visibleIds,
                 });
             }
+            // Network/offline error — paint stale snapshot rather than blank grid.
+            // data.js offline banner already informs the user; no extra toast needed.
+            const isOffline = !navigator.onLine || /failed to fetch|network request failed|load failed/i.test(msg);
+            if (isOffline) {
+                const staleSnap = (() => {
+                    try { const raw = localStorage.getItem(_calSnapKey); return raw ? JSON.parse(raw).html : null; } catch (_) { return null; }
+                })();
+                if (staleSnap && grid.innerHTML !== staleSnap) grid.innerHTML = staleSnap;
+                console.warn('[calendar] offline — showing stale snapshot');
+                return;
+            }
             console.error('[calendar] get_calendar_window failed:', lightRes.error);
             UI.toast.error('Calendar load failed: ' + msg);
             return;
