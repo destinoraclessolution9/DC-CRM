@@ -480,6 +480,24 @@ class DataStore {
         this._inflightController = (typeof AbortController === 'function') ? new AbortController() : null;
     }
 
+    // Race a Supabase query against a timeout so a TCP-reachable-but-slow
+    // server never leaves a view stuck on a skeleton loader indefinitely.
+    // On timeout the error is NOT an AbortError, so it falls through to the
+    // offline-fallback catch block (shows banner, reads localStorage).
+    // Default 8 s — fast enough to feel responsive on a poor 4G connection.
+    _timedFetch(query, ms = 8000) {
+        return Promise.race([
+            Promise.resolve(query),
+            new Promise((_, reject) =>
+                setTimeout(() => {
+                    const e = new Error(`Supabase fetch timed out after ${ms}ms`);
+                    e.code = 'NETWORK_TIMEOUT';
+                    reject(e);
+                }, ms)
+            ),
+        ]);
+    }
+
     // True if err looks like an AbortError from any of: fetch, supabase-js,
     // or our own abort() call. Different layers report the abort differently:
     //   - native fetch:    err.name === 'AbortError'
@@ -853,10 +871,12 @@ class DataStore {
         if (this._deletedUsersPromise) return this._deletedUsersPromise;
         this._deletedUsersPromise = (async () => {
             try {
-                const { data, error } = await this._readClient()
-                    .from('users')
-                    .select(this._selectClauseForGetAll('users'))
-                    .eq('status', 'deleted');
+                const { data, error } = await this._timedFetch(
+                    this._readClient()
+                        .from('users')
+                        .select(this._selectClauseForGetAll('users'))
+                        .eq('status', 'deleted')
+                );
                 if (error) throw error;
                 return data || [];
             } catch (e) {
@@ -958,17 +978,17 @@ class DataStore {
             let data, error;
             let q1 = this._readClient().from(tableName).select(selectClause);
             if (signal && typeof q1.abortSignal === 'function') q1 = q1.abortSignal(signal);
-            ({ data, error } = await q1);
+            ({ data, error } = await this._timedFetch(q1));
             // Abort: view changed mid-fetch — drop silently, don't poison cache.
             if (this._isAbortError(error)) return [];
             // If the light-select column list is stale (e.g. a column was renamed
             // or dropped), PostgREST returns a 400. Fall back to '*' once so the
             // page still loads with the full row (including the heavy column).
-            if (error && selectClause !== '*') {
+            if (error && selectClause !== '*' && !this._isAbortError(error)) {
                 console.warn(`Light select failed for ${tableName}, retrying with *:`, error.message);
                 let q2 = this._readClient().from(tableName).select('*');
                 if (signal && typeof q2.abortSignal === 'function') q2 = q2.abortSignal(signal);
-                ({ data, error } = await q2);
+                ({ data, error } = await this._timedFetch(q2));
                 if (this._isAbortError(error)) return [];
             }
             if (error) throw error;
@@ -2047,25 +2067,31 @@ class DataStore {
 
         try {
             const dormantFilter = `last_activity_date.gte.${cutoff},last_activity_date.is.null`;
-            let { data, error } = await this._readClient()
-                .from('prospects')
-                .select(listingSelect)
-                .or(dormantFilter)
-                .limit(limit);
-            if (error && listingSelect !== fullSelect) {
-                ({ data, error } = await this._readClient()
+            let { data, error } = await this._timedFetch(
+                this._readClient()
                     .from('prospects')
-                    .select(fullSelect)
+                    .select(listingSelect)
                     .or(dormantFilter)
-                    .limit(limit));
+                    .limit(limit)
+            );
+            if (error && listingSelect !== fullSelect) {
+                ({ data, error } = await this._timedFetch(
+                    this._readClient()
+                        .from('prospects')
+                        .select(fullSelect)
+                        .or(dormantFilter)
+                        .limit(limit)
+                ));
             }
             // Final fallback: bare * so nothing is blocked by a stale column list
             if (error && fullSelect !== '*') {
-                ({ data, error } = await this._readClient()
-                    .from('prospects')
-                    .select('*')
-                    .or(dormantFilter)
-                    .limit(limit));
+                ({ data, error } = await this._timedFetch(
+                    this._readClient()
+                        .from('prospects')
+                        .select('*')
+                        .or(dormantFilter)
+                        .limit(limit)
+                ));
             }
             if (error) throw error;
             // Tombstone filter — keep parity with getAll()
