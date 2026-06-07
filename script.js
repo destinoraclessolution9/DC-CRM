@@ -2288,8 +2288,7 @@ function _wireLoginBtn() {
         // of it blocks the user seeing the first screen. Each has its own
         // error boundary so one failure can't cascade.
         const _bgInit = [
-            (async () => { if (isMobile()) { await window._loadChunk('chunks/script-mobile.min.js'); await (window.app.renderMobileBottomNav || (() => {}))(); (window.app.initSwipeActions || (() => {}))(); await (window.app.initPullToRefresh || (() => {}))(); } })(),
-            (async () => { if (isMobile() && window.app.initMobileApp) await window.app.initMobileApp(); })(),
+            (async () => { if (isMobile()) { await window._loadChunk('chunks/script-mobile.min.js'); await (window.app.renderMobileBottomNav || (() => {}))(); (window.app.initSwipeActions || (() => {}))(); await (window.app.initPullToRefresh || (() => {}))(); await window._loadChunk('chunks/script-features2.min.js'); await (window.app.initMobileApp || (() => {}))(); } })(),
             (window.app.ensureReferralFields || (() => {}))(),
             (async () => { if (typeof SystemHealth !== 'undefined' && typeof SystemHealth.init === 'function') await SystemHealth.init(); })(),
             (async () => { if (typeof ConfigManager !== 'undefined' && typeof ConfigManager.init === 'function') await ConfigManager.init(); })(),
