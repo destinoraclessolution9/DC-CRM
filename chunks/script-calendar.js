@@ -1989,8 +1989,39 @@
         // slow hotRes added its full latency to the time-to-grid-paint.
         // NOTE: supabase-js v2 .rpc() returns a thenable PostgrestFilterBuilder,
         // not a real Promise — wrap in Promise.resolve() before .catch/.then.
+        // Helper: read any stored snapshot for this month, ignoring TTL.
+        // Used in multiple fallback paths below so defined once here.
+        const _readStaleSnap = () => {
+            try { const raw = localStorage.getItem(_calSnapKey); return raw ? JSON.parse(raw).html : null; } catch (_) { return null; }
+        };
+        // Helper: paint stale snapshot or, if none exists, show an offline
+        // placeholder so the user never stares at a blank/skeleton grid.
+        const _paintOfflineFallback = (reason) => {
+            const staleSnap = _readStaleSnap();
+            if (staleSnap) {
+                if (grid.innerHTML !== staleSnap) grid.innerHTML = staleSnap;
+                console.warn('[calendar] ' + reason + ' — showing stale snapshot');
+            } else {
+                grid.innerHTML = '<div style="padding:40px 16px;text-align:center;color:#9ca3af;grid-column:1/-1">' +
+                    '<div style="font-size:36px;margin-bottom:10px">📅</div>' +
+                    '<div style="font-weight:600;color:#6b7280">No cached data</div>' +
+                    '<div style="font-size:13px;margin-top:6px">Open calendar while connected to enable offline view</div>' +
+                    '</div>';
+                console.warn('[calendar] ' + reason + ' — no cached snapshot available');
+            }
+        };
+
+        // Wrap the light RPC so a thrown network error (supabase-js on Android
+        // can throw TypeError instead of returning { error }) is normalised into
+        // the same { data, error } shape as a returned error, keeping all
+        // error-handling logic in one place below.
         _calPerf('rpc:light:start');
-        const lightRes = await window.supabase.rpc('get_calendar_window', lightParams);
+        let lightRes;
+        try {
+            lightRes = await window.supabase.rpc('get_calendar_window', lightParams);
+        } catch (fetchErr) {
+            lightRes = { data: null, error: { message: fetchErr?.message || 'Network error', code: '' } };
+        }
         _calPerf('rpc:light:done');
         // Fire-and-forget hot RPC. Once it lands we drop the rows into
         // _state.hac so subsequent activity-card taps still feel instant,
@@ -2023,17 +2054,16 @@
                     rangeStart, monthEnd, html, grid, visibleIds,
                 });
             }
-            // Network/offline error — paint stale snapshot rather than blank grid.
-            // data.js offline banner already informs the user; no extra toast needed.
-            const isOffline = !navigator.onLine || /failed to fetch|network request failed|load failed/i.test(msg);
-            if (isOffline) {
-                const staleSnap = (() => {
-                    try { const raw = localStorage.getItem(_calSnapKey); return raw ? JSON.parse(raw).html : null; } catch (_) { return null; }
-                })();
-                if (staleSnap && grid.innerHTML !== staleSnap) grid.innerHTML = staleSnap;
-                console.warn('[calendar] offline — showing stale snapshot');
+            // Network/offline — prefer stale snapshot over blank grid.
+            // navigator.onLine is unreliable on Android (true even when server
+            // unreachable), so also match common fetch-failure message patterns.
+            const isNetworkErr = !navigator.onLine
+                || /failed to fetch|network request failed|load failed|networkerror|internet connection/i.test(msg);
+            if (isNetworkErr) {
+                _paintOfflineFallback('offline');
                 return;
             }
+            // Non-network server error — toast and leave whatever is on screen.
             console.error('[calendar] get_calendar_window failed:', lightRes.error);
             UI.toast.error('Calendar load failed: ' + msg);
             return;
