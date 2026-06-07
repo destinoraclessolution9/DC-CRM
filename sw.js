@@ -59,6 +59,12 @@ self.addEventListener('activate', (event) => {
                 )
             )
             .then(() => self.clients.claim())
+            .then(() => self.clients.matchAll({ type: 'window', includeUncontrolled: true }))
+            .then((clients) => {
+                // Tell every open tab to reload so they pick up the new index.html
+                // and fixed chunks immediately, without waiting for a manual refresh.
+                clients.forEach((c) => c.postMessage({ type: 'SW_ACTIVATED', version: CACHE_VERSION }));
+            })
     );
 });
 

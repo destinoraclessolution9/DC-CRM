@@ -50,8 +50,22 @@
         navigator.serviceWorker.register('/sw.js').then(function (reg) {
             console.info('[SW] registered, scope:', reg.scope);
             window._swRegistration = reg;
+            // Proactively check for an updated SW on every load so phones
+            // don't wait 24 h for the browser's automatic update check.
+            reg.update().catch(function () {});
         }).catch(function (err) {
             console.warn('[SW] registration failed:', err);
         });
     });
+
+    // When the SW activates a new version it sends SW_ACTIVATED — reload
+    // immediately so the page picks up the new index.html + fixed chunks.
+    if (navigator.serviceWorker) {
+        navigator.serviceWorker.addEventListener('message', function (evt) {
+            if (evt.data && evt.data.type === 'SW_ACTIVATED') {
+                console.info('[SW] new version activated (' + evt.data.version + '), reloading…');
+                window.location.reload();
+            }
+        });
+    }
 })();
