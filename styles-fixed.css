@@ -43,6 +43,10 @@ body {
        in addition to the in-app pull-to-refresh, which can dump the user
        back to the login screen. */
     overscroll-behavior-y: contain;
+    /* Prevent wide fixed-width elements (e.g. pipeline table) from causing
+       the mobile browser to zoom out the entire viewport. */
+    overflow-x: hidden;
+    max-width: 100vw;
 }
 
 /* App Shell */
