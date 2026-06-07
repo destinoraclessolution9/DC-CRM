@@ -805,5 +805,9 @@
         disconnectGoogle,
         confirmDisconnectGoogle,
         resolveConflict,
+        initGoogleIntegration,
     });
+    // Self-init: the main script no longer calls initGoogleIntegration() directly
+    // (it's a lazy chunk), so we call it here when the chunk first loads.
+    initGoogleIntegration();
 })();

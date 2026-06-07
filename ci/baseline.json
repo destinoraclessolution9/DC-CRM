@@ -1,9 +1,9 @@
 {
-  "generated": "2026-06-06T02:16:04.658Z",
+  "generated": "2026-06-07T02:31:57.188Z",
   "script": {
-    "lines": 4593,
-    "hash": "afa41198",
-    "definedCount": 604,
+    "lines": 4665,
+    "hash": "189d3ab5",
+    "definedCount": 605,
     "stateVars": [
       "_currentView",
       "_currentUser",
@@ -529,17 +529,17 @@
   "chunks": [
     {
       "file": "script-activities.js",
-      "lines": 4644,
+      "lines": 4643,
       "exports": [
         "openActivityModal",
         "fillActivityForm",
         "typeSelect",
-        "setField",
+        "fillActivityForm",
         "updateActivity",
         "activity",
         "venueVal",
         "locationAddressEl",
-        "updatedData",
+        "_autoSubscribePush",
         "BASIC_INFO_INCOME_RANGES",
         "BASIC_INFO_RELATIONS",
         "BASIC_INFO_INTERESTS",
@@ -629,7 +629,7 @@
     },
     {
       "file": "script-admin.js",
-      "lines": 565,
+      "lines": 560,
       "exports": [
         "showAdminDashboard",
         "showTenantManagement",
@@ -685,7 +685,7 @@
     },
     {
       "file": "script-calendar.js",
-      "lines": 5479,
+      "lines": 5481,
       "exports": [
         "showCalendarView",
         "loadFollowUpTemplates",
@@ -812,7 +812,7 @@
     },
     {
       "file": "script-cps.js",
-      "lines": 1376,
+      "lines": 1378,
       "exports": [
         "_refreshNotifBadge",
         "_buildNotifPanel",
@@ -857,7 +857,7 @@
     },
     {
       "file": "script-documents.js",
-      "lines": 1049,
+      "lines": 1051,
       "exports": [
         "showDocumentManagementView",
         "renderFolderTree",
@@ -949,7 +949,7 @@
     },
     {
       "file": "script-features2.js",
-      "lines": 1662,
+      "lines": 1664,
       "exports": [
         "initMobileApp",
         "addMobileMetaTags",
@@ -1073,7 +1073,7 @@
     },
     {
       "file": "script-fude.js",
-      "lines": 2590,
+      "lines": 2587,
       "exports": [
         "showFudeView",
         "openStoryDetail",
@@ -1122,7 +1122,7 @@
     },
     {
       "file": "script-gcal.js",
-      "lines": 809,
+      "lines": 813,
       "exports": [
         "showIntegrationHub",
         "showIntegrationDetails",
@@ -1137,12 +1137,13 @@
         "refreshSyncHistory",
         "disconnectGoogle",
         "confirmDisconnectGoogle",
-        "resolveConflict"
+        "resolveConflict",
+        "initGoogleIntegration"
       ]
     },
     {
       "file": "script-import.js",
-      "lines": 2072,
+      "lines": 2074,
       "exports": [
         "showImportDashboard",
         "renderRecentImports",
@@ -1208,6 +1209,27 @@
         "viewAgentDetails",
         "contactProspect",
         "userExists"
+      ]
+    },
+    {
+      "file": "script-journey.js",
+      "lines": 688,
+      "exports": [
+        "renderJourneyTab",
+        "markJourneyTouchpointDone",
+        "skipJourneyTouchpoint",
+        "snoozeJourneyTouchpoint",
+        "executeSnooze",
+        "sendJourneyWhatsApp",
+        "switchJourneyTrackDisplay",
+        "switchJourneyTrack",
+        "confirmSwitchJourneyTrack",
+        "openSpawnTouchpointsModal",
+        "executeSpawnTouchpoints",
+        "showAgentJourneyDashboard",
+        "showAgentJourneyLoad",
+        "evaluateConditionalRules",
+        "recalcProspectScore"
       ]
     },
     {
@@ -1316,7 +1338,7 @@
     },
     {
       "file": "script-mobile.js",
-      "lines": 2329,
+      "lines": 2343,
       "exports": [
         "addCustomerNote",
         "deleteCustomerNote",
@@ -1363,8 +1385,26 @@
         "applyMobileTableLabels",
         "initSwipeActions",
         "initPullToRefresh",
-        "initMobileApp",
         "addMobileMetaTags"
+      ]
+    },
+    {
+      "file": "script-order-form-extract.js",
+      "lines": 1198,
+      "exports": [
+        "showOrderFormExtractView",
+        "ofeShowTab",
+        "ofeHandleFile",
+        "ofeHistToggleRow",
+        "ofeHistSearch",
+        "ofeHistPage",
+        "ofeRefreshHistory",
+        "ofeHistToggleStatus",
+        "ofeSetStatus",
+        "ofeClosSearch",
+        "ofeClosSelect",
+        "ofeClosClear",
+        "ofeSaveClosing"
       ]
     },
     {
@@ -1407,7 +1447,7 @@
     },
     {
       "file": "script-pipeline.js",
-      "lines": 2942,
+      "lines": 2944,
       "exports": [
         "loadPipelineConfig",
         "savePipelineConfigJson",
@@ -1492,7 +1532,7 @@
     },
     {
       "file": "script-prospects.js",
-      "lines": 9769,
+      "lines": 9816,
       "exports": [
         "sortProspects",
         "showProspectsView",
@@ -1775,7 +1815,7 @@
     },
     {
       "file": "script-search.js",
-      "lines": 1814,
+      "lines": 1816,
       "exports": [
         "ensureReferralFields",
         "toggleSearchPanel",
@@ -1938,6 +1978,8 @@
     "chunks/script-admin.min.js",
     "chunks/script-org.min.js",
     "chunks/script-search.min.js",
+    "chunks/script-order-form-extract.min.js",
+    "chunks/script-journey.min.js",
     "styles-fixed.min.css",
     "styles-mobile.min.css",
     "styles-login-v2.min.css",

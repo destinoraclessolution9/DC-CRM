@@ -1827,7 +1827,8 @@ function _wireLoginBtn() {
             UI.toast.success(`Welcome ${profile.full_name}!`);
 
             // Auto-subscribe to push notifications for PWA / homescreen users
-            _autoSubscribePush();
+            // _autoSubscribePush lives in the activities lazy chunk — call via window.app
+            window.app?._autoSubscribePush?.();
 
             // Force password change on first login
             if (profile.force_password_change) {
@@ -2143,7 +2144,8 @@ function _wireLoginBtn() {
 
         // Fire-and-forget the sync module initializers — they have no awaitable
         // state the render path needs.
-        initGoogleIntegration();
+        // initGoogleIntegration lives in the gcal lazy chunk; it self-inits when
+        // that chunk loads, so skip the bare call here to avoid a ReferenceError.
         initWhatsAppIntegration();
 
         // Fire-and-forget: these don't affect what the first view renders.
@@ -2302,7 +2304,7 @@ function _wireLoginBtn() {
         // in every tab — N+1 over the user table on nano was a major IO drain.
 
         // Auto-subscribe to push notifications for PWA / homescreen users
-        _autoSubscribePush();
+        window.app?._autoSubscribePush?.();
 
         // Route notification clicks to the correct view
         if ('serviceWorker' in navigator) {

@@ -119,15 +119,10 @@
     };
     
     // Add to window.app
+    // Note: initSecurity, initSessionTimeout, logoutDueToInactivity, monitorLoginAttempts,
+    // checkForSecurityIncidents, addSecurityAlertIcon, checkExpiredConsents, scheduleRetentionJobs
+    // are defined in script.js and already on window.app — do NOT reference them as bare vars here.
     Object.assign(window.app, {
-        initSecurity,
-        initSessionTimeout,
-        logoutDueToInactivity,
-        monitorLoginAttempts,
-        checkForSecurityIncidents,
-        addSecurityAlertIcon,
-        checkExpiredConsents,
-        scheduleRetentionJobs,
         showSecurityDashboard,
         showAuditLogs,
         showComplianceCenter,

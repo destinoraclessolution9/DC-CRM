@@ -4550,13 +4550,10 @@
     Object.assign(window.app, {
         openActivityModal,
         fillActivityForm,
-        typeSelect,
-        setField,
+        // typeSelect, setField — local vars inside fillActivityForm, not chunk-scope
         updateActivity,
-        activity,
-        venueVal,
-        locationAddressEl,
-        updatedData,
+        // activity, venueVal, locationAddressEl, updatedData — local vars inside updateActivity
+        _autoSubscribePush,
         BASIC_INFO_INCOME_RANGES,
         BASIC_INFO_RELATIONS,
         BASIC_INFO_INTERESTS,

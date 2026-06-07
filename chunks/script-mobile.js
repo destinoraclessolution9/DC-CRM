@@ -2337,7 +2337,7 @@
         applyMobileTableLabels,
         initSwipeActions,
         initPullToRefresh,
-        initMobileApp,
+        // initMobileApp is defined in script-features2 chunk — do not reference as bare var here
         addMobileMetaTags,
     });
 })();
