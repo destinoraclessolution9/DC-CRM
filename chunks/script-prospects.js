@@ -974,9 +974,11 @@ const renderProspectsTable = async () => {
     _mark('skeleton-painted');
     // When filtering by a specific agent, always include dormant so the admin
     // sees the agent's full prospect list, not just the "active" subset.
+    // Also force a fresh DB fetch (bypass SWR cache) so newly-imported prospects
+    // for that agent are immediately visible without waiting for background sync.
     const prospectsPromise = searchQueryRaw
         ? AppDataStore.searchProspects(searchQueryRaw, { includeDormant: true, limit: 200 })
-        : AppDataStore.getActiveProspects({ includeDormant: includeDormantToggle || !!agentFilter });
+        : AppDataStore.getActiveProspects({ includeDormant: includeDormantToggle || !!agentFilter, fresh: !!agentFilter });
     const [allProspects, allUsers] = await Promise.all([
         prospectsPromise,
         // includeDeleted: the active-users cache hides status='deleted'
@@ -990,14 +992,15 @@ const renderProspectsTable = async () => {
 
     // ── Scope by role hierarchy ──
     let prospects;
+    let _scopeVisibleIds = 'all'; // 'all' = no restriction; array = restrict to these agent IDs
     if (isSystemAdmin(_currentUser)) {
         prospects = allProspects;
     } else {
-        const visibleIds = await getVisibleUserIds(_currentUser);
-        if (visibleIds === 'all') {
+        _scopeVisibleIds = await getVisibleUserIds(_currentUser);
+        if (_scopeVisibleIds === 'all') {
             prospects = allProspects;
         } else {
-            const visibleIdSet = new Set(visibleIds.map(String));
+            const visibleIdSet = new Set(_scopeVisibleIds.map(String));
             prospects = allProspects.filter(p => visibleIdSet.has(String(p.responsible_agent_id)));
         }
     }
@@ -1031,9 +1034,14 @@ const renderProspectsTable = async () => {
     const agentDropdownStale = agentFilterEl && !agentFilterEl.dataset.hydrated;
     if (agentFilterEl && (filterPanelOpen || agentDropdownStale)) {
         const currentAgentVal = agentFilterEl.value;
+        const scopeIdSet = (_scopeVisibleIds !== 'all' && Array.isArray(_scopeVisibleIds))
+            ? new Set(_scopeVisibleIds.map(String)) : null;
         const visibleAgents = allUsers.filter(u => {
             const lvl = _getUserLevel(u);
-            return lvl >= 3 && lvl <= 11 && u.status !== 'deleted';
+            if (!(lvl >= 3 && lvl <= 11 && u.status !== 'deleted')) return false;
+            // For non-admins, only show agents whose prospects this user can actually see.
+            if (scopeIdSet) return scopeIdSet.has(String(u.id));
+            return true;
         }).sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''));
         agentFilterEl.innerHTML = '<option value="">All Agents</option>' +
             visibleAgents.map(a => `<option value="${a.id}"${String(a.id) === currentAgentVal ? ' selected' : ''}>${a.full_name || 'Agent'}</option>`).join('');
@@ -1181,9 +1189,11 @@ const renderProspectsTable = async () => {
     if (pageProspects.length === 0) {
         const hint = searchQueryRaw
             ? `No prospects matched "<strong>${searchQueryRaw.replace(/</g, '&lt;')}</strong>". Dormant records were included in this search.`
-            : (includeDormantToggle
-                ? 'No prospects found. Click "Add Prospect" to create one.'
-                : 'No active prospects. Check "Include dormant" or type a name/phone to search older records.');
+            : (agentFilter
+                ? 'No prospects found for this agent.'
+                : (includeDormantToggle
+                    ? 'No prospects found. Click "Add Prospect" to create one.'
+                    : 'No active prospects. Check "Include dormant" or type a name/phone to search older records.'));
         html = `<tr><td colspan="9" style="text-align:center; padding:40px;">${hint}</td></tr>`;
     }
 
