@@ -27,6 +27,16 @@
     const canAccessStockTake   = (u) => _utils.isSystemAdmin(u) || _utils.isStockTakeStaff(u);
     const debounce             = _utils.debounce;
     const debounceCall         = _utils.debounceCall;
+    // Permission helpers — defined in script.js IIFE, exported to _crmUtils after line ~755.
+    const canViewProspect     = (p) => _utils.canViewProspect(p);
+    const canViewCustomer     = (c) => _utils.canViewCustomer(c);
+    const getVisibleCustomers = ()  => _utils.getVisibleCustomers();
+    // navigateTo lives in the script.js IIFE — reach it via window.app.
+    const navigateTo          = (v) => window.app.navigateTo(v);
+    // Cross-chunk reassign helpers — defined in script-import.js, exported to window.app.
+    const cascadeProspectReassign   = (...a) => window.app.cascadeProspectReassign(...a);
+    const _renderReassignSummary    = (...a) => window.app._renderReassignSummary(...a);
+    const _showReassignConfirmPopup = (...a) => window.app._showReassignConfirmPopup(...a);
     // Live reference to current user (refreshed on each navigation via _syncProspectsUser)
     let _currentUser = _state.cu;
     const _syncUser = () => { _currentUser = _state.cu; };
@@ -1697,7 +1707,7 @@ const confirmBulkReassign = async () => {
     const linkedCount = (allCustomers || []).filter(c =>
         selectedSet.has(String(c.converted_from_prospect_id))).length;
 
-    _pendingReassign = {
+    _state._pendingReassign = {
         kind: 'bulkProspects',
         agentId,
         cascadeCustomer,
@@ -1717,9 +1727,9 @@ const confirmBulkReassign = async () => {
 };
 
 const executeConfirmedBulkReassign = async () => {
-    const p = _pendingReassign;
+    const p = _state._pendingReassign;
     if (!p || p.kind !== 'bulkProspects') return;
-    _pendingReassign = null;
+    _state._pendingReassign = null;
     UI.hideModal();
     let errors = 0, totalCust = 0, totalActs = 0;
     for (const id of p.selectedIds) {
@@ -1954,13 +1964,13 @@ const saveProspect = async () => {
         }
     }
 
-    // Validate compulsory referral fields
-    if (!_state.sprr) {
+    // Validate compulsory referral fields (create only — edits keep the existing referrer)
+    if (!editId && !_state.sprr) {
         UI.toast.error('Referred By is required. Please search and select a referrer.');
         return;
     }
     const relationship = document.getElementById('prospect-relationship')?.value;
-    if (!relationship) {
+    if (!editId && !relationship) {
         UI.toast.error('Relationship is required.');
         return;
     }
@@ -1975,9 +1985,8 @@ const saveProspect = async () => {
         referred_by: _state.sprr?.name || null,
         referred_by_id: _state.sprr?.id || null,
         referred_by_type: _state.sprr?.type || null,
-        responsible_agent_id: _currentUser?.id || null,
-        cps_assignment_date: new Date().toISOString().split('T')[0],
-        pipeline_stage: 'new',
+        // responsible_agent_id / cps_assignment_date / pipeline_stage are create-only fields.
+        // They are added below in the `else` branch so edits never overwrite the original agent.
         score: editId ? undefined : 200,
         expected_close_date: null,
         deal_value: 0,
@@ -2022,6 +2031,10 @@ const saveProspect = async () => {
             data.id = Date.now();
             data.protection_deadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
             data.score = SCORING_RULES.CREATE_PROSPECT;
+            // Create-only fields — never overwritten on edit so the original agent keeps ownership
+            data.responsible_agent_id = _currentUser?.id || null;
+            data.cps_assignment_date  = new Date().toISOString().split('T')[0];
+            data.pipeline_stage       = 'new';
             data.created_at = new Date().toISOString();
             const newProspect = await AppDataStore.create('prospects', data);
             UI.toast.success('Prospect created successfully');
@@ -2982,8 +2995,8 @@ const savePaymentProof = async (purchaseId, customerId) => {
     if (file.size > 5 * 1024 * 1024) { UI.toast.error('File too large (max 5MB)'); return; }
     const fileName = `proof_${purchaseId}_${Date.now()}_${file.name}`;
     try {
-        if (window.supabaseClient) {
-            await window.supabaseClient.storage.from('attachments').upload(fileName, file);
+        if (window.supabase) {
+            await window.supabase.storage.from('attachments').upload(fileName, file);
         }
         await AppDataStore.update('purchases', purchaseId, { proof: fileName, status: 'COLLECTED' });
         UI.hideModal();
@@ -3646,7 +3659,10 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                             }).join(' &nbsp; ')}</span>` : ''}
                             <span class="meet-date">${a.activity_date || ''}</span>
                         </div>
-                        <button class="btn btn-sm secondary" style="font-size:12px;padding:4px 8px;" onclick="event.stopPropagation();app.viewActivityDetails(${a.id})">Details</button>
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            ${(a.photo_urls && a.photo_urls.length > 0) ? `<button class="btn btn-sm secondary" style="font-size:12px;padding:4px 8px;color:var(--primary);border-color:var(--primary);" title="${a.photo_urls.length} discussion photo${a.photo_urls.length > 1 ? 's' : ''}" onclick="event.stopPropagation();app.viewActivityPhotos(${a.id})"><i class="fas fa-camera"></i> ${a.photo_urls.length}</button>` : ''}
+                            <button class="btn btn-sm secondary" style="font-size:12px;padding:4px 8px;" onclick="event.stopPropagation();app.viewActivityDetails(${a.id})">Details</button>
+                        </div>
                     </div>
                     ${(() => {
                         const _esc = s => s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '';

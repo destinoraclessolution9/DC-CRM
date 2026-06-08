@@ -716,8 +716,13 @@ class DataStore {
             // into a near-zero payload on most revalidations.
             // Falls back to full fetch if: no timestamp, table has no
             // updated_at column (PostgREST 400), or network error.
+            // Tables known to lack updated_at — skip delta to avoid 400 spam.
+            const _NO_DELTA_TABLES = new Set([
+                'special_program_participants', 'cps_intake_requests',
+                'pipeline_config', 'pipeline_config_history',
+            ]);
             const lastSync = localStorage.getItem(`fs_crm_${tableName}_last_sync`);
-            if (lastSync) {
+            if (lastSync && !_NO_DELTA_TABLES.has(tableName)) {
                 try {
                     const delta = await this.getAllSince(tableName, lastSync);
                     const now = new Date().toISOString();
@@ -1087,6 +1092,7 @@ class DataStore {
             }
             console.warn(`Offline/error: falling back for ${tableName}`, e);
             const isNetworkError = !navigator.onLine
+                || e?.code === 'NETWORK_TIMEOUT'
                 || (e instanceof TypeError && /failed to fetch|network request failed|load failed/i.test(e.message || ''));
             if (isNetworkError && !window._offlineNotified) {
                 window._offlineNotified = true;
@@ -1347,21 +1353,27 @@ class DataStore {
                 } catch (_) {}
                 return tableName === 'users' ? this._sanitizeUserRecord(result) : result;
             }
-            // Not found in Supabase — check localStorage fallback (schema-mismatch saves)
+            // Not found in Supabase — check localStorage fallback (schema-mismatch saves).
+            // Apply tombstone filtering so a deleted row that is still in localStorage
+            // (because localStorage is not pruned on every delete) is never returned.
             const local = localStorage.getItem(`fs_crm_${tableName}`);
             if (local) {
+                const tombstoneRaw = localStorage.getItem('fs_crm_tombstones');
+                const deletedIds = new Set(((tombstoneRaw ? JSON.parse(tombstoneRaw) : {})[tableName] || []).map(String));
                 const records = JSON.parse(local);
-                const found = records.find(r => String(r.id) === String(id)) || null;
+                const found = records.find(r => String(r.id) === String(id) && !deletedIds.has(String(r.id))) || null;
                 return tableName === 'users' ? this._sanitizeUserRecord(found) : found;
             }
             return null;
         } catch (e) {
             // Service-role REST fallback removed — rely on localStorage cache
-            // if the primary Supabase query fails.
+            // if the primary Supabase query fails. Apply tombstone filtering here too.
             const local = localStorage.getItem(`fs_crm_${tableName}`);
             if (local) {
+                const tombstoneRaw = localStorage.getItem('fs_crm_tombstones');
+                const deletedIds = new Set(((tombstoneRaw ? JSON.parse(tombstoneRaw) : {})[tableName] || []).map(String));
                 const records = JSON.parse(local);
-                return records.find(r => String(r.id) === String(id)) || null;
+                return records.find(r => String(r.id) === String(id) && !deletedIds.has(String(r.id))) || null;
             }
             return null;
         }

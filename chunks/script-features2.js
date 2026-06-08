@@ -1504,11 +1504,8 @@ const showMilestonesView = async (container, targetUserId = null) => {
             </div>
         </div>`;
 
-    // Determine admin status
-    const viewerLevel = (() => {
-        const m = (currentUser.role || '').match(/Level\s+(\d+)/i);
-        return m ? parseInt(m[1]) : 12;
-    })();
+    // Determine admin status using canonical helper (handles Chinese-only role names)
+    const viewerLevel = _getUserLevel(currentUser);
     const isAdmin = viewerLevel <= 2;
 
     // Resolve subject (whose milestones to show)
@@ -1532,7 +1529,7 @@ const showMilestonesView = async (container, targetUserId = null) => {
     let adminPicker = '';
     if (isAdmin) {
         let allUsers = [];
-        try { allUsers = (await AppDataStore.getAll('users')).filter(u => u.role && u.role.match(/Level\s+1[34]/i)); } catch(e) {}
+        try { allUsers = (await AppDataStore.getAll('users')).filter(u => { const l = _getUserLevel(u); return l >= 13 && l <= 14; }); } catch(e) {}
         if (allUsers.length) {
             adminPicker = `
                 <div class="milestone-admin-picker">

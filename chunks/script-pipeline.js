@@ -19,9 +19,14 @@
     const _getUserLevel        = (u) => _utils.getUserLevel(u);
     const getAgentsAndLeaders  = () => _utils.getAgentsAndLeaders();
     const navigateTo           = (v) => window.app.navigateTo(v);
+    const withTimeout          = (...a) => _utils.withTimeout(...a);
+    const isAgentOrLeader      = (u) => _utils.isAgentOrLeader(u || _state.cu);
+    const getVisibleProspects  = () => _utils.getVisibleProspects();
+    const getVisibleActivities = () => _utils.getVisibleActivities();
     // Live references to state
     let _currentUser = _state.cu;
     window._syncPipelineUser = () => { _currentUser = _state.cu; };
+    let _draggedId = null; // shared between handleDragStart and handleDrop
 
 // ========== PHASE 6: PIPELINE & SALES FORCE MODULE ==========
 
@@ -2582,7 +2587,7 @@ const renderRecentOverrides = async () => {
     const container = document.getElementById('recent-overrides-table');
     if (!container) return;
 
-    const overrides = await AppDataStore.query('manual_overrides', { user_id: _currentUser?.id || 5 })
+    const overrides = (await AppDataStore.query('manual_overrides', { user_id: _currentUser?.id || 5 }))
         .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
         .slice(0, 3);
 
@@ -2687,7 +2692,7 @@ const submitBoost = async () => {
         return;
     }
 
-    const manualList = await AppDataStore.query('my_potential_list', { user_id: _currentUser?.id || 5 })
+    const manualList = (await AppDataStore.query('my_potential_list', { user_id: _currentUser?.id || 5 }))
         .sort((a, b) => a.priority_order - b.priority_order);
 
     const currentItem = manualList.find(i => i.prospect_id === prospectId);

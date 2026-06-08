@@ -710,7 +710,11 @@ const appLogic = (() => {
             resolve(fallback);
         }, ms)),
     ]);
-    Object.assign(window._crmUtils, { withTimeout: (p,ms,fb,lbl) => withTimeout(p,ms,fb,lbl) });
+    Object.assign(window._crmUtils, {
+        withTimeout:          (p,ms,fb,lbl) => withTimeout(p,ms,fb,lbl),
+        getVisibleProspects:  ()            => getVisibleProspects(),
+        getVisibleActivities: ()            => getVisibleActivities(),
+    });
 
     // Check if current user can view a given prospect
     const canViewProspect = async (prospect) => {
@@ -749,6 +753,14 @@ const appLogic = (() => {
         // Customers may store the owning agent on either responsible_agent_id (new) or agent_id (legacy)
         return all.filter(c => visibleIds.includes(c.responsible_agent_id) || visibleIds.includes(c.agent_id));
     };
+    // Export permission-check helpers to _crmUtils so lazy chunks can resolve them.
+    // canViewProspect/canViewCustomer/getVisibleCustomers are defined after the first
+    // Object.assign block (line ~713) so they get their own Object.assign here.
+    Object.assign(window._crmUtils, {
+        canViewProspect:     (p) => canViewProspect(p),
+        canViewCustomer:     (c) => canViewCustomer(c),
+        getVisibleCustomers: ()  => getVisibleCustomers(),
+    });
 
     // Role-based referral visibility:
     //   - Admin / Marketing Manager / Level 1-2: see every referral
@@ -3990,20 +4002,22 @@ function _wireLoginBtn() {
         logBirthdayGift,
 
         // Phase 6A: Journey System — implemented by chunks/script-journey.js
-        // (Object.assign after chunk load overrides these forwarding stubs)
-        renderJourneyTab:          async (...a) => (window.app.renderJourneyTab           || (() => {}))(...a),
-        markJourneyTouchpointDone: async (...a) => (window.app.markJourneyTouchpointDone  || (() => {}))(...a),
-        skipJourneyTouchpoint:     async (...a) => (window.app.skipJourneyTouchpoint      || (() => {}))(...a),
-        snoozeJourneyTouchpoint:   async (...a) => (window.app.snoozeJourneyTouchpoint    || (() => {}))(...a),
-        executeSnooze:             async (...a) => (window.app.executeSnooze              || (() => {}))(...a),
-        sendJourneyWhatsApp:       async (...a) => (window.app.sendJourneyWhatsApp        || (() => {}))(...a),
-        switchJourneyTrackDisplay: async (...a) => (window.app.switchJourneyTrackDisplay  || (() => {}))(...a),
-        switchJourneyTrack:        async (...a) => (window.app.switchJourneyTrack         || (() => {}))(...a),
-        confirmSwitchJourneyTrack: async (...a) => (window.app.confirmSwitchJourneyTrack  || (() => {}))(...a),
-        openSpawnTouchpointsModal: async (...a) => (window.app.openSpawnTouchpointsModal  || (() => {}))(...a),
-        executeSpawnTouchpoints:   async (...a) => (window.app.executeSpawnTouchpoints    || (() => {}))(...a),
-        showAgentJourneyDashboard: async (...a) => (window.app.showAgentJourneyDashboard  || (() => {}))(...a),
-        showAgentJourneyLoad:      async (...a) => (window.app.showAgentJourneyLoad       || (() => {}))(...a),
+        // Safe self-loading stubs: use _loadChunkOnce so the chunk is loaded on first call,
+        // then invoke the real function. The old `(window.app.X || (() => {}))(...a)` pattern
+        // caused infinite recursion because window.app.X IS this stub before the chunk loads.
+        renderJourneyTab:          (...a) => _loadChunkOnce('chunks/script-journey.min.js').then(() => window.app.renderJourneyTab(...a)),
+        markJourneyTouchpointDone: (...a) => _loadChunkOnce('chunks/script-journey.min.js').then(() => window.app.markJourneyTouchpointDone(...a)),
+        skipJourneyTouchpoint:     (...a) => _loadChunkOnce('chunks/script-journey.min.js').then(() => window.app.skipJourneyTouchpoint(...a)),
+        snoozeJourneyTouchpoint:   (...a) => _loadChunkOnce('chunks/script-journey.min.js').then(() => window.app.snoozeJourneyTouchpoint(...a)),
+        executeSnooze:             (...a) => _loadChunkOnce('chunks/script-journey.min.js').then(() => window.app.executeSnooze(...a)),
+        sendJourneyWhatsApp:       (...a) => _loadChunkOnce('chunks/script-journey.min.js').then(() => window.app.sendJourneyWhatsApp(...a)),
+        switchJourneyTrackDisplay: (...a) => _loadChunkOnce('chunks/script-journey.min.js').then(() => window.app.switchJourneyTrackDisplay(...a)),
+        switchJourneyTrack:        (...a) => _loadChunkOnce('chunks/script-journey.min.js').then(() => window.app.switchJourneyTrack(...a)),
+        confirmSwitchJourneyTrack: (...a) => _loadChunkOnce('chunks/script-journey.min.js').then(() => window.app.confirmSwitchJourneyTrack(...a)),
+        openSpawnTouchpointsModal: (...a) => _loadChunkOnce('chunks/script-journey.min.js').then(() => window.app.openSpawnTouchpointsModal(...a)),
+        executeSpawnTouchpoints:   (...a) => _loadChunkOnce('chunks/script-journey.min.js').then(() => window.app.executeSpawnTouchpoints(...a)),
+        showAgentJourneyDashboard: (...a) => _loadChunkOnce('chunks/script-journey.min.js').then(() => window.app.showAgentJourneyDashboard(...a)),
+        showAgentJourneyLoad:      (...a) => _loadChunkOnce('chunks/script-journey.min.js').then(() => window.app.showAgentJourneyLoad(...a)),
 
         // Calendar + Follow-Up Engine — implemented by chunks/script-calendar.js
         // Self-loading stubs so these can be called from any view without the calendar chunk pre-loaded.

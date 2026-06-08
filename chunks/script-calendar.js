@@ -4603,6 +4603,7 @@
     };
 
     const savePostMeetup = async (activityId, prospectId) => {
+        try {
         const outcomeText = document.getElementById('post-mtup-outcome')?.value?.trim();
         const notesText = document.getElementById('post-mtup-notes')?.value?.trim();
         const agentName = _state.cu?.full_name || 'Agent';
@@ -4627,6 +4628,9 @@
         }
         UI.hideModal();
         UI.toast.success('Post-meetup notes saved');
+        } catch (err) {
+            UI.toast.error('Failed to save notes: ' + (err?.message || 'Unknown error'));
+        }
 
         // Navigate to prospect detail and open Potential & Opportunities + Next Actions
         if (prospectId) {
@@ -4768,7 +4772,12 @@
         if (updates.unable_to_serve) {
             updates.unable_reason = mo.unable_reason;
         }
-        await AppDataStore.update('activities', activityId, updates);
+        try {
+            await AppDataStore.update('activities', activityId, updates);
+        } catch (err) {
+            UI.toast.error('Failed to save meeting outcome: ' + (err?.message || 'Unknown error'));
+            return;
+        }
 
         // Sync unable_to_serve to the prospect row so filtering works without scanning activities
         try {
@@ -4903,7 +4912,7 @@
         else if (crSyncStatus === 'submitted')            UI.toast.success('✓ Submitted to manager for approval');
         else if (crSyncStatus === 'synced')               UI.toast.success('Saved as draft (fill product, amount, invoice & full name to auto-submit for approval)');
         else if (crSyncStatus === 'locked')               UI.toast.success('Activity saved (closing record locked — not overwritten)');
-        else if (crSyncStatus === 'failed')               UI.toast.success('Activity saved (closing record sync failed — try again from prospect profile)');
+        else if (crSyncStatus === 'failed')               UI.toast.error('Activity saved but closing record sync failed — retry from the prospect profile');
         else                                              UI.toast.success('Meeting outcome saved');
         if (document.querySelector('.calendar-view-container')) { await renderCalendar(); await renderTodayActivities(); }
     };
@@ -4970,6 +4979,45 @@
 
     const savePostMeetupNotes = async (activityId, prospectId) => {
         const updates = (window.app.collectPostMeetupNotesData || (() => ({})))('pmn');
+
+        // ── Discussion paper photos ────────────────────────────────────────
+        // Upload any files selected in the Minutes photo picker before saving
+        // the text fields, then merge URLs into photo_urls on the same row.
+        const photoInput = document.getElementById('pmn-photo-files');
+        const photoFiles = photoInput?.files?.length ? Array.from(photoInput.files) : [];
+        if (photoFiles.length > 0) {
+            const sb = window.supabase || window.supabaseClient;
+            if (sb && sb.storage) {
+                const _compress = window.app.compressImageFile || (f => Promise.resolve(f));
+                // Read existing photo_urls from the activity row first so we can append.
+                let existingUrls = [];
+                try {
+                    const act = await _lookupActivityRobust(activityId);
+                    existingUrls = Array.isArray(act?.photo_urls) ? act.photo_urls : [];
+                } catch (_) {}
+
+                UI.toast.success('Uploading photo(s)…');
+                const newUrls = [];
+                for (const file of photoFiles) {
+                    if (!file.type.startsWith('image/')) continue;
+                    try {
+                        const compressed = await _compress(file);
+                        const safeName = compressed.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+                        const path = `activity_photos/${activityId}_${Date.now()}_${safeName}`;
+                        const { error: upErr } = await sb.storage.from('attachments').upload(path, compressed, { upsert: false, contentType: 'image/jpeg' });
+                        if (upErr) { console.warn('minutes photo upload error:', upErr); continue; }
+                        const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
+                        if (urlData?.publicUrl) newUrls.push(urlData.publicUrl);
+                    } catch (e) { console.warn('minutes photo upload threw:', e); }
+                }
+                if (newUrls.length > 0) {
+                    updates.photo_urls = [...existingUrls, ...newUrls];
+                }
+            } else {
+                UI.toast.error('Supabase storage not available — photos not uploaded');
+            }
+        }
+        // ── End photo upload ───────────────────────────────────────────────
 
         // Use the authenticated Supabase client so RLS applies and errors
         // surface instead of silently falling back to localStorage.
@@ -5201,12 +5249,16 @@
     };
 
     const confirmDeleteActivity = async (activityId) => {
-        await AppDataStore.delete('activities', activityId);
-        UI.hideModal();
-        UI.toast.success('Activity deleted');
-        if (document.querySelector('.calendar-view-container')) {
-            await renderCalendar();
-            await renderTodayActivities();
+        try {
+            await AppDataStore.delete('activities', activityId);
+            UI.hideModal();
+            UI.toast.success('Activity deleted');
+            if (document.querySelector('.calendar-view-container')) {
+                await renderCalendar();
+                await renderTodayActivities();
+            }
+        } catch (err) {
+            UI.toast.error('Failed to delete activity: ' + (err?.message || 'Unknown error'));
         }
     };
 
