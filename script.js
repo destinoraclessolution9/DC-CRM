@@ -1475,7 +1475,7 @@ const Auth = {
     async function logout() {
         await Auth.logout();
         _currentUser = null;
-        localStorage.removeItem('remember_me'); // clear "keep me logged in" on explicit logout
+        try { localStorage.removeItem('remember_me'); } catch (_) {} // clear "keep me logged in" on explicit logout
         document.getElementById('app-shell').style.display = 'none';
         document.getElementById('login-container').style.display = 'flex';
         UI.hideModal();      // close the user menu modal
@@ -1493,8 +1493,8 @@ const Auth = {
             await Auth.logout();
         } catch (_) { /* sign out even if the network call fails */ }
         _currentUser = null;
-        localStorage.removeItem('remember_me');
-        localStorage.removeItem('remember_me_email');
+        try { localStorage.removeItem('remember_me'); } catch (_) {}
+        try { localStorage.removeItem('remember_me_email'); } catch (_) {}
         const emailField = document.getElementById('loginEmail') || document.getElementById('email');
         if (emailField) emailField.value = '';
         const pwField = document.getElementById('loginPassword') || document.getElementById('password');
@@ -1512,7 +1512,13 @@ function _wireLoginBtn() {
     if (!btn || btn._supabaseSetup) return;
     btn._supabaseSetup = true;
     // Pre-fill email from last successful login (convenience only).
-    const rememberedEmail = localStorage.getItem('remember_me_email');
+    // Guarded: on iOS Safari with Block-All-Cookies, even localStorage.getItem
+    // can throw SecurityError, which would abort _wireLoginBtn before the
+    // storage detector below ever runs — leaving the login button silently
+    // unwired (btn._supabaseSetup was just set true, so the fallback retry
+    // in app-init.js sees the flag and bails out).
+    let rememberedEmail = null;
+    try { rememberedEmail = localStorage.getItem('remember_me_email'); } catch (_) {}
     if (rememberedEmail) {
         const emailField = document.getElementById('email') || document.getElementById('loginEmail');
         if (emailField && !emailField.value) emailField.value = rememberedEmail;
@@ -1813,7 +1819,11 @@ function _wireLoginBtn() {
                 localStorage.setItem('remember_me', '1');
                 if (_loginEmail?.value) localStorage.setItem('remember_me_email', _loginEmail.value.trim().toLowerCase());
             } catch (e) {
-                localStorage.removeItem('offline_queue');
+                // setItem failed (quota or storage blocked). Make a single best-effort
+                // attempt to free space and retry — each call individually guarded so
+                // a broken localStorage can't throw out of the catch block and
+                // mis-route us into the login-failed error path AFTER a successful login.
+                try { localStorage.removeItem('offline_queue'); } catch (_) {}
                 try { localStorage.setItem('remember_me', '1'); } catch (_) {}
             }
             document.getElementById('login-container').style.display = 'none';
@@ -4517,8 +4527,13 @@ const initSessionTimeout = async () => {
     // Sessions always persist until explicit logout — skip the inactivity timer.
     // Guard 1: remember_me flag set at login. Guard 2: no user yet (called before
     // app.init() resolves — arming the timer pre-auth would fire on a valid session).
+    // NOTE: `_currentUser` lives inside the appLogic IIFE — invisible here at module
+    // scope. Reach it via window._appState.cu, which is a getter that proxies the
+    // same binding. Without this, initSessionTimeout threw ReferenceError on every
+    // initSecurity() call after login (silently — the unhandled-rejection didn't
+    // surface to the UI, but the inactivity timer never armed).
     if (localStorage.getItem('remember_me') === '1') return;
-    if (!_currentUser) return;
+    if (!window._appState?.cu) return;
     const timeoutMinutes = parseInt(UserPreferences.getSync('session_timeout', 30));
     const resetTimeout = () => {
         clearTimeout(sessionTimeoutTimer);
@@ -4693,7 +4708,11 @@ Object.assign(window.app, {
     showSalesForecast:        (...a) => window._loadChunk('chunks/script-ai.min.js').then(() => window.app.showSalesForecast?.(...a)),
     showChurnRiskAnalysis:    (...a) => window._loadChunk('chunks/script-ai.min.js').then(() => window.app.showChurnRiskAnalysis?.(...a)),
     showPerformanceInsights:  (...a) => window._loadChunk('chunks/script-ai.min.js').then(() => window.app.showPerformanceInsights?.(...a)),
-    _prefetchChunkForView,
+    // _prefetchChunkForView is internal to the IIFE — used only by the pointerover
+    // listener at script.js:2743. Removed from the export list because esbuild's
+    // --keep-names option renames the const binding (to a short letter) but leaves
+    // the shorthand reference here as the bare name, causing a ReferenceError on
+    // bundle eval. Nothing outside the IIFE ever read `app._prefetchChunkForView`.
     // Two-factor (defined in two-factor.min.js, loaded separately)
     showTwoFactorSetup:  typeof showTwoFactorSetup  !== 'undefined' ? showTwoFactorSetup  : () => UI?.toast?.warning('Two-factor setup not available.'),
     verifyAndEnable2FA:  typeof verifyAndEnable2FA  !== 'undefined' ? verifyAndEnable2FA  : () => UI?.toast?.warning('Two-factor not available.'),
