@@ -1493,19 +1493,8 @@ function _wireLoginBtn() {
     const btn = document.getElementById('loginBtn');
     if (!btn || btn._supabaseSetup) return;
     btn._supabaseSetup = true;
-    // Restore remembered checkbox state and pre-fill email.
-    // Default to CHECKED for first-time / explicitly-logged-out users so mobile
-    // sessions survive across app cold-boots. Only an explicit logout (which
-    // removes 'remember_me') flips this off — and even then we re-check it
-    // unless the user manually unticks before next login.
-    const rememberChk = document.getElementById('rememberMe');
+    // Pre-fill email from last successful login (convenience only).
     const rememberedEmail = localStorage.getItem('remember_me_email');
-    if (rememberChk) {
-        const saved = localStorage.getItem('remember_me');
-        // saved === '0' → user explicitly opted OUT last time → keep unchecked
-        // saved === '1' OR null → check it (default-on for first-timers)
-        rememberChk.checked = saved !== '0';
-    }
     if (rememberedEmail) {
         const emailField = document.getElementById('email') || document.getElementById('loginEmail');
         if (emailField && !emailField.value) emailField.value = rememberedEmail;
@@ -2090,6 +2079,9 @@ function _wireLoginBtn() {
                 }
                 if (profile) {
                     _currentUser = profile;
+                    // Ensure the inactivity-timer guard is always set for restored sessions,
+                    // even if localStorage was partially cleared between visits.
+                    try { localStorage.setItem('remember_me', '1'); } catch (_) {}
                     _runPredictivePrefetch();
                     // Flush stale SWR snapshots so the user always sees fresh data,
                     // not a cached view from a previous session that may pre-date reassignments.
@@ -2122,6 +2114,7 @@ function _wireLoginBtn() {
                         status: 'active',
                         _placeholder: true,
                     };
+                    try { localStorage.setItem('remember_me', '1'); } catch (_) {}
                 } else {
                     // Auth session exists but no matching user profile in DB — force sign out
                     console.warn('No user profile found for:', authUser.email, '— signing out.');
@@ -4496,8 +4489,11 @@ const initSecurity = async () => {
 
 let sessionTimeoutTimer;
 const initSessionTimeout = async () => {
-    // If "Keep me logged in" was checked at last login, skip inactivity timeout entirely
+    // Sessions always persist until explicit logout — skip the inactivity timer.
+    // Guard 1: remember_me flag set at login. Guard 2: no user yet (called before
+    // app.init() resolves — arming the timer pre-auth would fire on a valid session).
     if (localStorage.getItem('remember_me') === '1') return;
+    if (!_currentUser) return;
     const timeoutMinutes = parseInt(UserPreferences.getSync('session_timeout', 30));
     const resetTimeout = () => {
         clearTimeout(sessionTimeoutTimer);
