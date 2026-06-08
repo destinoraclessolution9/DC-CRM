@@ -2637,6 +2637,9 @@ function _wireLoginBtn() {
         'order_form_extract':   { src: 'chunks/script-order-form-extract.min.js', minLevel: null, exactLevels: null },
         // Phase 6A: Journey System — 5-year automated follow-up (2026-06-06)
         'journey':              { src: 'chunks/script-journey.min.js',    minLevel: null, exactLevels: null },
+        // Views whose render function lives in an existing chunk (no dedicated entry above)
+        'promotions':           { src: 'chunks/script-marketing.min.js',  minLevel: null, exactLevels: null },
+        'settings':             { src: 'chunks/script-prospects.min.js',  minLevel: null, exactLevels: null },
         // Modal-bound chunks (not tied to a view — underscore prefix prevents nav matching)
         '_activities':          { src: 'chunks/script-activities.min.js', minLevel: null, exactLevels: null },
     };
@@ -4004,8 +4007,10 @@ function _wireLoginBtn() {
 
         // Calendar + Follow-Up Engine — implemented by chunks/script-calendar.js
         // Self-loading stubs so these can be called from any view without the calendar chunk pre-loaded.
-        openPostMeetupNotesModal: (...args) => _loadChunkOnce('chunks/script-calendar.min.js').then(() => window.app.openPostMeetupNotesModal(...args)),
-        savePostMeetupNotes:      (...args) => _loadChunkOnce('chunks/script-calendar.min.js').then(() => window.app.savePostMeetupNotes(...args)),
+        // Both calendar AND activities chunks needed: calendar owns the modal/save,
+        // activities owns collectPostMeetupNotesData / buildPostMeetupNotesBlock.
+        openPostMeetupNotesModal: (...args) => Promise.all([_loadChunkOnce('chunks/script-calendar.min.js'), _loadChunkOnce('chunks/script-activities.min.js')]).then(() => window.app.openPostMeetupNotesModal(...args)),
+        savePostMeetupNotes:      (...args) => Promise.all([_loadChunkOnce('chunks/script-calendar.min.js'), _loadChunkOnce('chunks/script-activities.min.js')]).then(() => window.app.savePostMeetupNotes(...args)),
 
         // Phase 11: DMS — implemented by chunks/script-documents.js
 
@@ -4140,7 +4145,7 @@ function _wireLoginBtn() {
                 if (window.app.showCasesView) await window.app.showCasesView(viewport);
                 break;
             case 'promotions':
-                await showMonthlyPromotionView(viewport);
+                if (window.app.showMonthlyPromotionView) await window.app.showMonthlyPromotionView(viewport);
                 break;
             case 'marketing_automation':
                 if (window.app.showMarketingAutomationView) await window.app.showMarketingAutomationView(viewport);
@@ -4653,6 +4658,14 @@ Object.assign(window.app, {
     showAuditLogs:          () => (window.app._adminChunkLoaded ? window.app.showAuditLogs()          : window._loadChunk('chunks/script-admin.min.js').then(() => window.app.showAuditLogs())),
     showComplianceCenter:   () => (window.app._adminChunkLoaded ? window.app.showComplianceCenter()   : window._loadChunk('chunks/script-admin.min.js').then(() => window.app.showComplianceCenter())),
     showAdminDashboard:     () => window._loadChunk('chunks/script-admin.min.js').then(() => window.app.showAdminDashboard()),
+    // Mobile nav toggle — stub ensures hamburger works even before mobile chunk finishes loading
+    toggleMobileNav: (...a) => _loadChunkOnce('chunks/script-mobile.min.js').then(() => window.app.toggleMobileNav?.(...a)),
+    // AI Insights — stubs load ai chunk on first click (Tier-2 prefetch at 3 s; user may click sooner)
+    showAIInsightsDashboard:  (...a) => _loadChunkOnce('chunks/script-ai.min.js').then(() => window.app.showAIInsightsDashboard?.(...a)),
+    showLeadScoring:          (...a) => _loadChunkOnce('chunks/script-ai.min.js').then(() => window.app.showLeadScoring?.(...a)),
+    showSalesForecast:        (...a) => _loadChunkOnce('chunks/script-ai.min.js').then(() => window.app.showSalesForecast?.(...a)),
+    showChurnRiskAnalysis:    (...a) => _loadChunkOnce('chunks/script-ai.min.js').then(() => window.app.showChurnRiskAnalysis?.(...a)),
+    showPerformanceInsights:  (...a) => _loadChunkOnce('chunks/script-ai.min.js').then(() => window.app.showPerformanceInsights?.(...a)),
     _prefetchChunkForView,
     // Two-factor (defined in two-factor.min.js, loaded separately)
     showTwoFactorSetup:  typeof showTwoFactorSetup  !== 'undefined' ? showTwoFactorSetup  : () => UI?.toast?.warning('Two-factor setup not available.'),
