@@ -4982,6 +4982,8 @@
 
     const savePostMeetupNotes = async (activityId, prospectId) => {
         const updates = (window.app.collectPostMeetupNotesData || (() => ({})))('pmn');
+        // Single client reference used by both the photo upload and the row update.
+        const sb = window.supabase || window.supabaseClient;
 
         // ── Discussion paper photos ────────────────────────────────────────
         // Upload any files selected in the Minutes photo picker before saving
@@ -4989,7 +4991,6 @@
         const photoInput = document.getElementById('pmn-photo-files');
         const photoFiles = photoInput?.files?.length ? Array.from(photoInput.files) : [];
         if (photoFiles.length > 0) {
-            const sb = window.supabase || window.supabaseClient;
             if (sb && sb.storage) {
                 const _compress = window.app.compressImageFile || (f => Promise.resolve(f));
                 // Read existing photo_urls from the data attribute embedded in the
@@ -5008,7 +5009,7 @@
                         const compressed = await _compress(file);
                         const safeName = compressed.name.replace(/[^a-zA-Z0-9._-]/g, '_');
                         const path = `activity_photos/${activityId}_${Date.now()}_${safeName}`;
-                        const { error: upErr } = await sb.storage.from('attachments').upload(path, compressed, { upsert: false, contentType: 'image/jpeg' });
+                        const { error: upErr } = await sb.storage.from('attachments').upload(path, compressed, { upsert: false, contentType: compressed.type || 'image/jpeg' });
                         if (upErr) { console.warn('minutes photo upload error:', upErr); continue; }
                         const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
                         if (urlData?.publicUrl) newUrls.push(urlData.publicUrl);
@@ -5025,7 +5026,6 @@
 
         // Use the authenticated Supabase client so RLS applies and errors
         // surface instead of silently falling back to localStorage.
-        const sb = window.supabase || window.supabaseClient;
         let writeOk = false;
         if (sb) {
             try {

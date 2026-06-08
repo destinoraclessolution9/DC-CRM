@@ -1072,17 +1072,17 @@
                     const existingPhotos = Array.isArray(a.photo_urls) ? a.photo_urls : [];
                     const thumbs = existingPhotos.map(url => `
                         <div style="position:relative;flex-shrink:0;">
-                            <img loading="lazy" src="${url}" style="height:64px;width:64px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-200);cursor:zoom-in;" onclick="window._openAttachment && window._openAttachment('${url}')">
+                            <img loading="lazy" src="${escapeHtml(url)}" style="height:64px;width:64px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-200);cursor:zoom-in;" onclick="window._openAttachment && window._openAttachment('${escapeHtml(url)}')">
                         </div>`).join('');
                     return `
-                <div class="form-group" style="border-top:1px solid var(--gray-200);padding-top:12px;margin-top:4px;">
+                <div class="form-group" id="${prefix}-photo-section" data-existing="${escapeHtml(JSON.stringify(existingPhotos))}" style="border-top:1px solid var(--gray-200);padding-top:12px;margin-top:4px;">
                     <label style="display:flex;align-items:center;gap:6px;"><i class="fas fa-camera" style="color:var(--primary);"></i> Discussion Papers</label>
                     ${existingPhotos.length > 0 ? `
                     <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;padding:8px;background:#f9fafb;border-radius:6px;border:1px solid var(--gray-200);">
                         ${thumbs}
                     </div>` : ''}
                     ${!readOnly ? `
-                    <input type="file" id="${prefix}-photo-files" class="form-control" accept="image/*" multiple capture="environment" style="font-size:13px;">
+                    <input type="file" id="${prefix}-photo-files" class="form-control" accept="image/*" multiple style="font-size:13px;">
                     <p style="color:var(--gray-400);font-size:11px;margin-top:4px;"><i class="fas fa-info-circle"></i> Photos are saved with this meet up record and visible in Meet Up History.</p>
                     ` : (existingPhotos.length === 0 ? '<p style="color:var(--gray-400);font-size:13px;">No discussion photos attached.</p>' : '')}
                 </div>`;

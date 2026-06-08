@@ -34,9 +34,11 @@
     // navigateTo lives in the script.js IIFE — reach it via window.app.
     const navigateTo          = (v) => window.app.navigateTo(v);
     // Cross-chunk reassign helpers — defined in script-import.js, exported to window.app.
-    const cascadeProspectReassign   = (...a) => window.app.cascadeProspectReassign(...a);
-    const _renderReassignSummary    = (...a) => window.app._renderReassignSummary(...a);
-    const _showReassignConfirmPopup = (...a) => window.app._showReassignConfirmPopup(...a);
+    // Guards use || noop so callers don't throw if the import chunk hasn't loaded yet
+    // (e.g. user opens Prospects view without ever visiting Import/Protection).
+    const cascadeProspectReassign   = (...a) => (window.app.cascadeProspectReassign   || (() => Promise.resolve(null)))(...a);
+    const _renderReassignSummary    = (...a) => (window.app._renderReassignSummary    || (() => '<p style="color:var(--gray-400)">Loading…</p>'))(...a);
+    const _showReassignConfirmPopup = (...a) => (window.app._showReassignConfirmPopup || (() => {}))(...a);
     // Robust activity lookup — defined in script-calendar.js. Falls back to plain
     // AppDataStore.getById when the calendar chunk hasn't loaded yet (e.g. user
     // jumps straight into a prospect detail before opening calendar).
@@ -5083,8 +5085,8 @@ const viewActivityPhotos = async (activityId) => {
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;max-height:60vh;overflow:auto;padding:4px;">
             ${photos.map((url, i) => `
                 <div style="position:relative;">
-                    <img loading="lazy" decoding="async" src="${url}" style="width:100%;height:120px;border-radius:6px;object-fit:cover;cursor:zoom-in;border:1px solid var(--gray-200);" onclick="window._openAttachment && window._openAttachment('${url}')">
-                    <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:22px;height:22px;font-size:11px;padding:0;" title="Remove" onclick="event.stopPropagation();app.removeActivityPhoto(${activityId}, '${url}', 'view')"><i class="fas fa-times"></i></button>
+                    <img loading="lazy" decoding="async" src="${escapeHtml(url)}" style="width:100%;height:120px;border-radius:6px;object-fit:cover;cursor:zoom-in;border:1px solid var(--gray-200);" onclick="window._openAttachment && window._openAttachment('${escapeHtml(url)}')">
+                    <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:22px;height:22px;font-size:11px;padding:0;" title="Remove" onclick="event.stopPropagation();app.removeActivityPhoto(${activityId}, '${escapeHtml(url)}', 'view')"><i class="fas fa-times"></i></button>
                 </div>
             `).join('')}
         </div>
@@ -5221,6 +5223,7 @@ const removeActivityPhoto = async (activityId, photoTarget, source) => {
         // race), skip the DB round-trip — nothing to update.
         if (updated.length !== existing.length) {
             await AppDataStore.update('activities', activityId, { photo_urls: updated });
+            AppDataStore.invalidateCache('activities');
         }
         return { activity, updated, skipped: false };
     });
