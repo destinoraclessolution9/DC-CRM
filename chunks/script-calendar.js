@@ -69,7 +69,7 @@
                                     <button class="cal-icon-btn cal-btn-wa" onclick="app.openShareCpsIntakeLinkModal()" title="Share CPS Intake Link">
                                         <i class="fab fa-whatsapp"></i>
                                     </button>
-                                    <button class="cal-icon-btn cal-btn-add" onclick="app.(window.app.openActivityModal || (() => {}))())" title="Quick Add Activity">
+                                    <button class="cal-icon-btn cal-btn-add" onclick="app.openActivityModal()" title="Quick Add Activity">
                                         <i class="fas fa-plus"></i>
                                     </button>
                                 </div>

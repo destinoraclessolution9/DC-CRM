@@ -3582,7 +3582,7 @@ function _wireLoginBtn() {
     const copySmartBookingLink = async (...a) => { const _r = window.app.copySmartBookingLink; if (_r && _r !== copySmartBookingLink) return _r(...a); };
     const confirmBookingAppointment = async (...a) => { const _r = window.app.confirmBookingAppointment; if (_r && _r !== confirmBookingAppointment) return _r(...a); };
     const cancelBookingAppointment = async (...a) => { const _r = window.app.cancelBookingAppointment; if (_r && _r !== cancelBookingAppointment) return _r(...a); };
-    const openShareCpsIntakeLinkModal = async (...a) => { const _r = window.app.openShareCpsIntakeLinkModal; if (_r && _r !== openShareCpsIntakeLinkModal) return _r(...a); };
+    const openShareCpsIntakeLinkModal = async (...a) => { await _loadChunkOnce('chunks/script-cps.min.js'); const _r = window.app.openShareCpsIntakeLinkModal; if (_r && _r !== openShareCpsIntakeLinkModal) return _r(...a); };
     const saveCpsIntakeLink = async (...a) => { const _r = window.app.saveCpsIntakeLink; if (_r && _r !== saveCpsIntakeLink) return _r(...a); };
     const copyCpsIntakeLink = async (...a) => { const _r = window.app.copyCpsIntakeLink; if (_r && _r !== copyCpsIntakeLink) return _r(...a); };
     const shareCpsIntakeWhatsApp = async (...a) => { const _r = window.app.shareCpsIntakeWhatsApp; if (_r && _r !== shareCpsIntakeWhatsApp) return _r(...a); };

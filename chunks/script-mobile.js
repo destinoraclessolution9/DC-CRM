@@ -1886,10 +1886,24 @@
         const visibleIds = (typeof getVisibleUserIds === 'function')
             ? await getVisibleUserIds(_state.cu).catch(() => 'all') : 'all';
 
+        const searchTerm = (_mpSearch || '').trim();
         let rows = [];
+        let _serverSearched = false;
         try {
+            let tableRowsPromise;
+            if (searchTerm) {
+                // Bypass SWR cache on search — getAll() serves stale localStorage snapshot
+                // so prospects added on another device wouldn't appear. Server-side search
+                // always hits Supabase fresh, matching the desktop prospects search behavior.
+                tableRowsPromise = table === 'prospects'
+                    ? AppDataStore.searchProspects(searchTerm, { includeDormant: true, limit: 200 })
+                    : AppDataStore.searchCustomers(searchTerm, { limit: 200 });
+                _serverSearched = true;
+            } else {
+                tableRowsPromise = AppDataStore.getAll(table);
+            }
             const [tableRows, agentRows] = await Promise.all([
-                AppDataStore.getAll(table),
+                tableRowsPromise,
                 _mpAgentMap ? Promise.resolve(null) : AppDataStore.getAll('users').catch(() => []),
             ]);
             rows = tableRows || [];
@@ -1907,13 +1921,15 @@
             rows = rows.filter(r => !r.responsible_agent_id || setIds.has(String(r.responsible_agent_id)));
         }
 
-        // Search filter
-        const q = (_mpSearch || '').trim().toLowerCase();
-        if (q) {
-            rows = rows.filter(r => {
-                const blob = `${r.full_name || ''} ${r.phone || ''} ${r.email || ''} ${r.nickname || ''}`.toLowerCase();
-                return blob.includes(q);
-            });
+        // Client-side text filter — skip when server already filtered via searchProspects/searchCustomers
+        if (!_serverSearched) {
+            const q = searchTerm.toLowerCase();
+            if (q) {
+                rows = rows.filter(r => {
+                    const blob = `${r.full_name || ''} ${r.phone || ''} ${r.email || ''} ${r.nickname || ''}`.toLowerCase();
+                    return blob.includes(q);
+                });
+            }
         }
 
         // Filter modal — applied AFTER search so the filter button count
