@@ -264,7 +264,9 @@
             renderBirthdaySection().catch(e => console.warn('renderBirthdaySection failed:', e));
             renderRefillReminders().catch(e => console.warn('renderRefillReminders failed:', e));
             (window.app.renderPendingCpsIntakes || (() => Promise.resolve()))().catch(e => console.warn('renderPendingCpsIntakes failed:', e));
-            Promise.all([
+            // Use allSettled so a single dispatch failure doesn't block the
+            // follow-up render — each dispatch is fire-and-forget side work.
+            Promise.allSettled([
                 dispatchBirthdayTriggers(),
                 dispatchProactiveEventInvites(),
                 dispatchPendingSolutionReminders()
@@ -2556,12 +2558,13 @@
         const day2 = new Date(today); day2.setDate(today.getDate() + 2);
         const day2Str = mmdd(day2);
 
-        // Fetch everything in parallel instead of serialized awaits.
+        // Fetch everything in parallel. Individual .catch(() => []) guards
+        // ensure a single table failure doesn't prevent glance counts updating.
         const [prospects, customers, names, allUsers] = await Promise.all([
-            AppDataStore.getAll('prospects'),
-            AppDataStore.getAll('customers'),
-            AppDataStore.getAll('names'),
-            AppDataStore.getAll('users'),
+            AppDataStore.getAll('prospects').catch(() => []),
+            AppDataStore.getAll('customers').catch(() => []),
+            AppDataStore.getAll('names').catch(() => []),
+            AppDataStore.getAll('users').catch(() => []),
         ]);
         const all = [...prospects, ...customers];
         const userMap = new Map(allUsers.map(u => [String(u.id), u]));
