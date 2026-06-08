@@ -22,6 +22,8 @@
     let _recordingStartTime = null;
     let _recordingTimer = null;
     let _recordingStream = null;
+    // ── Pull-to-refresh flag — consumed by Home/Calendar/People renders ──
+    let _mobileForceFresh = false;
     // ==================== PHASE 14: CUSTOMER & AGENT NOTE HELPERS ====================
 
     const addCustomerNote = async (customerId) => {
@@ -1066,10 +1068,6 @@
     let _mcalMonth = null;
     let _mcalByDate = new Map();
     let _mcalPersonMap = new Map();
-
-    // Set by pull-to-refresh; consumed (and reset) by the mobile Home/Calendar
-    // render so a manual refresh bypasses every localStorage cache once.
-    let _mobileForceFresh = false;
 
     // SWR revalidate guard — last-revalidated timestamp per `${year}-${month}`.
     // Background refetch is skipped if the same month was revalidated < 30s ago,

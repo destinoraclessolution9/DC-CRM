@@ -57,7 +57,7 @@
                     <select class="form-control" style="width:200px"><option>All Categories</option></select>
                     <select class="form-control" style="width:200px">
                         <option>All Levels</option>
-                        ${USER_ROLES.map(r => `<option>${r}</option>`).join('')}
+                        ${(_utils.USER_ROLES || []).map(r => `<option>${r}</option>`).join('')}
                     </select>
                 </div>
                 <table class="audit-table">

@@ -354,7 +354,7 @@
     };
 
     const initSampleDocuments = async () => {
-        if (await AppDataStore.getAll('documents').length === 0) {
+        if ((await AppDataStore.getAll('documents')).length === 0) {
             await AppDataStore.create('documents', { id: 101, filename: 'Welcome Guide.pdf', folder_id: 1, size: 1024 * 500, created_at: new Date().toISOString() });
             await AppDataStore.create('documents', { id: 102, filename: 'Privacy Policy.docx', folder_id: 1, size: 1024 * 200, created_at: new Date().toISOString() });
         }

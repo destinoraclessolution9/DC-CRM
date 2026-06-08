@@ -80,7 +80,7 @@ const showRankingPerformanceView = async (container) => {
     const purchasesByAgent = new Map();
     for (const p of allPurchases) {
         if (!p.agent_id) continue;
-        if (p.purchase_date < monthStart || p.purchase_date > monthEnd) continue;
+        if ((p.date || p.purchase_date) < monthStart || (p.date || p.purchase_date) > monthEnd) continue;
         const k = String(p.agent_id);
         let bucket = purchasesByAgent.get(k);
         if (!bucket) { bucket = []; purchasesByAgent.set(k, bucket); }
@@ -413,7 +413,7 @@ const saveWorkflow = async (workflowId) => {
     UI.hideModal();
     UI.toast.success(workflowId ? 'Workflow updated' : 'Workflow created');
     const _tabC = document.getElementById('marketing-tab-content');
-    if (_tabC) _tabC.innerHTML = await renderAutomationTab();
+    if (_tabC) _tabC.innerHTML = await app.renderAutomationTab();
 };
 
 const createWorkflowFromTemplate = async (triggerType) => {
@@ -446,7 +446,7 @@ const createWorkflowFromTemplate = async (triggerType) => {
     await AppDataStore.create('automation_workflows', data);
     UI.toast.success(`Workflow "${tpl.name}" created from template`);
     const _tabC2 = document.getElementById('marketing-tab-content');
-    if (_tabC2) _tabC2.innerHTML = await renderAutomationTab();
+    if (_tabC2) _tabC2.innerHTML = await app.renderAutomationTab();
 };
 
 const toggleWorkflow = async (workflowId) => {
@@ -456,7 +456,7 @@ const toggleWorkflow = async (workflowId) => {
     await AppDataStore.update('automation_workflows', workflowId, { status: newStatus });
     UI.toast.success(`Workflow ${newStatus === 'active' ? 'activated' : 'paused'}`);
     const _tabC3 = document.getElementById('marketing-tab-content');
-    if (_tabC3) _tabC3.innerHTML = await renderAutomationTab();
+    if (_tabC3) _tabC3.innerHTML = await app.renderAutomationTab();
 };
 
 const editWorkflow = async (workflowId) => {

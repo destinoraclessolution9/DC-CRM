@@ -37,6 +37,10 @@
     const cascadeProspectReassign   = (...a) => window.app.cascadeProspectReassign(...a);
     const _renderReassignSummary    = (...a) => window.app._renderReassignSummary(...a);
     const _showReassignConfirmPopup = (...a) => window.app._showReassignConfirmPopup(...a);
+    // Robust activity lookup — defined in script-calendar.js. Falls back to plain
+    // AppDataStore.getById when the calendar chunk hasn't loaded yet (e.g. user
+    // jumps straight into a prospect detail before opening calendar).
+    const _lookupActivityRobust = (...a) => (window.app._lookupActivityRobust || AppDataStore.getById.bind(AppDataStore, 'activities'))(...a);
     // Live reference to current user (refreshed on each navigation via _syncProspectsUser)
     let _currentUser = _state.cu;
     const _syncUser = () => { _currentUser = _state.cu; };
@@ -558,10 +562,10 @@ const renderApprovalQueue = async () => {
 
         html += `<tr>
             <td><span style="background:${tc.bg}; color:${tc.color}; padding:3px 10px; border-radius:6px; font-size:12px; font-weight:600; white-space:nowrap;"><i class="fas ${tc.icon}" style="margin-right:4px;"></i>${tc.label}</span></td>
-            <td><strong>${name}</strong></td>
-            <td>${agentName}</td>
+            <td><strong>${escapeHtml(name)}</strong></td>
+            <td>${escapeHtml(agentName)}</td>
             <td style="font-size:12px; white-space:nowrap;">${dateStr}</td>
-            <td style="max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px;">${entry.description || '-'}</td>
+            <td style="max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px;">${escapeHtml(entry.description || '-')}</td>
             <td onclick="event.stopPropagation()">
                 <button class="btn-icon" title="View Details" onclick="event.stopPropagation();app.showApprovalDetail(${entry.id})"><i class="fas fa-eye"></i></button>
                 <button class="btn-icon" title="Approve" style="color:#16a34a;" onclick="event.stopPropagation();app.approveQueueEntry(${entry.id})"><i class="fas fa-check-circle"></i></button>

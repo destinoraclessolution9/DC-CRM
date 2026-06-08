@@ -1505,7 +1505,7 @@ const renderTargetOverview = async () => {
     const container = document.getElementById('target-overview-container');
     if (!container) return;
 
-    const year = 2026;
+    const year = new Date().getFullYear();
     const quarterlyTargets = await AppDataStore.getAll('quarterly_targets');
     const qTargets = quarterlyTargets.filter(t => t.year === year);
 
@@ -2014,6 +2014,7 @@ const exportKPIReport = async (format) => {
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
         UI.toast.success('Comprehensive CSV report exported.');
     }
 };

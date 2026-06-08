@@ -302,7 +302,7 @@
                         <span>${msg.direction === 'outgoing' ? '📤 Outgoing' : '📥 Incoming'} · ${new Date(msg.sent_at || msg.created_at).toLocaleString()}</span>
                         ${msg.template_name ? `<span class="template-badge">${esc(msg.template_name)}</span>` : ''}
                     </div>
-                    <div class="message-content" style="font-size:14px;margin-bottom:8px;">${msg.content || msg.template_name + ' template message'}</div>
+                    <div class="message-content" style="font-size:14px;margin-bottom:8px;">${esc(msg.content) || esc(msg.template_name) + ' template message'}</div>
                     <div class="message-footer" style="display:flex;justify-content:space-between;align-items:center;font-size:11px;">
                         <span class="message-status status-${msg.status}">
                             ${msg.status === 'sent' ? '✓ Sent' : msg.status === 'delivered' ? '✓✓ Delivered' : msg.status === 'read' ? '👁️ Read' : '❌ Failed'}
@@ -330,7 +330,7 @@
                     <div><strong>Sent:</strong> ${new Date(message.sent_at || message.created_at).toLocaleString()}</div>
                 </div>
                 <div class="message-bubble-large" style="background:#e5ddd5;padding:20px;border-radius:12px;margin-bottom:16px;">
-                    ${message.content || message.template_name}
+                    ${esc(message.content || message.template_name || '')}
                 </div>
             </div>
         `, [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }]);

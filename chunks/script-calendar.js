@@ -656,7 +656,7 @@
             const solutionList = (tpl.solution_match || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
             const solCatList   = (tpl.solution_category_match || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 
-            const interestOk = !interestList.length || interestList.some(m => interest === m);
+            const interestOk = !interestList.length || interestList.some(m => interest.includes(m));
             const solutionOk = !solutionList.length || solutionList.some(m => solutionNames.some(s => s.includes(m)));
             const solCatOk   = !solCatList.length   || solCatList.some(m => solutionCategories.some(c => c.includes(m)));
 
@@ -2637,8 +2637,8 @@
                     <div class="bday-name">${b.name} 🎂</div>
                     <div class="bday-info">${b.info}</div>
                     <div class="act-actions" style="border-top:none; margin-top:4px; padding-top:0;">
-                        <button class="btn btn-sm secondary" style="font-size:11px" onclick="app.sendBirthdayWish('${b.name}', '${b.phone}')">Send Wish</button>
-                        <button class="btn btn-sm secondary" style="font-size:11px" onclick="app.scheduleBirthdayFollowup('${b.name}', ${b.id}, '${b.type}')">Prepare Gift</button>
+                        <button class="btn btn-sm secondary" style="font-size:11px" onclick="app.openSendBirthdayWish(${b.id}, '${b.type}')">Send Wish</button>
+                        <button class="btn btn-sm secondary" style="font-size:11px" onclick="app.openPrepareGiftModal(${b.id}, '${b.type}')">Prepare Gift</button>
                     </div>
                 </div>
             `).join('');
@@ -3442,7 +3442,7 @@
 
         for (let i = 8; i <= 20; i++) {
             const hourStr = `${i.toString().padStart(2, '0')}:00`;
-            const actsAtHour = dayActs.filter(a => a.start_time.startsWith(i.toString().padStart(2, '0')));
+            const actsAtHour = dayActs.filter(a => a.start_time && a.start_time.startsWith(i.toString().padStart(2, '0')));
 
             const hourContent = actsAtHour.map(a => {
                 let prospectInfo = '';
@@ -4989,12 +4989,13 @@
             const sb = window.supabase || window.supabaseClient;
             if (sb && sb.storage) {
                 const _compress = window.app.compressImageFile || (f => Promise.resolve(f));
-                // Read existing photo_urls from the activity row first so we can append.
+                // Read existing photo_urls from the data attribute embedded in the
+                // modal DOM when it was rendered — avoids any cache/network dependency.
                 let existingUrls = [];
                 try {
-                    const act = await _lookupActivityRobust(activityId);
-                    existingUrls = Array.isArray(act?.photo_urls) ? act.photo_urls : [];
-                } catch (_) {}
+                    const section = document.getElementById('pmn-photo-section');
+                    existingUrls = JSON.parse(section?.dataset?.existing || '[]');
+                } catch (_) { existingUrls = []; }
 
                 UI.toast.success('Uploading photo(s)…');
                 const newUrls = [];
@@ -5562,6 +5563,7 @@
         serializeMultiSelectToText,
         serializeEventSelectToText,
         openPostMeetupNotesModal,
+        _lookupActivityRobust,
         savePostMeetupNotes,
         openAttendeePostEventModal,
         saveAttendeePostEventNotes,

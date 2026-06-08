@@ -834,6 +834,15 @@ ${_activePlan ? `
         return `<span ${clickable}><span style="background:${color};color:white;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">${label}</span><strong style="margin-left:6px;">${prob}%</strong></span>`;
     };
 
+    // ── Pre-fetch relational data needed by renderFocusRow before we compute
+    // focusRows below. Declared here (before use) to avoid TDZ ReferenceError.
+    const [_plAllReferrals, _plAllPurchases, _plAllSolutions] = await Promise.all([
+        AppDataStore.getAll('referrals').catch(() => []),
+        AppDataStore.getAll('purchases').catch(() => []),
+        AppDataStore.getAll('proposed_solutions').catch(() => []),
+    ]);
+    const _plPrefetched = { allReferrals: _plAllReferrals, allPurchases: _plAllPurchases, allSolutions: _plAllSolutions };
+
     const focusRows = _isArchiveView
         ? (await Promise.all(focusList.map((arc, idx) => renderArchiveFocusRow(arc, idx)))).join('')
         : (await Promise.all(focusList.map((rec, idx) => renderFocusRow(rec, idx, allActivities, probBadge, false, _plPrefetched)))).join('');
@@ -886,14 +895,7 @@ ${_isArchiveView
     }
 
     // ── STEP 6: Expensive enrichment — Table 2 tbody has skeleton, fill after ──
-    // Pre-fetch relational tables once so calcPipelineEntry doesn't fire N+1 requests.
-    const [_plAllReferrals, _plAllPurchases, _plAllSolutions] = await Promise.all([
-        AppDataStore.getAll('referrals').catch(() => []),
-        AppDataStore.getAll('purchases').catch(() => []),
-        AppDataStore.getAll('proposed_solutions').catch(() => []),
-    ]);
-    const _plPrefetched = { allReferrals: _plAllReferrals, allPurchases: _plAllPurchases, allSolutions: _plAllSolutions };
-
+    // (_plPrefetched already populated above before focusRows was computed)
     const enrichedRaw = await Promise.all(activeProspects.map(async (p) => {
         const acts = allActivities.filter(a => a.prospect_id === p.id);
         const pipeline = await calcPipelineEntry(p, acts, _plPrefetched);

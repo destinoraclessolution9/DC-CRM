@@ -565,6 +565,12 @@ const appLogic = (() => {
         isAgent(user) || user?.role === 'team_leader' || user?.role?.includes('Level 7');
     Object.assign(window._crmUtils, { isAgentOrLeader });
 
+    // Customer (L13) and Referrer (L14) role helpers — used by script-prospects.js
+    // and script-cps.js via _utils.isCustomer / _utils.isReferrer.
+    const isCustomer = (user) => _getUserLevel(user) === 13;
+    const isReferrer  = (user) => _getUserLevel(user) === 14;
+    Object.assign(window._crmUtils, { isCustomer, isReferrer });
+
     // Memoized agents-and-leaders fetch. getAll('users') is already in-memory
     // cached by data.js, so the savings here are modest — but having a single
     // source of truth makes future tightening (e.g. server-side role filter)
