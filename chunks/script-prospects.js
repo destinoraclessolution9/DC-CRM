@@ -3129,6 +3129,9 @@ const showProspectDetail = async (prospectId) => {
     const prospect = await AppDataStore.getById('prospects', prospectId);
     if (!prospect) {
         UI.toast.error('Prospect not found. They may not have been added to the system yet.');
+        // Purge stale SWR caches so the ghost row disappears from the list on re-render
+        AppDataStore.invalidateCache('prospects');
+        renderProspectsTable().catch(() => {});
         return;
     }
     // Single source of truth for prospect visibility: canViewProspect walks

@@ -4021,6 +4021,10 @@ function _wireLoginBtn() {
         showAgentJourneyLoad:      async (...a) => (window.app.showAgentJourneyLoad       || (() => {}))(...a),
 
         // Calendar + Follow-Up Engine — implemented by chunks/script-calendar.js
+        // Self-loading stubs so these can be called from any view without the calendar chunk pre-loaded.
+        openPostMeetupNotesModal: (...args) => _loadChunkOnce('chunks/script-calendar.min.js').then(() => window.app.openPostMeetupNotesModal(...args)),
+        savePostMeetupNotes:      (...args) => _loadChunkOnce('chunks/script-calendar.min.js').then(() => window.app.savePostMeetupNotes(...args)),
+
         // Phase 11: DMS — implemented by chunks/script-documents.js
 
         // Phase 12 Marketing Functions (chunk-loaded — call via window.app.*)

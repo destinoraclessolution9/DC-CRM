@@ -1084,7 +1084,9 @@ class DataStore {
                 return local ? JSON.parse(local).filter(r => !deletedIds.has(String(r.id))) : [];
             }
             console.warn(`Offline/error: falling back for ${tableName}`, e);
-            if (!window._offlineNotified) {
+            const isNetworkError = !navigator.onLine
+                || (e instanceof TypeError && /failed to fetch|network request failed|load failed/i.test(e.message || ''));
+            if (isNetworkError && !window._offlineNotified) {
                 window._offlineNotified = true;
                 const banner = document.createElement('div');
                 banner.id = 'offline-banner';
