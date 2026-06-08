@@ -33,7 +33,7 @@
     const _callWhatsAppAPI = async (method, path, body = null) => {
         const conn = await getWhatsAppConnection();
         if (!conn?.access_token) throw new Error('WhatsApp not connected. Please configure credentials in Integrations.');
-        const url = `https://graph.facebook.com/v18.0/${path}`;
+        const url = `https://graph.facebook.com/v20.0/${path}`;
         const opts = {
             method,
             headers: { 'Authorization': `Bearer ${conn.access_token}`, 'Content-Type': 'application/json' }
@@ -404,7 +404,7 @@
             UI.toast.error('WhatsApp not connected. Configure integration settings first.'); return;
         }
         try {
-            const res = await fetch(`https://graph.facebook.com/v17.0/${connection.business_account_id}/message_templates?access_token=${connection.access_token}`);
+            const res = await fetch(`https://graph.facebook.com/v20.0/${connection.business_account_id}/message_templates?access_token=${connection.access_token}`);
             if (!res.ok) throw new Error(`API error ${res.status}`);
             const data = await res.json();
             showTemplateSyncModal((data.data || []).filter(t => t.status === 'APPROVED'));

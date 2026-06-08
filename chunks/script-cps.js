@@ -313,12 +313,13 @@ const renderQuickHealthBadge = (customer) => {
 
 const showBookingSettingsView = async (container) => {
     _state.cv = 'booking_settings';
+    if (!_currentUser?.id) { UI.toast.error('Session not ready — please refresh.'); return; }
     const allSlots = await AppDataStore.getAll('booking_slots').catch(() => []);
-    const agentSlots = allSlots.filter(s => s.agent_id === (_currentUser?.id || 1));
+    const agentSlots = allSlots.filter(s => s.agent_id === _currentUser.id);
     const allAppts = await AppDataStore.getAll('booking_appointments').catch(() => []);
-    const appointments = allAppts.filter(a => a.agent_id === (_currentUser?.id || 1))
+    const appointments = allAppts.filter(a => a.agent_id === _currentUser.id)
         .sort((a, b) => (b.booking_date || '').localeCompare(a.booking_date || ''));
-    const bookingUrl = `${window.location.origin}/booking.html?agent=${_currentUser?.id || 1}`;
+    const bookingUrl = `${window.location.origin}/booking.html?agent=${_currentUser.id}`;
     const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 
     container.innerHTML = `
@@ -426,7 +427,7 @@ const saveBookingSlot = async () => {
     const end = document.getElementById('slot-end').value;
     if (!start || !end || start >= end) { UI.toast.error('End time must be after start time.'); return; }
     await AppDataStore.create('booking_slots', {
-        agent_id: _currentUser?.id || 1,
+        agent_id: _currentUser?.id,
         day_of_week: parseInt(document.getElementById('slot-day').value),
         start_time: start, end_time: end,
         duration_minutes: parseInt(document.getElementById('slot-duration').value),
@@ -453,12 +454,12 @@ const toggleSlotActive = async (slotId, isActive) => {
 };
 
 const copyBookingLink = () => {
-    const url = `${window.location.origin}/booking.html?agent=${_currentUser?.id || 1}`;
+    const url = `${window.location.origin}/booking.html?agent=${_currentUser?.id}`;
     navigator.clipboard.writeText(url).then(() => UI.toast.success('Booking link copied!')).catch(() => UI.toast.info(`Link: ${url}`));
 };
 
 const openShareBookingLinkModal = () => {
-    const baseUrl = `${window.location.origin}/booking.html?agent=${_currentUser?.id || 1}`;
+    const baseUrl = `${window.location.origin}/booking.html?agent=${_currentUser?.id}`;
     UI.showModal('Share Booking Link', `
         <div style="display:flex; flex-direction:column; gap:16px;">
             <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:12px; font-size:13px; color:#166534;">
@@ -499,7 +500,7 @@ const openShareBookingLinkModal = () => {
 };
 
 const updateShareLinkPreview = () => {
-    const baseUrl = `${window.location.origin}/booking.html?agent=${_currentUser?.id || 1}`;
+    const baseUrl = `${window.location.origin}/booking.html?agent=${_currentUser?.id}`;
     const ref = document.getElementById('share-referrer')?.value.trim();
     const rel = document.getElementById('share-relation')?.value;
     let url = baseUrl;
@@ -511,7 +512,7 @@ const updateShareLinkPreview = () => {
 
 const copySmartBookingLink = () => {
     const linkEl = document.getElementById('share-link-preview');
-    const url = linkEl?.value || `${window.location.origin}/booking.html?agent=${_currentUser?.id || 1}`;
+    const url = linkEl?.value || `${window.location.origin}/booking.html?agent=${_currentUser?.id}`;
     navigator.clipboard.writeText(url).then(() => {
         UI.hideModal();
         UI.toast.success('Booking link copied!');

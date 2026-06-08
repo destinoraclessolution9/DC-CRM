@@ -35,7 +35,8 @@
             author: currentUser?.full_name || 'System',
             date: new Date().toISOString().split('T')[0]
         });
-        document.getElementById('customer-note-text').value = '';
+        const _cnEl = document.getElementById('customer-note-text');
+        if (_cnEl) _cnEl.value = '';
         UI.toast.success('Note added');
         await (window.app.showCustomerDetail || (() => {}))(customerId);
     };
@@ -59,7 +60,8 @@
             author: currentUser?.full_name || 'System',
             date: new Date().toISOString().split('T')[0]
         });
-        document.getElementById(`agent-note-text-${agentId}`).value = '';
+        const _anEl = document.getElementById(`agent-note-text-${agentId}`);
+        if (_anEl) _anEl.value = '';
         UI.toast.success('Note added');
         await showAgentDetail(agentId);
     };
@@ -210,7 +212,7 @@
         const voiceSettings = UserPreferences.getSync('voice_settings', {});
         const delay = voiceSettings.quality === 'high' ? 3000 : voiceSettings.quality === 'fast' ? 1000 : 2000;
 
-        (() => {
+        setTimeout(() => {
             const samples = [
                 "Customer is facing career stagnation and financial difficulties. Interested in PR4 solution. Office located in Bangsar with main entrance facing North-West.",
                 "Discussed upcoming Feng Shui workshop. Client wants to bring two friends. Follow up next week with registration details.",
@@ -219,11 +221,6 @@
                 "Follow-up call: Client decided to proceed with PR4 purchase. Payment scheduled for next Friday. Need to prepare invoice.",
                 "Birthday greeting sent. Client replied with thanks and mentioned interest in office audit for new company premises."
             ];
-
-            // Use browser speech recognition if available, else use sample
-            if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-                // In a real implementation would use actual transcript here
-            }
 
             const transcribedText = samples[Math.floor(Math.random() * samples.length)];
 
@@ -2351,6 +2348,11 @@
         applyMobileTableLabels,
         initSwipeActions,
         initPullToRefresh,
+        // Optimistic-calendar helpers called by script-activities.js on mobile save path
+        _mcalOptimisticInsert,
+        _mcalOptimisticSwap,
+        _mcalOptimisticMarkFailed,
+        _mcalEnqueueRetry,
         // initMobileApp and addMobileMetaTags are defined in script-features2 chunk — exported from there
     });
 })();

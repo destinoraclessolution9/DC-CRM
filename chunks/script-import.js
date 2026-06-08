@@ -1223,6 +1223,12 @@ const cascadeCustomerReassign = async (customerId, toAgentId) => {
 // _pendingReassign and shows a summary popup. Only the user's explicit
 // "Yes, Shift Everything Over" click triggers the actual cascade write.
 let _pendingReassign = null;
+// Expose via _state so script-prospects.js (a different IIFE) can read/write the same variable.
+Object.defineProperty(_state, '_pendingReassign', {
+    configurable: true,
+    get: () => _pendingReassign,
+    set: (v) => { _pendingReassign = v; },
+});
 
 const _renderReassignSummary = (s) => {
     const lines = [];

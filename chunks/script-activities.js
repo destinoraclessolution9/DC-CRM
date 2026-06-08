@@ -19,6 +19,15 @@
     const isTeamLeaderOrAbove  = (u) => _utils.isTeamLeaderOrAbove(u || _state.cu);
     const getUserLevel         = (u) => _utils.getUserLevel(u);
     const getAgentsAndLeaders  = () => _utils.getAgentsAndLeaders();
+    // Permission helpers — exported to _crmUtils from script.js after line ~755.
+    const getVisibleProspects  = () => _utils.getVisibleProspects();
+    const getVisibleCustomers  = () => _utils.getVisibleCustomers();
+    // Mobile optimistic-calendar helpers — exported from script-mobile.js Object.assign.
+    // Use safe forwarding: if mobile chunk not loaded yet, fall back to no-op.
+    const _mcalOptimisticInsert     = (...a) => (window.app._mcalOptimisticInsert     || (() => {}))(...a);
+    const _mcalOptimisticSwap       = (...a) => (window.app._mcalOptimisticSwap       || (() => {}))(...a);
+    const _mcalOptimisticMarkFailed = (...a) => (window.app._mcalOptimisticMarkFailed || (() => {}))(...a);
+    const _mcalEnqueueRetry         = (...a) => (window.app._mcalEnqueueRetry         || (() => {}))(...a);
 
     // Venue/product lookup cache — mirrors the same helpers in script-calendar.js.
     // Both chunks share _state, so whichever chunk loaded first warms the cache for the other.
@@ -474,7 +483,7 @@
                 setField('meeting-title', activity.activity_title || '');
                 break;
             case 'FSA':
-            case ' SITE':
+            case 'SITE':
                 if (activity.compass_needed) {
                     const chk = document.getElementById('compass-needed');
                     if (chk) chk.checked = true;
@@ -1040,6 +1049,25 @@
                     </div>
                     <div style="font-size:11px;color:var(--gray-400);margin-top:3px;"><i class="fas fa-link"></i> Linked to prospect profile → Next Actions / Pipeline → Action Needed to Close Deal</div>
                 </div>
+                ${(() => {
+                    const existingPhotos = Array.isArray(a.photo_urls) ? a.photo_urls : [];
+                    const thumbs = existingPhotos.map(url => `
+                        <div style="position:relative;flex-shrink:0;">
+                            <img loading="lazy" src="${url}" style="height:64px;width:64px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-200);cursor:zoom-in;" onclick="window._openAttachment && window._openAttachment('${url}')">
+                        </div>`).join('');
+                    return `
+                <div class="form-group" style="border-top:1px solid var(--gray-200);padding-top:12px;margin-top:4px;">
+                    <label style="display:flex;align-items:center;gap:6px;"><i class="fas fa-camera" style="color:var(--primary);"></i> Discussion Papers</label>
+                    ${existingPhotos.length > 0 ? `
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;padding:8px;background:#f9fafb;border-radius:6px;border:1px solid var(--gray-200);">
+                        ${thumbs}
+                    </div>` : ''}
+                    ${!readOnly ? `
+                    <input type="file" id="${prefix}-photo-files" class="form-control" accept="image/*" multiple capture="environment" style="font-size:13px;">
+                    <p style="color:var(--gray-400);font-size:11px;margin-top:4px;"><i class="fas fa-info-circle"></i> Photos are saved with this meet up record and visible in Meet Up History.</p>
+                    ` : (existingPhotos.length === 0 ? '<p style="color:var(--gray-400);font-size:13px;">No discussion photos attached.</p>' : '')}
+                </div>`;
+                })()}
             </div>
         `;
     };
@@ -3192,7 +3220,7 @@
                 .slice(0, 5);
             const matchedConsultants = allUsers
                 .filter(u => {
-                    const lvl = parseInt(u.role?.match(/Level\s+(\d+)/i)?.[1] || 0);
+                    const lvl = getUserLevel(u);
                     return lvl >= 3 && u.full_name && u.full_name.toLowerCase().includes(term);
                 })
                 .slice(0, 5);
@@ -3268,7 +3296,7 @@
         const users = await AppDataStore.getAll('users');
         // Consultants = Level 1–9 (any level user)
         const consultants = users.filter(u => {
-            const lvl = parseInt(u.role?.match(/Level\s+(\d+)/i)?.[1] || 0);
+            const lvl = getUserLevel(u);
             return lvl >= 1 && lvl <= 9;
         });
 
@@ -3339,7 +3367,7 @@
             if (!term || term.length < 1) { if (resultsDiv) resultsDiv.style.display = 'none'; return; }
 
             const allProspects = (await AppDataStore.getAll('prospects')).filter(p => !p.status || p.status === 'active');
-            const allUsers = (await AppDataStore.getAll('users')).filter(u => parseInt(u.role?.match(/Level\s+(\d+)/i)?.[1] || 0) >= 3);
+            const allUsers = (await AppDataStore.getAll('users')).filter(u => getUserLevel(u) >= 3);
 
             const matchedProspects = allProspects.filter(p => p.full_name?.toLowerCase().includes(term) || p.nickname?.toLowerCase().includes(term)).slice(0, 5);
             const matchedConsultants = allUsers.filter(u => u.full_name?.toLowerCase().includes(term)).slice(0, 5);
@@ -3507,7 +3535,7 @@
         if (!term || term.length < 1) { if (resultsDiv) resultsDiv.style.display = 'none'; return; }
 
         const consultants = (await AppDataStore.getAll('users')).filter(u => {
-            const lvl = parseInt(u.role?.match(/Level\s+(\d+)/i)?.[1] || 0);
+            const lvl = getUserLevel(u);
             return lvl >= 3 || isAgent(u) || u.role === 'team_leader' || u.role === 'consultant';
         });
         const matches = consultants.filter(u => u.full_name && u.full_name.toLowerCase().includes(term));
