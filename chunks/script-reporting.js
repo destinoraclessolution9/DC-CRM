@@ -65,7 +65,7 @@
                         <p>Real-time performance tracking and hierarchical targets</p>
                     </div>
                     <div class="header-actions">
-                        ${isSystemAdmin(_state.cu) || _state.cu?.role?.includes('Level 7') ?
+                        ${isTeamLeaderOrAbove(_state.cu) ?
                 `<button class="btn primary" onclick="app.openKPITargetsModal()">
                                 <i class="fas fa-bullseye"></i> Set Yearly Targets
                              </button>

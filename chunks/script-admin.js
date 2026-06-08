@@ -136,8 +136,8 @@
     
     const showAdminDashboard = async () => {
         const _adminCheckUser = await Auth.getCurrentUser();
-        if (!_adminCheckUser || _adminCheckUser.role !== 'admin') {
-            if (window.UI) window.UI.toast.error("Access Denied. Admins only.");
+        if (!_adminCheckUser || !isSystemAdmin(_adminCheckUser)) {
+            if (window.UI) window.UI.toast.error("Access Denied. Super Admins only.");
             return;
         }
     

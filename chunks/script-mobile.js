@@ -1747,7 +1747,7 @@
                 ${isEmpty ? '<div style="text-align:center;padding:28px;color:var(--gray-400);font-size:13px;">No activities on this day</div>' : ''}
             </div>
         `, [
-            { label: '+ Add Meet Up', type: 'primary', action: `UI.hideModal();app.(window.app.openActivityModal || (() => {}))() && ('${dateStr}')` },
+            { label: '+ Add Meet Up', type: 'primary', action: `UI.hideModal();app.openActivityModal && app.openActivityModal('${dateStr}')` },
             { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
         ]);
     };
@@ -1767,11 +1767,9 @@
     const mcalFilter = () => {
         UI.toast.success('Filter options coming soon');
     };
-    const mcalAdd = () => {
+    const mcalAdd = async () => {
         // Open the activity creation modal — pre-fills with today's date by default.
-        if (typeof openActivityModal === 'function') {
-            try { await (window.app.openActivityModal || (() => {}))(); return; } catch (_) {}
-        }
+        try { await (window.app.openActivityModal || (() => {}))(); return; } catch (_) {}
         UI.toast.success('Add activity');
     };
     const mcalWa = () => {

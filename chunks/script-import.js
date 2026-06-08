@@ -111,8 +111,7 @@ const renderRecentImports = async () => {
 const openImportWizard = async () => {
     // R9: Only system admin, marketing manager, or team leader may import
     const u = _currentUser;
-    const canImport = isSystemAdmin(u) || isMarketingManager(u) ||
-                      u?.role === 'team_leader' || u?.role?.includes('Level 7');
+    const canImport = isTeamLeaderOrAbove(u);
     if (!canImport) { UI.toast.error('You do not have permission to import data.'); return; }
 
     _currentImportStep = 1;

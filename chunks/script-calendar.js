@@ -180,7 +180,7 @@
                     <div class="cal-pipeline-card">
                         <h4>Keep your pipeline moving forward!</h4>
                         <p>Add activities, follow-ups and never miss a customer touchpoint.</p>
-                        <button class="btn-add-activity" onclick="app.(window.app.openActivityModal || (() => {}))())">
+                        <button class="btn-add-activity" onclick="app.openActivityModal()">
                             <i class="fas fa-plus"></i> Add Activity
                         </button>
                     </div>
@@ -195,7 +195,7 @@
                             </div>
                             <i class="fas fa-chevron-right qa-arrow"></i>
                         </div>
-                        <div class="quick-action-row" onclick="app.(window.app.openActivityModal || (() => {}))())">
+                        <div class="quick-action-row" onclick="app.openActivityModal()">
                             <div class="qa-left">
                                 <div class="qa-icon green"><i class="fas fa-calendar-plus"></i></div>
                                 <div><div class="qa-title">Add Activity</div><div class="qa-sub">Log a new activity</div></div>
@@ -1554,7 +1554,7 @@
                         const isEscalated = !!sol.escalated_at;
                         const borderColor = isEscalated ? '#dc2626' : isOverdue ? '#f59e0b' : '#22c55e';
                         const navId = sol.prospect_id || sol.customer_id;
-                        const navFn = sol.prospect_id ? `app.(window.app.showProspectDetail || (() => {}))(${navId})` : `app.(window.app.showCustomerDetail || (() => {}))(${navId})`;
+                        const navFn = sol.prospect_id ? `app.showProspectDetail(${navId})` : `app.showCustomerDetail(${navId})`;
                         return `
                         <div style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:#f9fafb;border-radius:8px;border-left:4px solid ${borderColor};cursor:pointer;" onclick="${navFn}">
                             <div style="flex:1;min-width:0;">
@@ -1618,6 +1618,10 @@
             return [];
         }
     };
+
+    // Cache TTL constant — defined locally so this chunk works standalone
+    // (script-activities.js defines the same constant; both share _state cache keys).
+    const _LOOKUP_CACHE_TTL_MS = 5 * 60 * 1000;
 
     const _getVenuesCached = async () => {
         const now = Date.now();
@@ -1786,7 +1790,7 @@
                 activityHtml += `<div class="more-events-indicator" onclick="event.stopPropagation(); app.openDayView('${dateStr}')">+${skippedInCell} more</div>`;
             }
             html += `
-                <div class="calendar-cell ${isToday ? 'today' : ''}" onclick="app.(window.app.openActivityModal || (() => {}))()'${dateStr}')">
+                <div class="calendar-cell ${isToday ? 'today' : ''}" onclick="app.openActivityModal('${dateStr}')">
                     <span class="date-num">${i}</span>
                     <div class="grid-activities">${activityHtml}</div>
                 </div>`;
@@ -1797,7 +1801,7 @@
             const nextMonth = month === 11 ? 0 : month + 1;
             const nextYear = month === 11 ? year + 1 : year;
             const nextDateStr = `${nextYear}-${(nextMonth + 1).toString().padStart(2, '0')}-${i.toString().padStart(2, '0')}`;
-            html += `<div class="calendar-cell" onclick="app.(window.app.openActivityModal || (() => {}))()'${nextDateStr}')"><span class="date-num other-month">${i}</span></div>`;
+            html += `<div class="calendar-cell" onclick="app.openActivityModal('${nextDateStr}')"><span class="date-num other-month">${i}</span></div>`;
         }
         if (myToken !== _state.rct) return;
         grid.innerHTML = html;
@@ -1939,7 +1943,7 @@
             const prevMonth = month === 0 ? 11 : month - 1;
             const prevYear = month === 0 ? year - 1 : year;
             const prevDateStr = `${prevYear}-${(prevMonth + 1).toString().padStart(2, '0')}-${dateNum.toString().padStart(2, '0')}`;
-            html += `<div class="calendar-cell" onclick="app.(window.app.openActivityModal || (() => {}))()'${prevDateStr}')"><span class="date-num other-month">${dateNum}</span></div>`;
+            html += `<div class="calendar-cell" onclick="app.openActivityModal('${prevDateStr}')"><span class="date-num other-month">${dateNum}</span></div>`;
         }
 
         // ── Visible date range (incl. prev-month overflow + next-month overflow) ──
@@ -2269,7 +2273,7 @@
             }
 
             html += `
-                <div class="calendar-cell ${isToday ? 'today' : ''}" onclick="app.(window.app.openActivityModal || (() => {}))()'${dateStr}')">
+                <div class="calendar-cell ${isToday ? 'today' : ''}" onclick="app.openActivityModal('${dateStr}')">
                     <span class="date-num">${i}</span>
                     <div class="grid-activities">
                         ${activityHtml}
@@ -2285,7 +2289,7 @@
             const nextMonth = month === 11 ? 0 : month + 1;
             const nextYear = month === 11 ? year + 1 : year;
             const nextDateStr = `${nextYear}-${(nextMonth + 1).toString().padStart(2, '0')}-${i.toString().padStart(2, '0')}`;
-            html += `<div class="calendar-cell" onclick="app.(window.app.openActivityModal || (() => {}))()'${nextDateStr}')"><span class="date-num other-month">${i}</span></div>`;
+            html += `<div class="calendar-cell" onclick="app.openActivityModal('${nextDateStr}')"><span class="date-num other-month">${i}</span></div>`;
         }
 
         // Discard if a newer render started while this one's fetches were in flight.
@@ -3368,7 +3372,7 @@
         html += `
                 <div class="day-header">
                     <h2>${_state.cd.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</h2>
-                    <button class="btn primary btn-sm" onclick="app.(window.app.openActivityModal || (() => {}))()'${todayStr}')">
+                    <button class="btn primary btn-sm" onclick="app.openActivityModal('${todayStr}')">
                         <i class="fas fa-plus"></i> Add Activity
                     </button>
                 </div>
@@ -3426,7 +3430,9 @@
 
     const generateDayHours = async () => {
         let hoursHtml = '';
-        const todayStr = _state.cd.toISOString().split('T')[0];
+        // Use local date parts — toISOString() gives UTC which yields yesterday for MY (UTC+8) before 08:00
+        const _gdy = _state.cd.getFullYear(), _gdm = String(_state.cd.getMonth()+1).padStart(2,'0'), _gdd = String(_state.cd.getDate()).padStart(2,'0');
+        const todayStr = `${_gdy}-${_gdm}-${_gdd}`;
         const [allActsGDH, allProspectsGDH] = await Promise.all([
             AppDataStore.getAll('activities'),
             AppDataStore.getAll('prospects'),

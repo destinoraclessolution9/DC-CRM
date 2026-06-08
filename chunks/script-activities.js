@@ -537,7 +537,7 @@
 };
 
     const updateActivity = async (activityId) => {
-    const activity = await _lookupActivityRobust(activityId);
+    const activity = await (window.app._lookupActivityRobust || AppDataStore.getById.bind(AppDataStore, 'activities'))(activityId);
     if (!activity) { UI.toast.error('Activity not found'); return; }
 
     const venueVal = document.getElementById('activity-venue')?.value;
@@ -607,7 +607,7 @@
                 { key: 'Sharing',       test: () => aTitle.includes('sharing') || aType === 'Sharing' }
             ];
             for (const m of milestoneMap) {
-                if (m.test()) await markMilestoneCompleted(_state.cu.id, m.key);
+                if (m.test()) window.app.markMilestoneCompleted && await window.app.markMilestoneCompleted(_state.cu.id, m.key);
             }
         }
     } catch (e) { console.warn('Milestone auto-mark (update) failed:', e); }
@@ -1055,7 +1055,7 @@
             summary: keyPoints,
             note_needs: document.getElementById(`${prefix}-needs`)?.value || '',
             note_pain_points: document.getElementById(`${prefix}-pain-points`)?.value || '',
-            opportunity_potential: serializeMultiSelectToText(`${prefix}-opp-items`, `${prefix}-opportunity-remarks`),
+            opportunity_potential: (window.app.serializeMultiSelectToText || (() => ''))(`${prefix}-opp-items`, `${prefix}-opportunity-remarks`),
             next_action: (() => {
                 const items = Array.from(document.querySelectorAll(`input[name="${prefix}-na-items"]:checked`)).map(c => c.value);
                 const othersCb = document.getElementById(`${prefix}-na-others-cb`);
@@ -1907,7 +1907,7 @@
 
         // Use the shared scan-overlay (sits ON TOP of the Meeting Outcome modal so
         // the closing form DOM stays intact while we write into its fields).
-        _showCpsScanOverlay('Review Scanned Order Form', html, [
+        (window.app._showCpsScanOverlay || (() => {}))('Review Scanned Order Form', html, [
             { type: 'secondary', label: 'Skip Auto-Fill (keep photo)', action: 'app.dismissOrderFormScanReview()' },
             { type: 'primary',   label: 'Apply Selected', action: '(async () => { await app.applyOrderFormScanSelection(); })()' },
         ]);
@@ -1918,7 +1918,7 @@
     };
 
     const dismissOrderFormScanReview = () => {
-        _hideCpsScanOverlay();
+        (window.app._hideCpsScanOverlay || (() => {}))();
         _renderOrderFormThumb(_orderFormScanCache);
         _orderFormScanCache = null;
     };
@@ -1991,7 +1991,7 @@
             }
         }
 
-        _hideCpsScanOverlay();
+        (window.app._hideCpsScanOverlay || (() => {}))();
         _renderOrderFormThumb(_orderFormScanCache);
         _orderFormScanCache = null;
 
@@ -3321,7 +3321,7 @@
 
     // Called by consultant to accept/reject — from notification or activity detail
     const respondConsultantInvite = async (activityId, consultantId, response) => {
-        const activity = await _lookupActivityRobust(activityId);
+        const activity = await (window.app._lookupActivityRobust || AppDataStore.getById.bind(AppDataStore, 'activities'))(activityId);
         if (!activity) return UI.toast.error('Activity not found');
         const consultants = (activity.consultants || []).map(c =>
             c.id === consultantId ? { ...c, status: response } : c
@@ -3329,7 +3329,7 @@
         await AppDataStore.update('activities', activityId, { consultants });
         UI.toast.success(response === 'accepted' ? 'Appointment accepted!' : 'Appointment rejected.');
         UI.hideModal();
-        await viewActivityDetails(activityId);
+        await app.viewActivityDetails(activityId);
     };
 
     const searchProspectReferrers = async () => {
@@ -3587,7 +3587,7 @@
             return;
         }
         const activity = (await AppDataStore.getByIdFull('activities', activityId))
-            || (await _lookupActivityRobust(activityId));
+            || (await (window.app._lookupActivityRobust || AppDataStore.getById.bind(AppDataStore, 'activities'))(activityId));
         if (!activity) { UI.toast.error('Activity not found'); return; }
         const coAgents = Array.isArray(activity.co_agents) ? activity.co_agents : [];
         const myEntry = coAgents.find(ca => String(ca.id) === String(_state.cu.id));
@@ -3617,7 +3617,7 @@
         // If the activity detail modal is open, re-open it to reflect the new status.
         if (document.querySelector('.modal-overlay.active')) {
             UI.hideModal();
-            setTimeout(() => viewActivityDetails(activityId), 150);
+            setTimeout(() => app.viewActivityDetails(activityId), 150);
         }
     };
 
@@ -4185,7 +4185,7 @@
                     { key: 'Sharing',       test: () => aTitle.includes('sharing') || aType === 'Sharing' }
                 ];
                 for (const m of milestoneMap) {
-                    if (m.test()) await markMilestoneCompleted(_state.cu.id, m.key);
+                    if (m.test()) window.app.markMilestoneCompleted && await window.app.markMilestoneCompleted(_state.cu.id, m.key);
                 }
             }
         } catch (e) { console.warn('Milestone auto-mark failed:', e); }
@@ -4195,12 +4195,12 @@
 
         // === Follow-Up Automation: trigger CPS-based follow-ups (data-driven, non-blocking) ===
         if (activity.activity_type === 'CPS' && activity.prospect_id) {
-            dispatchAfterCpsTriggers(activity.prospect_id).catch(e => console.warn('CPS follow-up triggers failed:', e));
+            (window.app.dispatchAfterCpsTriggers || (() => Promise.resolve()))(activity.prospect_id).catch(e => console.warn('CPS follow-up triggers failed:', e));
         }
 
         // === Follow-Up Automation: scan for invite candidates when a new calendar event is scheduled ===
         if (activity.activity_type === 'EVENT' && activity.event_id && savedActivity?.id) {
-            dispatchOnNewCalendarEvent({ ...activity, id: savedActivity.id })
+            (window.app.dispatchOnNewCalendarEvent || (() => Promise.resolve()))({ ...activity, id: savedActivity.id })
                 .catch(e => console.warn('Calendar event invite dispatch failed:', e));
         }
 
@@ -4228,7 +4228,7 @@
         }
 
         await (window.app.renderCalendar || (() => {}))();
-        await renderFollowUpReminders();
+        await (window.app.renderFollowUpReminders || (() => {}))();
         await (window.app.renderTodayActivities || (() => {}))();
 
         // === Auto-refresh open activity tabs so changes reflect immediately ===

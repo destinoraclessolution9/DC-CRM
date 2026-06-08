@@ -348,8 +348,8 @@ const sendSecurityAlert = (incident) => {
     // Send email/SMS to security team
     console.log('SECURITY ALERT:', incident);
 
-    // Show notification to admin
-    if (window._currentUser?.role === 'admin') {
+    // Show notification to admin (use canonical helper so 'Level 1 Super Admin' roles are matched)
+    if (window._crmUtils?.isSystemAdmin(window._currentUser) || window._currentUser?.role === 'admin') {
         if (window.UI && window.UI.toast) {
             UI.toast.error(`Security Alert: ${incident.type}`, 0);
         }

@@ -406,7 +406,9 @@ class DataStore {
                 const table = payload?.table;
                 if (!table) return;
                 const evt = payload?.eventType;        // INSERT | UPDATE | DELETE
-                const row = payload?.new || payload?.old;
+                // For DELETE, payload.new is an empty object {} (not null) in supabase-js realtime,
+                // so use event-type-aware selection to avoid discarding the old row's id.
+                const row = evt === 'DELETE' ? payload?.old : (payload?.new || payload?.old);
                 if (!row || !row.id) return;
                 // Update in-memory cache if present (LRU): splice the row.
                 const cached = this._cache.get(table);
@@ -1610,7 +1612,8 @@ class DataStore {
                     const key = `fs_crm_${tableName}`;
                     const all = JSON.parse(localStorage.getItem(key) || '[]');
                     const idx = all.findIndex(r => String(r.id) === String(id));
-                    const full = { ...data, ...updates };
+                    // Server response wins: spread updates first so data (server-canonical) takes precedence.
+                    const full = { ...updates, ...data };
                     if (idx >= 0) { all[idx] = full; localStorage.setItem(key, JSON.stringify(this._sanitizeForStorage(tableName, all))); }
                 } catch (_) {}
                 this._writeAudit('update', tableName, id, _auditOldData, data);
