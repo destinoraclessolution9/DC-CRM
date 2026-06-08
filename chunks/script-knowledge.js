@@ -41,7 +41,11 @@
 
     const _kbOwnerId = async () => {
         try {
-            const { data: { session } } = await window.supabase.auth.getSession();
+            // Defensive destructure — on iPad Safari with blocked storage,
+            // getSession() can resolve to undefined and the nested destructure
+            // would throw, making us misreport "no session" for a logged-in user.
+            const r = await window.supabase.auth.getSession();
+            const session = (r && r.data && r.data.session) || null;
             return session?.user?.id || null;
         } catch (_) { return null; }
     };

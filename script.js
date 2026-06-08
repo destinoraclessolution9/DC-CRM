@@ -689,10 +689,14 @@ const appLogic = (() => {
         const allUsers = await AppDataStore.getAll('users');
         const userTeamId = user.team_id;
         const result = [];
+        const _visitedCollect = new Set();
         const collect = (uid) => {
+            const uidStr = String(uid);
+            if (_visitedCollect.has(uidStr)) return; // cycle guard
+            _visitedCollect.add(uidStr);
             result.push(uid);
             allUsers
-                .filter(u => String(u.reporting_to) === String(uid) &&
+                .filter(u => String(u.reporting_to) === uidStr &&
                     (!userTeamId || !u.team_id || String(u.team_id) === String(userTeamId)))
                 .forEach(u => collect(u.id));
         };
@@ -915,10 +919,10 @@ const appLogic = (() => {
         if (level <= 10) {
             const visibleIds = await getVisibleUserIds(user);
             if (visibleIds === 'all') return true;
-            return visibleIds.includes(prospect.responsible_agent_id);
+            return visibleIds.some(id => String(id) === String(prospect.responsible_agent_id));
         }
         // Levels 11-14: own records only
-        return prospect.responsible_agent_id === user.id;
+        return String(prospect.responsible_agent_id) === String(user.id);
     };
 
     // Similar for customers, activities, etc. – you can add as needed.
@@ -2195,10 +2199,8 @@ function _wireLoginBtn() {
         (typeof initAIAnalytics === 'function' ? initAIAnalytics() : Promise.resolve()).catch(e => console.warn('initAIAnalytics failed:', e));
 
         // L13 (Customer) and L14 (Referrer) land on 福德; everyone else on calendar
-        const _initLevel = (() => {
-            const m = (_currentUser?.role || '').match(/Level\s+(\d+)/i);
-            return m ? parseInt(m[1]) : 0;
-        })();
+        // Use _getUserLevel() to handle Chinese-only role names (改命客户, 准传福大使, etc.)
+        const _initLevel = _getUserLevel(_currentUser);
 
         // ── Deep-link / bookmark restoration ──────────────────────────────
         // If the user bookmarked or shared a URL with a hash (e.g. #prospects),
@@ -3476,7 +3478,7 @@ function _wireLoginBtn() {
     const renewLicense = async (...a) => { const _r = window.app.renewLicense; if (_r && _r !== renewLicense) return _r(...a); };
     const executeRenewal = async (...a) => { const _r = window.app.executeRenewal; if (_r && _r !== executeRenewal) return _r(...a); };
     const sendRenewalReminder = async (...a) => { const _r = window.app.sendRenewalReminder; if (_r && _r !== sendRenewalReminder) return _r(...a); };
-    const toggleNotifPanel = async (...a) => { const _r = window.app.toggleNotifPanel; if (_r && _r !== toggleNotifPanel) return _r(...a); };
+    const toggleNotifPanel = async (...a) => { await _loadChunkOnce('chunks/script-cps.min.js'); const _r = window.app.toggleNotifPanel; if (_r && _r !== toggleNotifPanel) return _r(...a); };
     const updateAgentTargets = async (...a) => { const _r = window.app.updateAgentTargets; if (_r && _r !== updateAgentTargets) return _r(...a); };
     const saveAgentTargets = async (...a) => { const _r = window.app.saveAgentTargets; if (_r && _r !== saveAgentTargets) return _r(...a); };
     const deactivateAgent = async (...a) => { const _r = window.app.deactivateAgent; if (_r && _r !== deactivateAgent) return _r(...a); };
@@ -4041,6 +4043,8 @@ function _wireLoginBtn() {
         // activities owns collectPostMeetupNotesData / buildPostMeetupNotesBlock.
         openPostMeetupNotesModal: (...args) => Promise.all([_loadChunkOnce('chunks/script-calendar.min.js'), _loadChunkOnce('chunks/script-activities.min.js')]).then(() => window.app.openPostMeetupNotesModal(...args)),
         savePostMeetupNotes:      (...args) => Promise.all([_loadChunkOnce('chunks/script-calendar.min.js'), _loadChunkOnce('chunks/script-activities.min.js')]).then(() => window.app.savePostMeetupNotes(...args)),
+        openMeetingOutcomeModal:  (...args) => _loadChunkOnce('chunks/script-calendar.min.js').then(() => window.app.openMeetingOutcomeModal(...args)),
+        saveMeetingOutcome:       (...args) => _loadChunkOnce('chunks/script-calendar.min.js').then(() => window.app.saveMeetingOutcome?.(...args)),
 
         // Phase 11: DMS — implemented by chunks/script-documents.js
 

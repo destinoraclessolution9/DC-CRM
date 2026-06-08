@@ -356,8 +356,15 @@ class DataStore {
             }
             if (!data || typeof data !== 'object') return null;
             // Prime caches so subsequent getAll() reads hit warm cache.
+            // IMPORTANT: when agentId is set the RPC returns a scoped subset of
+            // prospects/customers for that agent only. Writing those subsets under
+            // the canonical 'prospects'/'customers' cache keys would poison the
+            // full-table cache used by admin/manager views. Skip those tables when
+            // a scoped agent query was issued.
+            const _scopedTables = agentId ? new Set(['prospects', 'customers']) : new Set();
             const tablesPrimed = [];
             for (const t of ['activities', 'users', 'prospects', 'customers']) {
+                if (_scopedTables.has(t)) continue; // scoped subset — do not poison full-table cache
                 const rows = data[t];
                 if (Array.isArray(rows)) {
                     this._cacheSet(t, rows);
@@ -480,6 +487,9 @@ class DataStore {
             }
         } catch (_) {}
         this._inflightController = (typeof AbortController === 'function') ? new AbortController() : null;
+        // Clear in-flight dedupe map so the next view gets fresh promises
+        // even if the old aborted promises haven't settled yet.
+        if (this._inFlightGetAll) this._inFlightGetAll.clear();
     }
 
     // Race a Supabase query against a timeout so a TCP-reachable-but-slow
@@ -586,6 +596,12 @@ class DataStore {
     // Invalidate cache for a table (and any table that depends on it)
     invalidateCache(tableName) {
         this._cache.delete(tableName);
+        // Also remove the persisted localStorage snapshot so a page refresh
+        // doesn't load stale data from the local copy.
+        try {
+            localStorage.removeItem(`fs_crm_${tableName}`);
+            localStorage.removeItem(`fs_crm_${tableName}_last_sync`);
+        } catch (_) {}
         // Drop any primed rows for this table — they're a side cache and must
         // never outlive a write or a deliberate refresh.
         this._primedRows.delete(tableName);
@@ -958,12 +974,12 @@ class DataStore {
         const selectClause = this._selectClauseForGetAll(tableName);
         const signal = this._inflightSignal();
         try {
-            let q1 = this._readClient().from(tableName).select(selectClause).gt('updated_at', sinceISO);
+            let q1 = this._readClient().from(tableName).select(selectClause).gte('updated_at', sinceISO);
             if (signal && typeof q1.abortSignal === 'function') q1 = q1.abortSignal(signal);
             let { data, error } = await q1;
             // If the light-select column list is stale, retry with '*'
             if (error && selectClause !== '*' && !this._isAbortError(error)) {
-                let q2 = this._readClient().from(tableName).select('*').gt('updated_at', sinceISO);
+                let q2 = this._readClient().from(tableName).select('*').gte('updated_at', sinceISO);
                 if (signal && typeof q2.abortSignal === 'function') q2 = q2.abortSignal(signal);
                 ({ data, error } = await q2);
             }

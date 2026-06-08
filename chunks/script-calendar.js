@@ -1334,12 +1334,12 @@
                 deduped.push(d);
             }
             drafts = deduped.sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''));
+            // Update the count badge inside the try block so an error doesn't reset it to 0.
+            const _gfc = document.getElementById('glance-followup-count');
+            if (_gfc) _gfc.textContent = drafts.length;
         } catch (e) {
             console.warn('renderFollowUpReminders failed:', e);
         }
-
-        const _gfc = document.getElementById('glance-followup-count');
-        if (_gfc) _gfc.textContent = drafts.length;
 
         if (drafts.length === 0) {
             container.style.display = 'none';
@@ -2520,19 +2520,19 @@
             const prospect = a.prospect_id ? prospectMapRTA.get(String(a.prospect_id)) : null;
             const customer = a.customer_id ? customerMapRTA.get(String(a.customer_id)) : null;
             const entityName = prospect ? prospect.full_name : (customer ? customer.full_name : (a.customer_name || 'N/A'));
-            const typeClass = (a.activity_type || '').toLowerCase();
-            const statusText = a.status || 'scheduled';
+            const typeClass = (a.activity_type || '').toLowerCase().replace(/[^a-z0-9-]/g, '');
+            const statusText = esc(a.status || 'scheduled');
 
             html += `
                 <div class="today-act-card ${typeClass}" onclick="app.viewActivityDetails(${a.id})">
                     <div class="tac-meta">
                         <span class="tac-time">${a.start_time ? a.start_time.slice(0,5) : '--:--'}</span>
-                        <span class="tac-type ${typeClass}">${a.activity_type}</span>
+                        <span class="tac-type ${typeClass}">${esc(a.activity_type)}</span>
                         <span class="tac-status">${statusText}${(a.closing_amount || a.is_closing) ? ' · Closed' : ''}</span>
                     </div>
                     <div class="tac-names">
-                        <div class="tac-agent">${agent.full_name}</div>
-                        ${entityName !== 'N/A' ? `<div class="tac-customer">${entityName}</div>` : ''}
+                        <div class="tac-agent">${esc(agent.full_name)}</div>
+                        ${entityName !== 'N/A' ? `<div class="tac-customer">${esc(entityName)}</div>` : ''}
                     </div>
                     <div class="tac-actions" onclick="event.stopPropagation()">
                         <button class="btn btn-sm tac-btn-view" title="View" onclick="app.viewActivityDetails(${a.id})"><i class="fas fa-eye"></i></button>
@@ -2637,11 +2637,11 @@
             if (data.length === 0) return '<div class="text-muted" style="padding:10px; font-size:12px;">No birthdays found.</div>';
             return data.map(b => `
                 <div class="bday-card">
-                    <div class="bday-name">${b.name} 🎂</div>
-                    <div class="bday-info">${b.info}</div>
+                    <div class="bday-name">${esc(b.name)} 🎂</div>
+                    <div class="bday-info">${esc(b.info)}</div>
                     <div class="act-actions" style="border-top:none; margin-top:4px; padding-top:0;">
-                        <button class="btn btn-sm secondary" style="font-size:11px" onclick="app.openSendBirthdayWish(${b.id}, '${b.type}')">Send Wish</button>
-                        <button class="btn btn-sm secondary" style="font-size:11px" onclick="app.openPrepareGiftModal(${b.id}, '${b.type}')">Prepare Gift</button>
+                        <button class="btn btn-sm secondary" style="font-size:11px" onclick="app.openSendBirthdayWish(${b.id}, '${esc(b.type)}')">Send Wish</button>
+                        <button class="btn btn-sm secondary" style="font-size:11px" onclick="app.openPrepareGiftModal(${b.id}, '${esc(b.type)}')">Prepare Gift</button>
                     </div>
                 </div>
             `).join('');
@@ -3256,7 +3256,7 @@
             for (let day = 0; day < 7; day++) {
                 const dayDate = new Date(startOfWeek);
                 dayDate.setDate(startOfWeek.getDate() + day);
-                const dateStr = dayDate.toISOString().split('T')[0];
+                const dateStr = `${dayDate.getFullYear()}-${String(dayDate.getMonth()+1).padStart(2,'0')}-${String(dayDate.getDate()).padStart(2,'0')}`;
                 const hourStr = hour.toString().padStart(2, '0');
 
                 const dayActivities = activities.filter(a =>

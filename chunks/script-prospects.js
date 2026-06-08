@@ -131,7 +131,9 @@ const showProspectsView = async (container) => {
                         <option value="name_asc">Sort: Name (A → Z)</option>
                         <option value="name_desc">Sort: Name (Z → A)</option>
                         <option value="activity_desc">Sort: Recent Activity</option>
+                        <option value="activity_asc">Sort: Oldest Activity</option>
                         <option value="protection_asc">Sort: Protection (Urgent first)</option>
+                        <option value="protection_desc">Sort: Protection (Latest first)</option>
                     </select>
                 </div>
                 <div id="prospect-adv-filters" style="display:none;margin-top:10px;">
@@ -401,10 +403,20 @@ const renderCustomersTable = async () => {
 
     const _custUserLevel = _getUserLevel(_currentUser);
     const canReassignCust = _custUserLevel <= 5;
-    const activeAgentsCust = canReassignCust ? allUsers.filter(u => {
-        const lvl = _getUserLevel(u);
-        return lvl >= 3 && lvl <= 11 && u.status !== 'deleted';
-    }) : [];
+    let activeAgentsCust = [];
+    if (canReassignCust) {
+        const _custScopeIds = _custUserLevel <= 2
+            ? null
+            : await getVisibleUserIds(_currentUser);
+        const _custScopeSet = (_custScopeIds && _custScopeIds !== 'all' && Array.isArray(_custScopeIds))
+            ? new Set(_custScopeIds.map(String)) : null;
+        activeAgentsCust = allUsers.filter(u => {
+            const lvl = _getUserLevel(u);
+            if (!(lvl >= 3 && lvl <= 11 && u.status !== 'deleted')) return false;
+            if (_custScopeSet) return _custScopeSet.has(String(u.id));
+            return true;
+        });
+    }
 
     const searchQuery = document.getElementById('customer-search')?.value?.trim()?.toLowerCase() || '';
     const typeFilter = document.getElementById('filter-customer-type')?.value || '';
@@ -1124,7 +1136,7 @@ const renderProspectsTable = async () => {
         if (statusFilter) {
             if (statusFilter === 'active' && protectionStatus !== 'normal') continue;
             if (statusFilter === 'attention' && protectionStatus !== 'warning') continue;
-            if (statusFilter === 'reassign' && protectionStatus !== 'critical') continue;
+            if (statusFilter === 'reassign' && p.responsible_agent_id) continue;
             if (statusFilter === 'critical' && protectionStatus !== 'critical') continue;
         }
         filtered.push(p);
@@ -1324,7 +1336,7 @@ const renderProspectsTable = async () => {
     // one-click path to reveal them. Only shown on the "plain list" path
     // (no search term, toggle off) — when searching or when the toggle is
     // on, the dormant set is already being considered, so no nudge needed.
-    const dormantNote = (!searchQueryRaw && !includeDormantToggle)
+    const dormantNote = (!searchQueryRaw && !includeDormantToggle && !agentFilter)
         ? `<span style="color:var(--text-secondary);font-size:12px;margin-left:12px;">
              <i class="fas fa-moon" style="opacity:0.6;"></i>
              Prospects inactive 500+ days are hidden. Search by name/phone to find them.
@@ -1371,7 +1383,6 @@ const renderProspectsTable = async () => {
 };
 
 const prospectPageNav = async (dir) => {
-    const visibleIds = await getVisibleUserIds(_currentUser);
     // Estimate total to compute last page — use cached count from last render
     const paginationText = document.getElementById('prospects-pagination')?.textContent || '';
     const totalMatch = paginationText.match(/of (\d+)/);
@@ -1489,7 +1500,7 @@ const setProspectGrade = async (prospectId, grade) => {
 };
 
 const calculateProtectionDays = (prospect) => {
-    if (!prospect.protection_deadline) return 30;
+    if (!prospect.protection_deadline) return 0;
     const deadline = new Date(prospect.protection_deadline);
     const today = new Date();
     const diffTime = deadline - today;
@@ -1504,7 +1515,7 @@ const getProtectionStatus = (days) => {
 };
 
 const calculateDaysLeft = (deadline) => {
-    if (!deadline) return 30;
+    if (!deadline) return 0;
     const diff = new Date(deadline) - new Date();
     const d = Math.ceil(diff / 86400000);
     return d > 0 ? d : 0;
@@ -1808,17 +1819,20 @@ const sortProspectsBySelect = async (val) => {
 };
 
 const openProspectModal = async (prospectId = null) => {
+    const prospect = prospectId ? await AppDataStore.getById('prospects', prospectId) : null;
     if (prospectId) {
-        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) {
+            UI.toast.error('Prospect not found.');
+            return;
+        }
         const currentUser = _currentUser || await Auth.getCurrentUser();
         const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || currentUser.role?.includes('Level 3') || currentUser.role?.includes('Level 7') || currentUser.role === 'team_leader';
-        const isOwner = prospect.responsible_agent_id == currentUser.id;
+        const isOwner = String(prospect.responsible_agent_id) === String(currentUser.id);
         if (!isAdmin && !isOwner) {
             UI.toast.error('You cannot edit this prospect.');
             return;
         }
     }
-    const prospect = prospectId ? await AppDataStore.getById('prospects', prospectId) : null;
     _state.sprr = prospect?.referred_by ? { name: prospect.referred_by, id: prospect.referred_by_id || null, type: prospect.referred_by_type || null } : null;
     const allUsers = await AppDataStore.getAll('users');
     const isEdit = !!prospect;
@@ -2003,8 +2017,8 @@ const saveProspect = async () => {
         // responsible_agent_id / cps_assignment_date / pipeline_stage are create-only fields.
         // They are added below in the `else` branch so edits never overwrite the original agent.
         score: editId ? undefined : 200,
-        expected_close_date: null,
-        deal_value: 0,
+        expected_close_date: editId ? undefined : null,
+        deal_value: editId ? undefined : 0,
     };
 
     // Capture snapshot before update for approval queue
@@ -6859,7 +6873,8 @@ const saveCustomer = async () => {
         date_of_birth: document.getElementById('cust-dob')?.value,
         lifetime_value: parseFloat(document.getElementById('cust-init-amt')?.value) || 0,
         status: 'active',
-        customer_since: new Date().toISOString().split('T')[0]
+        customer_since: new Date().toISOString().split('T')[0],
+        responsible_agent_id: _currentUser?.id || null,
     });
     UI.hideModal();
     UI.toast.success('Customer created (Legacy)');
@@ -8749,11 +8764,12 @@ const submitForcePasswordChange = async () => {
     if (newPwd !== confirmPwd) return UI.toast.error('Passwords do not match');
 
     try {
-        const { error } = await window.supabase.auth.updateUser({ password: newPwd });
+        const r = await window.supabase.auth.updateUser({ password: newPwd });
+        const error = r && r.error;
         if (error) throw error;
     } catch (e) {
         // Offline fallback — update users table only
-        console.warn('Supabase updateUser failed (offline?):', e.message);
+        console.warn('Supabase updateUser failed (offline?):', e?.message || e);
     }
     await AppDataStore.update('users', _currentUser.id, {
         force_password_change: false,
@@ -9383,9 +9399,10 @@ const executePasswordReset = async (agentId) => {
 
     if (resetType === 'email' && agent.email) {
         try {
-            const { error } = await window.supabase.auth.resetPasswordForEmail(agent.email, {
+            const r = await window.supabase.auth.resetPasswordForEmail(agent.email, {
                 redirectTo: window.location.origin + window.location.pathname + '?reset=true'
             });
+            const error = r && r.error;
             if (error) throw error;
             UI.hideModal();
             UI.toast.success(`Password reset email sent to ${agent.email}`);
