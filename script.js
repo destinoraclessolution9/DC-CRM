@@ -1800,25 +1800,14 @@ function _wireLoginBtn() {
             AppDataStore.invalidateCache('users');
             await UserPreferences.load(profile.id);
             _runPredictivePrefetch();
-            // Save "remember me" preference before leaving login screen
-            const _rememberChk = document.getElementById('rememberMe');
+            // Always keep users logged in — session persists until explicit logout.
             const _loginEmail = document.getElementById('loginEmail');
-            if (_rememberChk && _rememberChk.checked) {
-                try {
-                    localStorage.setItem('remember_me', '1');
-                    // Store email so it pre-fills if iOS clears the auth token after 7 days
-                    if (_loginEmail?.value) localStorage.setItem('remember_me_email', _loginEmail.value.trim().toLowerCase());
-                } catch (e) {
-                    // localStorage quota exceeded — clear stale offline queue and retry
-                    localStorage.removeItem('offline_queue');
-                    try { localStorage.setItem('remember_me', '1'); } catch (_) {}
-                }
-            } else {
-                // User explicitly opted OUT. Record that so we don't auto-tick
-                // the checkbox next time — they get the original behavior they
-                // chose. Email is also cleared.
-                localStorage.setItem('remember_me', '0');
-                localStorage.removeItem('remember_me_email');
+            try {
+                localStorage.setItem('remember_me', '1');
+                if (_loginEmail?.value) localStorage.setItem('remember_me_email', _loginEmail.value.trim().toLowerCase());
+            } catch (e) {
+                localStorage.removeItem('offline_queue');
+                try { localStorage.setItem('remember_me', '1'); } catch (_) {}
             }
             document.getElementById('login-container').style.display = 'none';
             document.getElementById('app-shell').style.display = 'block';

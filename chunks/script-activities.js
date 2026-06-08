@@ -19,6 +19,25 @@
     const isTeamLeaderOrAbove  = (u) => _utils.isTeamLeaderOrAbove(u || _state.cu);
     const getUserLevel         = (u) => _utils.getUserLevel(u);
     const getAgentsAndLeaders  = () => _utils.getAgentsAndLeaders();
+
+    // Venue/product lookup cache — mirrors the same helpers in script-calendar.js.
+    // Both chunks share _state, so whichever chunk loaded first warms the cache for the other.
+    const _LOOKUP_CACHE_TTL_MS = 5 * 60 * 1000;
+    const _getVenuesCached = async () => {
+        const now = Date.now();
+        if (_state.vc && (now - _state.vcts) < _LOOKUP_CACHE_TTL_MS) return _state.vc;
+        _state.vc = await AppDataStore.getAll('venues').catch(() => []);
+        _state.vcts = Date.now();
+        return _state.vc;
+    };
+    const _getProductsCached = async () => {
+        const now = Date.now();
+        if (_state.pc && (now - _state.pcts) < _LOOKUP_CACHE_TTL_MS) return _state.pc;
+        _state.pc = await AppDataStore.getAll('products').catch(() => []);
+        _state.pcts = Date.now();
+        return _state.pc;
+    };
+
     // ========== PHASE 2: ACTIVITY MODAL FUNCTIONS ==========
 
     const openActivityModal = async (prefillDate = null, prospectId = null, activity = null) => {
