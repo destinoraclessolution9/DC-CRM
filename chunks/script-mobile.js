@@ -16,6 +16,10 @@
     const isMobile = () => _utils.isMobile();
     const escapeHtml = (...a) => _utils.escapeHtml(...a);
     const navigateTo = (v) => window.app.navigateTo(v);
+    // Cross-chunk helpers — defined in script-prospects.js, exported to window.app.
+    const showAgentDetail        = (...a) => (window.app.showAgentDetail        || (() => Promise.resolve()))(...a);
+    const showProspectsView      = (...a) => (window.app.showProspectsView      || (() => Promise.resolve()))(...a);
+    const openAddCustomerModal   = (...a) => (window.app.openAddCustomerModal   || (() => {}))(...a);
     // ── Chunk-local: voice recording state ──
     let _mediaRecorder = null;
     let _audioChunks = [];
@@ -29,7 +33,7 @@
     const addCustomerNote = async (customerId) => {
         const text = document.getElementById('customer-note-text')?.value?.trim();
         if (!text) { UI.toast.error('Please enter a note'); return; }
-        const currentUser = await Auth.getCurrentUser();
+        const currentUser = _state.cu;
         await AppDataStore.create('notes', {
             id: Date.now(),
             customer_id: customerId,
@@ -54,7 +58,7 @@
     const addAgentNote = async (agentId) => {
         const text = document.getElementById(`agent-note-text-${agentId}`)?.value?.trim();
         if (!text) { UI.toast.error('Please enter a note'); return; }
-        const currentUser = await Auth.getCurrentUser();
+        const currentUser = _state.cu;
         await AppDataStore.create('notes', {
             id: Date.now(),
             agent_id: agentId,
@@ -65,14 +69,14 @@
         const _anEl = document.getElementById(`agent-note-text-${agentId}`);
         if (_anEl) _anEl.value = '';
         UI.toast.success('Note added');
-        await showAgentDetail(agentId);
+        await (window.app.showAgentDetail || (() => {}))(agentId);
     };
 
     const deleteAgentNote = async (agentId, noteId) => {
         UI.confirm('Delete Note?', 'Are you sure?', async () => {
             await AppDataStore.delete('notes', noteId);
             UI.toast.success('Note deleted');
-            await showAgentDetail(agentId);
+            await (window.app.showAgentDetail || (() => {}))(agentId);
         });
     };
 
@@ -214,7 +218,7 @@
         const voiceSettings = UserPreferences.getSync('voice_settings', {});
         const delay = voiceSettings.quality === 'high' ? 3000 : voiceSettings.quality === 'fast' ? 1000 : 2000;
 
-        setTimeout(() => {
+        return new Promise(resolve => setTimeout(() => {
             const samples = [
                 "Customer is facing career stagnation and financial difficulties. Interested in PR4 solution. Office located in Bangsar with main entrance facing North-West.",
                 "Discussed upcoming Feng Shui workshop. Client wants to bring two friends. Follow up next week with registration details.",
@@ -235,7 +239,8 @@
             if (actionsEl) actionsEl.style.display = 'flex';
 
             UI.toast.success('Transcription complete!');
-        }, delay);
+            resolve();
+        }, delay));
     };
 
     const saveTranscription = async () => {
@@ -280,7 +285,7 @@
         } else if (entityType === 'agent') {
             noteData.agent_id = entityId;
             await AppDataStore.create('notes', noteData);
-            if (entityId) await showAgentDetail(entityId);
+            if (entityId) await (window.app.showAgentDetail || (() => {}))(entityId);
         } else {
             await AppDataStore.create('notes', noteData);
         }
@@ -1760,7 +1765,11 @@
         }
     };
     const mcalFilter = () => {
-        UI.toast.success('Filter options coming soon');
+        if (typeof window.app?.openCalendarFilterModal === 'function') {
+            window.app.openCalendarFilterModal();
+        } else {
+            UI.toast.error('Filter unavailable — please try again in a moment');
+        }
     };
     const mcalAdd = async () => {
         // Open the activity creation modal — pre-fills with today's date by default.
@@ -1867,7 +1876,7 @@
     const showProspectsViewSmart = async (viewport) => {
         if (!viewport) viewport = document.getElementById('content-viewport');
         if (isMobile()) return showMobileProspectsView(viewport);
-        return showProspectsView(viewport);
+        return (window.app.showProspectsView || (() => {}))(viewport);
     };
 
     const _mpRenderList = async (silent = false) => {
@@ -1966,7 +1975,7 @@
         const palettes = ['red','purple','pink','peach','wood'];
         const html = rows.slice(0, 60).map((p, i) => {
             const init = _mhomeInitials(p.full_name);
-            const pal = palettes[(p.id || i) % palettes.length];
+            const pal = palettes[i % palettes.length];
             const phone = _mhomeEsc(p.phone || '');
             const agentEntry = p.responsible_agent_id ? (_mpAgentMap?.get(String(p.responsible_agent_id)) || null) : null;
             const agentCode = agentEntry?.code || '';
@@ -2054,11 +2063,11 @@
         _mpSearchTimer = setTimeout(() => { _mpRenderList(); }, 220);
     };
     const mpAdd = () => {
-        if (_mpTab === 'customers' && typeof openAddCustomerModal === 'function') {
-            try { openAddCustomerModal(); return; } catch (_) {}
+        if (_mpTab === 'customers' && typeof window.app?.openAddCustomerModal === 'function') {
+            try { window.app.openAddCustomerModal(); return; } catch (_) {}
         }
-        if (typeof openAddProspectModal === 'function') {
-            try { openAddProspectModal(); return; } catch (_) {}
+        if (typeof window.app?.openAddProspectModal === 'function') {
+            try { window.app.openAddProspectModal(); return; } catch (_) {}
         }
         UI.toast.success('Add');
     };

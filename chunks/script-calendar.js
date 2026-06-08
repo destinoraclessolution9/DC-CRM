@@ -23,6 +23,9 @@
     const isManagement         = (u) => _utils.isManagement(u || _state.cu);
     const isTeamLeaderOrAbove  = (u) => _utils.isTeamLeaderOrAbove(u || _state.cu);
     const getAgentsAndLeaders  = () => _utils.getAgentsAndLeaders();
+    // Co-agent push notification — defined in script-activities.js, exported to window.app.
+    // Fire-and-forget after a co-agent is added to an activity.
+    const _notifyCoAgentAdded  = (...a) => (window.app._notifyCoAgentAdded || (() => Promise.resolve()))(...a);
     // ========== PHASE 1: FULL CALENDAR IMPLEMENTATION ==========
 
     const showCalendarView = async (container) => {

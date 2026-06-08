@@ -3248,11 +3248,11 @@ function _wireLoginBtn() {
     // No-op stubs for prospect functions called before chunk loads:
     const getScoreGrade = (s) => window.app.getScoreGrade ? window.app.getScoreGrade(s) : { grade: "N/A", label: "N/A", color: "#888" };
     const calculateProtectionDays = (p) => (window.app.calculateProtectionDays || (() => 0))(p);
-    const showProspectDetail = async (id) => (window.app.showProspectDetail || (() => {}))(id);
-    const showCustomerDetail = async (id) => (window.app.showCustomerDetail || (() => {}))(id);
-    const showPurchasesHistoryView = async (vp) => (window.app.showPurchasesHistoryView || (() => {}))(vp);
-    const showAgentsView = async (vp) => (window.app.showAgentsView || (() => {}))(vp);
-    const showAgentDetail = async (id) => (window.app.showAgentDetail || (() => {}))(id);
+    const showProspectDetail      = async (...a) => { await _loadChunkOnce('chunks/script-prospects.min.js'); const _r = window.app.showProspectDetail;      if (_r && _r !== showProspectDetail)      return _r(...a); };
+    const showCustomerDetail      = async (...a) => { await _loadChunkOnce('chunks/script-prospects.min.js'); const _r = window.app.showCustomerDetail;      if (_r && _r !== showCustomerDetail)      return _r(...a); };
+    const showPurchasesHistoryView = async (...a) => { await _loadChunkOnce('chunks/script-prospects.min.js'); const _r = window.app.showPurchasesHistoryView; if (_r && _r !== showPurchasesHistoryView) return _r(...a); };
+    const showAgentsView          = async (...a) => { await _loadChunkOnce('chunks/script-prospects.min.js'); const _r = window.app.showAgentsView;          if (_r && _r !== showAgentsView)          return _r(...a); };
+    const showAgentDetail         = async (...a) => { await _loadChunkOnce('chunks/script-prospects.min.js'); const _r = window.app.showAgentDetail;         if (_r && _r !== showAgentDetail)         return _r(...a); };
     const showForcePasswordChangeModal = () => (window.app.showForcePasswordChangeModal || (() => {}))();
     // ========== PHASE 6: PIPELINE & SALES FORCE MODULE ==========
     // [CHUNK: pipeline] ~2837 lines extracted to chunks/script-pipeline.js
@@ -4678,14 +4678,21 @@ Object.assign(window.app, {
     showAuditLogs:          () => (window.app._adminChunkLoaded ? window.app.showAuditLogs()          : window._loadChunk('chunks/script-admin.min.js').then(() => window.app.showAuditLogs())),
     showComplianceCenter:   () => (window.app._adminChunkLoaded ? window.app.showComplianceCenter()   : window._loadChunk('chunks/script-admin.min.js').then(() => window.app.showComplianceCenter())),
     showAdminDashboard:     () => window._loadChunk('chunks/script-admin.min.js').then(() => window.app.showAdminDashboard()),
+    // Admin sub-menu items — must load chunk before calling (direct nav skips showAdminDashboard)
+    showTenantManagement:    () => window._loadChunk('chunks/script-admin.min.js').then(() => window.app.showTenantManagement?.()),
+    showSystemHealth:        () => window._loadChunk('chunks/script-admin.min.js').then(() => window.app.showSystemHealth?.()),
+    showBackupManager:       () => window._loadChunk('chunks/script-admin.min.js').then(() => window.app.showBackupManager?.()),
+    showPerformanceMonitor:  () => window._loadChunk('chunks/script-admin.min.js').then(() => window.app.showPerformanceMonitor?.()),
+    showDeploymentCenter:    () => window._loadChunk('chunks/script-admin.min.js').then(() => window.app.showDeploymentCenter?.()),
+    showSystemLogs:          () => window._loadChunk('chunks/script-admin.min.js').then(() => window.app.showSystemLogs?.()),
     // Mobile nav toggle — stub ensures hamburger works even before mobile chunk finishes loading
-    toggleMobileNav: (...a) => _loadChunkOnce('chunks/script-mobile.min.js').then(() => window.app.toggleMobileNav?.(...a)),
+    toggleMobileNav: (...a) => window._loadChunk('chunks/script-mobile.min.js').then(() => window.app.toggleMobileNav?.(...a)),
     // AI Insights — stubs load ai chunk on first click (Tier-2 prefetch at 3 s; user may click sooner)
-    showAIInsightsDashboard:  (...a) => _loadChunkOnce('chunks/script-ai.min.js').then(() => window.app.showAIInsightsDashboard?.(...a)),
-    showLeadScoring:          (...a) => _loadChunkOnce('chunks/script-ai.min.js').then(() => window.app.showLeadScoring?.(...a)),
-    showSalesForecast:        (...a) => _loadChunkOnce('chunks/script-ai.min.js').then(() => window.app.showSalesForecast?.(...a)),
-    showChurnRiskAnalysis:    (...a) => _loadChunkOnce('chunks/script-ai.min.js').then(() => window.app.showChurnRiskAnalysis?.(...a)),
-    showPerformanceInsights:  (...a) => _loadChunkOnce('chunks/script-ai.min.js').then(() => window.app.showPerformanceInsights?.(...a)),
+    showAIInsightsDashboard:  (...a) => window._loadChunk('chunks/script-ai.min.js').then(() => window.app.showAIInsightsDashboard?.(...a)),
+    showLeadScoring:          (...a) => window._loadChunk('chunks/script-ai.min.js').then(() => window.app.showLeadScoring?.(...a)),
+    showSalesForecast:        (...a) => window._loadChunk('chunks/script-ai.min.js').then(() => window.app.showSalesForecast?.(...a)),
+    showChurnRiskAnalysis:    (...a) => window._loadChunk('chunks/script-ai.min.js').then(() => window.app.showChurnRiskAnalysis?.(...a)),
+    showPerformanceInsights:  (...a) => window._loadChunk('chunks/script-ai.min.js').then(() => window.app.showPerformanceInsights?.(...a)),
     _prefetchChunkForView,
     // Two-factor (defined in two-factor.min.js, loaded separately)
     showTwoFactorSetup:  typeof showTwoFactorSetup  !== 'undefined' ? showTwoFactorSetup  : () => UI?.toast?.warning('Two-factor setup not available.'),

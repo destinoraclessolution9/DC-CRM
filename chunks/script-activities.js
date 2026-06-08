@@ -18,6 +18,7 @@
     const isManagement         = (u) => _utils.isManagement(u || _state.cu);
     const isTeamLeaderOrAbove  = (u) => _utils.isTeamLeaderOrAbove(u || _state.cu);
     const getUserLevel         = (u) => _utils.getUserLevel(u);
+    const _getUserLevel        = (u) => _utils.getUserLevel(u);
     const getAgentsAndLeaders  = () => _utils.getAgentsAndLeaders();
     // Permission helpers — exported to _crmUtils from script.js after line ~755.
     const getVisibleProspects  = () => _utils.getVisibleProspects();
@@ -28,6 +29,24 @@
     const _mcalOptimisticSwap       = (...a) => (window.app._mcalOptimisticSwap       || (() => {}))(...a);
     const _mcalOptimisticMarkFailed = (...a) => (window.app._mcalOptimisticMarkFailed || (() => {}))(...a);
     const _mcalEnqueueRetry         = (...a) => (window.app._mcalEnqueueRetry         || (() => {}))(...a);
+    // CPS-photo silent uploader — defined in script-cps.js. Fire-and-forget.
+    const _uploadCpsFormFile        = (...a) => (window.app._uploadCpsFormFile        || (() => Promise.resolve()))(...a);
+    // Prospect / customer chunk helpers — defined in script-prospects.js.
+    const switchProspectTab         = (...a) => (window.app.switchProspectTab         || (() => Promise.resolve()))(...a);
+    const openProspectModal         = (...a) => (window.app.openProspectModal         || (() => {}))(...a);
+    const renderCustomerActivityTab = (...a) => (window.app.renderCustomerActivityTab || (() => Promise.resolve()))(...a);
+    // Calendar follow-up dispatcher — defined in script-calendar.js.
+    const dispatchOnEventAttendanceTriggers = (...a) => (window.app.dispatchOnEventAttendanceTriggers || (() => Promise.resolve()))(...a);
+    // Features2 scoring/workflow helpers — defined in script-features2.js.
+    const addScoreToProspect        = (...a) => (window.app.addScoreToProspect        || (() => Promise.resolve()))(...a);
+    const applyActivityScoring      = (...a) => (window.app.applyActivityScoring      || (() => Promise.resolve()))(...a);
+    const getExtensionType          = (...a) => (window.app.getExtensionType          || (() => 'standard'))(...a);
+    const autoExtendProtection      = (...a) => (window.app.autoExtendProtection      || (() => Promise.resolve()))(...a);
+    const executeWorkflows          = (...a) => (window.app.executeWorkflows          || (() => Promise.resolve()))(...a);
+    // SCORING_RULES constant — exported by script-features2.js. Fallback guards against load order.
+    const SCORING_RULES = window.app.SCORING_RULES || { CREATE_PROSPECT: 5, MARK_NOT_INTERESTED: -500 };
+    // buildEventCategoriesField — exported by script-marketing.js (marketing managers only).
+    const buildEventCategoriesField = (...a) => (window.app.buildEventCategoriesField || (() => ''))(...a);
 
     // Venue/product lookup cache — mirrors the same helpers in script-calendar.js.
     // Both chunks share _state, so whichever chunk loaded first warms the cache for the other.
@@ -3803,14 +3822,14 @@
 
             // Silent upload of CPS form photo (if scanned during this session).
             // Fire-and-forget — does not block the rest of the save flow.
-            if (_state.cppf.cps) {
+            if (_state.cppf?.cps) {
                 const _pendingScanFile = _state.cppf.cps;
                 delete _state.cppf.cps;
                 _uploadCpsFormFile(_pendingScanFile, prospect.id).catch(() => {});
             }
 
             // Auto-create referral record from CPS activity
-            const _refType = (_state.sr.type || '').toLowerCase() === 'consultant' ? 'user' : 'prospect';
+            const _refType = (_state.sr?.type || '').toLowerCase() === 'consultant' ? 'user' : 'prospect';
             try {
                 await AppDataStore.create('referrals', {
                     id: Date.now(),
@@ -4687,5 +4706,7 @@
         saveAndAddAnother,
         openPastRecordModal,
         savePastRecord,
+        _notifyCoAgentAdded,
+        _notifyHighlightSaved,
     });
 })();

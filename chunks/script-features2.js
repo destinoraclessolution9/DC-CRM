@@ -1657,5 +1657,6 @@ const resetMilestone = async (userId, milestoneName) => {
         markMilestoneCompleted,
         showMilestonesView,
         resetMilestone,
+        SCORING_RULES,
     });
 })();

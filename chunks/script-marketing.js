@@ -27,6 +27,13 @@
     const generateId           = () => _utils.generateId();
     const debounceCall         = (...a) => window.app.debounceCall(...a);
     const navigateTo           = (v)   => window.app.navigateTo(v);
+    // Cross-chunk helpers — defined in sibling chunks, exported to window.app.
+    const renderSpecialProgramsTable = (...a) => (window.app.renderSpecialProgramsTable || (() => Promise.resolve()))(...a);  // script-features2.js
+    const renderFormsTab             = (...a) => (window.app.renderFormsTab             || (() => Promise.resolve()))(...a);  // script-fude.js
+    const loadFollowUpTemplates      = (...a) => (window.app.loadFollowUpTemplates      || (() => Promise.resolve([])))(...a); // script-calendar.js
+    const invalidateFollowUpTemplatesCache = (...a) => (window.app.invalidateFollowUpTemplatesCache || (() => {}))(...a);     // script-calendar.js
+    const renderFolderTree           = (...a) => (window.app.renderFolderTree           || (() => Promise.resolve()))(...a);  // script-documents.js
+    const loadFolderContents         = (...a) => (window.app.loadFolderContents         || (() => Promise.resolve()))(...a);  // script-documents.js
     // AppDataStore, UI, supabase, XLSX (on demand) are globals — no alias needed.
 
     // ========== PHASE: MARKETING MANAGER LISTS ==========
@@ -4362,5 +4369,7 @@ const simulateCampaignSending = async (campaignId) => {
         confirmRenameFolder,
         showMarketingAutomationView,
         showMarketingListsView,
+        showMonthlyPromotionView,
+        buildEventCategoriesField,
     });
 })();

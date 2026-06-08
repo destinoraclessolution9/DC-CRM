@@ -25,6 +25,8 @@
     const generateId           = () => _utils.generateId();
     const debounceCall         = (...a) => window.app.debounceCall(...a);
     const navigateTo           = (v)   => window.app.navigateTo(v);
+    // Cross-chunk helper — defined in script-prospects.js, exported to window.app.
+    const openAddTagModal      = (...a) => (window.app.openAddTagModal || (() => {}))(...a);
     // AppDataStore, UI, supabase, XLSX (on demand) are globals — no alias needed.
 
     // ========== PHASE 18: CASES MODULE IMPLEMENTATION ==========

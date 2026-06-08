@@ -41,6 +41,17 @@
     // AppDataStore.getById when the calendar chunk hasn't loaded yet (e.g. user
     // jumps straight into a prospect detail before opening calendar).
     const _lookupActivityRobust = (...a) => (window.app._lookupActivityRobust || AppDataStore.getById.bind(AppDataStore, 'activities'))(...a);
+    // CPS-photo silent uploader — defined in script-cps.js. Fire-and-forget.
+    const _uploadCpsFormFile    = (...a) => (window.app._uploadCpsFormFile || (() => Promise.resolve()))(...a);
+    // CPS health helpers — defined in script-cps.js, exported to window.app.
+    const renderQuickHealthBadge       = (...a) => (window.app.renderQuickHealthBadge       || (() => ''))(...a);
+    const renderHealthBadge            = (...a) => (window.app.renderHealthBadge            || (() => ''))(...a);
+    const calculateCustomerHealthScore = (...a) => (window.app.calculateCustomerHealthScore || (() => 0))(...a);
+    // Import / workflow helpers — defined in script-import.js and script-features2.js.
+    const exportMarketingList          = (...a) => (window.app.exportMarketingList          || (() => Promise.resolve()))(...a);
+    const executeWorkflows             = (...a) => (window.app.executeWorkflows             || (() => Promise.resolve()))(...a);
+    // SCORING_RULES constant — exported by script-features2.js. Fallback guards against load order.
+    const SCORING_RULES = window.app.SCORING_RULES || { CREATE_PROSPECT: 5, MARK_NOT_INTERESTED: -500 };
     // Live reference to current user (refreshed on each navigation via _syncProspectsUser)
     let _currentUser = _state.cu;
     const _syncUser = () => { _currentUser = _state.cu; };

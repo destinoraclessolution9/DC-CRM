@@ -19,6 +19,9 @@
     const isReferrer           = (u) => _utils.isReferrer(u || _state.cu);
     const _getUserLevel        = (u) => _utils.getUserLevel(u);
     const navigateTo           = (v) => window.app.navigateTo(v);
+    // News-highlight push notification — defined in script-activities.js, exported to window.app.
+    // Fire-and-forget after a highlight is created/edited.
+    const _notifyHighlightSaved = (...a) => (window.app._notifyHighlightSaved || (() => Promise.resolve()))(...a);
     let _currentUser = _state.cu;
     window._syncFudeUser = () => { _currentUser = _state.cu; };
 

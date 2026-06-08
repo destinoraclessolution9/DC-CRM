@@ -25,6 +25,8 @@
     const generateId           = () => _utils.generateId();
     const debounceCall         = (...a) => window.app.debounceCall(...a);
     const navigateTo           = (v)   => window.app.navigateTo(v);
+    // Cross-chunk helper — defined in script-features2.js, exported to window.app.
+    const renderKPITargetComparison = (...a) => (window.app.renderKPITargetComparison || (() => Promise.resolve(''))) (...a);
     // AppDataStore, UI, supabase, XLSX (on demand) are globals — no alias needed.
 
     // ==================== PHASE 9: REPORTING & KPI DASHBOARD ====================
