@@ -902,5 +902,8 @@ const openNoticeboardDetail = async (eventId) => {
         // Noticeboard
         showNoticeboardView,
         openNoticeboardDetail,
+        // Shared computation helpers (used by script-features2.js for milestones view)
+        computeNineMethodStatuses,
+        computeFourPillarStatuses,
     });
 })();

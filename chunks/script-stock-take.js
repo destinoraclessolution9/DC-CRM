@@ -30,6 +30,7 @@
     const generateId           = () => _utils.generateId();
     const debounceCall         = (...a) => window.app.debounceCall(...a);
     const navigateTo           = (v)   => window.app.navigateTo(v);
+    const canAccessStockTake   = (u)   => _utils.isSystemAdmin(u) || _utils.isStockTakeStaff(u);
     // AppDataStore, UI, supabase are global — no alias needed.
 
     // ==================== STOCK TAKE (Super Admin, Level 1) ====================

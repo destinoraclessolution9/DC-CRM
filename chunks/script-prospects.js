@@ -33,6 +33,9 @@
     const getVisibleCustomers = ()  => _utils.getVisibleCustomers();
     // navigateTo lives in the script.js IIFE — reach it via window.app.
     const navigateTo          = (v) => window.app.navigateTo(v);
+    // Constants defined in script.js IIFE — redeclare locally for chunk scope.
+    const USER_ROLES    = _utils.USER_ROLES || [];
+    const _PH_PAGE_SIZE = 50;
     // Cross-chunk reassign helpers — defined in script-import.js, exported to window.app.
     // Guards use || noop so callers don't throw if the import chunk hasn't loaded yet
     // (e.g. user opens Prospects view without ever visiting Import/Protection).

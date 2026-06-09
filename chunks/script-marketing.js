@@ -34,6 +34,16 @@
     const invalidateFollowUpTemplatesCache = (...a) => (window.app.invalidateFollowUpTemplatesCache || (() => {}))(...a);     // script-calendar.js
     const renderFolderTree           = (...a) => (window.app.renderFolderTree           || (() => Promise.resolve()))(...a);  // script-documents.js
     const loadFolderContents         = (...a) => (window.app.loadFolderContents         || (() => Promise.resolve()))(...a);  // script-documents.js
+    // renderWorkflowTemplate defined in script-performance.js IIFE (private). Redeclare locally.
+    const renderWorkflowTemplate = (name, trigger, desc, icon) => `
+        <div style="background:var(--gray-50); border-radius:8px; padding:16px; border:1px solid var(--gray-200); cursor:pointer;" onclick="app.createWorkflowFromTemplate('${trigger}')">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                <i class="${icon}" style="color:var(--primary);"></i>
+                <span style="font-weight:600; font-size:13px;">${name}</span>
+            </div>
+            <p style="font-size:12px; color:var(--gray-500); margin:0;">${desc}</p>
+        </div>
+    `;
     // AppDataStore, UI, supabase, XLSX (on demand) are globals — no alias needed.
 
     // ========== PHASE: MARKETING MANAGER LISTS ==========

@@ -17,6 +17,21 @@
     const isTeamLeaderOrAbove  = (u) => _utils.isTeamLeaderOrAbove(u || _state.cu);
     const _getUserLevel        = (u) => _utils.getUserLevel(u);
     const navigateTo           = (v) => window.app.navigateTo(v);
+    // computeNineMethodStatuses / computeFourPillarStatuses live in script-performance.js.
+    // Ensure that chunk is loaded before calling them (milestones view may load features2
+    // before performance). Falls back to empty objects so the view degrades gracefully.
+    const computeNineMethodStatuses = async (...a) => {
+        if (!window.app.computeNineMethodStatuses) {
+            await (window._loadChunk ? window._loadChunk('chunks/script-performance.min.js') : Promise.resolve());
+        }
+        return (window.app.computeNineMethodStatuses || (() => Promise.resolve({})))(...a);
+    };
+    const computeFourPillarStatuses = async (...a) => {
+        if (!window.app.computeFourPillarStatuses) {
+            await (window._loadChunk ? window._loadChunk('chunks/script-performance.min.js') : Promise.resolve());
+        }
+        return (window.app.computeFourPillarStatuses || (() => Promise.resolve({})))(...a);
+    };
     let _currentUser = _state.cu;
     window._syncFeatures2User = () => { _currentUser = _state.cu; };
 
