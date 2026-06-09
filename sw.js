@@ -126,6 +126,7 @@ self.addEventListener('fetch', (event) => {
         url.hostname.includes('fonts.gstatic.com')
     ) {
         event.respondWith(cacheFirst(req));
+        return;
     }
 });
 
@@ -149,7 +150,9 @@ async function cacheFirst(req) {
     if (cached) return cached;
     try {
         const res = await fetch(req);
-        if (res && (res.status === 200 || res.type === 'opaque')) {
+        // Never cache opaque responses (status 0) — a network error returns opaque
+        // with status 0 and would be permanently cached, breaking the asset forever.
+        if (res && res.status === 200 && res.type !== 'opaque') {
             cache.put(req, res.clone()).catch(() => {});
         }
         return res;

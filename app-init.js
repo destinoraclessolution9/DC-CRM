@@ -76,7 +76,9 @@ document.addEventListener('DOMContentLoaded', function () {
         if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Escape') return;
         var item = document.activeElement;
         if (!item || item.getAttribute('role') !== 'menuitem') return;
-        var items = Array.from(item.closest('.dropdown-menu').querySelectorAll('[role="menuitem"]'));
+        var menu = item.closest('.dropdown-menu');
+        if (!menu) return;
+        var items = Array.from(menu.querySelectorAll('[role="menuitem"]'));
         var idx = items.indexOf(item);
         if (e.key === 'ArrowDown') { e.preventDefault(); if (items[idx + 1]) items[idx + 1].focus(); }
         if (e.key === 'ArrowUp')   { e.preventDefault(); if (items[idx - 1]) items[idx - 1].focus(); }

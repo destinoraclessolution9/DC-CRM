@@ -2072,9 +2072,11 @@ const saveProspect = async () => {
             document.dispatchEvent(new CustomEvent('prospectCreated', { detail: data }));
             // Silent upload of CPS form photo if one was scanned this session.
             // Fire-and-forget — does not block the save flow.
-            if (_cpsPendingPhotoFiles.prospect) {
-                const _pendingScanFile = _cpsPendingPhotoFiles.prospect;
-                delete _cpsPendingPhotoFiles.prospect;
+            // Access via _appState bridge (cppf) — _cpsPendingPhotoFiles lives in the main IIFE.
+            const _cppf = (window._appState && window._appState.cppf) || {};
+            if (_cppf.prospect) {
+                const _pendingScanFile = _cppf.prospect;
+                delete _cppf.prospect;
                 const prospectId = newProspect?.id || data.id;
                 _uploadCpsFormFile(_pendingScanFile, prospectId).catch(() => {});
             }

@@ -1955,7 +1955,7 @@ class DataStore {
             const { data, error, count } = await q;
             if (error) {
                 // If light-select column list is stale, retry with '*'
-                if (selectClause !== '*' && error.code) {
+                if (selectClause !== '*' && this._isSchemaError(error)) {
                     console.warn(`queryAdvanced light-select failed for ${tableName}, retrying with *`);
                     options.select = '*';
                     return this.queryAdvanced(tableName, options);
@@ -2567,7 +2567,9 @@ class DataStore {
         const cached = cache.get(path);
         if (cached && cached.exp > Date.now()) return cached.url;
         const url = await this.getSignedAttachmentUrl(path, ttlSeconds);
-        if (url) cache.set(path, { url, exp: Date.now() + (ttlSeconds - 600) * 1000 });
+        // Subtract 600 s safety margin so the cached entry expires before the signed URL does.
+        // Clamp to 0 so short-lived TTLs (< 600 s) don't produce a negative/past expiry.
+        if (url) cache.set(path, { url, exp: Date.now() + (Math.max(0, ttlSeconds - 600)) * 1000 });
         return url;
     }
 

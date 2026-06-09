@@ -190,14 +190,14 @@
     // Render AI Stats Cards
     const renderAIStatsCards = async () => {
         // Get forecast data
-        const forecasts = await AppDataStore.getAll('forecast_history')
+        const forecasts = (await AppDataStore.getAll('forecast_history'))
             .filter(f => new Date(f.forecast_date) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000))
             .sort((a, b) => new Date(b.forecast_date) - new Date(a.forecast_date));
 
         const latestForecast = forecasts[0] || { predicted_amount: 2400000 };
 
         // Get lead scores
-        const leadScores = await AppDataStore.getAll('lead_scores')
+        const leadScores = (await AppDataStore.getAll('lead_scores'))
             .filter(l => new Date(l.score_date) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
 
         const highValueLeads = leadScores.filter(l => l.overall_score >= 80).length;
@@ -207,7 +207,7 @@
         ).length;
 
         // Get churn risks
-        const churnRisks = await AppDataStore.getAll('churn_risk')
+        const churnRisks = (await AppDataStore.getAll('churn_risk'))
             .filter(c => c.risk_level === 'high');
 
         return `

@@ -209,7 +209,7 @@ window._ensureQrScanner = () => typeof Html5Qrcode !== 'undefined'
     : window._loadScriptOnce('./libs/html5-qrcode.min.js');
 
 // Patch to prevent the "undefined .call" error and map missing .create to .add
-if (!window.AppDataStore._patched) {
+if (window.AppDataStore && !window.AppDataStore._patched) {
     const originalCreate = window.AppDataStore.create || window.AppDataStore.add;
     window.AppDataStore.create = function(...args) {
         try {
@@ -414,6 +414,7 @@ const appLogic = (() => {
     let _selectedProspectReferrer = null;
     let _pendingIntakeId = null;   // Set by openApproveCpsIntakeModal; consumed by saveActivity
     let _pendingIntakeRow = null;  // Full intake row, used to send WhatsApp confirmation
+    let _cpsPendingPhotoFiles = []; // Pending photo files for CPS photo upload (fix: was undeclared → ReferenceError on _appState.cppf)
     let _currentDate = new Date(); // Dynamic start date
     let _filters = { agent: 'all', type: 'all', from: '', to: '' };
     // Stamped by navigateTo. Used by initSync's dataChanged listener to
@@ -2949,7 +2950,7 @@ function _wireLoginBtn() {
                 _currentView = cacheKey;
                 if (isMobile()) {
                     (window.app.updateBottomNavActive || (() => {}))(viewId);
-                    setTimeout(applyMobileTableLabels, 200);
+                    setTimeout(() => (window.app.applyMobileTableLabels || (() => {}))(), 200);
                 }
                 return;
             }
@@ -3145,7 +3146,7 @@ function _wireLoginBtn() {
         if (isMobile()) {
             (window.app.updateBottomNavActive || (() => {}))(viewId);
             // Small delay so DOM is painted before we label tds
-            setTimeout(applyMobileTableLabels, 200);
+            setTimeout(() => (window.app.applyMobileTableLabels || (() => {}))(), 200);
         }
     };
 

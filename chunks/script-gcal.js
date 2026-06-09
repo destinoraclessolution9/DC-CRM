@@ -360,7 +360,7 @@
                     </div>
                 </div>
                 <div class="integration-action">
-                    <button class="btn ${status === 'connected' ? 'secondary' : 'primary'}" onclick="event.stopPropagation(); id === 'whatsapp' ? await app.showWhatsAppIntegration() : app.showIntegrationDetails('${id}')">
+                    <button class="btn ${status === 'connected' ? 'secondary' : 'primary'}" onclick="event.stopPropagation(); id === 'whatsapp' ? (async()=>{ await app.showWhatsAppIntegration(); })() : app.showIntegrationDetails('${id}')">
                         ${status === 'connected' ? 'Configure' : 'Connect'}
                     </button>
                 </div>
