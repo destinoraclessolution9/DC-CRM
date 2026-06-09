@@ -1341,100 +1341,8 @@ const checkSpecialProgramPopup = async () => {
     ]);
 };
 
-const renderKPITargetComparison = async () => {
-    const year = new Date().getFullYear();
-    const quarter = Math.ceil((new Date().getMonth() + 1) / 3);
-    const month = new Date().getMonth() + 1;
-
-    const yearlyTargets = (await AppDataStore.getAll('yearly_targets')).find(t => t.target_year === year);
-    const quarterlyTarget = (await AppDataStore.getAll('quarterly_targets')).find(t => t.quarter === quarter && t.year === year);
-    const monthlyTarget = (await AppDataStore.getAll('monthly_targets')).find(t => t.month === month && t.year === year);
-
-    if (!yearlyTargets) return '<div style="text-align:center; padding:20px; color:var(--gray-500);">No targets set for ' + year + '. <button class="btn primary btn-sm" onclick="app.openKPITargetsModal()">Set Targets</button></div>';
-
-    // Calculate quarter date range
-    const qStart = `${year}-${String((quarter - 1) * 3 + 1).padStart(2, '0')}-01`;
-    const qEndMonth = quarter * 3;
-    const qEnd = `${year}-${String(qEndMonth).padStart(2, '0')}-${new Date(year, qEndMonth, 0).getDate()}`;
-
-    // Get actuals
-    const cpsActual = await getCPSCount(qStart, qEnd);
-    const salesActual = await getTotalSales(qStart, qEnd);
-    const popCountActual = await getPOPCaseCount(qStart, qEnd);
-    const popSalesActual = await getPOPSales(qStart, qEnd);
-    const eppCountActual = await getEPPCaseCount(qStart, qEnd);
-    const eppSalesActual = await getEPPSales(qStart, qEnd);
-    const agentsActual = await getNewAgents(qStart, qEnd);
-    const customersActual = await getNewCustomers(qStart, qEnd);
-    const meetingsActual = await getTotalMeetings(qStart, qEnd);
-
-    const row = (label, actual, target) => {
-        const pct = target > 0 ? Math.round((actual / target) * 100) : 0;
-        const color = pct >= 95 ? 'success' : pct >= 80 ? 'warning' : 'danger';
-        const variance = actual - target;
-        return `<tr>
-            <td>${label}</td>
-            <td style="text-align:right;">${typeof target === 'number' && target > 999 ? 'RM ' + target.toLocaleString() : target}</td>
-            <td style="text-align:right;">${typeof actual === 'number' && actual > 999 ? 'RM ' + actual.toLocaleString() : actual}</td>
-            <td style="text-align:right; color:${variance >= 0 ? 'var(--success)' : 'var(--danger)'};">${variance >= 0 ? '+' : ''}${typeof variance === 'number' && Math.abs(variance) > 999 ? 'RM ' + variance.toLocaleString() : variance}</td>
-            <td style="text-align:right;"><span class="badge ${color}">${pct}%</span></td>
-        </tr>`;
-    };
-
-    return `
-        <div class="profile-section" style="margin-top:20px;">
-            <h2><i class="fas fa-bullseye"></i> Q${quarter} ${year} — Target vs Actual</h2>
-            <table class="data-table" style="width:100%;">
-                <thead><tr><th scope="col">Metric</th><th scope="col" style="text-align:right;">Target</th><th scope="col" style="text-align:right;">Actual</th><th scope="col" style="text-align:right;">Variance</th><th scope="col" style="text-align:right;">%</th></tr></thead>
-                <tbody>
-                    ${row('CPS Count', cpsActual, quarterlyTarget?.cps_count_target || 0)}
-                    ${row('Total Sales', salesActual, quarterlyTarget?.total_sales_target || 0)}
-                    ${row('POP Cases', popCountActual, quarterlyTarget?.pop_case_count_target || 0)}
-                    ${row('POP Sales', popSalesActual, quarterlyTarget?.pop_sales_target || 0)}
-                    ${row('EPP Cases', eppCountActual, quarterlyTarget?.epp_case_count_target || 0)}
-                    ${row('EPP Sales', eppSalesActual, quarterlyTarget?.epp_sales_target || 0)}
-                    ${row('New Agents', agentsActual, quarterlyTarget?.new_agents_target || 0)}
-                    ${row('New Customers', customersActual, quarterlyTarget?.new_customers_target || 0)}
-                    ${row('Total Meetings', meetingsActual, quarterlyTarget?.total_meetings_target || 0)}
-                </tbody>
-            </table>
-        </div>
-        <div class="profile-section" style="margin-top:16px;">
-            <h2><i class="fas fa-calendar-alt"></i> Yearly Target Overview — ${year}</h2>
-            <table class="data-table" style="width:100%;">
-                <thead><tr><th scope="col">Metric</th><th scope="col" style="text-align:right;">Q1</th><th scope="col" style="text-align:right;">Q2</th><th scope="col" style="text-align:right;">Q3</th><th scope="col" style="text-align:right;">Q4</th><th scope="col" style="text-align:right;">Year Total</th></tr></thead>
-                <tbody>
-                    ${await renderYearlyTargetRows(year)}
-                </tbody>
-            </table>
-        </div>`;
-};
-
-const renderYearlyTargetRows = async (year) => {
-    const qTargets = (await AppDataStore.getAll('quarterly_targets')).filter(t => t.year === year).sort((a, b) => a.quarter - b.quarter);
-    const yearlyTarget = (await AppDataStore.getAll('yearly_targets')).find(t => t.target_year === year);
-    if (!yearlyTarget || qTargets.length === 0) return '<tr><td colspan="6" style="text-align:center;">No targets configured</td></tr>';
-
-    const metrics = [
-        { key: 'cps_count_target', label: 'CPS Count' },
-        { key: 'total_sales_target', label: 'Total Sales (RM)' },
-        { key: 'pop_case_count_target', label: 'POP Cases' },
-        { key: 'pop_sales_target', label: 'POP Sales (RM)' },
-        { key: 'new_agents_target', label: 'New Agents' },
-        { key: 'new_customers_target', label: 'New Customers' },
-        { key: 'total_meetings_target', label: 'Total Meetings' }
-    ];
-    return metrics.map(m => {
-        const vals = qTargets.map(q => q[m.key] || 0);
-        const fmt = (v) => v > 999 ? v.toLocaleString() : v;
-        return `<tr>
-            <td>${m.label}</td>
-            ${vals.map(v => `<td style="text-align:right;">${fmt(v)}</td>`).join('')}
-            ${vals.length < 4 ? '<td></td>'.repeat(4 - vals.length) : ''}
-            <td style="text-align:right; font-weight:600;">${fmt(yearlyTarget[m.key] || 0)}</td>
-        </tr>`;
-    }).join('');
-};
+// renderKPITargetComparison + renderYearlyTargetRows moved to script-reporting.js
+// (they call getCPSCount/getTotalSales/etc. which are IIFE-private to that chunk).
 
 
 // [CHUNK: performance] 913 lines extracted to chunks/script-performance.js
@@ -1666,8 +1574,6 @@ const resetMilestone = async (userId, milestoneName) => {
         deleteSpecialProgram,
         confirmDeleteSpecialProgram,
         checkSpecialProgramPopup,
-        renderKPITargetComparison,
-        renderYearlyTargetRows,
         executeWorkflows,
         markMilestoneCompleted,
         showMilestonesView,
