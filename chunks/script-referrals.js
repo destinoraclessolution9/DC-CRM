@@ -25,6 +25,8 @@
     const generateId           = () => _utils.generateId();
     const debounceCall         = (...a) => window.app.debounceCall(...a);
     const navigateTo           = (v)   => window.app.navigateTo(v);
+    // getVisibleReferrals lives in script.js IIFE — exported to _crmUtils.
+    const getVisibleReferrals  = (...a) => (_utils.getVisibleReferrals || (() => Promise.resolve([])))(...a);
     // AppDataStore, UI, supabase, XLSX (on demand) are globals — no alias needed.
     // ── Chunk-local: referral tree UI state ──
     let _currentSelectedPerson = null;

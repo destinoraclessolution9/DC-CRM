@@ -817,6 +817,8 @@ const appLogic = (() => {
             return false;
         });
     };
+    // Export so lazy chunks (script-referrals.js) can call it cross-chunk.
+    Object.assign(window._crmUtils, { getVisibleReferrals: () => getVisibleReferrals() });
 
     // For activities: visible if current user is lead, co-agent, or the activity is 'open', or if the lead agent is within visible users.
     const canViewActivity = async (activity) => {
