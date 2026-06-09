@@ -905,5 +905,8 @@ const openNoticeboardDetail = async (eventId) => {
         // Shared computation helpers (used by script-features2.js for milestones view)
         computeNineMethodStatuses,
         computeFourPillarStatuses,
+        // Definition arrays (used by features2.js showMilestonesView for rendering)
+        NINE_METHOD_DEFS,
+        FOUR_PILLAR_DEFS,
     });
 })();

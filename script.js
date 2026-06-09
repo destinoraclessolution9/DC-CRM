@@ -2198,8 +2198,8 @@ function _wireLoginBtn() {
         // Fire-and-forget: these don't affect what the first view renders.
         // Decoupled from navigateTo so the user sees the first screen without
         // waiting for expireOldOverrides (N writes) or AI model bootstrap.
-        (typeof expireOldOverrides === 'function' ? expireOldOverrides() : Promise.resolve()).catch(e => console.warn('expireOldOverrides failed:', e));
-        (typeof initAIAnalytics === 'function' ? initAIAnalytics() : Promise.resolve()).catch(e => console.warn('initAIAnalytics failed:', e));
+        Promise.resolve(typeof expireOldOverrides === 'function' ? expireOldOverrides() : undefined).catch(e => console.warn('expireOldOverrides failed:', e));
+        Promise.resolve(typeof initAIAnalytics === 'function' ? initAIAnalytics() : undefined).catch(e => console.warn('initAIAnalytics failed:', e));
 
         // L13 (Customer) and L14 (Referrer) land on 福德; everyone else on calendar
         // Use _getUserLevel() to handle Chinese-only role names (改命客户, 准传福大使, etc.)

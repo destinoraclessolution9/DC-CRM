@@ -1491,7 +1491,7 @@ const showMilestonesView = async (container, targetUserId = null) => {
                     </div>
                     ${adminPicker}
                     <div class="nine-method-grid">
-                        ${NINE_METHOD_DEFS.map(def => {
+                        ${(window.app.NINE_METHOD_DEFS || []).map(def => {
                             const on = !!nineStatuses[def.key];
                             return `
                                 <div class="nine-method-card ${on ? 'attended' : ''}">
@@ -1505,7 +1505,7 @@ const showMilestonesView = async (container, targetUserId = null) => {
                     <div class="four-pillar-section">
                         <h2>丁财贵寿四柱</h2>
                         <div class="four-pillar-grid">
-                            ${FOUR_PILLAR_DEFS.map(def => {
+                            ${(window.app.FOUR_PILLAR_DEFS || []).map(def => {
                                 const on = !!pillarStatuses[def.key];
                                 return `
                                     <div class="four-pillar-card ${on ? 'owned' : ''}">

@@ -2628,7 +2628,9 @@ class DataStore {
                 .lte('due_date', today)
                 .order('priority', { ascending: false })
                 .order('due_date', { ascending: true });
-            if (agentId) q = q.eq('assigned_to', agentId);
+            // Only apply agent filter when agentId is a real UUID (not seed integer like 9999)
+            const _isUUID = (v) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+            if (agentId && _isUUID(agentId)) q = q.eq('assigned_to', agentId);
             const { data, error } = await q;
             if (error) throw error;
             return data || [];
