@@ -1,10 +1,21 @@
-# Exclude development dependencies — not served by the static site
+# Development dependencies
 node_modules
 
-# Exclude Python utility scripts (contacts, audit tools, etc.)
+# Claude Code session data (transcripts, worktrees, memory) — never deploy
+.claude
+
+# Python cache & scripts
+__pycache__
 *.py
 
-# Exclude data/admin files that should never be publicly served
+# Test infrastructure
+test-results
+playwright-report
+tests
+test_screenshots
+playwright-report
+
+# Data/admin files that should never be publicly served
 *.xlsx
 apply_log.txt
 contacts_*.csv
@@ -15,7 +26,24 @@ three_styles_sample.csv
 *_Phones.xlsx
 missing_*.xlsx
 "diamond and jeweler.txt"
+order_form_extract.md
+diamond\ and\ jeweler.txt
 
-# Exclude test infrastructure
-test-results
-playwright-report
+# Marketing content (belongs in DNJ project, not CRM)
+marketing/
+
+# Large media files
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.mp3
+*.wav
+*.ogg
+
+# Old/scratch build artifacts not needed in production
+dist/
+downloaded_files/
+_chunks/
+_chunks2/
