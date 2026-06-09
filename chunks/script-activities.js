@@ -4251,6 +4251,100 @@
                 .catch(e => console.warn('Calendar event invite dispatch failed:', e));
         }
 
+        // === Journey ROS: Evaluate conditional rules after every activity save ===
+        // Maps activity_type + event_category → journey trigger_event → stage advancement.
+        (async () => {
+            try {
+                const evaluateJourneyRules = window.app.evaluateJourneyRules;
+                if (!evaluateJourneyRules) return; // chunk not loaded yet
+                const entityType = activity.customer_id ? 'customer' : 'prospect';
+                const entityId   = activity.customer_id || activity.prospect_id;
+                if (!entityId) return;
+
+                const ctx = { fromStage: null };
+
+                // ── CPS logged: detect product interest and spawn pre-purchase track ──
+                if (activity.activity_type === 'CPS' && activity.prospect_id) {
+                    const notes    = (activity.notes || '').toLowerCase();
+                    const solution = (activity.proposed_solution || activity.solution || '').toLowerCase();
+                    const combined = notes + ' ' + solution;
+                    const INTEREST_MAP = [
+                        ['cps_interest_ring',        ['个人改命','改命戒指','power ring','ring','九星']],
+                        ['cps_interest_fengshui',    ['风水方案','fengshui','feng shui','风水审计','audit']],
+                        ['cps_interest_calligraphy', ['画作','calligraphy','艺品','书法']],
+                        ['cps_interest_bed',         ['旺床','满堂','bujishu bed','bed']],
+                        ['cps_interest_sofa',        ['旺沙发','sofa','沙发']],
+                        ['cps_interest_curtain',     ['旺窗帘','curtain','窗帘']],
+                        ['cps_interest_healthcare',  ['福粒','fish oil','健康','probiotic','eye plus','formula','d3k2','yang power']],
+                    ];
+                    for (const [trigger, keywords] of INTEREST_MAP) {
+                        if (keywords.some(k => combined.includes(k))) {
+                            await evaluateJourneyRules(entityType, entityId, trigger, ctx);
+                            break; // fire only the primary interest (first match)
+                        }
+                    }
+                }
+
+                // ── GR activity: advance to Step 6 ──────────────────────────────────
+                if (activity.activity_type === 'GR') {
+                    await evaluateJourneyRules(entityType, entityId, 'gr_activity_logged', ctx);
+                }
+
+                // ── Closing activity: purchase signed → role upgrade + Step 5 ────────
+                if (activity.is_closing && activity.solution_sold) {
+                    await evaluateJourneyRules(entityType, entityId, 'purchase_signed',      ctx);
+                    await evaluateJourneyRules(entityType, entityId, 'purchase_signed_role', ctx);
+                }
+
+                // ── Event attendance: map event_category → funnel advancement rule ────
+                if (activity.activity_type === 'EVENT' && activity.event_category) {
+                    const cat = activity.event_category;
+                    const EVENT_TO_TRIGGER = {
+                        'pr_9star':         'pr_9star_class_attended',
+                        'pr_destiny':       'pr_sharing_attended',
+                        'pr_museum':        'pr_museum_attended',
+                        'fs_diy':           'fs_diy_attended',
+                        'fs_sharing':       'fs_sharing_attended',
+                        'fs_museum':        'fs_museum_attended',
+                        'fs_huiji':         'fs_huiji_attended',
+                        'painting_sharing': 'cal_sharing_attended',
+                        'painting_art':     'cal_art_attended',
+                        'painting_huiji':   null, // handled below — multi-track
+                        'bujishu_sharing':  'bed_sharing_attended',  // primary: bed
+                        'formula_sharing':  'hc_sharing_attended',
+                        'formula_launch':   'hc_launch_attended',
+                        'formula_memberday':'hc_memberday_attended',
+                        'recruitment_dc':   'dc_meetup_attended',
+                    };
+
+                    const trigger = EVENT_TO_TRIGGER[cat];
+                    if (trigger) {
+                        await evaluateJourneyRules(entityType, entityId, trigger, { ...ctx, eventCategory: cat });
+                    }
+
+                    // 汇集 is multi-track — fire all matching huiji rules
+                    if (cat === 'painting_huiji' || cat.includes('huiji')) {
+                        const huijiTriggers = [
+                            'pr_huiji_attended','fs_huiji_attended',
+                            'cal_huiji_attended','bed_huiji_attended',
+                            'sofa_huiji_attended','curtain_huiji_attended',
+                        ];
+                        for (const t of huijiTriggers) {
+                            await evaluateJourneyRules(entityType, entityId, t, { ...ctx, eventCategory: cat });
+                        }
+                    }
+
+                    // Museum can serve both PR and FS tracks
+                    if (cat === 'pr_museum' || cat === 'fs_museum') {
+                        const museumTrigger = cat === 'pr_museum' ? 'pr_museum_attended' : 'fs_museum_attended';
+                        // Already fired above via EVENT_TO_TRIGGER; add cross-track if both interests exist
+                    }
+                }
+            } catch (e) {
+                console.warn('[journey ROS] post-save evaluation failed:', e?.message);
+            }
+        })();
+
         // === Auto-mark proposed solution as Purchased when closing activity has solution_sold ===
         if (activity.is_closing && activity.solution_sold) {
             const soldLower = (activity.solution_sold || '').toLowerCase();

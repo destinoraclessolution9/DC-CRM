@@ -2705,32 +2705,55 @@ class DataStore {
     }
 
     // Spawn touchpoints for an entity from a given stage.
-    // startDate: Date object = when the stage begins (defaults to today).
+    // opts.startDate    : Date object = when the stage begins (defaults to today)
+    // opts.track        : 'active'|'nurture'|'annual'
+    // opts.assignedTo   : UUID of the agent to assign to
+    // opts.productTrack : 'pr'|'fs'|'cal'|'bed'|'sofa'|'curtain'|'hc'|'all' — filters templates
+    // opts.followMode   : 'active'|'warm_hold'|'gentle_nurture' — stored on each touchpoint
     async spawnTouchpointsForStage(entityType, entityId, stageName, opts = {}) {
-        const { startDate = new Date(), track = 'active', assignedTo = null } = opts;
+        const {
+            startDate    = new Date(),
+            track        = 'active',
+            assignedTo   = null,
+            productTrack = null,
+            followMode   = 'active',
+        } = opts;
         try {
-            const templates = await this.getJourneyTemplates(track);
-            const stageTemplates = templates.filter(t => t.stage_name === stageName);
-            if (!stageTemplates.length) return 0;
+            // Fetch templates filtered by stage_name (and optionally product_track)
+            let q = window.supabase
+                .from('journey_templates')
+                .select('*')
+                .eq('is_active', true)
+                .eq('stage_name', stageName)
+                .order('sort_order', { ascending: true });
+            if (productTrack && productTrack !== 'all') {
+                // Match specific product track OR 'all'
+                q = q.in('product_track', [productTrack, 'all', null]);
+            }
+            const { data: stageTemplates, error: tErr } = await q;
+            if (tErr) throw tErr;
+            if (!stageTemplates || !stageTemplates.length) return 0;
 
             const entityCol = entityType === 'customer' ? 'customer_id' : 'prospect_id';
             const rows = stageTemplates.map(t => {
                 const dueDate = new Date(startDate);
-                dueDate.setDate(dueDate.getDate() + t.days_offset);
+                dueDate.setDate(dueDate.getDate() + (t.days_offset || 0));
                 return {
-                    [entityCol]:        entityId,
-                    template_id:        t.id,
-                    stage_name:         t.stage_name,
-                    track:              t.track,
-                    touchpoint_type:    t.touchpoint_type,
-                    message_template:   t.message_template,
-                    title:              t.name,
-                    due_date:           dueDate.toISOString().slice(0, 10),
-                    priority:           t.priority,
-                    status:             'pending',
-                    assigned_to:        assignedTo,
-                    escalates_to:       null,
+                    [entityCol]:         entityId,
+                    template_id:         t.id,
+                    stage_name:          t.stage_name,
+                    track:               t.track || track,
+                    touchpoint_type:     t.touchpoint_type,
+                    message_template:    t.message_template,
+                    title:               t.name,
+                    due_date:            dueDate.toISOString().slice(0, 10),
+                    priority:            t.priority,
+                    status:              'pending',
+                    assigned_to:         assignedTo,
+                    escalates_to:        null,
                     escalate_after_days: t.escalate_after_days,
+                    product_track:       productTrack || t.product_track || null,
+                    follow_mode:         t.follow_mode || followMode,
                 };
             });
 
@@ -2743,6 +2766,27 @@ class DataStore {
         } catch (e) {
             console.warn('[journey] spawnTouchpointsForStage', e?.message);
             return 0;
+        }
+    }
+
+    // Get the next scheduled event date for a given event category.
+    // Returns YYYY-MM-DD string or null if no upcoming event found.
+    async getNextEventDate(eventCategory) {
+        if (!eventCategory) return null;
+        try {
+            const today = new Date().toISOString().slice(0, 10);
+            const { data, error } = await window.supabase
+                .from('events')
+                .select('event_date')
+                .eq('event_category', eventCategory)
+                .gte('event_date', today)
+                .order('event_date', { ascending: true })
+                .limit(1);
+            if (error) throw error;
+            return (data && data.length) ? data[0].event_date : null;
+        } catch (e) {
+            console.warn('[journey] getNextEventDate', e?.message);
+            return null;
         }
     }
 
