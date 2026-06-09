@@ -2369,5 +2369,7 @@
         _mcalOptimisticMarkFailed,
         _mcalEnqueueRetry,
         // initMobileApp and addMobileMetaTags are defined in script-features2 chunk — exported from there
+        // Snapshot invalidation helper — called by script.js DataStore event listener
+        _clearMobileSnapshots,
     });
 })();

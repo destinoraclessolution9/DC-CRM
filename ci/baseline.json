@@ -1,8 +1,8 @@
 {
-  "generated": "2026-06-09T09:53:21.813Z",
+  "generated": "2026-06-09T09:59:56.250Z",
   "script": {
     "lines": 4749,
-    "hash": "190d94ec",
+    "hash": "55d82dc1",
     "definedCount": 607,
     "stateVars": [
       "_currentView",
@@ -1347,7 +1347,7 @@
     },
     {
       "file": "script-mobile.js",
-      "lines": 2373,
+      "lines": 2375,
       "exports": [
         "addCustomerNote",
         "deleteCustomerNote",
@@ -1398,7 +1398,8 @@
         "_mcalOptimisticInsert",
         "_mcalOptimisticSwap",
         "_mcalOptimisticMarkFailed",
-        "_mcalEnqueueRetry"
+        "_mcalEnqueueRetry",
+        "_clearMobileSnapshots"
       ]
     },
     {
@@ -1549,7 +1550,7 @@
     },
     {
       "file": "script-prospects.js",
-      "lines": 9885,
+      "lines": 9887,
       "exports": [
         "sortProspects",
         "showProspectsView",

@@ -57,6 +57,8 @@
     const executeWorkflows             = (...a) => (window.app.executeWorkflows             || (() => Promise.resolve()))(...a);
     // SCORING_RULES constant — exported by script-features2.js. Fallback guards against load order.
     const SCORING_RULES = window.app.SCORING_RULES || { CREATE_PROSPECT: 5, MARK_NOT_INTERESTED: -500 };
+    // addWhatsAppButtonToProfile — defined in script.js IIFE, exported to window.app.
+    const addWhatsAppButtonToProfile = (...a) => (window.app.addWhatsAppButtonToProfile || (() => Promise.resolve()))(...a);
     // Live reference to current user (refreshed on each navigation via _syncProspectsUser)
     let _currentUser = _state.cu;
     const _syncUser = () => { _currentUser = _state.cu; };
@@ -2508,7 +2510,7 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
         `;
     }
     else if (tab === 'journey') {
-        await window._loadChunkOnce('chunks/script-journey.min.js');
+        await window._loadChunk('chunks/script-journey.min.js');
         await (window.app.renderJourneyTab || (() => {}))('customer', customer.id, container);
     }
 };
@@ -4595,7 +4597,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
     }
     else if (tab === 'journey') {
         // Lazy-load the journey chunk then render
-        await window._loadChunkOnce('chunks/script-journey.min.js');
+        await window._loadChunk('chunks/script-journey.min.js');
         await (window.app.renderJourneyTab || (() => {}))('prospect', prospectId, container);
     }
 };

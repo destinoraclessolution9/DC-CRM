@@ -4229,14 +4229,14 @@ function _wireLoginBtn() {
                 if (action && action !== 'revalidate') {
                     if (table === 'activities' || table === 'events') {
                         // Rendered views change; people caches stay warm.
-                        _clearMobileSnapshots(['mcal-snap-', 'mcal-acts-', 'mhome-snap-']);
+                        (window.app._clearMobileSnapshots || (() => {}))(['mcal-snap-', 'mcal-acts-', 'mhome-snap-']);
                     } else if (table === 'prospects' || table === 'customers') {
                         // Everything people-derived must refresh.
-                        _clearMobileSnapshots(['mp-list-snap-', 'mhome-', 'mcal-people', 'mcal-snap-', 'mcal-acts-']);
+                        (window.app._clearMobileSnapshots || (() => {}))(['mp-list-snap-', 'mhome-', 'mcal-people', 'mcal-snap-', 'mcal-acts-']);
                     } else if (table === 'users') {
-                        _clearMobileSnapshots(['mhome-users', 'mhome-snap-', 'mcal-people', 'mp-list-snap-']);
+                        (window.app._clearMobileSnapshots || (() => {}))(['mhome-users', 'mhome-snap-', 'mcal-people', 'mp-list-snap-']);
                     } else if (table === 'follow_up_drafts' || table === 'refill_reminders') {
-                        _clearMobileSnapshots(['mhome-drafts', 'mhome-refills', 'mhome-snap-']);
+                        (window.app._clearMobileSnapshots || (() => {}))(['mhome-drafts', 'mhome-refills', 'mhome-snap-']);
                     }
 
                     // ── View HTML cache invalidation ──
