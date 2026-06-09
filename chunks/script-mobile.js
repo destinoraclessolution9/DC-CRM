@@ -1747,7 +1747,7 @@
                 ${isEmpty ? '<div style="text-align:center;padding:28px;color:var(--gray-400);font-size:13px;">No activities on this day</div>' : ''}
             </div>
         `, [
-            { label: '+ Add Meet Up', type: 'primary', action: `UI.hideModal();app.openActivityModal && app.openActivityModal('${dateStr}')` },
+            { label: '+ Add Meet Up', type: 'primary', action: `app.mcalAddMeetUp && app.mcalAddMeetUp('${dateStr}')` },
             { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
         ]);
     };
@@ -1775,6 +1775,13 @@
         // Open the activity creation modal — pre-fills with today's date by default.
         try { await (window.app.openActivityModal || (() => {}))(); return; } catch (_) {}
         UI.toast.success('Add activity');
+    };
+    const mcalAddMeetUp = (dateStr) => {
+        // Opens the activity modal from a calendar day-detail. After saving, the
+        // day-detail is automatically reopened so the user sees the new activity.
+        UI.hideModal();
+        window._mcalAfterSaveDate = dateStr;
+        window.app.openActivityModal && window.app.openActivityModal(dateStr);
     };
     const mcalWa = () => {
         window.open('https://web.whatsapp.com', '_blank', 'noopener');
@@ -2340,6 +2347,7 @@
         mcalNextMonth,
         mcalToday,
         mcalDayClick,
+        mcalAddMeetUp,
         mcalTab,
         mcalFilter,
         mcalAdd,

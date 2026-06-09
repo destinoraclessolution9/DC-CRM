@@ -4403,6 +4403,11 @@
 
         if (!stayOpen) {
             UI.hideModal();
+            if (window._mcalAfterSaveDate) {
+                const _dStr = window._mcalAfterSaveDate;
+                window._mcalAfterSaveDate = null;
+                setTimeout(() => { try { window.app.mcalDayClick && window.app.mcalDayClick(_dStr); } catch(_) {} }, 300);
+            }
             if (_cpsIntakeWaCallback) setTimeout(_cpsIntakeWaCallback, 300);
         } else {
             // Reset co-agents and consultants when staying open for another add
