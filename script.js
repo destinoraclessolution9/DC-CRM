@@ -2083,7 +2083,19 @@ function _wireLoginBtn() {
             // getSession() can resolve to undefined and the nested destructure
             // would throw "undefined is not an object" before our outer catch
             // could log a useful message.
-            const sessionResponse = await window.supabase.auth.getSession();
+            //
+            // Also: when the stored session token is expired, Supabase JS
+            // automatically calls POST /auth/v1/token to refresh it. If the
+            // auth server is unreachable that network call hangs indefinitely.
+            // Wrap in a 6s timeout so a dead network shows the login screen
+            // quickly instead of leaving the dark #app-loading spinner forever.
+            const sessionResponse = await Promise.race([
+                window.supabase.auth.getSession(),
+                new Promise(resolve => setTimeout(
+                    () => resolve({ data: { session: null }, error: new Error('getSession timeout') }),
+                    6000
+                ))
+            ]);
             const session = (sessionResponse && sessionResponse.data && sessionResponse.data.session) || null;
             const authUser = session?.user ?? null;
             if (authUser) {
