@@ -5024,7 +5024,10 @@ window._fv._showAgentProfile = async (agentId) => {
     };
 
     const renderFollowupStats = async (agentId) => {
-        const stats = (await window.AppDataStore.query('agent_stats', { agent_id: agentId }))[0];
+        const stats = (await Promise.race([
+            window.AppDataStore.query('agent_stats', { agent_id: agentId }).catch(() => []),
+            new Promise(resolve => setTimeout(() => resolve([]), 5000))
+        ]))[0];
         if (!stats) return '<p>No performance data available.</p>';
         return `
     <div class="performance-stats">
@@ -5057,8 +5060,10 @@ window._fv._showAgentProfile = async (agentId) => {
     };
 
     const renderCurrentAssignments = async (agentId) => {
-        const allP = await window.AppDataStore.getAll('prospects', { fresh: true });
-        const agentProspects = allP.filter(p => String(p.responsible_agent_id) === String(agentId));
+        const agentProspects = await Promise.race([
+            window.AppDataStore.query('prospects', { responsible_agent_id: agentId }).catch(() => []),
+            new Promise(resolve => setTimeout(() => resolve([]), 6000))
+        ]);
         if (agentProspects.length === 0) return '<p style="color:var(--gray-400);font-size:13px;">No prospects assigned.</p>';
         agentProspects.sort((a, b) => (b.last_activity_date || '').localeCompare(a.last_activity_date || ''));
         return `
@@ -5080,7 +5085,10 @@ window._fv._showAgentProfile = async (agentId) => {
     };
 
     const renderPerformanceTargets = async (agentId) => {
-        const target = (await window.AppDataStore.query('agent_targets', { agent_id: agentId }))[0];
+        const target = (await Promise.race([
+            window.AppDataStore.query('agent_targets', { agent_id: agentId }).catch(() => []),
+            new Promise(resolve => setTimeout(() => resolve([]), 5000))
+        ]))[0];
         if (!target) return '<p>No targets set for this month.</p>';
         return `
     <div class="performance-stats">
@@ -5114,8 +5122,10 @@ window._fv._showAgentProfile = async (agentId) => {
     };
 
     const renderCustomerHistory = async (agentId) => {
-        const allC = await window.AppDataStore.getAll('customers');
-        const customers = allC.filter(c => String(c.responsible_agent_id) === String(agentId));
+        const customers = await Promise.race([
+            window.AppDataStore.query('customers', { responsible_agent_id: agentId }).catch(() => []),
+            new Promise(resolve => setTimeout(() => resolve([]), 6000))
+        ]);
         if (customers.length === 0) return '<p>No converted customers yet.</p>';
         return `
     <div class="assignments-list">
@@ -5132,6 +5142,7 @@ window._fv._showAgentProfile = async (agentId) => {
     `;
     };
 
+    const _apLoading = '<div style="padding:20px;text-align:center;color:var(--gray-400);font-size:13px;"><i class="fas fa-circle-notch fa-spin" style="margin-right:6px;"></i>Loading…</div>';
     const viewport = document.getElementById('content-viewport');
     viewport.innerHTML = `
     <div class="agent-profile-view">
@@ -5218,25 +5229,25 @@ window._fv._showAgentProfile = async (agentId) => {
 
             <div class="performance-card">
                 <h4><i class="fas fa-chart-line"></i> Follow-up Performance</h4>
-                ${await renderFollowupStats(agent.id)}
+                <div id="_ap-followup-${agentId}">${_apLoading}</div>
             </div>
         </div>
 
         <div class="performance-grid">
             <div class="performance-card">
                 <h4><i class="fas fa-list-check"></i> Current Assignments</h4>
-                ${await renderCurrentAssignments(agent.id)}
+                <div id="_ap-assignments-${agentId}">${_apLoading}</div>
             </div>
             <div class="performance-card">
                 <h4><i class="fas fa-bullseye"></i> Performance Targets (March)</h4>
-                ${await renderPerformanceTargets(agent.id)}
+                <div id="_ap-targets-${agentId}">${_apLoading}</div>
             </div>
         </div>
 
         <div class="performance-grid">
             <div class="performance-card">
                 <h4><i class="fas fa-history"></i> Customer History</h4>
-                ${await renderCustomerHistory(agent.id)}
+                <div id="_ap-customers-${agentId}">${_apLoading}</div>
             </div>
             <div class="performance-card">
                 <h4><i class="fas fa-clock-rotate-left"></i> Agent Activity History</h4>
@@ -5274,22 +5285,52 @@ window._fv._showAgentProfile = async (agentId) => {
     </div>
     `;
 
-    setTimeout(async () => {
-        const agentNotes = await window.AppDataStore.query('notes', { agent_id: agent.id });
-        const notesHtml = agentNotes.length
-            ? agentNotes.map(n => `
-                <div class="notes-item" style="margin-top:8px;">
-                    <div class="notes-header">
-                        <span>${escapeHtml(n.date)} - ${escapeHtml(n.author)}${n.is_voice_note ? ' <i class="fas fa-microphone voice-note-icon" title="Voice note"></i>' : ''}</span>
-                        <button class="btn-icon" onclick="app.deleteAgentNote(${agent.id}, ${n.id})"><i class="fas fa-trash"></i></button>
+    // Populate all async sections in parallel — page already visible above
+    Promise.all([
+        renderFollowupStats(agent.id).then(html => {
+            const el = document.getElementById(`_ap-followup-${agentId}`);
+            if (el) el.innerHTML = html;
+        }).catch(() => {
+            const el = document.getElementById(`_ap-followup-${agentId}`);
+            if (el) el.innerHTML = '<p style="color:var(--gray-400);font-size:13px;">Failed to load.</p>';
+        }),
+        renderCurrentAssignments(agent.id).then(html => {
+            const el = document.getElementById(`_ap-assignments-${agentId}`);
+            if (el) el.innerHTML = html;
+        }).catch(() => {
+            const el = document.getElementById(`_ap-assignments-${agentId}`);
+            if (el) el.innerHTML = '<p style="color:var(--gray-400);font-size:13px;">Failed to load.</p>';
+        }),
+        renderPerformanceTargets(agent.id).then(html => {
+            const el = document.getElementById(`_ap-targets-${agentId}`);
+            if (el) el.innerHTML = html;
+        }).catch(() => {
+            const el = document.getElementById(`_ap-targets-${agentId}`);
+            if (el) el.innerHTML = '<p style="color:var(--gray-400);font-size:13px;">Failed to load.</p>';
+        }),
+        renderCustomerHistory(agent.id).then(html => {
+            const el = document.getElementById(`_ap-customers-${agentId}`);
+            if (el) el.innerHTML = html;
+        }).catch(() => {
+            const el = document.getElementById(`_ap-customers-${agentId}`);
+            if (el) el.innerHTML = '<p style="color:var(--gray-400);font-size:13px;">Failed to load.</p>';
+        }),
+        window.AppDataStore.query('notes', { agent_id: agent.id }).catch(() => []).then(agentNotes => {
+            const notesHtml = agentNotes.length
+                ? agentNotes.map(n => `
+                    <div class="notes-item" style="margin-top:8px;">
+                        <div class="notes-header">
+                            <span>${escapeHtml(n.date)} - ${escapeHtml(n.author)}${n.is_voice_note ? ' <i class="fas fa-microphone voice-note-icon" title="Voice note"></i>' : ''}</span>
+                            <button class="btn-icon" onclick="app.deleteAgentNote(${agent.id}, ${n.id})"><i class="fas fa-trash"></i></button>
+                        </div>
+                        <div>"${escapeHtml(n.text)}"</div>
                     </div>
-                    <div>"${escapeHtml(n.text)}"</div>
-                </div>
-            `).join('')
-            : '<p style="color:var(--gray-400); font-size:13px;">No notes yet.</p>';
-        const notesContainer = document.getElementById(`agent-notes-list-${agent.id}`);
-        if (notesContainer) notesContainer.innerHTML = notesHtml;
-    }, 100);
+                `).join('')
+                : '<p style="color:var(--gray-400); font-size:13px;">No notes yet.</p>';
+            const notesContainer = document.getElementById(`agent-notes-list-${agent.id}`);
+            if (notesContainer) notesContainer.innerHTML = notesHtml;
+        })
+    ]);
 };
 
 // ══════════════ showSettingsView ══════════════
