@@ -2093,7 +2093,17 @@ function _wireLoginBtn() {
                 let profileMatches = [];
                 let profileFetchFailed = false;
                 try {
-                    profileMatches = await AppDataStore.query('users', { email: authUser.email });
+                    // Wrap in a 7s timeout — query() has no internal timeout and
+                    // hangs forever when Supabase is unreachable, keeping #app-loading
+                    // on screen indefinitely. The catch below handles the rejection
+                    // by falling back to a minimal placeholder profile so the app
+                    // continues instead of being stuck on the loading screen.
+                    profileMatches = await Promise.race([
+                        AppDataStore.query('users', { email: authUser.email }),
+                        new Promise((_, reject) => setTimeout(
+                            () => reject(new Error('Profile fetch timed out after 7s')), 7000
+                        ))
+                    ]);
                 } catch (qErr) {
                     profileFetchFailed = true;
                     console.warn('users-table lookup failed during auto-login:', qErr?.message || qErr);
