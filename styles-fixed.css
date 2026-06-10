@@ -10696,6 +10696,19 @@ input:checked+.slider:before {
     background: var(--accent,#e91e8c); color: #fff;
     border-color: var(--accent,#e91e8c);
 }
+.fude-story-search-bar { padding: 0 16px 12px; }
+.fude-story-search-input {
+    width: 100%; padding: 9px 16px; box-sizing: border-box;
+    border: 1.5px solid #e5e7eb; border-radius: 24px;
+    font-size: 0.82rem; outline: none;
+    background: #fafafa; color: #374151;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+.fude-story-search-input:focus {
+    border-color: var(--accent,#e91e8c);
+    box-shadow: 0 0 0 3px rgba(233,30,140,0.08);
+}
+.fude-story-search-input::placeholder { color: #9ca3af; }
 
 /* ---- 小贴士 Tips row ---- */
 .fude-tips-section {

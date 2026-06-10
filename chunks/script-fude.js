@@ -293,6 +293,9 @@ const showFudeView = async (container) => {
                 </div>
                 ${filterBar}
                 <div class="fude-story-grid">${cards}</div>
+                <div class="fude-story-search-bar">
+                    <input type="text" class="fude-story-search-input" placeholder="🔍  Search stories…" oninput="app.fudeSearchStories(this.value)">
+                </div>
                 ${hasMore ? `<button class="fude-stories-more-btn" onclick="app.fudeShowAllStories()">✦ Explore More Success Stories</button>` : ''}
             </div>`;
     })();
@@ -2557,6 +2560,29 @@ const openFudeRedeemModal = (pts = 0) => {
     `, [{ label: '关闭', action: 'UI.hideModal()', type: 'primary' }]);
 };
 
+const fudeSearchStories = (query) => {
+    const section = document.querySelector('.fude-stories-section');
+    if (!section) return;
+    const q = query.trim().toLowerCase();
+    const cards = section.querySelectorAll('.fude-story-card');
+    const moreBtn = section.querySelector('.fude-stories-more-btn');
+    const chips = section.querySelectorAll('.fude-story-filter-chip');
+    if (!q) {
+        chips.forEach(c => c.classList.toggle('active', c.dataset.tag === '*'));
+        cards.forEach(c => c.classList.toggle('fude-story-card--hidden', c.dataset.overflow === '1'));
+        if (moreBtn) moreBtn.style.display = '';
+        return;
+    }
+    chips.forEach(c => c.classList.remove('active'));
+    if (moreBtn) moreBtn.style.display = 'none';
+    cards.forEach(c => {
+        const title   = (c.querySelector('h3')?.textContent || '').toLowerCase();
+        const excerpt = (c.querySelector('p')?.textContent  || '').toLowerCase();
+        const tags    = (c.dataset.tags || '').toLowerCase();
+        c.classList.toggle('fude-story-card--hidden', !title.includes(q) && !excerpt.includes(q) && !tags.includes(q));
+    });
+};
+
 const fudeFilterStories = (tag) => {
     const section = document.querySelector('.fude-stories-section');
     if (!section) return;
@@ -2590,6 +2616,7 @@ const fudeShowAllStories = () => {
     Object.assign(window.app, {
         showFudeView,
         openStoryDetail,
+        fudeSearchStories,
         fudeFilterStories,
         fudeShowAllStories,
         openHighlightModal,
