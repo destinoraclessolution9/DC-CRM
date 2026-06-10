@@ -467,7 +467,7 @@ window.addEventListener('beforeinstallprompt', function (e) {
     }
 
     async function resolveAttachmentImages(root) {
-        if (!window.AppDataStore || !AppDataStore.resolveAttachmentSrc) return;
+        if (!window.AppDataStore || !window.AppDataStore.resolveAttachmentSrc) return;
         const scope = root || document;
         const imgs = Array.from(scope.querySelectorAll('img[data-attach-src]:not([data-attach-resolved])'));
         const bgs  = Array.from(scope.querySelectorAll('[data-attach-bg]:not([data-attach-resolved])'));
@@ -475,11 +475,11 @@ window.addEventListener('beforeinstallprompt', function (e) {
         [...imgs, ...bgs].forEach(function (el) { el.setAttribute('data-attach-resolved', '1'); });
         await Promise.all([
             ...imgs.map(async function (img) {
-                const url = await AppDataStore.resolveAttachmentSrc(img.getAttribute('data-attach-src')).catch(function () { return null; });
+                const url = await window.AppDataStore.resolveAttachmentSrc(img.getAttribute('data-attach-src')).catch(function () { return null; });
                 if (url) img.src = url; else img.style.display = 'none';
             }),
             ...bgs.map(async function (el) {
-                const url = await AppDataStore.resolveAttachmentSrc(el.getAttribute('data-attach-bg')).catch(function () { return null; });
+                const url = await window.AppDataStore.resolveAttachmentSrc(el.getAttribute('data-attach-bg')).catch(function () { return null; });
                 if (url) el.style.backgroundImage = "url('" + url.replace(/'/g, "\\'") + "')";
             })
         ]);
@@ -528,8 +528,8 @@ window.addEventListener('beforeinstallprompt', function (e) {
 // ── Attachment opener ──────────────────────────────────────────────────────
 window._openAttachment = async function (src) {
     try {
-        if (window.AppDataStore && AppDataStore.resolveAttachmentSrc) {
-            const url = await AppDataStore.resolveAttachmentSrc(src);
+        if (window.AppDataStore && window.AppDataStore.resolveAttachmentSrc) {
+            const url = await window.AppDataStore.resolveAttachmentSrc(src);
             if (url) { window.open(url, '_blank', 'noopener'); return; }
         }
     } catch (_) {}

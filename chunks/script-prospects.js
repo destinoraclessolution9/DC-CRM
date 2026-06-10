@@ -231,18 +231,19 @@ const showProspectsView = async (container) => {
 const switchCustomerTab = async (tabName) => {
     const pTab = document.getElementById('prospects-tab-content');
     const cTab = document.getElementById('customers-tab-content');
+    if (!pTab || !cTab) return;
     const btns = document.querySelectorAll('.tab-btn');
 
     btns.forEach(b => b.classList.remove('active'));
     if (tabName === 'prospects') {
         pTab.style.display = 'block';
         cTab.style.display = 'none';
-        btns[0].classList.add('active');
+        if (btns[0]) btns[0].classList.add('active');
         await renderProspectsTable();
     } else {
         pTab.style.display = 'none';
         cTab.style.display = 'block';
-        btns[1].classList.add('active');
+        if (btns[1]) btns[1].classList.add('active');
         await showCustomersView(cTab);
     }
 };
@@ -735,7 +736,6 @@ const approveQueueEntry = async (entryId) => {
                 const cr = entry.snapshot_after;
                 const amt = parseFloat(cr.sale_amount) || 0;
                 await AppDataStore.create('purchases', {
-                    id: Date.now(),
                     customer_id: customer.id,
                     date: cr.closing_date || now.split('T')[0],
                     invoice: cr.invoice_number || '',
@@ -2050,7 +2050,6 @@ const saveProspect = async () => {
             if (!isManager && isConverted) {
                 try {
                     await AppDataStore.create('approval_queue', {
-                        id: Date.now(),
                         approval_type: 'info_update',
                         status: 'pending',
                         prospect_id: parseInt(editId),
@@ -2064,7 +2063,7 @@ const saveProspect = async () => {
                 } catch (e) { /* approval queue write failed silently */ }
             }
         } else {
-            data.id = Date.now();
+            data.id = window.AppDataStore._generateId();
             data.protection_deadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
             data.score = SCORING_RULES.CREATE_PROSPECT;
             // Create-only fields — never overwritten on edit so the original agent keeps ownership
@@ -2735,7 +2734,7 @@ const saveDocument = async (entityId, entityType) => {
 const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text).then(() => {
         UI.toast.success('Copied!');
-    });
+    }).catch(() => UI.toast.error('Copy failed'));
 };
 
 const renderPurchaseHistoryTab = async (customer, containerId = 'profile-tab-content') => {
@@ -4983,7 +4982,6 @@ const addNote = async (prospectId) => {
     const latestActivity = _latestActs.find(a => MEETUP_TYPES.includes(a.activity_type));
 
     await AppDataStore.create('notes', {
-        id: Date.now(),
         prospect_id: prospectId,
         activity_id: latestActivity?.id || null,
         text: text,
@@ -6377,7 +6375,7 @@ const submitClosingRecord = async (prospectId) => {
         try {
             // New sale approval entry
             await AppDataStore.create('approval_queue', {
-                id: Date.now(),
+                id: window.AppDataStore._generateId(),
                 approval_type: 'new_sale',
                 status: 'pending',
                 prospect_id: prospectId,
@@ -6391,7 +6389,7 @@ const submitClosingRecord = async (prospectId) => {
             // If auto-conversion triggered and not already a customer, create new_customer entry
             if (saleAmount >= 2000 && !isAlreadyConverted) {
                 await AppDataStore.create('approval_queue', {
-                    id: Date.now() + 1,
+                    id: window.AppDataStore._generateId(),
                     approval_type: 'new_customer',
                     status: 'pending',
                     prospect_id: prospectId,
@@ -6800,7 +6798,7 @@ const approveClosingRecord = async (prospectId) => {
         if (!customer) {
             // Prospect was marked converted but no customer record exists — create one now
             const newCust = await AppDataStore.create('customers', {
-                id: Date.now(),
+                id: window.AppDataStore._generateId(),
                 full_name: prospect.full_name,
                 phone: prospect.phone,
                 email: prospect.email,
@@ -6816,7 +6814,6 @@ const approveClosingRecord = async (prospectId) => {
         }
         if (customer) {
             await AppDataStore.create('purchases', {
-                id: Date.now(),
                 customer_id: customer.id,
                 date: cr.closing_date || cr.order_date || now.split('T')[0],
                 invoice: cr.invoice_number || '',
@@ -7428,7 +7425,7 @@ const confirmConvertToCustomer = async (prospectId, isManual = false) => {
         : document.getElementById('customer-since')?.value;
 
     const customer = {
-        id: Date.now(),
+        id: window.AppDataStore._generateId(),
         full_name: prospect.full_name,
         nickname: prospect.nickname || '',
         phone: prospect.phone,
@@ -7573,7 +7570,6 @@ const requestProspectConversion = async (prospectId) => {
     try {
         const prospect = await AppDataStore.getById('prospects', prospectId);
         await AppDataStore.create('approval_queue', {
-            id: Date.now(),
             approval_type: 'new_customer',
             status: 'pending',
             prospect_id: prospectId,
@@ -7647,7 +7643,6 @@ const approveProspectConversion = async (prospectId) => {
 
     // Full data copy — every field from prospect goes to customer
     const customer = {
-        id: Date.now(),
         title: prospect.title || '',
         full_name: prospect.full_name,
         nickname: prospect.nickname || '',
@@ -8680,7 +8675,6 @@ const saveAgent = async () => {
         }
 
         const newAgent = {
-            id: Date.now(),
             username: usernameVal,
             password: initialPassword,
             join_date: new Date().toISOString().split('T')[0],

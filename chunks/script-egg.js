@@ -1762,7 +1762,7 @@ JB 星期二到
                 _eggState.urgentOrders = [rows[0]];
                 eggOpenAddUrgentModal(id);
             }
-        });
+        }).catch(err => { UI.toast.error("Failed to load urgent order: " + (err?.message||err)); });
     };
 
     const eggCancelUrgent = async (id) => {

@@ -714,12 +714,14 @@ const startImport = async () => {
     const duplicateAction = document.querySelector('input[name="duplicate-action"]:checked')?.value || 'skip';
     const assignTo        = document.querySelector('input[name="assign-to"]:checked')?.value || 'myself';
 
-    document.getElementById('progress-area').style.display = 'block';
-    document.getElementById('start-import-btn').disabled = true;
+    const progressArea = document.getElementById('progress-area');
+    if (progressArea) progressArea.style.display = 'block';
+    const startBtn = document.getElementById('start-import-btn');
+    if (startBtn) startBtn.disabled = true;
 
     const rowsToProcess = _importData.validationResults.filter(vr => vr.status !== 'error');
     const total = rowsToProcess.length;
-    if (total === 0) { UI.toast.error('No valid rows to import'); document.getElementById('start-import-btn').disabled = false; return; }
+    if (total === 0) { UI.toast.error('No valid rows to import'); if (startBtn) startBtn.disabled = false; return; }
 
     const dupMap = new Map();
     _importData.duplicates.list.forEach(d => dupMap.set(d.rowIndex, d));
@@ -751,7 +753,6 @@ const startImport = async () => {
             // merge: fall through to create
         }
         try {
-            record.id = Date.now() + i;
             record.created_at = new Date().toISOString();
             if (!isMarketingType) {
                 record.status = 'New';

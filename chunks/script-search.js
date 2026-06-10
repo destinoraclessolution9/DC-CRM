@@ -171,16 +171,16 @@ const showSearchPanel = async () => {
                 <div class="search-presets">
                     <h3>Quick Presets</h3>
                     <div class="preset-buttons">
-                        <button class="preset-btn" onclick="app.loadPreset('agent-monthly')">Agent Monthly Report</button>
-                        <button class="preset-btn" onclick="app.loadPreset('high-score')">High Score Prospects</button>
-                        <button class="preset-btn" onclick="app.loadPreset('recent-activities')">Recent Activities</button>
-                        <button class="preset-btn" onclick="app.loadPreset('cai-ku-not-purchased')">CAI KU Painting Not Purchased</button>
+                        <button class="preset-btn" onclick="(async()=>{try{await app.loadPreset('agent-monthly');}catch(e){console.error(e);}})()">Agent Monthly Report</button>
+                        <button class="preset-btn" onclick="(async()=>{try{await app.loadPreset('high-score');}catch(e){console.error(e);}})()">High Score Prospects</button>
+                        <button class="preset-btn" onclick="(async()=>{try{await app.loadPreset('recent-activities');}catch(e){console.error(e);}})()">Recent Activities</button>
+                        <button class="preset-btn" onclick="(async()=>{try{await app.loadPreset('cai-ku-not-purchased');}catch(e){console.error(e);}})()">CAI KU Painting Not Purchased</button>
                     </div>
                 </div>
 
                 <div class="search-entity-selector">
                     <label>Search in:</label>
-                    <select id="search-entity" onchange="app.updateFilterSections()">
+                    <select id="search-entity" onchange="(async()=>{try{await app.updateFilterSections();}catch(e){console.error(e);}})()">
                         <option value="agents">Agents</option>
                         <option value="prospects" selected>Prospects</option>
                         <option value="customers">Customers</option>
@@ -224,7 +224,7 @@ const showSearchPanel = async () => {
                 </div>
 
                 <div style="display:flex; gap:8px; margin:8px 0; flex-wrap:wrap;">
-                    <button class="btn secondary" onclick="app.openSaveSearchModal()">
+                    <button class="btn secondary" onclick="(async()=>{try{await app.openSaveSearchModal();}catch(e){console.error(e);}})()">
                         <i class="fas fa-save"></i> Save Search
                     </button>
                     <button class="btn secondary" onclick="app.exportResults('csv')">
@@ -248,7 +248,7 @@ const showSearchPanel = async () => {
             </details>
 
             <div class="search-actions">
-                <button class="btn primary" onclick="app.executeSearch()">
+                <button class="btn primary" onclick="(async()=>{try{await app.executeSearch();}catch(e){console.error(e);}})()">
                     <i class="fas fa-search"></i> Apply Filters
                 </button>
                 <button class="btn secondary" onclick="app.clearAllFilters()">
@@ -267,6 +267,7 @@ const showSearchPanel = async () => {
     `;
 
     // Insert panel before the main content
+    if (!viewport) return;
     viewport.insertAdjacentHTML('beforebegin', searchHTML);
 
     // Load saved searches
@@ -968,39 +969,51 @@ const loadPreset = async (presetId) => {
     clearAllFilters();
 
     switch (presetId) {
-        case 'agent-monthly':
-            document.getElementById('search-entity').value = 'agents';
+        case 'agent-monthly': {
+            const seEl = document.getElementById('search-entity');
+            if (seEl) seEl.value = 'agents';
             await updateFilterSections();
-            document.getElementById('filter-agent-status').value = 'active';
+            const fasEl = document.getElementById('filter-agent-status');
+            if (fasEl) fasEl.value = 'active';
             break;
-        case 'high-score':
-            document.getElementById('search-entity').value = 'prospects';
+        }
+        case 'high-score': {
+            const seEl = document.getElementById('search-entity');
+            if (seEl) seEl.value = 'prospects';
             await updateFilterSections();
-            document.getElementById('filter-prospect-score-min').value = 800;
+            const fsmEl = document.getElementById('filter-prospect-score-min');
+            if (fsmEl) fsmEl.value = 800;
             break;
-        case 'cai-ku-not-purchased':
-            document.getElementById('search-entity').value = 'prospects';
+        }
+        case 'cai-ku-not-purchased': {
+            const seEl = document.getElementById('search-entity');
+            if (seEl) seEl.value = 'prospects';
             await updateFilterSections();
-            document.getElementById('filter-prospect-not-purchased').value = 'CAI KU Painting';
+            const fnpEl = document.getElementById('filter-prospect-not-purchased');
+            if (fnpEl) fnpEl.value = 'CAI KU Painting';
             break;
-        case 'recent-activities':
-            document.getElementById('search-entity').value = 'activities';
+        }
+        case 'recent-activities': {
+            const seEl = document.getElementById('search-entity');
+            if (seEl) seEl.value = 'activities';
             await updateFilterSections();
             const today = new Date().toISOString().split('T')[0];
-            document.getElementById('search-date-from').value = today;
+            const sdfEl = document.getElementById('search-date-from');
+            if (sdfEl) sdfEl.value = today;
             break;
+        }
     }
 
     await executeSearch();
 };
 
 const collectFilters = () => {
-    const entity = document.getElementById('search-entity').value;
+    const entity = document.getElementById('search-entity')?.value || 'prospects';
     const filters = {
         entity,
         dateRange: {
-            from: document.getElementById('search-date-from').value,
-            to: document.getElementById('search-date-to').value
+            from: document.getElementById('search-date-from')?.value || '',
+            to: document.getElementById('search-date-to')?.value || ''
         },
         basic: {},
         complex: _conditionGroups
@@ -1596,9 +1609,9 @@ const renderPagination = async () => {
 
     container.innerHTML = `
         <div class="pagination-controls">
-            <button ${_currentPage === 1 ? 'disabled' : ''} onclick="app.goToPage(${_currentPage - 1})">Prev</button>
+            <button ${_currentPage === 1 ? 'disabled' : ''} onclick="(async()=>{try{await app.goToPage(${_currentPage - 1});}catch(e){console.error(e);}})()">Prev</button>
             <span>Page ${_currentPage} of ${totalPages}</span>
-            <button ${_currentPage === totalPages ? 'disabled' : ''} onclick="app.goToPage(${_currentPage + 1})">Next</button>
+            <button ${_currentPage === totalPages ? 'disabled' : ''} onclick="(async()=>{try{await app.goToPage(${_currentPage + 1});}catch(e){console.error(e);}})()">Next</button>
         </div>
     `;
 };
@@ -1621,12 +1634,12 @@ const renderSavedSearches = async () => {
 
     container.innerHTML = searches.map(s => `
         <div class="saved-search-item">
-            <div class="saved-search-info" onclick="app.loadSavedSearch(${s.id})">
+            <div class="saved-search-info" onclick="(async()=>{try{await app.loadSavedSearch(${s.id});}catch(e){console.error(e);}})()">
                 <i class="fas fa-bookmark"></i>
                 <span>${s.search_name}</span>
                 <small>${s.entity}</small>
             </div>
-            <button class="btn-icon" onclick="app.deleteSavedSearch(${s.id})">
+            <button class="btn-icon" onclick="(async()=>{try{await app.deleteSavedSearch(${s.id});}catch(e){console.error(e);}})()">
                 <i class="fas fa-trash"></i>
             </button>
         </div>
@@ -1643,15 +1656,18 @@ const openSaveSearchModal = async () => {
 const saveCurrentSearch = async (name) => {
     const filters = collectFilters();
     const savedSearch = {
-        id: Date.now(),
         search_name: name,
         entity: filters.entity,
         filter_data: JSON.stringify(filters),
         created_at: new Date().toISOString()
     };
 
-    await AppDataStore.create('saved_searches', savedSearch);
-    UI.toast.success('Search saved successfully');
+    try {
+        await AppDataStore.create('saved_searches', savedSearch);
+        UI.toast.success('Search saved successfully');
+    } catch (e) {
+        UI.toast.error('Failed to save search: ' + (e?.message || e));
+    }
     await renderSavedSearches();
 };
 
@@ -1663,11 +1679,14 @@ const loadSavedSearch = async (id) => {
     const filters = JSON.parse(search.filter_data);
 
     // Restore UI
-    document.getElementById('search-entity').value = filters.entity;
+    const seEl = document.getElementById('search-entity');
+    if (seEl) seEl.value = filters.entity;
     await updateFilterSections();
 
-    document.getElementById('search-date-from').value = filters.dateRange.from || '';
-    document.getElementById('search-date-to').value = filters.dateRange.to || '';
+    const sdfEl = document.getElementById('search-date-from');
+    if (sdfEl) sdfEl.value = filters.dateRange.from || '';
+    const sdtEl = document.getElementById('search-date-to');
+    if (sdtEl) sdtEl.value = filters.dateRange.to || '';
 
     _conditionGroups = filters.complex;
     renderConditionGroups();
@@ -1678,8 +1697,12 @@ const loadSavedSearch = async (id) => {
 
 const deleteSavedSearch = async (id) => {
     if (confirm('Are you sure you want to delete this saved search?')) {
-        await AppDataStore.delete('saved_searches', id);
-        UI.toast.success('Search deleted');
+        try {
+            await AppDataStore.delete('saved_searches', id);
+            UI.toast.success('Search deleted');
+        } catch (e) {
+            UI.toast.error('Failed to delete search: ' + (e?.message || e));
+        }
         await renderSavedSearches();
     }
 };
@@ -1718,8 +1741,10 @@ const clearAllFilters = () => {
     }
 
     // Reset date
-    document.getElementById('search-date-from').value = '';
-    document.getElementById('search-date-to').value = '';
+    const sdfEl = document.getElementById('search-date-from');
+    if (sdfEl) sdfEl.value = '';
+    const sdtEl = document.getElementById('search-date-to');
+    if (sdtEl) sdtEl.value = '';
 
     // Reset conditions
     _conditionGroups = [{ logic: 'AND', conditions: [] }];

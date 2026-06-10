@@ -232,6 +232,9 @@ window.UI = (() => {
         `;
 
         overlay.classList.add('active');
+        // Remove any stale handler first so rapid re-opens don't stack duplicate
+        // keydown listeners (each showModal would otherwise add another).
+        document.removeEventListener('keydown', _trapFocus);
         document.addEventListener('keydown', _trapFocus);
 
         // Focus first focusable element inside modal
@@ -261,7 +264,14 @@ window.UI = (() => {
         window._uiConfirmCb = async () => {
             hideModal();
             delete window._uiConfirmCb;
-            if (typeof onConfirm === 'function') await onConfirm();
+            // The modal is already gone, so a rejection here would be invisible.
+            // Surface it as a toast instead of an unhandled promise rejection.
+            try {
+                if (typeof onConfirm === 'function') await onConfirm();
+            } catch (err) {
+                if (toast && toast.error) toast.error('Action failed: ' + (err?.message || err));
+                else console.error('Confirm action failed:', err);
+            }
         };
         showModal(
             title,

@@ -34,23 +34,26 @@
         const text = document.getElementById('customer-note-text')?.value?.trim();
         if (!text) { UI.toast.error('Please enter a note'); return; }
         const currentUser = _state.cu;
-        await AppDataStore.create('notes', {
-            id: Date.now(),
-            customer_id: customerId,
-            text,
-            author: currentUser?.full_name || 'System',
-            date: new Date().toISOString().split('T')[0]
-        });
-        const _cnEl = document.getElementById('customer-note-text');
-        if (_cnEl) _cnEl.value = '';
-        UI.toast.success('Note added');
+        try {
+            await AppDataStore.create('notes', {
+                customer_id: customerId,
+                text,
+                author: currentUser?.full_name || 'System',
+                date: new Date().toISOString().split('T')[0]
+            });
+            const _cnEl = document.getElementById('customer-note-text');
+            if (_cnEl) _cnEl.value = '';
+            UI.toast.success('Note added');
+        } catch (e) { UI.toast.error('Failed to add note: ' + (e?.message || e)); return; }
         await (window.app.showCustomerDetail || (() => {}))(customerId);
     };
 
     const deleteCustomerNote = async (customerId, noteId) => {
         UI.confirm('Delete Note?', 'Are you sure?', async () => {
-            await AppDataStore.delete('notes', noteId);
-            UI.toast.success('Note deleted');
+            try {
+                await AppDataStore.delete('notes', noteId);
+                UI.toast.success('Note deleted');
+            } catch (e) { UI.toast.error('Failed to delete note: ' + (e?.message || e)); return; }
             await (window.app.showCustomerDetail || (() => {}))(customerId);
         });
     };
@@ -59,23 +62,26 @@
         const text = document.getElementById(`agent-note-text-${agentId}`)?.value?.trim();
         if (!text) { UI.toast.error('Please enter a note'); return; }
         const currentUser = _state.cu;
-        await AppDataStore.create('notes', {
-            id: Date.now(),
-            agent_id: agentId,
-            text,
-            author: currentUser?.full_name || 'System',
-            date: new Date().toISOString().split('T')[0]
-        });
-        const _anEl = document.getElementById(`agent-note-text-${agentId}`);
-        if (_anEl) _anEl.value = '';
-        UI.toast.success('Note added');
+        try {
+            await AppDataStore.create('notes', {
+                agent_id: agentId,
+                text,
+                author: currentUser?.full_name || 'System',
+                date: new Date().toISOString().split('T')[0]
+            });
+            const _anEl = document.getElementById(`agent-note-text-${agentId}`);
+            if (_anEl) _anEl.value = '';
+            UI.toast.success('Note added');
+        } catch (e) { UI.toast.error('Failed to add note: ' + (e?.message || e)); return; }
         await (window.app.showAgentDetail || (() => {}))(agentId);
     };
 
     const deleteAgentNote = async (agentId, noteId) => {
         UI.confirm('Delete Note?', 'Are you sure?', async () => {
-            await AppDataStore.delete('notes', noteId);
-            UI.toast.success('Note deleted');
+            try {
+                await AppDataStore.delete('notes', noteId);
+                UI.toast.success('Note deleted');
+            } catch (e) { UI.toast.error('Failed to delete note: ' + (e?.message || e)); return; }
             await (window.app.showAgentDetail || (() => {}))(agentId);
         });
     };
@@ -267,28 +273,29 @@
     const createNoteFromVoice = async (entityType, entityId, text) => {
         const currentUser = await Auth.getCurrentUser();
         const noteData = {
-            id: Date.now(),
             text,
             author: currentUser?.full_name || 'System',
             date: new Date().toISOString().split('T')[0],
             is_voice_note: true
         };
 
-        if (entityType === 'prospect') {
-            noteData.prospect_id = entityId;
-            await AppDataStore.create('notes', noteData);
-            if (entityId) await (window.app.showProspectDetail || (() => {}))(entityId);
-        } else if (entityType === 'customer') {
-            noteData.customer_id = entityId;
-            await AppDataStore.create('notes', noteData);
-            if (entityId) await (window.app.showCustomerDetail || (() => {}))(entityId);
-        } else if (entityType === 'agent') {
-            noteData.agent_id = entityId;
-            await AppDataStore.create('notes', noteData);
-            if (entityId) await (window.app.showAgentDetail || (() => {}))(entityId);
-        } else {
-            await AppDataStore.create('notes', noteData);
-        }
+        try {
+            if (entityType === 'prospect') {
+                noteData.prospect_id = entityId;
+                await AppDataStore.create('notes', noteData);
+                if (entityId) await (window.app.showProspectDetail || (() => {}))(entityId);
+            } else if (entityType === 'customer') {
+                noteData.customer_id = entityId;
+                await AppDataStore.create('notes', noteData);
+                if (entityId) await (window.app.showCustomerDetail || (() => {}))(entityId);
+            } else if (entityType === 'agent') {
+                noteData.agent_id = entityId;
+                await AppDataStore.create('notes', noteData);
+                if (entityId) await (window.app.showAgentDetail || (() => {}))(entityId);
+            } else {
+                await AppDataStore.create('notes', noteData);
+            }
+        } catch (e) { UI.toast.error('Failed to save voice note: ' + (e?.message || e)); }
     };
 
     const editTranscription = () => {
@@ -365,9 +372,11 @@
             deleteAudio: document.getElementById('voice-delete-audio')?.checked ?? true,
             saveAudio: document.getElementById('voice-save-audio')?.checked ?? false
         };
-        await UserPreferences.save('voice_settings', settings);
-        UI.hideModal();
-        UI.toast.success('Voice settings saved');
+        try {
+            await UserPreferences.save('voice_settings', settings);
+            UI.hideModal();
+            UI.toast.success('Voice settings saved');
+        } catch (e) { UI.toast.error('Failed to save settings: ' + (e?.message || e)); }
     };
     // Apply/remove body.is-mobile class and drive layout changes
     const applyMobileClass = () => {
@@ -1728,7 +1737,7 @@
             const venue = a.venue_name || a.venue || a.location_address || '';
             const color = _mcalColorForType(type);
             return `
-                <div style="display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--gray-100);cursor:pointer;" onclick="UI.hideModal();app.viewActivityDetails(${a.id})">
+                <div style="display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--gray-100);cursor:pointer;" onclick="(async()=>{try{UI.hideModal();await app.viewActivityDetails(${a.id});}catch(e){console.error(e);}})();">
                     <div style="min-width:42px;font-size:13px;font-weight:600;color:var(--gray-700);">${_mhomeEsc(time)}</div>
                     <span class="mcal-evt ${color}" style="white-space:nowrap;font-size:11px;padding:2px 7px;border-radius:4px;flex-shrink:0;">${_mhomeEsc(type)}</span>
                     <div style="flex:1;min-width:0;">
@@ -1747,7 +1756,7 @@
                 ${isEmpty ? '<div style="text-align:center;padding:28px;color:var(--gray-400);font-size:13px;">No activities on this day</div>' : ''}
             </div>
         `, [
-            { label: '+ Add Meet Up', type: 'primary', action: `app.mcalAddMeetUp && app.mcalAddMeetUp('${dateStr}')` },
+            { label: '+ Add Meet Up', type: 'primary', action: `(async()=>{try{app.mcalAddMeetUp && await app.mcalAddMeetUp('${dateStr}');}catch(e){console.error(e);}})()` },
             { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
         ]);
     };

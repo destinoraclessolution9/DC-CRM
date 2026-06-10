@@ -400,20 +400,20 @@ const saveWorkflow = async (workflowId) => {
         updated_at: new Date().toISOString()
     };
 
-    if (workflowId) {
-        await AppDataStore.update('automation_workflows', workflowId, data);
-    } else {
-        data.id = Date.now();
-        data.created_by = _state.cu?.id || 5;
-        data.created_at = new Date().toISOString();
-        data.run_count = 0;
-        await AppDataStore.create('automation_workflows', data);
-    }
-
-    UI.hideModal();
-    UI.toast.success(workflowId ? 'Workflow updated' : 'Workflow created');
-    const _tabC = document.getElementById('marketing-tab-content');
-    if (_tabC) _tabC.innerHTML = await app.renderAutomationTab();
+    try {
+        if (workflowId) {
+            await AppDataStore.update('automation_workflows', workflowId, data);
+        } else {
+            data.created_by = _state.cu?.id || 5;
+            data.created_at = new Date().toISOString();
+            data.run_count = 0;
+            await AppDataStore.create('automation_workflows', data);
+        }
+        UI.hideModal();
+        UI.toast.success(workflowId ? 'Workflow updated' : 'Workflow created');
+        const _tabC = document.getElementById('marketing-tab-content');
+        if (_tabC && app.renderAutomationTab) _tabC.innerHTML = await app.renderAutomationTab();
+    } catch (e) { UI.toast.error('Save failed: ' + (e?.message || e)); }
 };
 
 const createWorkflowFromTemplate = async (triggerType) => {
@@ -430,7 +430,6 @@ const createWorkflowFromTemplate = async (triggerType) => {
     if (!tpl) return;
 
     const data = {
-        id: Date.now(),
         workflow_name: tpl.name,
         trigger_type: triggerType,
         action_type: tpl.action,
@@ -443,20 +442,24 @@ const createWorkflowFromTemplate = async (triggerType) => {
         run_count: 0
     };
 
-    await AppDataStore.create('automation_workflows', data);
-    UI.toast.success(`Workflow "${tpl.name}" created from template`);
-    const _tabC2 = document.getElementById('marketing-tab-content');
-    if (_tabC2) _tabC2.innerHTML = await app.renderAutomationTab();
+    try {
+        await AppDataStore.create('automation_workflows', data);
+        UI.toast.success(`Workflow "${tpl.name}" created from template`);
+        const _tabC2 = document.getElementById('marketing-tab-content');
+        if (_tabC2 && app.renderAutomationTab) _tabC2.innerHTML = await app.renderAutomationTab();
+    } catch (e) { UI.toast.error('Template create failed: ' + (e?.message || e)); }
 };
 
 const toggleWorkflow = async (workflowId) => {
     const wf = await AppDataStore.getById('automation_workflows', workflowId);
     if (!wf) return;
     const newStatus = wf.status === 'active' ? 'paused' : 'active';
-    await AppDataStore.update('automation_workflows', workflowId, { status: newStatus });
-    UI.toast.success(`Workflow ${newStatus === 'active' ? 'activated' : 'paused'}`);
-    const _tabC3 = document.getElementById('marketing-tab-content');
-    if (_tabC3) _tabC3.innerHTML = await app.renderAutomationTab();
+    try {
+        await AppDataStore.update('automation_workflows', workflowId, { status: newStatus });
+        UI.toast.success(`Workflow ${newStatus === 'active' ? 'activated' : 'paused'}`);
+        const _tabC3 = document.getElementById('marketing-tab-content');
+        if (_tabC3 && app.renderAutomationTab) _tabC3.innerHTML = await app.renderAutomationTab();
+    } catch (e) { UI.toast.error('Toggle failed: ' + (e?.message || e)); }
 };
 
 const editWorkflow = async (workflowId) => {
@@ -466,7 +469,7 @@ const editWorkflow = async (workflowId) => {
 const deleteWorkflow = async (workflowId) => {
     UI.showModal('Delete Workflow', '<p>Are you sure you want to delete this workflow?</p>', [
         { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-        { label: 'Delete', type: 'primary', action: `(async () => { await AppDataStore.delete('automation_workflows', ${workflowId}); UI.hideModal(); UI.toast.success('Workflow deleted'); const tc = document.getElementById('marketing-tab-content'); if (tc) tc.innerHTML = await app.renderAutomationTab(); })()` }
+        { label: 'Delete', type: 'primary', action: `(async () => { try { await AppDataStore.delete('automation_workflows', ${workflowId}); UI.hideModal(); UI.toast.success('Workflow deleted'); const tc = document.getElementById('marketing-tab-content'); if (tc && app.renderAutomationTab) tc.innerHTML = await app.renderAutomationTab(); } catch(e) { UI.toast.error('Delete failed: ' + (e?.message || e)); } })()` }
     ]);
 };
 

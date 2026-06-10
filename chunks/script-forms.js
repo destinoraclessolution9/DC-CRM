@@ -99,20 +99,22 @@
     };
 
     const saveLeadForm = async () => {
-        const name = document.getElementById('form-name').value.trim();
+        const _nameEl = document.getElementById('form-name');
+        if (!_nameEl) { UI.toast.error('Form name field not found.'); return; }
+        const name = _nameEl.value.trim();
         if (!name) { UI.toast.error('Form name is required.'); return; }
         const fields = [];
         document.querySelectorAll('#form-fields-list .form-field-row').forEach((row, i) => {
-            const label = row.querySelector('.field-label').value.trim();
-            const type = row.querySelector('.field-type').value;
-            const required = row.querySelector('.field-required').checked;
+            const label = (row.querySelector('.field-label')?.value || '').trim();
+            const type = row.querySelector('.field-type')?.value || 'text';
+            const required = row.querySelector('.field-required')?.checked || false;
             if (label) fields.push({ id: `field_${i}`, label, type, required });
         });
         if (fields.length === 0) { UI.toast.error('Add at least one field.'); return; }
         const slug = name.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Date.now();
         await AppDataStore.create('lead_forms', {
             name, slug, title: name,
-            description: document.getElementById('form-description').value.trim(),
+            description: document.getElementById('form-description')?.value.trim() ?? '',
             fields, assigned_agent_id: _state.cu?.id || 1,
             is_active: true, created_at: new Date().toISOString()
         });
@@ -260,12 +262,14 @@
     };
 
     const saveSurvey = async () => {
-        const name = document.getElementById('survey-name').value.trim();
+        const _survNameEl = document.getElementById('survey-name');
+        if (!_survNameEl) { UI.toast.error('Survey name field not found.'); return; }
+        const name = _survNameEl.value.trim();
         if (!name) { UI.toast.error('Survey name is required.'); return; }
         await AppDataStore.create('surveys', {
-            name, type: document.getElementById('survey-type').value,
-            question: document.getElementById('survey-question').value.trim(),
-            description: document.getElementById('survey-description').value.trim(),
+            name, type: document.getElementById('survey-type')?.value ?? 'nps',
+            question: document.getElementById('survey-question')?.value.trim() ?? '',
+            description: document.getElementById('survey-description')?.value.trim() ?? '',
             created_by: _state.cu?.id || 1, is_active: true, created_at: new Date().toISOString()
         });
         UI.hideModal();
@@ -417,9 +421,11 @@
     };
 
     const uploadContract = async () => {
-        const title = document.getElementById('contract-title').value.trim();
+        const _titleEl = document.getElementById('contract-title');
+        if (!_titleEl) { UI.toast.error('Contract title field not found.'); return; }
+        const title = _titleEl.value.trim();
         if (!title) { UI.toast.error('Contract title is required.'); return; }
-        const customerId = document.getElementById('contract-customer-id').value.trim();
+        const customerId = document.getElementById('contract-customer-id')?.value.trim() ?? '';
         const fileInput = document.getElementById('contract-file');
         const fileName = fileInput.files?.[0]?.name || null;
         await AppDataStore.create('contracts', {
@@ -480,6 +486,7 @@
     const renderCustomerContractsTab = async (customer, containerId = 'profile-tab-content') => {
         const contracts = (await AppDataStore.getAll('contracts').catch(() => [])).filter(c => c.customer_id == customer.id);
         const container = document.getElementById(containerId);
+        if (!container) return;
         container.innerHTML = `
             <div>
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
@@ -578,10 +585,12 @@
     };
 
     const saveCustomFieldDefinition = async () => {
-        const label = document.getElementById('cf-label').value.trim();
+        const _cfLabelEl = document.getElementById('cf-label');
+        if (!_cfLabelEl) { UI.toast.error('Field label input not found.'); return; }
+        const label = _cfLabelEl.value.trim();
         if (!label) { UI.toast.error('Field label is required.'); return; }
-        const entityType = document.getElementById('cf-entity-type').value;
-        const type = document.getElementById('cf-type').value;
+        const entityType = document.getElementById('cf-entity-type')?.value ?? '';
+        const type = document.getElementById('cf-type')?.value ?? 'text';
         const fieldKey = label.toLowerCase().replace(/[^a-z0-9]/g, '_');
         const optionsRaw = document.getElementById('cf-options')?.value || '';
         const options = type === 'dropdown' ? optionsRaw.split(',').map(o => o.trim()).filter(Boolean) : [];

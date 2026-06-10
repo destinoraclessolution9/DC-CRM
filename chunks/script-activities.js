@@ -97,7 +97,7 @@
             <div class="activity-modal-form">
                 <div class="form-group">
                     <label>Activity Type <span class="required">*</span></label>
-                    <select id="modal-activity-type" class="form-control" onchange="app.updateActivityForm()">
+                    <select id="modal-activity-type" class="form-control" onchange="(async()=>{ try{ await app.updateActivityForm(); }catch(e){ console.error(e); } })()">
                         <option value="CPS">🟢 CPS - Consultation/Planning Session</option>
                         <option value="FTF">🔵 FTF - Face to Face Meeting</option>
                         <option value="FSA">🟠 FSA - Feng Shui Analysis</option>
@@ -1225,7 +1225,7 @@
             </div>
             <div class="form-group">
                 <label>Upload Purchased Invoice <span style="font-size:11px;color:var(--gray-400);font-weight:normal;">(AI auto-fill on upload)</span></label>
-                <input id="${prefix}-invoice-file" type="file" class="form-control" accept="image/png,image/jpeg,application/pdf" ${disabled} onchange="if(!this.disabled)app.scanInvoiceWithAI(this,'${prefix}','mo')">
+                <input id="${prefix}-invoice-file" type="file" class="form-control" accept="image/png,image/jpeg,application/pdf" ${disabled} onchange="if(!this.disabled)(async()=>{ try{ await app.scanInvoiceWithAI(this,'${prefix}','mo'); }catch(e){ console.error(e); } })()">
                 ${v.invoice_file ? `<div style="margin-top:6px;font-size:11px;color:var(--gray-500);"><i class="fas fa-paperclip"></i> Current: <a href="${v.invoice_file}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">${escapeHtml(v.invoice_file_name || 'View invoice')}</a> <span style="color:var(--gray-400);">(choosing a new file will replace it)</span></div>` : ''}
             </div>
         ` : '';
@@ -1284,8 +1284,8 @@
                                 <option value="B">B — PRN Receipt</option>
                                 <option value="C">C — Paper Form</option>
                             </select>
-                            <input type="file" id="${prefix}-order-form-camera" accept="image/*" capture="environment" style="display:none;" onchange="app.handleOrderFormFile(this,'${prefix}',${a.prospect_id})">
-                            <input type="file" id="${prefix}-order-form-file" accept="image/png,image/jpeg" style="display:none;" onchange="app.handleOrderFormFile(this,'${prefix}',${a.prospect_id})">
+                            <input type="file" id="${prefix}-order-form-camera" accept="image/*" capture="environment" style="display:none;" onchange="(async()=>{ try{ await app.handleOrderFormFile(this,'${prefix}',${a.prospect_id}); }catch(e){ console.error(e); } })()">
+                            <input type="file" id="${prefix}-order-form-file" accept="image/png,image/jpeg" style="display:none;" onchange="(async()=>{ try{ await app.handleOrderFormFile(this,'${prefix}',${a.prospect_id}); }catch(e){ console.error(e); } })()">
                         </div>
                         <div id="${prefix}-order-form-thumbs" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;"></div>
                         <div id="${prefix}-order-form-status" style="margin-top:6px;"></div>
@@ -2358,7 +2358,7 @@
                         <div id="existing-event-section">
                             <div class="form-group">
                                 <label>Choose ${type.includes('AGENT') ? 'Meeting/Training' : 'Event'}</label>
-                                <select id="existing-event" class="form-control" onchange="app.showSelectedEventDetails(this.value)">
+                                <select id="existing-event" class="form-control" onchange="(async()=>{ try{ await app.showSelectedEventDetails(this.value); }catch(e){ console.error(e); } })()">
                                     <option value="">-- Select --</option>
                                     ${(await AppDataStore.getAll('events')).filter(e => e.is_active !== false && e.status !== 'inactive').map(e => `<option value="${e.id}">${e.event_title || e.title || 'Untitled Event'}</option>`).join('')}
                                 </select>
@@ -3218,7 +3218,7 @@
 
     const searchReferrers = async () => {
         try {
-            const term = document.getElementById('cps-referrer')?.value.toLowerCase();
+            const term = (document.getElementById('cps-referrer')?.value || "").toLowerCase();
             const resultsDiv = document.getElementById('cps-referrer-results');
 
             if (!term || term.length < 1) {
@@ -3307,7 +3307,7 @@
     // ========== APPOINTMENT CONSULTANT ==========
 
     const searchConsultants = async () => {
-        const term = document.getElementById('consultant-search-input')?.value.toLowerCase().trim();
+        const term = (document.getElementById('consultant-search-input')?.value || "").toLowerCase().trim();
         const resultsDiv = document.getElementById('consultant-search-results');
         if (!resultsDiv) return;
         if (!term || term.length < 1) { resultsDiv.style.display = 'none'; return; }
@@ -3381,7 +3381,7 @@
 
     const searchProspectReferrers = async () => {
         try {
-            const term = document.getElementById('prospect-referrer')?.value.toLowerCase();
+            const term = (document.getElementById('prospect-referrer')?.value || "").toLowerCase();
             const resultsDiv = document.getElementById('prospect-referrer-results');
             if (!term || term.length < 1) { if (resultsDiv) resultsDiv.style.display = 'none'; return; }
 
@@ -3549,7 +3549,7 @@
     };
 
     const searchAgents = async () => {
-        const term = document.getElementById('co-agent-search-input')?.value.toLowerCase();
+        const term = (document.getElementById('co-agent-search-input')?.value || "").toLowerCase();
         const resultsDiv = document.getElementById('agent-search-results');
         if (!term || term.length < 1) { if (resultsDiv) resultsDiv.style.display = 'none'; return; }
 
@@ -3732,7 +3732,7 @@
             const name = document.getElementById('cps-name')?.value;
             const phone = document.getElementById('cps-phone')?.value;
             const relation = document.getElementById('cps-relationship')?.value;
-            const referrerInputName = document.getElementById('cps-referrer')?.value.trim();
+            const referrerInputName = (document.getElementById('cps-referrer')?.value || "").trim();
 
             // All CPS must have a referrer — business runs by recommendation only
             if (!_state.sr) {

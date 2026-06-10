@@ -360,7 +360,7 @@
                     </div>
                 </div>
                 <div class="integration-action">
-                    <button class="btn ${status === 'connected' ? 'secondary' : 'primary'}" onclick="event.stopPropagation(); id === 'whatsapp' ? (async()=>{ await app.showWhatsAppIntegration(); })() : app.showIntegrationDetails('${id}')">
+                    <button class="btn ${status === 'connected' ? 'secondary' : 'primary'}" onclick="event.stopPropagation(); id === 'whatsapp' ? (window.app.showWhatsAppIntegration ? (async()=>{ await app.showWhatsAppIntegration(); })() : UI.toast.info('WhatsApp integration coming soon')) : app.showIntegrationDetails('${id}')">
                         ${status === 'connected' ? 'Configure' : 'Connect'}
                     </button>
                 </div>
@@ -404,7 +404,9 @@
         const connection = await getGoogleConnection();
         const isConnected = connection && connection.status === 'connected';
 
-        const viewport = document.getElementById('content-viewport');
+        const vp = document.getElementById('content-viewport');
+        if (!vp) return;
+        const viewport = vp;
         viewport.innerHTML = `
             <div class="integration-detail">
                 <div class="detail-header">

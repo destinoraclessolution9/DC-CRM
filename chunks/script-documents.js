@@ -171,6 +171,7 @@
 
     const renameFolder = async (id) => {
         const folder = await AppDataStore.getById('folders', id);
+        if (!folder) { UI.toast.error("Folder not found"); return; }
         UI.showModal('Rename Folder', `<div class="form-group"><label>New Name</label><input type="text" id="rename-folder-input" class="form-control" value="${folder.name}"></div>`,
             [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Rename', type: 'primary', action: `(async () => { await app.confirmRenameFolder(${id}); })()` }]);
     };
@@ -281,12 +282,15 @@
                 <span>vs</span>
                 <select id="v2" class="form-control">${versions.map(v => `<option value="${v.id}">Version ${v.version_number}</option>`).join('')}</select>
             </div>
-        `, [{ label: 'Compare', type: 'primary', action: `app.compareVersions(${fileId})` }]);
+        `, [{ label: 'Compare', type: 'primary', action: `(async () => { await app.compareVersions(${fileId}); })()` }]);
     };
 
     const compareVersions = async (fileId) => {
-        const v1 = await AppDataStore.getById('document_versions', parseInt(document.getElementById('v1').value));
-        const v2 = await AppDataStore.getById('document_versions', parseInt(document.getElementById('v2').value));
+        const v1El = document.getElementById('v1');
+        const v2El = document.getElementById('v2');
+        if (!v1El || !v2El) return;
+        const v1 = await AppDataStore.getById('document_versions', parseInt(v1El.value));
+        const v2 = await AppDataStore.getById('document_versions', parseInt(v2El.value));
         UI.showModal('Comparison', `<div class="diff-view"><pre>${v1.data || ''}</pre><pre>${v2.data || ''}</pre></div>`, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
     };
 
@@ -789,7 +793,10 @@
         }
 
         // Show progress
-        document.getElementById('upload-progress').style.display = 'block';
+        const progressEl = document.getElementById('upload-progress');
+        const progressFillEl = document.getElementById('upload-progress-fill');
+        const progressStatusEl = document.getElementById('upload-status');
+        if (progressEl) progressEl.style.display = 'block';
 
         let uploaded = 0;
         const total = files.length;
@@ -803,7 +810,6 @@
             });
 
             const newDoc = {
-                id: Date.now() + index,
                 filename: file.name,
                 folder_id: _currentFolder,
                 size: file.size,
@@ -821,8 +827,8 @@
 
             uploaded++;
             const percent = (uploaded / total) * 100;
-            document.getElementById('upload-progress-fill').style.width = percent + '%';
-            document.getElementById('upload-status').textContent = `Uploaded ${uploaded} of ${total} files`;
+            if (progressFillEl) progressFillEl.style.width = percent + '%';
+            if (progressStatusEl) progressStatusEl.textContent = `Uploaded ${uploaded} of ${total} files`;
         }
 
         setTimeout(async () => {

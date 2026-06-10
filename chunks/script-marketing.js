@@ -1556,7 +1556,6 @@
         if (existing.some(t => t.trigger_type === slug)) { UI.toast.error('A trigger with this slug already exists'); return; }
         data.trigger_type = slug;
         data.is_active = true;
-        data.id = Date.now();
         data.created_at = new Date().toISOString();
         try {
             await AppDataStore.create('follow_up_templates', data);
@@ -3059,7 +3058,7 @@ ALTER TABLE public.promotions
     };
 
     const searchTemplates = async () => {
-        const search = document.getElementById('template-search').value.toLowerCase();
+        const search = (document.getElementById('template-search')?.value || '').toLowerCase();
         const templates = await AppDataStore.getAll('whatsapp_templates');
         const filtered = templates.filter(t =>
             t.template_name.toLowerCase().includes(search) ||
@@ -3991,8 +3990,8 @@ const simulateCampaignSending = async (campaignId) => {
     };
 
     const filterRecipients = async (campaignId) => {
-        const search = document.getElementById('recipient-search').value.toLowerCase();
-        const status = document.getElementById('recipient-status-filter').value;
+        const search = (document.getElementById('recipient-search')?.value || '').toLowerCase();
+        const status = document.getElementById('recipient-status-filter')?.value || 'all';
         const messages = (await AppDataStore.getAll('campaign_messages')).filter(m => m.campaign_id === campaignId);
 
         const filteredResults = await Promise.all(messages.map(async m => {

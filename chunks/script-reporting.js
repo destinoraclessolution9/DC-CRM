@@ -388,13 +388,13 @@
         // them sequentially serialized ~4 separate getAll() round trips
         // and chart-rendering work that should run in parallel.
         await Promise.all([
-            renderTargetOverview(),
-            renderPerformanceTable(perfKpis),
-            renderAgentLeaderboard(),
-            renderRevenueChart(_currentTimeFilter, ranges.current),
-            renderCaseCountsTable(),
-            renderHeadcountTable(),
-            renderActivityAttendanceDetails(),
+            renderTargetOverview().catch(e => console.warn('renderTargetOverview failed:', e)),
+            renderPerformanceTable(perfKpis).catch(e => console.warn('renderPerformanceTable failed:', e)),
+            renderAgentLeaderboard().catch(e => console.warn('renderAgentLeaderboard failed:', e)),
+            renderRevenueChart(_currentTimeFilter, ranges.current).catch(e => console.warn('renderRevenueChart failed:', e)),
+            renderCaseCountsTable().catch(e => console.warn('renderCaseCountsTable failed:', e)),
+            renderHeadcountTable().catch(e => console.warn('renderHeadcountTable failed:', e)),
+            renderActivityAttendanceDetails().catch(e => console.warn('renderActivityAttendanceDetails failed:', e)),
             // Hierarchical target comparison runs in the same parallel batch.
             // Wrapped so a render failure doesn't reject the whole Promise.all.
             (async () => {
@@ -1852,6 +1852,91 @@ const renderAgentLeaderboard = async () => {
         });
     };
 
+    // Thin wrapper: "Set Yearly Targets" button calls this.
+    // Delegates to openTargetManagementModal which owns the yearly-target form.
+    const openKPITargetsModal = async () => {
+        return openTargetManagementModal();
+    };
+
+    // "Set Quarterly Targets" — lets managers override individual quarter targets
+    // that were auto-calculated by calculateQuarterlyBreakdown.
+    const openQuarterlyTargetsModal = async () => {
+        const year = new Date().getFullYear();
+        const allQ = await AppDataStore.getAll('quarterly_targets');
+        const qMap = {};
+        for (const q of [1, 2, 3, 4]) {
+            qMap[q] = allQ.find(t => t.year === year && t.quarter === q) || {};
+        }
+        const qFields = (q) => `
+            <fieldset style="border:1px solid var(--gray-200);border-radius:6px;padding:12px;margin-bottom:12px;">
+                <legend style="font-weight:600;padding:0 6px;">Q${q}</legend>
+                <div class="target-form-group">
+                    <label>CPS Count</label>
+                    <input type="number" id="qtarget-q${q}-cps" value="${qMap[q].cps_count_target || 0}">
+                </div>
+                <div class="target-form-group">
+                    <label>Total Sales (RM)</label>
+                    <input type="number" id="qtarget-q${q}-sales" value="${qMap[q].total_sales_target || 0}">
+                </div>
+                <div class="target-form-group">
+                    <label>New Agents</label>
+                    <input type="number" id="qtarget-q${q}-agents" value="${qMap[q].new_agents_target || 0}">
+                </div>
+                <div class="target-form-group">
+                    <label>New Customers</label>
+                    <input type="number" id="qtarget-q${q}-customers" value="${qMap[q].new_customers_target || 0}">
+                </div>
+                <div class="target-form-group">
+                    <label>POP Cases</label>
+                    <input type="number" id="qtarget-q${q}-pop-cases" value="${qMap[q].pop_case_count_target || 0}">
+                </div>
+                <div class="target-form-group">
+                    <label>POP Sales (RM)</label>
+                    <input type="number" id="qtarget-q${q}-pop-sales" value="${qMap[q].pop_sales_target || 0}">
+                </div>
+                <div class="target-form-group">
+                    <label>Activity Headcount</label>
+                    <input type="number" id="qtarget-q${q}-headcount" value="${qMap[q].activity_headcount_target || 0}">
+                </div>
+            </fieldset>`;
+        const content = `<div class="target-form">${[1,2,3,4].map(qFields).join('')}</div>`;
+        UI.showModal('Quarterly Targets — ' + year, content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save Quarterly Targets', type: 'primary', action: '(async () => { await app.saveQuarterlyTargets(); })()' }
+        ]);
+    };
+
+    const saveQuarterlyTargets = async () => {
+        const year = new Date().getFullYear();
+        const allQ = await AppDataStore.getAll('quarterly_targets');
+        try {
+            for (const q of [1, 2, 3, 4]) {
+                const data = {
+                    quarter: q,
+                    year,
+                    cps_count_target:         parseInt(document.getElementById(`qtarget-q${q}-cps`)?.value) || 0,
+                    total_sales_target:        parseFloat(document.getElementById(`qtarget-q${q}-sales`)?.value) || 0,
+                    new_agents_target:         parseInt(document.getElementById(`qtarget-q${q}-agents`)?.value) || 0,
+                    new_customers_target:      parseInt(document.getElementById(`qtarget-q${q}-customers`)?.value) || 0,
+                    pop_case_count_target:     parseInt(document.getElementById(`qtarget-q${q}-pop-cases`)?.value) || 0,
+                    pop_sales_target:          parseFloat(document.getElementById(`qtarget-q${q}-pop-sales`)?.value) || 0,
+                    activity_headcount_target: parseInt(document.getElementById(`qtarget-q${q}-headcount`)?.value) || 0,
+                };
+                const existing = allQ.find(t => t.year === year && t.quarter === q);
+                if (existing) {
+                    await AppDataStore.update('quarterly_targets', existing.id, data);
+                } else {
+                    await AppDataStore.create('quarterly_targets', data);
+                }
+            }
+            UI.hideModal();
+            UI.toast.success('Quarterly targets saved.');
+            if (_state.cv === 'reports') await refreshKPIDashboard();
+        } catch (e) {
+            UI.toast.error('Failed to save quarterly targets: ' + (e?.message || e));
+        }
+    };
+
     const openTargetManagementModal = async () => {
         const year = new Date().getFullYear();
         const existing = (await AppDataStore.getAll('yearly_targets')).find(t => t.target_year === year) || {};
@@ -2123,6 +2208,9 @@ const exportKPIReport = async (format) => {
     // _patch_v2.mjs — includes column-0 definitions the extractor missed).
     Object.assign(window.app, {
         openTargetManagementModal,
+        openKPITargetsModal,
+        openQuarterlyTargetsModal,
+        saveQuarterlyTargets,
         exportKPIReport,
         printDashboard,
         setTimeFilter,

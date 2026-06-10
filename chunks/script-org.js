@@ -469,8 +469,12 @@
         if (!row) return;
         const members = Array.isArray(row.members) ? [...row.members] : [];
         members.splice(idx, 1);
-        await AppDataStore.update('org_consultations', cid, { members });
-        await window.app.openOrgConsultationDetail(cid);
+        try {
+            await AppDataStore.update('org_consultations', cid, { members });
+            await window.app.openOrgConsultationDetail(cid);
+        } catch (e) {
+            UI.toast.error('Remove failed: ' + (e?.message || e));
+        }
     };
     
     const openOrgMemberBulkPaste = async (cid) => {
@@ -635,24 +639,32 @@
             <div style="max-height:70vh;overflow:auto;" id="org-report-body">${row.report_html}</div>
         `, [
             { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Print', type: 'primary', action: '(() => { const body=document.getElementById("org-report-body")?.innerHTML||""; const w=window.open("","_blank"); w.document.write("<html><head><title>Report</title></head><body>"+body+"</body></html>"); w.document.close(); w.print(); })()' }
+            { label: 'Print', type: 'primary', action: '(() => { const body=document.getElementById("org-report-body")?.innerHTML||""; const w=window.open("","_blank"); if(!w){alert("Popup blocked. Please allow popups to print.");return;} w.document.write("<html><head><title>Report</title></head><body>"+body+"</body></html>"); w.document.close(); w.print(); })()' }
         ]);
     };
     
     // ---------------- MISC ----------------
     const markOrgConsultationPaid = async (cid) => {
-        await AppDataStore.update('org_consultations', cid, {
-            payment_status: 'paid',
-            payment_received_at: new Date().toISOString()
-        });
-        UI.toast.success('Marked as paid.');
-        await window.app.openOrgConsultationDetail(cid);
+        try {
+            await AppDataStore.update('org_consultations', cid, {
+                payment_status: 'paid',
+                payment_received_at: new Date().toISOString()
+            });
+            UI.toast.success('Marked as paid.');
+            await window.app.openOrgConsultationDetail(cid);
+        } catch (e) {
+            UI.toast.error('Update failed: ' + (e?.message || e));
+        }
     };
-    
+
     const saveOrgConsultationNotes = async (cid) => {
         const notes = document.getElementById(`org-detail-notes-${cid}`)?.value || '';
-        await AppDataStore.update('org_consultations', cid, { consultant_notes: notes });
-        UI.toast.success('Notes saved.');
+        try {
+            await AppDataStore.update('org_consultations', cid, { consultant_notes: notes });
+            UI.toast.success('Notes saved.');
+        } catch (e) {
+            UI.toast.error('Save failed: ' + (e?.message || e));
+        }
     };
     
     Object.assign(window.app, {

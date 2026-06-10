@@ -175,7 +175,12 @@ const TOTPManager = {
                 return { hash, salt, used: false };
             })
         );
-        await AppDataStore.update('users', userId, user);
+        try {
+            await AppDataStore.update('users', userId, user);
+        } catch (e) {
+            console.error('[2FA] enableTOTP persist failed:', e);
+            return { success: false, error: 'save_failed' };
+        }
 
         _safeAudit('info', 'SECURITY', 'MFA_ENABLE', { user_id: userId, method: TwoFactorMethod.TOTP });
 
@@ -223,7 +228,14 @@ const TOTPManager = {
         if (matchedIdx === -1) return false;
         user.mfa_backup_codes[matchedIdx].used = true;
         user.mfa_backup_codes[matchedIdx].used_at = new Date().toISOString();
-        await AppDataStore.update('users', userId, user);
+        // If we can't persist the "used" flag, fail closed — granting login on an
+        // unpersisted consumption would let the same code be replayed.
+        try {
+            await AppDataStore.update('users', userId, user);
+        } catch (e) {
+            console.error('[2FA] consumeBackupCode persist failed:', e);
+            return false;
+        }
         _safeAudit('warn', 'SECURITY', 'MFA_BACKUP_CODE_USED', { user_id: userId, slot: matchedIdx });
         return true;
     },
@@ -237,7 +249,12 @@ const TOTPManager = {
         user.mfa_secret = null;
         user.mfa_backup_codes = null;
 
-        await AppDataStore.update('users', userId, user);
+        try {
+            await AppDataStore.update('users', userId, user);
+        } catch (e) {
+            console.error('[2FA] disableMFA persist failed:', e);
+            return false;
+        }
 
         _safeAudit('warn', 'SECURITY', 'MFA_DISABLE', { user_id: userId });
 
@@ -451,7 +468,7 @@ const showTwoFactorLogin = (username, password) => {
             </div>
 
             <div class="backup-option">
-                <a href="#" onclick="app.showBackupCodeLogin()">Use backup code instead</a>
+                <a href="#" onclick="event.preventDefault(); app.showBackupCodeLogin('${escAttr(username)}', '${escAttr(password)}')">Use backup code instead</a>
             </div>
         </div>
     `;
@@ -491,5 +508,76 @@ const verifyTwoFactorLogin = async (username, password) => {
         window.location.href = '#dashboard';
     } else {
         if (window.UI && window.UI.toast) UI.toast.error('Invalid verification code');
+    }
+};
+
+// Backup-code login screen — shown when the user can't access their authenticator.
+// Carries username/password forward so a successful backup code completes the login.
+const showBackupCodeLogin = (username, password) => {
+    const escAttr = (s) => String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const content = `
+        <div class="two-factor-login">
+            <h3>Enter a Backup Code</h3>
+            <p>Enter one of the backup codes you saved when you enabled two-factor authentication. Each code works only once.</p>
+
+            <div class="form-group">
+                <input type="text" id="2fa-backup-code" placeholder="Backup code" autocomplete="one-time-code" autofocus>
+            </div>
+
+            <div class="form-actions">
+                <button class="btn primary" onclick="app.verifyBackupCodeLogin('${escAttr(username)}', '${escAttr(password)}')">Verify</button>
+            </div>
+
+            <div class="backup-option">
+                <a href="#" onclick="event.preventDefault(); app.showTwoFactorLogin('${escAttr(username)}', '${escAttr(password)}')">Use authenticator code instead</a>
+            </div>
+        </div>
+    `;
+
+    UI.showModal('Backup Code', content, [
+        { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }
+    ]);
+};
+
+// Verify a backup code and complete login. Consumes the code (single-use).
+const verifyBackupCodeLogin = async (username, password) => {
+    const code = document.getElementById('2fa-backup-code')?.value || '';
+    if (!code.trim()) {
+        if (window.UI && window.UI.toast) UI.toast.error('Enter a backup code');
+        return;
+    }
+
+    let user;
+    try {
+        const users = await AppDataStore.getAll('users');
+        user = (users || []).find(u => u.username === username);
+    } catch (e) {
+        if (window.UI && window.UI.toast) UI.toast.error('Could not verify backup code. Try again.');
+        return;
+    }
+    if (!user || !user.mfa_enabled) {
+        if (window.UI && window.UI.toast) UI.toast.error('Invalid backup code');
+        return;
+    }
+
+    let ok = false;
+    try {
+        ok = await TOTPManager.consumeBackupCode(user.id, code);
+    } catch (e) {
+        if (window.UI && window.UI.toast) UI.toast.error('Could not verify backup code. Try again.');
+        return;
+    }
+
+    if (ok) {
+        UI.hideModal();
+        if (typeof Auth !== 'undefined') {
+            if (typeof Encryption !== 'undefined' && typeof Encryption.generateToken === 'function') {
+                Auth.setToken(Encryption.generateToken());
+            }
+            Auth.setUser(user);
+        }
+        window.location.href = '#dashboard';
+    } else {
+        if (window.UI && window.UI.toast) UI.toast.error('Invalid or already-used backup code');
     }
 };

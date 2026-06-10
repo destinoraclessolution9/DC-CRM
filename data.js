@@ -1762,7 +1762,9 @@ class DataStore {
         let updatedRecord;
         try {
             const all = JSON.parse(localStorage.getItem(key) || '[]');
-            const idx = all.findIndex(r => r.id == id);
+            // String-compare ids (the codebase convention) so a numeric record id
+            // still matches a string id argument and vice versa, without == coercion edge cases.
+            const idx = all.findIndex(r => String(r.id) === String(id));
             updatedRecord = idx >= 0 ? { ...all[idx], ...updates } : { id, ...updates };
             if (idx >= 0) all[idx] = updatedRecord; else all.push(updatedRecord);
             localStorage.setItem(key, JSON.stringify(this._sanitizeForStorage(tableName, all)));

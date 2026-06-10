@@ -347,11 +347,11 @@
 
             rows += `
                 <tr>
-                    <td><strong>${p.icon} ${p.name}</strong></td>
-                    <td>${p.type}</td>
+                    <td><strong>${p.icon} ${window._crmUtils.escapeHtml(p.name)}</strong></td>
+                    <td>${window._crmUtils.escapeHtml(p.type)}</td>
                     <td><span class="score-badge ${p.score >= 80 ? 'high' : p.score >= 60 ? 'medium' : 'low'}">${p.score}</span></td>
                     <td><span class="confidence ${confidenceClass}">${p.confidence}%</span></td>
-                    <td><button class="btn-link" onclick="app.executeAction('${p.action}')">${p.action}</button></td>
+                    <td><button class="btn-link" onclick="app.executeAction('${window._crmUtils.escapeHtml(p.action)}')">${window._crmUtils.escapeHtml(p.action)}</button></td>
                 </tr>
             `;
         });
@@ -1113,7 +1113,7 @@
     // Show Performance Insights
     const showPerformanceInsights = async () => {
         const allAgents = await AppDataStore.getAll('users');
-        const agents = (allAgents || []).filter(isAgent);
+        const agents = (allAgents || []).filter(window._crmUtils.isAgent);
 
         let insightsHTML = '';
         for (const agent of agents) {
@@ -1326,7 +1326,7 @@
 
                 // Update model versions and accuracy
                 try {
-                    const models = Object.values(await AppDataStore.getAll('ai_models') || {});
+                    const models = Object.values(await AppDataStore.getAll('ai_models') || []);
                     for (const model of models) {
                         model.model_version = '1.1.0';
                         model.accuracy += Math.random() * 3 - 1; // Random change

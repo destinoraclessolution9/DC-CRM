@@ -2391,10 +2391,10 @@
     };
 
     const applyCalendarFilters = async () => {
-        _filters.agent = document.getElementById('cal-filter-agent').value;
-        _filters.type = document.getElementById('cal-filter-type').value;
-        _filters.from = document.getElementById('cal-filter-from').value;
-        _filters.to = document.getElementById('cal-filter-to').value;
+        _filters.agent = document.getElementById('cal-filter-agent')?.value ?? 'all';
+        _filters.type = document.getElementById('cal-filter-type')?.value ?? 'all';
+        _filters.from = document.getElementById('cal-filter-from')?.value ?? '';
+        _filters.to = document.getElementById('cal-filter-to')?.value ?? '';
 
         const caseStatus = document.querySelector('input[name="case-status"]:checked');
         _filters.caseStatus = caseStatus ? caseStatus.value : 'all';
@@ -4618,7 +4618,7 @@
             if (existing) {
                 await AppDataStore.update('notes', existing.id, { text: outcomeText });
             } else {
-                await AppDataStore.create('notes', { id: Date.now(), activity_id: activityId, prospect_id: prospectId, note_type: 'outcome', text: outcomeText, author: agentName, date: today });
+                await AppDataStore.create('notes', { activity_id: activityId, prospect_id: prospectId, note_type: 'outcome', text: outcomeText, author: agentName, date: today });
             }
         }
         if (notesText) {
@@ -4626,7 +4626,7 @@
             if (existing) {
                 await AppDataStore.update('notes', existing.id, { text: notesText });
             } else {
-                await AppDataStore.create('notes', { id: Date.now() + 1, activity_id: activityId, prospect_id: prospectId, note_type: 'post_meetup', text: notesText, author: agentName, date: today });
+                await AppDataStore.create('notes', { activity_id: activityId, prospect_id: prospectId, note_type: 'post_meetup', text: notesText, author: agentName, date: today });
             }
         }
         UI.hideModal();
@@ -4871,7 +4871,6 @@
                         if (!isManager) {
                             try {
                                 await AppDataStore.create('approval_queue', {
-                                    id: Date.now(),
                                     approval_type: 'new_sale',
                                     status: 'pending',
                                     prospect_id: activity.prospect_id,
@@ -4884,7 +4883,6 @@
                                 });
                                 if (saleAmount >= 2000) {
                                     await AppDataStore.create('approval_queue', {
-                                        id: Date.now() + 1,
                                         approval_type: 'new_customer',
                                         status: 'pending',
                                         prospect_id: activity.prospect_id,

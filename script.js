@@ -1783,7 +1783,9 @@ function _wireLoginBtn() {
             if (!profile && profileError && profileError.code === 'PGRST116') {
                 // Profile not found, creating one
                 const newProfile = {
-                    id: Date.now(),
+                    // No explicit id — AppDataStore.create() generates a jittered id
+                    // (Date.now()+random) so concurrent auto-creates never collide, and
+                    // the large value still loses the sort tiebreak to admin ids (1-999).
                     email: user.email,
                     username: user.email.split('@')[0],
                     full_name: user.user_metadata?.full_name || user.email,
@@ -2478,12 +2480,17 @@ function _wireLoginBtn() {
             notes: document.getElementById('name-notes')?.value
         };
 
-        if (nameId) {
-            await AppDataStore.update('names', parseInt(nameId), data);
-            UI.toast.success('Name updated successfully');
-        } else {
-            await AppDataStore.create('names', data);
-            UI.toast.success('Name added successfully');
+        try {
+            if (nameId) {
+                await AppDataStore.update('names', parseInt(nameId), data);
+                UI.toast.success('Name updated successfully');
+            } else {
+                await AppDataStore.create('names', data);
+                UI.toast.success('Name added successfully');
+            }
+        } catch (e) {
+            UI.toast.error('Could not save name: ' + (e?.message || e));
+            return; // Leave the modal open so the user can retry
         }
 
         UI.hideModal();
@@ -2498,7 +2505,13 @@ function _wireLoginBtn() {
     };
 
     const confirmDeleteName = async (prospectId, nameId) => {
-        await AppDataStore.delete('names', nameId);
+        try {
+            await AppDataStore.delete('names', nameId);
+        } catch (e) {
+            UI.hideModal();
+            UI.toast.error('Could not delete name: ' + (e?.message || e));
+            return;
+        }
         UI.hideModal();
         UI.toast.success('Name deleted');
         await app.showProspectDetail(prospectId);
@@ -4765,6 +4778,8 @@ Object.assign(window.app, {
     verifyAndEnable2FA:  typeof verifyAndEnable2FA  !== 'undefined' ? verifyAndEnable2FA  : () => UI?.toast?.warning('Two-factor not available.'),
     showTwoFactorLogin:  typeof showTwoFactorLogin  !== 'undefined' ? showTwoFactorLogin  : () => UI?.toast?.warning('Two-factor not available.'),
     verifyTwoFactorLogin: typeof verifyTwoFactorLogin !== 'undefined' ? verifyTwoFactorLogin : () => UI?.toast?.warning('Two-factor not available.'),
+    showBackupCodeLogin:  typeof showBackupCodeLogin  !== 'undefined' ? showBackupCodeLogin  : () => UI?.toast?.warning('Two-factor not available.'),
+    verifyBackupCodeLogin: typeof verifyBackupCodeLogin !== 'undefined' ? verifyBackupCodeLogin : () => UI?.toast?.warning('Two-factor not available.'),
 });
 
 // ========== SECURITY DASHBOARD + SYSTEM ADMIN (Phase 5B) ==========

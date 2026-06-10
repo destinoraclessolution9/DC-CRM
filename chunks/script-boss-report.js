@@ -329,7 +329,13 @@
         const runId = Number(document.getElementById('br-run-select')?.value);
         if (!runId) { UI.toast.error('Select an egg run first'); return; }
 
-        const runRows = await AppDataStore.query('egg_run_history', { id: runId });
+        let runRows;
+        try {
+            runRows = await AppDataStore.query('egg_run_history', { id: runId });
+        } catch (e) {
+            UI.toast.error('Failed to load run: ' + (e?.message || e));
+            return;
+        }
         const run = runRows?.[0];
         if (!run) { UI.toast.error('Run not found'); return; }
         const totals = run.totals || {};

@@ -548,7 +548,7 @@ const saveHighlight = async () => {
             await AppDataStore.update('news_highlights', parseInt(id), payload);
             UI.toast.success('Highlight updated.');
         } else {
-            await AppDataStore.create('news_highlights', { id: Date.now(), ...payload, created_at: new Date().toISOString() });
+            await AppDataStore.create('news_highlights', { ...payload, created_at: new Date().toISOString() });
             UI.toast.success('Highlight added.');
         }
         // Push notification fan-out (non-blocking, best-effort)
@@ -662,7 +662,7 @@ const saveReward = async () => {
             await AppDataStore.update('recommendation_rewards', parseInt(id), payload);
             UI.toast.success('Reward updated.');
         } else {
-            await AppDataStore.create('recommendation_rewards', { id: Date.now(), ...payload, created_at: new Date().toISOString() });
+            await AppDataStore.create('recommendation_rewards', { ...payload, created_at: new Date().toISOString() });
             UI.toast.success('Reward awarded!');
         }
         // Recalculate and sync summary for the recipient
@@ -2107,6 +2107,7 @@ const saveApuAppraisal = async () => {
             await AppDataStore.update('apu_appraisals', apuId, payload);
         } else {
             const row = await AppDataStore.create('apu_appraisals', { ...payload, created_at: new Date().toISOString() });
+            if (!row?.id) { UI.toast.error('Save failed: record was not created.'); return; }
             savedId = row?.id;
         }
 
@@ -2115,7 +2116,7 @@ const saveApuAppraisal = async () => {
             const existingRefs = (await AppDataStore.getAll('apu_referrals').catch(() => []))
                 .filter(r => r.appraisal_id == savedId);
             for (const r of existingRefs) {
-                try { await AppDataStore.delete('apu_referrals', r.id); } catch (_) {}
+                try { await AppDataStore.delete('apu_referrals', r.id); } catch (e) { console.error('Failed to delete apu_referral', r.id, e); }
             }
             for (let i = 0; i < 3; i++) {
                 const name = document.getElementById(`cf-apu-ref-name-${i}`)?.value?.trim();

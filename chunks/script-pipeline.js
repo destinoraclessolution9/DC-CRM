@@ -1257,7 +1257,7 @@ const saveActionPlan = async (planId) => {
     const rows = document.querySelectorAll('.plan-item-row');
     for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
-        const eventName = row.querySelector('.item-event-name')?.value.trim();
+        const eventName = row.querySelector('.item-event-name')?.value?.trim() || '';
         if (!eventName) continue;
         const itemId = row.querySelector('.item-id')?.value;
         const itemData = {
@@ -2684,9 +2684,9 @@ const openBoostModal = async () => {
 };
 
 const submitBoost = async () => {
-    const prospectId = parseInt(document.getElementById('boost-prospect-id').value);
-    const justification = document.getElementById('boost-justification').value;
-    const reason = document.querySelector('input[name="boost-reason"]:checked').value;
+    const prospectId = parseInt(document.getElementById('boost-prospect-id')?.value ?? '0');
+    const justification = document.getElementById('boost-justification')?.value ?? '';
+    const reason = document.querySelector('input[name="boost-reason"]:checked')?.value ?? 'conversation';
     const expires = document.getElementById('boost-expires').checked;
 
     if (!justification) {
@@ -2779,8 +2779,11 @@ const openHistoryModal = async () => {
 };
 
 const loadOverrideHistory = async () => {
-    const type = document.getElementById('hist-type').value;
-    const status = document.getElementById('hist-status').value;
+    const t = document.getElementById('hist-type');
+    const s = document.getElementById('hist-status');
+    if (!t || !s) return;
+    const type = t.value;
+    const status = s.value;
 
     let overrides = await AppDataStore.query('manual_overrides', { user_id: _currentUser?.id || 5 });
 

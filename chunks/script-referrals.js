@@ -411,6 +411,7 @@
     const toggleLeaderboard = () => {
         const content = document.querySelector('.collapsible-content');
         const header = document.querySelector('.section-header');
+        if (!content || !header) return;
         content.classList.toggle('collapsed');
         header.classList.toggle('collapsed');
     };
@@ -1105,7 +1106,6 @@
 
             const person = await AppDataStore.getById(type === 'customer' ? 'customers' : 'prospects', id);
             await AppDataStore.create('tree_interested', {
-                id: Date.now(),
                 user_id: currentUserId,
                 interested_person_id: id,
                 interested_person_type: type,
@@ -1240,6 +1240,7 @@
  
     const searchReferrersForModal = async (query, modalType) => {
         const resultsDiv = document.getElementById(`${modalType}-search-results`);
+        if (!resultsDiv) return;
         if (!query || query.length < 2) {
             resultsDiv.style.display = 'none';
             return;
@@ -1280,10 +1281,13 @@
         if (modalType === 'referrer') _modalSelectedReferrer = { id, type, name: person.full_name };
         else _modalSelectedReferred = { id, type, name: person.full_name };
  
-        document.getElementById(`${modalType}-search-results`).style.display = 'none';
-        document.getElementById(`${modalType}-search`).value = '';
- 
+        const resultsEl = document.getElementById(`${modalType}-search-results`);
+        if (resultsEl) resultsEl.style.display = 'none';
+        const searchEl = document.getElementById(`${modalType}-search`);
+        if (searchEl) searchEl.value = '';
+
         const display = document.getElementById(`selected-${modalType}-info`);
+        if (!display) return;
         display.innerHTML = `
             <div class="entity-chip">
                 <span><i class="fas fa-check-circle" style="color:#10b981"></i> <strong>${person.full_name}</strong> (${type})</span>
@@ -1316,12 +1320,11 @@
         }
  
         const referral = {
-            id: Date.now(),
             referrer_id: _modalSelectedReferrer.id,
             referrer_type: _modalSelectedReferrer.type,
             referred_prospect_id: _modalSelectedReferred.id,
-            referral_source: document.getElementById('referral-source-v2').value,
-            memo: document.getElementById('referral-memo-v2').value,
+            referral_source: document.getElementById('referral-source-v2')?.value ?? '',
+            memo: document.getElementById('referral-memo-v2')?.value ?? '',
             is_converted: false,
             status: 'Pending',
             created_at: new Date().toISOString()
@@ -1404,10 +1407,14 @@
     };
 
     const saveReferralUpdate = async (referralId) => {
+        const statusEl = document.getElementById('ref-update-status');
+        const rewardEl = document.getElementById('ref-update-reward');
+        const notesEl  = document.getElementById('ref-update-notes');
+        if (!statusEl || !rewardEl || !notesEl) { UI.toast.error('Modal fields missing.'); return; }
         const data = {
-            status: document.getElementById('ref-update-status').value,
-            reward_status: document.getElementById('ref-update-reward').value,
-            notes: document.getElementById('ref-update-notes').value.trim()
+            status: statusEl.value,
+            reward_status: rewardEl.value,
+            notes: notesEl.value.trim()
         };
         await AppDataStore.update('referrals', referralId, data);
         UI.toast.success('Referral updated.');

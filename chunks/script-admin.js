@@ -16,7 +16,7 @@
     window._syncAdminUser = () => { _currentUser = _state.cu; };
 
     const showSecurityDashboard = async () => {
-        const incidents = await AppDataStore.getAll('security_incidents') || [];
+        const incidents = (await AppDataStore.getAll('security_incidents').catch(() => [])) || [];
     
         let content = `
             <div class="security-dashboard">
@@ -295,16 +295,23 @@
         }
     };
     
-    const submitNewTenant = () => {
-        const id = document.getElementById('new-tenant-id').value;
-        const name = document.getElementById('new-tenant-name').value;
-        const email = document.getElementById('new-tenant-email').value;
+    const submitNewTenant = async () => {
+        const idEl    = document.getElementById('new-tenant-id');
+        const nameEl  = document.getElementById('new-tenant-name');
+        const emailEl = document.getElementById('new-tenant-email');
+        if (!idEl || !nameEl || !emailEl) {
+            if (window.UI) UI.toast.error("Tenant form elements missing — please reopen the dialog");
+            return;
+        }
+        const id    = idEl.value;
+        const name  = nameEl.value;
+        const email = emailEl.value;
         if (!id || !name || !email) {
             if (window.UI) UI.toast.error("Please fill all fields");
             return;
         }
         if (typeof TenantManager !== 'undefined') {
-            TenantManager.createTenant(id, name, email);
+            await TenantManager.createTenant(id, name, email);
         }
         if (window.UI) {
             UI.hideModal();

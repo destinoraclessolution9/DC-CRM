@@ -375,7 +375,7 @@
             <div style="background:var(--gray-50);padding:12px;border-radius:8px;font-size:13px;">${esc(original.content)}</div>
         `, [
             { label: 'Cancel',  type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Forward', type: 'primary',   action: `(async () => {
+            { label: 'Forward', type: 'primary',   action: `(async () => { try {
                 const val = document.getElementById('forward-target').value;
                 if (!val) { UI.toast.error('Select a recipient'); return; }
                 const [type, id] = val.split(':');
@@ -387,7 +387,7 @@
                     status: 'delivered', sent_at: new Date().toISOString(), created_at: new Date().toISOString()
                 });
                 UI.hideModal(); UI.toast.success('Message forwarded');
-            })()` }
+            } catch(e) { UI.toast.error('Forward failed: ' + (e?.message || e)); } })()` }
         ]);
     };
 
@@ -399,7 +399,7 @@
     };
 
     const syncWhatsAppTemplates = async () => {
-        const connection = (await AppDataStore.query('integration_connections', { provider: 'whatsapp' }))[0];
+        const connection = await getWhatsAppConnection();
         if (!connection?.phone_number_id || !connection?.access_token) {
             UI.toast.error('WhatsApp not connected. Configure integration settings first.'); return;
         }
@@ -427,7 +427,7 @@
             </div>
         `, [
             { label: 'Cancel',          type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Import Selected', type: 'primary',   action: '(async () => { await app.importSelectedTemplates(); })()' }
+            { label: 'Import Selected', type: 'primary',   action: '(async () => { try { await app.importSelectedTemplates(); } catch(e) { UI.toast.error(\'Import failed: \' + (e?.message || e)); } })()' }
         ]);
     };
 

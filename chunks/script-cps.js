@@ -423,14 +423,19 @@ const openAddSlotModal = () => {
 };
 
 const saveBookingSlot = async () => {
-    const start = document.getElementById('slot-start').value;
-    const end = document.getElementById('slot-end').value;
+    const startEl = document.getElementById('slot-start');
+    const endEl = document.getElementById('slot-end');
+    const dayEl = document.getElementById('slot-day');
+    const durEl = document.getElementById('slot-duration');
+    if (!startEl || !endEl || !dayEl || !durEl) { UI.toast.error('Booking slot form is not ready.'); return; }
+    const start = startEl.value;
+    const end = endEl.value;
     if (!start || !end || start >= end) { UI.toast.error('End time must be after start time.'); return; }
     await AppDataStore.create('booking_slots', {
         agent_id: _currentUser?.id,
-        day_of_week: parseInt(document.getElementById('slot-day').value),
+        day_of_week: parseInt(dayEl.value),
         start_time: start, end_time: end,
-        duration_minutes: parseInt(document.getElementById('slot-duration').value),
+        duration_minutes: parseInt(durEl.value),
         is_active: true, created_at: new Date().toISOString()
     });
     UI.hideModal();
@@ -449,8 +454,12 @@ const deleteBookingSlot = async (slotId) => {
 };
 
 const toggleSlotActive = async (slotId, isActive) => {
-    await AppDataStore.update('booking_slots', slotId, { is_active: isActive });
-    UI.toast.success(isActive ? 'Slot activated.' : 'Slot deactivated.');
+    try {
+        await AppDataStore.update('booking_slots', slotId, { is_active: isActive });
+        UI.toast.success(isActive ? 'Slot activated.' : 'Slot deactivated.');
+    } catch (err) {
+        UI.toast.error('Update failed: ' + (err?.message || err));
+    }
 };
 
 const copyBookingLink = () => {
@@ -523,15 +532,23 @@ const copySmartBookingLink = () => {
 };
 
 const confirmBookingAppointment = async (apptId) => {
-    await AppDataStore.update('booking_appointments', apptId, { status: 'confirmed' });
-    UI.toast.success('Appointment confirmed.');
-    await showBookingSettingsView(document.getElementById('content-viewport'));
+    try {
+        await AppDataStore.update('booking_appointments', apptId, { status: 'confirmed' });
+        UI.toast.success('Appointment confirmed.');
+        await showBookingSettingsView(document.getElementById('content-viewport'));
+    } catch (err) {
+        UI.toast.error('Confirm failed: ' + (err?.message || err));
+    }
 };
 
 const cancelBookingAppointment = async (apptId) => {
-    await AppDataStore.update('booking_appointments', apptId, { status: 'cancelled' });
-    UI.toast.success('Appointment cancelled.');
-    await showBookingSettingsView(document.getElementById('content-viewport'));
+    try {
+        await AppDataStore.update('booking_appointments', apptId, { status: 'cancelled' });
+        UI.toast.success('Appointment cancelled.');
+        await showBookingSettingsView(document.getElementById('content-viewport'));
+    } catch (err) {
+        UI.toast.error('Cancel failed: ' + (err?.message || err));
+    }
 };
 
 // ========== CPS INTAKE LINK (shareable one-time form) ==========
@@ -613,10 +630,10 @@ const saveCpsIntakeLink = async () => {
         return;
     }
 
-    const opt = venueSel.options[venueSel.selectedIndex];
-    const venueName = opt.getAttribute('data-name') || '';
-    const venueAddress = opt.getAttribute('data-address') || '';
-    const wazeLink = opt.getAttribute('data-waze') || '';
+    const opt = (venueSel && venueSel.selectedIndex >= 0) ? venueSel.options[venueSel.selectedIndex] : null;
+    const venueName = opt?.getAttribute('data-name') || '';
+    const venueAddress = opt?.getAttribute('data-address') || '';
+    const wazeLink = opt?.getAttribute('data-waze') || '';
 
     try {
         const row = await AppDataStore.create('cps_intake_requests', {

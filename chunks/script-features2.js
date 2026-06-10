@@ -483,7 +483,7 @@ const sendBirthdayWish = async (personName, phone) => {
         </div>
     `, [
         { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-        { label: 'Send', type: 'primary', action: `(async () => { UI.hideModal(); UI.toast.success('Birthday wish sent to ${personName} via ' + document.getElementById('bday-channel').value); })()` }
+        { label: 'Send', type: 'primary', action: `(async () => { const ch = document.getElementById('bday-channel')?.value || 'whatsapp'; UI.hideModal(); UI.toast.success('Birthday wish sent to ${personName} via ' + ch); })()` }
     ]);
 };
 
@@ -672,7 +672,6 @@ const saveKPITargets = async (year) => {
     if (existing) {
         await AppDataStore.update('yearly_targets', existing.id, yearlyData);
     } else {
-        yearlyData.id = Date.now();
         await AppDataStore.create('yearly_targets', yearlyData);
     }
 
@@ -691,7 +690,6 @@ const saveKPITargets = async (year) => {
         if (existingQ) {
             await AppDataStore.update('quarterly_targets', existingQ.id, qData);
         } else {
-            qData.id = Date.now() + q;
             await AppDataStore.create('quarterly_targets', qData);
         }
 
@@ -704,7 +702,6 @@ const saveKPITargets = async (year) => {
             if (existingM) {
                 await AppDataStore.update('monthly_targets', existingM.id, mData);
             } else {
-                mData.id = Date.now() + q * 10 + m;
                 await AppDataStore.create('monthly_targets', mData);
             }
         }
@@ -786,7 +783,6 @@ const saveQuarterlyTargets = async (year) => {
         if (existingQ) {
             await AppDataStore.update('quarterly_targets', existingQ.id, qData);
         } else if (hasValue) {
-            qData.id = Date.now() + q;
             await AppDataStore.create('quarterly_targets', qData);
         }
     }
@@ -1234,7 +1230,7 @@ const saveSpecialProgram = async (programId = null) => {
             await AppDataStore.delete('special_program_participants', p.id);
         }
     } else {
-        programData.id = Date.now();
+        programData.id = window.AppDataStore._generateId();
         savedProgramId = programData.id;
         await AppDataStore.create('special_programs', programData);
     }
@@ -1242,7 +1238,7 @@ const saveSpecialProgram = async (programId = null) => {
     // Create new participants
     for (const agentId of selectedAgents) {
         await AppDataStore.create('special_program_participants', {
-            id: Date.now() + agentId,
+            id: window.AppDataStore._generateId(),
             program_id: savedProgramId,
             agent_id: agentId,
             joined_at: new Date().toISOString()
@@ -1385,7 +1381,6 @@ const markMilestoneCompleted = async (userId, milestoneName) => {
         const existing = await AppDataStore.query('user_milestones', { user_id: userId, milestone_name: milestoneName });
         if (existing.length === 0) {
             await AppDataStore.create('user_milestones', {
-                id: Date.now(),
                 user_id: userId,
                 milestone_name: milestoneName,
                 completed: true,
