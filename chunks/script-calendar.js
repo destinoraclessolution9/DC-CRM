@@ -5007,6 +5007,7 @@
 
                 UI.toast.success('Uploading photo(s)…');
                 const newUrls = [];
+                let uploadFailed = false;
                 for (const file of photoFiles) {
                     if (!file.type.startsWith('image/')) continue;
                     try {
@@ -5014,13 +5015,25 @@
                         const safeName = compressed.name.replace(/[^a-zA-Z0-9._-]/g, '_');
                         const path = `activity_photos/${activityId}_${Date.now()}_${safeName}`;
                         const { error: upErr } = await sb.storage.from('attachments').upload(path, compressed, { upsert: false, contentType: compressed.type || 'image/jpeg' });
-                        if (upErr) { console.warn('minutes photo upload error:', upErr); continue; }
+                        if (upErr) {
+                            console.warn('minutes photo upload error:', upErr);
+                            uploadFailed = true;
+                            continue;
+                        }
                         const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
                         if (urlData?.publicUrl) newUrls.push(urlData.publicUrl);
-                    } catch (e) { console.warn('minutes photo upload threw:', e); }
+                    } catch (e) {
+                        console.warn('minutes photo upload threw:', e);
+                        uploadFailed = true;
+                    }
                 }
                 if (newUrls.length > 0) {
                     updates.photo_urls = [...existingUrls, ...newUrls];
+                } else if (uploadFailed) {
+                    // Re-enable the Save button so the user can retry
+                    if (_saveBtn) { _saveBtn.disabled = false; _saveBtn.textContent = 'Save'; }
+                    UI.toast.error('Photo upload failed — check your connection and try again. Notes were NOT saved.');
+                    return;
                 }
             } else {
                 UI.toast.error('Supabase storage not available — photos not uploaded');
