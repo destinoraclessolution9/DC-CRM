@@ -4981,6 +4981,10 @@
     };
 
     const savePostMeetupNotes = async (activityId, prospectId) => {
+        // Disable Save immediately to prevent double-submit while upload/write runs.
+        const _saveBtn = document.querySelector('.modal-footer .btn.primary');
+        if (_saveBtn) { _saveBtn.disabled = true; _saveBtn.textContent = 'Saving…'; }
+
         const updates = (window.app.collectPostMeetupNotesData || (() => ({})))('pmn');
         // Single client reference used by both the photo upload and the row update.
         const sb = window.supabase || window.supabaseClient;

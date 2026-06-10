@@ -3722,7 +3722,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                     })()}
                     ${a.score_value ? `<div style="margin-bottom:6px;"><span class="badge success" style="font-size:11px;">+${a.score_value} pts</span></div>` : ''}
                     <div class="meet-actions">
-                        <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.viewActivityPhotos(${a.id})">${(a.photo_urls && a.photo_urls.length > 0) ? `<i class="fas fa-images"></i> Photos (${a.photo_urls.length})` : `<i class="fas fa-camera"></i> Photo`}</button>
+                        ${(a.photo_urls && a.photo_urls.length > 0) ? `<button class="btn btn-sm secondary" onclick="event.stopPropagation();app.viewActivityPhotos(${a.id})"><i class="fas fa-images"></i> Photos (${a.photo_urls.length})</button>` : `<button class="btn btn-sm secondary" onclick="event.stopPropagation();app.attachActivityPhoto(${a.id})"><i class="fas fa-camera"></i> Attach Photo</button>`}
                         <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.openPostMeetupNotesModal(${a.id}, ${prospect.id})"><i class="fas fa-sticky-note"></i> Minutes</button>
                         ${a.is_closed ? `<span class="badge success" style="align-self:center;font-size:12px;"><i class="fas fa-handshake"></i> Sale Closed</span>` : `<button class="btn btn-sm primary" onclick="event.stopPropagation();app.openMeetingOutcomeModal(${a.id})"><i class="fas fa-handshake"></i> Close Sale</button>`}
                     </div>

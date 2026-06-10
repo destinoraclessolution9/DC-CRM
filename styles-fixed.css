@@ -10675,6 +10675,28 @@ input:checked+.slider:before {
 }
 .fude-stories-more-btn:hover { background: #fce7f3; }
 
+/* ---- Story tag filter bar ---- */
+.fude-story-card--hidden { display: none !important; }
+.fude-story-filter-bar {
+    display: flex; gap: 6px; overflow-x: auto; padding: 0 16px 12px;
+    scrollbar-width: none;
+}
+.fude-story-filter-bar::-webkit-scrollbar { display: none; }
+.fude-story-filter-chip {
+    flex-shrink: 0; padding: 4px 12px; border-radius: 20px;
+    border: 1.5px solid #e5e7eb; background: #f9fafb;
+    color: #6b7280; font-size: 0.72rem; font-weight: 700;
+    cursor: pointer; transition: background 0.15s, color 0.15s, border-color 0.15s;
+    white-space: nowrap;
+}
+.fude-story-filter-chip:hover {
+    border-color: var(--accent,#e91e8c); color: var(--accent,#e91e8c); background: #fce7f3;
+}
+.fude-story-filter-chip.active {
+    background: var(--accent,#e91e8c); color: #fff;
+    border-color: var(--accent,#e91e8c);
+}
+
 /* ---- 小贴士 Tips row ---- */
 .fude-tips-section {
     background: #fffbeb; border-radius: 14px;

@@ -233,7 +233,6 @@ const showFudeView = async (container) => {
     // --- Success Stories grid ---
     const storiesSection = (() => {
         const PREVIEW = 6;
-        const shown = successStories.slice(0, PREVIEW);
         const hasMore = successStories.length > PREVIEW;
         if (!successStories.length) return `
             <div class="fude-section fude-stories-section">
@@ -248,17 +247,27 @@ const showFudeView = async (container) => {
                 </div>
                 <div style="padding:20px;color:var(--gray-500,#6b7280);">No success stories yet.</div>
             </div>`;
-        const cards = shown.map((s) => {
+        const allTags = [...new Set(
+            successStories.flatMap(s => (s.tags || '').split(',').filter(Boolean).map(t => t.trim()))
+        )].sort();
+        const filterBar = allTags.length ? `
+            <div class="fude-story-filter-bar">
+                <button class="fude-story-filter-chip active" data-tag="*" onclick="app.fudeFilterStories('*')">All</button>
+                ${allTags.map(t => `<button class="fude-story-filter-chip" data-tag="${t.replace(/"/g,'&quot;').replace(/'/g,'&#39;')}" onclick="app.fudeFilterStories(${JSON.stringify(t)})">#${t}</button>`).join('')}
+            </div>` : '';
+        const cards = successStories.map((s, idx) => {
             const imgEl = s._signedUrl
                 ? `<img loading="lazy" decoding="async" class="fude-story-card-img" ${imgSrc(s)} alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
                 : '';
             const ph = `<div class="fude-story-card-img-ph" style="display:${s._signedUrl ? 'none' : 'flex'};">📖</div>`;
-            const tags = (s.tags || '').split(',').filter(Boolean).slice(0, 2)
-                .map(t => `<span class="fude-story-tag">${t.trim()}</span>`).join('');
-            return `<div class="fude-story-card" onclick="app.openStoryDetail(${s.id})" style="cursor:pointer;">
+            const tagArr = (s.tags || '').split(',').filter(Boolean).map(t => t.trim());
+            const tagSpans = tagArr.slice(0, 2).map(t => `<span class="fude-story-tag">#${t}</span>`).join('');
+            const tagData = tagArr.map(t => t.toLowerCase()).join('|');
+            const isOverflow = idx >= PREVIEW;
+            return `<div class="fude-story-card${isOverflow ? ' fude-story-card--hidden' : ''}" data-tags="${tagData}" data-overflow="${isOverflow ? '1' : '0'}" onclick="app.openStoryDetail(${s.id})" style="cursor:pointer;">
                 ${imgEl}${ph}
                 <div class="fude-story-card-body">
-                    ${tags ? `<div class="fude-story-card-tags">${tags}</div>` : ''}
+                    ${tagSpans ? `<div class="fude-story-card-tags">${tagSpans}</div>` : ''}
                     <h3>${s.title}</h3>
                     ${s.content ? `<p>${s.content}</p>` : '<p style="flex:1"></p>'}
                     <div class="fude-story-card-footer">
@@ -282,8 +291,9 @@ const showFudeView = async (container) => {
                     </div>
                     <div class="fude-stories-masthead-line"></div>
                 </div>
+                ${filterBar}
                 <div class="fude-story-grid">${cards}</div>
-                ${hasMore ? `<button class="fude-stories-more-btn">✦ Explore More Success Stories</button>` : ''}
+                ${hasMore ? `<button class="fude-stories-more-btn" onclick="app.fudeShowAllStories()">✦ Explore More Success Stories</button>` : ''}
             </div>`;
     })();
 
@@ -442,6 +452,10 @@ const openHighlightModal = async (highlightId = null) => {
                 <textarea id="highlight-content" class="form-control" rows="4" placeholder="Enter content...">${h?.content || ''}</textarea>
             </div>
             <div class="form-group">
+                <label>Tags <span style="font-weight:400;color:var(--gray-500,#6b7280);font-size:12px;">(comma-separated, e.g. 风水,卧室,案例)</span></label>
+                <input type="text" id="highlight-tags" class="form-control" value="${h?.tags || ''}" placeholder="逆转胜, 卧室, 风水">
+            </div>
+            <div class="form-group">
                 <label>Photo</label>
                 <div style="display:flex;flex-direction:column;gap:8px;">
                     <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;background:var(--gray-100,#f3f4f6);border:1px dashed var(--gray-300,#d1d5db);border-radius:8px;padding:10px 14px;font-size:14px;color:var(--gray-600,#4b5563);">
@@ -519,6 +533,7 @@ const saveHighlight = async () => {
     const payload = {
         title,
         content:   document.getElementById('highlight-content')?.value || '',
+        tags:      document.getElementById('highlight-tags')?.value?.trim() || '',
         image_url: imageUrl,
         type:      document.getElementById('highlight-type')?.value || 'highlight',
         is_active: document.getElementById('highlight-active')?.checked ?? true,
@@ -2542,9 +2557,41 @@ const openFudeRedeemModal = (pts = 0) => {
     `, [{ label: '关闭', action: 'UI.hideModal()', type: 'primary' }]);
 };
 
+const fudeFilterStories = (tag) => {
+    const section = document.querySelector('.fude-stories-section');
+    if (!section) return;
+    const cards = section.querySelectorAll('.fude-story-card');
+    const moreBtn = section.querySelector('.fude-stories-more-btn');
+    const chips = section.querySelectorAll('.fude-story-filter-chip');
+    chips.forEach(c => c.classList.toggle('active', c.dataset.tag === tag));
+    if (tag === '*') {
+        cards.forEach(c => c.classList.toggle('fude-story-card--hidden', c.dataset.overflow === '1'));
+        if (moreBtn) moreBtn.style.display = '';
+    } else {
+        const lowerTag = tag.toLowerCase();
+        cards.forEach(c => {
+            const tags = (c.dataset.tags || '').split('|').filter(Boolean);
+            c.classList.toggle('fude-story-card--hidden', !tags.includes(lowerTag));
+        });
+        if (moreBtn) moreBtn.style.display = 'none';
+    }
+};
+
+const fudeShowAllStories = () => {
+    const section = document.querySelector('.fude-stories-section');
+    if (!section) return;
+    section.querySelectorAll('.fude-story-card').forEach(c => c.classList.remove('fude-story-card--hidden'));
+    const moreBtn = section.querySelector('.fude-stories-more-btn');
+    if (moreBtn) moreBtn.style.display = 'none';
+    const chips = section.querySelectorAll('.fude-story-filter-chip');
+    chips.forEach(c => c.classList.toggle('active', c.dataset.tag === '*'));
+};
+
     Object.assign(window.app, {
         showFudeView,
         openStoryDetail,
+        fudeFilterStories,
+        fudeShowAllStories,
         openHighlightModal,
         saveHighlight,
         deleteHighlight,
