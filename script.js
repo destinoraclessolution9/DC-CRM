@@ -3688,9 +3688,20 @@ function _wireLoginBtn() {
     const openDestinyBlueprintInTab = async (...a) => { const _r = window.app.openDestinyBlueprintInTab; if (_r && _r !== openDestinyBlueprintInTab) return _r(...a); };
     const saveDestinyBlueprint = async (...a) => { const _r = window.app.saveDestinyBlueprint; if (_r && _r !== saveDestinyBlueprint) return _r(...a); };
 
+    const goBackFromDetail = () => {
+        const prev = window._appState.pvd;
+        if (prev === 'calendar' || prev === 'month') {
+            navigateTo(prev);
+        } else {
+            const vp = document.getElementById('content-viewport');
+            (window.app.showProspectsViewSmart || (() => {}))(vp);
+        }
+    };
+
     return {
         init,
         navigateTo,
+        goBackFromDetail,
         todo,
         // [CHUNK: knowledge] 26 functions Object.assigned to window.app by chunks/script-knowledge.js
         // Stub implementations (2026-04-11) — replace app.todo() placeholders

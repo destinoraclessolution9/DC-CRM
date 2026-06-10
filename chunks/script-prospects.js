@@ -2112,6 +2112,7 @@ const showCustomerDetail = async (customerId) => {
         await navigateTo('prospects');
         return;
     }
+    _state.pvd = _state.cv;
     _state.cdv = { type: 'customer', id: customerId };
 
     setTimeout(async () => {
@@ -2153,7 +2154,7 @@ const showCustomerDetail = async (customerId) => {
                 .pv-sub:first-child{margin-top:0;padding-top:0;border-top:none;}
             </style>
             <div class="pv-back">
-                <button class="btn secondary btn-sm" onclick="app.navigateTo('prospects')">
+                <button class="btn secondary btn-sm" onclick="app.goBackFromDetail()">
                     <i class="fas fa-arrow-left"></i> Back to List
                 </button>
             </div>
@@ -3195,6 +3196,7 @@ const showProspectDetail = async (prospectId) => {
         await navigateTo('prospects');
         return;
     }
+    _state.pvd = _state.cv;
     _state.cdv = { type: 'prospect', id: prospectId };
 
     const container = document.getElementById('content-viewport');
@@ -3287,7 +3289,7 @@ const showProspectDetail = async (prospectId) => {
                 .cr-status.approved{background:#d1fae5;color:#065f46;}
             </style>
             <div class="pv-back">
-                <button class="btn secondary btn-sm" onclick="app.showProspectsViewSmart(document.getElementById('content-viewport'))">
+                <button class="btn secondary btn-sm" onclick="app.goBackFromDetail()">
                     <i class="fas fa-arrow-left"></i> Back to List
                 </button>
             </div>
@@ -5081,7 +5083,11 @@ const attachActivityPhoto = async (activityId) => {
 const viewActivityPhotos = async (activityId) => {
     const activity = await _lookupActivityRobust(activityId);
     if (!activity) { UI.toast.error('Meet up record not found'); return; }
-    const photos = Array.isArray(activity.photo_urls) ? activity.photo_urls : [];
+    // Always fetch fresh photo_urls from the DB — the pinned/cached activity
+    // may predate the most recent upload, causing a stale empty-array fallback.
+    const fresh = await AppDataStore.getById('activities', activityId);
+    const photos = Array.isArray(fresh?.photo_urls) ? fresh.photo_urls :
+                   Array.isArray(activity.photo_urls) ? activity.photo_urls : [];
 
     // Nothing to view → jump straight to the upload modal so the tap still feels useful.
     if (photos.length === 0) {
