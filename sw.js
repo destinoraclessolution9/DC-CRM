@@ -21,7 +21,7 @@
 //   sw-init.js is loaded as <script defer> from index.html.
 //
 // Cache version: bump CACHE_VERSION on each deploy to expire old caches.
-const CACHE_VERSION = 'crm-v2026-06-07-2';
+const CACHE_VERSION = 'crm-v2026-06-10-1';
 const STATIC_CACHE  = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
@@ -140,7 +140,11 @@ async function staleWhileRevalidate(req) {
             }
             return res;
         })
-        .catch(() => cached);
+        // #fix: when cached is undefined AND fetch fails, return Response.error()
+        // so event.respondWith() always gets a valid Response — never undefined.
+        // Previously: .catch(() => cached)  →  resolves to undefined  →
+        //   TypeError: Failed to convert value to 'Response'
+        .catch(() => cached || Response.error());
     return cached || fetchPromise;
 }
 
