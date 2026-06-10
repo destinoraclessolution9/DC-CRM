@@ -261,12 +261,15 @@
     // Page shell — tabs: Scan | History
     // ══════════════════════════════════════════════════════════════════════
     const showOrderFormExtractView = async (viewport) => {
-        _ofeResult      = null;
-        _ofeCrmRef      = null;
-        _ofeAttachId    = null;
-        _ofeAllRows     = [];
-        _ofeHistPage    = 0;
-        _ofeHistSearch  = '';
+        _ofeResult         = null;
+        _ofeCrmRef         = null;
+        _ofeAttachId       = null;
+        _ofeAllRows        = [];
+        _ofeHistPage       = 0;
+        _ofeHistSearch     = '';
+        _ofeLinkedProspect = null;
+        clearTimeout(_ofeClosTimer);
+        _ofeClosTimer      = null;
         viewport.innerHTML = `
             <div class="view-header" style="padding:20px 24px 0;">
                 <h2 class="view-title" style="display:flex;align-items:center;gap:8px;">
@@ -670,6 +673,7 @@
     // ══════════════════════════════════════════════════════════════════════
     let _ofeLinkedProspect = null;
     let _ofeClosTimer      = null;
+    let _ofeSaving         = false;
 
     const _ofeMapPayment = (type, method) => {
         const t = (type   || '').toLowerCase();
@@ -829,7 +833,7 @@
                 const badge = entityType === 'customer'
                     ? `<span style="font-size:10px;padding:1px 6px;border-radius:10px;background:#dbeafe;color:#1d4ed8;">Customer</span>`
                     : `<span style="font-size:10px;padding:1px 6px;border-radius:10px;background:#dcfce7;color:#15803d;">Prospect</span>`;
-                return `<div onclick="app.ofeClosSelect('${esc(String(r.id))}',${JSON.stringify(r.full_name || '')},'${entityType}')"
+                return `<div onclick="app.ofeClosSelect('${esc(String(r.id))}',${esc(JSON.stringify(r.full_name || ''))},'${entityType}')"
                     style="padding:9px 12px;cursor:pointer;border:1px solid var(--border,#e2e8f0);border-radius:8px;margin-bottom:5px;background:var(--surface,#fff);display:flex;align-items:center;gap:8px;"
                     onmouseover="this.style.background='var(--gray-50,#f8fafc)'" onmouseout="this.style.background='var(--surface,#fff)'">
                     <i class="fas fa-user-circle" style="color:var(--gray-300);font-size:18px;"></i>
@@ -879,8 +883,10 @@
     };
 
     const ofeSaveClosing = async () => {
+        if (_ofeSaving) return;
         if (!_ofeLinkedProspect) { UI.toast.error('Please select a prospect first.'); return; }
         if (!_ofeResult) { UI.toast.error('No scan result to save.'); return; }
+        _ofeSaving = true;
 
         const fields   = _ofeResult.fields || {};
         const actType  = document.querySelector('input[name="ofe-clos-type"]:checked')?.value || 'FTF';
@@ -961,7 +967,7 @@
                         collection_status: 'pending',
                     }).select('id').single().catch(() => ({ data: null }));
 
-                    if (att) _ofeAttachId = att.id;
+                    if (att) { _ofeAttachId = att.id; _ofeAllRows = []; } // invalidate history cache so new entry appears on next tab switch
                 } catch (_) { /* graceful — attachment save failure shouldn't block activity */ }
             }
 
@@ -969,6 +975,7 @@
             const statusBadge = document.getElementById('ofe-status-badge');
             if (statusBadge) statusBadge.innerHTML = _statusBadge('pending');
 
+            _ofeSaving = false;
             UI.toast.success(`✓ Closing activity created for ${_ofeLinkedProspect.name}`);
             const panel = document.getElementById('ofe-closing-panel');
             if (panel) panel.innerHTML = `
@@ -982,6 +989,7 @@
                 </div>`;
             _ofeLinkedProspect = null;
         } catch (err) {
+            _ofeSaving = false;
             UI.toast.error('Failed to save: ' + (err.message || String(err)));
             if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fas fa-check"></i> Save Closing Activity'; }
         }
@@ -989,10 +997,14 @@
 
     // ── Set collection status for current scan ─────────────────────────────
     const ofeSetStatus = async (newStatus) => {
-        // Update badge immediately
         const badge   = document.getElementById('ofe-status-badge');
         const btnP    = document.getElementById('ofe-btn-pending');
         const btnC    = document.getElementById('ofe-btn-collected');
+        // Snapshot for rollback if DB fails
+        const oldBadge = badge ? badge.innerHTML : undefined;
+        const oldOpP   = btnP  ? btnP.style.opacity  : undefined;
+        const oldOpC   = btnC  ? btnC.style.opacity  : undefined;
+        // Optimistic update
         if (badge) badge.innerHTML = _statusBadge(newStatus);
         if (btnP)  btnP.style.opacity  = newStatus === 'pending'   ? '0.4' : '1';
         if (btnC)  btnC.style.opacity  = newStatus === 'collected' ? '0.4' : '1';
@@ -1015,6 +1027,10 @@
             }
             UI.toast.success(`Marked as ${newStatus}`);
         } catch (err) {
+            // Roll back optimistic UI to previous state
+            if (badge && oldBadge !== undefined) badge.innerHTML = oldBadge;
+            if (btnP  && oldOpP   !== undefined) btnP.style.opacity  = oldOpP;
+            if (btnC  && oldOpC   !== undefined) btnC.style.opacity  = oldOpC;
             UI.toast.error('Could not update status: ' + (err.message || String(err)));
         }
     };
