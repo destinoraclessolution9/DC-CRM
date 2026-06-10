@@ -30,6 +30,9 @@ const showFudeView = async (container) => {
     const currentUser = _currentUser;
     if (!currentUser) return;
 
+    // Show skeleton immediately — don't block first paint on data fetches
+    if (container) container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:200px;gap:12px;color:var(--gray-400,#9ca3af);flex-direction:column;"><i class="fas fa-circle-notch fa-spin" style="font-size:24px;"></i><span style="font-size:13px;">Loading 福运相随…</span></div>';
+
     const userLevel = (() => {
         const m = (currentUser.role || '').match(/Level\s+(\d+)/i);
         return m ? parseInt(m[1]) : 12;
@@ -38,22 +41,17 @@ const showFudeView = async (container) => {
     const isL1314   = userLevel >= 13;
     const isCustomer = userLevel === 13;
 
-    // --- Data loading ---
-    let highlights = [], myRewards = [], myPurchases = [], allRewards = [];
-    try {
-        highlights = isAdmin
-            ? await AppDataStore.getAll('news_highlights')
-            : await AppDataStore.query('news_highlights', { is_active: true });
-    } catch(e) {}
-    try { myRewards = await AppDataStore.query('recommendation_rewards', { user_id: currentUser.id }); } catch(e) {}
-    if (isCustomer && currentUser.customer_id) {
-        try { myPurchases = await AppDataStore.query('purchases', { customer_id: currentUser.customer_id }); } catch(e) {}
-    }
-    let allUsersForReward = [];
-    if (isAdmin) {
-        try { allUsersForReward = (await AppDataStore.getAll('users')).filter(u => u.role && u.role.match(/Level\s*1[34]/i)); } catch(e) {}
-        try { allRewards = await AppDataStore.getAll('recommendation_rewards'); } catch(e) {}
-    }
+    // --- Data loading — all fetches in parallel with timeouts ---
+    const _t = (p, ms = 6000) => Promise.race([p, new Promise(r => setTimeout(() => r([]), ms))]);
+
+    const [highlights, myRewards, myPurchases, allUsersRaw, allRewards] = await Promise.all([
+        _t(isAdmin ? AppDataStore.getAll('news_highlights').catch(() => []) : AppDataStore.query('news_highlights', { is_active: true }).catch(() => [])),
+        _t(AppDataStore.query('recommendation_rewards', { user_id: currentUser.id }).catch(() => [])),
+        _t(isCustomer && currentUser.customer_id ? AppDataStore.query('purchases', { customer_id: currentUser.customer_id }).catch(() => []) : Promise.resolve([])),
+        _t(isAdmin ? AppDataStore.getAll('users').catch(() => []) : Promise.resolve([])),
+        _t(isAdmin ? AppDataStore.getAll('recommendation_rewards').catch(() => []) : Promise.resolve([]))
+    ]);
+    const allUsersForReward = allUsersRaw.filter(u => u.role && u.role.match(/Level\s*1[34]/i));
 
     // --- Helpers ---
     const fmtDate = d => { try { return new Date(d).toLocaleDateString(); } catch(e) { return d || '-'; } };
@@ -62,24 +60,25 @@ const showFudeView = async (container) => {
 
     // --- Content filters ---
     // Sort highlights/news by created_at desc so the newest one is slide 0
-    // (the user expects to see freshly-added highlights immediately, not
-    // hidden behind the carousel's next-arrow).
     const publicNews         = highlights.filter(h => h.type === 'highlight').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     const successStories     = highlights.filter(h => h.type === 'success_story').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     const recommendationTips = highlights.filter(h => h.type === 'recommendation_tip').sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
-    // --- Pre-sign highlight images so render doesn't depend on DOM resolver ---
+    // --- Pre-sign highlight images (parallel, with timeout) ---
     const withImg = [...publicNews, ...successStories].filter(h => h.image_url);
     if (withImg.length && AppDataStore.resolveAttachmentSrc) {
-        await Promise.all(withImg.map(async h => {
-            try { h._signedUrl = await AppDataStore.resolveAttachmentSrc(h.image_url); } catch(e) {}
-        }));
+        await Promise.race([
+            Promise.all(withImg.map(async h => {
+                try { h._signedUrl = await AppDataStore.resolveAttachmentSrc(h.image_url); } catch(e) {}
+            })),
+            new Promise(r => setTimeout(r, 5000))
+        ]);
     }
 
-    // --- Totals & summary sync ---
+    // --- Totals & summary sync (fire-and-forget, don't block render) ---
     const totalPoints  = myRewards.reduce((s, r) => s + (parseInt(r.fudi_points)    || 0), 0);
     const totalReturns = myRewards.reduce((s, r) => s + (parseFloat(r.sharing_return) || 0), 0);
-    if (myRewards.length > 0) { try { await syncFudiSummary(currentUser.id, totalPoints, totalReturns); } catch(e) { console.warn('[fude] syncFudiSummary failed:', e?.message || e); } }
+    if (myRewards.length > 0) { syncFudiSummary(currentUser.id, totalPoints, totalReturns).catch(e => console.warn('[fude] syncFudiSummary failed:', e?.message || e)); }
 
     // --- Helper: pre-signed image src attr ---
     const imgSrc = (h) => h._signedUrl ? `src="${h._signedUrl}"` : '';

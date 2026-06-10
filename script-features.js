@@ -5000,16 +5000,30 @@ window._fv._showAgentProfile = async (agentId) => {
     const _currentUser = window._appState?.cu;
     const { escapeHtml } = window._crmUtils || {};
 
-    const agent = await window.AppDataStore.getById('users', agentId);
+    // Show skeleton immediately so the user sees something while data loads
+    const viewport = document.getElementById('content-viewport');
+    if (viewport) viewport.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:200px;gap:12px;color:var(--gray-400);flex-direction:column;"><i class="fas fa-circle-notch fa-spin" style="font-size:24px;"></i><span style="font-size:13px;">Loading agent profile…</span></div>';
+
+    const [agent, allUsers] = await Promise.all([
+        Promise.race([
+            window.AppDataStore.getById('users', agentId).catch(() => null),
+            new Promise(resolve => setTimeout(() => resolve(null), 8000))
+        ]),
+        Promise.race([
+            window.AppDataStore.getAll('users').catch(() => []),
+            new Promise(resolve => setTimeout(() => resolve([]), 8000))
+        ])
+    ]);
+
     if (!agent) {
         window.UI.toast.error('Agent not found');
+        if (viewport) viewport.innerHTML = '<div style="padding:40px;text-align:center;color:var(--gray-400);">Agent not found or could not be loaded.</div>';
         return;
     }
 
     const lvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
     const isAdminOrLead = lvlMatch ? parseInt(lvlMatch[1]) <= 4 : false;
 
-    const allUsers = await window.AppDataStore.getAll('users');
     const reportingToUser = agent.reporting_to ? allUsers.find(u => u.id == agent.reporting_to) : null;
     const reportingToName = reportingToUser ? reportingToUser.full_name : '—';
 
@@ -5143,7 +5157,6 @@ window._fv._showAgentProfile = async (agentId) => {
     };
 
     const _apLoading = '<div style="padding:20px;text-align:center;color:var(--gray-400);font-size:13px;"><i class="fas fa-circle-notch fa-spin" style="margin-right:6px;"></i>Loading…</div>';
-    const viewport = document.getElementById('content-viewport');
     viewport.innerHTML = `
     <div class="agent-profile-view">
         <div class="header-actions" style="margin-bottom:16px;">
