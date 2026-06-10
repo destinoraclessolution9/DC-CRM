@@ -2586,9 +2586,11 @@ const fudeSearchStories = (query) => {
 const fudeFilterStories = (tag) => {
     const section = document.querySelector('.fude-stories-section');
     if (!section) return;
-    const cards = section.querySelectorAll('.fude-story-card');
+    const cards   = section.querySelectorAll('.fude-story-card');
     const moreBtn = section.querySelector('.fude-stories-more-btn');
-    const chips = section.querySelectorAll('.fude-story-filter-chip');
+    const chips   = section.querySelectorAll('.fude-story-filter-chip');
+    const searchInput = section.querySelector('.fude-story-search-input');
+    if (searchInput) searchInput.value = '';          // clear search when chip clicked
     chips.forEach(c => c.classList.toggle('active', c.dataset.tag === tag));
     if (tag === '*') {
         cards.forEach(c => c.classList.toggle('fude-story-card--hidden', c.dataset.overflow === '1'));
@@ -2611,6 +2613,8 @@ const fudeShowAllStories = () => {
     if (moreBtn) moreBtn.style.display = 'none';
     const chips = section.querySelectorAll('.fude-story-filter-chip');
     chips.forEach(c => c.classList.toggle('active', c.dataset.tag === '*'));
+    const searchInput = section.querySelector('.fude-story-search-input');
+    if (searchInput) searchInput.value = '';          // clear search when Explore More clicked
 };
 
     Object.assign(window.app, {
