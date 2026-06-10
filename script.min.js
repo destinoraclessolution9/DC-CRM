@@ -3691,10 +3691,17 @@ function _wireLoginBtn() {
     const goBackFromDetail = () => {
         const prev = window._appState.pvd;
         if (prev === 'calendar' || prev === 'month') {
+            // navigateTo clears _currentDetailView internally
             navigateTo(prev);
         } else {
+            // Clear _currentDetailView NOW so SWR background-sync can re-render
+            // the prospects list — if we skip navigateTo, it never gets cleared.
+            window._appState.cdv = null;
             const vp = document.getElementById('content-viewport');
-            (window.app.showProspectsViewSmart || (() => {}))(vp);
+            const fn = window.app.showProspectsViewSmart;
+            // Fallback to navigateTo('prospects') in case script-mobile.js hasn't
+            // loaded yet (e.g. desktop session that never visited the Home tab).
+            if (fn) { fn(vp); } else { navigateTo('prospects'); }
         }
     };
 

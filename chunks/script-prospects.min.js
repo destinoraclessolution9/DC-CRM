@@ -2106,13 +2106,16 @@ const filterProspects = async () => {
 };
 
 const showCustomerDetail = async (customerId) => {
+    // Snapshot originating view BEFORE any await — a concurrent navigateTo during
+    // the async gap would overwrite _state.cv, corrupting the back-destination.
+    const _fromView = _state.cv;
     const customer = await AppDataStore.getById('customers', customerId);
     if (!customer || !await canViewCustomer(customer)) {
         UI.toast.error('You do not have permission to view this customer.');
         await navigateTo('prospects');
         return;
     }
-    _state.pvd = _state.cv;
+    _state.pvd = _fromView;
     _state.cdv = { type: 'customer', id: customerId };
 
     setTimeout(async () => {
@@ -3178,6 +3181,9 @@ const zoomCpsPhoto = (url) => {
 };
 
 const showProspectDetail = async (prospectId) => {
+    // Snapshot originating view BEFORE any await — a concurrent navigateTo during
+    // the async gap would overwrite _state.cv, corrupting the back-destination.
+    const _fromView = _state.cv;
     const prospect = await AppDataStore.getById('prospects', prospectId);
     if (!prospect) {
         UI.toast.error('Prospect not found. They may not have been added to the system yet.');
@@ -3196,7 +3202,7 @@ const showProspectDetail = async (prospectId) => {
         await navigateTo('prospects');
         return;
     }
-    _state.pvd = _state.cv;
+    _state.pvd = _fromView;
     _state.cdv = { type: 'prospect', id: prospectId };
 
     const container = document.getElementById('content-viewport');
@@ -5083,9 +5089,10 @@ const attachActivityPhoto = async (activityId) => {
 const viewActivityPhotos = async (activityId) => {
     const activity = await _lookupActivityRobust(activityId);
     if (!activity) { UI.toast.error('Meet up record not found'); return; }
-    // Always fetch fresh photo_urls from the DB — the pinned/cached activity
-    // may predate the most recent upload, causing a stale empty-array fallback.
-    const fresh = await AppDataStore.getById('activities', activityId);
+    // Always fetch fresh photo_urls from the DB — getByIdFull bypasses the
+    // in-memory + SWR localStorage cache entirely, unlike getById which returns
+    // a warm cache hit and would show the same stale row as _lookupActivityRobust.
+    const fresh = await AppDataStore.getByIdFull('activities', activityId);
     const photos = Array.isArray(fresh?.photo_urls) ? fresh.photo_urls :
                    Array.isArray(activity.photo_urls) ? activity.photo_urls : [];
 
