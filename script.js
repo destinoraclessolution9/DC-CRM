@@ -2181,7 +2181,32 @@ function _wireLoginBtn() {
                     _currentUser = null;
                 }
             } else {
+                // getSession() returned null — token expired/timed-out or truly no session.
+                // Before forcing the login screen, try restoring the session from the
+                // Supabase localStorage token + the SWR user cache. This lets users whose
+                // token refresh timed out (Supabase temporarily unreachable) stay in the
+                // app in offline mode rather than being kicked to login when they can't
+                // re-authenticate anyway.
                 _currentUser = null;
+                try {
+                    if (localStorage.getItem('remember_me') === '1') {
+                        // supabase-js stores the auth session as 'sb-<ref>-auth-token'
+                        const _sbKey = Object.keys(localStorage).find(k => /^sb-.+-auth-token$/.test(k));
+                        const _sbData = _sbKey ? JSON.parse(localStorage.getItem(_sbKey) || 'null') : null;
+                        const _offlineEmail = _sbData?.user?.email;
+                        if (_offlineEmail) {
+                            const _rawUsers = localStorage.getItem('fs_crm_users');
+                            const _allUsers = _rawUsers ? JSON.parse(_rawUsers) : [];
+                            const _offlineUser = Array.isArray(_allUsers) && _allUsers.find(u => u.email === _offlineEmail);
+                            if (_offlineUser) {
+                                console.info('[init] Supabase offline — resuming from cache for:', _offlineEmail);
+                                _currentUser = { ..._offlineUser, _offline: true };
+                            }
+                        }
+                    }
+                } catch (_offlineErr) {
+                    // Cache read failed — fall through to login screen normally
+                }
             }
             // User loaded
         } catch (err) {
