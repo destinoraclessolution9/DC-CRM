@@ -4196,46 +4196,44 @@
             }
         }
 
-        // === Auto Scoring: Award points based on activity type ===
-        try {
-            await applyActivityScoring(activity);
-        } catch (e) { console.warn('Activity scoring failed:', e); }
+        // === Auto Scoring / Protection / Workflows / Milestones — fire-and-forget ===
+        // These are post-save bookkeeping; they must not delay closing the modal.
+        applyActivityScoring(activity).catch(e => console.warn('Activity scoring failed:', e));
 
-        // === Auto Protection Extension: Extend deadline based on activity type ===
         if (activity.prospect_id) {
-            try {
-                const extType = activity.is_closing ? 'transaction' : getExtensionType(activity.activity_type);
-                await autoExtendProtection(activity.prospect_id, extType);
-            } catch (e) { console.warn('Protection auto-extend failed:', e); }
+            const extType = activity.is_closing ? 'transaction' : getExtensionType(activity.activity_type);
+            autoExtendProtection(activity.prospect_id, extType).catch(e => console.warn('Protection auto-extend failed:', e));
         }
 
-        // === Workflow Engine: Trigger activity_completed workflows ===
-        try {
-            const entityName = _state.se?.name || activity.activity_title || '';
-            await executeWorkflows('activity_completed', { name: entityName, activityType: activity.activity_type });
-        } catch (e) { console.warn('Workflow trigger failed:', e); }
+        (async () => {
+            try {
+                const entityName = _state.se?.name || activity.activity_title || '';
+                await executeWorkflows('activity_completed', { name: entityName, activityType: activity.activity_type });
+            } catch (e) { console.warn('Workflow trigger failed:', e); }
+        })();
 
-        // === Auto Milestone: Mark milestone based on activity type / title ===
-        try {
-            if (_state.cu) {
-                const aType = activity.activity_type || '';
-                const aTitle = (activity.activity_title || '').toLowerCase();
-                const milestoneMap = [
-                    { key: 'CPS',           test: () => aType === 'CPS' },
-                    { key: '9 Stars',       test: () => aTitle.includes('9 star') || aTitle.includes('nine star') },
-                    { key: 'DIY',           test: () => aTitle.includes('diy') },
-                    { key: '福气课',         test: () => aTitle.includes('福气') || aTitle.includes('fudi') || aTitle.includes('fu qi') },
-                    { key: '九运课',         test: () => aTitle.includes('九运') || aTitle.includes('jiuyun') || aTitle.includes('jiu yun') },
-                    { key: 'Museum',        test: () => aTitle.includes('museum') },
-                    { key: 'HuiJi',         test: () => aTitle.includes('huiji') || aTitle.includes('hui ji') },
-                    { key: 'Advance Class', test: () => aTitle.includes('advance') },
-                    { key: 'Sharing',       test: () => aTitle.includes('sharing') || aType === 'Sharing' }
-                ];
-                for (const m of milestoneMap) {
-                    if (m.test()) window.app.markMilestoneCompleted && await window.app.markMilestoneCompleted(_state.cu.id, m.key);
+        (async () => {
+            try {
+                if (_state.cu) {
+                    const aType = activity.activity_type || '';
+                    const aTitle = (activity.activity_title || '').toLowerCase();
+                    const milestoneMap = [
+                        { key: 'CPS',           test: () => aType === 'CPS' },
+                        { key: '9 Stars',       test: () => aTitle.includes('9 star') || aTitle.includes('nine star') },
+                        { key: 'DIY',           test: () => aTitle.includes('diy') },
+                        { key: '福气课',         test: () => aTitle.includes('福气') || aTitle.includes('fudi') || aTitle.includes('fu qi') },
+                        { key: '九运课',         test: () => aTitle.includes('九运') || aTitle.includes('jiuyun') || aTitle.includes('jiu yun') },
+                        { key: 'Museum',        test: () => aTitle.includes('museum') },
+                        { key: 'HuiJi',         test: () => aTitle.includes('huiji') || aTitle.includes('hui ji') },
+                        { key: 'Advance Class', test: () => aTitle.includes('advance') },
+                        { key: 'Sharing',       test: () => aTitle.includes('sharing') || aType === 'Sharing' }
+                    ];
+                    for (const m of milestoneMap) {
+                        if (m.test()) window.app.markMilestoneCompleted && await window.app.markMilestoneCompleted(_state.cu.id, m.key);
+                    }
                 }
-            }
-        } catch (e) { console.warn('Milestone auto-mark failed:', e); }
+            } catch (e) { console.warn('Milestone auto-mark failed:', e); }
+        })();
 
         // === Push notification: alert lead agent, co-agents, and management ===
         _notifyActivityCreated(savedActivity).catch(() => {});
@@ -4368,39 +4366,7 @@
             }
         }
 
-        await (window.app.renderCalendar || (() => {}))();
-        await (window.app.renderFollowUpReminders || (() => {}))();
-        await (window.app.renderTodayActivities || (() => {}))();
-
-        // === Auto-refresh open activity tabs so changes reflect immediately ===
-        try {
-            const pid = activity.prospect_id;
-            const cid = activity.customer_id;
-            if (pid) {
-                const bodyEl = document.getElementById(`acc-body-activity-${pid}`);
-                if (bodyEl && bodyEl.style.display !== 'none') {
-                    await switchProspectTab('activity', pid, null, bodyEl);
-                }
-            }
-            if (cid) {
-                const bodyEl = document.getElementById(`cust-acc-body-activity-${cid}`);
-                if (bodyEl && bodyEl.style.display !== 'none') {
-                    const cust = await AppDataStore.getById('customers', cid);
-                    if (cust) await renderCustomerActivityTab(cust, bodyEl.id);
-                }
-            }
-        } catch (e) { console.warn('Activity tab auto-refresh failed:', e); }
-
-        // Mobile calendar: ensure the saved activity is visible before the modal
-        // closes. The fire-and-forget render from _mcalOptimisticInsert may not
-        // have finished by now, so we do one final await here so the user never
-        // sees the calendar in an un-updated state when the modal dismisses.
-        if (_mcalActiveForSave) {
-            const _mcVp = document.getElementById('content-viewport');
-            if (_mcVp && _mcVp.classList.contains('mcal-active'))
-                await (window.app.showMobileCalendarView || (() => {}))(_mcVp).catch(() => {});
-        }
-
+        // Close modal immediately — user sees result without waiting for re-renders.
         if (!stayOpen) {
             UI.hideModal();
             if (window._mcalAfterSaveDate) {
@@ -4414,6 +4380,36 @@
             _state.sca = [];
             _state.scon = [];
             await openActivityModal(date);
+        }
+
+        // Fire-and-forget re-renders — happen in background after modal is gone.
+        (window.app.renderCalendar || (() => Promise.resolve()))().catch(() => {});
+        (window.app.renderFollowUpReminders || (() => Promise.resolve()))().catch(() => {});
+        (window.app.renderTodayActivities || (() => Promise.resolve()))().catch(() => {});
+
+        // Activity tab auto-refresh (fire-and-forget)
+        try {
+            const pid = activity.prospect_id;
+            const cid = activity.customer_id;
+            if (pid) {
+                const bodyEl = document.getElementById(`acc-body-activity-${pid}`);
+                if (bodyEl && bodyEl.style.display !== 'none')
+                    switchProspectTab('activity', pid, null, bodyEl).catch(() => {});
+            }
+            if (cid) {
+                const bodyEl = document.getElementById(`cust-acc-body-activity-${cid}`);
+                if (bodyEl && bodyEl.style.display !== 'none')
+                    AppDataStore.getById('customers', cid)
+                        .then(cust => { if (cust) renderCustomerActivityTab(cust, bodyEl.id).catch(() => {}); })
+                        .catch(() => {});
+            }
+        } catch (e) { console.warn('Activity tab auto-refresh failed:', e); }
+
+        // Mobile calendar refresh (fire-and-forget)
+        if (_mcalActiveForSave) {
+            const _mcVp = document.getElementById('content-viewport');
+            if (_mcVp && _mcVp.classList.contains('mcal-active'))
+                (window.app.showMobileCalendarView || (() => Promise.resolve()))(_mcVp).catch(() => {});
         }
         } finally {
             _releaseSaveGuard();
