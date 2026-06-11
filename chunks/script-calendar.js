@@ -2253,7 +2253,7 @@
                         }
                         activityHtml += `
                             <div class="calendar-appointment ${a.activity_type.toLowerCase()} ${(a.closing_amount || a.is_closing) ? 'closed-case' : ''} ${isPendingInvite ? 'pending-invite' : ''} ${isRejectedInvite ? 'rejected-invite' : ''} ${a._optimistic === 'pending' ? 'optimistic-pending' : ''} ${a._optimistic === 'failed' ? 'optimistic-failed' : ''}"
-                                onclick="event.stopPropagation(); ${a._optimistic ? '' : `app.viewActivityDetails(${a.id})`}">
+                                onclick="event.stopPropagation(); ${a._optimistic === 'failed' ? `app.showSyncErrorModal(${JSON.stringify(a.id)},${JSON.stringify(a._errorMsg||'')},${JSON.stringify(a._errorCode||'')})` : a._optimistic ? '' : `app.viewActivityDetails(${a.id})`}">
                                 <div class="appointment-time">${(a.start_time || '00:00').slice(0,5)}${_optBadge}</div>
                                 ${isEvent
                                     ? `<div class="appointment-customer">${eventTitle || a.activity_title || 'Event'}</div>`
@@ -5612,5 +5612,47 @@
         saveAttendeeNote,
         addCoAgentToActivity,
         getAgentName,
+        showSyncErrorModal,
+        discardFailedActivity,
     });
+
+    function discardFailedActivity(localId) {
+        if (!localId) return;
+        _optimisticActivities.delete(localId);
+        // Also evict from the mcal retry queue so it doesn't re-surface.
+        try {
+            const qKey = 'fs_crm_mcal_retry_queue';
+            const q = JSON.parse(localStorage.getItem(qKey) || '[]');
+            const filtered = q.filter(item => item.tmpId !== localId);
+            if (filtered.length !== q.length) localStorage.setItem(qKey, JSON.stringify(filtered));
+        } catch (_) {}
+        if (typeof renderCalendar === 'function') renderCalendar().catch(() => {});
+        UI.toast.success('Activity discarded.');
+    }
+
+    function showSyncErrorModal(localId, errorMsg, errorCode) {
+        const codeHint = errorCode === '23503'
+            ? 'The linked contact doesn\'t exist on the server yet — make sure their record synced first, then re-enter this activity.'
+            : errorCode === '42703' || (errorMsg && errorMsg.includes('column'))
+                ? 'A field in this activity doesn\'t exist in the database yet. Ask your admin to run the pending migration, then re-enter.'
+                : errorCode
+                    ? `Server error code: ${errorCode}.`
+                    : '';
+        const humanMsg = errorMsg || 'Save failed — could not sync to server.';
+        UI.showModal('⚠ Sync Failed', `
+            <div style="display:flex;flex-direction:column;gap:12px;">
+                <div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:12px 14px;font-size:13px;color:#7f1d1d;">
+                    <strong>${humanMsg}</strong>
+                    ${codeHint ? `<div style="margin-top:6px;color:#991b1b;">${codeHint}</div>` : ''}
+                </div>
+                <div style="font-size:13px;color:#374151;">
+                    This appointment was saved on this device but <strong>did not reach the server</strong>.
+                    Other users cannot see it yet. You can discard it and re-enter it once the issue is resolved.
+                </div>
+            </div>
+        `, [
+            { label: 'Keep (retry later)', type: 'secondary', action: 'UI.hideModal()' },
+            { label: '🗑 Discard', type: 'danger', action: `(async () => { app.discardFailedActivity(${JSON.stringify(localId)}); UI.hideModal(); })()` },
+        ]);
+    }
 })();
