@@ -2197,7 +2197,14 @@
                     // Synchronous lookups from the prefetched maps — no awaits per row.
                     const prospect = a.prospect_id ? prospectMap.get(String(a.prospect_id)) : null;
                     const customer = a.customer_id ? customerMap.get(String(a.customer_id)) : null;
-                    const entityName = prospect ? prospect.full_name : (customer ? customer.full_name : (a.activity_title || a.customer_name || 'Event'));
+                    // Client names are private to the activity owner/co-agents even on public events.
+                    const _tileViewerId = _state.cu?.id;
+                    const _tileOwned = String(a.lead_agent_id) === String(_tileViewerId)
+                        || (Array.isArray(a.co_agents) && a.co_agents.some(ca => String(ca.id) === String(_tileViewerId)))
+                        || isSystemAdmin(_state.cu);
+                    const entityName = _tileOwned
+                        ? (prospect ? prospect.full_name : (customer ? customer.full_name : (a.activity_title || a.customer_name || 'Event')))
+                        : (a.activity_title || a.activity_type || 'Activity');
 
                     if (entityName) {
                         if (renderedInCell >= maxRenderPerCell) {
@@ -2532,7 +2539,13 @@
             const agent = userMapRTA.get(String(a.lead_agent_id)) || { full_name: 'Unknown Agent' };
             const prospect = a.prospect_id ? prospectMapRTA.get(String(a.prospect_id)) : null;
             const customer = a.customer_id ? customerMapRTA.get(String(a.customer_id)) : null;
-            const entityName = prospect ? prospect.full_name : (customer ? customer.full_name : (a.customer_name || 'N/A'));
+            const _rtaViewerId = _state.cu?.id;
+            const _rtaOwned = String(a.lead_agent_id) === String(_rtaViewerId)
+                || (Array.isArray(a.co_agents) && a.co_agents.some(ca => String(ca.id) === String(_rtaViewerId)))
+                || isSystemAdmin(_state.cu);
+            const entityName = _rtaOwned
+                ? (prospect ? prospect.full_name : (customer ? customer.full_name : (a.customer_name || 'N/A')))
+                : null;
             const typeClass = (a.activity_type || '').toLowerCase().replace(/[^a-z0-9-]/g, '');
             const statusText = esc(a.status || 'scheduled');
 
@@ -3425,7 +3438,11 @@
             for (const a of hourActivities) {
                 const prospect = a.prospect_id ? prospectMapDV.get(String(a.prospect_id)) : null;
                 const customer = a.customer_id ? customerMapDV.get(String(a.customer_id)) : null;
-                const name = prospect?.full_name || customer?.full_name || '';
+                const _dvViewerId = _state.cu?.id;
+                const _dvOwned = String(a.lead_agent_id) === String(_dvViewerId)
+                    || (Array.isArray(a.co_agents) && a.co_agents.some(ca => String(ca.id) === String(_dvViewerId)))
+                    || isSystemAdmin(_state.cu);
+                const name = _dvOwned ? (prospect?.full_name || customer?.full_name || '') : '';
                 const agent = userMapDV.get(String(a.lead_agent_id));
 
                 html += `
@@ -3656,6 +3673,12 @@
             || customer?.full_name
             || (entityOrphaned ? `⚠ Deleted ${orphanKind} (ID: ${orphanId})` : 'Unknown');
 
+        // Non-owners (agents viewing someone else's public activity) must not see
+        // prospect/customer names or profile links — those belong to the lead agent.
+        const _isOwnActivity = isSystemAdmin(_state.cu)
+            || String(activity.lead_agent_id) === String(_state.cu?.id)
+            || (Array.isArray(activity.co_agents) && activity.co_agents.some(ca => String(ca.id) === String(_state.cu?.id)));
+
         let attendeeHtml = '';
         const isAttendeeType = ['EVENT', 'AGENT_MEETING', 'AGENT_TRAINING'].includes(activity.activity_type);
         if (isAttendeeType && activity.event_id) {
@@ -3697,6 +3720,10 @@
             const agentAttendees = attendees.filter(a => a.attendee_type === 'agent');
 
             const renderProspectRow = async (att) => {
+                // Non-owners must not see attendee names or links to client profiles.
+                if (!_isOwnActivity) {
+                    return `<div class="info-row" style="color:var(--gray-400);font-size:12px;font-style:italic;">— Attendee (private) —</div>`;
+                }
                 const entityId = att.entity_id || att.attendee_id;
                 const person = all.find(p => String(p.id) === String(entityId));
                 const name = person?.full_name || att.entity_name || '';
@@ -3813,7 +3840,7 @@
         const _entityActionId = activity.prospect_id || activity.customer_id;
         const _entityIsProspect = !!activity.prospect_id;
         const _entityProfileFn = _entityIsProspect ? 'showProspectDetail' : 'showCustomerDetail';
-        const _entityIconBtn = _entityActionId
+        const _entityIconBtn = (_isOwnActivity && _entityActionId)
             ? (entityOrphaned
                 ? `<button title="Relink this activity to a contact" style="margin-left:8px; height:26px; padding:0 10px; border-radius:13px; border:1px solid #f59e0b; background:#fef3c7; color:#92400e; cursor:pointer; display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600;" onclick="event.stopPropagation();(async()=>{ await app.openActivityRepairModal(${activity.id}); })()"><i class="fas fa-link"></i> Repair</button>`
                 : `<button title="Open ${_entityIsProspect ? 'prospect' : 'customer'} profile" style="margin-left:8px; width:26px; height:26px; border-radius:50%; border:none; background:#dbeafe; color:#1e40af; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; font-size:13px;" onclick="event.stopPropagation();(async()=>{ const p=await AppDataStore.getById('${_entityIsProspect ? 'prospects' : 'customers'}', ${_entityActionId}); if(!p){UI.toast.error('${_entityIsProspect ? 'Prospect' : 'Customer'} record not found'); return;} UI.hideModal(); app.${_entityProfileFn}(${_entityActionId}); })()"><i class="fas fa-user-circle"></i></button>`)
@@ -3827,7 +3854,7 @@
                     <div class="info-row"><span class="info-label">Title:</span> <span>${marketingEvent?.event_title || marketingEvent?.title || activity.activity_title || 'N/A'}</span></div>
                     <div class="info-row"><span class="info-label">Date:</span> <span>${activity.activity_date}</span></div>
                     <div class="info-row"><span class="info-label">Time:</span> <span>${activity.start_time} - ${activity.end_time}</span></div>
-                    ${activity.activity_type !== 'EVENT' ? `<div class="info-row"><span class="info-label">Entity:</span> <span style="display:inline-flex; align-items:center; flex-wrap:wrap; gap:4px;">${entityName}${_entityIconBtn}</span></div>` : ''}
+                    ${activity.activity_type !== 'EVENT' && _isOwnActivity ? `<div class="info-row"><span class="info-label">Entity:</span> <span style="display:inline-flex; align-items:center; flex-wrap:wrap; gap:4px;">${entityName}${_entityIconBtn}</span></div>` : ''}
                     ${activity.location_address ? `<div class="info-row"><span class="info-label">Location:</span> <span>${activity.location_address}</span></div>` : ''}
                     ${marketingEvent?.description ? `<div class="info-row" style="flex-direction:column; align-items:flex-start; gap:4px;"><div style="display:flex; align-items:center; gap:8px; width:100%;"><span class="info-label">Description:</span><button style="width:30px;height:30px;border-radius:50%;border:none;background:#25d366;color:#fff;font-size:17px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 8px rgba(37,211,102,0.4);flex-shrink:0;" onclick="event.stopPropagation();app.sendDescriptionInvite(${activity.id})" title="Send WhatsApp Invite"><i class="fab fa-whatsapp"></i></button></div><span style="white-space:pre-wrap; color:var(--gray-700);">${marketingEvent.description}</span></div>` : ''}
                     ${activity.summary ? `<div class="info-row"><span class="info-label">Summary:</span> <span>${activity.summary}</span></div>` : ''}
@@ -3845,7 +3872,7 @@
                 </div>
                 ` : ''}
 
-                ${isAttendeeType ? '' : `
+                ${isAttendeeType || !_isOwnActivity ? '' : `
                 <div class="detail-section">
                     <h4>Consultant</h4>
                     ${_consultantId
