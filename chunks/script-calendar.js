@@ -2034,7 +2034,13 @@
         _calPerf('rpc:light:start');
         let lightRes;
         try {
-            lightRes = await window.supabase.rpc('get_calendar_window', lightParams);
+            lightRes = await Promise.race([
+                Promise.resolve(window.supabase.rpc('get_calendar_window', lightParams)),
+                new Promise(resolve => setTimeout(
+                    () => resolve({ data: null, error: { message: 'Failed to fetch: calendar RPC timed out after 10s', code: '' } }),
+                    10000
+                ))
+            ]);
         } catch (fetchErr) {
             lightRes = { data: null, error: { message: fetchErr?.message || 'Network error', code: '' } };
         }
