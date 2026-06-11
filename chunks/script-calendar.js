@@ -2503,15 +2503,14 @@
         const existingEventIds = new Set(allEventsRTA.map(e => String(e.id)));
         const userMapRTA = new Map(allUsersRTA.map(u => [String(u.id), u]));
 
-        let activities = actResult.data.filter(a =>
-            a.activity_type !== 'EVENT'
-        );
+        let activities = actResult.data;
 
-        // Case status filter (computed — must stay client-side)
+        // Case status filter (computed — must stay client-side); EVENTs have no
+        // closing_amount so always pass them through regardless of the filter.
         if (_filters && _filters.caseStatus === 'closed') {
-            activities = activities.filter(a => a.closing_amount && parseFloat(a.closing_amount) > 0);
+            activities = activities.filter(a => a.activity_type === 'EVENT' || (a.closing_amount && parseFloat(a.closing_amount) > 0));
         } else if (_filters && _filters.caseStatus === 'open') {
-            activities = activities.filter(a => !a.closing_amount || parseFloat(a.closing_amount) <= 0);
+            activities = activities.filter(a => a.activity_type === 'EVENT' || (!a.closing_amount || parseFloat(a.closing_amount) <= 0));
         }
 
         // Fetch only the prospect/customer names we actually need
@@ -2543,9 +2542,14 @@
             const _rtaOwned = String(a.lead_agent_id) === String(_rtaViewerId)
                 || (Array.isArray(a.co_agents) && a.co_agents.some(ca => String(ca.id) === String(_rtaViewerId)))
                 || isSystemAdmin(_state.cu);
-            const entityName = _rtaOwned
-                ? (prospect ? prospect.full_name : (customer ? customer.full_name : (a.customer_name || 'N/A')))
+            const _rtaEvent = a.activity_type === 'EVENT' && a.event_id
+                ? allEventsRTA.find(e => String(e.id) === String(a.event_id))
                 : null;
+            const entityName = a.activity_type === 'EVENT'
+                ? (_rtaEvent?.title || a.activity_title || 'Company Event')
+                : (_rtaOwned
+                    ? (prospect ? prospect.full_name : (customer ? customer.full_name : (a.customer_name || 'N/A')))
+                    : null);
             const typeClass = (a.activity_type || '').toLowerCase().replace(/[^a-z0-9-]/g, '');
             const statusText = esc(a.status || 'scheduled');
 
