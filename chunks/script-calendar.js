@@ -393,6 +393,11 @@
     // One-time JS migration: ensure all templates exist + backfill new columns
     const _migrateFollowUpTemplateColumns = async () => {
         try {
+            // Never run against an unauthenticated read: RLS answers it with
+            // 0 rows, which made this seeder re-create every default template
+            // (31 rows straight into the sync queue) on one bad boot.
+            if (window.AppDataStore && typeof AppDataStore.hasLiveSession === 'function'
+                && !AppDataStore.hasLiveSession()) return;
             const templates = await AppDataStore.getAll('follow_up_templates');
             const existing = (templates || []);
 
@@ -416,8 +421,10 @@
             for (const [tType, defaults] of Object.entries(_TRIGGER_DEFAULTS)) {
                 await _yieldToMain();
                 if (!existing.some(t => t.trigger_type === tType)) {
+                    // No explicit id — data.js stamps an integer. The old
+                    // Date.now()+Math.random() float was rejected by the
+                    // bigint id column (22P02) and poisoned the sync queue.
                     await AppDataStore.create('follow_up_templates', {
-                        id: Date.now() + Math.random(),
                         trigger_type: tType,
                         is_active: true,
                         created_at: new Date().toISOString(),

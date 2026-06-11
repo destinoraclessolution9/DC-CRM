@@ -1148,7 +1148,17 @@ const appLogic = (() => {
     // ========== ADVANCED SEARCH + FILTER PANEL (Phase 5D) ==========
     // [CHUNK: search] ~1725 lines extracted to chunks/script-search.js
     // Loaded on-demand when user first opens the search panel.
-    const ensureReferralFields  = async () => (window.app.ensureReferralFields  || (() => {}))();
+    // ensureReferralFields is ALSO exported in the app return object, so
+    // app.ensureReferralFields IS this wrapper until the search chunk's
+    // Object.assign replaces it — calling it blindly recursed into itself
+    // (stack overflow in the bg-init task on every boot). Load the chunk,
+    // then only delegate if the registration actually changed.
+    const ensureReferralFields  = async () => {
+        if (typeof window._loadChunk !== 'function') return;
+        try { await window._loadChunk('chunks/script-search.min.js'); } catch (_) { return; }
+        const fn = window.app && window.app.ensureReferralFields;
+        if (typeof fn === 'function' && fn !== ensureReferralFields) return fn();
+    };
     const toggleSearchPanel     = async () => (window.app.toggleSearchPanel     || (() => {}))();
     const hideSearchPanel       =       () => (window.app.hideSearchPanel       || (() => {}))();
     const showSearchPanel       = async () => (window.app.showSearchPanel       || (() => {}))();

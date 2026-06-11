@@ -166,6 +166,9 @@ class DataStore {
         // recoverable from Supabase, so they're safe to drop — pick the
         // largest fs_crm_ keys first.
         try { this._pruneStorageIfFull(); } catch (_) {}
+
+        // Clear delta cursors poisoned by pre-guard builds (see method docs).
+        try { this._healPoisonedSyncCursors(); } catch (_) {}
     }
 
     // Drop fs_crm_ snapshots when localStorage usage approaches the quota.
@@ -299,8 +302,55 @@ class DataStore {
     _writeClient() { return window.supabase; }
     _readClient()  { return window.supabase; }
 
-    _generateId() {
+    _generateId(tableName) {
+        // fp_* tables use uuid primary keys — a numeric id is rejected by
+        // Postgres (22P02 invalid input syntax for type uuid), and the failed
+        // row would sit in the sync queue retrying forever.
+        if (tableName && /^fp_/.test(String(tableName)) && window.crypto && typeof crypto.randomUUID === 'function') {
+            return crypto.randomUUID();
+        }
         return Date.now() + Math.floor(Math.random() * 1000);
+    }
+
+    // True when a Supabase auth session with an unexpired access token is
+    // present in localStorage (key set in supabase-init.js). Synchronous on
+    // purpose: supabase-js's async getSession() can block on the cross-tab
+    // auth lock during boot races — exactly the moments this check guards.
+    //
+    // Why it matters: without a live session, PostgREST answers RLS-protected
+    // reads with 200 + 0 rows (not an error). Treating that as table truth
+    // overwrites the local snapshot and advances the delta cursor — the
+    // wiped rows then never come back (the "calendar all gone" bug).
+    hasLiveSession() {
+        try {
+            const raw = localStorage.getItem('fs-crm-auth-v1');
+            if (!raw) return false;
+            const s = JSON.parse(raw);
+            const token = (s && s.access_token) || (s && s.currentSession && s.currentSession.access_token);
+            if (!token) return false;
+            const exp = (s && s.expires_at) || (s && s.currentSession && s.currentSession.expires_at);
+            return !exp || (exp * 1000) > Date.now();
+        } catch (_) {
+            return false;
+        }
+    }
+
+    // One-time (per epoch) repair: earlier builds let unauthenticated reads
+    // overwrite table snapshots and advance the fs_crm_*_last_sync delta
+    // cursors, leaving hollowed-out caches that delta sync can never backfill
+    // (e.g. calendar showing 16 of 155 activities). Clearing the cursors
+    // forces one full refetch per table on its next read; the snapshots
+    // themselves are kept so views still paint instantly meanwhile.
+    _healPoisonedSyncCursors() {
+        const EPOCH = '2026-06-11-rls-empty-read-guard';
+        if (localStorage.getItem('fs_crm_cache_epoch') === EPOCH) return;
+        const toRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && k.startsWith('fs_crm_') && k.endsWith('_last_sync')) toRemove.push(k);
+        }
+        for (const k of toRemove) localStorage.removeItem(k);
+        localStorage.setItem('fs_crm_cache_epoch', EPOCH);
     }
 
     // Merge hard-coded tombstones into localStorage so externally-deleted records
@@ -725,6 +775,11 @@ class DataStore {
         const prevSnapshot = (prevEntry && prevEntry.data) || [];
 
         try {
+            // Skip background revalidation entirely while unauthenticated —
+            // an RLS-filtered (empty/partial) response must never overwrite
+            // the snapshot or advance the delta cursor. The post-login read
+            // revalidates normally.
+            if (!this.hasLiveSession()) return;
             // ── Incremental (delta) sync ─────────────────────────────────
             // If we have a lastSync timestamp, only fetch rows changed since
             // then instead of downloading the full table. For large tables
@@ -995,6 +1050,17 @@ class DataStore {
     }
 
     async _getAllImpl(tableName) {
+        // ── RLS empty-read guard ──────────────────────────────────────────
+        // Without a live auth session (boot race, expired token mid-refresh,
+        // offline session restore) PostgREST silently RLS-filters every
+        // protected table to 0 rows with HTTP 200. That result must never be
+        // mistaken for table truth: serve the local snapshot instead and let
+        // the next authenticated read revalidate.
+        const hasSession = this.hasLiveSession();
+        if (!hasSession) {
+            const local = this._swrGetLocal(tableName);
+            if (local && local.length > 0) return local;
+        }
         const selectClause = this._selectClauseForGetAll(tableName);
         const signal = this._inflightSignal();
         try {
@@ -1037,6 +1103,11 @@ class DataStore {
             const tombstones = tombstoneRaw ? JSON.parse(tombstoneRaw) : {};
             const deletedIds = new Set(tombstones[tableName] || []);
             const serverData = (data || []).filter(r => !deletedIds.has(String(r.id)) && !(tableName === 'users' && r.status === 'deleted'));
+            // Unauthenticated read reached the network (no local snapshot to
+            // serve above): return what came back but do NOT run _autoSync,
+            // cache, persist, or bump last_sync — the result is RLS-filtered
+            // junk and _autoSync could tombstone or push against it.
+            if (!hasSession) return serverData;
             // Auto-sync: push any locally-saved (offline) items to Supabase so ALL users can see them,
             // then return the merged result (includes items still pending sync).
             const result = await this._autoSync(tableName, serverData);
@@ -1144,8 +1215,9 @@ class DataStore {
                 document.addEventListener('visibilitychange', _onVisibilityChange);
                 window.addEventListener('pageshow', _onPageShow);
             }
-            // Even when read fails, still try to push queued writes — write endpoint is separate from read
-            this._pushQueuedWrites(tableName).catch(() => {});
+            // Even when read fails, still try to push queued writes — write endpoint is separate from read.
+            // Only when authenticated: anon writes just bounce off RLS and spam the network.
+            if (this.hasLiveSession()) this._pushQueuedWrites(tableName).catch(() => {});
             // Always strip tombstoned IDs from any fallback path so deleted records can never reappear
             const tombstoneRaw = localStorage.getItem('fs_crm_tombstones');
             const tombstones = tombstoneRaw ? JSON.parse(tombstoneRaw) : {};
@@ -1158,6 +1230,38 @@ class DataStore {
             const local = localStorage.getItem(`fs_crm_${tableName}`);
             return local ? stripDeleted(JSON.parse(local)) : [];
         }
+    }
+
+    // Classify a PostgREST/Postgres write error for sync-queue handling.
+    //   'duplicate' — unique-key hit: the row already exists server-side
+    //                 (typically inserted under a different id by a retry or
+    //                 another device). Treat as already-synced and drop.
+    //   'permanent' — data/constraint/schema/permission error: retrying the
+    //                 identical payload can never succeed. Park to the dead
+    //                 queue instead of retrying on every read forever (this
+    //                 was the egg_processed_orders 409 / fp_* 400 storm).
+    //   'transient' — network/5xx/everything else: keep and retry later.
+    _classifyQueueError(error) {
+        const code = String((error && error.code) || '');
+        const msg = [error && error.message, error && error.details, error && error.hint]
+            .filter(Boolean).join(' ');
+        if (code === '23505' || /duplicate key value/i.test(msg)) return 'duplicate';
+        if (/^22/.test(code) || /^23/.test(code) || code === '42501' || code === '42703' || code === 'PGRST204'
+            || /invalid input syntax|violates (not-null|foreign key|check) constraint|row-level security|schema cache/i.test(msg)) {
+            return 'permanent';
+        }
+        return 'transient';
+    }
+
+    // Move an unsyncable queue item to fs_crm_sync_queue_dead so its data is
+    // preserved for inspection without retrying (and failing) on every read.
+    _parkQueueItem(item, reason) {
+        try {
+            const dead = JSON.parse(localStorage.getItem('fs_crm_sync_queue_dead') || '[]');
+            dead.push({ ...item, parkedAt: new Date().toISOString(), reason: String(reason || '').slice(0, 300) });
+            localStorage.setItem('fs_crm_sync_queue_dead', JSON.stringify(dead.slice(-200)));
+        } catch (_) {}
+        console.warn(`DataStore: parked unsyncable ${item.tableName} record ${item.record && item.record.id} — ${reason}. Kept in fs_crm_sync_queue_dead.`);
     }
 
     // Push queued writes to Supabase even when reads are failing (e.g. 400 on activities).
@@ -1181,6 +1285,15 @@ class DataStore {
                         .from(tableName)
                         .upsert(item.record);
                     if (error) {
+                        const kind = this._classifyQueueError(error);
+                        if (kind === 'duplicate') {
+                            console.warn(`DataStore: dropping queued ${tableName} ${item.record.id} — already on server (${error.message})`);
+                            continue;
+                        }
+                        if (kind === 'permanent') {
+                            this._parkQueueItem({ tableName, ...item }, error.message);
+                            continue;
+                        }
                         console.warn(`DataStore: force-push failed for ${item.record.id}: ${error.message}`);
                         stillPending.push(item);
                     }
@@ -1255,7 +1368,22 @@ class DataStore {
                                 try { window._confirmOptimisticActivity(item.record.client_request_id); } catch (_) {}
                             }
                         } else {
-                            // Sync failed — include item locally but keep in queue for next attempt
+                            const kind = uErr ? this._classifyQueueError(uErr) : 'transient';
+                            if (kind === 'duplicate') {
+                                // Unique-key hit: the row already lives on the
+                                // server under another id. Server copy wins —
+                                // drop the queued one and don't merge it.
+                                console.warn(`DataStore: dropping queued ${tableName} ${item.record.id} — already on server (${uErr.message})`);
+                                continue;
+                            }
+                            if (kind === 'permanent') {
+                                // Unfixable payload (bad id type, FK gone, RLS
+                                // deny…) — park it; retrying every read was the
+                                // endless 400 storm in the console.
+                                this._parkQueueItem({ tableName, ...item }, uErr && uErr.message);
+                                continue;
+                            }
+                            // Transient — include item locally but keep in queue for next attempt
                             if (!serverIds.has(String(item.record.id))) merged.push(item.record);
                             stillPending.push(item);
                         }
@@ -1433,7 +1561,7 @@ class DataStore {
 
     async add(tableName, record) {
         const dataToInsert = { ...record };
-        if (!dataToInsert.id) dataToInsert.id = this._generateId();
+        if (!dataToInsert.id) dataToInsert.id = this._generateId(tableName);
 
         // Phase F: server-side idempotency. Stamp a UUID on inserts to tables
         // that have a unique client_request_id index (see migrations/perf_indexes_2026-05-26.sql).
@@ -1489,6 +1617,18 @@ class DataStore {
                 if (col && col in insertData) {
                     delete insertData[col];
                     continue; // retry without the unknown column
+                }
+                // Table has a uuid primary key but the auto-id was numeric —
+                // regenerate as a uuid and retry. Only for ids WE stamped;
+                // caller-supplied ids are left alone (failing loudly beats
+                // silently renaming a record the caller still references).
+                if (record.id === undefined
+                    && insertData.id !== undefined
+                    && /invalid input syntax for type uuid/i.test([e?.message, e?.details].filter(Boolean).join(' '))
+                    && window.crypto && typeof crypto.randomUUID === 'function') {
+                    insertData.id = crypto.randomUUID();
+                    dataToInsert.id = insertData.id;
+                    continue;
                 }
                 // Broader schema error but no column name extracted — strip all non-primitive fields
                 if (this._isSchemaError(e)) {
@@ -1954,6 +2094,10 @@ class DataStore {
         q = q.range(offset, offset + limit - 1);
 
         try {
+            // Unauthenticated (boot race / expired token): the server would
+            // RLS-filter to 0 rows with HTTP 200 — render from the cached
+            // snapshot below instead of showing a falsely-empty view.
+            if (!this.hasLiveSession()) throw new Error('no live auth session — using cached fallback');
             const { data, error, count } = await q;
             if (error) {
                 // If light-select column list is stale, retry with '*'
