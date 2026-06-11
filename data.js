@@ -1630,6 +1630,24 @@ class DataStore {
                     dataToInsert.id = insertData.id;
                     continue;
                 }
+                // FK violation (23503): strip the offending FK column and retry.
+                // PostgREST surfaces the column in the detail field: "Key (customer_id)=(uuid) is not present in..."
+                if (e?.code === '23503') {
+                    const fkSrc = [e?.details, e?.detail, e?.message, e?.hint].filter(Boolean).join(' ');
+                    const fkCol = fkSrc.match(/Key \((\w+)\)=/)?.[1];
+                    if (fkCol && fkCol in insertData) {
+                        console.warn(`FK violation on ${fkCol} — retrying without it`);
+                        delete insertData[fkCol];
+                        continue;
+                    }
+                    // Column not identifiable — strip all known FK columns
+                    const knownFKs = ['customer_id', 'prospect_id', 'referrer_id'];
+                    let anyStripped = false;
+                    for (const fc of knownFKs) {
+                        if (fc in insertData) { delete insertData[fc]; anyStripped = true; }
+                    }
+                    if (anyStripped) continue;
+                }
                 // Broader schema error but no column name extracted — strip all non-primitive fields
                 if (this._isSchemaError(e)) {
                     const stripped = {};
