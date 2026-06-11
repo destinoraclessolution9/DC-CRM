@@ -3956,7 +3956,8 @@
         activity.note_next_steps = document.getElementById('note-next-steps')?.value || '';
         activity.note_needs = document.getElementById('note-needs')?.value || '';
         activity.note_pain_points = document.getElementById('note-pain-points')?.value || '';
-        activity.remarks = document.getElementById('activity-remarks')?.value || '';
+        const _remarksVal = document.getElementById('activity-remarks')?.value || '';
+        if (_remarksVal) activity.remarks = _remarksVal; // only include when non-empty; column may not exist yet
 
         // CPS attachment upload — store the file in Supabase storage so it's viewable everywhere.
         // We stash it here and upload AFTER the activity row exists so the path can reference the activity id.
