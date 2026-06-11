@@ -21,7 +21,7 @@
 //   sw-init.js is loaded as <script defer> from index.html.
 //
 // Cache version: bump CACHE_VERSION on each deploy to expire old caches.
-const CACHE_VERSION = 'crm-v2026-06-11-1';
+const CACHE_VERSION = 'crm-v2026-06-11-2';
 const STATIC_CACHE  = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
