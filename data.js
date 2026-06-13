@@ -411,7 +411,15 @@ class DataStore {
             // the canonical 'prospects'/'customers' cache keys would poison the
             // full-table cache used by admin/manager views. Skip those tables when
             // a scoped agent query was issued.
-            const _scopedTables = agentId ? new Set(['prospects', 'customers']) : new Set();
+            // 'activities' from this RPC is a ±60-day WINDOWED subset. Priming it
+            // under the canonical 'activities' cache key (and bumping its last_sync
+            // cursor below) would make every getAll('activities') consumer see only
+            // a ~120-day slice, and delta-sync could never backfill the older rows
+            // (their updated_at predates the new cursor) — the 'hollow snapshot'
+            // class behind the 2026-06-11 incident. The calendar grid renders from
+            // its own get_calendar_window RPC, not this cache, so skipping it is safe.
+            const _scopedTables = new Set(['activities']);
+            if (agentId) { _scopedTables.add('prospects'); _scopedTables.add('customers'); }
             const tablesPrimed = [];
             for (const t of ['activities', 'users', 'prospects', 'customers']) {
                 if (_scopedTables.has(t)) continue; // scoped subset — do not poison full-table cache
@@ -793,9 +801,25 @@ class DataStore {
                 'pipeline_config', 'pipeline_config_history',
             ]);
             const lastSync = localStorage.getItem(`fs_crm_${tableName}_last_sync`);
-            if (lastSync && !_NO_DELTA_TABLES.has(tableName)) {
+            // Once per session per table, force the FULL fetch path instead of
+            // delta. The delta path only ADDS/UPDATES rows — it can never REMOVE
+            // one — so a record deleted on the server by another user would
+            // otherwise persist in this device's snapshot indefinitely (even
+            // across reloads, because the snapshot + cursor live in localStorage).
+            // The full fetch below replaces the snapshot with server truth, which
+            // reconciles those deletions. It runs through the same hasLiveSession-
+            // guarded path as a cold load, so it cannot be poisoned by RLS-empty.
+            if (!this._fullReconciledThisSession) this._fullReconciledThisSession = new Set();
+            const _needsReconcile = !this._fullReconciledThisSession.has(tableName);
+            if (lastSync && !_NO_DELTA_TABLES.has(tableName) && !_needsReconcile) {
                 try {
                     const delta = await this.getAllSince(tableName, lastSync);
+                    // null = the read was ABORTED (user navigated away mid-fetch).
+                    // Must NOT advance the cursor or merge: doing so would move the
+                    // cursor past rows that changed in this window, dropping those
+                    // updates forever. Leave everything untouched; a later
+                    // revalidation retries from the same lastSync.
+                    if (delta === null) return;
                     const now = new Date().toISOString();
                     if (delta.length > 0) {
                         // Merge delta into the existing cached snapshot.
@@ -838,6 +862,10 @@ class DataStore {
                 this._inFlightGetAll.set(tableName, fetchPromise);
             }
             const fresh = await fetchPromise;
+            // Mark reconciled: the full fetch replaced the snapshot with server
+            // truth, so any server-side deletions are now reflected. Subsequent
+            // revalidations this session use the fast delta path again.
+            this._fullReconciledThisSession.add(tableName);
 
             if (this._snapshotsDiffer(prevSnapshot, fresh)) {
                 // _getAllImpl already updated the in-memory cache with fresh
@@ -1039,12 +1067,12 @@ class DataStore {
                 ({ data, error } = await q2);
             }
             if (error) {
-                if (this._isAbortError(error)) return [];  // view changed mid-fetch — drop silently
+                if (this._isAbortError(error)) return null;  // view changed mid-fetch — signal abort (NOT empty)
                 throw error;
             }
             return data || [];
         } catch (e) {
-            if (this._isAbortError(e)) return [];
+            if (this._isAbortError(e)) return null;  // signal abort distinctly from "no changes"
             throw e;
         }
     }
@@ -1246,8 +1274,14 @@ class DataStore {
         const msg = [error && error.message, error && error.details, error && error.hint]
             .filter(Boolean).join(' ');
         if (code === '23505' || /duplicate key value/i.test(msg)) return 'duplicate';
+        // FK violation (23503): the referenced parent row may simply not have
+        // synced YET — e.g. an activity created offline replays before its
+        // prospect. Dead-lettering it loses the record even though a later pass
+        // (once the parent lands) would succeed. Classify as bounded-retry 'fk';
+        // the caller retries a few times before parking.
+        if (code === '23503' || /violates foreign key constraint/i.test(msg)) return 'fk';
         if (/^22/.test(code) || /^23/.test(code) || code === '42501' || code === '42703' || code === 'PGRST204'
-            || /invalid input syntax|violates (not-null|foreign key|check) constraint|row-level security|schema cache/i.test(msg)) {
+            || /invalid input syntax|violates (not-null|check) constraint|row-level security|schema cache/i.test(msg)) {
             return 'permanent';
         }
         return 'transient';
@@ -1290,6 +1324,14 @@ class DataStore {
                             console.warn(`DataStore: dropping queued ${tableName} ${item.record.id} — already on server (${error.message})`);
                             continue;
                         }
+                        if (kind === 'fk') {
+                            // Parent row not synced yet — keep retrying up to a bound
+                            // so a later pass (after the parent lands) can succeed.
+                            item._fkRetries = (item._fkRetries || 0) + 1;
+                            if (item._fkRetries < 5) { stillPending.push(item); }
+                            else { this._parkQueueItem({ tableName, ...item }, 'FK unresolved after 5 retries: ' + error.message); }
+                            continue;
+                        }
                         if (kind === 'permanent') {
                             this._parkQueueItem({ tableName, ...item }, error.message);
                             continue;
@@ -1301,7 +1343,15 @@ class DataStore {
                     stillPending.push(item);
                 }
             }
-            localStorage.setItem('fs_crm_sync_queue', JSON.stringify([...otherTable, ...stillPending]));
+            // Re-read the queue at write time: a concurrent drain for another
+            // table (getAll runs for many tables in parallel at boot) may have
+            // synced-and-removed its items while we awaited the network. Rebuilding
+            // from the stale `otherTable` snapshot captured before those awaits
+            // would resurrect them. Read fresh and replace only THIS table's rows —
+            // a synchronous read+write is atomic relative to other passes.
+            const _freshQueue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
+            const _keptOther = _freshQueue.filter(q => q.tableName !== tableName);
+            localStorage.setItem('fs_crm_sync_queue', JSON.stringify([..._keptOther, ...stillPending]));
         } catch (_) {}
     }
 
@@ -1376,9 +1426,22 @@ class DataStore {
                                 console.warn(`DataStore: dropping queued ${tableName} ${item.record.id} — already on server (${uErr.message})`);
                                 continue;
                             }
+                            if (kind === 'fk') {
+                                // Parent row not synced yet (e.g. activity queued
+                                // before its prospect). Bounded retry so it isn't
+                                // lost to the dead queue before the parent lands.
+                                item._fkRetries = (item._fkRetries || 0) + 1;
+                                if (item._fkRetries < 5) {
+                                    if (!serverIds.has(String(item.record.id))) merged.push(item.record);
+                                    stillPending.push(item);
+                                } else {
+                                    this._parkQueueItem({ tableName, ...item }, 'FK unresolved after 5 retries: ' + (uErr && uErr.message));
+                                }
+                                continue;
+                            }
                             if (kind === 'permanent') {
-                                // Unfixable payload (bad id type, FK gone, RLS
-                                // deny…) — park it; retrying every read was the
+                                // Unfixable payload (bad id type, RLS deny, bad
+                                // column…) — park it; retrying every read was the
                                 // endless 400 storm in the console.
                                 this._parkQueueItem({ tableName, ...item }, uErr && uErr.message);
                                 continue;
@@ -1392,7 +1455,15 @@ class DataStore {
                         stillPending.push(item);
                     }
                 }
-                localStorage.setItem('fs_crm_sync_queue', JSON.stringify([...otherTable, ...stillPending]));
+                // Re-read the queue at write time: a concurrent drain for another
+            // table (getAll runs for many tables in parallel at boot) may have
+            // synced-and-removed its items while we awaited the network. Rebuilding
+            // from the stale `otherTable` snapshot captured before those awaits
+            // would resurrect them. Read fresh and replace only THIS table's rows —
+            // a synchronous read+write is atomic relative to other passes.
+            const _freshQueue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
+            const _keptOther = _freshQueue.filter(q => q.tableName !== tableName);
+            localStorage.setItem('fs_crm_sync_queue', JSON.stringify([..._keptOther, ...stillPending]));
                 // Persist any new tombstones discovered during this pass
                 if (newTombstones.length > 0) {
                     try {
