@@ -429,11 +429,15 @@
         const idx = parseInt(document.getElementById('org-mem-idx')?.value, 10);
         const name = document.getElementById('org-mem-name')?.value?.trim();
         if (!cid || !name) { UI.toast.error('Name is required.'); return; }
-    
+        const dobVal = document.getElementById('org-mem-dob')?.value || '';
+        // DOB is marked required (*) and the archetype analysis needs it — enforce
+        // it so analysis can't silently complete on incomplete data.
+        if (!dobVal) { UI.toast.error('Date of Birth is required.'); return; }
+
         const member = {
             name,
             current_role: document.getElementById('org-mem-role')?.value?.trim() || '',
-            dob:          document.getElementById('org-mem-dob')?.value || '',
+            dob:          dobVal,
             dob_time:     document.getElementById('org-mem-dobtime')?.value || '',
             dob_city:     document.getElementById('org-mem-city')?.value?.trim() || '',
             gender:       document.getElementById('org-mem-gender')?.value || '',
@@ -454,7 +458,10 @@
         }
     
         try {
-            await AppDataStore.update('org_consultations', cid, { members, status: 'collecting' });
+            // Clearing analysis/pairs: they store member ARRAY INDICES which go
+            // stale the moment the member list changes, producing wrong names in
+            // a regenerated report. Reset so analysis must be re-run.
+            await AppDataStore.update('org_consultations', cid, { members, status: 'collecting', analysis: {}, pairs: [], report_html: null });
             UI.toast.success('Member saved.');
             UI.hideModal();
             await window.app.openOrgConsultationDetail(cid);
@@ -470,7 +477,9 @@
         const members = Array.isArray(row.members) ? [...row.members] : [];
         members.splice(idx, 1);
         try {
-            await AppDataStore.update('org_consultations', cid, { members });
+            // Reset analysis/pairs (member-index based) so the removed member
+            // can't leave the regenerated report pointing at the wrong people.
+            await AppDataStore.update('org_consultations', cid, { members, status: 'collecting', analysis: {}, pairs: [], report_html: null });
             await window.app.openOrgConsultationDetail(cid);
         } catch (e) {
             UI.toast.error('Remove failed: ' + (e?.message || e));
@@ -498,11 +507,11 @@
         if (!row) return;
         const members = Array.isArray(row.members) ? [...row.members] : [];
     
-        let added = 0;
+        let added = 0, skipped = 0;
         for (const line of lines) {
             const parts = line.split(',').map(p => p.trim());
-            const name = parts[0]; if (!name) continue;
-            if (members.length >= row.team_size) break;
+            const name = parts[0]; if (!name) { skipped++; continue; }
+            if (members.length >= row.team_size) { skipped++; continue; }
             members.push({
                 name,
                 current_role: parts[1] || '',
@@ -514,9 +523,11 @@
             });
             added++;
         }
-    
-        await AppDataStore.update('org_consultations', cid, { members });
-        UI.toast.success(`Imported ${added} member(s).`);
+
+        // Reset analysis/pairs (member-index based) since the roster changed.
+        await AppDataStore.update('org_consultations', cid, { members, status: 'collecting', analysis: {}, pairs: [], report_html: null });
+        if (skipped > 0) UI.toast.warning(`Imported ${added} member(s); skipped ${skipped} (team-size cap ${row.team_size} reached or blank/malformed row).`);
+        else UI.toast.success(`Imported ${added} member(s).`);
         UI.hideModal();
         await window.app.openOrgConsultationDetail(cid);
     };

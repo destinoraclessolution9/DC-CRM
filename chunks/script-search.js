@@ -20,6 +20,9 @@
     const isTeamLeaderOrAbove  = (u) => _utils.isTeamLeaderOrAbove(u || _state.cu);
     const _getUserLevel        = (u) => _utils.getUserLevel(u);
     const getAgentsAndLeaders  = () => _utils.getAgentsAndLeaders();
+    const getVisibleProspects  = (...a) => _utils.getVisibleProspects(...a);
+    const getVisibleCustomers  = (...a) => _utils.getVisibleCustomers(...a);
+    const getVisibleActivities = (...a) => _utils.getVisibleActivities(...a);
     const navigateTo           = (v) => window.app.navigateTo(v);
     // Live user reference
     let _currentUser = _state.cu;
@@ -1577,10 +1580,10 @@ const renderSearchResults = async () => {
 
         return `
                     <tr style="cursor: pointer;" onclick="app.viewEntityDetail('${_currentSearchEntity}', ${item.id})">
-                        <td><strong>${nameCol}</strong></td>
-                        <td>${identifierCol}</td>
-                        <td>${agentName}</td>
-                        <td>${displayStatus}</td>
+                        <td><strong>${esc(nameCol)}</strong></td>
+                        <td>${esc(identifierCol)}</td>
+                        <td>${esc(agentName)}</td>
+                        <td>${esc(displayStatus)}</td>
                         <td>
                             <button class="btn-icon" title="View Detail" onclick="app.viewEntityDetail('${_currentSearchEntity}', ${item.id}); event.stopPropagation();">
                                 <i class="fas fa-eye"></i>
@@ -1636,8 +1639,8 @@ const renderSavedSearches = async () => {
         <div class="saved-search-item">
             <div class="saved-search-info" onclick="(async()=>{try{await app.loadSavedSearch(${s.id});}catch(e){console.error(e);}})()">
                 <i class="fas fa-bookmark"></i>
-                <span>${s.search_name}</span>
-                <small>${s.entity}</small>
+                <span>${esc(s.search_name || '')}</span>
+                <small>${esc(s.entity || '')}</small>
             </div>
             <button class="btn-icon" onclick="(async()=>{try{await app.deleteSavedSearch(${s.id});}catch(e){console.error(e);}})()">
                 <i class="fas fa-trash"></i>
@@ -1761,9 +1764,16 @@ const exportResults = (format) => {
 
     if (format === 'csv') {
         const keys = Object.keys(_currentSearchResults[0]);
+        // CSV-safe cell: double embedded quotes, and neutralize leading
+        // =,+,-,@ so spreadsheets don't execute a value as a formula.
+        const csvCell = (v) => {
+            const cell = String(v ?? '');
+            const safe = /^[=+\-@]/.test(cell) ? "'" + cell : cell;
+            return '"' + safe.replace(/"/g, '""') + '"';
+        };
         const header = keys.join(',');
         const rows = _currentSearchResults.map(row =>
-            keys.map(key => `"${row[key] || ''}"`).join(',')
+            keys.map(key => csvCell(row[key])).join(',')
         );
 
         const csv = [header, ...rows].join('\n');
@@ -1787,8 +1797,34 @@ const exportResults = (format) => {
 
 
 
+    // viewEntityDetail: opening a search result row. Previously this lived ONLY
+    // in the Super-Admin-gated admin chunk, so for every non-admin the result
+    // rows were dead buttons. Define it here (search chunk loads for all roles)
+    // and lazy-load the prospects chunk which owns the detail views.
+    const viewEntityDetail = async (entity, id) => {
+        if (window.app.hideSearchPanel) window.app.hideSearchPanel();
+        if (typeof window._loadChunk === 'function' && ['prospects','customers','agents'].includes(entity)) {
+            try { await window._loadChunk('chunks/script-prospects.min.js'); } catch (_) {}
+        }
+        switch (entity) {
+            case 'prospects': if (window.app.showProspectDetail) await window.app.showProspectDetail(id); break;
+            case 'customers': if (window.app.showCustomerDetail) await window.app.showCustomerDetail(id); break;
+            case 'agents':    if (window.app.showAgentDetail) await window.app.showAgentDetail(id); break;
+            case 'products':
+            case 'bujishu':
+            case 'formula':
+                if (window.app.navigateTo) await window.app.navigateTo('marketing');
+                UI.toast.info('Navigate to Marketing → Lists to manage ' + entity);
+                break;
+            case 'activities': if (window.app.viewActivityDetails) await window.app.viewActivityDetails(id); break;
+            case 'events':     if (window.app.showEventDetail) await window.app.showEventDetail(id); else UI.toast.info('Event #' + id); break;
+            default: UI.toast.info(`${entity} #${id}`);
+        }
+    };
+
     Object.assign(window.app, {
         ensureReferralFields,
+        viewEntityDetail,
         toggleSearchPanel,
         showSearchPanel,
         hideSearchPanel,

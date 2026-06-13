@@ -130,8 +130,17 @@
         const businessAccountId = document.getElementById('waba-id')?.value;
         const phoneNumberId     = document.getElementById('phone-id')?.value;
         const businessPhone     = document.getElementById('business-phone')?.value;
-        const accessToken       = document.getElementById('access-token')?.value;
+        const tokenInput        = document.getElementById('access-token')?.value;
         const verifyToken       = document.getElementById('verify-token')?.value;
+
+        const existingConnection = await getWhatsAppConnection();
+        // The token field is pre-filled with a bullet mask when a connection
+        // already exists. Treat the mask (or an empty field) as "unchanged" and
+        // keep the previously-stored token — otherwise editing any other field
+        // and saving would overwrite the real token with the literal mask.
+        const accessToken = (tokenInput && tokenInput !== '••••••••')
+            ? tokenInput
+            : (existingConnection?.access_token || '');
 
         if (!businessAccountId || !phoneNumberId || !businessPhone || !accessToken) {
             UI.toast.error('Please fill in all required fields'); return;
@@ -144,7 +153,6 @@
                 created_at: new Date().toISOString()
             });
         }
-        const existingConnection = await getWhatsAppConnection();
         const connectionData = {
             integration_id: integration.id, user_id: _state.cu?.id || 1,
             business_account_id: businessAccountId, phone_number_id: phoneNumberId,
@@ -233,7 +241,7 @@
                 <div id="template-section">
                     <div class="form-group">
                         <label>Template</label>
-                        <select id="template-select" class="form-control" onchange="app.previewTemplate()">
+                        <select id="template-select" class="form-control">
                             <option value="">Select a template</option>
                             ${templates.map(t => `<option value="${esc(String(t.id))}">${esc(t.template_name)}</option>`).join('')}
                         </select>

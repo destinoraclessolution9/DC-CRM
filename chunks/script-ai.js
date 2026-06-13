@@ -1350,6 +1350,36 @@
     };
 
     // ── Attach public functions to window.app ────────────────────────────
+    // ── Placeholder handlers for AI-dashboard action buttons ──────────────
+    // The Lead Scoring / Sales Forecast / Churn Risk / Performance Insights
+    // dashboards wired these onclick handlers before their backends existed.
+    // Calling an undefined app.* throws an uncaught TypeError, so register safe
+    // stubs that tell the user the feature is pending instead of crashing.
+    const _aiSoon = (label) => () => UI.toast.info(`${label} — coming soon`);
+    Object.assign(window.app, {
+        executeAction:                _aiSoon('Recommended action'),
+        viewLeadDetails:              _aiSoon('Lead details'),
+        recalculateLeadScores:        _aiSoon('Recalculate lead scores'),
+        exportLeads:                  _aiSoon('Export leads'),
+        createSegmentFromScoredLeads: _aiSoon('Create segment'),
+        scheduleBulkFollowup:         _aiSoon('Bulk follow-up'),
+        exportScoringReport:          _aiSoon('Export scoring report'),
+        viewDealDetails:              _aiSoon('Deal details'),
+        viewProspectDetails:          _aiSoon('Prospect details'),
+        viewUpsellOpportunities:      _aiSoon('Upsell opportunities'),
+        viewReferrals:                _aiSoon('Referrals'),
+        viewRenewals:                 _aiSoon('Renewals'),
+        exportForecast:               _aiSoon('Export forecast'),
+        adjustForecast:               _aiSoon('Adjust forecast'),
+        scheduleForecastReview:       _aiSoon('Schedule forecast review'),
+        contactAtRiskCustomer:        _aiSoon('Contact customer'),
+        executeRiskActions:           _aiSoon('Risk actions'),
+        viewAgentDetails:             _aiSoon('Agent details'),
+        refreshPerformanceInsights:   _aiSoon('Refresh insights'),
+        scheduleCoachingSessions:     _aiSoon('Coaching sessions'),
+        generatePerformanceReport:    _aiSoon('Performance report'),
+        shareInsights:                _aiSoon('Share insights'),
+    });
     Object.assign(window.app, {
         showAIInsightsDashboard,
         showLeadScoring,

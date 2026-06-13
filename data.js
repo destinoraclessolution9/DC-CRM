@@ -1588,6 +1588,7 @@ class DataStore {
         // so data reaches Supabase even when the table schema is missing new columns.
         let insertData = { ...dataToInsert };
         let lastError = null; // remember the final error so we can surface it on the ⚠ chip
+        const _strippedFKCols = []; // FK columns dropped by a 23503 retry — warn the user the link was lost
         for (let attempt = 0; attempt < 15; attempt++) {
             try {
                 const { data, error } = await this._writeClient()
@@ -1596,6 +1597,12 @@ class DataStore {
                     .select()
                     .single();
                 if (error) throw error;
+                // A 23503 retry dropped an FK column to let the row save. The row
+                // is now orphaned from its referenced record — tell the user so a
+                // missing prospect/customer link isn't silently lost.
+                if (_strippedFKCols.length && window.UI?.toast?.warning) {
+                    try { window.UI.toast.warning(`Saved, but couldn't link to ${_strippedFKCols.join(', ')} — that record no longer exists.`); } catch (_) {}
+                }
                 // Save full record (including stripped fields) to localStorage
                 try {
                     const key = `fs_crm_${tableName}`;
@@ -1638,13 +1645,14 @@ class DataStore {
                     if (fkCol && fkCol in insertData) {
                         console.warn(`FK violation on ${fkCol} — retrying without it`);
                         delete insertData[fkCol];
+                        _strippedFKCols.push(fkCol);
                         continue;
                     }
                     // Column not identifiable — strip all known FK columns
                     const knownFKs = ['customer_id', 'prospect_id', 'referrer_id'];
                     let anyStripped = false;
                     for (const fc of knownFKs) {
-                        if (fc in insertData) { delete insertData[fc]; anyStripped = true; }
+                        if (fc in insertData) { delete insertData[fc]; _strippedFKCols.push(fc); anyStripped = true; }
                     }
                     if (anyStripped) continue;
                 }
@@ -2783,7 +2791,10 @@ class DataStore {
 
     // Touchpoints due today for a specific agent (or all agents if null).
     async getJourneyTouchpointsDueToday(agentId = null) {
-        const today = new Date().toISOString().slice(0, 10);
+        // Local (MYT) date — toISOString() is UTC, so before 08:00 local it yields
+        // yesterday and the due-today list comes back empty for morning users.
+        const _d = new Date();
+        const today = `${_d.getFullYear()}-${String(_d.getMonth()+1).padStart(2,'0')}-${String(_d.getDate()).padStart(2,'0')}`;
         try {
             let q = window.supabase
                 .from('journey_touchpoints')
@@ -2792,9 +2803,11 @@ class DataStore {
                 .lte('due_date', today)
                 .order('priority', { ascending: false })
                 .order('due_date', { ascending: true });
-            // Only apply agent filter when agentId is a real UUID (not seed integer like 9999)
-            const _isUUID = (v) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
-            if (agentId && _isUUID(agentId)) q = q.eq('assigned_to', agentId);
+            // Always scope to the requesting agent when an id is given. The CRM
+            // generates NUMERIC ids, so the old UUID-only guard silently dropped
+            // the filter for every real agent — returning the whole company's
+            // touchpoints (with prospect/customer names + phones). Security leak.
+            if (agentId) q = q.eq('assigned_to', String(agentId));
             const { data, error } = await q;
             if (error) throw error;
             return data || [];
@@ -2893,8 +2906,11 @@ class DataStore {
                 .eq('stage_name', stageName)
                 .order('sort_order', { ascending: true });
             if (productTrack && productTrack !== 'all') {
-                // Match specific product track OR 'all'
-                q = q.in('product_track', [productTrack, 'all', null]);
+                // Match the specific track, the generic 'all', OR NULL (default
+                // templates). SQL `col IN (NULL)` is never true and PostgREST's
+                // .in() can't express IS NULL, so the generic/default templates
+                // were silently skipped — use an OR with is.null instead.
+                q = q.or(`product_track.in.(${productTrack},all),product_track.is.null`);
             }
             const { data: stageTemplates, error: tErr } = await q;
             if (tErr) throw tErr;

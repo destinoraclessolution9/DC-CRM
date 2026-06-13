@@ -15,7 +15,12 @@
     const _utils = window._crmUtils;
     const isMobile = () => _utils.isMobile();
     const escapeHtml = (...a) => _utils.escapeHtml(...a);
+    const getVisibleUserIds = (u) => _utils.getVisibleUserIds(u);
+    const isSystemAdmin = (u) => _utils.isSystemAdmin(u || _state.cu);
     const navigateTo = (v) => window.app.navigateTo(v);
+    // Local (MYT) date YYYY-MM-DD — toISOString() is UTC and records the previous
+    // day for actions taken before 08:00 local.
+    const _mLocalDate = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
     // Cross-chunk helpers — defined in script-prospects.js, exported to window.app.
     const showAgentDetail        = (...a) => (window.app.showAgentDetail        || (() => Promise.resolve()))(...a);
     const showProspectsView      = (...a) => (window.app.showProspectsView      || (() => Promise.resolve()))(...a);
@@ -39,7 +44,7 @@
                 customer_id: customerId,
                 text,
                 author: currentUser?.full_name || 'System',
-                date: new Date().toISOString().split('T')[0]
+                date: _mLocalDate()
             });
             const _cnEl = document.getElementById('customer-note-text');
             if (_cnEl) _cnEl.value = '';
@@ -67,7 +72,7 @@
                 agent_id: agentId,
                 text,
                 author: currentUser?.full_name || 'System',
-                date: new Date().toISOString().split('T')[0]
+                date: _mLocalDate()
             });
             const _anEl = document.getElementById(`agent-note-text-${agentId}`);
             if (_anEl) _anEl.value = '';
@@ -275,7 +280,7 @@
         const noteData = {
             text,
             author: currentUser?.full_name || 'System',
-            date: new Date().toISOString().split('T')[0],
+            date: _mLocalDate(),
             is_voice_note: true
         };
 
@@ -801,7 +806,7 @@
         cachedCustomers = cachedCustomers || [];
         const _pendNum = '<i class="fas fa-spinner fa-spin" style="font-size:11px;opacity:.55"></i>';
         const personMap = new Map(allPeople.map(p => [String(p.id), p]));
-        const _isMine = (d) => !d.agent_id || String(d.agent_id) === String(_state.cu?.id);
+        const _isMine = (d) => isSystemAdmin(_state.cu) || String(d.agent_id) === String(_state.cu?.id);
         const visibleDrafts = cachedDrafts.filter(d =>
             d.status === 'pending' && (d.due_date || '') <= todayStr && _isMine(d)
         );
@@ -1137,10 +1142,19 @@
         let h = 0; for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0;
         return palette[Math.abs(h) % palette.length];
     };
+    // Ownership gate — mirrors the desktop calendar (commits fa31e3b/3a75855).
+    // Non-owners viewing another agent's public/open activity must NOT see the
+    // client's name; they see the activity type instead.
+    const _mcalOwned = (a) => {
+        const cu = _state.cu;
+        return isSystemAdmin(cu)
+            || String(a.lead_agent_id) === String(cu?.id)
+            || (Array.isArray(a.co_agents) && a.co_agents.some(c => String(c.id) === String(cu?.id)));
+    };
     const _mcalShortTitle = (a, personMap) => {
         const pid = a.prospect_id || a.customer_id;
         const person = pid ? personMap.get(String(pid)) : null;
-        if (person?.full_name) {
+        if (person?.full_name && _mcalOwned(a)) {
             const parts = String(person.full_name).split(/\s+/);
             return parts[0]; // first name fits the cell
         }
@@ -1733,7 +1747,8 @@
             const type = a.activity_type || '';
             const pid = a.prospect_id || a.customer_id;
             const person = pid ? _mcalPersonMap.get(String(pid)) : null;
-            const name = person?.full_name || a.activity_title || '—';
+            // Ownership gate: non-owners never see another agent's client name.
+            const name = (_mcalOwned(a) && person?.full_name) ? person.full_name : (a.activity_title || a.activity_type || '—');
             const venue = a.venue_name || a.venue || a.location_address || '';
             const color = _mcalColorForType(type);
             return `

@@ -448,6 +448,8 @@ const renderCustomersTable = async () => {
         )) continue;
         if (guaFilter && c.ming_gua !== guaFilter) continue;
         if (typeFilter === 'VIP' && (c.lifetime_value || 0) < 5000) continue;
+        if (typeFilter === 'Regular' && (c.lifetime_value || 0) >= 5000) continue;
+        if (typeFilter === 'Agent Eligible' && !(c.agent_eligible || c.is_agent_eligible)) continue;
         if (deficiencyFilter) {
             const needs = c.needs ? (Array.isArray(c.needs) ? c.needs : c.needs.split(',').map(t => t.trim())) : [];
             if (!needs.includes(deficiencyFilter)) continue;
@@ -653,7 +655,7 @@ const showApprovalDetail = async (entryId) => {
         detailHtml = `
             <div style="background:#fef3c7; border:1px solid #fcd34d; border-radius:8px; padding:12px; font-size:13px; color:#92400e; margin-bottom:14px;">
                 <i class="fas fa-edit" style="margin-right:6px;"></i>
-                Information updated by <strong>${agentName}</strong>. Review changes below.
+                Information updated by <strong>${escapeHtml(agentName)}</strong>. Review changes below.
             </div>
             ${changedFields.length > 0 ? `
                 <table style="width:100%; border-collapse:collapse; font-size:13px;">
@@ -664,8 +666,8 @@ const showApprovalDetail = async (entryId) => {
                     </tr></thead>
                     <tbody>${changedFields.map(f => `<tr>
                         <td style="padding:6px 8px; border-bottom:1px solid var(--gray-100); font-weight:500;">${f.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</td>
-                        <td style="padding:6px 8px; border-bottom:1px solid var(--gray-100); color:#dc2626; text-decoration:line-through;">${before[f] || '<em>empty</em>'}</td>
-                        <td style="padding:6px 8px; border-bottom:1px solid var(--gray-100); color:#16a34a; font-weight:600;">${after[f] || '<em>empty</em>'}</td>
+                        <td style="padding:6px 8px; border-bottom:1px solid var(--gray-100); color:#dc2626; text-decoration:line-through;">${before[f] ? escapeHtml(String(before[f])) : '<em>empty</em>'}</td>
+                        <td style="padding:6px 8px; border-bottom:1px solid var(--gray-100); color:#16a34a; font-weight:600;">${after[f] ? escapeHtml(String(after[f])) : '<em>empty</em>'}</td>
                     </tr>`).join('')}</tbody>
                 </table>
             ` : '<div style="color:var(--gray-400); font-size:13px; font-style:italic; padding:12px;">No field differences detected.</div>'}`;
@@ -675,16 +677,16 @@ const showApprovalDetail = async (entryId) => {
         detailHtml = `
             <div style="background:#d1fae5; border:1px solid #6ee7b7; border-radius:8px; padding:12px; font-size:13px; color:#065f46; margin-bottom:14px;">
                 <i class="fas fa-dollar-sign" style="margin-right:6px;"></i>
-                New sale submitted by <strong>${agentName}</strong>. Review closing record below.
+                New sale submitted by <strong>${escapeHtml(agentName)}</strong>. Review closing record below.
             </div>
             <div style="font-size:13px; display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                <div><span style="color:var(--gray-500);">Prospect:</span> <strong>${cr.full_name || snapshot.prospect_name || '-'}</strong></div>
-                <div><span style="color:var(--gray-500);">Product:</span> ${cr.product || '-'}</div>
+                <div><span style="color:var(--gray-500);">Prospect:</span> <strong>${escapeHtml(cr.full_name || snapshot.prospect_name || '-')}</strong></div>
+                <div><span style="color:var(--gray-500);">Product:</span> ${escapeHtml(cr.product || '-')}</div>
                 <div><span style="color:var(--gray-500);">Sale Amount:</span> <strong style="color:#166534;">RM ${saleAmount.toLocaleString()}</strong></div>
-                <div><span style="color:var(--gray-500);">Payment:</span> ${cr.payment_method || '-'}</div>
-                <div><span style="color:var(--gray-500);">Invoice:</span> ${cr.invoice_number || '-'}</div>
-                <div><span style="color:var(--gray-500);">Closing Date:</span> ${cr.closing_date || '-'}</div>
-                ${cr.sales_idea ? `<div style="grid-column:1/-1;"><span style="color:var(--gray-500);">Sales Idea:</span> ${cr.sales_idea}</div>` : ''}
+                <div><span style="color:var(--gray-500);">Payment:</span> ${escapeHtml(cr.payment_method || '-')}</div>
+                <div><span style="color:var(--gray-500);">Invoice:</span> ${escapeHtml(cr.invoice_number || '-')}</div>
+                <div><span style="color:var(--gray-500);">Closing Date:</span> ${escapeHtml(cr.closing_date || '-')}</div>
+                ${cr.sales_idea ? `<div style="grid-column:1/-1;"><span style="color:var(--gray-500);">Sales Idea:</span> ${escapeHtml(cr.sales_idea)}</div>` : ''}
             </div>`;
     }
 
@@ -692,7 +694,7 @@ const showApprovalDetail = async (entryId) => {
         <div style="display:flex; flex-direction:column; gap:14px;">
             ${detailHtml}
             <div style="font-size:12px; color:var(--gray-400); border-top:1px solid var(--gray-100); padding-top:8px;">
-                Submitted: ${new Date(entry.submitted_at).toLocaleString('en-MY')} | By: ${agentName}
+                Submitted: ${new Date(entry.submitted_at).toLocaleString('en-MY')} | By: ${escapeHtml(agentName)}
             </div>
         </div>
     `, [
@@ -779,7 +781,7 @@ const rejectQueueEntry = async (entryId) => {
         <div style="display:flex; flex-direction:column; gap:12px;">
             <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:12px; font-size:13px; color:#991b1b;">
                 <i class="fas fa-exclamation-circle" style="margin-right:6px;"></i>
-                You are rejecting: <strong>${entry.description || 'this entry'}</strong>
+                You are rejecting: <strong>${escapeHtml(entry.description || 'this entry')}</strong>
             </div>
             <div class="form-group">
                 <label>Reason for rejection</label>
@@ -1185,7 +1187,7 @@ const renderProspectsTable = async () => {
                     <input type="checkbox" data-pid="${p.id}" ${isSelected ? 'checked' : ''} onchange="app.toggleProspectSelect(${p.id})">
                 </td>
                 <td data-label="Name">
-                    <strong class="${p.unable_to_serve ? 'name-unable' : ''}">${p.full_name || '(No Name)'}</strong>
+                    <strong class="${p.unable_to_serve ? 'name-unable' : ''}">${escapeHtml(p.full_name || '(No Name)')}</strong>
                     ${p.phone ? `<br><span style="font-size:12px;color:var(--text-secondary);">${escapeHtml(p.phone)}</span>` : ''}
                     ${p.unable_to_serve ? `<br><span class="badge-unable">Unable to Serve</span>` : ''}
                 </td>
@@ -1207,7 +1209,7 @@ const renderProspectsTable = async () => {
                     <span class="score-badge score-${grade.replace('+', '-plus')}">${p.score || 0} (${grade})</span>
                 </td>
                 <td data-label="Ming Gua">${p.ming_gua || 'MG4'}</td>
-                <td data-label="Occupation">${p.occupation || ''}${p.company_name ? ' · ' + p.company_name : ''}</td>
+                <td data-label="Occupation">${escapeHtml((p.occupation || '') + (p.company_name ? ' · ' + p.company_name : ''))}</td>
                 <td data-label="Last Activity" data-la-id="${p.id}">${lastActivityHtml}</td>
                 <td data-label="Protection">
                     <div class="${daysClass}">${daysLabel}</div>
@@ -2169,7 +2171,7 @@ const showCustomerDetail = async (customerId) => {
                         <span style="font-size:11px;color:var(--gray-400);"><i class="fas fa-lock"></i> Permanent</span>
                     </div>
                     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0 4px;">
-                        <span style="font-size:22px;font-weight:700;line-height:1.3;flex-shrink:0;">${customer.full_name}</span>
+                        <span style="font-size:22px;font-weight:700;line-height:1.3;flex-shrink:0;">${escapeHtml(customer.full_name)}</span>
                         ${(isSystemAdmin(_currentUser) || isMarketingManager(_currentUser)) ? iconBtn('Edit', 'fas fa-edit', `app.openProspectModal(${customer.id})`) : ''}
                         ${iconBtn('Add Purchase', 'fas fa-plus', `app.openAddPurchaseModal(${customer.id})`)}
                         ${iconBtn('Refer a Friend', 'fas fa-user-plus', `app.openCustomerReferralModal(${customer.id})`)}
@@ -2359,23 +2361,23 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
     if (tab === 'info') {
         container.innerHTML = `
             <div class="pv-sub">Contact</div>
-            <div class="pv-row"><span class="pv-lbl">Full Name</span><span class="pv-val"><strong>${customer.full_name}</strong></span></div>
-            <div class="pv-row"><span class="pv-lbl">Phone</span><span class="pv-val">${customer.phone || '-'} ${customer.phone ? '<button class="btn-icon" style="margin-left:4px;"><i class="fas fa-phone"></i></button>' : ''}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Email</span><span class="pv-val">${customer.email || '-'} ${customer.email ? '<button class="btn-icon" style="margin-left:4px;"><i class="fas fa-envelope"></i></button>' : ''}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Full Name</span><span class="pv-val"><strong>${escapeHtml(customer.full_name)}</strong></span></div>
+            <div class="pv-row"><span class="pv-lbl">Phone</span><span class="pv-val">${escapeHtml(customer.phone || '-')} ${customer.phone ? '<button class="btn-icon" style="margin-left:4px;"><i class="fas fa-phone"></i></button>' : ''}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Email</span><span class="pv-val">${escapeHtml(customer.email || '-')} ${customer.email ? '<button class="btn-icon" style="margin-left:4px;"><i class="fas fa-envelope"></i></button>' : ''}</span></div>
             <div class="pv-sub">Identity</div>
-            <div class="pv-row"><span class="pv-lbl">IC Number</span><span class="pv-val">${customer.ic_number || '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Date of Birth</span><span class="pv-val">${customer.date_of_birth || '-'}${customer.date_of_birth ? ` (Age ${Math.floor((Date.now() - new Date(customer.date_of_birth).getTime()) / 31557600000)})` : ''}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Ming Gua</span><span class="pv-val"><span style="color:#6b21a8;font-weight:600;">${customer.ming_gua || '-'}${customer.element ? ' (' + customer.element + ')' : ''}</span></span></div>
-            <div class="pv-row"><span class="pv-lbl">Gender</span><span class="pv-val">${customer.gender || '-'}</span></div>
+            <div class="pv-row"><span class="pv-lbl">IC Number</span><span class="pv-val">${escapeHtml(customer.ic_number || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Date of Birth</span><span class="pv-val">${escapeHtml(customer.date_of_birth || '-')}${customer.date_of_birth ? ` (Age ${Math.floor((Date.now() - new Date(customer.date_of_birth).getTime()) / 31557600000)})` : ''}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Ming Gua</span><span class="pv-val"><span style="color:#6b21a8;font-weight:600;">${escapeHtml(customer.ming_gua || '-')}${customer.element ? ' (' + escapeHtml(customer.element) + ')' : ''}</span></span></div>
+            <div class="pv-row"><span class="pv-lbl">Gender</span><span class="pv-val">${escapeHtml(customer.gender || '-')}</span></div>
             <div class="pv-sub">Employment</div>
-            <div class="pv-row"><span class="pv-lbl">Occupation</span><span class="pv-val">${customer.occupation || '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Company</span><span class="pv-val">${customer.company_name || '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Income</span><span class="pv-val">${customer.income_range || '-'}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Occupation</span><span class="pv-val">${escapeHtml(customer.occupation || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Company</span><span class="pv-val">${escapeHtml(customer.company_name || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Income</span><span class="pv-val">${escapeHtml(customer.income_range || '-')}</span></div>
             <div class="pv-sub">Address</div>
-            <div class="pv-row"><span class="pv-lbl">Address</span><span class="pv-val">${[customer.address, customer.city, customer.state, customer.postal_code].filter(Boolean).join(', ') || '-'}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Address</span><span class="pv-val">${escapeHtml([customer.address, customer.city, customer.state, customer.postal_code].filter(Boolean).join(', ') || '-')}</span></div>
             <div class="pv-sub">Referral Information</div>
-            <div class="pv-row"><span class="pv-lbl">Referred By</span><span class="pv-val">${customer.referred_by || '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Relationship</span><span class="pv-val">${customer.referral_relationship || '-'}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Referred By</span><span class="pv-val">${escapeHtml(customer.referred_by || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Relationship</span><span class="pv-val">${escapeHtml(customer.referral_relationship || '-')}</span></div>
         `;
         const cfDisplay = await (window.app.renderCustomFieldDisplay || (() => ''))('customer', customer.id);
         if (cfDisplay) container.insertAdjacentHTML('beforeend', cfDisplay);
@@ -2487,10 +2489,10 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
             ${customerNotes.length > 0 ? customerNotes.map(n => `
                 <div style="margin-top:10px;background:var(--gray-50);border-radius:8px;padding:12px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-                        <span style="font-size:12px;color:var(--gray-500);">${n.date} - ${n.author}${n.is_voice_note ? ' <i class="fas fa-microphone voice-note-icon" title="Voice note"></i>' : ''}</span>
+                        <span style="font-size:12px;color:var(--gray-500);">${escapeHtml(n.date)} - ${escapeHtml(n.author)}${n.is_voice_note ? ' <i class="fas fa-microphone voice-note-icon" title="Voice note"></i>' : ''}</span>
                         <button class="btn-icon" onclick="app.deleteCustomerNote(${customer.id}, ${n.id})"><i class="fas fa-trash"></i></button>
                     </div>
-                    <div style="font-size:13px;color:var(--gray-700);">${n.text}</div>
+                    <div style="font-size:13px;color:var(--gray-700);">${escapeHtml(n.text)}</div>
                 </div>
             `).join('') : '<p style="color:var(--gray-400);font-size:13px;margin-top:8px;">No notes yet.</p>'}
         `;
@@ -2501,7 +2503,7 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
         if (entityTags.length > 0) {
             const tagSpans = await Promise.all(entityTags.map(async (et) => {
                 const tag = await AppDataStore.getById('tags', et.tag_id);
-                return tag ? `<span class="score-badge" style="background:${tag.color || 'var(--primary)'};color:white;display:flex;align-items:center;gap:4px;font-size:11px;">${tag.name} <span style="cursor:pointer;" onclick="app.removeTagFromCustomer(${customer.id},${tag.id})">&times;</span></span>` : '';
+                return tag ? `<span class="score-badge" style="background:${tag.color || 'var(--primary)'};color:white;display:flex;align-items:center;gap:4px;font-size:11px;">${escapeHtml(tag.name)} <span style="cursor:pointer;" onclick="app.removeTagFromCustomer(${customer.id},${tag.id})">&times;</span></span>` : '';
             }));
             tagsHtml = tagSpans.join('');
         }
@@ -2525,24 +2527,24 @@ const renderBasicBankTab = async (customer, containerId = 'profile-tab-content')
             <div>
                 <h4 style="font-size:16px; font-weight:600; margin-bottom:16px; color:var(--primary);">Customer Information</h4>
                 <div style="display:flex; flex-direction:column; gap:12px;">
-                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Full Name:</span> <strong>${customer.full_name}</strong></div>
+                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Full Name:</span> <strong>${escapeHtml(customer.full_name)}</strong></div>
                     <div style="display:flex; justify-content:space-between;">
-                        <span style="color:var(--gray-500);">Phone:</span> 
-                        <span>${customer.phone} <button class="btn-icon"><i class="fas fa-phone"></i></button></span>
+                        <span style="color:var(--gray-500);">Phone:</span>
+                        <span>${escapeHtml(customer.phone || '')} <button class="btn-icon"><i class="fas fa-phone"></i></button></span>
                     </div>
                     <div style="display:flex; justify-content:space-between;">
-                        <span style="color:var(--gray-500);">Email:</span> 
-                        <span>${customer.email} <button class="btn-icon"><i class="fas fa-envelope"></i></button></span>
+                        <span style="color:var(--gray-500);">Email:</span>
+                        <span>${escapeHtml(customer.email || '')} <button class="btn-icon"><i class="fas fa-envelope"></i></button></span>
                     </div>
-                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">IC Number:</span> <span>${customer.ic_number}</span></div>
-                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Date of Birth:</span> <span>${customer.date_of_birth} (Age 44)</span></div>
-                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Ming Gua:</span> <span style="color:#6b21a8; font-weight:600;">${customer.ming_gua} (${customer.element})</span></div>
-                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Gender:</span> <span>${customer.gender}</span></div>
+                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">IC Number:</span> <span>${escapeHtml(customer.ic_number || '')}</span></div>
+                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Date of Birth:</span> <span>${escapeHtml(customer.date_of_birth || '')} (Age 44)</span></div>
+                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Ming Gua:</span> <span style="color:#6b21a8; font-weight:600;">${escapeHtml(customer.ming_gua || '')} (${escapeHtml(customer.element || '')})</span></div>
+                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Gender:</span> <span>${escapeHtml(customer.gender || '')}</span></div>
                     <hr style="border:none; border-top:1px solid var(--gray-100); margin:8px 0;">
-                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Occupation:</span> <span>${customer.occupation || '-'}</span></div>
-                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Company:</span> <span>${customer.company_name || '-'}</span></div>
-                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Income:</span> <span>${customer.income_range || '-'}</span></div>
-                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Address:</span> <span style="text-align:right;">${customer.address || '-'} ${customer.city || ''} ${customer.state || ''} ${customer.postal_code || ''}</span></div>
+                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Occupation:</span> <span>${escapeHtml(customer.occupation || '-')}</span></div>
+                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Company:</span> <span>${escapeHtml(customer.company_name || '-')}</span></div>
+                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Income:</span> <span>${escapeHtml(customer.income_range || '-')}</span></div>
+                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Address:</span> <span style="text-align:right;">${escapeHtml((customer.address || '-') + ' ' + (customer.city || '') + ' ' + (customer.state || '') + ' ' + (customer.postal_code || ''))}</span></div>
                 </div>
 
                 <h4 style="font-size:16px; font-weight:600; margin-top:24px; margin-bottom:16px; color:var(--primary);">Referral Information</h4>
@@ -2556,10 +2558,10 @@ const renderBasicBankTab = async (customer, containerId = 'profile-tab-content')
             <div>
                 <h4 style="font-size:16px; font-weight:600; margin-bottom:16px; color:var(--primary);">Bank and Payment Information</h4>
                 <div style="display:flex; flex-direction:column; gap:12px; background:var(--gray-50); padding:16px; border-radius:8px;">
-                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Bank Name:</span> <strong>${customer.bank_name}</strong></div>
+                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Bank Name:</span> <strong>${escapeHtml(customer.bank_name || '')}</strong></div>
                     <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Account Number:</span> <span>5123-****-8901</span></div>
-                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Account Holder:</span> <span>${customer.account_holder}</span></div>
-                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Payment Method:</span> <span>${customer.payment_methods}</span></div>
+                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Account Holder:</span> <span>${escapeHtml(customer.account_holder || '')}</span></div>
+                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Payment Method:</span> <span>${escapeHtml(customer.payment_methods || '')}</span></div>
                 </div>
 
                 <h4 style="font-size:16px; font-weight:600; margin-top:24px; margin-bottom:16px; color:var(--primary);">Customer Metrics</h4>
@@ -2627,7 +2629,7 @@ const renderPlatformIdsTab = async (customer, containerId = 'profile-tab-content
                 ${internal.map(p => `
                     <div class="platform-row">
                         <span class="platform-label">${p.platform} ID</span>
-                        <span class="platform-value">${p.platform_id} <button class="copy-btn" onclick="app.copyToClipboard('${p.platform_id}')"><i class="fas fa-copy"></i></button></span>
+                        <span class="platform-value">${escapeHtml(p.platform_id || '')} <button class="copy-btn" data-copy="${escapeHtml(p.platform_id || '')}" onclick="app.copyToClipboard(this.dataset.copy)"><i class="fas fa-copy"></i></button></span>
                     </div>
                 `).join('')}
             </div>
@@ -2636,7 +2638,7 @@ const renderPlatformIdsTab = async (customer, containerId = 'profile-tab-content
                 ${external.map(p => `
                     <div class="platform-row">
                         <span class="platform-label">${p.platform} ID</span>
-                        <span class="platform-value">${p.platform_id} <button class="copy-btn" onclick="app.copyToClipboard('${p.platform_id}')"><i class="fas fa-copy"></i></button></span>
+                        <span class="platform-value">${escapeHtml(p.platform_id || '')} <button class="copy-btn" data-copy="${escapeHtml(p.platform_id || '')}" onclick="app.copyToClipboard(this.dataset.copy)"><i class="fas fa-copy"></i></button></span>
                     </div>
                 `).join('')}
             </div>
@@ -2783,17 +2785,18 @@ const renderPurchaseHistoryTab = async (customer, containerId = 'profile-tab-con
             <tbody>
                 ${crRow}
                 ${purchases.map(p => {
-        if (p.status !== 'PENDING') totalPaid += p.amount;
-        else totalPending += p.amount;
+        const _pstatus = p.status || 'PENDING';
+        if (_pstatus !== 'PENDING') totalPaid += (p.amount || 0);
+        else totalPending += (p.amount || 0);
 
-        const badgeClass = `badge-${p.status.toLowerCase().replace('/', '')}`;
+        const badgeClass = `badge-${_pstatus.toLowerCase().replace('/', '')}`;
         return `
                         <tr>
-                            <td>${p.date}</td>
-                            <td>${p.invoice}</td>
-                            <td>${p.item}</td>
-                            <td>RM ${p.amount.toLocaleString()}</td>
-                            <td><span class="score-badge ${badgeClass}" style="font-size:11px;">${p.status}</span></td>
+                            <td>${escapeHtml(p.date || '')}</td>
+                            <td>${escapeHtml(p.invoice || '')}</td>
+                            <td>${escapeHtml(p.item || '')}</td>
+                            <td>RM ${(p.amount || 0).toLocaleString()}</td>
+                            <td><span class="score-badge ${badgeClass}" style="font-size:11px;">${escapeHtml(_pstatus)}</span></td>
                             <td>${p.proof ? `<a href="#" style="color:var(--primary);">${p.proof.endsWith('.pdf') ? 'View Report' : 'View Image'}</a>` : `<button class="btn-sm secondary" onclick="app.uploadPaymentProof(${p.id}, ${customer.id})">Upload Image</button>`}</td>
                             <td>
                                 <button class="btn-icon"><i class="fas fa-download"></i></button>
@@ -3109,7 +3112,7 @@ const renderCustomerActivityTab = async (customer, containerId = 'profile-tab-co
     const seenIds = new Set();
     const activities = [...custActs, ...prospActs]
         .filter(a => { if (seenIds.has(a.id)) return false; seenIds.add(a.id); return true; })
-        .sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
+        .sort((a, b) => new Date(b.activity_date || b.created_at) - new Date(a.activity_date || a.created_at));
 
     container.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
@@ -3119,8 +3122,9 @@ const renderCustomerActivityTab = async (customer, containerId = 'profile-tab-co
         ${activities.length > 0 ? `
             <div class="activity-timeline">
                 ${activities.map(a => {
-        const icon = a.type === 'FTF' ? 'users' : (a.type === 'CALL' ? 'phone' : (a.type === 'EVENT' ? 'calendar-alt' : 'sticky-note'));
-        const date = a.date || (a.created_at ? a.created_at.split('T')[0] : 'N/A');
+        const _atype = a.activity_type || a.type;
+        const icon = _atype === 'FTF' ? 'users' : (_atype === 'CALL' ? 'phone' : (_atype === 'EVENT' ? 'calendar-alt' : 'sticky-note'));
+        const date = a.activity_date || a.date || (a.created_at ? a.created_at.split('T')[0] : 'N/A');
         return `
                         <div class="timeline-item" style="display:flex; gap:16px; margin-bottom:20px; position:relative;">
                             <div class="timeline-icon" style="flex-shrink:0; width:32px; height:32px; border-radius:50%; background:var(--gray-100); display:flex; align-items:center; justify-content:center; color:var(--primary); font-size:14px; z-index:1;">
@@ -3128,11 +3132,11 @@ const renderCustomerActivityTab = async (customer, containerId = 'profile-tab-co
                             </div>
                             <div class="timeline-content" style="flex:1; background:var(--gray-50); padding:12px; border-radius:8px; border:1px solid var(--gray-200);">
                                 <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-                                    <strong style="font-size:14px;">${a.activity_title || a.type}</strong>
-                                    <span style="font-size:12px; color:var(--gray-500);">${date}</span>
+                                    <strong style="font-size:14px;">${escapeHtml(a.activity_title || _atype)}</strong>
+                                    <span style="font-size:12px; color:var(--gray-500);">${escapeHtml(date)}</span>
                                 </div>
-                                <div style="font-size:13px; color:var(--gray-700);">${a.notes || 'No details provided.'}</div>
-                                ${a.outcome ? `<div style="font-size:12px; margin-top:8px;"><span class="score-badge" style="background:var(--success-bg); color:var(--success); border:none;">${a.outcome}</span></div>` : ''}
+                                <div style="font-size:13px; color:var(--gray-700);">${a.notes ? escapeHtml(a.notes) : 'No details provided.'}</div>
+                                ${a.outcome ? `<div style="font-size:12px; margin-top:8px;"><span class="score-badge" style="background:var(--success-bg); color:var(--success); border:none;">${escapeHtml(a.outcome)}</span></div>` : ''}
                             </div>
                         </div>
                     `;
@@ -3319,7 +3323,7 @@ const showProspectDetail = async (prospectId) => {
                         <span class="badge" onclick="event.stopPropagation();app.openScoreAdjustmentModal('prospect',${prospect.id})" style="background:var(--primary);color:#fff;cursor:pointer;user-select:none;" title="Click to adjust score">⭐ ${prospect.score || 0} pts (${getScoreGrade(prospect.score || 0)}) <i class="fas fa-pen" style="font-size:9px;opacity:.8;margin-left:2px;"></i></span>
                     </div>
                     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0 8px;">
-                        <span style="font-size:22px;font-weight:700;line-height:1.3;flex-shrink:0;">${prospect.full_name}</span>${prospect.nickname ? `<span style="font-size:15px;font-weight:400;color:var(--gray-500);">"${prospect.nickname}"</span>` : ''}
+                        <span style="font-size:22px;font-weight:700;line-height:1.3;flex-shrink:0;">${escapeHtml(prospect.full_name)}</span>${prospect.nickname ? `<span style="font-size:15px;font-weight:400;color:var(--gray-500);">"${escapeHtml(prospect.nickname)}"</span>` : ''}
                         <button title="Edit" aria-label="Edit prospect" onclick="app.editProspect(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--gray-500);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i></button><button title="Convert to Customer" aria-label="Convert to customer" onclick="app.convertToCustomer(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:none;background:var(--primary);color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'"><i class="fa-solid fa-user-check" aria-hidden="true"></i></button><button title="Meet-Up History" aria-label="Meet-up history" onclick="app.openMeetupHistoryModal(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--primary);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i></button><button title="Save to Phone Contacts" aria-label="Save to phone contacts" onclick="app.downloadProspectVCard(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--success);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-solid fa-address-book" aria-hidden="true"></i></button>
                     </div>
                 </div>
@@ -3817,17 +3821,17 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                     <div class="meet-card" style="margin-bottom:10px;">
                         <div class="meet-card-hdr">
                             <div>
-                                <span class="meet-type"><i class="fas ${icon}"></i> ${label}${a.activity_title ? ' — ' + a.activity_title : ''}${sourceTag}</span>
-                                <span class="meet-date">${a.activity_date || ''}</span>
+                                <span class="meet-type"><i class="fas ${icon}"></i> ${escapeHtml(label)}${a.activity_title ? ' — ' + escapeHtml(a.activity_title) : ''}${sourceTag}</span>
+                                <span class="meet-date">${escapeHtml(a.activity_date || '')}</span>
                             </div>
                             <button class="btn btn-sm secondary" style="font-size:12px;padding:4px 8px;" onclick="event.stopPropagation();app.viewActivityDetails(${detailsId})">Details</button>
                         </div>
-                        ${a.summary || a.note_key_points ? `<div class="meet-section"><div class="meet-lbl">Key Points</div><div class="meet-txt">${a.summary || a.note_key_points}</div></div>` : ''}
-                        ${a.note_needs ? `<div class="meet-section"><div class="meet-lbl">Needs</div><div class="meet-txt">${a.note_needs}</div></div>` : ''}
-                        ${a.note_pain_points ? `<div class="meet-section"><div class="meet-lbl">Pain Points</div><div class="meet-txt">${a.note_pain_points}</div></div>` : ''}
-                        ${a.opportunity_potential ? `<div class="meet-section"><div class="meet-lbl">Opportunity / Potential</div><div class="meet-txt">${a.opportunity_potential}</div></div>` : ''}
-                        ${a.next_action ? `<div class="meet-section"><div class="meet-lbl">Next Action</div><div class="meet-txt" style="color:var(--primary);font-weight:500;">${a.next_action}</div></div>` : ''}
-                        ${a.location_address ? `<div class="meet-section"><div class="meet-lbl">Location</div><div class="meet-txt">${a.location_address}</div></div>` : ''}
+                        ${a.summary || a.note_key_points ? `<div class="meet-section"><div class="meet-lbl">Key Points</div><div class="meet-txt">${escapeHtml(a.summary || a.note_key_points)}</div></div>` : ''}
+                        ${a.note_needs ? `<div class="meet-section"><div class="meet-lbl">Needs</div><div class="meet-txt">${escapeHtml(a.note_needs)}</div></div>` : ''}
+                        ${a.note_pain_points ? `<div class="meet-section"><div class="meet-lbl">Pain Points</div><div class="meet-txt">${escapeHtml(a.note_pain_points)}</div></div>` : ''}
+                        ${a.opportunity_potential ? `<div class="meet-section"><div class="meet-lbl">Opportunity / Potential</div><div class="meet-txt">${escapeHtml(a.opportunity_potential)}</div></div>` : ''}
+                        ${a.next_action ? `<div class="meet-section"><div class="meet-lbl">Next Action</div><div class="meet-txt" style="color:var(--primary);font-weight:500;">${escapeHtml(a.next_action)}</div></div>` : ''}
+                        ${a.location_address ? `<div class="meet-section"><div class="meet-lbl">Location</div><div class="meet-txt">${escapeHtml(a.location_address)}</div></div>` : ''}
                         ${a.score_value ? `<div style="margin-bottom:6px;"><span class="badge success" style="font-size:11px;">+${a.score_value} pts</span></div>` : ''}
                         <div class="meet-actions">
                             ${notesBtn}
@@ -3840,7 +3844,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 html += '<div style="overflow-x:auto;"><table class="events-table" style="width:100%;"><thead><tr><th scope="col">Event</th><th scope="col">Date</th><th scope="col">Status</th><th scope="col">Pts</th></tr></thead><tbody>';
                 for (const r of registrations) {
                     const ev = eventsById.get(String(r.event_id));
-                    html += `<tr><td>${ev?.event_title || ev?.title || 'Unknown'}</td><td>${r.event_date || '-'}</td><td>${r.attendance_status}</td><td>${r.points_awarded || 0}</td></tr>`;
+                    html += `<tr><td>${escapeHtml(ev?.event_title || ev?.title || 'Unknown')}</td><td>${escapeHtml(r.event_date || '-')}</td><td>${escapeHtml(r.attendance_status || '')}</td><td>${r.points_awarded || 0}</td></tr>`;
                 }
                 html += '</tbody></table></div>';
             }
@@ -6893,7 +6897,7 @@ const saveCustomer = async () => {
         date_of_birth: document.getElementById('cust-dob')?.value,
         lifetime_value: parseFloat(document.getElementById('cust-init-amt')?.value) || 0,
         status: 'active',
-        customer_since: new Date().toISOString().split('T')[0],
+        customer_since: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
         responsible_agent_id: _currentUser?.id || null,
     });
     UI.hideModal();
@@ -7061,6 +7065,30 @@ const updatePurchaseDelivery = async (purchaseId, customerId) => {
     UI.showModal('Update Delivery Status', content, [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }]);
 };
 
+// Delete a row from the `purchases` table (PENDING rows show a trash button in
+// renderCustomerClosingTab). Was wired to app.deletePurchase which did not exist.
+const deletePurchase = async (purchaseId, customerId) => {
+    if (!confirm('Delete this purchase record? This cannot be undone.')) return;
+    try {
+        const p = await AppDataStore.getById('purchases', purchaseId);
+        await AppDataStore.delete('purchases', purchaseId);
+        // Keep the customer's lifetime value in sync if this purchase counted toward it.
+        if (p && p.status && p.status !== 'PENDING') {
+            const cust = await AppDataStore.getById('customers', customerId);
+            if (cust) {
+                const amt = parseFloat(p.amount) || 0;
+                await AppDataStore.update('customers', customerId, { lifetime_value: Math.max(0, (cust.lifetime_value || 0) - amt) });
+            }
+        }
+        UI.toast.success('Purchase deleted');
+        const customer = await AppDataStore.getById('customers', customerId);
+        const closingBody = document.getElementById(`cust-acc-body-closing-${customerId}`);
+        if (customer && closingBody) await renderCustomerClosingTab(customer, closingBody);
+    } catch (e) {
+        UI.toast.error('Delete failed: ' + (e?.message || e));
+    }
+};
+
 const updateConversionDelivery = async (prospectId, customerId) => {
     const prospect = await AppDataStore.getById('prospects', prospectId);
     const current = prospect?.closing_record?.delivery_status || 'Pending Delivery';
@@ -7165,7 +7193,7 @@ const openAddTagModal = async (entityId, entityType = 'prospect') => {
             <label>Select Tag</label>
             <select id="tag-select" class="form-control">
                 <option value="">-- Select existing tag --</option>
-                ${availableTags.map(t => `<option value="${t.id}">${t.name}</option>`).join('')}
+                ${availableTags.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('')}
             </select>
         </div>
         <div class="form-group">
@@ -7443,7 +7471,7 @@ const confirmConvertToCustomer = async (prospectId, isManual = false) => {
         postal_code: prospect.postal_code,
         lifetime_value: amount,
         status: 'active',
-        customer_since: date || new Date().toISOString().split('T')[0],
+        customer_since: date || (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
         responsible_agent_id: prospect.responsible_agent_id || 5,
         converted_from_prospect_id: prospectId,
         referred_by: prospect.referred_by,
@@ -7472,7 +7500,7 @@ const confirmConvertToCustomer = async (prospectId, isManual = false) => {
     UI.hideModal();
     UI.toast.success('Converted to customer successfully!');
 
-    const content = document.getElementById('main-content');
+    const content = document.getElementById('content-viewport');
     if (content) await (window.app.showProspectsViewSmart || (() => {}))(content);
 };
 
@@ -7917,10 +7945,6 @@ const calculateDaysDiff = (expiryDate) => {
     return diff > 0 ? diff : 0;
 };
 
-const renderFollowupStats = async (agentId) => {
-    // Your existing implementation – ensure it returns a string
-    return `<div class="stat-row"><span>Follow-up rate: 85%</span></div>`;
-};
 const renderCurrentAssignments = async (agentId) => {
     // fresh:true bypasses SWR cache so stale localStorage data never hides prospects
     const allP = await AppDataStore.getAll('prospects', { fresh: true });
@@ -7943,12 +7967,6 @@ const renderCurrentAssignments = async (agentId) => {
         </div>
         <p style="font-size:12px;color:var(--gray-400);margin-top:8px;">${agentProspects.length} prospect${agentProspects.length !== 1 ? 's' : ''} total</p>
     `;
-};
-const renderPerformanceTargets = async (agentId) => {
-    return `<div>Monthly target: RM 50,000</div>`;
-};
-const renderCustomerHistory = async (agentId) => {
-    return `<div>12 customers converted</div>`;
 };
 
 const viewport = document.getElementById('content-viewport');
@@ -9580,7 +9598,7 @@ const deactivateAgent = async (agentId) => {
 UI.confirm('Deactivate Agent?', 'This will prevent the agent from logging in. You should reassign their active prospects first.', async () => {
     await AppDataStore.update('users', agentId, { status: 'inactive' });
     UI.toast.success('Agent deactivated');
-    const main = document.getElementById('main-content');
+    const main = document.getElementById('content-viewport');
     if (main) await showAgentsView(main);
 });
 };
@@ -9811,6 +9829,7 @@ const viewInactiveProspects = (agentId) => {
         _setDelivery,
         updatePurchaseDelivery,
         updateConversionDelivery,
+        deletePurchase,
         openRecruitModal,
         confirmDelete,
         executeDelete,

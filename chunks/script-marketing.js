@@ -27,7 +27,9 @@
     const generateId           = () => _utils.generateId();
     const debounceCall         = (...a) => window.app.debounceCall(...a);
     const navigateTo           = (v)   => window.app.navigateTo(v);
+    const getVisibleProspects  = (...a) => _utils.getVisibleProspects(...a);
     // Cross-chunk helpers — defined in sibling chunks, exported to window.app.
+    const renderWorkflowCard         = (...a) => (window.app.renderWorkflowCard         || (() => ''))(...a);                  // script-performance.js
     const renderSpecialProgramsTable = (...a) => (window.app.renderSpecialProgramsTable || (() => Promise.resolve()))(...a);  // script-features2.js
     const renderFormsTab             = (...a) => (window.app.renderFormsTab             || (() => Promise.resolve()))(...a);  // script-fude.js
     const loadFollowUpTemplates      = (...a) => (window.app.loadFollowUpTemplates      || (() => Promise.resolve([])))(...a); // script-calendar.js
@@ -565,10 +567,10 @@
         if (type === 'products') {
             const _today = new Date().toISOString().split('T')[0];
             content = `
-                <div class="form-group"><label>Name*</label><input type="text" id="mkt-name" class="form-control" value="${item.name}"></div>
-                <div class="form-group"><label>Category</label><input type="text" id="mkt-category" class="form-control" value="${item.category || ''}" placeholder="e.g. Power Ring, 画作, 风水方案"></div>
-                <div class="form-group"><label>Functions Description</label><textarea id="mkt-functions-desc" class="form-control" placeholder="Describe functions...">${item.functions_description || ''}</textarea></div>
-                <div class="form-group"><label>Product Description</label><textarea id="mkt-desc" class="form-control" placeholder="Describe the product...">${item.description || ''}</textarea></div>
+                <div class="form-group"><label>Name*</label><input type="text" id="mkt-name" class="form-control" value="${escapeHtml(item.name || '')}"></div>
+                <div class="form-group"><label>Category</label><input type="text" id="mkt-category" class="form-control" value="${escapeHtml(item.category || '')}" placeholder="e.g. Power Ring, 画作, 风水方案"></div>
+                <div class="form-group"><label>Functions Description</label><textarea id="mkt-functions-desc" class="form-control" placeholder="Describe functions...">${escapeHtml(item.functions_description || '')}</textarea></div>
+                <div class="form-group"><label>Product Description</label><textarea id="mkt-desc" class="form-control" placeholder="Describe the product...">${escapeHtml(item.description || '')}</textarea></div>
                 <div class="form-row">
                     <div class="form-group half"><label>Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="${item.price || 0}"></div>
                     <div class="form-group half"><label>Price Effective Date</label><input type="date" id="mkt-price-date" class="form-control" value="${_today}"></div>
@@ -1238,10 +1240,14 @@
 
     // ========== AUTOMATION TAB (merged Follow-Up Triggers + Custom Workflows) ==========
     const renderAutomationTab = async () => {
+        // renderWorkflowCard lives in script-performance.js — ensure it's loaded
+        // before we map workflows through it (avoids a blank card list if the
+        // performance chunk hasn't been prefetched yet).
+        try { if (window._loadChunk) await window._loadChunk('chunks/script-performance.min.js'); } catch (_) {}
         const templates = await loadFollowUpTemplates();
         invalidateFollowUpTemplatesCache(); // force fresh on next load
 
-        const isAdmin = isSystemAdmin(_state.cu) || (_state.cu?.role <= 2);
+        const isAdmin = isSystemAdmin(_state.cu) || isMarketingManager(_state.cu);
         const categoryLabels = { after_cps: 'After CPS', on_event_attendance: 'Event Attendance', on_apu_photo: 'APU Photo', on_birthday: 'Birthday' };
         const categoryColors = { after_cps: '#3b82f6', on_event_attendance: '#8b5cf6', on_apu_photo: '#f59e0b', on_birthday: '#ec4899' };
         const sorted = [...templates].sort((a, b) => (a.sort_order || 99) - (b.sort_order || 99));
@@ -1973,7 +1979,7 @@
         let paymentBadges = '';
         try {
             const modes = JSON.parse(p.payment_modes || '[]');
-            paymentBadges = modes.map(m => `<span class="badge badge-gray" style="font-size:10px; margin:1px;">${m}</span>`).join('');
+            paymentBadges = modes.map(m => `<span class="badge badge-gray" style="font-size:10px; margin:1px;">${escapeHtml(String(m))}</span>`).join('');
         } catch(e) { paymentBadges = p.payment_modes || '—'; }
 
         const statusClass = `status-${(p.status || 'draft').toLowerCase()}`;
@@ -1987,18 +1993,18 @@
         return `
             <tr style="cursor: pointer;" onclick="app.viewMonthlyPromotionDetails(${p.id})">
                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
-                    <strong>${p.name}</strong>
+                    <strong>${escapeHtml(p.name || '')}</strong>
                 </td>
                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">${monthYear}</td>
                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200); font-size: 12px; color: var(--gray-600);">${timeFrame}</td>
-                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);" title="${p.special_package || ''}">${pkg}</td>
+                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);" title="${escapeHtml(p.special_package || '')}">${escapeHtml(pkg)}</td>
                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
                     <div style="display: flex; flex-wrap: wrap; gap: 2px;">${paymentBadges || '—'}</div>
                 </td>
-                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);" title="${p.target_customer || ''}">${target}</td>
-                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);" title="${p.entitlement_requirement || ''}">${entitle}</td>
+                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);" title="${escapeHtml(p.target_customer || '')}">${escapeHtml(target)}</td>
+                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);" title="${escapeHtml(p.entitlement_requirement || '')}">${escapeHtml(entitle)}</td>
                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
-                    <span class="status-badge ${statusClass}">${p.status || 'Draft'}</span>
+                    <span class="status-badge ${statusClass}">${escapeHtml(p.status || 'Draft')}</span>
                 </td>
                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
                     <div class="table-actions" onclick="event.stopPropagation()">
@@ -3370,7 +3376,7 @@ ALTER TABLE public.promotions
                     </div>
                 </div>
             `;
-            (calculateAudienceSize, 200);
+            setTimeout(calculateAudienceSize, 200);
         } else if (_currentCampaignStep === 4) {
             container.innerHTML = `
                 <div class="campaign-step" id="step-4">
@@ -3392,7 +3398,7 @@ ALTER TABLE public.promotions
                     <div class="campaign-summary-box" style="background:var(--gray-50); padding:16px; border-radius:8px; margin-top:20px;">
                         <h5>Campaign Summary</h5>
                         <p><strong>Name:</strong> ${_campaignData.campaign_name}</p>
-                        <p><strong>Template:</strong> ${await AppDataStore.getById('whatsapp_templates', _campaignData.template_id)?.template_name}</p>
+                        <p><strong>Template:</strong> ${escapeHtml((await AppDataStore.getById('whatsapp_templates', _campaignData.template_id))?.template_name || 'N/A')}</p>
                         <p><strong>Estimated Audience:</strong> <span id="final-audience-size">...</span></p>
                     </div>
                 </div>
@@ -3711,9 +3717,9 @@ const simulateCampaignSending = async (campaignId) => {
                         <tbody>
                             ${analytics.topCampaigns.map(c => `
                                 <tr>
-                                    <td>${c.campaign_name}</td>
+                                    <td>${escapeHtml(c.campaign_name || '')}</td>
                                     <td>${c.sent_count}</td>
-                                    <td>${Math.round((c.opened_count / c.sent_count) * 100)}%</td>
+                                    <td>${c.sent_count > 0 ? Math.round((c.opened_count / c.sent_count) * 100) : 0}%</td>
                                     <td><span class="badge-green">High</span></td>
                                 </tr>
                             `).join('')}
@@ -3745,7 +3751,8 @@ const simulateCampaignSending = async (campaignId) => {
         const avgResponseRate = totalSent > 0 ? Math.round((totalReplied / totalSent) * 100) : 0;
         const avgConversionRate = totalSent > 0 ? Math.round((totalConverted / totalSent) * 100) : 0;
 
-        const topCampaigns = [...campaigns].sort((a, b) => (b.opened_count / b.sent_count) - (a.opened_count / a.sent_count)).slice(0, 5);
+        const _openRate = (c) => (c.sent_count > 0 ? c.opened_count / c.sent_count : 0);
+        const topCampaigns = [...campaigns].sort((a, b) => _openRate(b) - _openRate(a)).slice(0, 5);
 
         return {
             totalCampaigns,
@@ -3816,7 +3823,7 @@ const simulateCampaignSending = async (campaignId) => {
     };
 
     const refreshAnalytics = async () => {
-        (initMarketingCharts, 100);
+        setTimeout(initMarketingCharts, 100);
     };
 
     const exportAnalyticsReport = async () => {
@@ -4373,6 +4380,7 @@ const simulateCampaignSending = async (campaignId) => {
         filterRecipients,
         viewRecipientHistory,
         retryMessage,
+        toggleUserMenu,
         loginAs,
         uploadProfilePhoto,
         confirmRenameFolder,

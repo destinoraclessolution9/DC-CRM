@@ -902,6 +902,8 @@ const openNoticeboardDetail = async (eventId) => {
         toggleWorkflow,
         editWorkflow,
         deleteWorkflow,
+        // Exported so script-marketing.js renderAutomationTab can render workflow cards
+        renderWorkflowCard,
         // Noticeboard
         showNoticeboardView,
         openNoticeboardDetail,

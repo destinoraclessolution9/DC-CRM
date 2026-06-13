@@ -23,6 +23,8 @@
     // Permission helpers — exported to _crmUtils from script.js after line ~755.
     const getVisibleProspects  = () => _utils.getVisibleProspects();
     const getVisibleCustomers  = () => _utils.getVisibleCustomers();
+    // Lunar DOB conversion — exported to _crmUtils from script.js.
+    const convertSolarToLunar  = (...a) => (_utils.convertSolarToLunar || (() => ''))(...a);
     // Mobile optimistic-calendar helpers — exported from script-mobile.js Object.assign.
     // Use safe forwarding: if mobile chunk not loaded yet, fall back to no-op.
     const _mcalOptimisticInsert     = (...a) => (window.app._mcalOptimisticInsert     || (() => {}))(...a);
@@ -362,7 +364,7 @@
                     if (infoDiv) {
                         infoDiv.innerHTML = `
                             <div class="selected-entity-badge">
-                                <span>Prospect: <strong>${prospect.full_name}</strong></span>
+                                <span>Prospect: <strong>${escapeHtml(prospect.full_name || '')}</strong></span>
                                 <button class="btn btn-sm secondary" onclick="app.clearSelectedEntity()">Clear</button>
                             </div>
                         `;
@@ -2893,7 +2895,7 @@
             || (u.email || '').toLowerCase().includes(q)
         ).slice(0, 15);
         res.innerHTML = matches.map(u =>
-            `<div style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #eee;" onmousedown="app.selectAddConsultant(${u.id},'${(u.full_name||'').replace(/'/g,"\\'")}')">
+            `<div style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #eee;" data-name="${escapeHtml(u.full_name||'')}" onmousedown="app.selectAddConsultant(${u.id}, this.dataset.name)">
                 <strong>${escapeHtml(u.full_name || '')}</strong>
                 <small style="color:gray;margin-left:6px;">${escapeHtml(u.role || '')}</small>
             </div>`
@@ -3022,8 +3024,7 @@
                 }
 
                 res.innerHTML = matches.map(p => {
-                    const safeName = (p.full_name || '').replace(/'/g, "\\'");
-                    return `<div style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #eee;" onmousedown="app.selectAddAttendee(${p.id},'${safeName}','${p._type}')">
+                    return `<div style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #eee;" data-name="${escapeHtml(p.full_name || '')}" onmousedown="app.selectAddAttendee(${p.id}, this.dataset.name, '${p._type}')">
                         ${escapeHtml(p.full_name || '')} <small style="color:gray;margin-left:6px;">${p._type}${p.phone ? ' · ' + escapeHtml(p.phone) : ''}</small>
                     </div>`;
                 }).join('');
@@ -3110,7 +3111,7 @@
 
         if (input && resultsContainer) {
             clearTimeout(window.attendeeSearchTimeout);
-            window.attendeeSearchTimeout = (async () => {
+            window.attendeeSearchTimeout = setTimeout(async () => {
                 const searchTerm = input.value.toLowerCase();
                 if (searchTerm.length < 2) {
                     resultsContainer.style.display = 'none';
@@ -3147,9 +3148,9 @@
 
                 if (matches.length > 0) {
                     resultsContainer.innerHTML = matches.map(m => `
-                        <div class="search-result-item" onclick="app.addAttendee(${m.id}, '${m.type}', '${m.full_name.replace(/'/g, "\\'")}')">
-                            <div class="name">${m.full_name} <small>(${m.type})</small></div>
-                            <div class="details">${m.phone || ''}</div>
+                        <div class="search-result-item" data-name="${escapeHtml(m.full_name || '')}" onclick="app.addAttendee(${m.id}, '${m.type}', this.dataset.name)">
+                            <div class="name">${escapeHtml(m.full_name || '')} <small>(${escapeHtml(m.type)})</small></div>
+                            <div class="details">${escapeHtml(m.phone || '')}</div>
                         </div>
                     `).join('');
                     resultsContainer.style.display = 'block';
@@ -3250,10 +3251,10 @@
                 if (matchedProspects.length > 0) {
                     html += `<div style="padding:4px 10px; font-size:11px; font-weight:600; color:#6b7280; background:#f9fafb; border-bottom:1px solid #e5e7eb; text-transform:uppercase; letter-spacing:0.05em;">Prospects</div>`;
                     html += matchedProspects.map(p => `
-                        <div class="search-result-item" onclick="app.selectReferrer(${p.id}, '${(p.full_name || '').replace(/'/g, "\\'")}', 'Prospect')"
+                        <div class="search-result-item" data-name="${escapeHtml(p.full_name || '')}" onclick="app.selectReferrer(${p.id}, this.dataset.name, 'Prospect')"
                              style="cursor:pointer; padding:8px 12px; border-bottom:1px solid #f3f4f6; display:flex; flex-direction:column;">
-                            <strong style="font-size:13px;">${p.full_name || ''}</strong>
-                            <span style="font-size:11px; color:#6b7280;">${p.phone || p.ic_number || ''}</span>
+                            <strong style="font-size:13px;">${escapeHtml(p.full_name || '')}</strong>
+                            <span style="font-size:11px; color:#6b7280;">${escapeHtml(p.phone || p.ic_number || '')}</span>
                         </div>
                     `).join('');
                 }
@@ -3261,10 +3262,10 @@
                 if (matchedConsultants.length > 0) {
                     html += `<div style="padding:4px 10px; font-size:11px; font-weight:600; color:#6b7280; background:#f9fafb; border-bottom:1px solid #e5e7eb; text-transform:uppercase; letter-spacing:0.05em;">Consultants</div>`;
                     html += matchedConsultants.map(u => `
-                        <div class="search-result-item" onclick="app.selectReferrer(${u.id}, '${(u.full_name || '').replace(/'/g, "\\'")}', 'Consultant')"
+                        <div class="search-result-item" data-name="${escapeHtml(u.full_name || '')}" onclick="app.selectReferrer(${u.id}, this.dataset.name, 'Consultant')"
                              style="cursor:pointer; padding:8px 12px; border-bottom:1px solid #f3f4f6; display:flex; flex-direction:column;">
-                            <strong style="font-size:13px;">${u.full_name || ''}</strong>
-                            <span style="font-size:11px; color:#6b7280;">${u.agent_code || u.role || ''}</span>
+                            <strong style="font-size:13px;">${escapeHtml(u.full_name || '')}</strong>
+                            <span style="font-size:11px; color:#6b7280;">${escapeHtml(u.agent_code || u.role || '')}</span>
                         </div>
                     `).join('');
                 }
@@ -3326,8 +3327,8 @@
 
         resultsDiv.innerHTML = matches.length
             ? matches.map(u => `
-                <div class="search-result-item" onclick="app.selectConsultant(${u.id}, '${(u.full_name||'').replace(/'/g,"\\'")}', '${u.role||''}')" style="cursor:pointer;padding:8px;border-bottom:1px solid #eee;">
-                    <strong>${u.full_name}</strong> <span style="font-size:12px;color:#888;">${u.role || ''}</span>
+                <div class="search-result-item" data-name="${escapeHtml(u.full_name||'')}" data-role="${escapeHtml(u.role||'')}" onclick="app.selectConsultant(${u.id}, this.dataset.name, this.dataset.role)" style="cursor:pointer;padding:8px;border-bottom:1px solid #eee;">
+                    <strong>${escapeHtml(u.full_name || '')}</strong> <span style="font-size:12px;color:#888;">${escapeHtml(u.role || '')}</span>
                 </div>`).join('')
             : '<div class="search-result-item" style="padding:8px;">No consultants found</div>';
         resultsDiv.style.display = 'block';
@@ -3394,11 +3395,11 @@
             let html = '';
             if (matchedProspects.length) {
                 html += `<div style="padding:4px 10px;font-size:11px;font-weight:600;color:#6b7280;background:#f9fafb;border-bottom:1px solid #e5e7eb;text-transform:uppercase;letter-spacing:0.05em;">Prospects</div>`;
-                html += matchedProspects.map(p => `<div style="cursor:pointer;padding:8px 12px;border-bottom:1px solid #f3f4f6;" onmousedown="app.selectProspectReferrer(${p.id},'${(p.full_name||'').replace(/'/g,"\\'")}','Prospect')"><strong>${p.full_name}</strong><br><small style="color:#6b7280;">${p.phone||''}</small></div>`).join('');
+                html += matchedProspects.map(p => `<div style="cursor:pointer;padding:8px 12px;border-bottom:1px solid #f3f4f6;" data-name="${escapeHtml(p.full_name||'')}" onmousedown="app.selectProspectReferrer(${p.id}, this.dataset.name, 'Prospect')"><strong>${escapeHtml(p.full_name||'')}</strong><br><small style="color:#6b7280;">${escapeHtml(p.phone||'')}</small></div>`).join('');
             }
             if (matchedConsultants.length) {
                 html += `<div style="padding:4px 10px;font-size:11px;font-weight:600;color:#6b7280;background:#f9fafb;border-bottom:1px solid #e5e7eb;text-transform:uppercase;letter-spacing:0.05em;">Consultants</div>`;
-                html += matchedConsultants.map(u => `<div style="cursor:pointer;padding:8px 12px;border-bottom:1px solid #f3f4f6;" onmousedown="app.selectProspectReferrer(${u.id},'${(u.full_name||'').replace(/'/g,"\\'")}','Consultant')"><strong>${u.full_name}</strong><br><small style="color:#6b7280;">${u.agent_code||u.role||''}</small></div>`).join('');
+                html += matchedConsultants.map(u => `<div style="cursor:pointer;padding:8px 12px;border-bottom:1px solid #f3f4f6;" data-name="${escapeHtml(u.full_name||'')}" onmousedown="app.selectProspectReferrer(${u.id}, this.dataset.name, 'Consultant')"><strong>${escapeHtml(u.full_name||'')}</strong><br><small style="color:#6b7280;">${escapeHtml(u.agent_code||u.role||'')}</small></div>`).join('');
             }
             if (!html) html = '<div style="padding:10px 12px;color:#6b7280;font-size:13px;">No results found</div>';
 
@@ -3531,7 +3532,7 @@
         if (infoDiv) {
             infoDiv.innerHTML = `
                 <div class="selected-entity-badge">
-                    <span>${type}: <strong>${entity.full_name}</strong></span>
+                    <span>${escapeHtml(type)}: <strong>${escapeHtml(entity.full_name || '')}</strong></span>
                     <button class="btn btn-sm secondary" onclick="app.clearSelectedEntity()">Clear</button>
                 </div>
              `;
@@ -3561,8 +3562,8 @@
 
         if (resultsDiv) {
             resultsDiv.innerHTML = matches.map(m => `
-                <div class="search-result-item" onclick="app.addCoAgent(${m.id}, '${m.full_name.replace(/'/g, "\\'")}')">
-                    <strong>${m.full_name}</strong> <span style="color:#888; font-size:11px;">(${m.role || 'Consultant'})</span>
+                <div class="search-result-item" data-name="${escapeHtml(m.full_name || '')}" onclick="app.addCoAgent(${m.id}, this.dataset.name)">
+                    <strong>${escapeHtml(m.full_name || '')}</strong> <span style="color:#888; font-size:11px;">(${escapeHtml(m.role || 'Consultant')})</span>
                 </div>
             `).join('') || '<div class="search-result-item">No consultants found</div>';
             resultsDiv.style.display = 'block';
@@ -3786,12 +3787,12 @@
                         const activities2 = [...byProspect, ...byCustomer];
                         activities2.sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
                         const lastDate = activities2.length > 0 ? activities2[0].activity_date : 'N/A';
-                        const msg = `This person may have visited before. The agent is ${agent.full_name}, last meet up on ${lastDate}. Are you sure this is not the same prospect? Check with your leader.`;
-                        UI.showModal('Potential Duplicate Found', `<p>${msg}</p>`, [
-                            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-                            { label: 'Continue Anyway', type: 'primary', action: `window._cpsDuplicateConfirmed = true; (async () => { await app.saveActivity(${stayOpen}); })()` }
-                        ]);
-                        return;
+                        const msg = `This person may have visited before. The agent is ${agent.full_name}, last meet up on ${lastDate}. Are you sure this is not the same prospect? Check with your leader.\n\nClick OK to continue creating this record, or Cancel to stop.`;
+                        // Use a NON-destructive confirm so the Quick Add Activity form
+                        // DOM survives (UI.showModal would overwrite the shared overlay
+                        // and wipe every entered field). Continue the save in-place.
+                        if (!window.confirm(msg)) { return; }
+                        window._cpsDuplicateConfirmed = true;
                     }
                 }
             }
@@ -4613,7 +4614,7 @@
         const modalContent = `
             <div class="activity-modal-form">
                 <p style="background:#fff8e1;border:1px solid #ffe082;color:#7a5c00;padding:10px 12px;border-radius:6px;font-size:13px;margin-bottom:14px;">
-                    <i class="fas fa-history"></i> Log a historical meet up for <strong>${prospect.full_name}</strong>. This entry will <strong>not</strong> award scoring points or extend protection — it is only for record keeping.
+                    <i class="fas fa-history"></i> Log a historical meet up for <strong>${escapeHtml(prospect.full_name || '')}</strong>. This entry will <strong>not</strong> award scoring points or extend protection — it is only for record keeping.
                 </p>
                 <div class="form-row">
                     <div class="form-group half">

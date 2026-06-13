@@ -905,7 +905,9 @@ let _cpsScanCache = null;
 // review modal lifecycle — consumed when the host record (prospect or
 // activity) is saved, then cleared. Per-prefix so prospect-modal and
 // cps-modal flows don't trample each other.
-let _cpsPendingPhotoFiles = {}; // { [prefix]: File }
+// NOTE: backed by the shared _appState bridge (_state.cppf) so script-activities.js
+// saveActivity can see the photo. A chunk-local object would be invisible to it.
+const _cpsPendingPhotoFiles = _state.cppf;  // { [prefix]: File } — shared reference
 
 // Centralized helper: upload a CPS form photo to Supabase Storage and
 // patch the prospect record with the URL + date + filename. Single source
@@ -925,7 +927,7 @@ const _uploadCpsFormFile = async (file, prospectId) => {
         const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
         await AppDataStore.update('prospects', prospectId, {
             cps_form_url: urlData?.publicUrl || null,
-            cps_form_date: new Date().toISOString().split('T')[0],
+            cps_form_date: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
             cps_form_name: file.name,
         });
         return urlData?.publicUrl || null;

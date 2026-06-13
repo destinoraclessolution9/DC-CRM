@@ -414,7 +414,7 @@ const appLogic = (() => {
     let _selectedProspectReferrer = null;
     let _pendingIntakeId = null;   // Set by openApproveCpsIntakeModal; consumed by saveActivity
     let _pendingIntakeRow = null;  // Full intake row, used to send WhatsApp confirmation
-    let _cpsPendingPhotoFiles = []; // Pending photo files for CPS photo upload (fix: was undeclared → ReferenceError on _appState.cppf)
+    let _cpsPendingPhotoFiles = {}; // Pending photo files for CPS photo upload, keyed by prefix (e.g. {cps: File}). Written by script-cps.js via _state.cppf, consumed by script-activities.js saveActivity.
     let _currentDate = new Date(); // Dynamic start date
     let _filters = { agent: 'all', type: 'all', from: '', to: '' };
     // Stamped by navigateTo. Used by initSync's dataChanged listener to
@@ -1009,6 +1009,8 @@ const appLogic = (() => {
         // Fallback: return a simple error message (but conversion should work now)
         return 'Conversion failed';
     };
+    // Exposed for script-activities.js updateLunarBirth (lunar DOB auto-fill).
+    Object.assign(window._crmUtils, { convertSolarToLunar: (d) => convertSolarToLunar(d) });
 	const escapeHtml = (unsafe) => {
     if (!unsafe || typeof unsafe !== 'string') return unsafe || '';
     return unsafe
@@ -1159,9 +1161,25 @@ const appLogic = (() => {
         const fn = window.app && window.app.ensureReferralFields;
         if (typeof fn === 'function' && fn !== ensureReferralFields) return fn();
     };
-    const toggleSearchPanel     = async () => (window.app.toggleSearchPanel     || (() => {}))();
-    const hideSearchPanel       =       () => (window.app.hideSearchPanel       || (() => {}))();
-    const showSearchPanel       = async () => (window.app.showSearchPanel       || (() => {}))();
+    // These three are ALSO exported in the app return object, so app.X IS this
+    // wrapper until the search chunk's Object.assign replaces it. Calling the
+    // bare `(window.app.X || noop)()` recursed into itself → stack overflow when
+    // the header Search button is clicked before the (tier-2, 3s-delayed) search
+    // chunk loads. Self-load the chunk, then delegate only if the real fn exists.
+    const toggleSearchPanel     = async () => {
+        if (typeof window._loadChunk === 'function') { try { await window._loadChunk('chunks/script-search.min.js'); } catch (_) { return; } }
+        const fn = window.app && window.app.toggleSearchPanel;
+        if (typeof fn === 'function' && fn !== toggleSearchPanel) return fn();
+    };
+    const hideSearchPanel       = () => {
+        const fn = window.app && window.app.hideSearchPanel;
+        if (typeof fn === 'function' && fn !== hideSearchPanel) return fn();
+    };
+    const showSearchPanel       = async () => {
+        if (typeof window._loadChunk === 'function') { try { await window._loadChunk('chunks/script-search.min.js'); } catch (_) { return; } }
+        const fn = window.app && window.app.showSearchPanel;
+        if (typeof fn === 'function' && fn !== showSearchPanel) return fn();
+    };
     // ==================== PHASE 14: NOTES + VOICE + MOBILE ====================
     // [CHUNK: mobile] ~2258 lines extracted to chunks/script-mobile.js
     // Loaded eagerly at startup on mobile; lazily on desktop for mobile views.
@@ -1338,6 +1356,25 @@ const appLogic = (() => {
         }
     };
 
+    // Self-loading stub: inline onclick="app.openSendWhatsAppModal(...)" on the
+    // customer-profile WhatsApp icon (prospects chunk, tier-1) is reachable before
+    // the whatsapp chunk loads. Load it, then delegate to the real modal.
+    const openSendWhatsAppModal = async (...a) => {
+        if (typeof window._loadChunk === 'function') { try { await window._loadChunk('chunks/script-whatsapp.min.js'); } catch (_) { return; } }
+        const fn = window.app && window.app.openSendWhatsAppModal;
+        if (typeof fn === 'function' && fn !== openSendWhatsAppModal) return fn(...a);
+    };
+
+    // Account / logout menu (top-nav avatar click, app-init.js). The real impl
+    // lives in the L1/L2-only marketing chunk, but the menu must work for EVERY
+    // role — self-load the chunk, then delegate. uploadProfilePhoto/loginAs are
+    // reached only from inside the rendered menu, so the chunk is loaded by then.
+    const toggleUserMenu = async (...a) => {
+        if (typeof window._loadChunk === 'function') { try { await window._loadChunk('chunks/script-marketing.min.js'); } catch (_) { return; } }
+        const fn = window.app && window.app.toggleUserMenu;
+        if (typeof fn === 'function' && fn !== toggleUserMenu) return fn(...a);
+    };
+
     // ========== PHASE 17: AI ANALYTICS FUNCTIONS ==========
     // [CHUNK: ai] ~1336 lines extracted to chunks/script-ai.js
     // Loaded lazily by navigateTo("ai_insights"). All public functions
@@ -1492,6 +1529,7 @@ const Auth = {
     async function logout() {
         await Auth.logout();
         _currentUser = null;
+        try { (window.app._clearMobileSnapshots || (() => {}))(); } catch (_) {} // wipe per-user mobile Home/Calendar caches (shared-device leak)
         try { localStorage.removeItem('remember_me'); } catch (_) {} // clear "keep me logged in" on explicit logout
         document.getElementById('app-shell').style.display = 'none';
         document.getElementById('login-container').style.display = 'flex';
@@ -1510,6 +1548,7 @@ const Auth = {
             await Auth.logout();
         } catch (_) { /* sign out even if the network call fails */ }
         _currentUser = null;
+        try { (window.app._clearMobileSnapshots || (() => {}))(); } catch (_) {} // wipe per-user mobile caches (shared-device leak)
         try { localStorage.removeItem('remember_me'); } catch (_) {}
         try { localStorage.removeItem('remember_me_email'); } catch (_) {}
         const emailField = document.getElementById('loginEmail') || document.getElementById('email');
@@ -2726,7 +2765,7 @@ function _wireLoginBtn() {
         'marketing_automation': { src: 'chunks/script-marketing.min.js',   minLevel: null, exactLevels: [1, 2] },
         'marketing_lists':      { src: 'chunks/script-marketing.min.js',   minLevel: null, exactLevels: [1, 2] },
         'workflows':            { src: 'chunks/script-marketing.min.js',   minLevel: null, exactLevels: [1, 2] },
-        'reports':              { src: 'chunks/script-reporting.min.js',   minLevel: null, exactLevels: [1, 2, 3, 4, 5] },
+        'reports':              { src: 'chunks/script-reporting.min.js',   minLevel: null, exactLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] },
         'cases':                { src: 'chunks/script-cases.min.js',       minLevel: null, exactLevels: null },
         'referrals':            { src: 'chunks/script-referrals.min.js',   minLevel: null, exactLevels: null },
         // Phase: Ranking + Workflow Automation + Noticeboard (extracted 2026-06-05)
@@ -2798,12 +2837,52 @@ function _wireLoginBtn() {
             const manifest = window.__ASSET_MANIFEST || {};
             s.src = manifest[src] || src;
             s.async = true;
-            s.onload = resolve;
-            s.onerror = (e) => { console.warn('[chunk] failed to load', src, e); resolve(); };
+            s.onload = () => {
+                // Re-apply the double-submit guard + search debounce to functions
+                // this chunk just registered. They run once at boot and only wrap
+                // the forwarding stubs; without re-running, every chunk's real
+                // save*/filter* impl ships UNGUARDED (duplicate-submit risk).
+                try { window._autoGuardAppMutations && window._autoGuardAppMutations(); } catch (_) {}
+                try { window._autoDebounceAppSearch && window._autoDebounceAppSearch(); } catch (_) {}
+                resolve();
+            };
+            s.onerror = (e) => {
+                // EVICT the failed entry so a later call retries instead of being
+                // served this permanently-resolved "success". Without this, one
+                // transient network blip leaves every delegating stub for this
+                // chunk a silent no-op for the whole session.
+                _chunkInFlight.delete(src);
+                console.warn('[chunk] failed to load', src, e);
+                try { if (window.UI?.toast?.error) window.UI.toast.error('A module failed to load — check your connection and try again.'); } catch (_) {}
+                resolve();
+            };
             document.body.appendChild(s);
         });
         _chunkInFlight.set(src, p);
         return p;
+    };
+    // Build a self-loading delegating stub with a recursion guard. Loads `src`,
+    // then calls the real window.app[name] ONLY if it is no longer this stub —
+    // so a failed/incomplete chunk load can't make the stub re-invoke itself
+    // forever (tab-freezing microtask/retry loop).
+    const _lazyStub = (src, name) => {
+        const stub = (...a) => _loadChunkOnce(src).then(() => {
+            const r = window.app[name];
+            if (typeof r === 'function' && r !== stub) return r(...a);
+            console.warn(`[chunk] ${name} unavailable after loading ${src}`);
+            return undefined;
+        });
+        return stub;
+    };
+    // Multi-chunk variant for handlers that need several chunks loaded first.
+    const _lazyStubMulti = (srcs, name) => {
+        const stub = (...a) => Promise.all(srcs.map(s => _loadChunkOnce(s))).then(() => {
+            const r = window.app[name];
+            if (typeof r === 'function' && r !== stub) return r(...a);
+            console.warn(`[chunk] ${name} unavailable after loading ${srcs.join(', ')}`);
+            return undefined;
+        });
+        return stub;
     };
     // Expose _loadChunkOnce globally so retained stubs in script.js (e.g.
     // addWhatsAppButtonToProfile) can trigger lazy chunk loads without needing
@@ -2854,8 +2933,13 @@ function _wireLoginBtn() {
                     s.async = false; // preserve execution order
                     s.onload = () => { window._appFeaturesLoaded = true; resolve(); };
                     s.onerror = (e) => {
-                        console.warn('[perf] script-features failed, falling back to script.js', e);
-                        window._appFeaturesLoaded = true; // don't retry forever
+                        // Post code-split, script.js no longer contains these view
+                        // implementations — there is no fallback. Reset _promise (and
+                        // leave _appFeaturesLoaded false) so the NEXT navigation retries
+                        // instead of leaving every non-core view permanently dead.
+                        console.warn('[perf] script-features failed to load — will retry on next navigation', e);
+                        _promise = null;
+                        try { if (window.UI?.toast?.error) window.UI.toast.error('Failed to load features — check your connection and try again.'); } catch (_) {}
                         resolve();
                     };
                     document.body.appendChild(s);
@@ -2865,8 +2949,24 @@ function _wireLoginBtn() {
         };
     })();
 
+    // Re-sync every lazy chunk's cached _currentUser snapshot to the live user.
+    // Chunks capture `let _currentUser = _state.cu` at load time and expose a
+    // window._sync*User refresher; without this they keep a stale identity after
+    // an in-tab logout→login (shared-device identity bleed).
+    const _syncAllChunkUsers = () => {
+        try {
+            for (const k of Object.keys(window)) {
+                if (/^_sync\w*User$/.test(k) && typeof window[k] === 'function') {
+                    try { window[k](); } catch (_) {}
+                }
+            }
+        } catch (_) {}
+    };
+    window._syncAllChunkUsers = _syncAllChunkUsers;
+
     const navigateTo = async (viewId) => {
         UI.hideModal();
+        _syncAllChunkUsers();
         // Cancel any in-flight Supabase reads tied to the OUTGOING view so
         // their late-arriving responses can't overwrite the new view's cache
         // ~800ms after navigation. AppDataStore catches AbortError internally
@@ -3467,7 +3567,7 @@ function _wireLoginBtn() {
     const extendProtection = async (...a) => { const _r = window.app.extendProtection; if (_r && _r !== extendProtection) return _r(...a); };
     const transferProspect = async (...a) => { const _r = window.app.transferProspect; if (_r && _r !== transferProspect) return _r(...a); };
     const reassignProspect = async (...a) => { const _r = window.app.reassignProspect; if (_r && _r !== reassignProspect) return _r(...a); };
-    const quickReassign = async (...a) => { const _r = window.app.quickReassign; if (_r && _r !== quickReassign) return _r(...a); };
+    const quickReassign = async (...a) => { if (typeof window._loadChunk === 'function') { try { await window._loadChunk('chunks/script-import.min.js'); } catch (_) { return; } } const _r = window.app.quickReassign; if (_r && _r !== quickReassign) return _r(...a); };
     const openReviveProspectModal = async (...a) => { const _r = window.app.openReviveProspectModal; if (_r && _r !== openReviveProspectModal) return _r(...a); };
     const saveReviveProspect = async (...a) => { const _r = window.app.saveReviveProspect; if (_r && _r !== saveReviveProspect) return _r(...a); };
     const convertToCustomer = async (...a) => { const _r = window.app.convertToCustomer; if (_r && _r !== convertToCustomer) return _r(...a); };
@@ -3801,6 +3901,8 @@ function _wireLoginBtn() {
         //  or first WhatsApp button click in a prospect/customer profile)
         initWhatsAppIntegration,
         addWhatsAppButtonToProfile,
+        openSendWhatsAppModal,
+        toggleUserMenu,
 
         // Pipeline Functions
         handleProspectDrag,
@@ -3813,7 +3915,7 @@ function _wireLoginBtn() {
         // Self-loading stub: eager-loader covers this after login, but if called
         // before it finishes (e.g. user clicks calendar cell immediately), the
         // stub loads the chunk then re-invokes the now-real function.
-        openActivityModal: (...args) => _loadChunkOnce('chunks/script-activities.min.js').then(() => window.app.openActivityModal(...args)),
+        openActivityModal: _lazyStub('chunks/script-activities.min.js', 'openActivityModal'),
 
         // Phase 3 Prospect Management Functions
         showProspectsView,
@@ -4114,28 +4216,28 @@ function _wireLoginBtn() {
         // Safe self-loading stubs: use _loadChunkOnce so the chunk is loaded on first call,
         // then invoke the real function. The old `(window.app.X || (() => {}))(...a)` pattern
         // caused infinite recursion because window.app.X IS this stub before the chunk loads.
-        renderJourneyTab:          (...a) => _loadChunkOnce('chunks/script-journey.min.js').then(() => window.app.renderJourneyTab(...a)),
-        markJourneyTouchpointDone: (...a) => _loadChunkOnce('chunks/script-journey.min.js').then(() => window.app.markJourneyTouchpointDone(...a)),
-        skipJourneyTouchpoint:     (...a) => _loadChunkOnce('chunks/script-journey.min.js').then(() => window.app.skipJourneyTouchpoint(...a)),
-        snoozeJourneyTouchpoint:   (...a) => _loadChunkOnce('chunks/script-journey.min.js').then(() => window.app.snoozeJourneyTouchpoint(...a)),
-        executeSnooze:             (...a) => _loadChunkOnce('chunks/script-journey.min.js').then(() => window.app.executeSnooze(...a)),
-        sendJourneyWhatsApp:       (...a) => _loadChunkOnce('chunks/script-journey.min.js').then(() => window.app.sendJourneyWhatsApp(...a)),
-        switchJourneyTrackDisplay: (...a) => _loadChunkOnce('chunks/script-journey.min.js').then(() => window.app.switchJourneyTrackDisplay(...a)),
-        switchJourneyTrack:        (...a) => _loadChunkOnce('chunks/script-journey.min.js').then(() => window.app.switchJourneyTrack(...a)),
-        confirmSwitchJourneyTrack: (...a) => _loadChunkOnce('chunks/script-journey.min.js').then(() => window.app.confirmSwitchJourneyTrack(...a)),
-        openSpawnTouchpointsModal: (...a) => _loadChunkOnce('chunks/script-journey.min.js').then(() => window.app.openSpawnTouchpointsModal(...a)),
-        executeSpawnTouchpoints:   (...a) => _loadChunkOnce('chunks/script-journey.min.js').then(() => window.app.executeSpawnTouchpoints(...a)),
-        showAgentJourneyDashboard: (...a) => _loadChunkOnce('chunks/script-journey.min.js').then(() => window.app.showAgentJourneyDashboard(...a)),
-        showAgentJourneyLoad:      (...a) => _loadChunkOnce('chunks/script-journey.min.js').then(() => window.app.showAgentJourneyLoad(...a)),
+        renderJourneyTab:          _lazyStub('chunks/script-journey.min.js', 'renderJourneyTab'),
+        markJourneyTouchpointDone: _lazyStub('chunks/script-journey.min.js', 'markJourneyTouchpointDone'),
+        skipJourneyTouchpoint:     _lazyStub('chunks/script-journey.min.js', 'skipJourneyTouchpoint'),
+        snoozeJourneyTouchpoint:   _lazyStub('chunks/script-journey.min.js', 'snoozeJourneyTouchpoint'),
+        executeSnooze:             _lazyStub('chunks/script-journey.min.js', 'executeSnooze'),
+        sendJourneyWhatsApp:       _lazyStub('chunks/script-journey.min.js', 'sendJourneyWhatsApp'),
+        switchJourneyTrackDisplay: _lazyStub('chunks/script-journey.min.js', 'switchJourneyTrackDisplay'),
+        switchJourneyTrack:        _lazyStub('chunks/script-journey.min.js', 'switchJourneyTrack'),
+        confirmSwitchJourneyTrack: _lazyStub('chunks/script-journey.min.js', 'confirmSwitchJourneyTrack'),
+        openSpawnTouchpointsModal: _lazyStub('chunks/script-journey.min.js', 'openSpawnTouchpointsModal'),
+        executeSpawnTouchpoints:   _lazyStub('chunks/script-journey.min.js', 'executeSpawnTouchpoints'),
+        showAgentJourneyDashboard: _lazyStub('chunks/script-journey.min.js', 'showAgentJourneyDashboard'),
+        showAgentJourneyLoad:      _lazyStub('chunks/script-journey.min.js', 'showAgentJourneyLoad'),
 
         // Calendar + Follow-Up Engine — implemented by chunks/script-calendar.js
         // Self-loading stubs so these can be called from any view without the calendar chunk pre-loaded.
         // Both calendar AND activities chunks needed: calendar owns the modal/save,
         // activities owns collectPostMeetupNotesData / buildPostMeetupNotesBlock.
-        openPostMeetupNotesModal: (...args) => Promise.all([_loadChunkOnce('chunks/script-calendar.min.js'), _loadChunkOnce('chunks/script-activities.min.js')]).then(() => window.app.openPostMeetupNotesModal(...args)),
-        savePostMeetupNotes:      (...args) => Promise.all([_loadChunkOnce('chunks/script-calendar.min.js'), _loadChunkOnce('chunks/script-activities.min.js')]).then(() => window.app.savePostMeetupNotes(...args)),
-        openMeetingOutcomeModal:  (...args) => _loadChunkOnce('chunks/script-calendar.min.js').then(() => window.app.openMeetingOutcomeModal(...args)),
-        saveMeetingOutcome:       (...args) => _loadChunkOnce('chunks/script-calendar.min.js').then(() => window.app.saveMeetingOutcome?.(...args)),
+        openPostMeetupNotesModal: _lazyStubMulti(['chunks/script-calendar.min.js', 'chunks/script-activities.min.js'], 'openPostMeetupNotesModal'),
+        savePostMeetupNotes:      _lazyStubMulti(['chunks/script-calendar.min.js', 'chunks/script-activities.min.js'], 'savePostMeetupNotes'),
+        openMeetingOutcomeModal:  _lazyStub('chunks/script-calendar.min.js', 'openMeetingOutcomeModal'),
+        saveMeetingOutcome:       _lazyStub('chunks/script-calendar.min.js', 'saveMeetingOutcome'),
 
         // Phase 11: DMS — implemented by chunks/script-documents.js
 
@@ -4550,7 +4652,7 @@ Object.assign(window.app, appLogic);
 // key includes the function name and a stringified arg signature, so saving
 // two different rows in parallel still works — only IDENTICAL re-entrancy is
 // suppressed. Disables the clicked button and shows "Saving…" while in-flight.
-(function autoGuardAppMutations() {
+function autoGuardAppMutations() {
     if (!window.Perf || !window.app) return;
     const prefixes = ['save', 'create', 'add', 'update', 'submit', 'send'];
     // Skip pure UI / nav helpers that happen to start with these prefixes.
@@ -4576,13 +4678,15 @@ Object.assign(window.app, appLogic);
         window.app[k] = wrapped;
     });
     console.info('[Perf] auto-guard installed on app mutations');
-})();
+}
+window._autoGuardAppMutations = autoGuardAppMutations;
+autoGuardAppMutations();
 
 // ==================== AUTO-DEBOUNCE SEARCH/FILTER (Phase C: input lag) ====================
 // Inline oninput="app.searchEntities()" handlers fire on every keystroke. Wrap
 // known search/filter functions so they only run once typing stops (250ms).
 // Functions explicitly using debounceCall in their template stay unchanged.
-(function autoDebounceAppSearch() {
+function autoDebounceAppSearch() {
     if (!window.Perf || !window.app) return;
     const targets = [
         'mpSearchInput', 'updateShareLinkPreview', 'handleCaseSearch',
@@ -4602,8 +4706,10 @@ Object.assign(window.app, appLogic);
         window.app[name] = debounced;
         wrappedCount++;
     });
-    console.info('[Perf] auto-debounce installed on', wrappedCount, 'search/filter handlers');
-})();
+    if (wrappedCount) console.info('[Perf] auto-debounce installed on', wrappedCount, 'search/filter handlers');
+}
+window._autoDebounceAppSearch = autoDebounceAppSearch;
+autoDebounceAppSearch();
 
 
 // ========== SECURITY INITIALIZATION ==========
@@ -4772,6 +4878,21 @@ function toggleLoginPassword(btn) {
     if (icon) icon.className = 'fas ' + (inp.type === 'text' ? 'fa-eye-slash' : 'fa-eye');
 }
 
+// Self-loading delegating stub (top-level scope) with a recursion guard: after
+// loading `src`, call the real window.app[name] only if it's no longer this stub.
+// Prevents an infinite retry loop when the chunk fails to load or doesn't export
+// the name (the `?.` optional-chaining variants did NOT guard against this — the
+// property is always defined because it IS the stub).
+const _lazyAppStub = (src, name) => {
+    const stub = (...a) => window._loadChunk(src).then(() => {
+        const r = window.app[name];
+        if (typeof r === 'function' && r !== stub) return r(...a);
+        console.warn(`[chunk] ${name} unavailable after loading ${src}`);
+        return undefined;
+    });
+    return stub;
+};
+
 // Export startup-critical security functions (dashboards moved to script-admin.js chunk)
 Object.assign(window.app, {
     toggleLoginPassword,
@@ -4784,25 +4905,25 @@ Object.assign(window.app, {
     checkExpiredConsents,
     scheduleRetentionJobs,
     // Security dashboards + Admin functions loaded lazily by script-admin.js chunk
-    showSecurityDashboard:  () => (window.app._adminChunkLoaded ? window.app.showSecurityDashboard()  : window._loadChunk('chunks/script-admin.min.js').then(() => window.app.showSecurityDashboard())),
-    showAuditLogs:          () => (window.app._adminChunkLoaded ? window.app.showAuditLogs()          : window._loadChunk('chunks/script-admin.min.js').then(() => window.app.showAuditLogs())),
-    showComplianceCenter:   () => (window.app._adminChunkLoaded ? window.app.showComplianceCenter()   : window._loadChunk('chunks/script-admin.min.js').then(() => window.app.showComplianceCenter())),
-    showAdminDashboard:     () => window._loadChunk('chunks/script-admin.min.js').then(() => window.app.showAdminDashboard()),
+    showSecurityDashboard:  _lazyAppStub('chunks/script-admin.min.js', 'showSecurityDashboard'),
+    showAuditLogs:          _lazyAppStub('chunks/script-admin.min.js', 'showAuditLogs'),
+    showComplianceCenter:   _lazyAppStub('chunks/script-admin.min.js', 'showComplianceCenter'),
+    showAdminDashboard:     _lazyAppStub('chunks/script-admin.min.js', 'showAdminDashboard'),
     // Admin sub-menu items — must load chunk before calling (direct nav skips showAdminDashboard)
-    showTenantManagement:    () => window._loadChunk('chunks/script-admin.min.js').then(() => window.app.showTenantManagement?.()),
-    showSystemHealth:        () => window._loadChunk('chunks/script-admin.min.js').then(() => window.app.showSystemHealth?.()),
-    showBackupManager:       () => window._loadChunk('chunks/script-admin.min.js').then(() => window.app.showBackupManager?.()),
-    showPerformanceMonitor:  () => window._loadChunk('chunks/script-admin.min.js').then(() => window.app.showPerformanceMonitor?.()),
-    showDeploymentCenter:    () => window._loadChunk('chunks/script-admin.min.js').then(() => window.app.showDeploymentCenter?.()),
-    showSystemLogs:          () => window._loadChunk('chunks/script-admin.min.js').then(() => window.app.showSystemLogs?.()),
+    showTenantManagement:    _lazyAppStub('chunks/script-admin.min.js', 'showTenantManagement'),
+    showSystemHealth:        _lazyAppStub('chunks/script-admin.min.js', 'showSystemHealth'),
+    showBackupManager:       _lazyAppStub('chunks/script-admin.min.js', 'showBackupManager'),
+    showPerformanceMonitor:  _lazyAppStub('chunks/script-admin.min.js', 'showPerformanceMonitor'),
+    showDeploymentCenter:    _lazyAppStub('chunks/script-admin.min.js', 'showDeploymentCenter'),
+    showSystemLogs:          _lazyAppStub('chunks/script-admin.min.js', 'showSystemLogs'),
     // Mobile nav toggle — stub ensures hamburger works even before mobile chunk finishes loading
-    toggleMobileNav: (...a) => window._loadChunk('chunks/script-mobile.min.js').then(() => window.app.toggleMobileNav?.(...a)),
+    toggleMobileNav: _lazyAppStub('chunks/script-mobile.min.js', 'toggleMobileNav'),
     // AI Insights — stubs load ai chunk on first click (Tier-2 prefetch at 3 s; user may click sooner)
-    showAIInsightsDashboard:  (...a) => window._loadChunk('chunks/script-ai.min.js').then(() => window.app.showAIInsightsDashboard?.(...a)),
-    showLeadScoring:          (...a) => window._loadChunk('chunks/script-ai.min.js').then(() => window.app.showLeadScoring?.(...a)),
-    showSalesForecast:        (...a) => window._loadChunk('chunks/script-ai.min.js').then(() => window.app.showSalesForecast?.(...a)),
-    showChurnRiskAnalysis:    (...a) => window._loadChunk('chunks/script-ai.min.js').then(() => window.app.showChurnRiskAnalysis?.(...a)),
-    showPerformanceInsights:  (...a) => window._loadChunk('chunks/script-ai.min.js').then(() => window.app.showPerformanceInsights?.(...a)),
+    showAIInsightsDashboard:  _lazyAppStub('chunks/script-ai.min.js', 'showAIInsightsDashboard'),
+    showLeadScoring:          _lazyAppStub('chunks/script-ai.min.js', 'showLeadScoring'),
+    showSalesForecast:        _lazyAppStub('chunks/script-ai.min.js', 'showSalesForecast'),
+    showChurnRiskAnalysis:    _lazyAppStub('chunks/script-ai.min.js', 'showChurnRiskAnalysis'),
+    showPerformanceInsights:  _lazyAppStub('chunks/script-ai.min.js', 'showPerformanceInsights'),
     // _prefetchChunkForView is internal to the IIFE — used only by the pointerover
     // listener at script.js:2743. Removed from the export list because esbuild's
     // --keep-names option renames the const binding (to a short letter) but leaves

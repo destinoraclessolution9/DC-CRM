@@ -26,6 +26,10 @@
     // Co-agent push notification — defined in script-activities.js, exported to window.app.
     // Fire-and-forget after a co-agent is added to an activity.
     const _notifyCoAgentAdded  = (...a) => (window.app._notifyCoAgentAdded || (() => Promise.resolve()))(...a);
+    // Local (MYT) date string YYYY-MM-DD. toISOString() uses UTC, which shifts to
+    // the previous day for any action taken 00:00–08:00 local — wrong due_date and
+    // breaks birthday-draft dedup. Use this for all date-only fields.
+    const _localDateStr = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     // ========== PHASE 1: FULL CALENDAR IMPLEMENTATION ==========
 
     const showCalendarView = async (container) => {
@@ -628,7 +632,7 @@
             messageText: msg,
             phone: entity.phone || '',
             prospectName: entity.full_name || '',
-            dueDate: dueDate.toISOString().split('T')[0],
+            dueDate: _localDateStr(dueDate),
             attachmentUrl: extraVars.photo_url || null
         });
     };
@@ -715,7 +719,7 @@
                 eventId,
                 eventDate: activityDate,
                 eventName: event.event_title || event.title,
-                dueDate: dueDate.toISOString().split('T')[0]
+                dueDate: _localDateStr(dueDate)
             });
         }
     };
@@ -800,7 +804,7 @@
                         event_id: null,
                         event_date: null,
                         event_name: '',
-                        due_date: dueDate.toISOString().split('T')[0],
+                        due_date: _localDateStr(dueDate),
                         attachment_url: latestPhotoUrl || null,
                         status: 'pending'
                     });
@@ -1745,7 +1749,14 @@
                 }
                 const prospect = a.prospect_id ? prospectMap.get(String(a.prospect_id)) : null;
                 const customer = a.customer_id ? customerMap.get(String(a.customer_id)) : null;
-                const entityName = prospect ? prospect.full_name : (customer ? customer.full_name : (a.activity_title || 'Event'));
+                // Ownership gate (commits fa31e3b/3a75855): non-owners viewing
+                // another agent's public/open activity must not see the client name.
+                const _tileOwned = isSystemAdmin(_state.cu)
+                    || String(a.lead_agent_id) === String(_state.cu?.id)
+                    || (Array.isArray(a.co_agents) && a.co_agents.some(ca => String(ca.id) === String(_state.cu?.id)));
+                const entityName = _tileOwned
+                    ? (prospect ? prospect.full_name : (customer ? customer.full_name : (a.activity_title || 'Event')))
+                    : (a.activity_title || a.activity_type || 'Activity');
                 if (!entityName) continue;
                 if (renderedInCell >= maxRenderPerCell) { skippedInCell++; continue; }
                 const isEvent = a.activity_type === 'EVENT';
@@ -2013,6 +2024,7 @@
         // Helper: paint stale snapshot or, if none exists, show an offline
         // placeholder so the user never stares at a blank/skeleton grid.
         const _paintOfflineFallback = (reason) => {
+            if (myToken !== _state.rct) return; // a newer render owns the grid
             const staleSnap = _readStaleSnap();
             if (staleSnap) {
                 if (grid.innerHTML !== staleSnap) grid.innerHTML = staleSnap;
@@ -2067,6 +2079,10 @@
         // back to the legacy multi-query path so the calendar still renders.
         // Safe to remove once the migration has been verified live.
         if (lightRes.error) {
+            // Staleness guard: if the user navigated to another month/view while
+            // this RPC was in flight, do NOT paint our (error/offline) result over
+            // the newer render — it would clobber good content with a fallback.
+            if (myToken !== _state.rct) return;
             const msg = lightRes.error.message || '';
             const missing = lightRes.error.code === '42883' || /function .* does not exist/i.test(msg);
             if (missing) {
@@ -2546,7 +2562,7 @@
                 ? allEventsRTA.find(e => String(e.id) === String(a.event_id))
                 : null;
             const entityName = a.activity_type === 'EVENT'
-                ? (_rtaEvent?.title || a.activity_title || 'Company Event')
+                ? (_rtaEvent?.event_title || _rtaEvent?.title || a.activity_title || 'Company Event')
                 : (_rtaOwned
                     ? (prospect ? prospect.full_name : (customer ? customer.full_name : (a.customer_name || 'N/A')))
                     : null);
@@ -3057,14 +3073,17 @@
         const msg = document.getElementById('bday-wish-msg')?.value?.trim();
         const channel = document.getElementById('bday-wish-channel')?.value;
         if (!msg) { UI.toast.error('Message cannot be empty.'); return; }
-        await AppDataStore.create('activities', {
-            entity_type: entityType,
-            entity_id: id,
-            type: 'Birthday Wish',
-            notes: `Sent via ${channel}: ${msg}`,
-            date: new Date().toISOString().split('T')[0],
+        const _d = new Date();
+        const _localDate = `${_d.getFullYear()}-${String(_d.getMonth()+1).padStart(2,'0')}-${String(_d.getDate()).padStart(2,'0')}`;
+        const _payload = {
+            activity_type: 'CALL',
+            activity_date: _localDate,
+            summary: `Birthday Wish via ${channel}: ${msg}`,
+            lead_agent_id: _state.cu?.id,
             created_by: _state.cu?.id
-        });
+        };
+        if (entityType === 'customer') _payload.customer_id = id; else _payload.prospect_id = id;
+        await AppDataStore.create('activities', _payload);
         UI.hideModal();
         UI.toast.success('Birthday wish logged.');
     };
@@ -3101,14 +3120,17 @@
         const value = document.getElementById('bday-gift-value')?.value?.trim();
         const notes = document.getElementById('bday-gift-notes')?.value?.trim();
         if (!desc) { UI.toast.error('Gift description is required.'); return; }
-        await AppDataStore.create('activities', {
-            entity_type: entityType,
-            entity_id: id,
-            type: 'Birthday Gift',
-            notes: `Gift: ${desc}${value ? ` (RM ${value})` : ''}${notes ? ` — ${notes}` : ''}`,
-            date: new Date().toISOString().split('T')[0],
+        const _d = new Date();
+        const _localDate = `${_d.getFullYear()}-${String(_d.getMonth()+1).padStart(2,'0')}-${String(_d.getDate()).padStart(2,'0')}`;
+        const _payload = {
+            activity_type: 'CALL',
+            activity_date: _localDate,
+            summary: `Birthday Gift: ${desc}${value ? ` (RM ${value})` : ''}${notes ? ` — ${notes}` : ''}`,
+            lead_agent_id: _state.cu?.id,
             created_by: _state.cu?.id
-        });
+        };
+        if (entityType === 'customer') _payload.customer_id = id; else _payload.prospect_id = id;
+        await AppDataStore.create('activities', _payload);
         UI.hideModal();
         UI.toast.success('Birthday gift logged.');
     };
@@ -3854,14 +3876,14 @@
             <div class="activity-details">
                 <div class="detail-section">
                     <h4>Activity Information</h4>
-                    <div class="info-row"><span class="info-label">Type:</span> <span>${activity.activity_type}</span></div>
-                    <div class="info-row"><span class="info-label">Title:</span> <span>${marketingEvent?.event_title || marketingEvent?.title || activity.activity_title || 'N/A'}</span></div>
-                    <div class="info-row"><span class="info-label">Date:</span> <span>${activity.activity_date}</span></div>
-                    <div class="info-row"><span class="info-label">Time:</span> <span>${activity.start_time} - ${activity.end_time}</span></div>
-                    ${activity.activity_type !== 'EVENT' && _isOwnActivity ? `<div class="info-row"><span class="info-label">Entity:</span> <span style="display:inline-flex; align-items:center; flex-wrap:wrap; gap:4px;">${entityName}${_entityIconBtn}</span></div>` : ''}
-                    ${activity.location_address ? `<div class="info-row"><span class="info-label">Location:</span> <span>${activity.location_address}</span></div>` : ''}
-                    ${marketingEvent?.description ? `<div class="info-row" style="flex-direction:column; align-items:flex-start; gap:4px;"><div style="display:flex; align-items:center; gap:8px; width:100%;"><span class="info-label">Description:</span><button style="width:30px;height:30px;border-radius:50%;border:none;background:#25d366;color:#fff;font-size:17px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 8px rgba(37,211,102,0.4);flex-shrink:0;" onclick="event.stopPropagation();app.sendDescriptionInvite(${activity.id})" title="Send WhatsApp Invite"><i class="fab fa-whatsapp"></i></button></div><span style="white-space:pre-wrap; color:var(--gray-700);">${marketingEvent.description}</span></div>` : ''}
-                    ${activity.summary ? `<div class="info-row"><span class="info-label">Summary:</span> <span>${activity.summary}</span></div>` : ''}
+                    <div class="info-row"><span class="info-label">Type:</span> <span>${escapeHtml(activity.activity_type || '')}</span></div>
+                    <div class="info-row"><span class="info-label">Title:</span> <span>${escapeHtml(marketingEvent?.event_title || marketingEvent?.title || activity.activity_title || 'N/A')}</span></div>
+                    <div class="info-row"><span class="info-label">Date:</span> <span>${escapeHtml(activity.activity_date || '')}</span></div>
+                    <div class="info-row"><span class="info-label">Time:</span> <span>${escapeHtml(activity.start_time || '')} - ${escapeHtml(activity.end_time || '')}</span></div>
+                    ${activity.activity_type !== 'EVENT' && _isOwnActivity ? `<div class="info-row"><span class="info-label">Entity:</span> <span style="display:inline-flex; align-items:center; flex-wrap:wrap; gap:4px;">${escapeHtml(entityName || '')}${_entityIconBtn}</span></div>` : ''}
+                    ${activity.location_address ? `<div class="info-row"><span class="info-label">Location:</span> <span>${escapeHtml(activity.location_address)}</span></div>` : ''}
+                    ${marketingEvent?.description ? `<div class="info-row" style="flex-direction:column; align-items:flex-start; gap:4px;"><div style="display:flex; align-items:center; gap:8px; width:100%;"><span class="info-label">Description:</span><button style="width:30px;height:30px;border-radius:50%;border:none;background:#25d366;color:#fff;font-size:17px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 8px rgba(37,211,102,0.4);flex-shrink:0;" onclick="event.stopPropagation();app.sendDescriptionInvite(${activity.id})" title="Send WhatsApp Invite"><i class="fab fa-whatsapp"></i></button></div><span style="white-space:pre-wrap; color:var(--gray-700);">${escapeHtml(marketingEvent.description)}</span></div>` : ''}
+                    ${activity.summary ? `<div class="info-row"><span class="info-label">Summary:</span> <span>${escapeHtml(activity.summary)}</span></div>` : ''}
                 </div>
 
                 ${marketingEvent ? `

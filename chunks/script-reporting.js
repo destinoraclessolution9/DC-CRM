@@ -54,6 +54,11 @@
     let _revenueChart = null;
 
     const showKPIDashboard = async (container) => {
+        // The "Set Yearly/Quarterly Targets" buttons call app.openKPITargetsModal /
+        // openQuarterlyTargetsModal, whose real forms live in script-features2.js
+        // (this chunk only owns openTargetManagementModal — the "Agent Targets"
+        // button). Ensure features2 is loaded so those buttons aren't dead.
+        try { if (window._loadChunk) await window._loadChunk('chunks/script-features2.min.js'); } catch (_) {}
         _state.se = null; // Clear selection
         // Agent dropdown filled after paint — don't block initial render
         const _kpiAgentOptions = `<option value="all">All Agents</option>`;
@@ -2208,9 +2213,12 @@ const exportKPIReport = async (format) => {
     // _patch_v2.mjs — includes column-0 definitions the extractor missed).
     Object.assign(window.app, {
         openTargetManagementModal,
-        openKPITargetsModal,
-        openQuarterlyTargetsModal,
-        saveQuarterlyTargets,
+        // openKPITargetsModal / openQuarterlyTargetsModal / saveQuarterlyTargets
+        // are intentionally NOT registered here — script-features2.js owns the
+        // real yearly/quarterly target forms. Registering this chunk's stub
+        // copies caused a load-order-dependent overwrite (Set Yearly Targets
+        // opened the Agent Targets modal instead). features2 is force-loaded in
+        // showKPIDashboard above so its versions are always present.
         exportKPIReport,
         printDashboard,
         setTimeFilter,
