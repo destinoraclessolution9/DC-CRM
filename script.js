@@ -736,17 +736,31 @@ const appLogic = (() => {
         return visibleIds.includes(prospect.responsible_agent_id);
     };
 
+    // Server-visibility scoping (getVisibleProspects/Customers) — ON by default.
+    // Provably parity-equal to the legacy whole-table-then-filter (same visibleIds
+    // drive the server `.in()` as the client `.includes()`), and a query error
+    // auto-falls back. Instant kill-switch to force the legacy path:
+    //   ?novis=1 in the URL · localStorage.crm_visibility_off='1' · window.__SERVER_VISIBILITY=false
+    const _serverVisibilityOn = () => {
+        try {
+            if (window.__SERVER_VISIBILITY === false) return false;
+            if (typeof location !== 'undefined' && /[?&]novis=1/.test(location.search || '')) return false;
+            if (typeof localStorage !== 'undefined' && localStorage.getItem('crm_visibility_off') === '1') return false;
+        } catch (_) {}
+        return true;
+    };
+
     // Get all prospects visible to current user
     const getVisibleProspects = async () => {
         const user = _currentUser;
         if (!user) return [];
         const visibleIds = await getVisibleUserIds(user);
-        // Scale-safe (flag-gated, DEFAULT-OFF): scoped (non-admin) users fetch only
+        // Scale-safe (ON by default; kill-switch ?novis=1 / crm_visibility_off): scoped (non-admin) users fetch only
         // prospects owned by a visible agent server-side (paged) instead of
         // downloading the whole table then filtering. Provable parity — the same
         // visibleIds drive `.in(responsible_agent_id, …)` as the client filter.
         // Any error / flag off / admin → exact legacy getAll-then-filter below.
-        if (window.__SERVER_VISIBILITY === true && Array.isArray(visibleIds) && visibleIds.length) {
+        if (_serverVisibilityOn() && Array.isArray(visibleIds) && visibleIds.length) {
             try {
                 const scoped = await AppDataStore.queryPaged('prospects', {
                     filters: { responsible_agent_id: visibleIds }, max: 200000,
@@ -774,11 +788,11 @@ const appLogic = (() => {
         const user = _currentUser;
         if (!user) return [];
         const visibleIds = await getVisibleUserIds(user);
-        // Scale-safe (flag-gated, DEFAULT-OFF): scoped users fetch only customers
+        // Scale-safe (ON by default; kill-switch ?novis=1 / crm_visibility_off): scoped users fetch only customers
         // owned by a visible agent server-side (paged) via TWO scoped fetches
         // (responsible_agent_id OR legacy agent_id) merged + deduped — matching the
         // client OR filter. Any error / flag off / admin → legacy getAll-then-filter.
-        if (window.__SERVER_VISIBILITY === true && Array.isArray(visibleIds) && visibleIds.length) {
+        if (_serverVisibilityOn() && Array.isArray(visibleIds) && visibleIds.length) {
             try {
                 const [byResp, byAgent] = await Promise.all([
                     AppDataStore.queryPaged('customers', { filters: { responsible_agent_id: visibleIds }, max: 200000 }),
