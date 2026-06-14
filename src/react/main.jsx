@@ -14,6 +14,7 @@ import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useCustomers } from './data/useCustomers.js';
 import { CustomersTable } from './views/CustomersTable.jsx';
+import { ProspectsTable } from './views/ProspectsTable.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -96,10 +97,47 @@ function unmountCustomersTable(container) {
     }
 }
 
+// ── 4.3 mount API — Prospects table island ───────────────────────────────────
+// A fresh `key` per param-set remounts the component so React-local selection
+// re-seeds from the chunk's _selectedProspects on page/sort/filter change.
+function mountProspectsTable(container, opts) {
+    if (!container) return;
+    let root = _roots.get(container);
+    if (!root) {
+        root = createRoot(container);
+        _roots.set(container, root);
+    }
+    const o = opts || {};
+    const p = o.params || {};
+    const key = `${p.page || 0}|${p.sortField || ''}|${p.sortDir || ''}|${p.q || ''}|${p.gua || ''}|${p.agent || ''}|${p.dormant ? 1 : 0}`;
+    root.render(
+        <QueryClientProvider client={queryClient}>
+            <ProspectsTable
+                key={key}
+                params={p}
+                meta={o.meta || { canReassign: false, canDelete: false, isAdmin: false, isMktMgr: false, agents: [], agentNames: {}, selectedIds: [] }}
+                pageSize={o.pageSize || 50}
+                onNavigate={o.onNavigate || (() => {})}
+            />
+        </QueryClientProvider>
+    );
+    window.__REACT_PROSPECTS_MOUNTED = true;
+}
+
+function unmountProspectsTable(container) {
+    const root = container && _roots.get(container);
+    if (root) {
+        try { root.unmount(); } catch (_) {}
+        _roots.delete(container);
+    }
+}
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
     unmountCustomersTable,
+    mountProspectsTable,
+    unmountProspectsTable,
 });
 
 if (document.readyState === 'loading') {

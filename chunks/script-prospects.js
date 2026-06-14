@@ -253,6 +253,11 @@ const showProspectsView = async (container) => {
                 <button class="btn-bulk ml-auto" onclick="app.clearProspectSelection()"><i class="fas fa-times"></i> Clear</button>
             </div>
 
+            <!-- Phase 4.3 (#13): React island mount target. renderProspectsTable
+                 swaps visibility between this and the legacy table below when the
+                 opt-in React prospects path is active (server-eligible only). -->
+            <div id="prospects-react-root" style="display:none;"></div>
+
             <div class="prospects-table-container" id="prospects-table-view">
                 <table class="prospects-table" id="prospects-table">
                     <thead>
@@ -1171,6 +1176,28 @@ const exportData = async (type, format) => {
     }
 };
 
+// ── Phase 4.3 (#13): React-island prospects path ─────────────────────────────
+// Engages when the opt-in island bundle is loaded AND the flag is on (?react=1 /
+// localStorage crm_react_island=1 / window.__REACT_PROSPECTS===true) and not
+// killed (window.__REACT_PROSPECTS===false). Opt-in bundle → never normal users.
+const _reactProspectsOn = () => {
+    try {
+        if (window.__REACT_PROSPECTS === false) return false;
+        if (!window.CRMReact || typeof window.CRMReact.mountProspectsTable !== 'function') return false;
+        return window.__REACT_PROSPECTS === true
+            || /[?&]react=1/.test(location.search)
+            || localStorage.getItem('crm_react_island') === '1';
+    } catch (_) { return false; }
+};
+const _showProspectsReactRoot = (useReact) => {
+    const root   = document.getElementById('prospects-react-root');
+    if (root) root.style.display = useReact ? '' : 'none';
+    // Only manage the legacy table-view visibility in TABLE mode — in card mode
+    // toggleProspectView owns the table-view/card-view swap, so don't fight it.
+    const legacy = document.getElementById('prospects-table-view');
+    if (legacy && _prospectViewMode !== 'card') legacy.style.display = useReact ? 'none' : '';
+};
+
 const renderProspectsTable = async () => {
     const tbody = document.getElementById('prospects-table-body');
     if (!tbody) return;
@@ -1239,6 +1266,71 @@ const renderProspectsTable = async () => {
     // shows, mirroring the legacy includeDormant:!!agentFilter behavior.
     const _sortColMap = { name: 'full_name', score: 'score', activity: 'last_activity_date' };
     const _pUnsupported = !!scoreFilter || !!statusFilter || !_sortColMap[_sortField];
+
+    // ── Phase 4.3 (#13): React-island render path (opt-in bundle + flag) ───────
+    // Server-eligible only — same gate as the BFF/server path: table view, no
+    // derived score/status filter, sort ∈ name/score/activity. Card view +
+    // unsupported filters / protection sort fall through to the legacy DOM render.
+    if (_reactProspectsOn() && !_pUnsupported && _prospectViewMode !== 'card') {
+        const reactRoot = document.getElementById('prospects-react-root');
+        if (reactRoot) {
+            try {
+                const allUsersR = await AppDataStore.getAll('users', { includeDeleted: true });
+                const _lvlR = _getUserLevel(_currentUser);
+                const _canReassignR = _lvlR <= 5;
+                const _scopeIdsR = _lvlR <= 2 ? null : await getVisibleUserIds(_currentUser);
+                const _scopeSetR = (_scopeIdsR && _scopeIdsR !== 'all' && Array.isArray(_scopeIdsR)) ? new Set(_scopeIdsR.map(String)) : null;
+                const _visAgentsR = allUsersR.filter(u => {
+                    const lvl = _getUserLevel(u);
+                    if (!(lvl >= 3 && lvl <= 11 && u.status !== 'deleted')) return false;
+                    if (_scopeSetR) return _scopeSetR.has(String(u.id));
+                    return true;
+                });
+                // Populate the agent-filter dropdown (mirrors the legacy path) so
+                // agent filtering works on the React path too.
+                const agentFilterEl = document.getElementById('filter-agent');
+                const filterPanelOpen = document.getElementById('prospect-adv-filters')?.style.display !== 'none';
+                if (agentFilterEl && (filterPanelOpen || !agentFilterEl.dataset.hydrated)) {
+                    const curVal = agentFilterEl.value;
+                    const sorted = _visAgentsR.slice().sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''));
+                    agentFilterEl.innerHTML = '<option value="">All Agents</option>' +
+                        sorted.map(a => `<option value="${a.id}"${String(a.id) === curVal ? ' selected' : ''}>${esc(a.full_name || 'Agent')}</option>`).join('');
+                    agentFilterEl.dataset.hydrated = '1';
+                }
+                _showProspectsReactRoot(true);
+                window.CRMReact.mountProspectsTable(reactRoot, {
+                    params: {
+                        q: searchQueryRaw,
+                        gua: guaFilter,
+                        agent: agentFilter,
+                        sortField: _sortField,
+                        sortDir: _sortDirection,
+                        dormant: includeDormantToggle || !!agentFilter,
+                        page: _prospectPage,
+                    },
+                    pageSize: _prospectPageSize,
+                    meta: {
+                        canReassign: _canReassignR,
+                        canDelete: _lvlR <= 5,
+                        isAdmin: isSystemAdmin(_currentUser),
+                        isMktMgr: isMarketingManager(_currentUser),
+                        agents: _canReassignR ? _visAgentsR.map(a => ({ id: a.id, full_name: a.full_name || 'Agent' })) : [],
+                        agentNames: Object.fromEntries(allUsersR.map(u => [String(u.id), u.full_name || ''])),
+                        selectedIds: Array.from(_selectedProspects),
+                    },
+                    onNavigate: async (page) => { _prospectPage = Math.max(0, page | 0); await renderProspectsTable(); },
+                });
+                updateProspectBulkBar();
+                return;
+            } catch (e) {
+                console.warn('[react-prospects] mount failed → legacy:', e?.message || e);
+                _showProspectsReactRoot(false);
+            }
+        }
+    }
+    // Not using the React path → ensure the legacy table is the visible one.
+    _showProspectsReactRoot(false);
+
     let allProspects, allUsers, _usedServerP = false, _serverProspectCount = 0;
     if (window.__SERVER_TABLES && !_pUnsupported) {
         const [r, users] = await Promise.all([
