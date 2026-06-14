@@ -971,7 +971,39 @@ const _tryPurchaseDetails = async (from, to) => {
     }
 };
 
+// Shared fast path for the activity drill-downs (CPS / meetings / client
+// meetings / meet-up / CF headcount): returns only the period+scope+role
+// activity rows matching a type set (and/or a title pattern), with agent +
+// entity names joined, via report_activity_details. Returns null on error →
+// the builder's original getAll path runs. Behavior-preserving.
+const _tryActivityDetails = async (from, to, types, titleLike = null) => {
+    if (!window.supabase || !window.supabase.rpc) return null;
+    try {
+        const agentIds = (_visibleUserIds === 'all' || !Array.isArray(_visibleUserIds))
+            ? null
+            : _visibleUserIds.map(v => Number(v)).filter(n => Number.isFinite(n));
+        const role = (!_currentRoleFilter || _currentRoleFilter === 'All') ? null : _currentRoleFilter;
+        const { data, error } = await window.supabase.rpc('report_activity_details', {
+            p_from: from, p_to: to, p_agent_ids: agentIds, p_role: role,
+            p_types: types || null, p_title_like: titleLike
+        });
+        if (error || !Array.isArray(data)) return null;
+        return data;
+    } catch (_) {
+        return null;
+    }
+};
+
 const buildCPSDetails = async (from, to) => {
+    const _det = await _tryActivityDetails(from, to, ['CPS']);
+    if (_det) {
+        const rows = _det.map(a => [a.activity_date, a.agent_name || 'Unknown', a.entity_name || '—', a.activity_title || 'CPS Session']);
+        return renderDetailTable(['Date', 'Lead Agent', 'Customer / Prospect', 'Title'], rows);
+    }
+    return _buildCPSDetailsLegacy(from, to);
+};
+
+const _buildCPSDetailsLegacy = async (from, to) => {
     const [activities, users, customers, prospects] = await Promise.all([
         AppDataStore.getAll('activities'),
         AppDataStore.getAll('users'),
@@ -1295,6 +1327,15 @@ const buildConversionDetails = async (from, to) => {
 };
 
 const buildMeetingsDetails = async (from, to) => {
+    const _det = await _tryActivityDetails(from, to, AGENT_MEETING_TYPES);
+    if (_det) {
+        const rows = _det.map(a => [a.activity_date, a.activity_type || '—', a.activity_title || '—', a.agent_name || '—']);
+        return renderDetailTable(['Date', 'Type', 'Title', 'Lead Agent'], rows);
+    }
+    return _buildMeetingsDetailsLegacy(from, to);
+};
+
+const _buildMeetingsDetailsLegacy = async (from, to) => {
     const [activities, users] = await Promise.all([
         AppDataStore.getAll('activities'),
         AppDataStore.getAll('users')
@@ -1316,6 +1357,15 @@ const buildMeetingsDetails = async (from, to) => {
 };
 
 const buildClientMeetingsDetails = async (from, to) => {
+    const _det = await _tryActivityDetails(from, to, CLIENT_MEETING_TYPES);
+    if (_det) {
+        const rows = _det.map(a => [a.activity_date, a.activity_type || '—', a.activity_title || '—', a.agent_name || '—', a.entity_name || '—']);
+        return renderDetailTable(['Date', 'Type', 'Title', 'Lead Agent', 'Customer / Prospect'], rows);
+    }
+    return _buildClientMeetingsDetailsLegacy(from, to);
+};
+
+const _buildClientMeetingsDetailsLegacy = async (from, to) => {
     const [activities, users, customers, prospects] = await Promise.all([
         AppDataStore.getAll('activities'),
         AppDataStore.getAll('users'),
@@ -1344,6 +1394,15 @@ const buildClientMeetingsDetails = async (from, to) => {
 };
 
 const buildMeetUpExistingDetails = async (from, to) => {
+    const _det = await _tryActivityDetails(from, to, CLIENT_MEETING_TYPES, '%golden road%');
+    if (_det) {
+        const rows = _det.map(a => [a.activity_date, a.activity_type || '—', a.activity_title || '—', a.agent_name || '—']);
+        return renderDetailTable(['Date', 'Type', 'Title', 'Lead Agent'], rows);
+    }
+    return _buildMeetUpExistingDetailsLegacy(from, to);
+};
+
+const _buildMeetUpExistingDetailsLegacy = async (from, to) => {
     const [activities, users] = await Promise.all([
         AppDataStore.getAll('activities'),
         AppDataStore.getAll('users')
@@ -1367,6 +1426,25 @@ const buildMeetUpExistingDetails = async (from, to) => {
 };
 
 const buildCFHeadcountDetails = async (from, to) => {
+    const _det = await _tryActivityDetails(from, to, ['CPS']);
+    if (_det) {
+        const referrerMap = {};
+        for (const a of _det) {
+            if (!a.customer_id) continue;
+            const key = String(a.customer_id);
+            if (!referrerMap[key]) referrerMap[key] = { name: a.entity_name || '—', agent: a.agent_name || '—', sessions: 0 };
+            referrerMap[key].sessions++;
+        }
+        const rows = Object.values(referrerMap).map(r => [r.name, r.agent, r.sessions]);
+        const summary = `<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px;">
+        <strong>${rows.length}</strong> unique referrer${rows.length===1?'':'s'} brought <strong>${rows.reduce((s,r)=>s+r[2],0)}</strong> total CPS sessions
+    </div>`;
+        return summary + renderDetailTable(['Referrer (Customer)', 'Agent', 'CPS Sessions'], rows);
+    }
+    return _buildCFHeadcountDetailsLegacy(from, to);
+};
+
+const _buildCFHeadcountDetailsLegacy = async (from, to) => {
     const [activities, users, customers] = await Promise.all([
         AppDataStore.getAll('activities'),
         AppDataStore.getAll('users'),
