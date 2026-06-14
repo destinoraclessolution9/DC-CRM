@@ -414,7 +414,12 @@ const showCustomersView = async (container) => {
                 </div>
             </div>
 
-            <div class="prospects-table-container">
+            <!-- Phase 4.2 (#13): React island mount target. renderCustomersTable
+                 swaps visibility between this and the legacy table below when the
+                 opt-in React customers path is active. -->
+            <div id="customers-react-root" style="display:none;"></div>
+
+            <div class="prospects-table-container" id="customers-table-container">
                 <table class="prospects-table">
                     <thead>
                         <tr>
@@ -442,6 +447,31 @@ const showCustomersView = async (container) => {
 // ── Pagination state for customers table ──
 let _customerPage = 0;
 const _customerPageSize = 50;
+
+// ── Phase 4.2 (#13): React-island customers path ─────────────────────────────
+// The real Customers table can render via a React island (window.CRMReact,
+// loaded only by the opt-in island bundle). Engages when the island bundle is
+// present AND the flag is on (?react=1 / localStorage crm_react_island=1 /
+// window.__REACT_CUSTOMERS===true) and not explicitly killed
+// (window.__REACT_CUSTOMERS===false). Because the bundle is opt-in, this never
+// engages for normal users — the legacy table stays the only path until promoted.
+const _reactCustomersOn = () => {
+    try {
+        if (window.__REACT_CUSTOMERS === false) return false;
+        if (!window.CRMReact || typeof window.CRMReact.mountCustomersTable !== 'function') return false;
+        return window.__REACT_CUSTOMERS === true
+            || /[?&]react=1/.test(location.search)
+            || localStorage.getItem('crm_react_island') === '1';
+    } catch (_) { return false; }
+};
+
+// Swap visibility between the React mount root and the legacy table container.
+const _showCustomersReactRoot = (useReact) => {
+    const root   = document.getElementById('customers-react-root');
+    const legacy = document.getElementById('customers-table-container');
+    if (root)   root.style.display   = useReact ? '' : 'none';
+    if (legacy) legacy.style.display = useReact ? 'none' : '';
+};
 
 // Live app-state bridge for lazy-loaded chunks.
 // Every getter/setter delegates to the private IIFE `let` — the local
@@ -532,6 +562,41 @@ const renderCustomersTable = async () => {
     // Falls through to the legacy client path for filters not yet expressible
     // server-side (Regular null-edge, deficiency arrays, event-count aggregation).
     const _serverUnsupported = typeFilter === 'Regular' || !!deficiencyFilter || minEventsFilter > 0 || !!purchaseFilter;
+
+    // ── Phase 4.2 (#13): React-island render path (opt-in bundle + flag) ───────
+    // Same eligibility as the BFF branch below (the island fetches the same lean
+    // BFF page via React Query). For unsupported filters / house-audit /
+    // Agent-Eligible we fall through to the legacy DOM render (and hide the root).
+    if (_reactCustomersOn() && !_serverUnsupported && !houseAuditFilter && typeFilter !== 'Agent Eligible') {
+        const reactRoot = document.getElementById('customers-react-root');
+        if (reactRoot) {
+            try {
+                _showCustomersReactRoot(true);
+                window.CRMReact.mountCustomersTable(reactRoot, {
+                    params: {
+                        q: searchQuery,
+                        gua: guaFilter,
+                        type: typeFilter === 'VIP' ? 'VIP' : '',
+                        page: _customerPage,
+                    },
+                    pageSize: _customerPageSize,
+                    meta: {
+                        canReassign: canReassignCust,
+                        agents: activeAgentsCust.map(a => ({ id: a.id, full_name: a.full_name || 'Agent' })),
+                        agentNames: Object.fromEntries(allUsers.map(u => [String(u.id), u.full_name || ''])),
+                    },
+                    onNavigate: async (page) => { _customerPage = Math.max(0, page | 0); await renderCustomersTable(); },
+                });
+                return;
+            } catch (e) {
+                console.warn('[react-customers] mount failed → legacy:', e?.message || e);
+                _showCustomersReactRoot(false);
+            }
+        }
+    }
+    // Not using the React path → ensure the legacy table is the visible one.
+    _showCustomersReactRoot(false);
+
     let _usedServer = false;
     // ── PHASE 2 (#11): BFF path (DEFAULT ON; set window.__USE_BFF_CUSTOMERS=false to disable) ──
     // Routes through /api/customers, which verifies the JWT + applies the

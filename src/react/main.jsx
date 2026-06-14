@@ -1,22 +1,25 @@
-// Phase 4.0/4.1 (#13) — React beachhead + first React Query data flow.
+// Phase 4.0/4.1/4.2 (#13) — React beachhead → data layer → first real view.
 //
-// Strangler-fig entry: mounts a React island into #react-island-root (if present)
-// WITHOUT touching the vanilla window.app shell. Opt-in only (index.html injects
-// this bundle for ?react=1 / localStorage crm_react_island=1), so the React
-// bundle stays off normal users' loads until a real view migrates (4.2+).
+// Strangler-fig entry. Opt-in only (index.html injects this bundle for
+// ?react=1 / localStorage crm_react_island=1), so the React bundle stays off
+// normal users' loads until a real view is promoted to default.
 //
-// 4.1: the demo island fetches customers through React Query → the BFF
-// (/api/customers, server-verified JWT + scope), proving the React + TanStack
-// Query + BFF stack end-to-end in production. It renders into the (hidden)
-// #react-island-root; verify via window.__REACT_ISLAND_* + the node's text.
+// 4.0/4.1: a demo island (#react-island-root) fetches customers through React
+//   Query → the BFF, proving React + TanStack Query + BFF end-to-end in prod.
+// 4.2: exposes window.CRMReact.mountCustomersTable(container, opts) — the real
+//   Customers table, rendered by chunks/script-prospects.js into the live view
+//   (behind a flag, legacy table as fallback). React Query owns the cache, which
+//   is what lets Phase 3 retire the bespoke per-view sync for migrated views.
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useCustomers } from './data/useCustomers.js';
+import { CustomersTable } from './views/CustomersTable.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
 });
 
+// ── 4.1 demo probe (kept for the existing end-to-end proof) ──────────────────
 function CustomersProbe() {
     const { data, isLoading, error } = useCustomers({ limit: 5 });
     if (isLoading) {
@@ -28,7 +31,7 @@ function CustomersProbe() {
         return <span data-react-island="error" aria-hidden="true">react-island error: {String(error.message)}</span>;
     }
     const rows = (data && data.rows) || [];
-    const sample = rows.map(r => r.full_name).filter(Boolean).slice(0, 3).join(', ');
+    const sample = rows.map((r) => r.full_name).filter(Boolean).slice(0, 3).join(', ');
     window.__REACT_ISLAND_STATE = 'ready';
     window.__REACT_ISLAND_COUNT = data && data.count;
     return (
@@ -38,7 +41,7 @@ function CustomersProbe() {
     );
 }
 
-function App() {
+function ProbeApp() {
     return (
         <QueryClientProvider client={queryClient}>
             <CustomersProbe />
@@ -46,21 +49,61 @@ function App() {
     );
 }
 
-function mount() {
+function mountProbe() {
     const el = document.getElementById('react-island-root');
     if (!el) return;
     try {
-        createRoot(el).render(<App />);
+        createRoot(el).render(<ProbeApp />);
         window.__REACT_ISLAND_MOUNTED = true;
         window.__REACT_VERSION = 'bundled-19';
     } catch (e) {
-        // Never let the island crash the host app.
-        console.warn('[react-island] mount failed (non-fatal):', e && e.message);
+        console.warn('[react-island] probe mount failed (non-fatal):', e && e.message);
     }
 }
 
+// ── 4.2 mount API — real Customers table island ──────────────────────────────
+// One React root per container element (re-mounts re-render in place). The
+// chunk calls this each time renderCustomersTable runs while the React path is
+// active; React Query dedups + caches the underlying fetches by query key.
+const _roots = new Map();
+
+function mountCustomersTable(container, opts) {
+    if (!container) return;
+    let root = _roots.get(container);
+    if (!root) {
+        root = createRoot(container);
+        _roots.set(container, root);
+    }
+    const o = opts || {};
+    root.render(
+        <QueryClientProvider client={queryClient}>
+            <CustomersTable
+                params={o.params || {}}
+                meta={o.meta || { canReassign: false, agents: [], agentNames: {} }}
+                pageSize={o.pageSize || 50}
+                onNavigate={o.onNavigate || (() => {})}
+            />
+        </QueryClientProvider>
+    );
+    window.__REACT_CUSTOMERS_MOUNTED = true;
+}
+
+function unmountCustomersTable(container) {
+    const root = container && _roots.get(container);
+    if (root) {
+        try { root.unmount(); } catch (_) {}
+        _roots.delete(container);
+    }
+}
+
+window.CRMReact = Object.assign(window.CRMReact || {}, {
+    queryClient,
+    mountCustomersTable,
+    unmountCustomersTable,
+});
+
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', mount, { once: true });
+    document.addEventListener('DOMContentLoaded', mountProbe, { once: true });
 } else {
-    mount();
+    mountProbe();
 }

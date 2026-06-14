@@ -6,7 +6,7 @@
 // (#8) for migrated views — React Query owns the cache, so Phase 3's teardown
 // falls out per-view. The session token comes from the existing window.supabase
 // client (strangler-fig: the island lives in the same page, shares auth).
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 
 async function fetchCustomers({ q = '', gua = '', type = '', limit = 50, offset = 0 } = {}) {
     const sb = window.supabase;
@@ -30,5 +30,8 @@ export function useCustomers(params = {}) {
         queryFn: () => fetchCustomers(params),
         staleTime: 30_000,
         retry: 1,
+        // Keep the current page visible while the next page/filter loads, so
+        // pagination doesn't flash an empty table between fetches.
+        placeholderData: keepPreviousData,
     });
 }
