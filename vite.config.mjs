@@ -23,8 +23,16 @@ export default defineConfig({
         outDir: 'react-dist',
         // Don't wipe the dir — keeps the committed bundle as a fallback if a
         // future Vercel `vite build` ever fails mid-run (deploy stays safe).
+        // target es2022 (NOT es2020): esbuild's es2020 *lowering* of React
+        // Query v5's class private fields/methods, combined with the minify
+        // syntax pass, emits a broken `Object.defineProperty(obj, key, null)`
+        // inside `new QueryObserver` → "Property description must be an object:
+        // null" at useState, which crashes the whole island. es2022 keeps class
+        // fields/private members native (no lowering) so the bug can't occur.
+        // Verified: es2020+min crashes; es2022/esnext+min and es2020 non-min are
+        // all clean. es2022 is supported by every browser this island targets.
         emptyOutDir: false,
-        target: 'es2020',
+        target: 'es2022',
         minify: 'esbuild',
         lib: {
             entry: 'src/react/main.jsx',
