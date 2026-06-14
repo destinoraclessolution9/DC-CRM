@@ -263,12 +263,26 @@
     };
 
     const getCaseCountsByProduct = async (from, to) => {
-        const purchases = await AppDataStore.getAll('purchases');
         const categories = {
             'FengShui': 0, 'Flexi FengShui': 0, 'Simplified Feng Shui': 0,
             'Power Ring': 0, 'Calligraphy': 0, 'Adornment': 0,
             'Royal Woodwork': 0, 'Courses': 0, 'Book': 0
         };
+        // Server fast path. The legacy agent filter is a dead path (purchases has
+        // no agent_id → a non-'all' filter always yields zeros), so only the
+        // 'all' case has data to fetch server-side.
+        if (_currentAgentFilter === 'all') {
+            try {
+                if (window.supabase && window.supabase.rpc) {
+                    const { data, error } = await window.supabase.rpc('purchase_category_counts', { p_from: from, p_to: to });
+                    if (!error && Array.isArray(data)) {
+                        for (const r of data) if (r.category in categories) categories[r.category] = Number(r.cnt) || 0;
+                        return categories;
+                    }
+                }
+            } catch (_) { /* fall through to legacy */ }
+        }
+        const purchases = await AppDataStore.getAll('purchases');
         const keywordMap = {
             'FengShui': ['feng shui', 'fengshui'],
             'Flexi FengShui': ['flexi', 'flexible feng shui'],
@@ -1160,6 +1174,28 @@ const buildEPPCasesDetails = async (from, to) => {
     return summary + renderDetailTable(['Date', 'Agent', 'Customer', 'Amount', 'Bank', 'Months'], rows);
 };
 
+// Target Overview helpers: server-side sales aggregates so the Target Overview
+// tab no longer needs getAll('purchases'). Both return null on any error so the
+// caller falls back to its original client path.
+const _trySalesTotal = async (from, to) => {
+    try {
+        if (window.supabase && window.supabase.rpc) {
+            const { data, error } = await window.supabase.rpc('kpi_purchase_summary', { p_from: from, p_to: to, p_agent_ids: null, p_role: null });
+            if (!error && data) return Number(data.total_sales) || 0;
+        }
+    } catch (_) {}
+    return null;
+};
+const _trySalesByDay = async (from, to) => {
+    try {
+        if (window.supabase && window.supabase.rpc) {
+            const { data, error } = await window.supabase.rpc('purchase_sales_by_day', { p_from: from, p_to: to });
+            if (!error && Array.isArray(data)) return data;
+        }
+    } catch (_) {}
+    return null;
+};
+
 const buildNewAgentsDetails = async (from, to) => {
     const users = await AppDataStore.getAll('users');
     const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
@@ -1789,11 +1825,14 @@ const renderTargetOverview = async () => {
         const qStart = `${year}-${((q - 1) * 3 + 1).toString().padStart(2, '0')}-01`;
         const qEnd = `${year}-${(q * 3).toString().padStart(2, '0')}-${new Date(year, q * 3, 0).getDate()}`;
         
-        const purchases = await AppDataStore.getAll('purchases');
-        const actualSales = purchases
-            .filter(p => p.date >= qStart && p.date <= qEnd && !p.is_agent_package)
-            .reduce((sum, p) => sum + (p.amount || 0), 0);
-        
+        let actualSales = await _trySalesTotal(qStart, qEnd);
+        if (actualSales === null) {
+            const purchases = await AppDataStore.getAll('purchases');
+            actualSales = purchases
+                .filter(p => p.date >= qStart && p.date <= qEnd && !p.is_agent_package)
+                .reduce((sum, p) => sum + (p.amount || 0), 0);
+        }
+
         const progress = target.total_sales_target ? Math.min(100, (actualSales / target.total_sales_target * 100)) : 0;
         const statusColor = progress > 90 ? 'green' : (progress > 70 ? 'yellow' : (progress > 0 ? 'red' : 'gray'));
 
@@ -2029,14 +2068,21 @@ const renderAgentLeaderboard = async () => {
             const dayMap = { 0: 6, 1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5 }; // Sunday is 0 in JS
             actualData = [0, 0, 0, 0, 0, 0, 0];
 
-            const currentWeekPurchases = (await AppDataStore.getAll('purchases')).filter(p =>
-                p.date >= range.from && p.date <= range.to && !p.is_agent_package
-            );
-
-            currentWeekPurchases.forEach(p => {
-                const day = new Date(p.date).getDay();
-                actualData[dayMap[day]] += (p.amount || 0);
-            });
+            const _byDay = await _trySalesByDay(range.from, range.to);
+            if (_byDay) {
+                _byDay.forEach(r => {
+                    const day = new Date(r.sale_date).getDay();
+                    actualData[dayMap[day]] += (Number(r.total) || 0);
+                });
+            } else {
+                const currentWeekPurchases = (await AppDataStore.getAll('purchases')).filter(p =>
+                    p.date >= range.from && p.date <= range.to && !p.is_agent_package
+                );
+                currentWeekPurchases.forEach(p => {
+                    const day = new Date(p.date).getDay();
+                    actualData[dayMap[day]] += (p.amount || 0);
+                });
+            }
 
             const weeklyTarget = (yTarget.total_sales_target || 0) / 52;
             targetData = Array(7).fill(weeklyTarget / 7);
@@ -2045,14 +2091,21 @@ const renderAgentLeaderboard = async () => {
             actualData = Array(12).fill(0);
             targetData = Array(12).fill(0);
 
-            const yearPurchases = (await AppDataStore.getAll('purchases')).filter(p =>
-                p.date.startsWith(year.toString()) && !p.is_agent_package
-            );
-
-            yearPurchases.forEach(p => {
-                const month = new Date(p.date).getMonth();
-                actualData[month] += (p.amount || 0);
-            });
+            const _byDay = await _trySalesByDay(`${year}-01-01`, `${year}-12-31`);
+            if (_byDay) {
+                _byDay.forEach(r => {
+                    const month = new Date(r.sale_date).getMonth();
+                    actualData[month] += (Number(r.total) || 0);
+                });
+            } else {
+                const yearPurchases = (await AppDataStore.getAll('purchases')).filter(p =>
+                    p.date.startsWith(year.toString()) && !p.is_agent_package
+                );
+                yearPurchases.forEach(p => {
+                    const month = new Date(p.date).getMonth();
+                    actualData[month] += (p.amount || 0);
+                });
+            }
 
             // Distribute quarterly targets to months
             qTargets.forEach(qt => {
@@ -2067,14 +2120,21 @@ const renderAgentLeaderboard = async () => {
             actualData = Array(4).fill(0);
             targetData = [0, 0, 0, 0];
 
-            const yearPurchases = (await AppDataStore.getAll('purchases')).filter(p =>
-                p.date.startsWith(year.toString()) && !p.is_agent_package
-            );
-
-            yearPurchases.forEach(p => {
-                const quarter = Math.floor(new Date(p.date).getMonth() / 3);
-                actualData[quarter] += (p.amount || 0);
-            });
+            const _byDay = await _trySalesByDay(`${year}-01-01`, `${year}-12-31`);
+            if (_byDay) {
+                _byDay.forEach(r => {
+                    const quarter = Math.floor(new Date(r.sale_date).getMonth() / 3);
+                    actualData[quarter] += (Number(r.total) || 0);
+                });
+            } else {
+                const yearPurchases = (await AppDataStore.getAll('purchases')).filter(p =>
+                    p.date.startsWith(year.toString()) && !p.is_agent_package
+                );
+                yearPurchases.forEach(p => {
+                    const quarter = Math.floor(new Date(p.date).getMonth() / 3);
+                    actualData[quarter] += (p.amount || 0);
+                });
+            }
 
             qTargets.forEach(qt => {
                 targetData[qt.quarter - 1] = qt.total_sales_target || 0;
@@ -2088,15 +2148,23 @@ const renderAgentLeaderboard = async () => {
             labels = [];
             actualData = Array(days).fill(0);
 
+            const _byDay = await _trySalesByDay(range.from, range.to);
+            const _dayTotals = _byDay ? new Map(_byDay.map(r => [r.sale_date, Number(r.total) || 0])) : null;
+            let _allPurchases = null;
             for (let i = 0; i < days; i++) {
                 const d = new Date(start);
                 d.setDate(start.getDate() + i);
                 const dStr = d.toISOString().split('T')[0];
                 labels.push(dStr.split('-').slice(1).join('/'));
 
-                actualData[i] = (await AppDataStore.getAll('purchases')).filter(p =>
-                    p.date === dStr && !p.is_agent_package
-                ).reduce((sum, p) => sum + (p.amount || 0), 0);
+                if (_dayTotals) {
+                    actualData[i] = _dayTotals.get(dStr) || 0;
+                } else {
+                    if (!_allPurchases) _allPurchases = await AppDataStore.getAll('purchases');
+                    actualData[i] = _allPurchases.filter(p =>
+                        p.date === dStr && !p.is_agent_package
+                    ).reduce((sum, p) => sum + (p.amount || 0), 0);
+                }
             }
 
             const dailyTarget = (yTarget.total_sales_target || 0) / 365;
