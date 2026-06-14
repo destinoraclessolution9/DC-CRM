@@ -1648,18 +1648,54 @@ const renderAgentLeaderboard = async () => {
         agentsList = agentsList.filter(u => u.role === _currentRoleFilter);
     }
     const ranges = getDateRanges(_currentTimeFilter);
-    const allPurchases = await AppDataStore.getAll('purchases');
+
+    // ── Per-agent sales (current + previous period) ────────────────────────
+    // Resolve each purchase's agent via its customer's responsible_agent_id —
+    // purchases has NO agent_id column, so the old `p.agent_id === agent.id`
+    // match was ALWAYS false and this leaderboard always rendered zero. Try the
+    // server aggregation first (one grouped pass, scalable); on any guard/RPC
+    // error fall back to a CORRECTED client computation (same customer-based
+    // resolution). Either path now produces the right numbers.
+    const salesByAgent = new Map(); // String(agentId) -> { current, prev }
+    const _lbScopeIds = (_visibleUserIds === 'all' || !Array.isArray(_visibleUserIds))
+        ? null
+        : _visibleUserIds.map(v => Number(v)).filter(n => Number.isFinite(n));
+    try {
+        const rows = await AppDataStore.agentSalesByPeriod({
+            curFrom: ranges.current.from,  curTo: ranges.current.to,
+            prevFrom: ranges.previous.from, prevTo: ranges.previous.to,
+            visibleAgentIds: _lbScopeIds,
+        });
+        for (const r of rows) {
+            salesByAgent.set(String(r.agent_id), {
+                current: Number(r.current_sales) || 0,
+                prev:    Number(r.prev_sales)    || 0,
+            });
+        }
+    } catch (e) {
+        console.warn('[agentLeaderboard] server agg → corrected client fallback:', e?.message || e);
+        const [allPurchases, allCustomers] = await Promise.all([
+            AppDataStore.getAll('purchases'),
+            AppDataStore.getAll('customers'),
+        ]);
+        const custAgent = new Map(allCustomers.map(c => [String(c.id), c.responsible_agent_id]));
+        for (const p of allPurchases) {
+            const aid = custAgent.get(String(p.customer_id));
+            if (aid == null) continue;
+            const key = String(aid);
+            let s = salesByAgent.get(key);
+            if (!s) { s = { current: 0, prev: 0 }; salesByAgent.set(key, s); }
+            if (p.date >= ranges.current.from  && p.date <= ranges.current.to)  s.current += (p.amount || 0);
+            if (p.date >= ranges.previous.from && p.date <= ranges.previous.to) s.prev    += (p.amount || 0);
+        }
+    }
 
     // Build stats using for...of to avoid async map issues
     const agentStats = [];
     for (const agent of agentsList) {
-        const currentSales = allPurchases
-            .filter(p => p.agent_id === agent.id && p.date >= ranges.current.from && p.date <= ranges.current.to)
-            .reduce((sum, p) => sum + (p.amount || 0), 0);
-
-        const prevSales = allPurchases
-            .filter(p => p.agent_id === agent.id && p.date >= ranges.previous.from && p.date <= ranges.previous.to)
-            .reduce((sum, p) => sum + (p.amount || 0), 0);
+        const _s = salesByAgent.get(String(agent.id)) || { current: 0, prev: 0 };
+        const currentSales = _s.current;
+        const prevSales = _s.prev;
 
         let trend = 'Stable';
         let trendClass = 'warning';

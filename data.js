@@ -2313,6 +2313,26 @@ class DataStore {
         return data || [];
     }
 
+    // ── Agent leaderboard sales aggregation ───────────────────────────────
+    // Per-agent purchase totals for a current + previous period in one grouped
+    // server pass (agent_sales_by_period RPC), resolving each purchase's agent
+    // via its customer's responsible_agent_id (purchases has no agent_id). Scope
+    // is applied server-side via visibleAgentIds (null = unrestricted). Throws on
+    // no-session / RPC error so renderAgentLeaderboard falls back to a corrected
+    // client computation. Returns [{ agent_id, current_sales, prev_sales }].
+    async agentSalesByPeriod({ curFrom, curTo, prevFrom, prevTo, visibleAgentIds = null } = {}) {
+        if (!this.hasLiveSession()) throw new Error('no live auth session — agentSalesByPeriod fallback');
+        const { data, error } = await this._readClient().rpc('agent_sales_by_period', {
+            p_cur_from:  curFrom,
+            p_cur_to:    curTo,
+            p_prev_from: prevFrom,
+            p_prev_to:   prevTo,
+            p_agent_ids: visibleAgentIds,
+        });
+        if (error) throw error;
+        return data || [];
+    }
+
     // Bulk delete — runs all deletes in parallel instead of one-by-one
     async deleteMany(tableName, ids) {
         if (!ids || ids.length === 0) return;
