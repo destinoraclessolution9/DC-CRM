@@ -2692,8 +2692,18 @@
             }
         }
         // Refresh the modal so the Attended checkbox unticks if it was on
-        const allActivities = await AppDataStore.getAll('activities');
-        const acts = allActivities.filter(a => a.event_id == eventId && a.activity_date == activityDate);
+        // Scale-safe: fetch only the activities for this event+date (eq event_id +
+        // activity_date) instead of the whole activities table; reapply the exact
+        // client filter for parity. Any error / missing eventId → full-table scan.
+        let acts;
+        try {
+            if (eventId == null) throw new Error('no eventId — using full scan');
+            const rows = await AppDataStore.query('activities', { event_id: eventId, activity_date: activityDate });
+            acts = (rows || []).filter(a => a.event_id == eventId && a.activity_date == activityDate);
+        } catch (e) {
+            console.warn('toggleAttendeeUnattended: scoped refresh query failed — full-table fallback', e);
+            acts = (await AppDataStore.getAll('activities')).filter(a => a.event_id == eventId && a.activity_date == activityDate);
+        }
         if (acts.length > 0) await app.viewActivityDetails(acts[0].id);
     };
 

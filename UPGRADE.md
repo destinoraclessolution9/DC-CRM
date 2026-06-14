@@ -26,6 +26,8 @@ Source: parallel 5-agent codebase audit → 40 ordered increments. The autonomou
 
 **Extra broader-audit scale-swaps (beyond the 11, same eq/IN pattern + fallback):**
 - [x] **approval-entry linked-customer lookup** ✅ SW-27 — `approveQueueEntry` (prospects:925 + :943, new_customer/info_update + new_sale) `getAll('customers').find(converted_from_prospect_id==pid)` → `query('customers',{converted_from_prospect_id})` [0] + whole-table fallback (both sites). `node --check` + regression PASS.
+- [x] **attendee-modal refresh** ✅ SW-28 — `toggleAttendeeUnattended` (activities:2695) `getAll('activities').filter(event_id&&activity_date)` → `query('activities',{event_id,activity_date})` + exact client re-filter + eventId guard + whole-table fallback. PASS.
+- [ ] **pipeline referrer-name lookup** (pipeline:286, Path-B fallback) — `getAll('customers').find(full_name/name===needle)` → BLOCKED-needs-normalization (case-insensitive trimmed match across full_name AND legacy `name` col; same parity hazard as whatsapp/CPS — needs a normalized lookup RPC). Low-freq fallback path; left on legacy getAll.
 
 ### Phase 2 — React islands for EASY table/CRUD views (proven pattern + ?react=0 kill-switch)
 - [ ] **react-agents-list** (M·low) — Agents/Consultant list → island + `api/agents.mjs`
