@@ -1,0 +1,57 @@
+# CI Gates — runs the correctness gates on every PR + every push to main.
+#
+# These are the SAME checks the autonomous upgrade loop runs locally before each
+# push (node ci/audit.js + node ci/test.mjs); wiring them into GitHub Actions
+# makes regressions visible automatically as a red check, so a bad commit is
+# caught even if a local pre-push run was skipped.
+#
+# What it checks (all dependency-free — no `npm ci` needed):
+#   1. ci/audit.js   — ghost-call sweep: bare calls to chunk-exported functions
+#                      inside the script.js IIFE that would throw ReferenceError
+#                      at load (the cross-chunk crash class). Exit 1 on issues.
+#   2. ci/test.mjs   — TypeScript (`tsc --noEmit`, fetched via npx) over the typed
+#                      surface (types/ + api/) + the data-layer contract suite
+#                      (offline-queue classification + snapshot-diff). Exit 1 on fail.
+#
+# IMPORTANT: this workflow is REPORTING-ONLY. It does NOT gate the Vercel
+# deployment (Vercel builds independently on push). A red check here surfaces a
+# regression for a human to look at; it never blocks or breaks the live site.
+# Build + snapshot (ci/regression.js, needs esbuild devDeps + baseline) stays a
+# local pre-push gate to keep this workflow fast and install-free.
+
+name: CI Gates
+
+on:
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'marketing/**'
+      - '_*'
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'marketing/**'
+      - '_*'
+
+jobs:
+  gates:
+    name: Audit + TypeScript + Contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Ghost-call audit (cross-chunk ReferenceError sweep)
+        run: node ci/audit.js
+
+      - name: TypeScript + data-layer contract tests
+        run: node ci/test.mjs

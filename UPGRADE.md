@@ -50,7 +50,7 @@ Source: parallel 5-agent codebase audit → 40 ordered increments. The autonomou
 - [ ] **refactor-permissions** (M·low, blockedBy refactor-core-utils) — isAgent/getVisibleUserIds → `src/utils/permissions` (28+ chunks)
 - [ ] **refactor-scoring-module** (M·med, blockedBy refactor-permissions) — protection/health scoring → `src/modules/scoring`
 - [ ] **refactor-debounce-search** (S·low, blockedBy refactor-core-utils) — autoDebounceAppSearch wrapper → `src/perf`
-- [ ] **ci-wire-gates** (M·low) — audit/contract/tsc into GitHub Actions + Vercel buildCommand (no test DB needed)
+- [x] **ci-wire-gates** (M·low) ✅ — new `.github/workflows/ci.yml` ("CI Gates") runs `node ci/audit.js` (ghost-call/cross-chunk ReferenceError sweep) + `node ci/test.mjs` (tsc --noEmit scoped + data-layer contract suite) on every PR + push to main. Dependency-free (npx fetches typescript; contract is pure node → no `npm ci`). **REPORTING-ONLY — does NOT gate the Vercel deploy** (so it can never block/break live; a red check just surfaces a regression). Deliberately did NOT add a fatal gate to the Vercel buildCommand (would halt deploys on a flake). Verified both gates green locally before wiring (audit 0 issues; tsc clean + contract PASS). No SW bump (CI-only, no client bundle change). (build+snapshot stays the local pre-push gate.)
 - [ ] **build-vite-ownership** (L·high, blockedBy react-medium-forms) — Vite single build owner; retire build.mjs
 - [ ] **build-stop-committing-bundles** (M·med, blockedBy build-vite-ownership) — gitignore *.min.js/.br
 - [ ] **🚫 BLOCKED test-e2e-suite** — needs USER to provision + seed a separate TEST Supabase project (env: E2E_EMAIL/E2E_PASSWORD/E2E_BASE_URL). Cannot run autonomously; all authed specs `test.skip()` without it.
