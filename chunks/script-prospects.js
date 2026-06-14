@@ -6884,23 +6884,40 @@ const showPurchasesHistoryView = async (viewport) => {
 
 const _loadPurchasesHistory = async () => {
     try {
-        const allProspects = await AppDataStore.getAll('prospects');
-        console.log('[PH] total prospects from getAll:', (allProspects||[]).length);
-        const convertedIds = (allProspects || [])
-            .filter(p => p.status === 'converted' || p.conversion_status === 'approved')
-            .map(p => p.id);
-        console.log('[PH] convertedIds:', convertedIds);
+        // Scale-safe: fetch ONLY converted/approved prospects server-side (status OR
+        // conversion_status) instead of downloading the WHOLE prospects table just to
+        // collect converted IDs. Falls back to the exact legacy two-step (getAll +
+        // client filter + .in) on any error / when offline, so behavior is identical.
+        const PH_SELECT = 'id,full_name,responsible_agent_id,closing_records_history,closing_record,conversion_status';
         let data = [];
-        if (convertedIds.length) {
+        let usedServerFilter = false;
+        try {
+            if (AppDataStore.hasLiveSession && !AppDataStore.hasLiveSession()) {
+                throw new Error('no live session — using cached fallback');
+            }
             const { data: rows, error } = await AppDataStore._readClient()
                 .from('prospects')
-                .select('id,full_name,responsible_agent_id,closing_records_history,closing_record,conversion_status')
-                .in('id', convertedIds);
-            console.log('[PH] .in() query result:', rows, 'error:', error);
+                .select(PH_SELECT)
+                .or('status.eq.converted,conversion_status.eq.approved');
             if (error) throw error;
             data = rows || [];
+            usedServerFilter = true;
+        } catch (eServer) {
+            console.warn('[PH] server-side converted-prospects query unavailable — legacy whole-table fallback', eServer);
+            const allProspects = await AppDataStore.getAll('prospects');
+            const convertedIds = (allProspects || [])
+                .filter(p => p.status === 'converted' || p.conversion_status === 'approved')
+                .map(p => p.id);
+            if (convertedIds.length) {
+                const { data: rows, error } = await AppDataStore._readClient()
+                    .from('prospects')
+                    .select(PH_SELECT)
+                    .in('id', convertedIds);
+                if (error) throw error;
+                data = rows || [];
+            }
         }
-        console.log('[PH] data rows to process:', data.length);
+        console.log('[PH] data rows to process:', data.length, usedServerFilter ? '(server-filtered)' : '(legacy)');
         const allUsers = await AppDataStore.getAll('users');
         const agentMap = Object.fromEntries((allUsers||[]).map(u => [String(u.id), u.full_name || u.name || u.email || 'Unknown']));
         const rows = [];
