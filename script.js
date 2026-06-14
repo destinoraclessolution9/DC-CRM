@@ -738,10 +738,25 @@ const appLogic = (() => {
 
     // Get all prospects visible to current user
     const getVisibleProspects = async () => {
-        const all = await AppDataStore.getAll('prospects');
         const user = _currentUser;
         if (!user) return [];
         const visibleIds = await getVisibleUserIds(user);
+        // Scale-safe (flag-gated, DEFAULT-OFF): scoped (non-admin) users fetch only
+        // prospects owned by a visible agent server-side (paged) instead of
+        // downloading the whole table then filtering. Provable parity — the same
+        // visibleIds drive `.in(responsible_agent_id, …)` as the client filter.
+        // Any error / flag off / admin → exact legacy getAll-then-filter below.
+        if (window.__SERVER_VISIBILITY === true && Array.isArray(visibleIds) && visibleIds.length) {
+            try {
+                const scoped = await AppDataStore.queryPaged('prospects', {
+                    filters: { responsible_agent_id: visibleIds }, max: 200000,
+                });
+                if (Array.isArray(scoped)) return scoped;
+            } catch (e) {
+                console.warn('getVisibleProspects: server-scope query failed — full-table fallback', e);
+            }
+        }
+        const all = await AppDataStore.getAll('prospects');
         if (visibleIds === 'all') return all;
         return all.filter(p => visibleIds.includes(p.responsible_agent_id));
     };
@@ -756,10 +771,33 @@ const appLogic = (() => {
     };
 
     const getVisibleCustomers = async () => {
-        const all = await AppDataStore.getAll('customers');
         const user = _currentUser;
         if (!user) return [];
         const visibleIds = await getVisibleUserIds(user);
+        // Scale-safe (flag-gated, DEFAULT-OFF): scoped users fetch only customers
+        // owned by a visible agent server-side (paged) via TWO scoped fetches
+        // (responsible_agent_id OR legacy agent_id) merged + deduped — matching the
+        // client OR filter. Any error / flag off / admin → legacy getAll-then-filter.
+        if (window.__SERVER_VISIBILITY === true && Array.isArray(visibleIds) && visibleIds.length) {
+            try {
+                const [byResp, byAgent] = await Promise.all([
+                    AppDataStore.queryPaged('customers', { filters: { responsible_agent_id: visibleIds }, max: 200000 }),
+                    AppDataStore.queryPaged('customers', { filters: { agent_id: visibleIds }, max: 200000 }),
+                ]);
+                if (Array.isArray(byResp) && Array.isArray(byAgent)) {
+                    const seen = new Set();
+                    const out = [];
+                    for (const c of [...byResp, ...byAgent]) {
+                        const k = String(c.id);
+                        if (!seen.has(k)) { seen.add(k); out.push(c); }
+                    }
+                    return out;
+                }
+            } catch (e) {
+                console.warn('getVisibleCustomers: server-scope query failed — full-table fallback', e);
+            }
+        }
+        const all = await AppDataStore.getAll('customers');
         if (visibleIds === 'all') return all;
         // Customers may store the owning agent on either responsible_agent_id (new) or agent_id (legacy)
         return all.filter(c => visibleIds.includes(c.responsible_agent_id) || visibleIds.includes(c.agent_id));
