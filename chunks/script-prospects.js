@@ -461,6 +461,33 @@ const _customerPageSize = 50;
 //   pii   → _pendingIntakeId    pir   → _pendingIntakeRow
 //   cppf  → _cpsPendingPhotoFiles
 
+// Phase 2 (#11): fetch a customers page through the BFF (/api/customers). The
+// server verifies the JWT and applies the visibility scope (bff_visible_agent_ids),
+// so RLS becomes defense-in-depth rather than the only guard. Returns
+// {data, count, used:true} or {used:false} on any guard/error so the caller
+// falls back to _serverPage/legacy. Behind window.__USE_BFF_CUSTOMERS (default
+// OFF). Offset-paginated to match the page-number UI.
+const _bffGetCustomers = async ({ limit, offset, search, gua, type }) => {
+    try {
+        if (!window.supabase?.auth) return { used: false };
+        const { data: sess } = await window.supabase.auth.getSession();
+        const token = sess?.session?.access_token;
+        if (!token) return { used: false };
+        const p = new URLSearchParams();
+        p.set('limit', String(limit));
+        p.set('offset', String(offset));
+        if (search) p.set('q', search);
+        if (gua) p.set('gua', gua);
+        if (type) p.set('type', type);
+        const res = await fetch('/api/customers?' + p.toString(), { headers: { Authorization: 'Bearer ' + token } });
+        if (!res.ok) return { used: false };
+        const j = await res.json();
+        return { data: j.rows || [], count: j.count || 0, used: true };
+    } catch (_) {
+        return { used: false };
+    }
+};
+
 const renderCustomersTable = async () => {
     const tbody = document.getElementById('customers-table-body');
     if (!tbody) return;
@@ -506,7 +533,20 @@ const renderCustomersTable = async () => {
     // server-side (Regular null-edge, deficiency arrays, event-count aggregation).
     const _serverUnsupported = typeFilter === 'Regular' || !!deficiencyFilter || minEventsFilter > 0 || !!purchaseFilter;
     let _usedServer = false;
-    if (window.__SERVER_TABLES && !_serverUnsupported) {
+    // ── PHASE 2 (#11): BFF path (flag default OFF) ─────────────────────────
+    // Routes through /api/customers, which verifies the JWT + applies the
+    // visibility scope server-side. Engages for the BFF-supported filter set
+    // (search / ming_gua / VIP); house-audit + Agent-Eligible have no column so
+    // they fall through to _serverPage/legacy. Any error → {used:false} → fallback.
+    if (window.__USE_BFF_CUSTOMERS && !_serverUnsupported && !houseAuditFilter && typeFilter !== 'Agent Eligible') {
+        const r = await _bffGetCustomers({
+            limit: _customerPageSize, offset: pageStart,
+            search: searchQuery, gua: guaFilter,
+            type: typeFilter === 'VIP' ? 'VIP' : '',
+        });
+        if (r.used) { pageCustomers = r.data; totalCount = r.count; _usedServer = true; }
+    }
+    if (window.__SERVER_TABLES && !_serverUnsupported && !_usedServer) {
         const opts = {
             limit: _customerPageSize, offset: pageStart,
             sort: 'full_name', sortDir: 'asc',

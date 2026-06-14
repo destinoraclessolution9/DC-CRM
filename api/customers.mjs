@@ -5,8 +5,8 @@
  *
  * Flow: browser → GET /api/customers → (1) verify the caller's Supabase JWT →
  * (2) compute the visible agent-id scope SERVER-SIDE (bff_visible_agent_ids RPC)
- * → (3) run the scoped + searched + keyset-paginated query with the SECRET key
- * (bypasses RLS) → { rows, nextCursor }. RLS stays as defense-in-depth.
+ * → (3) run the scoped + searched + offset-paginated query with the SECRET key
+ * (bypasses RLS) → { rows, count }. RLS stays as defense-in-depth.
  *
  * Env (Vercel → Settings → Environment Variables; server-only, NEVER committed):
  *   SUPABASE_SECRET_KEY        REQUIRED — the sb_secret_… key. Without it → 503.
@@ -35,9 +35,10 @@ export default async function handler(req, res) {
 
   const Q = req.query || {};
   const limit  = clampInt(Q.limit, 50, 1, 100);
-  const cursor = clampInt(Q.cursor, 0, 0, Number.MAX_SAFE_INTEGER);
-  const q   = String(Q.q   || '').trim().slice(0, 80);
-  const gua = String(Q.gua || '').trim().slice(0, 40);
+  const offset = clampInt(Q.offset, 0, 0, Number.MAX_SAFE_INTEGER);
+  const q    = String(Q.q    || '').trim().slice(0, 80);
+  const gua  = String(Q.gua  || '').trim().slice(0, 40);
+  const type = String(Q.type || '').trim().slice(0, 30);
 
   // (1) Authn — verify the caller's Supabase access token.
   const token = String((req.headers && req.headers.authorization) || '').replace(/^Bearer\s+/i, '');
@@ -70,34 +71,38 @@ export default async function handler(req, res) {
   }
   if (Array.isArray(visible) && visible.length === 0) return send(200, { rows: [], nextCursor: null });
 
-  // (3) Service-role query — scoped + searched + keyset-paginated (id asc).
+  // (3) Service-role query — scoped + searched + offset-paginated (full_name asc,
+  //     matching the customers list). count=planned gives a cheap total for the
+  //     page-number UI (returned in the Content-Range header).
   const params = new URLSearchParams();
   params.set('select', LIST_COLUMNS);
-  params.set('order', 'id.asc');
-  params.set('limit', String(limit + 1)); // fetch one extra to detect a next page
-  if (cursor > 0) params.append('id', `gt.${cursor}`);
+  params.set('order', 'full_name.asc');
+  params.set('limit', String(limit));
+  params.set('offset', String(offset));
   if (Array.isArray(visible)) params.append('responsible_agent_id', `in.(${visible.join(',')})`);
   if (gua) params.append('ming_gua', `eq.${gua}`);
+  if (type === 'VIP') params.append('lifetime_value', 'gte.5000');
   if (q) {
     const safe = q.replace(/[(),*]/g, ' ').trim();
     if (safe) params.append('or', `(full_name.ilike.*${safe}*,nickname.ilike.*${safe}*,phone.ilike.*${safe}*,email.ilike.*${safe}*)`);
   }
 
-  let rows;
+  let rows, count = 0;
   try {
-    const dataRes = await fetch(`${SUPABASE_URL}/rest/v1/customers?${params.toString()}`, { headers: svc() });
+    const dataRes = await fetch(`${SUPABASE_URL}/rest/v1/customers?${params.toString()}`, {
+      headers: svc({ Prefer: 'count=planned' }),
+    });
     if (!dataRes.ok) return send(502, { error: 'query_failed', status: dataRes.status });
     rows = await dataRes.json();
+    // Content-Range: "0-49/1234"  (the part after '/' is the planned total)
+    const cr = dataRes.headers.get('content-range') || '';
+    const total = cr.split('/')[1];
+    count = (total && total !== '*') ? (parseInt(total, 10) || 0) : (Array.isArray(rows) ? rows.length : 0);
   } catch {
     return send(502, { error: 'query_unreachable' });
   }
 
-  let nextCursor = null;
-  if (Array.isArray(rows) && rows.length > limit) {
-    rows = rows.slice(0, limit);
-    nextCursor = rows[rows.length - 1].id;
-  }
-  return send(200, { rows: Array.isArray(rows) ? rows : [], nextCursor });
+  return send(200, { rows: Array.isArray(rows) ? rows : [], count });
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
