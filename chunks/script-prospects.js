@@ -462,11 +462,12 @@ const _customerPageSize = 50;
 // engages for normal users — the legacy table stays the only path until promoted.
 const _reactCustomersOn = () => {
     try {
+        // DEFAULT ON (promoted 2026-06-14). Kill-switch → legacy table:
+        //   window.__REACT_CUSTOMERS===false, ?react=0, or localStorage crm_react_off='1'.
         if (window.__REACT_CUSTOMERS === false) return false;
-        if (!window.CRMReact || typeof window.CRMReact.mountCustomersTable !== 'function') return false;
-        return window.__REACT_CUSTOMERS === true
-            || /[?&]react=1/.test(location.search)
-            || localStorage.getItem('crm_react_island') === '1';
+        if (/[?&]react=0/.test(location.search)) return false;
+        if (localStorage.getItem('crm_react_off') === '1') return false;
+        return !!(window.CRMReact && typeof window.CRMReact.mountCustomersTable === 'function');
     } catch (_) { return false; }
 };
 
@@ -1182,11 +1183,12 @@ const exportData = async (type, format) => {
 // killed (window.__REACT_PROSPECTS===false). Opt-in bundle → never normal users.
 const _reactProspectsOn = () => {
     try {
+        // DEFAULT ON (promoted 2026-06-14). Kill-switch → legacy table:
+        //   window.__REACT_PROSPECTS===false, ?react=0, or localStorage crm_react_off='1'.
         if (window.__REACT_PROSPECTS === false) return false;
-        if (!window.CRMReact || typeof window.CRMReact.mountProspectsTable !== 'function') return false;
-        return window.__REACT_PROSPECTS === true
-            || /[?&]react=1/.test(location.search)
-            || localStorage.getItem('crm_react_island') === '1';
+        if (/[?&]react=0/.test(location.search)) return false;
+        if (localStorage.getItem('crm_react_off') === '1') return false;
+        return !!(window.CRMReact && typeof window.CRMReact.mountProspectsTable === 'function');
     } catch (_) { return false; }
 };
 const _showProspectsReactRoot = (useReact) => {
