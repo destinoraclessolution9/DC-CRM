@@ -35,7 +35,18 @@ The scale unlock. 255 `getAll('<bigtable>')` full-table fetches → server-side 
 - ⬜ Next: **purchases_history / agents lists**, then reporting drill-downs above.
 - ⬜ Enablement: flip `window.__SERVER_TABLES = true` per-view via a config flag after each flagged view is verified against live data (with login). (KPI cards + leaderboard are already live, not flag-gated.)
 
-## Phase 2 — Centralize the server seam (#11 BFF, #6 RBAC)  🟡
+## Phase 2 — Centralize the server seam (#11 BFF, #6 RBAC)  🟡 BFF built + deployed
+
+**#11 BFF — IMPLEMENTED + DEPLOYED 2026-06-14** (endpoint live; activation pending one env var).
+- `api/customers.mjs` is a real Vercel serverless function (web `Request→Response`, pure `fetch`, zero npm deps): (1) verifies the caller's Supabase JWT via `/auth/v1/user`, (2) computes the visible agent-id scope SERVER-SIDE via the **`bff_visible_agent_ids`** RPC (applied live; mirrors `getVisibleUserIds` using `role_level`), (3) runs a scoped + searched + keyset-paginated query with the SECRET key (bypasses RLS → RLS becomes defense-in-depth). Returns `{ rows, nextCursor }`.
+- Secret handling: `SUPABASE_SECRET_KEY` is read ONLY from `process.env` (no default) — **never committed**. URL + publishable key are public defaults. Until the env var is set the endpoint returns **503 `not_configured`** (no data exposure). `api/` removed from `.vercelignore`; tsc clean (`types/node-shim.d.ts` shims `process`).
+- `lib/api-client.js` — browser adapter (`window.ApiClient.getCustomers`), attaches the session token. Built, not yet loaded.
+- **Activation (user)**: set `SUPABASE_SECRET_KEY` in Vercel env → verify `GET /api/customers` with a bearer token → then load the adapter + flip `renderCustomersTable`'s server path to keyset pagination via `ApiClient`. (Reads keep working via the current `queryAdvanced` path until flipped.)
+
+**#6 RBAC** — `role_level` applied + live (used by the BFF scope RPC). Optional follow-up: a `custom_access_token_hook` to stamp `role_level` into the JWT so RLS reads it without re-deriving; then drop client-side `_getUserLevel` parsing (display-only).
+
+---
+### (original Phase 2 notes)  🟡
 - 🟡 **#11 BFF** — `api/customers.mjs` Vercel serverless scaffold (browser → `/api` → Postgres; scoping + service role server-side; RLS becomes defense-in-depth). Helpers are `not_wired` stubs (typed). Needs: Vercel `/api` provisioning, `SUPABASE_SERVICE_ROLE_KEY` env (server-only), a `lib/api-client.js` adapter, Upstash rate-limit.
 - ✅ **#6 RBAC — `role_level` migration APPLIED to live 2026-06-14** (staged: add column + backfill → verified 0 nulls / 0 out-of-range → NOT NULL + check(1–15) + index). All 22 users backfilled correctly from `"Level N"` strings (Level 1–11 present). Authoritative numeric `users.role_level` now exists server-side. **Still client-display-only** — no read path uses it yet. Follow-up migration: `custom_access_token_hook` to stamp `role_level` into the JWT so RLS reads it directly; then deprecate client-side `_getUserLevel` parsing (display-only).
 - ⬜ Sequence: apply migration (dual-read) → wire BFF reads with server-side scope → flip source of truth → drop string parsing.
