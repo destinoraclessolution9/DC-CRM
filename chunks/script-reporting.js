@@ -947,6 +947,30 @@ const renderDetailTable = (headers, rows, emptyMsg = 'No records in this period'
     `;
 };
 
+// Shared fast path for the three purchase drill-downs (total sales / POP / EPP):
+// returns only the period+scope+role purchase rows (agent + customer names
+// joined server-side) via the report_purchase_details RPC, instead of
+// getAll('purchases') + getAll('customers') per click. Each builder sub-filters
+// (NOT is_agent_package / payment_method) and formats. Returns null on any
+// error → the builder's original getAll path runs. Behavior-preserving,
+// including null-date rows (see the RPC's NULL-date parity note).
+const _tryPurchaseDetails = async (from, to) => {
+    if (!window.supabase || !window.supabase.rpc) return null;
+    try {
+        const agentIds = (_visibleUserIds === 'all' || !Array.isArray(_visibleUserIds))
+            ? null
+            : _visibleUserIds.map(v => Number(v)).filter(n => Number.isFinite(n));
+        const role = (!_currentRoleFilter || _currentRoleFilter === 'All') ? null : _currentRoleFilter;
+        const { data, error } = await window.supabase.rpc('report_purchase_details', {
+            p_from: from, p_to: to, p_agent_ids: agentIds, p_role: role
+        });
+        if (error || !Array.isArray(data)) return null;
+        return data;
+    } catch (_) {
+        return null;
+    }
+};
+
 const buildCPSDetails = async (from, to) => {
     const [activities, users, customers, prospects] = await Promise.all([
         AppDataStore.getAll('activities'),
@@ -975,6 +999,19 @@ const buildCPSDetails = async (from, to) => {
 };
 
 const buildTotalSalesDetails = async (from, to) => {
+    const _det = await _tryPurchaseDetails(from, to);
+    if (_det) {
+        const rows = [];
+        let total = 0;
+        for (const p of _det) {
+            if (p.is_agent_package) continue;
+            total += p.amount || 0;
+            rows.push([p.date, p.agent_name || '—', p.customer_name || '—', `RM ${(p.amount || 0).toLocaleString()}`, p.payment_method || '—', p.item || '—']);
+        }
+        const summary = `<div style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px;">Total: <strong>RM ${total.toLocaleString()}</strong> across ${rows.length} sale${rows.length===1?'':'s'}</div>`;
+        return summary + renderDetailTable(['Date', 'Agent', 'Customer', 'Amount', 'Method', 'Item'], rows);
+    }
+    // Fallback: whole-table client path.
     const [purchases, users, customers] = await Promise.all([
         AppDataStore.getAll('purchases'),
         AppDataStore.getAll('users'),
@@ -1002,6 +1039,19 @@ const buildTotalSalesDetails = async (from, to) => {
 };
 
 const buildPOPDetails = async (from, to) => {
+    const _det = await _tryPurchaseDetails(from, to);
+    if (_det) {
+        const rows = [];
+        let total = 0;
+        for (const p of _det) {
+            if (p.payment_method !== 'POP') continue;
+            total += p.amount || 0;
+            rows.push([p.date, p.agent_name || '—', p.customer_name || '—', `RM ${(p.amount || 0).toLocaleString()}`, p.pop_tenure ? `${p.pop_tenure} mo` : '—', p.item || '—']);
+        }
+        const summary = `<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px;">Total: <strong>RM ${total.toLocaleString()}</strong> across ${rows.length} POP case${rows.length===1?'':'s'}</div>`;
+        return summary + renderDetailTable(['Date', 'Agent', 'Customer', 'Amount', 'Tenure', 'Item'], rows);
+    }
+    // Fallback: whole-table client path.
     const [purchases, users, customers] = await Promise.all([
         AppDataStore.getAll('purchases'),
         AppDataStore.getAll('users'),
@@ -1029,6 +1079,24 @@ const buildPOPDetails = async (from, to) => {
 };
 
 const buildEPPCasesDetails = async (from, to) => {
+    const _det = await _tryPurchaseDetails(from, to);
+    if (_det) {
+        const rows = [];
+        const byBank = {};
+        let total = 0;
+        for (const p of _det) {
+            if (p.payment_method !== 'EPP') continue;
+            const bank = p.epp_bank || 'Unknown';
+            const months = p.epp_months || '-';
+            total += p.amount || 0;
+            byBank[bank] = (byBank[bank] || 0) + 1;
+            rows.push([p.date, p.agent_name || '—', p.customer_name || '—', `RM ${(p.amount || 0).toLocaleString()}`, bank, `${months} mo`]);
+        }
+        const bankPills = Object.entries(byBank).map(([b, c]) => `<span style="display:inline-block;background:#ede9fe;color:#6d28d9;padding:3px 10px;border-radius:12px;font-size:11px;margin-right:6px;">${b}: ${c}</span>`).join('');
+        const summary = `<div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px;">Total: <strong>RM ${total.toLocaleString()}</strong> across ${rows.length} EPP case${rows.length===1?'':'s'}${bankPills ? '<br/><div style="margin-top:6px;">' + bankPills + '</div>' : ''}</div>`;
+        return summary + renderDetailTable(['Date', 'Agent', 'Customer', 'Amount', 'Bank', 'Months'], rows);
+    }
+    // Fallback: whole-table client path.
     const [purchases, users, customers] = await Promise.all([
         AppDataStore.getAll('purchases'),
         AppDataStore.getAll('users'),
