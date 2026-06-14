@@ -124,9 +124,6 @@
   "cleanUrls": true,
   "trailingSlash": false,
   "buildCommand": "node build.mjs",
-  "outputDirectory": ".",
-  "functions": {
-    "api/**/*.mjs": {}
-  }
+  "outputDirectory": "."
 }
 
