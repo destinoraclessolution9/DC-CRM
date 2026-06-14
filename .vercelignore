@@ -47,3 +47,15 @@ dist/
 downloaded_files/
 _chunks/
 _chunks2/
+
+# Phase 6-15 upgrade: internal artifacts that must NOT be publicly served
+# - api/: BFF scaffold (not_wired stubs) — would deploy as a live 500ing
+#   serverless function; keep out of prod until the endpoint is actually wired.
+# - migrations/: raw SQL DDL / RPC definitions — schema info disclosure.
+# - UPGRADE.md / tsconfig.json / types/ / ci/: dev-only architecture + tooling.
+api/
+migrations/
+UPGRADE.md
+tsconfig.json
+types/
+ci/
