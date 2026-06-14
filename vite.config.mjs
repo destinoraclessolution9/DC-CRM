@@ -11,6 +11,14 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
     plugins: [react()],
+    // Vite lib mode does NOT auto-replace process.env.NODE_ENV — without this,
+    // React's bundled prod check hits a bare `process` reference in the browser
+    // and throws "process is not defined". Replace it at build time so the
+    // bundle runs standalone + uses React's production path.
+    define: {
+        'process.env.NODE_ENV': JSON.stringify('production'),
+        'process.env': '{}',
+    },
     build: {
         outDir: 'react-dist',
         // Don't wipe the dir — keeps the committed bundle as a fallback if a
