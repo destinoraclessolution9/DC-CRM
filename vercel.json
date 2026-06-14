@@ -123,7 +123,7 @@
   ],
   "cleanUrls": true,
   "trailingSlash": false,
-  "buildCommand": "node build.mjs",
+  "buildCommand": "node build.mjs && (npx vite build || echo 'vite build skipped — using committed react-dist')",
   "outputDirectory": "."
 }
 

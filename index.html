@@ -678,6 +678,32 @@
   
     <script defer src="app-init.c8993f55bc.min.js"></script>
 
+    <!-- Phase 4.0 (#13): React island beachhead. An inert, hidden mount point +
+         a self-contained Vite/React bundle (React 19 inlined). Renders nothing
+         visible today (a hidden marker) — it proves React mounts inside the
+         vanilla window.app shell with zero UX impact, and is the template the
+         migrated views (customers/prospects/reports) will follow. The ?v= query
+         busts the immutable-JS cache; bump it (and the SW CACHE_VERSION) when the
+         island bundle changes. -->
+    <div id="react-island-root" hidden></div>
+    <script>
+        // Load the island ONLY when explicitly enabled (?react=1 in the URL, or
+        // localStorage crm_react_island='1') so the ~177 KB-gzip React bundle
+        // stays off every normal user's load until a real view is migrated
+        // (Phase 4.2+). The infra is deployed + verifiable now; the cost is
+        // opt-in until the island carries a real view.
+        (function () {
+            try {
+                var on = /[?&]react=1/.test(location.search) || localStorage.getItem('crm_react_island') === '1';
+                if (!on) return;
+                var s = document.createElement('script');
+                s.defer = true;
+                s.src = 'react-dist/react-island.js?v=2026-06-14-10';
+                document.head.appendChild(s);
+            } catch (e) {}
+        })();
+    </script>
+
     <!-- Speculation Rules (Chrome 121+) — prerender the small static info pages
          on a user-likely-to-navigate signal (hover or moderate-eagerness idle).
          These pages are tiny static HTML, so prerendering them costs ~10 KB
