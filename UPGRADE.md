@@ -6,6 +6,17 @@ This is a multi-session program. Each phase ships behind a flag and is independe
 
 ---
 
+## ⏸️ STATUS 2026-06-15: AUTONOMOUS RUN PAUSED — safe unattended scope COMPLETE
+13 scale increments shipped live (SW-17→SW-28) + CI Gates workflow + getVisibleProspects/Customers scoping staged flag-off. Every hot-path whole-table read that mattered is fixed or staged. The recurring loop is **cancelled** — everything left needs the USER or a login (so unattended runs would be no-ops or risk the shared live React bundle). **To finish the rest, see "NEEDS USER" below.**
+
+### NEEDS USER (to resume the remaining work)
+1. **Flip `window.__SERVER_VISIBILITY=true`** after a 2-min agent-scope check (confirm a scoped agent's prospect/customer list count matches legacy) → activates the biggest per-view scaling win, then default it on.
+2. **Apply 3 normalized-lookup helpers** (additive RPCs — pre-authorized but the PAT-on-CLI is classifier-blocked unattended; apply via Supabase SQL editor or run me where DDL is allowed): WhatsApp phone lookup (483/512), CPS duplicate-check (activities:3755), pipeline referrer-name (pipeline:286).
+3. **Seed a TEST Supabase project** (env: E2E_EMAIL/E2E_PASSWORD/E2E_BASE_URL) → unblocks the Playwright e2e suite.
+4. **React UI migration** (Phase 2/3 islands) — each rebuilds the shared `react-dist/react-island.js` that is LIVE-DEFAULT for customers/prospects, so it must be runtime-verified with a login before shipping; do these with you present (ship each opt-in first).
+
+---
+
 ## AUTONOMOUS ROADMAP (2026-06-14, audit-driven — THIS IS THE EXECUTION CHECKLIST)
 
 Source: parallel 5-agent codebase audit → 40 ordered increments. The autonomous loop (and each session) works the TOP unchecked, `deployable`, non-BLOCKED item.
