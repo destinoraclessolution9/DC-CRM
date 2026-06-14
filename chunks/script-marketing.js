@@ -2648,35 +2648,66 @@ ALTER TABLE public.promotions
     const pkg = await AppDataStore.getById('promotions', packageId);
     if (!pkg) return;
 
-    // Get all purchases (once)
-    const allPurchases = await AppDataStore.getAll('purchases');
-    
-    // Filter purchases that have matching package_id
-    let purchases = allPurchases.filter(p => p.package_id == packageId);
+    // Scale-safe: fetch ONLY this package's purchases server-side (eq package_id),
+    // not the whole purchases table. Any error → fall back to the exact legacy
+    // whole-table path so behavior is identical when the server filter is unavailable.
+    let purchases;
+    try {
+        purchases = await AppDataStore.query('purchases', { package_id: packageId });
+    } catch (e) {
+        console.warn('viewPackageCustomers: package_id query failed — full-table fallback', e);
+        purchases = (await AppDataStore.getAll('purchases')).filter(p => p.package_id == packageId);
+    }
+    purchases = purchases || [];
 
-    // Fallback: match by product name if package_id not set
+    // Fallback: legacy purchases with no package_id, matched by product name.
+    // Query per product name (eq item) instead of scanning the whole table.
     if (purchases.length === 0 && pkg.product_ids && pkg.product_ids.length) {
-        // Fetch product names in parallel
         const products = await Promise.all(
             pkg.product_ids.map(id => AppDataStore.getById('products', id))
         );
         const productNames = products.map(prod => prod ? prod.name : null).filter(n => n);
-
-        purchases = [];
-        for (const p of allPurchases) {
-            if (!p.package_id && productNames.includes(p.item)) {
-                purchases.push(p);
+        const byName = [];
+        try {
+            for (const name of productNames) {
+                const matches = await AppDataStore.query('purchases', { item: name });
+                for (const p of (matches || [])) if (!p.package_id) byName.push(p);
+            }
+        } catch (e) {
+            console.warn('viewPackageCustomers: product-name query failed — full-table fallback', e);
+            const allPurchases = await AppDataStore.getAll('purchases');
+            for (const p of allPurchases) {
+                if (!p.package_id && productNames.includes(p.item)) byName.push(p);
             }
         }
+        purchases = byName;
     }
 
-    // Preload customers + prospects once (was N+1 sequential getById in the loop)
-    const [allCustomers, allProspects] = await Promise.all([
-        AppDataStore.getAll('customers'),
-        AppDataStore.getAll('prospects'),
-    ]);
-    const customersById = new Map((allCustomers || []).map(c => [String(c.id), c]));
-    const prospectsById = new Map((allProspects || []).map(p => [String(p.id), p]));
+    // Resolve member names via bounded id-IN lookups (only the customers/prospects
+    // referenced by this package's purchases) instead of two whole-table getAll reads.
+    const memberIds = [...new Set(
+        purchases.map(p => String(p.customer_id)).filter(id => id && id !== 'null' && id !== 'undefined')
+    )];
+    let customersById = new Map();
+    let prospectsById = new Map();
+    if (memberIds.length) {
+        try {
+            const [custRes, prosRes] = await Promise.all([
+                AppDataStore.queryAdvanced('customers', { scopeField: 'id', scopeValues: memberIds, limit: 5000, countMode: null }),
+                AppDataStore.queryAdvanced('prospects', { scopeField: 'id', scopeValues: memberIds, limit: 5000, countMode: null }),
+            ]);
+            customersById = new Map(((custRes && custRes.data) || []).map(c => [String(c.id), c]));
+            prospectsById = new Map(((prosRes && prosRes.data) || []).map(p => [String(p.id), p]));
+        } catch (e) {
+            console.warn('viewPackageCustomers: id-IN lookup failed — full-table fallback', e);
+            const [allCustomers, allProspects] = await Promise.all([
+                AppDataStore.getAll('customers'),
+                AppDataStore.getAll('prospects'),
+            ]);
+            customersById = new Map((allCustomers || []).map(c => [String(c.id), c]));
+            prospectsById = new Map((allProspects || []).map(p => [String(p.id), p]));
+        }
+    }
 
     const rows = [];
     for (const p of purchases) {

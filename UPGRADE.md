@@ -6,6 +6,57 @@ This is a multi-session program. Each phase ships behind a flag and is independe
 
 ---
 
+## AUTONOMOUS ROADMAP (2026-06-14, audit-driven — THIS IS THE EXECUTION CHECKLIST)
+
+Source: parallel 5-agent codebase audit → 40 ordered increments. The autonomous loop (and each session) works the TOP unchecked, `deployable`, non-BLOCKED item.
+**Rules per increment:** ship behind a flag/kill-switch with a legacy fallback; for scale swaps, guard the new path with `try/catch → legacy` (or default the flag OFF) so a bad path can NEVER break live; verify (`node --check` + `node ci/regression.js` + happy-path) → deploy (`git push origin main` → Vercel; bump `sw.js` CACHE_VERSION only when client bundles change) → check the box + record verification here. Additive DDL pre-authorized; destructive DDL → ask. (Audit ran 2026-06-14; scale-risk file:lines cited inline per item.)
+
+### Phase 1 — remaining full-table reads → server (each isolated + fallback) [S/M/L · risk]
+- [x] **sp-marketing-package-customers** (S·low) ✅ SW-17 — `viewPackageCustomers` (marketing:2647) did 3 whole-table reads (purchases+customers+prospects); now: purchases via `query('purchases',{package_id})`, product-name fallback via per-name `query`, member names via bounded `queryAdvanced(scopeField:'id',scopeValues:ids)` IN-lookups. Each wrapped `try/catch → exact legacy getAll path`. Verified: `node --check` + `node ci/regression.js` PASS (build green); fallback-safe by construction.
+- [ ] **sp-purchases-search** (M·low) — search:1364 `getAll('purchases')` → `queryAdvanced` (server filter/sort/page); derived cross-table filters fall back client-side. `chunks/script-search.js`,`data.js`
+- [ ] **sp-purchases-history-view** (M·low) — purchases_history list → `queryAdvanced`. `chunks/script-prospects.js`,`data.js`
+- [ ] **sp-entity-lookup-rpc** (M·low) — whatsapp:483/512, calendar:5449, activities:3755 fetch BOTH big tables to find ONE record → `getById`/phone-indexed lookup. `script-whatsapp.js`,`script-calendar.js`,`script-activities.js`,`data.js`
+- [ ] **sp-autocomplete-search** (M·low) — referrer/referral pickers (activities:3389, prospects:3196, customer-referral modal) → `searchProspects/Customers` trigram. `script-activities.js`,`script-prospects.js`,`data.js`
+- [ ] **sp-prospect-activity-indexed** (M·low) — meetup/attendee history (calendar:5284/5292/5381, features2:373) → `getActivitiesForProspect` (indexed). `script-calendar.js`,`script-features2.js`,`data.js`
+- [ ] **sp-reassign-cascade-rpc** (M·med) — reassign modals (import:1111/1118/1613/1780/1803) full-scan to count `converted_from_prospect_id` → cascade-count RPC. `script-import.js`,`data.js`
+- [ ] **sp-visibility-helpers** (L·med) — getVisibleProspects/Customers/Referrals/Activities (script.js:741/759/794/904) full-fetch on every view switch → role-scoped RPC (role_level live). HIGH-FREQUENCY core code → flag + careful. `script.js`,`data.js`
+- [ ] **sp-reporting-fallbacks** (M·low) — reporting `getAll('purchases')` FALLBACKs (reporting:285/1830/2078/2101/2130/2163) — bound with a `limit` rather than delete (keep resilience). `chunks/script-reporting.js`
+- [ ] **sp-batch-jobs-rpc** (L·med) — weekly inactivity (features2:248), AI lead-score (ai:621), churn (ai:1103), HuiJi migration (pipeline:520) load whole tables → set-based RPC/edge. `features2`,`ai`,`pipeline`,`data.js`
+- [ ] **sp-gcal-incremental** (M·med) — gcal:138 `getAll('activities')` → date-window/changed-since cursor. `chunks/script-gcal.js`,`data.js`
+
+### Phase 2 — React islands for EASY table/CRUD views (proven pattern + ?react=0 kill-switch)
+- [ ] **react-agents-list** (M·low) — Agents/Consultant list → island + `api/agents.mjs`
+- [ ] **react-purchases-history** (M·low, blockedBy sp-purchases-history-view) — → island + `api/purchases.mjs`
+- [ ] **react-marketing-lists** (M·low) · **react-promotions** (S·low) — marketing CRUD
+- [ ] **react-knowledge-hq** (M·low) — Knowledge HQ
+- [ ] **react-forms-suite** (M·low) — forms/surveys/contracts/custom_fields (one chunk family)
+- [ ] **react-noticeboard** (S·low) · **react-performance-ranking** (M·low)
+- [ ] **react-boss-admin-security** (M·low) — read-only L1/L2 dashboards
+- [ ] **react-standard-functions** (S·low) · **react-cases** (M·low)
+- [ ] **react-protection-view** (M·med, blockedBy sp-reassign-cascade-rpc)
+
+### Phase 3 — HARD views (large; isolate behind flag) + sync teardown
+- [ ] **react-calendar** (L·high, blockedBy sp-prospect-activity-indexed) — ~5700 LOC engine
+- [ ] **react-pipeline-kanban** (L·high) — ~2950 LOC drag-drop
+- [ ] **react-reports-dashboard** (L·high, blockedBy sp-reporting-fallbacks) — Chart.js
+- [ ] **react-referrals-tree** (L·high, blockedBy sp-prospect-activity-indexed) — D3
+- [ ] **react-ai-insights** (L·high, blockedBy sp-batch-jobs-rpc)
+- [ ] **react-fude-milestones** (L·high) · **react-org-chart** (L·high)
+- [ ] **react-medium-forms** (L·med, blockedBy sp-purchases-search) — search/import/cps/journey/documents/marketing long tail
+- [ ] **refactor-sync-teardown** (L·high, blockedBy react-medium-forms) — data.js SWR/delta/tombstone/offline-queue; ONLY after views stop reading through AppDataStore. Guarded by `tests/contract/data-store.contract.test.mjs`
+
+### Phase 4 — structural cleanup (interleave once surface shrinks)
+- [ ] **refactor-core-utils** (S·low) — escapeHtml/formatFileSize/getFileIcon/generateId/convertSolarToLunar → `src/utils` (pure; no flag)
+- [ ] **refactor-permissions** (M·low, blockedBy refactor-core-utils) — isAgent/getVisibleUserIds → `src/utils/permissions` (28+ chunks)
+- [ ] **refactor-scoring-module** (M·med, blockedBy refactor-permissions) — protection/health scoring → `src/modules/scoring`
+- [ ] **refactor-debounce-search** (S·low, blockedBy refactor-core-utils) — autoDebounceAppSearch wrapper → `src/perf`
+- [ ] **ci-wire-gates** (M·low) — audit/contract/tsc into GitHub Actions + Vercel buildCommand (no test DB needed)
+- [ ] **build-vite-ownership** (L·high, blockedBy react-medium-forms) — Vite single build owner; retire build.mjs
+- [ ] **build-stop-committing-bundles** (M·med, blockedBy build-vite-ownership) — gitignore *.min.js/.br
+- [ ] **🚫 BLOCKED test-e2e-suite** — needs USER to provision + seed a separate TEST Supabase project (env: E2E_EMAIL/E2E_PASSWORD/E2E_BASE_URL). Cannot run autonomously; all authed specs `test.skip()` without it.
+
+---
+
 ## Phase 0 — Safety net (#10)  ✅
 The net that must stay green before any later refactor ships.
 - ✅ `tsconfig.json` — incremental `checkJs` over the typed surface (`types/`, `api/`). `tsc --noEmit` is clean.
