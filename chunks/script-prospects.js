@@ -108,6 +108,40 @@ const _serverPage = async (table, opts = {}) => {
     }
 };
 
+// Dormancy-curated, scoped, server-side prospect page via the prospects_page
+// RPC. Unlike _serverPage (plain queryAdvanced), this hides >500-day-dormant
+// prospects while KEEPING never-contacted ones — exact parity with the legacy
+// getActiveProspects rule — and scopes by role hierarchy in the same call.
+// Resolves the visibility scope to a bigint[] (null = unrestricted for
+// admin/manager). Returns { data, count, used } or { used:false } on any
+// guard/error so renderProspectsTable cleanly falls back to its legacy path.
+const _serverProspectsPage = async ({ search, mingGua, agentFilter, includeDormant, sortField, sortDir, limit, offset }) => {
+    try {
+        let visibleAgentIds = null; // null = unrestricted (admin/manager)
+        if (!isSystemAdmin(_currentUser)) {
+            const visible = await getVisibleUserIds(_currentUser);
+            if (visible && visible !== 'all' && Array.isArray(visible)) {
+                visibleAgentIds = visible.map(Number).filter(n => Number.isFinite(n));
+            }
+        }
+        const sortMap = { name: 'full_name', score: 'score', activity: 'last_activity_date' };
+        const res = await AppDataStore.prospectsPage({
+            visibleAgentIds,
+            search:  search || null,
+            mingGua: mingGua || null,
+            agentId: agentFilter ? Number(agentFilter) : null,
+            includeDormant: !!includeDormant,
+            sort:    sortMap[sortField] || 'score',
+            sortDir: sortDir || 'desc',
+            limit, offset,
+        });
+        return { data: res.data || [], count: res.count || 0, used: true };
+    } catch (e) {
+        console.warn('[prospectsPage] RPC → client fallback:', e?.message || e);
+        return { used: false };
+    }
+};
+
 const sortProspects = async (field) => {
     if (_sortField === field) {
         _sortDirection = _sortDirection === 'asc' ? 'desc' : 'asc';
@@ -1082,23 +1116,27 @@ const renderProspectsTable = async () => {
     // queryAdvanced — ONE page, not the whole active-prospect set. NOTE: this
     // page is not dormancy-curated (pagination already bounds the load, and
     // hiding never-contacted prospects via a date cutoff would wrongly drop
-    // brand-new ones); exact hide-dormant-by-default parity is the job of the
-    // prospects_page RPC (migrations/prospects_page_rpc_2026-06-14.sql).
+    // brand-new ones). With the prospects_page RPC applied (2026-06-14) the
+    // server path now routes through _serverProspectsPage, which DOES curate
+    // dormancy server-side (hide >500-day-dormant, keep never-contacted) — exact
+    // parity with the legacy getActiveProspects rule. An agent filter (or the
+    // "include dormant" toggle) forces include-dormant so the agent's full list
+    // shows, mirroring the legacy includeDormant:!!agentFilter behavior.
     const _sortColMap = { name: 'full_name', score: 'score', activity: 'last_activity_date' };
     const _pUnsupported = !!scoreFilter || !!statusFilter || !_sortColMap[_sortField];
     let allProspects, allUsers, _usedServerP = false, _serverProspectCount = 0;
     if (window.__SERVER_TABLES && !_pUnsupported) {
-        const opts = {
-            limit: _prospectPageSize, offset: _prospectPage * _prospectPageSize,
-            sort: _sortColMap[_sortField], sortDir: _sortDirection,
-            searchFields: ['full_name', 'nickname', 'phone', 'email'],
-            filters: {}, scopeBy: ['responsible_agent_id'],
-        };
-        if (searchQuery) opts.search = searchQuery;
-        if (guaFilter) opts.filters.ming_gua = guaFilter;
-        if (agentFilter) opts.filters.responsible_agent_id = agentFilter;
         const [r, users] = await Promise.all([
-            _serverPage('prospects', opts),
+            _serverProspectsPage({
+                search: searchQuery,
+                mingGua: guaFilter,
+                agentFilter,
+                includeDormant: includeDormantToggle || !!agentFilter,
+                sortField: _sortField,
+                sortDir: _sortDirection,
+                limit: _prospectPageSize,
+                offset: _prospectPage * _prospectPageSize,
+            }),
             AppDataStore.getAll('users', { includeDeleted: true }),
         ]);
         allUsers = users;

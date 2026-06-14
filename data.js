@@ -2261,6 +2261,38 @@ class DataStore {
         }
     }
 
+    // ── Server-side prospect page (dormancy + scope + filter + sort + page) ──
+    // Single round-trip via the prospects_page RPC
+    // (migrations/prospects_page_rpc_2026-06-14.sql, SECURITY DEFINER). Unlike
+    // queryAdvanced, the RPC curates dormancy server-side exactly like
+    // getActiveProspects (hide >500-day-dormant, KEEP never-contacted) and
+    // applies the role-visibility scope in the same statement. Throws on
+    // no-session / RPC error so the caller (renderProspectsTable) falls back to
+    // the legacy client path. Returns { data, count }.
+    //
+    // p_visible_agent_ids is a bigint[] of agent IDs (null = unrestricted, for
+    // admin/manager). responsible_agent_id is bigint on this schema — pass
+    // numbers, not strings/uuids.
+    async prospectsPage(opts = {}) {
+        if (!this.hasLiveSession()) throw new Error('no live auth session — prospectsPage fallback');
+        const { data, error } = await this._readClient().rpc('prospects_page', {
+            p_visible_agent_ids: opts.visibleAgentIds ?? null,
+            p_search:            opts.search ?? null,
+            p_ming_gua:          opts.mingGua ?? null,
+            p_agent_id:          opts.agentId ?? null,
+            p_include_dormant:   opts.includeDormant ?? false,
+            p_dormant_days:      opts.dormantDays ?? 500,
+            p_sort:              opts.sort ?? 'score',
+            p_sort_dir:          opts.sortDir ?? 'desc',
+            p_limit:             opts.limit ?? 50,
+            p_offset:            opts.offset ?? 0,
+        });
+        if (error) throw error;
+        // The RPC returns a single row shaped { rows: jsonb[], total: bigint }.
+        const row = Array.isArray(data) ? data[0] : data;
+        return { data: (row && row.rows) || [], count: Number(row && row.total) || 0 };
+    }
+
     // Bulk delete — runs all deletes in parallel instead of one-by-one
     async deleteMany(tableName, ids) {
         if (!ids || ids.length === 0) return;
