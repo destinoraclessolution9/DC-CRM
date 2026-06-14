@@ -5281,16 +5281,46 @@
     // notes without rewriting their render code.
     const getProspectAttendeeNotes = async (prospectId) => {
         if (!prospectId) return [];
-        const allAttendees = await AppDataStore.getAll('event_attendees');
-        const myRows = allAttendees.filter(a =>
+        const _matchesProspect = (a) =>
             String(a.entity_id || a.attendee_id) === String(prospectId) &&
             (a.attendee_type || 'prospect') === 'prospect' &&
             (a.note_key_points || a.note_needs || a.note_pain_points ||
-             a.opportunity_potential || a.next_action || a.summary)
-        );
+             a.opportunity_potential || a.next_action || a.summary);
+
+        // Scale-safe: fetch ONLY this prospect's attendee rows server-side via an
+        // OR on the two possible id columns (a SUPERSET of the client filter),
+        // then trim with the exact client filter. Whole-table fallback on error.
+        let myRows;
+        try {
+            const { data, error } = await AppDataStore._readClient()
+                .from('event_attendees')
+                .select(AppDataStore._selectClauseForGetAll('event_attendees'))
+                .or(`entity_id.eq.${prospectId},attendee_id.eq.${prospectId}`);
+            if (error) throw error;
+            myRows = (data || []).filter(_matchesProspect);
+        } catch (e) {
+            console.warn('getProspectAttendeeNotes: event_attendees scope query failed — full-table fallback', e);
+            myRows = (await AppDataStore.getAll('event_attendees')).filter(_matchesProspect);
+        }
         if (myRows.length === 0) return [];
-        const allActivities = await AppDataStore.getAll('activities');
-        const byId = new Map(allActivities.map(a => [String(a.id), a]));
+
+        // Scale-safe: resolve ONLY the parent activities referenced by these rows
+        // (by id) instead of mapping the whole activities table. Fallback on error.
+        const parentIds = [...new Set(myRows.map(att => att.activity_id).filter(Boolean).map(String))];
+        let byId = new Map();
+        if (parentIds.length) {
+            try {
+                const { data, error } = await AppDataStore._readClient()
+                    .from('activities')
+                    .select(AppDataStore._selectClauseForGetAll('activities'))
+                    .in('id', parentIds);
+                if (error) throw error;
+                byId = new Map((data || []).map(a => [String(a.id), a]));
+            } catch (e) {
+                console.warn('getProspectAttendeeNotes: parent-activities lookup failed — full-table fallback', e);
+                byId = new Map((await AppDataStore.getAll('activities')).map(a => [String(a.id), a]));
+            }
+        }
         return myRows.map(att => {
             const parent = byId.get(String(att.activity_id)) || {};
             return {
