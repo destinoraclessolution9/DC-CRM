@@ -13,6 +13,7 @@
   "devDependencies": {
     "@fortawesome/fontawesome-free": "^6.7.2",
     "@playwright/test": "^1.44.0",
+    "@tanstack/react-query": "^5.101.0",
     "@vitejs/plugin-react": "^4.7.0",
     "esbuild": "^0.28.0",
     "gifsicle": "^7.0.1",
