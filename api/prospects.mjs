@@ -71,7 +71,13 @@ export default async function handler(req, res) {
   } catch {
     return send(502, { error: 'scope_unreachable' });
   }
-  if (Array.isArray(visible) && visible.length === 0) return send(200, { rows: [], count: 0 });
+  // bff_visible_agent_ids returns [] ONLY for an unresolved caller (auth uid not
+  // mapped to a users row) — every real user gets null / [self] / a non-empty
+  // downline. During a token-refresh / SW-activation race the uid can transiently
+  // not resolve; an empty 200 here would cache "0 prospects" (the cold-boot blank
+  // bug seen on the -14→-15 SW reload). Treat [] as retryable so the client
+  // retries / falls back instead of showing an empty list.
+  if (Array.isArray(visible) && visible.length === 0) return send(409, { error: 'caller_unresolved' });
 
   // (3) Service-role RPC call — dormancy + scope + filter + sort + page in one
   //     round-trip. p_visible_agent_ids: null = unrestricted (admin/manager).
