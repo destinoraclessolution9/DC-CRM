@@ -1108,9 +1108,18 @@ const cascadeProspectReassign = async (prospectId, toAgentId, opts = {}) => {
                  linkedCustomerCount: 0, customersCascaded: 0, activitiesCascaded: 0 };
     }
 
-    const allCustomers = await AppDataStore.getAll('customers');
-    const linkedCustomers = (allCustomers || []).filter(c =>
-        String(c.converted_from_prospect_id) === String(pid));
+    // Scale-safe: fetch ONLY the customers linked to this prospect (eq
+    // converted_from_prospect_id) instead of the whole customers table. Falls
+    // back to the whole-table scan on error.
+    let linkedCustomers;
+    try {
+        linkedCustomers = await AppDataStore.query('customers', { converted_from_prospect_id: pid });
+    } catch (e) {
+        console.warn('cascadeProspectReassign: linked-customers query failed — full-table fallback', e);
+        linkedCustomers = (await AppDataStore.getAll('customers')).filter(c =>
+            String(c.converted_from_prospect_id) === String(pid));
+    }
+    linkedCustomers = linkedCustomers || [];
 
     let activitiesToTransfer = [];
     const cascadeActivitiesAfter = opts.cascadeActivitiesAfter ?? null;
@@ -1610,11 +1619,18 @@ const quickReassign = async (entityId, newAgentId, entityType = 'prospect') => {
             fromAgentId = prospect.responsible_agent_id || null;
             if (fromAgentId != null && String(fromAgentId) === String(newAgentId)) return;
             entityName = prospect.full_name || entityName;
-            const customers = await AppDataStore.getAll('customers');
             fromAgentName = userById(fromAgentId)
                 || (fromAgentId ? `Agent #${fromAgentId}` : 'Unassigned');
-            linkedCustomerCount = (customers || []).filter(c =>
-                String(c.converted_from_prospect_id) === String(id)).length;
+            // Scale-safe: count linked customers via eq query (only matching rows)
+            // instead of scanning the whole customers table. Fallback on error.
+            try {
+                const linked = await AppDataStore.query('customers', { converted_from_prospect_id: id });
+                linkedCustomerCount = (linked || []).length;
+            } catch (e) {
+                console.warn('quickReassign preview: linked-count query failed — full-table fallback', e);
+                linkedCustomerCount = (await AppDataStore.getAll('customers')).filter(c =>
+                    String(c.converted_from_prospect_id) === String(id)).length;
+            }
         }
     } catch (err) {
         if (selectEl && fromAgentId != null) selectEl.value = String(fromAgentId);
@@ -1777,8 +1793,16 @@ const confirmBulkReassignment = async () => {
         const justification = document.querySelector('.bulk-reassign-modal textarea')?.value || 'Bulk reassignment';
         if (!checkedProspectIds.length) { UI.toast.error('No prospects selected'); return; }
 
-        const allProspects = await AppDataStore.getAll('prospects');
-        const matchedProspects = allProspects.filter(p => checkedProspectIds.includes(p.id));
+        // Scale-safe: fetch ONLY the selected prospects by id (IN) instead of the
+        // whole prospects table. Falls back to the whole-table scan on error.
+        let matchedProspects;
+        try {
+            const res = await AppDataStore.queryAdvanced('prospects', { scopeField: 'id', scopeValues: checkedProspectIds, limit: 5000, countMode: null });
+            matchedProspects = ((res && res.data) || []).filter(p => checkedProspectIds.includes(p.id));
+        } catch (e) {
+            console.warn('confirmBulkReassignment: prospects IN-query failed — full-table fallback', e);
+            matchedProspects = (await AppDataStore.getAll('prospects')).filter(p => checkedProspectIds.includes(p.id));
+        }
         const fromAgentId = parseInt(document.getElementById('bulk-reassign-from-agent')?.value) || null;
 
         const allUsers = await AppDataStore.getAll('users');
@@ -1800,10 +1824,19 @@ const confirmBulkReassignment = async () => {
         const cascadeFromDate = document.getElementById('bulkmon-cascade-activities-from')?.value || null;
 
         // Preview cascade scope
-        const allCustomers = await AppDataStore.getAll('customers');
+        // Scale-safe: count customers linked to ANY selected prospect via an IN
+        // query (only matching rows) instead of scanning the whole customers table.
         const matchedIds = new Set(matchedProspects.map(p => String(p.id)));
-        const linkedCount = (allCustomers || []).filter(c =>
-            matchedIds.has(String(c.converted_from_prospect_id))).length;
+        let linkedCount;
+        try {
+            const res = await AppDataStore.queryAdvanced('customers', { scopeField: 'converted_from_prospect_id', scopeValues: matchedProspects.map(p => p.id), limit: 10000, countMode: null });
+            linkedCount = ((res && res.data) || []).filter(c =>
+                matchedIds.has(String(c.converted_from_prospect_id))).length;
+        } catch (e) {
+            console.warn('confirmBulkReassignment: linked-count IN-query failed — full-table fallback', e);
+            linkedCount = (await AppDataStore.getAll('customers')).filter(c =>
+                matchedIds.has(String(c.converted_from_prospect_id))).length;
+        }
 
         _pendingReassign = {
             kind: 'bulkMonitoring',
