@@ -7439,71 +7439,6 @@ const deleteSolution = async (solutionId, entityId, isProspect = true) => {
     UI.toast.success('Solution removed');
 };
 
-// Name List Functions
-const confirmConvertToCustomer = async (prospectId, isManual = false) => {
-    const prospect = await AppDataStore.getById('prospects', prospectId);
-    if (!prospect) return;
-
-    const amount = isManual
-        ? parseFloat(document.getElementById('manual-conversion-amount')?.value) || 0
-        : parseFloat(document.getElementById('conversion-amount')?.value) || 0;
-
-    const date = isManual
-        ? document.getElementById('manual-customer-since')?.value
-        : document.getElementById('customer-since')?.value;
-
-    const customer = {
-        id: window.AppDataStore._generateId(),
-        full_name: prospect.full_name,
-        nickname: prospect.nickname || '',
-        phone: prospect.phone,
-        email: prospect.email,
-        ic_number: prospect.ic_number,
-        date_of_birth: prospect.date_of_birth,
-        lunar_birth: prospect.lunar_birth,
-        ming_gua: prospect.ming_gua,
-        occupation: prospect.occupation,
-        company_name: prospect.company_name,
-        income_range: prospect.income_range,
-        address: prospect.address,
-        city: prospect.city,
-        state: prospect.state,
-        postal_code: prospect.postal_code,
-        lifetime_value: amount,
-        status: 'active',
-        customer_since: date || (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
-        responsible_agent_id: prospect.responsible_agent_id || 5,
-        converted_from_prospect_id: prospectId,
-        referred_by: prospect.referred_by,
-        referred_by_id: prospect.referred_by_id,
-        referred_by_type: prospect.referred_by_type,
-        referral_relationship: prospect.referral_relationship
-    };
-
-    const newCustomer = await AppDataStore.create('customers', customer);
-    await AppDataStore.update('prospects', prospectId, { status: 'converted' });
-
-    // Phase X: Create purchase record for conversion amount
-    // BUG FIX 2026-04-11: removed stray double `await`
-    if (amount > 0) {
-        await AppDataStore.create('purchases', {
-            customer_id: newCustomer.id,
-            date: customer.customer_since,
-            item: 'Conversion Package / First Deal',
-            amount: amount,
-            status: 'PAID',
-            invoice: `INV - ${new Date().getFullYear()} -${Math.floor(1000 + Math.random() * 9000)} `,
-            notes: 'Created during prospect conversion'
-        });
-    }
-
-    UI.hideModal();
-    UI.toast.success('Converted to customer successfully!');
-
-    const content = document.getElementById('content-viewport');
-    if (content) await (window.app.showProspectsViewSmart || (() => {}))(content);
-};
-
 const extendProtection = async (prospectId) => {
     const prospect = await AppDataStore.getById('prospects', prospectId);
     if (!prospect) return;
@@ -9842,7 +9777,6 @@ const viewInactiveProspects = (agentId) => {
         openEditSolutionModal,
         saveSolutionEdit,
         deleteSolution,
-        confirmConvertToCustomer,
         extendProtection,
         transferProspect,
         reassignProspect,

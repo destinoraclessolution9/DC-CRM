@@ -3571,7 +3571,6 @@ function _wireLoginBtn() {
     const openReviveProspectModal = async (...a) => { const _r = window.app.openReviveProspectModal; if (_r && _r !== openReviveProspectModal) return _r(...a); };
     const saveReviveProspect = async (...a) => { const _r = window.app.saveReviveProspect; if (_r && _r !== saveReviveProspect) return _r(...a); };
     const convertToCustomer = async (...a) => { const _r = window.app.convertToCustomer; if (_r && _r !== convertToCustomer) return _r(...a); };
-    const confirmConvertToCustomer = async (...a) => { const _r = window.app.confirmConvertToCustomer; if (_r && _r !== confirmConvertToCustomer) return _r(...a); };
     const requestProspectConversion = async (...a) => { const _r = window.app.requestProspectConversion; if (_r && _r !== requestProspectConversion) return _r(...a); };
     const showConversionApprovalModal = async (...a) => { const _r = window.app.showConversionApprovalModal; if (_r && _r !== showConversionApprovalModal) return _r(...a); };
     const approveProspectConversion = async (...a) => { const _r = window.app.approveProspectConversion; if (_r && _r !== approveProspectConversion) return _r(...a); };
@@ -4013,7 +4012,6 @@ function _wireLoginBtn() {
         openReviveProspectModal,
         saveReviveProspect,
         convertToCustomer,
-        confirmConvertToCustomer,
         requestProspectConversion,
         showConversionApprovalModal,
         approveProspectConversion,
