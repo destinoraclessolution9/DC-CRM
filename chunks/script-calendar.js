@@ -5446,8 +5446,19 @@
         const ev = await AppDataStore.getById('events', eventId);
         await (window.app.openActivityModal || (() => {}))();
         setTimeout(async () => {
-            const all = [...await AppDataStore.getAll('prospects'), ...await AppDataStore.getAll('customers')];
-            const p = all.find(x => x.id === entityId);
+            // Scale-safe: resolve the one record by id (prospects first, then
+            // customers) instead of downloading BOTH whole tables. getById is a
+            // synchronous in-memory hit when the table is already cached, else a
+            // single-row fetch. Falls back to the dual whole-table scan on error.
+            let p = null;
+            try {
+                p = await AppDataStore.getById('prospects', entityId);
+                if (!p) p = await AppDataStore.getById('customers', entityId);
+            } catch (e) {
+                console.warn('postEventFollowUp: getById lookup failed — whole-table fallback', e);
+                const all = [...await AppDataStore.getAll('prospects'), ...await AppDataStore.getAll('customers')];
+                p = all.find(x => x.id === entityId);
+            }
             if (p) app.selectEntity(entityId, p.is_customer ? 'customer' : 'prospect');
 
             const typeEl = document.getElementById('modal-activity-type');
