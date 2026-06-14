@@ -55,6 +55,7 @@ _chunks2/
 # - UPGRADE.md / tsconfig.json / types/ / ci/: dev-only architecture + tooling.
 migrations/
 UPGRADE.md
+PHASE_3_4_PLAN.md
 tsconfig.json
 types/
 ci/

@@ -1,6 +1,7 @@
 /**
- * Phase 2 (#11) — Customers BFF endpoint (Vercel Serverless Function, web-standard
- * Request→Response handler on Node/Fluid Compute).
+ * Phase 2 (#11) — Customers BFF endpoint (Vercel Node Serverless Function /
+ * Fluid Compute). Uses the canonical Vercel Node `(req, res)` signature for
+ * broad runtime compatibility.
  *
  * Flow: browser → GET /api/customers → (1) verify the caller's Supabase JWT →
  * (2) compute the visible agent-id scope SERVER-SIDE (bff_visible_agent_ids RPC)
@@ -14,11 +15,8 @@
  *                              only as the apikey when verifying the user JWT).
  *
  * The URL + publishable key are public (already shipped in the browser bundle),
- * so they are safe defaults here. The SECRET key is the only true secret and is
- * read exclusively from the environment.
- *
- * @param {Request} req
- * @returns {Promise<Response>}
+ * so they are safe defaults. The SECRET key is the only true secret and is read
+ * exclusively from the environment.
  */
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://remuwhxvzkzjtgbzqjaa.supabase.co';
 const PUBLISHABLE  = process.env.SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_XVWyiw5j1lnEErQUTV4XWg_lQcCIAjX';
@@ -27,31 +25,35 @@ const SECRET       = process.env.SUPABASE_SECRET_KEY || '';
 // Lean listing columns (verified against the live schema 2026-06-14).
 const LIST_COLUMNS = 'id,full_name,nickname,phone,email,ming_gua,responsible_agent_id,lifetime_value,customer_since';
 
-export default async function handler(req) {
-  if (req.method !== 'GET') return json({ error: 'method_not_allowed' }, 405);
-  if (!SECRET) return json({ error: 'not_configured', detail: 'SUPABASE_SECRET_KEY env var is not set on this deployment' }, 503);
+export default async function handler(req, res) {
+  res.setHeader('content-type', 'application/json');
+  res.setHeader('cache-control', 'no-store');
+  const send = (status, body) => { res.statusCode = status; res.end(JSON.stringify(body)); };
 
-  const url = new URL(req.url);
-  const limit  = clampInt(url.searchParams.get('limit'), 50, 1, 100);
-  const cursor = clampInt(url.searchParams.get('cursor'), 0, 0, Number.MAX_SAFE_INTEGER);
-  const q   = (url.searchParams.get('q')   || '').trim().slice(0, 80);
-  const gua = (url.searchParams.get('gua') || '').trim().slice(0, 40);
+  if (req.method !== 'GET') return send(405, { error: 'method_not_allowed' });
+  if (!SECRET) return send(503, { error: 'not_configured', detail: 'SUPABASE_SECRET_KEY env var is not set on this deployment' });
+
+  const Q = req.query || {};
+  const limit  = clampInt(Q.limit, 50, 1, 100);
+  const cursor = clampInt(Q.cursor, 0, 0, Number.MAX_SAFE_INTEGER);
+  const q   = String(Q.q   || '').trim().slice(0, 80);
+  const gua = String(Q.gua || '').trim().slice(0, 40);
 
   // (1) Authn — verify the caller's Supabase access token.
-  const token = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
-  if (!token) return json({ error: 'unauthenticated' }, 401);
+  const token = String((req.headers && req.headers.authorization) || '').replace(/^Bearer\s+/i, '');
+  if (!token) return send(401, { error: 'unauthenticated' });
   let authId;
   try {
     const authRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
       headers: { apikey: PUBLISHABLE, Authorization: `Bearer ${token}` },
     });
-    if (!authRes.ok) return json({ error: 'unauthenticated' }, 401);
+    if (!authRes.ok) return send(401, { error: 'unauthenticated' });
     const authUser = await authRes.json();
     authId = authUser && authUser.id;
   } catch {
-    return json({ error: 'auth_unreachable' }, 502);
+    return send(502, { error: 'auth_unreachable' });
   }
-  if (!authId) return json({ error: 'unauthenticated' }, 401);
+  if (!authId) return send(401, { error: 'unauthenticated' });
 
   // (2) Authz — server-side visibility scope (null = all, [] = none, [ids] = scoped).
   let visible;
@@ -61,14 +63,12 @@ export default async function handler(req) {
       headers: svc({ 'content-type': 'application/json' }),
       body: JSON.stringify({ p_auth_id: authId }),
     });
-    if (!scopeRes.ok) return json({ error: 'scope_failed', status: scopeRes.status }, 500);
+    if (!scopeRes.ok) return send(500, { error: 'scope_failed', status: scopeRes.status });
     visible = await scopeRes.json();
   } catch {
-    return json({ error: 'scope_unreachable' }, 502);
+    return send(502, { error: 'scope_unreachable' });
   }
-  if (Array.isArray(visible) && visible.length === 0) {
-    return json({ rows: [], nextCursor: null }); // caller sees nothing
-  }
+  if (Array.isArray(visible) && visible.length === 0) return send(200, { rows: [], nextCursor: null });
 
   // (3) Service-role query — scoped + searched + keyset-paginated (id asc).
   const params = new URLSearchParams();
@@ -86,10 +86,10 @@ export default async function handler(req) {
   let rows;
   try {
     const dataRes = await fetch(`${SUPABASE_URL}/rest/v1/customers?${params.toString()}`, { headers: svc() });
-    if (!dataRes.ok) return json({ error: 'query_failed', status: dataRes.status }, 502);
+    if (!dataRes.ok) return send(502, { error: 'query_failed', status: dataRes.status });
     rows = await dataRes.json();
   } catch {
-    return json({ error: 'query_unreachable' }, 502);
+    return send(502, { error: 'query_unreachable' });
   }
 
   let nextCursor = null;
@@ -97,18 +97,12 @@ export default async function handler(req) {
     rows = rows.slice(0, limit);
     nextCursor = rows[rows.length - 1].id;
   }
-  return json({ rows: Array.isArray(rows) ? rows : [], nextCursor });
+  return send(200, { rows: Array.isArray(rows) ? rows : [], nextCursor });
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 function svc(extra = {}) {
   return { apikey: SECRET, Authorization: `Bearer ${SECRET}`, ...extra };
-}
-function json(body, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
-  });
 }
 function clampInt(v, dflt, min, max) {
   const n = Number.parseInt(String(v ?? ''), 10);
