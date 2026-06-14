@@ -1109,6 +1109,16 @@ class DataStore {
                 if (this._isAbortError(error)) return [];
             }
             if (error) throw error;
+            // A successful server read proves connectivity — clear any stuck
+            // offline banner. Its own dismissal relies on an 'online' event or a
+            // visibility/pageshow probe, which can MISS when a transient fetch
+            // error fired the banner while navigator.onLine never actually
+            // flipped (cold boot / SW update) — leaving it stuck on a healthy
+            // connection. A successful read is the authoritative "back online".
+            if (window._offlineNotified) {
+                try { document.getElementById('offline-banner')?.remove(); } catch (_) {}
+                window._offlineNotified = false;
+            }
             // Supabase caps getAll() implicitly at 1000 rows per request. When
             // we hit that cap, auto-page through the rest so list views never
             // silently show a truncated dataset. This is transparent to callers.

@@ -533,12 +533,14 @@ const renderCustomersTable = async () => {
     // server-side (Regular null-edge, deficiency arrays, event-count aggregation).
     const _serverUnsupported = typeFilter === 'Regular' || !!deficiencyFilter || minEventsFilter > 0 || !!purchaseFilter;
     let _usedServer = false;
-    // ── PHASE 2 (#11): BFF path (flag default OFF) ─────────────────────────
+    // ── PHASE 2 (#11): BFF path (DEFAULT ON; set window.__USE_BFF_CUSTOMERS=false to disable) ──
     // Routes through /api/customers, which verifies the JWT + applies the
-    // visibility scope server-side. Engages for the BFF-supported filter set
-    // (search / ming_gua / VIP); house-audit + Agent-Eligible have no column so
-    // they fall through to _serverPage/legacy. Any error → {used:false} → fallback.
-    if (window.__USE_BFF_CUSTOMERS && !_serverUnsupported && !houseAuditFilter && typeFilter !== 'Agent Eligible') {
+    // visibility scope server-side (RLS becomes defense-in-depth). Engages for
+    // the BFF-supported filter set (search / ming_gua / VIP); house-audit +
+    // Agent-Eligible have no column so they fall through to _serverPage/legacy.
+    // Any guard/error → {used:false} → _serverPage/legacy fallback (verified
+    // end-to-end live 2026-06-14: count 164, scoped rows render).
+    if (window.__USE_BFF_CUSTOMERS !== false && !_serverUnsupported && !houseAuditFilter && typeFilter !== 'Agent Eligible') {
         const r = await _bffGetCustomers({
             limit: _customerPageSize, offset: pageStart,
             search: searchQuery, gua: guaFilter,
@@ -678,6 +680,10 @@ const filterCustomers = async () => {
 const renderApprovalQueue = async () => {
     const tbody = document.getElementById('approval-queue-body');
     if (!tbody) return;
+    // Failure-isolated: a transient error loading the approval queue must never
+    // bubble up and abort showCustomersView (which would leave the whole
+    // Customers tab half-rendered). On error, show a graceful fallback row.
+    try {
 
     // Fetch all three tables in parallel. Previously these awaited
     // sequentially and then the rendering loop did `await getAgentName()`
@@ -734,6 +740,10 @@ const renderApprovalQueue = async () => {
         </tr>`;
     }
     tbody.innerHTML = html;
+    } catch (e) {
+        console.warn('[renderApprovalQueue] non-fatal — approval queue load failed:', e?.message || e);
+        try { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--gray-400);">Approval queue temporarily unavailable — refresh to retry</td></tr>'; } catch (_) {}
+    }
 };
 
 const showApprovalDetail = async (entryId) => {
