@@ -370,8 +370,9 @@ const getExtensionType = (activityType) => {
 
 // ========== FEATURE: PROSPECT POTENTIAL & OPPORTUNITIES ==========
 const openLatestMeetupNotes = async (prospectId) => {
-    const allActivities = (await AppDataStore.getAll('activities'))
-        .filter(a => a.prospect_id == prospectId)
+    // Scale-safe: indexed per-prospect activity fetch (eq prospect_id, ordered,
+    // has its own getAll fallback) instead of scanning the WHOLE activities table.
+    const allActivities = (await AppDataStore.getActivitiesForProspect(prospectId))
         .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date) || b.id - a.id);
     if (allActivities.length === 0) {
         UI.toast.error('No activities found. Log a meetup or event first.');

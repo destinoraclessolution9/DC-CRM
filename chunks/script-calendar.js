@@ -5378,8 +5378,10 @@
         const prospect = await AppDataStore.getById('prospects', prospectId);
         if (!prospect) { UI.toast.error('Prospect not found'); return; }
         const MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP'];
-        const ownActivities = (await AppDataStore.getAll('activities'))
-            .filter(a => a.prospect_id == prospectId && MEETUP_TYPES.includes(a.activity_type));
+        // Scale-safe: indexed per-prospect activity fetch (eq prospect_id, has its
+        // own getAll fallback) instead of scanning the WHOLE activities table.
+        const ownActivities = (await AppDataStore.getActivitiesForProspect(prospectId, { limit: 2000 }))
+            .filter(a => MEETUP_TYPES.includes(a.activity_type));
         const attendeeNotes = await getProspectAttendeeNotes(prospectId);
         const activities = [...ownActivities, ...attendeeNotes]
             .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date) || (b.id || 0) - (a.id || 0));
