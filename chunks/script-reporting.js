@@ -1182,6 +1182,24 @@ const buildActiveAgentsDetails = async () => {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - 60);
     const cutoffStr = cutoff.toISOString().slice(0, 10);
+    const _ids = (_visibleUserIds === 'all' || !Array.isArray(_visibleUserIds)) ? null : _visibleUserIds.map(v => Number(v)).filter(n => Number.isFinite(n));
+    try {
+        if (window.supabase && window.supabase.rpc) {
+            const { data, error } = await window.supabase.rpc('agent_last_activity_60d', { p_agent_ids: _ids });
+            if (!error && Array.isArray(data)) {
+                const lastActivityDate = new Map(data.map(r => [String(r.agent_id), r.last_date]));
+                const users = await AppDataStore.getAll('users');
+                return _renderActiveAgentsTeams(lastActivityDate, users, cutoffStr);
+            }
+        }
+    } catch (_) { /* fall through to legacy */ }
+    return _buildActiveAgentsDetailsLegacy();
+};
+
+const _buildActiveAgentsDetailsLegacy = async () => {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 60);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
 
     const [users, allActivities, allAttendees] = await Promise.all([
         AppDataStore.getAll('users'),
@@ -1213,7 +1231,14 @@ const buildActiveAgentsDetails = async () => {
         const k = String(ea.entity_id);
         if (!lastActivityDate.has(k)) lastActivityDate.set(k, cutoffStr);
     }
+    return _renderActiveAgentsTeams(lastActivityDate, users, cutoffStr);
+};
 
+// Shared render for buildActiveAgentsDetails — groups the visible agents by team
+// and marks active/inactive from `lastActivityDate` (a Map of String(agentId) ->
+// last activity date within the 60-day window). Data source is either the
+// agent_last_activity_60d RPC (fast path) or the client scan (legacy).
+const _renderActiveAgentsTeams = (lastActivityDate, users, cutoffStr) => {
     // Group agents by team
     const agents = users.filter(u => {
         if (!isAgent(u)) return false;
@@ -1274,6 +1299,20 @@ const buildActiveAgentsDetails = async () => {
 };
 
 const buildNewCustomersDetails = async (from, to) => {
+    const _ids = (_visibleUserIds === 'all' || !Array.isArray(_visibleUserIds)) ? null : _visibleUserIds.map(v => Number(v)).filter(n => Number.isFinite(n));
+    try {
+        if (window.supabase && window.supabase.rpc) {
+            const { data, error } = await window.supabase.rpc('report_new_customers', { p_from: from, p_to: to, p_agent_ids: _ids });
+            if (!error && Array.isArray(data)) {
+                const rows = data.map(c => [c.customer_since, c.full_name || '—', c.agent_name || '—', c.source || '—']);
+                return renderDetailTable(['Since', 'Name', 'Agent', 'Source'], rows);
+            }
+        }
+    } catch (_) { /* fall through to legacy */ }
+    return _buildNewCustomersDetailsLegacy(from, to);
+};
+
+const _buildNewCustomersDetailsLegacy = async (from, to) => {
     const [customers, users, purchases] = await Promise.all([
         AppDataStore.getAll('customers'),
         AppDataStore.getAll('users'),
@@ -1293,6 +1332,34 @@ const buildNewCustomersDetails = async (from, to) => {
 };
 
 const buildConversionDetails = async (from, to) => {
+    const _ids = (_visibleUserIds === 'all' || !Array.isArray(_visibleUserIds)) ? null : _visibleUserIds.map(v => Number(v)).filter(n => Number.isFinite(n));
+    try {
+        if (window.supabase && window.supabase.rpc) {
+            const [pr, cr] = await Promise.all([
+                window.supabase.rpc('report_new_prospects', { p_from: from, p_to: to, p_agent_ids: _ids }),
+                window.supabase.rpc('report_new_customers', { p_from: from, p_to: to, p_agent_ids: _ids }),
+            ]);
+            if (!pr.error && Array.isArray(pr.data) && !cr.error && Array.isArray(cr.data)) {
+                const pRows = pr.data.map(p => [(p.created_at || '').slice(0, 10), p.full_name || '—', p.agent_name || '—', p.status || '—']);
+                const cRows = cr.data.map(c => [c.customer_since, c.full_name || '—', c.agent_name || '—']);
+                const rate = pRows.length === 0 ? 0 : Math.round((cRows.length / pRows.length) * 100);
+                const summary = `
+        <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;padding:12px 16px;margin-bottom:14px;">
+            <div style="font-size:13px;color:var(--gray-500);">Conversion Rate: <strong style="color:var(--primary,#8B1A1A);font-size:18px;">${rate}%</strong></div>
+            <div style="font-size:12px;color:var(--gray-400);margin-top:4px;">${cRows.length} converted customer${cRows.length===1?'':'s'} ÷ ${pRows.length} new prospect${pRows.length===1?'':'s'}</div>
+        </div>`;
+                return summary +
+                    `<h4 style="margin:0 0 8px;font-size:13px;">Prospects (${pRows.length})</h4>` +
+                    renderDetailTable(['Created', 'Name', 'Agent', 'Status'], pRows, 'No prospects in this period') +
+                    `<h4 style="margin:14px 0 8px;font-size:13px;">Converted Customers (${cRows.length})</h4>` +
+                    renderDetailTable(['Since', 'Name', 'Agent'], cRows, 'No conversions in this period');
+            }
+        }
+    } catch (_) { /* fall through to legacy */ }
+    return _buildConversionDetailsLegacy(from, to);
+};
+
+const _buildConversionDetailsLegacy = async (from, to) => {
     const [prospects, customers, users] = await Promise.all([
         AppDataStore.getAll('prospects'),
         AppDataStore.getAll('customers'),
@@ -1477,6 +1544,26 @@ const _buildCFHeadcountDetailsLegacy = async (from, to) => {
 };
 
 const buildActivityHeadcountDetails = async (from, to) => {
+    const _ids = (_visibleUserIds === 'all' || !Array.isArray(_visibleUserIds)) ? null : _visibleUserIds.map(v => Number(v)).filter(n => Number.isFinite(n));
+    try {
+        if (window.supabase && window.supabase.rpc) {
+            const { data, error } = await window.supabase.rpc('report_activity_headcount_details', { p_from: from, p_to: to, p_agent_ids: _ids });
+            if (!error && Array.isArray(data)) {
+                const prospectRows = [], agentRows = [], byEvent = {};
+                let prospectCount = 0, agentCount = 0;
+                for (const r of data) {
+                    if (r.is_agent) { agentRows.push([r.activity_date, r.event_title, r.display_name]); agentCount++; }
+                    else { prospectRows.push([r.activity_date, r.event_title, r.display_name, r.attendee_type || 'prospect']); prospectCount++; }
+                    byEvent[r.event_title] = (byEvent[r.event_title] || 0) + 1;
+                }
+                return _renderActivityHeadcount(prospectRows, agentRows, byEvent, prospectCount, agentCount);
+            }
+        }
+    } catch (_) { /* fall through to legacy */ }
+    return _buildActivityHeadcountDetailsLegacy(from, to);
+};
+
+const _buildActivityHeadcountDetailsLegacy = async (from, to) => {
     const [allAttendees, activities, events, prospects, customers, users] = await Promise.all([
         AppDataStore.getAll('event_attendees'),
         AppDataStore.getAll('activities'),
@@ -1535,6 +1622,13 @@ const buildActivityHeadcountDetails = async (from, to) => {
         byEvent[eventTitle] = (byEvent[eventTitle] || 0) + 1;
     }
 
+    return _renderActivityHeadcount(prospectRows, agentRows, byEvent, prospectCount, agentCount);
+};
+
+// Shared render for buildActivityHeadcountDetails — both the RPC fast path and
+// the legacy client scan build prospectRows/agentRows/byEvent + counts, then
+// render here identically.
+const _renderActivityHeadcount = (prospectRows, agentRows, byEvent, prospectCount, agentCount) => {
     const summaryByEvent = Object.keys(byEvent).length
         ? `<div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;padding:12px 16px;margin-bottom:14px;">
              <div style="font-size:12px;color:var(--gray-500);margin-bottom:8px;font-weight:600;">By Event:</div>
