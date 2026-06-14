@@ -1,4 +1,6 @@
--- Phase 1 (#12) — import duplicate-check existence lookup. APPLIED to live 2026-06-14.
+-- Phase 1 (#12) — import duplicate-check existence lookup. APPLIED to live
+-- 2026-06-14 (user-authorized). Verified: norm-phone + email lookups hit,
+-- bogus/empty keys miss, normalization parity with client normalisePhone holds.
 --
 -- runDuplicateCheck() used to getAll(table) — download the ENTIRE prospects /
 -- customers table into the browser just to dedup an import file against it. At
