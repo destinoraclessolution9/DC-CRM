@@ -81,6 +81,33 @@ let _purchasesHistoryCacheTs = 0;
 let _phFilter = { search: '', agent: 'all', delivery: 'all', from: '', to: '' };
 let _phPage = 0;
 
+// ── Phase 1 (#12): shared server-pagination helper ───────────────────────────
+// Fetch ONE page (server-filtered/sorted/paginated) via queryAdvanced, with the
+// role-visibility scope injected SERVER-side (pass scopeBy: [columns]). Returns
+// { data, count, used:true } on success, or { used:false } on the hasLiveSession
+// guard / any error so the caller cleanly falls back to its legacy client path.
+// Shared by the customers + prospects lists; promote to _crmUtils when a 3rd
+// chunk adopts it (UPGRADE.md Phase 4).
+const _serverPage = async (table, opts = {}) => {
+    try {
+        const o = { countMode: 'planned', ...opts };
+        o.filters = { ...(opts.filters || {}) };
+        const scopeBy = opts.scopeBy;
+        delete o.scopeBy;
+        if (scopeBy && !o.scopeFields && !o.scopeField) {
+            const visible = await getVisibleUserIds(_currentUser);
+            if (visible && visible !== 'all' && Array.isArray(visible)) {
+                o.scopeFields = scopeBy.map(field => ({ field, values: visible }));
+            }
+        }
+        const res = await AppDataStore.queryAdvanced(table, o);
+        return { data: res.data || [], count: res.count || 0, used: true };
+    } catch (e) {
+        console.warn(`[serverPage] ${table} → client fallback:`, e?.message || e);
+        return { used: false };
+    }
+};
+
 const sortProspects = async (field) => {
     if (_sortField === field) {
         _sortDirection = _sortDirection === 'asc' ? 'desc' : 'asc';
@@ -447,34 +474,18 @@ const renderCustomersTable = async () => {
     let _usedServer = false;
     if (window.__SERVER_TABLES && !_serverUnsupported) {
         const opts = {
-            limit: _customerPageSize,
-            offset: pageStart,
-            countMode: 'planned',                 // fast planner estimate, not a full count scan
+            limit: _customerPageSize, offset: pageStart,
             sort: 'full_name', sortDir: 'asc',
-            filters: {},
             searchFields: ['full_name', 'nickname', 'phone', 'email'],
+            filters: {}, scopeBy: ['responsible_agent_id', 'agent_id'],
         };
         if (searchQuery) opts.search = searchQuery;
         if (guaFilter) opts.filters.ming_gua = guaFilter;
         if (houseAuditFilter) opts.filters.house_audit_status = houseAuditFilter;
         if (typeFilter === 'VIP') opts.gte = { lifetime_value: 5000 };
         else if (typeFilter === 'Agent Eligible') opts.filters.agent_eligible = true;
-        // Visibility scoping done server-side (not in the browser).
-        const _visible = await getVisibleUserIds(_currentUser);
-        if (_visible && _visible !== 'all' && Array.isArray(_visible)) {
-            opts.scopeFields = [
-                { field: 'responsible_agent_id', values: _visible },
-                { field: 'agent_id', values: _visible },
-            ];
-        }
-        try {
-            const res = await AppDataStore.queryAdvanced('customers', opts);
-            pageCustomers = res.data || [];
-            totalCount = res.count || 0;
-            _usedServer = true;
-        } catch (e) {
-            console.warn('[customers] server pagination failed — falling back to client path', e);
-        }
+        const r = await _serverPage('customers', opts);
+        if (r.used) { pageCustomers = r.data; totalCount = r.count; _usedServer = true; }
     }
 
     if (!_usedServer) {
@@ -1064,18 +1075,46 @@ const renderProspectsTable = async () => {
     // sees the agent's full prospect list, not just the "active" subset.
     // Also force a fresh DB fetch (bypass SWR cache) so newly-imported prospects
     // for that agent are immediately visible without waiting for background sync.
-    const prospectsPromise = searchQueryRaw
-        ? AppDataStore.searchProspects(searchQueryRaw, { includeDormant: true, limit: 200 })
-        : AppDataStore.getActiveProspects({ includeDormant: includeDormantToggle || !!agentFilter, fresh: !!agentFilter });
-    const [allProspects, allUsers] = await Promise.all([
-        prospectsPromise,
-        // includeDeleted: the active-users cache hides status='deleted'
-        // staff, but prospects may still reference them as owning agent.
-        // Merging deleted users into the lookup keeps the Agent column
-        // populated; activeAgents below stays restricted so the reassign
-        // dropdown options don't expose deleted records.
-        AppDataStore.getAll('users', { includeDeleted: true }),
-    ]);
+    // ── PHASE 1 (#12): server-side pagination (flagged, default OFF) ────────
+    // Engages only when no DERIVED filter is active (score-grade / protection-
+    // status are computed client-side, not columns) and the sort key is a real
+    // column. Paginates the scoped/searched/filtered set server-side via
+    // queryAdvanced — ONE page, not the whole active-prospect set. NOTE: this
+    // page is not dormancy-curated (pagination already bounds the load, and
+    // hiding never-contacted prospects via a date cutoff would wrongly drop
+    // brand-new ones); exact hide-dormant-by-default parity is the job of the
+    // prospects_page RPC (migrations/prospects_page_rpc_2026-06-14.sql).
+    const _sortColMap = { name: 'full_name', score: 'score', activity: 'last_activity_date' };
+    const _pUnsupported = !!scoreFilter || !!statusFilter || !_sortColMap[_sortField];
+    let allProspects, allUsers, _usedServerP = false, _serverProspectCount = 0;
+    if (window.__SERVER_TABLES && !_pUnsupported) {
+        const opts = {
+            limit: _prospectPageSize, offset: _prospectPage * _prospectPageSize,
+            sort: _sortColMap[_sortField], sortDir: _sortDirection,
+            searchFields: ['full_name', 'nickname', 'phone', 'email'],
+            filters: {}, scopeBy: ['responsible_agent_id'],
+        };
+        if (searchQuery) opts.search = searchQuery;
+        if (guaFilter) opts.filters.ming_gua = guaFilter;
+        if (agentFilter) opts.filters.responsible_agent_id = agentFilter;
+        const [r, users] = await Promise.all([
+            _serverPage('prospects', opts),
+            AppDataStore.getAll('users', { includeDeleted: true }),
+        ]);
+        allUsers = users;
+        if (r.used) { allProspects = r.data; _serverProspectCount = r.count; _usedServerP = true; }
+    }
+    if (!_usedServerP) {
+        const prospectsPromise = searchQueryRaw
+            ? AppDataStore.searchProspects(searchQueryRaw, { includeDormant: true, limit: 200 })
+            : AppDataStore.getActiveProspects({ includeDormant: includeDormantToggle || !!agentFilter, fresh: !!agentFilter });
+        // includeDeleted users so deleted-staff owners still resolve in the Agent column.
+        const [_p, _u] = await Promise.all([
+            prospectsPromise,
+            allUsers ? Promise.resolve(allUsers) : AppDataStore.getAll('users', { includeDeleted: true }),
+        ]);
+        allProspects = _p; allUsers = _u;
+    }
     _mark('prospects+users-loaded');
 
     // ── Scope by role hierarchy ──
@@ -1145,8 +1184,8 @@ const renderProspectsTable = async () => {
         return lvl >= 3 && lvl <= 11 && u.status !== 'deleted';
     }) : [];
 
-    // ── Apply sorting ──
-    prospects.sort((a, b) => {
+    // ── Apply sorting (skipped on the server path — already sorted server-side) ──
+    if (!_usedServerP) prospects.sort((a, b) => {
         let valA, valB;
         if (_sortField === 'name') {
             valA = a.full_name || ''; valB = b.full_name || '';
@@ -1166,9 +1205,9 @@ const renderProspectsTable = async () => {
         return 0;
     });
 
-    // ── Apply filters, then paginate ──
-    let filtered = [];
-    for (const p of prospects) {
+    // ── Apply filters (skipped on the server path — already filtered server-side) ──
+    let filtered = prospects;
+    if (!_usedServerP) { filtered = []; for (const p of prospects) {
         if (searchQuery && !(
             (p.full_name || '').toLowerCase().includes(searchQuery) ||
             (p.nickname && p.nickname.toLowerCase().includes(searchQuery)) ||
@@ -1191,12 +1230,12 @@ const renderProspectsTable = async () => {
             if (statusFilter === 'critical' && protectionStatus !== 'critical') continue;
         }
         filtered.push(p);
-    }
+    } }
 
-    // ── Client-side pagination ──
-    const totalCount = filtered.length;
+    // ── Pagination (server path already returned exactly one page) ──
     const pageStart = _prospectPage * _prospectPageSize;
-    const pageProspects = filtered.slice(pageStart, pageStart + _prospectPageSize);
+    const totalCount = _usedServerP ? _serverProspectCount : filtered.length;
+    const pageProspects = _usedServerP ? filtered : filtered.slice(pageStart, pageStart + _prospectPageSize);
 
     // ── Progressive Last Activity render ──────────────────────────────
     // `last_activity_date` is already a column on prospects rows (kept in

@@ -14,12 +14,14 @@ The net that must stay green before any later refactor ships.
 - ✅ `ci/test.mjs` — runs tsc + contract suite. (Keep `ci/regression.js` running separately.)
 - ⬜ Next: provision a seeded Supabase test project; fill the `fixme` specs; add `npm run test:e2e` to CI.
 
-## Phase 1 — Server-paginated reads (#12)  ✅ first slice
+## Phase 1 — Server-paginated reads (#12)  ✅ customers + prospects
 The scale unlock. 255 `getAll('<bigtable>')` full-table fetches → server-side filter/sort/paginate via the existing `queryAdvanced`.
-- ✅ **Customers list migrated** (`chunks/script-prospects.js` `renderCustomersTable`) behind `window.__SERVER_TABLES` (default OFF → identical legacy behavior). Server path: `queryAdvanced('customers', { search, filters, gte/lte, scopeFields, sort, limit, offset, countMode:'planned' })`; visibility scoping computed server-side; `try/catch` falls back to the legacy client path. Verified: returns correct paginated shape with a session; degrades safely without one. Also fixed unescaped `full_name`/`customer_since`/`ming_gua` XSS in the row render.
-- 🟡 Not yet server-expressible → client fallback: `Regular` (null `lifetime_value` edge), `deficiency` (array contains), `min-events` (aggregation). Move the aggregation to an RPC later.
-- ⬜ Next, in traffic order: **prospects list → activities/calendar feed (42 calls) → import preview (25) → reporting (70, mostly aggregations → RPCs).** Extract the customers server-path into a reusable `lib/server-table.js` once the 2nd view adopts it.
-- ⬜ Enablement: flip `window.__SERVER_TABLES = true` per-view via a config flag after each view is verified against live data.
+- ✅ Shared **`_serverPage(table, opts)`** helper (`chunks/script-prospects.js`): runs `queryAdvanced` with role-visibility scope injected server-side (`scopeBy:[cols]`), returns `{data,count,used}` or `{used:false}` → caller falls back. (Promote to `_crmUtils`/`lib` when a 3rd chunk adopts it.)
+- ✅ **Customers list** (`renderCustomersTable`) behind `window.__SERVER_TABLES` (default OFF → identical legacy behavior). Server-handled: search, `ming_gua`, `house_audit_status`, VIP (`gte lifetime_value`), Agent-Eligible, scope. Client fallback: `Regular` (null edge), `deficiency` (array), `min-events` (aggregation). Fixed unescaped `full_name`/`customer_since`/`ming_gua` XSS.
+- ✅ **Prospects list** (`renderProspectsTable`) behind the same flag. Server-handled: search, `ming_gua`, agent, scope, column sort (name/score/activity), paginated. Client fallback: score-grade + protection-status filters (derived, not columns) and protection sort. **Dormancy caveat:** the flagged path is not dormancy-curated (it shows all matching, paginated; never-contacted prospects are correctly NOT hidden) — exact hide-dormant-by-default parity is the job of the scaffolded **`migrations/prospects_page_rpc_2026-06-14.sql`** (SECURITY DEFINER, dormancy + scope + filter + page in one call; apply via DDL to activate).
+- ⬜ **Activities** has no standalone full-table list view to migrate — activities surface through the calendar feed (already server-windowed via `get_calendar_window` RPC) and per-entity timelines (`getActivitiesForProspect`, indexed). Not the `getAll`-whole-table anti-pattern.
+- ⬜ Next, in traffic order: **import preview (25 `getAll`) → reporting (70, mostly aggregations → RPCs) → agents / purchases_history lists.**
+- ⬜ Enablement: flip `window.__SERVER_TABLES = true` per-view via a config flag after each view is verified against live data (with login).
 
 ## Phase 2 — Centralize the server seam (#11 BFF, #6 RBAC)  🟡
 - 🟡 **#11 BFF** — `api/customers.mjs` Vercel serverless scaffold (browser → `/api` → Postgres; scoping + service role server-side; RLS becomes defense-in-depth). Helpers are `not_wired` stubs (typed). Needs: Vercel `/api` provisioning, `SUPABASE_SERVICE_ROLE_KEY` env (server-only), a `lib/api-client.js` adapter, Upstash rate-limit.
