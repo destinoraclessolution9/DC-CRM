@@ -404,8 +404,6 @@ const renderCustomersTable = async () => {
     const tbody = document.getElementById('customers-table-body');
     if (!tbody) return;
 
-    // ── Use getAll() with cache (proven reliable) ──
-    const customers = await getVisibleCustomers();
     const allUsers = await AppDataStore.getAll('users');
     const userById = new Map(allUsers.map(u => [String(u.id), u]));
 
@@ -434,41 +432,85 @@ const renderCustomersTable = async () => {
     const houseAuditFilter = document.getElementById('filter-customer-house-audit')?.value || '';
     const minEventsFilter = parseInt(document.getElementById('filter-customer-min-events')?.value || '0');
 
-    let allEventRegs = [];
-    if (minEventsFilter > 0) allEventRegs = await AppDataStore.getAll('event_registrations');
+    const pageStart = _customerPage * _customerPageSize;
+    let pageCustomers = [];
+    let totalCount = 0;
 
-    // ── Apply filters ──
-    let filtered = [];
-    for (const c of customers) {
-        if (searchQuery && !(
-            (c.full_name || '').toLowerCase().includes(searchQuery) ||
-            (c.nickname && c.nickname.toLowerCase().includes(searchQuery)) ||
-            (c.phone && c.phone.includes(searchQuery)) ||
-            (c.email && c.email.toLowerCase().includes(searchQuery))
-        )) continue;
-        if (guaFilter && c.ming_gua !== guaFilter) continue;
-        if (typeFilter === 'VIP' && (c.lifetime_value || 0) < 5000) continue;
-        if (typeFilter === 'Regular' && (c.lifetime_value || 0) >= 5000) continue;
-        if (typeFilter === 'Agent Eligible' && !(c.agent_eligible || c.is_agent_eligible)) continue;
-        if (deficiencyFilter) {
-            const needs = c.needs ? (Array.isArray(c.needs) ? c.needs : c.needs.split(',').map(t => t.trim())) : [];
-            if (!needs.includes(deficiencyFilter)) continue;
+    // ── PHASE 1 (#12): server-side pagination via queryAdvanced ────────────
+    // Behind the window.__SERVER_TABLES flag (default OFF → identical legacy
+    // behavior). Fetches ONE page (≈50 rows) server-filtered/sorted/paginated
+    // instead of pulling the whole customers table to the browser and filtering
+    // in JS — the change that lets this view scale to a 500k customer base.
+    // Falls through to the legacy client path for filters not yet expressible
+    // server-side (Regular null-edge, deficiency arrays, event-count aggregation).
+    const _serverUnsupported = typeFilter === 'Regular' || !!deficiencyFilter || minEventsFilter > 0 || !!purchaseFilter;
+    let _usedServer = false;
+    if (window.__SERVER_TABLES && !_serverUnsupported) {
+        const opts = {
+            limit: _customerPageSize,
+            offset: pageStart,
+            countMode: 'planned',                 // fast planner estimate, not a full count scan
+            sort: 'full_name', sortDir: 'asc',
+            filters: {},
+            searchFields: ['full_name', 'nickname', 'phone', 'email'],
+        };
+        if (searchQuery) opts.search = searchQuery;
+        if (guaFilter) opts.filters.ming_gua = guaFilter;
+        if (houseAuditFilter) opts.filters.house_audit_status = houseAuditFilter;
+        if (typeFilter === 'VIP') opts.gte = { lifetime_value: 5000 };
+        else if (typeFilter === 'Agent Eligible') opts.filters.agent_eligible = true;
+        // Visibility scoping done server-side (not in the browser).
+        const _visible = await getVisibleUserIds(_currentUser);
+        if (_visible && _visible !== 'all' && Array.isArray(_visible)) {
+            opts.scopeFields = [
+                { field: 'responsible_agent_id', values: _visible },
+                { field: 'agent_id', values: _visible },
+            ];
         }
-        if (houseAuditFilter) {
-            const auditStatus = c.house_audit_status || 'None';
-            if (auditStatus !== houseAuditFilter) continue;
+        try {
+            const res = await AppDataStore.queryAdvanced('customers', opts);
+            pageCustomers = res.data || [];
+            totalCount = res.count || 0;
+            _usedServer = true;
+        } catch (e) {
+            console.warn('[customers] server pagination failed — falling back to client path', e);
         }
-        if (minEventsFilter > 0) {
-            const attendedCount = allEventRegs.filter(r => r.attendee_id === c.id).length;
-            if (attendedCount < minEventsFilter) continue;
-        }
-        filtered.push(c);
     }
 
-    // ── Client-side pagination ──
-    const totalCount = filtered.length;
-    const pageStart = _customerPage * _customerPageSize;
-    const pageCustomers = filtered.slice(pageStart, pageStart + _customerPageSize);
+    if (!_usedServer) {
+        // ── Legacy client path (full-table fetch + filter + slice) ──
+        const customers = await getVisibleCustomers();
+        let allEventRegs = [];
+        if (minEventsFilter > 0) allEventRegs = await AppDataStore.getAll('event_registrations');
+        let filtered = [];
+        for (const c of customers) {
+            if (searchQuery && !(
+                (c.full_name || '').toLowerCase().includes(searchQuery) ||
+                (c.nickname && c.nickname.toLowerCase().includes(searchQuery)) ||
+                (c.phone && c.phone.includes(searchQuery)) ||
+                (c.email && c.email.toLowerCase().includes(searchQuery))
+            )) continue;
+            if (guaFilter && c.ming_gua !== guaFilter) continue;
+            if (typeFilter === 'VIP' && (c.lifetime_value || 0) < 5000) continue;
+            if (typeFilter === 'Regular' && (c.lifetime_value || 0) >= 5000) continue;
+            if (typeFilter === 'Agent Eligible' && !(c.agent_eligible || c.is_agent_eligible)) continue;
+            if (deficiencyFilter) {
+                const needs = c.needs ? (Array.isArray(c.needs) ? c.needs : c.needs.split(',').map(t => t.trim())) : [];
+                if (!needs.includes(deficiencyFilter)) continue;
+            }
+            if (houseAuditFilter) {
+                const auditStatus = c.house_audit_status || 'None';
+                if (auditStatus !== houseAuditFilter) continue;
+            }
+            if (minEventsFilter > 0) {
+                const attendedCount = allEventRegs.filter(r => r.attendee_id === c.id).length;
+                if (attendedCount < minEventsFilter) continue;
+            }
+            filtered.push(c);
+        }
+        totalCount = filtered.length;
+        pageCustomers = filtered.slice(pageStart, pageStart + _customerPageSize);
+    }
 
     let html = '';
     for (const c of pageCustomers) {
@@ -477,10 +519,10 @@ const renderCustomersTable = async () => {
 
         html += `
             <tr onclick="app.showCustomerDetail(${c.id})">
-                <td data-label="Name"><strong>${c.full_name}</strong></td>
+                <td data-label="Name"><strong>${escapeHtml(c.full_name || '')}</strong></td>
                 <td data-label="Lifetime Value">RM ${(c.lifetime_value || 0).toLocaleString()} <span style="color:var(--success); font-size:12px;"><i class="fas fa-caret-up"></i></span></td>
-                <td data-label="Customer Since">${c.customer_since || '—'}</td>
-                <td data-label="Ming Gua">${c.ming_gua || '—'}</td>
+                <td data-label="Customer Since">${escapeHtml(c.customer_since || '—')}</td>
+                <td data-label="Ming Gua">${escapeHtml(c.ming_gua || '—')}</td>
                 <td data-label="Agent" onclick="event.stopPropagation()">${canReassignCust
                     ? `<select class="form-control" style="padding:2px 6px;font-size:12px;min-width:120px;border:1px solid var(--border);border-radius:4px;background:var(--surface);cursor:pointer;" onchange="app.quickReassign(${c.id}, this.value, 'customer')" title="Reassign agent">${(() => {
                         const cid = (c.responsible_agent_id || c.agent_id) ? String(c.responsible_agent_id || c.agent_id) : '';

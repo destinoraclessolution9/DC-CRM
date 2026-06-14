@@ -1,0 +1,28 @@
+{
+  "$comment": "Phase 4 (#14) — incremental TypeScript adoption. checkJs type-checks ONLY new/typed code (lib, types, tests, api) so tsc stays green while the legacy IIFE migrates view-by-view. Run: npx tsc --noEmit",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": true,
+    "noImplicitAny": false,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "types": []
+  },
+  "$comment_include": "Scoped to the typed surface. e2e specs are type-checked by Playwright's own runner (it provides @playwright/test + node types); contract tests run under node --test.",
+  "include": [
+    "types/**/*.d.ts",
+    "api/**/*.mjs"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "chunks",
+    "*.min.js"
+  ]
+}
