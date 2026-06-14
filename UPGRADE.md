@@ -24,6 +24,9 @@ Source: parallel 5-agent codebase audit → 40 ordered increments. The autonomou
 - [ ] **sp-batch-jobs-rpc** (L·med) — weekly inactivity (features2:248), AI lead-score (ai:621), churn (ai:1103), HuiJi migration (pipeline:520) load whole tables → set-based RPC/edge. `features2`,`ai`,`pipeline`,`data.js`
 - [ ] **sp-gcal-incremental** (M·med) — gcal:138 `getAll('activities')` → date-window/changed-since cursor. `chunks/script-gcal.js`,`data.js`
 
+**Extra broader-audit scale-swaps (beyond the 11, same eq/IN pattern + fallback):**
+- [x] **approval-entry linked-customer lookup** ✅ SW-27 — `approveQueueEntry` (prospects:925 + :943, new_customer/info_update + new_sale) `getAll('customers').find(converted_from_prospect_id==pid)` → `query('customers',{converted_from_prospect_id})` [0] + whole-table fallback (both sites). `node --check` + regression PASS.
+
 ### Phase 2 — React islands for EASY table/CRUD views (proven pattern + ?react=0 kill-switch)
 - [ ] **react-agents-list** (M·low) — Agents/Consultant list → island + `api/agents.mjs`
 - [ ] **react-purchases-history** (M·low, blockedBy sp-purchases-history-view) — → island + `api/purchases.mjs`

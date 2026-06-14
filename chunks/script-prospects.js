@@ -922,8 +922,17 @@ const approveQueueEntry = async (entryId) => {
     } else if (entry.approval_type === 'info_update') {
         const prospect = await AppDataStore.getById('prospects', entry.prospect_id);
         if (prospect?.status === 'converted') {
-            const customers = await AppDataStore.getAll('customers');
-            const customer = customers.find(c => c.converted_from_prospect_id == entry.prospect_id);
+            // Scale-safe: fetch only the customer linked to this prospect (eq
+            // converted_from_prospect_id) instead of the whole customers table.
+            // Falls back to the whole-table scan on error.
+            let customer;
+            try {
+                const linked = await AppDataStore.query('customers', { converted_from_prospect_id: entry.prospect_id });
+                customer = (linked || [])[0];
+            } catch (e) {
+                console.warn('approveQueueEntry: linked-customer query failed — full-table fallback', e);
+                customer = (await AppDataStore.getAll('customers')).find(c => c.converted_from_prospect_id == entry.prospect_id);
+            }
             if (customer) {
                 const syncable = ['title','full_name','nickname','gender','nationality','phone','email','ic_number','date_of_birth','lunar_birth','ming_gua','occupation','company_name','income_range','address','city','state','postal_code','referred_by','referred_by_id','referred_by_type','referral_relationship'];
                 const syncFields = {};
@@ -940,8 +949,17 @@ const approveQueueEntry = async (entryId) => {
     } else if (entry.approval_type === 'new_sale') {
         const prospect = await AppDataStore.getById('prospects', entry.prospect_id);
         if (prospect?.status === 'converted') {
-            const customers = await AppDataStore.getAll('customers');
-            const customer = customers.find(c => c.converted_from_prospect_id == entry.prospect_id);
+            // Scale-safe: fetch only the customer linked to this prospect (eq
+            // converted_from_prospect_id) instead of the whole customers table.
+            // Falls back to the whole-table scan on error.
+            let customer;
+            try {
+                const linked = await AppDataStore.query('customers', { converted_from_prospect_id: entry.prospect_id });
+                customer = (linked || [])[0];
+            } catch (e) {
+                console.warn('approveQueueEntry: linked-customer query failed — full-table fallback', e);
+                customer = (await AppDataStore.getAll('customers')).find(c => c.converted_from_prospect_id == entry.prospect_id);
+            }
             if (customer) {
                 const cr = entry.snapshot_after;
                 const amt = parseFloat(cr.sale_amount) || 0;
