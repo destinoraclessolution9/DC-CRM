@@ -2293,6 +2293,26 @@ class DataStore {
         return { data: (row && row.rows) || [], count: Number(row && row.total) || 0 };
     }
 
+    // ── Import duplicate-preview existence check ──────────────────────────
+    // Returns only the existing rows whose normalized phone/email/ic matches a
+    // key present in the import file — instead of getAll(table) downloading the
+    // whole contact table to dedup against. Normalization is done server-side
+    // identically to the client (import_existing_matches RPC,
+    // migrations/import_existing_matches_2026-06-14.sql). Throws on no-session /
+    // RPC error so runDuplicateCheck falls back to the legacy whole-table path.
+    // `table` is whitelisted server-side to prospects|customers.
+    async importExistingMatches(table, { phones = [], emails = [], ics = [] } = {}) {
+        if (!this.hasLiveSession()) throw new Error('no live auth session — importExistingMatches fallback');
+        const { data, error } = await this._readClient().rpc('import_existing_matches', {
+            p_table:  table,
+            p_phones: phones,
+            p_emails: emails,
+            p_ics:    ics,
+        });
+        if (error) throw error;
+        return data || [];
+    }
+
     // Bulk delete — runs all deletes in parallel instead of one-by-one
     async deleteMany(tableName, ids) {
         if (!ids || ids.length === 0) return;

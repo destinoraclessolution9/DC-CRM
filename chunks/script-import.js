@@ -605,11 +605,12 @@ const runDuplicateCheck = async () => {
     const importType = _importData.importType;
     const isMarketingType = ['products', 'events', 'promotions'].includes(importType);
     const table = { customers: 'customers', prospects: 'prospects', products: 'products', events: 'events', promotions: 'promotions' }[importType] || 'prospects';
-    let existing = [];
-    try { existing = await AppDataStore.getAll(table); } catch (e) { existing = []; }
-
     if (isMarketingType) {
-        // Duplicate check by name for marketing list types
+        // Duplicate check by name for marketing list types. These are small
+        // reference tables (products/events/promotions) — a whole-table fetch
+        // is cheap, so they stay on the legacy getAll path.
+        let existing = [];
+        try { existing = await AppDataStore.getAll(table); } catch (e) { existing = []; }
         const nameField = importType === 'products' ? 'name' : importType === 'events' ? 'title' : 'package_name';
         const nameCol = reverseMap[nameField];
         const existingNames = new Map();
@@ -636,11 +637,48 @@ const runDuplicateCheck = async () => {
     const existingPhones = new Map();
     const existingEmails = new Map();
     const existingIcs    = new Map();
-    existing.forEach(rec => {
-        if (rec.phone)     existingPhones.set(normalisePhone(rec.phone), rec);
-        if (rec.email)     existingEmails.set((rec.email || '').toLowerCase().trim(), rec);
-        if (rec.ic_number) existingIcs.set((rec.ic_number || '').replace(/[-\s]/g, ''), rec);
-    });
+
+    // ── PHASE 1 (#12): server-side existence check (flagged, default OFF) ──
+    // Instead of getAll(table) (download the WHOLE contact table to dedup the
+    // import file), ask the server for only the existing rows whose normalized
+    // phone/email/ic matches a key present in this import file. A duplicate
+    // requires key equality, so existing rows with no key in the import set can
+    // never match — the candidate set is identical, the payload is just the
+    // real matches. Normalization runs server-side identically (the
+    // import_existing_matches RPC). Any guard/RPC error falls back to the
+    // whole-table path below, so the flag-off behavior is byte-identical.
+    let _builtServerSide = false;
+    if (window.__SERVER_TABLES) {
+        try {
+            const phoneSet = new Set(), emailSet = new Set(), icSet = new Set();
+            _importData.validationResults.forEach(vr => {
+                if (vr.status === 'error') return;
+                if (phoneCol !== undefined) { const p = normalisePhone(vr.row[phoneCol]); if (p) phoneSet.add(p); }
+                if (emailCol !== undefined) { const e = (vr.row[emailCol] || '').toString().toLowerCase().trim(); if (e) emailSet.add(e); }
+                if (icCol    !== undefined) { const ic = (vr.row[icCol] || '').toString().replace(/[-\s]/g, ''); if (ic) icSet.add(ic); }
+            });
+            const matches = await AppDataStore.importExistingMatches(table, {
+                phones: [...phoneSet], emails: [...emailSet], ics: [...icSet],
+            });
+            matches.forEach(rec => {
+                if (rec.norm_phone) existingPhones.set(rec.norm_phone, rec);
+                if (rec.norm_email) existingEmails.set(rec.norm_email, rec);
+                if (rec.norm_ic)    existingIcs.set(rec.norm_ic, rec);
+            });
+            _builtServerSide = true;
+        } catch (e) {
+            console.warn('[runDuplicateCheck] server existence check → whole-table fallback:', e?.message || e);
+        }
+    }
+    if (!_builtServerSide) {
+        let existing = [];
+        try { existing = await AppDataStore.getAll(table); } catch (e) { existing = []; }
+        existing.forEach(rec => {
+            if (rec.phone)     existingPhones.set(normalisePhone(rec.phone), rec);
+            if (rec.email)     existingEmails.set((rec.email || '').toLowerCase().trim(), rec);
+            if (rec.ic_number) existingIcs.set((rec.ic_number || '').replace(/[-\s]/g, ''), rec);
+        });
+    }
 
     let byPhone = 0, byEmail = 0, byIc = 0;
     const dupList = [];
