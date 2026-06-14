@@ -494,18 +494,46 @@
         }
     };
 
+    // Fast path for the four headcounts that otherwise scan getAll('activities')
+    // (+ event_attendees / users) client-side on every render: activityHeadcount,
+    // meetUpExistingCount, cfHeadcount, activeAgents. One kpi_extended_summary RPC
+    // returns all four (verified parity incl. entity-resolution + the 60-day
+    // active-agents window). Returns null on any error → individual getters run.
+    const _tryExtendedKpiRPC = async (from, to) => {
+        if (!window.supabase || !window.supabase.rpc) return null;
+        try {
+            const agentIds = (_visibleUserIds === 'all' || !Array.isArray(_visibleUserIds))
+                ? null
+                : _visibleUserIds.map(v => Number(v)).filter(n => Number.isFinite(n));
+            const role = (!_currentRoleFilter || _currentRoleFilter === 'All') ? null : _currentRoleFilter;
+            const { data, error } = await window.supabase.rpc('kpi_extended_summary', {
+                p_from: from, p_to: to, p_agent_ids: agentIds, p_role: role
+            });
+            if (error || !data) return null;
+            return {
+                activityHeadcount:   Number(data.activity_headcount) || 0,
+                meetUpExistingCount: Number(data.meet_up_existing)   || 0,
+                cfHeadcount:         Number(data.cf_headcount)       || 0,
+                activeAgents:        Number(data.active_agents)      || 0,
+            };
+        } catch (_) {
+            return null;
+        }
+    };
+
     const calculateKPIs = async (from, to) => {
-        // activityHeadcount and conversionRate involve joins through
-        // event_attendees → activities → prospects/customers and
-        // prospects → customers respectively, with role-scope filtering
-        // that's awkward to express in a single RPC. Keep them client-side
-        // for now (they're cached by AppDataStore so the cost is bounded).
+        // The four headcounts below run server-side via _tryExtendedKpiRPC when
+        // available (one kpi_extended_summary call), falling back to the
+        // per-metric client getters on any error. conversionRate has its own
+        // RPC fast path inside getConversionRate. getActiveAgents uses a rolling
+        // 60-day window (ignores from/to) — the RPC replicates that exactly.
+        const _ext = await _tryExtendedKpiRPC(from, to);
         const [activityHeadcount, conversionRate, meetUpExistingCount, cfHeadcount, activeAgents] = await Promise.all([
-            getActivityHeadcount(from, to),
+            _ext ? _ext.activityHeadcount   : getActivityHeadcount(from, to),
             getConversionRate(from, to),
-            getMeetUpExistingCustomerCount(from, to),
-            getCFHeadcount(from, to),
-            getActiveAgents(),
+            _ext ? _ext.meetUpExistingCount : getMeetUpExistingCustomerCount(from, to),
+            _ext ? _ext.cfHeadcount         : getCFHeadcount(from, to),
+            _ext ? _ext.activeAgents        : getActiveAgents(),
         ]);
 
         // Fast path: try server-side aggregates first.
