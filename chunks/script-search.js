@@ -1361,7 +1361,42 @@ const performActivitySearch = async (filters) => {
 };
 
 const performTransactionSearch = async (filters) => {
-    let items = await AppDataStore.getAll('purchases');
+    // Scale-safe SOURCE: push the provably-equivalent predicates to Supabase so we
+    // fetch only matching purchases instead of the whole table:
+    //   • payment_method / status — exact eq (== the client === checks below)
+    //   • product — ilike %term% (== the client case-insensitive .includes below)
+    //   • date range — WIDENED ±1 day so the server result is ALWAYS a superset of
+    //     what the client date filter keeps (guards against date/tz boundary parity).
+    // EVERY original client filter below still runs on the result, so the returned
+    // set is identical. If the matched set exceeds the fetch cap (or anything errors)
+    // we fall back to the exact legacy whole-table scan for completeness.
+    const FETCH_CAP = 10000;
+    const _ymdShift = (ymd, days) => {
+        try {
+            const [y, m, d] = String(ymd).split('-').map(Number);
+            if (!y || !m || !d) return null;
+            return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+        } catch (_) { return null; }
+    };
+    let items;
+    try {
+        const opts = { sort: 'id', sortDir: 'asc', countMode: null, limit: FETCH_CAP + 1, offset: 0, filters: {}, gte: {}, lte: {} };
+        if (filters.basic.payment) opts.filters.payment_method = filters.basic.payment;
+        if (filters.basic.status)  opts.filters.status = filters.basic.status;
+        if (filters.basic.product) { opts.search = filters.basic.product; opts.searchFields = ['item']; }
+        if (filters.dateRange.from) { const w = _ymdShift(filters.dateRange.from, -1); if (w) opts.gte.date = w; }
+        if (filters.dateRange.to)   { const w = _ymdShift(filters.dateRange.to, 1);    if (w) opts.lte.date = w; }
+        const res = await AppDataStore.queryAdvanced('purchases', opts);
+        const data = (res && Array.isArray(res.data)) ? res.data : null;
+        if (data && data.length <= FETCH_CAP) {
+            items = data;
+        } else {
+            throw new Error('matched purchases exceed fetch cap — full scan for completeness');
+        }
+    } catch (e) {
+        console.warn('performTransactionSearch: server filter unavailable — full-table fallback', e);
+        items = await AppDataStore.getAll('purchases');
+    }
 
     if (filters.basic.product) {
         const q = filters.basic.product.toLowerCase();
