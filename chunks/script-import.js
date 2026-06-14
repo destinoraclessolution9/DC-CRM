@@ -1124,17 +1124,36 @@ const cascadeProspectReassign = async (prospectId, toAgentId, opts = {}) => {
     let activitiesToTransfer = [];
     const cascadeActivitiesAfter = opts.cascadeActivitiesAfter ?? null;
     if (cascadeActivitiesAfter) {
-        const allActs = await AppDataStore.getAll('activities');
         const cutoffMs = new Date(cascadeActivitiesAfter).getTime();
         const linkedCustomerIds = new Set(linkedCustomers.map(c => String(c.id)));
-        activitiesToTransfer = (allActs || []).filter(a => {
+        const _matchesCascade = (a) => {
             const matchesEntity = String(a.prospect_id) === String(pid)
                 || (a.customer_id && linkedCustomerIds.has(String(a.customer_id)));
             if (!matchesEntity) return false;
             if (fromAgentId != null && String(a.lead_agent_id) !== String(fromAgentId)) return false;
             if (!a.activity_date) return false;
             return new Date(a.activity_date).getTime() >= cutoffMs;
-        });
+        };
+        // Scale-safe: fetch only activities for THIS prospect + its linked customers
+        // (server OR on prospect_id / customer_id, + lead_agent_id eq when known)
+        // instead of the whole activities table; the exact client filter (incl. the
+        // date cutoff) is reapplied for parity. >cap or any error → full-table scan.
+        const CASCADE_CAP = 10000;
+        let acts = null;
+        try {
+            const scopeFields = [{ field: 'prospect_id', values: [pid] }];
+            if (linkedCustomerIds.size) scopeFields.push({ field: 'customer_id', values: [...linkedCustomerIds] });
+            const opt = { scopeFields, limit: CASCADE_CAP + 1, offset: 0, countMode: null, sort: 'id', sortDir: 'asc' };
+            if (fromAgentId != null) opt.filters = { lead_agent_id: fromAgentId };
+            const res = await AppDataStore.queryAdvanced('activities', opt);
+            const data = (res && Array.isArray(res.data)) ? res.data : null;
+            if (data && data.length <= CASCADE_CAP) acts = data;
+            else throw new Error('cascade activity set exceeds cap — full scan for completeness');
+        } catch (e) {
+            console.warn('cascadeProspectReassign: scoped activity query unavailable — full-table fallback', e);
+            acts = await AppDataStore.getAll('activities');
+        }
+        activitiesToTransfer = (acts || []).filter(_matchesCascade);
     }
 
     const now = new Date().toISOString();
