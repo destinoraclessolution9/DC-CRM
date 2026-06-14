@@ -3386,10 +3386,25 @@
             const resultsDiv = document.getElementById('prospect-referrer-results');
             if (!term || term.length < 1) { if (resultsDiv) resultsDiv.style.display = 'none'; return; }
 
-            const allProspects = (await AppDataStore.getAll('prospects')).filter(p => !p.status || p.status === 'active');
+            // Scale-safe: server-side trigram/ilike search for matching prospects
+            // (full_name/nickname/phone/email) instead of downloading the WHOLE
+            // prospects table on every keystroke. Reapply the EXACT original client
+            // filters (active status + name/nickname contains) so the result set is
+            // identical, then take 5. Falls back to the whole-table scan on error.
+            let matchedProspects;
+            try {
+                const sr = await AppDataStore.searchProspects(term, { includeDormant: true, limit: 100 });
+                const rows = Array.isArray(sr) ? sr : ((sr && sr.data) || []);
+                matchedProspects = rows
+                    .filter(p => (!p.status || p.status === 'active') &&
+                                 (p.full_name?.toLowerCase().includes(term) || p.nickname?.toLowerCase().includes(term)))
+                    .slice(0, 5);
+            } catch (e) {
+                console.warn('searchProspectReferrers: server search unavailable — whole-table fallback', e);
+                const allProspects = (await AppDataStore.getAll('prospects')).filter(p => !p.status || p.status === 'active');
+                matchedProspects = allProspects.filter(p => p.full_name?.toLowerCase().includes(term) || p.nickname?.toLowerCase().includes(term)).slice(0, 5);
+            }
             const allUsers = (await AppDataStore.getAll('users')).filter(u => getUserLevel(u) >= 3);
-
-            const matchedProspects = allProspects.filter(p => p.full_name?.toLowerCase().includes(term) || p.nickname?.toLowerCase().includes(term)).slice(0, 5);
             const matchedConsultants = allUsers.filter(u => u.full_name?.toLowerCase().includes(term)).slice(0, 5);
 
             let html = '';
