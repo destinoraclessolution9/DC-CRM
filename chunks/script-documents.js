@@ -22,16 +22,16 @@
     let _fileFilter = '';
     let _draggedFileId = null;
 
-    // React-island flag (default-on) for the Document Management shell.
-    // Kill-switch → legacy: window.__REACT_DMS===false, ?react=0, crm_react_off='1'.
-    const _reactDocumentsOn = () => {
-        try {
-            if (window.__REACT_DMS === false) return false;
-            if (/[?&]react=0/.test(location.search)) return false;
-            if (localStorage.getItem('crm_react_off') === '1') return false;
-            return !!(window.CRMReact && typeof window.CRMReact.mountDocuments === 'function');
-        } catch (_) { return false; }
-    };
+    // React-island flag for the Document Management shell.
+    // DISABLED 2026-06-16 (forced legacy): the scaffold-shell rAF-populate did NOT
+    // reliably run renderFolderTree()/loadFolderContents() on mount — live folder
+    // tree + file container came up EMPTY (manual app.refreshFolderTree() works, so
+    // the chunk fns are fine; the on-mount trigger is the problem). Also surfaced a
+    // pre-existing latent bug `getFileIcon is not defined` in renderFileListView
+    // (fires when files render; affects legacy too). DEFER documents until both are
+    // fixed + interactively verified (drive populate from the island via useEffect,
+    // not an rAF in the chunk). Island code kept (unused) for that follow-up.
+    const _reactDocumentsOn = () => false;
 
     const showDocumentManagementView = async (container) => {
         // React scaffold-shell — island renders the static shell; the chunk then
