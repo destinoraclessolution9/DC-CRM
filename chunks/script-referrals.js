@@ -37,16 +37,16 @@
 
     // ========== PHASE 7: REFERRALS MODULE IMPLEMENTATION (VERTICAL LAYOUT) ==========
 
-    // React-island flag — OPT-IN during verification (NOT default-on). Enable:
-    // window.__REACT_REFERRALS=true | ?react_referrals=1 | localStorage crm_react_referrals='1'.
+    // React-island flag (default-on, PROMOTED 2026-06-16 after opt-in verify:
+    // parity-identical to legacy — summary 1398 / leaderboard 29606 / D3 tree svg
+    // path identical, by-id fills work on the React-rendered containers).
+    // Kill-switch → legacy: window.__REACT_REFERRALS===false, ?react=0, crm_react_off='1'.
     const _reactReferralsOn = () => {
         try {
+            if (window.__REACT_REFERRALS === false) return false;
             if (/[?&]react=0/.test(location.search)) return false;
             if (localStorage.getItem('crm_react_off') === '1') return false;
-            if (!(window.CRMReact && typeof window.CRMReact.mountReferrals === 'function')) return false;
-            return window.__REACT_REFERRALS === true
-                || /[?&]react_referrals=1/.test(location.search)
-                || localStorage.getItem('crm_react_referrals') === '1';
+            return !!(window.CRMReact && typeof window.CRMReact.mountReferrals === 'function');
         } catch (_) { return false; }
     };
 
