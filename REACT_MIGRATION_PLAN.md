@@ -22,7 +22,9 @@ Path to **D** (god-object retirement / Vite build ownership / module extraction)
 
 ### ▶️ LOOP RESUMED 2026-06-16 — user said "keep going" (proceed unattended, kill-switch = safety net)
 Strategy: count-verifiable views (full island) first; genuinely-interactive views via SCAFFOLD-SHELL (island static shell w/ stable ids + inline app.* handlers, chunk keeps ALL interactivity unchanged → byte-identical behavior). calendar/referrals LAST.
-NEXT = documents RETRY (useEffect-driven populate + OPT-IN-first deploy, see incident below).
+NEXT = stock_take (scaffold-shell + useEffect populate + opt-in-first; 9-tab shell, chunk renders tab content + owns QR/reconciliation). Then search/reports/pipeline likewise. calendar/referrals last.
+
+- [x] documents (#39) — SW-59, 2026-06-16, PROMOTED default-on after opt-in verify. Scaffold-shell: island renders shell, useEffect onReady → chunk renderFolderTree()+loadFolderContents() (drag-drop/tree/files unchanged). Fixed latent getFileIcon/formatFileSize/getFileExtension ReferenceErrors (aliased from _crmUtils / defined locally) — benefited legacy too. Recovered from the SW-56 incident via: useEffect (not chunk rAF) + opt-in→verify→promote.
 
 ⚠️ INCIDENT 2026-06-16 (documents SW-56 → rolled back SW-57): scaffold-shell shipped default-on but the chunk-side rAF populate did NOT reliably run renderFolderTree()/loadFolderContents() → live folder tree + file area came up EMPTY for ~1 deploy cycle. Caught by the folderItems count check; rolled back (_reactDocumentsOn()→false). LESSONS:
   1. Scaffold-shell populate MUST be driven from the island's useEffect (runs after React commit), NOT a chunk-side requestAnimationFrame. Pass onReady via opts; component calls it in useEffect(()=>{onReady()},[]).
