@@ -983,7 +983,7 @@ const appLogic = (() => {
         // activities table, then apply the SAME checker for exact parity — the
         // superset provably covers every activity canView passes. Any error / flag
         // off → exact legacy whole-table path below.
-        if (_serverVisExtOn() && user) {
+        if (_serverVisibilityOn() && window.__SERVER_VIS_ACT !== false && user) {
             try {
                 const visibleIds = await getVisibleUserIds(user);
                 const sel = AppDataStore._selectClauseForGetAll('activities');
