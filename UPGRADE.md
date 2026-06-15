@@ -6,7 +6,11 @@ This is a multi-session program. Each phase ships behind a flag and is independe
 
 ---
 
-## ✅ STATUS 2026-06-15 (SW-32): scaling COMPLETE + #1/#2 done + LIVE-VERIFIED via `@go`
+## ✅ STATUS 2026-06-15 (SW-34): scaling COMPLETE + #1/#2 + B/C done + LIVE-VERIFIED
+
+**B/C/D pass (SW-33/34, both LIVE-VERIFIED in admin browser):** **C** — admin console noise FIXED (`monitorLoginAttempts` JSON.parse guard + Array guard; `checkForSecurityIncidents` try/catch — both ran without throwing). **B5** — Refer-a-Friend `<select>` of all prospects → **type-to-search** (`searchProspects` + hidden id; last whole-table read in that flow; verified search→2 results→select→hidden id set). **Remaining:** B3 dup-block + **B4 getVisibleReferrals/Activities need a DB function** (B4 = core calendar/referral authz, high blast-radius — NOT hand-rolled without an RPC + parity test); **D (god-object retire / Vite build ownership / module extraction) is GATED on the React migration (#4, PAUSED)** — can't precede it. test-DB (#3) still user-gated. So B/C/D's *unblocked* parts are DONE; the rest hits the same DB-function / React-migration walls as A.
+
+
 ~16 increments shipped live (SW-17→SW-32): all hot-path whole-table reads fixed, permission-scoping (#1) ON + verified, lookups (#2) done. **`@go crm "make sure no bug"` verification (admin browser session):** app healthy (real data renders, React island `ready`, reads OK, "LIVE" indicator green); the React `defineProperty:null` errors were STALE console history (live = es2022 `?v=-15`, no current crash). **Found + fixed one real bug — a stuck FALSE "offline mode" banner** (set on a transient cold-boot/SW blip; never cleared once reads shifted to query/queryAdvanced/queryPaged/BFF): SW-31 clears it on any successful server read (live-verified), SW-32 adds a 4s self-healing poll for BFF/RPC-only screens. **Banner confirmed gone; screen clean.** Pre-existing admin-only console noise remains (`checkForSecurityIncidents`/`monitorLoginAttempts` — non-fatal, not user-facing) — optional future cleanup. React UI migration (#4) still PAUSED per user; test-DB (#3) still user-gated.
 
 ### NEEDS USER (to resume the remaining work)
