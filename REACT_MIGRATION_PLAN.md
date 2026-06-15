@@ -15,7 +15,8 @@ Path to **D** (god-object retirement / Vite build ownership / module extraction)
 - [x] protection (#35) — SW-53, 2026-06-16, render-only island (chunk computes 4 model arrays); parity-identical (2 teams / 20 agents / 410 inactive / 9 reassign all match) + XSS-escaped
 - [~] documents (#39) — script-documents.js (957L) — DEFERRED (interactive: recursive folder tree + per-element drag-drop file moves + list/grid toggle + versioning; drag-drop correctness not validatable by count-parity → do when user present for interactive verification)
 - [~] journey (#33) — RE-CLASSIFIED: NOT a standalone screen. = renderJourneyTab (embedded timeline inside prospect/customer detail accordions, heavy touchpoint mutations) + showAgentJourneyDashboard/showAgentJourneyLoad (small dashboard widgets). Defer with the modal/embedded-component batch; do standalone screens first.
-- [ ] monthly_promotion (#44-ish) — script-marketing.js showMonthlyPromotionView L997 ← NEXT (clean read-only promo-card display; zero mutations; XSS-hardening)
+- [x] monthly_promotion (view 'promotions') — SW-54, 2026-06-16, clean read-only promo-card island; parity-identical (live empty-state) + synthetic populated/XSS/both-empty-variants verified
+- [ ] home (#24) — main dashboard ← NEXT (assess: likely composite read-render; defer if it embeds interactive widgets like journey)
 - [~] ai (#30) — RE-CLASSIFIED: rendered via UI.showModal(...'fullscreen'), it's a MODAL not a navigable view (+ hardcoded placeholder data + custom chart) → defer to modal batch
 - [ ] stock_take (#37) — script-stock-take.js (1888L), 9 tabs/QR/reconciliation
 - [ ] egg_purchasing (#40) — script-egg.js (1963L) wizard
