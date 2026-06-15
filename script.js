@@ -750,6 +750,12 @@ const appLogic = (() => {
         return true;
     };
 
+    // Staging gate for the EXTENDED visibility scoping (referrals + activities).
+    // Honors the master kill-switch above, but defaults OFF until each is parity-
+    // verified against live data, then flipped on. Force-on for verification with
+    // window.__SERVER_VIS_EXT = true.
+    const _serverVisExtOn = () => _serverVisibilityOn() && window.__SERVER_VIS_EXT === true;
+
     // Get all prospects visible to current user
     const getVisibleProspects = async () => {
         const user = _currentUser;
@@ -834,40 +840,55 @@ const appLogic = (() => {
     //   - referrer is a customer/prospect -> its responsible_agent_id
     //   - referred_prospect's responsible_agent_id
     const getVisibleReferrals = async () => {
-        const all = await AppDataStore.getAll('referrals');
         const user = _currentUser;
         if (!user) return [];
         const visibleIds = await getVisibleUserIds(user);
-        if (visibleIds === 'all') return all;
+        if (visibleIds === 'all') return await AppDataStore.getAll('referrals');
         const visibleSet = new Set(visibleIds.map(String));
+        const _ownerAgentOf = (id, type, prospectMap, customerMap) => {
+            if (!id) return null;
+            if (type === 'user') return String(id);
+            if (type === 'customer') { const c = customerMap.get(String(id)); return c?.responsible_agent_id != null ? String(c.responsible_agent_id) : null; }
+            const p = prospectMap.get(String(id));
+            return p?.responsible_agent_id != null ? String(p.responsible_agent_id) : null;
+        };
+        const _filterRefs = (rows, prospectMap, customerMap) => (rows || []).filter(r => {
+            const ro = _ownerAgentOf(r.referrer_id, r.referrer_type || 'prospect', prospectMap, customerMap);
+            if (ro && visibleSet.has(ro)) return true;
+            const rdo = _ownerAgentOf(r.referred_prospect_id, 'prospect', prospectMap, customerMap);
+            if (rdo && visibleSet.has(rdo)) return true;
+            return false;
+        });
 
-        // Prefetch lookup maps so we don't re-query per referral
+        // Scale-safe (flag-gated, staging): fetch only the VISIBLE prospects/customers
+        // + only referrals that touch a visible entity id, instead of the whole
+        // referrals + prospects + customers tables. Maps built from the visible
+        // entities make _filterRefs exactly equivalent to the legacy full-map filter
+        // (a referral via a non-visible entity's owner is never in visibleSet either
+        // way). Any error / flag off → exact legacy whole-table path below.
+        if (_serverVisibilityOn() && window.__SERVER_VIS_REF !== false && Array.isArray(visibleIds) && visibleIds.length) {
+            try {
+                const [visProspects, visCustomers] = await Promise.all([getVisibleProspects(), getVisibleCustomers()]);
+                const prospectMap = new Map((visProspects || []).map(p => [String(p.id), p]));
+                const customerMap = new Map((visCustomers || []).map(c => [String(c.id), c]));
+                const unionIds = [...new Set([...visibleIds.map(String), ...prospectMap.keys(), ...customerMap.keys()])];
+                const prospectIds = [...prospectMap.keys()];
+                const scopeFields = [{ field: 'referrer_id', values: unionIds }];
+                if (prospectIds.length) scopeFields.push({ field: 'referred_prospect_id', values: prospectIds });
+                const res = await AppDataStore.queryAdvanced('referrals', { scopeFields, limit: 100000, countMode: null });
+                if (res && Array.isArray(res.data)) return _filterRefs(res.data, prospectMap, customerMap);
+            } catch (e) {
+                console.warn('getVisibleReferrals: server-scope failed — full-table fallback', e);
+            }
+        }
+
+        // Legacy exact path — whole tables.
+        const all = await AppDataStore.getAll('referrals');
         const [allProspects, allCustomers] = await Promise.all([
             AppDataStore.getAll('prospects'),
             AppDataStore.getAll('customers')
         ]);
-        const prospectMap = new Map(allProspects.map(p => [String(p.id), p]));
-        const customerMap = new Map(allCustomers.map(c => [String(c.id), c]));
-
-        const ownerAgentOf = (id, type) => {
-            if (!id) return null;
-            if (type === 'user') return String(id);
-            if (type === 'customer') {
-                const c = customerMap.get(String(id));
-                return c?.responsible_agent_id != null ? String(c.responsible_agent_id) : null;
-            }
-            // default prospect
-            const p = prospectMap.get(String(id));
-            return p?.responsible_agent_id != null ? String(p.responsible_agent_id) : null;
-        };
-
-        return all.filter(r => {
-            const referrerOwner = ownerAgentOf(r.referrer_id, r.referrer_type || 'prospect');
-            if (referrerOwner && visibleSet.has(referrerOwner)) return true;
-            const referredOwner = ownerAgentOf(r.referred_prospect_id, 'prospect');
-            if (referredOwner && visibleSet.has(referredOwner)) return true;
-            return false;
-        });
+        return _filterRefs(all, new Map(allProspects.map(p => [String(p.id), p])), new Map(allCustomers.map(c => [String(c.id), c])));
     };
     // Export so lazy chunks (script-referrals.js) can call it cross-chunk.
     Object.assign(window._crmUtils, { getVisibleReferrals: () => getVisibleReferrals() });
