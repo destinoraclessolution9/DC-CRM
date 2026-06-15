@@ -8273,9 +8273,22 @@ const renderAgentsTable = async () => {
         if (reactRoot) {
             try {
                 const _curLvlR = _currentUser?.role?.match(/Level\s+(\d+)/i);
+                // Per-agent count + stats maps from the SAME warm getAll the legacy
+                // path below uses (byte-identical loops) — passed as props so the
+                // island never re-fetches them (React Query paused these as offline).
+                const [_allP, _allC, _allS] = await Promise.all([
+                    AppDataStore.getAll('prospects'),
+                    AppDataStore.getAll('customers'),
+                    AppDataStore.getAll('agent_stats'),
+                ]);
+                const _pcm = {}, _ccm = {}, _sba = {};
+                for (const _p of _allP) { const _aid = String(_p.responsible_agent_id); _pcm[_aid] = (_pcm[_aid] || 0) + 1; }
+                for (const _c of _allC) { const _aid = String(_c.responsible_agent_id || _c.agent_id); if (_aid) _ccm[_aid] = (_ccm[_aid] || 0) + 1; }
+                for (const _s of _allS) { _sba[String(_s.agent_id)] = _s; }
                 _showAgentsReactRoot(true);
                 window.CRMReact.mountAgentsTable(reactRoot, {
                     agents,
+                    counts: { prospectCountMap: _pcm, customerCountMap: _ccm, statsByAgentId: _sba },
                     filters: {
                         search: document.getElementById('agent-search')?.value.toLowerCase() || '',
                         team:   document.getElementById('filter-agent-team')?.value || '',

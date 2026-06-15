@@ -9,7 +9,13 @@
 // exported for the legacy inline-onclick template). Mounted by the chunk behind
 // the opt-in flag __REACT_AGENTS with the legacy table as fallback — so normal
 // users are untouched until this path is promoted to default.
-import { useAgentStats } from '../data/useAgentStats.js';
+//
+// Counts note: the per-agent prospect/customer/stats maps are computed in the
+// chunk (renderAgentsTable) from the SAME warm AppDataStore.getAll the legacy
+// table uses, and passed in as `counts`. We deliberately do NOT wrap that in
+// React Query here — it's a derived aggregate, and a mount-time RQ query paused
+// as "offline" (never ran) leaving counts at 0. Reading warm data via props is
+// simpler and guarantees parity with the legacy table.
 
 const app = () => window.app || {};
 const stop = (e) => e.stopPropagation();
@@ -50,11 +56,10 @@ function Row({ agent, prospectCount, customerCount, stats, canAssignUpline }) {
     );
 }
 
-export function AgentsTable({ agents = [], filters = {}, meta = {} }) {
-    const { data, isLoading, isError } = useAgentStats();
-    const prospectCountMap = (data && data.prospectCountMap) || {};
-    const customerCountMap = (data && data.customerCountMap) || {};
-    const statsByAgentId = (data && data.statsByAgentId) || {};
+export function AgentsTable({ agents = [], counts = {}, filters = {}, meta = {} }) {
+    const prospectCountMap = counts.prospectCountMap || {};
+    const customerCountMap = counts.customerCountMap || {};
+    const statsByAgentId = counts.statsByAgentId || {};
 
     const search = (filters.search || '').toLowerCase();
     const team = filters.team || '';
@@ -75,9 +80,8 @@ export function AgentsTable({ agents = [], filters = {}, meta = {} }) {
     });
 
     // Live-verification markers (mirror the Customers island convention).
-    if (isLoading && !data) window.__REACT_AGENTS_STATE = 'loading';
-    else if (isError) window.__REACT_AGENTS_STATE = 'error';
-    else { window.__REACT_AGENTS_STATE = 'ready'; window.__REACT_AGENTS_ROWS = visible.length; }
+    window.__REACT_AGENTS_STATE = 'ready';
+    window.__REACT_AGENTS_ROWS = visible.length;
 
     let body;
     if (visible.length === 0) {

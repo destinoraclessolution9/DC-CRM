@@ -153,6 +153,7 @@ function mountAgentsTable(container, opts) {
             <AgentsTable
                 key={key}
                 agents={o.agents || []}
+                counts={o.counts || {}}
                 filters={f}
                 meta={o.meta || { canAssignUpline: false }}
             />
