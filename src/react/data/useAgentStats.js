@@ -41,5 +41,11 @@ export function useAgentStats() {
         queryFn: fetchAgentStats,
         staleTime: 30_000,
         retry: 1,
+        // networkMode 'always': the queryFn reads AppDataStore (local-first cache +
+        // its own offline handling), NOT raw network — so it must run regardless of
+        // React Query's online belief. Without this, a query created during a cold
+        // load (before RQ's onlineManager settles) pauses as "offline" and never
+        // resumes (no online transition event fires), leaving counts stuck at 0.
+        networkMode: 'always',
     });
 }
