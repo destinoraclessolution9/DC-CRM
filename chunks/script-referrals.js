@@ -37,8 +37,36 @@
 
     // ========== PHASE 7: REFERRALS MODULE IMPLEMENTATION (VERTICAL LAYOUT) ==========
 
+    // React-island flag — OPT-IN during verification (NOT default-on). Enable:
+    // window.__REACT_REFERRALS=true | ?react_referrals=1 | localStorage crm_react_referrals='1'.
+    const _reactReferralsOn = () => {
+        try {
+            if (/[?&]react=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            if (!(window.CRMReact && typeof window.CRMReact.mountReferrals === 'function')) return false;
+            return window.__REACT_REFERRALS === true
+                || /[?&]react_referrals=1/.test(location.search)
+                || localStorage.getItem('crm_react_referrals') === '1';
+        } catch (_) { return false; }
+    };
+
     const showReferralsView = async (container) => {
         _state.cv = 'referrals';
+        // React scaffold-shell — island renders shell; the style-inject + summary/
+        // leaderboard + D3 tree fills below populate by id after awaiting island
+        // useEffect-ready (rAF-too-early lesson). D3/search/filters stay in chunk.
+        if (_reactReferralsOn()) {
+            container.innerHTML = '<div id="ref-react-root"></div>';
+            let _refReady; const _refReadyP = new Promise(res => { _refReady = res; });
+            const _refGuard = setTimeout(() => _refReady(), 4000);
+            try {
+                window.CRMReact.mountReferrals(document.getElementById('ref-react-root'), { onReady: () => { clearTimeout(_refGuard); _refReady(); } });
+            } catch (e) {
+                console.warn('[referrals] island mount failed, falling back to legacy:', e && e.message);
+                clearTimeout(_refGuard); _refReady();
+            }
+            await _refReadyP;
+        } else {
         container.innerHTML = `
             <div class="referrals-view-v2">
                 <div class="ref-v2-header">
@@ -106,6 +134,7 @@
                 </div>
             </div>
         `;
+        }
 
         // Inject Styles if not already present
         if (!document.getElementById('referral-styles-v2')) {

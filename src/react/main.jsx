@@ -40,6 +40,7 @@ import { ReportsView } from './views/ReportsView.jsx';
 import { PipelineView } from './views/PipelineView.jsx';
 import { MarketingAutomationView } from './views/MarketingAutomationView.jsx';
 import { CalendarView } from './views/CalendarView.jsx';
+import { ReferralsView } from './views/ReferralsView.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -390,6 +391,14 @@ function mountCalendar(container, opts) {
     window.__REACT_CAL_MOUNTED = true;
 }
 
+// ── Referrals scaffold-shell island (chunk keeps the D3 zoom/pan tree + summary/
+// leaderboard fills + style injection; populates by id after useEffect-ready). ──
+function mountReferrals(container, opts) {
+    const o = opts || {};
+    _mountSimple(container, <ReferralsView onReady={o.onReady} />);
+    window.__REACT_REFERRALS_MOUNTED = true;
+}
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
@@ -450,6 +459,8 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountMarketingAutomation: _unmountSimple,
     mountCalendar,
     unmountCalendar: _unmountSimple,
+    mountReferrals,
+    unmountReferrals: _unmountSimple,
 });
 
 if (document.readyState === 'loading') {
