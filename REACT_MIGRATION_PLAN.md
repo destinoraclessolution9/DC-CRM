@@ -22,7 +22,9 @@ Path to **D** (god-object retirement / Vite build ownership / module extraction)
 
 ### ▶️ LOOP RESUMED 2026-06-16 — user said "keep going" (proceed unattended, kill-switch = safety net)
 Strategy: count-verifiable views (full island) first; genuinely-interactive views via SCAFFOLD-SHELL (island static shell w/ stable ids + inline app.* handlers, chunk keeps ALL interactivity unchanged → byte-identical behavior). calendar/referrals LAST.
-NEXT = stock_take (scaffold-shell + useEffect populate + opt-in-first; 9-tab shell, chunk renders tab content + owns QR/reconciliation). Then search/reports/pipeline likewise. calendar/referrals last.
+NEXT = search (scaffold-shell + useEffect + opt-in-first). Then reports/pipeline/marketing_automation likewise. calendar/referrals last.
+
+- [x] stock_take (#37) — SW-61, 2026-06-16, PROMOTED default-on after opt-in verify. Scaffold-shell: island renders header + role-gated 9-tab bar + #st-session-chip + #st-tab-body; useEffect onReady → chunk stSwitchTab fills chip+body + active styling. All tabs/QR/reconcile/recount/realtime in chunk. Live-verified: 9 tabs, body 595/chip 76 match legacy, tab-switch works.
 
 - [x] documents (#39) — SW-59, 2026-06-16, PROMOTED default-on after opt-in verify. Scaffold-shell: island renders shell, useEffect onReady → chunk renderFolderTree()+loadFolderContents() (drag-drop/tree/files unchanged). Fixed latent getFileIcon/formatFileSize/getFileExtension ReferenceErrors (aliased from _crmUtils / defined locally) — benefited legacy too. Recovered from the SW-56 incident via: useEffect (not chunk rAF) + opt-in→verify→promote.
 
