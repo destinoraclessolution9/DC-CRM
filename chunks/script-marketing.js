@@ -1182,7 +1182,40 @@
 
     // ========== PHASE 12: MARKETING AUTOMATION ==========
 
+    // React-island flag — OPT-IN during verification (NOT default-on). Enable:
+    // window.__REACT_MKTAUTO=true | ?react_mktauto=1 | localStorage crm_react_mktauto='1'.
+    const _reactMktAutoOn = () => {
+        try {
+            if (/[?&]react=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            if (!(window.CRMReact && typeof window.CRMReact.mountMarketingAutomation === 'function')) return false;
+            return window.__REACT_MKTAUTO === true
+                || /[?&]react_mktauto=1/.test(location.search)
+                || localStorage.getItem('crm_react_mktauto') === '1';
+        } catch (_) { return false; }
+    };
+
     const showMarketingAutomationView = async (container) => {
+        // React scaffold-shell — island renders shell; STEP-2 below fills
+        // #marketing-tab-content by id after awaiting the island useEffect-ready
+        // (pipeline lesson: a bare rAF fires before React commits).
+        if (_reactMktAutoOn()) {
+            container.innerHTML = '<div id="mkt-auto-react-root"></div>';
+            let _maReady; const _maReadyP = new Promise(res => { _maReady = res; });
+            const _maGuard = setTimeout(() => _maReady(), 4000);
+            try {
+                window.CRMReact.mountMarketingAutomation(document.getElementById('mkt-auto-react-root'), {
+                    canExport: isManagement(_state.cu) || isSystemAdmin(_state.cu),
+                    canTabs: isMarketingManager(_state.cu) || isSystemAdmin(_state.cu),
+                    activeTab: _state.cmt,
+                    onReady: () => { clearTimeout(_maGuard); _maReady(); },
+                });
+            } catch (e) {
+                console.warn('[marketing-automation] island mount failed, falling back to legacy:', e && e.message);
+                clearTimeout(_maGuard); _maReady();
+            }
+            await _maReadyP;
+        } else {
         // ── STEP 1: Paint shell + skeleton immediately so the page never
         // looks frozen, even if the inner tab data fetch is slow/timing out.
         const _mktSkel = `
@@ -1249,6 +1282,7 @@
                 </div>
             </div>
         `;
+        }
 
         // ── STEP 2: Load the active tab content with a timeout so a slow
         // Supabase call never leaves the user staring at the spinner forever.

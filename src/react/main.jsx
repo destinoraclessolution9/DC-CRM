@@ -38,6 +38,7 @@ import { EggPurchasingView } from './views/EggPurchasingView.jsx';
 import { FormulaPurchaserView } from './views/FormulaPurchaserView.jsx';
 import { ReportsView } from './views/ReportsView.jsx';
 import { PipelineView } from './views/PipelineView.jsx';
+import { MarketingAutomationView } from './views/MarketingAutomationView.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -372,6 +373,14 @@ function mountPipeline(container, opts) {
     window.__REACT_PIPELINE_MOUNTED = true;
 }
 
+// ── Marketing Automation scaffold-shell island (chunk fills #marketing-tab-content
+// via renderMarketingTabContent after awaiting island useEffect-ready). ──────────
+function mountMarketingAutomation(container, opts) {
+    const o = opts || {};
+    _mountSimple(container, <MarketingAutomationView canExport={!!o.canExport} canTabs={!!o.canTabs} activeTab={o.activeTab || 'forms'} onReady={o.onReady} />);
+    window.__REACT_MKTAUTO_MOUNTED = true;
+}
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
@@ -428,6 +437,8 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountReports: _unmountSimple,
     mountPipeline,
     unmountPipeline: _unmountSimple,
+    mountMarketingAutomation,
+    unmountMarketingAutomation: _unmountSimple,
 });
 
 if (document.readyState === 'loading') {
