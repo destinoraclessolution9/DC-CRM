@@ -3796,7 +3796,16 @@ const showProspectDetail = async (prospectId) => {
                         <div class="acc-body" id="acc-body-formula-${prospect.id}" style="display:none" data-loaded="false"></div>
                     </div>
 
-                    <!-- ⑦c Feng Shui Audit -->
+                    <!-- ⑦c Sales Orders (Destiny Code) -->
+                    <div class="acc-item" id="acc-orders-${prospect.id}">
+                        <div class="acc-hdr" onclick="app.toggleAccordion('orders',${prospect.id},this.parentElement)">
+                            <span><i class="fas fa-shopping-cart"></i> Sales Orders (Destiny Code)</span>
+                            <i class="fas fa-chevron-down acc-chev"></i>
+                        </div>
+                        <div class="acc-body" id="acc-body-orders-${prospect.id}" style="display:none" data-loaded="false"></div>
+                    </div>
+
+                    <!-- ⑦d Feng Shui Audit -->
                     <div class="acc-item" id="acc-fengshui-${prospect.id}">
                         <div class="acc-hdr" onclick="app.toggleAccordion('fengshui',${prospect.id},this.parentElement)">
                             <span><i class="fas fa-compass"></i> Feng Shui Audit</span>
@@ -4843,8 +4852,58 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             </div>
         `;
     }
+    else if (tab === 'orders') {
+        let orders = [];
+        try {
+            orders = await AppDataStore.query('purchases', { prospect_id: prospect.id });
+            orders.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+        } catch(_) {}
+        if (!orders.length) {
+            container.innerHTML = `<div style="padding:16px;color:var(--gray-400);font-size:13px;text-align:center;">No sales orders on record.</div>`;
+            return;
+        }
+        const dsBadge = (ds) => {
+            const s = ds || 'Pending Delivery';
+            const map = {
+                'Delivered':       ['#DCFCE7','#166534'],
+                'Cancelled':       ['#FFE4E6','#9F1239'],
+                'Doubtful':        ['#FEF3C7','#92400E'],
+                'Partial Delivery':['#E0F2FE','#0369A1'],
+            };
+            const [bg, fg] = map[s] || ['#EFF6FF','#1e40af'];
+            return `<span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:600;background:${bg};color:${fg};">${s}</span>`;
+        };
+        const fmtAmt = (v) => v ? 'RM ' + Number(v).toLocaleString('en-MY', {minimumFractionDigits:0,maximumFractionDigits:0}) : '-';
+        const rows = orders.map(o => `<tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:7px 8px;font-size:11px;color:var(--gray-500);white-space:nowrap;">${o.date || '-'}</td>
+            <td style="padding:7px 8px;font-size:11px;color:var(--gray-400);white-space:nowrap;">${o.invoice || '-'}</td>
+            <td style="padding:7px 8px;font-size:12px;font-weight:500;color:var(--gray-800);">${o.item || '-'}</td>
+            <td style="padding:7px 8px;font-size:12px;font-weight:600;color:var(--primary);white-space:nowrap;">${fmtAmt(o.amount)}</td>
+            <td style="padding:7px 8px;font-size:11px;color:var(--gray-500);">${o.payment_method || '-'}</td>
+            <td style="padding:7px 8px;">${dsBadge(o.delivery_status)}</td>
+        </tr>`).join('');
+        const total = orders.reduce((s, o) => s + (parseFloat(o.amount) || 0), 0);
+        container.innerHTML = `<div style="padding:8px 12px;overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                <thead><tr style="border-bottom:2px solid var(--border);background:var(--gray-50);">
+                    <th style="padding:7px 8px;text-align:left;font-size:11px;color:var(--gray-500);font-weight:600;">Date</th>
+                    <th style="padding:7px 8px;text-align:left;font-size:11px;color:var(--gray-500);font-weight:600;">PRN</th>
+                    <th style="padding:7px 8px;text-align:left;font-size:11px;color:var(--gray-500);font-weight:600;">Product</th>
+                    <th style="padding:7px 8px;text-align:left;font-size:11px;color:var(--gray-500);font-weight:600;">Amount</th>
+                    <th style="padding:7px 8px;text-align:left;font-size:11px;color:var(--gray-500);font-weight:600;">Payment</th>
+                    <th style="padding:7px 8px;text-align:left;font-size:11px;color:var(--gray-500);font-weight:600;">Delivery</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+                <tfoot><tr style="border-top:2px solid var(--border);background:var(--gray-50);">
+                    <td colspan="3" style="padding:8px;font-weight:700;font-size:12px;color:var(--gray-700);">TOTAL &middot; ${orders.length} order${orders.length > 1 ? 's' : ''}</td>
+                    <td style="padding:8px;font-weight:700;font-size:13px;color:var(--primary);">${fmtAmt(total)}</td>
+                    <td colspan="2"></td>
+                </tr></tfoot>
+            </table>
+        </div>`;
+    }
     else if (tab === 'fengshui') {
-        // ── ⑦c Feng Shui Audit — sequence per audit event: layout plan file, audit report file,
+        // ── ⑦d Feng Shui Audit — sequence per audit event: layout plan file, audit report file,
         //    key notes, product selections (products/bujishu/formula — auto-flow to Potential),
         //    Before photos (up to 50 w/ remarks), After photos (up to 50 w/ remarks),
         //    Site Review entries (multi-date, remarks, up to 5 photos each).
