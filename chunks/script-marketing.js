@@ -1182,16 +1182,16 @@
 
     // ========== PHASE 12: MARKETING AUTOMATION ==========
 
-    // React-island flag — OPT-IN during verification (NOT default-on). Enable:
-    // window.__REACT_MKTAUTO=true | ?react_mktauto=1 | localStorage crm_react_mktauto='1'.
+    // React-island flag (default-on, PROMOTED 2026-06-16 after opt-in verify:
+    // parity-identical to legacy — 8 tabs, 4 header buttons, #marketing-tab-content
+    // filled 5070=5070 via useEffect-ready await). Kill-switch → legacy:
+    // window.__REACT_MKTAUTO===false, ?react=0, crm_react_off='1'.
     const _reactMktAutoOn = () => {
         try {
+            if (window.__REACT_MKTAUTO === false) return false;
             if (/[?&]react=0/.test(location.search)) return false;
             if (localStorage.getItem('crm_react_off') === '1') return false;
-            if (!(window.CRMReact && typeof window.CRMReact.mountMarketingAutomation === 'function')) return false;
-            return window.__REACT_MKTAUTO === true
-                || /[?&]react_mktauto=1/.test(location.search)
-                || localStorage.getItem('crm_react_mktauto') === '1';
+            return !!(window.CRMReact && typeof window.CRMReact.mountMarketingAutomation === 'function');
         } catch (_) { return false; }
     };
 
