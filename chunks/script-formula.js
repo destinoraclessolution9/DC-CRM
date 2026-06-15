@@ -27,17 +27,16 @@
     const navigateTo           = (v)   => window.app.navigateTo(v);
     // AppDataStore, UI, supabase, XLSX (on demand) are globals — no alias needed.
 
-    // React-island flag — OPT-IN during verification (NOT default-on) per the
-    // scaffold-shell protocol. Enable: window.__REACT_FP=true | ?react_fp=1 |
-    // localStorage crm_react_fp='1'. Promote default-on after live verify.
+    // React-island flag (default-on, PROMOTED 2026-06-16 after opt-in verify:
+    // useEffect→fpLoadData+fpSwitchTab populate confirmed live — 6 tabs, dashboard
+    // content matches legacy, import-menu toggle + tab-switch work). Kill-switch →
+    // legacy: window.__REACT_FP===false, ?react=0, crm_react_off='1'.
     const _reactFpOn = () => {
         try {
+            if (window.__REACT_FP === false) return false;
             if (/[?&]react=0/.test(location.search)) return false;
             if (localStorage.getItem('crm_react_off') === '1') return false;
-            if (!(window.CRMReact && typeof window.CRMReact.mountFormulaPurchaser === 'function')) return false;
-            return window.__REACT_FP === true
-                || /[?&]react_fp=1/.test(location.search)
-                || localStorage.getItem('crm_react_fp') === '1';
+            return !!(window.CRMReact && typeof window.CRMReact.mountFormulaPurchaser === 'function');
         } catch (_) { return false; }
     };
 
