@@ -41,6 +41,7 @@ import { PipelineView } from './views/PipelineView.jsx';
 import { MarketingAutomationView } from './views/MarketingAutomationView.jsx';
 import { CalendarView } from './views/CalendarView.jsx';
 import { ReferralsView } from './views/ReferralsView.jsx';
+import { MobileHomeView } from './views/MobileHomeView.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -399,6 +400,14 @@ function mountReferrals(container, opts) {
     window.__REACT_REFERRALS_MOUNTED = true;
 }
 
+// ── Mobile Home scaffold-shell island (chunk keeps snapshot/fetches/_composeBody;
+// fills #mhome-body by id after useEffect-ready). ──────────────────────────────
+function mountMobileHome(container, opts) {
+    const o = opts || {};
+    _mountSimple(container, <MobileHomeView greetWord={o.greetWord || 'Hello'} userName={o.userName || 'there'} dateStr={o.dateStr || ''} avatarUrl={o.avatarUrl || ''} initBody={o.initBody || ''} onReady={o.onReady} />);
+    window.__REACT_HOME_MOUNTED = true;
+}
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
@@ -461,6 +470,8 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountCalendar: _unmountSimple,
     mountReferrals,
     unmountReferrals: _unmountSimple,
+    mountMobileHome,
+    unmountMobileHome: _unmountSimple,
 });
 
 if (document.readyState === 'loading') {

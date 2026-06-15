@@ -624,6 +624,19 @@
         return digits;
     };
 
+    // React-island flag — OPT-IN during verification (NOT default-on). Enable:
+    // window.__REACT_HOME=true | ?react_home=1 | localStorage crm_react_home='1'.
+    const _reactHomeOn = () => {
+        try {
+            if (/[?&]react=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            if (!(window.CRMReact && typeof window.CRMReact.mountMobileHome === 'function')) return false;
+            return window.__REACT_HOME === true
+                || /[?&]react_home=1/.test(location.search)
+                || localStorage.getItem('crm_react_home') === '1';
+        } catch (_) { return false; }
+    };
+
     const showMobileHomeView = async (viewport) => {
         if (!viewport) return;
         viewport.classList.add('mhome-active');
@@ -667,6 +680,24 @@
                     </div>
                 </div></div>`;
 
+        // React scaffold-shell — island renders greeting + #mhome-body (seeded
+        // with the cached snapshot); the foreground fetch + _composeBody below
+        // fill #mhome-body by id (after awaiting island useEffect-ready).
+        if (_reactHomeOn()) {
+            viewport.innerHTML = '<div id="mhome-react-root"></div>';
+            let _hReady; const _hReadyP = new Promise(res => { _hReady = res; });
+            const _hGuard = setTimeout(() => _hReady(), 4000);
+            try {
+                window.CRMReact.mountMobileHome(document.getElementById('mhome-react-root'), {
+                    greetWord, userName, dateStr, avatarUrl, initBody: _mhomeInitBody,
+                    onReady: () => { clearTimeout(_hGuard); _hReady(); },
+                });
+            } catch (e) {
+                console.warn('[mhome] island mount failed, falling back to legacy:', e && e.message);
+                clearTimeout(_hGuard); _hReady();
+            }
+            await _hReadyP;
+        } else {
         viewport.innerHTML = `
         <div class="mhome">
             <div class="mhome-greet">
@@ -683,6 +714,7 @@
             </div>
             <div id="mhome-body">${_mhomeInitBody}</div>
         </div>`;
+        }
 
         // ── Data ─────────────────────────────────────────────────
         const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
