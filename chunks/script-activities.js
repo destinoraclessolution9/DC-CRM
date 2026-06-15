@@ -3777,10 +3777,45 @@
 
             // Duplicate checking: BLOCK on same name+phone or same name+IC
             {
-                const allPeople = [...(await AppDataStore.getAll('prospects')), ...(await AppDataStore.getAll('customers'))];
+                const ic = document.getElementById('cps-ic')?.value?.trim();
                 const normalize = str => str ? str.toLowerCase().replace(/\s+/g, '') : '';
                 const normName = normalize(name);
-                const ic = document.getElementById('cps-ic')?.value?.trim();
+                // Scale-safe (flag-gated, staging): gather only CANDIDATE people —
+                // phone/IC matches via the import_existing_matches RPC (its robust
+                // normalization is a SUPERSET of the strict check below) + name matches
+                // via trigram search — instead of downloading the WHOLE prospects +
+                // customers tables. The hard/soft duplicate logic below is UNCHANGED, so
+                // the block decision is identical. Flag off / any error → exact legacy.
+                let allPeople;
+                if (window.__SERVER_DUP_CHECK !== false) {
+                    try {
+                        const sb = window.supabase || AppDataStore._readClient();
+                        const phones = phone ? [phone] : [];
+                        const ics = ic ? [ic] : [];
+                        const hasKeys = phones.length || ics.length;
+                        const [mp, mc, sp, sc] = await Promise.all([
+                            hasKeys ? sb.rpc('import_existing_matches', { p_table: 'prospects', p_phones: phones, p_emails: [], p_ics: ics }).then(r => r.data || []).catch(() => []) : Promise.resolve([]),
+                            hasKeys ? sb.rpc('import_existing_matches', { p_table: 'customers', p_phones: phones, p_emails: [], p_ics: ics }).then(r => r.data || []).catch(() => []) : Promise.resolve([]),
+                            AppDataStore.searchProspects(name, { includeDormant: true, limit: 50 }).then(r => Array.isArray(r) ? r : ((r && r.data) || [])).catch(() => []),
+                            AppDataStore.searchCustomers(name, { limit: 50 }).catch(() => []),
+                        ]);
+                        // import_existing_matches returns lean rows (no responsible_agent_id) — fetch full rows by id.
+                        const pIds = [...new Set(mp.map(r => String(r.id)))];
+                        const cIds = [...new Set(mc.map(r => String(r.id)))];
+                        const [pFull, cFull] = await Promise.all([
+                            pIds.length ? AppDataStore.queryAdvanced('prospects', { scopeField: 'id', scopeValues: pIds, limit: 1000, countMode: null }).then(r => r.data || []).catch(() => []) : Promise.resolve([]),
+                            cIds.length ? AppDataStore.queryAdvanced('customers', { scopeField: 'id', scopeValues: cIds, limit: 1000, countMode: null }).then(r => r.data || []).catch(() => []) : Promise.resolve([]),
+                        ]);
+                        const byKey = new Map();
+                        for (const r of [...sp, ...pFull, ...sc, ...cFull]) if (r && r.id != null) byKey.set(String(r.id), r);
+                        allPeople = [...byKey.values()];
+                    } catch (e) {
+                        console.warn('CPS dup-check: scoped candidate fetch failed — full-table fallback', e);
+                        allPeople = [...(await AppDataStore.getAll('prospects')), ...(await AppDataStore.getAll('customers'))];
+                    }
+                } else {
+                    allPeople = [...(await AppDataStore.getAll('prospects')), ...(await AppDataStore.getAll('customers'))];
+                }
 
                 const hardDuplicate = allPeople.find(p => {
                     const sameName = normalize(p.full_name) === normName;
