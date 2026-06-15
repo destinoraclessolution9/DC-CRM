@@ -39,6 +39,7 @@ import { FormulaPurchaserView } from './views/FormulaPurchaserView.jsx';
 import { ReportsView } from './views/ReportsView.jsx';
 import { PipelineView } from './views/PipelineView.jsx';
 import { MarketingAutomationView } from './views/MarketingAutomationView.jsx';
+import { CalendarView } from './views/CalendarView.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -381,6 +382,14 @@ function mountMarketingAutomation(container, opts) {
     window.__REACT_MKTAUTO_MOUNTED = true;
 }
 
+// ── Calendar scaffold-shell island (largest shell; chunk fills the grid + all
+// widgets by id after awaiting island useEffect-ready). ──────────────────────
+function mountCalendar(container, opts) {
+    const o = opts || {};
+    _mountSimple(container, <CalendarView greeting={o.greeting || 'Hello'} userName={o.userName || 'there'} userEmail={o.userEmail || ''} onReady={o.onReady} />);
+    window.__REACT_CAL_MOUNTED = true;
+}
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
@@ -439,6 +448,8 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountPipeline: _unmountSimple,
     mountMarketingAutomation,
     unmountMarketingAutomation: _unmountSimple,
+    mountCalendar,
+    unmountCalendar: _unmountSimple,
 });
 
 if (document.readyState === 'loading') {

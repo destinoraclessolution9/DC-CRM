@@ -32,12 +32,45 @@
     const _localDateStr = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     // ========== PHASE 1: FULL CALENDAR IMPLEMENTATION ==========
 
+    // React-island flag — OPT-IN during verification (NOT default-on). Highest-risk
+    // view → verify thoroughly before promote. Enable: window.__REACT_CAL=true |
+    // ?react_cal=1 | localStorage crm_react_cal='1'.
+    const _reactCalendarOn = () => {
+        try {
+            if (/[?&]react=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            if (!(window.CRMReact && typeof window.CRMReact.mountCalendar === 'function')) return false;
+            return window.__REACT_CAL === true
+                || /[?&]react_cal=1/.test(location.search)
+                || localStorage.getItem('crm_react_cal') === '1';
+        } catch (_) { return false; }
+    };
+
     const showCalendarView = async (container) => {
         const userName = _state.cu?.display_name || _state.cu?.name || _state.cu?.email?.split('@')[0] || 'there';
         const userEmail = _state.cu?.email || '';
         const hour = new Date().getHours();
         const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
+        // React scaffold-shell — island renders the shell; the cache-warm +
+        // renderCalendar()/renderTodayActivities()/secondary fills below populate
+        // the by-id containers (grid/today/birthdays/refills/glance) exactly as
+        // legacy, after awaiting the island useEffect-ready (rAF-too-early lesson).
+        if (_reactCalendarOn()) {
+            container.innerHTML = '<div id="cal-react-root"></div>';
+            let _calReady; const _calReadyP = new Promise(res => { _calReady = res; });
+            const _calGuard = setTimeout(() => _calReady(), 4000);
+            try {
+                window.CRMReact.mountCalendar(document.getElementById('cal-react-root'), {
+                    greeting, userName, userEmail,
+                    onReady: () => { clearTimeout(_calGuard); _calReady(); },
+                });
+            } catch (e) {
+                console.warn('[calendar] island mount failed, falling back to legacy:', e && e.message);
+                clearTimeout(_calGuard); _calReady();
+            }
+            await _calReadyP;
+        } else {
         container.innerHTML = `
             <div class="calendar-page-layout">
 
@@ -228,6 +261,7 @@
 
             </div>
         `;
+        }
 
         // Warm the cache for small shared lookup tables that multiple renderers
         // need. Calendar + Today activities now use queryAdvanced() with date
