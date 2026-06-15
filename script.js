@@ -4825,11 +4825,16 @@ const monitorLoginAttempts = async () => {
         const rows = await AppDataStore.getAll('login_attempts');
         if (rows && rows.length > 0) failedAttempts = rows[0].attempts_data || {};
     } catch (_) {
-        failedAttempts = JSON.parse(localStorage.getItem('login_attempts') || '{}');
+        // Legacy localStorage may hold "[object Object]" (a stringified object from
+        // before the write was removed) — JSON.parse would throw; default to {}.
+        try { failedAttempts = JSON.parse(localStorage.getItem('login_attempts') || '{}'); }
+        catch (_e) { failedAttempts = {}; }
     }
+    if (!failedAttempts || typeof failedAttempts !== 'object') failedAttempts = {};
     const now = Date.now();
     Object.keys(failedAttempts).forEach(ip => {
-        failedAttempts[ip] = failedAttempts[ip].filter(t => now - t < 24 * 60 * 60 * 1000);
+        const arr = Array.isArray(failedAttempts[ip]) ? failedAttempts[ip] : [];
+        failedAttempts[ip] = arr.filter(t => now - t < 24 * 60 * 60 * 1000);
         if (failedAttempts[ip].length === 0) delete failedAttempts[ip];
     });
     try {
@@ -4850,13 +4855,20 @@ const monitorLoginAttempts = async () => {
 
 const checkForSecurityIncidents = async () => {
     if (!window.AppDataStore) return;
-    const incidents = (await AppDataStore.getAll('security_incidents')).filter(i => i.status === 'new' && !i.acknowledged);
-    if (incidents.length > 0) {
-        const critical = incidents.filter(i => i.severity === 'critical');
-        if (critical.length > 0) {
-            if (window.UI && window.UI.toast) window.UI.toast.error(`${critical.length} critical security incidents require attention`, 0);
-            window.app.addSecurityAlertIcon();
+    // Non-critical background monitor — never let a read glitch surface as an
+    // unhandled rejection (the minified getAll can intermittently throw a
+    // defineProperty TypeError under cold-load concurrency).
+    try {
+        const incidents = (await AppDataStore.getAll('security_incidents')).filter(i => i.status === 'new' && !i.acknowledged);
+        if (incidents.length > 0) {
+            const critical = incidents.filter(i => i.severity === 'critical');
+            if (critical.length > 0) {
+                if (window.UI && window.UI.toast) window.UI.toast.error(`${critical.length} critical security incidents require attention`, 0);
+                window.app.addSecurityAlertIcon();
+            }
         }
+    } catch (e) {
+        console.warn('checkForSecurityIncidents skipped:', e && e.message);
     }
 };
 
