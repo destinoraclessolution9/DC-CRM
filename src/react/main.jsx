@@ -29,6 +29,7 @@ import { BookingSettingsView } from './views/BookingSettingsView.jsx';
 import { MilestonesView } from './views/MilestonesView.jsx';
 import { CasesGrid } from './views/CasesGrid.jsx';
 import { BossReportView } from './views/BossReportView.jsx';
+import { ProtectionMonitoringView } from './views/ProtectionMonitoringView.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -291,6 +292,14 @@ function mountBossReport(container, opts) {
     window.__REACT_BOSSREPORT_MOUNTED = true;
 }
 
+// ── Protection Monitoring island (read-render; chunk computes the 4 model
+// arrays, mutations via app.*). ───────────────────────────────────────────────
+function mountProtectionMonitoring(container, opts) {
+    const o = opts || {};
+    _mountSimple(container, <ProtectionMonitoringView teamCards={o.teamCards || []} agentRows={o.agentRows || []} inactiveRows={o.inactiveRows || []} reassignRows={o.reassignRows || []} reassignEmpty={o.reassignEmpty || 'No reassignment history yet.'} />);
+    window.__REACT_PROTECTION_MOUNTED = true;
+}
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
@@ -329,6 +338,8 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountCasesGrid: _unmountSimple,
     mountBossReport,
     unmountBossReport: _unmountSimple,
+    mountProtectionMonitoring,
+    unmountProtectionMonitoring: _unmountSimple,
 });
 
 if (document.readyState === 'loading') {

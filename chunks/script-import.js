@@ -19,6 +19,17 @@
     let _currentUser = _state.cu;
     window._syncImportUser = () => { _currentUser = _state.cu; };
 
+    // React-island flag (default-on) for the Protection Monitoring view.
+    // Kill-switch → legacy: window.__REACT_PROTECTION===false, ?react=0, crm_react_off='1'.
+    const _reactProtectionOn = () => {
+        try {
+            if (window.__REACT_PROTECTION === false) return false;
+            if (/[?&]react=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            return !!(window.CRMReact && typeof window.CRMReact.mountProtectionMonitoring === 'function');
+        } catch (_) { return false; }
+    };
+
 // ========== PHASE 13: IMPORT SYSTEM FUNCTIONS ==========
 
 let _currentImportStep = 1;
@@ -972,6 +983,97 @@ const showProtectionMonitoringView = async (container) => {
         ? allProspects
         : allProspects.filter(p => visibleIds.includes(p.responsible_agent_id));
     const monitorData = { visibleProspects, visibleAgents, agentMap, lastActivityMap };
+
+    // React island — chunk computes the 4 model arrays (mirroring the legacy
+    // render* helpers below), island renders; mutations stay on app.*.
+    if (_reactProtectionOn()) {
+        try {
+            const _calcProt = window.app.calculateProtectionDays || (() => 0);
+
+            // team summary cards (mirror renderTeamSummaryCards)
+            const teamColors = ['team-a', 'team-b', 'team-c', 'team-d', 'team-e'];
+            const teamStats = {};
+            const totals = { active: 0, attention: 0, inactive: 0, critical: 0 };
+            for (const p of visibleProspects) {
+                const agent = agentMap[p.responsible_agent_id];
+                const teamName = agent?.team || 'Unassigned';
+                if (!teamStats[teamName]) teamStats[teamName] = { active: 0, attention: 0, inactive: 0, critical: 0 };
+                const days = lastActivityMap[p.id]?.daysSince ?? 999;
+                const protDays = _calcProt(p);
+                if (days > 14 || protDays <= 0) { teamStats[teamName].critical++; totals.critical++; }
+                else if (days > 7) { teamStats[teamName].inactive++; totals.inactive++; }
+                else if (days > 3) { teamStats[teamName].attention++; totals.attention++; }
+                else { teamStats[teamName].active++; totals.active++; }
+            }
+            const teamNames = Object.keys(teamStats).sort();
+            const teamCards = teamNames.map((name, i) => ({ name, colorClass: teamColors[i % teamColors.length], ...teamStats[name] }));
+            teamCards.push({ name: 'Total', colorClass: 'total', ...totals });
+
+            // agent performance rows (mirror renderAgentPerformanceRows)
+            const agentRows = visibleAgents.map(agent => {
+                const aP = visibleProspects.filter(p => String(p.responsible_agent_id) === String(agent.id));
+                const assigned = aP.length;
+                let followedUp7d = 0, i37 = 0, i814 = 0, i15 = 0;
+                for (const p of aP) {
+                    const days = lastActivityMap[p.id]?.daysSince ?? 999;
+                    if (days <= 7) followedUp7d++;
+                    if (days > 3 && days <= 7) i37++;
+                    else if (days > 7 && days <= 14) i814++;
+                    else if (days > 14) i15++;
+                }
+                const rate = assigned > 0 ? Math.round((followedUp7d / assigned) * 100) : 0;
+                const rateCls = rate < 70 ? 'rate-bad' : rate < 90 ? 'rate-warning' : 'rate-good';
+                return { id: agent.id, full_name: agent.full_name || 'Unknown', team: agent.team || 'Unassigned', assigned, followedUp7d, rate, rateCls, i37, i814, i15 };
+            });
+
+            // inactive prospect rows (mirror renderInactiveProspectsRows)
+            const inactiveRows = visibleProspects
+                .filter(p => (lastActivityMap[p.id]?.daysSince ?? 999) > 7)
+                .sort((a, b) => (lastActivityMap[b.id]?.daysSince ?? 999) - (lastActivityMap[a.id]?.daysSince ?? 999))
+                .map(p => {
+                    const days = lastActivityMap[p.id]?.daysSince ?? 999;
+                    const agentName = agentMap[p.responsible_agent_id]?.full_name || 'Unassigned';
+                    const protDays = _calcProt(p);
+                    const status = (days > 14 || protDays <= 0) ? 'critical' : 'warning';
+                    return {
+                        id: p.id, full_name: p.full_name || 'Unknown', agentName,
+                        days, daysText: days === 999 ? 'Never' : days + ' days', daysCls: days > 14 ? 'critical' : 'warning',
+                        score: p.score || 0,
+                        deadline: p.protection_deadline ? UI.formatDate(p.protection_deadline) : 'N/A',
+                        status, statusLabel: status === 'critical' ? '🔴 Critical' : '🟡 Warning',
+                    };
+                });
+
+            // reassignment history rows (mirror renderReassignmentHistory data)
+            let reassignRows = [];
+            try {
+                const [historyRaw, allUsers2] = await Promise.all([
+                    AppDataStore.getAll('reassignment_history'),
+                    AppDataStore.getAll('users'),
+                ]);
+                const history = (historyRaw || []).sort((a, b) => new Date(b.reassignment_date) - new Date(a.reassignment_date));
+                const userMap2 = new Map((allUsers2 || []).map(u => [String(u.id), u]));
+                const nameOf = (id) => userMap2.get(String(id))?.full_name || `Agent #${id}`;
+                reassignRows = history.map(r => ({
+                    date: UI.formatDate(r.reassignment_date),
+                    prospect_id: r.prospect_id,
+                    fromName: nameOf(r.from_agent_id),
+                    toName: nameOf(r.to_agent_id),
+                    reason: r.reassignment_reason,
+                    byName: nameOf(r.reassigned_by),
+                }));
+            } catch (e) { console.warn('[protection] reassignment rows', e && e.message); }
+
+            container.innerHTML = '<div id="protection-react-root"></div>';
+            window.CRMReact.mountProtectionMonitoring(document.getElementById('protection-react-root'), {
+                teamCards, agentRows, inactiveRows, reassignRows,
+            });
+            return;
+        } catch (e) {
+            console.warn('[protection] island mount failed, falling back to legacy:', e && e.message);
+            // fall through to the legacy render below
+        }
+    }
 
     container.innerHTML = `
         <div class="protection-view">
