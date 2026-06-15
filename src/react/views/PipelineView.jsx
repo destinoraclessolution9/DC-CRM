@@ -7,7 +7,7 @@
 // continues after mount (post-await) and fills these containers by id exactly as
 // the legacy skeleton path — byte-identical behavior. No props/onReady needed;
 // the chunk rAF-waits for React to commit before filling.
-import React from 'react';
+import React, { useEffect } from 'react';
 
 const cardBox = { background: 'white', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', marginBottom: '32px' };
 const skel = (extra) => ({ ...{ borderRadius: '8px' }, ...extra });
@@ -31,8 +31,16 @@ function SkelRows({ n, cols }) {
 
 const TH = ['Prospect Name', 'Target to Sign (Product/Service)', 'Amount (RM)', 'Probability', 'Action Needed to Close Deal', 'Quick Action'];
 
-export function PipelineView() {
+export function PipelineView({ onReady }) {
     try { window.__REACT_PIPELINE_STATE = 'ready'; } catch (_) { /* noop */ }
+
+    // Signal post-commit so the chunk's STEP-2 fills target the committed shell
+    // (a single rAF fired before React committed → fills hit null → skeleton stuck).
+    useEffect(() => {
+        if (typeof onReady === 'function') {
+            try { onReady(); } catch (_) { /* noop */ }
+        }
+    }, [onReady]);
 
     return (
         <div className="pipeline-dual-view">

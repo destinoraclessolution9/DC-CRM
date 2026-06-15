@@ -366,8 +366,9 @@ function mountReports(container, opts) {
 
 // ── Pipeline scaffold-shell island (pure static skeleton; the chunk fills the
 // stable-id containers + owns drag-drop + the v6 scoring engine). ─────────────
-function mountPipeline(container) {
-    _mountSimple(container, <PipelineView />);
+function mountPipeline(container, opts) {
+    const o = opts || {};
+    _mountSimple(container, <PipelineView onReady={o.onReady} />);
     window.__REACT_PIPELINE_MOUNTED = true;
 }
 

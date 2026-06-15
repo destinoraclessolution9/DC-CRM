@@ -607,9 +607,18 @@ const showPipelineView = async (container) => {
     // below populate #pl-* by id exactly as legacy (rAF-wait ensures React committed).
     if (_reactPipelineOn()) {
         container.innerHTML = '<div id="pl-react-root"></div>';
-        try { window.CRMReact.mountPipeline(document.getElementById('pl-react-root')); }
-        catch (e) { console.warn('[pipeline] island mount failed, falling back to legacy:', e && e.message); }
-        await new Promise(r => requestAnimationFrame(() => r()));
+        // Await the island's useEffect (post-commit) so the STEP-2 fills below
+        // target the committed shell. A bare rAF fired before React committed →
+        // getElementById returned null → fills skipped → skeleton stuck.
+        let _plReady; const _plReadyP = new Promise(res => { _plReady = res; });
+        const _plGuard = setTimeout(() => _plReady(), 4000); // safety: never hang
+        try {
+            window.CRMReact.mountPipeline(document.getElementById('pl-react-root'), { onReady: () => { clearTimeout(_plGuard); _plReady(); } });
+        } catch (e) {
+            console.warn('[pipeline] island mount failed, falling back to legacy:', e && e.message);
+            clearTimeout(_plGuard); _plReady();
+        }
+        await _plReadyP;
     } else {
     container.innerHTML = `
 <div class="pipeline-dual-view">
