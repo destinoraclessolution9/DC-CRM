@@ -359,7 +359,7 @@ function mountFormulaPurchaser(container, opts) {
 // + Chart.js canvas via _kpiPopulate/refreshKPIDashboard on useEffect onReady). ─
 function mountReports(container, opts) {
     const o = opts || {};
-    _mountSimple(container, <ReportsView isTeamLeader={!!o.isTeamLeader} currentTimeFilter={o.currentTimeFilter || 'monthly'} roles={o.roles || []} currentRoleFilter={o.currentRoleFilter || 'All'} customDateFrom={o.customDateFrom || ''} customDateTo={o.customDateTo || ''} agents={o.agents || []} currentAgentFilter={o.currentAgentFilter || 'all'} onReady={o.onReady} />);
+    _mountSimple(container, <ReportsView isTeamLeader={!!o.isTeamLeader} currentTimeFilter={o.currentTimeFilter || 'monthly'} roles={o.roles || []} currentRoleFilter={o.currentRoleFilter || 'All'} customDateFrom={o.customDateFrom || ''} customDateTo={o.customDateTo || ''} agents={o.agents || []} currentAgentFilter={o.currentAgentFilter || 'all'} loadAgents={o.loadAgents} onReady={o.onReady} />);
     window.__REACT_REPORTS_MOUNTED = true;
 }
 

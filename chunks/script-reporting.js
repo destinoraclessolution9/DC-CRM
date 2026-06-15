@@ -79,7 +79,7 @@
 
         // Post-shell populate (cached-stats snapshot inject + async agent-dropdown
         // fill + refreshKPIDashboard) — shared by the React island and legacy paths.
-        const _kpiPopulate = async () => {
+        const _kpiPopulate = async (fillAgents = true) => {
             const _kpiSnapKey = `kpi-stats-snap-${_state.cu?.id || 'anon'}-${_currentTimeFilter}`;
             try {
                 const _kpiRaw = localStorage.getItem(_kpiSnapKey);
@@ -91,13 +91,17 @@
                     } else { localStorage.removeItem(_kpiSnapKey); }
                 }
             } catch (_) {}
-            AppDataStore.getAll('users').then(allUsers => {
-                const sel = document.getElementById('kpi-agent-filter');
-                if (!sel) return;
-                const _kpiAgents = allUsers.filter(u => isAgent(u) || u.role === 'team_leader' || (u.role || '').includes('Level 7'));
-                sel.innerHTML = `<option value="all">All Agents</option>` +
-                    _kpiAgents.map(a => `<option value="${a.id}" ${String(_currentAgentFilter) === String(a.id) ? 'selected' : ''}>${escapeHtml(a.full_name || '')}</option>`).join('');
-            }).catch(() => {});
+            // Legacy path fills the agent dropdown via innerHTML; the React island
+            // owns its options via state (loadAgents), so skip the fill there.
+            if (fillAgents) {
+                AppDataStore.getAll('users').then(allUsers => {
+                    const sel = document.getElementById('kpi-agent-filter');
+                    if (!sel) return;
+                    const _kpiAgents = allUsers.filter(u => isAgent(u) || u.role === 'team_leader' || (u.role || '').includes('Level 7'));
+                    sel.innerHTML = `<option value="all">All Agents</option>` +
+                        _kpiAgents.map(a => `<option value="${a.id}" ${String(_currentAgentFilter) === String(a.id) ? 'selected' : ''}>${escapeHtml(a.full_name || '')}</option>`).join('');
+                }).catch(() => {});
+            }
             await refreshKPIDashboard();
         };
 
@@ -105,16 +109,6 @@
         // canvas); _kpiPopulate (via useEffect onReady) fills everything as legacy.
         if (_reactReportsOn()) {
             try {
-                // Compute the agent-filter options BEFORE mount so React renders them
-                // directly (the chunk's post-mount innerHTML fill loses a one-time
-                // race against React's commit; rendering from a prop is race-free).
-                let _kpiAgents = [];
-                try {
-                    const _us = await AppDataStore.getAll('users');
-                    _kpiAgents = (_us || [])
-                        .filter(u => isAgent(u) || u.role === 'team_leader' || (u.role || '').includes('Level 7'))
-                        .map(a => ({ id: a.id, name: a.full_name || '' }));
-                } catch (_) {}
                 container.innerHTML = '<div id="reports-react-root"></div>';
                 window.CRMReact.mountReports(document.getElementById('reports-react-root'), {
                     isTeamLeader: isTeamLeaderOrAbove(_state.cu),
@@ -123,9 +117,15 @@
                     currentRoleFilter: _currentRoleFilter,
                     customDateFrom: _customDateFrom,
                     customDateTo: _customDateTo,
-                    agents: _kpiAgents,
                     currentAgentFilter: _currentAgentFilter,
-                    onReady: () => { _kpiPopulate(); },
+                    // Island owns the agent dropdown via state; loadAgents resolves
+                    // the list whenever users data is ready (cold-load safe).
+                    loadAgents: () => AppDataStore.getAll('users')
+                        .then(us => (us || [])
+                            .filter(u => isAgent(u) || u.role === 'team_leader' || (u.role || '').includes('Level 7'))
+                            .map(a => ({ id: a.id, name: a.full_name || '' })))
+                        .catch(() => []),
+                    onReady: () => { _kpiPopulate(false); },
                 });
                 return;
             } catch (e) {

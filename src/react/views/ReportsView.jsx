@@ -7,14 +7,26 @@
 // _kpiPopulate() (cached-snapshot inject + async agent-dropdown fill +
 // refreshKPIDashboard, which draws Chart.js into the canvas + fills the tables).
 // Filter buttons / selects / date pickers call window.app.* exactly as legacy.
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 
 const app = () => window.app || {};
 const call = (name, ...args) => { const f = app()[name]; if (typeof f === 'function') f(...args); };
 const byId = (id) => { const el = document.getElementById(id); return el ? el.value : ''; };
 
-export function ReportsView({ isTeamLeader = false, currentTimeFilter = 'monthly', roles = [], currentRoleFilter = 'All', customDateFrom = '', customDateTo = '', agents = [], currentAgentFilter = 'all', onReady }) {
+export function ReportsView({ isTeamLeader = false, currentTimeFilter = 'monthly', roles = [], currentRoleFilter = 'All', customDateFrom = '', customDateTo = '', agents = [], currentAgentFilter = 'all', loadAgents, onReady }) {
     try { window.__REACT_REPORTS_STATE = 'ready'; } catch (_) { /* noop */ }
+
+    // Agent-filter options are owned by React state (rendered options, not an
+    // imperative innerHTML fill — which lost a race vs React's <select> sync and
+    // depended on users being warm at mount). loadAgents() resolves the list
+    // whenever the data is ready (cold-load safe).
+    const [agentList, setAgentList] = useState(agents);
+    useEffect(() => {
+        if (typeof loadAgents !== 'function') return undefined;
+        let alive = true;
+        Promise.resolve(loadAgents()).then((a) => { if (alive && Array.isArray(a)) setAgentList(a); }).catch(() => {});
+        return () => { alive = false; };
+    }, [loadAgents]);
 
     useEffect(() => {
         if (typeof onReady === 'function') {
@@ -61,7 +73,7 @@ export function ReportsView({ isTeamLeader = false, currentTimeFilter = 'monthly
                 <div className="role-filter-group" style={{ marginLeft: '12px' }}>
                     <select id="kpi-agent-filter" className="form-control" defaultValue={String(currentAgentFilter)} onChange={(e) => call('setAgentFilter', e.target.value)} style={{ width: '200px' }}>
                         <option value="all">All Agents</option>
-                        {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                        {agentList.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
                     </select>
                 </div>
                 <div className="date-range-picker" style={{ marginLeft: 'auto' }}>
