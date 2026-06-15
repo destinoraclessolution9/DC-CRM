@@ -1253,6 +1253,21 @@ class DataStore {
                 }, { once: true });
                 document.addEventListener('visibilitychange', _onVisibilityChange);
                 window.addEventListener('pageshow', _onPageShow);
+                // Belt-and-suspenders auto-recovery: poll a real (network-only)
+                // Supabase read so the banner self-dismisses within a few seconds
+                // once the server is reachable again — even on screens whose reads
+                // go through BFF/RPC paths that don't hit _clearOfflineNotice, and
+                // even if no online/visibility/pageshow event ever fires. Reaching
+                // the server at all (even an RLS error resolves, not rejects) = online.
+                const _offlineRecoverPoll = setInterval(async () => {
+                    if (!window._offlineNotified) { clearInterval(_offlineRecoverPoll); return; }
+                    try {
+                        await this._readClient().from('users').select('id').limit(1);
+                        try { document.getElementById('offline-banner')?.remove(); } catch (_) {}
+                        window._offlineNotified = false;
+                        clearInterval(_offlineRecoverPoll);
+                    } catch (_) { /* network failure — still offline, keep polling */ }
+                }, 4000);
             }
             // Even when read fails, still try to push queued writes — write endpoint is separate from read.
             // Only when authenticated: anon writes just bounce off RLS and spam the network.
