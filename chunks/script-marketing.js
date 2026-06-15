@@ -34,6 +34,17 @@
     const renderFormsTab             = (...a) => (window.app.renderFormsTab             || (() => Promise.resolve()))(...a);  // script-fude.js
     const loadFollowUpTemplates      = (...a) => (window.app.loadFollowUpTemplates      || (() => Promise.resolve([])))(...a); // script-calendar.js
     const invalidateFollowUpTemplatesCache = (...a) => (window.app.invalidateFollowUpTemplatesCache || (() => {}))(...a);     // script-calendar.js
+
+    // React-island flag (default-on) for the Monthly Promotion view.
+    // Kill-switch → legacy: window.__REACT_PROMO===false, ?react=0, crm_react_off='1'.
+    const _reactPromoOn = () => {
+        try {
+            if (window.__REACT_PROMO === false) return false;
+            if (/[?&]react=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            return !!(window.CRMReact && typeof window.CRMReact.mountMonthlyPromotion === 'function');
+        } catch (_) { return false; }
+    };
     const renderFolderTree           = (...a) => (window.app.renderFolderTree           || (() => Promise.resolve()))(...a);  // script-documents.js
     const loadFolderContents         = (...a) => (window.app.loadFolderContents         || (() => Promise.resolve()))(...a);  // script-documents.js
     // renderWorkflowTemplate defined in script-performance.js IIFE (private). Redeclare locally.
@@ -1008,6 +1019,44 @@
         // Pre-load all products once then resolve names locally
         const _allProducts = await AppDataStore.getAll('products');
         const _productMap = new Map(_allProducts.map(pr => [pr.id, pr.name]));
+
+        // React island — chunk builds plain card models, island renders.
+        if (_reactPromoOn()) {
+            try {
+                const promos = promotions.map(p => {
+                    const productNames = (p.product_ids || []).map(id => _productMap.get(id) || null).filter(Boolean);
+                    let hasDiscount = false, originalStr = '', savePct = 0;
+                    if (p.original_value && p.original_value > (p.price || 0)) {
+                        hasDiscount = true;
+                        savePct = Math.round(((p.original_value - p.price) / p.original_value) * 100);
+                        originalStr = parseFloat(p.original_value).toFixed(2);
+                    }
+                    return {
+                        id: p.id,
+                        name: p.package_name || p.name || 'Promotion',
+                        productNames,
+                        requirement: p.requirement || '',
+                        hasTimeFrame: !!(p.start_date || p.end_date),
+                        startStr: p.start_date ? UI.formatDate(p.start_date) : '—',
+                        endStr: p.end_date ? UI.formatDate(p.end_date) : 'Ongoing',
+                        slots: p.limited_slots || null,
+                        paymentTypes: p.payment_types || [],
+                        remarks: p.remarks || '',
+                        price: p.price ? parseFloat(p.price).toFixed(2) : null,
+                        hasDiscount, originalStr, savePct,
+                    };
+                });
+                container.innerHTML = '<div id="monthly-promo-react-root"></div>';
+                window.CRMReact.mountMonthlyPromotion(document.getElementById('monthly-promo-react-root'), {
+                    promos, totalPromos: allPromos.length,
+                });
+                return;
+            } catch (e) {
+                console.warn('[monthly-promo] island mount failed, falling back to legacy:', e && e.message);
+                // fall through to the legacy render below
+            }
+        }
+
         const promoCards = await Promise.all(promotions.map(async p => {
             const productNames = (p.product_ids || []).map(id => _productMap.get(id) || null);
             const validProductNames = productNames.filter(Boolean);

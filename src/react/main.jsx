@@ -30,6 +30,7 @@ import { MilestonesView } from './views/MilestonesView.jsx';
 import { CasesGrid } from './views/CasesGrid.jsx';
 import { BossReportView } from './views/BossReportView.jsx';
 import { ProtectionMonitoringView } from './views/ProtectionMonitoringView.jsx';
+import { MonthlyPromotionView } from './views/MonthlyPromotionView.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -300,6 +301,13 @@ function mountProtectionMonitoring(container, opts) {
     window.__REACT_PROTECTION_MOUNTED = true;
 }
 
+// ── Monthly Promotion island (read-only promo-card display). ──────────────────
+function mountMonthlyPromotion(container, opts) {
+    const o = opts || {};
+    _mountSimple(container, <MonthlyPromotionView promos={o.promos || []} totalPromos={o.totalPromos || 0} />);
+    window.__REACT_PROMO_MOUNTED = true;
+}
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
@@ -340,6 +348,8 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountBossReport: _unmountSimple,
     mountProtectionMonitoring,
     unmountProtectionMonitoring: _unmountSimple,
+    mountMonthlyPromotion,
+    unmountMonthlyPromotion: _unmountSimple,
 });
 
 if (document.readyState === 'loading') {
