@@ -1046,6 +1046,7 @@ class DataStore {
             out.push(...data);
             if (data.length < pageSize) break; // last page
         }
+        this._clearOfflineNotice();
         return out;
     }
 
@@ -2081,6 +2082,19 @@ class DataStore {
         this.emit('dataChanged', { action: 'delete', table: tableName, id });
     }
 
+    // A successful SERVER read proves we're online — clear any stale false
+    // "offline mode" banner. It is set on a transient fetch error but was only
+    // cleared inside getAll/_getAllImpl's cold-fetch success; reads via
+    // query/queryAdvanced/queryPaged/RPC never cleared it (and getAll returns
+    // from cache once warm), so a transient blip during a cold boot / SW update
+    // could leave the banner stuck even while the server is perfectly reachable.
+    _clearOfflineNotice() {
+        if (window._offlineNotified) {
+            try { document.getElementById('offline-banner')?.remove(); } catch (_) {}
+            window._offlineNotified = false;
+        }
+    }
+
     async query(tableName, filters = {}) {
         try {
             // Use the same light-select projection that getAll uses, so wide
@@ -2104,6 +2118,7 @@ class DataStore {
                 ({ data, error } = await q2);
             }
             if (error) throw error;
+            this._clearOfflineNotice();
             return data || [];
         } catch (e) {
             console.warn(`Offline: falling back for ${tableName} query`, e);
@@ -2215,6 +2230,7 @@ class DataStore {
                 }
                 throw error;
             }
+            this._clearOfflineNotice();
             return { data: data || [], count: count || 0, limit, offset };
         } catch (e) {
             console.error(`queryAdvanced error on ${tableName}:`, e);
