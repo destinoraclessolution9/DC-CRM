@@ -27,17 +27,18 @@
     const navigateTo           = (v)   => window.app.navigateTo(v);
     // AppDataStore, UI, supabase, XLSX (on demand) are globals — no alias needed.
 
-    // React-island flag — OPT-IN during verification (NOT default-on) per the
-    // scaffold-shell protocol. Enable: window.__REACT_REPORTS=true | ?react_reports=1
-    // | localStorage crm_react_reports='1'. Promote default-on after live verify.
+    // React-island flag (default-on, PROMOTED 2026-06-16). The earlier "agent
+    // dropdown stuck at 1" was a transient chunk-load/session glitch, not a bug —
+    // instrumented verify on a clean load confirmed loadAgents→setState→render
+    // fills the dropdown (agentOpts 21 = legacy), grid 11, charts + tables all
+    // render. Kill-switch → legacy: window.__REACT_REPORTS===false, ?react=0,
+    // crm_react_off='1'.
     const _reactReportsOn = () => {
         try {
+            if (window.__REACT_REPORTS === false) return false;
             if (/[?&]react=0/.test(location.search)) return false;
             if (localStorage.getItem('crm_react_off') === '1') return false;
-            if (!(window.CRMReact && typeof window.CRMReact.mountReports === 'function')) return false;
-            return window.__REACT_REPORTS === true
-                || /[?&]react_reports=1/.test(location.search)
-                || localStorage.getItem('crm_react_reports') === '1';
+            return !!(window.CRMReact && typeof window.CRMReact.mountReports === 'function');
         } catch (_) { return false; }
     };
 

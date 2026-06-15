@@ -21,16 +21,11 @@ export function ReportsView({ isTeamLeader = false, currentTimeFilter = 'monthly
     // depended on users being warm at mount). loadAgents() resolves the list
     // whenever the data is ready (cold-load safe).
     const [agentList, setAgentList] = useState(agents);
-    try { window.__DBG_RPT_RENDER = (window.__DBG_RPT_RENDER || 0) + 1; window.__DBG_RPT_RENDER_AGENTS = agentList.length; } catch (_) {}
     useEffect(() => {
-        try { window.__DBG_RPT_LA = (typeof loadAgents === 'function') ? 'called' : ('no-fn:' + typeof loadAgents); } catch (_) {}
         if (typeof loadAgents !== 'function') return undefined;
         let alive = true;
-        Promise.resolve(loadAgents()).then((a) => {
-            try { window.__DBG_RPT_LA_RESOLVED = Array.isArray(a) ? a.length : ('non-array:' + typeof a); } catch (_) {}
-            if (alive && Array.isArray(a)) { setAgentList(a); try { window.__DBG_RPT_SETSTATE = a.length; } catch (_) {} }
-        }).catch((e) => { try { window.__DBG_RPT_LA_ERR = String(e && e.message); } catch (_) {} });
-        return () => { alive = false; try { window.__DBG_RPT_CLEANUP = (window.__DBG_RPT_CLEANUP || 0) + 1; } catch (_) {} };
+        Promise.resolve(loadAgents()).then((a) => { if (alive && Array.isArray(a)) setAgentList(a); }).catch(() => {});
+        return () => { alive = false; };
     }, [loadAgents]);
 
     useEffect(() => {
