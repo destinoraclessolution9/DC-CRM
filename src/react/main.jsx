@@ -23,6 +23,8 @@ import { LeadFormsView, SurveysView, ContractsView } from './views/FormsViews.js
 import { PurchasesHistoryView } from './views/PurchasesHistoryView.jsx';
 import { KnowledgeDashboardCards } from './views/KnowledgeDashboardCards.jsx';
 import { KnowledgeAllEntries } from './views/KnowledgeAllEntries.jsx';
+import { CustomFieldsAdmin } from './views/CustomFieldsAdmin.jsx';
+import { OrgChartView } from './views/OrgChartView.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -256,6 +258,10 @@ function mountKnowledgeAllEntries(container, opts) {
     window.__REACT_KB_ALL_MOUNTED = true;
 }
 
+// ── Custom Fields admin + Org Chart list islands (read-only; data via props) ───
+function mountCustomFieldsAdmin(container, opts) { const o = opts || {}; _mountSimple(container, <CustomFieldsAdmin prospectFields={o.prospectFields || []} customerFields={o.customerFields || []} />); window.__REACT_CUSTOMFIELDS_MOUNTED = true; }
+function mountOrgChartView(container, opts) { const o = opts || {}; _mountSimple(container, <OrgChartView rows={o.rows || []} />); window.__REACT_ORG_MOUNTED = true; }
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
@@ -282,6 +288,10 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountKnowledgeDashboard: _unmountSimple,
     mountKnowledgeAllEntries,
     unmountKnowledgeAllEntries: _unmountSimple,
+    mountCustomFieldsAdmin,
+    unmountCustomFieldsAdmin: _unmountSimple,
+    mountOrgChartView,
+    unmountOrgChartView: _unmountSimple,
 });
 
 if (document.readyState === 'loading') {

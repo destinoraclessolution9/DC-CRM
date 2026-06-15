@@ -27,6 +27,17 @@
     ];
     
     const _orgTierForSize = (size) => ORG_TIERS.find(t => size >= t.min && size <= t.max) || null;
+
+    // React-island flag (default-on). Kill-switch → legacy: window.__REACT_ORG===false,
+    // ?react=0, or localStorage crm_react_off='1'.
+    const _reactOrgOn = () => {
+        try {
+            if (window.__REACT_ORG === false) return false;
+            if (/[?&]react=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            return !!(window.CRMReact && typeof window.CRMReact.mountOrgChartView === 'function');
+        } catch (_) { return false; }
+    };
     
     // BaZi-secrecy sanitiser. Anything that touches report_html or DOM goes
     // through this. Codes are matched case-insensitively.
@@ -121,7 +132,15 @@
         } catch (_) {
             rows = [];
         }
-    
+
+        if (_reactOrgOn()) {
+            try {
+                viewport.innerHTML = '<div id="orgchart-react-root"></div>';
+                window.CRMReact.mountOrgChartView(document.getElementById('orgchart-react-root'), { rows });
+                return;
+            } catch (e) { console.warn('[react-orgchart] mount failed → legacy:', e?.message || e); }
+        }
+
         const statusBadge = (s) => {
             const map = { draft: ['#94a3b8', 'Draft'], collecting: ['#3b82f6', 'Collecting'], analyzing: ['#8b5cf6', 'Analysing'], completed: ['#16a34a', 'Completed'], delivered: ['#0891b2', 'Delivered'] };
             const [bg, label] = map[s] || ['#94a3b8', '—'];

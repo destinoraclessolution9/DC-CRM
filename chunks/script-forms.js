@@ -554,6 +554,13 @@
         const defs = await AppDataStore.getAll('custom_field_definitions').catch(() => []);
         const prospectFields = defs.filter(d => d.entity_type === 'prospect');
         const customerFields = defs.filter(d => d.entity_type === 'customer');
+        if (_reactFormsOn('__REACT_CUSTOMFIELDS', 'mountCustomFieldsAdmin')) {
+            try {
+                container.innerHTML = '<div id="customfields-react-root"></div>';
+                window.CRMReact.mountCustomFieldsAdmin(document.getElementById('customfields-react-root'), { prospectFields, customerFields });
+                return;
+            } catch (e) { console.warn('[react-customfields] mount failed → legacy:', e?.message || e); }
+        }
         const renderFieldList = (fields) => fields.length === 0
             ? '<p style="color:var(--gray-400); font-size:13px; padding:8px 0;">No custom fields yet.</p>'
             : fields.map(f => `
