@@ -18,7 +18,13 @@ Path to **D** (god-object retirement / Vite build ownership / module extraction)
 - [x] monthly_promotion (view 'promotions') — SW-54, 2026-06-16, clean read-only promo-card island; parity-identical (live empty-state) + synthetic populated/XSS/both-empty-variants verified
 - [~] home (#24) — DEFERRED: showMobileHomeView (script-mobile.js) is a mobile, STATEFUL view (localStorage snapshot caching 8h TTL + pull-to-refresh + multi-tier cache loading + AI card) — cache/refresh correctness not count-parity-verifiable unattended.
 
-### ⏸️ AUTONOMOUS LOOP PAUSED 2026-06-16 — remaining views need an ATTENDED session
+- [x] marketing_lists (#22) — SW-55, 2026-06-16, tabbed island: React renders shell + 5 master tables (products/events/venues/bujishu/formula); promotions+special_programs = chunk legacy HTML passthrough (dangerouslySetInnerHTML). Parity-verified (products 66=66, tabs 7=7, all 5 tables + 2 passthroughs + action-btn labels correct) + XSS-escaped.
+
+### ▶️ LOOP RESUMED 2026-06-16 — user said "keep going" (proceed unattended, kill-switch = safety net)
+Strategy: count-verifiable views (full island) first; genuinely-interactive views via SCAFFOLD-SHELL (island static shell w/ stable ids + inline app.* handlers, chunk keeps ALL interactivity unchanged → byte-identical behavior). calendar/referrals LAST.
+NEXT = fude (assess: island render-only sections [tiles/leaderboard/admin tables/stories]; keep carousel + CRUD in chunk).
+
+### (historical) AUTONOMOUS LOOP PAUSED 2026-06-16 — superseded by "keep going" above
 All cleanly count/structure-parity-verifiable render views are DONE (18 shipped: …→ monthly_promotion SW-54). Every remaining standalone view is heavy/interactive/stateful and its CORRECTNESS cannot be validated by the unattended count-parity method (broken drag-drop / charts / wizard steps / carousels / QR / caching would pass structural parity yet ship behaviorally-broken to live users by default). Per the conservative unattended stance, these are NOT migrated without the user present to interactively verify:
 - home (caching/refresh), fude (carousel + story/highlight CRUD), marketing_automation (workflow builder), reports (Chart.js + 11 drill-down modals), stock_take (9 tabs/QR/realtime/3-way reconciliation), egg_purchasing + formula_purchaser (reconciliation wizards), search (9-entity condition builder), pipeline (drag-drop + scoring), calendar+month (6-week grid, highest-risk — alone & last), referrals (D3 zoom/pan tree), marketing_lists (7-tab manager).
 - Modals/embedded (always deferred): ai, journey, documents, knowledge_capture/daily_notes/detail, cps-analysis, apu-appraisal, destiny-blueprint, fude-redeem, story-detail, reward-crud, highlight-crud, customer-survey.
