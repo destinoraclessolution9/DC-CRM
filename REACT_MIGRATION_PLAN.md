@@ -26,7 +26,7 @@ Strategy: count-verifiable views (full island) first; genuinely-interactive view
 customers, prospects, agents, security, ranking, noticeboard, lead_forms, surveys, contracts, purchases_history, knowledge_dashboard, knowledge_all_entries, custom_fields, org_chart, booking_settings, milestones, cases, boss_report, protection, monthly_promotion, marketing_lists, documents, stock_take, egg_purchasing, formula_purchaser, marketing_automation, calendar(+month), referrals. (reports = built+working but OPT-IN, blocked on agent-dropdown.)
 
 REMAINING (lower-value / different class — were always deferred):
-1. reports (#38) agent-filter dropdown — opt-in island works except this; needs React devtools root-cause; then promote. (?react_reports=1)
+1. ✅ reports (#38) — RESOLVED + PROMOTED default-on (SW-80). The agent-dropdown-stuck-at-1 was a transient chunk-load/session glitch, NOT a bug; instrumented verify on a clean load confirmed loadAgents→setState→render fills it (agentOpts 21=legacy, grid 11, Chart.js drawn, leaderboard 4448). So all 28 standalone views are now default-on.
 2. Modals/overlays/embedded/mixed (the "modals deferred" category): ai (UI.showModal), search (overlay drawer), journey (embedded detail-tab + widgets), fude (mixed dashboard: render sections + carousel + CRUD), home (mobile stateful caching), knowledge_capture/daily_notes/detail, cps-analysis, apu-appraisal, destiny-blueprint, fude-redeem, story-detail, reward-crud, highlight-crud, customer-survey.
 3. Pre-existing cleanups found: marketing_automation duplicate Monthly-Promotions tab; data.js _getAllImpl offline crash.
 
