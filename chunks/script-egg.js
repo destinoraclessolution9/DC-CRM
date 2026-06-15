@@ -31,17 +31,16 @@
     const debounceCall         = (...a) => window.app.debounceCall(...a);
     const navigateTo           = (v)   => window.app.navigateTo(v);
 
-    // React-island flag — OPT-IN during verification (NOT default-on) per the
-    // scaffold-shell protocol. Enable: window.__REACT_EGG=true | ?react_egg=1 |
-    // localStorage crm_react_egg='1'. Promote default-on after live verify.
+    // React-island flag (default-on, PROMOTED 2026-06-16 after opt-in verify:
+    // useEffect→eggSwitchTab populate confirmed live — 4 tabs, Run wizard content
+    // matches legacy, tab-switch works). Kill-switch → legacy: window.__REACT_EGG===false,
+    // ?react=0, crm_react_off='1'.
     const _reactEggOn = () => {
         try {
+            if (window.__REACT_EGG === false) return false;
             if (/[?&]react=0/.test(location.search)) return false;
             if (localStorage.getItem('crm_react_off') === '1') return false;
-            if (!(window.CRMReact && typeof window.CRMReact.mountEggPurchasing === 'function')) return false;
-            return window.__REACT_EGG === true
-                || /[?&]react_egg=1/.test(location.search)
-                || localStorage.getItem('crm_react_egg') === '1';
+            return !!(window.CRMReact && typeof window.CRMReact.mountEggPurchasing === 'function');
         } catch (_) { return false; }
     };
     // AppDataStore, UI, supabase are global — no alias needed.
