@@ -33,18 +33,16 @@
     const canAccessStockTake   = (u)   => _utils.isSystemAdmin(u) || _utils.isStockTakeStaff(u);
     // AppDataStore, UI, supabase are global — no alias needed.
 
-    // React-island flag — OPT-IN during verification (NOT default-on yet) per the
-    // scaffold-shell protocol. Enable per-session to verify the useEffect populate:
-    //   window.__REACT_ST=true | ?react_st=1 | localStorage crm_react_st='1'.
-    // Promote to default-on in a follow-up deploy once verified live.
+    // React-island flag (default-on, PROMOTED 2026-06-16 after opt-in verification:
+    // useEffect→stSwitchTab populate confirmed live — 9 tabs, chip + body match
+    // legacy, tab-switch works). Kill-switch → legacy: window.__REACT_ST===false,
+    // ?react=0, crm_react_off='1'.
     const _reactStockTakeOn = () => {
         try {
+            if (window.__REACT_ST === false) return false;
             if (/[?&]react=0/.test(location.search)) return false;
             if (localStorage.getItem('crm_react_off') === '1') return false;
-            if (!(window.CRMReact && typeof window.CRMReact.mountStockTake === 'function')) return false;
-            return window.__REACT_ST === true
-                || /[?&]react_st=1/.test(location.search)
-                || localStorage.getItem('crm_react_st') === '1';
+            return !!(window.CRMReact && typeof window.CRMReact.mountStockTake === 'function');
         } catch (_) { return false; }
     };
 
