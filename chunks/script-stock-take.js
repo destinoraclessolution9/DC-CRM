@@ -33,6 +33,21 @@
     const canAccessStockTake   = (u)   => _utils.isSystemAdmin(u) || _utils.isStockTakeStaff(u);
     // AppDataStore, UI, supabase are global — no alias needed.
 
+    // React-island flag — OPT-IN during verification (NOT default-on yet) per the
+    // scaffold-shell protocol. Enable per-session to verify the useEffect populate:
+    //   window.__REACT_ST=true | ?react_st=1 | localStorage crm_react_st='1'.
+    // Promote to default-on in a follow-up deploy once verified live.
+    const _reactStockTakeOn = () => {
+        try {
+            if (/[?&]react=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            if (!(window.CRMReact && typeof window.CRMReact.mountStockTake === 'function')) return false;
+            return window.__REACT_ST === true
+                || /[?&]react_st=1/.test(location.search)
+                || localStorage.getItem('crm_react_st') === '1';
+        } catch (_) { return false; }
+    };
+
     // ==================== STOCK TAKE (Super Admin, Level 1) ====================
     // Shelf-by-shelf physical count reconciliation against imported system balances.
     // Storage: localStorage (key prefix `stockTake.v1.*`) — Supabase tables can be
@@ -146,6 +161,29 @@
                 }
             } catch (e) { console.warn('[stock-take] staff bootstrap failed:', e?.message); }
         }
+        // React scaffold-shell — island renders the shell; the chunk's stSwitchTab()
+        // (via useEffect onReady) fills #st-session-chip + #st-tab-body exactly as
+        // legacy (all 9 tabs / QR / reconcile / realtime unchanged).
+        if (_reactStockTakeOn()) {
+            try {
+                const _stKeys = isSystemAdmin(_state.cu)
+                    ? ['sessions', 'shelves', 'import', 'exclusions', 'count', 'bulk', 'reconcile', 'recount', 'summary']
+                    : ['count', 'recount', 'summary'];
+                const _stLabels = { sessions: 'Sessions', shelves: 'Shelves (v2)', import: 'System Stock', exclusions: 'Exclusions', count: 'Per-shelf Count', bulk: 'Bulk Physical', reconcile: 'Reconciliation', recount: 'Recount', summary: 'Final Summary' };
+                const _stDefault = isSystemAdmin(_state.cu) ? 'sessions' : 'count';
+                const _stTab = new Set(_stKeys).has(_stState.tab) ? _stState.tab : _stDefault;
+                container.innerHTML = '<div id="st-react-root"></div>';
+                window.CRMReact.mountStockTake(document.getElementById('st-react-root'), {
+                    tabs: _stKeys.map(k => ({ key: k, label: _stLabels[k] })),
+                    onReady: () => { stSwitchTab(_stTab); },
+                });
+                return;
+            } catch (e) {
+                console.warn('[stock-take] island mount failed, falling back to legacy:', e && e.message);
+                // fall through to the legacy render below
+            }
+        }
+
         container.innerHTML = `
             <div class="stock-take-view" style="padding:24px;max-width:1400px;margin:0 auto;">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:12px;">

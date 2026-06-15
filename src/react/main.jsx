@@ -33,6 +33,7 @@ import { ProtectionMonitoringView } from './views/ProtectionMonitoringView.jsx';
 import { MonthlyPromotionView } from './views/MonthlyPromotionView.jsx';
 import { MarketingListsView } from './views/MarketingListsView.jsx';
 import { DocumentManagementView } from './views/DocumentManagementView.jsx';
+import { StockTakeView } from './views/StockTakeView.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -327,6 +328,14 @@ function mountDocuments(container, opts) {
     window.__REACT_DMS_MOUNTED = true;
 }
 
+// ── Stock Take scaffold-shell island (chunk fills #st-session-chip + #st-tab-body
+// via stSwitchTab on useEffect onReady; owns all 9 tabs/QR/reconcile/realtime). ──
+function mountStockTake(container, opts) {
+    const o = opts || {};
+    _mountSimple(container, <StockTakeView tabs={o.tabs || []} onReady={o.onReady} />);
+    window.__REACT_ST_MOUNTED = true;
+}
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
@@ -373,6 +382,8 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountMarketingLists: _unmountSimple,
     mountDocuments,
     unmountDocuments: _unmountSimple,
+    mountStockTake,
+    unmountStockTake: _unmountSimple,
 });
 
 if (document.readyState === 'loading') {
