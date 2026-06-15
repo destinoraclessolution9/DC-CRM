@@ -35,6 +35,17 @@
     let _caseActiveTab = 'cps'; // 'cps' | 'closed'
     let _caseAdvOpen = false;
 
+    // React-island flag (default-on). Kill-switch → legacy: window.__REACT_CASES===false,
+    // ?react=0, or localStorage crm_react_off='1'.
+    const _reactCasesOn = () => {
+        try {
+            if (window.__REACT_CASES === false) return false;
+            if (/[?&]react=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            return !!(window.CRMReact && typeof window.CRMReact.mountCasesGrid === 'function');
+        } catch (_) { return false; }
+    };
+
 
 
     const showCasesView = async (container) => {
@@ -427,12 +438,106 @@
                 </div>`;
         };
 
+        // React path — derive a plain, fully-computed card model from the same
+        // helpers/maps buildCard uses, so the island renders an identical card.
+        // (buildCard above stays the legacy fallback when the kill-switch is on.)
+        const cardModel = (c, type) => {
+            let entityName = '';
+            let entityIcon = '';
+            let prospectData = null;
+            if (c.customer_id) {
+                const cust = customerMap.get(String(c.customer_id));
+                if (cust) { entityName = cust.full_name; entityIcon = 'fa-user-check'; }
+            } else if (c.prospect_id) {
+                const pros = prospectMap.get(String(c.prospect_id));
+                if (pros) { prospectData = pros; entityName = pros.full_name; entityIcon = 'fa-user'; }
+            }
+
+            const isOwner = c.created_by === currentUser?.id;
+            const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || /manager|team_leader/i.test(currentUser?.role || '');
+            const canEdit = isOwner || isAdmin;
+
+            const creator = allUsers.find(u => u.id === c.created_by);
+            const creatorName = creator ? (creator.full_name || creator.username || 'Agent') : 'System';
+            const creatorInitial = (creatorName[0] || '?').toUpperCase();
+
+            const caseMappings = allTagMappings.filter(et => et.entity_type === 'case_study' && et.entity_id === c.id);
+            const caseTags = caseMappings.map(mp => allTags.find(t => t.id === mp.tag_id)).filter(Boolean);
+            const tags = caseTags.slice(0, 3).map(t => ({ name: t.name, bg: (t.color || '#e5e7eb'), text: (t.color || '#374151') }));
+            const extraTagCount = caseTags.length > 3 ? caseTags.length - 3 : 0;
+
+            const photos = Array.isArray(c.photo_urls) ? c.photo_urls : [];
+            const coverPhoto = photos[0] || null;
+            const totalPhotos = photos.length;
+
+            const ageText = prospectData?.date_of_birth
+                ? Math.floor((Date.now() - new Date(prospectData.date_of_birth)) / (365.25 * 24 * 60 * 60 * 1000)) + 'y'
+                : '';
+
+            const m = {
+                id: c.id,
+                type,
+                coverPhoto,
+                totalPhotos,
+                coverGradient: productGradient(type === 'cps' ? (entityName || 'cps') : c.product),
+                coverIcon: type === 'cps' ? 'fa-handshake' : 'fa-trophy',
+                isPublic: !!c.is_public,
+                entityName,
+                entityIcon,
+                canEdit,
+                creatorName,
+                creatorInitial,
+                tags,
+                extraTagCount,
+            };
+
+            if (type === 'cps') {
+                m.title = entityName ? entityName : (c.title ? c.title : 'CPS Case');
+                m.subtitle = prospectData?.occupation
+                    ? prospectData.occupation
+                    : (prospectData?.referral_relationship ? 'Referred via ' + prospectData.referral_relationship : '');
+                m.desc = c.cps_invitation_details
+                    ? (c.cps_invitation_details.length > 140 ? c.cps_invitation_details.substring(0, 140) + '…' : c.cps_invitation_details)
+                    : 'No invitation details recorded yet.';
+                m.metaPills = [
+                    prospectData?.gender ? { icon: 'fa-venus-mars', text: `${prospectData.gender} ${genderEmoji(prospectData.gender)}` } : null,
+                    ageText ? { icon: 'fa-birthday-cake', text: ageText } : null,
+                    c.cps_invitation_method ? { icon: 'fa-paper-plane', text: c.cps_invitation_method } : null,
+                    prospectData?.referral_relationship ? { icon: 'fa-people-arrows', text: prospectData.referral_relationship } : null,
+                ].filter(Boolean);
+            } else {
+                m.title = c.title || 'Untitled Case';
+                m.amountStr = c.amount ? 'RM ' + parseFloat(c.amount).toLocaleString() : '';
+                const closedDate = c.closing_date ? new Date(c.closing_date).toLocaleDateString('en-MY', { year: 'numeric', month: 'short', day: 'numeric' }) : '';
+                const storyPreview = (c.success_story || c.sales_idea || c.closing_details || '').trim();
+                m.desc = storyPreview
+                    ? (storyPreview.length > 160 ? storyPreview.substring(0, 160) + '…' : storyPreview)
+                    : 'Tap to read the full closing strategy and sales idea.';
+                m.metaPills = [
+                    entityName ? { icon: entityIcon, text: entityName } : null,
+                    c.product ? { icon: 'fa-box', text: c.product } : null,
+                    closedDate ? { icon: 'fa-calendar-check', text: closedDate } : null,
+                ].filter(Boolean);
+            }
+            return m;
+        };
+
+        const _reactOn = _reactCasesOn();
+
         // CPS cases — applySharedFilters + buildCard are now sync (preloaded maps)
         let cpsCases = allCases.filter(c => (c.case_type || 'cps') === 'cps');
         cpsCases = applySharedFilters(cpsCases);
         cpsCases.sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0));
         if (countCps) countCps.textContent = cpsCases.length;
-        if (cpsCases.length === 0) {
+        if (_reactOn) {
+            // Island owns the grid's children — never touch gridCps.innerHTML on
+            // this path (it would corrupt the React root). Empty-state + grid
+            // visibility are siblings, safe to toggle directly.
+            const cpsModels = cpsCases.map(c => cardModel(c, 'cps'));
+            window.CRMReact.mountCasesGrid(gridCps, { cards: cpsModels, type: 'cps' });
+            gridCps.style.display = cpsModels.length ? '' : 'none';
+            emptyCps.style.display = cpsModels.length ? 'none' : 'flex';
+        } else if (cpsCases.length === 0) {
             gridCps.innerHTML = '';
             gridCps.style.display = 'none';
             emptyCps.style.display = 'flex';
@@ -447,7 +552,12 @@
         closedCases = applySharedFilters(closedCases);
         closedCases.sort((a, b) => new Date(b.closing_date || b.updated_at || 0) - new Date(a.closing_date || a.updated_at || 0));
         if (countClosed) countClosed.textContent = closedCases.length;
-        if (closedCases.length === 0) {
+        if (_reactOn) {
+            const closedModels = closedCases.map(c => cardModel(c, 'closed'));
+            window.CRMReact.mountCasesGrid(gridClosed, { cards: closedModels, type: 'closed' });
+            gridClosed.style.display = closedModels.length ? '' : 'none';
+            emptyClosed.style.display = closedModels.length ? 'none' : 'flex';
+        } else if (closedCases.length === 0) {
             gridClosed.innerHTML = '';
             gridClosed.style.display = 'none';
             emptyClosed.style.display = 'flex';

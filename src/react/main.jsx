@@ -27,6 +27,7 @@ import { CustomFieldsAdmin } from './views/CustomFieldsAdmin.jsx';
 import { OrgChartView } from './views/OrgChartView.jsx';
 import { BookingSettingsView } from './views/BookingSettingsView.jsx';
 import { MilestonesView } from './views/MilestonesView.jsx';
+import { CasesGrid } from './views/CasesGrid.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -272,6 +273,15 @@ function mountMilestonesView(container, opts) {
     window.__REACT_MILESTONES_MOUNTED = true;
 }
 
+// ── Cases card-grid island (Success Case Library) — data via props, mutations
+// via app.*. Mounted twice per render (cps grid + closed grid), each with its
+// own container/root in the _roots map. ──────────────────────────────────────
+function mountCasesGrid(container, opts) {
+    const o = opts || {};
+    _mountSimple(container, <CasesGrid cards={o.cards || []} type={o.type || 'cps'} />);
+    window.__REACT_CASES_MOUNTED = true;
+}
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
@@ -306,6 +316,8 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountBookingSettings: _unmountSimple,
     mountMilestonesView,
     unmountMilestonesView: _unmountSimple,
+    mountCasesGrid,
+    unmountCasesGrid: _unmountSimple,
 });
 
 if (document.readyState === 'loading') {
