@@ -1271,9 +1271,6 @@
                     <button class="marketing-tab ${_state.cmt === 'promotions' ? 'active' : ''}" onclick="app.switchMarketingTab('promotions')">
                         <i class="fas fa-calendar-alt"></i> Monthly Promotions
                     </button>
-                    <button class="marketing-tab ${_state.cmt === 'promotions' ? 'active' : ''}" onclick="app.switchMarketingTab('promotions')">
-                        <i class="fas fa-calendar-alt"></i> Monthly Promotions
-                    </button>
                     ` : ''}
                 </div>
 

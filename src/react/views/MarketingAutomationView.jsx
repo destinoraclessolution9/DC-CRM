@@ -18,11 +18,11 @@ const BASE_TABS = [
     { key: 'automation', icon: 'fa-cogs', label: 'Automation' },
     { key: 'analytics', icon: 'fa-chart-line', label: 'Campaign Analytics' },
 ];
-// Marketing-manager/admin-only extra tabs. NOTE: legacy renders "Monthly
-// Promotions" TWICE (a pre-existing copy-paste dup) — reproduced for parity.
+// Marketing-manager/admin-only extra tabs. (The legacy view rendered "Monthly
+// Promotions" twice — a pre-existing copy-paste dup, now removed here + in the
+// chunk fallback.)
 const EXTRA_TABS = [
     { key: 'products', icon: 'fa-box', label: 'Products & Services' },
-    { key: 'promotions', icon: 'fa-calendar-alt', label: 'Monthly Promotions' },
     { key: 'promotions', icon: 'fa-calendar-alt', label: 'Monthly Promotions' },
 ];
 
