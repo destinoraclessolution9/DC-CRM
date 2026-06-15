@@ -13,7 +13,7 @@ const app = () => window.app || {};
 const call = (name, ...args) => { const f = app()[name]; if (typeof f === 'function') f(...args); };
 const byId = (id) => { const el = document.getElementById(id); return el ? el.value : ''; };
 
-export function ReportsView({ isTeamLeader = false, currentTimeFilter = 'monthly', roles = [], currentRoleFilter = 'All', customDateFrom = '', customDateTo = '', onReady }) {
+export function ReportsView({ isTeamLeader = false, currentTimeFilter = 'monthly', roles = [], currentRoleFilter = 'All', customDateFrom = '', customDateTo = '', agents = [], currentAgentFilter = 'all', onReady }) {
     try { window.__REACT_REPORTS_STATE = 'ready'; } catch (_) { /* noop */ }
 
     useEffect(() => {
@@ -59,8 +59,9 @@ export function ReportsView({ isTeamLeader = false, currentTimeFilter = 'monthly
                     </select>
                 </div>
                 <div className="role-filter-group" style={{ marginLeft: '12px' }}>
-                    <select id="kpi-agent-filter" className="form-control" onChange={(e) => call('setAgentFilter', e.target.value)} style={{ width: '200px' }}>
+                    <select id="kpi-agent-filter" className="form-control" defaultValue={String(currentAgentFilter)} onChange={(e) => call('setAgentFilter', e.target.value)} style={{ width: '200px' }}>
                         <option value="all">All Agents</option>
+                        {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
                     </select>
                 </div>
                 <div className="date-range-picker" style={{ marginLeft: 'auto' }}>

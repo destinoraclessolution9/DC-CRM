@@ -105,6 +105,16 @@
         // canvas); _kpiPopulate (via useEffect onReady) fills everything as legacy.
         if (_reactReportsOn()) {
             try {
+                // Compute the agent-filter options BEFORE mount so React renders them
+                // directly (the chunk's post-mount innerHTML fill loses a one-time
+                // race against React's commit; rendering from a prop is race-free).
+                let _kpiAgents = [];
+                try {
+                    const _us = await AppDataStore.getAll('users');
+                    _kpiAgents = (_us || [])
+                        .filter(u => isAgent(u) || u.role === 'team_leader' || (u.role || '').includes('Level 7'))
+                        .map(a => ({ id: a.id, name: a.full_name || '' }));
+                } catch (_) {}
                 container.innerHTML = '<div id="reports-react-root"></div>';
                 window.CRMReact.mountReports(document.getElementById('reports-react-root'), {
                     isTeamLeader: isTeamLeaderOrAbove(_state.cu),
@@ -113,6 +123,8 @@
                     currentRoleFilter: _currentRoleFilter,
                     customDateFrom: _customDateFrom,
                     customDateTo: _customDateTo,
+                    agents: _kpiAgents,
+                    currentAgentFilter: _currentAgentFilter,
                     onReady: () => { _kpiPopulate(); },
                 });
                 return;
