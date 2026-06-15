@@ -8,9 +8,27 @@
     const esc = (s) => window._crmUtils.escapeHtml(s);
     // ========== LEAD CAPTURE FORMS ==========
 
+    // React-island flag for the forms-chunk views (default-on). Kill-switch → legacy:
+    // window.__REACT_<X>===false, ?react=0, or localStorage crm_react_off='1'.
+    const _reactFormsOn = (killFlag, mountName) => {
+        try {
+            if (window[killFlag] === false) return false;
+            if (/[?&]react=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            return !!(window.CRMReact && typeof window.CRMReact[mountName] === 'function');
+        } catch (_) { return false; }
+    };
+
     const showLeadFormsView = async (container) => {
         _state.cv = 'lead_forms';
         const forms = await AppDataStore.getAll('lead_forms').catch(() => []);
+        if (_reactFormsOn('__REACT_LEADFORMS', 'mountLeadFormsView')) {
+            try {
+                container.innerHTML = '<div id="leadforms-react-root"></div>';
+                window.CRMReact.mountLeadFormsView(document.getElementById('leadforms-react-root'), { forms });
+                return;
+            } catch (e) { console.warn('[react-leadforms] mount failed → legacy:', e?.message || e); }
+        }
         container.innerHTML = `
             <div style="padding:24px; max-width:1000px; margin:0 auto;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;">
@@ -192,6 +210,13 @@
     const showSurveysView = async (container) => {
         _state.cv = 'surveys';
         const surveys = await AppDataStore.getAll('surveys').catch(() => []);
+        if (_reactFormsOn('__REACT_SURVEYS', 'mountSurveysView')) {
+            try {
+                container.innerHTML = '<div id="surveys-react-root"></div>';
+                window.CRMReact.mountSurveysView(document.getElementById('surveys-react-root'), { surveys });
+                return;
+            } catch (e) { console.warn('[react-surveys] mount failed → legacy:', e?.message || e); }
+        }
         container.innerHTML = `
             <div style="padding:24px; max-width:1000px; margin:0 auto;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;">
@@ -359,6 +384,13 @@
     const showContractsView = async (container) => {
         _state.cv = 'contracts';
         const contracts = await AppDataStore.getAll('contracts').catch(() => []);
+        if (_reactFormsOn('__REACT_CONTRACTS', 'mountContractsView')) {
+            try {
+                container.innerHTML = '<div id="contracts-react-root"></div>';
+                window.CRMReact.mountContractsView(document.getElementById('contracts-react-root'), { contracts });
+                return;
+            } catch (e) { console.warn('[react-contracts] mount failed → legacy:', e?.message || e); }
+        }
         container.innerHTML = `
             <div style="padding:24px; max-width:1000px; margin:0 auto;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;">

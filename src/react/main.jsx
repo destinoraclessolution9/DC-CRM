@@ -19,6 +19,7 @@ import { AgentsTable } from './views/AgentsTable.jsx';
 import { SecurityDashboard } from './views/SecurityDashboard.jsx';
 import { RankingView } from './views/RankingView.jsx';
 import { NoticeboardGrid } from './views/NoticeboardGrid.jsx';
+import { LeadFormsView, SurveysView, ContractsView } from './views/FormsViews.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -224,6 +225,21 @@ function unmountNoticeboardGrid(container) {
     if (root) { try { root.unmount(); } catch (_) {} _roots.delete(container); }
 }
 
+// ── Forms-chunk islands (Lead Forms / Surveys / Contracts) — data via props ────
+function _mountSimple(container, element) {
+    if (!container) return;
+    let root = _roots.get(container);
+    if (!root) { root = createRoot(container); _roots.set(container, root); }
+    root.render(element);
+}
+function _unmountSimple(container) {
+    const root = container && _roots.get(container);
+    if (root) { try { root.unmount(); } catch (_) {} _roots.delete(container); }
+}
+function mountLeadFormsView(container, opts) { _mountSimple(container, <LeadFormsView forms={(opts || {}).forms || []} />); window.__REACT_LEADFORMS_MOUNTED = true; }
+function mountSurveysView(container, opts) { _mountSimple(container, <SurveysView surveys={(opts || {}).surveys || []} />); window.__REACT_SURVEYS_MOUNTED = true; }
+function mountContractsView(container, opts) { _mountSimple(container, <ContractsView contracts={(opts || {}).contracts || []} />); window.__REACT_CONTRACTS_MOUNTED = true; }
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
@@ -238,6 +254,12 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountRankingView,
     mountNoticeboardGrid,
     unmountNoticeboardGrid,
+    mountLeadFormsView,
+    mountSurveysView,
+    mountContractsView,
+    unmountLeadFormsView: _unmountSimple,
+    unmountSurveysView: _unmountSimple,
+    unmountContractsView: _unmountSimple,
 });
 
 if (document.readyState === 'loading') {
