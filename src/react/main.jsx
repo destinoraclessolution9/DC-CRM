@@ -34,6 +34,7 @@ import { MonthlyPromotionView } from './views/MonthlyPromotionView.jsx';
 import { MarketingListsView } from './views/MarketingListsView.jsx';
 import { DocumentManagementView } from './views/DocumentManagementView.jsx';
 import { StockTakeView } from './views/StockTakeView.jsx';
+import { EggPurchasingView } from './views/EggPurchasingView.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -336,6 +337,14 @@ function mountStockTake(container, opts) {
     window.__REACT_ST_MOUNTED = true;
 }
 
+// ── Egg Purchasing scaffold-shell island (chunk fills #egg-tab-content via
+// eggSwitchTab on useEffect onReady; owns wizard/file-IO/reconcile). ───────────
+function mountEggPurchasing(container, opts) {
+    const o = opts || {};
+    _mountSimple(container, <EggPurchasingView tabs={o.tabs || []} activeTab={o.activeTab || 'run'} onReady={o.onReady} />);
+    window.__REACT_EGG_MOUNTED = true;
+}
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
@@ -384,6 +393,8 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountDocuments: _unmountSimple,
     mountStockTake,
     unmountStockTake: _unmountSimple,
+    mountEggPurchasing,
+    unmountEggPurchasing: _unmountSimple,
 });
 
 if (document.readyState === 'loading') {

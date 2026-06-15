@@ -30,6 +30,20 @@
     const generateId           = () => _utils.generateId();
     const debounceCall         = (...a) => window.app.debounceCall(...a);
     const navigateTo           = (v)   => window.app.navigateTo(v);
+
+    // React-island flag — OPT-IN during verification (NOT default-on) per the
+    // scaffold-shell protocol. Enable: window.__REACT_EGG=true | ?react_egg=1 |
+    // localStorage crm_react_egg='1'. Promote default-on after live verify.
+    const _reactEggOn = () => {
+        try {
+            if (/[?&]react=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            if (!(window.CRMReact && typeof window.CRMReact.mountEggPurchasing === 'function')) return false;
+            return window.__REACT_EGG === true
+                || /[?&]react_egg=1/.test(location.search)
+                || localStorage.getItem('crm_react_egg') === '1';
+        } catch (_) { return false; }
+    };
     // AppDataStore, UI, supabase are global — no alias needed.
 
     // ==================== EGG PURCHASING SYSTEM (Super Admin only) ====================
@@ -557,6 +571,29 @@ JB 星期二到
             return;
         }
         await eggLoadConfig();
+
+        // React scaffold-shell — island renders shell; chunk eggSwitchTab() (via
+        // useEffect onReady) fills #egg-tab-content (wizard/file-IO/reconcile unchanged).
+        if (_reactEggOn()) {
+            try {
+                const _eggTabs = [
+                    { key: 'run', label: 'Run This Week', icon: 'fa-play-circle' },
+                    { key: 'urgent', label: 'Urgent Orders', icon: 'fa-bolt' },
+                    { key: 'history', label: 'Run History', icon: 'fa-history' },
+                    { key: 'config', label: 'Configuration', icon: 'fa-cog' },
+                ];
+                const _eggTab = _eggState.currentTab || 'run';
+                container.innerHTML = '<div id="egg-react-root"></div>';
+                window.CRMReact.mountEggPurchasing(document.getElementById('egg-react-root'), {
+                    tabs: _eggTabs, activeTab: _eggTab,
+                    onReady: () => { eggSwitchTab(_eggTab); },
+                });
+                return;
+            } catch (e) {
+                console.warn('[egg] island mount failed, falling back to legacy:', e && e.message);
+                // fall through to the legacy render below
+            }
+        }
 
         container.innerHTML = `
             <div class="egg-purchasing-view" style="padding:24px;">
