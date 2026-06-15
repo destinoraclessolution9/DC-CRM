@@ -32,6 +32,7 @@ import { BossReportView } from './views/BossReportView.jsx';
 import { ProtectionMonitoringView } from './views/ProtectionMonitoringView.jsx';
 import { MonthlyPromotionView } from './views/MonthlyPromotionView.jsx';
 import { MarketingListsView } from './views/MarketingListsView.jsx';
+import { DocumentManagementView } from './views/DocumentManagementView.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -318,6 +319,14 @@ function mountMarketingLists(container, opts) {
     window.__REACT_MKTLISTS_MOUNTED = true;
 }
 
+// ── Document Management scaffold-shell island (chunk populates the containers +
+// owns all interactivity incl. drag-drop). ───────────────────────────────────
+function mountDocuments(container, opts) {
+    const o = opts || {};
+    _mountSimple(container, <DocumentManagementView viewMode={o.viewMode || 'list'} />);
+    window.__REACT_DMS_MOUNTED = true;
+}
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
@@ -362,6 +371,8 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountMonthlyPromotion: _unmountSimple,
     mountMarketingLists,
     unmountMarketingLists: _unmountSimple,
+    mountDocuments,
+    unmountDocuments: _unmountSimple,
 });
 
 if (document.readyState === 'loading') {

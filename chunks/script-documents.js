@@ -21,7 +21,43 @@
     let _fileSortDirection = 'asc';
     let _fileFilter = '';
     let _draggedFileId = null;
+
+    // React-island flag (default-on) for the Document Management shell.
+    // Kill-switch → legacy: window.__REACT_DMS===false, ?react=0, crm_react_off='1'.
+    const _reactDocumentsOn = () => {
+        try {
+            if (window.__REACT_DMS === false) return false;
+            if (/[?&]react=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            return !!(window.CRMReact && typeof window.CRMReact.mountDocuments === 'function');
+        } catch (_) { return false; }
+    };
+
     const showDocumentManagementView = async (container) => {
+        // React scaffold-shell — island renders the static shell; the chunk then
+        // populates #folder-tree + #file-container via the SAME renderFolderTree()
+        // + loadFolderContents() as the legacy path (drag-drop + all rendering
+        // unchanged). rAF-wait so the populate runs after React commits the DOM.
+        if (_reactDocumentsOn()) {
+            try {
+                container.innerHTML = '<div id="dms-react-root"></div>';
+                window.CRMReact.mountDocuments(document.getElementById('dms-react-root'), { viewMode: _viewMode });
+                const _pop = () => {
+                    if (!document.getElementById('folder-tree') || !document.getElementById('file-container')) {
+                        requestAnimationFrame(_pop);
+                        return;
+                    }
+                    renderFolderTree();
+                    loadFolderContents();
+                };
+                _pop();
+                return;
+            } catch (e) {
+                console.warn('[documents] island mount failed, falling back to legacy:', e && e.message);
+                // fall through to the legacy render below
+            }
+        }
+
         container.innerHTML = `
             <div class="dms-view">
                 <div class="dms-header">
