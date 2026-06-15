@@ -32,6 +32,17 @@
     const navigateTo           = (v)   => window.app.navigateTo(v);
     // AppDataStore, UI, supabase are global — no alias needed.
 
+    // React-island flag (default-on). Kill-switch → legacy: window.__REACT_BOSSREPORT===false,
+    // ?react=0, or localStorage crm_react_off='1'.
+    const _reactBossReportOn = () => {
+        try {
+            if (window.__REACT_BOSSREPORT === false) return false;
+            if (/[?&]react=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            return !!(window.CRMReact && typeof window.CRMReact.mountBossReport === 'function');
+        } catch (_) { return false; }
+    };
+
     // ==================== BOSS REPORT (Super Admin only) ====================
 
     let _brState = {
@@ -132,6 +143,25 @@
 
         _brState.skusMap = _brGetSkus();
         const skusDate = localStorage.getItem('br_skus_date');
+
+        // React island — render-once scaffold (same ids + app.* handlers).
+        if (_reactBossReportOn()) {
+            const runData = runs.map(r => {
+                const cartons = (r.totals?.KL?.GOLD||0)+(r.totals?.KL?.KING||0)+(r.totals?.PG?.GOLD||0)+(r.totals?.PG?.KING||0);
+                return { id: r.id, label: `Week ${r.week_start_date} • ${r.run_at ? new Date(r.run_at).toLocaleString() : ''} • ${cartons} cartons` };
+            });
+            container.innerHTML = '<div id="boss-report-react-root"></div>';
+            try {
+                window.CRMReact.mountBossReport(document.getElementById('boss-report-react-root'), {
+                    runs: runData, bals, tgts, monthLabel,
+                    skusLabel: _brState.skusMap ? `Cached ${skusDate||''}` : 'Not loaded',
+                });
+                return;
+            } catch (e) {
+                console.warn('[boss-report] island mount failed, falling back to legacy:', e && e.message);
+                // fall through to the legacy scaffold below
+            }
+        }
 
         const runOpts = runs.map(r => {
             const cartons = (r.totals?.KL?.GOLD||0)+(r.totals?.KL?.KING||0)+(r.totals?.PG?.GOLD||0)+(r.totals?.PG?.KING||0);

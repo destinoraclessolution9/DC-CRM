@@ -28,6 +28,7 @@ import { OrgChartView } from './views/OrgChartView.jsx';
 import { BookingSettingsView } from './views/BookingSettingsView.jsx';
 import { MilestonesView } from './views/MilestonesView.jsx';
 import { CasesGrid } from './views/CasesGrid.jsx';
+import { BossReportView } from './views/BossReportView.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -282,6 +283,14 @@ function mountCasesGrid(container, opts) {
     window.__REACT_CASES_MOUNTED = true;
 }
 
+// ── Boss Report island (Super-Admin generator form; mount-once scaffold, all
+// logic stays in the chunk handlers via stable ids + app.*). ──────────────────
+function mountBossReport(container, opts) {
+    const o = opts || {};
+    _mountSimple(container, <BossReportView runs={o.runs || []} bals={o.bals || {}} tgts={o.tgts || {}} monthLabel={o.monthLabel || ''} skusLabel={o.skusLabel || 'Not loaded'} />);
+    window.__REACT_BOSSREPORT_MOUNTED = true;
+}
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
@@ -318,6 +327,8 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountMilestonesView: _unmountSimple,
     mountCasesGrid,
     unmountCasesGrid: _unmountSimple,
+    mountBossReport,
+    unmountBossReport: _unmountSimple,
 });
 
 if (document.readyState === 'loading') {

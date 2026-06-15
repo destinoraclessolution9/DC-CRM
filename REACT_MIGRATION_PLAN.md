@@ -4,9 +4,33 @@ Path to **D** (god-object retirement / Vite build ownership / module extraction)
 
 **Deploy rule:** every migration rebuilds ONE shared live bundle → build → deploy → live browser parity-verify → promote, sequentially. Batch at most 2-3 closely-related read-only M views per deploy; S/L/XL one-at-a-time. Bump `react-island.js ?v=` in index.html (line ~703) + `sw.js` whenever `src/react/*` changes.
 
-## Done
+## Done (full-screen view islands, all default-on + live parity-verified)
 - ✅ customers, prospects (promoted 2026-06-14)
-- ✅ **agents** (promoted 2026-06-15, SW-43, parity `identical`)
+- ✅ **agents** (SW-43) · security (SW-44) · ranking + noticeboard (SW-45) · lead_forms + surveys + contracts (SW-46) · purchases_history (SW-47) · knowledge_dashboard + knowledge_all_entries (SW-48) · custom_fields + org_chart (SW-49) · booking_settings + milestones (SW-50) · **cases (SW-51, 2026-06-15)**
+
+## AUTONOMOUS MODE (2026-06-15): work the pending list below end-to-end, no per-view approval; auto-resume after any pause/usage-limit (ScheduleWakeup heartbeat + this durable checklist). Tick each box on live parity-verify. Order = smallest/cleanest first to bank wins.
+
+### Pending full-screen VIEWS (tick on deploy+verify)
+- [ ] boss_report (#34) — chunk script-boss-report.js (453L), showBossReportView L117 ← NEXT
+- [ ] journey (#33) — script-journey.js (1049L)
+- [ ] documents (#39) — script-documents.js (957L)
+- [ ] protection (#35) — script-import.js showProtectionMonitoringView L947
+- [ ] ai (#30) — script-ai.js (1272L), showAIInsightsDashboard L111 + showAIPredictionDashboard L1348
+- [ ] stock_take (#37) — script-stock-take.js (1888L), 9 tabs/QR/reconciliation
+- [ ] egg_purchasing (#40) — script-egg.js (1963L) wizard
+- [ ] formula_purchaser (#41) — script-formula.js (1646L) wizard
+- [ ] search (#42) — script-search.js (1770L), showSearchPanel L153
+- [ ] pipeline (#36) — script-pipeline.js (2736L) drag-drop + scoring
+- [ ] fude (#31) — script-fude.js (2466L) multi-section dashboard
+- [ ] marketing_automation (#32) — script-marketing.js (4097L) showMarketingAutomationView L1092
+- [ ] marketing_lists (#22) — script-marketing.js, 7-tab manager (deferred-heavy)
+- [ ] monthly_promotion/month (#44) — script-marketing.js showMonthlyPromotionView L997
+- [ ] home (#24) — main dashboard
+- [ ] reports (#38) — Chart.js + drill-down modals
+- [ ] calendar (#43) + month — script-calendar.js (5280L), HIGHEST-risk, deploy ALONE last
+- [ ] referrals D3 tree — script-referrals.js (1360L), showReferralTree L483, XL
+
+Deferred (modals / form-editors, fold in opportunistically): knowledge_capture, knowledge_daily_notes, knowledge_detail, cps-analysis, apu-appraisal, destiny-blueprint, fude-redeem, story-detail, reward-crud, highlight-crud, customer-survey.
 
 ## Ordered roadmap (from the screen-map workflow, 2026-06-15) — 44 views
 
