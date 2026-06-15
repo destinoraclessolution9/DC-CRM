@@ -3210,16 +3210,53 @@ const renderReferralsTab = async (customer, containerId = 'profile-tab-content')
     `;
 };
 
+const searchReferralProspect = async () => {
+    try {
+        const term = (document.getElementById('referral-prospect-search')?.value || '').trim();
+        const resultsDiv = document.getElementById('referral-prospect-results');
+        if (!resultsDiv) return;
+        if (!term) { resultsDiv.style.display = 'none'; return; }
+        let rows = [];
+        try {
+            const sr = await AppDataStore.searchProspects(term, { includeDormant: true, limit: 50 });
+            rows = Array.isArray(sr) ? sr : ((sr && sr.data) || []);
+        } catch (e) {
+            rows = (await AppDataStore.getAll('prospects'));
+        }
+        const q = term.toLowerCase();
+        const matched = (rows || []).filter(p =>
+            (p.full_name || '').toLowerCase().includes(q) || (p.phone || '').includes(term)
+        ).slice(0, 8);
+        if (!matched.length) {
+            resultsDiv.innerHTML = '<div style="padding:10px 12px;color:#6b7280;font-size:13px;">No prospects found</div>';
+        } else {
+            resultsDiv.innerHTML = matched.map(p => {
+                const label = `${p.full_name || ''} (${p.phone || 'no phone'})`;
+                return `<div style="cursor:pointer;padding:8px 12px;border-bottom:1px solid #f3f4f6;" data-id="${p.id}" data-name="${escapeHtml(label)}" onmousedown="app.selectReferralProspect(this.dataset.id, this.dataset.name)"><strong>${escapeHtml(p.full_name || '')}</strong><br><small style="color:#6b7280;">${escapeHtml(p.phone || 'no phone')}</small></div>`;
+            }).join('');
+        }
+        resultsDiv.style.display = 'block';
+    } catch (e) { console.error('searchReferralProspect:', e); }
+};
+
+const selectReferralProspect = (id, name) => {
+    const hid = document.getElementById('referral-prospect-id');
+    const search = document.getElementById('referral-prospect-search');
+    const results = document.getElementById('referral-prospect-results');
+    if (hid) hid.value = id;
+    if (search) search.value = name;
+    if (results) results.style.display = 'none';
+};
+
 const openCustomerReferralModal = async (customerId) => {
-    const allProspects = await AppDataStore.getAll('prospects');
-    const prospectOptions = allProspects.map(p => `<option value="${p.id}">${escapeHtml(p.full_name)} (${p.phone || 'no phone'})</option>`).join('');
+    // Scale-safe: type-to-search instead of a <select> that lists EVERY prospect
+    // (which would render 100k+ <option>s at scale and freeze the modal).
     const content = `
-        <div class="form-group" style="margin-bottom:14px;">
+        <div class="form-group" style="margin-bottom:14px;position:relative;">
             <label>Referred Person (Prospect) <span class="required">*</span></label>
-            <select id="referral-prospect-id" class="form-control">
-                <option value="">-- Select Prospect --</option>
-                ${prospectOptions}
-            </select>
+            <input type="hidden" id="referral-prospect-id" value="">
+            <input type="text" id="referral-prospect-search" class="form-control" autocomplete="off" placeholder="Type a name or phone to search…" oninput="app.searchReferralProspect()" onblur="setTimeout(function(){var r=document.getElementById('referral-prospect-results');if(r)r.style.display='none';},200)">
+            <div id="referral-prospect-results" style="display:none;position:absolute;z-index:10;left:0;right:0;background:#fff;border:1px solid #e5e7eb;border-radius:8px;max-height:220px;overflow:auto;box-shadow:0 6px 18px rgba(0,0,0,0.10);"></div>
         </div>
         <div class="form-group" style="margin-bottom:14px;">
             <label>Relationship to Customer <span class="required">*</span></label>
@@ -10035,6 +10072,8 @@ const viewInactiveProspects = (agentId) => {
         renderReferralsTab,
         openCustomerReferralModal,
         saveCustomerReferral,
+        searchReferralProspect,
+        selectReferralProspect,
         viewReferralDetail,
         editReferral,
         saveEditReferral,
