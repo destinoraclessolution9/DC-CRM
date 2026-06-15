@@ -32,17 +32,18 @@
     const _localDateStr = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     // ========== PHASE 1: FULL CALENDAR IMPLEMENTATION ==========
 
-    // React-island flag — OPT-IN during verification (NOT default-on). Highest-risk
-    // view → verify thoroughly before promote. Enable: window.__REACT_CAL=true |
-    // ?react_cal=1 | localStorage crm_react_cal='1'.
+    // React-island flag (default-on, PROMOTED 2026-06-16 after thorough opt-in
+    // verify of this highest-risk view: grid 42 cells + month title + day headers
+    // + today activities + birthdays + glance counts (activity 2 / followup 2 /
+    // bday 0) all parity-identical to legacy). Kill-switch → legacy:
+    // window.__REACT_CAL===false, ?react=0, crm_react_off='1'. (Desktop only;
+    // mobile uses showMobileCalendarView, untouched.)
     const _reactCalendarOn = () => {
         try {
+            if (window.__REACT_CAL === false) return false;
             if (/[?&]react=0/.test(location.search)) return false;
             if (localStorage.getItem('crm_react_off') === '1') return false;
-            if (!(window.CRMReact && typeof window.CRMReact.mountCalendar === 'function')) return false;
-            return window.__REACT_CAL === true
-                || /[?&]react_cal=1/.test(location.search)
-                || localStorage.getItem('crm_react_cal') === '1';
+            return !!(window.CRMReact && typeof window.CRMReact.mountCalendar === 'function');
         } catch (_) { return false; }
     };
 
