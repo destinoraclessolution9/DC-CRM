@@ -29,19 +29,16 @@
     let _fileFilter = '';
     let _draggedFileId = null;
 
-    // React-island flag — OPT-IN during verification (NOT default-on yet) after the
-    // 2026-06-16 incident where a chunk-side rAF populate left the view empty.
-    // Enable per-session to verify the useEffect-driven populate live:
-    //   window.__REACT_DMS=true | ?react_dms=1 | localStorage crm_react_dms='1'.
-    // Promote to default-on in a follow-up deploy once verified.
+    // React-island flag (default-on, PROMOTED 2026-06-16 after opt-in verification:
+    // useEffect-driven populate confirmed live — folder tree + files + breadcrumb
+    // populate, matching legacy). Kill-switch → legacy: window.__REACT_DMS===false,
+    // ?react=0, crm_react_off='1'.
     const _reactDocumentsOn = () => {
         try {
+            if (window.__REACT_DMS === false) return false;
             if (/[?&]react=0/.test(location.search)) return false;
             if (localStorage.getItem('crm_react_off') === '1') return false;
-            if (!(window.CRMReact && typeof window.CRMReact.mountDocuments === 'function')) return false;
-            return window.__REACT_DMS === true
-                || /[?&]react_dms=1/.test(location.search)
-                || localStorage.getItem('crm_react_dms') === '1';
+            return !!(window.CRMReact && typeof window.CRMReact.mountDocuments === 'function');
         } catch (_) { return false; }
     };
 
