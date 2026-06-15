@@ -22,7 +22,9 @@ Path to **D** (god-object retirement / Vite build ownership / module extraction)
 
 ### ▶️ LOOP RESUMED 2026-06-16 — user said "keep going" (proceed unattended, kill-switch = safety net)
 Strategy: count-verifiable views (full island) first; genuinely-interactive views via SCAFFOLD-SHELL (island static shell w/ stable ids + inline app.* handlers, chunk keeps ALL interactivity unchanged → byte-identical behavior). calendar/referrals LAST.
-NEXT = search (scaffold-shell + useEffect + opt-in-first). Then reports/pipeline/marketing_automation likewise. calendar/referrals last.
+NEXT = formula_purchaser (sibling of egg — same scaffold-shell recipe). Then reports/pipeline/marketing_automation. calendar/referrals last.
+- [~] search (#42) — DEFERRED to modal/overlay batch: showSearchPanel is an OVERLAY drawer (search-panel-overlay click-to-close), not a content-viewport view; very heavy (9-entity condition builder, dynamic filter sections, presets, saved searches, history, results, pagination).
+- [x] egg_purchasing (#40) — SW-63, 2026-06-16, PROMOTED default-on after opt-in verify. Scaffold-shell: shell (header+Refresh+4-tab bar+#egg-tab-content); useEffect onReady → chunk eggSwitchTab fills content (3-phase Run wizard, urgent, history, config). File I/O/reconcile/webhook in chunk. Live-verified: 4 tabs, run content 4470 = legacy, tab-switch works.
 
 - [x] stock_take (#37) — SW-61, 2026-06-16, PROMOTED default-on after opt-in verify. Scaffold-shell: island renders header + role-gated 9-tab bar + #st-session-chip + #st-tab-body; useEffect onReady → chunk stSwitchTab fills chip+body + active styling. All tabs/QR/reconcile/recount/realtime in chunk. Live-verified: 9 tabs, body 595/chip 76 match legacy, tab-switch works.
 
