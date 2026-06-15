@@ -45,6 +45,17 @@
             return !!(window.CRMReact && typeof window.CRMReact.mountMonthlyPromotion === 'function');
         } catch (_) { return false; }
     };
+
+    // React-island flag (default-on) for the Marketing Lists (Product & Event Manager) view.
+    // Kill-switch → legacy: window.__REACT_MKTLISTS===false, ?react=0, crm_react_off='1'.
+    const _reactMarketingListsOn = () => {
+        try {
+            if (window.__REACT_MKTLISTS === false) return false;
+            if (/[?&]react=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            return !!(window.CRMReact && typeof window.CRMReact.mountMarketingLists === 'function');
+        } catch (_) { return false; }
+    };
     const renderFolderTree           = (...a) => (window.app.renderFolderTree           || (() => Promise.resolve()))(...a);  // script-documents.js
     const loadFolderContents         = (...a) => (window.app.loadFolderContents         || (() => Promise.resolve()))(...a);  // script-documents.js
     // renderWorkflowTemplate defined in script-performance.js IIFE (private). Redeclare locally.
@@ -142,6 +153,39 @@
     };
 
     const showMarketingListsView = async (container) => {
+        // React island — renders the shell + the 5 master-data tables; the two
+        // complex tabs (promotions, special_programs) are passed through as the
+        // chunk's pre-rendered legacy HTML so their renderers stay unchanged.
+        if (_reactMarketingListsOn()) {
+            try {
+                const tab = _state.cmlt;
+                const MASTER = ['products', 'events', 'venues', 'bujishu', 'formula'];
+                let rows = [], legacyHtml = '';
+                if (MASTER.includes(tab)) {
+                    let data = (await AppDataStore.getAll(tab)) || [];
+                    if (tab === 'venues') {
+                        const seen = new Set();
+                        data = data.filter(v => { const k = (v.name || '') + '|' + (v.location || ''); if (seen.has(k)) return false; seen.add(k); return true; });
+                        data.sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
+                    } else if (tab === 'events') {
+                        data = data.map(it => ({ ...it, _cats: parseEventCategories(it.categories) }));
+                    }
+                    rows = data;
+                } else {
+                    // promotions → renderPackagesTab, special_programs → renderSpecialProgramsTable
+                    legacyHtml = await renderMarketingListTable();
+                }
+                container.innerHTML = '<div id="ml-react-root"></div>';
+                window.CRMReact.mountMarketingLists(document.getElementById('ml-react-root'), {
+                    tab, rows, isTeamLeader: isTeamLeaderOrAbove(_state.cu), legacyHtml,
+                });
+                return;
+            } catch (e) {
+                console.warn('[marketing-lists] island mount failed, falling back to legacy:', e && e.message);
+                // fall through to the legacy render below
+            }
+        }
+
         container.innerHTML = `
             <div class="marketing-lists-view" style="padding: 24px;">
                 <div class="view-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">

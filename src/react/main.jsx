@@ -31,6 +31,7 @@ import { CasesGrid } from './views/CasesGrid.jsx';
 import { BossReportView } from './views/BossReportView.jsx';
 import { ProtectionMonitoringView } from './views/ProtectionMonitoringView.jsx';
 import { MonthlyPromotionView } from './views/MonthlyPromotionView.jsx';
+import { MarketingListsView } from './views/MarketingListsView.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -308,6 +309,15 @@ function mountMonthlyPromotion(container, opts) {
     window.__REACT_PROMO_MOUNTED = true;
 }
 
+// ── Marketing Lists island (tabbed master-data manager). React renders the
+// shell + the 5 master tables; promotions/special_programs filled by the chunk
+// into #marketing-list-content. ──────────────────────────────────────────────
+function mountMarketingLists(container, opts) {
+    const o = opts || {};
+    _mountSimple(container, <MarketingListsView tab={o.tab || 'products'} rows={o.rows || []} isTeamLeader={!!o.isTeamLeader} legacyHtml={o.legacyHtml || ''} />);
+    window.__REACT_MKTLISTS_MOUNTED = true;
+}
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
@@ -350,6 +360,8 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountProtectionMonitoring: _unmountSimple,
     mountMonthlyPromotion,
     unmountMonthlyPromotion: _unmountSimple,
+    mountMarketingLists,
+    unmountMarketingLists: _unmountSimple,
 });
 
 if (document.readyState === 'loading') {
