@@ -1398,6 +1398,17 @@ const markMilestoneCompleted = async (userId, milestoneName) => {
     }
 };
 
+// React-island flag (default-on). Kill-switch → legacy: window.__REACT_MILESTONES===false,
+// ?react=0, or localStorage crm_react_off='1'.
+const _reactMilestonesOn = () => {
+    try {
+        if (window.__REACT_MILESTONES === false) return false;
+        if (/[?&]react=0/.test(location.search)) return false;
+        if (localStorage.getItem('crm_react_off') === '1') return false;
+        return !!(window.CRMReact && typeof window.CRMReact.mountMilestonesView === 'function');
+    } catch (_) { return false; }
+};
+
 // showMilestonesView(container, targetUserId?)
 // If targetUserId is supplied (admin use), shows that user's progress instead of the current user's.
 const showMilestonesView = async (container, targetUserId = null) => {
@@ -1443,6 +1454,29 @@ const showMilestonesView = async (container, targetUserId = null) => {
         computeNineMethodStatuses(subject),
         computeFourPillarStatuses(subject),
     ]);
+
+    // React path: the chunk computed statuses + admin context above (DEF arrays are
+    // populated by script-performance.js, which computeNineMethodStatuses ensured is
+    // loaded). The island re-renders the def-driven grids; admin Mark/Reset + picker
+    // call window.app.* then reload via app.showMilestonesView.
+    if (_reactMilestonesOn()) {
+        try {
+            let adminUsers = [];
+            if (isAdmin) {
+                try { adminUsers = (await AppDataStore.getAll('users')).filter(u => { const l = _getUserLevel(u); return l >= 13 && l <= 14; }).map(u => ({ id: u.id, full_name: u.full_name })); } catch (e) {}
+            }
+            container.innerHTML = '<div id="milestones-react-root"></div>';
+            window.CRMReact.mountMilestonesView(document.getElementById('milestones-react-root'), {
+                nineDefs: window.app.NINE_METHOD_DEFS || [],
+                pillarDefs: window.app.FOUR_PILLAR_DEFS || [],
+                nineStatuses, pillarStatuses, isAdmin,
+                subjectUserId, viewingOther,
+                subjectName: subjectUser.full_name,
+                adminUsers, targetUserId,
+            });
+            return;
+        } catch (e) { console.warn('[react-milestones] mount failed → legacy:', e?.message || e); }
+    }
 
     // Admin user picker
     let adminPicker = '';

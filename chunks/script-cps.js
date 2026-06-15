@@ -311,6 +311,17 @@ const renderQuickHealthBadge = (customer) => {
 
 // ========== MEETING SCHEDULER / BOOKING LINKS ==========
 
+// React-island flag (default-on). Kill-switch → legacy: window.__REACT_BOOKING===false,
+// ?react=0, or localStorage crm_react_off='1'.
+const _reactBookingOn = () => {
+    try {
+        if (window.__REACT_BOOKING === false) return false;
+        if (/[?&]react=0/.test(location.search)) return false;
+        if (localStorage.getItem('crm_react_off') === '1') return false;
+        return !!(window.CRMReact && typeof window.CRMReact.mountBookingSettings === 'function');
+    } catch (_) { return false; }
+};
+
 const showBookingSettingsView = async (container) => {
     _state.cv = 'booking_settings';
     if (!_currentUser?.id) { UI.toast.error('Session not ready — please refresh.'); return; }
@@ -321,6 +332,14 @@ const showBookingSettingsView = async (container) => {
         .sort((a, b) => (b.booking_date || '').localeCompare(a.booking_date || ''));
     const bookingUrl = `${window.location.origin}/booking.html?agent=${_currentUser.id}`;
     const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+    if (_reactBookingOn()) {
+        try {
+            container.innerHTML = '<div id="booking-react-root"></div>';
+            window.CRMReact.mountBookingSettings(document.getElementById('booking-react-root'), { slots: agentSlots, appointments, bookingUrl });
+            return;
+        } catch (e) { console.warn('[react-booking] mount failed → legacy:', e?.message || e); }
+    }
 
     container.innerHTML = `
         <div style="padding:24px; max-width:1000px; margin:0 auto;">

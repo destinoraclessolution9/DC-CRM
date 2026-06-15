@@ -25,6 +25,8 @@ import { KnowledgeDashboardCards } from './views/KnowledgeDashboardCards.jsx';
 import { KnowledgeAllEntries } from './views/KnowledgeAllEntries.jsx';
 import { CustomFieldsAdmin } from './views/CustomFieldsAdmin.jsx';
 import { OrgChartView } from './views/OrgChartView.jsx';
+import { BookingSettingsView } from './views/BookingSettingsView.jsx';
+import { MilestonesView } from './views/MilestonesView.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -262,6 +264,14 @@ function mountKnowledgeAllEntries(container, opts) {
 function mountCustomFieldsAdmin(container, opts) { const o = opts || {}; _mountSimple(container, <CustomFieldsAdmin prospectFields={o.prospectFields || []} customerFields={o.customerFields || []} />); window.__REACT_CUSTOMFIELDS_MOUNTED = true; }
 function mountOrgChartView(container, opts) { const o = opts || {}; _mountSimple(container, <OrgChartView rows={o.rows || []} />); window.__REACT_ORG_MOUNTED = true; }
 
+// ── Booking Settings + Milestones islands (data via props; mutations via app.*) ─
+function mountBookingSettings(container, opts) { const o = opts || {}; _mountSimple(container, <BookingSettingsView slots={o.slots || []} appointments={o.appointments || []} bookingUrl={o.bookingUrl || ''} />); window.__REACT_BOOKING_MOUNTED = true; }
+function mountMilestonesView(container, opts) {
+    const o = opts || {};
+    _mountSimple(container, <MilestonesView nineDefs={o.nineDefs || []} pillarDefs={o.pillarDefs || []} nineStatuses={o.nineStatuses || {}} pillarStatuses={o.pillarStatuses || {}} isAdmin={!!o.isAdmin} subjectUserId={o.subjectUserId} viewingOther={!!o.viewingOther} subjectName={o.subjectName || ''} adminUsers={o.adminUsers || []} targetUserId={o.targetUserId} />);
+    window.__REACT_MILESTONES_MOUNTED = true;
+}
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
@@ -292,6 +302,10 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountCustomFieldsAdmin: _unmountSimple,
     mountOrgChartView,
     unmountOrgChartView: _unmountSimple,
+    mountBookingSettings,
+    unmountBookingSettings: _unmountSimple,
+    mountMilestonesView,
+    unmountMilestonesView: _unmountSimple,
 });
 
 if (document.readyState === 'loading') {
