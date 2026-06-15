@@ -22,7 +22,13 @@ Path to **D** (god-object retirement / Vite build ownership / module extraction)
 
 ### ▶️ LOOP RESUMED 2026-06-16 — user said "keep going" (proceed unattended, kill-switch = safety net)
 Strategy: count-verifiable views (full island) first; genuinely-interactive views via SCAFFOLD-SHELL (island static shell w/ stable ids + inline app.* handlers, chunk keeps ALL interactivity unchanged → byte-identical behavior). calendar/referrals LAST.
-NEXT = fude (assess: island render-only sections [tiles/leaderboard/admin tables/stories]; keep carousel + CRUD in chunk).
+NEXT = documents RETRY (useEffect-driven populate + OPT-IN-first deploy, see incident below).
+
+⚠️ INCIDENT 2026-06-16 (documents SW-56 → rolled back SW-57): scaffold-shell shipped default-on but the chunk-side rAF populate did NOT reliably run renderFolderTree()/loadFolderContents() → live folder tree + file area came up EMPTY for ~1 deploy cycle. Caught by the folderItems count check; rolled back (_reactDocumentsOn()→false). LESSONS:
+  1. Scaffold-shell populate MUST be driven from the island's useEffect (runs after React commit), NOT a chunk-side requestAnimationFrame. Pass onReady via opts; component calls it in useEffect(()=>{onReady()},[]).
+  2. For scaffold-shell / interactive views: deploy OPT-IN first (flag NOT default-on), verify live via the flag, THEN promote to default-on in a follow-up. Never default-on an unverified populate/interaction.
+  3. Pre-existing latent bug found: `getFileIcon is not defined` in renderFileListView (script-documents.js) — throws when files render (affects legacy too; root folder shows empty-state so normally masked). Fix alongside the documents retry.
+- [~] fude (#31) — DEFERRED: large MIXED dashboard (render-only tiles/leaderboard/admin tables + fragile inline-IIFE carousel + DOM-manipulating story filter/search), one inline innerHTML (no populate fns) → neither full-island nor scaffold-shell fits; dangerouslySetInnerHTML wrapper = no value.
 
 ### (historical) AUTONOMOUS LOOP PAUSED 2026-06-16 — superseded by "keep going" above
 All cleanly count/structure-parity-verifiable render views are DONE (18 shipped: …→ monthly_promotion SW-54). Every remaining standalone view is heavy/interactive/stateful and its CORRECTNESS cannot be validated by the unattended count-parity method (broken drag-drop / charts / wizard steps / carousels / QR / caching would pass structural parity yet ship behaviorally-broken to live users by default). Per the conservative unattended stance, these are NOT migrated without the user present to interactively verify:
