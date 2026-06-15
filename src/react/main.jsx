@@ -37,6 +37,7 @@ import { StockTakeView } from './views/StockTakeView.jsx';
 import { EggPurchasingView } from './views/EggPurchasingView.jsx';
 import { FormulaPurchaserView } from './views/FormulaPurchaserView.jsx';
 import { ReportsView } from './views/ReportsView.jsx';
+import { PipelineView } from './views/PipelineView.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -363,6 +364,13 @@ function mountReports(container, opts) {
     window.__REACT_REPORTS_MOUNTED = true;
 }
 
+// ── Pipeline scaffold-shell island (pure static skeleton; the chunk fills the
+// stable-id containers + owns drag-drop + the v6 scoring engine). ─────────────
+function mountPipeline(container) {
+    _mountSimple(container, <PipelineView />);
+    window.__REACT_PIPELINE_MOUNTED = true;
+}
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
@@ -417,6 +425,8 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountFormulaPurchaser: _unmountSimple,
     mountReports,
     unmountReports: _unmountSimple,
+    mountPipeline,
+    unmountPipeline: _unmountSimple,
 });
 
 if (document.readyState === 'loading') {

@@ -579,6 +579,20 @@ let _pipelineAgentFilter = 'all';
 let _pipelineStatusFilter = 'all';
 let _focusViewMonth = 'current'; // 'current' or 'YYYY-MM' for viewing archived month
 
+// React-island flag — OPT-IN during verification (NOT default-on) per the
+// scaffold-shell protocol. Enable: window.__REACT_PIPELINE=true | ?react_pipeline=1
+// | localStorage crm_react_pipeline='1'. Promote default-on after live verify.
+const _reactPipelineOn = () => {
+    try {
+        if (/[?&]react=0/.test(location.search)) return false;
+        if (localStorage.getItem('crm_react_off') === '1') return false;
+        if (!(window.CRMReact && typeof window.CRMReact.mountPipeline === 'function')) return false;
+        return window.__REACT_PIPELINE === true
+            || /[?&]react_pipeline=1/.test(location.search)
+            || localStorage.getItem('crm_react_pipeline') === '1';
+    } catch (_) { return false; }
+};
+
 const showPipelineView = async (container) => {
     const userId = _currentUser?.id || 5;
     runHuiJiMigration(); // fire-and-forget
@@ -589,6 +603,14 @@ const showPipelineView = async (container) => {
     const _skelRows = (n, cols) => Array(n).fill(0).map(()=>_skelR(cols)).join('');
     const _skelCard = (h=80) => `<div class="skeleton" style="border-radius:8px;height:${h}px;margin-bottom:12px;"></div>`;
 
+    // React scaffold-shell — island renders the skeleton shell; the STEP-2 fills
+    // below populate #pl-* by id exactly as legacy (rAF-wait ensures React committed).
+    if (_reactPipelineOn()) {
+        container.innerHTML = '<div id="pl-react-root"></div>';
+        try { window.CRMReact.mountPipeline(document.getElementById('pl-react-root')); }
+        catch (e) { console.warn('[pipeline] island mount failed, falling back to legacy:', e && e.message); }
+        await new Promise(r => requestAnimationFrame(() => r()));
+    } else {
     container.innerHTML = `
 <div class="pipeline-dual-view">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
@@ -638,6 +660,7 @@ const showPipelineView = async (container) => {
     </div>
 </div>
 </div>`;
+    }
 
     // ── STEP 2: Fire ALL big queries in parallel ──────────────────────────
     // Each query gets a 15s timeout so a slow Supabase call no longer
