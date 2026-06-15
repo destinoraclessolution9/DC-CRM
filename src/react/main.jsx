@@ -15,6 +15,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useCustomers } from './data/useCustomers.js';
 import { CustomersTable } from './views/CustomersTable.jsx';
 import { ProspectsTable } from './views/ProspectsTable.jsx';
+import { AgentsTable } from './views/AgentsTable.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -132,12 +133,50 @@ function unmountProspectsTable(container) {
     }
 }
 
+// ── Agents (Consultants) table island ────────────────────────────────────────
+// The chunk computes the identity-filtered + visibility-scoped agent list (it
+// owns isAgent + getVisibleUserIds) and passes it in as `agents`; the view
+// applies the toolbar filters + joins per-agent counts via React Query. A fresh
+// `key` per filter-set remounts so the view re-derives cleanly on filter change.
+function mountAgentsTable(container, opts) {
+    if (!container) return;
+    let root = _roots.get(container);
+    if (!root) {
+        root = createRoot(container);
+        _roots.set(container, root);
+    }
+    const o = opts || {};
+    const f = o.filters || {};
+    const key = `${f.search || ''}|${f.team || ''}|${f.role || ''}|${f.status || ''}|${(o.agents || []).length}`;
+    root.render(
+        <QueryClientProvider client={queryClient}>
+            <AgentsTable
+                key={key}
+                agents={o.agents || []}
+                filters={f}
+                meta={o.meta || { canAssignUpline: false }}
+            />
+        </QueryClientProvider>
+    );
+    window.__REACT_AGENTS_MOUNTED = true;
+}
+
+function unmountAgentsTable(container) {
+    const root = container && _roots.get(container);
+    if (root) {
+        try { root.unmount(); } catch (_) {}
+        _roots.delete(container);
+    }
+}
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
     unmountCustomersTable,
     mountProspectsTable,
     unmountProspectsTable,
+    mountAgentsTable,
+    unmountAgentsTable,
 });
 
 if (document.readyState === 'loading') {

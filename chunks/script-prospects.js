@@ -8200,7 +8200,11 @@ const showAgentsView = async (container) => {
                 </select>
             </div>
 
-            <div class="agents-table-container">
+            <!-- React island mount target. renderAgentsTable swaps visibility
+                 between this and the legacy table below when the opt-in React
+                 agents path (__REACT_AGENTS) is active. -->
+            <div id="agents-react-root" style="display:none;"></div>
+            <div id="agents-table-container" class="agents-table-container">
                 <table class="agents-table">
                     <thead>
                         <tr>
@@ -8224,6 +8228,32 @@ const showAgentsView = async (container) => {
     await renderAgentsTable();
 };
 
+// ── React-island Agents path (opt-in bundle + __REACT_AGENTS flag) ───────────
+// OPT-IN until promoted: engages only when the island bundle is present AND
+// explicitly enabled (?react_agents=1 / localStorage crm_react_agents='1' /
+// window.__REACT_AGENTS===true). Global kill-switches (?react=0, localStorage
+// crm_react_off='1', window.__REACT_AGENTS===false) force the legacy table.
+// Normal users get the legacy table until this view is promoted to default.
+const _reactAgentsOn = () => {
+    try {
+        if (window.__REACT_AGENTS === false) return false;
+        if (/[?&]react=0/.test(location.search)) return false;
+        if (localStorage.getItem('crm_react_off') === '1') return false;
+        let enabled = window.__REACT_AGENTS === true || /[?&]react_agents=1/.test(location.search);
+        if (!enabled) { try { enabled = localStorage.getItem('crm_react_agents') === '1'; } catch (_) {} }
+        if (!enabled) return false;
+        return !!(window.CRMReact && typeof window.CRMReact.mountAgentsTable === 'function');
+    } catch (_) { return false; }
+};
+
+// Swap visibility between the React mount root and the legacy table container.
+const _showAgentsReactRoot = (useReact) => {
+    const root   = document.getElementById('agents-react-root');
+    const legacy = document.getElementById('agents-table-container');
+    if (root)   root.style.display   = useReact ? '' : 'none';
+    if (legacy) legacy.style.display = useReact ? 'none' : '';
+};
+
 const renderAgentsTable = async () => {
     const tbody = document.getElementById('agents-table-body');
     if (!tbody) {
@@ -8234,6 +8264,33 @@ const renderAgentsTable = async () => {
     const allAgents = (await AppDataStore.getAll('users')).filter(u => isAgent(u) || u.agent_code);
     const visibleIds = await getVisibleUserIds(_currentUser);
     const agents = visibleIds === 'all' ? allAgents : allAgents.filter(a => visibleIds.map(String).includes(String(a.id)));
+
+    // React island reuses the SAME identity+scope `agents` list above; it applies
+    // the toolbar filters + joins per-agent counts (React Query). Legacy table is
+    // the fallback. mountAgentsTable + return short-circuits the legacy render.
+    if (_reactAgentsOn()) {
+        const reactRoot = document.getElementById('agents-react-root');
+        if (reactRoot) {
+            try {
+                const _curLvlR = _currentUser?.role?.match(/Level\s+(\d+)/i);
+                _showAgentsReactRoot(true);
+                window.CRMReact.mountAgentsTable(reactRoot, {
+                    agents,
+                    filters: {
+                        search: document.getElementById('agent-search')?.value.toLowerCase() || '',
+                        team:   document.getElementById('filter-agent-team')?.value || '',
+                        role:   document.getElementById('filter-agent-role')?.value || '',
+                        status: document.getElementById('filter-agent-status')?.value || '',
+                    },
+                    meta: { canAssignUpline: _curLvlR ? parseInt(_curLvlR[1]) <= 4 : false },
+                });
+                return;
+            } catch (e) {
+                console.warn('[react-agents] mount failed → legacy:', e?.message || e);
+                _showAgentsReactRoot(false);
+            }
+        }
+    }
     const searchQuery = document.getElementById('agent-search')?.value.toLowerCase() || '';
     const teamFilter = document.getElementById('filter-agent-team')?.value || '';
     const roleFilter = document.getElementById('filter-agent-role')?.value || '';
