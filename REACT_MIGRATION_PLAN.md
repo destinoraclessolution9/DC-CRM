@@ -1,0 +1,34 @@
+# React Island Migration — Plan & Status
+
+Path to **D** (god-object retirement / Vite build ownership / module extraction). Each screen becomes a React island (mounted by `window.CRMReact.mount<View>`), the chunk delegates behind a flag with the legacy render as fallback, promote = flip the flag default-on. Full playbook + gotchas in memory `project_react_migration.md`.
+
+**Deploy rule:** every migration rebuilds ONE shared live bundle → build → deploy → live browser parity-verify → promote, sequentially. Batch at most 2-3 closely-related read-only M views per deploy; S/L/XL one-at-a-time. Bump `react-island.js ?v=` in index.html (line ~703) + `sw.js` whenever `src/react/*` changes.
+
+## Done
+- ✅ customers, prospects (promoted 2026-06-14)
+- ✅ **agents** (promoted 2026-06-15, SW-43, parity `identical`)
+
+## Ordered roadmap (from the screen-map workflow, 2026-06-15) — 44 views
+
+Note: ranks 2-5 (`fude-redeem`, `story-detail`, `reward-crud`, knowledge-capture) are **modals**, lower value for god-object retirement than full screen VIEWS — do the screen views first; fold modals in opportunistically.
+
+**Wave 1 — S (read-only, harden the loop):** 1 security · 5 showKnowledgeCapture
+**Wave 2 — M Agents-pattern list/table views:** 6 ranking · 7 noticeboard · 8 forms-tab · 9 purchases_history · 10 showKnowledgeAllEntries · 11 contracts · 12 lead_forms · 13 surveys
+**Wave 3 — M broader surface:** 14 custom_fields · 15 booking_settings · 16 org_chart(list only) · 17 cases · 20 showKnowledgeDailyNotes · 21 milestones · 22 marketing_lists · 23 showKnowledgeDashboard · 34 boss_report
+**Wave 4 — L dashboards/forms:** 24 home · 25 import · 26 showKnowledgeDetail · 27 cps-analysis · 28 apu-appraisal · 29 destiny-blueprint · 30 ai · 31 fude · 32 marketing_automation · 33 journey
+**Wave 5 — XL (one-at-a-time, extra verification):** 35 protection · 36 pipeline · 37 stock_take · 38 reports · 39 documents · 40 egg_purchasing · 41 formula_purchaser · 42 search · 43 calendar · 44 month(alias→ship right after calendar) · + referrals D3 tree (XL, ~2-3wk)
+
+Modal islands (defer): fude-redeem, story-detail, reward-crud, highlight-crud, customer-survey, cps-analysis, apu-appraisal, destiny-blueprint.
+
+## Top risks (XL)
+- **calendar/month** — 6-week grid, optimistic badges, inline invite accept/reject, snapshot SWR cache, RPC warm-up, race-guard. Highest-risk single bundle; deploy alone, last.
+- **referrals** — D3 SVG zoom/pan tree (≤400 nodes), DOM-managed sidebar, nav stack. 2-3wk.
+- **search** — 9-entity AND/OR condition builder, saved searches, role-visibility gating across 9 tables. Keep modal vanilla, isolate filter hooks.
+- **pipeline** — drag-drop 100+ rows + v6 scoring engine; unit-test the algorithm before swapping.
+- **documents** — drag-drop file moves, recursive folder tree, versioning, batch ops, nested modals.
+- **egg_purchasing / formula_purchaser** — 1000+ line multi-tab reconciliation wizards (file I/O, Sheets webhook). Super-Admin gated (small blast radius) but each is a mini-app.
+- **reports** — Chart.js + 11 drill-down modals + RPC fallbacks + print/CSV export.
+- **stock_take** — 9 tabs, QR scanner, 3-way reconciliation, realtime + dual localStorage/Supabase state.
+- **Cross-chunk coupling** — marketing_automation/fude/milestones/journey call functions in OTHER chunks (renderFormsTab, renderWorkflowCard, compute*Statuses); a missing alias = the documented post-split ReferenceError crash. Re-verify after each rebuild.
+
+Full per-view specs: workflow output `tasks/wwt5nross.output` (run 2026-06-15).

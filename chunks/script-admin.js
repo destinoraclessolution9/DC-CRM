@@ -15,9 +15,33 @@
     let _currentUser = _state.cu;
     window._syncAdminUser = () => { _currentUser = _state.cu; };
 
+    // React-island Security dashboard. DEFAULT-ON (read-only, admin-only, low risk);
+    // kill-switch → legacy: window.__REACT_SECURITY===false, ?react=0, crm_react_off='1'.
+    const _reactSecurityOn = () => {
+        try {
+            if (window.__REACT_SECURITY === false) return false;
+            if (/[?&]react=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            return !!(window.CRMReact && typeof window.CRMReact.mountSecurityDashboard === 'function');
+        } catch (_) { return false; }
+    };
+
     const showSecurityDashboard = async () => {
+        const view = document.getElementById('content-viewport');
+        if (!view) return;
         const incidents = (await AppDataStore.getAll('security_incidents').catch(() => [])) || [];
-    
+
+        // React island (default-on). Legacy template is the fallback on any error.
+        if (_reactSecurityOn()) {
+            try {
+                view.innerHTML = '<div id="security-react-root"></div>';
+                window.CRMReact.mountSecurityDashboard(document.getElementById('security-react-root'), { incidents });
+                return;
+            } catch (e) {
+                console.warn('[react-security] mount failed → legacy:', e?.message || e);
+            }
+        }
+
         let content = `
             <div class="security-dashboard">
                 <div class="security-score-card">
@@ -41,10 +65,9 @@
                 </div>
             </div>
         `;
-        const view = document.getElementById('content-viewport');
-        if (view) view.innerHTML = content;
+        view.innerHTML = content;
     };
-    
+
     const showAuditLogs = async () => {
         const logs = (await AppDataStore.getAll('audit_logs') || [])
             .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))

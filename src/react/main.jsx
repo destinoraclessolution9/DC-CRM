@@ -16,6 +16,7 @@ import { useCustomers } from './data/useCustomers.js';
 import { CustomersTable } from './views/CustomersTable.jsx';
 import { ProspectsTable } from './views/ProspectsTable.jsx';
 import { AgentsTable } from './views/AgentsTable.jsx';
+import { SecurityDashboard } from './views/SecurityDashboard.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -170,6 +171,27 @@ function unmountAgentsTable(container) {
     }
 }
 
+// ── Security dashboard island (read-only; incidents passed as a prop) ─────────
+function mountSecurityDashboard(container, opts) {
+    if (!container) return;
+    let root = _roots.get(container);
+    if (!root) {
+        root = createRoot(container);
+        _roots.set(container, root);
+    }
+    const o = opts || {};
+    root.render(<SecurityDashboard incidents={o.incidents || []} />);
+    window.__REACT_SECURITY_MOUNTED = true;
+}
+
+function unmountSecurityDashboard(container) {
+    const root = container && _roots.get(container);
+    if (root) {
+        try { root.unmount(); } catch (_) {}
+        _roots.delete(container);
+    }
+}
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
@@ -178,6 +200,8 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountProspectsTable,
     mountAgentsTable,
     unmountAgentsTable,
+    mountSecurityDashboard,
+    unmountSecurityDashboard,
 });
 
 if (document.readyState === 'loading') {
