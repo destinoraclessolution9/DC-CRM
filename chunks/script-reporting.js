@@ -27,6 +27,20 @@
     const navigateTo           = (v)   => window.app.navigateTo(v);
     // AppDataStore, UI, supabase, XLSX (on demand) are globals — no alias needed.
 
+    // React-island flag — OPT-IN during verification (NOT default-on) per the
+    // scaffold-shell protocol. Enable: window.__REACT_REPORTS=true | ?react_reports=1
+    // | localStorage crm_react_reports='1'. Promote default-on after live verify.
+    const _reactReportsOn = () => {
+        try {
+            if (/[?&]react=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            if (!(window.CRMReact && typeof window.CRMReact.mountReports === 'function')) return false;
+            return window.__REACT_REPORTS === true
+                || /[?&]react_reports=1/.test(location.search)
+                || localStorage.getItem('crm_react_reports') === '1';
+        } catch (_) { return false; }
+    };
+
     // ==================== PHASE 9: REPORTING & KPI DASHBOARD ====================
 
     const KPI_DEFINITIONS = {
@@ -62,6 +76,52 @@
         _state.se = null; // Clear selection
         // Agent dropdown filled after paint — don't block initial render
         const _kpiAgentOptions = `<option value="all">All Agents</option>`;
+
+        // Post-shell populate (cached-stats snapshot inject + async agent-dropdown
+        // fill + refreshKPIDashboard) — shared by the React island and legacy paths.
+        const _kpiPopulate = async () => {
+            const _kpiSnapKey = `kpi-stats-snap-${_state.cu?.id || 'anon'}-${_currentTimeFilter}`;
+            try {
+                const _kpiRaw = localStorage.getItem(_kpiSnapKey);
+                if (_kpiRaw) {
+                    const { ts, val } = JSON.parse(_kpiRaw);
+                    if (Date.now() - ts < 60 * 60 * 1000) {
+                        const _sg = document.getElementById('kpi-stats-grid');
+                        if (_sg) _sg.innerHTML = val;
+                    } else { localStorage.removeItem(_kpiSnapKey); }
+                }
+            } catch (_) {}
+            AppDataStore.getAll('users').then(allUsers => {
+                const sel = document.getElementById('kpi-agent-filter');
+                if (!sel) return;
+                const _kpiAgents = allUsers.filter(u => isAgent(u) || u.role === 'team_leader' || (u.role || '').includes('Level 7'));
+                sel.innerHTML = `<option value="all">All Agents</option>` +
+                    _kpiAgents.map(a => `<option value="${a.id}" ${String(_currentAgentFilter) === String(a.id) ? 'selected' : ''}>${escapeHtml(a.full_name || '')}</option>`).join('');
+            }).catch(() => {});
+            await refreshKPIDashboard();
+        };
+
+        // React scaffold-shell — island renders shell + empty containers (+ Chart.js
+        // canvas); _kpiPopulate (via useEffect onReady) fills everything as legacy.
+        if (_reactReportsOn()) {
+            try {
+                container.innerHTML = '<div id="reports-react-root"></div>';
+                window.CRMReact.mountReports(document.getElementById('reports-react-root'), {
+                    isTeamLeader: isTeamLeaderOrAbove(_state.cu),
+                    currentTimeFilter: _currentTimeFilter,
+                    roles: _utils.USER_ROLES || [],
+                    currentRoleFilter: _currentRoleFilter,
+                    customDateFrom: _customDateFrom,
+                    customDateTo: _customDateTo,
+                    onReady: () => { _kpiPopulate(); },
+                });
+                return;
+            } catch (e) {
+                console.warn('[reports] island mount failed, falling back to legacy:', e && e.message);
+                // fall through to the legacy render below
+            }
+        }
+
         container.innerHTML = `
             <div class="kpi-dashboard">
                 <div class="dashboard-header">
@@ -181,30 +241,8 @@
             </div>
 `;
 
-        // Inject cached stats instantly so the grid isn't blank while data loads
-        const _kpiSnapKey = `kpi-stats-snap-${_state.cu?.id || 'anon'}-${_currentTimeFilter}`;
-        try {
-            const _kpiRaw = localStorage.getItem(_kpiSnapKey);
-            if (_kpiRaw) {
-                const { ts, val } = JSON.parse(_kpiRaw);
-                if (Date.now() - ts < 60 * 60 * 1000) {
-                    const _sg = document.getElementById('kpi-stats-grid');
-                    if (_sg) _sg.innerHTML = val;
-                } else { localStorage.removeItem(_kpiSnapKey); }
-            }
-        } catch(_) {}
-
-        // Fill agent dropdown after shell is painted (non-blocking)
-        AppDataStore.getAll('users').then(allUsers => {
-            const sel = document.getElementById('kpi-agent-filter');
-            if (!sel) return;
-            const _kpiAgents = allUsers.filter(u =>
-                isAgent(u) || u.role === 'team_leader' || (u.role || '').includes('Level 7')
-            );
-            sel.innerHTML = `<option value="all">All Agents</option>` +
-                _kpiAgents.map(a => `<option value="${a.id}" ${String(_currentAgentFilter) === String(a.id) ? 'selected' : ''}>${escapeHtml(a.full_name || '')}</option>`).join('');
-        }).catch(() => {});
-        await refreshKPIDashboard();
+        // Cached-snapshot inject + agent-dropdown fill + refresh (shared helper).
+        await _kpiPopulate();
     };
 
     const setTimeFilter = async (filter) => {

@@ -36,6 +36,7 @@ import { DocumentManagementView } from './views/DocumentManagementView.jsx';
 import { StockTakeView } from './views/StockTakeView.jsx';
 import { EggPurchasingView } from './views/EggPurchasingView.jsx';
 import { FormulaPurchaserView } from './views/FormulaPurchaserView.jsx';
+import { ReportsView } from './views/ReportsView.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -352,6 +353,14 @@ function mountFormulaPurchaser(container, opts) {
     const o = opts || {};
     _mountSimple(container, <FormulaPurchaserView tabs={o.tabs || []} activeTab={o.activeTab || 'dashboard'} onReady={o.onReady} />);
     window.__REACT_FP_MOUNTED = true;
+}
+
+// ── Reporting & KPI Dashboard scaffold-shell island (chunk fills all containers
+// + Chart.js canvas via _kpiPopulate/refreshKPIDashboard on useEffect onReady). ─
+function mountReports(container, opts) {
+    const o = opts || {};
+    _mountSimple(container, <ReportsView isTeamLeader={!!o.isTeamLeader} currentTimeFilter={o.currentTimeFilter || 'monthly'} roles={o.roles || []} currentRoleFilter={o.currentRoleFilter || 'All'} customDateFrom={o.customDateFrom || ''} customDateTo={o.customDateTo || ''} onReady={o.onReady} />);
+    window.__REACT_REPORTS_MOUNTED = true;
 }
 
 window.CRMReact = Object.assign(window.CRMReact || {}, {
