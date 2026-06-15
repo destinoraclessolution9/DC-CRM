@@ -7088,8 +7088,28 @@ const _loadPurchasesHistory = async () => {
     }
 };
 
+// React-island Purchases History (default-on). The island owns filter+page state
+// (keeps search focus) and renders the editable table with the SAME cell ids so
+// app.savePurchasesHistoryRow still works. Kill-switch → legacy: __REACT_PURCHASES
+// ===false, ?react=0, crm_react_off='1'. Legacy table is the fallback on error.
+const _reactPurchasesOn = () => {
+    try {
+        if (window.__REACT_PURCHASES === false) return false;
+        if (/[?&]react=0/.test(location.search)) return false;
+        if (localStorage.getItem('crm_react_off') === '1') return false;
+        return !!(window.CRMReact && typeof window.CRMReact.mountPurchasesHistory === 'function');
+    } catch (_) { return false; }
+};
+
 const _renderPurchasesHistory = (viewport) => {
     const { rows = [], agentMap = {} } = _purchasesHistoryCache || {};
+    if (_reactPurchasesOn()) {
+        try {
+            viewport.innerHTML = '<div id="purchases-react-root"></div>';
+            window.CRMReact.mountPurchasesHistory(document.getElementById('purchases-react-root'), { rows, agentMap });
+            return;
+        } catch (e) { console.warn('[react-purchases] mount failed → legacy:', e?.message || e); }
+    }
     const f = _phFilter;
     const filtered = rows.filter(r => {
         if (f.search) {

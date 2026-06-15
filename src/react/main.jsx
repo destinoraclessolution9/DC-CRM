@@ -20,6 +20,7 @@ import { SecurityDashboard } from './views/SecurityDashboard.jsx';
 import { RankingView } from './views/RankingView.jsx';
 import { NoticeboardGrid } from './views/NoticeboardGrid.jsx';
 import { LeadFormsView, SurveysView, ContractsView } from './views/FormsViews.jsx';
+import { PurchasesHistoryView } from './views/PurchasesHistoryView.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -239,6 +240,7 @@ function _unmountSimple(container) {
 function mountLeadFormsView(container, opts) { _mountSimple(container, <LeadFormsView forms={(opts || {}).forms || []} />); window.__REACT_LEADFORMS_MOUNTED = true; }
 function mountSurveysView(container, opts) { _mountSimple(container, <SurveysView surveys={(opts || {}).surveys || []} />); window.__REACT_SURVEYS_MOUNTED = true; }
 function mountContractsView(container, opts) { _mountSimple(container, <ContractsView contracts={(opts || {}).contracts || []} />); window.__REACT_CONTRACTS_MOUNTED = true; }
+function mountPurchasesHistory(container, opts) { const o = opts || {}; _mountSimple(container, <PurchasesHistoryView rows={o.rows || []} agentMap={o.agentMap || {}} />); window.__REACT_PURCHASES_MOUNTED = true; }
 
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
@@ -260,6 +262,8 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountLeadFormsView: _unmountSimple,
     unmountSurveysView: _unmountSimple,
     unmountContractsView: _unmountSimple,
+    mountPurchasesHistory,
+    unmountPurchasesHistory: _unmountSimple,
 });
 
 if (document.readyState === 'loading') {
