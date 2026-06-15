@@ -8228,20 +8228,17 @@ const showAgentsView = async (container) => {
     await renderAgentsTable();
 };
 
-// ── React-island Agents path (opt-in bundle + __REACT_AGENTS flag) ───────────
-// OPT-IN until promoted: engages only when the island bundle is present AND
-// explicitly enabled (?react_agents=1 / localStorage crm_react_agents='1' /
-// window.__REACT_AGENTS===true). Global kill-switches (?react=0, localStorage
-// crm_react_off='1', window.__REACT_AGENTS===false) force the legacy table.
-// Normal users get the legacy table until this view is promoted to default.
+// ── React-island Agents path ─────────────────────────────────────────────────
+// PROMOTED TO DEFAULT 2026-06-15 (parity-verified: island === legacy, 20/20 rows
+// identical). Engages whenever the island bundle is present. Kill-switch → legacy
+// table (instant rollback, no deploy): window.__REACT_AGENTS===false, ?react=0,
+// or localStorage crm_react_off='1'. Legacy table remains the fallback on any
+// mount/data error (the try/catch in renderAgentsTable).
 const _reactAgentsOn = () => {
     try {
         if (window.__REACT_AGENTS === false) return false;
         if (/[?&]react=0/.test(location.search)) return false;
         if (localStorage.getItem('crm_react_off') === '1') return false;
-        let enabled = window.__REACT_AGENTS === true || /[?&]react_agents=1/.test(location.search);
-        if (!enabled) { try { enabled = localStorage.getItem('crm_react_agents') === '1'; } catch (_) {} }
-        if (!enabled) return false;
         return !!(window.CRMReact && typeof window.CRMReact.mountAgentsTable === 'function');
     } catch (_) { return false; }
 };
