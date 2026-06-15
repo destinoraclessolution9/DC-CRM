@@ -579,17 +579,16 @@ let _pipelineAgentFilter = 'all';
 let _pipelineStatusFilter = 'all';
 let _focusViewMonth = 'current'; // 'current' or 'YYYY-MM' for viewing archived month
 
-// React-island flag — OPT-IN during verification (NOT default-on) per the
-// scaffold-shell protocol. Enable: window.__REACT_PIPELINE=true | ?react_pipeline=1
-// | localStorage crm_react_pipeline='1'. Promote default-on after live verify.
+// React-island flag (default-on, PROMOTED 2026-06-16 after opt-in verify:
+// useEffect-ready await fixed the rAF race — header selects + action-plan + focus
+// + body all fill, skeleton cleared, body shows genuine "0 qualified" empty-state).
+// Kill-switch → legacy: window.__REACT_PIPELINE===false, ?react=0, crm_react_off='1'.
 const _reactPipelineOn = () => {
     try {
+        if (window.__REACT_PIPELINE === false) return false;
         if (/[?&]react=0/.test(location.search)) return false;
         if (localStorage.getItem('crm_react_off') === '1') return false;
-        if (!(window.CRMReact && typeof window.CRMReact.mountPipeline === 'function')) return false;
-        return window.__REACT_PIPELINE === true
-            || /[?&]react_pipeline=1/.test(location.search)
-            || localStorage.getItem('crm_react_pipeline') === '1';
+        return !!(window.CRMReact && typeof window.CRMReact.mountPipeline === 'function');
     } catch (_) { return false; }
 };
 
