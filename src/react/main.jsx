@@ -415,6 +415,8 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountEggPurchasing: _unmountSimple,
     mountFormulaPurchaser,
     unmountFormulaPurchaser: _unmountSimple,
+    mountReports,
+    unmountReports: _unmountSimple,
 });
 
 if (document.readyState === 'loading') {
