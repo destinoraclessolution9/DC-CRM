@@ -26,6 +26,25 @@
     const navigateTo           = (v)   => window.app.navigateTo(v);
     // AppDataStore, UI, supabase are global — no alias needed.
 // ========== FEATURE: RANKING PERFORMANCE OVERVIEW ==========
+// React-island flags (default-on; read-only views). Kill-switch → legacy:
+// window.__REACT_<X>===false, ?react=0, or localStorage crm_react_off='1'.
+const _reactRankingOn = () => {
+    try {
+        if (window.__REACT_RANKING === false) return false;
+        if (/[?&]react=0/.test(location.search)) return false;
+        if (localStorage.getItem('crm_react_off') === '1') return false;
+        return !!(window.CRMReact && typeof window.CRMReact.mountRankingView === 'function');
+    } catch (_) { return false; }
+};
+const _reactNoticeboardOn = () => {
+    try {
+        if (window.__REACT_NOTICEBOARD === false) return false;
+        if (/[?&]react=0/.test(location.search)) return false;
+        if (localStorage.getItem('crm_react_off') === '1') return false;
+        return !!(window.CRMReact && typeof window.CRMReact.mountNoticeboardGrid === 'function');
+    } catch (_) { return false; }
+};
+
 const showRankingPerformanceView = async (container) => {
     _state.cv = 'ranking';
     // ── Paint skeleton immediately ──────────────────────────────────────
@@ -129,6 +148,19 @@ const showRankingPerformanceView = async (container) => {
         });
     }
     agentStats.sort((a, b) => b.performanceScore - a.performanceScore);
+
+    // React island (default-on) renders the computed stats. Legacy markup below
+    // is the fallback on any mount error.
+    if (_reactRankingOn()) {
+        try {
+            const monthLabel = now.toLocaleString('default', { month: 'long', year: 'numeric' });
+            container.innerHTML = '<div id="ranking-react-root"></div>';
+            window.CRMReact.mountRankingView(document.getElementById('ranking-react-root'), { agentStats, monthLabel });
+            return;
+        } catch (e) {
+            console.warn('[react-ranking] mount failed → legacy:', e?.message || e);
+        }
+    }
 
     const rankBadge = (i) => i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`;
 
@@ -822,6 +854,17 @@ const showNoticeboardView = async (container) => {
         if (s && e) return `${fmt(s)} – ${fmt(e)}`;
         return fmt(s || e);
     };
+
+    // React island (default-on) renders the cards from the prepared (filtered,
+    // sorted, poster-signed) `visible` events. Legacy template below is the fallback.
+    if (_reactNoticeboardOn()) {
+        try {
+            window.CRMReact.mountNoticeboardGrid(grid, { events: visible, isAdmin });
+            return;
+        } catch (e) {
+            console.warn('[react-noticeboard] mount failed → legacy:', e?.message || e);
+        }
+    }
 
     grid.innerHTML = visible.map((e, idx) => {
         const num = String(idx + 1).padStart(2, '0');

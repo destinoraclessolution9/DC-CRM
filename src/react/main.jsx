@@ -17,6 +17,8 @@ import { CustomersTable } from './views/CustomersTable.jsx';
 import { ProspectsTable } from './views/ProspectsTable.jsx';
 import { AgentsTable } from './views/AgentsTable.jsx';
 import { SecurityDashboard } from './views/SecurityDashboard.jsx';
+import { RankingView } from './views/RankingView.jsx';
+import { NoticeboardGrid } from './views/NoticeboardGrid.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -192,6 +194,36 @@ function unmountSecurityDashboard(container) {
     }
 }
 
+// ── Ranking Performance island (read-only; computed agentStats passed as props) ─
+function mountRankingView(container, opts) {
+    if (!container) return;
+    let root = _roots.get(container);
+    if (!root) { root = createRoot(container); _roots.set(container, root); }
+    const o = opts || {};
+    root.render(<RankingView agentStats={o.agentStats || []} monthLabel={o.monthLabel || ''} />);
+    window.__REACT_RANKING_MOUNTED = true;
+}
+
+function unmountRankingView(container) {
+    const root = container && _roots.get(container);
+    if (root) { try { root.unmount(); } catch (_) {} _roots.delete(container); }
+}
+
+// ── Noticeboard card grid island (read-only; prepared events passed as props) ──
+function mountNoticeboardGrid(container, opts) {
+    if (!container) return;
+    let root = _roots.get(container);
+    if (!root) { root = createRoot(container); _roots.set(container, root); }
+    const o = opts || {};
+    root.render(<NoticeboardGrid events={o.events || []} isAdmin={!!o.isAdmin} />);
+    window.__REACT_NOTICEBOARD_MOUNTED = true;
+}
+
+function unmountNoticeboardGrid(container) {
+    const root = container && _roots.get(container);
+    if (root) { try { root.unmount(); } catch (_) {} _roots.delete(container); }
+}
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
@@ -202,6 +234,10 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountAgentsTable,
     mountSecurityDashboard,
     unmountSecurityDashboard,
+    mountRankingView,
+    unmountRankingView,
+    mountNoticeboardGrid,
+    unmountNoticeboardGrid,
 });
 
 if (document.readyState === 'loading') {
