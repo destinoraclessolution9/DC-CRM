@@ -973,12 +973,39 @@ const appLogic = (() => {
     };
 
     const getVisibleActivities = async () => {
-        const [all, allUsersForVis] = await Promise.all([
-            AppDataStore.getAll('activities'),
-            AppDataStore.getAll('users'),
-        ]);
-        if (isSystemAdmin(_currentUser)) return all;
+        const user = _currentUser;
+        if (isSystemAdmin(user)) return await AppDataStore.getAll('activities');
+        const allUsersForVis = await AppDataStore.getAll('users');
         const canView = await buildActivityVisibilityChecker(allUsersForVis);
+
+        // Scale-safe (flag-gated, staging): fetch only the candidate superset
+        // (open/public ∪ lead∈visible ∪ I'm-a-co-agent) instead of the whole
+        // activities table, then apply the SAME checker for exact parity — the
+        // superset provably covers every activity canView passes. Any error / flag
+        // off → exact legacy whole-table path below.
+        if (_serverVisExtOn() && user) {
+            try {
+                const visibleIds = await getVisibleUserIds(user);
+                const sel = AppDataStore._selectClauseForGetAll('activities');
+                const parts = [
+                    AppDataStore.queryAdvanced('activities', { scopeFields: [{ field: 'visibility', values: ['open', 'public'] }, { field: 'is_public', values: [true] }], select: sel, limit: 100000, countMode: null }),
+                    (async () => { const { data, error } = await AppDataStore._readClient().from('activities').select(sel).contains('co_agents', JSON.stringify([{ id: user.id }])); if (error) throw error; return { data: data || [] }; })(),
+                ];
+                if (Array.isArray(visibleIds) && visibleIds.length) {
+                    parts.push(AppDataStore.queryAdvanced('activities', { scopeField: 'lead_agent_id', scopeValues: visibleIds, select: sel, limit: 100000, countMode: null }));
+                }
+                const results = await Promise.all(parts);
+                const byId = new Map();
+                for (const res of results) for (const a of (res && res.data) || []) byId.set(String(a.id), a);
+                // Strip locally-tombstoned rows (the co_agents .contains query bypasses
+                // the shared read methods, so apply the same filter getAll uses).
+                const candidates = AppDataStore._stripTombstones('activities', [...byId.values()]);
+                return candidates.filter(canView);
+            } catch (e) {
+                console.warn('getVisibleActivities: server-scope failed — full-table fallback', e);
+            }
+        }
+        const all = await AppDataStore.getAll('activities');
         return all.filter(canView);
     };
 

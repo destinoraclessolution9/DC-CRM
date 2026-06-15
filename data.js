@@ -1047,7 +1047,7 @@ class DataStore {
             if (data.length < pageSize) break; // last page
         }
         this._clearOfflineNotice();
-        return out;
+        return this._stripTombstones(tableName, out);
     }
 
     // Fetch only rows where updated_at > sinceISO. Used by _swrRevalidate for
@@ -2110,6 +2110,20 @@ class DataStore {
         }
     }
 
+    // Strip locally-tombstoned (deleted) ids from a result set so the scoped read
+    // methods (query/queryAdvanced/queryPaged) never resurface a record that getAll
+    // hides. Mirrors getAll/_getAllImpl's tombstone filter so every read path agrees.
+    _stripTombstones(tableName, rows) {
+        if (!Array.isArray(rows) || rows.length === 0) return rows || [];
+        try {
+            const raw = (typeof localStorage !== 'undefined') ? localStorage.getItem('fs_crm_tombstones') : null;
+            if (!raw) return rows;
+            const del = new Set((JSON.parse(raw)[tableName] || []).map(String));
+            if (!del.size) return rows;
+            return rows.filter(r => !del.has(String(r.id)));
+        } catch (_) { return rows; }
+    }
+
     async query(tableName, filters = {}) {
         try {
             // Use the same light-select projection that getAll uses, so wide
@@ -2134,7 +2148,7 @@ class DataStore {
             }
             if (error) throw error;
             this._clearOfflineNotice();
-            return data || [];
+            return this._stripTombstones(tableName, data || []);
         } catch (e) {
             console.warn(`Offline: falling back for ${tableName} query`, e);
             const local = localStorage.getItem(`fs_crm_${tableName}`);
@@ -2246,7 +2260,7 @@ class DataStore {
                 throw error;
             }
             this._clearOfflineNotice();
-            return { data: data || [], count: count || 0, limit, offset };
+            return { data: this._stripTombstones(tableName, data || []), count: count || 0, limit, offset };
         } catch (e) {
             console.error(`queryAdvanced error on ${tableName}:`, e);
             // Fallback: filter cached/local data client-side with pagination
