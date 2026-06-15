@@ -21,6 +21,8 @@ import { RankingView } from './views/RankingView.jsx';
 import { NoticeboardGrid } from './views/NoticeboardGrid.jsx';
 import { LeadFormsView, SurveysView, ContractsView } from './views/FormsViews.jsx';
 import { PurchasesHistoryView } from './views/PurchasesHistoryView.jsx';
+import { KnowledgeDashboardCards } from './views/KnowledgeDashboardCards.jsx';
+import { KnowledgeAllEntries } from './views/KnowledgeAllEntries.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -242,6 +244,18 @@ function mountSurveysView(container, opts) { _mountSimple(container, <SurveysVie
 function mountContractsView(container, opts) { _mountSimple(container, <ContractsView contracts={(opts || {}).contracts || []} />); window.__REACT_CONTRACTS_MOUNTED = true; }
 function mountPurchasesHistory(container, opts) { const o = opts || {}; _mountSimple(container, <PurchasesHistoryView rows={o.rows || []} agentMap={o.agentMap || {}} />); window.__REACT_PURCHASES_MOUNTED = true; }
 
+// ── Knowledge HQ islands ──────────────────────────────────────────────────────
+// Dashboard card lists (read-only; entries passed as a prop; quick-capture form
+// stays vanilla in the chunk) + All-Entries (stateful chip/search table; the
+// chunk passes a loadEntries(query) callback wrapping its supabase/AppDataStore
+// access). Detail editor + capture + daily notes remain vanilla.
+function mountKnowledgeDashboard(container, opts) { const o = opts || {}; _mountSimple(container, <KnowledgeDashboardCards entries={o.entries || []} today={o.today || ''} />); window.__REACT_KB_DASH_MOUNTED = true; }
+function mountKnowledgeAllEntries(container, opts) {
+    const o = opts || {};
+    _mountSimple(container, <KnowledgeAllEntries loadEntries={o.loadEntries} initialFilter={o.initialFilter || 'all'} onFilterChange={o.onFilterChange} />);
+    window.__REACT_KB_ALL_MOUNTED = true;
+}
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
@@ -264,6 +278,10 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountContractsView: _unmountSimple,
     mountPurchasesHistory,
     unmountPurchasesHistory: _unmountSimple,
+    mountKnowledgeDashboard,
+    unmountKnowledgeDashboard: _unmountSimple,
+    mountKnowledgeAllEntries,
+    unmountKnowledgeAllEntries: _unmountSimple,
 });
 
 if (document.readyState === 'loading') {

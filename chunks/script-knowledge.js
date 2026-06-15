@@ -75,6 +75,20 @@
         done: 'Done', archived: 'Archived'
     })[s] || s || '';
 
+    // React-island flag for the Knowledge data-rendering surfaces (default-on).
+    // Kill-switch → legacy: window.__REACT_KNOWLEDGE===false, ?react=0, or
+    // localStorage crm_react_off='1'. Only the Dashboard card lists + All-Entries
+    // table are islanded; the quick-capture form, capture/daily editors and the
+    // detail editor stay vanilla.
+    const _reactKbOn = (mountName) => {
+        try {
+            if (window.__REACT_KNOWLEDGE === false) return false;
+            if (/[?&]react=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            return !!(window.CRMReact && typeof window.CRMReact[mountName] === 'function');
+        } catch (_) { return false; }
+    };
+
     const showKnowledgeView = async (container) => {
         _state.cv = 'knowledge';
         if (!_kbSegment) _kbSegment = 'dashboard';
@@ -117,7 +131,18 @@
         if (_kbSegment === 'daily')     return showKnowledgeDailyNotes(slot);
     };
 
+    // Legacy dashboard grid (4 cards with kb-list-* slots filled by _kbRenderList).
+    // Reused for the non-React path and as the React-mount fallback.
+    const _kbDashGridHTML = () => `
+            <div class="kb-dash-grid">
+                <div class="kb-card" id="kb-card-inbox"><div class="kb-card-h"><i class="fas fa-inbox"></i> Inbox <span class="kb-count" id="kb-cnt-inbox">·</span></div><div class="kb-card-body" id="kb-list-inbox"><div class="kb-empty">Loading…</div></div></div>
+                <div class="kb-card" id="kb-card-tasks"><div class="kb-card-h"><i class="fas fa-check-square"></i> Today's Tasks <span class="kb-count" id="kb-cnt-tasks">·</span></div><div class="kb-card-body" id="kb-list-tasks"><div class="kb-empty">Loading…</div></div></div>
+                <div class="kb-card" id="kb-card-ideas"><div class="kb-card-h"><i class="fas fa-lightbulb"></i> Recent Ideas <span class="kb-count" id="kb-cnt-ideas">·</span></div><div class="kb-card-body" id="kb-list-ideas"><div class="kb-empty">Loading…</div></div></div>
+                <div class="kb-card" id="kb-card-cases"><div class="kb-card-h"><i class="fas fa-flask"></i> In-progress Case Studies <span class="kb-count" id="kb-cnt-cases">·</span></div><div class="kb-card-body" id="kb-list-cases"><div class="kb-empty">Loading…</div></div></div>
+            </div>`;
+
     const showKnowledgeDashboard = async (slot) => {
+        const reactOn = _reactKbOn('mountKnowledgeDashboard');
         slot.innerHTML = `
             <div class="kb-quick-capture">
                 <input type="text" id="kb-qc-title" class="kb-input" placeholder="What's on your mind? (title)" maxlength="200">
@@ -127,12 +152,7 @@
                     <button class="btn primary" onclick="app.saveQuickCapture()"><i class="fas fa-bolt"></i> Capture</button>
                 </div>
             </div>
-            <div class="kb-dash-grid">
-                <div class="kb-card" id="kb-card-inbox"><div class="kb-card-h"><i class="fas fa-inbox"></i> Inbox <span class="kb-count" id="kb-cnt-inbox">·</span></div><div class="kb-card-body" id="kb-list-inbox"><div class="kb-empty">Loading…</div></div></div>
-                <div class="kb-card" id="kb-card-tasks"><div class="kb-card-h"><i class="fas fa-check-square"></i> Today's Tasks <span class="kb-count" id="kb-cnt-tasks">·</span></div><div class="kb-card-body" id="kb-list-tasks"><div class="kb-empty">Loading…</div></div></div>
-                <div class="kb-card" id="kb-card-ideas"><div class="kb-card-h"><i class="fas fa-lightbulb"></i> Recent Ideas <span class="kb-count" id="kb-cnt-ideas">·</span></div><div class="kb-card-body" id="kb-list-ideas"><div class="kb-empty">Loading…</div></div></div>
-                <div class="kb-card" id="kb-card-cases"><div class="kb-card-h"><i class="fas fa-flask"></i> In-progress Case Studies <span class="kb-count" id="kb-cnt-cases">·</span></div><div class="kb-card-body" id="kb-list-cases"><div class="kb-empty">Loading…</div></div></div>
-            </div>
+            ${reactOn ? '<div id="kb-dash-react-root"></div>' : _kbDashGridHTML()}
         `;
         // Wire Ctrl+Enter on the quick-capture textarea
         const ta = document.getElementById('kb-qc-content');
@@ -156,6 +176,18 @@
             const slot = document.getElementById('kb-slot');
             if (slot) slot.innerHTML = `<div class="kb-empty" style="padding:40px;">Knowledge HQ tables not yet provisioned. Run <code>migrations/knowledge_hub_2026-05-09.sql</code> in Supabase SQL editor, then reload.</div>`;
             return;
+        }
+        // React path: mount the cards island with the full owner-scoped set; the
+        // island buckets/sorts/slices identically to the legacy code below.
+        const root = document.getElementById('kb-dash-react-root');
+        if (root && _reactKbOn('mountKnowledgeDashboard')) {
+            try {
+                window.CRMReact.mountKnowledgeDashboard(root, { entries: all, today: _kbTodayISO() });
+                return;
+            } catch (e) {
+                console.warn('[react-kb-dash] mount failed → legacy:', e?.message || e);
+                root.outerHTML = _kbDashGridHTML(); // rebuild legacy slots before falling through
+            }
         }
         const today = _kbTodayISO();
         const inbox  = all.filter(e => !e.type).sort((a,b)=> (b.created_at||'').localeCompare(a.created_at||'')).slice(0, 8);
@@ -246,6 +278,29 @@
     };
 
     const showKnowledgeAllEntries = async (slot) => {
+        // React path: the island owns the chip-filter + search state and calls
+        // back into this closure for data (knowledge_search RPC when searching,
+        // else AppDataStore.query owner-scoped) — identical to _kbReloadAll.
+        if (_reactKbOn('mountKnowledgeAllEntries')) {
+            try {
+                slot.innerHTML = '<div id="kb-all-react-root"></div>';
+                window.CRMReact.mountKnowledgeAllEntries(document.getElementById('kb-all-react-root'), {
+                    initialFilter: _kbAllFilter,
+                    onFilterChange: (f) => { _kbAllFilter = f; },
+                    loadEntries: async (q) => {
+                        const owner = await _kbOwnerId();
+                        if (!owner) throw new Error('SIGN_IN');
+                        if (q && q.trim()) {
+                            const { data, error } = await window.supabase.rpc('knowledge_search', { q: q.trim() });
+                            if (error) throw error;
+                            return data || [];
+                        }
+                        return await AppDataStore.query('knowledge_entries', { owner_id: owner }) || [];
+                    },
+                });
+                return;
+            } catch (e) { console.warn('[react-kb-all] mount failed → legacy:', e?.message || e); }
+        }
         slot.innerHTML = `
             <div class="kb-all-bar">
                 <div class="kb-chips">
