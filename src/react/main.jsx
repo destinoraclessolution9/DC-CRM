@@ -35,6 +35,7 @@ import { MarketingListsView } from './views/MarketingListsView.jsx';
 import { DocumentManagementView } from './views/DocumentManagementView.jsx';
 import { StockTakeView } from './views/StockTakeView.jsx';
 import { EggPurchasingView } from './views/EggPurchasingView.jsx';
+import { FormulaPurchaserView } from './views/FormulaPurchaserView.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -345,6 +346,14 @@ function mountEggPurchasing(container, opts) {
     window.__REACT_EGG_MOUNTED = true;
 }
 
+// ── Formula Purchaser scaffold-shell island (chunk fills #fp-tab-content via
+// fpLoadData + fpSwitchTab on useEffect onReady; owns imports/PO/transfers). ────
+function mountFormulaPurchaser(container, opts) {
+    const o = opts || {};
+    _mountSimple(container, <FormulaPurchaserView tabs={o.tabs || []} activeTab={o.activeTab || 'dashboard'} onReady={o.onReady} />);
+    window.__REACT_FP_MOUNTED = true;
+}
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
@@ -395,6 +404,8 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountStockTake: _unmountSimple,
     mountEggPurchasing,
     unmountEggPurchasing: _unmountSimple,
+    mountFormulaPurchaser,
+    unmountFormulaPurchaser: _unmountSimple,
 });
 
 if (document.readyState === 'loading') {

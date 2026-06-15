@@ -27,6 +27,20 @@
     const navigateTo           = (v)   => window.app.navigateTo(v);
     // AppDataStore, UI, supabase, XLSX (on demand) are globals — no alias needed.
 
+    // React-island flag — OPT-IN during verification (NOT default-on) per the
+    // scaffold-shell protocol. Enable: window.__REACT_FP=true | ?react_fp=1 |
+    // localStorage crm_react_fp='1'. Promote default-on after live verify.
+    const _reactFpOn = () => {
+        try {
+            if (/[?&]react=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            if (!(window.CRMReact && typeof window.CRMReact.mountFormulaPurchaser === 'function')) return false;
+            return window.__REACT_FP === true
+                || /[?&]react_fp=1/.test(location.search)
+                || localStorage.getItem('crm_react_fp') === '1';
+        } catch (_) { return false; }
+    };
+
     // ==================== FORMULA PURCHASER ====================
     // Stock replenishment & multi-outlet distribution system.
     // Super Admin only. See formula_purchaser_schema.sql for backing tables.
@@ -294,6 +308,31 @@
         if (!isSystemAdmin(_state.cu)) {
             container.innerHTML = `<div class="placeholder-view"><h1>Access Denied</h1><p>Formula Purchaser is restricted to Super Admin only.</p></div>`;
             return;
+        }
+
+        // React scaffold-shell — island renders shell; chunk fpLoadData()+fpSwitchTab()
+        // (via useEffect onReady) fill #fp-tab-content (imports/PO/transfers unchanged).
+        if (_reactFpOn()) {
+            try {
+                const _fpTabs = [
+                    { key: 'dashboard', label: 'Dashboard', icon: 'fa-chart-line' },
+                    { key: 'pos', label: 'Purchase Orders', icon: 'fa-file-invoice' },
+                    { key: 'transfers', label: 'Transfers', icon: 'fa-exchange-alt' },
+                    { key: 'stock', label: 'Stock Inquiry', icon: 'fa-warehouse' },
+                    { key: 'vendors', label: 'Vendors', icon: 'fa-truck' },
+                    { key: 'exclusions', label: 'Exclusions & Deals', icon: 'fa-ban' },
+                ];
+                const _fpTab = _fpState.currentTab || 'dashboard';
+                container.innerHTML = '<div id="fp-react-root"></div>';
+                window.CRMReact.mountFormulaPurchaser(document.getElementById('fp-react-root'), {
+                    tabs: _fpTabs, activeTab: _fpTab,
+                    onReady: async () => { await fpLoadData(); await fpSwitchTab(_fpTab); },
+                });
+                return;
+            } catch (e) {
+                console.warn('[fp] island mount failed, falling back to legacy:', e && e.message);
+                // fall through to the legacy render below
+            }
         }
 
         container.innerHTML = `
