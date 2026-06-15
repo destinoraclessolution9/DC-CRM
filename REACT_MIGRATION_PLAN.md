@@ -12,8 +12,8 @@ Path to **D** (god-object retirement / Vite build ownership / module extraction)
 
 ### Pending full-screen VIEWS (tick on deploy+verify)
 - [x] boss_report (#34) — SW-52, 2026-06-15, mount-once scaffold island, parity-verified (ids+options+labels+handlers)
-- [ ] protection (#35) — script-import.js showProtectionMonitoringView L947 ← NEXT (standalone; chunk computes monitorData → island renders team cards + agent-perf table + inactive table + reassignment history; mutations app.*)
-- [ ] documents (#39) — script-documents.js (957L)
+- [x] protection (#35) — SW-53, 2026-06-16, render-only island (chunk computes 4 model arrays); parity-identical (2 teams / 20 agents / 410 inactive / 9 reassign all match) + XSS-escaped
+- [ ] documents (#39) — script-documents.js (957L) ← NEXT
 - [~] journey (#33) — RE-CLASSIFIED: NOT a standalone screen. = renderJourneyTab (embedded timeline inside prospect/customer detail accordions, heavy touchpoint mutations) + showAgentJourneyDashboard/showAgentJourneyLoad (small dashboard widgets). Defer with the modal/embedded-component batch; do standalone screens first.
 - [ ] ai (#30) — script-ai.js (1272L), showAIInsightsDashboard L111 + showAIPredictionDashboard L1348
 - [ ] stock_take (#37) — script-stock-take.js (1888L), 9 tabs/QR/reconciliation
