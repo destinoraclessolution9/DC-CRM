@@ -323,7 +323,7 @@ function mountMarketingLists(container, opts) {
 // owns all interactivity incl. drag-drop). ───────────────────────────────────
 function mountDocuments(container, opts) {
     const o = opts || {};
-    _mountSimple(container, <DocumentManagementView viewMode={o.viewMode || 'list'} />);
+    _mountSimple(container, <DocumentManagementView viewMode={o.viewMode || 'list'} onReady={o.onReady} />);
     window.__REACT_DMS_MOUNTED = true;
 }
 

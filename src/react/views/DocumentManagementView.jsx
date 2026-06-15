@@ -9,13 +9,22 @@
 // drag-drop file moves, breadcrumb, and batch actions are byte-identical to the
 // legacy view (zero behavior change). Toolbar buttons call window.app.* (same
 // handlers the legacy inline markup used).
-import React from 'react';
+import React, { useEffect } from 'react';
 
 const app = () => window.app || {};
 const call = (name, ...args) => { const f = app()[name]; if (typeof f === 'function') f(...args); };
 
-export function DocumentManagementView({ viewMode = 'list' }) {
+export function DocumentManagementView({ viewMode = 'list', onReady }) {
     try { window.__REACT_DMS_STATE = 'ready'; } catch (_) { /* noop */ }
+
+    // Populate the shell AFTER React has committed the DOM (so #folder-tree /
+    // #file-container exist). The chunk passes onReady = renderFolderTree +
+    // loadFolderContents. (A chunk-side rAF proved unreliable — see incident.)
+    useEffect(() => {
+        if (typeof onReady === 'function') {
+            try { onReady(); } catch (e) { try { console.warn('[dms] onReady failed:', e && e.message); } catch (_) {} }
+        }
+    }, [onReady]);
 
     return (
         <div className="dms-view">

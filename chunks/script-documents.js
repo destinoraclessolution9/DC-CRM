@@ -13,6 +13,13 @@
     const esc    = (s) => window._crmUtils.escapeHtml(s);
     const escapeHtml = esc;
     const getVisibleUserIds = (u) => window._crmUtils.getVisibleUserIds(u);
+    // Post-split missing aliases — getFileIcon/formatFileSize live on _crmUtils
+    // (script.js); getFileExtension was never exported, so define it locally.
+    // (Fixes the latent `getFileIcon is not defined` / `formatFileSize is not
+    // defined` ReferenceErrors that threw whenever files/sizes rendered.)
+    const getFileIcon = (filename) => window._crmUtils.getFileIcon(filename);
+    const formatFileSize = (bytes) => window._crmUtils.formatFileSize(bytes);
+    const getFileExtension = (filename) => (filename || '').split('.').pop().toLowerCase();
     // ── Chunk-local state (documents view only) ──
     let _currentFolder = null;
     let _viewMode = 'list';
@@ -22,16 +29,21 @@
     let _fileFilter = '';
     let _draggedFileId = null;
 
-    // React-island flag for the Document Management shell.
-    // DISABLED 2026-06-16 (forced legacy): the scaffold-shell rAF-populate did NOT
-    // reliably run renderFolderTree()/loadFolderContents() on mount — live folder
-    // tree + file container came up EMPTY (manual app.refreshFolderTree() works, so
-    // the chunk fns are fine; the on-mount trigger is the problem). Also surfaced a
-    // pre-existing latent bug `getFileIcon is not defined` in renderFileListView
-    // (fires when files render; affects legacy too). DEFER documents until both are
-    // fixed + interactively verified (drive populate from the island via useEffect,
-    // not an rAF in the chunk). Island code kept (unused) for that follow-up.
-    const _reactDocumentsOn = () => false;
+    // React-island flag — OPT-IN during verification (NOT default-on yet) after the
+    // 2026-06-16 incident where a chunk-side rAF populate left the view empty.
+    // Enable per-session to verify the useEffect-driven populate live:
+    //   window.__REACT_DMS=true | ?react_dms=1 | localStorage crm_react_dms='1'.
+    // Promote to default-on in a follow-up deploy once verified.
+    const _reactDocumentsOn = () => {
+        try {
+            if (/[?&]react=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            if (!(window.CRMReact && typeof window.CRMReact.mountDocuments === 'function')) return false;
+            return window.__REACT_DMS === true
+                || /[?&]react_dms=1/.test(location.search)
+                || localStorage.getItem('crm_react_dms') === '1';
+        } catch (_) { return false; }
+    };
 
     const showDocumentManagementView = async (container) => {
         // React scaffold-shell — island renders the static shell; the chunk then
@@ -41,16 +53,12 @@
         if (_reactDocumentsOn()) {
             try {
                 container.innerHTML = '<div id="dms-react-root"></div>';
-                window.CRMReact.mountDocuments(document.getElementById('dms-react-root'), { viewMode: _viewMode });
-                const _pop = () => {
-                    if (!document.getElementById('folder-tree') || !document.getElementById('file-container')) {
-                        requestAnimationFrame(_pop);
-                        return;
-                    }
-                    renderFolderTree();
-                    loadFolderContents();
-                };
-                _pop();
+                // Populate via the island's useEffect (post-commit) — reliable, unlike
+                // the chunk-side rAF that left the view empty in the 2026-06-16 incident.
+                window.CRMReact.mountDocuments(document.getElementById('dms-react-root'), {
+                    viewMode: _viewMode,
+                    onReady: () => { renderFolderTree(); loadFolderContents(); },
+                });
                 return;
             } catch (e) {
                 console.warn('[documents] island mount failed, falling back to legacy:', e && e.message);
