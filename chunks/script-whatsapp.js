@@ -479,11 +479,32 @@
             UI.toast.success('WhatsApp message sent');
         } catch (e) { UI.toast.error(`Send failed: ${e.message}`); }
 
-        const allEntities = [
-            ...(await AppDataStore.getAll('prospects')).map(e => ({ ...e, _type: 'prospect' })),
-            ...(await AppDataStore.getAll('customers')).map(e => ({ ...e, _type: 'customer' }))
-        ];
-        const entity = allEntities.find(e => (e.phone || '').replace(/^\+/, '').replace(/\s/g, '') === phone);
+        // Scale-safe: resolve the recipient by phone via the existing
+        // import_existing_matches RPC (normalized phone match, SECURITY DEFINER)
+        // instead of downloading the whole prospects + customers tables. This is a
+        // best-effort attribution (entity_id on the logged message), so the RPC's
+        // more-robust phone normalization only improves match rate. Falls back to
+        // the exact legacy whole-table scan on any error.
+        let entity = null;
+        try {
+            const sb = window.supabase || (AppDataStore._readClient && AppDataStore._readClient());
+            const [mp, mc] = await Promise.all([
+                sb.rpc('import_existing_matches', { p_table: 'prospects', p_phones: [phone], p_emails: [], p_ics: [] }),
+                sb.rpc('import_existing_matches', { p_table: 'customers', p_phones: [phone], p_emails: [], p_ics: [] }),
+            ]);
+            if (mp.error) throw mp.error;
+            if (mc.error) throw mc.error;
+            const p0 = (mp.data || [])[0], c0 = (mc.data || [])[0];
+            if (p0) entity = { id: p0.id, _type: 'prospect' };
+            else if (c0) entity = { id: c0.id, _type: 'customer' };
+        } catch (e) {
+            console.warn('WhatsApp entity lookup via RPC failed — full-table fallback', e);
+            const allEntities = [
+                ...(await AppDataStore.getAll('prospects')).map(e => ({ ...e, _type: 'prospect' })),
+                ...(await AppDataStore.getAll('customers')).map(e => ({ ...e, _type: 'customer' }))
+            ];
+            entity = allEntities.find(e => (e.phone || '').replace(/^\+/, '').replace(/\s/g, '') === phone) || null;
+        }
         await AppDataStore.create('whatsapp_messages', {
             id: wamid, entity_type: entity?._type || 'prospect', entity_id: entity?.id || null,
             direction: 'outgoing', to, template_name: templateName, content, status,
@@ -508,11 +529,32 @@
             UI.toast.success('WhatsApp message sent');
         } catch (e) { UI.toast.error(`Send failed: ${e.message}`); }
 
-        const allEntities = [
-            ...(await AppDataStore.getAll('prospects')).map(e => ({ ...e, _type: 'prospect' })),
-            ...(await AppDataStore.getAll('customers')).map(e => ({ ...e, _type: 'customer' }))
-        ];
-        const entity = allEntities.find(e => (e.phone || '').replace(/^\+/, '').replace(/\s/g, '') === phone);
+        // Scale-safe: resolve the recipient by phone via the existing
+        // import_existing_matches RPC (normalized phone match, SECURITY DEFINER)
+        // instead of downloading the whole prospects + customers tables. This is a
+        // best-effort attribution (entity_id on the logged message), so the RPC's
+        // more-robust phone normalization only improves match rate. Falls back to
+        // the exact legacy whole-table scan on any error.
+        let entity = null;
+        try {
+            const sb = window.supabase || (AppDataStore._readClient && AppDataStore._readClient());
+            const [mp, mc] = await Promise.all([
+                sb.rpc('import_existing_matches', { p_table: 'prospects', p_phones: [phone], p_emails: [], p_ics: [] }),
+                sb.rpc('import_existing_matches', { p_table: 'customers', p_phones: [phone], p_emails: [], p_ics: [] }),
+            ]);
+            if (mp.error) throw mp.error;
+            if (mc.error) throw mc.error;
+            const p0 = (mp.data || [])[0], c0 = (mc.data || [])[0];
+            if (p0) entity = { id: p0.id, _type: 'prospect' };
+            else if (c0) entity = { id: c0.id, _type: 'customer' };
+        } catch (e) {
+            console.warn('WhatsApp entity lookup via RPC failed — full-table fallback', e);
+            const allEntities = [
+                ...(await AppDataStore.getAll('prospects')).map(e => ({ ...e, _type: 'prospect' })),
+                ...(await AppDataStore.getAll('customers')).map(e => ({ ...e, _type: 'customer' }))
+            ];
+            entity = allEntities.find(e => (e.phone || '').replace(/^\+/, '').replace(/\s/g, '') === phone) || null;
+        }
         await AppDataStore.create('whatsapp_messages', {
             id: wamid, entity_type: entity?._type || 'prospect', entity_id: entity?.id || null,
             direction: 'outgoing', to, content: text, status, sent_at: new Date().toISOString()

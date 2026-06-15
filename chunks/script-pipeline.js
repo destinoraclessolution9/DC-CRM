@@ -283,14 +283,19 @@ const checkReferralBonus = async (prospect, config, allReferrals, allPurchases) 
     // Path B: fallback to prospect.referrer_name → lookup in customers table
     if (!referrerCustomerId && prospect.referrer_name) {
         try {
-            const customers = await AppDataStore.getAll('customers');
             const needle = String(prospect.referrer_name).trim().toLowerCase();
             if (needle) {
-                const match = customers.find(c => {
-                    const n1 = String(c.full_name || '').trim().toLowerCase();
-                    const n2 = String(c.name || '').trim().toLowerCase();
-                    return n1 === needle || n2 === needle;
-                });
+                // Scale-safe: trigram search for the referrer by name instead of
+                // scanning the whole customers table; reapply the exact full_name
+                // match. (customers have no `name` column — that legacy check was a
+                // no-op.) Falls back to the whole-table scan on error.
+                let candidates;
+                try {
+                    candidates = await AppDataStore.searchCustomers(prospect.referrer_name, { limit: 50 });
+                } catch (e) {
+                    candidates = await AppDataStore.getAll('customers');
+                }
+                const match = (candidates || []).find(c => String(c.full_name || '').trim().toLowerCase() === needle);
                 if (match) referrerCustomerId = match.id;
             }
         } catch (_) {}
