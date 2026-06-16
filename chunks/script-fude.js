@@ -464,13 +464,20 @@ const showFudeView = async (container) => {
         </div>
     `);
 
-    // Wire carousel dot clicks
+    // Wire carousel dot clicks. NOTE: the .fude-carousel-dots row is rendered as a
+    // SIBLING of .fude-carousel-wrap (both inside .fude-section), so the dot is NOT
+    // inside the wrap — dot.closest('.fude-carousel-wrap') was null and the click
+    // threw, leaving the dots dead. Locate the track via the common .fude-section
+    // ancestor instead (zero layout change).
     container.querySelectorAll('.fude-carousel-dot').forEach((dot, i) => {
         dot.addEventListener('click', () => {
-            const track = dot.closest('.fude-carousel-wrap').querySelector('.fude-carousel-track');
+            const scope = dot.closest('.fude-section') || dot.closest('.fude-carousel-wrap')?.parentElement;
+            const track = scope ? scope.querySelector('.fude-carousel-track') : null;
+            if (!track) return;
             track.dataset.idx = i;
             track.style.transform = `translateX(-${i * 100}%)`;
-            dot.closest('.fude-carousel-dots').querySelectorAll('.fude-carousel-dot').forEach((d, j) => d.classList.toggle('active', j === i));
+            const dotsRow = dot.closest('.fude-carousel-dots');
+            if (dotsRow) dotsRow.querySelectorAll('.fude-carousel-dot').forEach((d, j) => d.classList.toggle('active', j === i));
         });
     });
 };
