@@ -2630,6 +2630,27 @@
         const userMap = new Map(allUsers.map(u => [String(u.id), u]));
         const prospectById = new Map(all.map(p => [String(p.id), p]));
 
+        // RBAC: scope birthdays to the viewer's visible agent set — admins /
+        // marketing managers see all; team leaders see their own team (self +
+        // same-team downline); plain agents see only their own contacts.
+        // Previously this section filtered by birthday date alone and leaked
+        // every agent's prospects/customers org-wide (cross-agent privacy bug).
+        // Mirrors the Health Product Refills widget below + the Activities
+        // widgets above. Unassigned contacts (no owner) show to admins only.
+        const visibleIds = await getVisibleUserIds(_state.cu).catch(() => 'all');
+        const ownerVisible = (ownerId) => {
+            if (visibleIds === 'all') return true;
+            if (!ownerId) return false; // unassigned → admins / marketing only
+            return Array.isArray(visibleIds) && visibleIds.some(id => String(id) === String(ownerId));
+        };
+        const visibleAll = all.filter(p => ownerVisible(p.responsible_agent_id || p.lead_agent_id));
+        // Family-member birthdays inherit the visibility of their parent contact.
+        const visibleNames = names.filter(n => {
+            if (visibleIds === 'all') return true; // admins / marketing see all
+            const parent = prospectById.get(String(n.prospect_id));
+            return parent && ownerVisible(parent.responsible_agent_id || parent.lead_agent_id);
+        });
+
         // Safely extract MM-DD from a date_of_birth string (YYYY-MM-DD)
         const getMMDD = (dob) => {
             if (!dob) return '';
@@ -2663,12 +2684,12 @@
         };
 
         const todayBdays = [
-            ...all.filter(p => getMMDD(p.date_of_birth) === todayStr).map(getBdayInfo),
-            ...names.filter(n => getMMDD(n.date_of_birth) === todayStr).map(getNameBdayInfo)
+            ...visibleAll.filter(p => getMMDD(p.date_of_birth) === todayStr).map(getBdayInfo),
+            ...visibleNames.filter(n => getMMDD(n.date_of_birth) === todayStr).map(getNameBdayInfo)
         ];
 
         const upcomingBdays = [
-            ...all.filter(p => {
+            ...visibleAll.filter(p => {
                 const md = getMMDD(p.date_of_birth);
                 return md === tomorrowStr || md === day2Str;
             }).map(p => {
@@ -2676,7 +2697,7 @@
                 info.info += ` · ${getMMDD(p.date_of_birth) === tomorrowStr ? 'Tomorrow' : 'In 2 days'}`;
                 return info;
             }),
-            ...names.filter(n => {
+            ...visibleNames.filter(n => {
                 const md = getMMDD(n.date_of_birth);
                 return md === tomorrowStr || md === day2Str;
             }).map(n => {

@@ -844,12 +844,24 @@
         const visibleDrafts = cachedDrafts.filter(d =>
             d.status === 'pending' && (d.due_date || '') <= todayStr && _isMine(d)
         );
-        const birthdays = [...allPeople, ...cachedUsers].filter(p => {
+        // RBAC: client (prospect/customer) birthdays are scoped to the viewer's
+        // visible agent set so agents don't see other agents' clients; colleague
+        // (cachedUsers) birthdays stay visible to all as a team feature.
+        const _bdayOwnerVisible = (ownerId) => {
+            if (visibleIds === 'all') return true;
+            if (!ownerId) return false;
+            return Array.isArray(visibleIds) && visibleIds.some(id => String(id) === String(ownerId));
+        };
+        const _bdayMatch = (p) => {
             const dob = p.date_of_birth || '';
             if (!dob || dob.length < 5) return false;
             const md = dob.slice(5, 10);
             return md === todayMD || md === tomMD;
-        });
+        };
+        const birthdays = [
+            ...allPeople.filter(p => _bdayMatch(p) && _bdayOwnerVisible(p.responsible_agent_id || p.lead_agent_id)),
+            ...cachedUsers.filter(_bdayMatch),
+        ];
         const refills = cachedRefills;
 
         const apptCount = activities.length;
@@ -1316,7 +1328,7 @@
 
         // B: Serve prospects + customers from localStorage cache (cold reference
         // data — birthdays/names rarely change; invalidated on edit).
-        const _PEOPLE_KEY  = 'mcal-people-v1';
+        const _PEOPLE_KEY  = 'mcal-people-v2'; // v2: now includes responsible_agent_id for RBAC birthday scoping
         const _DRAFTS_KEY  = 'mcal-drafts-v1';
         const _REFILLS_KEY = 'mcal-refills-v1';
         let allPeople     = _forceFresh ? null : _lsGet(_PEOPLE_KEY,  8 * 60 * 60 * 1000);
@@ -1327,6 +1339,15 @@
         const _needRefills = !cachedRefills;
 
         const visibleIds = await _visibleIdsP;
+
+        // RBAC: birthday grid markers + the coming-up count are scoped to the
+        // viewer's visible agent set so agents don't see other agents' clients'
+        // birthdays. Admins / marketing (visibleIds === 'all') see everything.
+        const _mcalBdayOwnerVisible = (ownerId) => {
+            if (visibleIds === 'all') return true;
+            if (!ownerId) return false;
+            return Array.isArray(visibleIds) && visibleIds.some(id => String(id) === String(ownerId));
+        };
 
         const _scopeFields = (typeof isSystemAdmin === 'function' && !isSystemAdmin(_state.cu) && visibleIds !== 'all')
             ? [ { field: 'lead_agent_id', values: visibleIds }, { field: 'visibility', values: ['open', 'public'] } ]
@@ -1375,8 +1396,8 @@
         const _capturedYearMcal = _mcalYear, _capturedMonthMcal = _mcalMonth;
         if (_needPeople || _needDrafts || _needRefills) {
             Promise.all([
-                _needPeople  ? AppDataStore.queryAdvanced('prospects', { select: 'id,full_name,date_of_birth', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []) : Promise.resolve(null),
-                _needPeople  ? AppDataStore.queryAdvanced('customers', { select: 'id,full_name,date_of_birth', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []) : Promise.resolve(null),
+                _needPeople  ? AppDataStore.queryAdvanced('prospects', { select: 'id,full_name,date_of_birth,responsible_agent_id', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []) : Promise.resolve(null),
+                _needPeople  ? AppDataStore.queryAdvanced('customers', { select: 'id,full_name,date_of_birth,responsible_agent_id', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []) : Promise.resolve(null),
                 _needDrafts  ? AppDataStore.getAll('follow_up_drafts').catch(() => []) : Promise.resolve(null),
                 _needRefills ? AppDataStore.query('refill_reminders', { status: 'pending' }).catch(() => []) : Promise.resolve(null),
             ]).then(([p, c, d, r]) => {
@@ -1434,6 +1455,7 @@
         for (const p of allPeople) {
             const dob = p.date_of_birth || '';
             if (!dob || dob.length < 10) continue;
+            if (!_mcalBdayOwnerVisible(p.responsible_agent_id || p.lead_agent_id)) continue;
             const md = dob.slice(5, 10); // MM-DD
             // Find the date in this month with this MM-DD
             const [_pm, _pd] = md.split('-').map(n => parseInt(n));
@@ -1512,6 +1534,7 @@
         const tomMD = mmdd(tom.getMonth()+1, tom.getDate());
         const bdayCount = allPeople.filter(p => {
             const dob = p.date_of_birth || ''; if (dob.length < 10) return false;
+            if (!_mcalBdayOwnerVisible(p.responsible_agent_id || p.lead_agent_id)) return false;
             const md = dob.slice(5, 10); return md === todayMD || md === tomMD;
         }).length;
         const refillCount = (refillsR || []).length;
