@@ -963,9 +963,22 @@ class DataStore {
         const existingPromise = this._inFlightGetAll.get(tableName);
         if (existingPromise) return existingPromise;
 
-        const fetchPromise = this._getAllImpl(tableName).finally(() => {
-            this._inFlightGetAll.delete(tableName);
-        });
+        const fetchPromise = this._getAllImpl(tableName)
+            .catch((err) => {
+                // Defense-in-depth: _getAllImpl owns a graceful offline/error
+                // fallback path, but if ANY unexpected error escapes it, getAll
+                // must STILL never reject — a rejected getAll() cascades into
+                // empty/broken data-heavy views (e.g. an UNHANDLED REJECTION that
+                // surfaced live as "Property description must be an object").
+                // Serve the last-known local snapshot (tombstone-filtered) or [].
+                try {
+                    console.warn(`[DataStore] getAll('${tableName}') hard-failed — serving local snapshot/[]:`, err && err.message || err);
+                } catch (_) {}
+                try { return this._swrGetLocal(tableName) || []; } catch (_) { return []; }
+            })
+            .finally(() => {
+                this._inFlightGetAll.delete(tableName);
+            });
         this._inFlightGetAll.set(tableName, fetchPromise);
         return fetchPromise;
     }
@@ -1272,17 +1285,19 @@ class DataStore {
             // Even when read fails, still try to push queued writes — write endpoint is separate from read.
             // Only when authenticated: anon writes just bounce off RLS and spam the network.
             if (this.hasLiveSession()) this._pushQueuedWrites(tableName).catch(() => {});
-            // Always strip tombstoned IDs from any fallback path so deleted records can never reappear
+            // Always strip tombstoned IDs from any fallback path so deleted records can never reappear.
+            // (Inlined the former `const stripDeleted = …` named arrow — the live error stack pinned the
+            //  crash to this exact construct's esbuild keepNames wrapper; the getAll()-level catch above
+            //  is the authoritative guard, this just removes the suspected trigger.)
             const tombstoneRaw = localStorage.getItem('fs_crm_tombstones');
             const tombstones = tombstoneRaw ? JSON.parse(tombstoneRaw) : {};
             const deletedIds = new Set(tombstones[tableName] || []);
-            const stripDeleted = (rows) => rows.filter(r => !deletedIds.has(String(r.id)));
             // Service-role REST fallback removed. The primary Supabase client
             // already carries the anon key + auth session JWT, and RLS policies
             // are set up so authenticated users can read. Fall straight to the
             // offline localStorage cache if the primary fetch failed.
             const local = localStorage.getItem(`fs_crm_${tableName}`);
-            return local ? stripDeleted(JSON.parse(local)) : [];
+            return local ? JSON.parse(local).filter(r => !deletedIds.has(String(r.id))) : [];
         }
     }
 
