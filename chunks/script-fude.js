@@ -58,6 +58,35 @@
         UI.showModal(title, html, actions || [], size || '');
     };
 
+    // React fude-VIEW passthrough — OPT-IN during verification (kill-switch:
+    // window.__REACT_FUDEVIEW=false | ?react_fudeview=0 | crm_react_fudeview='0';
+    // plus global ?react=0 / crm_react_off='1'). Flip the OPT-IN test to a plain
+    // `return true` after live parity check to promote default-on.
+    const _reactFudeViewOn = () => {
+        try {
+            if (/[?&]react=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            if (!(window.CRMReact && typeof window.CRMReact.mountFudeContent === 'function')) return false;
+            return window.__REACT_FUDEVIEW === true
+                || /[?&]react_fudeview=1/.test(location.search)
+                || localStorage.getItem('crm_react_fudeview') === '1';
+        } catch (_) { return false; }
+    };
+    // Render the assembled fude-view HTML into `container`, routed through the
+    // dedicated fude-view React root when enabled (re-mount on each call; the
+    // carousel/filter wiring operates on the rendered descendants regardless).
+    const _rxRenderFude = (container, viewHtml) => {
+        if (_reactFudeViewOn()) {
+            container.innerHTML = '<div id="fude-react-root"></div>';
+            const root = document.getElementById('fude-react-root');
+            if (root && window.CRMReact && typeof window.CRMReact.mountFudeContent === 'function') {
+                try { window.CRMReact.mountFudeContent(root, { html: viewHtml }); return; }
+                catch (e) { console.warn('[fude] view island mount failed, legacy:', e && e.message); }
+            }
+        }
+        container.innerHTML = viewHtml;
+    };
+
 // ========== LEVEL 13/14: 福德 VIEW ==========
 const showFudeView = async (container) => {
     const currentUser = _currentUser;
@@ -414,7 +443,7 @@ const showFudeView = async (container) => {
         </div>`;
 
     // --- Render ---
-    container.innerHTML = `
+    _rxRenderFude(container, `
         <div class="fude-tab">
             <div class="fude-inner">
                 ${summaryBanner}
@@ -431,7 +460,7 @@ const showFudeView = async (container) => {
             ${storiesSection}
             ${purchasesSection}
         </div>
-    `;
+    `);
 
     // Wire carousel dot clicks
     container.querySelectorAll('.fude-carousel-dot').forEach((dot, i) => {

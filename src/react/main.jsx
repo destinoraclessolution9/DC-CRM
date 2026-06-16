@@ -474,6 +474,29 @@ function unmountModalContent() {
     if (_modalContentRoot) { try { _modalContentRoot.unmount(); } catch (_) {} _modalContentRoot = null; }
 }
 
+// ── Fude dashboard VIEW passthrough (dedicated root, SEPARATE from the modal
+// root so opening a fude sub-modal doesn't unmount the view). The chunk's
+// showFudeView builds the assembled section HTML and mounts it here; on each
+// re-render (after a highlight/reward save) it unmounts-prior then re-mounts.
+// dangerouslySetInnerHTML keeps the carousel inline-IIFE + dot listeners +
+// story-filter classList mutations working (opaque to React). flushSync makes
+// the DOM present before the chunk's post-render carousel wiring runs. ────────
+let _fudeContentRoot = null;
+function mountFudeContent(container, opts) {
+    if (!container) return;
+    if (_fudeContentRoot) { try { _fudeContentRoot.unmount(); } catch (_) {} _fudeContentRoot = null; }
+    const o = opts || {};
+    const root = createRoot(container);
+    _fudeContentRoot = root;
+    const el = <ModalContentIsland html={o.html || ''} onReady={o.onReady} />;
+    try { flushSync(() => { root.render(el); }); }
+    catch (_) { root.render(el); }
+    window.__REACT_FUDEVIEW_MOUNTED = true;
+}
+function unmountFudeContent() {
+    if (_fudeContentRoot) { try { _fudeContentRoot.unmount(); } catch (_) {} _fudeContentRoot = null; }
+}
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
@@ -544,6 +567,8 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountSearchPanel,
     mountModalContent,
     unmountModalContent,
+    mountFudeContent,
+    unmountFudeContent,
 });
 
 if (document.readyState === 'loading') {
