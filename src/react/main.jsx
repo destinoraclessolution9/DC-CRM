@@ -42,6 +42,7 @@ import { MarketingAutomationView } from './views/MarketingAutomationView.jsx';
 import { CalendarView } from './views/CalendarView.jsx';
 import { ReferralsView } from './views/ReferralsView.jsx';
 import { MobileHomeView } from './views/MobileHomeView.jsx';
+import { AIInsightsView } from './views/AIInsightsView.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -408,6 +409,24 @@ function mountMobileHome(container, opts) {
     window.__REACT_HOME_MOUNTED = true;
 }
 
+// ── AI Insights modal-content island (scaffold-shell; rendered inside a
+// fullscreen UI.showModal). Modals are destroyed/recreated on each open, so we
+// keep a single dedicated root and unmount the prior one before mounting fresh
+// (NOT the _roots Map, which would leak a stale detached-node root per open). ──
+let _aiInsightsRoot = null;
+function mountAIInsights(container, opts) {
+    if (!container) return;
+    if (_aiInsightsRoot) { try { _aiInsightsRoot.unmount(); } catch (_) {} _aiInsightsRoot = null; }
+    const o = opts || {};
+    const root = createRoot(container);
+    _aiInsightsRoot = root;
+    root.render(<AIInsightsView onReady={o.onReady} />);
+    window.__REACT_AI_MOUNTED = true;
+}
+function unmountAIInsights() {
+    if (_aiInsightsRoot) { try { _aiInsightsRoot.unmount(); } catch (_) {} _aiInsightsRoot = null; }
+}
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
@@ -472,6 +491,8 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountReferrals: _unmountSimple,
     mountMobileHome,
     unmountMobileHome: _unmountSimple,
+    mountAIInsights,
+    unmountAIInsights,
 });
 
 if (document.readyState === 'loading') {

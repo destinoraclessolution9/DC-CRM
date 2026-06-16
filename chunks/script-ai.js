@@ -108,8 +108,27 @@
     };
 
     // Show AI Insights Dashboard
-    const showAIInsightsDashboard = async () => {
-        const content = `
+    // React-island flag — DEFAULT-ON (kill-switch: window.__REACT_AI=false |
+    // ?react_ai=0 | localStorage crm_react_ai='0'; plus global ?react=0 /
+    // crm_react_off='1'). During verification this is OPT-IN; flip to default-on
+    // after live parity check.
+    const _reactAiOn = () => {
+        try {
+            if (/[?&]react=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            if (!(window.CRMReact && typeof window.CRMReact.mountAIInsights === 'function')) return false;
+            // OPT-IN during verification:
+            return window.__REACT_AI === true
+                || /[?&]react_ai=1/.test(location.search)
+                || localStorage.getItem('crm_react_ai') === '1';
+        } catch (_) { return false; }
+    };
+
+    // Legacy content builder — kept as the un-migrated fallback (identical markup
+    // to the React island; both fill the same #ai-stats-grid / #ai-timeline-chart
+    // / #ai-predictions-tbody ids in the end). Used on the legacy path AND if the
+    // island mount throws.
+    const _aiBuildContent = async () => `
             <div class="ai-dashboard">
                 <div class="dashboard-header">
                     <h2>AI Insights Dashboard</h2>
@@ -117,11 +136,11 @@
                         <i class="fas fa-sync-alt"></i> Refresh
                     </button>
                 </div>
-                
-                <div class="stats-grid">
+
+                <div class="stats-grid" id="ai-stats-grid">
                     ${await renderAIStatsCards()}
                 </div>
-                
+
                 <div class="chart-container">
                     <h3>AI Predictions Timeline</h3>
                     <div class="ai-timeline-chart" id="ai-timeline-chart">
@@ -134,7 +153,7 @@
                         <div class="legend-item"><span class="color-dot confidence"></span> Confidence: 85%</div>
                     </div>
                 </div>
-                
+
                 <div class="insights-grid">
                     <div class="insight-card" onclick="app.showLeadScoring()">
                         <i class="fas fa-chart-line"></i>
@@ -161,7 +180,7 @@
                         <span class="trend up">3 high priority</span>
                     </div>
                 </div>
-                
+
                 <div class="recent-predictions">
                     <h3>Top Predictions This Week</h3>
                     <table class="predictions-table">
@@ -174,7 +193,7 @@
                                 <th scope="col">Recommended Action</th>
                             </tr>
                         </thead>
-                        <tbody>
+                        <tbody id="ai-predictions-tbody">
                             ${await renderTopPredictions()}
                         </tbody>
                     </table>
@@ -182,9 +201,38 @@
             </div>
         `;
 
-        UI.showModal('AI Insights Dashboard', content, [
-            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
-        ], 'fullscreen');
+    const showAIInsightsDashboard = async () => {
+        const closeBtn = [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }];
+
+        if (_reactAiOn()) {
+            // Scaffold-shell: React owns the static layout + stable-id containers;
+            // the chunk fills #ai-stats-grid / #ai-timeline-chart /
+            // #ai-predictions-tbody after the island signals onReady.
+            UI.showModal('AI Insights Dashboard', '<div id="ai-insights-react-root"></div>', closeBtn, 'fullscreen');
+            const rootEl = document.getElementById('ai-insights-react-root');
+            try {
+                if (!rootEl) throw new Error('react root missing');
+                let _aReady; const _aReadyP = new Promise(res => { _aReady = res; });
+                const _aGuard = setTimeout(() => _aReady(), 4000);
+                window.CRMReact.mountAIInsights(rootEl, {
+                    onReady: () => { clearTimeout(_aGuard); _aReady(); },
+                });
+                await _aReadyP;
+                const sg = document.getElementById('ai-stats-grid');
+                if (sg) sg.innerHTML = await renderAIStatsCards();
+                const tc = document.getElementById('ai-timeline-chart');
+                if (tc) tc.innerHTML = renderAITimelineChart();
+                const tb = document.getElementById('ai-predictions-tbody');
+                if (tb) tb.innerHTML = await renderTopPredictions();
+                if (window._resolveAttachmentImages) window._resolveAttachmentImages(rootEl);
+                return;
+            } catch (e) {
+                console.warn('[ai] island mount failed, falling back to legacy:', e && e.message);
+                // fall through to legacy render below (re-renders the modal body)
+            }
+        }
+
+        UI.showModal('AI Insights Dashboard', await _aiBuildContent(), closeBtn, 'fullscreen');
     };
 
     // Render AI Stats Cards
