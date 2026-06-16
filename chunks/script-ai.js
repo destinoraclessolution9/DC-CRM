@@ -108,19 +108,18 @@
     };
 
     // Show AI Insights Dashboard
-    // React-island flag — DEFAULT-ON (kill-switch: window.__REACT_AI=false |
-    // ?react_ai=0 | localStorage crm_react_ai='0'; plus global ?react=0 /
-    // crm_react_off='1'). During verification this is OPT-IN; flip to default-on
-    // after live parity check.
+    // React-island flag — DEFAULT-ON (parity-verified live, SW-85). Kill-switch:
+    // window.__REACT_AI=false | ?react_ai=0 | localStorage crm_react_ai='0'
+    // (plus the global ?react=0 / crm_react_off='1').
     const _reactAiOn = () => {
         try {
             if (/[?&]react=0/.test(location.search)) return false;
             if (localStorage.getItem('crm_react_off') === '1') return false;
             if (!(window.CRMReact && typeof window.CRMReact.mountAIInsights === 'function')) return false;
-            // OPT-IN during verification:
-            return window.__REACT_AI === true
-                || /[?&]react_ai=1/.test(location.search)
-                || localStorage.getItem('crm_react_ai') === '1';
+            if (window.__REACT_AI === false) return false;
+            if (/[?&]react_ai=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_ai') === '0') return false;
+            return true;
         } catch (_) { return false; }
     };
 
@@ -210,6 +209,7 @@
             // #ai-predictions-tbody after the island signals onReady.
             UI.showModal('AI Insights Dashboard', '<div id="ai-insights-react-root"></div>', closeBtn, 'fullscreen');
             const rootEl = document.getElementById('ai-insights-react-root');
+            let _mounted = false;
             try {
                 if (!rootEl) throw new Error('react root missing');
                 let _aReady; const _aReadyP = new Promise(res => { _aReady = res; });
@@ -218,17 +218,24 @@
                     onReady: () => { clearTimeout(_aGuard); _aReady(); },
                 });
                 await _aReadyP;
-                const sg = document.getElementById('ai-stats-grid');
-                if (sg) sg.innerHTML = await renderAIStatsCards();
-                const tc = document.getElementById('ai-timeline-chart');
-                if (tc) tc.innerHTML = renderAITimelineChart();
-                const tb = document.getElementById('ai-predictions-tbody');
-                if (tb) tb.innerHTML = await renderTopPredictions();
-                if (window._resolveAttachmentImages) window._resolveAttachmentImages(rootEl);
-                return;
+                _mounted = true;
             } catch (e) {
                 console.warn('[ai] island mount failed, falling back to legacy:', e && e.message);
-                // fall through to legacy render below (re-renders the modal body)
+                // fall through to the legacy render below
+            }
+            if (_mounted) {
+                // Per-section resilient fills: a transient AppDataStore.getAll
+                // cold-path crash (the known _getAllImpl fetch-fail bug) degrades
+                // that one section to empty instead of killing the whole modal —
+                // strictly better than the legacy all-or-nothing inline render.
+                const sg = document.getElementById('ai-stats-grid');
+                if (sg) { try { sg.innerHTML = await renderAIStatsCards(); } catch (e) { console.warn('[ai] stats fill failed:', e && e.message); } }
+                const tc = document.getElementById('ai-timeline-chart');
+                if (tc) { try { tc.innerHTML = renderAITimelineChart(); } catch (e) { console.warn('[ai] timeline fill failed:', e && e.message); } }
+                const tb = document.getElementById('ai-predictions-tbody');
+                if (tb) { try { tb.innerHTML = await renderTopPredictions(); } catch (e) { console.warn('[ai] predictions fill failed:', e && e.message); } }
+                if (window._resolveAttachmentImages) window._resolveAttachmentImages(rootEl);
+                return;
             }
         }
 
