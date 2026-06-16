@@ -1325,7 +1325,12 @@ const renderProspectsTable = async () => {
                         agent: agentFilter,
                         sortField: _sortField,
                         sortDir: _sortDirection,
-                        dormant: includeDormantToggle || !!agentFilter,
+                        // A search term must reach dormant/older records too — mirrors the
+                        // legacy searchProspects({ includeDormant: true }) contract (see the
+                        // dormancy comment above + the empty-state "type a name/phone to
+                        // search older records" hint). Without this, phone/name searches on
+                        // the React path silently miss prospects inactive > 500 days.
+                        dormant: includeDormantToggle || !!agentFilter || !!searchQueryRaw,
                         page: _prospectPage,
                     },
                     pageSize: _prospectPageSize,
@@ -1358,7 +1363,8 @@ const renderProspectsTable = async () => {
                 search: searchQuery,
                 mingGua: guaFilter,
                 agentFilter,
-                includeDormant: includeDormantToggle || !!agentFilter,
+                // Search term → include dormant (same contract as the React path + legacy).
+                includeDormant: includeDormantToggle || !!agentFilter || !!searchQueryRaw,
                 sortField: _sortField,
                 sortDir: _sortDirection,
                 limit: _prospectPageSize,
