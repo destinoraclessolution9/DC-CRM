@@ -27,7 +27,9 @@ customers, prospects, agents, security, ranking, noticeboard, lead_forms, survey
 
 REMAINING (lower-value / different class — were always deferred):
 1. ✅ reports (#38) — RESOLVED + PROMOTED default-on (SW-80). The agent-dropdown-stuck-at-1 was a transient chunk-load/session glitch, NOT a bug; instrumented verify on a clean load confirmed loadAgents→setState→render fills it (agentOpts 21=legacy, grid 11, Chart.js drawn, leaderboard 4448). So all 28 standalone views are now default-on.
-2. Modals/overlays/embedded/mixed (the "modals deferred" category): ai (UI.showModal), search (overlay drawer), journey (embedded detail-tab + widgets), fude (mixed dashboard: render sections + carousel + CRUD), knowledge_capture/daily_notes/detail, cps-analysis, apu-appraisal, destiny-blueprint, fude-redeem, story-detail, reward-crud, highlight-crud, customer-survey.
+2. Modals/overlays/embedded/mixed (the "modals deferred" category):
+   - [x] **ai** (UI.showModal fullscreen) — DONE + PROMOTED (SW-85, 2026-06-16). AIInsightsView.jsx modal-content scaffold-shell (static layout + #ai-stats-grid/#ai-timeline-chart/#ai-predictions-tbody filled by chunk after onReady). Dedicated single root (modal destroy/recreate → unmount prior). Per-section resilient fills (transient getAll cold-crash degrades 1 section, not whole modal). LIVE parity-identical (header, 4 cards, stats 15/633, 12 bars, 5 pred rows, 4 legend). **NOTE: surfaced the latent _getAllImpl crash — getAll('prospects') throws "Property description must be an object" on COLD first-call, succeeds on retry (warm). Pre-existing, affects legacy identically; still a deferred data.js fix.**
+   - [ ] search (overlay drawer), journey (embedded detail-tab + widgets), fude (mixed dashboard — needs section-extraction rewrite), knowledge_capture/daily_notes/detail, cps-analysis, apu-appraisal, destiny-blueprint, fude-redeem, story-detail, reward-crud, highlight-crud, customer-survey.
 3. Pre-existing cleanups found: marketing_automation duplicate Monthly-Promotions tab; data.js _getAllImpl offline crash.
 
 NEXT = assess fude (render-only sections) / decide modal phase. Then referrals done.
