@@ -27,47 +27,13 @@
                 container.innerHTML = '<div id="leadforms-react-root"></div>';
                 window.CRMReact.mountLeadFormsView(document.getElementById('leadforms-react-root'), { forms });
                 return;
-            } catch (e) { console.warn('[react-leadforms] mount failed → legacy:', e?.message || e); }
+            } catch (e) {
+                console.warn('[react-leadforms] react mount failed:', e && e.message);
+                container.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
+                return;
+            }
         }
-        container.innerHTML = `
-            <div style="padding:24px; max-width:1000px; margin:0 auto;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;">
-                    <div>
-                        <h1 style="font-size:24px; font-weight:700; margin:0;">Lead Capture Forms</h1>
-                        <p style="color:var(--gray-500); margin:4px 0 0;">Shareable forms that auto-create prospects when submitted.</p>
-                    </div>
-                    <button class="btn primary" onclick="app.openFormBuilderModal()"><i class="fas fa-plus"></i> New Form</button>
-                </div>
-                ${forms.length === 0 ? `
-                    <div style="text-align:center; padding:60px; background:white; border:1px solid var(--gray-200); border-radius:12px; color:var(--gray-400);">
-                        <i class="fas fa-wpforms" style="font-size:48px; display:block; margin-bottom:12px;"></i>
-                        <h3 style="color:var(--gray-500);">No forms yet</h3>
-                        <p>Create your first lead capture form to start collecting prospects automatically.</p>
-                        <button class="btn primary" onclick="app.openFormBuilderModal()">Create Form</button>
-                    </div>
-                ` : `
-                    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:16px;">
-                        ${forms.map(form => `
-                            <div style="background:white; border:1px solid var(--gray-200); border-radius:12px; padding:20px;">
-                                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
-                                    <div>
-                                        <h3 style="margin:0; font-size:16px;">${form.name}</h3>
-                                        <p style="margin:4px 0 0; color:var(--gray-500); font-size:13px;">${form.description || 'No description'}</p>
-                                    </div>
-                                    <span style="padding:3px 10px; border-radius:20px; font-size:12px; background:${form.is_active ? '#d1fae5' : '#f3f4f6'}; color:${form.is_active ? '#065f46' : '#6b7280'};">${form.is_active ? 'Active' : 'Inactive'}</span>
-                                </div>
-                                <div style="font-size:12px; color:var(--gray-400); margin-bottom:16px;">${(form.fields || []).length} fields</div>
-                                <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                                    <button class="btn secondary" style="flex:1; font-size:12px; padding:6px;" onclick="app.copyFormLink(${form.id})"><i class="fas fa-copy"></i> Copy Link</button>
-                                    <button class="btn secondary" style="flex:1; font-size:12px; padding:6px;" onclick="app.showFormSubmissions(${form.id})"><i class="fas fa-inbox"></i> Submissions</button>
-                                    <button class="btn-icon" style="color:var(--error);" onclick="app.deleteLeadForm(${form.id})"><i class="fas fa-trash"></i></button>
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                `}
-            </div>
-        `;
+        container.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
     };
 
     const openFormBuilderModal = () => {
@@ -215,46 +181,13 @@
                 container.innerHTML = '<div id="surveys-react-root"></div>';
                 window.CRMReact.mountSurveysView(document.getElementById('surveys-react-root'), { surveys });
                 return;
-            } catch (e) { console.warn('[react-surveys] mount failed → legacy:', e?.message || e); }
+            } catch (e) {
+                console.warn('[react-surveys] react mount failed:', e && e.message);
+                container.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
+                return;
+            }
         }
-        container.innerHTML = `
-            <div style="padding:24px; max-width:1000px; margin:0 auto;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;">
-                    <div>
-                        <h1 style="font-size:24px; font-weight:700; margin:0;">NPS & Satisfaction Surveys</h1>
-                        <p style="color:var(--gray-500); margin:4px 0 0;">Measure customer satisfaction with shareable survey links.</p>
-                    </div>
-                    <button class="btn primary" onclick="app.openSurveyBuilderModal()"><i class="fas fa-plus"></i> New Survey</button>
-                </div>
-                ${surveys.length === 0 ? `
-                    <div style="text-align:center; padding:60px; background:white; border:1px solid var(--gray-200); border-radius:12px; color:var(--gray-400);">
-                        <i class="fas fa-star" style="font-size:48px; display:block; margin-bottom:12px;"></i>
-                        <h3 style="color:var(--gray-500);">No surveys yet</h3>
-                        <button class="btn primary" onclick="app.openSurveyBuilderModal()">Create Survey</button>
-                    </div>
-                ` : `
-                    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:16px;">
-                        ${surveys.map(survey => `
-                            <div style="background:white; border:1px solid var(--gray-200); border-radius:12px; padding:20px;">
-                                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
-                                    <div>
-                                        <h3 style="margin:0; font-size:16px;">${survey.name}</h3>
-                                        <span style="font-size:12px; color:var(--gray-400); text-transform:uppercase;">${survey.type}</span>
-                                    </div>
-                                    <span style="padding:3px 10px; border-radius:20px; font-size:12px; background:${survey.is_active ? '#d1fae5' : '#f3f4f6'}; color:${survey.is_active ? '#065f46' : '#6b7280'};">${survey.is_active ? 'Active' : 'Inactive'}</span>
-                                </div>
-                                <p style="color:var(--gray-600); font-size:13px; margin:0 0 16px;">${survey.question}</p>
-                                <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                                    <button class="btn secondary" style="flex:1; font-size:12px; padding:6px;" onclick="app.copySurveyLink(${survey.id})"><i class="fas fa-copy"></i> Copy Link</button>
-                                    <button class="btn secondary" style="flex:1; font-size:12px; padding:6px;" onclick="app.showSurveyResults(${survey.id})"><i class="fas fa-chart-bar"></i> Results</button>
-                                    <button class="btn-icon" style="color:var(--error);" onclick="app.deleteSurvey(${survey.id})"><i class="fas fa-trash"></i></button>
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                `}
-            </div>
-        `;
+        container.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
     };
 
     const openSurveyBuilderModal = () => {
@@ -389,50 +322,13 @@
                 container.innerHTML = '<div id="contracts-react-root"></div>';
                 window.CRMReact.mountContractsView(document.getElementById('contracts-react-root'), { contracts });
                 return;
-            } catch (e) { console.warn('[react-contracts] mount failed → legacy:', e?.message || e); }
+            } catch (e) {
+                console.warn('[react-contracts] react mount failed:', e && e.message);
+                container.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
+                return;
+            }
         }
-        container.innerHTML = `
-            <div style="padding:24px; max-width:1000px; margin:0 auto;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;">
-                    <div>
-                        <h1 style="font-size:24px; font-weight:700; margin:0;">Contract Management</h1>
-                        <p style="color:var(--gray-500); margin:4px 0 0;">Upload contracts and collect e-signatures from customers.</p>
-                    </div>
-                    <button class="btn primary" onclick="app.openUploadContractModal()"><i class="fas fa-plus"></i> Upload Contract</button>
-                </div>
-                ${contracts.length === 0 ? `
-                    <div style="text-align:center; padding:60px; background:white; border:1px solid var(--gray-200); border-radius:12px; color:var(--gray-400);">
-                        <i class="fas fa-file-signature" style="font-size:48px; display:block; margin-bottom:12px;"></i>
-                        <h3 style="color:var(--gray-500);">No contracts yet</h3>
-                        <p>Upload a contract to send for e-signature.</p>
-                        <button class="btn primary" onclick="app.openUploadContractModal()">Upload Contract</button>
-                    </div>
-                ` : `
-                    <table style="width:100%; border-collapse:collapse; background:white; border:1px solid var(--gray-200); border-radius:12px; overflow:hidden;">
-                        <thead><tr style="background:var(--gray-50); border-bottom:2px solid var(--gray-200);">
-                            <th scope="col" style="padding:12px 16px; text-align:left;">Title</th>
-                            <th scope="col" style="padding:12px 16px; text-align:left;">Customer</th>
-                            <th scope="col" style="padding:12px 16px; text-align:left;">Status</th>
-                            <th scope="col" style="padding:12px 16px; text-align:left;">Date</th>
-                            <th scope="col" style="padding:12px 16px; text-align:left;">Actions</th>
-                        </tr></thead>
-                        <tbody>${contracts.map(c => `
-                            <tr style="border-bottom:1px solid var(--gray-100);">
-                                <td style="padding:12px 16px;"><i class="fas fa-file-contract" style="color:var(--primary); margin-right:8px;"></i>${c.title}</td>
-                                <td style="padding:12px 16px; color:var(--gray-600);">${c.signer_name || (c.customer_id ? `Customer #${c.customer_id}` : '—')}</td>
-                                <td style="padding:12px 16px;">${renderContractStatusBadge(c.status)}</td>
-                                <td style="padding:12px 16px; color:var(--gray-400); font-size:13px;">${c.created_at ? new Date(c.created_at).toLocaleDateString() : '—'}</td>
-                                <td style="padding:12px 16px;">
-                                    ${c.status === 'draft' ? `<button class="btn secondary" style="font-size:12px; padding:4px 10px;" onclick="app.sendContractForSigning(${c.id})"><i class="fas fa-paper-plane"></i> Send</button>` : ''}
-                                    ${c.status === 'sent' ? `<button class="btn secondary" style="font-size:12px; padding:4px 10px;" onclick="app.copySigningLink(${c.id})"><i class="fas fa-copy"></i> Copy Link</button>` : ''}
-                                    ${c.status === 'signed' ? `<button class="btn secondary" style="font-size:12px; padding:4px 10px;" onclick="app.showContractDetail(${c.id})"><i class="fas fa-eye"></i> View</button>` : ''}
-                                </td>
-                            </tr>
-                        `).join('')}</tbody>
-                    </table>
-                `}
-            </div>
-        `;
+        container.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
     };
 
     const openUploadContractModal = (entityType = null, entityId = null) => {
@@ -559,43 +455,13 @@
                 container.innerHTML = '<div id="customfields-react-root"></div>';
                 window.CRMReact.mountCustomFieldsAdmin(document.getElementById('customfields-react-root'), { prospectFields, customerFields });
                 return;
-            } catch (e) { console.warn('[react-customfields] mount failed → legacy:', e?.message || e); }
+            } catch (e) {
+                console.warn('[custom_fields] react mount failed:', e && e.message);
+                container.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
+                return;
+            }
         }
-        const renderFieldList = (fields) => fields.length === 0
-            ? '<p style="color:var(--gray-400); font-size:13px; padding:8px 0;">No custom fields yet.</p>'
-            : fields.map(f => `
-                <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:white; border:1px solid var(--gray-200); border-radius:8px; margin-bottom:6px;">
-                    <div><strong style="font-size:14px;">${f.label}</strong><span style="color:var(--gray-400); font-size:12px; margin-left:8px;">${f.type}${f.is_required ? ' · required' : ''}</span></div>
-                    <button class="btn-icon" style="color:var(--error);" onclick="app.deleteCustomFieldDefinition(${f.id})"><i class="fas fa-trash"></i></button>
-                </div>
-            `).join('');
-        container.innerHTML = `
-            <div style="padding:24px; max-width:800px; margin:0 auto;">
-                <div style="margin-bottom:24px;">
-                    <h1 style="font-size:24px; font-weight:700; margin:0;">Custom Fields</h1>
-                    <p style="color:var(--gray-500); margin:4px 0 0;">Add custom data fields to prospects and customers. Fields appear in all create/edit forms.</p>
-                </div>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px;">
-                    <div style="background:var(--gray-50); border:1px solid var(--gray-200); border-radius:12px; padding:20px;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-                            <h3 style="margin:0; font-size:16px;">Prospect Fields</h3>
-                            <button class="btn secondary" style="font-size:13px; padding:6px 12px;" onclick="app.openCustomFieldModal('prospect')"><i class="fas fa-plus"></i> Add</button>
-                        </div>
-                        ${renderFieldList(prospectFields)}
-                    </div>
-                    <div style="background:var(--gray-50); border:1px solid var(--gray-200); border-radius:12px; padding:20px;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-                            <h3 style="margin:0; font-size:16px;">Customer Fields</h3>
-                            <button class="btn secondary" style="font-size:13px; padding:6px 12px;" onclick="app.openCustomFieldModal('customer')"><i class="fas fa-plus"></i> Add</button>
-                        </div>
-                        ${renderFieldList(customerFields)}
-                    </div>
-                </div>
-                <div style="margin-top:24px; padding:16px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; font-size:13px; color:#1e40af;">
-                    <i class="fas fa-info-circle"></i> Custom field values appear in the Basic & Info tab of each customer/prospect profile.
-                </div>
-            </div>
-        `;
+        container.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
     };
 
     const openCustomFieldModal = (entityType) => {

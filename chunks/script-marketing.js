@@ -1096,88 +1096,13 @@
                 });
                 return;
             } catch (e) {
-                console.warn('[monthly-promo] island mount failed, falling back to legacy:', e && e.message);
-                // fall through to the legacy render below
+                console.warn('[monthly-promo] react mount failed:', e && e.message);
+                container.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
+                return;
             }
         }
 
-        const promoCards = await Promise.all(promotions.map(async p => {
-            const productNames = (p.product_ids || []).map(id => _productMap.get(id) || null);
-            const validProductNames = productNames.filter(Boolean);
-
-            // Discount display
-            let discountHtml = '';
-            if (p.original_value && p.original_value > (p.price || 0)) {
-                const savePct = Math.round(((p.original_value - p.price) / p.original_value) * 100);
-                discountHtml = `
-                    <div style="font-size:12px;color:#888;text-decoration:line-through;">RM ${parseFloat(p.original_value).toFixed(2)}</div>
-                    <div style="font-size:11px;color:#c53030;font-weight:700;">Save ${savePct}%</div>`;
-            }
-
-            // Time frame
-            let timeFrame = '';
-            if (p.start_date || p.end_date) {
-                const s = p.start_date ? UI.formatDate(p.start_date) : '—';
-                const e = p.end_date   ? UI.formatDate(p.end_date)   : 'Ongoing';
-                timeFrame = `<span style="font-size:11px;color:var(--gray-500);"><i class="fas fa-calendar-alt" style="margin-right:4px;"></i>${s} – ${e}</span>`;
-            }
-
-            // Payment types
-            const paymentHtml = (p.payment_types || []).length > 0
-                ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">${(p.payment_types || []).map(pt =>
-                    `<span style="font-size:11px;background:#f3f4f6;border:1px solid #e5e7eb;border-radius:4px;padding:1px 7px;color:#555;">${pt}</span>`
-                  ).join('')}</div>`
-                : '';
-
-            // Limited slots
-            const slotsHtml = p.limited_slots
-                ? `<span style="font-size:11px;color:var(--gray-500);"><i class="fas fa-layer-group" style="margin-right:4px;"></i>Limited: ${p.limited_slots} sets</span>`
-                : '';
-
-            return `
-                <div style="background:#fff;border:1px solid var(--gray-200);border-radius:10px;padding:18px 22px;box-shadow:var(--shadow-sm);">
-                    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;">
-                        <div style="flex:1;min-width:0;">
-                            <div style="font-size:17px;font-weight:700;color:#8B1A1A;margin-bottom:4px;">${p.package_name || p.name || 'Promotion'}</div>
-                            ${validProductNames.length > 0 ? `<div style="font-size:12px;color:var(--gray-500);margin-bottom:6px;"><i class="fas fa-box" style="margin-right:4px;"></i>${validProductNames.join(', ')}</div>` : ''}
-                            ${p.requirement ? `<div style="font-size:12px;color:var(--gray-600);margin-bottom:4px;"><i class="fas fa-check-circle" style="color:#8B1A1A;margin-right:4px;"></i>${p.requirement}</div>` : ''}
-                            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px;">
-                                ${timeFrame}
-                                ${slotsHtml}
-                            </div>
-                            ${paymentHtml}
-                            ${p.remarks ? `<div style="font-size:11px;color:var(--gray-400);margin-top:6px;"><i class="fas fa-info-circle" style="margin-right:4px;"></i>${p.remarks}</div>` : ''}
-                        </div>
-                        <div style="text-align:right;flex-shrink:0;min-width:90px;">
-                            ${p.price ? `<div style="font-size:20px;font-weight:800;color:#8B1A1A;">RM ${parseFloat(p.price).toFixed(2)}</div>` : ''}
-                            ${discountHtml}
-                        </div>
-                    </div>
-                </div>
-            `;
-        }));
-
-        container.innerHTML = `
-            <div style="padding:20px;max-width:960px;margin:0 auto;">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-                    <div>
-                        <h2 style="font-size:22px;font-weight:700;margin:0;">Monthly Promotion</h2>
-                        <p style="color:var(--gray-500);font-size:13px;margin:4px 0 0;">Current active promotions</p>
-                    </div>
-                </div>
-                ${promotions.length === 0 ? `
-                    <div style="text-align:center;padding:60px 20px;color:var(--gray-400);">
-                        <i class="fas fa-tags" style="font-size:40px;margin-bottom:12px;display:block;"></i>
-                        <p>No active promotions at the moment.</p>
-                        ${allPromos.length > 0 ? `<p style="font-size:12px;color:var(--gray-400);margin-top:8px;">(${allPromos.length} package(s) found but hidden — check Active status, End Date, or Visible To settings)</p>` : '<p style="font-size:12px;color:var(--gray-400);margin-top:8px;">No packages have been created yet. Go to Marketing Lists → Promotion Packages to create one.</p>'}
-                    </div>
-                ` : `
-                    <div style="display:grid;gap:16px;">
-                        ${promoCards.join('')}
-                    </div>
-                `}
-            </div>
-        `;
+        container.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
     };
 
     // ========== PHASE 12: MARKETING AUTOMATION ==========

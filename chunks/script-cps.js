@@ -331,86 +331,20 @@ const showBookingSettingsView = async (container) => {
     const appointments = allAppts.filter(a => a.agent_id === _currentUser.id)
         .sort((a, b) => (b.booking_date || '').localeCompare(a.booking_date || ''));
     const bookingUrl = `${window.location.origin}/booking.html?agent=${_currentUser.id}`;
-    const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 
     if (_reactBookingOn()) {
         try {
             container.innerHTML = '<div id="booking-react-root"></div>';
             window.CRMReact.mountBookingSettings(document.getElementById('booking-react-root'), { slots: agentSlots, appointments, bookingUrl });
             return;
-        } catch (e) { console.warn('[react-booking] mount failed → legacy:', e?.message || e); }
+        } catch (e) {
+            console.warn('[booking-settings] react mount failed:', e && e.message);
+            container.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
+            return;
+        }
     }
 
-    container.innerHTML = `
-        <div style="padding:24px; max-width:1000px; margin:0 auto;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;">
-                <div>
-                    <h1 style="font-size:24px; font-weight:700; margin:0;">Meeting Scheduler</h1>
-                    <p style="color:var(--gray-500); margin:4px 0 0;">Let prospects book appointments directly via a shareable link.</p>
-                </div>
-                <button class="btn primary" onclick="app.openAddSlotModal()"><i class="fas fa-plus"></i> Add Time Slot</button>
-            </div>
-            <div style="background:var(--gray-50); border:1px solid var(--gray-200); border-radius:12px; padding:20px; margin-bottom:24px;">
-                <h3 style="margin:0 0 8px; font-size:15px;">Your Booking Link</h3>
-                <div style="display:flex; align-items:center; gap:12px;">
-                    <input type="text" value="${bookingUrl}" readonly style="flex:1; padding:8px 12px; border:1px solid var(--border); border-radius:6px; background:white; font-size:13px;">
-                    <button class="btn secondary" onclick="app.openShareBookingLinkModal()"><i class="fas fa-share-alt"></i> Share</button>
-                    <a href="${bookingUrl}" target="_blank" rel="noopener noreferrer" class="btn secondary"><i class="fas fa-external-link-alt"></i> Preview</a>
-                </div>
-            </div>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px;">
-                <div>
-                    <h3 style="font-size:16px; font-weight:600; margin-bottom:12px;">Availability Slots</h3>
-                    ${agentSlots.length === 0 ? `
-                        <div style="text-align:center; padding:40px; background:white; border:1px solid var(--gray-200); border-radius:8px; color:var(--gray-400);">
-                            <i class="fas fa-clock" style="font-size:32px; display:block; margin-bottom:8px;"></i>
-                            No slots configured yet.
-                        </div>
-                    ` : agentSlots.map(slot => `
-                        <div style="display:flex; align-items:center; justify-content:space-between; background:white; border:1px solid var(--gray-200); border-radius:8px; padding:12px 16px; margin-bottom:8px;">
-                            <div>
-                                <strong>${dayNames[slot.day_of_week]}</strong>
-                                <span style="color:var(--gray-500); margin-left:8px;">${slot.start_time} – ${slot.end_time}</span>
-                                <span style="color:var(--gray-400); font-size:12px; margin-left:8px;">${slot.duration_minutes}min slots</span>
-                            </div>
-                            <div style="display:flex; gap:8px; align-items:center;">
-                                <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;">
-                                    <input type="checkbox" ${slot.is_active ? 'checked' : ''} onchange="app.toggleSlotActive(${slot.id}, this.checked)"> Active
-                                </label>
-                                <button class="btn-icon" aria-label="Delete time slot" onclick="app.deleteBookingSlot(${slot.id})" style="color:var(--error);"><i class="fas fa-trash" aria-hidden="true"></i></button>
-                            </div>
-                        </div>
-                    `).join('')}
-                </div>
-                <div>
-                    <h3 style="font-size:16px; font-weight:600; margin-bottom:12px;">Appointments <span style="font-size:13px; font-weight:400; color:var(--gray-400);">(${appointments.filter(a => a.status !== 'cancelled').length})</span></h3>
-                    ${appointments.length === 0 ? `
-                        <div style="text-align:center; padding:40px; background:white; border:1px solid var(--gray-200); border-radius:8px; color:var(--gray-400);">
-                            <i class="fas fa-calendar" style="font-size:32px; display:block; margin-bottom:8px;"></i>
-                            No bookings yet. Share your link to get started.
-                        </div>
-                    ` : appointments.slice(0, 10).map(appt => `
-                        <div style="background:white; border:1px solid var(--gray-200); border-radius:8px; padding:12px 16px; margin-bottom:8px;">
-                            <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                                <div>
-                                    <strong>${appt.prospect_name}</strong>
-                                    <div style="font-size:12px; color:var(--gray-500);">${appt.booking_date} ${appt.start_time} · ${appt.prospect_phone || appt.prospect_email || ''}</div>
-                                    ${appt.referred_by ? `<div style="font-size:11px; color:var(--gray-400); margin-top:2px;"><i class="fas fa-user-friends" style="margin-right:3px;"></i>Ref: ${appt.referred_by}${appt.referral_relationship ? ` (${appt.referral_relationship})` : ''}</div>` : ''}
-                                    ${appt.prospect_occupation || appt.prospect_company ? `<div style="font-size:11px; color:var(--gray-400); margin-top:2px;">${[appt.prospect_occupation, appt.prospect_company].filter(Boolean).join(' · ')}</div>` : ''}
-                                </div>
-                                <div style="display:flex; gap:6px;">
-                                    ${appt.status === 'pending' ? `
-                                        <button class="btn primary" style="padding:4px 10px; font-size:12px;" onclick="app.confirmBookingAppointment(${appt.id})">Confirm</button>
-                                        <button class="btn secondary" style="padding:4px 10px; font-size:12px;" onclick="app.cancelBookingAppointment(${appt.id})">Cancel</button>
-                                    ` : `<span style="font-size:12px; padding:4px 10px; border-radius:20px; background:${appt.status==='confirmed'?'#d1fae5':'#fee2e2'}; color:${appt.status==='confirmed'?'#065f46':'#991b1b'};">${appt.status}</span>`}
-                                </div>
-                            </div>
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        </div>
-    `;
+    container.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
 };
 
 const openAddSlotModal = () => {

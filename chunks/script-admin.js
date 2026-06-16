@@ -31,41 +31,21 @@
         if (!view) return;
         const incidents = (await AppDataStore.getAll('security_incidents').catch(() => [])) || [];
 
-        // React island (default-on). Legacy template is the fallback on any error.
+        // React island (default-on). Legacy template removed; the off/error path
+        // renders a small inline reload card into the same container.
         if (_reactSecurityOn()) {
             try {
                 view.innerHTML = '<div id="security-react-root"></div>';
                 window.CRMReact.mountSecurityDashboard(document.getElementById('security-react-root'), { incidents });
                 return;
             } catch (e) {
-                console.warn('[react-security] mount failed → legacy:', e?.message || e);
+                console.warn('[security] react mount failed:', e && e.message);
+                view.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
+                return;
             }
         }
 
-        let content = `
-            <div class="security-dashboard">
-                <div class="security-score-card">
-                    <div class="score-value">92/100</div>
-                    <div class="score-label">Overall Security Score - Excellent</div>
-                </div>
-                
-                <h3>Recent Security Incidents</h3>
-                <div class="incident-list">
-                    ${incidents.length ? incidents.map(inc => `
-                        <div class="incident-item ${inc.severity || 'medium'}">
-                            <div class="incident-icon"><i class="fas fa-exclamation-circle"></i></div>
-                            <div class="incident-content">
-                                <div class="incident-title">${inc.title || 'Security Alert'}</div>
-                                <div class="incident-meta">
-                                    <span>${new Date(inc.timestamp).toLocaleString()}</span>
-                                </div>
-                            </div>
-                        </div>
-                    `).join('') : '<p>No recent incidents.</p>'}
-                </div>
-            </div>
-        `;
-        view.innerHTML = content;
+        view.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
     };
 
     const showAuditLogs = async () => {

@@ -138,67 +138,14 @@
                 viewport.innerHTML = '<div id="orgchart-react-root"></div>';
                 window.CRMReact.mountOrgChartView(document.getElementById('orgchart-react-root'), { rows });
                 return;
-            } catch (e) { console.warn('[react-orgchart] mount failed → legacy:', e?.message || e); }
+            } catch (e) {
+                console.warn('[orgchart] react mount failed:', e && e.message);
+                viewport.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
+                return;
+            }
         }
 
-        const statusBadge = (s) => {
-            const map = { draft: ['#94a3b8', 'Draft'], collecting: ['#3b82f6', 'Collecting'], analyzing: ['#8b5cf6', 'Analysing'], completed: ['#16a34a', 'Completed'], delivered: ['#0891b2', 'Delivered'] };
-            const [bg, label] = map[s] || ['#94a3b8', '—'];
-            return `<span style="background:${bg};color:#fff;font-size:11px;padding:2px 8px;border-radius:10px;">${label}</span>`;
-        };
-        const payBadge = (p) => {
-            const map = { paid: ['#16a34a', 'Paid'], unpaid: ['#dc2626', 'Unpaid'], waived: ['#94a3b8', 'Waived'] };
-            const [bg, label] = map[p] || ['#94a3b8', '—'];
-            return `<span style="background:${bg};color:#fff;font-size:11px;padding:2px 8px;border-radius:10px;">${label}</span>`;
-        };
-    
-        viewport.innerHTML = `
-            <div style="padding:24px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;gap:16px;flex-wrap:wrap;">
-                    <div>
-                        <h1 style="margin:0;font-size:24px;">Org Chart Consultant</h1>
-                        <div style="color:var(--gray-500);font-size:13px;margin-top:4px;">Corporate team restructure analysis — RM 99 to RM 3,999 per engagement</div>
-                    </div>
-                    <button class="btn primary" onclick="app.openNewOrgConsultation()">
-                        <i class="fas fa-plus"></i> New Consultation
-                    </button>
-                </div>
-                <div style="background:#fff;border:1px solid var(--gray-200);border-radius:8px;overflow:hidden;">
-                    <table style="width:100%;border-collapse:collapse;font-size:14px;">
-                        <thead style="background:var(--gray-100);text-align:left;">
-                            <tr>
-                                <th style="padding:12px;">Client Company</th>
-                                <th style="padding:12px;">Team Size</th>
-                                <th style="padding:12px;">Price</th>
-                                <th style="padding:12px;">Payment</th>
-                                <th style="padding:12px;">Status</th>
-                                <th style="padding:12px;">Created</th>
-                                <th style="padding:12px;text-align:right;">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${rows.length ? rows.map(r => `
-                                <tr style="border-top:1px solid var(--gray-200);">
-                                    <td style="padding:12px;"><strong>${_orgEscapeHtml(r.client_company)}</strong>${r.client_contact_name ? `<div style="font-size:11px;color:var(--gray-500);">${_orgEscapeHtml(r.client_contact_name)}</div>` : ''}</td>
-                                    <td style="padding:12px;">${r.team_size}</td>
-                                    <td style="padding:12px;">RM ${Number(r.price_myr).toLocaleString()}</td>
-                                    <td style="padding:12px;">${payBadge(r.payment_status)}</td>
-                                    <td style="padding:12px;">${statusBadge(r.status)}</td>
-                                    <td style="padding:12px;font-size:12px;color:var(--gray-500);">${new Date(r.created_at).toLocaleDateString()}</td>
-                                    <td style="padding:12px;text-align:right;">
-                                        <button class="btn btn-sm" onclick="app.openOrgConsultationDetail(${r.id})">Open</button>
-                                    </td>
-                                </tr>
-                            `).join('') : `
-                                <tr><td colspan="7" style="padding:32px;text-align:center;color:var(--gray-500);">
-                                    No consultations yet. Click "New Consultation" to start.
-                                </td></tr>
-                            `}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        `;
+        viewport.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
     };
     
     // ---------------- NEW CONSULTATION ----------------

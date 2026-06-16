@@ -7127,115 +7127,13 @@ const _renderPurchasesHistory = (viewport) => {
             viewport.innerHTML = '<div id="purchases-react-root"></div>';
             window.CRMReact.mountPurchasesHistory(document.getElementById('purchases-react-root'), { rows, agentMap });
             return;
-        } catch (e) { console.warn('[react-purchases] mount failed → legacy:', e?.message || e); }
-    }
-    const f = _phFilter;
-    const filtered = rows.filter(r => {
-        if (f.search) {
-            const q = f.search.toLowerCase();
-            if (!r.customerName.toLowerCase().includes(q) && !r.invoiceNo.toLowerCase().includes(q) && !r.product.toLowerCase().includes(q)) return false;
+        } catch (e) {
+            console.warn('[purchases_history] react mount failed:', e && e.message);
+            viewport.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
+            return;
         }
-        if (f.agent !== 'all' && String(r.agentId) !== f.agent) return false;
-        if (f.delivery !== 'all' && r.deliveryStatus !== f.delivery) return false;
-        if (f.from && r.date && r.date < f.from) return false;
-        if (f.to && r.date && r.date > f.to) return false;
-        return true;
-    });
-    const totalCount = filtered.length;
-    const totalAmt = filtered.reduce((s, r) => s + r.amount, 0);
-    const start = _phPage * _PH_PAGE_SIZE;
-    const pageRows = filtered.slice(start, start + _PH_PAGE_SIZE);
-    const totalPages = Math.ceil(totalCount / _PH_PAGE_SIZE);
-    const uniqueAgentIds = [...new Set(rows.map(r => r.agentId).filter(Boolean))];
-    const agentOptions = uniqueAgentIds.map(id => `<option value="${id}" ${f.agent===String(id)?'selected':''}>${escapeHtml(agentMap[String(id)]||String(id))}</option>`).join('');
-    const tableRows = pageRows.map((r, i) => {
-        const sn = start + i + 1;
-        const rk = `${r.prospectId}-${r.historyIndex}`;
-        const rowBg = r.caseCompleted ? 'background:#f0fdf4;' : '';
-        return `<tr style="border-bottom:1px solid #f3f4f6;${rowBg}">
-            <td style="padding:8px 10px;font-size:12px;color:var(--gray-400);text-align:center;">${sn}</td>
-            <td style="padding:8px 10px;font-size:12px;white-space:nowrap;">${r.date||'-'}</td>
-            <td style="padding:8px 10px;font-size:12px;white-space:nowrap;">${escapeHtml(r.agentName)}</td>
-            <td style="padding:8px 10px;font-size:12px;white-space:nowrap;">${escapeHtml(r.invoiceNo)}</td>
-            <td style="padding:8px 10px;font-size:12px;">
-                <span style="color:var(--primary);cursor:pointer;text-decoration:underline;font-weight:500;" onclick="event.stopPropagation();app.showProspectDetail(${r.prospectId})">${escapeHtml(r.customerName)}</span>
-            </td>
-            <td style="padding:8px 10px;font-size:12px;">${escapeHtml(r.product)}</td>
-            <td style="padding:8px 10px;font-size:12px;text-align:right;font-weight:600;white-space:nowrap;">RM ${r.amount.toLocaleString()}</td>
-            <td style="padding:8px 10px;">
-                <select id="ph-ds-${rk}" class="form-control" style="font-size:11px;min-width:130px;">
-                    <option value="pending" ${r.deliveryStatus==='pending'?'selected':''}>Pending Delivery</option>
-                    <option value="delivered" ${r.deliveryStatus==='delivered'?'selected':''}>Delivered</option>
-                    <option value="completed" ${r.deliveryStatus==='completed'?'selected':''}>Completed</option>
-                </select>
-            </td>
-            <td style="padding:8px 10px;">
-                <input id="ph-rem-${rk}" class="form-control" value="${escapeHtml(r.remarks)}" placeholder="Remarks..." style="height:28px;font-size:11px;min-width:150px;">
-            </td>
-            <td style="padding:8px 10px;text-align:center;">
-                <input type="checkbox" id="ph-cc-${rk}" ${r.caseCompleted?'checked':''} style="width:16px;height:16px;cursor:pointer;">
-            </td>
-            <td style="padding:8px 10px;text-align:center;">
-                <button class="btn primary btn-sm" style="height:28px;padding:0 12px;font-size:11px;" onclick="event.stopPropagation();app.savePurchasesHistoryRow(${r.prospectId},${r.historyIndex},${r.isHistory})"><i class="fas fa-save"></i></button>
-            </td>
-        </tr>`;
-    }).join('');
-    const pager = totalPages > 1 ? `
-        <div style="display:flex;align-items:center;justify-content:center;gap:12px;padding:16px;border-top:1px solid #e5e7eb;">
-            <button class="btn secondary btn-sm" ${_phPage===0?'disabled':''} onclick="app.phSetPage(${_phPage-1})"><i class="fas fa-chevron-left"></i> Prev</button>
-            <span style="font-size:13px;color:var(--gray-600);">Page ${_phPage+1} of ${totalPages}</span>
-            <button class="btn secondary btn-sm" ${_phPage>=totalPages-1?'disabled':''} onclick="app.phSetPage(${_phPage+1})">Next <i class="fas fa-chevron-right"></i></button>
-        </div>` : '';
-    viewport.innerHTML = `
-        <div style="padding:16px 20px 10px;background:#fff;border-bottom:1px solid #e5e7eb;position:sticky;top:0;z-index:10;">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
-                <div>
-                    <div style="font-size:18px;font-weight:700;color:var(--gray-800);">🧾 Purchases History</div>
-                    <div style="font-size:12px;color:var(--gray-400);margin-top:2px;">${totalCount} record${totalCount!==1?'s':''} · Total: <strong style="color:var(--gray-700);">RM ${totalAmt.toLocaleString()}</strong></div>
-                </div>
-                <button class="btn secondary btn-sm" onclick="app.refreshPurchasesHistory()"><i class="fas fa-sync-alt"></i> Refresh</button>
-            </div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-                <input class="form-control" placeholder="🔍 Customer / invoice / product" value="${escapeHtml(f.search)}" style="flex:1;min-width:180px;height:32px;font-size:12px;" oninput="app.phSetFilter('search',this.value)">
-                <select class="form-control" style="height:32px;font-size:12px;min-width:130px;" onchange="app.phSetFilter('agent',this.value)">
-                    <option value="all" ${f.agent==='all'?'selected':''}>All Consultants</option>
-                    ${agentOptions}
-                </select>
-                <select class="form-control" style="height:32px;font-size:12px;min-width:120px;" onchange="app.phSetFilter('delivery',this.value)">
-                    <option value="all" ${f.delivery==='all'?'selected':''}>All Status</option>
-                    <option value="pending" ${f.delivery==='pending'?'selected':''}>Pending</option>
-                    <option value="delivered" ${f.delivery==='delivered'?'selected':''}>Delivered</option>
-                    <option value="completed" ${f.delivery==='completed'?'selected':''}>Completed</option>
-                </select>
-                <input type="date" class="form-control" value="${f.from}" style="height:32px;font-size:12px;width:130px;" onchange="app.phSetFilter('from',this.value)">
-                <span style="font-size:12px;color:var(--gray-400);">–</span>
-                <input type="date" class="form-control" value="${f.to}" style="height:32px;font-size:12px;width:130px;" onchange="app.phSetFilter('to',this.value)">
-            </div>
-        </div>
-        <div style="overflow-x:auto;">
-            <table style="width:100%;border-collapse:collapse;min-width:1000px;">
-                <thead>
-                    <tr style="background:#f9fafb;border-bottom:2px solid #e5e7eb;">
-                        <th scope="col" style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);text-align:center;white-space:nowrap;">SN</th>
-                        <th scope="col" style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Date</th>
-                        <th scope="col" style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Consultant</th>
-                        <th scope="col" style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Invoice No</th>
-                        <th scope="col" style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Customer Name</th>
-                        <th scope="col" style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Product / Service</th>
-                        <th scope="col" style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);text-align:right;white-space:nowrap;">Amount (RM)</th>
-                        <th scope="col" style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Delivery Tracking</th>
-                        <th scope="col" style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);white-space:nowrap;">Remarks</th>
-                        <th scope="col" style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);text-align:center;white-space:nowrap;">Case Completed</th>
-                        <th scope="col" style="padding:8px 10px;font-size:11px;font-weight:700;color:var(--gray-500);text-align:center;white-space:nowrap;">Save</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${tableRows || `<tr><td colspan="11" style="padding:48px;text-align:center;color:var(--gray-400);font-size:13px;"><i class="fas fa-receipt" style="font-size:36px;display:block;margin-bottom:10px;opacity:.4;"></i>No purchase records found</td></tr>`}
-                </tbody>
-            </table>
-        </div>
-        ${pager}
-    `;
+    }
+    viewport.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
 };
 
 const phSetFilter = (key, val) => {
@@ -8335,90 +8233,15 @@ const renderAgentsTable = async () => {
                 });
                 return;
             } catch (e) {
-                console.warn('[react-agents] mount failed → legacy:', e?.message || e);
+                console.warn('[agents] react mount failed:', e && e.message);
                 _showAgentsReactRoot(false);
+                tbody.innerHTML = '<tr><td colspan="8"><div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div></td></tr>';
+                return;
             }
         }
     }
-    const searchQuery = document.getElementById('agent-search')?.value.toLowerCase() || '';
-    const teamFilter = document.getElementById('filter-agent-team')?.value || '';
-    const roleFilter = document.getElementById('filter-agent-role')?.value || '';
-    const statusFilter = document.getElementById('filter-agent-status')?.value || '';
-
-    const curLvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
-    const canAssignUpline = curLvlMatch ? parseInt(curLvlMatch[1]) <= 4 : false;
-
-    // Pre-fetch prospects, customers AND agent_stats once, then look up per agent.
-    // Previously this loop fired one Supabase query per agent for agent_stats
-    // — N+1 round trips that dominated render time on the Agents page.
-    // getAll() hits the in-memory + SWR cache, so this is one shared fetch
-    // for the whole page instead of one network call per row.
-    const [allProspects, allCustomers, allAgentStats] = await Promise.all([
-        AppDataStore.getAll('prospects'),
-        AppDataStore.getAll('customers'),
-        AppDataStore.getAll('agent_stats')
-    ]);
-    const prospectCountMap = {};
-    const customerCountMap = {};
-    for (const p of allProspects) {
-        const aid = String(p.responsible_agent_id);
-        prospectCountMap[aid] = (prospectCountMap[aid] || 0) + 1;
-    }
-    for (const c of allCustomers) {
-        const aid = String(c.responsible_agent_id || c.agent_id);
-        if (aid) customerCountMap[aid] = (customerCountMap[aid] || 0) + 1;
-    }
-    const statsByAgentId = new Map();
-    for (const s of allAgentStats) {
-        statsByAgentId.set(String(s.agent_id), s);
-    }
-
-    let html = '';
-    for (const agent of agents) {
-        if (searchQuery && !agent.full_name?.toLowerCase().includes(searchQuery) && !agent.agent_code?.toLowerCase().includes(searchQuery) && !agent.phone?.toLowerCase().includes(searchQuery)) continue;
-        if (teamFilter && agent.team !== teamFilter) continue;
-        if (roleFilter && agent.role !== roleFilter) continue;
-        if (statusFilter && agent.status !== statusFilter) continue;
-
-        const prospectCount = prospectCountMap[String(agent.id)] || 0;
-        const customerCount = customerCountMap[String(agent.id)] || 0;
-        const stats = statsByAgentId.get(String(agent.id)) || { followup_rate: 0 };
-        const rateClass = stats.followup_rate >= 90 ? 'rate-good' : (stats.followup_rate >= 70 ? 'rate-warning' : 'rate-critical');
-        const status = agent.status || 'active';
-
-        // escapeHtml is synchronous — `await` here just yields a microtask
-        // per call, ~6 yields per row times N agents = hundreds of needless
-        // event-loop ticks during render.
-        html += `
-            <tr data-agent-id="${agent.id}" class="agent-row">
-                <td data-label="Name">
-                    <div style="font-weight:600;">${escapeHtml(agent.full_name)}</div>
-                    <div style="font-size:12px; color:var(--gray-500);">${escapeHtml(agent.agent_code) || 'N/A'}</div>
-                </td>
-                <td data-label="Team">${escapeHtml(agent.team) || 'Unassigned'}</td>
-                <td data-label="Status"><span class="status-badge status-${status}">${status.toUpperCase()}</span></td>
-                <td data-label="License Expiry">${escapeHtml(agent.license_expiry) || 'N/A'}</td>
-                <td data-label="Prospects">${prospectCount} prospects</td>
-                <td data-label="Customers">${customerCount} customers</td>
-                <td data-label="Follow-up">
-                    <div class="followup-rate">
-                        <span class="rate-indicator ${rateClass}"></span>
-                        <span>${stats.followup_rate ?? 0}%</span>
-                    </div>
-                </td>
-                <td onclick="event.stopPropagation()">
-                    <button class="btn-icon view-detail-btn" onclick="event.stopPropagation(); app.showAgentProfile('${agent.id}')" title="View Detail"><i class="fas fa-eye"></i></button>
-                    <button class="btn-icon edit-agent-btn" onclick="event.stopPropagation(); app.openEditAgentModal('${agent.id}')" title="Edit Agent"><i class="fas fa-edit"></i></button>
-                    ${canAssignUpline ? `<button class="btn-icon" onclick="event.stopPropagation(); app.openAssignUplineModal('${agent.id}')" title="Assign Upline"><i class="fas fa-sitemap"></i></button>` : ''}
-                    ${canAssignUpline ? `<button class="btn-icon" onclick="event.stopPropagation(); app.openResetPasswordModal('${agent.id}')" title="Reset Password"><i class="fas fa-key"></i></button>` : ''}
-                    ${canAssignUpline ? `<button class="btn-icon" onclick="event.stopPropagation(); app.deleteAgent('${agent.id}')" title="Delete Agent" style="color:var(--error);"><i class="fas fa-trash"></i></button>` : ''}
-                </td>
-            </tr>
-        `;
-    }
-
-    tbody.innerHTML = '';
-    tbody.insertAdjacentHTML('beforeend', html || '<tr><td colspan="8" style="text-align:center; padding:20px;">No agents found</td></tr>');
+    _showAgentsReactRoot(false);
+    tbody.innerHTML = '<tr><td colspan="8"><div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div></td></tr>';
 };
 
 const showAgentProfile = async (agentId) => {

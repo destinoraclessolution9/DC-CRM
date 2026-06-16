@@ -231,7 +231,7 @@
 
         // Fetch all six tables in parallel — used to be six sequential awaits
         // (3-8s on cold cache). Prospects/customers are preloaded once and
-        // passed into buildCard/applySharedFilters so each card render doesn't
+        // passed into cardModel/applySharedFilters so each card render doesn't
         // fire its own getById (was N+1 per render).
         const currentUser = _state.cu;
         const [allCases, allUsers, allTags, allTagMappings, allProspects, allCustomers] = await Promise.all([
@@ -310,137 +310,8 @@
             return palettes[hash % palettes.length];
         };
 
-        const buildCard = (c, type) => {
-            let entityName = '';
-            let entityHref = '';
-            let entityIcon = '';
-            let prospectData = null;
-            if (c.customer_id) {
-                const cust = customerMap.get(String(c.customer_id));
-                if (cust) { entityName = cust.full_name; entityHref = `app.showCustomerDetail(${c.customer_id})`; entityIcon = 'fa-user-check'; }
-            } else if (c.prospect_id) {
-                const pros = prospectMap.get(String(c.prospect_id));
-                if (pros) { prospectData = pros; entityName = pros.full_name; entityHref = `app.showProspectDetail(${c.prospect_id})`; entityIcon = 'fa-user'; }
-            }
-
-            const isOwner = c.created_by === currentUser?.id;
-            const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || /manager|team_leader/i.test(currentUser?.role || '');
-            const canEdit = isOwner || isAdmin;
-
-            const creator = allUsers.find(u => u.id === c.created_by);
-            const creatorName = creator ? (creator.full_name || creator.username || 'Agent') : 'System';
-            const creatorInitial = (creatorName[0] || '?').toUpperCase();
-
-            const caseMappings = allTagMappings.filter(et => et.entity_type === 'case_study' && et.entity_id === c.id);
-            const caseTags = caseMappings.map(m => allTags.find(t => t.id === m.tag_id)).filter(Boolean);
-            const tagBadges = caseTags.slice(0, 3).map(t =>
-                `<span class="case-tag-pill" style="background:${escapeHtml(t.color || '#e5e7eb')}22;color:${escapeHtml(t.color || '#374151')};border:1px solid ${escapeHtml(t.color || '#e5e7eb')}55;">${escapeHtml(t.name)}</span>`
-            ).join('');
-            const extraTagCount = caseTags.length > 3 ? `<span class="case-tag-pill case-tag-more">+${caseTags.length - 3}</span>` : '';
-
-            const photos = Array.isArray(c.photo_urls) ? c.photo_urls : [];
-            const coverPhoto = photos[0] || null;
-            const extraPhotoCount = photos.length > 1 ? photos.length - 1 : 0;
-
-            const ageText = prospectData?.date_of_birth
-                ? Math.floor((Date.now() - new Date(prospectData.date_of_birth)) / (365.25 * 24 * 60 * 60 * 1000)) + 'y'
-                : '';
-
-            const actions = `
-                <div class="case-card-actions" onclick="event.stopPropagation();">
-                    <button class="btn-icon" title="View" onclick="app.showCaseStudyDetail(${c.id})"><i class="fas fa-eye"></i></button>
-                    ${canEdit ? `
-                        <button class="btn-icon" title="Edit" onclick="app.openCaseStudyModal(${c.id})"><i class="fas fa-pen"></i></button>
-                        <button class="btn-icon text-danger" title="Delete" onclick="app.deleteCaseStudy(${c.id})"><i class="fas fa-trash"></i></button>
-                    ` : ''}
-                </div>`;
-
-            if (type === 'cps') {
-                const title = (() => {
-                    if (entityName) return escapeHtml(entityName);
-                    if (c.title) return escapeHtml(c.title);
-                    return 'CPS Case';
-                })();
-                const subtitle = prospectData?.occupation ? escapeHtml(prospectData.occupation) : (prospectData?.referral_relationship ? 'Referred via ' + escapeHtml(prospectData.referral_relationship) : '');
-                const detailsPreview = c.cps_invitation_details
-                    ? (c.cps_invitation_details.length > 140 ? c.cps_invitation_details.substring(0, 140) + '…' : c.cps_invitation_details)
-                    : 'No invitation details recorded yet.';
-                const metaPills = [
-                    prospectData?.gender ? `<span class="case-meta-pill"><i class="fas fa-venus-mars"></i> ${escapeHtml(prospectData.gender)} ${genderEmoji(prospectData.gender)}</span>` : '',
-                    ageText ? `<span class="case-meta-pill"><i class="fas fa-birthday-cake"></i> ${ageText}</span>` : '',
-                    c.cps_invitation_method ? `<span class="case-meta-pill"><i class="fas fa-paper-plane"></i> ${escapeHtml(c.cps_invitation_method)}</span>` : '',
-                    prospectData?.referral_relationship ? `<span class="case-meta-pill"><i class="fas fa-people-arrows"></i> ${escapeHtml(prospectData.referral_relationship)}</span>` : '',
-                ].filter(Boolean).join('');
-
-                return `
-                <div class="case-card" onclick="app.showCaseStudyDetail(${c.id})">
-                    <div class="case-card-cover" ${coverPhoto ? `data-attach-bg="${escapeHtml(coverPhoto)}"` : ''} style="${coverPhoto ? '' : `background:${productGradient(entityName || 'cps')};`}">
-                        ${!coverPhoto ? `<div class="case-card-cover-icon"><i class="fas fa-handshake"></i></div>` : ''}
-                        <div class="case-card-cover-badges">
-                            <span class="case-type-chip cps">CPS</span>
-                            ${c.is_public ? '<span class="case-type-chip public"><i class="fas fa-globe"></i> Public</span>' : ''}
-                        </div>
-                        ${extraPhotoCount > 0 ? `<div class="case-card-photo-count"><i class="fas fa-images"></i> ${extraPhotoCount + 1}</div>` : ''}
-                    </div>
-                    <div class="case-card-body">
-                        <h3 class="case-card-title">${title}</h3>
-                        ${subtitle ? `<p class="case-card-subtitle">${subtitle}</p>` : ''}
-                        <div class="case-card-meta">${metaPills}</div>
-                        <p class="case-card-desc">${escapeHtml(detailsPreview)}</p>
-                        <div class="case-card-footer">
-                            <div class="case-card-agent" title="${escapeHtml(creatorName)}">
-                                <span class="case-avatar">${escapeHtml(creatorInitial)}</span>
-                                <span class="case-agent-name">${escapeHtml(creatorName)}</span>
-                            </div>
-                            <div class="case-card-tags">${tagBadges}${extraTagCount}</div>
-                        </div>
-                    </div>
-                    ${actions}
-                </div>`;
-            }
-
-            // Closed card
-            const amountStr = c.amount ? 'RM ' + parseFloat(c.amount).toLocaleString() : '';
-            const closedDate = c.closing_date ? new Date(c.closing_date).toLocaleDateString('en-MY', { year:'numeric', month:'short', day:'numeric' }) : '';
-            const storyPreview = (c.success_story || c.sales_idea || c.closing_details || '').trim();
-            const storyText = storyPreview
-                ? (storyPreview.length > 160 ? storyPreview.substring(0, 160) + '…' : storyPreview)
-                : 'Tap to read the full closing strategy and sales idea.';
-
-            return `
-                <div class="case-card closed" onclick="app.showCaseStudyDetail(${c.id})">
-                    <div class="case-card-cover" ${coverPhoto ? `data-attach-bg="${escapeHtml(coverPhoto)}"` : ''} style="${coverPhoto ? '' : `background:${productGradient(c.product)};`}">
-                        ${!coverPhoto ? `<div class="case-card-cover-icon"><i class="fas fa-trophy"></i></div>` : ''}
-                        <div class="case-card-cover-badges">
-                            <span class="case-type-chip closed">Closed</span>
-                            ${c.is_public ? '<span class="case-type-chip public"><i class="fas fa-globe"></i> Public</span>' : ''}
-                        </div>
-                        ${amountStr ? `<div class="case-card-amount">${escapeHtml(amountStr)}</div>` : ''}
-                        ${extraPhotoCount > 0 ? `<div class="case-card-photo-count"><i class="fas fa-images"></i> ${extraPhotoCount + 1}</div>` : ''}
-                    </div>
-                    <div class="case-card-body">
-                        <h3 class="case-card-title">${escapeHtml(c.title || 'Untitled Case')}</h3>
-                        <div class="case-card-meta">
-                            ${entityName ? `<span class="case-meta-pill"><i class="fas ${entityIcon}"></i> ${escapeHtml(entityName)}</span>` : ''}
-                            ${c.product ? `<span class="case-meta-pill"><i class="fas fa-box"></i> ${escapeHtml(c.product)}</span>` : ''}
-                            ${closedDate ? `<span class="case-meta-pill"><i class="fas fa-calendar-check"></i> ${escapeHtml(closedDate)}</span>` : ''}
-                        </div>
-                        <p class="case-card-desc">${escapeHtml(storyText)}</p>
-                        <div class="case-card-footer">
-                            <div class="case-card-agent" title="${escapeHtml(creatorName)}">
-                                <span class="case-avatar">${escapeHtml(creatorInitial)}</span>
-                                <span class="case-agent-name">${escapeHtml(creatorName)}</span>
-                            </div>
-                            <div class="case-card-tags">${tagBadges}${extraTagCount}</div>
-                        </div>
-                    </div>
-                    ${actions}
-                </div>`;
-        };
-
         // React path — derive a plain, fully-computed card model from the same
-        // helpers/maps buildCard uses, so the island renders an identical card.
-        // (buildCard above stays the legacy fallback when the kill-switch is on.)
+        // helpers/maps the island needs to render an identical card.
         const cardModel = (c, type) => {
             let entityName = '';
             let entityIcon = '';
@@ -524,7 +395,7 @@
 
         const _reactOn = _reactCasesOn();
 
-        // CPS cases — applySharedFilters + buildCard are now sync (preloaded maps)
+        // CPS cases — applySharedFilters + cardModel are now sync (preloaded maps)
         let cpsCases = allCases.filter(c => (c.case_type || 'cps') === 'cps');
         cpsCases = applySharedFilters(cpsCases);
         cpsCases.sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0));
@@ -533,18 +404,21 @@
             // Island owns the grid's children — never touch gridCps.innerHTML on
             // this path (it would corrupt the React root). Empty-state + grid
             // visibility are siblings, safe to toggle directly.
-            const cpsModels = cpsCases.map(c => cardModel(c, 'cps'));
-            window.CRMReact.mountCasesGrid(gridCps, { cards: cpsModels, type: 'cps' });
-            gridCps.style.display = cpsModels.length ? '' : 'none';
-            emptyCps.style.display = cpsModels.length ? 'none' : 'flex';
-        } else if (cpsCases.length === 0) {
-            gridCps.innerHTML = '';
-            gridCps.style.display = 'none';
-            emptyCps.style.display = 'flex';
+            try {
+                const cpsModels = cpsCases.map(c => cardModel(c, 'cps'));
+                window.CRMReact.mountCasesGrid(gridCps, { cards: cpsModels, type: 'cps' });
+                gridCps.style.display = cpsModels.length ? '' : 'none';
+                emptyCps.style.display = cpsModels.length ? 'none' : 'flex';
+            } catch (e) {
+                console.warn('[cases-cps] react mount failed:', e && e.message);
+                if (emptyCps) emptyCps.style.display = 'none';
+                gridCps.style.display = '';
+                gridCps.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
+            }
         } else {
+            if (emptyCps) emptyCps.style.display = 'none';
             gridCps.style.display = '';
-            emptyCps.style.display = 'none';
-            gridCps.innerHTML = cpsCases.map(c => buildCard(c, 'cps')).join('');
+            gridCps.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
         }
 
         // Closed cases
@@ -553,18 +427,21 @@
         closedCases.sort((a, b) => new Date(b.closing_date || b.updated_at || 0) - new Date(a.closing_date || a.updated_at || 0));
         if (countClosed) countClosed.textContent = closedCases.length;
         if (_reactOn) {
-            const closedModels = closedCases.map(c => cardModel(c, 'closed'));
-            window.CRMReact.mountCasesGrid(gridClosed, { cards: closedModels, type: 'closed' });
-            gridClosed.style.display = closedModels.length ? '' : 'none';
-            emptyClosed.style.display = closedModels.length ? 'none' : 'flex';
-        } else if (closedCases.length === 0) {
-            gridClosed.innerHTML = '';
-            gridClosed.style.display = 'none';
-            emptyClosed.style.display = 'flex';
+            try {
+                const closedModels = closedCases.map(c => cardModel(c, 'closed'));
+                window.CRMReact.mountCasesGrid(gridClosed, { cards: closedModels, type: 'closed' });
+                gridClosed.style.display = closedModels.length ? '' : 'none';
+                emptyClosed.style.display = closedModels.length ? 'none' : 'flex';
+            } catch (e) {
+                console.warn('[cases-closed] react mount failed:', e && e.message);
+                if (emptyClosed) emptyClosed.style.display = 'none';
+                gridClosed.style.display = '';
+                gridClosed.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
+            }
         } else {
+            if (emptyClosed) emptyClosed.style.display = 'none';
             gridClosed.style.display = '';
-            emptyClosed.style.display = 'none';
-            gridClosed.innerHTML = closedCases.map(c => buildCard(c, 'closed')).join('');
+            gridClosed.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
         }
     };
 

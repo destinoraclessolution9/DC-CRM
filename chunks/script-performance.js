@@ -158,8 +158,10 @@ const showRankingPerformanceView = async (container) => {
     }
     agentStats.sort((a, b) => b.performanceScore - a.performanceScore);
 
-    // React island (default-on) renders the computed stats. Legacy markup below
-    // is the fallback on any mount error.
+    // React island (default-on) renders the computed stats. If the React
+    // bundle is force-disabled (kill-switch) or the mount throws, show a small
+    // reload card — the legacy vanilla render has been retired.
+    const _reloadCard = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
     if (_reactRankingOn()) {
         try {
             const monthLabel = now.toLocaleString('default', { month: 'long', year: 'numeric' });
@@ -167,76 +169,12 @@ const showRankingPerformanceView = async (container) => {
             window.CRMReact.mountRankingView(document.getElementById('ranking-react-root'), { agentStats, monthLabel });
             return;
         } catch (e) {
-            console.warn('[react-ranking] mount failed → legacy:', e?.message || e);
+            console.warn('[ranking] react mount failed:', e && e.message);
+            container.innerHTML = _reloadCard;
+            return;
         }
     }
-
-    const rankBadge = (i) => i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`;
-
-    container.innerHTML = `
-        <div class="ranking-view">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                <div>
-                    <h1>Ranking Performance Overview</h1>
-                    <p style="color:var(--gray-500);">Agent rankings for ${now.toLocaleString('default', { month: 'long', year: 'numeric' })}</p>
-                </div>
-                <div>
-                    <button class="btn secondary" onclick="app.refreshCurrentView()"><i class="fas fa-sync-alt"></i> Refresh</button>
-                </div>
-            </div>
-
-            <!-- Top 3 Cards -->
-            <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; margin-bottom:24px;">
-                ${agentStats.slice(0, 3).map((a, i) => `
-                    <div style="background:var(--white); border-radius:12px; padding:20px; text-align:center; box-shadow:0 2px 8px rgba(0,0,0,0.06); border-top:4px solid ${i === 0 ? '#FFD700' : i === 1 ? '#C0C0C0' : '#CD7F32'};">
-                        <div style="font-size:32px; margin-bottom:8px;">${rankBadge(i)}</div>
-                        <div style="font-size:16px; font-weight:600;">${a.name}</div>
-                        <div style="color:var(--gray-500); font-size:12px; margin-bottom:12px;">${a.team}</div>
-                        <div style="font-size:24px; font-weight:700; color:var(--primary);">${a.performanceScore} pts</div>
-                        <div style="font-size:12px; color:var(--gray-500); margin-top:8px;">Sales: RM ${a.sales.toLocaleString()} · CPS: ${a.cps} · Rate: ${a.closingRate}%</div>
-                    </div>
-                `).join('')}
-            </div>
-
-            <!-- Full Rankings Table -->
-            <div class="profile-section">
-                <h2><i class="fas fa-list-ol"></i> Full Rankings</h2>
-                <table class="data-table" style="width:100%;">
-                    <thead>
-                        <tr>
-                            <th scope="col">Rank</th>
-                            <th scope="col">Agent</th>
-                            <th scope="col">Team</th>
-                            <th scope="col" style="text-align:right;">Score</th>
-                            <th scope="col" style="text-align:right;">CPS</th>
-                            <th scope="col" style="text-align:right;">Sales (RM)</th>
-                            <th scope="col" style="text-align:right;">Meetings</th>
-                            <th scope="col" style="text-align:right;">Prospects</th>
-                            <th scope="col" style="text-align:right;">Follow-up %</th>
-                            <th scope="col" style="text-align:right;">Closing %</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${agentStats.map((a, i) => `
-                            <tr style="${i < 3 ? 'background:var(--primary-50);' : ''}">
-                                <td style="font-weight:600;">${rankBadge(i)}</td>
-                                <td>${a.name}</td>
-                                <td>${a.team}</td>
-                                <td style="text-align:right; font-weight:600;">${a.performanceScore}</td>
-                                <td style="text-align:right;">${a.cps}</td>
-                                <td style="text-align:right;">${a.sales.toLocaleString()}</td>
-                                <td style="text-align:right;">${a.meetings}</td>
-                                <td style="text-align:right;">${a.prospects}</td>
-                                <td style="text-align:right;"><span class="badge ${a.followupRate >= 80 ? 'success' : a.followupRate >= 50 ? 'warning' : 'danger'}">${a.followupRate}%</span></td>
-                                <td style="text-align:right;"><span class="badge ${a.closingRate >= 30 ? 'success' : a.closingRate >= 15 ? 'warning' : 'danger'}">${a.closingRate}%</span></td>
-                            </tr>
-                        `).join('')}
-                        ${agentStats.length === 0 ? '<tr><td colspan="10" style="text-align:center; padding:20px;">No agent data available</td></tr>' : ''}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    `;
+    container.innerHTML = _reloadCard;
 };
 
 // ========== FEATURE: WORKFLOW AUTOMATION ENGINE ==========
@@ -837,71 +775,22 @@ const showNoticeboardView = async (container) => {
         postered.forEach(e => { e._posterSigned = e.poster_url; });
     }
 
-    const esc = (s) => String(s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-    const titleOf = (e) => e.event_title || e.title || 'Untitled Event';
-    const fmtDate = (d) => {
-        const dt = new Date(d);
-        if (isNaN(dt.getTime())) return '日期待定 · Date TBD';
-        // 2026年6月15日 (星期六) style — closer to the reference design
-        try {
-            const opts = { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' };
-            return dt.toLocaleDateString('zh-CN', opts);
-        } catch(_) { return dt.toLocaleDateString(); }
-    };
-    const fmtTime = (s, e) => {
-        if (!s && !e) return '';
-        const fmt = (t) => {
-            if (!t) return '';
-            // Accept "14:30" or "14:30:00" → "2:30 PM"
-            const [h, m] = String(t).split(':');
-            const hr = parseInt(h, 10);
-            if (isNaN(hr)) return t;
-            const ampm = hr >= 12 ? 'PM' : 'AM';
-            const h12 = hr % 12 || 12;
-            return `${h12}:${(m || '00').padStart(2, '0')} ${ampm}`;
-        };
-        if (s && e) return `${fmt(s)} – ${fmt(e)}`;
-        return fmt(s || e);
-    };
-
     // React island (default-on) renders the cards from the prepared (filtered,
-    // sorted, poster-signed) `visible` events. Legacy template below is the fallback.
+    // sorted, poster-signed) `visible` events. If the React bundle is
+    // force-disabled (kill-switch) or the mount throws, show a small reload
+    // card — the legacy vanilla render has been retired.
+    const _reloadCard = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
     if (_reactNoticeboardOn()) {
         try {
             window.CRMReact.mountNoticeboardGrid(grid, { events: visible, isAdmin });
             return;
         } catch (e) {
-            console.warn('[react-noticeboard] mount failed → legacy:', e?.message || e);
+            console.warn('[noticeboard] react mount failed:', e && e.message);
+            grid.innerHTML = _reloadCard;
+            return;
         }
     }
-
-    grid.innerHTML = visible.map((e, idx) => {
-        const num = String(idx + 1).padStart(2, '0');
-        const posterHtml = e._posterSigned
-            ? `<img class="nb-poster" loading="lazy" decoding="async" src="${esc(e._posterSigned)}" alt="${esc(titleOf(e))}" onerror="this.outerHTML='<div class=&quot;nb-poster-placeholder&quot;>📅</div>';">`
-            : `<div class="nb-poster-placeholder">📅</div>`;
-        const time = fmtTime(e.start_time, e.end_time);
-        const tagline = e.speaker ? `主讲 · ${e.speaker}` : (e.target_group || '');
-        const priceBadge = e.ticket_price && parseFloat(e.ticket_price) > 0
-            ? `<div class="nb-price-badge">RM ${parseFloat(e.ticket_price).toFixed(0)}${e.early_bird_price ? ` · 早鸟 RM ${esc(e.early_bird_price)}` : ''}</div>`
-            : (e.ticket_price === 0 || e.ticket_price === '0' ? `<div class="nb-price-badge" style="background:#10b981;">免费 · Free</div>` : '');
-        return `
-            <article class="nb-card">
-                <div class="nb-num">${num}</div>
-                ${posterHtml}
-                <div class="nb-body">
-                    <h3 class="nb-title">${esc(titleOf(e))}</h3>
-                    ${tagline ? `<div class="nb-tagline">${esc(tagline)}</div>` : ''}
-                    <div class="nb-info">
-                        <div class="nb-info-row"><i class="fas fa-calendar"></i> ${esc(fmtDate(dateOf(e)))}</div>
-                        ${time ? `<div class="nb-info-row"><i class="fas fa-clock"></i> ${esc(time)}</div>` : ''}
-                        ${e.location ? `<div class="nb-info-row"><i class="fas fa-map-marker-alt"></i> ${esc(e.location)}</div>` : ''}
-                    </div>
-                    ${e.description ? `<div class="nb-desc">${esc(e.description)}</div>` : ''}
-                    ${priceBadge}
-                </div>
-            </article>`;
-    }).join('');
+    grid.innerHTML = _reloadCard;
 };
 
 // Full event detail modal opened from a noticeboard card tap.

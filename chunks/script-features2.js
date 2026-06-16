@@ -1475,82 +1475,14 @@ const showMilestonesView = async (container, targetUserId = null) => {
                 adminUsers, targetUserId,
             });
             return;
-        } catch (e) { console.warn('[react-milestones] mount failed → legacy:', e?.message || e); }
-    }
-
-    // Admin user picker
-    let adminPicker = '';
-    if (isAdmin) {
-        let allUsers = [];
-        try { allUsers = (await AppDataStore.getAll('users')).filter(u => { const l = _getUserLevel(u); return l >= 13 && l <= 14; }); } catch(e) {}
-        if (allUsers.length) {
-            adminPicker = `
-                <div class="milestone-admin-picker">
-                    <span>View:</span>
-                    <select onchange="(async()=>{ const vp=document.getElementById('content-viewport'); if(vp) await app.showMilestonesView(vp, this.value||null); })()">
-                        <option value="">— My own —</option>
-                        ${allUsers.map(u => `<option value="${u.id}" ${u.id === subjectUserId && viewingOther ? 'selected' : ''}>${u.full_name}</option>`).join('')}
-                    </select>
-                </div>`;
+        } catch (e) {
+            console.warn('[milestones] react mount failed:', e && e.message);
+            container.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
+            return;
         }
     }
 
-    const reloadAfter = `setTimeout(() => { const vp=document.getElementById('content-viewport'); if(vp) app.showMilestonesView(vp, ${targetUserId ? targetUserId : 'null'}); }, 120)`;
-    const adminBtn = (key, isOn) => {
-        if (!isAdmin) return '';
-        if (isOn) {
-            return `<button class="mc-admin reset" onclick="event.stopPropagation(); app.resetMilestone(${subjectUserId},'${key}').then(()=>{${reloadAfter}})">Reset</button>`;
-        }
-        return `<button class="mc-admin" onclick="event.stopPropagation(); app.markMilestoneCompleted(${subjectUserId},'${key}').then(()=>{${reloadAfter}})">Mark ✓</button>`;
-    };
-    const adminBtnPillar = (key, isOn) => {
-        if (!isAdmin) return '';
-        if (isOn) {
-            return `<button class="pc-admin reset" onclick="event.stopPropagation(); app.resetMilestone(${subjectUserId},'${key}').then(()=>{${reloadAfter}})">Reset</button>`;
-        }
-        return `<button class="pc-admin" onclick="event.stopPropagation(); app.markMilestoneCompleted(${subjectUserId},'${key}').then(()=>{${reloadAfter}})">Mark ✓</button>`;
-    };
-
-    container.innerHTML = `
-        <div class="milestone-view-wrap">
-            <div class="milestone-container">
-                <div class="milestone-inner">
-                    <div class="milestone-header">
-                        <h1>增运九法</h1>
-                        ${viewingOther ? `<div class="viewer-note">Viewing: ${subjectUser.full_name}</div>` : ''}
-                    </div>
-                    ${adminPicker}
-                    <div class="nine-method-grid">
-                        ${(window.app.NINE_METHOD_DEFS || []).map(def => {
-                            const on = !!nineStatuses[def.key];
-                            return `
-                                <div class="nine-method-card ${on ? 'attended' : ''}">
-                                    <div class="mc-icon"><picture><source srcset="${def.icon.replace(/\.png$/i,'.webp')}" type="image/webp"><img loading="lazy" decoding="async" src="${def.icon}" alt=""></picture></div>
-                                    ${adminBtn(def.key, on)}
-                                </div>
-                            `;
-                        }).join('')}
-                    </div>
-
-                    <div class="four-pillar-section">
-                        <h2>丁财贵寿四柱</h2>
-                        <div class="four-pillar-grid">
-                            ${(window.app.FOUR_PILLAR_DEFS || []).map(def => {
-                                const on = !!pillarStatuses[def.key];
-                                return `
-                                    <div class="four-pillar-card ${on ? 'owned' : ''}">
-                                        <div class="pc-icon"><picture><source srcset="${def.icon.replace(/\.png$/i,'.webp')}" type="image/webp"><img loading="lazy" decoding="async" src="${def.icon}" alt=""></picture></div>
-                                        <div class="pc-label">${def.label}</div>
-                                        ${adminBtnPillar(def.key, on)}
-                                    </div>
-                                `;
-                            }).join('')}
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    `;
+    container.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
 };
 
 // Reset a milestone — removes the admin override row so auto-detect takes over.
