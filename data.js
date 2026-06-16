@@ -1272,15 +1272,30 @@ class DataStore {
                 // go through BFF/RPC paths that don't hit _clearOfflineNotice, and
                 // even if no online/visibility/pageshow event ever fires. Reaching
                 // the server at all (even an RLS error resolves, not rejects) = online.
-                const _offlineRecoverPoll = setInterval(async () => {
-                    if (!window._offlineNotified) { clearInterval(_offlineRecoverPoll); return; }
+                // Exponential backoff + jitter (was a fixed 4s setInterval). During a
+                // real backend outage EVERY offline client polling 'users' every 4s
+                // becomes a thundering-herd retry storm that keeps a small/recovering
+                // instance pinned — this amplified the 2026-06-16 outage (NANO compute
+                // couldn't drain the reconnect storm). Back off 4s → 8s → 16s … capped
+                // at 60s, with ±30% jitter so clients don't re-sync into lockstep after
+                // a deploy/reconnect. Self-stops when _offlineNotified clears (online/
+                // visibility/pageshow handlers set it false).
+                let _offlineRecoverStopped = false;
+                let _offlineRecoverDelay = 4000;
+                const _offlineRecoverTick = async () => {
+                    if (_offlineRecoverStopped) return;
+                    if (!window._offlineNotified) { _offlineRecoverStopped = true; return; }
                     try {
                         await this._readClient().from('users').select('id').limit(1);
                         try { document.getElementById('offline-banner')?.remove(); } catch (_) {}
                         window._offlineNotified = false;
-                        clearInterval(_offlineRecoverPoll);
-                    } catch (_) { /* network failure — still offline, keep polling */ }
-                }, 4000);
+                        _offlineRecoverStopped = true;
+                        return;
+                    } catch (_) { /* still offline — back off and retry */ }
+                    _offlineRecoverDelay = Math.min(_offlineRecoverDelay * 2, 60000);
+                    setTimeout(_offlineRecoverTick, _offlineRecoverDelay * (0.7 + Math.random() * 0.6));
+                };
+                setTimeout(_offlineRecoverTick, 4000 * (0.7 + Math.random() * 0.6));
             }
             // Even when read fails, still try to push queued writes — write endpoint is separate from read.
             // Only when authenticated: anon writes just bounce off RLS and spam the network.
