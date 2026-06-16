@@ -25,6 +25,37 @@
     let _currentUser = _state.cu;
     window._syncFudeUser = () => { _currentUser = _state.cu; };
 
+    // React modal-content passthrough — OPT-IN during verification (kill-switch:
+    // window.__REACT_FUDEMODALS=false | ?react_fudemodals=0 | crm_react_fudemodals
+    // ='0'; plus global ?react=0 / crm_react_off='1'). Flip the OPT-IN test to a
+    // plain `return true` after live parity check to promote default-on.
+    const _reactFudeModalsOn = () => {
+        try {
+            if (/[?&]react=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            if (!(window.CRMReact && typeof window.CRMReact.mountModalContent === 'function')) return false;
+            return window.__REACT_FUDEMODALS === true
+                || /[?&]react_fudemodals=1/.test(location.search)
+                || localStorage.getItem('crm_react_fudemodals') === '1';
+        } catch (_) { return false; }
+    };
+    // Route a modal BODY through the generic React passthrough island (chunk keeps
+    // 100% of logic; inline handlers + <style> + signature pads survive because
+    // dangerouslySetInnerHTML uses innerHTML). Footer `actions` render normally in
+    // UI.showModal's footer (outside the React root). flushSync (in the island
+    // mount) guarantees the DOM is present before any post-render setTimeout wiring.
+    const _rxShowModal = (title, html, actions, size) => {
+        if (_reactFudeModalsOn()) {
+            UI.showModal(title, '<div id="fude-modal-react-root"></div>', actions || [], size || '');
+            const root = document.getElementById('fude-modal-react-root');
+            if (root && window.CRMReact && typeof window.CRMReact.mountModalContent === 'function') {
+                try { window.CRMReact.mountModalContent(root, { html }); return; }
+                catch (e) { console.warn('[fude] modal island mount failed, legacy:', e && e.message); root.outerHTML = html; return; }
+            }
+        }
+        UI.showModal(title, html, actions || [], size || '');
+    };
+
 // ========== LEVEL 13/14: 福德 VIEW ==========
 const showFudeView = async (container) => {
     const currentUser = _currentUser;
@@ -429,7 +460,7 @@ const openStoryDetail = async (highlightId) => {
                 <div style="font-size:12px;color:var(--gray-500,#6b7280);margin-bottom:14px;">📅 ${fmtDate(h.created_at)}</div>
                 <div style="font-size:14px;line-height:1.7;color:var(--gray-700,#374151);white-space:pre-wrap;">${h.content || '<em>No content.</em>'}</div>
             </div>`;
-        UI.showModal(h.title || 'Story', content, [
+        _rxShowModal(h.title || 'Story', content, [
             { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
         ]);
     } catch (err) {
@@ -503,7 +534,7 @@ const openHighlightModal = async (highlightId = null) => {
         </div>
     `;
 
-    UI.showModal(isEdit ? 'Edit Highlight' : 'Add New Highlight', content, [
+    _rxShowModal(isEdit ? 'Edit Highlight' : 'Add New Highlight', content, [
         { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
         { label: isEdit ? 'Save Changes' : 'Add Highlight', type: 'primary', action: '(async () => { await app.saveHighlight(); })()' }
     ]);
@@ -638,7 +669,7 @@ const openRewardModal = async (rewardId = null) => {
         </div>
     `;
 
-    UI.showModal(isEdit ? 'Edit Reward' : 'Award 福气 Points', content, [
+    _rxShowModal(isEdit ? 'Edit Reward' : 'Award 福气 Points', content, [
         { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
         { label: isEdit ? 'Save Changes' : 'Award', type: 'primary', action: '(async () => { await app.saveReward(); })()' }
     ]);
@@ -1376,7 +1407,7 @@ const openCustomerSurveyModal = async (prospectId, surveyId = null) => {
             <span class="cf-cb-txt">${zh}${en ? ` <span class="cf-cb-en">${en}</span>` : ''}${extra}</span>
         </label>`;
 
-    UI.showModal(`新客户调查表 · ${_cfEscape(prospect.full_name || '')}`, `
+    _rxShowModal(`新客户调查表 · ${_cfEscape(prospect.full_name || '')}`, `
         ${_cfPaperStyles()}
         <div class="cf-paper" id="cf-survey-paper">
             <input type="hidden" id="cf-survey-prospect-id" value="${prospect.id}">
@@ -1640,7 +1671,7 @@ const openCpsAnalysisModal = async (prospectId, cpsId = null) => {
             </div>`;
     };
 
-    UI.showModal(`細解命盤 · ${_cfEscape(prospect.full_name || '')}`, `
+    _rxShowModal(`細解命盤 · ${_cfEscape(prospect.full_name || '')}`, `
         ${_cfPaperStyles()}
         <div class="cf-paper" id="cf-cps-paper">
             <input type="hidden" id="cf-cps-prospect-id" value="${prospect.id}">
@@ -1927,7 +1958,7 @@ const openApuAppraisalModal = async (prospectId, apuId = null) => {
         </div>
     `;
 
-    UI.showModal(`DC APPRAISAL FORM · ${_cfEscape(prospect.full_name || '')}`, `
+    _rxShowModal(`DC APPRAISAL FORM · ${_cfEscape(prospect.full_name || '')}`, `
         ${_cfPaperStyles()}
         <div class="cf-paper" id="cf-apu-paper">
             <input type="hidden" id="cf-apu-prospect-id" value="${prospect.id}">
@@ -2178,7 +2209,7 @@ const openDestinyBlueprintModal = async (prospectId, dbId = null) => {
     const startYear = data.start_year || 2026;
     const y1 = startYear, y2 = startYear + 1, y3 = startYear + 2;
 
-    UI.showModal(`九運改命藍圖表 Destiny Code Blueprint · ${_cfEscape(prospect.full_name || '')}`, `
+    _rxShowModal(`九運改命藍圖表 Destiny Code Blueprint · ${_cfEscape(prospect.full_name || '')}`, `
         <style>
             /* ── Destiny Blueprint — paper-form-faithful layout ── */
             .db-form{ font-family: 'Inter', sans-serif; color:#111827; }
@@ -2532,7 +2563,7 @@ const saveDestinyBlueprint = async () => {
 // #10 fix: accept pts as a parameter passed from the onclick — avoids fragile DOM
 //          scrape that returns 0 if the fude view re-renders before button click.
 const openFudeRedeemModal = (pts = 0) => {
-    UI.showModal('立即兑换福气积分', `
+    _rxShowModal('立即兑换福气积分', `
         <div style="font-size:14px;line-height:1.7;">
             <div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:12px 14px;border-radius:6px;margin-bottom:16px;">
                 <strong>当前积分：${pts} 福气积分</strong>

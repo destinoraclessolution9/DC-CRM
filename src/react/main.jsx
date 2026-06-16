@@ -11,6 +11,7 @@
 //   (behind a flag, legacy table as fallback). React Query owns the cache, which
 //   is what lets Phase 3 retire the bespoke per-view sync for migrated views.
 import { createRoot } from 'react-dom/client';
+import { flushSync } from 'react-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useCustomers } from './data/useCustomers.js';
 import { CustomersTable } from './views/CustomersTable.jsx';
@@ -44,6 +45,7 @@ import { ReferralsView } from './views/ReferralsView.jsx';
 import { MobileHomeView } from './views/MobileHomeView.jsx';
 import { AIInsightsView } from './views/AIInsightsView.jsx';
 import { SearchPanelView } from './views/SearchPanelView.jsx';
+import { ModalContentIsland } from './views/ModalContentIsland.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -445,6 +447,33 @@ function unmountSearchPanel() {
     if (_searchPanelRoot) { try { _searchPanelRoot.unmount(); } catch (_) {} _searchPanelRoot = null; }
 }
 
+// ── Generic modal-content passthrough island (dedicated single root). Renders a
+// chunk-built HTML body via dangerouslySetInnerHTML; flushSync forces a
+// synchronous commit so the chunk's post-render wiring (getElementById on
+// signature canvases / autosave fields) finds the DOM immediately. Used for all
+// the inline-value modal forms (cps/apu/destiny/survey, fude sub-modals,
+// knowledge editors) that are too complex/risky to hand-port to JSX. ──────────
+let _modalContentRoot = null;
+function mountModalContent(container, opts) {
+    if (!container) return;
+    if (_modalContentRoot) { try { _modalContentRoot.unmount(); } catch (_) {} _modalContentRoot = null; }
+    const o = opts || {};
+    const root = createRoot(container);
+    _modalContentRoot = root;
+    const el = <ModalContentIsland html={o.html || ''} onReady={o.onReady} />;
+    try {
+        flushSync(() => { root.render(el); });
+    } catch (_) {
+        // flushSync can throw if called while React is already rendering — fall
+        // back to a plain async render (the chunk's setTimeout wiring still runs).
+        root.render(el);
+    }
+    window.__REACT_MODALCONTENT_MOUNTED = true;
+}
+function unmountModalContent() {
+    if (_modalContentRoot) { try { _modalContentRoot.unmount(); } catch (_) {} _modalContentRoot = null; }
+}
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
@@ -513,6 +542,8 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountAIInsights,
     mountSearchPanel,
     unmountSearchPanel,
+    mountModalContent,
+    unmountModalContent,
 });
 
 if (document.readyState === 'loading') {
