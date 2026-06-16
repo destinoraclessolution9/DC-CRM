@@ -497,6 +497,27 @@ function unmountFudeContent() {
     if (_fudeContentRoot) { try { _fudeContentRoot.unmount(); } catch (_) {} _fudeContentRoot = null; }
 }
 
+// ── Journey timeline passthrough (dedicated root, separate from modal/fude-view
+// roots). renderJourneyTab is pure innerHTML (inline app.* onclicks, no
+// post-render wiring) that re-renders via _refreshJourneyTab after each
+// touchpoint mutation — so the same re-mount-on-each-render passthrough applies.
+// Embedded in a prospect/customer detail accordion body. ──────────────────────
+let _journeyContentRoot = null;
+function mountJourneyContent(container, opts) {
+    if (!container) return;
+    if (_journeyContentRoot) { try { _journeyContentRoot.unmount(); } catch (_) {} _journeyContentRoot = null; }
+    const o = opts || {};
+    const root = createRoot(container);
+    _journeyContentRoot = root;
+    const el = <ModalContentIsland html={o.html || ''} onReady={o.onReady} />;
+    try { flushSync(() => { root.render(el); }); }
+    catch (_) { root.render(el); }
+    window.__REACT_JOURNEY_MOUNTED = true;
+}
+function unmountJourneyContent() {
+    if (_journeyContentRoot) { try { _journeyContentRoot.unmount(); } catch (_) {} _journeyContentRoot = null; }
+}
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
@@ -569,6 +590,8 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountModalContent,
     mountFudeContent,
     unmountFudeContent,
+    mountJourneyContent,
+    unmountJourneyContent,
 });
 
 if (document.readyState === 'loading') {

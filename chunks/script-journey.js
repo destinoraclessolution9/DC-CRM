@@ -545,6 +545,36 @@
 
     // ── Main render entry point ───────────────────────────────────────────────
 
+    // React journey-timeline passthrough — OPT-IN during verification (kill-switch:
+    // window.__REACT_JOURNEY=false | ?react_journey=0 | crm_react_journey='0'; plus
+    // global ?react=0 / crm_react_off='1'). Flip the OPT-IN test to a plain
+    // `return true` after live parity check to promote default-on.
+    const _reactJourneyOn = () => {
+        try {
+            if (/[?&]react=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            if (!(window.CRMReact && typeof window.CRMReact.mountJourneyContent === 'function')) return false;
+            return window.__REACT_JOURNEY === true
+                || /[?&]react_journey=1/.test(location.search)
+                || localStorage.getItem('crm_react_journey') === '1';
+        } catch (_) { return false; }
+    };
+    // Render the assembled journey HTML into `container`, routed through the
+    // dedicated journey React root when enabled (re-mount on each call — including
+    // _refreshJourneyTab after touchpoint mutations). Inline app.* onclicks survive
+    // (dangerouslySetInnerHTML). flushSync makes the DOM present synchronously.
+    const _rxRenderJourney = (container, viewHtml) => {
+        if (_reactJourneyOn()) {
+            container.innerHTML = '<div id="jny-react-root"></div>';
+            const root = document.getElementById('jny-react-root');
+            if (root && window.CRMReact && typeof window.CRMReact.mountJourneyContent === 'function') {
+                try { window.CRMReact.mountJourneyContent(root, { html: viewHtml }); return; }
+                catch (e) { console.warn('[journey] island mount failed, legacy:', e && e.message); }
+            }
+        }
+        container.innerHTML = viewHtml;
+    };
+
     const renderJourneyTab = async (entityType, entityId, container) => {
         if (!container) return;
         container.innerHTML = '<div style="text-align:center;padding:24px;color:var(--gray-400);"><i class="fas fa-spinner fa-spin"></i> Loading journey…</div>';
@@ -575,7 +605,7 @@
         const latestPending = touchpoints.find(t => ['pending','overdue','snoozed'].includes(t.status));
         const followMode = latestPending?.follow_mode || 'active';
 
-        container.innerHTML = `
+        _rxRenderJourney(container, `
             <style>
                 .jny-wrap{font-size:14px;}
                 .jny-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;}
@@ -703,7 +733,7 @@
                 </div>` : ''}
 
             </div>
-        `;
+        `);
     };
 
     function renderStageTimeline(touchpoints, currentStage, activeTrack) {
