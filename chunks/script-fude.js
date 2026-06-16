@@ -97,11 +97,25 @@ const showFudeView = async (container) => {
     // Show skeleton immediately — don't block first paint on data fetches
     if (container) container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:200px;gap:12px;color:var(--gray-400,#9ca3af);flex-direction:column;"><i class="fas fa-circle-notch fa-spin" style="font-size:24px;"></i><span style="font-size:13px;">Loading 福运相随…</span></div>';
 
-    const userLevel = (() => {
-        const m = (currentUser.role || '').match(/Level\s+(\d+)/i);
-        return m ? parseInt(m[1]) : 12;
-    })();
-    const isAdmin   = userLevel <= 2 || ['mianformula@gmail.com', 'destinyoracles@gmail.com', 'shilynateh7689@gmail.com'].includes((currentUser.email || '').toLowerCase());
+    // Canonical numeric level via the shared role helper (no inline /Level N/ regex).
+    const userLevel = _getUserLevel(currentUser);
+    // Admin gate for fude management surfaces (leaderboard read + Manage Highlights/Stories
+    // CRUD + Manage Rewards/福气 Points CRUD). Original gate was `userLevel <= 2`, i.e.
+    // L1 Super Admin OR L2 Marketing Manager — reproduced EXACTLY via canonical helpers so
+    // no new band (e.g. L3/L4 agents) silently gains access. Chose L1||L2 (not the broader
+    // isManagement L4+) to stay faithful and err on the MORE restrictive side.
+    const _canonAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser);
+    // DEPRECATED legacy email allowlist — kept ONLY as an OR-ed fallback so the three known
+    // admins do NOT lose access while their DB role level is still unset/stale (this is live).
+    // TODO(fude-authz): set the correct role level for these users in the DB, then delete this.
+    const _LEGACY_ADMIN_EMAILS = ['mianformula@gmail.com', 'destinyoracles@gmail.com', 'shilynateh7689@gmail.com'];
+    const _email = (currentUser.email || '').toLowerCase();
+    const _legacyAdmin = _LEGACY_ADMIN_EMAILS.includes(_email);
+    // Surface the drift: warn whenever the legacy fallback is the ONLY thing granting access.
+    if (_legacyAdmin && !_canonAdmin) {
+        console.warn('[fude-authz] falling back to legacy email allowlist for', _email);
+    }
+    const isAdmin   = _canonAdmin || _legacyAdmin;
     const isL1314   = userLevel >= 13;
     const isCustomer = userLevel === 13;
 

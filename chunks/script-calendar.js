@@ -1687,6 +1687,109 @@
         return _state.pc;
     };
 
+    // Single source of truth for a month-grid appointment card. Previously this
+    // ~60-line builder was duplicated in _renderCalendarLegacy and the main
+    // _renderCalendarImpl per-cell loops; the two copies had drifted (only the
+    // main path grew optimistic-badge handling). Both call sites now go through
+    // here so they can never diverge again. ctx carries the lookup maps both
+    // sites build; _state.cu / isSystemAdmin / esc / escapeHtml are read from the
+    // enclosing closure. The richer (main-path) behaviour — optimistic ⏳/⚠
+    // badge, optimistic-pending/failed classes, and the sync-error onclick — is
+    // preserved for BOTH paths. Legacy activity rows have no _optimistic field,
+    // so for them _optBadge stays '' and the onclick falls back to
+    // viewActivityDetails — identical to the legacy output before extraction.
+    const buildAppointmentCardHtml = (a, ctx) => {
+        const { prospectMap, customerMap, userMap, eventMap } = ctx;
+        const prospect = a.prospect_id ? prospectMap.get(String(a.prospect_id)) : null;
+        const customer = a.customer_id ? customerMap.get(String(a.customer_id)) : null;
+        // Ownership gate (commits fa31e3b/3a75855): non-owners viewing another
+        // agent's public/open activity must not see the client name.
+        const _tileViewerId = _state.cu?.id;
+        const _tileOwned = String(a.lead_agent_id) === String(_tileViewerId)
+            || (Array.isArray(a.co_agents) && a.co_agents.some(ca => String(ca.id) === String(_tileViewerId)))
+            || isSystemAdmin(_state.cu);
+        const entityName = _tileOwned
+            ? (prospect ? prospect.full_name : (customer ? customer.full_name : (a.activity_title || a.customer_name || 'Event')))
+            : (a.activity_title || a.activity_type || 'Activity');
+        if (!entityName) return '';
+
+        const isEvent = a.activity_type === 'EVENT';
+        const agent = (!isEvent && a.lead_agent_id) ? userMap.get(String(a.lead_agent_id)) : null;
+        // Fall back through lead → first co-agent → "Unassigned" so the UI never
+        // renders a literal "null" when the lead user isn't in userMap.
+        const firstCoAgentName = Array.isArray(a.co_agents) && a.co_agents[0]?.name;
+        const agentName = agent?.full_name || firstCoAgentName || 'Unassigned';
+        const coAgentCount = Array.isArray(a.co_agents) ? a.co_agents.length : 0;
+        const extraCoAgents = agent?.full_name ? coAgentCount : Math.max(coAgentCount - 1, 0);
+
+        // Pending invite: does the current viewer need to Accept/Reject this co-agent slot?
+        const myCoAgentStatus = _state.cu && Array.isArray(a.co_agents)
+            ? a.co_agents.find(ca => String(ca.id) === String(_state.cu.id))?.status
+            : null;
+        const isPendingInvite = myCoAgentStatus === 'pending';
+        const isRejectedInvite = myCoAgentStatus === 'rejected';
+
+        // For EVENTs: show event title instead of agent/entity
+        let eventTitle = null;
+        let eventVenue = null;
+        if (isEvent && a.event_id) {
+            const ev = eventMap.get(String(a.event_id));
+            eventTitle = ev ? (ev.event_title || ev.title) : null;
+            eventVenue = ev ? (ev.location || null) : null;
+        }
+        // Fall back to location_address: the `venue` column may be missing from
+        // the Supabase schema, in which case it gets stripped on save and only
+        // survives in the creator's localStorage. We mirror to location_address
+        // (which IS persisted server-side) so other users see the venue too.
+        const displayVenue = a.venue || eventVenue || a.location_address || '';
+
+        // Build the optimistic badge with a rich, captured error in the tooltip.
+        // 'pending' = ⏳ Saving / Retrying; 'failed' = ⚠ + actual Postgres error.
+        // navigator.onLine drives the wording so the user knows we *will* retry
+        // automatically when WiFi/data returns — no manual action required.
+        let _optBadge = '';
+        if (a._optimistic === 'pending') {
+            const _t = navigator.onLine ? 'Saving…' : 'Waiting for connection — will sync automatically';
+            _optBadge = ` <span class="opt-badge" title="${escapeHtml(_t)}">⏳</span>`;
+        } else if (a._optimistic === 'failed') {
+            const _human = a._errorMsg || 'Save failed';
+            const _code  = a._errorCode ? ` [${a._errorCode}]` : '';
+            const _raw   = a._errorRaw && a._errorRaw !== a._errorMsg ? `\nDetails: ${a._errorRaw}` : '';
+            const _hint  = navigator.onLine
+                ? '\nWill keep retrying in background.'
+                : '\nWaiting for connection — auto-syncs when you reconnect.';
+            _optBadge = ` <span class="opt-badge fail" title="${escapeHtml(_human + _code + _raw + _hint)}">⚠</span>`;
+        }
+
+        return `
+            <div class="calendar-appointment ${a.activity_type.toLowerCase()} ${(a.closing_amount || a.is_closing) ? 'closed-case' : ''} ${isPendingInvite ? 'pending-invite' : ''} ${isRejectedInvite ? 'rejected-invite' : ''} ${a._optimistic === 'pending' ? 'optimistic-pending' : ''} ${a._optimistic === 'failed' ? 'optimistic-failed' : ''}"
+                onclick="event.stopPropagation(); ${a._optimistic === 'failed' ? `app.showSyncErrorModal(${JSON.stringify(a.id)},${JSON.stringify(a._errorMsg||'')},${JSON.stringify(a._errorCode||'')})` : a._optimistic ? '' : `app.viewActivityDetails(${a.id})`}">
+                <div class="appointment-time">${(a.start_time || '00:00').slice(0,5)}${_optBadge}</div>
+                ${isEvent
+                    ? `<div class="appointment-customer">${esc(eventTitle || a.activity_title || 'Event')}</div>`
+                    : `<div class="appointment-customer">${esc(entityName)}</div>
+                <div class="appointment-agent">${esc(agentName)}${extraCoAgents > 0 ? ` +${extraCoAgents}` : ''}</div>`
+                }
+                <div class="appointment-type">${esc(a.activity_type)}</div>
+                ${displayVenue ? `<div class="appointment-venue">${esc(displayVenue)}</div>` : ''}
+                ${isPendingInvite ? `
+                <div class="co-agent-invite-actions" style="display:flex;gap:4px;margin-top:6px;padding-top:6px;border-top:1px dashed rgba(0,0,0,0.1);">
+                    <button class="btn btn-sm" style="flex:1;background:#dcfce7;color:#166534;border:none;padding:3px 6px;border-radius:4px;cursor:pointer;font-size:11px;" onclick="event.stopPropagation();(async()=>{await app.respondCoAgentInvite(${a.id},'accepted');})()"><i class="fas fa-check"></i> Accept</button>
+                    <button class="btn btn-sm" style="flex:1;background:#fee2e2;color:#991b1b;border:none;padding:3px 6px;border-radius:4px;cursor:pointer;font-size:11px;" onclick="event.stopPropagation();(async()=>{await app.respondCoAgentInvite(${a.id},'rejected');})()"><i class="fas fa-times"></i> Reject</button>
+                </div>
+                ` : ''}
+                ${isRejectedInvite ? `<div class="appointment-status-rejected" style="margin-top:6px;padding:3px 6px;background:#fee2e2;color:#991b1b;border-radius:4px;font-size:11px;text-align:center;"><i class="fas fa-times-circle"></i> You rejected this</div>` : ''}
+                ${(a.closing_amount || a.is_closing) ? `
+                <div class="appointment-closed">
+                    <div class="closed-badge">✓ CLOSED</div>
+                    ${a.solution_sold ? `<div class="closed-product">📦 ${a.solution_sold}</div>` : ''}
+                    ${a.closing_amount ? `<div class="closed-amount">💰 RM ${parseFloat(a.closing_amount).toLocaleString('en-MY', {minimumFractionDigits:2,maximumFractionDigits:2})}</div>` : ''}
+                </div>
+                ` : ''}
+            </div>
+        `;
+    };
+
     // Legacy multi-query calendar fetch — the pre-2026-05-03 path. Kept as a
     // fallback so the calendar still renders if the get_calendar_window RPC
     // hasn't been deployed yet (e.g. during the gap between code push and
@@ -1782,64 +1885,13 @@
                     if (seenEventSlots.has(slotKey)) continue;
                     seenEventSlots.add(slotKey);
                 }
-                const prospect = a.prospect_id ? prospectMap.get(String(a.prospect_id)) : null;
-                const customer = a.customer_id ? customerMap.get(String(a.customer_id)) : null;
-                // Ownership gate (commits fa31e3b/3a75855): non-owners viewing
-                // another agent's public/open activity must not see the client name.
-                const _tileOwned = isSystemAdmin(_state.cu)
-                    || String(a.lead_agent_id) === String(_state.cu?.id)
-                    || (Array.isArray(a.co_agents) && a.co_agents.some(ca => String(ca.id) === String(_state.cu?.id)));
-                const entityName = _tileOwned
-                    ? (prospect ? prospect.full_name : (customer ? customer.full_name : (a.activity_title || 'Event')))
-                    : (a.activity_title || a.activity_type || 'Activity');
-                if (!entityName) continue;
+                // Unified card builder (shared with the main RPC path). Returns ''
+                // when the ownership/entity gate produces no name — matches the
+                // legacy `if (!entityName) continue;` (no per-cell cap consumed).
+                const _cardHtml = buildAppointmentCardHtml(a, { prospectMap, customerMap, userMap, eventMap });
+                if (!_cardHtml) continue;
                 if (renderedInCell >= maxRenderPerCell) { skippedInCell++; continue; }
-                const isEvent = a.activity_type === 'EVENT';
-                const agent = (!isEvent && a.lead_agent_id) ? userMap.get(String(a.lead_agent_id)) : null;
-                const firstCoAgentName = Array.isArray(a.co_agents) && a.co_agents[0]?.name;
-                const agentName = agent?.full_name || firstCoAgentName || 'Unassigned';
-                const coAgentCount = Array.isArray(a.co_agents) ? a.co_agents.length : 0;
-                const extraCoAgents = agent?.full_name ? coAgentCount : Math.max(coAgentCount - 1, 0);
-                const myCoAgentStatus = _state.cu && Array.isArray(a.co_agents)
-                    ? a.co_agents.find(ca => String(ca.id) === String(_state.cu.id))?.status
-                    : null;
-                const isPendingInvite = myCoAgentStatus === 'pending';
-                const isRejectedInvite = myCoAgentStatus === 'rejected';
-                let eventTitle = null;
-                let eventVenue = null;
-                if (isEvent && a.event_id) {
-                    const ev = eventMap.get(String(a.event_id));
-                    eventTitle = ev ? (ev.event_title || ev.title) : null;
-                    eventVenue = ev ? (ev.location || null) : null;
-                }
-                const displayVenue = a.venue || eventVenue || a.location_address || '';
-                activityHtml += `
-                    <div class="calendar-appointment ${a.activity_type.toLowerCase()} ${(a.closing_amount || a.is_closing) ? 'closed-case' : ''} ${isPendingInvite ? 'pending-invite' : ''} ${isRejectedInvite ? 'rejected-invite' : ''}"
-                        onclick="event.stopPropagation(); app.viewActivityDetails(${a.id})">
-                        <div class="appointment-time">${(a.start_time || '00:00').slice(0,5)}</div>
-                        ${isEvent
-                            ? `<div class="appointment-customer">${esc(eventTitle || a.activity_title || 'Event')}</div>`
-                            : `<div class="appointment-customer">${esc(entityName)}</div>
-                        <div class="appointment-agent">${esc(agentName)}${extraCoAgents > 0 ? ` +${extraCoAgents}` : ''}</div>`
-                        }
-                        <div class="appointment-type">${esc(a.activity_type)}</div>
-                        ${displayVenue ? `<div class="appointment-venue">${esc(displayVenue)}</div>` : ''}
-                        ${isPendingInvite ? `
-                        <div class="co-agent-invite-actions" style="display:flex;gap:4px;margin-top:6px;padding-top:6px;border-top:1px dashed rgba(0,0,0,0.1);">
-                            <button class="btn btn-sm" style="flex:1;background:#dcfce7;color:#166534;border:none;padding:3px 6px;border-radius:4px;cursor:pointer;font-size:11px;" onclick="event.stopPropagation();(async()=>{await app.respondCoAgentInvite(${a.id},'accepted');})()"><i class="fas fa-check"></i> Accept</button>
-                            <button class="btn btn-sm" style="flex:1;background:#fee2e2;color:#991b1b;border:none;padding:3px 6px;border-radius:4px;cursor:pointer;font-size:11px;" onclick="event.stopPropagation();(async()=>{await app.respondCoAgentInvite(${a.id},'rejected');})()"><i class="fas fa-times"></i> Reject</button>
-                        </div>
-                        ` : ''}
-                        ${isRejectedInvite ? `<div class="appointment-status-rejected" style="margin-top:6px;padding:3px 6px;background:#fee2e2;color:#991b1b;border-radius:4px;font-size:11px;text-align:center;"><i class="fas fa-times-circle"></i> You rejected this</div>` : ''}
-                        ${(a.closing_amount || a.is_closing) ? `
-                        <div class="appointment-closed">
-                            <div class="closed-badge">✓ CLOSED</div>
-                            ${a.solution_sold ? `<div class="closed-product">📦 ${a.solution_sold}</div>` : ''}
-                            ${a.closing_amount ? `<div class="closed-amount">💰 RM ${parseFloat(a.closing_amount).toLocaleString('en-MY', {minimumFractionDigits:2,maximumFractionDigits:2})}</div>` : ''}
-                        </div>
-                        ` : ''}
-                    </div>
-                `;
+                activityHtml += _cardHtml;
                 renderedInCell++;
             }
             if (skippedInCell > 0) {
@@ -2245,97 +2297,17 @@
                         if (seenEventSlots.has(slotKey)) continue;
                         seenEventSlots.add(slotKey);
                     }
-                    // Synchronous lookups from the prefetched maps — no awaits per row.
-                    const prospect = a.prospect_id ? prospectMap.get(String(a.prospect_id)) : null;
-                    const customer = a.customer_id ? customerMap.get(String(a.customer_id)) : null;
-                    // Client names are private to the activity owner/co-agents even on public events.
-                    const _tileViewerId = _state.cu?.id;
-                    const _tileOwned = String(a.lead_agent_id) === String(_tileViewerId)
-                        || (Array.isArray(a.co_agents) && a.co_agents.some(ca => String(ca.id) === String(_tileViewerId)))
-                        || isSystemAdmin(_state.cu);
-                    const entityName = _tileOwned
-                        ? (prospect ? prospect.full_name : (customer ? customer.full_name : (a.activity_title || a.customer_name || 'Event')))
-                        : (a.activity_title || a.activity_type || 'Activity');
-
-                    if (entityName) {
+                    // Unified card builder (shared with the legacy fetch path).
+                    // Returns '' when the ownership/entity gate yields no name —
+                    // matches the previous `if (entityName) { … }` guard. The cap
+                    // and "+N more" accounting are unchanged.
+                    const _cardHtml = buildAppointmentCardHtml(a, { prospectMap, customerMap, userMap, eventMap });
+                    if (_cardHtml) {
                         if (renderedInCell >= maxRenderPerCell) {
                             skippedInCell++;
                             continue;
                         }
-                        const isEvent = a.activity_type === 'EVENT';
-                        const agent = (!isEvent && a.lead_agent_id) ? userMap.get(String(a.lead_agent_id)) : null;
-                        // Fall back through lead → first co-agent → "Unassigned" so the UI
-                        // never renders a literal "null" when the lead user isn't in userMap.
-                        const firstCoAgentName = Array.isArray(a.co_agents) && a.co_agents[0]?.name;
-                        const agentName = agent?.full_name || firstCoAgentName || 'Unassigned';
-                        const coAgentCount = Array.isArray(a.co_agents) ? a.co_agents.length : 0;
-                        const extraCoAgents = agent?.full_name ? coAgentCount : Math.max(coAgentCount - 1, 0);
-
-                        // Pending invite: does the current viewer need to Accept/Reject this co-agent slot?
-                        const myCoAgentStatus = _state.cu && Array.isArray(a.co_agents)
-                            ? a.co_agents.find(ca => String(ca.id) === String(_state.cu.id))?.status
-                            : null;
-                        const isPendingInvite = myCoAgentStatus === 'pending';
-                        const isRejectedInvite = myCoAgentStatus === 'rejected';
-
-                        // For EVENTs: show event title instead of agent/entity
-                        let eventTitle = null;
-                        let eventVenue = null;
-                        if (isEvent && a.event_id) {
-                            const ev = eventMap.get(String(a.event_id));
-                            eventTitle = ev ? (ev.event_title || ev.title) : null;
-                            eventVenue = ev ? (ev.location || null) : null;
-                        }
-                        // Fall back to location_address: the `venue` column may be missing from
-                        // the Supabase schema, in which case it gets stripped on save and only
-                        // survives in the creator's localStorage. We mirror to location_address
-                        // (which IS persisted server-side) so other users see the venue too.
-                        const displayVenue = a.venue || eventVenue || a.location_address || '';
-
-                        // Build the optimistic badge with a rich, captured error in the tooltip.
-                        // 'pending' = ⏳ Saving / Retrying; 'failed' = ⚠ + actual Postgres error.
-                        // navigator.onLine drives the wording so the user knows we *will* retry
-                        // automatically when WiFi/data returns — no manual action required.
-                        let _optBadge = '';
-                        if (a._optimistic === 'pending') {
-                            const _t = navigator.onLine ? 'Saving…' : 'Waiting for connection — will sync automatically';
-                            _optBadge = ` <span class="opt-badge" title="${escapeHtml(_t)}">⏳</span>`;
-                        } else if (a._optimistic === 'failed') {
-                            const _human = a._errorMsg || 'Save failed';
-                            const _code  = a._errorCode ? ` [${a._errorCode}]` : '';
-                            const _raw   = a._errorRaw && a._errorRaw !== a._errorMsg ? `\nDetails: ${a._errorRaw}` : '';
-                            const _hint  = navigator.onLine
-                                ? '\nWill keep retrying in background.'
-                                : '\nWaiting for connection — auto-syncs when you reconnect.';
-                            _optBadge = ` <span class="opt-badge fail" title="${escapeHtml(_human + _code + _raw + _hint)}">⚠</span>`;
-                        }
-                        activityHtml += `
-                            <div class="calendar-appointment ${a.activity_type.toLowerCase()} ${(a.closing_amount || a.is_closing) ? 'closed-case' : ''} ${isPendingInvite ? 'pending-invite' : ''} ${isRejectedInvite ? 'rejected-invite' : ''} ${a._optimistic === 'pending' ? 'optimistic-pending' : ''} ${a._optimistic === 'failed' ? 'optimistic-failed' : ''}"
-                                onclick="event.stopPropagation(); ${a._optimistic === 'failed' ? `app.showSyncErrorModal(${JSON.stringify(a.id)},${JSON.stringify(a._errorMsg||'')},${JSON.stringify(a._errorCode||'')})` : a._optimistic ? '' : `app.viewActivityDetails(${a.id})`}">
-                                <div class="appointment-time">${(a.start_time || '00:00').slice(0,5)}${_optBadge}</div>
-                                ${isEvent
-                                    ? `<div class="appointment-customer">${esc(eventTitle || a.activity_title || 'Event')}</div>`
-                                    : `<div class="appointment-customer">${esc(entityName)}</div>
-                                <div class="appointment-agent">${esc(agentName)}${extraCoAgents > 0 ? ` +${extraCoAgents}` : ''}</div>`
-                                }
-                                <div class="appointment-type">${esc(a.activity_type)}</div>
-                                ${displayVenue ? `<div class="appointment-venue">${esc(displayVenue)}</div>` : ''}
-                                ${isPendingInvite ? `
-                                <div class="co-agent-invite-actions" style="display:flex;gap:4px;margin-top:6px;padding-top:6px;border-top:1px dashed rgba(0,0,0,0.1);">
-                                    <button class="btn btn-sm" style="flex:1;background:#dcfce7;color:#166534;border:none;padding:3px 6px;border-radius:4px;cursor:pointer;font-size:11px;" onclick="event.stopPropagation();(async()=>{await app.respondCoAgentInvite(${a.id},'accepted');})()"><i class="fas fa-check"></i> Accept</button>
-                                    <button class="btn btn-sm" style="flex:1;background:#fee2e2;color:#991b1b;border:none;padding:3px 6px;border-radius:4px;cursor:pointer;font-size:11px;" onclick="event.stopPropagation();(async()=>{await app.respondCoAgentInvite(${a.id},'rejected');})()"><i class="fas fa-times"></i> Reject</button>
-                                </div>
-                                ` : ''}
-                                ${isRejectedInvite ? `<div class="appointment-status-rejected" style="margin-top:6px;padding:3px 6px;background:#fee2e2;color:#991b1b;border-radius:4px;font-size:11px;text-align:center;"><i class="fas fa-times-circle"></i> You rejected this</div>` : ''}
-                                ${(a.closing_amount || a.is_closing) ? `
-                                <div class="appointment-closed">
-                                    <div class="closed-badge">✓ CLOSED</div>
-                                    ${a.solution_sold ? `<div class="closed-product">📦 ${a.solution_sold}</div>` : ''}
-                                    ${a.closing_amount ? `<div class="closed-amount">💰 RM ${parseFloat(a.closing_amount).toLocaleString('en-MY', {minimumFractionDigits:2,maximumFractionDigits:2})}</div>` : ''}
-                                </div>
-                                ` : ''}
-                            </div>
-                        `;
+                        activityHtml += _cardHtml;
                         renderedInCell++;
                     }
                 }
@@ -3335,6 +3307,23 @@
         const prospectMapWV = new Map((allProspectsWV || []).map(p => [String(p.id), p]));
         const customerMapWV = new Map((allCustomersWV || []).map(c => [String(c.id), c]));
 
+        // Pre-bucket activities ONCE by "<date> <hour>" so each of the ~91
+        // (13 hours × 7 days) grid cells is an O(1) Map.get instead of an O(n)
+        // .filter over the whole activities array (previously ~1M iterations at
+        // 10k+ activities, blocking the main thread). Keying on start_time's
+        // first two chars reproduces the original predicate exactly:
+        // `a.start_time.startsWith(hourStr)` where hourStr is the 2-digit hour.
+        // Rows with no start_time are skipped here just as the `a.start_time &&`
+        // guard skipped them before.
+        const wvActivityBuckets = new Map();
+        for (const a of activities) {
+            if (!a.activity_date || !a.start_time) continue;
+            const bk = `${a.activity_date} ${a.start_time.slice(0, 2)}`;
+            let bucket = wvActivityBuckets.get(bk);
+            if (!bucket) { bucket = []; wvActivityBuckets.set(bk, bucket); }
+            bucket.push(a);
+        }
+
         // Time async slots (8 AM to 8 PM)
         for (let hour = 8; hour <= 20; hour++) {
             html += '<div class="week-hour-row">';
@@ -3346,11 +3335,7 @@
                 const dateStr = `${dayDate.getFullYear()}-${String(dayDate.getMonth()+1).padStart(2,'0')}-${String(dayDate.getDate()).padStart(2,'0')}`;
                 const hourStr = hour.toString().padStart(2, '0');
 
-                const dayActivities = activities.filter(a =>
-                    a.activity_date === dateStr &&
-                    a.start_time &&
-                    a.start_time.startsWith(hourStr)
-                );
+                const dayActivities = wvActivityBuckets.get(`${dateStr} ${hourStr}`) || [];
 
                 html += '<div class="week-hour-cell">';
                 for (const a of dayActivities) {

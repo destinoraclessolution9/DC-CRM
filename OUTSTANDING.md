@@ -1,8 +1,8 @@
 # CRM — Outstanding / Backlog
 
-_Last updated: 2026-06-16. Pick these up whenever you have time — none are user-blocking right now._
+_Last updated: 2026-06-16 (SW-100). Pick these up whenever you have time — none are user-blocking right now._
 
-> **Critical bugs are already DONE + LIVE (SW-98).** This file is everything **not** yet done.
+> **Critical bugs (SW-98) AND the tier-2 bug fixes (SW-100) are DONE + LIVE.** This file is everything **not** yet done.
 > Legend — **Effort:** S (≤1h) · M (a few h) · L (day+). **Priority:** P1 (do next) · P2 · P3.
 
 ---
@@ -10,67 +10,67 @@ _Last updated: 2026-06-16. Pick these up whenever you have time — none are use
 ## ✅ Already fixed + live this session (for context — do NOT redo)
 - **Login outage** — Supabase project was down (NANO compute exhausted, HTTP 521); restarted from dashboard, recovered + hardened (offline-poll backoff, SW-96).
 - **5 critical bugs (SW-98):** stored-XSS sweep (forms, calendar month+week, import, pipeline) · calendar week-view client-name privacy leak · silent activity-save failure (now shows error) · leaderboard always-zero (now resolves sales via customer's agent) · AI `generateId` ReferenceError.
+- **4 tier-2 bugs (SW-100)** — each adversarially verified before deploy:
+  - **1.1 Pipeline auto-archive** — was un-awaited / non-idempotent / errors swallowed on every view-open. Now a guarded async routine: concurrency + per-session once-guard, archive-then-delete ordering (never deletes without a confirmed archive), idempotency check against `monthly_focus_archive`, all failures logged (`[pipeline-archive]`) not swallowed, off the synchronous render path.
+  - **1.2 Fude authz** — hardcoded email allowlist + inline role regex replaced with the canonical `isSystemAdmin || isMarketingManager` (exactly reproduces the old `level<=2` gate, no privilege change). Email allowlist kept only as a **logged deprecated fallback** so no admin loses access; warns `[fude-authz]` when the fallback is the sole grantor. (Bonus: now correctly resolves L13/L14 for Chinese-only role names.)
+  - **1.3 Calendar card-builder dedup** — the ~60-line month-grid card builder, duplicated and drifted across `_renderCalendarLegacy` + main `renderCalendar`, is now one shared `buildAppointmentCardHtml(a, ctx)` (richer main-path behavior — optimistic ⏳/⚠ badges — used by both). XSS escaping preserved.
+  - **1.4 Calendar week-view perf** — replaced the per-cell `.filter` over all activities (~1M iterations at 10k+ rows) with a one-pass bucket Map keyed by `date hour` → O(1) per cell. Ownership masking + escaping unchanged.
 - **React migration:** all 29 standalone views + 9 modal forms + fude dashboard + journey timeline — migrated & promoted default-on. `getAll()` crash-guard (SW-94), carousel dots (SW-95).
 
 ---
 
-## 1. Tier-2 bugs — real, but lower-urgency (recommended order)
+## 1. Tier-2 bugs — ✅ all addressed (SW-100)
 
-### 1.1 Pipeline view auto-archives on open — **P1, M** ⚠️ data integrity
-- **File:** `chunks/script-pipeline.js` (~line 701-730, `showPipelineView`).
-- **Problem:** merely OPENING the pipeline view fires an un-awaited, non-idempotent migration — loops expired focus items, creates rows in `monthly_focus_archive`, deletes from `my_potential_list`, all with `catch(e){}` swallowing errors. A partial failure (archive created but delete fails) leaves orphaned/duplicate rows; repeated/concurrent opens race each other. A read action is mutating data.
-- **Fix:** move archiving out of the render path into an explicit, awaited routine (scheduled job or explicit user action). Confirm the archive row exists before deleting the source. Replace `catch(e){}` with a logged warning + counter.
-- **Why P1:** the only leftover with real data-corruption risk.
+- **1.1–1.4** — DONE + LIVE (see above).
+- **1.5 Boss-report React fallback** — **VERIFIED NON-BUG, no change needed.** The mount at `script-boss-report.js` is gated by `_reactBossReportOn()`, which returns true ONLY when `typeof window.CRMReact.mountBossReport === 'function'` — so a mount-before-ready race is impossible (a retry/poll would be dead code) and matches the codebase-wide convention (~35 chunk sites). The legacy fallback is reachable two clean ways (flag off → full scaffold builds; mount throws → caught, falls through to an unconditional `container.innerHTML` rebuild) and the React view is a 1:1 id-for-id reproduction with identical `app.*` wiring. Nothing to fix.
 
-### 1.2 Fude admin via hardcoded email allowlist — **P2, M** (authz drift)
-- **File:** `chunks/script-fude.js` (~line 36-40).
-- **Problem:** admin power in the fude view is partly governed by three literal emails baked into shipped client code (`mianformula@gmail.com`, `destinyoracles@gmail.com`, `shilynateh7689@gmail.com`) + an inline non-canonical role-regex, divorced from the numeric role system. Stale on email change / departures; admin data reads gated only client-side, not RLS.
-- **Fix:** replace with the canonical `_getUserLevel` helper + `isManagement` predicate; treat special elevation as a real role/level in the DB; ensure RLS covers admin data so client gating isn't load-bearing.
-
-### 1.3 Calendar appointment-card builder duplicated — **P2, M** (drift)
-- **File:** `chunks/script-calendar.js` — `_renderCalendarLegacy` (~1742-1818) vs main `renderCalendar` (~2205-2321).
-- **Problem:** ~60-line per-cell card builder exists twice and has already drifted (legacy lacked optimistic-badge handling + escaping). Every card change must be made twice. (Note: the XSS escaping was applied to BOTH paths in SW-98, but the duplication remains.)
-- **Fix:** extract one `buildAppointmentCardHtml(activity, ctx)` helper called by both paths.
-
-### 1.4 Calendar week-view O(n) per-cell filter — **P3, M** (perf, only at scale)
-- **File:** `chunks/script-calendar.js` (~3349-3353).
-- **Problem:** week view re-filters the entire activities array for each of 91 hour-cells (~1M iterations at 10k+ activities), blocking the main thread.
-- **Fix:** pre-bucket activities by `${dateStr} ${hour}` once, then O(1) lookup per cell.
-
-### 1.5 Boss Report React-island fallback — **P3, S** (suspected, unverified)
-- **File:** `chunks/script-boss-report.js` (~154-164).
-- **Problem (suspected):** if the React island fails to mount (CRMReact not loaded), the legacy fallback may not render correctly.
-- **Fix:** validate the legacy fallback renders, or queue the mount if CRMReact isn't ready yet.
+**Tiny optional follow-ups surfaced during the fixes (all low/no urgency):**
+- **1.1+** add a server-side `UNIQUE(user_id, month, prospect_id)` constraint on `monthly_focus_archive` for cross-tab race-proofing (additive DDL, pre-authorized). The client in-flight guard + DB idempotency check already cover correctness.
+- **1.2+** assign the correct canonical role level (L1/L2) to the 3 legacy-allowlist admins in the DB; once their roles are right, the `[fude-authz]` warn stops firing and the deprecated email fallback can be deleted. Watch consoles for that warn to catch any *other* stale-role admins first.
+- **1.3+ / 1.4+ latent (pre-existing, NOT introduced):** `a.solution_sold` (calendar closed-product div) and the boss-report run-`<option>` labels are interpolated without `esc()`. Low risk (admin-gated / controlled data) — fold into a future escaping pass, not urgent.
 
 ---
 
-## 2. React migration — last 2 render paths (everything else is done)
+## 2. React migration — last 2 render paths (plans now READY)
 
-### 2.1 Knowledge kb-slot editors — **P2, M**
-- **What:** full-capture, daily-notes, and detail editors (`chunks/script-knowledge.js`) still render via vanilla `kb-slot.innerHTML` (the quick-capture *modal* IS migrated, SW-90).
-- **Caveat:** `kb-slot` is shared with the already-React Knowledge dashboard/all-entries islands — route ALL kb-slot renders through one passthrough without clobbering the dashboard island, or componentize properly.
-- **Note:** these have autosave (debounce) + link-search wiring — preserve it.
+> Both are **safe to implement** per the deep-dive. Both touch `src/react/main.jsx` (additive exports only) so they need a **vite react rebuild + `?v=` bump**, and they must ship **opt-in (default-off) → authenticated-verify → promote default-on** (the established migration protocol). Bundle them into ONE react-inclusive deploy.
 
-### 2.2 Journey aux widgets — **P3, S/M**
-- **What:** `showAgentJourneyDashboard` + `showAgentJourneyLoad` (`chunks/script-journey.js` ~1073/1124) — small read-only dashboard widgets, still vanilla. (The journey *timeline* is migrated + promoted.)
-- **Note:** two widgets can be on-screen at once → needs separate React roots (or a keyed map), not the single modal/journey root.
+### 2.1 Knowledge kb-slot editors — **P2, M** (full-capture / daily-notes / detail)
+- **Key fact:** `kb-slot` is NOT a React root. The already-React dashboard/all-entries islands mount onto their OWN child nodes (`#kb-dash-react-root`, `#kb-all-react-root`) that the chunk inserts into `kb-slot`. So the "clobber the dashboard island" hazard only arises if you mount editors onto `kb-slot` itself or reuse the dashboard's node/root — **avoid that.**
+- **Plan (design a — dedicated root):**
+  1. `src/react/main.jsx`: add `let _kbEditorRoot` + `mountKbEditor(container,{html,onReady})` (clone of `mountJourneyContent`: unmount-prior → `createRoot` → `flushSync(render(<ModalContentIsland html onReady/>))`) + `unmountKbEditor()`. Reuse the existing `ModalContentIsland` (no new view). Register both on `window.CRMReact`.
+  2. `chunks/script-knowledge.js`: add `_reactKbEditorsOn()` gate (clone `_reactKbModalsOn`, own kill-switch `?react_kbeditors=0` / `crm_react_kbeditors='0'` / `__REACT_KBEDITORS===false` + global, require `mountKbEditor` is a fn) + a `_kbMountEditor(slot, html, onReady)` helper that mounts into a fresh `#kb-editor-react-root` child (try/catch → legacy `slot.innerHTML=html` fallback). Route the **3 editors** through it; **leave dashboard + all-entries unchanged.**
+  3. **Preserve wiring:** detail editor is all inline `oninput`/`onchange` + inline `debounceCall` link-search → survives `dangerouslySetInnerHTML` with no `onReady`. **Capture** (Ctrl+Enter `keydown`) and **daily-notes** (`input` autosave + `await _kbLoadDaily()`) use `addEventListener` → MUST be re-bound inside `onReady` or they silently break.
+- **Verify (behind `?react_kbeditors=1`):** capture Ctrl+Enter save; detail autosave status flip + type/convert/link add+remove; daily date-nav + load + autosave + promote-selection; repeated Dashboard↔All↔editor switches with NO double-mount/detached-root console warnings. Then drop the flag (promote).
+- **Files:** `src/react/main.jsx`, `chunks/script-knowledge.js`, `react-dist/react-island.js` (rebuild) + `index.html` `?v=` bump. **Risk:** low-med.
+
+### 2.2 Journey aux widgets — **P3, S** (`showAgentJourneyDashboard` / `showAgentJourneyLoad`)
+- **Key fact:** these are small **read-only** widgets. `showAgentJourneyDashboard` has ONE caller (Journey view → `#content-viewport`). **`showAgentJourneyLoad` has NO live caller — it is effectively dead code** (parity-only; can't be UI-verified without adding a caller). The "two on-screen at once" caveat is forward-looking, not a current bug.
+- **Plan:** use the **multi-root** `_mountSimple`/`_roots` WeakMap (keyed by container) — NOT the singleton `_journeyContentRoot` (that's the timeline's; reusing it would cause the very collision warned about). Add `mountJourneyAux(container,{html}) = _mountSimple(container, <ModalContentIsland html/>)` + `unmountJourneyAux = _unmountSimple` to `main.jsx`; add `_reactJourneyAuxOn()` + `_rxRenderAux(container, html)` to `chunks/script-journey.js`; swap the ~5 `innerHTML` sites in the two widgets. Inline `onclick="app.navigateTo(...)"` survives `dangerouslySetInnerHTML`; no `onReady`/`flushSync` needed.
+- **Files:** `src/react/main.jsx`, `chunks/script-journey.js`, react + chunk rebuild. **Risk:** low. **(Could legitimately be DEFERRED — no live correctness bug, pure migration-uniformity.)**
 
 ---
 
 ## 3. Architecture — the "D" goal (god-object retirement). Biggest, lowest-urgency.
 
-### 3.1 Delete legacy fallback renderers — **P2, M-L** (highest-value slice of D)
-- **What:** the migration *added* React on top but kept the old render code as fallback (e.g., `buildCard`, `_renderCalendarLegacy`, the passthrough-built HTML). The codebase is currently *larger*, not smaller. Removing the now-proven legacy fallbacks is what actually shrinks the god-object / chunks and delivers the payoff that justified the migration.
-- **Risk:** verify each React path is solid before deleting its fallback.
+### 3.1 Delete legacy fallback renderers — **P2, L** (multi-session; the real shrink)
+- **Reachability model (verified):** each migrated view does `if (_reactXOn()){ mount; return } ` then a self-contained legacy block. `_reactXOn()` is false only on the 3 kill-switches (`__REACT_X===false` / `?react=0` / `crm_react_off='1'`), enforced at **bundle load** in `index.html` — so in normal default-on operation the legacy blocks are dead, reachable only via the debug kill-switch or a caught mount-throw.
+- **⚠️ PREREQUISITE (do FIRST, or rollback breaks):** the kill-switch is the documented instant-rollback path. If you delete legacy WITHOUT reworking it, turning React off → blank screen for every migrated view (no legacy to fall to). Rework each Class-A gate to `if(_reactXOn()){ try{mount;return}catch{ render minimal inline error card; return } }` and drop the per-view `__REACT_X`/`?react=0`/`crm_react_off` branch (or route it to the same error card). Verify `?react=0` no longer blanks.
+- **SAFE to delete (Class-A — React owns render via props, legacy is a standalone dead renderer), tiered, one deploy + live-verify each:**
+  1. `security` (`script-admin.js`, placeholder — safest, do first alone)
+  2. `monthly_promotion` (`script-marketing.js`), `org_chart` (`script-org.js`), `ranking` + `noticeboard` (`script-performance.js`)
+  3. `lead_forms`/`surveys`/`contracts` (`script-forms.js`), `purchases_history` (`script-prospects.js`), `custom_fields`+`milestones` (`script-features2.js`), `booking_settings` (`script-cps.js`), `knowledge_dashboard`+`knowledge_all_entries` (`script-knowledge.js`)
+  4. `cases` (`script-cases.js`) — delete the two legacy else-branches; then delete `buildCard` ONLY after grep-confirming no other caller; KEEP `cardModel`+`applySharedFilters`
+  5. `agents` (`script-prospects.js`, largest Class-A block — deploy alone)
+- **❌ DO NOT delete (reachable / shared / not default-on):** `customers` + `prospects` legacy — REACHABLE in normal use via unsupported-filter fall-through (Regular/deficiency/min-events/purchase-status/house-audit/Agent-Eligible) + prospects card view, and entangled with `__USE_BFF_CUSTOMERS`/`__SERVER_TABLES`. Class-B scaffold/passthrough legacy (calendar/pipeline/reports/stock_take/egg/formula/marketing_automation/referrals/home/mobile/boss_report/protection + marketing_lists promotions/special_programs) — shares by-id population logic. `journey` (opt-in, not default-on). `ai`/`search`/`fude`/`modal-content` (dangerouslySetInnerHTML passthrough — the "legacy" IS the live HTML).
+- **Risk:** MEDIUM (the prerequisite, and misclassification). Mitigate: tiered deploys, `node ci/regression.js` gate, live `?react=0` smoke-test after each batch. ~1.5–2.5k LOC removable.
 
 ### 3.2 Full JSX componentization of the passthrough forms — **P3, L (multi-week)**
-- **What:** cps/apu/destiny/survey forms, fude view, journey, the 9 modals currently render through React via `dangerouslySetInnerHTML` (the chunk still builds the HTML — a thin wrapper, not real components).
-- **Recommendation:** do this **only when you're already changing a given form** ("componentize when touched"). For the signature/print legal forms specifically (cps/apu/destiny), the passthrough is genuinely fine to leave — full JSX rewrite is high-effort/low-reward.
-- **Caveat:** `dangerouslySetInnerHTML` bypasses React's auto-escaping, so the manual-escaping XSS surface persists on those forms — worth a dedicated escaping pass (cheaper than full componentization).
+- Unchanged recommendation: do this **only when you're already changing a given form** ("componentize when touched"). The signature/print legal forms (cps/apu/destiny) are fine left as passthrough. `dangerouslySetInnerHTML` keeps the manual-escaping XSS surface alive on those — a dedicated escaping pass is cheaper than full componentization.
 
-### 3.3 `getAll()` root cause — **P3, M** (masked, not pinned)
-- **What:** the `_getAllImpl` "Property description must be an object: undefined" crash is **masked** by the SW-94 defensive guard (getAll degrades to cache/[] instead of throwing) — so it's not user-facing. The exact construct was never pinned (both bundles statically had only valid `Object.defineProperty` calls → likely a misattributed async stack frame).
-- **Fix:** reproduce under a sourcemapped debug session to find the real throwing construct, then fix at source so the guard becomes belt-and-suspenders.
+### 3.3 `getAll()` "Property description must be an object" — **✅ ROOT CAUSE PINNED** (was: masked/unknown)
+- **Finding (verified read-only):** the throw is **NOT in `data.js`** — the entire `_getAllImpl` read path has zero `Object.defineProperty`/`Object.create(proto,desc)` calls, and `data.min.js`'s only `defineProperty` is the esbuild keepNames helper with a *literal* descriptor (can't throw). The real source is esbuild **es2020 lowering of React Query v5 private class fields** inside `react-island.js`, which emitted `Object.defineProperty(obj,key,null)` in the `QueryObserver` ctor — **already fixed** via `vite.config.mjs target:'es2022'`. The legacy "_getAllImpl crash" was a **misattributed async stack frame** (V8 stitched the island's sync throw onto the nearest keepNames-wrapped frame in the awaiting data path).
+- **Remaining (cheap, low-risk) cleanup:** (a) optional sourcemapped repro to confirm; (b) add a CI canary in `ci/regression.js` that fails the build if `react-dist/react-island.js` matches `/defineProperty\([^)]*,\s*(null|void 0|undefined)\)/`; (c) **keep** the SW-94 `getAll().catch` guard but demote its comment to "defense-in-depth; root cause = esbuild es2020 private-field lowering, fixed via vite es2022"; (d) optional: set `target:'es2022'` in `build.mjs` too. **No live read-path change needed.**
 
 ---
 
@@ -78,7 +78,7 @@ _Last updated: 2026-06-16. Pick these up whenever you have time — none are use
 
 ### 4.1 Upgrade Supabase compute Nano → Micro/Small — **P1 (operational)**
 - **Where:** Supabase dashboard → project `remuwhxvzkzjtgbzqjaa` → Settings → Compute and Disk.
-- **Why:** NANO compute can't sustain the reconnect load — it's what caused the 2026-06-16 outage (a restart recovers it but won't durably hold). This is the real fix to prevent repeat 521 outages. **Until then, deploys should be spaced/batched** (each deploy forces a full-fleet client reload that spikes the small DB).
+- **Why:** NANO can't sustain the reconnect load — it caused the 2026-06-16 outage (a restart recovers it but won't durably hold). The real fix to prevent repeat 521 outages. **Until then, deploys are spaced/batched** (each forces a full-fleet client reload that spikes the small DB).
 
 ---
 

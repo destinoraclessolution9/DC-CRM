@@ -27,6 +27,12 @@
     let _currentUser = _state.cu;
     window._syncPipelineUser = () => { _currentUser = _state.cu; };
     let _draggedId = null; // shared between handleDragStart and handleDrop
+    // Guards for the expired-focus archive migration (see _runPipelineArchive).
+    // _pipelineArchiveInFlight: prevents concurrent runs racing into double-archive.
+    // _pipelineArchiveDone: per-session set of "userId|month|prospectId" keys already
+    //   handled this session, so repeated view-opens don't re-process the same items.
+    let _pipelineArchiveInFlight = false;
+    const _pipelineArchiveDone = new Set();
 
 // ========== PHASE 6: PIPELINE & SALES FORCE MODULE ==========
 
@@ -544,6 +550,86 @@ const runHuiJiMigration = async () => {
     } catch (_) { /* offline fallback */ }
 };
 
+// Archive expired monthly-focus items SAFELY. Runs off the render path.
+// Guarantees:
+//  - no concurrent / redundant runs (module-level in-flight + per-session done-set)
+//  - ordered per item: confirm/create archive row FIRST; only delete source if archived
+//  - idempotent: skips items already present in monthly_focus_archive (or already done this session)
+//  - never swallows silently: every failure is console.warn'd and counted
+const _runPipelineArchive = async (expiredItems, userId, allActivities) => {
+    if (!expiredItems || expiredItems.length === 0) return;
+    if (_pipelineArchiveInFlight) return; // another run is already processing
+    _pipelineArchiveInFlight = true;
+    let archived = 0, failures = 0;
+    try {
+        for (const item of expiredItems) {
+            const doneKey = `${userId}|${item.focus_month}|${item.prospect_id}`;
+            if (_pipelineArchiveDone.has(doneKey)) continue; // already handled this session
+            try {
+                const ep = await AppDataStore.getById('prospects', item.prospect_id);
+                if (!ep) {
+                    // Source prospect is gone — nothing to archive; safe to drop the dangling focus row.
+                    await AppDataStore.delete('my_potential_list', item.id);
+                    _pipelineArchiveDone.add(doneKey);
+                    continue;
+                }
+                // Idempotency: do not duplicate an existing archive row for this user+month+prospect.
+                let existing = [];
+                try {
+                    existing = await AppDataStore.query('monthly_focus_archive', { user_id: userId, month: item.focus_month, prospect_id: item.prospect_id });
+                } catch (e) {
+                    // Could not confirm idempotency — abort this item rather than risk a duplicate or a
+                    // delete-without-archive. Leave the source row intact for a later run.
+                    console.warn('[pipeline-archive] idempotency check failed; skipping item', item.id, e);
+                    failures++;
+                    continue;
+                }
+                let archiveConfirmed = existing.length > 0;
+                if (!archiveConfirmed) {
+                    const eActs = (allActivities || []).filter(a => a.prospect_id === ep.id);
+                    const eEntry = await calcPipelineEntry(ep, eActs);
+                    const eAmt = await getPipelineAmount(ep, eEntry.category);
+                    try {
+                        await AppDataStore.create('monthly_focus_archive', {
+                            user_id: userId, month: item.focus_month, prospect_id: item.prospect_id,
+                            priority_order: item.priority_order,
+                            target_product: item.target_product || eEntry.latestOppPotential || eEntry.category?.name || '',
+                            amount: eAmt, probability: String(eEntry.probability || 0),
+                            action_needed: eEntry.latestNextAction || ''
+                        });
+                        archiveConfirmed = true;
+                    } catch (e) {
+                        // Archive create failed — DO NOT delete the source row. Skip; retry next run.
+                        console.warn('[pipeline-archive] archive create failed; keeping source row', item.id, e);
+                        failures++;
+                        continue;
+                    }
+                }
+                // Only reach here when the archive row is confirmed to exist.
+                if (archiveConfirmed) {
+                    try {
+                        await AppDataStore.delete('my_potential_list', item.id);
+                        _pipelineArchiveDone.add(doneKey);
+                        archived++;
+                    } catch (e) {
+                        // Archive exists but source delete failed — idempotency check above will
+                        // prevent a duplicate archive on the next run, so just log and retry later.
+                        console.warn('[pipeline-archive] source delete failed (archive already exists)', item.id, e);
+                        failures++;
+                    }
+                }
+            } catch (e) {
+                console.warn('[pipeline-archive] unexpected error processing item', item && item.id, e);
+                failures++;
+            }
+        }
+        if (archived > 0) UI.toast.info(`${archived} expired focus item(s) archived from last month.`);
+        if (failures > 0) console.warn(`[pipeline-archive] completed with ${failures} failure(s); ${archived} archived.`);
+    } finally {
+        _pipelineArchiveInFlight = false;
+    }
+};
+
 const getNoteCount = async (prospectId) => {
     const notes = await AppDataStore.query('notes', { prospect_id: prospectId });
     const activities = await AppDataStore.query('activities', { prospect_id: prospectId });
@@ -734,34 +820,13 @@ const showPipelineView = async (container) => {
                 .then(() => { item.focus_month = _focusCurrentMonth; }).catch(() => {})
         ));
     }
-    // Archive expired items — fire-and-forget
+    // Expired items: hide them from THIS render immediately (UX), then archive them
+    // OFF the render path via the guarded, awaited, idempotent _runPipelineArchive.
     const _expiredFocusItems = _allMyFocusItems.filter(i => i.focus_month && i.focus_month < _focusCurrentMonth);
     if (_expiredFocusItems.length > 0) {
-        (async () => {
-            let archived = 0;
-            for (const item of _expiredFocusItems) {
-                try {
-                    const ep = await AppDataStore.getById('prospects', item.prospect_id);
-                    if (!ep) { await AppDataStore.delete('my_potential_list', item.id); continue; }
-                    const eActs = (allActivities || []).filter(a => a.prospect_id === ep.id);
-                    const eEntry = await calcPipelineEntry(ep, eActs);
-                    const eAmt = await getPipelineAmount(ep, eEntry.category);
-                    const existing = await AppDataStore.query('monthly_focus_archive', { user_id: userId, month: item.focus_month, prospect_id: item.prospect_id });
-                    if (existing.length === 0) {
-                        await AppDataStore.create('monthly_focus_archive', {
-                            user_id: userId, month: item.focus_month, prospect_id: item.prospect_id,
-                            priority_order: item.priority_order,
-                            target_product: item.target_product || eEntry.latestOppPotential || eEntry.category?.name || '',
-                            amount: eAmt, probability: String(eEntry.probability || 0),
-                            action_needed: eEntry.latestNextAction || ''
-                        });
-                    }
-                    await AppDataStore.delete('my_potential_list', item.id);
-                    archived++;
-                } catch(e) {}
-            }
-            if (archived > 0) UI.toast.info(`${archived} expired focus item(s) archived from last month.`);
-        })();
+        // Do not block render: fire the guarded routine and let it await internally.
+        _runPipelineArchive([..._expiredFocusItems], userId, allActivities)
+            .catch(e => console.warn('[pipeline-archive] run failed', e));
         _allMyFocusItems = _allMyFocusItems.filter(i => !_expiredFocusItems.includes(i));
     }
 
