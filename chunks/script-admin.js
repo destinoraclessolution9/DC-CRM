@@ -158,8 +158,12 @@
     // ========== PHASE 20: SYSTEM ADMINISTRATION & DEPLOYMENT ==========
     
     const showAdminDashboard = async () => {
-        const _adminCheckUser = await Auth.getCurrentUser();
-        if (!_adminCheckUser || !isSystemAdmin(_adminCheckUser)) {
+        // Gate on the app PROFILE user (_state.cu), not Auth.getCurrentUser():
+        // the latter returns the raw Supabase auth user whose .role is the
+        // Postgres claim "authenticated" — never "Level 1 …" — so a real Super
+        // Admin was being denied. isSystemAdmin() defaults to _state.cu, matching
+        // every other Super-Admin-gated view (boss-report, egg, formula).
+        if (!isSystemAdmin()) {
             if (window.UI) window.UI.toast.error("Access Denied. Super Admins only.");
             return;
         }
