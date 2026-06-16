@@ -1818,12 +1818,12 @@
                         onclick="event.stopPropagation(); app.viewActivityDetails(${a.id})">
                         <div class="appointment-time">${(a.start_time || '00:00').slice(0,5)}</div>
                         ${isEvent
-                            ? `<div class="appointment-customer">${eventTitle || a.activity_title || 'Event'}</div>`
-                            : `<div class="appointment-customer">${entityName}</div>
-                        <div class="appointment-agent">${agentName}${extraCoAgents > 0 ? ` +${extraCoAgents}` : ''}</div>`
+                            ? `<div class="appointment-customer">${esc(eventTitle || a.activity_title || 'Event')}</div>`
+                            : `<div class="appointment-customer">${esc(entityName)}</div>
+                        <div class="appointment-agent">${esc(agentName)}${extraCoAgents > 0 ? ` +${extraCoAgents}` : ''}</div>`
                         }
-                        <div class="appointment-type">${a.activity_type}</div>
-                        ${displayVenue ? `<div class="appointment-venue">${displayVenue}</div>` : ''}
+                        <div class="appointment-type">${esc(a.activity_type)}</div>
+                        ${displayVenue ? `<div class="appointment-venue">${esc(displayVenue)}</div>` : ''}
                         ${isPendingInvite ? `
                         <div class="co-agent-invite-actions" style="display:flex;gap:4px;margin-top:6px;padding-top:6px;border-top:1px dashed rgba(0,0,0,0.1);">
                             <button class="btn btn-sm" style="flex:1;background:#dcfce7;color:#166534;border:none;padding:3px 6px;border-radius:4px;cursor:pointer;font-size:11px;" onclick="event.stopPropagation();(async()=>{await app.respondCoAgentInvite(${a.id},'accepted');})()"><i class="fas fa-check"></i> Accept</button>
@@ -2314,12 +2314,12 @@
                                 onclick="event.stopPropagation(); ${a._optimistic === 'failed' ? `app.showSyncErrorModal(${JSON.stringify(a.id)},${JSON.stringify(a._errorMsg||'')},${JSON.stringify(a._errorCode||'')})` : a._optimistic ? '' : `app.viewActivityDetails(${a.id})`}">
                                 <div class="appointment-time">${(a.start_time || '00:00').slice(0,5)}${_optBadge}</div>
                                 ${isEvent
-                                    ? `<div class="appointment-customer">${eventTitle || a.activity_title || 'Event'}</div>`
-                                    : `<div class="appointment-customer">${entityName}</div>
-                                <div class="appointment-agent">${agentName}${extraCoAgents > 0 ? ` +${extraCoAgents}` : ''}</div>`
+                                    ? `<div class="appointment-customer">${esc(eventTitle || a.activity_title || 'Event')}</div>`
+                                    : `<div class="appointment-customer">${esc(entityName)}</div>
+                                <div class="appointment-agent">${esc(agentName)}${extraCoAgents > 0 ? ` +${extraCoAgents}` : ''}</div>`
                                 }
-                                <div class="appointment-type">${a.activity_type}</div>
-                                ${displayVenue ? `<div class="appointment-venue">${displayVenue}</div>` : ''}
+                                <div class="appointment-type">${esc(a.activity_type)}</div>
+                                ${displayVenue ? `<div class="appointment-venue">${esc(displayVenue)}</div>` : ''}
                                 ${isPendingInvite ? `
                                 <div class="co-agent-invite-actions" style="display:flex;gap:4px;margin-top:6px;padding-top:6px;border-top:1px dashed rgba(0,0,0,0.1);">
                                     <button class="btn btn-sm" style="flex:1;background:#dcfce7;color:#166534;border:none;padding:3px 6px;border-radius:4px;cursor:pointer;font-size:11px;" onclick="event.stopPropagation();(async()=>{await app.respondCoAgentInvite(${a.id},'accepted');})()"><i class="fas fa-check"></i> Accept</button>
@@ -3356,11 +3356,20 @@
                 for (const a of dayActivities) {
                     const prospect = a.prospect_id ? prospectMapWV.get(String(a.prospect_id)) : null;
                     const customer = a.customer_id ? customerMapWV.get(String(a.customer_id)) : null;
-                    const name = prospect?.full_name || customer?.full_name || 'Activity';
+                    // Client names are private to the activity owner/co-agents (match the
+                    // month-grid _tileOwned gate) — otherwise the week view leaked every
+                    // agent's prospect/customer names. Also escape to prevent stored XSS.
+                    const _wvViewerId = _state.cu?.id;
+                    const _wvOwned = String(a.lead_agent_id) === String(_wvViewerId)
+                        || (Array.isArray(a.co_agents) && a.co_agents.some(ca => String(ca.id) === String(_wvViewerId)))
+                        || isSystemAdmin(_state.cu);
+                    const name = _wvOwned
+                        ? (prospect?.full_name || customer?.full_name || a.activity_title || 'Activity')
+                        : (a.activity_title || a.activity_type || 'Activity');
 
                     html += `
-    <div class="week-activity ${a.activity_type.toLowerCase()}" onclick="app.viewActivityDetails(${a.id})">
-        ${a.start_time} ${name}
+    <div class="week-activity ${esc(a.activity_type.toLowerCase())}" onclick="app.viewActivityDetails(${a.id})">
+        ${esc(a.start_time)} ${esc(name)}
     </div>
     `;
                 }

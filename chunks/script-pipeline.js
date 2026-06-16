@@ -939,13 +939,13 @@ ${_isArchiveView
         if (!pipeline.qualified && (p.close_probability > 0 || p.potential_level)) {
             const potentialProb = p.close_probability > 0
                 ? p.close_probability
-                : (p.potential_level === 'High' ? 70 : p.potential_level === 'Medium' ? 40 : 20);
+                : (String(p.potential_level) === 'High' ? 70 : String(p.potential_level) === 'Medium' ? 40 : 20);
             pipeline.qualified = true;
             pipeline.probability = potentialProb;
             pipeline.fromPotential = true;
             pipeline.potentialLevel = p.potential_level;
             if (!pipeline.action || pipeline.action.startsWith('Complete prerequisite') || pipeline.action.startsWith('Book CPS')) {
-                pipeline.action = `Potential: <strong>${p.potential_level || 'Set'}</strong> – follow up to advance to close`;
+                pipeline.action = `Potential: <strong>${esc(p.potential_level || 'Set')}</strong> – follow up to advance to close`;
             }
         }
         return { ...p, _pipeline: pipeline };

@@ -14,6 +14,11 @@
  */
 (() => {
     const generateModelId = window._crmUtils.generateModelId;
+    // Missing cross-chunk alias (post-split): generateId() is called in
+    // predictLeadScore/calculateChurnRisk/generateSalesForecast/generateAgentInsights
+    // (lines ~650/840/1131/1318) but was never aliased here → ReferenceError on
+    // every AI prediction/forecast write. _crmUtils.generateId is the canonical one.
+    const generateId = (...a) => window._crmUtils.generateId(...a);
     let _aiService = null;
     let _currentModelVersion = '1.0.0';
 

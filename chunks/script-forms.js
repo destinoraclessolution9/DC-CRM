@@ -176,7 +176,7 @@
                             const data = s.data || {};
                             const name = data['Full Name'] || data.name || 'Unknown';
                             return `<tr style="border-bottom:1px solid var(--gray-100);">
-                                <td style="padding:10px;">${name}</td>
+                                <td style="padding:10px;">${esc(name)}</td>
                                 <td style="padding:10px; color:var(--gray-500); font-size:13px;">${s.created_at ? new Date(s.created_at).toLocaleDateString() : '—'}</td>
                                 <td style="padding:10px;"><span style="padding:2px 8px; border-radius:10px; font-size:12px; background:${s.status==='processed'?'#d1fae5':'#fef3c7'}; color:${s.status==='processed'?'#065f46':'#92400e'};">${s.status || 'new'}</span></td>
                                 <td style="padding:10px;">${s.status !== 'processed' ? `<button class="btn secondary" style="font-size:12px; padding:4px 10px;" onclick="app.processFormSubmission(${s.id})">Create Prospect</button>` : '<span style="color:var(--gray-400); font-size:12px;">Done</span>'}</td>

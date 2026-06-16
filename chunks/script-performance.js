@@ -74,12 +74,18 @@ const showRankingPerformanceView = async (container) => {
     // records). With 100 agents and 5k activities that's 500k comparisons
     // inside the render path, and each await-in-loop forces a microtask
     // yield even when the cache is hot.
-    const [users, allActivities, allPurchases, allProspects] = await Promise.all([
+    const [users, allActivities, allPurchases, allProspects, allCustomers] = await Promise.all([
         AppDataStore.getAll('users'),
         AppDataStore.getAll('activities'),
         AppDataStore.getAll('purchases'),
         AppDataStore.getAll('prospects'),
+        AppDataStore.getAll('customers'),
     ]);
+    // Purchases have NO agent_id column — sales are attributed via the customer's
+    // responsible_agent_id (same resolution the KPI reporting dashboard uses).
+    // Without this map every purchase was skipped → leaderboard sales/closing/score
+    // were all zero.
+    const _custAgentMap = new Map((allCustomers || []).map(c => [String(c.id), c.responsible_agent_id]));
     const agents = users.filter(u => u.role && (u.role.includes('Level') || u.role === 'agent' || u.role === 'consultant'));
     const now = new Date();
     const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
@@ -98,9 +104,12 @@ const showRankingPerformanceView = async (container) => {
     // Bucket purchases for the current month by agent_id
     const purchasesByAgent = new Map();
     for (const p of allPurchases) {
-        if (!p.agent_id) continue;
+        // Resolve the owning agent: prefer an explicit agent_id if present, else
+        // fall back to the purchase's customer's responsible_agent_id.
+        const agentId = p.agent_id || (p.customer_id != null ? _custAgentMap.get(String(p.customer_id)) : null);
+        if (!agentId) continue;
         if ((p.date || p.purchase_date) < monthStart || (p.date || p.purchase_date) > monthEnd) continue;
-        const k = String(p.agent_id);
+        const k = String(agentId);
         let bucket = purchasesByAgent.get(k);
         if (!bucket) { bucket = []; purchasesByAgent.set(k, bucket); }
         bucket.push(p);

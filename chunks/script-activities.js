@@ -4473,6 +4473,13 @@
             if (_mcVp && _mcVp.classList.contains('mcal-active'))
                 (window.app.showMobileCalendarView || (() => Promise.resolve()))(_mcVp).catch(() => {});
         }
+        } catch (err) {
+            // Previously this try had ONLY a finally — a deep DB/network/upload error
+            // threw past it as an UNHANDLED rejection: the Save buttons re-enabled but
+            // NO error was shown, so the user believed the activity saved when it had
+            // not (silent data loss). Surface it so they know to retry.
+            console.error('[saveActivity] save failed:', err);
+            try { UI.toast.error('Could not save activity: ' + ((err && err.message) || 'unexpected error — please retry')); } catch (_) {}
         } finally {
             _releaseSaveGuard();
         }
