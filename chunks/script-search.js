@@ -39,18 +39,18 @@
     let _totalResults = 0;
     let _currentSelectedPerson = null;
 
-    // React-island flag — OPT-IN during verification (kill-switch: window.__REACT_SEARCH
-    // =false | ?react_search=0 | localStorage crm_react_search='0'; plus global
-    // ?react=0 / crm_react_off='1'). Flip the OPT-IN test to a plain `return true`
-    // after live parity check to promote default-on.
+    // React-island flag — DEFAULT-ON (parity-verified live, SW-87). Kill-switch:
+    // window.__REACT_SEARCH=false | ?react_search=0 | localStorage crm_react_search
+    // ='0' (plus the global ?react=0 / crm_react_off='1').
     const _reactSearchOn = () => {
         try {
             if (/[?&]react=0/.test(location.search)) return false;
             if (localStorage.getItem('crm_react_off') === '1') return false;
             if (!(window.CRMReact && typeof window.CRMReact.mountSearchPanel === 'function')) return false;
-            return window.__REACT_SEARCH === true
-                || /[?&]react_search=1/.test(location.search)
-                || localStorage.getItem('crm_react_search') === '1';
+            if (window.__REACT_SEARCH === false) return false;
+            if (/[?&]react_search=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_search') === '0') return false;
+            return true;
         } catch (_) { return false; }
     };
 
