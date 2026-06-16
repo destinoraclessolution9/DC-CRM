@@ -25,18 +25,20 @@
     let _currentUser = _state.cu;
     window._syncFudeUser = () => { _currentUser = _state.cu; };
 
-    // React modal-content passthrough — OPT-IN during verification (kill-switch:
+    // React modal-content passthrough — DEFAULT-ON (parity-verified live, SW-89:
+    // all 8 fude modals render through the React root with signature pads bound,
+    // bagua/Likert/referral cells + year-label listener intact). Kill-switch:
     // window.__REACT_FUDEMODALS=false | ?react_fudemodals=0 | crm_react_fudemodals
-    // ='0'; plus global ?react=0 / crm_react_off='1'). Flip the OPT-IN test to a
-    // plain `return true` after live parity check to promote default-on.
+    // ='0' (plus the global ?react=0 / crm_react_off='1').
     const _reactFudeModalsOn = () => {
         try {
             if (/[?&]react=0/.test(location.search)) return false;
             if (localStorage.getItem('crm_react_off') === '1') return false;
             if (!(window.CRMReact && typeof window.CRMReact.mountModalContent === 'function')) return false;
-            return window.__REACT_FUDEMODALS === true
-                || /[?&]react_fudemodals=1/.test(location.search)
-                || localStorage.getItem('crm_react_fudemodals') === '1';
+            if (window.__REACT_FUDEMODALS === false) return false;
+            if (/[?&]react_fudemodals=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_fudemodals') === '0') return false;
+            return true;
         } catch (_) { return false; }
     };
     // Route a modal BODY through the generic React passthrough island (chunk keeps
