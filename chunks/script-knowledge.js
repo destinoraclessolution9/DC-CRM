@@ -678,8 +678,38 @@
     };
 
     // Quick-capture modal — wired to Ctrl+Shift+N + the cmdk palette
+    // React modal-content passthrough — DEFAULT-ON (generic island proven across
+    // the 8 fude modals incl. signature pads/Likert; this is a trivial 2-field
+    // modal). Kill-switch: window.__REACT_KBMODALS=false | ?react_kbmodals=0 |
+    // crm_react_kbmodals='0' (plus global ?react=0 / crm_react_off='1').
+    const _reactKbModalsOn = () => {
+        try {
+            if (/[?&]react=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            if (!(window.CRMReact && typeof window.CRMReact.mountModalContent === 'function')) return false;
+            if (window.__REACT_KBMODALS === false) return false;
+            if (/[?&]react_kbmodals=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_kbmodals') === '0') return false;
+            return true;
+        } catch (_) { return false; }
+    };
+    // Route a modal body through the generic React passthrough island; footer
+    // actions render in UI.showModal's footer (outside the root). flushSync (in
+    // the island mount) makes the body DOM present before the setTimeout wiring.
+    const _rxShowModal = (title, html, actions, size) => {
+        if (_reactKbModalsOn()) {
+            UI.showModal(title, '<div id="kb-modal-react-root"></div>', actions || [], size || '');
+            const root = document.getElementById('kb-modal-react-root');
+            if (root && window.CRMReact && typeof window.CRMReact.mountModalContent === 'function') {
+                try { window.CRMReact.mountModalContent(root, { html }); return; }
+                catch (e) { console.warn('[kb] modal island mount failed, legacy:', e && e.message); root.outerHTML = html; return; }
+            }
+        }
+        UI.showModal(title, html, actions || [], size || '');
+    };
+
     const openCaptureModal = () => {
-        UI.showModal('Quick capture', `
+        _rxShowModal('Quick capture', `
             <div class="kb-modal-cap">
                 <input type="text" id="kb-modal-title" class="kb-input" placeholder="Title" maxlength="200" autofocus>
                 <textarea id="kb-modal-content" class="kb-textarea" rows="6" placeholder="Optional notes (Ctrl+Enter to save)"></textarea>
