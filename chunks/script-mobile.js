@@ -624,16 +624,18 @@
         return digits;
     };
 
-    // React-island flag — OPT-IN during verification (NOT default-on). Enable:
-    // window.__REACT_HOME=true | ?react_home=1 | localStorage crm_react_home='1'.
+    // React-island flag — DEFAULT-ON (parity-verified live, SW-82). Kill-switch:
+    // window.__REACT_HOME=false | ?react_home=0 | localStorage crm_react_home='0'
+    // (plus the global ?react=0 / crm_react_off='1').
     const _reactHomeOn = () => {
         try {
             if (/[?&]react=0/.test(location.search)) return false;
             if (localStorage.getItem('crm_react_off') === '1') return false;
             if (!(window.CRMReact && typeof window.CRMReact.mountMobileHome === 'function')) return false;
-            return window.__REACT_HOME === true
-                || /[?&]react_home=1/.test(location.search)
-                || localStorage.getItem('crm_react_home') === '1';
+            if (window.__REACT_HOME === false) return false;
+            if (/[?&]react_home=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_home') === '0') return false;
+            return true;
         } catch (_) { return false; }
     };
 
