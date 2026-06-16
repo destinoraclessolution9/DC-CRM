@@ -58,18 +58,20 @@
         UI.showModal(title, html, actions || [], size || '');
     };
 
-    // React fude-VIEW passthrough — OPT-IN during verification (kill-switch:
-    // window.__REACT_FUDEVIEW=false | ?react_fudeview=0 | crm_react_fudeview='0';
-    // plus global ?react=0 / crm_react_off='1'). Flip the OPT-IN test to a plain
-    // `return true` after live parity check to promote default-on.
+    // React fude-VIEW passthrough — DEFAULT-ON (parity-verified live, SW-92:
+    // renders through the React root with all sections/carousel/stories/admin
+    // tables; carousel dot quirk is a PRE-EXISTING legacy bug, identical on both
+    // paths). Kill-switch: window.__REACT_FUDEVIEW=false | ?react_fudeview=0 |
+    // crm_react_fudeview='0' (plus the global ?react=0 / crm_react_off='1').
     const _reactFudeViewOn = () => {
         try {
             if (/[?&]react=0/.test(location.search)) return false;
             if (localStorage.getItem('crm_react_off') === '1') return false;
             if (!(window.CRMReact && typeof window.CRMReact.mountFudeContent === 'function')) return false;
-            return window.__REACT_FUDEVIEW === true
-                || /[?&]react_fudeview=1/.test(location.search)
-                || localStorage.getItem('crm_react_fudeview') === '1';
+            if (window.__REACT_FUDEVIEW === false) return false;
+            if (/[?&]react_fudeview=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_fudeview') === '0') return false;
+            return true;
         } catch (_) { return false; }
     };
     // Render the assembled fude-view HTML into `container`, routed through the
