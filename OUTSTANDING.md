@@ -1,9 +1,25 @@
 # CRM — Outstanding / Backlog
 
-_Last updated: 2026-06-16 (SW-100). Pick these up whenever you have time — none are user-blocking right now._
+_Last updated: 2026-06-16. SW-98 + SW-100 are LIVE. **SW-101 is STAGED LOCALLY (2 commits, NOT pushed) — awaiting verification + push.**_
 
-> **Critical bugs (SW-98) AND the tier-2 bug fixes (SW-100) are DONE + LIVE.** This file is everything **not** yet done.
+> **Critical bugs (SW-98) AND tier-2 bug fixes (SW-100) are DONE + LIVE.**
 > Legend — **Effort:** S (≤1h) · M (a few h) · L (day+). **Priority:** P1 (do next) · P2 · P3.
+
+---
+
+## 🟡 STAGED for SW-101 — implemented + built + regression-green, NOT pushed (verify, then push)
+Two local commits ahead of `origin/main`: `9fa1b31` (additive) + `a528976` (3.1 deletion). Each piece was adversarially verified in source, but I could **not** run the live app — **the items below need a quick interactive check before/after push** (kill-switch `?react_<x>=0` is the per-view rollback for the migration items; `git revert a528976` rolls back just the deletions):
+- **Migration tail (§2):** kb-slot editors (capture/daily/detail) + journey aux widgets → React. **Verify:** capture Ctrl+Enter saves; detail/daily autosave fires; journey dashboard widget renders + row click navigates.
+- **React bundle re-synced:** the rebuilt `react-island.js` now contains `mountFudeContent` + `mountJourneyContent` (were stale/inert) → **fude main dashboard + journey timeline now render via React for the first time on push. Verify both render + the fude carousel + journey timeline work.**
+- **AI Insights (§5):** real deterministic heuristics + real React cards. **Verify:** open AI Insights — cards/timeline/predictions show real numbers, no NaN, empty-data states OK.
+- **Export KPI (§5):** **Verify:** click Export KPI → downloads a CSV/XLSX of the 福气 leaderboard.
+- **Integrations (§5):** webhook notifications (Slack/Discord) config + Test; OAuth-only services show honest "needs backend" (NOT faked). `dispatchWebhookEvent` exposed but **not yet wired into save paths** (follow-up).
+- **Mobile calendar (§5):** Week/Day/Agenda tabs. **Verify on a phone width:** each tab renders; Month still works; switching tabs mid-cold-load doesn't snap back to Month (the repaint-guard fix).
+- **Batch DMS actions (§5):** Move/Share(copy)/Download wired into the file-explorer toolbar (`script-documents.js`) + the `confirmDeleteFolder` no-op bug fixed. **Verify:** select files → Move/Copy/Download work.
+- **getAll cleanup (§3.3):** CI defineProperty canary + guard-comment demote. Root cause was pinned to esbuild es2020 RQ lowering (fixed via vite es2022).
+- **§3.1 legacy-fallback deletion:** ~1,500 LOC of dead vanilla renderers removed for 13 views; off/error path degrades to a small inline reload card. **Verify each deleted view still renders via React:** security, ranking, noticeboard, monthly_promotion, org_chart, lead_forms, surveys, contracts, purchases_history, agents, booking_settings, custom_fields, milestones, knowledge dashboard + all-entries, cases. **(`customers`/`prospects`/Class-B/journey/fude legacy intentionally KEPT.)**
+
+**Still NOT done after SW-101:** §3.2 full JSX componentization (do "when touched"); §4.1 compute upgrade (your billing action); full OAuth integrations (need a backend — not client-side feasible); wiring `dispatchWebhookEvent` into lead/deal/activity save handlers.
 
 ---
 
