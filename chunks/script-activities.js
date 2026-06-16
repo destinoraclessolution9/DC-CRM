@@ -4184,6 +4184,23 @@
 
         UI.toast.success('Activity saved!');
 
+        // === Fire configured Slack/Discord webhook for a saved activity ===
+        // Guarded + non-blocking: dispatchWebhookEvent lives in the gcal chunk
+        // (may not be loaded), and a webhook failure must never break the save.
+        try {
+            if (typeof window.app.dispatchWebhookEvent === 'function') {
+                const _aTitle = activity.activity_title || activity.activity_type || 'Activity';
+                window.app.dispatchWebhookEvent('new_activity', `New activity: ${_aTitle}`, {
+                    id: savedActivity?.id || null,
+                    title: activity.activity_title || '',
+                    type: activity.activity_type || '',
+                    date: activity.activity_date || '',
+                    prospect_id: activity.prospect_id || null,
+                    customer_id: activity.customer_id || null,
+                });
+            }
+        } catch (e) { console.warn('new_activity webhook dispatch failed:', e); }
+
         // === If this save was approving a CPS intake request, mark it approved ===
         let _cpsIntakeWaCallback = null;
         if (_state.pii) {

@@ -493,9 +493,65 @@
                         UI.toast.success(`🎉 角色升级 → ${roleName}`);
                     }
 
-                    // For purchase_signed: also move to customer table if currently prospect
+                    // For purchase_signed: also create the Customer record if this
+                    // prospect just hit customer level (13). Reuse the canonical
+                    // conversion routine (app.approveProspectConversion) — the same
+                    // record-creator the manager auto-convert path uses — rather than
+                    // hand-rolling a second conversion. DATA-MUTATING: stay conservative.
                     if (roleLevel === 13 && entityType === 'prospect') {
-                        console.log('[journey] TODO: trigger prospect → customer conversion');
+                        try {
+                            // Re-fetch fresh: role was just updated above, and we must
+                            // check the latest conversion flags for idempotency.
+                            const p = await AppDataStore.getById('prospects', entityId);
+                            if (p) {
+                                // Idempotency guard — never double-convert. A prospect is
+                                // already a customer if it is flagged converted/approved or
+                                // a customers row already links back to it.
+                                let alreadyCustomer =
+                                    p.status === 'converted' ||
+                                    p.conversion_status === 'approved';
+                                if (!alreadyCustomer) {
+                                    try {
+                                        const linked = await AppDataStore.query('customers', {
+                                            converted_from_prospect_id: entityId,
+                                        });
+                                        alreadyCustomer = Array.isArray(linked) && linked.length > 0;
+                                    } catch (lookupErr) {
+                                        console.warn('[journey] customer-link lookup failed', lookupErr?.message);
+                                    }
+                                }
+
+                                if (alreadyCustomer) {
+                                    console.log('[journey] prospect → customer: already converted, skipping', entityId);
+                                } else {
+                                    // Only auto-create the Customer record when there is real
+                                    // sale evidence (a closing_record with a positive amount).
+                                    // approveProspectConversion derives lifetime_value /
+                                    // customer_since from that record — without it we would
+                                    // fabricate an empty/zero customer, so we instead flag the
+                                    // record for manual completion via app.convertToCustomer.
+                                    const saleAmount = parseFloat(p.closing_record?.sale_amount) || 0;
+                                    if (p.closing_record && saleAmount > 0 &&
+                                        typeof window.app?.approveProspectConversion === 'function') {
+                                        await window.app.approveProspectConversion(entityId);
+                                    } else if (p.conversion_status !== 'pending_approval') {
+                                        // No sale data to copy — don't invent a customer record.
+                                        // Park it for manual review so an agent/manager can
+                                        // complete the conversion via the existing flow.
+                                        await AppDataStore.update('prospects', entityId, {
+                                            conversion_status: 'pending_approval',
+                                            conversion_requested_at: new Date().toISOString(),
+                                            conversion_requested_by: _cu()?.id || null,
+                                            updated_at: new Date().toISOString(),
+                                        });
+                                        UI.toast.info('🎯 已达成交客户等级 — 请确认转为客户 (Convert to Customer)');
+                                    }
+                                }
+                            }
+                        } catch (convErr) {
+                            // Never throw into the rule loop / journey render.
+                            console.warn('[journey] prospect → customer conversion failed', convErr?.message);
+                        }
                     }
                 }
             }

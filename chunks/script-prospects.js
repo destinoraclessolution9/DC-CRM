@@ -2440,6 +2440,20 @@ const saveProspect = async () => {
             }
             // Trigger new_prospect workflow
             try { await executeWorkflows('new_prospect', { name: data.full_name }); } catch (e) { /* ignore */ }
+            // Fire configured Slack/Discord webhook for a new lead — guarded +
+            // non-blocking: the gcal chunk (which owns dispatchWebhookEvent) may
+            // not be loaded, and a webhook failure must never break the save.
+            try {
+                if (typeof window.app.dispatchWebhookEvent === 'function') {
+                    window.app.dispatchWebhookEvent('new_lead', `New lead: ${data.full_name || 'Unnamed'}`, {
+                        id: newProspect?.id || data.id,
+                        name: data.full_name || '',
+                        phone: data.phone || '',
+                        email: data.email || '',
+                        agent_id: data.responsible_agent_id || null,
+                    });
+                }
+            } catch (e) { console.warn('new_lead webhook dispatch failed:', e); }
         }
     } catch (err) {
         UI.toast.error('Save failed: ' + (err.message || 'Unknown error'));

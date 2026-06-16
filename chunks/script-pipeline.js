@@ -2372,6 +2372,22 @@ const closeDealWon = async (prospectId) => {
         });
     }
 
+    // Fire configured Slack/Discord webhook for a closed deal — guarded +
+    // non-blocking: dispatchWebhookEvent lives in the gcal chunk (may not be
+    // loaded), and a webhook failure must never break the close.
+    try {
+        if (typeof window.app.dispatchWebhookEvent === 'function') {
+            window.app.dispatchWebhookEvent('deal_closed', `Deal closed: ${prospect.full_name || 'Customer'} — RM ${amount.toLocaleString()}`, {
+                prospect_id: prospect.id,
+                customer_id: customer.id,
+                name: prospect.full_name || '',
+                amount: amount,
+                close_date: closeDate,
+                agent_id: prospect.responsible_agent_id || null,
+            });
+        }
+    } catch (e) { console.warn('deal_closed webhook dispatch failed:', e); }
+
     UI.hideModal();
     UI.toast.success(`Deal closed at RM ${amount.toLocaleString()} !Customer created.`);
     await showPipelineView(document.getElementById('content-viewport'));

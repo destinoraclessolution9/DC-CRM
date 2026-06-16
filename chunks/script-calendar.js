@@ -1782,7 +1782,7 @@
                 ${(a.closing_amount || a.is_closing) ? `
                 <div class="appointment-closed">
                     <div class="closed-badge">✓ CLOSED</div>
-                    ${a.solution_sold ? `<div class="closed-product">📦 ${a.solution_sold}</div>` : ''}
+                    ${a.solution_sold ? `<div class="closed-product">📦 ${esc(a.solution_sold)}</div>` : ''}
                     ${a.closing_amount ? `<div class="closed-amount">💰 RM ${parseFloat(a.closing_amount).toLocaleString('en-MY', {minimumFractionDigits:2,maximumFractionDigits:2})}</div>` : ''}
                 </div>
                 ` : ''}

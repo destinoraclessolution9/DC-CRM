@@ -166,7 +166,7 @@
         const runOpts = runs.map(r => {
             const cartons = (r.totals?.KL?.GOLD||0)+(r.totals?.KL?.KING||0)+(r.totals?.PG?.GOLD||0)+(r.totals?.PG?.KING||0);
             const label = `Week ${r.week_start_date} • ${r.run_at ? new Date(r.run_at).toLocaleString() : ''} • ${cartons} cartons`;
-            return `<option value="${r.id}">${label}</option>`;
+            return `<option value="${escapeHtml(r.id)}">${escapeHtml(label)}</option>`;
         }).join('');
 
         const balGroups = [

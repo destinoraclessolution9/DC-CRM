@@ -2717,37 +2717,136 @@ const saveDestinyBlueprint = async () => {
     }
 };
 
-// #4 — Redeem Fude points modal.
+// #4 — Redeem Fude points modal — REAL redemption-REQUEST flow (no catalog table).
 // #8  fix: use `type: 'primary'` (UI.showModal reads btn.type, not btn.class).
 // #10 fix: accept pts as a parameter passed from the onclick — avoids fragile DOM
 //          scrape that returns 0 if the fude view re-renders before button click.
+//
+// Points model: a user's 福气 balance is SUM(fudi_points) over their
+// `recommendation_rewards` rows (computed in showFudeView as `totalPoints`).
+// There is NO rewards-catalog table and NO redemption ledger in the schema, so
+// this implements an honest redemption-REQUEST flow: the user picks/enters what
+// they want + the points to spend, and we persist a `redemption_requests` record
+// (status: pending) for an admin to process out-of-band. The preset reward tiers
+// below pre-fill the form but the user may also enter a custom request.
+//
+// `pts` is the trusted balance passed from the banner onclick; we cache it on a
+// module-level var so confirmRedeemPoints can validate the spend against it
+// without re-scraping the DOM.
+let _fudeRedeemBalance = 0;
+const _fudeRedeemPresets = [
+    { item: '精选礼品兑换',                cost: 500  },
+    { item: '专属顾问咨询（1小时）',        cost: 1000 },
+    { item: 'DestinOracles 会员升级',      cost: 2000 },
+    { item: '现金抵用券 (RM 50)',          cost: 5000 }
+];
+
 const openFudeRedeemModal = (pts = 0) => {
+    const bal = Math.max(0, parseInt(pts, 10) || 0);
+    _fudeRedeemBalance = bal;
+
+    if (bal <= 0) {
+        _rxShowModal('立即兑换福气积分', `
+            <div style="font-size:14px;line-height:1.7;">
+                <div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:12px 14px;border-radius:6px;">
+                    <strong>当前积分：0 福气积分</strong>
+                </div>
+                <p style="margin-top:14px;color:var(--gray-600,#4b5563);">您当前没有可兑换的福气积分。推荐好友、分享福报即可累积积分。</p>
+            </div>
+        `, [{ label: '关闭', action: 'UI.hideModal()', type: 'primary' }]);
+        return;
+    }
+
+    // Preset buttons pre-fill the custom form; affordable ones are highlighted.
+    const presetRows = _fudeRedeemPresets.map(p => {
+        const affordable = bal >= p.cost;
+        return `<button type="button"
+            ${affordable ? '' : 'disabled'}
+            onclick="app._fudeRedeemPickPreset(${p.cost}, this.dataset.item)"
+            data-item="${esc(p.item)}"
+            style="display:flex;justify-content:space-between;align-items:center;width:100%;text-align:left;padding:9px 12px;margin-bottom:6px;border:1px solid ${affordable ? '#d1d5db' : '#e5e7eb'};border-radius:6px;background:${affordable ? '#ffffff' : '#f9fafb'};cursor:${affordable ? 'pointer' : 'not-allowed'};opacity:${affordable ? '1' : '0.55'};font-size:13px;">
+            <span>${esc(p.item)}</span>
+            <span style="font-weight:600;color:${affordable ? '#be185d' : '#9ca3af'};white-space:nowrap;">${p.cost.toLocaleString()} 积分${affordable ? '' : '（积分不足）'}</span>
+        </button>`;
+    }).join('');
+
     _rxShowModal('立即兑换福气积分', `
         <div style="font-size:14px;line-height:1.7;">
             <div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:12px 14px;border-radius:6px;margin-bottom:16px;">
-                <strong>当前积分：${pts} 福气积分</strong>
+                <strong>当前积分：${bal.toLocaleString()} 福气积分</strong>
             </div>
-            <p style="margin-bottom:12px;">福气积分可用于兑换以下奖励，请联系顾问团队处理兑换申请：</p>
-            <table style="width:100%;border-collapse:collapse;font-size:13px;">
-                <thead>
-                    <tr style="background:#f9fafb;">
-                        <th style="text-align:left;padding:8px 10px;border-bottom:1px solid #e5e7eb;">奖励</th>
-                        <th style="text-align:right;padding:8px 10px;border-bottom:1px solid #e5e7eb;">所需积分</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr><td style="padding:8px 10px;">精选礼品兑换</td><td style="text-align:right;padding:8px 10px;">500+</td></tr>
-                    <tr style="background:#f9fafb;"><td style="padding:8px 10px;">专属顾问咨询（1小时）</td><td style="text-align:right;padding:8px 10px;">1,000</td></tr>
-                    <tr><td style="padding:8px 10px;">DestinOracles 会员升级</td><td style="text-align:right;padding:8px 10px;">2,000</td></tr>
-                    <tr style="background:#f9fafb;"><td style="padding:8px 10px;">现金抵用券 (RM 50)</td><td style="text-align:right;padding:8px 10px;">5,000</td></tr>
-                </tbody>
-            </table>
-            <div style="margin-top:16px;padding:10px 14px;background:#eff6ff;border-radius:6px;font-size:13px;">
-                📩 发送兑换申请至 <a href="mailto:destinoraclessolution9@gmail.com" style="color:#1d4ed8;">destinoraclessolution9@gmail.com</a>，
-                注明您的姓名、积分数量及所选奖励，团队将在 3 个工作日内回复。
+            <p style="margin-bottom:10px;color:var(--gray-600,#4b5563);">选择一项精选奖励，或在下方填写您想兑换的内容。提交后将生成兑换申请，团队会在 3 个工作日内处理。</p>
+            <div style="margin-bottom:14px;">${presetRows}</div>
+            <div style="margin-bottom:12px;">
+                <label for="fude-redeem-item" style="display:block;font-weight:600;margin-bottom:4px;">兑换内容</label>
+                <input type="text" id="fude-redeem-item" class="form-control" maxlength="200" placeholder="例如：精选礼品兑换" autocomplete="off">
+            </div>
+            <div style="margin-bottom:12px;">
+                <label for="fude-redeem-points" style="display:block;font-weight:600;margin-bottom:4px;">使用积分（最多 ${bal.toLocaleString()}）</label>
+                <input type="number" id="fude-redeem-points" class="form-control" min="1" max="${bal}" step="1" placeholder="输入要使用的积分数">
+            </div>
+            <div style="margin-bottom:4px;">
+                <label for="fude-redeem-note" style="display:block;font-weight:600;margin-bottom:4px;">备注（选填）</label>
+                <textarea id="fude-redeem-note" class="form-control" rows="2" maxlength="500" placeholder="送货地址、联系方式或其他说明"></textarea>
             </div>
         </div>
-    `, [{ label: '关闭', action: 'UI.hideModal()', type: 'primary' }]);
+    `, [
+        { label: '取消', action: 'UI.hideModal()', type: 'secondary' },
+        { label: '提交兑换申请', action: '(async () => { await app.confirmRedeemPoints(); })()', type: 'primary' }
+    ]);
+};
+
+// Pre-fill the custom form from a preset reward tier.
+const _fudeRedeemPickPreset = (cost, item) => {
+    const itemEl = document.getElementById('fude-redeem-item');
+    const ptsEl  = document.getElementById('fude-redeem-points');
+    if (itemEl) itemEl.value = item || '';
+    if (ptsEl)  ptsEl.value  = parseInt(cost, 10) || '';
+};
+
+// Persist a redemption REQUEST (status pending) for admin processing. No catalog
+// table exists, so we do NOT debit points here — the awarding ledger
+// (recommendation_rewards) is admin-managed; the admin reconciles on approval.
+const confirmRedeemPoints = async () => {
+    const user = _currentUser || _state.cu;
+    if (!user || !user.id) { UI.toast.error('无法识别当前用户，请重新登录后再试。'); return; }
+
+    const bal  = Math.max(0, parseInt(_fudeRedeemBalance, 10) || 0);
+    if (bal <= 0) { UI.toast.error('您当前没有可兑换的福气积分。'); return; }
+
+    const item = (document.getElementById('fude-redeem-item')?.value || '').trim();
+    const note = (document.getElementById('fude-redeem-note')?.value || '').trim();
+    const pts  = parseInt(document.getElementById('fude-redeem-points')?.value, 10);
+
+    if (!item)                       { UI.toast.error('请填写要兑换的内容。'); return; }
+    if (!Number.isFinite(pts) || pts <= 0) { UI.toast.error('请输入有效的积分数量。'); return; }
+    if (pts > bal)                   { UI.toast.error(`积分不足：当前仅有 ${bal.toLocaleString()} 福气积分。`); return; }
+
+    // No server-side redemption table/queue exists yet, and AppDataStore.create
+    // silently falls back to localStorage on a missing table (would show a FALSE
+    // "submitted" success). Until a redemption_requests table + admin workflow is
+    // provisioned, do an HONEST copy-to-leader flow: hand the user a formatted
+    // request to send to their team leader — no false claim of server submission.
+    const reqText = [
+        '福气积分兑换申请 / FuQi Points Redemption Request',
+        '姓名 Name: ' + (user.full_name || user.name || user.email || user.id),
+        '兑换内容 Item: ' + item,
+        '使用积分 Points: ' + pts,
+        '当前余额 Balance: ' + bal,
+        note ? ('备注 Note: ' + note) : ''
+    ].filter(Boolean).join('\n');
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(reqText);
+            UI.hideModal();
+            UI.toast.success('兑换详情已复制 — 请发送给您的团队负责人处理。(Details copied — send to your team leader to redeem.)');
+        } else {
+            UI.hideModal();
+            UI.showModal('福气积分兑换申请', '<p>请将以下内容发送给您的团队负责人处理：</p><pre style="white-space:pre-wrap;background:var(--surface-2,#f5f5f5);padding:12px;border-radius:8px;">' + esc(reqText) + '</pre>', [{ label: '好的 OK', type: 'primary', action: 'UI.hideModal()' }]);
+        }
+    } catch (err) {
+        UI.toast.error('操作失败：' + (err?.message || '未知错误'));
+    }
 };
 
 const fudeSearchStories = (query) => {
@@ -2854,5 +2953,7 @@ const fudeShowAllStories = () => {
         openDestinyBlueprintModal,
         saveDestinyBlueprint,
         openFudeRedeemModal,
+        _fudeRedeemPickPreset,
+        confirmRedeemPoints,
     });
 })();

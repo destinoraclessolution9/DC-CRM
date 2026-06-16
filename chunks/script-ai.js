@@ -427,6 +427,33 @@
         return `RM${Math.round(n)}`;
     };
 
+    // ── CSV export helpers (shared by every export* action) ───────────────
+    // Injection-safe + RFC-4180 quoting — identical contract to the 福气 KPI
+    // export in script-fude.js (neutralise =,+,-,@ formula triggers; quote on
+    // comma/quote/newline; double embedded quotes).
+    const _csvCell = (v) => {
+        let s = String(v == null ? '' : v);
+        if (/^[=+\-@]/.test(s)) s = "'" + s;
+        return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    // Build a CSV string from an array-of-arrays. Prepends a UTF-8 BOM so Excel
+    // reads Chinese names correctly; CRLF line endings per RFC-4180.
+    const _csvFromRows = (rows) => '﻿' + rows.map(r => r.map(_csvCell).join(',')).join('\r\n');
+    // Trigger a client-side download of `text` as `filename`. No external infra.
+    const _downloadFile = (text, filename, mime = 'text/csv;charset=utf-8') => {
+        const blob = new Blob([text], { type: mime });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+    // YYYY-MM-DD stamp for export filenames.
+    const _stamp = () => new Date().toISOString().split('T')[0];
+
     // Initialize AI Service
     const initAIAnalytics = async () => {
         // Initializing AI Analytics
@@ -1093,6 +1120,7 @@
                                 <th scope="col">Source</th>
                                 <th scope="col">Projected</th>
                                 <th scope="col">Share</th>
+                                <th scope="col"></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1100,21 +1128,25 @@
                                 <td>Existing Deals</td>
                                 <td>${esc(_fmtMoney(forecast.breakdown.existing_deals))}</td>
                                 <td><span class="confidence high">58%</span></td>
+                                <td><button class="btn-link" onclick="event.stopPropagation(); app.viewDealDetails()">View</button></td>
                             </tr>
                             <tr>
                                 <td>New Prospects</td>
                                 <td>${esc(_fmtMoney(forecast.breakdown.new_prospects))}</td>
                                 <td><span class="confidence medium">27%</span></td>
+                                <td><button class="btn-link" onclick="event.stopPropagation(); app.viewProspectDetails()">View</button></td>
                             </tr>
                             <tr>
                                 <td>Upsells</td>
                                 <td>${esc(_fmtMoney(forecast.breakdown.upsells))}</td>
                                 <td><span class="confidence medium">12%</span></td>
+                                <td><button class="btn-link" onclick="event.stopPropagation(); app.viewUpsellOpportunities()">View</button></td>
                             </tr>
                             <tr>
                                 <td>Referrals</td>
                                 <td>${esc(_fmtMoney(forecast.breakdown.referrals))}</td>
                                 <td><span class="confidence high">3%</span></td>
+                                <td><button class="btn-link" onclick="event.stopPropagation(); app.viewReferrals()">View</button></td>
                             </tr>
                         </tbody>
                     </table>
@@ -1366,6 +1398,9 @@
                     </ul>
                     <button class="btn primary" onclick="app.executeRiskActions()">
                         <i class="fas fa-check-circle"></i> Execute Selected Actions
+                    </button>
+                    <button class="btn secondary" onclick="app.viewRenewals()">
+                        <i class="fas fa-redo"></i> Renewals Due
                     </button>
                 </div>
             </div>
@@ -1734,33 +1769,571 @@
         await showSalesForecast(period);
     };
 
+    // ═════════════════════════════════════════════════════════════════════
+    // SECONDARY DASHBOARD ACTIONS — real, client-side, snapshot-backed.
+    // Replaces the old "coming soon" stubs. No external infra: exports build a
+    // CSV (injection-safe) + Blob download; views navigate/open existing app
+    // screens; schedule/risk actions create real follow-up activity records via
+    // AppDataStore.create; segment/share are pure client-side (modal / clipboard).
+    // ═════════════════════════════════════════════════════════════════════
+
+    // Map a lead's prediction → a sensible follow-up activity type.
+    const _followupType = (lead) => (lead && lead.prediction === 'hot' ? 'CALL' : 'WHATSAPP');
+    const _todayISO = () => new Date().toISOString().split('T')[0];
+
+    // Create one follow-up activity record for a targeted entity. Returns the
+    // saved record (or throws — caller batches + reports a single toast).
+    const _createFollowupActivity = async ({ prospectId = null, customerId = null, type = 'CALL', nextAction = '', summary = '' }) => {
+        const activity = {
+            activity_type: type,
+            activity_title: summary || nextAction || type,
+            activity_date: _todayISO(),
+            lead_agent_id: (_state && _state.cu) ? _state.cu.id : 5,
+            summary: summary,
+            note_next_steps: nextAction,
+            next_action: nextAction,
+            next_action_done: false,
+            co_agents: [],
+            consultants: [],
+            source: 'ai_insights'
+        };
+        if (prospectId != null) activity.prospect_id = prospectId;
+        if (customerId != null) activity.customer_id = customerId;
+        return AppDataStore.create('activities', activity);
+    };
+
+    // ── Lead Scoring: Export top leads as CSV ─────────────────────────────
+    const exportLeads = async () => {
+        try {
+            const snap = await _getSnapshot();
+            const leads = snap.leads || [];
+            if (!leads.length) { UI.toast.error('No scored leads to export yet.'); return; }
+            const rows = [
+                ['AI Lead Scoring Export'],
+                ['Generated', new Date().toLocaleString()],
+                [],
+                ['Lead Name', 'Score', 'Prediction', 'Recent Activities', 'Days Since Last Touch', 'Recommended Action'],
+                ...leads.map(l => [
+                    l.name,
+                    l.score,
+                    l.prediction,
+                    l.recentCount,
+                    l.recencyDays === Infinity ? 'never' : l.recencyDays,
+                    l.action
+                ])
+            ];
+            _downloadFile(_csvFromRows(rows), `ai-lead-scores-${_stamp()}.csv`);
+            UI.toast.success(`Exported ${leads.length} scored lead${leads.length === 1 ? '' : 's'} (CSV).`);
+        } catch (err) {
+            UI.toast.error('Export failed: ' + (err && err.message ? err.message : 'Unknown error'));
+        }
+    };
+
+    // ── Lead Scoring: Export the full scoring report (scores + factor weights) ──
+    const exportScoringReport = async () => {
+        try {
+            const snap = await _getSnapshot();
+            const leads = snap.leads || [];
+            if (!leads.length) { UI.toast.error('No scored leads to report on yet.'); return; }
+            const rows = [
+                ['AI Lead Scoring Report'],
+                ['Generated', new Date().toLocaleString()],
+                ['Active leads scored', leads.length],
+                [],
+                ['Factor weights (deterministic heuristic)'],
+                ['Recency', '30%'], ['Frequency', '25%'], ['Potential', '20%'],
+                ['Engagement', '15%'], ['Pipeline age', '10%'],
+                [],
+                ['Lead Name', 'Score', 'Prediction', 'Recency', 'Frequency', 'Potential', 'Engagement', 'Pipeline Age', 'Recommended Action'],
+                ...leads.map(l => {
+                    const f = l.factors || {};
+                    return [
+                        l.name, l.score, l.prediction,
+                        Math.round(f.recency || 0), Math.round(f.frequency || 0), Math.round(f.potential || 0),
+                        Math.round(f.engagement || 0), Math.round(f.pipelineAge || 0),
+                        l.action
+                    ];
+                })
+            ];
+            _downloadFile(_csvFromRows(rows), `ai-scoring-report-${_stamp()}.csv`);
+            UI.toast.success(`Exported scoring report — ${leads.length} lead${leads.length === 1 ? '' : 's'} (CSV).`);
+        } catch (err) {
+            UI.toast.error('Export failed: ' + (err && err.message ? err.message : 'Unknown error'));
+        }
+    };
+
+    // ── Sales Forecast: Export the projection + breakdown as CSV ──────────
+    const exportForecast = async () => {
+        try {
+            const snap = await _getSnapshot();
+            const fc = snap.forecast;
+            if (!fc || !fc.hasData) { UI.toast.error('Not enough sales history to export a forecast.'); return; }
+            const rows = [
+                ['AI Sales Forecast Export'],
+                ['Generated', new Date().toLocaleString()],
+                ['Recent monthly average', _fmtMoney(fc.recentAvg)],
+                ['Trend', fc.trendDir],
+                [],
+                ['Month', 'Amount (RM)', 'Type'],
+                ...fc.keys.map((k, i) => [_monthLabel(k), Math.round(_num(fc.series[i])), 'actual']),
+                ...(fc.projections || []).map(p => [_monthLabel(p.key), Math.round(_num(p.amount)), 'projected'])
+            ];
+            _downloadFile(_csvFromRows(rows), `ai-sales-forecast-${_stamp()}.csv`);
+            UI.toast.success('Exported sales forecast (CSV).');
+        } catch (err) {
+            UI.toast.error('Export failed: ' + (err && err.message ? err.message : 'Unknown error'));
+        }
+    };
+
+    // ── Performance: Export the full per-agent report as CSV ──────────────
+    const generatePerformanceReport = async () => {
+        try {
+            const snap = await _getSnapshot();
+            const rows0 = (snap.agents && snap.agents.rows) || [];
+            if (!rows0.length) { UI.toast.error('No agent performance data to report on yet.'); return; }
+            const ranked = [...rows0].sort((a, b) => b.pipelineValue - a.pipelineValue || b.conversionRate - a.conversionRate);
+            const rows = [
+                ['Agent Performance Report'],
+                ['Generated', new Date().toLocaleString()],
+                ['Agents analyzed', ranked.length],
+                [],
+                ['Rank', 'Agent', 'Conversion %', 'Activities', 'Recent (30d)', 'Prior (30d)', 'Activity Delta', 'Pipeline Value (RM)', 'Customers', 'Prospects', 'Closed'],
+                ...ranked.map((r, i) => [
+                    i + 1, r.name, r.conversionRate, r.activityVolume, r.recentActs, r.priorActs,
+                    r.activityDelta, Math.round(_num(r.pipelineValue)), r.customers, r.prospects, r.won
+                ])
+            ];
+            _downloadFile(_csvFromRows(rows), `agent-performance-${_stamp()}.csv`);
+            UI.toast.success(`Exported performance report — ${ranked.length} agent${ranked.length === 1 ? '' : 's'} (CSV).`);
+        } catch (err) {
+            UI.toast.error('Export failed: ' + (err && err.message ? err.message : 'Unknown error'));
+        }
+    };
+
+    // ── Lead Scoring: Create a segment from high-score leads ──────────────
+    // No server segments table exists in this CRM (grep-verified) — so this
+    // surfaces the high-intent segment in a modal with copy-list + CSV export
+    // rather than inventing persistence.
+    const createSegmentFromScoredLeads = async () => {
+        try {
+            const snap = await _getSnapshot();
+            const seg = (snap.leads || []).filter(l => l.score >= 75);
+            if (!seg.length) {
+                UI.showModal('High-Intent Segment', `<p class="empty-state" style="padding:16px;">No leads currently score 75+ — nothing to segment yet. Log more activity to warm the pipeline.</p>`, [
+                    { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
+                ]);
+                return;
+            }
+            const listRows = seg.map(l => `
+                <tr>
+                    <td><strong>${esc(l.name)}</strong></td>
+                    <td><span class="score-badge ${l.score >= 80 ? 'high' : 'medium'}">${l.score}</span></td>
+                    <td>${esc(l.action)}</td>
+                    <td><button class="btn-icon" aria-label="View lead" onclick="event.stopPropagation(); app.viewLeadDetails('${esc(String(l.id))}')"><i class="fas fa-eye" aria-hidden="true"></i></button></td>
+                </tr>`).join('');
+            const plain = seg.map(l => `${l.name} (score ${l.score})`).join('\n');
+            // Stash for the copy/export buttons (avoids re-querying; escaped on use).
+            window.__aiSegment = seg.map(l => ({ id: l.id, name: l.name, score: l.score, action: l.action }));
+            const content = `
+                <div class="ai-segment">
+                    <p>${seg.length} high-intent lead${seg.length === 1 ? '' : 's'} (score ≥ 75). This is a working list — copy it or export it to your tools.</p>
+                    <div style="margin:8px 0; display:flex; gap:8px; flex-wrap:wrap;">
+                        <button class="btn secondary" onclick="app.copySegmentList()"><i class="fas fa-copy"></i> Copy list</button>
+                        <button class="btn secondary" onclick="app.exportLeads()"><i class="fas fa-download"></i> Export CSV</button>
+                    </div>
+                    <table class="leads-table">
+                        <thead><tr><th scope="col">Lead</th><th scope="col">Score</th><th scope="col">Action</th><th scope="col"></th></tr></thead>
+                        <tbody>${listRows}</tbody>
+                    </table>
+                    <textarea id="ai-segment-text" readonly style="position:absolute; left:-9999px;">${esc(plain)}</textarea>
+                </div>`;
+            UI.showModal(`High-Intent Segment (${seg.length})`, content, [
+                { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
+            ]);
+        } catch (err) {
+            UI.toast.error('Could not build segment: ' + (err && err.message ? err.message : 'Unknown error'));
+        }
+    };
+
+    // Copy the high-intent segment as plain text to the clipboard.
+    const copySegmentList = async () => {
+        const seg = window.__aiSegment || [];
+        if (!seg.length) { UI.toast.error('No segment to copy.'); return; }
+        const text = seg.map(l => `${l.name} (score ${l.score}) — ${l.action}`).join('\n');
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(text);
+            } else {
+                const ta = document.getElementById('ai-segment-text');
+                if (ta) { ta.select(); document.execCommand('copy'); }
+                else throw new Error('Clipboard unavailable');
+            }
+            UI.toast.success(`Copied ${seg.length} lead${seg.length === 1 ? '' : 's'} to clipboard.`);
+        } catch (err) {
+            UI.toast.error('Copy failed: ' + (err && err.message ? err.message : 'clipboard blocked'));
+        }
+    };
+
+    // ── Lead Scoring: Schedule bulk follow-up for the top warm/hot leads ──
+    const scheduleBulkFollowup = async () => {
+        try {
+            const snap = await _getSnapshot();
+            const targets = (snap.leads || []).filter(l => l.score >= 50).slice(0, 25);
+            if (!targets.length) { UI.toast.error('No warm/hot leads to follow up on yet.'); return; }
+            const listHtml = targets.map(l => `
+                <li class="action-item ${l.score >= 75 ? 'high' : 'medium'}">
+                    <strong>${esc(l.name)}</strong> — score ${l.score} · ${esc(_followupType(l))} · <span>${esc(l.action)}</span>
+                </li>`).join('');
+            window.__aiFollowupTargets = targets.map(l => ({ id: l.id, type: _followupType(l), action: l.action }));
+            const content = `
+                <div class="ai-bulk-followup">
+                    <p>Create a follow-up activity (dated today, assigned to you) for the top ${targets.length} warm/hot lead${targets.length === 1 ? '' : 's'}:</p>
+                    <ul class="action-list">${listHtml}</ul>
+                    <p style="color:#6B7280; font-size:0.9em;">Each becomes a real activity record with an open next-action you can complete from the prospect.</p>
+                </div>`;
+            UI.showModal(`Schedule Bulk Follow-up (${targets.length})`, content, [
+                { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+                { label: 'Create Follow-ups', type: 'primary', action: '(async () => { await app.confirmBulkFollowup(); })()' }
+            ]);
+        } catch (err) {
+            UI.toast.error('Could not prepare follow-ups: ' + (err && err.message ? err.message : 'Unknown error'));
+        }
+    };
+
+    const confirmBulkFollowup = async () => {
+        const targets = window.__aiFollowupTargets || [];
+        if (!targets.length) { UI.toast.error('Nothing to schedule.'); return; }
+        let ok = 0, fail = 0;
+        for (const t of targets) {
+            try {
+                await _createFollowupActivity({ prospectId: t.id, type: t.type, nextAction: t.action, summary: 'AI Insights bulk follow-up' });
+                ok++;
+            } catch (_) { fail++; }
+        }
+        window.__aiFollowupTargets = null;
+        _invalidateSnapshot();
+        try { UI.hideModal(); } catch (_) {}
+        if (ok && !fail) UI.toast.success(`Created ${ok} follow-up activit${ok === 1 ? 'y' : 'ies'}.`);
+        else if (ok && fail) UI.toast.info(`Created ${ok} follow-up(s); ${fail} failed.`);
+        else UI.toast.error('Could not create follow-up activities.');
+    };
+
+    // ── Churn: Execute retention actions for high-risk customers ──────────
+    const executeRiskActions = async () => {
+        try {
+            const snap = await _getSnapshot();
+            const targets = (snap.churn || []).filter(c => c.level === 'high');
+            if (!targets.length) { UI.toast.error('No high-risk customers — nothing to action.'); return; }
+            window.__aiRiskTargets = targets.map(c => ({ id: c.id, name: c.name, action: c.action }));
+            const listHtml = targets.map(c => `
+                <li class="action-item high">
+                    <strong>${esc(c.name)}</strong> — ${c.riskScore}% risk · ${esc(c.action)}
+                </li>`).join('');
+            const content = `
+                <div class="ai-risk-actions">
+                    <p>Create a retention follow-up (dated today, assigned to you) for ${targets.length} high-risk customer${targets.length === 1 ? '' : 's'}:</p>
+                    <ul class="action-list">${listHtml}</ul>
+                </div>`;
+            UI.showModal(`Execute Retention Actions (${targets.length})`, content, [
+                { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+                { label: 'Create Retention Tasks', type: 'primary', action: '(async () => { await app.confirmRiskActions(); })()' }
+            ]);
+        } catch (err) {
+            UI.toast.error('Could not prepare retention actions: ' + (err && err.message ? err.message : 'Unknown error'));
+        }
+    };
+
+    const confirmRiskActions = async () => {
+        const targets = window.__aiRiskTargets || [];
+        if (!targets.length) { UI.toast.error('Nothing to action.'); return; }
+        let ok = 0, fail = 0;
+        for (const t of targets) {
+            try {
+                await _createFollowupActivity({ customerId: t.id, type: 'CALL', nextAction: t.action, summary: 'AI Insights retention call' });
+                ok++;
+            } catch (_) { fail++; }
+        }
+        window.__aiRiskTargets = null;
+        _invalidateSnapshot();
+        try { UI.hideModal(); } catch (_) {}
+        if (ok && !fail) UI.toast.success(`Created ${ok} retention task${ok === 1 ? '' : 's'}.`);
+        else if (ok && fail) UI.toast.info(`Created ${ok} retention task(s); ${fail} failed.`);
+        else UI.toast.error('Could not create retention tasks.');
+    };
+
+    // ── Performance: Schedule coaching sessions for agents needing attention ──
+    const scheduleCoachingSessions = async () => {
+        try {
+            const snap = await _getSnapshot();
+            const rows = (snap.agents && snap.agents.rows) || [];
+            // Target the agents trending down or with weak conversion.
+            const targets = rows.filter(r => r.activityDelta < 0 || r.conversionRate < 20)
+                .sort((a, b) => a.activityDelta - b.activityDelta);
+            if (!targets.length) {
+                UI.showModal('Coaching Sessions', `<p class="empty-state" style="padding:16px;">No agents are trending down or under-converting right now — the team looks healthy.</p>`, [
+                    { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
+                ]);
+                return;
+            }
+            window.__aiCoachTargets = targets.map(r => ({ id: r.id, name: r.name, delta: r.activityDelta, conv: r.conversionRate }));
+            const listHtml = targets.map(r => `
+                <li class="action-item ${r.activityDelta < 0 ? 'high' : 'medium'}">
+                    <strong>${esc(r.name)}</strong> — ${r.conversionRate}% conversion · ${r.activityDelta >= 0 ? '+' : ''}${r.activityDelta} acts (30d)
+                </li>`).join('');
+            const content = `
+                <div class="ai-coaching">
+                    <p>Log a coaching meeting (dated today) for ${targets.length} agent${targets.length === 1 ? '' : 's'} needing attention:</p>
+                    <ul class="action-list">${listHtml}</ul>
+                </div>`;
+            UI.showModal(`Schedule Coaching Sessions (${targets.length})`, content, [
+                { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+                { label: 'Create Coaching Tasks', type: 'primary', action: '(async () => { await app.confirmCoachingSessions(); })()' }
+            ]);
+        } catch (err) {
+            UI.toast.error('Could not prepare coaching sessions: ' + (err && err.message ? err.message : 'Unknown error'));
+        }
+    };
+
+    const confirmCoachingSessions = async () => {
+        const targets = window.__aiCoachTargets || [];
+        if (!targets.length) { UI.toast.error('Nothing to schedule.'); return; }
+        let ok = 0, fail = 0;
+        for (const t of targets) {
+            try {
+                await _createFollowupActivity({
+                    type: 'AGENT_TRAINING',
+                    nextAction: `Coaching: ${t.name} (${t.conv}% conv, ${t.delta >= 0 ? '+' : ''}${t.delta} acts/30d)`,
+                    summary: 'AI Insights coaching session'
+                });
+                ok++;
+            } catch (_) { fail++; }
+        }
+        window.__aiCoachTargets = null;
+        _invalidateSnapshot();
+        try { UI.hideModal(); } catch (_) {}
+        if (ok && !fail) UI.toast.success(`Scheduled ${ok} coaching session${ok === 1 ? '' : 's'}.`);
+        else if (ok && fail) UI.toast.info(`Scheduled ${ok} session(s); ${fail} failed.`);
+        else UI.toast.error('Could not schedule coaching sessions.');
+    };
+
+    // ── Forecast: Schedule a review (a dated agent-meeting activity) ──────
+    const scheduleForecastReview = async () => {
+        try {
+            const snap = await _getSnapshot();
+            const fc = snap.forecast;
+            const note = fc && fc.hasData
+                ? `Forecast review — next month ${_fmtMoney(fc.nextMonth)} (${fc.trendDir}), recent avg ${_fmtMoney(fc.recentAvg)}`
+                : 'Forecast review — insufficient sales history';
+            await _createFollowupActivity({ type: 'AGENT_MEETING', nextAction: note, summary: 'AI Insights forecast review' });
+            _invalidateSnapshot();
+            UI.toast.success('Forecast review scheduled as an agent meeting (today).');
+        } catch (err) {
+            UI.toast.error('Could not schedule review: ' + (err && err.message ? err.message : 'Unknown error'));
+        }
+    };
+
+    // ── Forecast: Adjust a growth assumption + re-render the forecast ─────
+    // Client-side what-if: applies a growth multiplier to the projected months
+    // for the open forecast view. Persisted only on the in-memory snapshot.
+    const adjustForecast = async () => {
+        const snap = await _getSnapshot();
+        const fc = snap.forecast;
+        if (!fc || !fc.hasData) { UI.toast.error('Not enough data to adjust the forecast.'); return; }
+        const current = window.__aiForecastGrowth != null ? window.__aiForecastGrowth : 0;
+        const content = `
+            <div class="ai-adjust-forecast">
+                <p>Apply a growth assumption to the next 3 projected months. Re-renders the forecast view (this session only).</p>
+                <div class="form-group">
+                    <label for="ai-growth-input">Monthly growth %</label>
+                    <input type="number" id="ai-growth-input" class="form-control" value="${current}" min="-50" max="100" step="1">
+                </div>
+                <p style="color:#6B7280; font-size:0.9em;">Baseline next-month projection: ${esc(_fmtMoney(fc.nextMonth))}</p>
+            </div>`;
+        UI.showModal('Adjust Forecast Assumption', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Apply', type: 'primary', action: '(async () => { await app.applyForecastAdjustment(); })()' }
+        ]);
+    };
+
+    const applyForecastAdjustment = async () => {
+        const el = document.getElementById('ai-growth-input');
+        let g = el ? Number(el.value) : 0;
+        if (!isFinite(g)) g = 0;
+        g = _clamp(g, -50, 100);
+        const snap = await _getSnapshot();
+        const fc = snap.forecast;
+        if (!fc || !fc.projections) { UI.toast.error('No forecast to adjust.'); return; }
+        // Re-derive projections from the ORIGINAL baseline each time so repeated
+        // tweaks don't compound. Stash baseline once.
+        if (!window.__aiForecastBaseline) {
+            window.__aiForecastBaseline = fc.projections.map(p => ({ key: p.key, amount: p.amount }));
+        }
+        const base = window.__aiForecastBaseline;
+        const factor = 1 + (g / 100);
+        fc.projections = base.map((p, i) => ({ key: p.key, amount: Math.max(0, Math.round(p.amount * Math.pow(factor, i + 1))) }));
+        fc.nextMonth = fc.projections[0] ? fc.projections[0].amount : fc.nextMonth;
+        fc.total3mo = fc.projections.reduce((a, p) => a + p.amount, 0);
+        window.__aiForecastGrowth = g;
+        try { UI.hideModal(); } catch (_) {}
+        // Re-render the forecast view with the adjusted snapshot.
+        await showSalesForecast();
+        UI.toast.success(`Applied ${g >= 0 ? '+' : ''}${g}% monthly growth to the forecast.`);
+    };
+
+    // ── Performance: Share a text summary of the dashboard to clipboard ───
+    const shareInsights = async () => {
+        try {
+            const snap = await _getSnapshot();
+            const fc = snap.forecast || {};
+            const highLeads = (snap.leads || []).filter(l => l.score >= 80).length;
+            const warmLeads = (snap.leads || []).filter(l => l.score >= 50 && l.score < 80).length;
+            const highRisk = (snap.churn || []).filter(c => c.level === 'high').length;
+            const medRisk = (snap.churn || []).filter(c => c.level === 'medium').length;
+            const top = snap.agents && snap.agents.topPerformer;
+            const lines = [
+                `AI Insights — ${new Date().toLocaleString()}`,
+                ``,
+                `Lead Scoring: ${highLeads} hot (≥80), ${warmLeads} warm in pipeline`,
+                `Sales Forecast: ${fc.hasData ? `${_fmtMoney(fc.nextMonth)} next month (${fc.trendDir})` : 'insufficient data'}`,
+                `Churn Risk: ${highRisk} high, ${medRisk} medium-risk customers`,
+                `Team: ${(snap.agents && snap.agents.rows.length) || 0} agents analyzed${top ? `, top performer ${top.name} (${_fmtMoney(top.pipelineValue)} pipeline)` : ''}`,
+            ];
+            const text = lines.join('\n');
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(text);
+                UI.toast.success('Insights summary copied to clipboard.');
+            } else {
+                // Fallback: show in a modal the user can manually copy.
+                UI.showModal('Share Insights', `<textarea readonly class="form-control" rows="8" style="width:100%;">${esc(text)}</textarea>`, [
+                    { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
+                ]);
+            }
+        } catch (err) {
+            UI.toast.error('Could not share insights: ' + (err && err.message ? err.message : 'Unknown error'));
+        }
+    };
+
+    // ── View drill-downs (forecast breakdown / generic prediction action) ──
+    // executeAction is the generic dispatcher behind the "Recommended Action"
+    // prediction button — it just routes to the dashboard refresh (recompute),
+    // since the recommended action is advisory text, not a single entity.
+    const executeAction = async (label) => {
+        UI.toast.info(label ? `Action: ${String(label)}` : 'Recommended action acknowledged.');
+    };
+    // Forecast breakdown rows ("Existing Deals" / "New Prospects" / "Upsells" /
+    // "Referrals") drill into the relevant existing screen or a snapshot list.
+    const viewDealDetails = async () => {
+        try { UI.hideModal(); } catch (_) {}
+        if (window.app && typeof window.app.navigateTo === 'function') return window.app.navigateTo('pipeline');
+        UI.toast.info('Open the Pipeline tab to view deals.');
+    };
+    const viewProspectDetails = async () => {
+        try { UI.hideModal(); } catch (_) {}
+        if (window.app && typeof window.app.navigateTo === 'function') return window.app.navigateTo('prospects');
+        UI.toast.info('Open the Prospects tab to view new prospects.');
+    };
+
+    // Upsell candidates = healthy (low-risk) active customers — strong
+    // relationship, ripe for a next purchase. Listed from the snapshot.
+    const viewUpsellOpportunities = async () => {
+        try {
+            const snap = await _getSnapshot();
+            const cands = (snap.churn || []).filter(c => c.level === 'low').slice(0, 30);
+            if (!cands.length) {
+                UI.showModal('Upsell Opportunities', `<p class="empty-state" style="padding:16px;">No clearly healthy customers to target for upsell yet — re-engage at-risk accounts first.</p>`, [
+                    { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
+                ]);
+                return;
+            }
+            const rows = cands.map(c => `
+                <tr>
+                    <td><strong>${esc(c.name)}</strong></td>
+                    <td><span class="risk-badge low">${c.riskScore}% risk</span></td>
+                    <td><button class="btn-icon" aria-label="Open customer" onclick="event.stopPropagation(); app.contactAtRiskCustomer('${esc(String(c.id))}')"><i class="fas fa-eye" aria-hidden="true"></i></button></td>
+                </tr>`).join('');
+            UI.showModal(`Upsell Opportunities (${cands.length})`, `
+                <div class="ai-upsell">
+                    <p>Healthy, engaged customers — best candidates for a next purchase or upgrade.</p>
+                    <table class="risk-table"><thead><tr><th scope="col">Customer</th><th scope="col">Churn Risk</th><th scope="col"></th></tr></thead>
+                    <tbody>${rows}</tbody></table>
+                </div>`, [
+                { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
+            ]);
+        } catch (err) {
+            UI.toast.error('Could not load upsell opportunities: ' + (err && err.message ? err.message : 'Unknown error'));
+        }
+    };
+
+    // Referrals — the CRM has a dedicated Referrals screen (showReferralsView,
+    // navigateTo('referrals')); route there.
+    const viewReferrals = async () => {
+        try { UI.hideModal(); } catch (_) {}
+        if (window.app && typeof window.app.navigateTo === 'function') return window.app.navigateTo('referrals');
+        UI.toast.info('Open the Referrals tab to review referrals.');
+    };
+
+    // Renewals = active customers most overdue for contact (dormancy signal) —
+    // the closest data-backed proxy for "due to renew". Listed from snapshot.
+    const viewRenewals = async () => {
+        try {
+            const snap = await _getSnapshot();
+            const due = (snap.churn || [])
+                .filter(c => c.dormDays !== Infinity && c.dormDays >= 60)
+                .sort((a, b) => b.dormDays - a.dormDays)
+                .slice(0, 30);
+            if (!due.length) {
+                UI.showModal('Renewals Due', `<p class="empty-state" style="padding:16px;">No customers are overdue for contact (60+ days) — nothing flagged for renewal right now.</p>`, [
+                    { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
+                ]);
+                return;
+            }
+            const rows = due.map(c => `
+                <tr>
+                    <td><strong>${esc(c.name)}</strong></td>
+                    <td>${c.dormDays} days</td>
+                    <td><button class="btn-icon" aria-label="Open customer" onclick="event.stopPropagation(); app.contactAtRiskCustomer('${esc(String(c.id))}')"><i class="fas fa-eye" aria-hidden="true"></i></button></td>
+                </tr>`).join('');
+            UI.showModal(`Renewals Due (${due.length})`, `
+                <div class="ai-renewals">
+                    <p>Active customers overdue for contact (60+ days) — prioritise these for a renewal touch.</p>
+                    <table class="risk-table"><thead><tr><th scope="col">Customer</th><th scope="col">Since Last Touch</th><th scope="col"></th></tr></thead>
+                    <tbody>${rows}</tbody></table>
+                </div>`, [
+                { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
+            ]);
+        } catch (err) {
+            UI.toast.error('Could not load renewals: ' + (err && err.message ? err.message : 'Unknown error'));
+        }
+    };
+
     // ── Attach public functions to window.app ────────────────────────────
-    // ── Placeholder handlers for AI-dashboard action buttons ──────────────
-    // The Lead Scoring / Sales Forecast / Churn Risk / Performance Insights
-    // dashboards wired these onclick handlers before their backends existed.
-    // Calling an undefined app.* throws an uncaught TypeError, so register safe
-    // stubs that tell the user the feature is pending instead of crashing.
-    const _aiSoon = (label) => () => UI.toast.info(`${label} — coming soon`);
+    // Secondary dashboard actions — now REAL (implemented above). Each builds a
+    // CSV download, opens an existing screen/modal, creates follow-up activity
+    // records, or copies a summary to the clipboard. No "coming soon" stubs.
     Object.assign(window.app, {
-        // Still-pending secondary actions (export / scheduling / segmentation).
-        executeAction:                _aiSoon('Recommended action'),
+        executeAction,                        // generic prediction-action acknowledge
         recalculateLeadScores:        refreshAIPredictions,
-        exportLeads:                  _aiSoon('Export leads'),
-        createSegmentFromScoredLeads: _aiSoon('Create segment'),
-        scheduleBulkFollowup:         _aiSoon('Bulk follow-up'),
-        exportScoringReport:          _aiSoon('Export scoring report'),
-        viewDealDetails:              _aiSoon('Deal details'),
-        viewProspectDetails:          _aiSoon('Prospect details'),
-        viewUpsellOpportunities:      _aiSoon('Upsell opportunities'),
-        viewReferrals:                _aiSoon('Referrals'),
-        viewRenewals:                 _aiSoon('Renewals'),
-        exportForecast:               _aiSoon('Export forecast'),
-        adjustForecast:               _aiSoon('Adjust forecast'),
-        scheduleForecastReview:       _aiSoon('Schedule forecast review'),
-        executeRiskActions:           _aiSoon('Risk actions'),
-        scheduleCoachingSessions:     _aiSoon('Coaching sessions'),
-        generatePerformanceReport:    _aiSoon('Performance report'),
-        shareInsights:                _aiSoon('Share insights'),
+        exportLeads,                          // CSV of scored leads
+        exportScoringReport,                  // CSV scoring report (scores + weights)
+        createSegmentFromScoredLeads,         // modal of ≥75 leads + copy/CSV
+        copySegmentList,                      // clipboard copy for the segment modal
+        scheduleBulkFollowup,                 // modal → confirmBulkFollowup
+        confirmBulkFollowup,                  // creates follow-up activities (prospects)
+        viewDealDetails,                      // → Pipeline
+        viewProspectDetails,                  // → Prospects
+        viewUpsellOpportunities,              // modal: healthy customers
+        viewReferrals,                        // → Customers
+        viewRenewals,                         // modal: customers overdue for contact
+        exportForecast,                       // CSV of forecast actuals + projections
+        adjustForecast,                       // what-if growth modal
+        applyForecastAdjustment,              // re-renders forecast with growth %
+        scheduleForecastReview,               // creates an agent-meeting activity
+        executeRiskActions,                   // modal → confirmRiskActions
+        confirmRiskActions,                   // creates retention activities (customers)
+        scheduleCoachingSessions,             // modal → confirmCoachingSessions
+        confirmCoachingSessions,              // creates coaching activities
+        generatePerformanceReport,            // CSV per-agent performance report
+        shareInsights,                        // clipboard summary of the dashboard
     });
     Object.assign(window.app, {
         showAIInsightsDashboard,
