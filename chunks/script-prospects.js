@@ -6804,13 +6804,15 @@ const submitClosingRecord = async (prospectId) => {
 
     const saleAmount = parseFloat(data.sale_amount) || 0;
     const isAlreadyConverted = prospect.status === 'converted' || prospect.conversion_status === 'approved';
+    const isManager = isSystemAdmin(_currentUser) || isMarketingManager(_currentUser);
+    const qualifiesForConversion = saleAmount >= 2000 && !isAlreadyConverted;
     const submittedCr = { ...existingCr, ...data, status: 'submitted', submitted_at: new Date().toISOString() };
     const updates = {
         closing_record: submittedCr
     };
 
     // Auto-trigger conversion approval only for first-time conversions
-    if (saleAmount >= 2000 && !isAlreadyConverted) {
+    if (qualifiesForConversion) {
         updates.conversion_status = 'pending_approval';
         updates.conversion_requested_at = new Date().toISOString();
         updates.conversion_requested_by = _currentUser?.id;
@@ -6820,7 +6822,6 @@ const submitClosingRecord = async (prospectId) => {
     await _mirrorCrToActivity(prospectId, submittedCr);
 
     // Create approval queue entries for non-managers
-    const isManager = isSystemAdmin(_currentUser) || isMarketingManager(_currentUser);
     if (!isManager) {
         // Re-fetch post-update so snapshot captures the freshly submitted closing_record
         const freshProspect = await AppDataStore.getById('prospects', prospectId);
@@ -6839,7 +6840,7 @@ const submitClosingRecord = async (prospectId) => {
                 description: `New sale RM ${saleAmount.toLocaleString()} for ${freshProspect?.full_name || 'prospect'}`
             });
             // If auto-conversion triggered and not already a customer, create new_customer entry
-            if (saleAmount >= 2000 && !isAlreadyConverted) {
+            if (qualifiesForConversion) {
                 await AppDataStore.create('approval_queue', {
                     id: window.AppDataStore._generateId(),
                     approval_type: 'new_customer',
@@ -6856,7 +6857,19 @@ const submitClosingRecord = async (prospectId) => {
         } catch (e) { /* approval queue write failed silently */ }
     }
 
-    if (saleAmount >= 2000 && !isAlreadyConverted) {
+    // A manager is themselves the conversion approver — so a qualifying first
+    // sale they submit converts to a Customer immediately instead of parking in
+    // pending_approval (the old path set pending_approval but created NO queue
+    // entry for managers, leaving the prospect stuck as a prospect forever).
+    // approveProspectConversion reads the freshly-submitted closing_record,
+    // creates the customer with lifetime_value = sale amount, archives the CR,
+    // and refreshes the view + toasts "<name> is now a Customer!".
+    if (isManager && qualifiesForConversion) {
+        await approveProspectConversion(prospectId);
+        return;
+    }
+
+    if (qualifiesForConversion) {
         UI.toast.success('Closing record submitted. Sale ≥ RM 2,000 — conversion request auto-submitted for manager approval!');
     } else {
         UI.toast.success('Closing record submitted for approval');
