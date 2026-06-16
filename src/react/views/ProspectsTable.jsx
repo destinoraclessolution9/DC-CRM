@@ -210,7 +210,11 @@ export function ProspectsTable({ params, meta, pageSize = 50, onNavigate }) {
     if (isLoading && rows.length === 0) {
         body = <tr><td colSpan="9" style={{ textAlign: 'center', padding: 40, color: 'var(--text-secondary)' }}>Loading prospects…</td></tr>;
     } else if (isError) {
-        body = <tr><td colSpan="9" style={{ textAlign: 'center', padding: 40, color: 'var(--danger, #dc2626)' }}>Failed to load prospects{error && error.message ? ` — ${error.message}` : ''}</td></tr>;
+        // error.message is now a classified, human message (bffError); a transient
+        // outage shows neutral, a genuine session expiry shows danger red.
+        const retryable = !error || error.retryable;
+        const msg = (error && error.message) || 'Failed to load prospects.';
+        body = <tr><td colSpan="9" style={{ textAlign: 'center', padding: 40, color: retryable ? 'var(--text-secondary)' : 'var(--danger, #dc2626)' }}>{msg}</td></tr>;
     } else if (rows.length === 0) {
         body = <tr><td colSpan="9" style={{ textAlign: 'center', padding: 40 }}>No active prospects. Check "Include dormant" or type a name/phone to search older records.</td></tr>;
     } else {

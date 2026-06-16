@@ -137,7 +137,11 @@ export function CustomersTable({ params, meta, pageSize = 50, onNavigate }) {
     if (isLoading && rows.length === 0) {
         body = <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-secondary)' }}>Loading customers…</td></tr>;
     } else if (isError) {
-        body = <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: 'var(--danger, #dc2626)' }}>Failed to load customers{error && error.message ? ` — ${error.message}` : ''}</td></tr>;
+        // error.message is now a classified, human message (bffError); a transient
+        // outage shows neutral, a genuine session expiry shows danger red.
+        const retryable = !error || error.retryable;
+        const msg = (error && error.message) || 'Failed to load customers.';
+        body = <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: retryable ? 'var(--text-secondary)' : 'var(--danger, #dc2626)' }}>{msg}</td></tr>;
     } else if (rows.length === 0) {
         body = <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px' }}>No customers found</td></tr>;
     } else {

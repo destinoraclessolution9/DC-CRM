@@ -45,29 +45,39 @@ export default async function handler(req, res) {
   if (!token) return send(401, { error: 'unauthenticated' });
   let authId;
   try {
-    const authRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+    const authRes = await fetchT(`${SUPABASE_URL}/auth/v1/user`, {
       headers: { apikey: PUBLISHABLE, Authorization: `Bearer ${token}` },
     });
-    if (!authRes.ok) return send(401, { error: 'unauthenticated' });
+    if (!authRes.ok) {
+      // 401/403 = the token itself is genuinely rejected (expired / bad sig) →
+      // a real auth failure. ANY other status (5xx, 408, 429, 521 from an
+      // overloaded/down GoTrue) is an UPSTREAM OUTAGE, not the caller's fault —
+      // report it as retryable 503 so the client shows "service unavailable /
+      // retrying" and keeps cached data, instead of a misleading 401 dead-end.
+      if (authRes.status === 401 || authRes.status === 403) return send(401, { error: 'unauthenticated' });
+      return send(503, { error: 'auth_unavailable', status: authRes.status });
+    }
     const authUser = await authRes.json();
     authId = authUser && authUser.id;
-  } catch {
-    return send(502, { error: 'auth_unreachable' });
+  } catch (e) {
+    // Network failure or our own abort timeout — Auth is unreachable, not a bad
+    // token. Retryable, so the client falls back to cache and tries again.
+    return send(503, { error: 'auth_unavailable', detail: e && e.name === 'AbortError' ? 'timeout' : 'unreachable' });
   }
   if (!authId) return send(401, { error: 'unauthenticated' });
 
   // (2) Authz — server-side visibility scope (null = all, [] = none, [ids] = scoped).
   let visible;
   try {
-    const scopeRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/bff_visible_agent_ids`, {
+    const scopeRes = await fetchT(`${SUPABASE_URL}/rest/v1/rpc/bff_visible_agent_ids`, {
       method: 'POST',
       headers: svc({ 'content-type': 'application/json' }),
       body: JSON.stringify({ p_auth_id: authId }),
     });
-    if (!scopeRes.ok) return send(500, { error: 'scope_failed', status: scopeRes.status });
+    if (!scopeRes.ok) return send(503, { error: 'scope_unavailable', status: scopeRes.status });
     visible = await scopeRes.json();
   } catch {
-    return send(502, { error: 'scope_unreachable' });
+    return send(503, { error: 'scope_unavailable' });
   }
   // bff_visible_agent_ids returns [] ONLY for an unresolved caller (auth uid not
   // mapped to a users row) — every real user gets null / [self] / a non-empty
@@ -95,23 +105,36 @@ export default async function handler(req, res) {
 
   let rows, count = 0;
   try {
-    const dataRes = await fetch(`${SUPABASE_URL}/rest/v1/customers?${params.toString()}`, {
+    const dataRes = await fetchT(`${SUPABASE_URL}/rest/v1/customers?${params.toString()}`, {
       headers: svc({ Prefer: 'count=planned' }),
     });
-    if (!dataRes.ok) return send(502, { error: 'query_failed', status: dataRes.status });
+    if (!dataRes.ok) return send(503, { error: 'query_unavailable', status: dataRes.status });
     rows = await dataRes.json();
     // Content-Range: "0-49/1234"  (the part after '/' is the planned total)
     const cr = dataRes.headers.get('content-range') || '';
     const total = cr.split('/')[1];
     count = (total && total !== '*') ? (parseInt(total, 10) || 0) : (Array.isArray(rows) ? rows.length : 0);
   } catch {
-    return send(502, { error: 'query_unreachable' });
+    return send(503, { error: 'query_unavailable' });
   }
 
   return send(200, { rows: Array.isArray(rows) ? rows : [], count });
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
+// fetch with an abort timeout (default 8s) so a hung/overloaded Supabase upstream
+// fails fast instead of blocking the function up to the platform timeout. During
+// the 2026-06-16 compute outage these endpoints hung 20–25s; an 8s ceiling turns
+// that into a clean retryable 503 while staying well above a healthy <200ms call.
+async function fetchT(url, opts = {}, ms = 8000) {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), ms);
+  try {
+    return await fetch(url, { ...opts, signal: ac.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
 function svc(extra = {}) {
   return { apikey: SECRET, Authorization: `Bearer ${SECRET}`, ...extra };
 }

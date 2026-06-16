@@ -7,6 +7,7 @@
 // falls out per-view. The session token comes from the existing window.supabase
 // client (strangler-fig: the island lives in the same page, shares auth).
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
+import { bffError, bffRetry } from './bffError.js';
 
 async function fetchCustomers({ q = '', gua = '', type = '', limit = 50, offset = 0 } = {}) {
     const sb = window.supabase;
@@ -20,7 +21,7 @@ async function fetchCustomers({ q = '', gua = '', type = '', limit = 50, offset 
     if (gua) p.set('gua', gua);
     if (type) p.set('type', type);
     const res = await fetch('/api/customers?' + p.toString(), { headers: { Authorization: 'Bearer ' + token } });
-    if (!res.ok) throw new Error('BFF /api/customers ' + res.status);
+    if (!res.ok) throw bffError(res.status, 'customers');
     return res.json(); // { rows, count }
 }
 
@@ -29,7 +30,7 @@ export function useCustomers(params = {}) {
         queryKey: ['customers', params],
         queryFn: () => fetchCustomers(params),
         staleTime: 30_000,
-        retry: 1,
+        retry: bffRetry,
         // Keep the current page visible while the next page/filter loads, so
         // pagination doesn't flash an empty table between fetches.
         placeholderData: keepPreviousData,
