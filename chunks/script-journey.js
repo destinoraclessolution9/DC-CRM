@@ -545,18 +545,19 @@
 
     // ── Main render entry point ───────────────────────────────────────────────
 
-    // React journey-timeline passthrough — OPT-IN during verification (kill-switch:
-    // window.__REACT_JOURNEY=false | ?react_journey=0 | crm_react_journey='0'; plus
-    // global ?react=0 / crm_react_off='1'). Flip the OPT-IN test to a plain
-    // `return true` after live parity check to promote default-on.
+    // React journey-timeline passthrough — DEFAULT-ON (e2e-verified live 2026-06-16:
+    // stats/timeline/empty-state render through the React root, 0 unhandled
+    // rejections). Kill-switch: window.__REACT_JOURNEY=false | ?react_journey=0 |
+    // crm_react_journey='0' (plus the global ?react=0 / crm_react_off='1').
     const _reactJourneyOn = () => {
         try {
             if (/[?&]react=0/.test(location.search)) return false;
             if (localStorage.getItem('crm_react_off') === '1') return false;
             if (!(window.CRMReact && typeof window.CRMReact.mountJourneyContent === 'function')) return false;
-            return window.__REACT_JOURNEY === true
-                || /[?&]react_journey=1/.test(location.search)
-                || localStorage.getItem('crm_react_journey') === '1';
+            if (window.__REACT_JOURNEY === false) return false;
+            if (/[?&]react_journey=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_journey') === '0') return false;
+            return true;
         } catch (_) { return false; }
     };
     // Render the assembled journey HTML into `container`, routed through the

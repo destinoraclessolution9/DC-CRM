@@ -2084,14 +2084,36 @@ function _wireLoginBtn() {
                         : 'tap the ⋮ menu and choose "Open in Chrome" (or external browser)';
                     networkErrText = `Login is blocked inside ${_inAppBrowser}'s in-app browser. Please ${openHint}, then log in again.`;
                 } else {
+                    // A no-cors probe to the root only proves Cloudflare's EDGE is up,
+                    // not the origin. Probe the auth endpoint with a real fetch: a
+                    // 5xx (incl. Cloudflare 521-523 "origin down") means the BACKEND
+                    // itself is down — restarting or overloaded — so the right advice
+                    // is "wait", NOT "reinstall / open in Safari" (2026-06-16 incident).
+                    let backendDown = false, edgeReachable = false;
                     try {
-                        await Promise.race([
-                            fetch(window.SUPABASE_URL, { mode: 'no-cors' }),
-                            new Promise((_, r) => setTimeout(() => r(new Error('t')), 4000))
+                        const probe = await Promise.race([
+                            fetch(`${window.SUPABASE_URL}/auth/v1/health`, { cache: 'no-store' }),
+                            new Promise((_, r) => setTimeout(() => r(new Error('t')), 5000))
                         ]);
-                        // Server is reachable — something else blocked the auth call
-                        networkErrText = 'Server is reachable but the login request was blocked. Try: close and reopen the app, or open in Safari instead of the home-screen icon.';
+                        edgeReachable = true;
+                        if (probe && probe.status >= 500) backendDown = true;
                     } catch (_) {
+                        // CORS-less error page or network drop — fall back to the root
+                        // no-cors probe to tell "edge up" from "fully unreachable".
+                        try {
+                            await Promise.race([
+                                fetch(window.SUPABASE_URL, { mode: 'no-cors' }),
+                                new Promise((_, r) => setTimeout(() => r(new Error('t')), 4000))
+                            ]);
+                            edgeReachable = true;
+                        } catch (_2) { edgeReachable = false; }
+                    }
+                    if (backendDown) {
+                        networkErrText = 'The server is temporarily unavailable — it may be restarting or under heavy load. Please wait a minute or two and try again. You do not need to reinstall the app or switch browsers.';
+                    } else if (edgeReachable) {
+                        // Edge up + auth endpoint reachable → genuine client-side block.
+                        networkErrText = 'Server is reachable but the login request was blocked. Try waiting a minute, then close and reopen the app — or open the site in your browser (not the home-screen icon).';
+                    } else {
                         // Can't reach the server at all
                         networkErrText = 'Cannot reach the login server from this device. Try: switch between WiFi and mobile data, disable any VPN or content-blocker apps, then retry.';
                     }
