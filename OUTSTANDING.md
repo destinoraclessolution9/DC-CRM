@@ -1,6 +1,6 @@
 # CRM — Outstanding / Backlog
 
-_Last updated: 2026-06-16. **SW-98 + SW-100 + SW-102 are all LIVE + verified-present on production.** This file tracks what remains._
+_Last updated: 2026-06-16. **SW-98 + SW-100 + SW-102 + SW-103 are all LIVE + verified-present on production.** This file tracks what remains._
 
 > **Critical bugs (SW-98) AND tier-2 bug fixes (SW-100) are DONE + LIVE.**
 > Legend — **Effort:** S (≤1h) · M (a few h) · L (day+). **Priority:** P1 (do next) · P2 · P3.
@@ -10,22 +10,23 @@ _Last updated: 2026-06-16. **SW-98 + SW-100 + SW-102 are all LIVE + verified-pre
 ## ✅ SHIPPED + LIVE in SW-102 (independently verified present on production 2026-06-16)
 Pushed (commits `9fa1b31` additive + `a528976` 3.1-deletion, deployed via the parallel `7271b3f` push, then `84fd0b3` bumped sw→102 to force a clean reload). A 4-agent audit confirmed every marker is live; only **runtime UI behavior** wasn't exercised by me (no login) — a quick interactive spot-check is still worthwhile (kill-switch `?react_<x>=0` per view, or `git revert a528976` for just the deletions, are the rollback levers):
 - **Migration tail (§2):** kb-slot editors + journey aux → React. Rebuilt `react-island.js` also **re-synced `mountFudeContent` + `mountJourneyContent`** (were stale/inert) — fude dashboard + journey timeline now run on React. _Spot-check: capture Ctrl+Enter save; detail/daily autosave; fude carousel; journey timeline._
-- **AI Insights (§5):** real deterministic heuristics + real React cards/timeline/predictions. _Spot-check: open AI Insights — real numbers, no NaN._ ⚠️ **Partial — see §5 below: the dashboard's secondary action buttons are still "coming soon."**
+- **AI Insights (§5):** real deterministic heuristics + real React cards/timeline/predictions, AND **(SW-103) all ~17 secondary action buttons now do real work** (CSV exports, snapshot modals, follow-up activity creation, drill-downs, clipboard share — zero "coming soon" left). _Spot-check: open AI Insights — try Export / View / Schedule buttons._
 - **Export KPI (§5):** real CSV/XLSX export of the 福气 leaderboard.
-- **Integrations (§5):** webhook notifications (Slack/Discord) config + Test; OAuth-only services honest "needs backend". ⚠️ **`dispatchWebhookEvent` has NO callers → configured webhooks fire nothing until wired into save paths (open follow-up).**
+- **Integrations (§5):** webhook notifications (Slack/Discord) config + Test. **(SW-103) `dispatchWebhookEvent` now FIRES** on new_lead / new_activity / deal_closed (guarded). OAuth-only services remain an honest "needs backend" card.
 - **Mobile calendar (§5):** Week/Day/Agenda tabs + the cold-load repaint-guard fix.
 - **Batch DMS actions (§5):** Move/Share/Download wired into the real file-explorer toolbar (`script-documents.js`) + `confirmDeleteFolder` no-op fixed.
 - **getAll cleanup (§3.3):** CI defineProperty canary + guard-comment demote. Root cause pinned (esbuild es2020 RQ lowering, fixed via vite es2022).
 - **§3.1 legacy-fallback deletion:** ~1,500 LOC of dead renderers removed for 13 views; off/error → reload card. Audit confirmed every view's React mount is intact and `customers`/`prospects`/Class-B legacy was NOT touched.
 
-## ⏳ Genuinely still outstanding (honest list, post-SW-102)
-- **§4.1 Supabase compute Nano → Micro/Small** — _your action_ (billing; can't be done from code). The real fix for repeat 521 outages. ⚠️ Confirm project id before upgrading: `OUTSTANDING.md` said `remuwhxvzkzjtgbzqjaa`, memory references org `umqvztwprplcfpvrshsn`.
-- **Wire `dispatchWebhookEvent`** into the new-lead / closed-deal / new-activity save handlers — _me, small_. Webhook config+Test are live but inert until this is done.
-- **AI Insights secondary action buttons (~17)** — still `_aiSoon` "coming soon" toasts (Export/Segment/Schedule/Share/view-details inside the Lead-Scoring/Forecast/Churn/Performance modals). The 4 core dashboards now show **real data**; these secondary actions need real net-new features (segment builder, bulk scheduler, share infra). _Build only if wanted._
-- **Full OAuth integrations** (Outlook/GitHub/Drive) — _infeasible_ client-side (need a server OAuth backend + secrets). Honest "needs backend" card shipped.
-- **§3.2 full JSX componentization** of the passthrough/legal forms — _deferred by design_ ("when touched"); leaves a manual-escaping XSS surface — a dedicated escaping pass is the cheaper interim.
-- **Minor me-followups:** optional `UNIQUE(user_id,month,prospect_id)` on `monthly_focus_archive` (1.1+, belt-and-suspenders); DB role-fix for the 3 fude legacy-allowlist admins then delete the `[fude-authz]` fallback (1.2+); `esc()` the `a.solution_sold` + boss-report `<option>` labels (pre-existing low-risk).
-- **Pre-existing unbuilt stubs** (out of scope, not regressions): fude "Redeem Points" button (`app.todo`); journey prospect→customer auto-conversion (console TODO only).
+## ⏳ Genuinely still outstanding (honest list, post-SW-103)
+**Every code-buildable item is now done + live.** Also done in SW-103: webhook events fire, all AI action buttons real, `esc()` hardening (`solution_sold` + boss-report options), journey prospect→customer auto-conversion wired (idempotent, reuses the canonical `approveProspectConversion`). What remains is NOT code-deployable by me:
+- **§4.1 Supabase compute Nano → Micro/Small** — _your action_ (billing; can't be done from code). The real fix for repeat 521 outages. ⚠️ Confirm the exact project/org first (`remuwhxvzkzjtgbzqjaa` vs memory's org `umqvztwprplcfpvrshsn`).
+- **Full OAuth integrations** (Outlook/GitHub/Drive) — _infeasible_ client-side (need a server OAuth backend + secrets). Only Google Calendar is real; others show an honest "needs backend" card.
+- **§3.2 full JSX componentization** of the passthrough/legal forms — _deferred by design_ ("when touched").
+- **fude "Redeem Points" → DB-backed request queue** — currently an honest **copy-to-leader** flow (SW-103, no false-success). A real request queue needs a `redemption_requests` table + RLS, which I can't create from code (the PAT-on-CLI security rule blocks DDL). Create it in the Supabase dashboard (or authorize the dashboard path) and the form can write to it.
+- **1.1+ optional `UNIQUE(user_id,month,prospect_id)` on `monthly_focus_archive`** — belt-and-suspenders DDL, same PAT-on-CLI block; do from the dashboard. Optional (client guard + idempotency already cover correctness).
+- **1.2+ fix the 3 fude legacy-allowlist admins' DB role levels** (set L1/L2), then delete the `[fude-authz]` email fallback — DB data fix (you) + a one-line code delete (me).
+- _Note:_ the `new_activity` webhook event defaults OFF (admin toggles it in the integrations config); `new_lead` + `deal_closed` default on.
 
 ---
 
