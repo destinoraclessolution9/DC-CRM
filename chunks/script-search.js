@@ -39,6 +39,21 @@
     let _totalResults = 0;
     let _currentSelectedPerson = null;
 
+    // React-island flag — OPT-IN during verification (kill-switch: window.__REACT_SEARCH
+    // =false | ?react_search=0 | localStorage crm_react_search='0'; plus global
+    // ?react=0 / crm_react_off='1'). Flip the OPT-IN test to a plain `return true`
+    // after live parity check to promote default-on.
+    const _reactSearchOn = () => {
+        try {
+            if (/[?&]react=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            if (!(window.CRMReact && typeof window.CRMReact.mountSearchPanel === 'function')) return false;
+            return window.__REACT_SEARCH === true
+                || /[?&]react_search=1/.test(location.search)
+                || localStorage.getItem('crm_react_search') === '1';
+        } catch (_) { return false; }
+    };
+
 // Ensure referrals have the new fields (id, referrer_id, referrer_type, referred_prospect_id)
 const ensureReferralFields = async () => {
     const referrals = await AppDataStore.getAll('referrals');
@@ -269,8 +284,39 @@ const showSearchPanel = async () => {
         </div>
     `;
 
-    // Insert panel before the main content
     if (!viewport) return;
+
+    if (_reactSearchOn()) {
+        // Scaffold-shell: React renders the drawer shell (overlay + panel chrome
+        // + stable-id containers) into a host div; the chunk fills the containers
+        // (filter sections / condition groups / saved searches) after the island
+        // signals onReady. The overlay/panel are position:fixed so the wrapping
+        // host div doesn't affect layout.
+        let host = document.getElementById('search-panel-react-host');
+        if (host) { try { window.CRMReact.unmountSearchPanel(); } catch (_) {} host.remove(); }
+        host = document.createElement('div');
+        host.id = 'search-panel-react-host';
+        viewport.insertAdjacentElement('beforebegin', host);
+        try {
+            let _sReady; const _sReadyP = new Promise(res => { _sReady = res; });
+            const _sGuard = setTimeout(() => _sReady(), 4000);
+            window.CRMReact.mountSearchPanel(host, {
+                onReady: () => { clearTimeout(_sGuard); _sReady(); },
+            });
+            await _sReadyP;
+            await renderSavedSearches();
+            await updateFilterSections();
+            renderConditionGroups();
+            return;
+        } catch (e) {
+            console.warn('[search] island mount failed, falling back to legacy:', e && e.message);
+            try { window.CRMReact.unmountSearchPanel(); } catch (_) {}
+            host.remove();
+            // fall through to the legacy insert below
+        }
+    }
+
+    // Insert panel before the main content (legacy / fallback)
     viewport.insertAdjacentHTML('beforebegin', searchHTML);
 
     // Load saved searches
@@ -284,6 +330,13 @@ const showSearchPanel = async () => {
 };
 
 const hideSearchPanel = () => {
+    // React path: unmount the island + remove its host.
+    const host = document.getElementById('search-panel-react-host');
+    if (host) {
+        try { window.CRMReact && window.CRMReact.unmountSearchPanel && window.CRMReact.unmountSearchPanel(); } catch (_) {}
+        host.remove();
+    }
+    // Legacy path (also clears any stray nodes).
     const overlay = document.getElementById('search-panel-overlay');
     const panel = document.getElementById('search-panel');
     if (overlay) overlay.remove();

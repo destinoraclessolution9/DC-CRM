@@ -43,6 +43,7 @@ import { CalendarView } from './views/CalendarView.jsx';
 import { ReferralsView } from './views/ReferralsView.jsx';
 import { MobileHomeView } from './views/MobileHomeView.jsx';
 import { AIInsightsView } from './views/AIInsightsView.jsx';
+import { SearchPanelView } from './views/SearchPanelView.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -427,6 +428,23 @@ function unmountAIInsights() {
     if (_aiInsightsRoot) { try { _aiInsightsRoot.unmount(); } catch (_) {} _aiInsightsRoot = null; }
 }
 
+// ── Advanced Search overlay-drawer island (scaffold-shell; mounted into a host
+// div the chunk inserts, destroyed/recreated per open → dedicated single root,
+// unmount-prior-before-fresh, NOT the _roots Map). ───────────────────────────
+let _searchPanelRoot = null;
+function mountSearchPanel(container, opts) {
+    if (!container) return;
+    if (_searchPanelRoot) { try { _searchPanelRoot.unmount(); } catch (_) {} _searchPanelRoot = null; }
+    const o = opts || {};
+    const root = createRoot(container);
+    _searchPanelRoot = root;
+    root.render(<SearchPanelView onReady={o.onReady} />);
+    window.__REACT_SEARCH_MOUNTED = true;
+}
+function unmountSearchPanel() {
+    if (_searchPanelRoot) { try { _searchPanelRoot.unmount(); } catch (_) {} _searchPanelRoot = null; }
+}
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
@@ -493,6 +511,8 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountMobileHome: _unmountSimple,
     mountAIInsights,
     unmountAIInsights,
+    mountSearchPanel,
+    unmountSearchPanel,
 });
 
 if (document.readyState === 'loading') {
