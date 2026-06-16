@@ -114,6 +114,28 @@ if (!fs.existsSync(BASELINE_PATH)) {
   }
 }
 
+// ── Step 4: React-island defineProperty canary ─────────────────────────────
+// The live "Property description must be an object" crash root caused to
+// esbuild es2020 lowering of React Query private class fields in
+// react-island.js, which emitted Object.defineProperty(obj, key, null). Fixed
+// by target: 'es2022' in vite.config.mjs. This canary fails the regression if a
+// future esbuild/vite target downgrade reintroduces a null/undefined property
+// descriptor. Absent island = skip (PASS), not a failure.
+console.log('\n── Step 4: React-island defineProperty canary ────────────');
+{
+  const islandPath = path.join(ROOT, 'react-dist', 'react-island.js');
+  if (!fs.existsSync(islandPath)) {
+    pass('react-dist/react-island.js absent — skipping canary');
+  } else {
+    const islandSrc = fs.readFileSync(islandPath, 'utf8');
+    if (/defineProperty\([^)]*,\s*(null|void 0|undefined)\)/.test(islandSrc)) {
+      fail('react-island.js has Object.defineProperty(…, null/undefined) — es2020 private-field lowering regressed; check vite.config.mjs target (es2022)');
+    } else {
+      pass('react-island.js: no null/undefined property descriptors');
+    }
+  }
+}
+
 // ── Summary ────────────────────────────────────────────────────────────────
 console.log('\n─────────────────────────────────────────────────────────');
 if (fails === 0) {

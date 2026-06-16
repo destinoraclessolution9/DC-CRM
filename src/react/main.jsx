@@ -518,6 +518,42 @@ function unmountJourneyContent() {
     if (_journeyContentRoot) { try { _journeyContentRoot.unmount(); } catch (_) {} _journeyContentRoot = null; }
 }
 
+// ── Knowledge HQ slot-editor passthrough (dedicated root, separate from the
+// modal/fude/journey roots). The KB dashboard + all-entries islands mount onto
+// their OWN child nodes inside kb-slot, so the editor passes its body through a
+// distinct root (createRoot on the editor's own #kb-editor-react-root node).
+// Used for the capture / daily-notes / detail editors: dangerouslySetInnerHTML
+// keeps the inline oninput/onchange/onclick handlers + inline debounceCall
+// link-search working, and the chunk re-binds the Ctrl+Enter / autosave keydown
+// listeners in onReady. flushSync makes the DOM present synchronously before
+// that onReady wiring runs. ───────────────────────────────────────────────────
+let _kbEditorRoot = null;
+function mountKbEditor(container, opts) {
+    if (!container) return;
+    if (_kbEditorRoot) { try { _kbEditorRoot.unmount(); } catch (_) {} _kbEditorRoot = null; }
+    const o = opts || {};
+    const root = createRoot(container);
+    _kbEditorRoot = root;
+    const el = <ModalContentIsland html={o.html || ''} onReady={o.onReady} />;
+    try { flushSync(() => { root.render(el); }); }
+    catch (_) { root.render(el); }
+    window.__REACT_KBEDITOR_MOUNTED = true;
+}
+function unmountKbEditor() {
+    if (_kbEditorRoot) { try { _kbEditorRoot.unmount(); } catch (_) {} _kbEditorRoot = null; }
+}
+
+// ── Journey aux-widget passthrough (MULTI-root via _mountSimple/_roots, NOT the
+// singleton _journeyContentRoot). The agent journey dashboard + load panels are
+// small read-only widgets that can BOTH be on-screen at once (each in its own
+// container), so they need per-container roots. Inline app.navigateTo(...)
+// onclicks survive dangerouslySetInnerHTML. ───────────────────────────────────
+function mountJourneyAux(container, opts) {
+    if (!container) return;
+    _mountSimple(container, <ModalContentIsland html={(opts || {}).html || ''} />);
+    window.__REACT_JOURNEYAUX_MOUNTED = true;
+}
+
 window.CRMReact = Object.assign(window.CRMReact || {}, {
     queryClient,
     mountCustomersTable,
@@ -592,6 +628,10 @@ window.CRMReact = Object.assign(window.CRMReact || {}, {
     unmountFudeContent,
     mountJourneyContent,
     unmountJourneyContent,
+    mountKbEditor,
+    unmountKbEditor,
+    mountJourneyAux,
+    unmountJourneyAux: _unmountSimple,
 });
 
 if (document.readyState === 'loading') {

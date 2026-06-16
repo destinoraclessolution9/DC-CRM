@@ -9,6 +9,9 @@
  */
 (() => {
     const _state = window._appState;
+    const _utils = window._crmUtils || {};
+    const esc = (...a) => (_utils.escapeHtml ? _utils.escapeHtml(...a) : String(a[0] ?? ''));
+    const isSystemAdmin = (u) => (_utils.isSystemAdmin ? _utils.isSystemAdmin(u || _state.cu) : false);
     const navigateTo = (v) => window.app.navigateTo(v);
     // ========== GOOGLE CALENDAR INTEGRATION FUNCTIONS ==========
 
@@ -319,11 +322,11 @@
 
                 <div class="integration-grid">
                     ${await renderIntegrationCard('google', 'Google Calendar', 'Two-way sync', 'calendar', await getConnectionStatus('google'))}
-                    ${await renderIntegrationCard('outlook', 'Outlook Calendar', 'One-way sync', 'calendar', await getConnectionStatus('outlook'))}
+                    ${await renderIntegrationCard('webhook', 'Webhook Notifications', 'Slack / Discord / generic', 'messaging', await getConnectionStatus('webhook'))}
                     ${await renderIntegrationCard('whatsapp', 'WhatsApp Business', 'Outbound only', 'messaging', await getConnectionStatus('whatsapp'))}
-                    ${await renderIntegrationCard('twilio', 'Twilio SMS', 'Outbound only', 'messaging', await getConnectionStatus('twilio'))}
-                    ${await renderIntegrationCard('quickbooks', 'QuickBooks', 'One-way sync', 'accounting', await getConnectionStatus('quickbooks'))}
-                    ${await renderIntegrationCard('googledrive', 'Google Drive', 'Two-way sync', 'storage', await getConnectionStatus('googledrive'))}
+                    ${await renderIntegrationCard('outlook', 'Outlook Calendar', 'Two-way sync', 'calendar', 'oauth_backend')}
+                    ${await renderIntegrationCard('github', 'GitHub', 'Issues & activity', 'devtools', 'oauth_backend')}
+                    ${await renderIntegrationCard('googledrive', 'Google Drive', 'Two-way sync', 'storage', 'oauth_backend')}
                 </div>
             </div>
         `;
@@ -337,31 +340,43 @@
         const statusColors = {
             connected: 'status-connected',
             disconnected: 'status-disconnected',
-            expired: 'status-expired'
+            expired: 'status-expired',
+            oauth_backend: 'status-expired'
         };
 
         const statusIcons = {
             calendar: 'fas fa-calendar-alt',
             messaging: 'fas fa-comment',
             accounting: 'fas fa-chart-line',
-            storage: 'fas fa-database'
+            storage: 'fas fa-database',
+            devtools: 'fab fa-github'
         };
 
+        // Honest state for OAuth-only services that this static SPA cannot
+        // actually connect (no server-side OAuth backend / secrets here).
+        const isOAuthBackend = status === 'oauth_backend';
+        const statusLabel = isOAuthBackend
+            ? '🔒 Requires admin OAuth setup'
+            : status === 'connected' ? '🟢 Connected'
+            : status === 'expired' ? '🟡 Expired'
+            : '🔴 Not configured';
+
+        const safeId = esc(id);
         return `
-            <div class="integration-card" onclick="app.showIntegrationDetails('${id}')">
-                <div class="integration-icon ${type}">
+            <div class="integration-card" onclick="app.showIntegrationDetails('${safeId}')">
+                <div class="integration-icon ${esc(type)}">
                     <i class="${statusIcons[type] || 'fas fa-plug'}"></i>
                 </div>
                 <div class="integration-info">
-                    <h3>${name}</h3>
-                    <p>${description}</p>
+                    <h3>${esc(name)}</h3>
+                    <p>${esc(description)}</p>
                     <div class="integration-status ${statusColors[status] || statusColors.disconnected}">
-                        ${status === 'connected' ? '🟢 Connected' : status === 'expired' ? '🟡 Expired' : '🔴 Disconnected'}
+                        ${statusLabel}
                     </div>
                 </div>
                 <div class="integration-action">
-                    <button class="btn ${status === 'connected' ? 'secondary' : 'primary'}" onclick="event.stopPropagation(); id === 'whatsapp' ? (window.app.showWhatsAppIntegration ? (async()=>{ await app.showWhatsAppIntegration(); })() : UI.toast.info('WhatsApp integration coming soon')) : app.showIntegrationDetails('${id}')">
-                        ${status === 'connected' ? 'Configure' : 'Connect'}
+                    <button class="btn ${status === 'connected' ? 'secondary' : 'primary'}" onclick="event.stopPropagation(); app.showIntegrationDetails('${safeId}')">
+                        ${isOAuthBackend ? 'Details' : status === 'connected' ? 'Configure' : 'Connect'}
                     </button>
                 </div>
             </div>
@@ -392,12 +407,62 @@
         return integration ? integration.id : null;
     };
 
+    // Services that genuinely require a server-side OAuth backend + client
+    // secrets the user must register. This static SPA cannot perform that
+    // flow client-side, so we show an HONEST explanation rather than a fake
+    // "Connect" button that pretends to work.
+    const OAUTH_BACKEND_SERVICES = {
+        outlook: {
+            name: 'Outlook Calendar',
+            why: 'Microsoft Graph calendar sync needs an Azure app registration (client ID + secret) and a server-side OAuth callback. Those secrets cannot live in the browser, so this can only be enabled once an admin sets up the backend.'
+        },
+        github: {
+            name: 'GitHub',
+            why: 'GitHub OAuth needs a registered OAuth App (client ID + secret) and a server-side token exchange. The browser cannot hold those credentials, so this requires backend setup before it can connect.'
+        },
+        googledrive: {
+            name: 'Google Drive',
+            why: 'Drive file sync needs Google OAuth scopes granted through a server-side consent + token-exchange flow with stored client secrets — not possible from this static front end alone.'
+        }
+    };
+
     const showIntegrationDetails = async (provider) => {
         if (provider === 'google') {
             await showGoogleCalendarIntegration();
+        } else if (provider === 'webhook') {
+            await showWebhookIntegration();
+        } else if (provider === 'whatsapp') {
+            if (window.app.showWhatsAppIntegration) {
+                await window.app.showWhatsAppIntegration();
+            } else {
+                UI.toast.info('WhatsApp integration coming soon');
+            }
+        } else if (OAUTH_BACKEND_SERVICES[provider]) {
+            showOAuthBackendNotice(provider);
         } else {
             UI.toast.info(`${provider} integration coming soon`);
         }
+    };
+
+    const showOAuthBackendNotice = (provider) => {
+        const svc = OAUTH_BACKEND_SERVICES[provider];
+        if (!svc) return;
+        UI.showModal(`${esc(svc.name)} — Requires backend setup`, `
+            <div style="display:flex;gap:14px;align-items:flex-start;">
+                <i class="fas fa-shield-halved" style="font-size:28px;color:var(--gray-400);margin-top:2px;"></i>
+                <div>
+                    <p style="margin-top:0;font-weight:600;">This integration is not available client-side.</p>
+                    <p style="color:var(--gray-600);line-height:1.55;">${esc(svc.why)}</p>
+                    <p style="color:var(--gray-600);line-height:1.55;margin-bottom:0;">
+                        Need outbound notifications today? Use
+                        <a href="#" onclick="event.preventDefault(); UI.hideModal(); app.showWebhookIntegration();" style="color:var(--primary);font-weight:600;">Webhook Notifications</a>
+                        to push CRM events to Slack, Discord, or any incoming-webhook endpoint — no backend required.
+                    </p>
+                </div>
+            </div>
+        `, [
+            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
+        ]);
     };
 
     const showGoogleCalendarIntegration = async () => {
@@ -747,6 +812,320 @@
         if (_syncManager) _syncManager.resolveConflict(choice, activityId, eventId);
     };
 
+    // ========== WEBHOOK NOTIFICATIONS INTEGRATION ==========
+    // Genuinely feasible from a static SPA: the admin pastes an *incoming*
+    // webhook URL (Slack / Discord / generic) and picks which CRM events
+    // should POST a JSON payload to it. No OAuth, no secrets we hold — the
+    // URL is user-provided config, persisted like Google's settings via an
+    // integration_connections row (config lives in the JSON sync_settings
+    // column). AppDataStore already falls back to localStorage when offline.
+
+    // Catalogue of events an admin can subscribe to. Keys are stored in
+    // config.events as booleans.
+    const WEBHOOK_EVENTS = [
+        { key: 'new_lead', label: 'New lead / prospect created' },
+        { key: 'deal_closed', label: 'Deal closed (sale recorded)' },
+        { key: 'new_activity', label: 'Activity logged (CPS / FTF / FSA)' },
+        { key: 'appointment_booked', label: 'Appointment booked' },
+        { key: 'customer_added', label: 'New customer added' }
+    ];
+
+    const DEFAULT_WEBHOOK_EVENTS = { new_lead: true, deal_closed: true, new_activity: false, appointment_booked: false, customer_added: false };
+
+    const getWebhookIntegrationId = async () => {
+        let integration = (await AppDataStore.getAll('integrations')).find(i => i.provider === 'webhook');
+        if (!integration) {
+            integration = await AppDataStore.create('integrations', {
+                integration_name: 'Webhook Notifications',
+                provider: 'webhook',
+                type: 'messaging',
+                is_active: true,
+                config_schema: {},
+                created_at: new Date().toISOString()
+            });
+        }
+        return integration ? integration.id : null;
+    };
+
+    const getWebhookConnection = async () => {
+        const integrationId = await getIntegrationId('webhook');
+        if (!integrationId) return null;
+        const connections = await AppDataStore.query('integration_connections', {
+            integration_id: integrationId,
+            user_id: _state.cu?.id || 1
+        });
+        return connections.length > 0 ? connections[0] : null;
+    };
+
+    // Pull the webhook config out of the connection's JSON column, with
+    // sane defaults so the form always renders.
+    const getWebhookConfig = (connection) => {
+        const s = connection?.sync_settings || {};
+        return {
+            url: typeof s.url === 'string' ? s.url : '',
+            provider: s.provider || 'generic', // slack | discord | generic
+            events: { ...DEFAULT_WEBHOOK_EVENTS, ...(s.events || {}) }
+        };
+    };
+
+    const isHttpsWebhookUrl = (url) => {
+        if (!url || typeof url !== 'string') return false;
+        try {
+            const u = new URL(url.trim());
+            return u.protocol === 'https:';
+        } catch (_) {
+            return false;
+        }
+    };
+
+    const detectWebhookProvider = (url) => {
+        const u = (url || '').toLowerCase();
+        if (u.includes('hooks.slack.com')) return 'slack';
+        if (u.includes('discord.com/api/webhooks') || u.includes('discordapp.com/api/webhooks')) return 'discord';
+        return 'generic';
+    };
+
+    const showWebhookIntegration = async () => {
+        const connection = await getWebhookConnection();
+        const cfg = getWebhookConfig(connection);
+        const isConfigured = !!cfg.url;
+        const canEdit = isSystemAdmin();
+
+        const vp = document.getElementById('content-viewport');
+        if (!vp) return;
+
+        const eventRows = WEBHOOK_EVENTS.map(ev => `
+            <label class="checkbox-label" style="display:flex;align-items:center;gap:8px;padding:4px 0;">
+                <input type="checkbox" id="wh-ev-${esc(ev.key)}" ${cfg.events[ev.key] ? 'checked' : ''} ${canEdit ? '' : 'disabled'}>
+                ${esc(ev.label)}
+            </label>
+        `).join('');
+
+        vp.innerHTML = `
+            <div class="integration-detail">
+                <div class="detail-header">
+                    <button class="btn secondary" onclick="app.showIntegrationHub(document.getElementById('content-viewport'))">
+                        <i class="fas fa-arrow-left"></i> Back to Integrations
+                    </button>
+                    <h1>Webhook Notifications</h1>
+                </div>
+
+                <div class="connection-status ${isConfigured ? 'connected' : 'disconnected'}">
+                    <div class="status-indicator ${isConfigured ? 'connected' : 'disconnected'}"></div>
+                    <div class="status-text">
+                        <h3>${isConfigured ? 'Configured' : 'Not configured'}</h3>
+                        ${isConfigured ? `
+                            <p>Posting selected CRM events to your <strong>${esc(cfg.provider)}</strong> webhook.</p>
+                        ` : `
+                            <p>Push CRM events (new leads, closed deals, …) to Slack, Discord, or any incoming-webhook URL.</p>
+                        `}
+                    </div>
+                </div>
+
+                ${!canEdit ? `
+                    <div class="settings-section" style="margin-top:16px;">
+                        <p style="color:var(--gray-500);"><i class="fas fa-lock"></i> Only a System Admin can configure webhook notifications.</p>
+                    </div>
+                ` : `
+                    <div class="sync-settings">
+                        <div class="settings-section">
+                            <h4>Incoming Webhook URL</h4>
+                            <p style="color:var(--gray-500);font-size:13px;margin:0 0 8px;">
+                                Paste a Slack / Discord / generic incoming-webhook URL. Must start with <code>https://</code>.
+                                Create one in Slack (Incoming Webhooks app) or Discord (Channel → Integrations → Webhooks).
+                            </p>
+                            <input type="url" class="form-control" id="wh-url" placeholder="https://hooks.slack.com/services/..." value="${esc(cfg.url)}">
+                        </div>
+
+                        <div class="settings-section">
+                            <h4>Notify me on</h4>
+                            ${eventRows}
+                        </div>
+
+                        <div class="settings-actions">
+                            <button class="btn primary" onclick="app.saveWebhookSettings()">Save</button>
+                            <button class="btn secondary" onclick="app.testWebhook()">Send Test</button>
+                            ${isConfigured ? `<button class="btn error" onclick="app.disconnectWebhook()">Remove</button>` : ''}
+                        </div>
+                    </div>
+                `}
+            </div>
+        `;
+    };
+
+    const readWebhookFormConfig = () => {
+        const url = (document.getElementById('wh-url')?.value || '').trim();
+        const events = {};
+        for (const ev of WEBHOOK_EVENTS) {
+            events[ev.key] = document.getElementById(`wh-ev-${ev.key}`)?.checked || false;
+        }
+        return { url, events, provider: detectWebhookProvider(url) };
+    };
+
+    const saveWebhookSettings = async () => {
+        if (!isSystemAdmin()) { UI.toast.error('Only a System Admin can change this'); return; }
+        const form = readWebhookFormConfig();
+
+        if (!form.url) { UI.toast.error('Please enter a webhook URL'); return; }
+        if (!isHttpsWebhookUrl(form.url)) {
+            UI.toast.error('Webhook URL must be a valid https:// address');
+            return;
+        }
+
+        try {
+            const integrationId = await getWebhookIntegrationId();
+            if (!integrationId) { UI.toast.error('Could not save — integration unavailable'); return; }
+
+            const settings = { url: form.url, provider: form.provider, events: form.events };
+            const existing = await getWebhookConnection();
+
+            if (existing) {
+                await AppDataStore.update('integration_connections', existing.id, {
+                    status: 'connected',
+                    sync_settings: settings,
+                    updated_at: new Date().toISOString()
+                });
+            } else {
+                await AppDataStore.create('integration_connections', {
+                    integration_id: integrationId,
+                    user_id: _state.cu?.id || 1,
+                    access_token: '',
+                    refresh_token: '',
+                    token_expires_at: null,
+                    scope: 'webhook',
+                    status: 'connected',
+                    last_sync: null,
+                    sync_settings: settings,
+                    created_at: new Date().toISOString()
+                });
+            }
+
+            UI.toast.success('Webhook settings saved');
+            await showWebhookIntegration();
+        } catch (e) {
+            console.error('Save webhook error:', e);
+            UI.toast.error('Failed to save webhook settings');
+        }
+    };
+
+    // Build a provider-shaped payload. Slack expects { text }, Discord
+    // expects { content }; generic endpoints get a structured object.
+    const buildWebhookPayload = (provider, event, summary, data) => {
+        const text = `:bell: *CRM ${event}* — ${summary}`;
+        if (provider === 'slack') return { text };
+        if (provider === 'discord') return { content: `🔔 **CRM ${event}** — ${summary}` };
+        return {
+            source: 'DestinOraclesSolution CRM',
+            event,
+            summary,
+            data: data || {},
+            timestamp: new Date().toISOString()
+        };
+    };
+
+    // POST to the configured webhook. Slack/Discord browser POSTs trip CORS,
+    // so we use mode:'no-cors' (opaque response — we can't read status, but
+    // the request is delivered). Generic endpoints that send CORS headers
+    // get a normal request so we can surface real failures. Always wrapped
+    // in try/catch; never throws to the caller.
+    const postToWebhook = async (url, provider, payload) => {
+        if (!isHttpsWebhookUrl(url)) return { ok: false, reason: 'invalid_url' };
+        const opaque = provider === 'slack' || provider === 'discord';
+        try {
+            const resp = await fetch(url, {
+                method: 'POST',
+                mode: opaque ? 'no-cors' : 'cors',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            // Opaque (no-cors) responses report ok:false / status:0 even on
+            // success — treat a non-thrown opaque response as delivered.
+            if (opaque) return { ok: true, opaque: true };
+            return { ok: resp.ok, status: resp.status };
+        } catch (e) {
+            console.error('Webhook POST failed:', e);
+            return { ok: false, reason: e?.message || 'network_error' };
+        }
+    };
+
+    const testWebhook = async () => {
+        if (!isSystemAdmin()) { UI.toast.error('Only a System Admin can do this'); return; }
+        // Prefer the value currently in the form so admins can test before saving.
+        const form = readWebhookFormConfig();
+        let url = form.url;
+        let provider = form.provider;
+        if (!url) {
+            const conn = await getWebhookConnection();
+            const cfg = getWebhookConfig(conn);
+            url = cfg.url; provider = cfg.provider;
+        }
+        if (!isHttpsWebhookUrl(url)) {
+            UI.toast.error('Enter a valid https:// webhook URL first');
+            return;
+        }
+
+        UI.toast.info('Sending test notification…');
+        const payload = buildWebhookPayload(
+            provider,
+            'test',
+            'This is a test notification from your CRM Integration Hub.',
+            { triggered_by: _state.cu?.name || _state.cu?.email || 'admin', kind: 'test' }
+        );
+        const result = await postToWebhook(url, provider, payload);
+        if (result.ok) {
+            UI.toast.success(result.opaque
+                ? 'Test sent — check your channel (delivery cannot be confirmed from the browser for Slack/Discord)'
+                : 'Test notification delivered successfully');
+        } else {
+            UI.toast.error('Test failed — check the URL and try again');
+        }
+    };
+
+    const disconnectWebhook = async () => {
+        UI.showModal('Remove Webhook', `
+            <p>Remove the configured webhook? CRM events will stop being sent.</p>
+            <p style="color:var(--gray-500);font-size:13px;">The webhook URL on your Slack/Discord side is not affected.</p>
+        `, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Remove', type: 'error', action: '(async () => { await app.confirmDisconnectWebhook(); })()' }
+        ]);
+    };
+
+    const confirmDisconnectWebhook = async () => {
+        try {
+            const connection = await getWebhookConnection();
+            if (connection) {
+                await AppDataStore.update('integration_connections', connection.id, {
+                    status: 'disconnected',
+                    sync_settings: { url: '', provider: 'generic', events: { ...DEFAULT_WEBHOOK_EVENTS } },
+                    updated_at: new Date().toISOString()
+                });
+            }
+        } catch (e) {
+            console.error('Disconnect webhook error:', e);
+        }
+        UI.hideModal();
+        UI.toast.success('Webhook removed');
+        await showWebhookIntegration();
+    };
+
+    // Public dispatch hook: other parts of the CRM can call
+    // app.dispatchWebhookEvent('new_lead', 'Jane Doe added', {...}) to fire a
+    // notification if (a) a webhook is configured and (b) that event is
+    // enabled. Silent + non-blocking — never throws into the caller.
+    const dispatchWebhookEvent = async (eventKey, summary, data) => {
+        try {
+            const connection = await getWebhookConnection();
+            if (!connection || connection.status !== 'connected') return;
+            const cfg = getWebhookConfig(connection);
+            if (!cfg.url || !cfg.events[eventKey]) return;
+            const payload = buildWebhookPayload(cfg.provider, eventKey, summary || eventKey, data);
+            await postToWebhook(cfg.url, cfg.provider, payload);
+        } catch (e) {
+            console.error('dispatchWebhookEvent error:', e);
+        }
+    };
+
     // Hook into activity CRUD for auto-sync
     const originalCreateActivity = AppDataStore.create;
     const originalUpdateActivity = AppDataStore.update;
@@ -808,6 +1187,13 @@
         confirmDisconnectGoogle,
         resolveConflict,
         initGoogleIntegration,
+        // Webhook Notifications integration
+        showWebhookIntegration,
+        saveWebhookSettings,
+        testWebhook,
+        disconnectWebhook,
+        confirmDisconnectWebhook,
+        dispatchWebhookEvent,
     });
     // Self-init: the main script no longer calls initGoogleIntegration() directly
     // (it's a lazy chunk), so we call it here when the chunk first loads.

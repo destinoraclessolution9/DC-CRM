@@ -1,14 +1,16 @@
 // AI Insights Dashboard — scaffold-shell island (modal-content, view 'ai_insights').
 //
 // Rendered as the body of a fullscreen UI.showModal. React owns the static
-// layout (header + Refresh, chart legend, the 4 static insight cards, the
-// predictions-table headers) and the stable-id containers the chunk fills:
+// layout (header + Refresh, chart title + legend, predictions-table headers)
+// and the stable-id containers the chunk fills with REAL data:
 //   #ai-stats-grid       ← chunk renderAIStatsCards()
 //   #ai-timeline-chart   ← chunk renderAITimelineChart()
+//   #ai-insights-grid    ← chunk _aiInsightCardsHtml() (the 4 clickable cards)
 //   #ai-predictions-tbody← chunk renderTopPredictions()
-// All logic + data fetches stay in chunks/script-ai.js (showAIInsightsDashboard
-// awaits the island onReady then fills by id). Insight-card / Refresh clicks
-// call window.app.* exactly as the legacy inline onclick did.
+// No hardcoded numbers live here — all logic + data fetches stay in
+// chunks/script-ai.js (showAIInsightsDashboard awaits the island onReady then
+// fills by id). The insight cards carry their own inline onclick="app.*"
+// drill-downs built by the chunk; the Refresh button calls window.app.* here.
 import React, { useEffect } from 'react';
 
 const app = () => window.app || {};
@@ -35,42 +37,15 @@ export function AIInsightsView({ onReady }) {
             <div className="stats-grid" id="ai-stats-grid"></div>
 
             <div className="chart-container">
-                <h3>AI Predictions Timeline</h3>
+                <h3>Activity &amp; Sales Timeline (last 12 months)</h3>
                 <div className="ai-timeline-chart" id="ai-timeline-chart"></div>
                 <div className="chart-legend">
-                    <div className="legend-item"><span className="color-dot actual"></span> Actual</div>
-                    <div className="legend-item"><span className="color-dot predicted"></span> Predicted</div>
-                    <div className="legend-item"><span className="color-dot target"></span> Target</div>
-                    <div className="legend-item"><span className="color-dot confidence"></span> Confidence: 85%</div>
+                    <div className="legend-item"><span className="color-dot actual"></span> Activities logged</div>
+                    <div className="legend-item"><span className="color-dot predicted"></span> Closings</div>
                 </div>
             </div>
 
-            <div className="insights-grid">
-                <div className="insight-card" onClick={() => call('showLeadScoring')} role="button">
-                    <i className="fas fa-chart-line"></i>
-                    <h4>Lead Scoring</h4>
-                    <p>156 leads&gt; 80 score</p>
-                    <span className="trend up">+34 this week</span>
-                </div>
-                <div className="insight-card" onClick={() => call('showSalesForecast')} role="button">
-                    <i className="fas fa-dollar-sign"></i>
-                    <h4>Sales Forecast</h4>
-                    <p>$2.4M next 30 days</p>
-                    <span className="trend down">-12% vs last month</span>
-                </div>
-                <div className="insight-card" onClick={() => call('showChurnRiskAnalysis')} role="button">
-                    <i className="fas fa-exclamation-triangle"></i>
-                    <h4>Churn Risk</h4>
-                    <p>23 customers at risk</p>
-                    <span className="trend up warning">+15% increase</span>
-                </div>
-                <div className="insight-card" onClick={() => call('showPerformanceInsights')} role="button">
-                    <i className="fas fa-users"></i>
-                    <h4>Team Insights</h4>
-                    <p>8 recommendations</p>
-                    <span className="trend up">3 high priority</span>
-                </div>
-            </div>
+            <div className="insights-grid" id="ai-insights-grid"></div>
 
             <div className="recent-predictions">
                 <h3>Top Predictions This Week</h3>

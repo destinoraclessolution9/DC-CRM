@@ -576,6 +576,33 @@
         container.innerHTML = viewHtml;
     };
 
+    // React aux-widget passthrough for the small read-only journey widgets
+    // (agent dashboard + team-load panels). Two can be on-screen at once, so
+    // these route through the MULTI-root mountJourneyAux (per-container roots),
+    // NOT the singleton journey-timeline root. DEFAULT-ON; same kill-switches as
+    // _reactJourneyOn plus a feature-detect on mountJourneyAux.
+    const _reactJourneyAuxOn = () => {
+        try {
+            if (/[?&]react=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            if (!(window.CRMReact && typeof window.CRMReact.mountJourneyAux === 'function')) return false;
+            if (window.__REACT_JOURNEY === false) return false;
+            if (/[?&]react_journey=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_journey') === '0') return false;
+            return true;
+        } catch (_) { return false; }
+    };
+    // Render an aux-widget body into `container` via the multi-root island when
+    // enabled, else plain innerHTML. Inline app.navigateTo(...) onclicks survive
+    // dangerouslySetInnerHTML.
+    const _rxRenderAux = (container, html) => {
+        if (_reactJourneyAuxOn()) {
+            try { window.CRMReact.mountJourneyAux(container, { html }); return; }
+            catch (e) { console.warn('[journey] aux island mount failed, legacy:', e && e.message); }
+        }
+        container.innerHTML = html;
+    };
+
     const renderJourneyTab = async (entityType, entityId, container) => {
         if (!container) return;
         container.innerHTML = '<div style="text-align:center;padding:24px;color:var(--gray-400);"><i class="fas fa-spinner fa-spin"></i> Loading journey…</div>';
@@ -1080,15 +1107,15 @@
         const todayCt      = dueTodayList.filter(t => t.status === 'pending').length;
 
         if (!dueTodayList.length) {
-            containerEl.innerHTML = `
+            _rxRenderAux(containerEl, `
                 <div style="text-align:center;padding:16px;color:var(--gray-400);font-size:13px;">
                     <i class="fas fa-check-circle" style="font-size:24px;color:#16a34a;display:block;margin-bottom:6px;"></i>
                     今日无待跟进任务
-                </div>`;
+                </div>`);
             return;
         }
 
-        containerEl.innerHTML = `
+        _rxRenderAux(containerEl, `
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
                 <span style="font-weight:700;font-size:14px;"><i class="fas fa-route" style="color:var(--primary);margin-right:6px;"></i>今日跟进任务</span>
                 <span style="font-size:11px;">
@@ -1116,7 +1143,7 @@
                 }).join('')}
                 ${dueTodayList.length > 8 ? `<div style="text-align:center;font-size:12px;color:var(--gray-400);padding:4px;">+${dueTodayList.length - 8} 更多</div>` : ''}
             </div>
-        `;
+        `);
     };
 
     // ── Agent load panel (TL+ only) ──────────────────────────────────────────
@@ -1132,14 +1159,14 @@
                 .limit(10);
 
             if (!data || !data.length) {
-                containerEl.innerHTML = `<div style="font-size:12px;color:var(--gray-400);text-align:center;padding:12px;">所有跟进人员均无开放任务。</div>`;
+                _rxRenderAux(containerEl, `<div style="font-size:12px;color:var(--gray-400);text-align:center;padding:12px;">所有跟进人员均无开放任务。</div>`);
                 return;
             }
 
             const allUsers = await AppDataStore.getAll('users');
             const userMap  = new Map((allUsers || []).map(u => [u.id, u.full_name]));
 
-            containerEl.innerHTML = `
+            _rxRenderAux(containerEl, `
                 <div style="font-size:12px;font-weight:700;color:var(--gray-600);margin-bottom:8px;">团队跟进负载</div>
                 ${data.map(row => {
                     const name   = userMap.get(row.agent_id) || row.agent_id;
@@ -1156,7 +1183,7 @@
                             </div>
                         </div>`;
                 }).join('')}
-            `;
+            `);
         } catch (e) {
             console.warn('[journey] showAgentJourneyLoad', e?.message);
         }

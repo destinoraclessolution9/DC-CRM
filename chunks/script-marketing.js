@@ -4311,9 +4311,12 @@ const simulateCampaignSending = async (campaignId) => {
             UI.toast.error('Delete failed: ' + (err.message || 'Unknown error'));
         }
     };
-    const batchMove = () => UI.toast.info('Batch move coming soon');
-    const batchShare = () => UI.toast.info('Batch share coming soon');
-    const batchDownload = () => UI.toast.info('Batch download coming soon');
+    // NOTE: The DMS batch Move/Share/Download actions were previously stubbed here
+    // (batchMove/confirmBatchMove/batchShare/batchDownload) reading selection by
+    // DOM-scraping. They had no callers and have been removed — the real,
+    // selection-state-driven implementations live in script-documents.js
+    // (moveSelected/confirmMoveSelected/copySelected/downloadSelected), the chunk
+    // that owns the toolbar and the _selectedFiles set.
     const toggleUserMenu = async () => {
         const currentUser = _state.cu;
 
@@ -4539,6 +4542,7 @@ const simulateCampaignSending = async (campaignId) => {
         loginAs,
         uploadProfilePhoto,
         confirmRenameFolder,
+        confirmDeleteFolder,
         showMarketingAutomationView,
         showMarketingListsView,
         showMonthlyPromotionView,

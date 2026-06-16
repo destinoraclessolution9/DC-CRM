@@ -89,6 +89,25 @@
         container.innerHTML = viewHtml;
     };
 
+// Shared 福气 leaderboard reducer — single source of truth for both the rendered
+// leaderboard table (showFudeView) and the Export KPI Dashboard download. Sums
+// 福气 points + sharing returns per user, resolves the display name, and ranks by
+// points desc. Returns [{ user_id, name, pts, ret }].
+const _computeFudeLeaderboard = (allRewards, allUsersForReward) => {
+    const totals = {};
+    (allRewards || []).forEach(r => {
+        if (!totals[r.user_id]) totals[r.user_id] = { pts: 0, ret: 0 };
+        totals[r.user_id].pts += parseInt(r.fudi_points)     || 0;
+        totals[r.user_id].ret += parseFloat(r.sharing_return) || 0;
+    });
+    return Object.entries(totals)
+        .map(([uid, t]) => {
+            const u = (allUsersForReward || []).find(u => u.id === parseInt(uid));
+            return { user_id: uid, name: u?.full_name || 'User ' + uid, pts: t.pts, ret: t.ret };
+        })
+        .sort((a, b) => b.pts - a.pts);
+};
+
 // ========== LEVEL 13/14: 福德 VIEW ==========
 const showFudeView = async (container) => {
     const currentUser = _currentUser;
@@ -176,15 +195,8 @@ const showFudeView = async (container) => {
 
     // --- Admin: leaderboard ---
     const leaderboardSection = isAdmin ? (() => {
-        const totals = {};
-        allRewards.forEach(r => {
-            if (!totals[r.user_id]) totals[r.user_id] = { pts: 0, ret: 0 };
-            totals[r.user_id].pts += parseInt(r.fudi_points)    || 0;
-            totals[r.user_id].ret += parseFloat(r.sharing_return) || 0;
-        });
-        const ranked = Object.entries(totals)
-            .map(([uid, t]) => { const u = allUsersForReward.find(u => u.id === parseInt(uid)); return { name: u?.full_name || 'User ' + uid, ...t }; })
-            .sort((a, b) => b.pts - a.pts);
+        // Shared compute (also used by Export KPI Dashboard) — keep one source of truth.
+        const ranked = _computeFudeLeaderboard(allRewards, allUsersForReward);
         if (!ranked.length) return '';
         const medals = ['🥇','🥈','🥉'];
         return `<div class="fude-section">
@@ -194,7 +206,7 @@ const showFudeView = async (container) => {
             </tr></thead><tbody>
                 ${ranked.map((r, i) => `<tr>
                     <td>${medals[i] || (i + 1)}</td>
-                    <td style="font-weight:600;">${r.name}</td>
+                    <td style="font-weight:600;">${esc(r.name)}</td>
                     <td>${r.pts}</td>
                     <td>${r.ret.toFixed(2)}</td>
                 </tr>`).join('')}
@@ -1002,8 +1014,101 @@ const showProfile = async (id, type) => {
     if (window.app.showCustomerDetail) return window.app.showCustomerDetail(id);
 };
 
-// Placeholder — export-data flow needs product scoping before full impl
-const exportKPIDashboard = () => (window.app.todo || (() => {}))('Export KPI Dashboard');
+// Export KPI Dashboard — downloads the same 福气 Leaderboard the admin dashboard
+// renders (showFudeView's leaderboardSection) as a spreadsheet. Reuses the SHARED
+// compute path (_computeFudeLeaderboard over recommendation_rewards × L13/14 users)
+// so the file matches the on-screen table exactly. Gated to the same admins that
+// can see the KPI dashboard (L1 Super Admin || L2 Marketing Manager). Offers XLSX
+// when the lazy SheetJS helper is present, otherwise falls back to CSV. Output is
+// CSV-injection-safe (leading =,+,-,@ in a cell is prefixed with a single quote)
+// and Excel-friendly (UTF-8 BOM so Chinese names render).
+const exportKPIDashboard = async () => {
+    const currentUser = _currentUser || _state.cu;
+    // Same role gate as the dashboard's leaderboard surface.
+    const _canonAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser);
+    if (!_canonAdmin) { UI.toast.error('You do not have permission to export the KPI dashboard.'); return; }
+
+    try {
+        // Reuse the dashboard's data prep: pull all reward rows + the L13/14 user
+        // pool, then run the shared reducer. No duplicated grouping logic.
+        const [allRewards, allUsersRaw] = await Promise.all([
+            AppDataStore.getAll('recommendation_rewards').catch(() => []),
+            AppDataStore.getAll('users').catch(() => [])
+        ]);
+        const allUsersForReward = (allUsersRaw || []).filter(u => u.role && u.role.match(/Level\s*1[34]/i));
+        const ranked = _computeFudeLeaderboard(allRewards, allUsersForReward);
+
+        if (!ranked.length) { UI.toast.error('No 福气 leaderboard data to export yet.'); return; }
+
+        // --- CSV cell encoder: injection-safe + RFC-4180 quoting ---
+        const csvCell = (v) => {
+            let s = String(v ?? '');
+            // CSV-injection guard: neutralise formula-trigger leading chars.
+            if (/^[=+\-@]/.test(s)) s = "'" + s;
+            // Quote when the value contains a comma, quote, or newline; double embedded quotes.
+            return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+        };
+
+        const generatedOn = new Date();
+        const totalPts = ranked.reduce((s, r) => s + (r.pts || 0), 0);
+        const totalRet = ranked.reduce((s, r) => s + (r.ret || 0), 0);
+
+        const headerCols = ['Rank', 'Name', '福气 Points', 'Sharing Returns (RM)'];
+        // Row tuples (raw values) — reused for both CSV and XLSX builders.
+        const dataRows = ranked.map((r, i) => [i + 1, r.name, r.pts, Number((r.ret || 0).toFixed(2))]);
+        const totalRow = ['', 'TOTAL', totalPts, Number(totalRet.toFixed(2))];
+
+        const stamp = generatedOn.toISOString().split('T')[0];
+        const baseName = `kpi-fude-leaderboard-${stamp}`;
+
+        // --- XLSX when SheetJS is available; otherwise CSV ---
+        let xlsxReady = false;
+        try {
+            if (typeof window._ensureXlsx === 'function') { await window._ensureXlsx(); }
+            xlsxReady = (typeof XLSX !== 'undefined' && XLSX && XLSX.utils);
+        } catch (_) { xlsxReady = false; }
+
+        if (xlsxReady) {
+            const aoa = [
+                ['福气 KPI Dashboard Export'],
+                ['Generated', generatedOn.toLocaleString()],
+                [],
+                headerCols,
+                ...dataRows,
+                totalRow
+            ];
+            const ws = XLSX.utils.aoa_to_sheet(aoa);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Leaderboard');
+            XLSX.writeFile(wb, `${baseName}.xlsx`);
+            UI.toast.success(`Exported KPI dashboard — ${ranked.length} agents (XLSX).`);
+            return;
+        }
+
+        // CSV path: title + generated-on timestamp rows, header row, data, total.
+        const lines = [];
+        lines.push(csvCell('福气 KPI Dashboard Export'));
+        lines.push([csvCell('Generated'), csvCell(generatedOn.toLocaleString())].join(','));
+        lines.push('');
+        lines.push(headerCols.map(csvCell).join(','));
+        dataRows.forEach(row => lines.push(row.map(csvCell).join(',')));
+        lines.push(totalRow.map(csvCell).join(','));
+
+        const csv = '﻿' + lines.join('\r\n'); // BOM so Excel reads UTF-8 (Chinese names) correctly
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${baseName}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        UI.toast.success(`Exported KPI dashboard — ${ranked.length} agents (CSV).`);
+    } catch (err) {
+        UI.toast.error('Export failed: ' + (err && err.message ? err.message : 'Unknown error'));
+    }
+};
 
 // [CHUNK: knowledge] Section extracted to chunks/script-knowledge.js — loaded role-gated by navigateTo().
 

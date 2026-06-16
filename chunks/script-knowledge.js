@@ -89,6 +89,44 @@
         } catch (_) { return false; }
     };
 
+    // KB slot-editor passthrough — DEFAULT-ON (engages whenever the bundle ships
+    // mountKbEditor). Routes the capture/daily-notes/detail editors through the
+    // dedicated KB-editor React root (NOT the dashboard/all-entries child nodes).
+    // Own kill-switch: window.__REACT_KBEDITORS=false | ?react_kbeditors=0 |
+    // crm_react_kbeditors='0' (plus the global ?react=0 / crm_react_off='1').
+    const _reactKbEditorsOn = () => {
+        try {
+            if (/[?&]react=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            if (!(window.CRMReact && typeof window.CRMReact.mountKbEditor === 'function')) return false;
+            if (window.__REACT_KBEDITORS === false) return false;
+            if (/[?&]react_kbeditors=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_kbeditors') === '0') return false;
+            return true;
+        } catch (_) { return false; }
+    };
+    // Render an editor body into `slot`, routed through the KB-editor React root
+    // when enabled. The editor mounts onto its OWN child node so it never reuses
+    // the dashboard/all-entries roots. onReady runs the chunk's post-render
+    // wiring (Ctrl+Enter / autosave keydown re-bind). Inline oninput/onchange +
+    // inline debounceCall link-search survive dangerouslySetInnerHTML.
+    const _kbMountEditor = (slot, html, onReady) => {
+        if (_reactKbEditorsOn()) {
+            slot.innerHTML = '<div id="kb-editor-react-root"></div>';
+            try {
+                window.CRMReact.mountKbEditor(document.getElementById('kb-editor-react-root'), { html, onReady });
+                return;
+            } catch (e) {
+                console.warn('[kb] editor island mount failed, legacy:', e && e.message);
+                slot.innerHTML = html;
+                if (onReady) onReady();
+                return;
+            }
+        }
+        slot.innerHTML = html;
+        if (onReady) onReady();
+    };
+
     const showKnowledgeView = async (container) => {
         _state.cv = 'knowledge';
         if (!_kbSegment) _kbSegment = 'dashboard';
@@ -240,7 +278,7 @@
     };
 
     const showKnowledgeCapture = async (slot) => {
-        slot.innerHTML = `
+        const html = `
             <div class="kb-capture-full">
                 <input type="text" id="kb-cap-title" class="kb-input kb-input-lg" placeholder="Title (short)" maxlength="200">
                 <textarea id="kb-cap-content" class="kb-textarea kb-textarea-lg" rows="14" placeholder="Free text or markdown...&#10;&#10;Ctrl+Enter to save."></textarea>
@@ -253,9 +291,11 @@
                 <p class="kb-qc-hint" style="margin-top:8px;">Tip: leave type blank to land in Inbox and classify later.</p>
             </div>
         `;
-        const ta = document.getElementById('kb-cap-content');
-        if (ta) ta.addEventListener('keydown', (e) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); saveCaptureFull(); }
+        _kbMountEditor(slot, html, () => {
+            const ta = document.getElementById('kb-cap-content');
+            if (ta) ta.addEventListener('keydown', (e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); saveCaptureFull(); }
+            });
         });
     };
 
@@ -399,7 +439,7 @@
                 linkedRows = linkedIds.map(lid => idx.get(lid)).filter(Boolean);
             } catch (_) {}
         }
-        slot.innerHTML = `
+        const html = `
             <div class="kb-detail">
                 <div class="kb-detail-back">
                     <button class="btn secondary" onclick="app.kbBackToSegment()"><i class="fas fa-arrow-left"></i> Back</button>
@@ -472,6 +512,9 @@
                 </div>
             </div>
         `;
+        // No onReady — all detail handlers are inline oninput/onchange + inline
+        // debounceCall link-search, which survive dangerouslySetInnerHTML.
+        _kbMountEditor(slot, html);
     };
 
     const kbBackToSegment = async () => {
@@ -591,7 +634,7 @@
 
     const showKnowledgeDailyNotes = async (slot) => {
         if (!_kbDailyDate) _kbDailyDate = _kbTodayISO();
-        slot.innerHTML = `
+        const html = `
             <div class="kb-daily">
                 <div class="kb-daily-bar">
                     <button class="btn secondary" onclick="app.kbShiftDailyDate(-1)"><i class="fas fa-chevron-left"></i></button>
@@ -606,12 +649,14 @@
                 <div class="kb-autosave-status" id="kb-daily-status">Loading…</div>
             </div>
         `;
-        await _kbLoadDaily();
-        const ta = document.getElementById('kb-daily-content');
-        if (ta) ta.addEventListener('input', () => {
-            const s = document.getElementById('kb-daily-status'); if (s) s.textContent = 'Saving…';
-            if (_kbAutosaveTimer) clearTimeout(_kbAutosaveTimer);
-            _kbAutosaveTimer = setTimeout(() => saveDailyNote().catch(()=>{}), 800);
+        _kbMountEditor(slot, html, async () => {
+            await _kbLoadDaily();
+            const ta = document.getElementById('kb-daily-content');
+            if (ta) ta.addEventListener('input', () => {
+                const s = document.getElementById('kb-daily-status'); if (s) s.textContent = 'Saving…';
+                if (_kbAutosaveTimer) clearTimeout(_kbAutosaveTimer);
+                _kbAutosaveTimer = setTimeout(() => saveDailyNote().catch(()=>{}), 800);
+            });
         });
     };
 

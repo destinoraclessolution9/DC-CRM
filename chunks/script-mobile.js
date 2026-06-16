@@ -1133,6 +1133,12 @@
     let _mcalMonth = null;
     let _mcalByDate = new Map();
     let _mcalPersonMap = new Map();
+    // Active calendar view: 'month' | 'week' | 'day' | 'agenda'. Month is the
+    // default; the Week/Day/Agenda renderers (below) read & write these.
+    // _mcalSelDate is the anchor day for the Week + Day views (a Date object,
+    // local-midnight). It defaults to today the first time an alt view opens.
+    let _mcalView = 'month';
+    let _mcalSelDate = null;
 
     // SWR revalidate guard — last-revalidated timestamp per `${year}-${month}`.
     // Background refetch is skipped if the same month was revalidated < 30s ago,
@@ -1212,6 +1218,7 @@
     const showMobileCalendarView = async (viewport) => {
         if (!viewport) return;
         viewport.classList.add('mcal-active');
+        _mcalView = 'month';
 
         const todayD = new Date();
         if (_mcalYear == null) { _mcalYear = todayD.getFullYear(); _mcalMonth = todayD.getMonth(); }
@@ -1412,7 +1419,7 @@
                 // fill in. Guarded so we don't repaint a month the user has
                 // already swiped away from.
                 const vp = document.getElementById('content-viewport');
-                if (vp && vp.classList.contains('mcal-active') &&
+                if (vp && vp.classList.contains('mcal-active') && _mcalView === 'month' &&
                     _capturedYearMcal === _mcalYear && _capturedMonthMcal === _mcalMonth) {
                     showMobileCalendarView(vp).catch(() => {});
                 }
@@ -1618,7 +1625,7 @@
                         // and the calendar view is still active.
                         if (_capturedYear === _mcalYear && _capturedMonth === _mcalMonth) {
                             const vp = document.getElementById('content-viewport');
-                            if (vp && vp.classList.contains('mcal-active')) {
+                            if (vp && vp.classList.contains('mcal-active') && _mcalView === 'month') {
                                 showMobileCalendarView(vp).catch(() => {});
                             }
                         }
@@ -1650,7 +1657,7 @@
         _mcalOptimisticRows.set(String(row.id), { key, row });
         // If the calendar is currently showing this month, re-render now.
         const vp = document.getElementById('content-viewport');
-        if (vp && vp.classList.contains('mcal-active') && _mcalYear === y && _mcalMonth === (m - 1)) {
+        if (vp && vp.classList.contains('mcal-active') && _mcalView === 'month' && _mcalYear === y && _mcalMonth === (m - 1)) {
             showMobileCalendarView(vp).catch(() => {});
         }
     };
@@ -1677,7 +1684,7 @@
         // before the real row arrived, so we repaint to ensure it stays visible.
         const [_swY, _swM] = key.replace('mcal-acts-', '').split('-').map(Number);
         const _swVp = document.getElementById('content-viewport');
-        if (_swVp && _swVp.classList.contains('mcal-active') &&
+        if (_swVp && _swVp.classList.contains('mcal-active') && _mcalView === 'month' &&
             !isNaN(_swY) && !isNaN(_swM) && _mcalYear === _swY && _mcalMonth === _swM) {
             showMobileCalendarView(_swVp).catch(() => {});
         }
@@ -1762,10 +1769,43 @@
         if (_mcalMonth > 11) { _mcalMonth = 0; _mcalYear++; }
         await showMobileCalendarView(document.getElementById('content-viewport'));
     };
+    // View-aware prev/next used by the Week + Day headers. Month keeps its own
+    // mcalPrevMonth/mcalNextMonth handlers (its header is built separately).
+    const mcalPrev = async () => {
+        if (_mcalView === 'week') {
+            _mcalSelDate = _mcalSelDate || new Date();
+            _mcalSelDate = new Date(_mcalSelDate.getFullYear(), _mcalSelDate.getMonth(), _mcalSelDate.getDate() - 7);
+            return showMobileCalendarWeek(document.getElementById('content-viewport'));
+        }
+        if (_mcalView === 'day') {
+            _mcalSelDate = _mcalSelDate || new Date();
+            _mcalSelDate = new Date(_mcalSelDate.getFullYear(), _mcalSelDate.getMonth(), _mcalSelDate.getDate() - 1);
+            return showMobileCalendarDay(document.getElementById('content-viewport'));
+        }
+        return mcalPrevMonth();
+    };
+    const mcalNext = async () => {
+        if (_mcalView === 'week') {
+            _mcalSelDate = _mcalSelDate || new Date();
+            _mcalSelDate = new Date(_mcalSelDate.getFullYear(), _mcalSelDate.getMonth(), _mcalSelDate.getDate() + 7);
+            return showMobileCalendarWeek(document.getElementById('content-viewport'));
+        }
+        if (_mcalView === 'day') {
+            _mcalSelDate = _mcalSelDate || new Date();
+            _mcalSelDate = new Date(_mcalSelDate.getFullYear(), _mcalSelDate.getMonth(), _mcalSelDate.getDate() + 1);
+            return showMobileCalendarDay(document.getElementById('content-viewport'));
+        }
+        return mcalNextMonth();
+    };
     const mcalToday = async () => {
         const t = new Date();
         _mcalYear = t.getFullYear();
         _mcalMonth = t.getMonth();
+        _mcalSelDate = new Date(t.getFullYear(), t.getMonth(), t.getDate());
+        // "Today" snaps the active view back to the current day/week/month.
+        if (_mcalView === 'week') return showMobileCalendarWeek(document.getElementById('content-viewport'));
+        if (_mcalView === 'day')  return showMobileCalendarDay(document.getElementById('content-viewport'));
+        if (_mcalView === 'list') return showMobileCalendarAgenda(document.getElementById('content-viewport'));
         await showMobileCalendarView(document.getElementById('content-viewport'));
     };
     const mcalDayClick = (dateStr) => {
@@ -1832,18 +1872,322 @@
             { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
         ]);
     };
-    const mcalTab = (tab, btn) => {
+    // ── Week / Day / Agenda views ────────────────────────────
+    // These three renderers reuse the SAME data path the Month grid uses:
+    // an activity-date-range query via AppDataStore.queryAdvanced('activities')
+    // with the identical ownership-scope fields (so non-admins only see their
+    // visible agent set's records + open/public ones), the same EVENT row
+    // filter, the same person map (id → prospect/customer), the same
+    // _mcalColorForType chips, the same _mcalOwned client-name masking gate,
+    // and the same _mhomeEsc escaping. The Month grid stays untouched.
+    const _fmtLocalDate = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    const _mcalDayNamesShort = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const _mcalMonNamesShort = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+    // Resolve the activity ownership-scope fields exactly as the Month view
+    // does (see _scopeFields in showMobileCalendarView): non-admin agents are
+    // limited to their visible agent set + open/public visibility.
+    const _mcalScopeFields = async () => {
+        const visibleIds = (typeof getVisibleUserIds === 'function')
+            ? await getVisibleUserIds(_state.cu).catch(() => 'all') : 'all';
+        if (typeof isSystemAdmin === 'function' && !isSystemAdmin(_state.cu) && visibleIds !== 'all') {
+            return [
+                { field: 'lead_agent_id', values: visibleIds },
+                { field: 'visibility', values: ['open', 'public'] },
+            ];
+        }
+        return null;
+    };
+
+    // Fetch activities for an inclusive [gteStr, lteStr] activity_date range
+    // and group them by YYYY-MM-DD. Mirrors the Month view's _buildActOpts +
+    // EVENT filter. Also ensures the person map is loaded so client names can
+    // render (and be masked for non-owners). Returns a Map(dateStr → [acts]).
+    const _mcalFetchRangeByDate = async (gteStr, lteStr) => {
+        const scopeFields = await _mcalScopeFields();
+        const opts = {
+            gte: { activity_date: gteStr },
+            lte: { activity_date: lteStr },
+            sort: 'start_time', sortDir: 'asc', limit: 2000, offset: 0, countMode: null,
+        };
+        if (scopeFields) opts.scopeFields = scopeFields;
+
+        // People map powers client names + the ownership mask. Reuse the live
+        // map if the Month view already populated it; otherwise pull a trimmed
+        // select (same shape the Month view caches) so names resolve.
+        let personMap = _mcalPersonMap;
+        if (!personMap || personMap.size === 0) {
+            try {
+                const [p, c] = await Promise.all([
+                    AppDataStore.queryAdvanced('prospects', { select: 'id,full_name', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []),
+                    AppDataStore.queryAdvanced('customers', { select: 'id,full_name', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []),
+                ]);
+                personMap = new Map([...(p || []), ...(c || [])].map(x => [String(x.id), x]));
+                if (personMap.size) _mcalPersonMap = personMap;
+            } catch (_) { personMap = _mcalPersonMap || new Map(); }
+        }
+
+        let acts = [];
+        try {
+            const res = await AppDataStore.queryAdvanced('activities', opts);
+            acts = (res?.data || []).filter(a => a.activity_type !== 'EVENT');
+        } catch (_) { acts = []; }
+
+        const byDate = new Map();
+        for (const a of acts) {
+            const k = String(a.activity_date || '').slice(0, 10);
+            if (!k) continue;
+            if (!byDate.has(k)) byDate.set(k, []);
+            byDate.get(k).push(a);
+        }
+        // Stable time-order within each day.
+        for (const list of byDate.values()) {
+            list.sort((a, b) => String(a.start_time || '').localeCompare(String(b.start_time || '')));
+        }
+        return byDate;
+    };
+
+    // One activity row, mobile-card style — shared by Week / Day / Agenda.
+    // Reuses _mcalColorForType for the chip and _mcalOwned for client-name
+    // masking (non-owners see the activity title/type, never the client name).
+    const _mcalActRowHtml = (a) => {
+        const time = (a.start_time || '').slice(0, 5);
+        const type = a.activity_type || '';
+        const pid = a.prospect_id || a.customer_id;
+        const person = pid ? _mcalPersonMap.get(String(pid)) : null;
+        const name = (_mcalOwned(a) && person?.full_name)
+            ? person.full_name
+            : (a.activity_title || a.activity_type || '—');
+        const venue = a.venue_name || a.venue || a.location_address || '';
+        const color = _mcalColorForType(type);
+        const pendingClass = a._syncFailed ? ' sync-failed' : (a._pending ? ' pending' : '');
+        const warnIcon = a._syncFailed ? '<i class="fas fa-exclamation-triangle" title="Not synced — will retry"></i> ' : '';
+        const click = a.id != null
+            ? `onclick="(async()=>{try{await app.viewActivityDetails(${a.id});}catch(e){console.error(e);}})();"`
+            : '';
+        return `
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--gray-100);${a.id != null ? 'cursor:pointer;' : ''}" ${click}>
+                <div style="min-width:46px;font-size:12.5px;font-weight:700;color:var(--mc-ink);">${time ? _mhomeEsc(time) : '<span style=\'color:var(--mc-ink-mute);font-weight:600;\'>All&nbsp;day</span>'}</div>
+                <span class="mcal-evt ${color}${pendingClass}" style="white-space:nowrap;font-size:10px;padding:2px 7px;border-radius:5px;flex-shrink:0;">${warnIcon}${_mhomeEsc(type)}</span>
+                <div style="flex:1;min-width:0;">
+                    <div style="font-size:13.5px;font-weight:600;color:var(--mc-ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_mhomeEsc(name)}</div>
+                    ${venue ? `<div style="font-size:11.5px;color:var(--mc-ink-soft);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><i class="fas fa-map-marker-alt" style="font-size:9px;margin-right:3px;"></i>${_mhomeEsc(venue)}</div>` : ''}
+                </div>
+                ${a.id != null ? '<i class="fas fa-chevron-right" style="color:var(--mc-ink-mute);font-size:11px;flex-shrink:0;"></i>' : ''}
+            </div>`;
+    };
+
+    // Shared chrome (top bar + tab strip + filter row) for the alt views, so
+    // they look identical to the Month view. `titleHtml` is the centre title
+    // with prev/next nav; `tab` is which tab pill is active.
+    const _mcalAltChrome = (tab, titleHtml, bodyHtml) => {
+        const userName = (_state.cu?.preferred_name || _state.cu?.full_name || 'there').split(' ')[0];
+        const avatarUrl = _state.cu?.avatar_url
+            || `https://ui-avatars.com/api/?name=${encodeURIComponent(_state.cu?.full_name || 'U')}&background=8B0000&color=fff`;
+        return `
+        <div class="mcal">
+            <div class="mcal-top">
+                <div class="mcal-blossom"><span class="b1">🌸</span><span class="b2">🌸</span><span class="b3">🌸</span></div>
+                <button class="mcal-burger" onclick="app.openMobileDrawer()" aria-label="Menu"><i class="fas fa-bars"></i></button>
+                <div class="mcal-title-wrap">
+                    <div class="mcal-title">${titleHtml}</div>
+                    <div class="mcal-sub">Let's make today count, ${_mhomeEsc(userName)}! <span class="spk">✨</span></div>
+                </div>
+                <div class="mcal-actions">
+                    <button class="mcal-search" onclick="(window._cmd=document.getElementById('cmdk-trigger'))&&_cmd.click()" aria-label="Search"><i class="fas fa-search"></i></button>
+                    <div class="mcal-avatar" onclick="app.openMobileDrawer()" role="button" aria-label="Profile" style="background-image:url('${_mhomeEsc(avatarUrl)}')"></div>
+                </div>
+            </div>
+            <div class="mcal-tabs">
+                <button class="mcal-tab ${tab==='month'?'active':''}" onclick="app.mcalTab('month', this)">Month</button>
+                <button class="mcal-tab ${tab==='week'?'active':''}" onclick="app.mcalTab('week', this)">Week</button>
+                <button class="mcal-tab ${tab==='day'?'active':''}" onclick="app.mcalTab('day', this)">Day</button>
+                <button class="mcal-tab ${tab==='list'?'active':''}" onclick="app.mcalTab('list', this)">List</button>
+            </div>
+            <div class="mcal-filter-row">
+                <button class="mcal-filter" onclick="app.mcalFilter()"><i class="fas fa-sliders"></i> All Events <i class="fas fa-chevron-down"></i></button>
+                <div class="mcal-quick">
+                    <button class="mcal-quick-btn wa" onclick="app.mcalWa()" aria-label="WhatsApp"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M17.498 14.382c-.301-.15-1.767-.867-2.04-.966-.273-.101-.473-.15-.673.15-.197.295-.771.964-.944 1.162-.175.195-.349.21-.646.075-.3-.15-1.263-.465-2.403-1.485-.888-.795-1.484-1.77-1.66-2.07-.174-.3-.019-.465.13-.615.136-.135.301-.345.451-.523.146-.181.194-.301.297-.496.1-.21.049-.375-.025-.524-.075-.15-.672-1.62-.922-2.206-.24-.584-.487-.51-.672-.51-.172-.015-.371-.015-.571-.015-.2 0-.523.074-.797.359-.273.3-1.045 1.02-1.045 2.475s1.07 2.865 1.219 3.075c.149.195 2.105 3.195 5.1 4.485.714.3 1.27.48 1.704.629.714.227 1.365.195 1.88.121.574-.091 1.767-.721 2.016-1.426.255-.705.255-1.29.18-1.425-.074-.135-.27-.21-.57-.345m-5.446 7.443h-.016c-1.77 0-3.524-.48-5.055-1.38l-.36-.214-3.75.975 1.005-3.645-.239-.375a9.869 9.869 0 0 1-1.516-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413Z"/></svg></button>
+                    <button class="mcal-quick-btn add" onclick="app.mcalAdd()" aria-label="Add activity" style="font-size:20px;line-height:1;">+</button>
+                </div>
+                <button class="mcal-today" onclick="app.mcalToday()">Today</button>
+            </div>
+            ${bodyHtml}
+        </div>`;
+    };
+
+    // WEEK — the Mon-Sun week containing _mcalSelDate. Compact day-by-day list
+    // (one card per day) which reads better on a phone than a 7×13 hour grid.
+    const showMobileCalendarWeek = async (viewport) => {
+        if (!viewport) viewport = document.getElementById('content-viewport');
+        if (!viewport) return;
+        viewport.classList.add('mcal-active');
+        _mcalView = 'week';
+        if (!_mcalSelDate) _mcalSelDate = new Date();
+
+        // Monday-start week (matches the Month grid's Mon-first layout).
+        const start = new Date(_mcalSelDate.getFullYear(), _mcalSelDate.getMonth(), _mcalSelDate.getDate());
+        const offsetToMon = (start.getDay() + 6) % 7;
+        start.setDate(start.getDate() - offsetToMon);
+        const end = new Date(start); end.setDate(start.getDate() + 6);
+
+        const title = `${start.getDate()} ${_mcalMonNamesShort[start.getMonth()]} – ${end.getDate()} ${_mcalMonNamesShort[end.getMonth()]} ${end.getFullYear()}`;
+        const titleHtml = `
+            <button class="mcal-nav-btn" onclick="event.stopPropagation();app.mcalPrev()" aria-label="Previous week" type="button"><i class="fas fa-chevron-left"></i></button>
+            <span class="mcal-title-text">${_mhomeEsc(title)}</span>
+            <button class="mcal-nav-btn" onclick="event.stopPropagation();app.mcalNext()" aria-label="Next week" type="button"><i class="fas fa-chevron-right"></i></button>`;
+
+        viewport.innerHTML = _mcalAltChrome('week', titleHtml,
+            `<div id="mcal-alt-body" style="background:#fff;border-radius:18px;padding:6px 12px 4px;box-shadow:var(--mc-shadow);min-height:120px;">
+                <div style="text-align:center;padding:26px;color:var(--mc-ink-mute);font-size:13px;"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
+            </div>`);
+
+        const byDate = await _mcalFetchRangeByDate(_fmtLocalDate(start), _fmtLocalDate(end));
+        // Guard against the user swiping away mid-fetch.
+        if (_mcalView !== 'week') return;
+        const host = document.getElementById('mcal-alt-body');
+        if (!host) return;
+
+        const todayStr = _fmtLocalDate(new Date());
+        let html = '';
+        for (let i = 0; i < 7; i++) {
+            const d = new Date(start); d.setDate(start.getDate() + i);
+            const ds = _fmtLocalDate(d);
+            const acts = byDate.get(ds) || [];
+            const isToday = ds === todayStr;
+            html += `
+                <div style="padding:10px 0;border-bottom:${i < 6 ? '1px solid var(--gray-100)' : 'none'};">
+                    <div onclick="app.mcalOpenDay('${ds}')" style="display:flex;align-items:center;gap:9px;cursor:pointer;margin-bottom:${acts.length ? '6px' : '0'};">
+                        <div style="min-width:34px;height:34px;border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;${isToday ? 'background:var(--mc-red);color:#fff;' : 'background:var(--mc-beige-deep);color:var(--mc-ink);'}">
+                            <span style="font-size:8.5px;font-weight:700;letter-spacing:0.4px;line-height:1;">${_mcalDayNamesShort[d.getDay()].toUpperCase()}</span>
+                            <span style="font-size:14px;font-weight:800;line-height:1.1;">${d.getDate()}</span>
+                        </div>
+                        <div style="flex:1;font-size:12px;font-weight:600;color:var(--mc-ink-soft);">${acts.length ? `${acts.length} ${acts.length === 1 ? 'activity' : 'activities'}` : 'No activities'}</div>
+                        <i class="fas fa-chevron-right" style="color:var(--mc-ink-mute);font-size:11px;"></i>
+                    </div>
+                    ${acts.length ? `<div style="padding-left:43px;">${acts.map(_mcalActRowHtml).join('')}</div>` : ''}
+                </div>`;
+        }
+        host.innerHTML = html;
+    };
+
+    // DAY — the selected day (_mcalSelDate), activities listed by time.
+    const showMobileCalendarDay = async (viewport) => {
+        if (!viewport) viewport = document.getElementById('content-viewport');
+        if (!viewport) return;
+        viewport.classList.add('mcal-active');
+        _mcalView = 'day';
+        if (!_mcalSelDate) _mcalSelDate = new Date();
+
+        const d = new Date(_mcalSelDate.getFullYear(), _mcalSelDate.getMonth(), _mcalSelDate.getDate());
+        const ds = _fmtLocalDate(d);
+        const todayStr = _fmtLocalDate(new Date());
+        const title = `${_mcalDayNamesShort[d.getDay()]}, ${d.getDate()} ${_mcalMonNamesShort[d.getMonth()]} ${d.getFullYear()}`;
+        const titleHtml = `
+            <button class="mcal-nav-btn" onclick="event.stopPropagation();app.mcalPrev()" aria-label="Previous day" type="button"><i class="fas fa-chevron-left"></i></button>
+            <span class="mcal-title-text">${ds === todayStr ? 'Today' : _mhomeEsc(title)}</span>
+            <button class="mcal-nav-btn" onclick="event.stopPropagation();app.mcalNext()" aria-label="Next day" type="button"><i class="fas fa-chevron-right"></i></button>`;
+
+        viewport.innerHTML = _mcalAltChrome('day', titleHtml,
+            `<div id="mcal-alt-body" style="background:#fff;border-radius:18px;padding:6px 14px 8px;box-shadow:var(--mc-shadow);min-height:120px;">
+                <div style="text-align:center;padding:26px;color:var(--mc-ink-mute);font-size:13px;"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
+            </div>`);
+
+        const byDate = await _mcalFetchRangeByDate(ds, ds);
+        if (_mcalView !== 'day') return;
+        const host = document.getElementById('mcal-alt-body');
+        if (!host) return;
+
+        const acts = byDate.get(ds) || [];
+        if (!acts.length) {
+            host.innerHTML = `<div style="text-align:center;padding:34px 10px;color:var(--mc-ink-mute);">
+                <div style="font-size:30px;margin-bottom:8px;">🌿</div>
+                <div style="font-size:13px;font-weight:600;">No activities on this day</div>
+                <button class="mcal-today" style="margin-top:14px;" onclick="app.mcalAddMeetUp('${ds}')">+ Add Meet Up</button>
+            </div>`;
+        } else {
+            host.innerHTML = `<div style="font-size:11.5px;font-weight:700;color:var(--mc-ink-soft);padding:8px 0 2px;">${acts.length} ${acts.length === 1 ? 'ACTIVITY' : 'ACTIVITIES'}</div>${acts.map(_mcalActRowHtml).join('')}`;
+        }
+    };
+
+    // AGENDA ("List") — a forward-looking chronological list of upcoming
+    // activities (today → +30 days), grouped by date.
+    const showMobileCalendarAgenda = async (viewport) => {
+        if (!viewport) viewport = document.getElementById('content-viewport');
+        if (!viewport) return;
+        viewport.classList.add('mcal-active');
+        _mcalView = 'list';
+
+        const today = new Date();
+        const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+        const end = new Date(start); end.setDate(start.getDate() + 30);
+        const startStr = _fmtLocalDate(start);
+        const endStr = _fmtLocalDate(end);
+
+        const titleHtml = `<span class="mcal-title-text">Upcoming</span>`;
+        viewport.innerHTML = _mcalAltChrome('list', titleHtml,
+            `<div id="mcal-alt-body" style="min-height:120px;">
+                <div style="background:#fff;border-radius:18px;padding:26px;box-shadow:var(--mc-shadow);text-align:center;color:var(--mc-ink-mute);font-size:13px;"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
+            </div>`);
+
+        const byDate = await _mcalFetchRangeByDate(startStr, endStr);
+        if (_mcalView !== 'list') return;
+        const host = document.getElementById('mcal-alt-body');
+        if (!host) return;
+
+        // Walk the 31-day window in order; emit a dated section per day that
+        // has activities. Skips empty days so the list stays dense.
+        const todayStr = _fmtLocalDate(today);
+        let tomorrow = new Date(start); tomorrow.setDate(start.getDate() + 1);
+        const tomorrowStr = _fmtLocalDate(tomorrow);
+        const sections = [];
+        for (let i = 0; i <= 30; i++) {
+            const d = new Date(start); d.setDate(start.getDate() + i);
+            const ds = _fmtLocalDate(d);
+            const acts = byDate.get(ds) || [];
+            if (!acts.length) continue;
+            let label = `${_mcalDayNamesShort[d.getDay()]}, ${d.getDate()} ${_mcalMonNamesShort[d.getMonth()]}`;
+            if (ds === todayStr) label = `Today · ${label}`;
+            else if (ds === tomorrowStr) label = `Tomorrow · ${label}`;
+            sections.push(`
+                <div style="background:#fff;border-radius:18px;padding:8px 14px 6px;box-shadow:var(--mc-shadow);margin-bottom:10px;">
+                    <div onclick="app.mcalOpenDay('${ds}')" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:6px 0 4px;border-bottom:1px dashed var(--gray-100);">
+                        <span style="font-size:12.5px;font-weight:800;color:var(--mc-red);">${_mhomeEsc(label)}</span>
+                        <span style="font-size:10.5px;font-weight:600;color:var(--mc-ink-mute);">${acts.length} ${acts.length === 1 ? 'item' : 'items'}</span>
+                    </div>
+                    ${acts.map(_mcalActRowHtml).join('')}
+                </div>`);
+        }
+
+        if (!sections.length) {
+            host.innerHTML = `<div style="background:#fff;border-radius:18px;padding:40px 16px;box-shadow:var(--mc-shadow);text-align:center;color:var(--mc-ink-mute);">
+                <div style="font-size:32px;margin-bottom:10px;">🗓️</div>
+                <div style="font-size:14px;font-weight:700;color:var(--mc-ink-soft);">Nothing on the horizon</div>
+                <div style="font-size:12px;margin-top:4px;">No activities in the next 30 days.</div>
+                <button class="mcal-today" style="margin-top:16px;" onclick="app.mcalAdd()">+ Add Activity</button>
+            </div>`;
+        } else {
+            host.innerHTML = sections.join('');
+        }
+    };
+
+    // Jump to the Day view for a specific date (used by Week / Agenda rows).
+    const mcalOpenDay = async (dateStr) => {
+        const d = new Date(dateStr + 'T00:00:00');
+        if (!isNaN(d.getTime())) _mcalSelDate = d;
+        await showMobileCalendarDay(document.getElementById('content-viewport'));
+    };
+
+    const mcalTab = async (tab, btn) => {
         document.querySelectorAll('.mcal-tab').forEach(t => t.classList.remove('active'));
         if (btn) btn.classList.add('active');
-        if (tab !== 'month') {
-            UI.toast.success(`${tab.charAt(0).toUpperCase() + tab.slice(1)} view coming soon`);
-            // Re-activate Month tab visually
-            setTimeout(() => {
-                document.querySelectorAll('.mcal-tab').forEach((t, i) => {
-                    t.classList.toggle('active', i === 0);
-                });
-            }, 600);
-        }
+        const vp = document.getElementById('content-viewport');
+        try {
+            if (tab === 'week')      { _mcalSelDate = _mcalSelDate || new Date(); await showMobileCalendarWeek(vp); }
+            else if (tab === 'day')  { _mcalSelDate = _mcalSelDate || new Date(); await showMobileCalendarDay(vp); }
+            else if (tab === 'list') { await showMobileCalendarAgenda(vp); }
+            else                     { await showMobileCalendarView(vp); }
+        } catch (e) { console.error(e); UI.toast.error('Could not load that view'); }
     };
     const mcalFilter = () => {
         if (typeof window.app?.openCalendarFilterModal === 'function') {
@@ -2424,10 +2768,16 @@
         showMobileHomeView,
         mhomeWa,
         showMobileCalendarView,
+        showMobileCalendarWeek,
+        showMobileCalendarDay,
+        showMobileCalendarAgenda,
         mcalPrevMonth,
         mcalNextMonth,
+        mcalPrev,
+        mcalNext,
         mcalToday,
         mcalDayClick,
+        mcalOpenDay,
         mcalAddMeetUp,
         mcalTab,
         mcalFilter,

@@ -965,11 +965,16 @@ class DataStore {
 
         const fetchPromise = this._getAllImpl(tableName)
             .catch((err) => {
-                // Defense-in-depth: _getAllImpl owns a graceful offline/error
-                // fallback path, but if ANY unexpected error escapes it, getAll
-                // must STILL never reject — a rejected getAll() cascades into
-                // empty/broken data-heavy views (e.g. an UNHANDLED REJECTION that
-                // surfaced live as "Property description must be an object").
+                // Defense-in-depth (NOT the primary mitigation). The live
+                // "Property description must be an object" crash root cause was
+                // pinned to esbuild's es2020 lowering of React Query's private
+                // class fields in react-island.js (it emitted
+                // Object.defineProperty(obj, key, null)), already fixed by
+                // setting target: 'es2022' in vite.config.mjs. This .catch is
+                // belt-and-suspenders: _getAllImpl owns a graceful offline/error
+                // fallback path, but if ANY unexpected error still escapes it,
+                // getAll must never reject — a rejected getAll() cascades into
+                // empty/broken data-heavy views via an unhandled rejection.
                 // Serve the last-known local snapshot (tombstone-filtered) or [].
                 try {
                     console.warn(`[DataStore] getAll('${tableName}') hard-failed — serving local snapshot/[]:`, err && err.message || err);

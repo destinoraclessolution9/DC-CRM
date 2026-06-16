@@ -707,17 +707,138 @@
         UI.toast.success('Files deleted');
     };
 
-    const downloadSelected = () => {
-        if (_selectedFiles.length === 1) {
-            app.downloadFile(_selectedFiles[0]);
-        } else {
-            UI.toast.info('Multiple download would create ZIP file');
-            // In production, implement ZIP creation
+    // Resolve the chunk-private selection (_selectedFiles = array of doc ids) into
+    // the matching document records, dropping any that no longer exist. One getAll
+    // beats N sequential getById round-trips.
+    const _getSelectedDocs = async () => {
+        const want = new Set(_selectedFiles.map(String));
+        const all = (await AppDataStore.getAll('documents')) || [];
+        return all.filter(d => want.has(String(d.id)));
+    };
+
+    // ── Move Selected ──────────────────────────────────────────────────
+    // Opens a folder picker; confirmMoveSelected() persists the new folder_id.
+    const moveSelected = async () => {
+        if (_selectedFiles.length < 1) { UI.toast.info('Select one or more files first'); return; }
+        try {
+            const folders = ((await AppDataStore.getAll('folders')) || [])
+                .slice()
+                .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+
+            const options = ['<option value="">Root (no folder)</option>']
+                .concat(folders.map(f => `<option value="${esc(String(f.id))}">${esc(f.name || 'Unnamed folder')}</option>`))
+                .join('');
+
+            const content = `
+                <div class="batch-move-modal" style="padding:4px 0;">
+                    <p style="margin-bottom:14px; color:var(--gray-600); font-size:14px;">
+                        Move <strong>${_selectedFiles.length}</strong> selected file${_selectedFiles.length === 1 ? '' : 's'} to:
+                    </p>
+                    <select id="batch-move-target" class="form-control" style="width:100%;">${options}</select>
+                </div>
+            `;
+
+            UI.showModal('Move Files', content, [
+                { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+                { label: 'Move', type: 'primary', action: '(async () => { await app.confirmMoveSelected(); })()' }
+            ]);
+        } catch (err) {
+            UI.toast.error('Could not load folders: ' + (err.message || 'Unknown error'));
         }
     };
 
-    const copySelected = () => { UI.toast.info('Copy selected files'); };
-    const moveSelected = () => { UI.toast.info('Move selected files'); };
+    const confirmMoveSelected = async () => {
+        if (_selectedFiles.length < 1) { UI.toast.info('Select one or more files first'); return; }
+        const sel = document.getElementById('batch-move-target');
+        const rawTarget = sel ? sel.value : '';
+        // Empty string → Root (null folder_id). Otherwise coerce to number when numeric.
+        let targetFolder = null;
+        if (rawTarget !== '') {
+            const n = Number(rawTarget);
+            targetFolder = Number.isNaN(n) ? rawTarget : n;
+        }
+
+        try {
+            let moved = 0;
+            for (const id of _selectedFiles) {
+                await AppDataStore.update('documents', id, {
+                    folder_id: targetFolder,
+                    updated_at: new Date().toISOString()
+                });
+                moved++;
+            }
+            _selectedFiles = [];
+            UI.hideModal();
+            await loadFolderContents();
+            await renderFolderTree();
+            UI.toast.success(`Moved ${moved} file${moved === 1 ? '' : 's'}`);
+        } catch (err) {
+            UI.toast.error('Move failed: ' + (err.message || 'Unknown error'));
+        }
+    };
+
+    // ── Copy Selected (Share) ──────────────────────────────────────────
+    // Build a plain-text reference summary (filename + any http(s) link the
+    // record carries) and copy it to the clipboard. We intentionally do NOT mint
+    // server-side share links — only surface what already exists on the record.
+    // Data-URIs are skipped (not shareable as a reference).
+    const copySelected = async () => {
+        if (_selectedFiles.length < 1) { UI.toast.info('Select one or more files first'); return; }
+        try {
+            const docs = await _getSelectedDocs();
+            if (docs.length === 0) { UI.toast.error('Selected files could not be found'); return; }
+
+            const lines = docs.map(d => {
+                const title = d.filename || ('File ' + d.id);
+                const link = (typeof d.data === 'string' && /^https?:\/\//i.test(d.data)) ? d.data : '';
+                return link ? `${title} — ${link}` : title;
+            });
+            const summary = lines.join('\n');
+
+            if (!(navigator.clipboard && navigator.clipboard.writeText)) {
+                throw new Error('Clipboard unavailable');
+            }
+            await navigator.clipboard.writeText(summary);
+            UI.toast.success(`Copied ${docs.length} reference${docs.length === 1 ? '' : 's'}`);
+        } catch (err) {
+            UI.toast.error('Copy failed: ' + (err.message || 'Clipboard unavailable'));
+        }
+    };
+
+    // ── Download Selected ──────────────────────────────────────────────
+    // Single OR multi: trigger the same per-file download mechanism downloadFile
+    // uses (anchor + record's `data` src). Counts started vs skipped (no content).
+    const downloadSelected = async () => {
+        if (_selectedFiles.length < 1) { UI.toast.info('Select one or more files first'); return; }
+        try {
+            const docs = await _getSelectedDocs();
+            if (docs.length === 0) { UI.toast.error('Selected files could not be found'); return; }
+
+            let started = 0;
+            let skipped = 0;
+            for (const d of docs) {
+                const src = d.data;
+                if (!src || src === '#') { skipped++; continue; }
+                const a = document.createElement('a');
+                a.href = src;
+                a.download = d.filename || ('download_' + d.id);
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                started++;
+            }
+
+            if (started === 0) {
+                UI.toast.error('No downloadable content on the selected files');
+            } else if (skipped > 0) {
+                UI.toast.success(`Downloading ${started} file${started === 1 ? '' : 's'} (${skipped} skipped — no content)`);
+            } else {
+                UI.toast.success(`Downloading ${started} file${started === 1 ? '' : 's'}`);
+            }
+        } catch (err) {
+            UI.toast.error('Download failed: ' + (err.message || 'Unknown error'));
+        }
+    };
 
     const openUploadModal = async () => {
         const content = `
@@ -1087,6 +1208,7 @@ In a production system, this would show the actual file contents.
         downloadSelected,
         copySelected,
         moveSelected,
+        confirmMoveSelected,
         openUploadModal,
         handleFileSelect,
         uploadFiles,
