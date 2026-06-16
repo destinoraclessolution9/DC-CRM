@@ -16,18 +16,18 @@ Path to **D** (god-object retirement / Vite build ownership / module extraction)
 - [~] documents (#39) — script-documents.js (957L) — DEFERRED (interactive: recursive folder tree + per-element drag-drop file moves + list/grid toggle + versioning; drag-drop correctness not validatable by count-parity → do when user present for interactive verification)
 - [~] journey (#33) — RE-CLASSIFIED: NOT a standalone screen. = renderJourneyTab (embedded timeline inside prospect/customer detail accordions, heavy touchpoint mutations) + showAgentJourneyDashboard/showAgentJourneyLoad (small dashboard widgets). Defer with the modal/embedded-component batch; do standalone screens first.
 - [x] monthly_promotion (view 'promotions') — SW-54, 2026-06-16, clean read-only promo-card island; parity-identical (live empty-state) + synthetic populated/XSS/both-empty-variants verified
-- [~] home (#24) — DEFERRED: showMobileHomeView (script-mobile.js) is a mobile, STATEFUL view (localStorage snapshot caching 8h TTL + pull-to-refresh + multi-tier cache loading + AI card) — cache/refresh correctness not count-parity-verifiable unattended.
+- [x] home (#24) — DONE + PROMOTED default-on (SW-83, 2026-06-16) via SCAFFOLD-SHELL + useEffect-onReady. React owns greeting header (greetWord/userName/dateStr/avatar + bell→toggleNotifPanel, avatar→openMobileDrawer) + #mhome-body (seeded w/ chunk's cached-snapshot via dangerouslySetInnerHTML). Chunk keeps 100% of logic: 8h localStorage snapshot cache, multi-tier fetch, _composeBody by-id fills (runs after island onReady), pull-to-refresh, AI card. Live parity confirmed (react vs ?react=0): identical greeting + same 4-section / 2281-char body (AI card, KPIs 2/241/1/0, schedule, alerts).
 
 - [x] marketing_lists (#22) — SW-55, 2026-06-16, tabbed island: React renders shell + 5 master tables (products/events/venues/bujishu/formula); promotions+special_programs = chunk legacy HTML passthrough (dangerouslySetInnerHTML). Parity-verified (products 66=66, tabs 7=7, all 5 tables + 2 passthroughs + action-btn labels correct) + XSS-escaped.
 
 ### ▶️ LOOP RESUMED 2026-06-16 — user said "keep going" (proceed unattended, kill-switch = safety net)
 Strategy: count-verifiable views (full island) first; genuinely-interactive views via SCAFFOLD-SHELL (island static shell w/ stable ids + inline app.* handlers, chunk keeps ALL interactivity unchanged → byte-identical behavior). calendar/referrals LAST.
-### ✅✅ ALL STANDALONE NAVIGABLE CONTENT-VIEWS MIGRATED + PROMOTED DEFAULT-ON (27) — 2026-06-16
-customers, prospects, agents, security, ranking, noticeboard, lead_forms, surveys, contracts, purchases_history, knowledge_dashboard, knowledge_all_entries, custom_fields, org_chart, booking_settings, milestones, cases, boss_report, protection, monthly_promotion, marketing_lists, documents, stock_take, egg_purchasing, formula_purchaser, marketing_automation, calendar(+month), referrals. (reports = built+working but OPT-IN, blocked on agent-dropdown.)
+### ✅✅ ALL STANDALONE NAVIGABLE CONTENT-VIEWS MIGRATED + PROMOTED DEFAULT-ON (29) — 2026-06-16
+customers, prospects, agents, security, ranking, noticeboard, lead_forms, surveys, contracts, purchases_history, knowledge_dashboard, knowledge_all_entries, custom_fields, org_chart, booking_settings, milestones, cases, boss_report, protection, monthly_promotion, marketing_lists, documents, stock_take, egg_purchasing, formula_purchaser, reports, marketing_automation, calendar(+month), referrals, home. (reports promoted SW-80; home promoted SW-83 — mobile landing.)
 
 REMAINING (lower-value / different class — were always deferred):
 1. ✅ reports (#38) — RESOLVED + PROMOTED default-on (SW-80). The agent-dropdown-stuck-at-1 was a transient chunk-load/session glitch, NOT a bug; instrumented verify on a clean load confirmed loadAgents→setState→render fills it (agentOpts 21=legacy, grid 11, Chart.js drawn, leaderboard 4448). So all 28 standalone views are now default-on.
-2. Modals/overlays/embedded/mixed (the "modals deferred" category): ai (UI.showModal), search (overlay drawer), journey (embedded detail-tab + widgets), fude (mixed dashboard: render sections + carousel + CRUD), home (mobile stateful caching), knowledge_capture/daily_notes/detail, cps-analysis, apu-appraisal, destiny-blueprint, fude-redeem, story-detail, reward-crud, highlight-crud, customer-survey.
+2. Modals/overlays/embedded/mixed (the "modals deferred" category): ai (UI.showModal), search (overlay drawer), journey (embedded detail-tab + widgets), fude (mixed dashboard: render sections + carousel + CRUD), knowledge_capture/daily_notes/detail, cps-analysis, apu-appraisal, destiny-blueprint, fude-redeem, story-detail, reward-crud, highlight-crud, customer-survey.
 3. Pre-existing cleanups found: marketing_automation duplicate Monthly-Promotions tab; data.js _getAllImpl offline crash.
 
 NEXT = assess fude (render-only sections) / decide modal phase. Then referrals done.
@@ -67,7 +67,7 @@ RESUME when user is available: do each heavy view with live interactive verifica
 - [ ] marketing_automation (#32) — script-marketing.js (4097L) showMarketingAutomationView L1092
 - [ ] marketing_lists (#22) — script-marketing.js, 7-tab manager (deferred-heavy)
 - [ ] monthly_promotion/month (#44) — script-marketing.js showMonthlyPromotionView L997
-- [ ] home (#24) — main dashboard
+- [x] home (#24) — main dashboard — DONE + PROMOTED (SW-83)
 - [ ] reports (#38) — Chart.js + drill-down modals
 - [ ] calendar (#43) + month — script-calendar.js (5280L), HIGHEST-risk, deploy ALONE last
 - [ ] referrals D3 tree — script-referrals.js (1360L), showReferralTree L483, XL
