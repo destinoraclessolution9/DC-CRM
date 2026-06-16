@@ -384,8 +384,8 @@ const getCRMFieldsForType = (type) => {
         { value: 'state', label: 'State' }, { value: 'postal_code', label: 'Postal Code' },
         { value: 'ming_gua', label: 'Ming Gua' }, { value: 'gender', label: 'Gender' }
     ];
-    if (type === 'prospects') return [...common, ...extraProspect];
-    if (type === 'customers') return [...common, { value: 'lifetime_value', label: 'Lifetime Value' }];
+    if (type === 'prospects') return [...common, ...extraProspect, { value: 'lifetime_value', label: 'Purchase Amount (auto-converts to customer)' }];
+    if (type === 'customers') return [...common, ...extraProspect, { value: 'customer_since', label: 'Customer Since' }, { value: 'lifetime_value', label: 'Purchase Amount / Lifetime Value' }];
     if (type === 'agents') return [...common, { value: 'agent_code', label: 'Agent Code', required: true }];
     if (type === 'products') return [
         { value: 'name', label: 'Name', required: true },
@@ -431,7 +431,7 @@ const autoMatchField = (header, importType = 'prospects') => {
         for (let key in m) { if (lower.includes(key)) return m[key]; }
         return '';
     }
-    const map = { 'full name': 'full_name', 'name': 'full_name', 'phone': 'phone', 'mobile': 'phone', 'email': 'email', 'ic': 'ic_number', 'ic number': 'ic_number', 'nric': 'ic_number', 'dob': 'date_of_birth', 'date of birth': 'date_of_birth', 'occupation': 'occupation', 'income': 'income_range', 'address': 'address', 'city': 'city', 'state': 'state', 'postcode': 'postal_code', 'postal': 'postal_code', 'postal code': 'postal_code', 'ming gua': 'ming_gua', 'gender': 'gender', 'title': 'title', 'nationality': 'nationality', 'lunar': 'lunar_birth', 'company': 'company_name', 'referred by': 'referred_by', 'referral relationship': 'referral_relationship', 'relationship': 'referral_relationship', 'pipeline': 'pipeline_stage', 'stage': 'pipeline_stage', 'close date': 'expected_close_date', 'expected close': 'expected_close_date', 'deal value': 'deal_value' };
+    const map = { 'full name': 'full_name', 'name': 'full_name', 'phone': 'phone', 'mobile': 'phone', 'email': 'email', 'ic': 'ic_number', 'ic number': 'ic_number', 'nric': 'ic_number', 'dob': 'date_of_birth', 'date of birth': 'date_of_birth', 'occupation': 'occupation', 'income': 'income_range', 'address': 'address', 'city': 'city', 'state': 'state', 'postcode': 'postal_code', 'postal': 'postal_code', 'postal code': 'postal_code', 'ming gua': 'ming_gua', 'gender': 'gender', 'title': 'title', 'nationality': 'nationality', 'lunar': 'lunar_birth', 'company': 'company_name', 'referred by': 'referred_by', 'referral relationship': 'referral_relationship', 'relationship': 'referral_relationship', 'pipeline': 'pipeline_stage', 'stage': 'pipeline_stage', 'close date': 'expected_close_date', 'expected close': 'expected_close_date', 'deal value': 'deal_value', 'customer since': 'customer_since', 'join date': 'customer_since', 'date joined': 'customer_since', 'amount': 'lifetime_value', 'purchase': 'lifetime_value', 'spend': 'lifetime_value', 'lifetime': 'lifetime_value', 'ltv': 'lifetime_value', 'total spent': 'lifetime_value' };
     for (let key in map) { if (lower.includes(key)) return map[key]; }
     return '';
 };
@@ -504,11 +504,39 @@ const buildReverseMapping = () => {
 
 const normalisePhone = (raw) => (raw || '').toString().replace(/[-\s()]/g, '').replace(/^\+60/, '0');
 
-const mapRowToRecord = (row, reverseMap, agentId) => {
+const _parseAmount = (raw) => { const n = parseFloat((raw || '').toString().replace(/[^0-9.]/g, '')); return Number.isFinite(n) ? n : 0; };
+
+const mapRowToRecord = (row, reverseMap, agentId, importType = 'prospects') => {
     const get = (field) => {
         const idx = reverseMap[field];
         return idx !== undefined ? (row[idx] || '').toString().trim() : '';
     };
+    // Customers import → a permanent, ACTIVE customer record (no prospect-only
+    // columns, no approval). Empty date fields must be null, not '' (date cols).
+    if (importType === 'customers') {
+        return {
+            full_name: get('full_name'),
+            gender: get('gender'),
+            nationality: get('nationality'),
+            phone: get('phone'),
+            email: get('email'),
+            ic_number: get('ic_number'),
+            date_of_birth: get('date_of_birth') || null,
+            lunar_birth: get('lunar_birth'),
+            occupation: get('occupation'),
+            company_name: get('company_name'),
+            income_range: get('income_range'),
+            address: get('address'),
+            city: get('city'),
+            state: get('state'),
+            postal_code: get('postal_code'),
+            ming_gua: get('ming_gua'),
+            responsible_agent_id: agentId,
+            lifetime_value: _parseAmount(get('lifetime_value')),
+            customer_since: get('customer_since') || new Date().toISOString().split('T')[0],
+            status: 'active'
+        };
+    }
     const dealVal = get('deal_value');
     const pipelineStage = get('pipeline_stage') || 'new';
     return {
@@ -781,7 +809,7 @@ const startImport = async () => {
     const reverseMap = buildReverseMapping();
     const isMarketingType = ['products', 'events', 'promotions'].includes(_importData.importType);
     const table = { customers: 'customers', prospects: 'prospects', products: 'products', events: 'events', promotions: 'promotions' }[_importData.importType] || 'prospects';
-    let created = 0, updated = 0, skipped = 0, errorCount = 0;
+    let created = 0, updated = 0, skipped = 0, errorCount = 0, convertedCount = 0;
 
     for (let i = 0; i < rowsToProcess.length; i++) {
         if (i % 10 === 0) {
@@ -789,7 +817,7 @@ const startImport = async () => {
             await new Promise(r => setTimeout(r, 0));
         }
         const vr = rowsToProcess[i];
-        const record = isMarketingType ? mapRowToMarketingRecord(vr.row, reverseMap, _importData.importType) : mapRowToRecord(vr.row, reverseMap, assignedAgentId);
+        const record = isMarketingType ? mapRowToMarketingRecord(vr.row, reverseMap, _importData.importType) : mapRowToRecord(vr.row, reverseMap, assignedAgentId, _importData.importType);
         const dup = dupMap.get(vr.rowIndex);
 
         if (dup) {
@@ -801,15 +829,50 @@ const startImport = async () => {
             }
             // merge: fall through to create
         }
+        // Purchase amount on this row (drives auto-conversion for prospects)
+        const purchaseAmount = (() => {
+            const idx = reverseMap['lifetime_value'];
+            return idx !== undefined ? _parseAmount(vr.row[idx]) : 0;
+        })();
         try {
             record.created_at = new Date().toISOString();
-            if (!isMarketingType) {
+            if (table === 'customers') {
+                // Imported customers go in directly as ACTIVE, visible records —
+                // no prospect→approval dance. lifetime_value / customer_since /
+                // status are already set by mapRowToRecord.
+                await AppDataStore.create('customers', record);
+                created++;
+            } else if (table === 'prospects') {
                 record.status = 'New';
                 record.protection_deadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
                 record.score = 5;
+                const newProspect = await AppDataStore.create('prospects', record);
+                created++;
+                // Imported prospect that already purchased → auto-approve the
+                // conversion right away: mark the prospect converted and create
+                // the linked permanent Customer (skip manager approval for imports).
+                if (purchaseAmount > 0 && newProspect?.id) {
+                    try {
+                        await AppDataStore.create('customers', {
+                            full_name: record.full_name, gender: record.gender || '', nationality: record.nationality || '',
+                            phone: record.phone || '', email: record.email || '', ic_number: record.ic_number || '',
+                            date_of_birth: record.date_of_birth || null, lunar_birth: record.lunar_birth || '',
+                            occupation: record.occupation || '', company_name: record.company_name || '',
+                            income_range: record.income_range || '', address: record.address || '', city: record.city || '',
+                            state: record.state || '', postal_code: record.postal_code || '', ming_gua: record.ming_gua || '',
+                            responsible_agent_id: assignedAgentId, lifetime_value: purchaseAmount,
+                            customer_since: new Date().toISOString().split('T')[0],
+                            converted_from_prospect_id: newProspect.id, status: 'active',
+                            created_at: new Date().toISOString()
+                        });
+                        await AppDataStore.update('prospects', newProspect.id, { status: 'converted', conversion_status: 'approved' });
+                        convertedCount++;
+                    } catch (convErr) { console.error('Auto-convert failed row', vr.rowIndex, convErr); }
+                }
+            } else {
+                await AppDataStore.create(table, record);
+                created++;
             }
-            await AppDataStore.create(table, record);
-            created++;
         } catch (e) { console.error('Insert failed row', vr.rowIndex, e); errorCount++; }
     }
 
@@ -837,14 +900,23 @@ const startImport = async () => {
     } catch (e) { console.error('Failed to log import job:', e); }
 
     UI.hideModal();
-    UI.toast.success(`Import complete: ${created} created, ${updated} updated, ${skipped} skipped`);
+    const convMsg = convertedCount > 0 ? `, ${convertedCount} auto-converted to customers` : '';
+    UI.toast.success(`Import complete: ${created} created${convMsg}, ${updated} updated, ${skipped} skipped`);
+    // Fresh reads so the new records show immediately (not a stale SWR snapshot)
+    try { AppDataStore.invalidateCache && AppDataStore.invalidateCache('customers'); AppDataStore.invalidateCache && AppDataStore.invalidateCache('prospects'); } catch (e) {}
     const vp = document.getElementById('content-viewport');
     if (vp) {
-        if (_importData.importType === 'prospects') {
-            await (window.app.showProspectsViewSmart || (() => {}))(vp);
-        } else if (['products', 'events', 'promotions'].includes(_importData.importType)) {
+        if (['products', 'events', 'promotions'].includes(_importData.importType)) {
             _state.cmlt = _importData.importType;
             await (window.app.showMarketingListsView || (() => Promise.resolve()))(vp);
+        } else if (_importData.importType === 'customers') {
+            // Show the imported customers directly on the Customers tab
+            await (window.app.navigateTo || (() => {}))('prospects');
+            try { await (window.app.switchCustomerTab || (() => {}))('customers'); } catch (e) {}
+        } else if (_importData.importType === 'prospects') {
+            await (window.app.navigateTo || (() => {}))('prospects');
+            // If any imported prospects were auto-converted, surface them on the Customers tab
+            if (convertedCount > 0) { try { await (window.app.switchCustomerTab || (() => {}))('customers'); } catch (e) {} }
         } else {
             await showImportDashboard(vp);
         }
