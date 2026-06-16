@@ -1,25 +1,31 @@
 # CRM — Outstanding / Backlog
 
-_Last updated: 2026-06-16. SW-98 + SW-100 are LIVE. **SW-101 is STAGED LOCALLY (2 commits, NOT pushed) — awaiting verification + push.**_
+_Last updated: 2026-06-16. **SW-98 + SW-100 + SW-102 are all LIVE + verified-present on production.** This file tracks what remains._
 
 > **Critical bugs (SW-98) AND tier-2 bug fixes (SW-100) are DONE + LIVE.**
 > Legend — **Effort:** S (≤1h) · M (a few h) · L (day+). **Priority:** P1 (do next) · P2 · P3.
 
 ---
 
-## 🟡 STAGED for SW-101 — implemented + built + regression-green, NOT pushed (verify, then push)
-Two local commits ahead of `origin/main`: `9fa1b31` (additive) + `a528976` (3.1 deletion). Each piece was adversarially verified in source, but I could **not** run the live app — **the items below need a quick interactive check before/after push** (kill-switch `?react_<x>=0` is the per-view rollback for the migration items; `git revert a528976` rolls back just the deletions):
-- **Migration tail (§2):** kb-slot editors (capture/daily/detail) + journey aux widgets → React. **Verify:** capture Ctrl+Enter saves; detail/daily autosave fires; journey dashboard widget renders + row click navigates.
-- **React bundle re-synced:** the rebuilt `react-island.js` now contains `mountFudeContent` + `mountJourneyContent` (were stale/inert) → **fude main dashboard + journey timeline now render via React for the first time on push. Verify both render + the fude carousel + journey timeline work.**
-- **AI Insights (§5):** real deterministic heuristics + real React cards. **Verify:** open AI Insights — cards/timeline/predictions show real numbers, no NaN, empty-data states OK.
-- **Export KPI (§5):** **Verify:** click Export KPI → downloads a CSV/XLSX of the 福气 leaderboard.
-- **Integrations (§5):** webhook notifications (Slack/Discord) config + Test; OAuth-only services show honest "needs backend" (NOT faked). `dispatchWebhookEvent` exposed but **not yet wired into save paths** (follow-up).
-- **Mobile calendar (§5):** Week/Day/Agenda tabs. **Verify on a phone width:** each tab renders; Month still works; switching tabs mid-cold-load doesn't snap back to Month (the repaint-guard fix).
-- **Batch DMS actions (§5):** Move/Share(copy)/Download wired into the file-explorer toolbar (`script-documents.js`) + the `confirmDeleteFolder` no-op bug fixed. **Verify:** select files → Move/Copy/Download work.
-- **getAll cleanup (§3.3):** CI defineProperty canary + guard-comment demote. Root cause was pinned to esbuild es2020 RQ lowering (fixed via vite es2022).
-- **§3.1 legacy-fallback deletion:** ~1,500 LOC of dead vanilla renderers removed for 13 views; off/error path degrades to a small inline reload card. **Verify each deleted view still renders via React:** security, ranking, noticeboard, monthly_promotion, org_chart, lead_forms, surveys, contracts, purchases_history, agents, booking_settings, custom_fields, milestones, knowledge dashboard + all-entries, cases. **(`customers`/`prospects`/Class-B/journey/fude legacy intentionally KEPT.)**
+## ✅ SHIPPED + LIVE in SW-102 (independently verified present on production 2026-06-16)
+Pushed (commits `9fa1b31` additive + `a528976` 3.1-deletion, deployed via the parallel `7271b3f` push, then `84fd0b3` bumped sw→102 to force a clean reload). A 4-agent audit confirmed every marker is live; only **runtime UI behavior** wasn't exercised by me (no login) — a quick interactive spot-check is still worthwhile (kill-switch `?react_<x>=0` per view, or `git revert a528976` for just the deletions, are the rollback levers):
+- **Migration tail (§2):** kb-slot editors + journey aux → React. Rebuilt `react-island.js` also **re-synced `mountFudeContent` + `mountJourneyContent`** (were stale/inert) — fude dashboard + journey timeline now run on React. _Spot-check: capture Ctrl+Enter save; detail/daily autosave; fude carousel; journey timeline._
+- **AI Insights (§5):** real deterministic heuristics + real React cards/timeline/predictions. _Spot-check: open AI Insights — real numbers, no NaN._ ⚠️ **Partial — see §5 below: the dashboard's secondary action buttons are still "coming soon."**
+- **Export KPI (§5):** real CSV/XLSX export of the 福气 leaderboard.
+- **Integrations (§5):** webhook notifications (Slack/Discord) config + Test; OAuth-only services honest "needs backend". ⚠️ **`dispatchWebhookEvent` has NO callers → configured webhooks fire nothing until wired into save paths (open follow-up).**
+- **Mobile calendar (§5):** Week/Day/Agenda tabs + the cold-load repaint-guard fix.
+- **Batch DMS actions (§5):** Move/Share/Download wired into the real file-explorer toolbar (`script-documents.js`) + `confirmDeleteFolder` no-op fixed.
+- **getAll cleanup (§3.3):** CI defineProperty canary + guard-comment demote. Root cause pinned (esbuild es2020 RQ lowering, fixed via vite es2022).
+- **§3.1 legacy-fallback deletion:** ~1,500 LOC of dead renderers removed for 13 views; off/error → reload card. Audit confirmed every view's React mount is intact and `customers`/`prospects`/Class-B legacy was NOT touched.
 
-**Still NOT done after SW-101:** §3.2 full JSX componentization (do "when touched"); §4.1 compute upgrade (your billing action); full OAuth integrations (need a backend — not client-side feasible); wiring `dispatchWebhookEvent` into lead/deal/activity save handlers.
+## ⏳ Genuinely still outstanding (honest list, post-SW-102)
+- **§4.1 Supabase compute Nano → Micro/Small** — _your action_ (billing; can't be done from code). The real fix for repeat 521 outages. ⚠️ Confirm project id before upgrading: `OUTSTANDING.md` said `remuwhxvzkzjtgbzqjaa`, memory references org `umqvztwprplcfpvrshsn`.
+- **Wire `dispatchWebhookEvent`** into the new-lead / closed-deal / new-activity save handlers — _me, small_. Webhook config+Test are live but inert until this is done.
+- **AI Insights secondary action buttons (~17)** — still `_aiSoon` "coming soon" toasts (Export/Segment/Schedule/Share/view-details inside the Lead-Scoring/Forecast/Churn/Performance modals). The 4 core dashboards now show **real data**; these secondary actions need real net-new features (segment builder, bulk scheduler, share infra). _Build only if wanted._
+- **Full OAuth integrations** (Outlook/GitHub/Drive) — _infeasible_ client-side (need a server OAuth backend + secrets). Honest "needs backend" card shipped.
+- **§3.2 full JSX componentization** of the passthrough/legal forms — _deferred by design_ ("when touched"); leaves a manual-escaping XSS surface — a dedicated escaping pass is the cheaper interim.
+- **Minor me-followups:** optional `UNIQUE(user_id,month,prospect_id)` on `monthly_focus_archive` (1.1+, belt-and-suspenders); DB role-fix for the 3 fude legacy-allowlist admins then delete the `[fude-authz]` fallback (1.2+); `esc()` the `a.solution_sold` + boss-report `<option>` labels (pre-existing low-risk).
+- **Pre-existing unbuilt stubs** (out of scope, not regressions): fude "Redeem Points" button (`app.todo`); journey prospect→customer auto-conversion (console TODO only).
 
 ---
 
