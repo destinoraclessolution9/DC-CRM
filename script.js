@@ -3028,13 +3028,18 @@ function _wireLoginBtn() {
     // old monolithic script.js).
     //
     // Two-tier to avoid blocking Supabase data at login:
-    //   Tier 1 (immediate) — 6 highest-traffic chunks start right away.
-    //             async=true means each executes as soon as it downloads,
-    //             without blocking other tasks.
-    //   Tier 2 (3 s delay) — remaining chunks load after the dashboard data
-    //             has had time to fetch from Supabase. Loading all 25+ scripts
-    //             at once on login was saturating the main-thread task queue
-    //             and causing Supabase fetch callbacks to time out.
+    //   Tier 1 (immediate) — a conservative set of essential first-nav chunks
+    //             start right away. async=true means each executes as soon as it
+    //             downloads, without blocking other tasks. These back the views an
+    //             agent is most likely to open first (prospects/customers/agents
+    //             share one chunk, plus calendar, pipeline, performance — and the
+    //             mobile shell so the first mobile paint isn't a cold load).
+    //   Tier 2 (idle) — everything else pre-warms during browser idle time via
+    //             requestIdleCallback (setTimeout fallback for older engines), so
+    //             rarely-first chunks no longer pile into a single 3 s burst that
+    //             saturated the main-thread task queue and timed out Supabase fetch
+    //             callbacks. The on-demand window._loadChunk path is unchanged, so
+    //             every view still loads on nav whether or not it pre-warmed.
     let _predictivePrefetchRan = false;
     const _runPredictivePrefetch = () => {
         if (_predictivePrefetchRan || !_currentUser) return;
@@ -3044,24 +3049,30 @@ function _wireLoginBtn() {
             const seen = new Set();
             const _load = (src) => { if (!seen.has(src)) { seen.add(src); _loadChunkOnce(src); } };
 
-            // Tier 1 — immediate: the views agents open most
+            // Tier 1 — immediate: essential first-nav views (prospects/customers/
+            // agents all live in script-prospects.min.js)
             [
                 'chunks/script-mobile.min.js',
                 'chunks/script-prospects.min.js',
                 'chunks/script-calendar.min.js',
                 'chunks/script-pipeline.min.js',
-                'chunks/script-activities.min.js',
-                'chunks/script-cps.min.js',
-                'chunks/script-forms.min.js',
+                'chunks/script-performance.min.js',
             ].forEach(_load);
 
-            // Tier 2 — after 3 s: everything else, Supabase data is loaded by then
-            setTimeout(() => {
+            // Tier 2 — idle: everything else, pre-warmed without blocking the burst.
+            // requestIdleCallback runs each chunk when the main thread is free;
+            // setTimeout is the fallback when rIC isn't available.
+            const _warmTier2 = () => {
                 for (const def of Object.values(_CHUNK_VIEWS)) {
                     const ok = !def.exactLevels || def.exactLevels.includes(lvl);
                     if (ok) _load(def.src);
                 }
-            }, 3000);
+            };
+            if (typeof window.requestIdleCallback === 'function') {
+                window.requestIdleCallback(_warmTier2, { timeout: 5000 });
+            } else {
+                setTimeout(_warmTier2, 3000);
+            }
         } catch (e) { console.warn('eager chunk load failed', e); }
     };
 
