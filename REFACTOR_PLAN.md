@@ -33,7 +33,10 @@ Re-validation result (53 audit findings vs current live): **10 fixed by the big 
 - [ ] 2.8 KPI Target-vs-Actual → `kpi_*` RPC (#34) — needs RPC (DDL, dashboard-only)
 
 ## Wave 3 — Structural decoupling
-- [ ] 3.1 One view registry: unify 2 dispatchers + 3 authz tables (#2/#39/#9)
+- [~] 3.1 One view registry: unify 2 dispatchers + authz/title tables (#2/#39/#9) — IN PROGRESS
+  - [x] 3.1a refreshCurrentView switch → declarative `_VIEW_REFRESH` map (script.js ~2911), exact mirror, DONE + DEPLOYED (211c210, Ready). script.js -29 lines.
+  - [ ] 3.1b navigateTo render if/else (script.js:3253-3450) → registry `render` fns. HIGH RISK (the router). Nuances to preserve: mobile-vs-desktop branch (home/calendar/prospects), fire-and-forget for pipeline/reports/referrals (no await + .catch), canonical _currentView (month←calendar, ranking←performance, marketing_automation←workflows + _currentMarketingTab side-effect), view-cache fast-path return, transitions. Do as its OWN commit, verify hard.
+  - [ ] 3.1c fold VIEW_TITLES (script.js:3200), _CHUNK_VIEWS authz gate (3104-3111), updateNavVisibility.levelPermissions (1522) into one `VIEWS[id] = {chunk, exactLevels, render, refresh, title, navId, canonical}` source. NOTE authz consolidation can change access for legacy/Chinese roles — preserve exact level sets.
 - [x] 3.2 gcal: `dataChanged` listener, not method monkey-patch (#7/#44) — DONE + DEPLOYED (commit dcb4b09). Behavior-equivalent (add→record.type, update→getById, delete→sync; filtered to add/update/delete to ignore realtime/revalidate echoes). Gate green, smoke 9/10 (flaky Calendar only, 0 errors).
 - [ ] 3.3 Extract god-functions: `saveActivity` (~749 lines), render monoliths (#36)
 - [ ] 3.4 Silent-catch sweep (~175 no-op `catch{}`) (#40)
@@ -59,3 +62,5 @@ These cannot be safely AUTO-pushed to a production CRM without per-role behavior
 - 2026-06-17: Wave 3.2 gcal monkey-patch→event-listener done, gate green + smoke 9/10 (flaky), pushed (12eafa8..dcb4b09). NOTE: committed artifacts churn (CRLF noise + gitignored hashed copies) is harmless — Vercel rebuilds all from source via `node build.mjs`; only SOURCE correctness matters for live.
 - 2026-06-17: DEPLOY VERIFY METHOD FIXED — curl-hash polling was buggy (captured baseline AFTER the fast 23s build, waited forever). Reliable method = Chrome → Vercel dashboard deployments list shows per-commit Ready/Building/Error in ~23s, then curl the live hashed bundle to confirm content. Vercel team slug: destinoraclessolution9-6587s-projects, project dc-crm. ALL deploys this session verified Ready in Production: 12eafa8, dcb4b09, 926fbf5.
 - 2026-06-17: Wave 2.3 (lone critical) WhatsApp createMany done, gate green, pushed (dcb4b09..926fbf5), Ready in prod, createMany confirmed live in data.19e5ab3b4b.min.js + marketing chunk. 4 waves now live: 0, 1.1, 3.2, 2.3.
+- 2026-06-17: caught + fixed self-inflicted disclosure — REFACTOR_PLAN.md was served publicly (HTTP 200); added it + _audit_* to .vercelignore (f62fa90), now 404. ⚠️ committed .md/working files at repo root get served by Vercel (outputDirectory ".") unless in .vercelignore.
+- 2026-06-17: Wave 3.1a (view-registry START) — refreshCurrentView → _VIEW_REFRESH map, deployed (211c210, Ready). 6 prod deploys this session, all Ready. Branch note: after the f62fa90 push I was left on main, so 211c210 landed on main directly; resynced refactor/quality→main. NEXT = 3.1b navigateTo router dispatch (HIGH RISK, own commit, do fresh not at session-tail).
