@@ -2908,6 +2908,34 @@ function _wireLoginBtn() {
         '_activities':          { src: 'chunks/script-activities.min.js', minLevel: null, exactLevels: null },
     };
 
+    // Declarative refresh map — the single source for refreshCurrentView (replaces
+    // the parallel switch(_currentView)). Each entry re-renders its view in place
+    // after a mutation; each mirrors its old switch case EXACTLY (same guard, same
+    // args, same side-effects) and refreshCurrentView awaits the returned promise
+    // (or a no-op when the fn isn't loaded). This is the seed of the unified view
+    // registry — navigateTo's render dispatch + _CHUNK_VIEWS/title data fold in
+    // here next (Wave 3.1 cont.).
+    const _VIEW_REFRESH = {
+        month:                (vp) => (window.app.renderCalendar || (() => {}))(),
+        week:                 (vp) => (window.app.renderWeekView || (() => {}))(),
+        day:                  (vp) => (window.app.renderTodayActivities || (() => {}))(),
+        prospects:            (vp) => { if (_currentDetailView) return; return (window.app.showProspectsViewSmart || (() => {}))(vp); },
+        pipeline:             (vp) => window.app.showPipelineView && window.app.showPipelineView(vp),
+        reports:              (vp) => (typeof window.app.refreshKPIDashboard === 'function') && window.app.refreshKPIDashboard(),
+        protection:           (vp) => window.app.showProtectionMonitoringView && window.app.showProtectionMonitoringView(vp),
+        agents:               (vp) => window.app.showAgentsView && window.app.showAgentsView(vp),
+        referrals:            (vp) => (typeof window.app.showReferralsView === 'function') && window.app.showReferralsView(vp),
+        cases:                (vp) => window.app.showCasesView && window.app.showCasesView(vp),
+        promotions:           (vp) => window.app.showMonthlyPromotionView && window.app.showMonthlyPromotionView(vp),
+        marketing_automation: (vp) => window.app.showMarketingAutomationView && window.app.showMarketingAutomationView(vp),
+        ranking:              (vp) => (typeof window.app.showRankingPerformanceView === 'function') && window.app.showRankingPerformanceView(vp),
+        workflows:            (vp) => { _currentMarketingTab = 'automation'; return window.app.showMarketingAutomationView && window.app.showMarketingAutomationView(vp); },
+        milestones:           (vp) => window.app.showMilestonesView && window.app.showMilestonesView(vp),
+        fude:                 (vp) => window.app.showFudeView && window.app.showFudeView(vp),
+        egg_purchasing:       (vp) => window.app.showEggPurchasingView && window.app.showEggPurchasingView(vp),
+        purchases_history:    (vp) => (window.app.showPurchasesHistoryView || (() => {}))(vp),
+    };
+
     // Eager chunk loader — after login, execute every permitted chunk so all
     // functions are in memory before the user taps anything (same feel as the
     // old monolithic script.js).
@@ -4457,68 +4485,11 @@ function _wireLoginBtn() {
     if (window._isRefreshing) return;
     window._isRefreshing = true;
     try {
-        const view = _currentView;
-        // Auto-refreshing current view
-        switch (view) {
-            case 'month':
-                await (window.app.renderCalendar || (() => {}))();
-                break;
-            case 'week':
-                await (window.app.renderWeekView || (() => {}))();
-                break;
-            case 'day':
-                await (window.app.renderTodayActivities || (() => {}))();
-                break;
-            case 'prospects':
-                if (_currentDetailView) break;
-                await (window.app.showProspectsViewSmart || (() => {}))(viewport);
-                break;
-            case 'pipeline':
-                if (window.app.showPipelineView) await window.app.showPipelineView(viewport);
-                break;
-            case 'reports':
-                if (typeof window.app.refreshKPIDashboard === 'function') await window.app.refreshKPIDashboard();
-                break;
-            case 'protection':
-                if (window.app.showProtectionMonitoringView) await window.app.showProtectionMonitoringView(viewport);
-                break;
-            case 'agents':
-                if (window.app.showAgentsView) await window.app.showAgentsView(viewport);
-                break;
-            case 'referrals':
-                if (typeof window.app.showReferralsView === 'function') await window.app.showReferralsView(viewport);
-                break;
-            case 'cases':
-                if (window.app.showCasesView) await window.app.showCasesView(viewport);
-                break;
-            case 'promotions':
-                if (window.app.showMonthlyPromotionView) await window.app.showMonthlyPromotionView(viewport);
-                break;
-            case 'marketing_automation':
-                if (window.app.showMarketingAutomationView) await window.app.showMarketingAutomationView(viewport);
-                break;
-            case 'ranking':
-                if (typeof window.app.showRankingPerformanceView === 'function') await window.app.showRankingPerformanceView(viewport);
-                break;
-            case 'workflows':
-                _currentMarketingTab = 'automation';
-                if (window.app.showMarketingAutomationView) await window.app.showMarketingAutomationView(viewport);
-                break;
-            case 'milestones':
-                if (window.app.showMilestonesView) await window.app.showMilestonesView(viewport);
-                break;
-            case 'fude':
-                if (window.app.showFudeView) await window.app.showFudeView(viewport);
-                break;
-            case 'egg_purchasing':
-                if (window.app.showEggPurchasingView) await window.app.showEggPurchasingView(viewport);
-                break;
-            case 'purchases_history':
-                await (window.app.showPurchasesHistoryView || (() => {}))(viewport);
-                break;
-            default:
-                // No specific refresh for this view
-        }
+        // Auto-refreshing current view via the declarative _VIEW_REFRESH map
+        // (replaces the old switch on _currentView). Unlisted views = no-op,
+        // matching the old `default` case.
+        const _refresh = _VIEW_REFRESH[_currentView];
+        if (_refresh) await _refresh(viewport);
     } catch (err) {
         console.error("Error during auto-refresh:", err);
     } finally {
