@@ -2025,6 +2025,20 @@
         return merged;
     };
 
+    // Pure HTML builder for one month-grid day cell — extracted verbatim from
+    // _renderCalendarImpl. The per-day activity loop (filter/dedup/+N-more, which
+    // uses `continue`) stays in the orchestrator; this only wraps the already-
+    // assembled `activityHtml` string in the cell markup.
+    const buildMonthDayCellHtml = (dayNum, dateStr, isToday, activityHtml) => {
+        return `
+                <div class="calendar-cell ${isToday ? 'today' : ''}" onclick="app.openActivityModal('${dateStr}')">
+                    <span class="date-num">${dayNum}</span>
+                    <div class="grid-activities">
+                        ${activityHtml}
+                    </div>
+                </div>`;
+    };
+
     const _renderCalendarImpl = async () => {
         const myToken = ++_state.rct;
         // ── Perf instrumentation (Tier 0). Cheap, observable in DevTools.
@@ -2367,13 +2381,7 @@
                 activityHtml += `<div class="more-events-indicator" onclick="event.stopPropagation(); app.openDayView('${dateStr}')">+${skippedInCell} more</div>`;
             }
 
-            html += `
-                <div class="calendar-cell ${isToday ? 'today' : ''}" onclick="app.openActivityModal('${dateStr}')">
-                    <span class="date-num">${i}</span>
-                    <div class="grid-activities">
-                        ${activityHtml}
-                    </div>
-                </div>`;
+            html += buildMonthDayCellHtml(i, dateStr, isToday, activityHtml);
         }
 
         // Next month overflow days
@@ -2517,6 +2525,33 @@
         } catch (e) { }
     }
 
+    // Pure HTML builder for one "today" activity card — extracted verbatim from
+    // renderTodayActivities' per-row loop. All ownership/entity/status resolution
+    // stays in the orchestrator; this only assembles the card string. `esc` is
+    // read from the enclosing closure (same as the inline code).
+    const buildTodayActivityCardHtml = (a, agentName, entityName, typeClass, statusText) => {
+        return `
+                <div class="today-act-card ${typeClass}" onclick="app.viewActivityDetails(${a.id})">
+                    <div class="tac-meta">
+                        <span class="tac-time">${a.start_time ? a.start_time.slice(0,5) : '--:--'}</span>
+                        <span class="tac-type ${typeClass}">${esc(a.activity_type)}</span>
+                        <span class="tac-status">${statusText}${(a.closing_amount || a.is_closing) ? ' · Closed' : ''}</span>
+                    </div>
+                    <div class="tac-names">
+                        <div class="tac-agent">${esc(agentName)}</div>
+                        ${entityName !== 'N/A' ? `<div class="tac-customer">${esc(entityName)}</div>` : ''}
+                    </div>
+                    <div class="tac-actions" onclick="event.stopPropagation()">
+                        <button class="btn btn-sm tac-btn-view" title="View" onclick="app.viewActivityDetails(${a.id})"><i class="fas fa-eye"></i></button>
+                        <button class="btn btn-sm tac-btn-outcome" title="Outcome" onclick="(async()=>{await app.openMeetingOutcomeModal(${a.id});})()"><i class="fas fa-clipboard-check"></i></button>
+                        <button class="btn btn-sm tac-btn-notes" title="Notes" onclick="(async()=>{await app.openPostMeetupNotesModal(${a.id},${a.prospect_id || 'null'});})()"><i class="fas fa-sticky-note"></i></button>
+                        <button class="btn btn-sm tac-btn-edit" title="Edit" onclick="app.editActivity(${a.id})"><i class="fas fa-pen"></i></button>
+                        <button class="btn btn-sm tac-btn-co" title="Add Co-Agent" onclick="app.addCoAgentToActivity(${a.id})"><i class="fas fa-user-plus"></i></button>
+                    </div>
+                </div>
+            `;
+    };
+
     const renderTodayActivities = async () => {
         const grid = document.getElementById('today-activities-grid');
         if (!grid) return;
@@ -2625,26 +2660,7 @@
             const typeClass = (a.activity_type || '').toLowerCase().replace(/[^a-z0-9-]/g, '');
             const statusText = esc(a.status || 'scheduled');
 
-            html += `
-                <div class="today-act-card ${typeClass}" onclick="app.viewActivityDetails(${a.id})">
-                    <div class="tac-meta">
-                        <span class="tac-time">${a.start_time ? a.start_time.slice(0,5) : '--:--'}</span>
-                        <span class="tac-type ${typeClass}">${esc(a.activity_type)}</span>
-                        <span class="tac-status">${statusText}${(a.closing_amount || a.is_closing) ? ' · Closed' : ''}</span>
-                    </div>
-                    <div class="tac-names">
-                        <div class="tac-agent">${esc(agent.full_name)}</div>
-                        ${entityName !== 'N/A' ? `<div class="tac-customer">${esc(entityName)}</div>` : ''}
-                    </div>
-                    <div class="tac-actions" onclick="event.stopPropagation()">
-                        <button class="btn btn-sm tac-btn-view" title="View" onclick="app.viewActivityDetails(${a.id})"><i class="fas fa-eye"></i></button>
-                        <button class="btn btn-sm tac-btn-outcome" title="Outcome" onclick="(async()=>{await app.openMeetingOutcomeModal(${a.id});})()"><i class="fas fa-clipboard-check"></i></button>
-                        <button class="btn btn-sm tac-btn-notes" title="Notes" onclick="(async()=>{await app.openPostMeetupNotesModal(${a.id},${a.prospect_id || 'null'});})()"><i class="fas fa-sticky-note"></i></button>
-                        <button class="btn btn-sm tac-btn-edit" title="Edit" onclick="app.editActivity(${a.id})"><i class="fas fa-pen"></i></button>
-                        <button class="btn btn-sm tac-btn-co" title="Add Co-Agent" onclick="app.addCoAgentToActivity(${a.id})"><i class="fas fa-user-plus"></i></button>
-                    </div>
-                </div>
-            `;
+            html += buildTodayActivityCardHtml(a, agent.full_name, entityName, typeClass, statusText);
         }
 
         html += `</div>`;
@@ -3338,6 +3354,25 @@
         await renderCalendar();
     };
 
+    // Pure HTML builders for renderWeekView — extracted verbatim so the
+    // orchestrator below keeps the same template strings while staying a thin
+    // loop. `esc` is read from the enclosing closure (same as the inline code).
+    const buildWeekDayHeaderHtml = (dayName, dayDate, isToday) => {
+        return `
+                <div class="week-day-header ${isToday ? 'today' : ''}">
+                    <div class="day-name">${dayName}</div>
+                    <div class="day-date">${dayDate.getDate()}</div>
+                </div>
+            `;
+    };
+    const buildWeekActivityHtml = (a, name) => {
+        return `
+    <div class="week-activity ${esc(a.activity_type.toLowerCase())}" onclick="app.viewActivityDetails(${a.id})">
+        ${esc(a.start_time)} ${esc(name)}
+    </div>
+    `;
+    };
+
     const renderWeekView = async () => {
         const grid = document.getElementById('calendar-grid');
         if (!grid) return;
@@ -3357,12 +3392,7 @@
             day.setDate(startOfWeek.getDate() + i);
             const isToday = day.toDateString() === new Date().toDateString();
 
-            html += `
-                <div class="week-day-header ${isToday ? 'today' : ''}">
-                    <div class="day-name">${days[i]}</div>
-                    <div class="day-date">${day.getDate()}</div>
-                </div>
-            `;
+            html += buildWeekDayHeaderHtml(days[i], day, isToday);
         }
 
         html += '</div>';
@@ -3469,11 +3499,7 @@
                         ? (prospect?.full_name || customer?.full_name || a.activity_title || 'Activity')
                         : (a.activity_title || a.activity_type || 'Activity');
 
-                    html += `
-    <div class="week-activity ${esc(a.activity_type.toLowerCase())}" onclick="app.viewActivityDetails(${a.id})">
-        ${esc(a.start_time)} ${esc(name)}
-    </div>
-    `;
+                    html += buildWeekActivityHtml(a, name);
                 }
                 html += '</div>';
             }

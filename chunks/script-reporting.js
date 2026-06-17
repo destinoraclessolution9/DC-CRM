@@ -96,6 +96,131 @@
     let _customDateTo = toLocalDateStr(new Date());
     let _revenueChart = null;
 
+    // Pure HTML-string builder for the legacy KPI dashboard shell. Extracted
+    // verbatim from showKPIDashboard's container.innerHTML assignment — same
+    // IIFE scope, so it reads _state/_utils/_currentTimeFilter/_currentRoleFilter/
+    // _customDateFrom/_customDateTo and the isTeamLeaderOrAbove helper directly.
+    // Only the post-paint agent-dropdown options string is passed in (it's a
+    // showKPIDashboard local). No awaits / no control flow inside.
+    const _buildKpiDashboardShell = (kpiAgentOptions) => `
+            <div class="kpi-dashboard">
+                <div class="dashboard-header">
+                    <div>
+                        <h1>Reporting & KPI Dashboard</h1>
+                        <p>Real-time performance tracking and hierarchical targets</p>
+                    </div>
+                    <div class="header-actions">
+                        ${isTeamLeaderOrAbove(_state.cu) ?
+                `<button class="btn primary" onclick="app.openKPITargetsModal()">
+                                <i class="fas fa-bullseye"></i> Set Yearly Targets
+                             </button>
+                             <button class="btn primary" onclick="app.openQuarterlyTargetsModal()">
+                                <i class="fas fa-calendar-alt"></i> Set Quarterly Targets
+                             </button>
+                             <button class="btn secondary" onclick="app.openTargetManagementModal()">
+                                <i class="fas fa-user-cog"></i> Agent Targets
+                             </button>` : ''
+            }
+                        <button class="btn secondary" onclick="app.exportKPIReport('csv')">
+                            <i class="fas fa-file-csv"></i> Export CSV
+                        </button>
+                        <button class="btn secondary" onclick="app.printDashboard()">
+                            <i class="fas fa-print"></i> Print
+                        </button>
+                    </div>
+                </div>
+
+                <div class="time-filter-bar">
+                    <div class="time-toggle-group">
+                        <button class="time-toggle-btn ${_currentTimeFilter === 'weekly' ? 'active' : ''}" onclick="app.setTimeFilter('weekly')">Weekly</button>
+                        <button class="time-toggle-btn ${_currentTimeFilter === 'monthly' ? 'active' : ''}" onclick="app.setTimeFilter('monthly')">Monthly</button>
+                        <button class="time-toggle-btn ${_currentTimeFilter === 'quarterly' ? 'active' : ''}" onclick="app.setTimeFilter('quarterly')">Quarterly</button>
+                        <button class="time-toggle-btn ${_currentTimeFilter === 'yearly' ? 'active' : ''}" onclick="app.setTimeFilter('yearly')">Yearly</button>
+                    </div>
+                    <div class="role-filter-group" style="margin-left: 20px;">
+                        <select id="kpi-role-filter" class="form-control" onchange="app.setRoleFilter(this.value)" style="width: 200px;">
+                            <option value="All">All Roles</option>
+                            ${_utils.USER_ROLES.map(r => `<option value="${r}" ${_currentRoleFilter === r ? 'selected' : ''}>${r}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="role-filter-group" style="margin-left: 12px;">
+                        <select id="kpi-agent-filter" class="form-control" onchange="app.setAgentFilter(this.value)" style="width: 200px;">
+                            ${kpiAgentOptions}
+                        </select>
+                    </div>
+                    <div class="date-range-picker" style="margin-left: auto;">
+                        <label for="kpi-date-from" class="sr-only">From date</label>
+                        <input type="date" id="kpi-date-from" aria-label="From date" value="${_customDateFrom}" onchange="app.setCustomDateRange(this.value, document.getElementById('kpi-date-to').value)">
+                        <span aria-hidden="true">to</span>
+                        <label for="kpi-date-to" class="sr-only">To date</label>
+                        <input type="date" id="kpi-date-to" aria-label="To date" value="${_customDateTo}" onchange="app.setCustomDateRange(document.getElementById('kpi-date-from').value, this.value)">
+                    </div>
+                </div>
+
+                <div id="kpi-stats-grid" class="stats-grid">
+                    <div style="grid-column:1/-1; text-align:center; padding:32px; color:var(--gray-400);"><i class="fas fa-spinner fa-spin"></i> Loading KPI data...</div>
+                </div>
+
+                <div class="dashboard-charts-row">
+                    <div class="chart-container">
+                        <div class="chart-header">
+                            <h3>Revenue Trend (Actual vs Target)</h3>
+                            <div class="chart-legend">
+                                <span style="display:inline-block; width:12px; height:12px; background:#0D9488; margin-right:4px;"></span> Actual
+                                <span style="display:inline-block; width:12px; height:12px; background:#94a3b8; margin-right:4px; margin-left:12px;"></span> Target
+                            </div>
+                        </div>
+                        <canvas id="revenue-trend-chart"></canvas>
+                    </div>
+                    <div id="target-overview-container">
+                        <!-- Target overview loaded by refreshKPIDashboard -->
+                    </div>
+                </div>
+
+                <div class="kpi-bottom-grid">
+                    <div class="performance-card card">
+                        <div class="card-header">
+                            <h3>Current Quarter Performance Breakdown</h3>
+                        </div>
+                        <div id="quarterly-performance-table">
+                            <!-- Performance table loaded by refreshKPIDashboard -->
+                        </div>
+                    </div>
+                    <div class="leaderboard-card">
+                        <div class="leaderboard-header">
+                            <h3>Agent Performance Leaderboard</h3>
+                        </div>
+                        <div id="agent-leaderboard-table">
+                            <!-- Leaderboard loaded by refreshKPIDashboard -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Hierarchical Target Comparison Section -->
+                <div id="kpi-target-comparison-section" style="margin-top:24px;">
+                    <!-- Loaded by refreshKPIDashboard -->
+                </div>
+
+                <!-- Case Counts by Product -->
+                <div class="kpi-card" style="margin-top:24px;">
+                    <h3 class="kpi-card-title">Cases by Product Category</h3>
+                    <div id="cases-count-table"><!-- Loaded by refreshKPIDashboard --></div>
+                </div>
+
+                <!-- Headcount by Event Type -->
+                <div class="kpi-card" style="margin-top:16px;">
+                    <h3 class="kpi-card-title">Headcount by Event Type</h3>
+                    <div id="headcount-table"><!-- Loaded by refreshKPIDashboard --></div>
+                </div>
+
+                <!-- Activity Attendance Breakdown -->
+                <div class="kpi-card" style="margin-top:16px;">
+                    <h3 class="kpi-card-title">Activity Attendance Breakdown</h3>
+                    <div id="activity-attendance-details"><!-- Loaded by refreshKPIDashboard --></div>
+                </div>
+            </div>
+`;
+
     const showKPIDashboard = async (container) => {
         // The "Set Yearly/Quarterly Targets" buttons call app.openKPITargetsModal /
         // openQuarterlyTargetsModal, whose real forms live in script-features2.js
@@ -181,124 +306,7 @@
             }
         }
 
-        container.innerHTML = `
-            <div class="kpi-dashboard">
-                <div class="dashboard-header">
-                    <div>
-                        <h1>Reporting & KPI Dashboard</h1>
-                        <p>Real-time performance tracking and hierarchical targets</p>
-                    </div>
-                    <div class="header-actions">
-                        ${isTeamLeaderOrAbove(_state.cu) ?
-                `<button class="btn primary" onclick="app.openKPITargetsModal()">
-                                <i class="fas fa-bullseye"></i> Set Yearly Targets
-                             </button>
-                             <button class="btn primary" onclick="app.openQuarterlyTargetsModal()">
-                                <i class="fas fa-calendar-alt"></i> Set Quarterly Targets
-                             </button>
-                             <button class="btn secondary" onclick="app.openTargetManagementModal()">
-                                <i class="fas fa-user-cog"></i> Agent Targets
-                             </button>` : ''
-            }
-                        <button class="btn secondary" onclick="app.exportKPIReport('csv')">
-                            <i class="fas fa-file-csv"></i> Export CSV
-                        </button>
-                        <button class="btn secondary" onclick="app.printDashboard()">
-                            <i class="fas fa-print"></i> Print
-                        </button>
-                    </div>
-                </div>
-
-                <div class="time-filter-bar">
-                    <div class="time-toggle-group">
-                        <button class="time-toggle-btn ${_currentTimeFilter === 'weekly' ? 'active' : ''}" onclick="app.setTimeFilter('weekly')">Weekly</button>
-                        <button class="time-toggle-btn ${_currentTimeFilter === 'monthly' ? 'active' : ''}" onclick="app.setTimeFilter('monthly')">Monthly</button>
-                        <button class="time-toggle-btn ${_currentTimeFilter === 'quarterly' ? 'active' : ''}" onclick="app.setTimeFilter('quarterly')">Quarterly</button>
-                        <button class="time-toggle-btn ${_currentTimeFilter === 'yearly' ? 'active' : ''}" onclick="app.setTimeFilter('yearly')">Yearly</button>
-                    </div>
-                    <div class="role-filter-group" style="margin-left: 20px;">
-                        <select id="kpi-role-filter" class="form-control" onchange="app.setRoleFilter(this.value)" style="width: 200px;">
-                            <option value="All">All Roles</option>
-                            ${_utils.USER_ROLES.map(r => `<option value="${r}" ${_currentRoleFilter === r ? 'selected' : ''}>${r}</option>`).join('')}
-                        </select>
-                    </div>
-                    <div class="role-filter-group" style="margin-left: 12px;">
-                        <select id="kpi-agent-filter" class="form-control" onchange="app.setAgentFilter(this.value)" style="width: 200px;">
-                            ${_kpiAgentOptions}
-                        </select>
-                    </div>
-                    <div class="date-range-picker" style="margin-left: auto;">
-                        <label for="kpi-date-from" class="sr-only">From date</label>
-                        <input type="date" id="kpi-date-from" aria-label="From date" value="${_customDateFrom}" onchange="app.setCustomDateRange(this.value, document.getElementById('kpi-date-to').value)">
-                        <span aria-hidden="true">to</span>
-                        <label for="kpi-date-to" class="sr-only">To date</label>
-                        <input type="date" id="kpi-date-to" aria-label="To date" value="${_customDateTo}" onchange="app.setCustomDateRange(document.getElementById('kpi-date-from').value, this.value)">
-                    </div>
-                </div>
-
-                <div id="kpi-stats-grid" class="stats-grid">
-                    <div style="grid-column:1/-1; text-align:center; padding:32px; color:var(--gray-400);"><i class="fas fa-spinner fa-spin"></i> Loading KPI data...</div>
-                </div>
-
-                <div class="dashboard-charts-row">
-                    <div class="chart-container">
-                        <div class="chart-header">
-                            <h3>Revenue Trend (Actual vs Target)</h3>
-                            <div class="chart-legend">
-                                <span style="display:inline-block; width:12px; height:12px; background:#0D9488; margin-right:4px;"></span> Actual
-                                <span style="display:inline-block; width:12px; height:12px; background:#94a3b8; margin-right:4px; margin-left:12px;"></span> Target
-                            </div>
-                        </div>
-                        <canvas id="revenue-trend-chart"></canvas>
-                    </div>
-                    <div id="target-overview-container">
-                        <!-- Target overview loaded by refreshKPIDashboard -->
-                    </div>
-                </div>
-
-                <div class="kpi-bottom-grid">
-                    <div class="performance-card card">
-                        <div class="card-header">
-                            <h3>Current Quarter Performance Breakdown</h3>
-                        </div>
-                        <div id="quarterly-performance-table">
-                            <!-- Performance table loaded by refreshKPIDashboard -->
-                        </div>
-                    </div>
-                    <div class="leaderboard-card">
-                        <div class="leaderboard-header">
-                            <h3>Agent Performance Leaderboard</h3>
-                        </div>
-                        <div id="agent-leaderboard-table">
-                            <!-- Leaderboard loaded by refreshKPIDashboard -->
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Hierarchical Target Comparison Section -->
-                <div id="kpi-target-comparison-section" style="margin-top:24px;">
-                    <!-- Loaded by refreshKPIDashboard -->
-                </div>
-
-                <!-- Case Counts by Product -->
-                <div class="kpi-card" style="margin-top:24px;">
-                    <h3 class="kpi-card-title">Cases by Product Category</h3>
-                    <div id="cases-count-table"><!-- Loaded by refreshKPIDashboard --></div>
-                </div>
-
-                <!-- Headcount by Event Type -->
-                <div class="kpi-card" style="margin-top:16px;">
-                    <h3 class="kpi-card-title">Headcount by Event Type</h3>
-                    <div id="headcount-table"><!-- Loaded by refreshKPIDashboard --></div>
-                </div>
-
-                <!-- Activity Attendance Breakdown -->
-                <div class="kpi-card" style="margin-top:16px;">
-                    <h3 class="kpi-card-title">Activity Attendance Breakdown</h3>
-                    <div id="activity-attendance-details"><!-- Loaded by refreshKPIDashboard --></div>
-                </div>
-            </div>
-`;
+        container.innerHTML = _buildKpiDashboardShell(_kpiAgentOptions);
 
         // Cached-snapshot inject + agent-dropdown fill + refresh (shared helper).
         await _kpiPopulate();
@@ -1993,6 +2001,32 @@ const showKPIDetails = async (key) => {
             `;
         }).join('');
     };
+// Pure HTML-string builder for the yearly target overview card. Extracted
+// verbatim from renderTargetOverview's container.innerHTML — it reads only the
+// pre-computed `year` and the already-built `rows` array. All async row-building
+// (sales totals, progress math) stays in the orchestrator above.
+const _buildTargetOverviewHtml = (year, rows) => `
+        <div class="targets-card">
+            <div class="targets-header">
+                <h2>${year} Target Overview</h2>
+            </div>
+            <div class="perf-table-scroll">
+            <table class="targets-table no-card-mode">
+                <thead>
+                    <tr>
+                        <th scope="col">Quarter</th>
+                        <th scope="col">CPS Target</th>
+                        <th scope="col">Sales Target</th>
+                        <th scope="col">Progress</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows.join('')}
+                </tbody>
+            </table>
+            </div>
+        </div>
+    `;
 const renderTargetOverview = async () => {
     const container = document.getElementById('target-overview-container');
     if (!container) return;
@@ -2036,57 +2070,15 @@ const renderTargetOverview = async () => {
         `);
     }
 
-    container.innerHTML = `
-        <div class="targets-card">
-            <div class="targets-header">
-                <h2>${year} Target Overview</h2>
-            </div>
-            <div class="perf-table-scroll">
-            <table class="targets-table no-card-mode">
-                <thead>
-                    <tr>
-                        <th scope="col">Quarter</th>
-                        <th scope="col">CPS Target</th>
-                        <th scope="col">Sales Target</th>
-                        <th scope="col">Progress</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${rows.join('')}
-                </tbody>
-            </table>
-            </div>
-        </div>
-    `;
+    container.innerHTML = _buildTargetOverviewHtml(year, rows);
 };
 
 
-    const renderPerformanceTable = async (kpis) => {
-        const container = document.getElementById('quarterly-performance-table');
-        if (!container) return;
-
-        // kpis is pre-computed by refreshKPIDashboard; fall back to computing
-        // it here only when this function is called in isolation (e.g. tests).
-        if (!kpis) {
-            const ranges = getDateRanges('quarterly');
-            kpis = await calculateKPIs(ranges.current.from, ranges.current.to);
-        }
-        const year = new Date().getFullYear();
-        const quarter = Math.floor(new Date().getMonth() / 3) + 1;
-        const qTarget = (await AppDataStore.getAll('quarterly_targets')).find(t => t.year === year && t.quarter === quarter) || {};
-
-        const metrics = [
-            { name: 'CPS Count', target: qTarget.cps_count_target || 0, actual: kpis.cpsCount },
-            { name: 'Total Sales', target: qTarget.total_sales_target || 0, actual: kpis.totalSales, isRM: true },
-            { name: 'New Agents', target: qTarget.new_agents_target || 0, actual: kpis.newAgents },
-            { name: 'New Customers', target: qTarget.new_customers_target || 0, actual: kpis.newCustomers },
-            { name: 'POP Cases', target: qTarget.pop_case_count_target || 0, actual: kpis.popCaseCount },
-            { name: 'EPP Cases', target: qTarget.epp_case_count_target || 0, actual: kpis.eppCaseCount },
-            { name: 'Meet Up (Existing Customers)', target: qTarget.meetup_existing_target || 0, actual: kpis.meetUpExistingCount || 0 },
-            { name: 'CF Headcount', target: qTarget.cf_headcount_target || 0, actual: kpis.cfHeadcount || 0 }
-        ];
-
-        container.innerHTML = `
+    // Pure HTML-string builder for the quarterly performance breakdown cards.
+    // Extracted verbatim from renderPerformanceTable's container.innerHTML — it
+    // reads only the pre-computed `metrics` array (all per-card derived math
+    // stays inside the .map()). No awaits / no DOM mutation here.
+    const _buildPerformanceTableHtml = (metrics) => `
             <div class="perf-card-list">
                 ${metrics.map(m => {
                     const variance = m.actual - m.target;
@@ -2123,6 +2115,33 @@ const renderTargetOverview = async () => {
                 }).join('')}
             </div>
         `;
+
+    const renderPerformanceTable = async (kpis) => {
+        const container = document.getElementById('quarterly-performance-table');
+        if (!container) return;
+
+        // kpis is pre-computed by refreshKPIDashboard; fall back to computing
+        // it here only when this function is called in isolation (e.g. tests).
+        if (!kpis) {
+            const ranges = getDateRanges('quarterly');
+            kpis = await calculateKPIs(ranges.current.from, ranges.current.to);
+        }
+        const year = new Date().getFullYear();
+        const quarter = Math.floor(new Date().getMonth() / 3) + 1;
+        const qTarget = (await AppDataStore.getAll('quarterly_targets')).find(t => t.year === year && t.quarter === quarter) || {};
+
+        const metrics = [
+            { name: 'CPS Count', target: qTarget.cps_count_target || 0, actual: kpis.cpsCount },
+            { name: 'Total Sales', target: qTarget.total_sales_target || 0, actual: kpis.totalSales, isRM: true },
+            { name: 'New Agents', target: qTarget.new_agents_target || 0, actual: kpis.newAgents },
+            { name: 'New Customers', target: qTarget.new_customers_target || 0, actual: kpis.newCustomers },
+            { name: 'POP Cases', target: qTarget.pop_case_count_target || 0, actual: kpis.popCaseCount },
+            { name: 'EPP Cases', target: qTarget.epp_case_count_target || 0, actual: kpis.eppCaseCount },
+            { name: 'Meet Up (Existing Customers)', target: qTarget.meetup_existing_target || 0, actual: kpis.meetUpExistingCount || 0 },
+            { name: 'CF Headcount', target: qTarget.cf_headcount_target || 0, actual: kpis.cfHeadcount || 0 }
+        ];
+
+        container.innerHTML = _buildPerformanceTableHtml(metrics);
     };
 
 

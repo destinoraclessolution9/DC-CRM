@@ -1686,21 +1686,11 @@
     };
 
     // ========== AUTOMATION TAB (merged Follow-Up Triggers + Custom Workflows) ==========
-    const renderAutomationTab = async () => {
-        // renderWorkflowCard lives in script-performance.js — ensure it's loaded
-        // before we map workflows through it (avoids a blank card list if the
-        // performance chunk hasn't been prefetched yet).
-        try { if (window._loadChunk) await window._loadChunk('chunks/script-performance.min.js'); } catch (_) {}
-        const templates = await loadFollowUpTemplates();
-        invalidateFollowUpTemplatesCache(); // force fresh on next load
-
-        const isAdmin = isSystemAdmin(_state.cu) || isMarketingManager(_state.cu);
-        const categoryLabels = { after_cps: 'After CPS', on_event_attendance: 'Event Attendance', on_apu_photo: 'APU Photo', on_birthday: 'Birthday' };
-        const categoryColors = { after_cps: '#3b82f6', on_event_attendance: '#8b5cf6', on_apu_photo: '#f59e0b', on_birthday: '#ec4899' };
-        const sorted = [...templates].sort((a, b) => (a.sort_order || 99) - (b.sort_order || 99));
-
-        // ── Section 1: Follow-Up Triggers ──
-        let html = `
+    // Pure HTML-string builders for renderAutomationTab — extracted verbatim so the
+    // orchestrator below keeps all data fetching/awaits/control flow. Each returns a
+    // string and takes exactly the values it reads.
+    const _buildAutomationTriggersHeaderHtml = (isAdmin) => {
+        return `
             <div style="margin-bottom:32px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
                     <div>
@@ -1713,7 +1703,10 @@
                     <strong>Variables:</strong> <code>{name}</code> <code>{date}</code> <code>{time}</code> <code>{venue}</code> <code>{event_name}</code> <code>{agent_name}</code> <code>{photo_url}</code> <small style="color:#666;">(APU only)</small>
                 </div>
         `;
+    };
 
+    const _buildAutomationTriggersListHtml = (isAdmin, sorted, categoryLabels, categoryColors) => {
+        let html = '';
         if (isAdmin) {
             // Editable table for super admin
             html += `
@@ -1792,17 +1785,11 @@
             }
             html += `</div>`;
         }
+        return html;
+    };
 
-        // Follow-Up Statistics
-        let drafts = [];
-        try {
-            drafts = await AppDataStore.getAll('follow_up_drafts');
-        } catch (e) { /* ignore */ }
-        const sentCount = drafts.filter(d => d.status === 'sent').length;
-        const pendingCount = drafts.filter(d => d.status === 'pending').length;
-        const dismissedCount = drafts.filter(d => d.status === 'dismissed').length;
-
-        html += `
+    const _buildAutomationStatsAndWorkflowsHeaderHtml = (pendingCount, sentCount, dismissedCount) => {
+        return `
                 <div style="margin-top:24px; background:var(--white,#fff); border:1px solid var(--gray-200); border-radius:10px; padding:16px;">
                     <h3 style="margin:0 0 12px; font-size:15px;">Follow-Up Statistics</h3>
                     <div style="display:flex; gap:24px;">
@@ -1834,15 +1821,13 @@
                     <button class="btn primary" onclick="app.openCreateWorkflowModal()"><i class="fas fa-plus"></i> Create Workflow</button>
                 </div>
         `;
+    };
 
-        // Load workflows
-        let workflows = [];
-        try { workflows = await AppDataStore.getAll('automation_workflows') || []; } catch (e) { /* ignore */ }
-
+    const _buildAutomationWorkflowsListHtml = (workflows) => {
         if (workflows.length > 0) {
-            html += `<div id="workflows-list">${workflows.map(w => renderWorkflowCard(w)).join('')}</div>`;
+            return `<div id="workflows-list">${workflows.map(w => renderWorkflowCard(w)).join('')}</div>`;
         } else {
-            html += `
+            return `
                 <div style="text-align:center; padding:40px; color:var(--gray-500); background:var(--gray-50); border-radius:10px; border:1px solid var(--gray-200);">
                     <i class="fas fa-cogs" style="font-size:48px; margin-bottom:12px; color:var(--gray-300);"></i>
                     <p>No custom workflows yet</p>
@@ -1851,9 +1836,10 @@
                 </div>
             `;
         }
+    };
 
-        // Quick Templates
-        html += `
+    const _buildAutomationQuickTemplatesHtml = () => {
+        return `
                 <div style="margin-top:24px;">
                     <h3 style="margin:0 0 12px; font-size:15px;"><i class="fas fa-clipboard-list"></i> Quick Templates</h3>
                     <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(250px, 1fr)); gap:12px;">
@@ -1867,6 +1853,45 @@
                 </div>
             </div>
         `;
+    };
+
+    const renderAutomationTab = async () => {
+        // renderWorkflowCard lives in script-performance.js — ensure it's loaded
+        // before we map workflows through it (avoids a blank card list if the
+        // performance chunk hasn't been prefetched yet).
+        try { if (window._loadChunk) await window._loadChunk('chunks/script-performance.min.js'); } catch (_) {}
+        const templates = await loadFollowUpTemplates();
+        invalidateFollowUpTemplatesCache(); // force fresh on next load
+
+        const isAdmin = isSystemAdmin(_state.cu) || isMarketingManager(_state.cu);
+        const categoryLabels = { after_cps: 'After CPS', on_event_attendance: 'Event Attendance', on_apu_photo: 'APU Photo', on_birthday: 'Birthday' };
+        const categoryColors = { after_cps: '#3b82f6', on_event_attendance: '#8b5cf6', on_apu_photo: '#f59e0b', on_birthday: '#ec4899' };
+        const sorted = [...templates].sort((a, b) => (a.sort_order || 99) - (b.sort_order || 99));
+
+        // ── Section 1: Follow-Up Triggers ──
+        let html = _buildAutomationTriggersHeaderHtml(isAdmin);
+
+        html += _buildAutomationTriggersListHtml(isAdmin, sorted, categoryLabels, categoryColors);
+
+        // Follow-Up Statistics
+        let drafts = [];
+        try {
+            drafts = await AppDataStore.getAll('follow_up_drafts');
+        } catch (e) { /* ignore */ }
+        const sentCount = drafts.filter(d => d.status === 'sent').length;
+        const pendingCount = drafts.filter(d => d.status === 'pending').length;
+        const dismissedCount = drafts.filter(d => d.status === 'dismissed').length;
+
+        html += _buildAutomationStatsAndWorkflowsHeaderHtml(pendingCount, sentCount, dismissedCount);
+
+        // Load workflows
+        let workflows = [];
+        try { workflows = await AppDataStore.getAll('automation_workflows') || []; } catch (e) { /* ignore */ }
+
+        html += _buildAutomationWorkflowsListHtml(workflows);
+
+        // Quick Templates
+        html += _buildAutomationQuickTemplatesHtml();
 
         return html;
     };

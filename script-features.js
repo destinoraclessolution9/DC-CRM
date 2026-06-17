@@ -6369,6 +6369,72 @@ window._fv.showMonthlyPromotionView = async (container) => {
 };
 
 // ══════════════ showRankingPerformanceView ══════════════
+// Pure HTML builder for the ranking results view (top-3 cards + full table).
+// Extracted from showRankingPerformanceView verbatim so the orchestrator stays
+// thin; takes exactly the values it reads and returns the identical string.
+const _buildRankingResultsHtml = (agentStats, now, rankBadge, escapeHtml) => `
+        <div class="ranking-view">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <div>
+                    <h1>Ranking Performance Overview</h1>
+                    <p style="color:var(--gray-500);">Agent rankings for ${now.toLocaleString('default', { month: 'long', year: 'numeric' })}</p>
+                </div>
+                <div>
+                    <button class="btn secondary" onclick="app.refreshCurrentView()"><i class="fas fa-sync-alt"></i> Refresh</button>
+                </div>
+            </div>
+
+            <!-- Top 3 Cards -->
+            <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; margin-bottom:24px;">
+                ${agentStats.slice(0, 3).map((a, i) => `
+                    <div style="background:var(--white); border-radius:12px; padding:20px; text-align:center; box-shadow:0 2px 8px rgba(0,0,0,0.06); border-top:4px solid ${i === 0 ? '#FFD700' : i === 1 ? '#C0C0C0' : '#CD7F32'};">
+                        <div style="font-size:32px; margin-bottom:8px;">${rankBadge(i)}</div>
+                        <div style="font-size:16px; font-weight:600;">${escapeHtml(a.name)}</div>
+                        <div style="color:var(--gray-500); font-size:12px; margin-bottom:12px;">${escapeHtml(a.team)}</div>
+                        <div style="font-size:24px; font-weight:700; color:var(--primary);">${a.performanceScore} pts</div>
+                        <div style="font-size:12px; color:var(--gray-500); margin-top:8px;">Sales: RM ${a.sales.toLocaleString()} · CPS: ${a.cps} · Rate: ${a.closingRate}%</div>
+                    </div>
+                `).join('')}
+            </div>
+
+            <!-- Full Rankings Table -->
+            <div class="profile-section">
+                <h2><i class="fas fa-list-ol"></i> Full Rankings</h2>
+                <table class="data-table" style="width:100%;">
+                    <thead>
+                        <tr>
+                            <th scope="col">Rank</th>
+                            <th scope="col">Agent</th>
+                            <th scope="col">Team</th>
+                            <th scope="col" style="text-align:right;">Score</th>
+                            <th scope="col" style="text-align:right;">CPS</th>
+                            <th scope="col" style="text-align:right;">Sales (RM)</th>
+                            <th scope="col" style="text-align:right;">Meetings</th>
+                            <th scope="col" style="text-align:right;">Prospects</th>
+                            <th scope="col" style="text-align:right;">Follow-up %</th>
+                            <th scope="col" style="text-align:right;">Closing %</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${agentStats.map((a, i) => `
+                            <tr style="${i < 3 ? 'background:var(--primary-50);' : ''}">
+                                <td>${rankBadge(i)}</td>
+                                <td>${escapeHtml(a.name)}</td>
+                                <td>${escapeHtml(a.team)}</td>
+                                <td style="text-align:right; font-weight:600;">${a.performanceScore}</td>
+                                <td style="text-align:right;">${a.cps}</td>
+                                <td style="text-align:right;">RM ${a.sales.toLocaleString()}</td>
+                                <td style="text-align:right;">${a.meetings}</td>
+                                <td style="text-align:right;">${a.prospects}</td>
+                                <td style="text-align:right;">${a.followupRate}%</td>
+                                <td style="text-align:right;">${a.closingRate}%</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>`;
+
 window._fv.showRankingPerformanceView = async (container) => {
     const { escapeHtml } = window._crmUtils || {};
     window._appState.cv = 'ranking';
@@ -6476,68 +6542,7 @@ window._fv.showRankingPerformanceView = async (container) => {
 
     const rankBadge = (i) => i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`;
 
-    container.innerHTML = `
-        <div class="ranking-view">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                <div>
-                    <h1>Ranking Performance Overview</h1>
-                    <p style="color:var(--gray-500);">Agent rankings for ${now.toLocaleString('default', { month: 'long', year: 'numeric' })}</p>
-                </div>
-                <div>
-                    <button class="btn secondary" onclick="app.refreshCurrentView()"><i class="fas fa-sync-alt"></i> Refresh</button>
-                </div>
-            </div>
-
-            <!-- Top 3 Cards -->
-            <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; margin-bottom:24px;">
-                ${agentStats.slice(0, 3).map((a, i) => `
-                    <div style="background:var(--white); border-radius:12px; padding:20px; text-align:center; box-shadow:0 2px 8px rgba(0,0,0,0.06); border-top:4px solid ${i === 0 ? '#FFD700' : i === 1 ? '#C0C0C0' : '#CD7F32'};">
-                        <div style="font-size:32px; margin-bottom:8px;">${rankBadge(i)}</div>
-                        <div style="font-size:16px; font-weight:600;">${escapeHtml(a.name)}</div>
-                        <div style="color:var(--gray-500); font-size:12px; margin-bottom:12px;">${escapeHtml(a.team)}</div>
-                        <div style="font-size:24px; font-weight:700; color:var(--primary);">${a.performanceScore} pts</div>
-                        <div style="font-size:12px; color:var(--gray-500); margin-top:8px;">Sales: RM ${a.sales.toLocaleString()} · CPS: ${a.cps} · Rate: ${a.closingRate}%</div>
-                    </div>
-                `).join('')}
-            </div>
-
-            <!-- Full Rankings Table -->
-            <div class="profile-section">
-                <h2><i class="fas fa-list-ol"></i> Full Rankings</h2>
-                <table class="data-table" style="width:100%;">
-                    <thead>
-                        <tr>
-                            <th scope="col">Rank</th>
-                            <th scope="col">Agent</th>
-                            <th scope="col">Team</th>
-                            <th scope="col" style="text-align:right;">Score</th>
-                            <th scope="col" style="text-align:right;">CPS</th>
-                            <th scope="col" style="text-align:right;">Sales (RM)</th>
-                            <th scope="col" style="text-align:right;">Meetings</th>
-                            <th scope="col" style="text-align:right;">Prospects</th>
-                            <th scope="col" style="text-align:right;">Follow-up %</th>
-                            <th scope="col" style="text-align:right;">Closing %</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${agentStats.map((a, i) => `
-                            <tr style="${i < 3 ? 'background:var(--primary-50);' : ''}">
-                                <td>${rankBadge(i)}</td>
-                                <td>${escapeHtml(a.name)}</td>
-                                <td>${escapeHtml(a.team)}</td>
-                                <td style="text-align:right; font-weight:600;">${a.performanceScore}</td>
-                                <td style="text-align:right;">${a.cps}</td>
-                                <td style="text-align:right;">RM ${a.sales.toLocaleString()}</td>
-                                <td style="text-align:right;">${a.meetings}</td>
-                                <td style="text-align:right;">${a.prospects}</td>
-                                <td style="text-align:right;">${a.followupRate}%</td>
-                                <td style="text-align:right;">${a.closingRate}%</td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            </div>
-        </div>`;
+    container.innerHTML = _buildRankingResultsHtml(agentStats, now, rankBadge, escapeHtml);
 };
 
 // ══════════════ showWorkflowAutomationView ══════════════
@@ -6823,18 +6828,10 @@ window._fv.showWorkflowAutomationView = async (container) => {
 };
 
 // ══════════════ showNoticeboardView ══════════════
-window._fv.showNoticeboardView = async (container) => {
-    const _currentUser = window._appState?.cu;
-    const { isSystemAdmin, isMarketingManager } = window._crmUtils || {};
-
-    if (!_currentUser) return;
-
-    const isAdmin = (isSystemAdmin && isSystemAdmin(_currentUser)) || (isMarketingManager && isMarketingManager(_currentUser));
-
-    // Inline <style> so the noticeboard is self-contained (independent of
-    // styles-fixed.css load order) and so card hover/responsive rules work
-    // without polluting the global stylesheet.
-    const styleBlock = `
+// Pure HTML builders extracted from showNoticeboardView. The <style> block is a
+// constant; the skeleton paint depends only on the style block + isAdmin flag.
+// Both return the identical strings the inline literals produced.
+const _buildNoticeboardStyles = () => `
     <style id="noticeboard-styles">
         .nb-page { background: linear-gradient(180deg, #fdf6ec 0%, #fdf2f8 100%); min-height: 100vh; padding: 0 0 64px; }
         .nb-topbar { display: flex; align-items: center; justify-content: space-between; padding: 18px 28px; border-bottom: 1px solid rgba(128,0,32,0.12); background: rgba(255,255,255,0.6); backdrop-filter: blur(8px); flex-wrap: wrap; gap: 12px; }
@@ -6870,8 +6867,7 @@ window._fv.showNoticeboardView = async (container) => {
         .nb-admin-bar { max-width: 1200px; margin: 0 auto 18px; padding: 0 28px; display: flex; justify-content: flex-end; }
     </style>`;
 
-    // Skeleton paint
-    container.innerHTML = `
+const _buildNoticeboardSkeleton = (styleBlock, isAdmin) => `
         ${styleBlock}
         <div class="nb-page">
             <div class="nb-topbar">
@@ -6894,6 +6890,22 @@ window._fv.showNoticeboardView = async (container) => {
                 <div class="nb-footer-meta">destinoraclessolution.com</div>
             </div>
         </div>`;
+
+window._fv.showNoticeboardView = async (container) => {
+    const _currentUser = window._appState?.cu;
+    const { isSystemAdmin, isMarketingManager } = window._crmUtils || {};
+
+    if (!_currentUser) return;
+
+    const isAdmin = (isSystemAdmin && isSystemAdmin(_currentUser)) || (isMarketingManager && isMarketingManager(_currentUser));
+
+    // Inline <style> so the noticeboard is self-contained (independent of
+    // styles-fixed.css load order) and so card hover/responsive rules work
+    // without polluting the global stylesheet.
+    const styleBlock = _buildNoticeboardStyles();
+
+    // Skeleton paint
+    container.innerHTML = _buildNoticeboardSkeleton(styleBlock, isAdmin);
 
     // Fetch events
     let events = [];
