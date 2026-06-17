@@ -48,24 +48,11 @@
 
 
 
-    const showCasesView = async (container) => {
-        const products = ((await AppDataStore.getAll('products')) || []).filter(p => p.is_active !== false);
-        const allUsers = (await AppDataStore.getAll('users')) || [];
-        const agents = allUsers.filter(u => u.status !== 'inactive');
-        const allTags = (await AppDataStore.getAll('tags')) || [];
-
-        // Count active advanced filters for badge
-        const activeAdvCount = [
-            _caseFilters.product !== 'all',
-            _caseFilters.agent !== 'all',
-            _caseFilters.from !== '',
-            _caseFilters.to !== '',
-            _caseFilters.tag !== 'all',
-            _caseFilters.visibility !== 'all'
-        ].filter(Boolean).length;
-
-        // Shared filter bar — simple search + collapsible advanced filters
-        const filterBar = `
+    // Pure HTML builder — shared filter bar (search + collapsible advanced filters).
+    // Reads module-scoped _caseFilters / _caseAdvOpen / escapeHtml; takes the
+    // orchestrator-local lists + count as params. No awaits / DOM mutation.
+    const buildCasesFilterBar = (products, agents, allTags, activeAdvCount) => {
+        return `
             <div class="cases-toolbar">
                 <div class="cases-search-wrap">
                     <i class="fas fa-search cases-search-icon"></i>
@@ -130,8 +117,12 @@
                     </button>
                 </div>
             </div>`;
+    };
 
-        container.innerHTML = `
+    // Pure HTML builder — the cases-view shell. Interpolates the prebuilt
+    // filterBar string; no awaits / DOM mutation.
+    const buildCasesViewShell = (filterBar) => {
+        return `
             <div class="cases-view">
                 <div class="prospects-header">
                     <div>
@@ -177,6 +168,28 @@
                 </div>
             </div>
         `;
+    };
+
+    const showCasesView = async (container) => {
+        const products = ((await AppDataStore.getAll('products')) || []).filter(p => p.is_active !== false);
+        const allUsers = (await AppDataStore.getAll('users')) || [];
+        const agents = allUsers.filter(u => u.status !== 'inactive');
+        const allTags = (await AppDataStore.getAll('tags')) || [];
+
+        // Count active advanced filters for badge
+        const activeAdvCount = [
+            _caseFilters.product !== 'all',
+            _caseFilters.agent !== 'all',
+            _caseFilters.from !== '',
+            _caseFilters.to !== '',
+            _caseFilters.tag !== 'all',
+            _caseFilters.visibility !== 'all'
+        ].filter(Boolean).length;
+
+        // Shared filter bar — simple search + collapsible advanced filters
+        const filterBar = buildCasesFilterBar(products, agents, allTags, activeAdvCount);
+
+        container.innerHTML = buildCasesViewShell(filterBar);
 
         await renderCasesList();
     };

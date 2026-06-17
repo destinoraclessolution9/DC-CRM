@@ -125,6 +125,87 @@
         return sold;
     };
 
+    const _brBuildScaffoldHtml = (runsLength, runOpts, balInputs, tgtInputs, monthLabel, skusMap, skusDate) => `
+        <div style="padding:24px;max-width:860px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+                <div>
+                    <h1 style="margin:0;display:flex;align-items:center;gap:10px;">
+                        <i class="fas fa-chart-bar" style="color:#8b5cf6;"></i> Boss Report
+                    </h1>
+                    <div style="color:var(--gray-500);font-size:13px;margin-top:4px;">Weekly boss summary generator • Super Admin only</div>
+                </div>
+            </div>
+
+            <!-- 1. Egg Run -->
+            <div style="background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);margin-bottom:16px;">
+                <h3 style="margin-top:0;margin-bottom:6px;">1. Select Egg Purchase Run</h3>
+                <p style="color:var(--gray-500);font-size:13px;margin:0 0 12px;">Egg KL/PG/JB totals and wholesales group data are read directly from the committed run.</p>
+                ${runsLength===0
+                    ? '<p style="color:#ef4444;margin:0;">No committed egg runs found.</p>'
+                    : `<select id="br-run-select" class="form-control" style="max-width:620px;">
+                           <option value="">— Select a run —</option>${runOpts}
+                       </select>`}
+            </div>
+
+            <!-- 2. Product Balance Files -->
+            <div style="background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);margin-bottom:16px;">
+                <h3 style="margin-top:0;margin-bottom:6px;">2. Product Balance Files</h3>
+                <p style="color:var(--gray-500);font-size:13px;margin:0 0 16px;">Upload both sales files each week. SKUs mapping is one-time and auto-cached.</p>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;">
+                    <div style="border:2px dashed var(--gray-300);border-radius:8px;padding:14px;text-align:center;cursor:pointer;" onclick="document.getElementById('br-inp-sales').click()">
+                        <i class="fas fa-file-excel" style="font-size:22px;color:#16a34a;display:block;margin-bottom:6px;"></i>
+                        <div style="font-weight:600;font-size:13px;">FORMULA Sales</div>
+                        <div style="font-size:11px;color:var(--gray-500);">POS retail (.xlsx)</div>
+                        <div id="br-lbl-sales" style="font-size:11px;color:#059669;margin-top:4px;min-height:14px;"></div>
+                        <input type="file" id="br-inp-sales" accept=".xlsx" style="display:none;" onchange="app.brLoadSales(this)">
+                    </div>
+                    <div style="border:2px dashed var(--gray-300);border-radius:8px;padding:14px;text-align:center;cursor:pointer;" onclick="document.getElementById('br-inp-track').click()">
+                        <i class="fas fa-file-csv" style="font-size:22px;color:#2563eb;display:block;margin-bottom:6px;"></i>
+                        <div style="font-weight:600;font-size:13px;">Order Tracking</div>
+                        <div style="font-size:11px;color:var(--gray-500);">Online sales (.csv)</div>
+                        <div id="br-lbl-track" style="font-size:11px;color:#059669;margin-top:4px;min-height:14px;"></div>
+                        <input type="file" id="br-inp-track" accept=".csv" style="display:none;" onchange="app.brLoadTracking(this)">
+                    </div>
+                    <div style="border:2px dashed var(--gray-300);border-radius:8px;padding:14px;text-align:center;cursor:pointer;" onclick="document.getElementById('br-inp-skus').click()">
+                        <i class="fas fa-table" style="font-size:22px;color:#f59e0b;display:block;margin-bottom:6px;"></i>
+                        <div style="font-weight:600;font-size:13px;">SKUs Mapping</div>
+                        <div style="font-size:11px;color:var(--gray-500);">One-time (.xlsx)</div>
+                        <div id="br-lbl-skus" style="font-size:11px;color:#059669;margin-top:4px;min-height:14px;">${skusMap ? `Cached ${skusDate||''}` : 'Not loaded'}</div>
+                        <input type="file" id="br-inp-skus" accept=".xlsx" style="display:none;" onchange="app.brLoadSkus(this)">
+                    </div>
+                </div>
+                <div style="font-weight:600;font-size:13px;margin-bottom:10px;">Last week's balances</div>
+                ${balInputs}
+            </div>
+
+            <!-- 3. Monthly Targets -->
+            <div style="background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);margin-bottom:20px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                    <h3 style="margin:0;">3. Monthly Targets — ${monthLabel}</h3>
+                    <button class="btn secondary" style="font-size:12px;" onclick="app.brSaveTargets()"><i class="fas fa-save"></i> Save</button>
+                </div>
+                <p style="color:var(--gray-500);font-size:13px;margin:0 0 14px;">Set once on the 1st of each month. Carton targets per wholesale group.</p>
+                ${tgtInputs}
+            </div>
+
+            <button class="btn primary" style="width:100%;padding:14px;font-size:15px;margin-bottom:20px;" onclick="app.brGenerate()">
+                <i class="fas fa-magic"></i> Generate Boss Report
+            </button>
+
+            <!-- Output -->
+            <div id="br-output" style="display:none;background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                    <h3 style="margin:0;">Report</h3>
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn secondary" onclick="app.brCopy()"><i class="fas fa-copy"></i> Copy</button>
+                        <button class="btn primary" onclick="app.brSaveFinal()"><i class="fas fa-save"></i> Save Final</button>
+                    </div>
+                </div>
+                <p style="color:var(--gray-500);font-size:12px;margin:0 0 10px;">Edit any values below, then click <strong>Save Final</strong>. Next week's balance fields will pre-fill from what you save here.</p>
+                <textarea id="br-text" class="form-control" style="width:100%;min-height:520px;font-family:monospace;font-size:13px;"></textarea>
+            </div>
+        </div>`;
+
     const showBossReportView = async (container) => {
         _state.cv = 'boss_report';
         if (!isSystemAdmin(_state.cu)) {
@@ -197,86 +278,7 @@
                     value="${tgts[g.key]||''}" placeholder="0" min="0">
             </div>`).join('');
 
-        container.innerHTML = `
-        <div style="padding:24px;max-width:860px;">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
-                <div>
-                    <h1 style="margin:0;display:flex;align-items:center;gap:10px;">
-                        <i class="fas fa-chart-bar" style="color:#8b5cf6;"></i> Boss Report
-                    </h1>
-                    <div style="color:var(--gray-500);font-size:13px;margin-top:4px;">Weekly boss summary generator • Super Admin only</div>
-                </div>
-            </div>
-
-            <!-- 1. Egg Run -->
-            <div style="background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);margin-bottom:16px;">
-                <h3 style="margin-top:0;margin-bottom:6px;">1. Select Egg Purchase Run</h3>
-                <p style="color:var(--gray-500);font-size:13px;margin:0 0 12px;">Egg KL/PG/JB totals and wholesales group data are read directly from the committed run.</p>
-                ${runs.length===0
-                    ? '<p style="color:#ef4444;margin:0;">No committed egg runs found.</p>'
-                    : `<select id="br-run-select" class="form-control" style="max-width:620px;">
-                           <option value="">— Select a run —</option>${runOpts}
-                       </select>`}
-            </div>
-
-            <!-- 2. Product Balance Files -->
-            <div style="background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);margin-bottom:16px;">
-                <h3 style="margin-top:0;margin-bottom:6px;">2. Product Balance Files</h3>
-                <p style="color:var(--gray-500);font-size:13px;margin:0 0 16px;">Upload both sales files each week. SKUs mapping is one-time and auto-cached.</p>
-                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;">
-                    <div style="border:2px dashed var(--gray-300);border-radius:8px;padding:14px;text-align:center;cursor:pointer;" onclick="document.getElementById('br-inp-sales').click()">
-                        <i class="fas fa-file-excel" style="font-size:22px;color:#16a34a;display:block;margin-bottom:6px;"></i>
-                        <div style="font-weight:600;font-size:13px;">FORMULA Sales</div>
-                        <div style="font-size:11px;color:var(--gray-500);">POS retail (.xlsx)</div>
-                        <div id="br-lbl-sales" style="font-size:11px;color:#059669;margin-top:4px;min-height:14px;"></div>
-                        <input type="file" id="br-inp-sales" accept=".xlsx" style="display:none;" onchange="app.brLoadSales(this)">
-                    </div>
-                    <div style="border:2px dashed var(--gray-300);border-radius:8px;padding:14px;text-align:center;cursor:pointer;" onclick="document.getElementById('br-inp-track').click()">
-                        <i class="fas fa-file-csv" style="font-size:22px;color:#2563eb;display:block;margin-bottom:6px;"></i>
-                        <div style="font-weight:600;font-size:13px;">Order Tracking</div>
-                        <div style="font-size:11px;color:var(--gray-500);">Online sales (.csv)</div>
-                        <div id="br-lbl-track" style="font-size:11px;color:#059669;margin-top:4px;min-height:14px;"></div>
-                        <input type="file" id="br-inp-track" accept=".csv" style="display:none;" onchange="app.brLoadTracking(this)">
-                    </div>
-                    <div style="border:2px dashed var(--gray-300);border-radius:8px;padding:14px;text-align:center;cursor:pointer;" onclick="document.getElementById('br-inp-skus').click()">
-                        <i class="fas fa-table" style="font-size:22px;color:#f59e0b;display:block;margin-bottom:6px;"></i>
-                        <div style="font-weight:600;font-size:13px;">SKUs Mapping</div>
-                        <div style="font-size:11px;color:var(--gray-500);">One-time (.xlsx)</div>
-                        <div id="br-lbl-skus" style="font-size:11px;color:#059669;margin-top:4px;min-height:14px;">${_brState.skusMap ? `Cached ${skusDate||''}` : 'Not loaded'}</div>
-                        <input type="file" id="br-inp-skus" accept=".xlsx" style="display:none;" onchange="app.brLoadSkus(this)">
-                    </div>
-                </div>
-                <div style="font-weight:600;font-size:13px;margin-bottom:10px;">Last week's balances</div>
-                ${balInputs}
-            </div>
-
-            <!-- 3. Monthly Targets -->
-            <div style="background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);margin-bottom:20px;">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-                    <h3 style="margin:0;">3. Monthly Targets — ${monthLabel}</h3>
-                    <button class="btn secondary" style="font-size:12px;" onclick="app.brSaveTargets()"><i class="fas fa-save"></i> Save</button>
-                </div>
-                <p style="color:var(--gray-500);font-size:13px;margin:0 0 14px;">Set once on the 1st of each month. Carton targets per wholesale group.</p>
-                ${tgtInputs}
-            </div>
-
-            <button class="btn primary" style="width:100%;padding:14px;font-size:15px;margin-bottom:20px;" onclick="app.brGenerate()">
-                <i class="fas fa-magic"></i> Generate Boss Report
-            </button>
-
-            <!-- Output -->
-            <div id="br-output" style="display:none;background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-                    <h3 style="margin:0;">Report</h3>
-                    <div style="display:flex;gap:8px;">
-                        <button class="btn secondary" onclick="app.brCopy()"><i class="fas fa-copy"></i> Copy</button>
-                        <button class="btn primary" onclick="app.brSaveFinal()"><i class="fas fa-save"></i> Save Final</button>
-                    </div>
-                </div>
-                <p style="color:var(--gray-500);font-size:12px;margin:0 0 10px;">Edit any values below, then click <strong>Save Final</strong>. Next week's balance fields will pre-fill from what you save here.</p>
-                <textarea id="br-text" class="form-control" style="width:100%;min-height:520px;font-family:monospace;font-size:13px;"></textarea>
-            </div>
-        </div>`;
+        container.innerHTML = _brBuildScaffoldHtml(runs.length, runOpts, balInputs, tgtInputs, monthLabel, _brState.skusMap, skusDate);
     };
 
     const brLoadSales = (input) => {

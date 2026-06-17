@@ -240,17 +240,7 @@
     };
     
     // ---------------- DETAIL VIEW ----------------
-    const openOrgConsultationDetail = async (id) => {
-        const row = await AppDataStore.getById('org_consultations', id);
-        if (!row) { UI.toast.error('Consultation not found.'); return; }
-        const viewport = document.getElementById('content-viewport');
-        if (!viewport) return;
-    
-        const members = Array.isArray(row.members) ? row.members : [];
-        const analysisDone = members.length > 0 && members.every(m => m.archetype_code);
-        const reportReady = !!row.report_html;
-    
-        viewport.innerHTML = `
+    const _orgBuildDetailHtml = (row, members, analysisDone, reportReady) => `
             <div style="padding:24px;max-width:1100px;margin:0 auto;">
                 <div style="margin-bottom:12px;">
                     <button class="btn btn-sm secondary" onclick="app.navigateTo('org_chart')">
@@ -351,8 +341,20 @@
                 </div>
             </div>
         `;
+
+    const openOrgConsultationDetail = async (id) => {
+        const row = await AppDataStore.getById('org_consultations', id);
+        if (!row) { UI.toast.error('Consultation not found.'); return; }
+        const viewport = document.getElementById('content-viewport');
+        if (!viewport) return;
+
+        const members = Array.isArray(row.members) ? row.members : [];
+        const analysisDone = members.length > 0 && members.every(m => m.archetype_code);
+        const reportReady = !!row.report_html;
+
+        viewport.innerHTML = _orgBuildDetailHtml(row, members, analysisDone, reportReady);
     };
-    
+
     // ---------------- MEMBER ADD / EDIT ----------------
     const openOrgMemberAddModal = async (consultationId, memberIdx) => {
         const row = await AppDataStore.getById('org_consultations', consultationId);

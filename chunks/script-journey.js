@@ -1153,25 +1153,8 @@
 
     // ── Dashboard widget ─────────────────────────────────────────────────────
 
-    const showAgentJourneyDashboard = async (containerEl) => {
-        if (!containerEl) return;
-        const cu = _cu();
-        if (!cu) return;
-
-        const dueTodayList = await AppDataStore.getJourneyTouchpointsDueToday(cu.id);
-        const overdueCt    = dueTodayList.filter(t => t.status === 'overdue').length;
-        const todayCt      = dueTodayList.filter(t => t.status === 'pending').length;
-
-        if (!dueTodayList.length) {
-            _rxRenderAux(containerEl, `
-                <div style="text-align:center;padding:16px;color:var(--gray-400);font-size:13px;">
-                    <i class="fas fa-check-circle" style="font-size:24px;color:#16a34a;display:block;margin-bottom:6px;"></i>
-                    今日无待跟进任务
-                </div>`);
-            return;
-        }
-
-        _rxRenderAux(containerEl, `
+    function buildAgentJourneyDashboard(dueTodayList, overdueCt, todayCt) {
+        return `
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
                 <span style="font-weight:700;font-size:14px;"><i class="fas fa-route" style="color:var(--primary);margin-right:6px;"></i>今日跟进任务</span>
                 <span style="font-size:11px;">
@@ -1199,7 +1182,28 @@
                 }).join('')}
                 ${dueTodayList.length > 8 ? `<div style="text-align:center;font-size:12px;color:var(--gray-400);padding:4px;">+${dueTodayList.length - 8} 更多</div>` : ''}
             </div>
-        `);
+        `;
+    }
+
+    const showAgentJourneyDashboard = async (containerEl) => {
+        if (!containerEl) return;
+        const cu = _cu();
+        if (!cu) return;
+
+        const dueTodayList = await AppDataStore.getJourneyTouchpointsDueToday(cu.id);
+        const overdueCt    = dueTodayList.filter(t => t.status === 'overdue').length;
+        const todayCt      = dueTodayList.filter(t => t.status === 'pending').length;
+
+        if (!dueTodayList.length) {
+            _rxRenderAux(containerEl, `
+                <div style="text-align:center;padding:16px;color:var(--gray-400);font-size:13px;">
+                    <i class="fas fa-check-circle" style="font-size:24px;color:#16a34a;display:block;margin-bottom:6px;"></i>
+                    今日无待跟进任务
+                </div>`);
+            return;
+        }
+
+        _rxRenderAux(containerEl, buildAgentJourneyDashboard(dueTodayList, overdueCt, todayCt));
     };
 
     // ── Agent load panel (TL+ only) ──────────────────────────────────────────

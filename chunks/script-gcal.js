@@ -306,9 +306,8 @@
         _syncManager = new SyncManager();
     };
 
-    const showIntegrationHub = async (container) => {
-        try {
-            container.innerHTML = `
+    const buildIntegrationHubHtml = (googleCard, webhookCard, whatsappCard, outlookCard, githubCard, googledriveCard) => {
+        return `
             <div class="integration-hub">
                 <div class="integration-header">
                     <div>
@@ -321,15 +320,26 @@
                 </div>
 
                 <div class="integration-grid">
-                    ${await renderIntegrationCard('google', 'Google Calendar', 'Two-way sync', 'calendar', await getConnectionStatus('google'))}
-                    ${await renderIntegrationCard('webhook', 'Webhook Notifications', 'Slack / Discord / generic', 'messaging', await getConnectionStatus('webhook'))}
-                    ${await renderIntegrationCard('whatsapp', 'WhatsApp Business', 'Outbound only', 'messaging', await getConnectionStatus('whatsapp'))}
-                    ${await renderIntegrationCard('outlook', 'Outlook Calendar', 'Two-way sync', 'calendar', 'oauth_backend')}
-                    ${await renderIntegrationCard('github', 'GitHub', 'Issues & activity', 'devtools', 'oauth_backend')}
-                    ${await renderIntegrationCard('googledrive', 'Google Drive', 'Two-way sync', 'storage', 'oauth_backend')}
+                    ${googleCard}
+                    ${webhookCard}
+                    ${whatsappCard}
+                    ${outlookCard}
+                    ${githubCard}
+                    ${googledriveCard}
                 </div>
             </div>
         `;
+    };
+
+    const showIntegrationHub = async (container) => {
+        try {
+            const googleCard = await renderIntegrationCard('google', 'Google Calendar', 'Two-way sync', 'calendar', await getConnectionStatus('google'));
+            const webhookCard = await renderIntegrationCard('webhook', 'Webhook Notifications', 'Slack / Discord / generic', 'messaging', await getConnectionStatus('webhook'));
+            const whatsappCard = await renderIntegrationCard('whatsapp', 'WhatsApp Business', 'Outbound only', 'messaging', await getConnectionStatus('whatsapp'));
+            const outlookCard = await renderIntegrationCard('outlook', 'Outlook Calendar', 'Two-way sync', 'calendar', 'oauth_backend');
+            const githubCard = await renderIntegrationCard('github', 'GitHub', 'Issues & activity', 'devtools', 'oauth_backend');
+            const googledriveCard = await renderIntegrationCard('googledrive', 'Google Drive', 'Two-way sync', 'storage', 'oauth_backend');
+            container.innerHTML = buildIntegrationHubHtml(googleCard, webhookCard, whatsappCard, outlookCard, githubCard, googledriveCard);
         } catch (e) {
             console.error('Integration Hub error:', e);
             container.innerHTML = '<div class="error-state" style="padding:40px;text-align:center;"><i class="fas fa-exclamation-circle" style="font-size:2rem;color:#ef4444;"></i><p style="margin-top:12px;">Failed to load integrations. Please try again later.</p></div>';

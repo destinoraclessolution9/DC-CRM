@@ -127,10 +127,9 @@
         if (onReady) onReady();
     };
 
-    const showKnowledgeView = async (container) => {
-        _state.cv = 'knowledge';
-        if (!_kbSegment) _kbSegment = 'dashboard';
-        container.innerHTML = `
+    // Pure HTML builder for the Knowledge HQ view shell (header + segment tabs +
+    // empty slot). Takes the active segment and returns the full markup string.
+    const _buildKnowledgeViewShell = (seg) => `
             <div class="kb-view">
                 <div class="kb-header">
                     <div>
@@ -138,15 +137,20 @@
                         <div class="kb-subtitle">Capture first. Classify later. Connect anytime.</div>
                     </div>
                     <div class="kb-segments">
-                        <button class="kb-seg ${_kbSegment==='dashboard'?'active':''}" onclick="app.switchKnowledgeSegment('dashboard')"><i class="fas fa-gauge"></i> Dashboard</button>
-                        <button class="kb-seg ${_kbSegment==='capture'?'active':''}" onclick="app.switchKnowledgeSegment('capture')"><i class="fas fa-feather"></i> Capture</button>
-                        <button class="kb-seg ${_kbSegment==='all'?'active':''}" onclick="app.switchKnowledgeSegment('all')"><i class="fas fa-list"></i> All Entries</button>
-                        <button class="kb-seg ${_kbSegment==='daily'?'active':''}" onclick="app.switchKnowledgeSegment('daily')"><i class="far fa-calendar"></i> Daily Notes</button>
+                        <button class="kb-seg ${seg==='dashboard'?'active':''}" onclick="app.switchKnowledgeSegment('dashboard')"><i class="fas fa-gauge"></i> Dashboard</button>
+                        <button class="kb-seg ${seg==='capture'?'active':''}" onclick="app.switchKnowledgeSegment('capture')"><i class="fas fa-feather"></i> Capture</button>
+                        <button class="kb-seg ${seg==='all'?'active':''}" onclick="app.switchKnowledgeSegment('all')"><i class="fas fa-list"></i> All Entries</button>
+                        <button class="kb-seg ${seg==='daily'?'active':''}" onclick="app.switchKnowledgeSegment('daily')"><i class="far fa-calendar"></i> Daily Notes</button>
                     </div>
                 </div>
                 <div id="kb-slot" class="kb-slot"></div>
             </div>
         `;
+
+    const showKnowledgeView = async (container) => {
+        _state.cv = 'knowledge';
+        if (!_kbSegment) _kbSegment = 'dashboard';
+        container.innerHTML = _buildKnowledgeViewShell(_kbSegment);
         await _kbRenderSegment();
     };
 

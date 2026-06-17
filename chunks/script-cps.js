@@ -667,38 +667,8 @@ const shareCpsIntakeWhatsApp = () => {
     window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
 };
 
-// Render a "Pending CPS Intake Approvals" section at the top of the calendar today-list.
-// Called from showCalendarView in parallel with the other renderers.
-const renderPendingCpsIntakes = async () => {
-    const host = document.getElementById('pending-cps-intakes');
-    if (!host) return;
-
-    let intakes = [];
-    try {
-        // SWR serves the cached snapshot instantly; background revalidation picks
-        // up new submissions within 5 min. Removed { fresh: true } which forced a
-        // Supabase round-trip on EVERY calendar render, blocking re-paints.
-        const all = await AppDataStore.getAll('cps_intake_requests');
-        const pendingStatuses = new Set(['submitted', 'pending', 'awaiting_approval', 'new']);
-        intakes = (all || []).filter(r => pendingStatuses.has(r.status));
-    } catch (_) { intakes = []; }
-
-    // Filter: only show intakes created by the current user or their subordinates.
-    // Records with no agent_id are always shown to any logged-in leader.
-    const visibleIds = await getVisibleUserIds(_currentUser);
-    if (visibleIds !== 'all') {
-        const visibleStrs = visibleIds.map(String);
-        intakes = intakes.filter(i => !i.agent_id || visibleStrs.includes(String(i.agent_id)));
-    }
-
-    if (!intakes || intakes.length === 0) {
-        host.innerHTML = '';
-        host.style.display = 'none';
-        return;
-    }
-
-    host.style.display = 'block';
-    host.innerHTML = `
+const _buildPendingCpsIntakesHtml = (intakes) => {
+    return `
         <div style="background:#fffbeb; border:1px solid #fcd34d; border-radius:12px; padding:16px; margin-bottom:16px;">
             <h3 style="margin:0 0 12px; font-size:15px; color:#92400e; display:flex; align-items:center; gap:8px;">
                 <i class="fas fa-bell"></i> PENDING CPS INTAKE APPROVALS (${intakes.length})
@@ -732,6 +702,40 @@ const renderPendingCpsIntakes = async () => {
             </div>
         </div>
     `;
+};
+
+// Render a "Pending CPS Intake Approvals" section at the top of the calendar today-list.
+// Called from showCalendarView in parallel with the other renderers.
+const renderPendingCpsIntakes = async () => {
+    const host = document.getElementById('pending-cps-intakes');
+    if (!host) return;
+
+    let intakes = [];
+    try {
+        // SWR serves the cached snapshot instantly; background revalidation picks
+        // up new submissions within 5 min. Removed { fresh: true } which forced a
+        // Supabase round-trip on EVERY calendar render, blocking re-paints.
+        const all = await AppDataStore.getAll('cps_intake_requests');
+        const pendingStatuses = new Set(['submitted', 'pending', 'awaiting_approval', 'new']);
+        intakes = (all || []).filter(r => pendingStatuses.has(r.status));
+    } catch (_) { intakes = []; }
+
+    // Filter: only show intakes created by the current user or their subordinates.
+    // Records with no agent_id are always shown to any logged-in leader.
+    const visibleIds = await getVisibleUserIds(_currentUser);
+    if (visibleIds !== 'all') {
+        const visibleStrs = visibleIds.map(String);
+        intakes = intakes.filter(i => !i.agent_id || visibleStrs.includes(String(i.agent_id)));
+    }
+
+    if (!intakes || intakes.length === 0) {
+        host.innerHTML = '';
+        host.style.display = 'none';
+        return;
+    }
+
+    host.style.display = 'block';
+    host.innerHTML = _buildPendingCpsIntakesHtml(intakes);
 };
 
 const openApproveCpsIntakeModal = async (intakeId) => {
@@ -1138,36 +1142,7 @@ const handleCpsScanFile = async (input, prefix = 'cps') => {
     }
 };
 
-const renderCpsScanReview = () => {
-    if (!_cpsScanCache) return;
-    const { scanned, confidence, current, rawText } = _cpsScanCache;
-
-    const norm = v => (v == null ? '' : String(v).trim());
-    const isEmpty = v => norm(v) === '';
-
-    const rows = CPS_SCAN_FIELD_MAP.map(([key, suffix, label]) => {
-        const cur = norm(current[key]);
-        const scn = norm(scanned[key]);
-        const conf = confidence[key] || null;
-
-        let status, defaultChecked;
-        if (isEmpty(scn)) {
-            status = 'no-scan';
-            defaultChecked = false;
-        } else if (isEmpty(cur)) {
-            status = 'fill-empty';
-            defaultChecked = true; // auto-fill empty fields
-        } else if (cur.toLowerCase() === scn.toLowerCase()) {
-            status = 'same';
-            defaultChecked = false; // already matches — no change needed
-        } else {
-            status = 'conflict';
-            defaultChecked = false; // agent must explicitly pick
-        }
-
-        return { key, suffix, label, cur, scn, conf, status, defaultChecked };
-    });
-
+const _buildCpsScanReviewHtml = (rows, rawText) => {
     const statusBadge = (s) => {
         if (s === 'same')       return '<span style="color:#10b981;font-size:11px;font-weight:600;">✓ MATCH</span>';
         if (s === 'fill-empty') return '<span style="color:#7c3aed;font-size:11px;font-weight:600;">+ FILL</span>';
@@ -1187,7 +1162,7 @@ const renderCpsScanReview = () => {
         return '#ffffff';
     };
 
-    const html = `
+    return `
         <div style="max-height:60vh;overflow-y:auto;">
             <p style="margin:0 0 14px;color:var(--gray-600);font-size:13px;">
                 Review the scanned values below. Tick the ones you want to apply.
@@ -1243,6 +1218,39 @@ const renderCpsScanReview = () => {
             ` : ''}
         </div>
     `;
+};
+
+const renderCpsScanReview = () => {
+    if (!_cpsScanCache) return;
+    const { scanned, confidence, current, rawText } = _cpsScanCache;
+
+    const norm = v => (v == null ? '' : String(v).trim());
+    const isEmpty = v => norm(v) === '';
+
+    const rows = CPS_SCAN_FIELD_MAP.map(([key, suffix, label]) => {
+        const cur = norm(current[key]);
+        const scn = norm(scanned[key]);
+        const conf = confidence[key] || null;
+
+        let status, defaultChecked;
+        if (isEmpty(scn)) {
+            status = 'no-scan';
+            defaultChecked = false;
+        } else if (isEmpty(cur)) {
+            status = 'fill-empty';
+            defaultChecked = true; // auto-fill empty fields
+        } else if (cur.toLowerCase() === scn.toLowerCase()) {
+            status = 'same';
+            defaultChecked = false; // already matches — no change needed
+        } else {
+            status = 'conflict';
+            defaultChecked = false; // agent must explicitly pick
+        }
+
+        return { key, suffix, label, cur, scn, conf, status, defaultChecked };
+    });
+
+    const html = _buildCpsScanReviewHtml(rows, rawText);
 
     _showCpsScanOverlay('Review Scanned Form', html, [
         { type: 'secondary', label: 'Cancel', action: 'app._hideCpsScanOverlay()' },

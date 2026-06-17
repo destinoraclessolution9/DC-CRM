@@ -165,11 +165,8 @@ const toggleSearchPanel = async () => {
     }
 };
 
-const showSearchPanel = async () => {
-    const viewport = document.getElementById('content-viewport');
-
-    // Create overlay and panel
-    const searchHTML = `
+const buildSearchPanelHTML = () => {
+    return `
         <div class="search-panel-overlay" id="search-panel-overlay" onclick="app.hideSearchPanel()"></div>
         <div class="search-panel" id="search-panel">
             <div class="search-panel-header">
@@ -283,6 +280,13 @@ const showSearchPanel = async () => {
             </div>
         </div>
     `;
+};
+
+const showSearchPanel = async () => {
+    const viewport = document.getElementById('content-viewport');
+
+    // Create overlay and panel
+    const searchHTML = buildSearchPanelHTML();
 
     if (!viewport) return;
 
@@ -1621,21 +1625,8 @@ const evaluateCondition = (item, cond) => {
 };
 
 // Section 10.9: Results Rendering
-const renderSearchResults = async () => {
-    const container = document.getElementById('search-results');
-    if (!container) return;
-
-    if (_totalResults === 0) {
-        container.innerHTML = '<div class="no-results">No matches found for your criteria.</div>';
-        return;
-    }
-
-    const start = (_currentPage - 1) * _pageSize;
-    const pageItems = _currentSearchResults.slice(start, start + _pageSize);
-
-    const _searchUserMap = new Map((await AppDataStore.getAll('users')).map(u => [String(u.id), u.full_name]));
-
-    let html = `
+const buildSearchResultsTable = (pageItems, _searchUserMap) => {
+    return `
         <h3>Search Results (${_totalResults} found)</h3>
         <table class="search-results-table table-hover">
             <thead>
@@ -1683,6 +1674,23 @@ const renderSearchResults = async () => {
             </tbody>
         </table>
     `;
+};
+
+const renderSearchResults = async () => {
+    const container = document.getElementById('search-results');
+    if (!container) return;
+
+    if (_totalResults === 0) {
+        container.innerHTML = '<div class="no-results">No matches found for your criteria.</div>';
+        return;
+    }
+
+    const start = (_currentPage - 1) * _pageSize;
+    const pageItems = _currentSearchResults.slice(start, start + _pageSize);
+
+    const _searchUserMap = new Map((await AppDataStore.getAll('users')).map(u => [String(u.id), u.full_name]));
+
+    let html = buildSearchResultsTable(pageItems, _searchUserMap);
 
     container.innerHTML = html;
     await renderPagination();
