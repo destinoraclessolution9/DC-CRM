@@ -1126,50 +1126,36 @@
         }
     };
 
-    // Hook into activity CRUD for auto-sync
-    const originalCreateActivity = AppDataStore.create;
-    const originalUpdateActivity = AppDataStore.update;
-    const originalDeleteActivity = AppDataStore.delete;
-
-    AppDataStore.create = async function (tableName, data) {
-        const result = await originalCreateActivity.call(this, tableName, data);
-        if (tableName === 'activities' && _syncManager) {
-            setTimeout(async () => {
-                const connection = await getGoogleConnection();
-                if (connection && connection.sync_settings?.syncTypes[data.activity_type?.toLowerCase()]) {
-                    await _syncManager.syncCRMtoGoogle().catch(console.error);
-                }
-            }, 1000);
-        }
-        return result;
-    };
-
-    AppDataStore.update = async function (tableName, id, data) {
-        const result = await originalUpdateActivity.call(this, tableName, id, data);
-        if (tableName === 'activities' && _syncManager) {
-            setTimeout(async () => {
-                const connection = await getGoogleConnection();
-                const activity = await AppDataStore.getById('activities', id);
-                if (connection && activity && connection.sync_settings?.syncTypes[activity.activity_type?.toLowerCase()]) {
-                    await _syncManager.syncCRMtoGoogle().catch(console.error);
-                }
-            }, 1000);
-        }
-        return result;
-    };
-
-    AppDataStore.delete = async function (tableName, id) {
-        const result = await originalDeleteActivity.call(this, tableName, id);
-        if (tableName === 'activities' && _syncManager) {
-            setTimeout(async () => {
-                const connection = await getGoogleConnection();
-                if (connection) {
-                    await _syncManager.syncCRMtoGoogle().catch(console.error);
-                }
-            }, 1000);
-        }
-        return result;
-    };
+    // Auto-sync activities to Google Calendar. Subscribe to the data layer's
+    // `dataChanged` event (emitted once per create/update/delete) instead of
+    // monkey-patching AppDataStore.create/update/delete process-wide. Filtering
+    // to the explicit-mutation actions (add/update/delete) reproduces the old
+    // method-wrap behavior exactly — same 1s debounce, same per-activity-type
+    // gate, same "sync on any delete" — while leaving the shared data layer's
+    // methods untouched (the wrap previously ran on every write of every table).
+    window.addEventListener('dataChanged', (e) => {
+        const d = e.detail || {};
+        if (d.table !== 'activities' || !_syncManager) return;
+        if (d.action !== 'add' && d.action !== 'update' && d.action !== 'delete') return;
+        setTimeout(async () => {
+            const connection = await getGoogleConnection();
+            if (!connection) return;
+            if (d.action === 'delete') {
+                await _syncManager.syncCRMtoGoogle().catch(console.error);
+                return;
+            }
+            // add: gate by the new record's type (matches the old create wrap).
+            // update: re-read the persisted activity, matching the old update
+            // wrap which fetched by id rather than trusting the partial payload.
+            let activity = d.record;
+            if (d.action === 'update') {
+                activity = await AppDataStore.getById('activities', d.record?.id);
+            }
+            if (activity && connection.sync_settings?.syncTypes[activity.activity_type?.toLowerCase()]) {
+                await _syncManager.syncCRMtoGoogle().catch(console.error);
+            }
+        }, 1000);
+    });
 
     Object.assign(window.app, {
         showIntegrationHub,
