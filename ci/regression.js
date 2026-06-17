@@ -154,6 +154,24 @@ try {
   fail('a source file exceeded its size budget (ci/size-budgets.json)');
 }
 
+// ── Step 7: Dead inline-handler check ──────────────────────────────────────
+console.log('\n── Step 7: Dead inline-handler check ─────────────────────');
+try {
+  execSync(`node "${path.join(__dirname,'onclick-check.js')}"`, { stdio: 'inherit' });
+  pass('no dead inline handlers');
+} catch {
+  fail('dead inline handler(s) — a referenced app.fn is not registered (ci/onclick-check.js)');
+}
+
+// ── Step 8: VIEWS derive identity ──────────────────────────────────────────
+console.log('\n── Step 8: VIEWS derive identity ─────────────────────────');
+try {
+  execSync(`node "${path.join(__dirname,'views-derive-check.js')}"`, { stdio: 'inherit' });
+  pass('VIEWS derives all 3 tables identically');
+} catch {
+  fail('VIEWS derivation drifted from baseline (ci/views-derive-check.js)');
+}
+
 // ── Summary ────────────────────────────────────────────────────────────────
 console.log('\n─────────────────────────────────────────────────────────');
 if (fails === 0) {

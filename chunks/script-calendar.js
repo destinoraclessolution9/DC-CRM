@@ -278,13 +278,6 @@
                     <!-- Quick actions -->
                     <div class="cal-panel-card">
                         <h4>Quick Actions</h4>
-                        <div class="quick-action-row" onclick="app.openFollowUpModal && app.openFollowUpModal()">
-                            <div class="qa-left">
-                                <div class="qa-icon pink"><i class="fas fa-bell"></i></div>
-                                <div><div class="qa-title">Add Follow-up</div><div class="qa-sub">Schedule a follow-up</div></div>
-                            </div>
-                            <i class="fas fa-chevron-right qa-arrow"></i>
-                        </div>
                         <div class="quick-action-row" onclick="app.openActivityModal()">
                             <div class="qa-left">
                                 <div class="qa-icon green"><i class="fas fa-calendar-plus"></i></div>
@@ -292,14 +285,7 @@
                             </div>
                             <i class="fas fa-chevron-right qa-arrow"></i>
                         </div>
-                        <div class="quick-action-row" onclick="app.openReminderModal && app.openReminderModal()">
-                            <div class="qa-left">
-                                <div class="qa-icon amber"><i class="fas fa-bookmark"></i></div>
-                                <div><div class="qa-title">Add Reminder</div><div class="qa-sub">Set a reminder</div></div>
-                            </div>
-                            <i class="fas fa-chevron-right qa-arrow"></i>
-                        </div>
-                        <div class="quick-action-row" onclick="app.openCreateProspectModal && app.openCreateProspectModal()">
+                        <div class="quick-action-row" onclick="app.openAddProspectModal && app.openAddProspectModal()">
                             <div class="qa-left">
                                 <div class="qa-icon purple"><i class="fas fa-user-plus"></i></div>
                                 <div><div class="qa-title">Add Prospect</div><div class="qa-sub">Create new prospect</div></div>

@@ -1418,7 +1418,7 @@ window._fv.renderPendingCpsIntakes = async () => {
         intakes = (all || []).filter(r => pendingStatuses.has(r.status));
     } catch (_) { intakes = []; /* intentional: offline/unprovisioned table → show empty pending list */ }
 
-    const visibleIds = await window.app.getVisibleUserIds(_currentUser);
+    const visibleIds = await (window._crmUtils?.getVisibleUserIds || (async () => 'all'))(_currentUser);
     if (visibleIds !== 'all') {
         const visibleStrs = visibleIds.map(String);
         intakes = intakes.filter(i => !i.agent_id || visibleStrs.includes(String(i.agent_id)));
@@ -5942,7 +5942,12 @@ window._fv.showMarketingListsView = async (container) => {
     };
 
     const renderPackagesTab = async () => {
-        return await window.app.renderPackagesTab();
+        // No `renderPackagesTab` is registered on window.app — the canonical
+        // promotions/packages renderer lives inside chunks/script-marketing.js
+        // (which also owns the live, registered showMarketingListsView that
+        // supersedes this _fv copy). Guard so this superseded fallback path
+        // degrades to empty HTML instead of throwing if ever reached.
+        return await (window.app.renderPackagesTab || (async () => ''))();
     };
 
     const renderMarketingListTable = async () => {
@@ -6856,7 +6861,7 @@ const _buildNoticeboardSkeleton = (styleBlock, isAdmin) => `
                 <h1 class="nb-hero-title">即将举行的活动</h1>
                 <div class="nb-hero-sub">探索风水智慧与人文之美</div>
             </div>
-            ${isAdmin ? `<div class="nb-admin-bar"><button class="btn primary" onclick="(async()=>{ if(app.openCreateEventModal) await app.openCreateEventModal(); })()"><i class="fas fa-plus"></i> Post Event</button></div>` : ''}
+            ${isAdmin ? `<div class="nb-admin-bar"><button class="btn primary" onclick="(async()=>{ if(app.openCpsCreateEventModal) await app.openCpsCreateEventModal(); })()"><i class="fas fa-plus"></i> Post Event</button></div>` : ''}
             <div id="noticeboard-grid" class="nb-grid">
                 <div class="nb-empty"><div style="opacity:0.5;">Loading events…</div></div>
             </div>

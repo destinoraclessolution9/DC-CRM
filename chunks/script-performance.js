@@ -662,7 +662,7 @@ const buildNoticeboardSkeletonHtml = (styleBlock, isAdmin) => `
                 <h1 class="nb-hero-title">即将举行的活动</h1>
                 <div class="nb-hero-sub">探索风水智慧与人文之美</div>
             </div>
-            ${isAdmin ? `<div class="nb-admin-bar"><button class="btn primary" onclick="(async()=>{ if(app.openCreateEventModal) await app.openCreateEventModal(); })()"><i class="fas fa-plus"></i> Post Event</button></div>` : ''}
+            ${isAdmin ? `<div class="nb-admin-bar"><button class="btn primary" onclick="(async()=>{ if(app.openCpsCreateEventModal) await app.openCpsCreateEventModal(); })()"><i class="fas fa-plus"></i> Post Event</button></div>` : ''}
             <div id="noticeboard-grid" class="nb-grid">
                 <div class="nb-empty"><div style="opacity:0.5;">Loading events…</div></div>
             </div>

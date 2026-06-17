@@ -552,7 +552,7 @@
                     UI.toast.info('Navigate to Marketing → Lists to manage ' + entity);
                     break;
                 case 'activities':
-                    if (window.app.showActivityDetail) await window.app.showActivityDetail(id);
+                    if (window.app.viewActivityDetails) await window.app.viewActivityDetails(id);
                     break;
                 case 'transactions':
                     if (window.app.showTransactionDetail) await window.app.showTransactionDetail(id);
