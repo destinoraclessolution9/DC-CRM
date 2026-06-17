@@ -3474,10 +3474,8 @@
             ];
         }
         const needsCoAgentMergeDV = !isSystemAdmin(_state.cu) && _state.cu?.id != null;
-        const [actResultDV, allProspectsDV, allCustomersDV, allUsersDV, allEventsDV, coAgentRowsDV] = await Promise.all([
+        const [actResultDV, allUsersDV, allEventsDV, coAgentRowsDV] = await Promise.all([
             AppDataStore.queryAdvanced('activities', actQueryOptsDV),
-            AppDataStore.getAll('prospects'),
-            AppDataStore.getAll('customers'),
             AppDataStore.getAll('users'),
             AppDataStore.getAll('events'),
             needsCoAgentMergeDV ? _fetchActivitiesAsCoAgent(todayStr, todayStr) : Promise.resolve([]),
@@ -3512,8 +3510,17 @@
             dayActivities.push(a);
         }
         dayActivities.sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
-        const prospectMapDV = new Map((allProspectsDV || []).map(p => [String(p.id), p]));
-        const customerMapDV = new Map((allCustomersDV || []).map(c => [String(c.id), c]));
+        // Fetch ONLY the prospect/customer names the scoped day activities
+        // reference (id,full_name) — not the whole tables. Mirrors the week-view
+        // + renderTodayActivities fix; closes the same getAll() privacy over-fetch.
+        const _dvPIds = [...new Set(dayActivities.filter(a => a.prospect_id).map(a => a.prospect_id))];
+        const _dvCIds = [...new Set(dayActivities.filter(a => a.customer_id).map(a => a.customer_id))];
+        const [_dvPRes, _dvCRes] = await Promise.all([
+            _dvPIds.length > 0 ? AppDataStore.queryAdvanced('prospects', { scopeField: 'id', scopeValues: _dvPIds, limit: 5000, select: 'id,full_name', countMode: null }) : Promise.resolve({ data: [] }),
+            _dvCIds.length > 0 ? AppDataStore.queryAdvanced('customers', { scopeField: 'id', scopeValues: _dvCIds, limit: 5000, select: 'id,full_name', countMode: null }) : Promise.resolve({ data: [] }),
+        ]);
+        const prospectMapDV = new Map(((_dvPRes && _dvPRes.data) || []).map(p => [String(p.id), p]));
+        const customerMapDV = new Map(((_dvCRes && _dvCRes.data) || []).map(c => [String(c.id), c]));
         const userMapDV = new Map((allUsersDV || []).map(u => [String(u.id), u]));
 
         // Calculate summary stats
