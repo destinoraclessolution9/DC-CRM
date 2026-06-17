@@ -431,14 +431,7 @@
     // Injection-safe + RFC-4180 quoting — identical contract to the 福气 KPI
     // export in script-fude.js (neutralise =,+,-,@ formula triggers; quote on
     // comma/quote/newline; double embedded quotes).
-    const _csvCell = (v) => {
-        let s = String(v == null ? '' : v);
-        if (/^[=+\-@]/.test(s)) s = "'" + s;
-        return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-    };
-    // Build a CSV string from an array-of-arrays. Prepends a UTF-8 BOM so Excel
-    // reads Chinese names correctly; CRLF line endings per RFC-4180.
-    const _csvFromRows = (rows) => '﻿' + rows.map(r => r.map(_csvCell).join(',')).join('\r\n');
+    const { csvCell: _csvCell, toCsv: _csvFromRows } = window._crmUtils;
     // Trigger a client-side download of `text` as `filename`. No external infra.
     const _downloadFile = (text, filename, mime = 'text/csv;charset=utf-8') => {
         const blob = new Blob([text], { type: mime });

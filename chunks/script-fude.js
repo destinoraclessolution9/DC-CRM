@@ -1054,13 +1054,8 @@ const exportKPIDashboard = async () => {
         if (!ranked.length) { UI.toast.error('No 福气 leaderboard data to export yet.'); return; }
 
         // --- CSV cell encoder: injection-safe + RFC-4180 quoting ---
-        const csvCell = (v) => {
-            let s = String(v ?? '');
-            // CSV-injection guard: neutralise formula-trigger leading chars.
-            if (/^[=+\-@]/.test(s)) s = "'" + s;
-            // Quote when the value contains a comma, quote, or newline; double embedded quotes.
-            return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-        };
+        // De-duped: reuse the canonical encoder (script.js _crmUtils.csvCell).
+        const csvCell = window._crmUtils.csvCell;
 
         const generatedOn = new Date();
         const totalPts = ranked.reduce((s, r) => s + (r.pts || 0), 0);

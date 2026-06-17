@@ -593,6 +593,11 @@ const appLogic = (() => {
     const isCustomer = (user) => _getUserLevel(user) === 13;
     const isReferrer  = (user) => _getUserLevel(user) === 14;
     Object.assign(window._crmUtils, { isCustomer, isReferrer });
+    // Canonical referrer-or-customer membership (Wave 1.3): both sides already
+    // resolve via _getUserLevel, so chunks folding their inline {l>=13&&l<=14}
+    // onto this are byte-decision-identical.
+    const isReferrerOrCustomer = (user) => { const l = _getUserLevel(user); return l >= 13 && l <= 14; };
+    Object.assign(window._crmUtils, { isReferrerOrCustomer });
 
     // Memoized agents-and-leaders fetch. getAll('users') is already in-memory
     // cached by data.js, so the savings here are modest — but having a single
@@ -1147,6 +1152,11 @@ const appLogic = (() => {
     // they're defined later in the file. Use Object.assign so we don't
     // clobber utils attached by earlier sections (isSystemAdmin, etc.).
     Object.assign(window._crmUtils, { escapeHtml });
+    // Canonical CSV helpers (Wave 1.3): byte-identical to the per-chunk copies
+    // they replace (injection-guard, quote-doubling, BOM + CRLF row join).
+    const csvCell = (v) => { let s = String(v == null ? '' : v); if (/^[=+\-@]/.test(s)) s = "'" + s; return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    const toCsv = (rows) => '﻿' + rows.map(r => r.map(csvCell).join(',')).join('\r\n');
+    Object.assign(window._crmUtils, { csvCell, toCsv });
 
     const FILE_ICONS = {
         // Documents

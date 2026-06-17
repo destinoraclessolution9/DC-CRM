@@ -1219,13 +1219,13 @@ const performProspectSearch = async (filters) => {
     }
     if (filters.basic['has-purchased']) {
         const product = filters.basic['has-purchased'];
-        const hasPurchased = await Promise.all(items.map(i => hasProspectPurchasedProduct(i.id, product)));
-        items = items.filter((_, idx) => hasPurchased[idx]);
+        const purchasedIds = await _buildPurchasedProductIdSet(product, items.map(i => i.id));
+        items = items.filter(i => purchasedIds.has(i.id));
     }
     if (filters.basic['not-purchased']) {
         const product = filters.basic['not-purchased'];
-        const notPurchased = await Promise.all(items.map(i => hasProspectPurchasedProduct(i.id, product)));
-        items = items.filter((_, idx) => !notPurchased[idx]);
+        const purchasedIds = await _buildPurchasedProductIdSet(product, items.map(i => i.id));
+        items = items.filter(i => !purchasedIds.has(i.id));
     }
     if (filters.basic.keyword) {
         const kw = filters.basic.keyword.toLowerCase();
@@ -1276,6 +1276,26 @@ const hasProspectPurchasedProduct = async (prospectId, productName) => {
 
     const activities = await AppDataStore.getAll('activities');
     return activities.some(a => (a.prospect_id === prospectId || a.customer_id === prospectId) && a.is_closing && a.solution_sold === productName);
+};
+
+const _buildPurchasedProductIdSet = async (productName, candidateIds) => {
+    const want = candidateIds instanceof Set ? candidateIds : new Set(candidateIds);
+    const set = new Set();
+    const [purchases, activities] = await Promise.all([
+        AppDataStore.getAll('purchases'),
+        AppDataStore.getAll('activities'),
+    ]);
+    for (const p of purchases) {
+        if (p.item && p.item.includes(productName) && want.has(p.customer_id)) {
+            set.add(p.customer_id);
+        }
+    }
+    for (const a of activities) {
+        if (!a.is_closing || a.solution_sold !== productName) continue;
+        if (want.has(a.prospect_id)) set.add(a.prospect_id);
+        if (want.has(a.customer_id)) set.add(a.customer_id);
+    }
+    return set;
 };
 
 const performCustomerSearch = async (filters) => {

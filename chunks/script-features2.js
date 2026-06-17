@@ -1482,7 +1482,7 @@ const showMilestonesView = async (container, targetUserId = null) => {
         try {
             let adminUsers = [];
             if (isAdmin) {
-                try { adminUsers = (await AppDataStore.getAll('users')).filter(u => { const l = _getUserLevel(u); return l >= 13 && l <= 14; }).map(u => ({ id: u.id, full_name: u.full_name })); } catch (e) {}
+                try { adminUsers = (await AppDataStore.getAll('users')).filter(u => _utils.isReferrerOrCustomer(u)).map(u => ({ id: u.id, full_name: u.full_name })); } catch (e) {}
             }
             container.innerHTML = '<div id="milestones-react-root"></div>';
             window.CRMReact.mountMilestonesView(document.getElementById('milestones-react-root'), {
