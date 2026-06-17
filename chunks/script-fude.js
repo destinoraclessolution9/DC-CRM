@@ -242,7 +242,10 @@ const showFudeView = async (container) => {
         <div class="fude-section">
             <div class="fude-sec-bar" style="justify-content:space-between;">
                 <div style="display:flex;align-items:center;gap:12px;"><div class="fude-sec-bar-icon gem">🎁</div><h2>Manage Rewards &amp; 福气 Points</h2></div>
-                <button class="btn primary btn-sm" onclick="app.openRewardModal()"><i class="fas fa-plus"></i> Award Points</button>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <button class="btn secondary btn-sm" onclick="app.showRedemptionQueue()"><i class="fas fa-inbox"></i> 兑换队列 Redemption Queue</button>
+                    <button class="btn primary btn-sm" onclick="app.openRewardModal()"><i class="fas fa-plus"></i> Award Points</button>
+                </div>
             </div>
             <div class="fude-sec-body"><div style="overflow-x:auto;"><table class="data-table"><thead><tr>
                 <th scope="col">User</th><th scope="col">Action</th><th scope="col">福气 Pts</th><th scope="col">Sharing Return</th><th scope="col">Description</th><th scope="col">Date</th><th scope="col"></th>
@@ -2822,11 +2825,42 @@ const confirmRedeemPoints = async () => {
     if (!Number.isFinite(pts) || pts <= 0) { UI.toast.error('请输入有效的积分数量。'); return; }
     if (pts > bal)                   { UI.toast.error(`积分不足：当前仅有 ${bal.toLocaleString()} 福气积分。`); return; }
 
-    // No server-side redemption table/queue exists yet, and AppDataStore.create
-    // silently falls back to localStorage on a missing table (would show a FALSE
-    // "submitted" success). Until a redemption_requests table + admin workflow is
-    // provisioned, do an HONEST copy-to-leader flow: hand the user a formatted
-    // request to send to their team leader — no false claim of server submission.
+    // FIRST: attempt a GENUINE server insert into redemption_requests. We deliberately
+    // bypass AppDataStore.create — its insert path silently falls back to localStorage
+    // on a missing table/RLS deny (which would surface a FALSE "submitted" success).
+    // Use the raw Supabase client the app exposes (window.supabase, with the
+    // window.supabaseClient alias the chunk already uses in saveHighlight).
+    const _sb = window.supabase || window.supabaseClient;
+    if (_sb && typeof _sb.from === 'function') {
+        try {
+            const { data: _rows, error: _insErr } = await _sb
+                .from('redemption_requests')
+                .insert({
+                    user_id:           user.id,
+                    requester_name:    (user.full_name || user.name || user.email),
+                    item:              item,
+                    points:            pts,
+                    balance_at_request: bal,
+                    note:              note || null,
+                    status:            'pending'
+                })
+                .select();
+            // SUCCESS = no error AND a row returned. Any error (PGRST205 missing table,
+            // RLS deny, network) OR empty result → fall through to the copy-to-leader flow.
+            if (!_insErr && Array.isArray(_rows) && _rows.length > 0) {
+                UI.hideModal();
+                UI.toast.success('兑换申请已提交，等待审核 (Redemption request submitted)');
+                return;
+            }
+        } catch (_serverErr) {
+            // network/offline (Failed to fetch) etc. — fall through to fallback below.
+        }
+    }
+
+    // FALLBACK (table absent / RLS deny / offline / empty): HONEST copy-to-leader flow.
+    // Hand the user a formatted request to send to their team leader — no false claim
+    // of server submission. Once the redemption_requests migration is applied, the
+    // genuine insert above succeeds and this branch is never reached.
     const reqText = [
         '福气积分兑换申请 / FuQi Points Redemption Request',
         '姓名 Name: ' + (user.full_name || user.name || user.email || user.id),
@@ -2848,6 +2882,140 @@ const confirmRedeemPoints = async () => {
         UI.toast.error('操作失败：' + (err?.message || '未知错误'));
     }
 };
+
+// ========== ADMIN: 福气 Redemption Queue ==========
+// Admin-only queue to process redemption_requests rows. Reads via the raw Supabase
+// client (genuine server read, never AppDataStore — which masks a missing table).
+// If the table is absent / read errors → friendly "not provisioned" card, never crash.
+const _fudeRedeemStatusBadge = (status) => {
+    const s = String(status || 'pending').toLowerCase();
+    const map = {
+        pending:   { label: '待审核 Pending',   bg: '#fef3c7', col: '#92400e' },
+        approved:  { label: '已批准 Approved',  bg: '#dbeafe', col: '#1e40af' },
+        fulfilled: { label: '已兑现 Fulfilled', bg: '#d1fae5', col: '#065f46' },
+        rejected:  { label: '已拒绝 Rejected',  bg: '#fee2e2', col: '#991b1b' }
+    };
+    const m = map[s] || { label: esc(status || '-'), bg: '#f3f4f6', col: '#6b7280' };
+    return `<span style="padding:2px 8px;border-radius:12px;font-size:0.78rem;background:${m.bg};color:${m.col};white-space:nowrap;">${m.label}</span>`;
+};
+
+const _fudeRedeemFmtDate = (d) => { try { return new Date(d).toLocaleString(); } catch (e) { return esc(d || '-'); } };
+
+const showRedemptionQueue = async () => {
+    // Admin gate — mirror the canonical fude admin gate (L1 Super Admin || L2 Marketing Manager).
+    if (!(isSystemAdmin() || isMarketingManager())) {
+        UI.toast.error('仅管理员可访问兑换队列。(Admins only.)');
+        return;
+    }
+
+    UI.showModal('福气 兑换队列 (Redemption Queue)', '<div style="display:flex;align-items:center;justify-content:center;height:120px;gap:10px;color:var(--gray-400,#9ca3af);"><i class="fas fa-circle-notch fa-spin"></i><span>加载中… Loading…</span></div>', [
+        { label: '关闭 Close', type: 'secondary', action: 'UI.hideModal()' }
+    ]);
+
+    const sb = window.supabase || window.supabaseClient;
+    let rows = null;
+    if (sb && typeof sb.from === 'function') {
+        try {
+            // Pending first, then newest first within each status group.
+            const { data, error } = await sb
+                .from('redemption_requests')
+                .select('*')
+                .order('status', { ascending: true })
+                .order('created_at', { ascending: false });
+            if (!error && Array.isArray(data)) rows = data;
+        } catch (_readErr) {
+            rows = null; // network/offline → treat as not provisioned
+        }
+    }
+
+    // Table absent / read error / no client → friendly card, never crash.
+    if (rows === null) {
+        const html = `<div style="font-size:14px;line-height:1.7;">
+            <div style="background:#f3f4f6;border-left:4px solid #9ca3af;padding:14px 16px;border-radius:8px;">
+                <div style="font-weight:600;margin-bottom:4px;">兑换队列尚未启用 (queue not provisioned yet)</div>
+                <div style="color:var(--gray-600,#4b5563);">redemption_requests 数据表尚未创建或当前不可读取。应用迁移后此队列将自动启用。在此之前，会员的兑换申请通过复制给团队负责人处理。</div>
+            </div>
+        </div>`;
+        UI.showModal('福气 兑换队列 (Redemption Queue)', html, [
+            { label: '关闭 Close', type: 'primary', action: 'UI.hideModal()' }
+        ]);
+        return;
+    }
+
+    // Sort: pending first, then newest first (defensive — DB order may vary).
+    const _rank = (s) => (String(s || 'pending').toLowerCase() === 'pending' ? 0 : 1);
+    rows.sort((a, b) => (_rank(a.status) - _rank(b.status)) || (new Date(b.created_at) - new Date(a.created_at)));
+
+    let body;
+    if (!rows.length) {
+        body = '<div style="text-align:center;color:var(--gray-400,#9ca3af);padding:24px;">暂无兑换申请。(No redemption requests yet.)</div>';
+    } else {
+        const rowsHtml = rows.map(r => {
+            const st = String(r.status || 'pending').toLowerCase();
+            // Pass the id as a SINGLE-quoted, attribute-escaped JS string literal so
+            // it works for both integer (bigserial) and uuid PKs — JSON.stringify on a
+            // uuid emits double quotes that would terminate the double-quoted onclick
+            // attribute. .eq('id', id) accepts a string for either column type.
+            const id = esc(String(r.id));
+            const actions = st === 'pending'
+                ? `<button class="btn primary btn-sm" onclick="event.stopPropagation();app.redemptionApprove('${id}')"><i class="fas fa-check"></i> 批准 Approve</button>
+                   <button class="btn danger btn-sm" style="margin-left:4px;" onclick="event.stopPropagation();app.redemptionReject('${id}')"><i class="fas fa-times"></i> 拒绝 Reject</button>`
+                : st === 'approved'
+                    ? `<button class="btn primary btn-sm" onclick="event.stopPropagation();app.redemptionFulfil('${id}')"><i class="fas fa-gift"></i> 兑现 Fulfil</button>
+                       <button class="btn danger btn-sm" style="margin-left:4px;" onclick="event.stopPropagation();app.redemptionReject('${id}')"><i class="fas fa-times"></i> 拒绝 Reject</button>`
+                    : `<span style="color:var(--gray-400,#9ca3af);font-size:0.82rem;">已完成 Done</span>`;
+            return `<tr>
+                <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">${esc(r.item || '-')}</td>
+                <td style="white-space:nowrap;font-weight:600;">${esc(String(r.points != null ? r.points : '-'))}</td>
+                <td>${esc(r.requester_name || ('User ' + (r.user_id != null ? r.user_id : '?')))}</td>
+                <td>${_fudeRedeemStatusBadge(r.status)}</td>
+                <td style="white-space:nowrap;">${_fudeRedeemFmtDate(r.created_at)}</td>
+                <td style="white-space:nowrap;">${actions}</td>
+            </tr>`;
+        }).join('');
+        body = `<div style="overflow-x:auto;"><table class="data-table"><thead><tr>
+            <th scope="col">兑换内容 Item</th><th scope="col">积分 Points</th><th scope="col">申请人 Requester</th>
+            <th scope="col">状态 Status</th><th scope="col">提交时间 Created</th><th scope="col">操作 Actions</th>
+        </tr></thead><tbody>${rowsHtml}</tbody></table></div>`;
+    }
+
+    UI.showModal('福气 兑换队列 (Redemption Queue)', `<div style="font-size:14px;">${body}</div>`, [
+        { label: '关闭 Close', type: 'primary', action: 'UI.hideModal()' }
+    ], 'large');
+};
+
+// Shared status-update helper for the redemption queue. Genuine server UPDATE via the
+// raw client; re-renders the queue on success. Admin-gated (defence in depth).
+const _redemptionUpdateStatus = async (id, status, okMsg) => {
+    if (!(isSystemAdmin() || isMarketingManager())) {
+        UI.toast.error('仅管理员可操作。(Admins only.)');
+        return;
+    }
+    const sb = window.supabase || window.supabaseClient;
+    if (!sb || typeof sb.from !== 'function') {
+        UI.toast.error('未连接服务器，无法更新。(Not connected.)');
+        return;
+    }
+    try {
+        const { data, error } = await sb
+            .from('redemption_requests')
+            .update({ status })
+            .eq('id', id)
+            .select();
+        if (error || !Array.isArray(data) || data.length === 0) {
+            UI.toast.error('更新失败：' + ((error && error.message) || '未找到记录'));
+            return;
+        }
+        UI.toast.success(okMsg);
+        await showRedemptionQueue(); // re-render with fresh data
+    } catch (err) {
+        UI.toast.error('更新失败：' + (err?.message || '未知错误'));
+    }
+};
+
+const redemptionApprove = (id) => _redemptionUpdateStatus(id, 'approved',  '已批准 (Approved)');
+const redemptionReject  = (id) => _redemptionUpdateStatus(id, 'rejected',  '已拒绝 (Rejected)');
+const redemptionFulfil  = (id) => _redemptionUpdateStatus(id, 'fulfilled', '已兑现 (Fulfilled)');
 
 const fudeSearchStories = (query) => {
     const section = document.querySelector('.fude-stories-section');
@@ -2955,5 +3123,9 @@ const fudeShowAllStories = () => {
         openFudeRedeemModal,
         _fudeRedeemPickPreset,
         confirmRedeemPoints,
+        showRedemptionQueue,
+        redemptionApprove,
+        redemptionReject,
+        redemptionFulfil,
     });
 })();
