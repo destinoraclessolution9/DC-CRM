@@ -976,6 +976,223 @@ const buildPipelineIslandData = async () => {
     };
 };
 
+// ── Render-builder helpers for showPipelineView ───────────────────────────
+// These are pure HTML string assemblers extracted verbatim from the STEP 1-7
+// blocks of showPipelineView. They take exactly the values the original block
+// read and return exactly the HTML string the caller assigned. No DOM access,
+// no control-flow changes — showPipelineView stays the orchestrator.
+
+// STEP 1 skeleton shell. _skelHelpers carries the local skeleton closures
+// (_skelRows, _skelCard) defined inside showPipelineView.
+const buildPipelineSkeletonHtml = (_skelHelpers) => {
+    const { _skelRows, _skelCard } = _skelHelpers;
+    return `
+<div class="pipeline-dual-view">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
+    <div>
+        <h1 style="font-size:24px;font-weight:700;margin:0;">Potential Pipeline Management</h1>
+        <p style="color:#6B7280;margin-top:4px;">Track signing probability across 6 solution categories</p>
+    </div>
+    <div id="pl-header-controls" style="display:flex;gap:12px;align-items:center;">
+        <div class="skeleton" style="width:160px;height:38px;border-radius:6px;"></div>
+        <div class="skeleton" style="width:140px;height:38px;border-radius:6px;"></div>
+        <button class="btn secondary" disabled><i class="fas fa-sync-alt"></i> Refresh</button>
+        <button class="btn primary" disabled><i class="fas fa-info-circle"></i> Rules</button>
+    </div>
+</div>
+<div id="pl-action-plan">
+    <div style="background:white;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.1);margin-bottom:32px;">
+        ${_skelCard(28)}${_skelCard(60)}${_skelCard(120)}
+    </div>
+</div>
+<div id="pl-focus-section">
+    <div style="background:white;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.1);margin-bottom:32px;">
+        ${_skelCard(28)}<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;min-width:1080px;"><tbody>${_skelRows(4,7)}</tbody></table></div>
+    </div>
+</div>
+<div style="background:white;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.1);padding:20px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <div style="display:flex;align-items:center;gap:12px;">
+            <h2 style="font-size:18px;font-weight:600;margin:0;">📊 Auto-Generated Pipeline</h2>
+            <span id="pl-table2-count"><div class="skeleton" style="display:inline-block;width:90px;height:22px;border-radius:20px;vertical-align:middle;"></div></span>
+        </div>
+        <p style="font-size:11px;color:#9CA3AF;margin:0;">Sorted: highest probability → most recent activity → name</p>
+    </div>
+    <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;min-width:1080px;">
+            <thead>
+                <tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">
+                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Prospect Name</th>
+                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Target to Sign (Product/Service)</th>
+                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Amount (RM)</th>
+                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Probability</th>
+                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Action Needed to Close Deal</th>
+                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Quick Action</th>
+                </tr>
+            </thead>
+            <tbody id="pipeline-list-body">${_skelRows(6,6)}</tbody>
+        </table>
+    </div>
+</div>
+</div>`;
+};
+
+// STEP 2 header controls (agent + status filters, refresh, rules).
+const buildPipelineHeaderControlsHtml = (agents, agentFilter, statusFilter) => {
+    return `
+        <select class="form-control" style="width:160px;height:38px;" onchange="app.setPipelineFilter('agent', this.value)">
+            <option value="all">All Agents</option>
+            ${agents.map(a => `<option value="${a.id}" ${agentFilter == a.id ? 'selected' : ''}>${escapeHtml(a.full_name)}</option>`).join('')}
+        </select>
+        <select class="form-control" style="width:140px;height:38px;" onchange="(async () => { await app.setPipelineFilter('status', this.value); })()">
+            <option value="all">All Status</option>
+            <option value="prospect" ${statusFilter === 'prospect' ? 'selected' : ''}>Prospect</option>
+            <option value="active" ${statusFilter === 'active' ? 'selected' : ''}>Active</option>
+            <option value="warm" ${statusFilter === 'warm' ? 'selected' : ''}>Warm</option>
+            <option value="hot" ${statusFilter === 'hot' ? 'selected' : ''}>Hot</option>
+        </select>
+        <button class="btn secondary" onclick="app.refreshPipeline()"><i class="fas fa-sync-alt"></i> Refresh</button>
+        <button class="btn primary" onclick="app.openPipelineConfigModal()"><i class="fas fa-info-circle"></i> Rules</button>`;
+};
+
+// STEP 4 action plan card (header + plan table or empty state).
+const buildPipelineActionPlanHtml = (apMonthLabel, activePlan, apItems, apChecks) => {
+    return `
+<div id="pl-action-plan" class="action-plan-section" style="margin-bottom:32px;background:white;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <div>
+        <h2 style="font-size:18px;font-weight:600;margin:0;">📋 Action Plan — ${apMonthLabel}</h2>
+        ${activePlan ? `<span style="background:#d1fae5;color:#065f46;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;margin-top:4px;display:inline-block;">${(activePlan.status||'active').toUpperCase()}</span>` : ''}
+    </div>
+    <div style="display:flex;gap:8px;">
+        <button class="btn secondary btn-sm" onclick="app.showActionPlanHistory()">View History</button>
+        <button class="btn primary btn-sm" onclick="app.openActionPlanModal()">${activePlan ? 'Edit Plan' : 'Create Plan'}</button>
+    </div>
+</div>
+${activePlan ? `
+    <div style="background:#f0fdf4;padding:12px;border-radius:8px;margin-bottom:20px;">
+        <strong>🎯 Main Target:</strong> RM ${(activePlan.main_target||0).toLocaleString()}
+    </div>
+    <div style="overflow-x:auto;">
+        <table class="plan-items-table" style="width:100%;border-collapse:collapse;">
+            <thead>
+                <tr style="background:#f9fafb;border-bottom:2px solid #e5e7eb;">
+                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Event Name</th>
+                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Objective</th>
+                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Target</th>
+                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Due Date</th>
+                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">This Week</th>
+                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Remarks</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${apItems.length ? apItems.map(item => {
+                    const chk = apChecks.find(c => c.item_id === item.id);
+                    const done = chk?.is_done || false;
+                    return `<tr style="border-bottom:1px solid #e5e7eb;">
+                        <td style="padding:10px 12px;">${escapeHtml(item.event_name)}</td>
+                        <td style="padding:10px 12px;">${escapeHtml(item.objective||'')}</td>
+                        <td style="padding:10px 12px;">${escapeHtml(item.target_to_achieve||'')}</td>
+                        <td style="padding:10px 12px;">${item.when_to_achieve||'-'}</td>
+                        <td style="padding:10px 12px;">
+                            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                                <input type="checkbox" class="plan-checkbox" ${done?'checked':''} onchange="app.updatePlanCheck(${activePlan.id},${item.id},this.checked)">
+                                ${done ? '<span style="color:#059669;font-weight:600;">✅ Done</span>' : '<span style="color:#9ca3af;">⏳ Pending</span>'}
+                            </label>
+                        </td>
+                        <td style="padding:10px 12px;">${escapeHtml(item.remarks||'')}</td>
+                    </tr>`;
+                }).join('') : `<tr><td colspan="6" style="padding:24px;text-align:center;color:#9ca3af;">No items added yet. Click "Edit Plan" to add items.</td></tr>`}
+            </tbody>
+        </table>
+    </div>
+    <div class="weekly-reminder" style="margin-top:16px;padding:12px;background:#fef3c7;border-radius:8px;display:flex;justify-content:space-between;align-items:center;">
+        <span><i class="fas fa-bell"></i> Weekly check every Monday — mark completed items above.</span>
+        <button class="btn secondary btn-sm" onclick="app.sendPlanReminder()">Send Reminder</button>
+    </div>
+` : `
+    <div style="text-align:center;padding:40px;color:#9ca3af;">
+        <i class="fas fa-clipboard-list" style="font-size:40px;margin-bottom:16px;display:block;"></i>
+        <p>No action plan for this month. Click <strong>"Create Plan"</strong> to get started.</p>
+    </div>
+`}
+</div>`;
+};
+
+// STEP 5 month-focus / priority-list section (header + month switcher + table).
+const buildPipelineFocusSectionHtml = (focusList, focusMonthLabel, archiveMonths, focusViewMonth, isArchiveView, focusRows) => {
+    return `
+<div id="pl-focus-section" style="margin-bottom:32px;background:white;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.1);padding:20px;">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <h2 style="font-size:18px;font-weight:600;margin:0;">🔥 MONTH FOCUS — My Priority List</h2>
+        <span style="background:#F3F4F6;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;">${focusList.length} prospects</span>
+        <select onchange="app.switchFocusMonth(this.value)" style="border:1px solid #D1D5DB;border-radius:6px;padding:4px 10px;font-size:12px;color:#374151;cursor:pointer;">
+            <option value="current" ${focusViewMonth === 'current' ? 'selected' : ''}>${focusMonthLabel} (Current)</option>
+            ${archiveMonths.map(m => {
+                const ml = new Date(m + '-01').toLocaleString('default', { month: 'long', year: 'numeric' });
+                return '<option value="' + m + '" ' + (focusViewMonth === m ? 'selected' : '') + '>' + ml + '</option>';
+            }).join('')}
+        </select>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+        <button class="btn secondary btn-sm" onclick="app.openExpiredSearchModal()" title="Browse expired & available prospects"><i class="fas fa-search"></i> Browse Past</button>
+        ${!isArchiveView ? '<button class="btn-icon" onclick="app.saveManualOrder()" title="Save Order"><i class="fas fa-save"></i></button>' : ''}
+    </div>
+</div>
+${isArchiveView
+    ? '<div style="background:#FEF3C7;padding:8px 16px;border-radius:8px;margin-bottom:12px;font-size:12px;color:#92400E;"><i class="fas fa-archive" style="margin-right:4px;"></i> Viewing archived month (read-only). Use "Browse Past" to re-add prospects to current month.</div>'
+    : '<p style="font-size:12px;color:#9CA3AF;margin-bottom:16px;"><i class="fas fa-arrows-alt" style="margin-right:4px;"></i> Drag ☰ to reorder priority • Add prospects from Table 2 below</p>'}
+<div style="overflow-x:auto;">
+    <table style="width:100%;border-collapse:collapse;min-width:1080px;">
+        <thead>
+            <tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">
+                <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;width:50px;">#</th>
+                <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Prospect Name</th>
+                <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Target to Sign (Product/Service)</th>
+                <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Amount (RM)</th>
+                <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Probability</th>
+                <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Action Needed to Close Deal</th>
+                <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Actions</th>
+            </tr>
+        </thead>
+        <tbody id="focus-list-body">
+            ${focusRows || '<tr><td colspan="7" style="padding:32px;text-align:center;color:#9CA3AF;">No prospects in your priority list. Add from Table 2 below.</td></tr>'}
+        </tbody>
+    </table>
+</div>
+<div id="pl-team-sections"></div>
+</div>`;
+};
+
+// STEP 7 one collapsible team-agent focus section (built per sub-user).
+const buildPipelineTeamSectionRowHtml = (sub, subFocus, subRows) => {
+    return `
+                <div style="margin-top:12px;">
+                    <div onclick="app.toggleAgentFocusSection(this)" style="cursor:pointer;display:flex;align-items:center;gap:8px;padding:12px 16px;background:#F0F4FF;border-radius:8px;border:1px solid #DBEAFE;user-select:none;">
+                        <span class="agent-collapse-icon" style="transition:transform 0.2s;font-size:14px;">▸</span>
+                        <strong style="font-size:14px;">${escapeHtml(sub.full_name || sub.username || 'Agent')}</strong>
+                        <span style="background:#E0E7FF;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;color:#3730A3;">${subFocus.length} prospects</span>
+                    </div>
+                    <div class="agent-focus-body" style="display:none;padding:8px 0;overflow-x:auto;">
+                        <table style="width:100%;border-collapse:collapse;min-width:1080px;">
+                            <thead>
+                                <tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">
+                                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;width:50px;">#</th>
+                                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Prospect Name</th>
+                                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Target to Sign</th>
+                                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Amount (RM)</th>
+                                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Probability</th>
+                                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Action Needed</th>
+                                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>${subRows}</tbody>
+                        </table>
+                    </div>
+                </div>`;
+};
+
 const showPipelineView = async (container) => {
     const userId = _currentUser?.id || 5;
     runHuiJiMigration(); // fire-and-forget
@@ -1029,55 +1246,7 @@ const showPipelineView = async (container) => {
         // (_plData undefined) falls through and fills the skeleton exactly as today.
         if (_plData) return;
     } else {
-    container.innerHTML = `
-<div class="pipeline-dual-view">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
-    <div>
-        <h1 style="font-size:24px;font-weight:700;margin:0;">Potential Pipeline Management</h1>
-        <p style="color:#6B7280;margin-top:4px;">Track signing probability across 6 solution categories</p>
-    </div>
-    <div id="pl-header-controls" style="display:flex;gap:12px;align-items:center;">
-        <div class="skeleton" style="width:160px;height:38px;border-radius:6px;"></div>
-        <div class="skeleton" style="width:140px;height:38px;border-radius:6px;"></div>
-        <button class="btn secondary" disabled><i class="fas fa-sync-alt"></i> Refresh</button>
-        <button class="btn primary" disabled><i class="fas fa-info-circle"></i> Rules</button>
-    </div>
-</div>
-<div id="pl-action-plan">
-    <div style="background:white;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.1);margin-bottom:32px;">
-        ${_skelCard(28)}${_skelCard(60)}${_skelCard(120)}
-    </div>
-</div>
-<div id="pl-focus-section">
-    <div style="background:white;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.1);margin-bottom:32px;">
-        ${_skelCard(28)}<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;min-width:1080px;"><tbody>${_skelRows(4,7)}</tbody></table></div>
-    </div>
-</div>
-<div style="background:white;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.1);padding:20px;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <div style="display:flex;align-items:center;gap:12px;">
-            <h2 style="font-size:18px;font-weight:600;margin:0;">📊 Auto-Generated Pipeline</h2>
-            <span id="pl-table2-count"><div class="skeleton" style="display:inline-block;width:90px;height:22px;border-radius:20px;vertical-align:middle;"></div></span>
-        </div>
-        <p style="font-size:11px;color:#9CA3AF;margin:0;">Sorted: highest probability → most recent activity → name</p>
-    </div>
-    <div style="overflow-x:auto;">
-        <table style="width:100%;border-collapse:collapse;min-width:1080px;">
-            <thead>
-                <tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">
-                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Prospect Name</th>
-                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Target to Sign (Product/Service)</th>
-                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Amount (RM)</th>
-                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Probability</th>
-                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Action Needed to Close Deal</th>
-                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Quick Action</th>
-                </tr>
-            </thead>
-            <tbody id="pipeline-list-body">${_skelRows(6,6)}</tbody>
-        </table>
-    </div>
-</div>
-</div>`;
+    container.innerHTML = buildPipelineSkeletonHtml({ _skelRows, _skelCard });
     }
 
     // ── STEP 2: Fire ALL big queries in parallel ──────────────────────────
@@ -1096,20 +1265,7 @@ const showPipelineView = async (container) => {
     // Fill header controls as soon as agents are available
     const _plHdrCtrl = document.getElementById('pl-header-controls');
     if (_plHdrCtrl) {
-        _plHdrCtrl.innerHTML = `
-        <select class="form-control" style="width:160px;height:38px;" onchange="app.setPipelineFilter('agent', this.value)">
-            <option value="all">All Agents</option>
-            ${agents.map(a => `<option value="${a.id}" ${_pipelineAgentFilter == a.id ? 'selected' : ''}>${escapeHtml(a.full_name)}</option>`).join('')}
-        </select>
-        <select class="form-control" style="width:140px;height:38px;" onchange="(async () => { await app.setPipelineFilter('status', this.value); })()">
-            <option value="all">All Status</option>
-            <option value="prospect" ${_pipelineStatusFilter === 'prospect' ? 'selected' : ''}>Prospect</option>
-            <option value="active" ${_pipelineStatusFilter === 'active' ? 'selected' : ''}>Active</option>
-            <option value="warm" ${_pipelineStatusFilter === 'warm' ? 'selected' : ''}>Warm</option>
-            <option value="hot" ${_pipelineStatusFilter === 'hot' ? 'selected' : ''}>Hot</option>
-        </select>
-        <button class="btn secondary" onclick="app.refreshPipeline()"><i class="fas fa-sync-alt"></i> Refresh</button>
-        <button class="btn primary" onclick="app.openPipelineConfigModal()"><i class="fas fa-info-circle"></i> Rules</button>`;
+        _plHdrCtrl.innerHTML = buildPipelineHeaderControlsHtml(agents, _pipelineAgentFilter, _pipelineStatusFilter);
     }
 
     // Filter prospects
@@ -1178,66 +1334,7 @@ const showPipelineView = async (container) => {
     // Fill action plan section — users see this before the slow table loads
     const _plActionPlan = document.getElementById('pl-action-plan');
     if (_plActionPlan) {
-        _plActionPlan.outerHTML = `
-<div id="pl-action-plan" class="action-plan-section" style="margin-bottom:32px;background:white;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-    <div>
-        <h2 style="font-size:18px;font-weight:600;margin:0;">📋 Action Plan — ${_apMonthLabel}</h2>
-        ${_activePlan ? `<span style="background:#d1fae5;color:#065f46;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;margin-top:4px;display:inline-block;">${(_activePlan.status||'active').toUpperCase()}</span>` : ''}
-    </div>
-    <div style="display:flex;gap:8px;">
-        <button class="btn secondary btn-sm" onclick="app.showActionPlanHistory()">View History</button>
-        <button class="btn primary btn-sm" onclick="app.openActionPlanModal()">${_activePlan ? 'Edit Plan' : 'Create Plan'}</button>
-    </div>
-</div>
-${_activePlan ? `
-    <div style="background:#f0fdf4;padding:12px;border-radius:8px;margin-bottom:20px;">
-        <strong>🎯 Main Target:</strong> RM ${(_activePlan.main_target||0).toLocaleString()}
-    </div>
-    <div style="overflow-x:auto;">
-        <table class="plan-items-table" style="width:100%;border-collapse:collapse;">
-            <thead>
-                <tr style="background:#f9fafb;border-bottom:2px solid #e5e7eb;">
-                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Event Name</th>
-                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Objective</th>
-                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Target</th>
-                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Due Date</th>
-                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">This Week</th>
-                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Remarks</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${_apItems.length ? _apItems.map(item => {
-                    const chk = _apChecks.find(c => c.item_id === item.id);
-                    const done = chk?.is_done || false;
-                    return `<tr style="border-bottom:1px solid #e5e7eb;">
-                        <td style="padding:10px 12px;">${escapeHtml(item.event_name)}</td>
-                        <td style="padding:10px 12px;">${escapeHtml(item.objective||'')}</td>
-                        <td style="padding:10px 12px;">${escapeHtml(item.target_to_achieve||'')}</td>
-                        <td style="padding:10px 12px;">${item.when_to_achieve||'-'}</td>
-                        <td style="padding:10px 12px;">
-                            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
-                                <input type="checkbox" class="plan-checkbox" ${done?'checked':''} onchange="app.updatePlanCheck(${_activePlan.id},${item.id},this.checked)">
-                                ${done ? '<span style="color:#059669;font-weight:600;">✅ Done</span>' : '<span style="color:#9ca3af;">⏳ Pending</span>'}
-                            </label>
-                        </td>
-                        <td style="padding:10px 12px;">${escapeHtml(item.remarks||'')}</td>
-                    </tr>`;
-                }).join('') : `<tr><td colspan="6" style="padding:24px;text-align:center;color:#9ca3af;">No items added yet. Click "Edit Plan" to add items.</td></tr>`}
-            </tbody>
-        </table>
-    </div>
-    <div class="weekly-reminder" style="margin-top:16px;padding:12px;background:#fef3c7;border-radius:8px;display:flex;justify-content:space-between;align-items:center;">
-        <span><i class="fas fa-bell"></i> Weekly check every Monday — mark completed items above.</span>
-        <button class="btn secondary btn-sm" onclick="app.sendPlanReminder()">Send Reminder</button>
-    </div>
-` : `
-    <div style="text-align:center;padding:40px;color:#9ca3af;">
-        <i class="fas fa-clipboard-list" style="font-size:40px;margin-bottom:16px;display:block;"></i>
-        <p>No action plan for this month. Click <strong>"Create Plan"</strong> to get started.</p>
-    </div>
-`}
-</div>`;
+        _plActionPlan.outerHTML = buildPipelineActionPlanHtml(_apMonthLabel, _activePlan, _apItems, _apChecks);
     }
 
     // ── STEP 5: Build focus list (medium speed) ───────────────────────────
@@ -1275,48 +1372,7 @@ ${_activePlan ? `
     // Fill focus section — visible before expensive table 2 loads
     const _plFocusSection = document.getElementById('pl-focus-section');
     if (_plFocusSection) {
-        _plFocusSection.outerHTML = `
-<div id="pl-focus-section" style="margin-bottom:32px;background:white;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.1);padding:20px;">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
-    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-        <h2 style="font-size:18px;font-weight:600;margin:0;">🔥 MONTH FOCUS — My Priority List</h2>
-        <span style="background:#F3F4F6;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;">${focusList.length} prospects</span>
-        <select onchange="app.switchFocusMonth(this.value)" style="border:1px solid #D1D5DB;border-radius:6px;padding:4px 10px;font-size:12px;color:#374151;cursor:pointer;">
-            <option value="current" ${_focusViewMonth === 'current' ? 'selected' : ''}>${_focusMonthLabel} (Current)</option>
-            ${_archiveMonths.map(m => {
-                const ml = new Date(m + '-01').toLocaleString('default', { month: 'long', year: 'numeric' });
-                return '<option value="' + m + '" ' + (_focusViewMonth === m ? 'selected' : '') + '>' + ml + '</option>';
-            }).join('')}
-        </select>
-    </div>
-    <div style="display:flex;gap:8px;align-items:center;">
-        <button class="btn secondary btn-sm" onclick="app.openExpiredSearchModal()" title="Browse expired & available prospects"><i class="fas fa-search"></i> Browse Past</button>
-        ${!_isArchiveView ? '<button class="btn-icon" onclick="app.saveManualOrder()" title="Save Order"><i class="fas fa-save"></i></button>' : ''}
-    </div>
-</div>
-${_isArchiveView
-    ? '<div style="background:#FEF3C7;padding:8px 16px;border-radius:8px;margin-bottom:12px;font-size:12px;color:#92400E;"><i class="fas fa-archive" style="margin-right:4px;"></i> Viewing archived month (read-only). Use "Browse Past" to re-add prospects to current month.</div>'
-    : '<p style="font-size:12px;color:#9CA3AF;margin-bottom:16px;"><i class="fas fa-arrows-alt" style="margin-right:4px;"></i> Drag ☰ to reorder priority • Add prospects from Table 2 below</p>'}
-<div style="overflow-x:auto;">
-    <table style="width:100%;border-collapse:collapse;min-width:1080px;">
-        <thead>
-            <tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">
-                <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;width:50px;">#</th>
-                <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Prospect Name</th>
-                <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Target to Sign (Product/Service)</th>
-                <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Amount (RM)</th>
-                <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Probability</th>
-                <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Action Needed to Close Deal</th>
-                <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Actions</th>
-            </tr>
-        </thead>
-        <tbody id="focus-list-body">
-            ${focusRows || '<tr><td colspan="7" style="padding:32px;text-align:center;color:#9CA3AF;">No prospects in your priority list. Add from Table 2 below.</td></tr>'}
-        </tbody>
-    </table>
-</div>
-<div id="pl-team-sections"></div>
-</div>`;
+        _plFocusSection.outerHTML = buildPipelineFocusSectionHtml(focusList, _focusMonthLabel, _archiveMonths, _focusViewMonth, _isArchiveView, focusRows);
     }
 
     // ── STEP 6: Expensive enrichment — Table 2 tbody has skeleton, fill after ──
@@ -1381,30 +1437,7 @@ ${_isArchiveView
             if (subFocus.length === 0) continue;
             agentCount++;
             const subRows = (await Promise.all(subFocus.map((rec, idx) => renderFocusRow(rec, idx, allActivities, probBadge, true, _plPrefetched)))).join('');
-            _teamAgentSections += `
-                <div style="margin-top:12px;">
-                    <div onclick="app.toggleAgentFocusSection(this)" style="cursor:pointer;display:flex;align-items:center;gap:8px;padding:12px 16px;background:#F0F4FF;border-radius:8px;border:1px solid #DBEAFE;user-select:none;">
-                        <span class="agent-collapse-icon" style="transition:transform 0.2s;font-size:14px;">▸</span>
-                        <strong style="font-size:14px;">${escapeHtml(sub.full_name || sub.username || 'Agent')}</strong>
-                        <span style="background:#E0E7FF;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;color:#3730A3;">${subFocus.length} prospects</span>
-                    </div>
-                    <div class="agent-focus-body" style="display:none;padding:8px 0;overflow-x:auto;">
-                        <table style="width:100%;border-collapse:collapse;min-width:1080px;">
-                            <thead>
-                                <tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">
-                                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;width:50px;">#</th>
-                                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Prospect Name</th>
-                                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Target to Sign</th>
-                                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Amount (RM)</th>
-                                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Probability</th>
-                                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Action Needed</th>
-                                    <th scope="col" style="padding:10px 12px;text-align:left;font-size:12px;color:#6B7280;">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>${subRows}</tbody>
-                        </table>
-                    </div>
-                </div>`;
+            _teamAgentSections += buildPipelineTeamSectionRowHtml(sub, subFocus, subRows);
         }
         const _plTeamSections = document.getElementById('pl-team-sections');
         if (_plTeamSections && _teamAgentSections) {

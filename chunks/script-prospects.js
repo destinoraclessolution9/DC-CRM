@@ -1218,6 +1218,120 @@ const _showProspectsReactRoot = (useReact) => {
     if (legacy && _prospectViewMode !== 'card') legacy.style.display = useReact ? 'none' : '';
 };
 
+// ── Internal render-builders (extracted from renderProspectsTable) ─────────
+// Pure string assembly — no DOM mutation, no fetches, no control-flow side
+// effects. Kept byte-for-byte equivalent to the inline templates they replace.
+const buildProspectRowHtml = (p, ctx) => {
+    const { userById, canReassign, canDelete, activeAgents } = ctx;
+    const grade = getScoreGrade(p.score);
+    const daysLeft = calculateProtectionDays(p);
+    const protectionStatus = getProtectionStatus(daysLeft);
+    const protFillClass = daysLeft <= 0 ? 'expired' : protectionStatus;
+    const daysClass = daysLeft <= 0 ? 'days-expired' : (daysLeft <= 7 ? 'days-critical' : (daysLeft <= 14 ? 'days-warning' : 'days-normal'));
+    const daysLabel = daysLeft <= 0 ? 'Expired' : `${daysLeft}d left`;
+    const relTime = timeAgo(p.last_activity_date);
+    const lastActivityHtml = p.last_activity_date
+        ? `<span style="font-weight:600;color:var(--text-primary);">${relTime}</span><br><span class="la-date" style="font-size:11px;color:var(--text-secondary);">${escapeHtml(p.last_activity_date)}</span>`
+        : '<span style="color:var(--text-secondary);font-style:italic;">No activity</span>';
+    const agent = userById.get(String(p.responsible_agent_id));
+    const agentName = agent ? agent.full_name : '—';
+    const isSelected = _selectedProspects.has(p.id);
+
+    return `
+            <tr onclick="app.showProspectDetail(${p.id})" class="${p.unable_to_serve ? 'row-unable' : ''}">
+                <td class="prospect-select-cell" onclick="event.stopPropagation()">
+                    <input type="checkbox" data-pid="${p.id}" ${isSelected ? 'checked' : ''} onchange="app.toggleProspectSelect(${p.id})">
+                </td>
+                <td data-label="Name">
+                    <strong class="${p.unable_to_serve ? 'name-unable' : ''}">${escapeHtml(p.full_name || '(No Name)')}</strong>
+                    ${p.phone ? `<br><span style="font-size:12px;color:var(--text-secondary);">${escapeHtml(p.phone)}</span>` : ''}
+                    ${p.unable_to_serve ? `<br><span class="badge-unable">Unable to Serve</span>` : ''}
+                </td>
+                <td data-label="Agent" onclick="event.stopPropagation()">${canReassign
+                    ? `<select class="form-control" style="padding:2px 6px;font-size:12px;min-width:120px;border:1px solid var(--border);border-radius:4px;background:var(--surface);cursor:pointer;" onchange="app.quickReassign(${p.id}, this.value, 'prospect')" title="Reassign agent">${(() => {
+                        // Render a selected placeholder so the dropdown can't fall back to showing
+                        // the alphabetically-first agent (e.g. "Lim Chi Kin") for unassigned or
+                        // off-list-owned prospects. Truly unassigned → blank label. Owner is an
+                        // admin/lead/deleted user → show the real name.
+                        const cid = p.responsible_agent_id ? String(p.responsible_agent_id) : '';
+                        if (!cid) return '<option value="" selected></option>';
+                        if (activeAgents.some(a => String(a.id) === cid)) return '';
+                        const u = userById.get(cid);
+                        if (!u || !u.full_name) return '<option value="" selected></option>';
+                        return `<option value="${escapeHtml(cid)}" selected>${escapeHtml(u.full_name)}</option>`;
+                    })()}${activeAgents.map(a => `<option value="${a.id}" ${String(a.id) === String(p.responsible_agent_id) ? 'selected' : ''}>${escapeHtml(a.full_name || 'Agent')}</option>`).join('')}</select>`
+                    : (p.responsible_agent_id ? escapeHtml(agentName) : '')}</td>
+                <td data-label="Score">
+                    <span class="score-badge score-${grade.replace('+', '-plus')}">${p.score || 0} (${grade})</span>
+                </td>
+                <td data-label="Ming Gua">${p.ming_gua || 'MG4'}</td>
+                <td data-label="Occupation">${escapeHtml((p.occupation || '') + (p.company_name ? ' · ' + p.company_name : ''))}</td>
+                <td data-label="Last Activity" data-la-id="${p.id}">${lastActivityHtml}</td>
+                <td data-label="Protection">
+                    <div class="${daysClass}">${daysLabel}</div>
+                    <div class="protection-bar">
+                        <div class="protection-fill ${protFillClass}" style="width:${Math.min(100, daysLeft <= 0 ? 100 : (daysLeft / 30) * 100)}%"></div>
+                    </div>
+                </td>
+                <td onclick="event.stopPropagation()">
+                    <button class="btn-icon" title="Edit" onclick="app.openProspectModal(${p.id})"><i class="fas fa-edit"></i></button>
+                    <button class="btn-icon" title="Add Activity" onclick="app.openActivityModal('', ${p.id})"><i class="fas fa-calendar-plus"></i></button>
+                    ${p.conversion_status === 'pending_approval' ? `
+                        <span title="Conversion pending manager approval" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;background:#fef3c7;border-radius:6px;cursor:default;"><i class="fas fa-user-clock" style="color:#d97706;font-size:12px;"></i></span>
+                        ${(isSystemAdmin(_currentUser) || isMarketingManager(_currentUser)) ? `<button class="btn-icon" title="Review & Approve Conversion" style="color:#d97706;" onclick="event.stopPropagation();app.showConversionApprovalModal(${p.id})"><i class="fas fa-check-circle"></i></button>` : ''}
+                    ` : (p.status !== 'converted' ? `
+                        <button class="btn-icon" title="Convert to Customer" onclick="app.convertToCustomer(${p.id})"><i class="fas fa-user-check"></i></button>
+                    ` : '')}
+                    ${canDelete ? `<button class="btn-icon" title="Delete" style="color:var(--red-500);" onclick="app.deleteProspect(${p.id})"><i class="fas fa-trash"></i></button>` : ''}
+                </td>
+            </tr>
+        `;
+};
+
+const buildProspectsEmptyHtml = (searchQueryRaw, agentFilter, includeDormantToggle) => {
+    const hint = searchQueryRaw
+        ? `No prospects matched "<strong>${searchQueryRaw.replace(/</g, '&lt;')}</strong>". Dormant records were included in this search.`
+        : (agentFilter
+            ? 'No prospects found for this agent.'
+            : (includeDormantToggle
+                ? 'No prospects found. Click "Add Prospect" to create one.'
+                : 'No active prospects. Check "Include dormant" or type a name/phone to search older records.'));
+    return `<tr><td colspan="9" style="text-align:center; padding:40px;">${hint}</td></tr>`;
+};
+
+const buildProspectsStatsHtml = (prospects, totalCount) => {
+    const totalAll = prospects.length;
+    const highScore = prospects.filter(p => (p.score || 0) >= 70).length;
+    const now = Date.now();
+    const active30 = prospects.filter(p => {
+        if (!p.last_activity_date) return false;
+        return (now - new Date(p.last_activity_date).getTime()) <= 30 * 86400000;
+    }).length;
+    const avgScore = totalAll ? Math.round(prospects.reduce((s, p) => s + (p.score || 0), 0) / totalAll) : 0;
+    return `
+            <div class="prospect-stat-card">
+                <div class="prospect-stat-icon pink"><i class="fas fa-users"></i></div>
+                <div><div class="prospect-stat-value">${totalAll}</div><div class="prospect-stat-label">Total Prospects</div></div>
+            </div>
+            <div class="prospect-stat-card">
+                <div class="prospect-stat-icon star"><i class="fas fa-star"></i></div>
+                <div><div class="prospect-stat-value">${highScore}</div><div class="prospect-stat-label">High Score (70+)</div></div>
+            </div>
+            <div class="prospect-stat-card">
+                <div class="prospect-stat-icon green"><i class="fas fa-bolt"></i></div>
+                <div><div class="prospect-stat-value">${active30}</div><div class="prospect-stat-label">Active (Last 30 Days)</div></div>
+            </div>
+            <div class="prospect-stat-card">
+                <div class="prospect-stat-icon blue"><i class="fas fa-chart-line"></i></div>
+                <div><div class="prospect-stat-value">${avgScore}</div><div class="prospect-stat-label">Avg. Score</div></div>
+            </div>
+            <div class="prospect-stat-card">
+                <div class="prospect-stat-icon rose"><i class="fas fa-filter"></i></div>
+                <div><div class="prospect-stat-value">${totalCount}</div><div class="prospect-stat-label">Filtered Results</div></div>
+            </div>
+        `;
+};
+
 const renderProspectsTable = async () => {
     const tbody = document.getElementById('prospects-table-body');
     if (!tbody) return;
@@ -1517,82 +1631,14 @@ const renderProspectsTable = async () => {
     // This decouples the 307 ms activities query from the table's first paint.
     _mark('latest-activities-loaded'); // updated once background fetch resolves
 
+    const _rowCtx = { userById, canReassign, canDelete, activeAgents };
     let html = '';
     for (const p of pageProspects) {
-        const grade = getScoreGrade(p.score);
-        const daysLeft = calculateProtectionDays(p);
-        const protectionStatus = getProtectionStatus(daysLeft);
-        const protFillClass = daysLeft <= 0 ? 'expired' : protectionStatus;
-        const daysClass = daysLeft <= 0 ? 'days-expired' : (daysLeft <= 7 ? 'days-critical' : (daysLeft <= 14 ? 'days-warning' : 'days-normal'));
-        const daysLabel = daysLeft <= 0 ? 'Expired' : `${daysLeft}d left`;
-        const relTime = timeAgo(p.last_activity_date);
-        const lastActivityHtml = p.last_activity_date
-            ? `<span style="font-weight:600;color:var(--text-primary);">${relTime}</span><br><span class="la-date" style="font-size:11px;color:var(--text-secondary);">${escapeHtml(p.last_activity_date)}</span>`
-            : '<span style="color:var(--text-secondary);font-style:italic;">No activity</span>';
-        const agent = userById.get(String(p.responsible_agent_id));
-        const agentName = agent ? agent.full_name : '—';
-        const isSelected = _selectedProspects.has(p.id);
-
-        html += `
-            <tr onclick="app.showProspectDetail(${p.id})" class="${p.unable_to_serve ? 'row-unable' : ''}">
-                <td class="prospect-select-cell" onclick="event.stopPropagation()">
-                    <input type="checkbox" data-pid="${p.id}" ${isSelected ? 'checked' : ''} onchange="app.toggleProspectSelect(${p.id})">
-                </td>
-                <td data-label="Name">
-                    <strong class="${p.unable_to_serve ? 'name-unable' : ''}">${escapeHtml(p.full_name || '(No Name)')}</strong>
-                    ${p.phone ? `<br><span style="font-size:12px;color:var(--text-secondary);">${escapeHtml(p.phone)}</span>` : ''}
-                    ${p.unable_to_serve ? `<br><span class="badge-unable">Unable to Serve</span>` : ''}
-                </td>
-                <td data-label="Agent" onclick="event.stopPropagation()">${canReassign
-                    ? `<select class="form-control" style="padding:2px 6px;font-size:12px;min-width:120px;border:1px solid var(--border);border-radius:4px;background:var(--surface);cursor:pointer;" onchange="app.quickReassign(${p.id}, this.value, 'prospect')" title="Reassign agent">${(() => {
-                        // Render a selected placeholder so the dropdown can't fall back to showing
-                        // the alphabetically-first agent (e.g. "Lim Chi Kin") for unassigned or
-                        // off-list-owned prospects. Truly unassigned → blank label. Owner is an
-                        // admin/lead/deleted user → show the real name.
-                        const cid = p.responsible_agent_id ? String(p.responsible_agent_id) : '';
-                        if (!cid) return '<option value="" selected></option>';
-                        if (activeAgents.some(a => String(a.id) === cid)) return '';
-                        const u = userById.get(cid);
-                        if (!u || !u.full_name) return '<option value="" selected></option>';
-                        return `<option value="${escapeHtml(cid)}" selected>${escapeHtml(u.full_name)}</option>`;
-                    })()}${activeAgents.map(a => `<option value="${a.id}" ${String(a.id) === String(p.responsible_agent_id) ? 'selected' : ''}>${escapeHtml(a.full_name || 'Agent')}</option>`).join('')}</select>`
-                    : (p.responsible_agent_id ? escapeHtml(agentName) : '')}</td>
-                <td data-label="Score">
-                    <span class="score-badge score-${grade.replace('+', '-plus')}">${p.score || 0} (${grade})</span>
-                </td>
-                <td data-label="Ming Gua">${p.ming_gua || 'MG4'}</td>
-                <td data-label="Occupation">${escapeHtml((p.occupation || '') + (p.company_name ? ' · ' + p.company_name : ''))}</td>
-                <td data-label="Last Activity" data-la-id="${p.id}">${lastActivityHtml}</td>
-                <td data-label="Protection">
-                    <div class="${daysClass}">${daysLabel}</div>
-                    <div class="protection-bar">
-                        <div class="protection-fill ${protFillClass}" style="width:${Math.min(100, daysLeft <= 0 ? 100 : (daysLeft / 30) * 100)}%"></div>
-                    </div>
-                </td>
-                <td onclick="event.stopPropagation()">
-                    <button class="btn-icon" title="Edit" onclick="app.openProspectModal(${p.id})"><i class="fas fa-edit"></i></button>
-                    <button class="btn-icon" title="Add Activity" onclick="app.openActivityModal('', ${p.id})"><i class="fas fa-calendar-plus"></i></button>
-                    ${p.conversion_status === 'pending_approval' ? `
-                        <span title="Conversion pending manager approval" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;background:#fef3c7;border-radius:6px;cursor:default;"><i class="fas fa-user-clock" style="color:#d97706;font-size:12px;"></i></span>
-                        ${(isSystemAdmin(_currentUser) || isMarketingManager(_currentUser)) ? `<button class="btn-icon" title="Review & Approve Conversion" style="color:#d97706;" onclick="event.stopPropagation();app.showConversionApprovalModal(${p.id})"><i class="fas fa-check-circle"></i></button>` : ''}
-                    ` : (p.status !== 'converted' ? `
-                        <button class="btn-icon" title="Convert to Customer" onclick="app.convertToCustomer(${p.id})"><i class="fas fa-user-check"></i></button>
-                    ` : '')}
-                    ${canDelete ? `<button class="btn-icon" title="Delete" style="color:var(--red-500);" onclick="app.deleteProspect(${p.id})"><i class="fas fa-trash"></i></button>` : ''}
-                </td>
-            </tr>
-        `;
+        html += buildProspectRowHtml(p, _rowCtx);
     }
 
     if (pageProspects.length === 0) {
-        const hint = searchQueryRaw
-            ? `No prospects matched "<strong>${searchQueryRaw.replace(/</g, '&lt;')}</strong>". Dormant records were included in this search.`
-            : (agentFilter
-                ? 'No prospects found for this agent.'
-                : (includeDormantToggle
-                    ? 'No prospects found. Click "Add Prospect" to create one.'
-                    : 'No active prospects. Check "Include dormant" or type a name/phone to search older records.'));
-        html = `<tr><td colspan="9" style="text-align:center; padding:40px;">${hint}</td></tr>`;
+        html = buildProspectsEmptyHtml(searchQueryRaw, agentFilter, includeDormantToggle);
     }
 
     tbody.innerHTML = html;
@@ -1600,36 +1646,7 @@ const renderProspectsTable = async () => {
     // ── Stats row ──────────────────────────────────────────────────────
     const statsEl = document.getElementById('prospect-stats-row');
     if (statsEl) {
-        const totalAll = prospects.length;
-        const highScore = prospects.filter(p => (p.score || 0) >= 70).length;
-        const now = Date.now();
-        const active30 = prospects.filter(p => {
-            if (!p.last_activity_date) return false;
-            return (now - new Date(p.last_activity_date).getTime()) <= 30 * 86400000;
-        }).length;
-        const avgScore = totalAll ? Math.round(prospects.reduce((s, p) => s + (p.score || 0), 0) / totalAll) : 0;
-        statsEl.innerHTML = `
-            <div class="prospect-stat-card">
-                <div class="prospect-stat-icon pink"><i class="fas fa-users"></i></div>
-                <div><div class="prospect-stat-value">${totalAll}</div><div class="prospect-stat-label">Total Prospects</div></div>
-            </div>
-            <div class="prospect-stat-card">
-                <div class="prospect-stat-icon star"><i class="fas fa-star"></i></div>
-                <div><div class="prospect-stat-value">${highScore}</div><div class="prospect-stat-label">High Score (70+)</div></div>
-            </div>
-            <div class="prospect-stat-card">
-                <div class="prospect-stat-icon green"><i class="fas fa-bolt"></i></div>
-                <div><div class="prospect-stat-value">${active30}</div><div class="prospect-stat-label">Active (Last 30 Days)</div></div>
-            </div>
-            <div class="prospect-stat-card">
-                <div class="prospect-stat-icon blue"><i class="fas fa-chart-line"></i></div>
-                <div><div class="prospect-stat-value">${avgScore}</div><div class="prospect-stat-label">Avg. Score</div></div>
-            </div>
-            <div class="prospect-stat-card">
-                <div class="prospect-stat-icon rose"><i class="fas fa-filter"></i></div>
-                <div><div class="prospect-stat-value">${totalCount}</div><div class="prospect-stat-label">Filtered Results</div></div>
-            </div>
-        `;
+        statsEl.innerHTML = buildProspectsStatsHtml(prospects, totalCount);
     }
 
     // ── Update sort icons in thead ─────────────────────────────────────
@@ -3586,68 +3603,14 @@ const zoomCpsPhoto = (url) => {
     if (window._resolveAttachmentImages) window._resolveAttachmentImages(overlay);
 };
 
-const showProspectDetail = async (prospectId) => {
-    // Snapshot originating view BEFORE any await — a concurrent navigateTo during
-    // the async gap would overwrite _state.cv, corrupting the back-destination.
-    const _fromView = _state.cv;
-    const prospect = await AppDataStore.getById('prospects', prospectId);
-    if (!prospect) {
-        UI.toast.error('Prospect not found. They may not have been added to the system yet.');
-        // Purge stale SWR caches so the ghost row disappears from the list on re-render
-        AppDataStore.invalidateCache('prospects');
-        renderProspectsTable().catch(() => {});
-        return;
-    }
-    // Single source of truth for prospect visibility: canViewProspect walks
-    // the reporting tree, so team leaders / uplines (Level 3–11) can open any
-    // prospect owned by someone in their subordinate chain. The previous
-    // duplicate "isAdmin || isOwner" check here blocked mid-level leads like
-    // Level 4/5/6/8 from viewing their own team's prospects.
-    if (!await canViewProspect(prospect)) {
-        UI.toast.error('You do not have permission to view this prospect.');
-        await navigateTo('prospects');
-        return;
-    }
-    _state.pvd = _fromView;
-    _state.cdv = { type: 'prospect', id: prospectId };
-
-    const container = document.getElementById('content-viewport');
-    if (!container) return;
-
-    // Only the CPS photo lookup needs activities on the header critical path.
-    // Previously also fetched proposed_solutions/notes/names, but those results
-    // were never used here — each was an extra serial uncached Supabase round
-    // trip that made opening a prospect feel laggy.
-    const activities = await AppDataStore.getActivitiesForProspect(prospectId, { limit: 500 });
-
-    const daysLeft = calculateProtectionDays(prospect);
-    const protectionStatus = getProtectionStatus(daysLeft);
-    const statusColor = protectionStatus === 'normal' ? 'success' : protectionStatus === 'warning' ? 'secondary' : 'error';
-    const statusLabel = protectionStatus === 'normal' ? 'Normal' : protectionStatus === 'warning' ? 'Expiring Soon' : 'Critical';
-
-    const cpsPhoto = activities
-        .filter(a => a.type === 'CPS' && a.cps_attachment?.url && a.cps_attachment?.type?.startsWith('image/'))
-        .sort((a, b) => (b.id || 0) - (a.id || 0))[0]?.cps_attachment;
-
-    setTimeout(async () => {
-        await addWhatsAppButtonToProfile('prospect', prospectId);
-        // Badge: count pending proposed solutions for this prospect
-        try {
-            const sols = await AppDataStore.getAll('proposed_solutions');
-            const pendingCount = (sols || []).filter(s => String(s.prospect_id) === String(prospectId) && s.status === 'Proposed').length;
-            const badge = document.getElementById(`pending-sol-badge-${prospectId}`);
-            if (badge) {
-                if (pendingCount > 0) {
-                    badge.textContent = pendingCount;
-                    badge.style.display = 'inline-block';
-                } else {
-                    badge.style.display = 'none';
-                }
-            }
-        } catch (e) {}
-    }, 100);
-
-    container.innerHTML = `
+// ── Internal render-builders (extracted from showProspectDetail) ───────────
+// Pure string assembly for the prospect-detail view. The header builder owns
+// the <style> block, the back button, the unable-to-serve banner and the
+// identity header (badges + name + action buttons + CPS photo). The tabs
+// builder owns the accordion shell. Both are byte-for-byte equivalent to the
+// inline templates they replace; the orchestrator concatenates them in order.
+const buildProspectDetailHeaderHtml = (prospect, cpsPhoto) => {
+    return `
         <div class="pv-wrap">
             <style>
                 .pv-wrap{background:#fff;border-radius:12px;box-shadow:var(--shadow-md);overflow:hidden;padding-bottom:80px;}
@@ -3732,7 +3695,11 @@ const showProspectDetail = async (prospectId) => {
                 </div>
                 ${cpsPhoto ? `<img loading="lazy" decoding="async" data-attach-src="${cpsPhoto.url}" onclick="event.stopPropagation();app.zoomCpsPhoto('${cpsPhoto.url}')" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:2px solid var(--gray-200);cursor:zoom-in;flex-shrink:0;margin-top:4px;" title="CPS Photo — click to enlarge">` : ''}
             </div>
+`;
+};
 
+const buildProspectDetailTabsHtml = (prospect) => {
+    return `
                 <div class="acc-container" id="acc-container-${prospect.id}" ${prospect.unable_to_serve ? 'style="opacity:0.6;pointer-events:none;"' : ''}>
 
                     <!-- ① Basic Information — collapsed by default -->
@@ -3891,6 +3858,70 @@ const showProspectDetail = async (prospectId) => {
                 </div>
         </div>
     `;
+};
+
+const showProspectDetail = async (prospectId) => {
+    // Snapshot originating view BEFORE any await — a concurrent navigateTo during
+    // the async gap would overwrite _state.cv, corrupting the back-destination.
+    const _fromView = _state.cv;
+    const prospect = await AppDataStore.getById('prospects', prospectId);
+    if (!prospect) {
+        UI.toast.error('Prospect not found. They may not have been added to the system yet.');
+        // Purge stale SWR caches so the ghost row disappears from the list on re-render
+        AppDataStore.invalidateCache('prospects');
+        renderProspectsTable().catch(() => {});
+        return;
+    }
+    // Single source of truth for prospect visibility: canViewProspect walks
+    // the reporting tree, so team leaders / uplines (Level 3–11) can open any
+    // prospect owned by someone in their subordinate chain. The previous
+    // duplicate "isAdmin || isOwner" check here blocked mid-level leads like
+    // Level 4/5/6/8 from viewing their own team's prospects.
+    if (!await canViewProspect(prospect)) {
+        UI.toast.error('You do not have permission to view this prospect.');
+        await navigateTo('prospects');
+        return;
+    }
+    _state.pvd = _fromView;
+    _state.cdv = { type: 'prospect', id: prospectId };
+
+    const container = document.getElementById('content-viewport');
+    if (!container) return;
+
+    // Only the CPS photo lookup needs activities on the header critical path.
+    // Previously also fetched proposed_solutions/notes/names, but those results
+    // were never used here — each was an extra serial uncached Supabase round
+    // trip that made opening a prospect feel laggy.
+    const activities = await AppDataStore.getActivitiesForProspect(prospectId, { limit: 500 });
+
+    const daysLeft = calculateProtectionDays(prospect);
+    const protectionStatus = getProtectionStatus(daysLeft);
+    const statusColor = protectionStatus === 'normal' ? 'success' : protectionStatus === 'warning' ? 'secondary' : 'error';
+    const statusLabel = protectionStatus === 'normal' ? 'Normal' : protectionStatus === 'warning' ? 'Expiring Soon' : 'Critical';
+
+    const cpsPhoto = activities
+        .filter(a => a.type === 'CPS' && a.cps_attachment?.url && a.cps_attachment?.type?.startsWith('image/'))
+        .sort((a, b) => (b.id || 0) - (a.id || 0))[0]?.cps_attachment;
+
+    setTimeout(async () => {
+        await addWhatsAppButtonToProfile('prospect', prospectId);
+        // Badge: count pending proposed solutions for this prospect
+        try {
+            const sols = await AppDataStore.getAll('proposed_solutions');
+            const pendingCount = (sols || []).filter(s => String(s.prospect_id) === String(prospectId) && s.status === 'Proposed').length;
+            const badge = document.getElementById(`pending-sol-badge-${prospectId}`);
+            if (badge) {
+                if (pendingCount > 0) {
+                    badge.textContent = pendingCount;
+                    badge.style.display = 'inline-block';
+                } else {
+                    badge.style.display = 'none';
+                }
+            }
+        } catch (e) {}
+    }, 100);
+
+    container.innerHTML = buildProspectDetailHeaderHtml(prospect, cpsPhoto) + buildProspectDetailTabsHtml(prospect);
     // All accordions start collapsed — no pre-load needed
     // Async: populate journey overdue badge if touchpoints exist
     AppDataStore.getJourneyTouchpoints('prospect', prospect.id).then(tps => {

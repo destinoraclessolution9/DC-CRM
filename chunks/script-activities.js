@@ -3694,6 +3694,234 @@
         }
     };
 
+    // ── saveActivity post-save helpers (internal; not exported) ──────────────
+    // Behavior-preserving extractions from saveActivity's post-save tail. Each
+    // helper is a verbatim copy of its original block; saveActivity calls them
+    // in the identical order with the identical variable flow.
+
+    // If this save was approving a CPS intake request, mark it approved and
+    // (when a phone is present) build the WhatsApp confirmation modal callback
+    // that is shown AFTER the activity modal closes. Returns the callback (or
+    // null). Mutates _state.pii / _state.pir exactly as the inline block did.
+    const _buildCpsIntakeWaCallback = async (savedActivity) => {
+        let _cpsIntakeWaCallback = null;
+        if (_state.pii) {
+            const intakeRow = _state.pir;
+            try {
+                await AppDataStore.update('cps_intake_requests', _state.pii, {
+                    status: 'approved',
+                    approved_at: new Date().toISOString(),
+                    approved_activity_id: savedActivity?.id || null
+                });
+            } catch (e) { console.warn('CPS intake approval mark failed:', e); }
+            _state.pii  = null;
+            _state.pir = null;
+
+            // Build WhatsApp modal — will be shown AFTER activity modal closes
+            if (intakeRow?.prospect_phone) {
+                let phone = intakeRow.prospect_phone.replace(/\D/g, '');
+                if (phone.startsWith('0')) phone = '60' + phone.slice(1);
+                else if (!phone.startsWith('60') && phone.length <= 10) phone = '60' + phone;
+                const name    = intakeRow.prospect_name  || 'Pelanggan';
+                const date    = intakeRow.activity_date  || '';
+                const start   = (intakeRow.start_time    || '').slice(0, 5);
+                const end     = (intakeRow.end_time      || '').slice(0, 5);
+                const venue   = intakeRow.venue_name     || '';
+                const address = intakeRow.venue_address  || '';
+                const waze    = intakeRow.waze_link      || '';
+
+                const mbbHqNote = (venue || '').toLowerCase().includes('mbb hq') ? [
+                    ``,
+                    `___________________________________________`,
+                    `给予第一次来DC-KL总部的朋友`,
+                    `欢迎您`,
+                    ``,
+                    `1. 驾车的朋友，可以Park 在B1-basement parking。`,
+                    `2. 搭monorail 的朋友，请下Bukit Nanas station。走向Menara Bangkok Bank 方向`,
+                    `3. 到了时，请打电话给我。因为需要亲自来接您才可以上楼。`,
+                    `4. 在等待的时候，请到保安柜台登记。 告知是去 21 楼 DC，需用到IC`,
+                ] : [];
+
+                const msg = [
+                    `✅ Your appointment has been CONFIRMED! / 您的预约已确认！`,
+                    ``,
+                    `\u{1F464} ${name}`,
+                    `\u{1F4C5} Date / 日期: ${date}`,
+                    `⏰ Time / 时间: ${start}–${end}`,
+                    venue   ? `\u{1F4CD} Venue / 地点: ${venue}` : '',
+                    address ? `\u{1F3E0} Address / 地址: ${address}` : '',
+                    waze    ? `\u{1F5FA}️ Waze: ${waze}` : '',
+                    ``,
+                    `Please ensure you arrive on time. Dress code: formal/smart casual.`,
+                    `请准时出席。着装要求：正式/整洁休闲。`,
+                    ...mbbHqNote,
+                ].filter(l => l !== undefined && !(l === '' && false)).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+
+                const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+
+                _cpsIntakeWaCallback = () => {
+                    UI.showModal(
+                        '✅ Appointment Confirmed',
+                        `<div style="text-align:center; padding:8px 0;">
+                            <p style="margin-bottom:12px; font-size:14px; color:#374151;">
+                                Notify <strong>${name}</strong> (${intakeRow.prospect_phone}) via WhatsApp?
+                            </p>
+                            <pre style="background:#f3f4f6; border-radius:8px; padding:12px; font-size:12px; text-align:left; white-space:pre-wrap; max-height:220px; overflow-y:auto;">${msg}</pre>
+                        </div>`,
+                        [
+                            { label: '📲 Send WhatsApp', type: 'primary',   action: `window.open('${waUrl}', '_blank'); UI.hideModal();` },
+                            { label: 'Skip',              type: 'secondary', action: 'UI.hideModal();' }
+                        ]
+                    );
+                };
+            }
+        }
+        return _cpsIntakeWaCallback;
+    };
+
+    // Journey ROS: evaluate conditional rules after every activity save. Maps
+    // activity_type + event_category → journey trigger_event → stage advancement.
+    // Fire-and-forget; the inner returns are local to this async helper exactly
+    // as they were local to the original IIFE.
+    const _evaluateActivityJourneyRules = async (activity) => {
+        try {
+            const evaluateJourneyRules = window.app.evaluateJourneyRules;
+            if (!evaluateJourneyRules) return; // chunk not loaded yet
+            const entityType = activity.customer_id ? 'customer' : 'prospect';
+            const entityId   = activity.customer_id || activity.prospect_id;
+            if (!entityId) return;
+
+            const ctx = { fromStage: null };
+
+            // ── CPS logged: detect product interest and spawn pre-purchase track ──
+            if (activity.activity_type === 'CPS' && activity.prospect_id) {
+                const notes    = (activity.notes || '').toLowerCase();
+                const solution = (activity.proposed_solution || activity.solution || '').toLowerCase();
+                const combined = notes + ' ' + solution;
+                const INTEREST_MAP = [
+                    ['cps_interest_ring',        ['个人改命','改命戒指','power ring','ring','九星']],
+                    ['cps_interest_fengshui',    ['风水方案','fengshui','feng shui','风水审计','audit']],
+                    ['cps_interest_calligraphy', ['画作','calligraphy','艺品','书法']],
+                    ['cps_interest_bed',         ['旺床','满堂','bujishu bed','bed']],
+                    ['cps_interest_sofa',        ['旺沙发','sofa','沙发']],
+                    ['cps_interest_curtain',     ['旺窗帘','curtain','窗帘']],
+                    ['cps_interest_healthcare',  ['福粒','fish oil','健康','probiotic','eye plus','formula','d3k2','yang power']],
+                ];
+                for (const [trigger, keywords] of INTEREST_MAP) {
+                    if (keywords.some(k => combined.includes(k))) {
+                        await evaluateJourneyRules(entityType, entityId, trigger, ctx);
+                        break; // fire only the primary interest (first match)
+                    }
+                }
+            }
+
+            // ── GR activity: advance to Step 6 ──────────────────────────────────
+            if (activity.activity_type === 'GR') {
+                await evaluateJourneyRules(entityType, entityId, 'gr_activity_logged', ctx);
+            }
+
+            // ── Closing activity: purchase signed → role upgrade + Step 5 ────────
+            if (activity.is_closing && activity.solution_sold) {
+                await evaluateJourneyRules(entityType, entityId, 'purchase_signed',      ctx);
+                await evaluateJourneyRules(entityType, entityId, 'purchase_signed_role', ctx);
+            }
+
+            // ── Event attendance: map event_category → funnel advancement rule ────
+            if (activity.activity_type === 'EVENT' && activity.event_category) {
+                const cat = activity.event_category;
+                const EVENT_TO_TRIGGER = {
+                    'pr_9star':         'pr_9star_class_attended',
+                    'pr_destiny':       'pr_sharing_attended',
+                    'pr_museum':        'pr_museum_attended',
+                    'fs_diy':           'fs_diy_attended',
+                    'fs_sharing':       'fs_sharing_attended',
+                    'fs_museum':        'fs_museum_attended',
+                    'fs_huiji':         'fs_huiji_attended',
+                    'painting_sharing': 'cal_sharing_attended',
+                    'painting_art':     'cal_art_attended',
+                    'painting_huiji':   null, // handled below — multi-track
+                    'bujishu_sharing':  'bed_sharing_attended',  // primary: bed
+                    'formula_sharing':  'hc_sharing_attended',
+                    'formula_launch':   'hc_launch_attended',
+                    'formula_memberday':'hc_memberday_attended',
+                    'recruitment_dc':   'dc_meetup_attended',
+                };
+
+                const trigger = EVENT_TO_TRIGGER[cat];
+                if (trigger) {
+                    await evaluateJourneyRules(entityType, entityId, trigger, { ...ctx, eventCategory: cat });
+                }
+
+                // 汇集 is multi-track — fire all matching huiji rules
+                if (cat === 'painting_huiji' || cat.includes('huiji')) {
+                    const huijiTriggers = [
+                        'pr_huiji_attended','fs_huiji_attended',
+                        'cal_huiji_attended','bed_huiji_attended',
+                        'sofa_huiji_attended','curtain_huiji_attended',
+                    ];
+                    for (const t of huijiTriggers) {
+                        await evaluateJourneyRules(entityType, entityId, t, { ...ctx, eventCategory: cat });
+                    }
+                }
+
+                // Museum can serve both PR and FS tracks
+                if (cat === 'pr_museum' || cat === 'fs_museum') {
+                    const museumTrigger = cat === 'pr_museum' ? 'pr_museum_attended' : 'fs_museum_attended';
+                    // Already fired above via EVENT_TO_TRIGGER; add cross-track if both interests exist
+                }
+            }
+        } catch (e) {
+            console.warn('[journey ROS] post-save evaluation failed:', e?.message);
+        }
+    };
+
+    // Auto-mark proposed solution as Purchased when a closing activity has
+    // solution_sold. Fire-and-forget (uses .then chains internally).
+    const _autoMarkProposedSolutionPurchased = (activity) => {
+        if (activity.is_closing && activity.solution_sold) {
+            const soldLower = (activity.solution_sold || '').toLowerCase();
+            const entityId = activity.prospect_id || activity.customer_id;
+            if (entityId) {
+                AppDataStore.getAll('proposed_solutions').then(sols => {
+                    const matches = (sols || []).filter(s => {
+                        const samePerson = String(s.prospect_id) === String(activity.prospect_id) ||
+                                           String(s.customer_id) === String(activity.customer_id);
+                        return samePerson && s.status !== 'Purchased' &&
+                               (s.solution || '').toLowerCase().includes(soldLower.slice(0, 8));
+                    });
+                    for (const s of matches) {
+                        AppDataStore.update('proposed_solutions', s.id, {
+                            status: 'Purchased',
+                            next_follow_up_date: null,
+                            updated_at: new Date().toISOString()
+                        }).catch(() => {});
+                    }
+                }).catch(() => {});
+            }
+        }
+    };
+
+    // Activity tab auto-refresh (fire-and-forget) — re-render the open prospect
+    // and/or customer activity accordion bodies so the new row shows up.
+    const _refreshActivityEntityTabs = (activity) => {
+        try {
+            const pid = activity.prospect_id;
+            const cid = activity.customer_id;
+            if (pid) {
+                const bodyEl = document.getElementById(`acc-body-activity-${pid}`);
+                if (bodyEl && bodyEl.style.display !== 'none')
+                    switchProspectTab('activity', pid, null, bodyEl).catch(() => {});
+            }
+            if (cid) {
+                const bodyEl = document.getElementById(`cust-acc-body-activity-${cid}`);
+                if (bodyEl && bodyEl.style.display !== 'none')
+                    AppDataStore.getById('customers', cid)
+                        .then(cust => { if (cust) renderCustomerActivityTab(cust, bodyEl.id).catch(() => {}); })
+                        .catch(() => {});
+            }
+        } catch (e) { console.warn('Activity tab auto-refresh failed:', e); }
+    };
+
     const saveActivity = async (stayOpen = false) => {
         // Re-entrancy guard: blocks double-clicks during the async save flow (file upload,
         // prospect creation, activity creation, referral creation, etc.) which previously
@@ -4202,78 +4430,9 @@
         } catch (e) { console.warn('new_activity webhook dispatch failed:', e); }
 
         // === If this save was approving a CPS intake request, mark it approved ===
-        let _cpsIntakeWaCallback = null;
-        if (_state.pii) {
-            const intakeRow = _state.pir;
-            try {
-                await AppDataStore.update('cps_intake_requests', _state.pii, {
-                    status: 'approved',
-                    approved_at: new Date().toISOString(),
-                    approved_activity_id: savedActivity?.id || null
-                });
-            } catch (e) { console.warn('CPS intake approval mark failed:', e); }
-            _state.pii  = null;
-            _state.pir = null;
-
-            // Build WhatsApp modal — will be shown AFTER activity modal closes
-            if (intakeRow?.prospect_phone) {
-                let phone = intakeRow.prospect_phone.replace(/\D/g, '');
-                if (phone.startsWith('0')) phone = '60' + phone.slice(1);
-                else if (!phone.startsWith('60') && phone.length <= 10) phone = '60' + phone;
-                const name    = intakeRow.prospect_name  || 'Pelanggan';
-                const date    = intakeRow.activity_date  || '';
-                const start   = (intakeRow.start_time    || '').slice(0, 5);
-                const end     = (intakeRow.end_time      || '').slice(0, 5);
-                const venue   = intakeRow.venue_name     || '';
-                const address = intakeRow.venue_address  || '';
-                const waze    = intakeRow.waze_link      || '';
-
-                const mbbHqNote = (venue || '').toLowerCase().includes('mbb hq') ? [
-                    ``,
-                    `___________________________________________`,
-                    `给予第一次来DC-KL总部的朋友`,
-                    `欢迎您`,
-                    ``,
-                    `1. 驾车的朋友，可以Park 在B1-basement parking。`,
-                    `2. 搭monorail 的朋友，请下Bukit Nanas station。走向Menara Bangkok Bank 方向`,
-                    `3. 到了时，请打电话给我。因为需要亲自来接您才可以上楼。`,
-                    `4. 在等待的时候，请到保安柜台登记。 告知是去 21 楼 DC，需用到IC`,
-                ] : [];
-
-                const msg = [
-                    `\u2705 Your appointment has been CONFIRMED! / 您的预约已确认！`,
-                    ``,
-                    `\u{1F464} ${name}`,
-                    `\u{1F4C5} Date / 日期: ${date}`,
-                    `\u23F0 Time / 时间: ${start}–${end}`,
-                    venue   ? `\u{1F4CD} Venue / 地点: ${venue}` : '',
-                    address ? `\u{1F3E0} Address / 地址: ${address}` : '',
-                    waze    ? `\u{1F5FA}\uFE0F Waze: ${waze}` : '',
-                    ``,
-                    `Please ensure you arrive on time. Dress code: formal/smart casual.`,
-                    `请准时出席。着装要求：正式/整洁休闲。`,
-                    ...mbbHqNote,
-                ].filter(l => l !== undefined && !(l === '' && false)).join('\n').replace(/\n{3,}/g, '\n\n').trim();
-
-                const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
-
-                _cpsIntakeWaCallback = () => {
-                    UI.showModal(
-                        '✅ Appointment Confirmed',
-                        `<div style="text-align:center; padding:8px 0;">
-                            <p style="margin-bottom:12px; font-size:14px; color:#374151;">
-                                Notify <strong>${name}</strong> (${intakeRow.prospect_phone}) via WhatsApp?
-                            </p>
-                            <pre style="background:#f3f4f6; border-radius:8px; padding:12px; font-size:12px; text-align:left; white-space:pre-wrap; max-height:220px; overflow-y:auto;">${msg}</pre>
-                        </div>`,
-                        [
-                            { label: '📲 Send WhatsApp', type: 'primary',   action: `window.open('${waUrl}', '_blank'); UI.hideModal();` },
-                            { label: 'Skip',              type: 'secondary', action: 'UI.hideModal();' }
-                        ]
-                    );
-                };
-            }
-        }
+        // (extracted to _buildCpsIntakeWaCallback — same DB update, same _state
+        // mutation, same WhatsApp-callback construction)
+        const _cpsIntakeWaCallback = await _buildCpsIntakeWaCallback(savedActivity);
 
         // === Auto Scoring / Protection / Workflows / Milestones — fire-and-forget ===
         // These are post-save bookkeeping; they must not delay closing the modal.
@@ -4329,121 +4488,13 @@
         }
 
         // === Journey ROS: Evaluate conditional rules after every activity save ===
-        // Maps activity_type + event_category → journey trigger_event → stage advancement.
-        (async () => {
-            try {
-                const evaluateJourneyRules = window.app.evaluateJourneyRules;
-                if (!evaluateJourneyRules) return; // chunk not loaded yet
-                const entityType = activity.customer_id ? 'customer' : 'prospect';
-                const entityId   = activity.customer_id || activity.prospect_id;
-                if (!entityId) return;
-
-                const ctx = { fromStage: null };
-
-                // ── CPS logged: detect product interest and spawn pre-purchase track ──
-                if (activity.activity_type === 'CPS' && activity.prospect_id) {
-                    const notes    = (activity.notes || '').toLowerCase();
-                    const solution = (activity.proposed_solution || activity.solution || '').toLowerCase();
-                    const combined = notes + ' ' + solution;
-                    const INTEREST_MAP = [
-                        ['cps_interest_ring',        ['个人改命','改命戒指','power ring','ring','九星']],
-                        ['cps_interest_fengshui',    ['风水方案','fengshui','feng shui','风水审计','audit']],
-                        ['cps_interest_calligraphy', ['画作','calligraphy','艺品','书法']],
-                        ['cps_interest_bed',         ['旺床','满堂','bujishu bed','bed']],
-                        ['cps_interest_sofa',        ['旺沙发','sofa','沙发']],
-                        ['cps_interest_curtain',     ['旺窗帘','curtain','窗帘']],
-                        ['cps_interest_healthcare',  ['福粒','fish oil','健康','probiotic','eye plus','formula','d3k2','yang power']],
-                    ];
-                    for (const [trigger, keywords] of INTEREST_MAP) {
-                        if (keywords.some(k => combined.includes(k))) {
-                            await evaluateJourneyRules(entityType, entityId, trigger, ctx);
-                            break; // fire only the primary interest (first match)
-                        }
-                    }
-                }
-
-                // ── GR activity: advance to Step 6 ──────────────────────────────────
-                if (activity.activity_type === 'GR') {
-                    await evaluateJourneyRules(entityType, entityId, 'gr_activity_logged', ctx);
-                }
-
-                // ── Closing activity: purchase signed → role upgrade + Step 5 ────────
-                if (activity.is_closing && activity.solution_sold) {
-                    await evaluateJourneyRules(entityType, entityId, 'purchase_signed',      ctx);
-                    await evaluateJourneyRules(entityType, entityId, 'purchase_signed_role', ctx);
-                }
-
-                // ── Event attendance: map event_category → funnel advancement rule ────
-                if (activity.activity_type === 'EVENT' && activity.event_category) {
-                    const cat = activity.event_category;
-                    const EVENT_TO_TRIGGER = {
-                        'pr_9star':         'pr_9star_class_attended',
-                        'pr_destiny':       'pr_sharing_attended',
-                        'pr_museum':        'pr_museum_attended',
-                        'fs_diy':           'fs_diy_attended',
-                        'fs_sharing':       'fs_sharing_attended',
-                        'fs_museum':        'fs_museum_attended',
-                        'fs_huiji':         'fs_huiji_attended',
-                        'painting_sharing': 'cal_sharing_attended',
-                        'painting_art':     'cal_art_attended',
-                        'painting_huiji':   null, // handled below — multi-track
-                        'bujishu_sharing':  'bed_sharing_attended',  // primary: bed
-                        'formula_sharing':  'hc_sharing_attended',
-                        'formula_launch':   'hc_launch_attended',
-                        'formula_memberday':'hc_memberday_attended',
-                        'recruitment_dc':   'dc_meetup_attended',
-                    };
-
-                    const trigger = EVENT_TO_TRIGGER[cat];
-                    if (trigger) {
-                        await evaluateJourneyRules(entityType, entityId, trigger, { ...ctx, eventCategory: cat });
-                    }
-
-                    // 汇集 is multi-track — fire all matching huiji rules
-                    if (cat === 'painting_huiji' || cat.includes('huiji')) {
-                        const huijiTriggers = [
-                            'pr_huiji_attended','fs_huiji_attended',
-                            'cal_huiji_attended','bed_huiji_attended',
-                            'sofa_huiji_attended','curtain_huiji_attended',
-                        ];
-                        for (const t of huijiTriggers) {
-                            await evaluateJourneyRules(entityType, entityId, t, { ...ctx, eventCategory: cat });
-                        }
-                    }
-
-                    // Museum can serve both PR and FS tracks
-                    if (cat === 'pr_museum' || cat === 'fs_museum') {
-                        const museumTrigger = cat === 'pr_museum' ? 'pr_museum_attended' : 'fs_museum_attended';
-                        // Already fired above via EVENT_TO_TRIGGER; add cross-track if both interests exist
-                    }
-                }
-            } catch (e) {
-                console.warn('[journey ROS] post-save evaluation failed:', e?.message);
-            }
-        })();
+        // (extracted verbatim into _evaluateActivityJourneyRules — fire-and-forget,
+        //  same trigger mapping + stage advancement)
+        _evaluateActivityJourneyRules(activity);
 
         // === Auto-mark proposed solution as Purchased when closing activity has solution_sold ===
-        if (activity.is_closing && activity.solution_sold) {
-            const soldLower = (activity.solution_sold || '').toLowerCase();
-            const entityId = activity.prospect_id || activity.customer_id;
-            if (entityId) {
-                AppDataStore.getAll('proposed_solutions').then(sols => {
-                    const matches = (sols || []).filter(s => {
-                        const samePerson = String(s.prospect_id) === String(activity.prospect_id) ||
-                                           String(s.customer_id) === String(activity.customer_id);
-                        return samePerson && s.status !== 'Purchased' &&
-                               (s.solution || '').toLowerCase().includes(soldLower.slice(0, 8));
-                    });
-                    for (const s of matches) {
-                        AppDataStore.update('proposed_solutions', s.id, {
-                            status: 'Purchased',
-                            next_follow_up_date: null,
-                            updated_at: new Date().toISOString()
-                        }).catch(() => {});
-                    }
-                }).catch(() => {});
-            }
-        }
+        // (extracted verbatim into _autoMarkProposedSolutionPurchased — fire-and-forget)
+        _autoMarkProposedSolutionPurchased(activity);
 
         // Close modal immediately — user sees result without waiting for re-renders.
         if (!stayOpen) {
@@ -4467,22 +4518,8 @@
         (window.app.renderTodayActivities || (() => Promise.resolve()))().catch(() => {});
 
         // Activity tab auto-refresh (fire-and-forget)
-        try {
-            const pid = activity.prospect_id;
-            const cid = activity.customer_id;
-            if (pid) {
-                const bodyEl = document.getElementById(`acc-body-activity-${pid}`);
-                if (bodyEl && bodyEl.style.display !== 'none')
-                    switchProspectTab('activity', pid, null, bodyEl).catch(() => {});
-            }
-            if (cid) {
-                const bodyEl = document.getElementById(`cust-acc-body-activity-${cid}`);
-                if (bodyEl && bodyEl.style.display !== 'none')
-                    AppDataStore.getById('customers', cid)
-                        .then(cust => { if (cust) renderCustomerActivityTab(cust, bodyEl.id).catch(() => {}); })
-                        .catch(() => {});
-            }
-        } catch (e) { console.warn('Activity tab auto-refresh failed:', e); }
+        // (extracted verbatim into _refreshActivityEntityTabs)
+        _refreshActivityEntityTabs(activity);
 
         // Mobile calendar refresh (fire-and-forget)
         if (_mcalActiveForSave) {
