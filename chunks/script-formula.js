@@ -437,6 +437,63 @@
     };
 
     // ---------- Main View ----------
+    // Pure builder for the legacy (non-React) Formula Purchaser shell HTML.
+    // Reads only currentTab; returns the identical string the orchestrator
+    // previously assigned inline to container.innerHTML.
+    const fpBuildLegacyShell = (currentTab) => `
+            <div class="fp-view" style="padding:24px;">
+                <div class="fp-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
+                    <div>
+                        <h1 style="margin:0;display:flex;align-items:center;gap:10px;">
+                            <i class="fas fa-flask" style="color:#0ea5e9;"></i> Formula Purchaser
+                        </h1>
+                        <div style="color:var(--gray-500);font-size:13px;margin-top:4px;">
+                            Stock replenishment, multi-outlet distribution & PO generation. Super Admin only.
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:8px;">
+                        <div style="position:relative;">
+                            <button class="btn secondary" onclick="app.fpToggleImportMenu()">
+                                <i class="fas fa-file-import"></i> Import &#9662;
+                            </button>
+                            <div id="fp-import-menu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:220px;z-index:100;">
+                                <div style="padding:8px 14px;cursor:pointer;border-bottom:1px solid var(--gray-100);" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background=''" onclick="app.fpImportStock()">
+                                    <i class="fas fa-boxes" style="width:18px;color:#0ea5e9;"></i> Stock Snapshot
+                                </div>
+                                <div style="padding:8px 14px;cursor:pointer;border-bottom:1px solid var(--gray-100);" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background=''" onclick="app.fpImportPos()">
+                                    <i class="fas fa-cash-register" style="width:18px;color:#10b981;"></i> POS Sales History
+                                </div>
+                                <div style="padding:8px 14px;cursor:pointer;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background=''" onclick="app.fpImportDelisted()">
+                                    <i class="fas fa-ban" style="width:18px;color:#dc2626;"></i> Delisted SKUs
+                                </div>
+                            </div>
+                        </div>
+                        <button class="btn secondary" onclick="app.fpRefresh()">
+                            <i class="fas fa-sync-alt"></i> Refresh
+                        </button>
+                    </div>
+                </div>
+
+                <div class="fp-tabs" style="display:flex;gap:4px;border-bottom:2px solid var(--gray-200);margin-bottom:20px;flex-wrap:wrap;">
+                    ${[
+                        ['dashboard',  'fa-chart-line',     'Dashboard'],
+                        ['pos',        'fa-file-invoice',   'Purchase Orders'],
+                        ['transfers',  'fa-exchange-alt',   'Transfers'],
+                        ['stock',      'fa-warehouse',      'Stock Inquiry'],
+                        ['vendors',    'fa-truck',          'Vendors'],
+                        ['exclusions', 'fa-ban',            'Exclusions & Deals'],
+                    ].map(([k, ic, lbl]) => `
+                        <button class="fp-tab-btn ${currentTab === k ? 'active' : ''}" data-tab="${k}" onclick="app.fpSwitchTab('${k}')"
+                            style="padding:12px 20px;background:none;border:none;border-bottom:3px solid ${currentTab === k ? '#0ea5e9' : 'transparent'};font-weight:600;cursor:pointer;color:${currentTab === k ? '#0ea5e9' : 'var(--gray-600)'};">
+                            <i class="fas ${ic}"></i> ${lbl}
+                        </button>
+                    `).join('')}
+                </div>
+
+                <div id="fp-tab-content"><div style="padding:40px;text-align:center;color:var(--gray-500);"><i class="fas fa-spinner fa-spin"></i> Loading...</div></div>
+            </div>
+        `;
+
     const showFormulaPurchaserView = async (container) => {
         _state.cv = 'formula_purchaser';
         if (!isSystemAdmin(_state.cu)) {
@@ -492,59 +549,7 @@
             }
         }
 
-        container.innerHTML = `
-            <div class="fp-view" style="padding:24px;">
-                <div class="fp-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
-                    <div>
-                        <h1 style="margin:0;display:flex;align-items:center;gap:10px;">
-                            <i class="fas fa-flask" style="color:#0ea5e9;"></i> Formula Purchaser
-                        </h1>
-                        <div style="color:var(--gray-500);font-size:13px;margin-top:4px;">
-                            Stock replenishment, multi-outlet distribution & PO generation. Super Admin only.
-                        </div>
-                    </div>
-                    <div style="display:flex;gap:8px;">
-                        <div style="position:relative;">
-                            <button class="btn secondary" onclick="app.fpToggleImportMenu()">
-                                <i class="fas fa-file-import"></i> Import &#9662;
-                            </button>
-                            <div id="fp-import-menu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:220px;z-index:100;">
-                                <div style="padding:8px 14px;cursor:pointer;border-bottom:1px solid var(--gray-100);" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background=''" onclick="app.fpImportStock()">
-                                    <i class="fas fa-boxes" style="width:18px;color:#0ea5e9;"></i> Stock Snapshot
-                                </div>
-                                <div style="padding:8px 14px;cursor:pointer;border-bottom:1px solid var(--gray-100);" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background=''" onclick="app.fpImportPos()">
-                                    <i class="fas fa-cash-register" style="width:18px;color:#10b981;"></i> POS Sales History
-                                </div>
-                                <div style="padding:8px 14px;cursor:pointer;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background=''" onclick="app.fpImportDelisted()">
-                                    <i class="fas fa-ban" style="width:18px;color:#dc2626;"></i> Delisted SKUs
-                                </div>
-                            </div>
-                        </div>
-                        <button class="btn secondary" onclick="app.fpRefresh()">
-                            <i class="fas fa-sync-alt"></i> Refresh
-                        </button>
-                    </div>
-                </div>
-
-                <div class="fp-tabs" style="display:flex;gap:4px;border-bottom:2px solid var(--gray-200);margin-bottom:20px;flex-wrap:wrap;">
-                    ${[
-                        ['dashboard',  'fa-chart-line',     'Dashboard'],
-                        ['pos',        'fa-file-invoice',   'Purchase Orders'],
-                        ['transfers',  'fa-exchange-alt',   'Transfers'],
-                        ['stock',      'fa-warehouse',      'Stock Inquiry'],
-                        ['vendors',    'fa-truck',          'Vendors'],
-                        ['exclusions', 'fa-ban',            'Exclusions & Deals'],
-                    ].map(([k, ic, lbl]) => `
-                        <button class="fp-tab-btn ${_fpState.currentTab === k ? 'active' : ''}" data-tab="${k}" onclick="app.fpSwitchTab('${k}')"
-                            style="padding:12px 20px;background:none;border:none;border-bottom:3px solid ${_fpState.currentTab === k ? '#0ea5e9' : 'transparent'};font-weight:600;cursor:pointer;color:${_fpState.currentTab === k ? '#0ea5e9' : 'var(--gray-600)'};">
-                            <i class="fas ${ic}"></i> ${lbl}
-                        </button>
-                    `).join('')}
-                </div>
-
-                <div id="fp-tab-content"><div style="padding:40px;text-align:center;color:var(--gray-500);"><i class="fas fa-spinner fa-spin"></i> Loading...</div></div>
-            </div>
-        `;
+        container.innerHTML = fpBuildLegacyShell(_fpState.currentTab);
 
         await fpLoadData();
         await fpSwitchTab(_fpState.currentTab || 'dashboard');

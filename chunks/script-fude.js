@@ -108,6 +108,156 @@ const _computeFudeLeaderboard = (allRewards, allUsersForReward) => {
         .sort((a, b) => b.pts - a.pts);
 };
 
+// --- News carousel HTML builder (pure; extracted from showFudeView) ---
+// Takes exactly the vars it reads and RETURNS the section HTML string.
+const _buildFudeCarousel = (publicNews, imgSrc, fmtDate) => {
+        if (!publicNews.length) return `
+            <div class="fude-section">
+                <div class="fude-sec-bar"><div class="fude-sec-bar-icon news">📰</div><h2>Highlights &amp; News</h2></div>
+                <div class="fude-sec-body"><p style="color:var(--gray-500,#6b7280);margin:0;">No highlights yet.</p></div>
+            </div>`;
+        const slides = publicNews.map((n, i) => `
+            <div class="fude-carousel-slide" onclick="app.openStoryDetail(${n.id})" style="cursor:pointer;">
+                ${n._signedUrl ? `<img loading="lazy" decoding="async" ${imgSrc(n)} alt="" onerror="this.style.display='none'">` : ''}
+                <div class="fude-carousel-overlay">
+                    <span class="fude-carousel-badge">${i === 0 ? 'Latest News' : 'News'}</span>
+                    <h3>${esc(n.title)}</h3>
+                    ${n.content ? `<p>${esc(n.content)}</p>` : ''}
+                    <span class="fude-carousel-date">📅 ${fmtDate(n.created_at)}</span>
+                    <button class="fude-carousel-readmore" onclick="event.stopPropagation(); app.openStoryDetail(${n.id})">Read More</button>
+                </div>
+            </div>`).join('');
+        const dots = publicNews.length > 1
+            ? `<div class="fude-carousel-dots">${publicNews.map((_, i) => `<button class="fude-carousel-dot${i === 0 ? ' active' : ''}" data-idx="${i}"></button>`).join('')}</div>`
+            : '';
+        const arrows = publicNews.length > 1
+            ? `<button class="fude-carousel-arrow prev" onclick="event.stopPropagation();(function(){var w=this.closest('.fude-carousel-wrap');var t=w.querySelector('.fude-carousel-track');var n=parseInt(t.dataset.idx||0);var tot=t.children.length;var ni=(n-1+tot)%tot;t.dataset.idx=ni;t.style.transform='translateX(-'+ni*100+'%)';w.querySelectorAll('.fude-carousel-dot').forEach(function(d,i){d.classList.toggle('active',i===ni);});}).call(this)">&#8249;</button>
+              <button class="fude-carousel-arrow next" onclick="event.stopPropagation();(function(){var w=this.closest('.fude-carousel-wrap');var t=w.querySelector('.fude-carousel-track');var n=parseInt(t.dataset.idx||0);var tot=t.children.length;var ni=(n+1)%tot;t.dataset.idx=ni;t.style.transform='translateX(-'+ni*100+'%)';w.querySelectorAll('.fude-carousel-dot').forEach(function(d,i){d.classList.toggle('active',i===ni);});}).call(this)">&#8250;</button>`
+            : '';
+        return `
+            <div class="fude-section">
+                <div class="fude-sec-bar" style="justify-content:space-between;">
+                    <div style="display:flex;align-items:center;gap:12px;"><div class="fude-sec-bar-icon news">📰</div><h2>Highlights &amp; News</h2></div>
+                    <a class="fude-sec-link">See all news →</a>
+                </div>
+                <div class="fude-carousel-wrap">
+                    ${arrows}
+                    <div class="fude-carousel-track" data-idx="0">${slides}</div>
+                </div>
+                ${dots}
+            </div>`;
+};
+
+// --- Success Stories grid builder (pure; extracted from showFudeView) ---
+const _buildFudeStories = (successStories, imgSrc, fmtDate) => {
+        const PREVIEW = 6;
+        const hasMore = successStories.length > PREVIEW;
+        if (!successStories.length) return `
+            <div class="fude-section fude-stories-section">
+                <div class="fude-stories-masthead">
+                    <div class="fude-stories-masthead-line"></div>
+                    <div class="fude-stories-masthead-center">
+                        <div class="fude-stories-masthead-icon">🏆</div>
+                        <div class="fude-stories-title">成功案例分享</div>
+                        <div class="fude-stories-subtitle">Success&nbsp;&nbsp;Stories</div>
+                    </div>
+                    <div class="fude-stories-masthead-line"></div>
+                </div>
+                <div style="padding:20px;color:var(--gray-500,#6b7280);">No success stories yet.</div>
+            </div>`;
+        const allTags = [...new Set(
+            successStories.flatMap(s => (s.tags || '').split(',').filter(Boolean).map(t => t.trim()))
+        )].sort();
+        const filterBar = allTags.length ? `
+            <div class="fude-story-filter-bar">
+                <button class="fude-story-filter-chip active" data-tag="*" onclick="app.fudeFilterStories('*')">All</button>
+                ${allTags.map(t => `<button class="fude-story-filter-chip" data-tag="${t.replace(/"/g,'&quot;').replace(/'/g,'&#39;')}" onclick="app.fudeFilterStories(${JSON.stringify(t)})">#${esc(t)}</button>`).join('')}
+            </div>` : '';
+        const cards = successStories.map((s, idx) => {
+            const imgEl = s._signedUrl
+                ? `<img loading="lazy" decoding="async" class="fude-story-card-img" ${imgSrc(s)} alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+                : '';
+            const ph = `<div class="fude-story-card-img-ph" style="display:${s._signedUrl ? 'none' : 'flex'};">📖</div>`;
+            const tagArr = (s.tags || '').split(',').filter(Boolean).map(t => t.trim());
+            const tagSpans = tagArr.slice(0, 2).map(t => `<span class="fude-story-tag">#${esc(t)}</span>`).join('');
+            const tagData = tagArr.map(t => t.toLowerCase()).join('|');
+            const isOverflow = idx >= PREVIEW;
+            return `<div class="fude-story-card${isOverflow ? ' fude-story-card--hidden' : ''}" data-tags="${tagData}" data-overflow="${isOverflow ? '1' : '0'}" onclick="app.openStoryDetail(${s.id})" style="cursor:pointer;">
+                ${imgEl}${ph}
+                <div class="fude-story-card-body">
+                    ${tagSpans ? `<div class="fude-story-card-tags">${tagSpans}</div>` : ''}
+                    <h3>${esc(s.title)}</h3>
+                    ${s.content ? `<p>${esc(s.content)}</p>` : '<p style="flex:1"></p>'}
+                    <div class="fude-story-card-footer">
+                        <div class="fude-story-card-meta">
+                            <div class="fude-story-card-avatar">${esc((s.title || 'D')[0].toUpperCase())}</div>
+                            <span>${fmtDate(s.created_at)}</span>
+                        </div>
+                        <button class="fude-story-readmore" onclick="event.stopPropagation(); app.openStoryDetail(${s.id})">Read More →</button>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+        return `
+            <div class="fude-section fude-stories-section">
+                <div class="fude-stories-masthead">
+                    <div class="fude-stories-masthead-line"></div>
+                    <div class="fude-stories-masthead-center">
+                        <div class="fude-stories-masthead-icon">🏆</div>
+                        <div class="fude-stories-title">成功案例分享</div>
+                        <div class="fude-stories-subtitle">Success&nbsp;&nbsp;Stories</div>
+                    </div>
+                    <div class="fude-stories-masthead-line"></div>
+                </div>
+                ${filterBar}
+                <div class="fude-story-grid">${cards}</div>
+                <div class="fude-story-search-bar">
+                    <input type="text" class="fude-story-search-input" placeholder="🔍  Search stories…" oninput="app.fudeSearchStories(this.value)">
+                </div>
+                ${hasMore ? `<button class="fude-stories-more-btn" onclick="app.fudeShowAllStories()">✦ Explore More Success Stories</button>` : ''}
+            </div>`;
+};
+
+// --- Tips row builder (pure; extracted from showFudeView) ---
+const _buildFudeTips = (dynamicTips) => {
+        const tipCols = [];
+        if (dynamicTips.length) {
+            tipCols.push(`<div class="fude-tip-col">
+                <div class="fude-tip-icon">💡</div>
+                <h3>${esc(dynamicTips[0].title)}</h3>
+                ${dynamicTips[0].content ? `<p>${esc(dynamicTips[0].content)}</p>` : ''}
+                <button class="fude-tip-link">Learn More →</button>
+            </div>`);
+        } else {
+            tipCols.push(`<div class="fude-tip-col">
+                <div class="fude-tip-icon">🛡️</div>
+                <h3>账户安全</h3>
+                <p>定期更新密码，避免使用常见密码，并开启双重验证，防止账户被盗用。</p>
+                <button class="fude-tip-link">Learn More →</button>
+            </div>`);
+        }
+        tipCols.push(`<div class="fude-tip-col">
+            <div class="fude-tip-icon">🎁</div>
+            <h3>积分攻略</h3>
+            <p>每日签到、参与活动、分享推荐好友，都能累积积分！</p>
+            <button class="fude-tip-link">Learn More →</button>
+        </div>`);
+        tipCols.push(`<div class="fude-tip-col">
+            <div class="fude-tip-icon" style="background:#fee2e2;">🎧</div>
+            <h3>需要帮助?</h3>
+            <p>遇到问题？我们的客服团队随时为您提供支持。</p>
+            <button class="fude-tip-link">Contact Us →</button>
+        </div>`);
+        return `
+            <div class="fude-tips-section">
+                <div class="fude-tips-header">
+                    <span class="fude-tips-header-icon">💡</span>
+                    <h2>今日 Tips</h2>
+                </div>
+                <div class="fude-tips-row">${tipCols.join('')}</div>
+            </div>`;
+};
+
 // ========== LEVEL 13/14: 福德 VIEW ==========
 const showFudeView = async (container) => {
     const currentUser = _currentUser;
@@ -284,154 +434,14 @@ const showFudeView = async (container) => {
     }
 
     // --- News carousel HTML ---
-    const carouselSection = (() => {
-        if (!publicNews.length) return `
-            <div class="fude-section">
-                <div class="fude-sec-bar"><div class="fude-sec-bar-icon news">📰</div><h2>Highlights &amp; News</h2></div>
-                <div class="fude-sec-body"><p style="color:var(--gray-500,#6b7280);margin:0;">No highlights yet.</p></div>
-            </div>`;
-        const slides = publicNews.map((n, i) => `
-            <div class="fude-carousel-slide" onclick="app.openStoryDetail(${n.id})" style="cursor:pointer;">
-                ${n._signedUrl ? `<img loading="lazy" decoding="async" ${imgSrc(n)} alt="" onerror="this.style.display='none'">` : ''}
-                <div class="fude-carousel-overlay">
-                    <span class="fude-carousel-badge">${i === 0 ? 'Latest News' : 'News'}</span>
-                    <h3>${esc(n.title)}</h3>
-                    ${n.content ? `<p>${esc(n.content)}</p>` : ''}
-                    <span class="fude-carousel-date">📅 ${fmtDate(n.created_at)}</span>
-                    <button class="fude-carousel-readmore" onclick="event.stopPropagation(); app.openStoryDetail(${n.id})">Read More</button>
-                </div>
-            </div>`).join('');
-        const dots = publicNews.length > 1
-            ? `<div class="fude-carousel-dots">${publicNews.map((_, i) => `<button class="fude-carousel-dot${i === 0 ? ' active' : ''}" data-idx="${i}"></button>`).join('')}</div>`
-            : '';
-        const arrows = publicNews.length > 1
-            ? `<button class="fude-carousel-arrow prev" onclick="event.stopPropagation();(function(){var w=this.closest('.fude-carousel-wrap');var t=w.querySelector('.fude-carousel-track');var n=parseInt(t.dataset.idx||0);var tot=t.children.length;var ni=(n-1+tot)%tot;t.dataset.idx=ni;t.style.transform='translateX(-'+ni*100+'%)';w.querySelectorAll('.fude-carousel-dot').forEach(function(d,i){d.classList.toggle('active',i===ni);});}).call(this)">&#8249;</button>
-              <button class="fude-carousel-arrow next" onclick="event.stopPropagation();(function(){var w=this.closest('.fude-carousel-wrap');var t=w.querySelector('.fude-carousel-track');var n=parseInt(t.dataset.idx||0);var tot=t.children.length;var ni=(n+1)%tot;t.dataset.idx=ni;t.style.transform='translateX(-'+ni*100+'%)';w.querySelectorAll('.fude-carousel-dot').forEach(function(d,i){d.classList.toggle('active',i===ni);});}).call(this)">&#8250;</button>`
-            : '';
-        return `
-            <div class="fude-section">
-                <div class="fude-sec-bar" style="justify-content:space-between;">
-                    <div style="display:flex;align-items:center;gap:12px;"><div class="fude-sec-bar-icon news">📰</div><h2>Highlights &amp; News</h2></div>
-                    <a class="fude-sec-link">See all news →</a>
-                </div>
-                <div class="fude-carousel-wrap">
-                    ${arrows}
-                    <div class="fude-carousel-track" data-idx="0">${slides}</div>
-                </div>
-                ${dots}
-            </div>`;
-    })();
+    const carouselSection = _buildFudeCarousel(publicNews, imgSrc, fmtDate);
 
     // --- Success Stories grid ---
-    const storiesSection = (() => {
-        const PREVIEW = 6;
-        const hasMore = successStories.length > PREVIEW;
-        if (!successStories.length) return `
-            <div class="fude-section fude-stories-section">
-                <div class="fude-stories-masthead">
-                    <div class="fude-stories-masthead-line"></div>
-                    <div class="fude-stories-masthead-center">
-                        <div class="fude-stories-masthead-icon">🏆</div>
-                        <div class="fude-stories-title">成功案例分享</div>
-                        <div class="fude-stories-subtitle">Success&nbsp;&nbsp;Stories</div>
-                    </div>
-                    <div class="fude-stories-masthead-line"></div>
-                </div>
-                <div style="padding:20px;color:var(--gray-500,#6b7280);">No success stories yet.</div>
-            </div>`;
-        const allTags = [...new Set(
-            successStories.flatMap(s => (s.tags || '').split(',').filter(Boolean).map(t => t.trim()))
-        )].sort();
-        const filterBar = allTags.length ? `
-            <div class="fude-story-filter-bar">
-                <button class="fude-story-filter-chip active" data-tag="*" onclick="app.fudeFilterStories('*')">All</button>
-                ${allTags.map(t => `<button class="fude-story-filter-chip" data-tag="${t.replace(/"/g,'&quot;').replace(/'/g,'&#39;')}" onclick="app.fudeFilterStories(${JSON.stringify(t)})">#${esc(t)}</button>`).join('')}
-            </div>` : '';
-        const cards = successStories.map((s, idx) => {
-            const imgEl = s._signedUrl
-                ? `<img loading="lazy" decoding="async" class="fude-story-card-img" ${imgSrc(s)} alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
-                : '';
-            const ph = `<div class="fude-story-card-img-ph" style="display:${s._signedUrl ? 'none' : 'flex'};">📖</div>`;
-            const tagArr = (s.tags || '').split(',').filter(Boolean).map(t => t.trim());
-            const tagSpans = tagArr.slice(0, 2).map(t => `<span class="fude-story-tag">#${esc(t)}</span>`).join('');
-            const tagData = tagArr.map(t => t.toLowerCase()).join('|');
-            const isOverflow = idx >= PREVIEW;
-            return `<div class="fude-story-card${isOverflow ? ' fude-story-card--hidden' : ''}" data-tags="${tagData}" data-overflow="${isOverflow ? '1' : '0'}" onclick="app.openStoryDetail(${s.id})" style="cursor:pointer;">
-                ${imgEl}${ph}
-                <div class="fude-story-card-body">
-                    ${tagSpans ? `<div class="fude-story-card-tags">${tagSpans}</div>` : ''}
-                    <h3>${esc(s.title)}</h3>
-                    ${s.content ? `<p>${esc(s.content)}</p>` : '<p style="flex:1"></p>'}
-                    <div class="fude-story-card-footer">
-                        <div class="fude-story-card-meta">
-                            <div class="fude-story-card-avatar">${esc((s.title || 'D')[0].toUpperCase())}</div>
-                            <span>${fmtDate(s.created_at)}</span>
-                        </div>
-                        <button class="fude-story-readmore" onclick="event.stopPropagation(); app.openStoryDetail(${s.id})">Read More →</button>
-                    </div>
-                </div>
-            </div>`;
-        }).join('');
-        return `
-            <div class="fude-section fude-stories-section">
-                <div class="fude-stories-masthead">
-                    <div class="fude-stories-masthead-line"></div>
-                    <div class="fude-stories-masthead-center">
-                        <div class="fude-stories-masthead-icon">🏆</div>
-                        <div class="fude-stories-title">成功案例分享</div>
-                        <div class="fude-stories-subtitle">Success&nbsp;&nbsp;Stories</div>
-                    </div>
-                    <div class="fude-stories-masthead-line"></div>
-                </div>
-                ${filterBar}
-                <div class="fude-story-grid">${cards}</div>
-                <div class="fude-story-search-bar">
-                    <input type="text" class="fude-story-search-input" placeholder="🔍  Search stories…" oninput="app.fudeSearchStories(this.value)">
-                </div>
-                ${hasMore ? `<button class="fude-stories-more-btn" onclick="app.fudeShowAllStories()">✦ Explore More Success Stories</button>` : ''}
-            </div>`;
-    })();
+    const storiesSection = _buildFudeStories(successStories, imgSrc, fmtDate);
 
     // --- Tips row (dynamic + 2 static) ---
     const dynamicTips = recommendationTips.slice(0, 1);
-    const tipsSection = (() => {
-        const tipCols = [];
-        if (dynamicTips.length) {
-            tipCols.push(`<div class="fude-tip-col">
-                <div class="fude-tip-icon">💡</div>
-                <h3>${esc(dynamicTips[0].title)}</h3>
-                ${dynamicTips[0].content ? `<p>${esc(dynamicTips[0].content)}</p>` : ''}
-                <button class="fude-tip-link">Learn More →</button>
-            </div>`);
-        } else {
-            tipCols.push(`<div class="fude-tip-col">
-                <div class="fude-tip-icon">🛡️</div>
-                <h3>账户安全</h3>
-                <p>定期更新密码，避免使用常见密码，并开启双重验证，防止账户被盗用。</p>
-                <button class="fude-tip-link">Learn More →</button>
-            </div>`);
-        }
-        tipCols.push(`<div class="fude-tip-col">
-            <div class="fude-tip-icon">🎁</div>
-            <h3>积分攻略</h3>
-            <p>每日签到、参与活动、分享推荐好友，都能累积积分！</p>
-            <button class="fude-tip-link">Learn More →</button>
-        </div>`);
-        tipCols.push(`<div class="fude-tip-col">
-            <div class="fude-tip-icon" style="background:#fee2e2;">🎧</div>
-            <h3>需要帮助?</h3>
-            <p>遇到问题？我们的客服团队随时为您提供支持。</p>
-            <button class="fude-tip-link">Contact Us →</button>
-        </div>`);
-        return `
-            <div class="fude-tips-section">
-                <div class="fude-tips-header">
-                    <span class="fude-tips-header-icon">💡</span>
-                    <h2>今日 Tips</h2>
-                </div>
-                <div class="fude-tips-row">${tipCols.join('')}</div>
-            </div>`;
-    })();
+    const tipsSection = _buildFudeTips(dynamicTips);
 
     // --- My Recommendations & Returns ---
     const rewardsTableHtml = myRewards.length === 0

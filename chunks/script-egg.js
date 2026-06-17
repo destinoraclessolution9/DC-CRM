@@ -791,6 +791,49 @@ JB 星期二到
 
     // ==================== MAIN VIEW RENDERER ====================
 
+    // Pure builder for the legacy (non-React) Egg Purchasing shell: header + tab
+    // bar + the empty #egg-tab-content host that eggSwitchTab() later fills.
+    // Fully static markup (no interpolation) — extracted from showEggPurchasingView
+    // verbatim so the produced HTML string is byte-identical to the inline literal.
+    const buildEggPurchasingShell = () => `
+            <div class="egg-purchasing-view" style="padding:24px;">
+                <div class="egg-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+                    <div>
+                        <h1 style="margin:0;display:flex;align-items:center;gap:10px;">
+                            <i class="fas fa-egg" style="color:#f59e0b;"></i> Egg Purchasing
+                        </h1>
+                        <div style="color:var(--gray-500);font-size:13px;margin-top:4px;">
+                            Weekly farm order generation. Super Admin only.
+                        </div>
+                    </div>
+                    <button class="btn secondary" onclick="app.eggRefresh()">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+
+                <div class="egg-tabs" style="display:flex;gap:4px;border-bottom:2px solid var(--gray-200);margin-bottom:20px;">
+                    <button class="egg-tab-btn active" data-tab="run" onclick="app.eggSwitchTab('run')"
+                        style="padding:12px 20px;background:none;border:none;border-bottom:3px solid #f59e0b;font-weight:600;cursor:pointer;color:#f59e0b;">
+                        <i class="fas fa-play-circle"></i> Run This Week
+                    </button>
+                    <button class="egg-tab-btn" data-tab="urgent" onclick="app.eggSwitchTab('urgent')"
+                        style="padding:12px 20px;background:none;border:none;border-bottom:3px solid transparent;font-weight:600;cursor:pointer;color:var(--gray-600);">
+                        <i class="fas fa-bolt"></i> Urgent Orders
+                    </button>
+                    <button class="egg-tab-btn" data-tab="history" onclick="app.eggSwitchTab('history')"
+                        style="padding:12px 20px;background:none;border:none;border-bottom:3px solid transparent;font-weight:600;cursor:pointer;color:var(--gray-600);">
+                        <i class="fas fa-history"></i> Run History
+                    </button>
+                    <button class="egg-tab-btn" data-tab="config" onclick="app.eggSwitchTab('config')"
+                        style="padding:12px 20px;background:none;border:none;border-bottom:3px solid transparent;font-weight:600;cursor:pointer;color:var(--gray-600);">
+                        <i class="fas fa-cog"></i> Configuration
+                    </button>
+                </div>
+
+                <div id="egg-tab-content"></div>
+            </div>
+        `;
+
     const showEggPurchasingView = async (container) => {
         _state.cv = 'egg_purchasing';
         if (!isSystemAdmin(_state.cu)) {
@@ -850,44 +893,7 @@ JB 星期二到
             }
         }
 
-        container.innerHTML = `
-            <div class="egg-purchasing-view" style="padding:24px;">
-                <div class="egg-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
-                    <div>
-                        <h1 style="margin:0;display:flex;align-items:center;gap:10px;">
-                            <i class="fas fa-egg" style="color:#f59e0b;"></i> Egg Purchasing
-                        </h1>
-                        <div style="color:var(--gray-500);font-size:13px;margin-top:4px;">
-                            Weekly farm order generation. Super Admin only.
-                        </div>
-                    </div>
-                    <button class="btn secondary" onclick="app.eggRefresh()">
-                        <i class="fas fa-sync-alt"></i> Refresh
-                    </button>
-                </div>
-
-                <div class="egg-tabs" style="display:flex;gap:4px;border-bottom:2px solid var(--gray-200);margin-bottom:20px;">
-                    <button class="egg-tab-btn active" data-tab="run" onclick="app.eggSwitchTab('run')"
-                        style="padding:12px 20px;background:none;border:none;border-bottom:3px solid #f59e0b;font-weight:600;cursor:pointer;color:#f59e0b;">
-                        <i class="fas fa-play-circle"></i> Run This Week
-                    </button>
-                    <button class="egg-tab-btn" data-tab="urgent" onclick="app.eggSwitchTab('urgent')"
-                        style="padding:12px 20px;background:none;border:none;border-bottom:3px solid transparent;font-weight:600;cursor:pointer;color:var(--gray-600);">
-                        <i class="fas fa-bolt"></i> Urgent Orders
-                    </button>
-                    <button class="egg-tab-btn" data-tab="history" onclick="app.eggSwitchTab('history')"
-                        style="padding:12px 20px;background:none;border:none;border-bottom:3px solid transparent;font-weight:600;cursor:pointer;color:var(--gray-600);">
-                        <i class="fas fa-history"></i> Run History
-                    </button>
-                    <button class="egg-tab-btn" data-tab="config" onclick="app.eggSwitchTab('config')"
-                        style="padding:12px 20px;background:none;border:none;border-bottom:3px solid transparent;font-weight:600;cursor:pointer;color:var(--gray-600);">
-                        <i class="fas fa-cog"></i> Configuration
-                    </button>
-                </div>
-
-                <div id="egg-tab-content"></div>
-            </div>
-        `;
+        container.innerHTML = buildEggPurchasingShell();
 
         await eggSwitchTab(_eggState.currentTab || 'run');
     };

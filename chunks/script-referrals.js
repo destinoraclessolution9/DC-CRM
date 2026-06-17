@@ -213,56 +213,12 @@
         };
     };
 
-    const showReferralsView = async (container) => {
-        _state.cv = 'referrals';
-        // When the NEW full-JSX path is active, the React view owns the summary
-        // cards + leaderboard DOM, so the shared tail skips that by-id fill. Stays
-        // false on every legacy / scaffold-only path → tail behaves exactly as today.
-        let _suppressByIdSummary = false;
-        // React scaffold-shell — island renders shell; the style-inject + summary/
-        // leaderboard + D3 tree fills below populate by id after awaiting island
-        // useEffect-ready (rAF-too-early lesson). D3/search/filters stay in chunk.
-        if (_reactReferralsOn()) {
-            container.innerHTML = '<div id="ref-react-root"></div>';
-            let _refReady; const _refReadyP = new Promise(res => { _refReady = res; });
-            const _refGuard = setTimeout(() => _refReady(), 4000);
-
-            // NEW full-JSX path (default-OFF). When the flag is on AND the
-            // payload builds without throwing, hand the island a serializable
-            // `data` prop — the JSX view then owns the header/summary/leaderboard
-            // DOM, so we SUPPRESS the renderReferralSummaryAndLeaderboard() by-id
-            // fill below for those parts. On any build error — or when the flag is
-            // off — `_refPayload` stays undefined, so `data:undefined` is passed
-            // (the scaffold branch in the view), the EXACT existing onReady
-            // handshake runs, and the by-id summary/leaderboard fills run exactly
-            // as today (byte-for-byte unchanged). The D3 relationship TREE fill
-            // (showReferralTree → #referral-tree-svg) ALWAYS runs on BOTH paths.
-            let _refPayload;
-            if (_reactRefJsxOn()) {
-                try { _refPayload = await buildReferralsIslandData(); }
-                catch (e2) {
-                    console.warn('[referrals] JSX payload build failed, falling back to scaffold fill:', e2 && e2.message);
-                    _refPayload = undefined;
-                }
-            }
-            const _refHasJsx = !!_refPayload;
-
-            try {
-                window.CRMReact.mountReferrals(document.getElementById('ref-react-root'), { data: _refPayload, onReady: () => { clearTimeout(_refGuard); _refReady(); } });
-            } catch (e) {
-                console.warn('[referrals] island mount failed, falling back to legacy:', e && e.message);
-                clearTimeout(_refGuard); _refReady();
-            }
-            await _refReadyP;
-
-            // Tell the shared tail (below) the JSX view already rendered the
-            // summary cards + leaderboard, so it skips the by-id fill for those
-            // parts (never writes into a React-owned node). The style-inject and
-            // the D3 tree render (showReferralTree → #referral-tree-svg) below
-            // still run on this path, exactly as today.
-            _suppressByIdSummary = _refHasJsx;
-        } else {
-        container.innerHTML = `
+    // ── Internal HTML/CSS builders for the legacy showReferralsView path ──
+    // Pure string builders extracted verbatim from showReferralsView so the
+    // orchestrator stays a thin shell. No interpolation, no side effects —
+    // each returns the identical template literal the orchestrator used inline.
+    const buildReferralsViewHtml = () => {
+        return `
             <div class="referrals-view-v2">
                 <div class="ref-v2-header">
                     <div>
@@ -329,13 +285,10 @@
                 </div>
             </div>
         `;
-        }
+    };
 
-        // Inject Styles if not already present
-        if (!document.getElementById('referral-styles-v2')) {
-            const style = document.createElement('style');
-            style.id = 'referral-styles-v2';
-            style.textContent = `
+    const buildReferralsStylesCss = () => {
+        return `
                 .referrals-view-v2 { padding: 24px; color: var(--gray-800); }
                 .ref-v2-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; gap: 20px; flex-wrap: wrap; }
                 .ref-v2-subtitle { color: var(--gray-500); font-size: 14px; margin-top: 4px; }
@@ -450,6 +403,65 @@
                     .leaderboard-table-v2 th:nth-child(4), .leaderboard-table-v2 td:nth-child(4) { display: none; }
                 }
             `;
+    };
+
+    const showReferralsView = async (container) => {
+        _state.cv = 'referrals';
+        // When the NEW full-JSX path is active, the React view owns the summary
+        // cards + leaderboard DOM, so the shared tail skips that by-id fill. Stays
+        // false on every legacy / scaffold-only path → tail behaves exactly as today.
+        let _suppressByIdSummary = false;
+        // React scaffold-shell — island renders shell; the style-inject + summary/
+        // leaderboard + D3 tree fills below populate by id after awaiting island
+        // useEffect-ready (rAF-too-early lesson). D3/search/filters stay in chunk.
+        if (_reactReferralsOn()) {
+            container.innerHTML = '<div id="ref-react-root"></div>';
+            let _refReady; const _refReadyP = new Promise(res => { _refReady = res; });
+            const _refGuard = setTimeout(() => _refReady(), 4000);
+
+            // NEW full-JSX path (default-OFF). When the flag is on AND the
+            // payload builds without throwing, hand the island a serializable
+            // `data` prop — the JSX view then owns the header/summary/leaderboard
+            // DOM, so we SUPPRESS the renderReferralSummaryAndLeaderboard() by-id
+            // fill below for those parts. On any build error — or when the flag is
+            // off — `_refPayload` stays undefined, so `data:undefined` is passed
+            // (the scaffold branch in the view), the EXACT existing onReady
+            // handshake runs, and the by-id summary/leaderboard fills run exactly
+            // as today (byte-for-byte unchanged). The D3 relationship TREE fill
+            // (showReferralTree → #referral-tree-svg) ALWAYS runs on BOTH paths.
+            let _refPayload;
+            if (_reactRefJsxOn()) {
+                try { _refPayload = await buildReferralsIslandData(); }
+                catch (e2) {
+                    console.warn('[referrals] JSX payload build failed, falling back to scaffold fill:', e2 && e2.message);
+                    _refPayload = undefined;
+                }
+            }
+            const _refHasJsx = !!_refPayload;
+
+            try {
+                window.CRMReact.mountReferrals(document.getElementById('ref-react-root'), { data: _refPayload, onReady: () => { clearTimeout(_refGuard); _refReady(); } });
+            } catch (e) {
+                console.warn('[referrals] island mount failed, falling back to legacy:', e && e.message);
+                clearTimeout(_refGuard); _refReady();
+            }
+            await _refReadyP;
+
+            // Tell the shared tail (below) the JSX view already rendered the
+            // summary cards + leaderboard, so it skips the by-id fill for those
+            // parts (never writes into a React-owned node). The style-inject and
+            // the D3 tree render (showReferralTree → #referral-tree-svg) below
+            // still run on this path, exactly as today.
+            _suppressByIdSummary = _refHasJsx;
+        } else {
+        container.innerHTML = buildReferralsViewHtml();
+        }
+
+        // Inject Styles if not already present
+        if (!document.getElementById('referral-styles-v2')) {
+            const style = document.createElement('style');
+            style.id = 'referral-styles-v2';
+            style.textContent = buildReferralsStylesCss();
             document.head.appendChild(style);
         }
 

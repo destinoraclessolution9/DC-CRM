@@ -174,6 +174,80 @@
         };
     };
 
+    // ── Builder: legacy (non-React) explorer shell HTML ──
+    // Pure string-building extracted verbatim from showDocumentManagementView's
+    // legacy innerHTML assignment. Takes the view mode it reads (the only
+    // interpolated module var) and RETURNS the identical HTML string. The
+    // orchestrator keeps all data fetching, the React path, early return, and the
+    // trailing renderFolderTree()/loadFolderContents() awaits.
+    const buildDocumentsShellHtml = (viewMode) => {
+        return `
+            <div class="dms-view">
+                <div class="dms-header">
+                    <div>
+                        <h1>Document Management System</h1>
+                        <p>Manage, organize, and share your documents</p>
+                    </div>
+                    <div class="dms-actions">
+                        <button class="btn primary" onclick="app.openUploadModal()">
+                            <i class="fas fa-upload"></i> Upload File
+                        </button>
+                        <button class="btn secondary" onclick="app.openNewFolderModal()">
+                            <i class="fas fa-folder-plus"></i> New Folder
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="dms-layout">
+                    <div class="folder-sidebar">
+                        <div class="sidebar-header">
+                            <h3>Folders</h3>
+                            <button class="btn-icon" onclick="app.refreshFolderTree()" title="Refresh">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </div>
+                        <div class="folder-tree" id="folder-tree"></div>
+                    </div>
+                    
+                    <div class="file-explorer">
+                        <div class="explorer-header">
+                            <div class="breadcrumb" id="breadcrumb"></div>
+                            
+                            <div class="explorer-controls">
+                                <div class="search-filter-bar">
+                                    <i class="fas fa-search"></i>
+                                    <input type="text" id="file-search" placeholder="Search files..." onkeyup="app.debounceCall('file-search', () => app.searchFiles(this.value), 220)">
+                                    <select id="file-sort" class="form-control" onchange="app.sortFiles(this.value)">
+                                        <option value="name">Sort by Name</option>
+                                        <option value="date">Sort by Date</option>
+                                        <option value="size">Sort by Size</option>
+                                    </select>
+                                    <div class="view-toggle">
+                                        <button class="btn-icon ${viewMode === 'list' ? 'active' : ''}" onclick="app.setViewMode('list')">
+                                            <i class="fas fa-list"></i>
+                                        </button>
+                                        <button class="btn-icon ${viewMode === 'grid' ? 'active' : ''}" onclick="app.setViewMode('grid')">
+                                            <i class="fas fa-th-large"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div id="batch-actions"></div>
+                            </div>
+                            
+                            <div class="special-filters" style="margin-top: 15px; display: flex; gap: 10px;">
+                                <button class="btn link-btn" onclick="app.showRecentFiles()"><i class="fas fa-clock"></i> Recent</button>
+                                <button class="btn link-btn" onclick="app.showAllFiles()"><i class="fas fa-copy"></i> All Files</button>
+                                <button class="btn link-btn" onclick="app.showStarredFiles()"><i class="fas fa-star"></i> Starred</button>
+                            </div>
+                        </div>
+                        
+                        <div class="file-container" id="file-container"></div>
+                    </div>
+                </div>
+            </div>
+        `;
+    };
+
     const showDocumentManagementView = async (container) => {
         // React scaffold-shell — island renders the static shell; the chunk then
         // populates #folder-tree + #file-container via the SAME renderFolderTree()
@@ -216,71 +290,7 @@
             }
         }
 
-        container.innerHTML = `
-            <div class="dms-view">
-                <div class="dms-header">
-                    <div>
-                        <h1>Document Management System</h1>
-                        <p>Manage, organize, and share your documents</p>
-                    </div>
-                    <div class="dms-actions">
-                        <button class="btn primary" onclick="app.openUploadModal()">
-                            <i class="fas fa-upload"></i> Upload File
-                        </button>
-                        <button class="btn secondary" onclick="app.openNewFolderModal()">
-                            <i class="fas fa-folder-plus"></i> New Folder
-                        </button>
-                    </div>
-                </div>
-                
-                <div class="dms-layout">
-                    <div class="folder-sidebar">
-                        <div class="sidebar-header">
-                            <h3>Folders</h3>
-                            <button class="btn-icon" onclick="app.refreshFolderTree()" title="Refresh">
-                                <i class="fas fa-sync-alt"></i>
-                            </button>
-                        </div>
-                        <div class="folder-tree" id="folder-tree"></div>
-                    </div>
-                    
-                    <div class="file-explorer">
-                        <div class="explorer-header">
-                            <div class="breadcrumb" id="breadcrumb"></div>
-                            
-                            <div class="explorer-controls">
-                                <div class="search-filter-bar">
-                                    <i class="fas fa-search"></i>
-                                    <input type="text" id="file-search" placeholder="Search files..." onkeyup="app.debounceCall('file-search', () => app.searchFiles(this.value), 220)">
-                                    <select id="file-sort" class="form-control" onchange="app.sortFiles(this.value)">
-                                        <option value="name">Sort by Name</option>
-                                        <option value="date">Sort by Date</option>
-                                        <option value="size">Sort by Size</option>
-                                    </select>
-                                    <div class="view-toggle">
-                                        <button class="btn-icon ${_viewMode === 'list' ? 'active' : ''}" onclick="app.setViewMode('list')">
-                                            <i class="fas fa-list"></i>
-                                        </button>
-                                        <button class="btn-icon ${_viewMode === 'grid' ? 'active' : ''}" onclick="app.setViewMode('grid')">
-                                            <i class="fas fa-th-large"></i>
-                                        </button>
-                                    </div>
-                                </div>
-                                <div id="batch-actions"></div>
-                            </div>
-                            
-                            <div class="special-filters" style="margin-top: 15px; display: flex; gap: 10px;">
-                                <button class="btn link-btn" onclick="app.showRecentFiles()"><i class="fas fa-clock"></i> Recent</button>
-                                <button class="btn link-btn" onclick="app.showAllFiles()"><i class="fas fa-copy"></i> All Files</button>
-                                <button class="btn link-btn" onclick="app.showStarredFiles()"><i class="fas fa-star"></i> Starred</button>
-                            </div>
-                        </div>
-                        
-                        <div class="file-container" id="file-container"></div>
-                    </div>
-                </div>
-            </div>
-        `;
+        container.innerHTML = buildDocumentsShellHtml(_viewMode);
         await renderFolderTree();
         await loadFolderContents();
     };

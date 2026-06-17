@@ -243,6 +243,36 @@
         };
     };
 
+    // Legacy (non-React) shell markup for the Stock Take view: the header, the
+    // tab strip (role-gated tab set), and the empty #st-tab-body slot that
+    // stSwitchTab fills. Pure string build — no awaits, no DOM mutation, no
+    // control flow crossing the boundary. Extracted verbatim from
+    // showStockTakeView's container.innerHTML assignment so the orchestrator
+    // stays a thin shell. Reads only isSystemAdmin(_state.cu) (module scope).
+    const _stBuildShellHtml = () => `
+            <div class="stock-take-view" style="padding:24px;max-width:1400px;margin:0 auto;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:12px;">
+                    <div>
+                        <h1 style="margin:0;font-size:24px;"><i class="fas fa-boxes"></i> Stock Take</h1>
+                        <div style="color:var(--gray-600);font-size:13px;margin-top:4px;">Shelf-by-shelf physical count reconciliation</div>
+                    </div>
+                    <div id="st-session-chip"></div>
+                </div>
+                <div class="st-tabs" style="display:flex;gap:4px;border-bottom:2px solid var(--gray-200);margin-bottom:16px;overflow-x:auto;">
+                    ${(isSystemAdmin(_state.cu)
+                        ? ['sessions','shelves','import','exclusions','count','bulk','reconcile','recount','summary']
+                        : ['count','recount','summary']
+                    ).map(t => `
+                        <button class="st-tab-btn" data-tab="${t}" onclick="app.stSwitchTab('${t}')"
+                            style="padding:10px 16px;border:none;background:none;cursor:pointer;font-weight:600;white-space:nowrap;border-bottom:3px solid transparent;color:var(--gray-600);">
+                            ${({sessions:'Sessions',shelves:'Shelves (v2)',import:'System Stock',exclusions:'Exclusions',count:'Per-shelf Count',bulk:'Bulk Physical',reconcile:'Reconciliation',recount:'Recount',summary:'Final Summary'})[t]}
+                        </button>
+                    `).join('')}
+                </div>
+                <div id="st-tab-body"></div>
+            </div>
+        `;
+
     const showStockTakeView = async (container) => {
         if (!_stRequireAdmin()) { await navigateTo('calendar'); return; }
         _state.cv = 'stock_take';
@@ -329,29 +359,7 @@
             }
         }
 
-        container.innerHTML = `
-            <div class="stock-take-view" style="padding:24px;max-width:1400px;margin:0 auto;">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:12px;">
-                    <div>
-                        <h1 style="margin:0;font-size:24px;"><i class="fas fa-boxes"></i> Stock Take</h1>
-                        <div style="color:var(--gray-600);font-size:13px;margin-top:4px;">Shelf-by-shelf physical count reconciliation</div>
-                    </div>
-                    <div id="st-session-chip"></div>
-                </div>
-                <div class="st-tabs" style="display:flex;gap:4px;border-bottom:2px solid var(--gray-200);margin-bottom:16px;overflow-x:auto;">
-                    ${(isSystemAdmin(_state.cu)
-                        ? ['sessions','shelves','import','exclusions','count','bulk','reconcile','recount','summary']
-                        : ['count','recount','summary']
-                    ).map(t => `
-                        <button class="st-tab-btn" data-tab="${t}" onclick="app.stSwitchTab('${t}')"
-                            style="padding:10px 16px;border:none;background:none;cursor:pointer;font-weight:600;white-space:nowrap;border-bottom:3px solid transparent;color:var(--gray-600);">
-                            ${({sessions:'Sessions',shelves:'Shelves (v2)',import:'System Stock',exclusions:'Exclusions',count:'Per-shelf Count',bulk:'Bulk Physical',reconcile:'Reconciliation',recount:'Recount',summary:'Final Summary'})[t]}
-                        </button>
-                    `).join('')}
-                </div>
-                <div id="st-tab-body"></div>
-            </div>
-        `;
+        container.innerHTML = _stBuildShellHtml();
         // Stock Take Staff land directly on Per-shelf Count; admins land on Sessions.
         const defaultTab = isSystemAdmin(_state.cu) ? 'sessions' : 'count';
         // If a stored tab is not allowed for this user level, fall back to default.

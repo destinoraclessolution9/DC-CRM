@@ -35,8 +35,9 @@
 let _currentImportStep = 1;
 let _importData = { file: null, fileName: null, fileSize: null, rows: 0, headers: ['Full Name', 'Phone Number', 'Email', 'IC Number', 'Date of Birth', 'Occupation', 'Income Range', 'Address', 'City', 'State', 'Postal Code', 'Ming Gua'], data: [], importType: 'prospects', mapping: {}, validation: { valid: 0, warnings: 0, errors: 0 }, duplicates: { total: 0 }, assignment: { assignTo: 'myself' } };
 
-const showImportDashboard = async (container) => {
-    container.innerHTML = `
+// Pure HTML head for showImportDashboard: everything up to (and including) the
+// <tbody> open tag that hosts the awaited recent-imports rows. Byte-exact split.
+const buildImportDashboardHead = () => `
         <div class="import-view">
             <div class="import-header">
                 <div>
@@ -55,7 +56,11 @@ const showImportDashboard = async (container) => {
                 <div class="imports-table-container">
                     <table class="imports-table">
                         <thead><tr><th scope="col">File Name</th><th scope="col">Type</th><th scope="col">Records</th><th scope="col">Success %</th><th scope="col">Status</th><th scope="col">Date</th><th scope="col">Actions</th></tr></thead>
-                        <tbody id="imports-table-body">${await renderRecentImports()}</tbody>
+                        <tbody id="imports-table-body">`;
+
+// Pure HTML tail for showImportDashboard: everything after the awaited
+// recent-imports rows (the <tbody> close onward). Byte-exact split.
+const buildImportDashboardTail = () => `</tbody>
                     </table>
                 </div>
             </div>
@@ -108,6 +113,9 @@ const showImportDashboard = async (container) => {
             </div>
         </div>
 `;
+
+const showImportDashboard = async (container) => {
+    container.innerHTML = buildImportDashboardHead() + await renderRecentImports() + buildImportDashboardTail();
 };
 
 const renderRecentImports = async () => {
@@ -1147,7 +1155,19 @@ const showProtectionMonitoringView = async (container) => {
         }
     }
 
-    container.innerHTML = `
+    container.innerHTML = buildProtectionMonitoringView(
+        renderTeamSummaryCards(monitorData),
+        renderAgentPerformanceRows(monitorData),
+        renderInactiveProspectsRows(monitorData),
+        await renderReassignmentHistory()
+    );
+};
+
+// Pure HTML shell for the legacy protection-monitoring view. The orchestrator
+// computes the four row-string fragments (3 sync renders + 1 awaited history)
+// and passes them in; this helper assembles the identical static markup with
+// the fragments interpolated at the same four positions. Byte-exact extraction.
+const buildProtectionMonitoringView = (teamSummaryCardsHtml, agentPerformanceRowsHtml, inactiveProspectsRowsHtml, reassignmentHistoryHtml) => `
         <div class="protection-view">
             <div class="protection-header">
                 <div><h1>Protection Period & Follow-up Monitoring</h1><p>Track prospect protection periods and agent follow-up performance</p></div>
@@ -1158,13 +1178,13 @@ const showProtectionMonitoringView = async (container) => {
                     <button class="btn primary" onclick="app.navigateTo('import')"><i class="fas fa-upload"></i> Bulk Import</button>
                 </div>
             </div>
-            <div class="team-summary-cards">${renderTeamSummaryCards(monitorData)}</div>
+            <div class="team-summary-cards">${teamSummaryCardsHtml}</div>
             <div class="agent-performance">
                 <h3>Agent Performance</h3>
                 <div class="agent-table-container">
                     <table class="agent-performance-table">
                         <thead><tr><th scope="col">Agent</th><th scope="col">Team</th><th scope="col">Assigned</th><th scope="col">Followed up (7d)</th><th scope="col">Rate</th><th scope="col">Inactive (3-7d)</th><th scope="col">Inactive (8-14d)</th><th scope="col">Inactive (15d+)</th><th scope="col">Actions</th></tr></thead>
-                        <tbody>${renderAgentPerformanceRows(monitorData)}</tbody>
+                        <tbody>${agentPerformanceRowsHtml}</tbody>
                     </table>
                 </div>
             </div>
@@ -1173,16 +1193,15 @@ const showProtectionMonitoringView = async (container) => {
                 <div class="inactive-table-container">
                     <table class="inactive-table">
                         <thead><tr><th scope="col">Prospect</th><th scope="col">Agent</th><th scope="col">Days Inactive</th><th scope="col">Score</th><th scope="col">Protection Deadline</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
-                        <tbody>${renderInactiveProspectsRows(monitorData)}</tbody>
+                        <tbody>${inactiveProspectsRowsHtml}</tbody>
                     </table>
                 </div>
             </div>
             <div class="agent-performance" style="margin-top:24px">
                 <h3>Reassignment History</h3>
-                <div class="agent-table-container">${await renderReassignmentHistory()}</div>
+                <div class="agent-table-container">${reassignmentHistoryHtml}</div>
             </div>
         </div>`;
-};
 
 const renderTeamSummaryCards = ({ visibleProspects, agentMap, lastActivityMap }) => {
     const teamColors = ['team-a', 'team-b', 'team-c', 'team-d', 'team-e'];
