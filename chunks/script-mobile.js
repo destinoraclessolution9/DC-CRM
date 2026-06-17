@@ -673,7 +673,7 @@
         // home load is spending time.
         const _mhomePerfT0 = performance.now();
         const _mhomePerf = (label) => {
-            try { console.info(`[mhome-perf] ${label} +${Math.round(performance.now() - _mhomePerfT0)}ms`); } catch(_) {}
+            try { console.info(`[mhome-perf] ${label} +${Math.round(performance.now() - _mhomePerfT0)}ms`); } catch(_) { /* intentional: perf logging is best-effort */ }
         };
         _mhomePerf('mhome:start');
 
@@ -696,7 +696,7 @@
                 if (Date.now() - ts < 8 * 60 * 60 * 1000) _mhomeCached = val;
                 else localStorage.removeItem(_mhomeSnapKey);
             }
-        } catch(_) {}
+        } catch(_) { /* intentional: corrupt/missing snapshot falls back to scaffold */ }
         const _mhomeInitBody = _mhomeCached || `
                 <div class="mhome-ai-card"><div class="mhome-ai-top" style="min-height:160px;">
                     <span class="mhome-arc"></span>
@@ -798,10 +798,10 @@
                 const { ts, val } = JSON.parse(raw);
                 if (Date.now() - ts > ttl) { localStorage.removeItem(key); return null; }
                 return val;
-            } catch(_) { return null; }
+            } catch(_) { return null; /* intentional: corrupt cache entry treated as miss */ }
         };
         const _mhomeLsSet = (key, val) => {
-            try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), val })); } catch(_) {}
+            try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), val })); } catch(_) { /* intentional: localStorage write is best-effort (quota/private mode) */ }
         };
         // Pull-to-refresh forces a one-time bypass of every cold cache below.
         const _mhomeForce = _mobileForceFresh; _mobileForceFresh = false;
@@ -1019,7 +1019,7 @@
         const body = document.getElementById('mhome-body');
         if (!body) return;
         // Track so we can save snapshot after render
-        const _mhomeSaveSnap = (html) => { try { localStorage.setItem(_mhomeSnapKey, JSON.stringify({ ts: Date.now(), val: html })); } catch(_) {} };
+        const _mhomeSaveSnap = (html) => { try { localStorage.setItem(_mhomeSnapKey, JSON.stringify({ ts: Date.now(), val: html })); } catch(_) { /* intentional: snapshot persistence is best-effort */ } };
         body.innerHTML = `
         <div class="mhome-ai-card">
             <div class="mhome-ai-top">
@@ -1336,7 +1336,7 @@
     // markFollowUpSent / dismissFollowUp handlers animate them out in place.
     const mhomeOpenFollowups = async () => {
         UI.showModal('Overdue Follow-ups', _mhomeSheetLoading, _mhomeSheetBtns);
-        try { await window._loadChunk('chunks/script-calendar.min.js'); } catch (_) {}
+        try { await window._loadChunk('chunks/script-calendar.min.js'); } catch (_) { /* intentional: action handlers are guarded at call sites if chunk missing */ }
         let drafts = [], people = [];
         try {
             const [dR, pR, cR] = await Promise.all([
@@ -1346,7 +1346,7 @@
             ]);
             drafts = dR || [];
             people = [...(pR || []), ...(cR || [])];
-        } catch (_) {}
+        } catch (_) { /* intentional: per-query fallbacks keep empty defaults → empty sheet */ }
         if (!_mhomeOverlayOpen()) return; // user closed the sheet while it loaded
         const personMap = new Map(people.map(p => [String(p.id), p]));
         const today = _mhomeToday();
@@ -1387,7 +1387,7 @@
     // Reuses sendRefillWhatsApp / viewRefillProspect from the calendar chunk.
     const mhomeOpenRefills = async () => {
         UI.showModal('Refills Due', _mhomeSheetLoading, _mhomeSheetBtns);
-        try { await window._loadChunk('chunks/script-calendar.min.js'); } catch (_) {}
+        try { await window._loadChunk('chunks/script-calendar.min.js'); } catch (_) { /* intentional: action handlers are guarded at call sites if chunk missing */ }
         let reminders = [], prospects = [], customers = [];
         try {
             const [rR, pR, cR] = await Promise.all([
@@ -1396,7 +1396,7 @@
                 AppDataStore.getAll('customers').catch(() => []),
             ]);
             reminders = rR || []; prospects = pR || []; customers = cR || [];
-        } catch (_) {}
+        } catch (_) { /* intentional: per-query fallbacks keep empty defaults → empty sheet */ }
         if (!_mhomeOverlayOpen()) return;
         const pMap = new Map(prospects.map(p => [String(p.id), p]));
         const cMap = new Map(customers.map(c => [String(c.id), c]));
@@ -1448,7 +1448,7 @@
     const mhomeOpenInactive = async () => {
         UI.showModal('Inactive Clients', _mhomeSheetLoading, _mhomeSheetBtns);
         let customers = [];
-        try { customers = await AppDataStore.getAll('customers').catch(() => []); } catch (_) {}
+        try { customers = await AppDataStore.getAll('customers').catch(() => []); } catch (_) { /* intentional: keeps empty default → empty sheet */ }
         if (!_mhomeOverlayOpen()) return;
         const sixtyAgo = Date.now() - 60 * 86400000;
         const isInactive = (c) => {
@@ -1521,10 +1521,10 @@
     // Drained on page load, on `online` events, and on a slow backoff timer.
     const _MCAL_RETRY_QUEUE_KEY = 'mcal-retry-queue-v1';
     const _mcalRetryQueueRead = () => {
-        try { return JSON.parse(localStorage.getItem(_MCAL_RETRY_QUEUE_KEY) || '[]'); } catch(_) { return []; }
+        try { return JSON.parse(localStorage.getItem(_MCAL_RETRY_QUEUE_KEY) || '[]'); } catch(_) { return []; /* intentional: corrupt queue treated as empty */ }
     };
     const _mcalRetryQueueWrite = (q) => {
-        try { localStorage.setItem(_MCAL_RETRY_QUEUE_KEY, JSON.stringify(q)); } catch(_) {}
+        try { localStorage.setItem(_MCAL_RETRY_QUEUE_KEY, JSON.stringify(q)); } catch(_) { /* intentional: queue persistence is best-effort */ }
     };
 
     // Wipe persisted mobile snapshots/caches so the next render refetches.
@@ -1542,8 +1542,8 @@
                 if (!k) continue;
                 if (pfx.some(p => k.startsWith(p))) toRemove.push(k);
             }
-            toRemove.forEach(k => { try { localStorage.removeItem(k); } catch(_) {} });
-        } catch(_) {}
+            toRemove.forEach(k => { try { localStorage.removeItem(k); } catch(_) { /* intentional: per-key removal is best-effort */ } });
+        } catch(_) { /* intentional: cache clear is best-effort (localStorage may be unavailable) */ }
     };
     const _mcalColorForType = (type) => {
         const t = String(type || '').toLowerCase();
@@ -1605,10 +1605,10 @@
                 const { ts, val } = JSON.parse(raw);
                 if (Date.now() - ts > ttl) { localStorage.removeItem(key); return null; }
                 return val;
-            } catch(_) { return null; }
+            } catch(_) { return null; /* intentional: corrupt cache entry treated as miss */ }
         };
         const _lsSet = (key, val) => {
-            try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), val })); } catch(_) {}
+            try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), val })); } catch(_) { /* intentional: localStorage write is best-effort (quota/private mode) */ }
         };
 
         // A: Instant snapshot restore — 8hr TTL survives app close on Android
@@ -1664,7 +1664,7 @@
         // mobile load is spending time.
         const _mcalPerfT0 = performance.now();
         const _mcalPerf = (label) => {
-            try { console.info(`[mcal-perf] ${label} +${Math.round(performance.now() - _mcalPerfT0)}ms`); } catch(_) {}
+            try { console.info(`[mcal-perf] ${label} +${Math.round(performance.now() - _mcalPerfT0)}ms`); } catch(_) { /* intentional: perf logging is best-effort */ }
         };
         _mcalPerf('mcal:start');
 
@@ -1688,7 +1688,7 @@
 
         // Persistent raw-activity cache for this month (no TTL — until edited).
         const _mcalActsKey = `mcal-acts-${_mcalYear}-${_mcalMonth}`;
-        const _lsGetRaw = (key) => { try { const r = localStorage.getItem(key); if (!r) return null; return JSON.parse(r).val; } catch(_) { return null; } };
+        const _lsGetRaw = (key) => { try { const r = localStorage.getItem(key); if (!r) return null; return JSON.parse(r).val; } catch(_) { return null; /* intentional: corrupt cache entry treated as miss */ } };
         const _cachedActs = _forceFresh ? null : _lsGetRaw(_mcalActsKey);
 
         // Start visibleIds resolution early (non-blocking) so it runs
@@ -2011,12 +2011,12 @@
         if (!y || !m) return;
         const key = `mcal-acts-${y}-${m - 1}`;
         let cached = [];
-        try { cached = JSON.parse(localStorage.getItem(key) || '{}').val || []; } catch(_) {}
+        try { cached = JSON.parse(localStorage.getItem(key) || '{}').val || []; } catch(_) { /* intentional: corrupt cache treated as empty */ }
         if (!Array.isArray(cached)) cached = [];
         // Avoid double-insert if called twice with same tmp id
         if (cached.some(a => String(a.id) === String(row.id))) return;
         cached.push(row);
-        try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), val: cached })); } catch(_) {}
+        try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), val: cached })); } catch(_) { /* intentional: optimistic cache write is best-effort */ }
         _mcalOptimisticRows.set(String(row.id), { key, row });
         // If the calendar is currently showing this month, re-render now.
         const vp = document.getElementById('content-viewport');
@@ -2033,7 +2033,7 @@
         if (!entry || !realRow) return;
         const { key } = entry;
         let cached = [];
-        try { cached = JSON.parse(localStorage.getItem(key) || '{}').val || []; } catch(_) {}
+        try { cached = JSON.parse(localStorage.getItem(key) || '{}').val || []; } catch(_) { /* intentional: corrupt cache treated as empty */ }
         if (!Array.isArray(cached)) return;
         const idx = cached.findIndex(a => String(a.id) === String(tmpId));
         if (idx >= 0) {
@@ -2041,7 +2041,7 @@
         } else {
             cached.push({ ...realRow, _pending: false });
         }
-        try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), val: cached })); } catch(_) {}
+        try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), val: cached })); } catch(_) { /* intentional: optimistic cache write is best-effort */ }
         // Re-render the mobile calendar if it's still showing the same month —
         // the SWR revalidation may have raced ahead and wiped the optimistic cell
         // before the real row arrived, so we repaint to ensure it stays visible.
@@ -2061,12 +2061,12 @@
         if (!entry) return;
         const { key } = entry;
         let cached = [];
-        try { cached = JSON.parse(localStorage.getItem(key) || '{}').val || []; } catch(_) {}
+        try { cached = JSON.parse(localStorage.getItem(key) || '{}').val || []; } catch(_) { /* intentional: corrupt cache treated as empty */ }
         if (!Array.isArray(cached)) return;
         const idx = cached.findIndex(a => String(a.id) === String(tmpId));
         if (idx >= 0) {
             cached[idx] = { ...cached[idx], _pending: true, _syncFailed: true };
-            try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), val: cached })); } catch(_) {}
+            try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), val: cached })); } catch(_) { /* intentional: optimistic cache write is best-effort */ }
         }
     };
 
@@ -2195,7 +2195,7 @@
     // detail modal, which keeps the same privacy masking. Robust against a
     // deleted/orphaned contact: if the lookup misses we drop back to details.
     const mcalOpenEvent = async (activityId, prospectId, customerId) => {
-        try { UI.hideModal(); } catch (_) {}
+        try { UI.hideModal(); } catch (_) { /* intentional: best-effort modal cleanup before navigating */ }
         try {
             if (prospectId) {
                 const p = await AppDataStore.getById('prospects', prospectId);
@@ -2328,14 +2328,14 @@
                 ]);
                 personMap = new Map([...(p || []), ...(c || [])].map(x => [String(x.id), x]));
                 if (personMap.size) _mcalPersonMap = personMap;
-            } catch (_) { personMap = _mcalPersonMap || new Map(); }
+            } catch (_) { personMap = _mcalPersonMap || new Map(); /* intentional: name lookup degrades to activity-type labels */ }
         }
 
         let acts = [];
         try {
             const res = await AppDataStore.queryAdvanced('activities', opts);
             acts = (res?.data || []).filter(a => a.activity_type !== 'EVENT');
-        } catch (_) { acts = []; }
+        } catch (_) { acts = []; /* intentional: fetch failure renders empty range */ }
 
         const byDate = new Map();
         for (const a of acts) {
@@ -2607,7 +2607,7 @@
     };
     const mcalAdd = async () => {
         // Open the activity creation modal — pre-fills with today's date by default.
-        try { await (window.app.openActivityModal || (() => {}))(); return; } catch (_) {}
+        try { await (window.app.openActivityModal || (() => {}))(); return; } catch (_) { /* intentional: falls through to toast if modal unavailable */ }
         UI.toast.success('Add activity');
     };
     const mcalAddMeetUp = (dateStr) => {
@@ -2664,7 +2664,7 @@
                     if (Date.now() - ts < 30 * 60 * 1000) _mpSnapHtml = val;
                     else localStorage.removeItem(_mpSnapKey);
                 }
-            } catch(_) {}
+            } catch(_) { /* intentional: corrupt/missing snapshot falls back to live fetch */ }
         }
         // Only use snapshot when there's no active search (search results shouldn't be cached)
         const _mpHasSnap = !!_mpSnapHtml && !_mpSearch;
@@ -2756,7 +2756,7 @@
                              .map(u => [String(u.id), { code: u.agent_code || '', name: u.full_name || '' }])
                 );
             }
-        } catch (_) { rows = []; }
+        } catch (_) { rows = []; /* intentional: fetch failure renders empty list */ }
 
         // Scope by visibility for non-admins
         if (typeof isSystemAdmin === 'function' && !isSystemAdmin(_state.cu) && visibleIds !== 'all') {
@@ -2852,7 +2852,7 @@
         // page reload would paint that narrowed list while the in-memory
         // filter state is empty — UI says "no filters" but list is narrowed.
         if (!_mpSearch && !_mpHasActiveFilters()) {
-            try { localStorage.setItem(`mp-list-snap-v2-${_mpTab}`, JSON.stringify({ ts: Date.now(), val: html })); } catch(_) {}
+            try { localStorage.setItem(`mp-list-snap-v2-${_mpTab}`, JSON.stringify({ ts: Date.now(), val: html })); } catch(_) { /* intentional: snapshot persistence is best-effort */ }
         }
     };
 
@@ -2905,10 +2905,10 @@
     };
     const mpAdd = () => {
         if (_mpTab === 'customers' && typeof window.app?.openAddCustomerModal === 'function') {
-            try { window.app.openAddCustomerModal(); return; } catch (_) {}
+            try { window.app.openAddCustomerModal(); return; } catch (_) { /* intentional: falls through to prospect modal / toast */ }
         }
         if (typeof window.app?.openAddProspectModal === 'function') {
-            try { window.app.openAddProspectModal(); return; } catch (_) {}
+            try { window.app.openAddProspectModal(); return; } catch (_) { /* intentional: falls through to toast if modal unavailable */ }
         }
         UI.toast.success('Add');
     };
@@ -2931,7 +2931,7 @@
                         .map(u => [String(u.id), { code: u.agent_code || '', name: u.full_name || '' }])
                 );
                 agentEntries = Array.from(_mpAgentMap.entries());
-            } catch (_) {}
+            } catch (_) { /* intentional: agent dropdown degrades to "All Agents" only */ }
         }
         agentEntries.sort((a, b) => (a[1].name || '').localeCompare(b[1].name || ''));
         const agentOptions = agentEntries.map(([id, e]) => {
@@ -3028,7 +3028,7 @@
         // Drop the snapshot so a stale unfiltered cache doesn't paint over the
         // narrowed list on the next visit. _mpRenderList skips saving while
         // filters are active, so this stays clear until filters are reset.
-        try { localStorage.removeItem(`mp-list-snap-v2-${_mpTab}`); } catch(_) {}
+        try { localStorage.removeItem(`mp-list-snap-v2-${_mpTab}`); } catch(_) { /* intentional: snapshot eviction is best-effort */ }
         _mpUpdateFilterBtn();
         await _mpRenderList();
     };
@@ -3036,7 +3036,7 @@
     const mpClearFilters = async () => {
         _mpFilters = { status: '', agentId: '', mingGua: '', scoreMin: '', scoreMax: '', pipelineStage: '' };
         UI.hideModal();
-        try { localStorage.removeItem(`mp-list-snap-v2-${_mpTab}`); } catch(_) {}
+        try { localStorage.removeItem(`mp-list-snap-v2-${_mpTab}`); } catch(_) { /* intentional: snapshot eviction is best-effort */ }
         _mpUpdateFilterBtn();
         await _mpRenderList();
     };
@@ -3124,7 +3124,7 @@
                     AppDataStore.invalidateCache('event_attendees');
                     AppDataStore.invalidateCache('prospects');
                     AppDataStore.invalidateCache('customers');
-                } catch (_) {}
+                } catch (_) { /* intentional: cache invalidation is best-effort before refetch */ }
                 // Bypass the mobile localStorage snapshots once so the manual
                 // refresh actually pulls live data for Home/Calendar/Clients.
                 _mobileForceFresh = true;

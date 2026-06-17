@@ -34,7 +34,7 @@ const _reactRankingOn = () => {
         if (/[?&]react=0/.test(location.search)) return false;
         if (localStorage.getItem('crm_react_off') === '1') return false;
         return !!(window.CRMReact && typeof window.CRMReact.mountRankingView === 'function');
-    } catch (_) { return false; }
+    } catch (_) { /* intentional: localStorage/location probe — default to legacy on access error */ return false; }
 };
 const _reactNoticeboardOn = () => {
     try {
@@ -42,7 +42,7 @@ const _reactNoticeboardOn = () => {
         if (/[?&]react=0/.test(location.search)) return false;
         if (localStorage.getItem('crm_react_off') === '1') return false;
         return !!(window.CRMReact && typeof window.CRMReact.mountNoticeboardGrid === 'function');
-    } catch (_) { return false; }
+    } catch (_) { /* intentional: localStorage/location probe — default to legacy on access error */ return false; }
 };
 
 const showRankingPerformanceView = async (container) => {
@@ -520,15 +520,15 @@ const computeNineMethodStatuses = async (subject) => {
     try {
         const rows = await AppDataStore.query('user_milestones', { user_id: subject.user_id });
         rows.forEach(r => { overrides[r.milestone_name] = r.completed; });
-    } catch(e) {}
+    } catch(e) { /* intentional: admin overrides are optional — no rows means auto-detect only */ }
 
     // Preload data for auto-detect
     let categories = [], events = [], regs = [], activities = [], referrals = [];
-    try { categories = await AppDataStore.getAll('event_categories'); } catch(e) {}
-    try { events     = await AppDataStore.getAll('events'); } catch(e) {}
-    try { regs       = await AppDataStore.getAll('event_registrations'); } catch(e) {}
-    try { activities = await AppDataStore.getAll('activities'); } catch(e) {}
-    try { referrals  = await AppDataStore.getAll('referrals'); } catch(e) {}
+    try { categories = await AppDataStore.getAll('event_categories'); } catch(e) { /* intentional: best-effort preload — fall back to empty list, status defaults to not-attended */ }
+    try { events     = await AppDataStore.getAll('events'); } catch(e) { /* intentional: best-effort preload — fall back to empty list, status defaults to not-attended */ }
+    try { regs       = await AppDataStore.getAll('event_registrations'); } catch(e) { /* intentional: best-effort preload — fall back to empty list, status defaults to not-attended */ }
+    try { activities = await AppDataStore.getAll('activities'); } catch(e) { /* intentional: best-effort preload — fall back to empty list, status defaults to not-attended */ }
+    try { referrals  = await AppDataStore.getAll('referrals'); } catch(e) { /* intentional: best-effort preload — fall back to empty list, status defaults to not-attended */ }
 
     const catByName = new Map(categories.map(c => [String(c.category_name || '').trim(), c.id]));
     const eventById = new Map(events.map(e => [String(e.id), e]));
@@ -605,14 +605,14 @@ const computeFourPillarStatuses = async (subject) => {
     try {
         const rows = await AppDataStore.query('user_milestones', { user_id: subject.user_id });
         rows.forEach(r => { overrides[r.milestone_name] = r.completed; });
-    } catch(e) {}
+    } catch(e) { /* intentional: admin overrides are optional — no rows means auto-detect only */ }
 
     let purchases = [], products = [], bujishuList = [];
     if (subject.customer_id) {
-        try { purchases = await AppDataStore.query('purchases', { customer_id: subject.customer_id }); } catch(e) {}
+        try { purchases = await AppDataStore.query('purchases', { customer_id: subject.customer_id }); } catch(e) { /* intentional: best-effort preload — fall back to empty list, pillar defaults to not-owned */ }
     }
-    try { products = await AppDataStore.getAll('products'); } catch(e) {}
-    try { bujishuList = await AppDataStore.getAll('bujishu'); } catch(e) {}
+    try { products = await AppDataStore.getAll('products'); } catch(e) { /* intentional: best-effort preload — fall back to empty list, pillar defaults to not-owned */ }
+    try { bujishuList = await AppDataStore.getAll('bujishu'); } catch(e) { /* intentional: best-effort preload — fall back to empty list, pillar defaults to not-owned */ }
 
     const nameMatches = (source, def, item) => {
         const pool = source === 'bujishu' ? bujishuList : products;
@@ -780,7 +780,7 @@ const showNoticeboardView = async (container) => {
     if (postered.length && AppDataStore.resolveAttachmentSrc) {
         await Promise.all(postered.map(async e => {
             try { e._posterSigned = await AppDataStore.resolveAttachmentSrc(e.poster_url); }
-            catch(_) { e._posterSigned = e.poster_url; }
+            catch(_) { /* intentional: pre-sign is best-effort — fall back to the raw poster_url */ e._posterSigned = e.poster_url; }
         }));
     } else {
         postered.forEach(e => { e._posterSigned = e.poster_url; });
@@ -812,11 +812,11 @@ const openNoticeboardDetail = async (eventId) => {
     let posterSrc = '';
     if (e.poster_url) {
         try { posterSrc = AppDataStore.resolveAttachmentSrc ? await AppDataStore.resolveAttachmentSrc(e.poster_url) : e.poster_url; }
-        catch(_) { posterSrc = e.poster_url; }
+        catch(_) { /* intentional: pre-sign is best-effort — fall back to the raw poster_url */ posterSrc = e.poster_url; }
     }
 
     const esc = (s) => window._crmUtils.escapeHtml(s);
-    const fmtDate = (d) => { try { return new Date(d).toLocaleDateString('en-MY', { weekday:'long', day:'numeric', month:'long', year:'numeric' }); } catch(_) { return d || ''; } };
+    const fmtDate = (d) => { try { return new Date(d).toLocaleDateString('en-MY', { weekday:'long', day:'numeric', month:'long', year:'numeric' }); } catch(_) { /* intentional: locale-format fallback — show the raw date string */ return d || ''; } };
     const time = (e.start_time && e.end_time) ? `${e.start_time} – ${e.end_time}` : (e.start_time || e.end_time || '');
     const evTitle = e.title || e.event_title || 'Event Details';
     const evDate  = e.date  || e.event_date  || null;

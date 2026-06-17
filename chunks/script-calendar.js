@@ -44,7 +44,7 @@
             if (/[?&]react=0/.test(location.search)) return false;
             if (localStorage.getItem('crm_react_off') === '1') return false;
             return !!(window.CRMReact && typeof window.CRMReact.mountCalendar === 'function');
-        } catch (_) { return false; }
+        } catch (_) { /* intentional: feature-detect, default off on any error */ return false; }
     };
 
     // ── NEW full-JSX render flag (default OFF). Opt in via ?react_cal_jsx=1 or
@@ -61,7 +61,7 @@
             if (/[?&]react_cal_jsx=1/.test(location.search)) return true;
             if (localStorage.getItem('crm_react_cal_jsx') === '1') return true;
             return false;
-        } catch (_) { return false; }
+        } catch (_) { /* intentional: opt-in flag probe, default off on any error */ return false; }
     };
 
     // Plain-serializable payload (NO HTML strings) for the parts CalendarFullJsx
@@ -333,7 +333,7 @@
         try {
             const _agentId = _state.cu?.id || null;
             AppDataStore.loadCalendarDashboard(_agentId).catch(() => {});
-        } catch (_) {}
+        } catch (_) { /* intentional: fire-and-forget cache prime, optional RPC */ }
 
         // ── Tier 1.2/1.3: critical path first, sidebars after ──
         // Critical path = the calendar grid + today's activity list. These
@@ -632,6 +632,7 @@
             const parsed = JSON.parse(raw);
             return Array.isArray(parsed) ? parsed : [];
         } catch (e) {
+            /* intentional: not JSON — fall back to comma-split parsing */
             return String(raw).split(',').map(s => s.trim()).filter(Boolean);
         }
     };
@@ -934,7 +935,7 @@
 
         // Index proposed_solutions — both names and product categories
         let allSolutions = [];
-        try { allSolutions = await AppDataStore.getAll('proposed_solutions') || []; } catch (e) {}
+        try { allSolutions = await AppDataStore.getAll('proposed_solutions') || []; } catch (e) { /* intentional: optional table, default [] */ }
         const solNamesByProspect = {}, solNamesByCustomer = {};
         const solCatsByProspect  = {}, solCatsByCustomer  = {};
         for (const s of allSolutions) {
@@ -952,7 +953,7 @@
 
         // Load EVENT activities for Engaged (3+ events) and Returning (same category last year) tiers
         let eventActs = [];
-        try { eventActs = (await AppDataStore.getAll('activities')).filter(a => a.activity_type === 'EVENT'); } catch (e) {}
+        try { eventActs = (await AppDataStore.getAll('activities')).filter(a => a.activity_type === 'EVENT'); } catch (e) { /* intentional: optional history, default [] */ }
         const eventsMap = Object.fromEntries((events || []).map(e => [String(e.id), e]));
         const eventCountP = {}, eventCountC = {};
         const prevYearCatsP = {}, prevYearCatsC = {};
@@ -1099,7 +1100,7 @@
         }
 
         let allSolutions = [];
-        try { allSolutions = await AppDataStore.getAll('proposed_solutions') || []; } catch (e) {}
+        try { allSolutions = await AppDataStore.getAll('proposed_solutions') || []; } catch (e) { /* intentional: optional table, default [] */ }
         const solNamesByProspect = {}, solNamesByCustomer = {};
         const solCatsByProspect  = {}, solCatsByCustomer  = {};
         for (const s of allSolutions) {
@@ -1117,7 +1118,7 @@
 
         // Build per-person event history from PAST activities only (future bookings don't count as attended)
         let eventActs = [];
-        try { eventActs = (await AppDataStore.getAll('activities')).filter(a => a.activity_type === 'EVENT'); } catch (e) {}
+        try { eventActs = (await AppDataStore.getAll('activities')).filter(a => a.activity_type === 'EVENT'); } catch (e) { /* intentional: optional history, default [] */ }
         const eventCountP = {}, eventCountC = {};
         const prevYearCatsP = {}, prevYearCatsC = {};
         const attendedTitlesP = {}, attendedTitlesC = {};
@@ -1263,7 +1264,7 @@
         const todayStr = new Date().toISOString().split('T')[0];
 
         let solutions = [];
-        try { solutions = await AppDataStore.getAll('proposed_solutions') || []; } catch (e) { return; }
+        try { solutions = await AppDataStore.getAll('proposed_solutions') || []; } catch (e) { /* intentional: optional table absent → nothing to dispatch */ return; }
 
         const pending = solutions.filter(s => s.status === 'Proposed');
         if (!pending.length) return;
@@ -1566,7 +1567,7 @@
                     && String(a.event_id) === String(draft.event_id)
                     && (!draft.event_date || a.activity_date === draft.event_date)
                 ) || null;
-            } catch (_) {}
+            } catch (_) { /* intentional: best-effort time lookup, falls back to event fields */ }
 
             const title = event?.event_title || event?.title || draft.event_name || '';
             const date = (event?.event_date || event?.date || draft.event_date || '').toString();
@@ -1609,7 +1610,7 @@
         if (!container) return;
 
         let solutions = [];
-        try { solutions = await AppDataStore.getAll('proposed_solutions') || []; } catch (e) { container.style.display = 'none'; return; }
+        try { solutions = await AppDataStore.getAll('proposed_solutions') || []; } catch (e) { /* intentional: optional table absent → hide widget */ container.style.display = 'none'; return; }
 
         const [prospects, customers] = await Promise.all([
             AppDataStore.getAll('prospects').catch(() => []),
@@ -2046,7 +2047,7 @@
         // cold-load time is going. Remove once cold-load p50 is acceptable.
         const _calPerfT0 = performance.now();
         const _calPerf = (label) => {
-            try { console.info(`[cal-perf] ${label} +${Math.round(performance.now() - _calPerfT0)}ms`); } catch(_) {}
+            try { console.info(`[cal-perf] ${label} +${Math.round(performance.now() - _calPerfT0)}ms`); } catch(_) { /* intentional: perf logging is best-effort */ }
         };
         _calPerf('renderCalendar:start');
         updateMonthHeader(_state.cd);
@@ -2073,7 +2074,7 @@
                 const { ts, html } = JSON.parse(raw);
                 if (!ts || Date.now() - ts > _CAL_SNAP_TTL_MS) return null;
                 return html;
-            } catch (_) { return null; }
+            } catch (_) { /* intentional: corrupt/absent snapshot → no cache */ return null; }
         })();
         if (_calSnap) {
             grid.innerHTML = _calSnap; // instant paint — no dim needed
@@ -2169,7 +2170,7 @@
         // Helper: read any stored snapshot for this month, ignoring TTL.
         // Used in multiple fallback paths below so defined once here.
         const _readStaleSnap = () => {
-            try { const raw = localStorage.getItem(_calSnapKey); return raw ? JSON.parse(raw).html : null; } catch (_) { return null; }
+            try { const raw = localStorage.getItem(_calSnapKey); return raw ? JSON.parse(raw).html : null; } catch (_) { /* intentional: corrupt/absent snapshot → no cache */ return null; }
         };
         // Helper: paint stale snapshot or, if none exists, show an offline
         // placeholder so the user never stares at a blank/skeleton grid.
@@ -2219,7 +2220,7 @@
             .then(hotRes => {
                 if (hotRes && hotRes.data && hotRes.data.length > 0) {
                     for (const a of hotRes.data) _state.hac.set(String(a.id), a);
-                    try { AppDataStore.primeRows('activities', hotRes.data); } catch (_) {}
+                    try { AppDataStore.primeRows('activities', hotRes.data); } catch (_) { /* intentional: cache priming is best-effort */ }
                 }
             })
             .catch(e => { console.warn('[calendar] hot warm-up failed:', e?.message || e); });
@@ -2407,7 +2408,7 @@
         // this month paint instantly — survives tab close on Android.
         try {
             localStorage.setItem(_calSnapKey, JSON.stringify({ ts: Date.now(), html }));
-        } catch (_) {}
+        } catch (_) { /* intentional: snapshot persist best-effort (quota/private mode) */ }
 
         // Warm the activity-modal lookup caches in the background so the first
         // tap on a day cell opens instantly instead of waiting on two fetches.
@@ -2522,7 +2523,7 @@
     if (storedFilters) {
         try {
             Object.assign(_filters, JSON.parse(storedFilters));
-        } catch (e) { }
+        } catch (e) { /* intentional: corrupt stored filters → keep defaults */ }
     }
 
     // Pure HTML builder for one "today" activity card — extracted verbatim from
@@ -2813,7 +2814,7 @@
             if (!error) return true;
             if (error.message && /relation|does not exist|refill_reminders/i.test(error.message)) return false;
             return false;
-        } catch (_) { return false; }
+        } catch (_) { /* intentional: table-exists probe, default false on any error */ return false; }
     };
 
     // Show the one-time migration modal when refill_reminders table is missing.
@@ -2965,6 +2966,7 @@
                 template = { content: "Hi {{name}}, hope you're doing well! Just checking — we noticed your {{product}} will be finishing around {{finish_date}}. Would you like us to prepare your next bottle? \u{1F64F}" };
             }
         } catch (_) {
+            /* intentional: template table unavailable → use built-in default copy */
             template = { content: "Hi {{name}}, hope you're doing well! Just checking — we noticed your {{product}} will be finishing around {{finish_date}}. Would you like us to prepare your next bottle? \u{1F64F}" };
         }
 
@@ -2985,7 +2987,7 @@
         // Mark reminder as whatsapp_sent (stays visible, just with a ✓ badge)
         try {
             await AppDataStore.update('refill_reminders', reminderId, { status: 'whatsapp_sent', updated_at: new Date().toISOString() });
-        } catch (_) {}
+        } catch (_) { /* intentional: best-effort status flag after WhatsApp opened */ }
         UI.toast.success('WhatsApp opened — review and send');
         renderRefillReminders().catch(() => {});
     };
@@ -3042,7 +3044,7 @@
                 ta.select();
                 copied = document.execCommand('copy');
                 document.body.removeChild(ta);
-            } catch (__) {}
+            } catch (__) { /* intentional: clipboard fallback failed → copied stays false */ }
         }
 
         // Escape HTML in the preview so special chars render correctly
@@ -3125,10 +3127,10 @@
     const viewRefillProspect = async (prospectId, customerId) => {
         if (prospectId) {
             await navigateTo('prospects');
-            setTimeout(() => { try { (window.app.showProspectDetail || (() => {}))(prospectId); } catch(_) {} }, 200);
+            setTimeout(() => { try { (window.app.showProspectDetail || (() => {}))(prospectId); } catch(_) { /* intentional: best-effort deferred navigation */ } }, 200);
         } else if (customerId) {
             await navigateTo('prospects');
-            setTimeout(() => { try { (window.app.showCustomerDetail || (() => {}))(customerId); } catch(_) {} }, 200);
+            setTimeout(() => { try { (window.app.showCustomerDetail || (() => {}))(customerId); } catch(_) { /* intentional: best-effort deferred navigation */ } }, 200);
         }
     };
 
@@ -3840,7 +3842,7 @@
                         activity = rows.find(a => a && String(a.id) === idStr) || null;
                     }
                 }
-            } catch (_) {}
+            } catch (_) { /* intentional: localStorage snapshot fallback is best-effort */ }
         }
         if (activity) _pinRecentActivity(activity);
         return activity;
@@ -4292,7 +4294,7 @@
             UI.hideModal();
             UI.toast.success(`Activity relinked to ${kind}.`);
             // Re-open the detail view so the user immediately sees the fixed state.
-            setTimeout(() => { try { app.viewActivityDetails(activityId); } catch (_) {} }, 200);
+            setTimeout(() => { try { app.viewActivityDetails(activityId); } catch (_) { /* intentional: best-effort detail re-open */ } }, 200);
         } catch (e) {
             UI.toast.error('Relink failed: ' + (e.message || e));
         }
@@ -4304,7 +4306,7 @@
             await AppDataStore.update('activities', activityId, { prospect_id: null, customer_id: null });
             UI.hideModal();
             UI.toast.success('Activity detached.');
-            setTimeout(() => { try { app.viewActivityDetails(activityId); } catch (_) {} }, 200);
+            setTimeout(() => { try { app.viewActivityDetails(activityId); } catch (_) { /* intentional: best-effort detail re-open */ } }, 200);
         } catch (e) {
             UI.toast.error('Detach failed: ' + (e.message || e));
         }
@@ -4472,14 +4474,14 @@
             if (el) el.textContent = _mcElapsed();
         }, 1000);
 
-        try { _mcState.wakeLock = await navigator.wakeLock.request('screen'); } catch(_) {}
+        try { _mcState.wakeLock = await navigator.wakeLock.request('screen'); } catch(_) { /* intentional: wakeLock optional API, best-effort */ }
     };
 
     const closeMeetingCapture = () => {
         if (_mcState) {
             clearInterval(_mcState.timerInterval);
-            if (_mcState.recognition) { try { _mcState.recognition.stop(); } catch(_) {} }
-            try { _mcState.wakeLock?.release(); } catch(_) {}
+            if (_mcState.recognition) { try { _mcState.recognition.stop(); } catch(_) { /* intentional: best-effort cleanup */ } }
+            try { _mcState.wakeLock?.release(); } catch(_) { /* intentional: best-effort cleanup */ }
             _mcState = null;
         }
         document.getElementById('mc-overlay')?.remove();
@@ -4544,7 +4546,7 @@
         if (!SR) { UI.toast.error('Speech recognition not supported in this browser'); return; }
 
         if (_mcState.micOn) {
-            try { _mcState.recognition?.stop(); } catch(_) {}
+            try { _mcState.recognition?.stop(); } catch(_) { /* intentional: best-effort mic stop */ }
             _mcState.micOn = false;
             _mcState.recognition = null;
             const btn = document.getElementById('mc-mic-btn');
@@ -4574,7 +4576,7 @@
         };
         recog.onend = () => {
             // Auto-restart so 90-min sessions don't cut off
-            if (_mcState?.micOn) { try { recog.start(); } catch(_) {} }
+            if (_mcState?.micOn) { try { recog.start(); } catch(_) { /* intentional: best-effort mic auto-restart */ } }
         };
         recog.onerror = (e) => {
             if (e.error !== 'no-speech') UI.toast.error('Mic: ' + e.error);
@@ -5254,7 +5256,7 @@
                 try {
                     const section = document.getElementById('pmn-photo-section');
                     existingUrls = JSON.parse(section?.dataset?.existing || '[]');
-                } catch (_) { existingUrls = []; }
+                } catch (_) { /* intentional: malformed dataset → start from empty list */ existingUrls = []; }
 
                 UI.toast.success('Uploading photo(s)…');
                 const newUrls = [];
@@ -5332,7 +5334,7 @@
             try {
                 const p = await AppDataStore.getById('prospects', prospectId);
                 if (!p) isProspect = false;
-            } catch (_) { isProspect = false; }
+            } catch (_) { /* intentional: lookup failed → treat as customer route */ isProspect = false; }
             if (isProspect) {
                 await (window.app.showProspectDetail || (() => {}))(prospectId);
                 setTimeout(async () => {
@@ -5908,7 +5910,7 @@
             const q = JSON.parse(localStorage.getItem(qKey) || '[]');
             const filtered = q.filter(item => item.tmpId !== localId);
             if (filtered.length !== q.length) localStorage.setItem(qKey, JSON.stringify(filtered));
-        } catch (_) {}
+        } catch (_) { /* intentional: best-effort retry-queue eviction */ }
         if (typeof renderCalendar === 'function') renderCalendar().catch(() => {});
         UI.toast.success('Activity discarded.');
     }

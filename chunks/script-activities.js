@@ -1003,7 +1003,7 @@
         try {
             const parsed = JSON.parse(raw);
             return Array.isArray(parsed) ? parsed : [];
-        } catch (_) {
+        } catch (_) { /* intentional: JSON.parse failed — fall back to comma-split */
             return String(raw).split(',').map(s => s.trim()).filter(Boolean);
         }
     };
@@ -1495,7 +1495,7 @@
                 const dmy = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
                 if (dmy) return `${dmy[3]}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`;
                 if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
-                try { const d = new Date(str); if (!isNaN(d)) return d.toISOString().split('T')[0]; } catch {}
+                try { const d = new Date(str); if (!isNaN(d)) return d.toISOString().split('T')[0]; } catch { /* intentional: unparseable date string — return null below */ }
                 return null;
             };
 
@@ -2983,7 +2983,7 @@
                 UI.toast.error(s.name + ' is already an agent attendee');
                 return;
             }
-        } catch (_) {}
+        } catch (_) { /* intentional: dup-check is best-effort — proceed with create on probe failure */ }
 
         await AppDataStore.create('event_attendees', {
             event_id: eventId,
@@ -3041,7 +3041,7 @@
                 // Customers table is small (≤ a few hundred); cache once per modal open.
                 if (!window._addAttCustomers) {
                     try { window._addAttCustomers = await AppDataStore.getAll('customers'); }
-                    catch { window._addAttCustomers = []; }
+                    catch { /* intentional: customers fetch failed — search prospects only */ window._addAttCustomers = []; }
                 }
                 const qLower = q.toLowerCase();
                 const customerMatches = (window._addAttCustomers || []).filter(c =>
@@ -3516,7 +3516,7 @@
         if (!list) return;
         list.innerHTML = '';
         let kids = [];
-        try { kids = Array.isArray(kidsData) ? kidsData : (kidsData ? JSON.parse(kidsData) : []); } catch(e) { kids = []; }
+        try { kids = Array.isArray(kidsData) ? kidsData : (kidsData ? JSON.parse(kidsData) : []); } catch(e) { /* intentional: malformed children JSON — start with empty list */ kids = []; }
         kids.forEach(k => addProspectChildRow(k.age || '', k.gender || ''));
     };
 
@@ -3997,7 +3997,7 @@
             // Only re-enable; let UI.js's _endAllBtnLoads (fired by toast.error / toast.success
             // / hideModal / the 10s safety net) own innerHTML restoration. Restoring a captured
             // innerHTML here would overwrite the cleaned-up label and leave the button stuck.
-            saveBtns.forEach(b => { try { if (b.isConnected) b.disabled = false; } catch (_) {} });
+            saveBtns.forEach(b => { try { if (b.isConnected) b.disabled = false; } catch (_) { /* intentional: stale/detached button node — skip re-enable */ } });
         };
 
         try {
@@ -4555,7 +4555,7 @@
             if (window._mcalAfterSaveDate) {
                 const _dStr = window._mcalAfterSaveDate;
                 window._mcalAfterSaveDate = null;
-                setTimeout(() => { try { window.app.mcalDayClick && window.app.mcalDayClick(_dStr); } catch(_) {} }, 300);
+                setTimeout(() => { try { window.app.mcalDayClick && window.app.mcalDayClick(_dStr); } catch(_) { /* intentional: best-effort mobile-calendar reopen after save */ } }, 300);
             }
             if (_cpsIntakeWaCallback) setTimeout(_cpsIntakeWaCallback, 300);
         } else {
@@ -4586,7 +4586,7 @@
             // NO error was shown, so the user believed the activity saved when it had
             // not (silent data loss). Surface it so they know to retry.
             console.error('[saveActivity] save failed:', err);
-            try { UI.toast.error('Could not save activity: ' + ((err && err.message) || 'unexpected error — please retry')); } catch (_) {}
+            try { UI.toast.error('Could not save activity: ' + ((err && err.message) || 'unexpected error — please retry')); } catch (_) { /* intentional: toast unavailable — primary error already console.error'd above */ }
         } finally {
             _releaseSaveGuard();
         }
@@ -4740,7 +4740,7 @@
                     await window.PushNotif.subscribe();
                 } catch (e) { console.warn('[Push] auto-subscribe skipped:', e.message || e); }
             }, 2000);
-        } catch (_) {}
+        } catch (_) { /* intentional: push feature-detection guard — silently skip if unavailable */ }
     };
 
     // ========== PUSH NOTIFICATION: notify when a 福运相随 highlight is created/updated ==========
@@ -4754,7 +4754,7 @@
                 (allUsers || []).forEach(u => {
                     if (u.id != null && u.status !== 'inactive') targets.add(String(u.id));
                 });
-            } catch (_) {}
+            } catch (_) { /* intentional: user-list fetch best-effort — highlight push is non-critical */ }
             // Don't self-notify the author
             if (_state.cu && _state.cu.id != null) targets.delete(String(_state.cu.id));
             if (targets.size === 0) return;

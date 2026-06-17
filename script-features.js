@@ -1416,7 +1416,7 @@ window._fv.renderPendingCpsIntakes = async () => {
         const all = await window.AppDataStore.getAll('cps_intake_requests');
         const pendingStatuses = new Set(['submitted', 'pending', 'awaiting_approval', 'new']);
         intakes = (all || []).filter(r => pendingStatuses.has(r.status));
-    } catch (_) { intakes = []; }
+    } catch (_) { intakes = []; /* intentional: offline/unprovisioned table → show empty pending list */ }
 
     const visibleIds = await window.app.getVisibleUserIds(_currentUser);
     if (visibleIds !== 'all') {
@@ -1564,7 +1564,7 @@ const _writeCpsField = (prefix, suffix, value) => {
     if (!el) return;
     el.value = value || '';
     if (suffix === 'dob' && typeof window.app !== 'undefined' && window.app.updateLunarBirth) {
-        try { window.app.updateLunarBirth(`${prefix}-dob`, `${prefix}-lunar`); } catch (e) {}
+        try { window.app.updateLunarBirth(`${prefix}-dob`, `${prefix}-lunar`); } catch (e) { /* intentional: lunar-birth auto-fill is optional, ignore if helper unavailable */ }
     }
 };
 
@@ -2722,7 +2722,7 @@ window._fv = window._fv || {};
                     interested_person_type: type
                 });
                 isInterested = existing.length > 0;
-            } catch (_) {}
+            } catch (_) { /* intentional: bookmark-state probe, default not-interested on failure */ }
         }
 
         const allReferrals = await window.AppDataStore.getAll('referrals');
@@ -2813,7 +2813,7 @@ window._fv = window._fv || {};
                 interested_person_id: id,
                 interested_person_type: type
             });
-        } catch (_) {}
+        } catch (_) { /* intentional: probe existing bookmark, default none on failure */ }
 
         const heartBtn = document.getElementById(`heart-btn-${id}`);
 
@@ -2824,7 +2824,7 @@ window._fv = window._fv || {};
             window.UI.toast.info('Removed from bookmarks');
         } else {
             let allInterested = [];
-            try { allInterested = await window.AppDataStore.query('tree_interested', { user_id: currentUserId }); } catch (_) {}
+            try { allInterested = await window.AppDataStore.query('tree_interested', { user_id: currentUserId }); } catch (_) { /* intentional: cap check best-effort, treat as zero on failure */ }
             if (allInterested.length >= 100) {
                 window.UI.toast.error('Maximum 100 bookmarks reached. Remove some first.');
                 return;
@@ -2851,7 +2851,7 @@ window._fv = window._fv || {};
         if (!currentUserId) { window.UI.toast.error('Login required'); return; }
 
         let bookmarks = [];
-        try { bookmarks = await window.AppDataStore.query('tree_interested', { user_id: currentUserId }); } catch (_) {}
+        try { bookmarks = await window.AppDataStore.query('tree_interested', { user_id: currentUserId }); } catch (_) { /* intentional: offline/unprovisioned → empty bookmarks, handled below */ }
 
         if (bookmarks.length === 0) {
             window.UI.toast.info('No bookmarks yet. Click ❤️ on any node in the sidebar to bookmark.');
@@ -5617,7 +5617,7 @@ window._fv.showPipelineView = async (container) => {
                     }
                     await window.AppDataStore.delete('my_potential_list', item.id);
                     archived++;
-                } catch(e) {}
+                } catch(e) { /* intentional: per-item archive best-effort, skip failed item and continue */ }
             }
             if (archived > 0) window.UI.toast.info(`${archived} expired focus item(s) archived from last month.`);
         })();
@@ -5927,7 +5927,7 @@ window._fv.showMarketingListsView = async (container) => {
         try {
             const parsed = JSON.parse(raw);
             if (Array.isArray(parsed)) return parsed.filter(Boolean);
-        } catch (_) {}
+        } catch (_) { /* intentional: not JSON → fall through to comma-split parsing below */ }
         if (typeof raw === 'string' && raw.trim()) return raw.split(',').map(s => s.trim()).filter(Boolean);
         return [];
     };
@@ -6963,7 +6963,7 @@ window._fv.showNoticeboardView = async (container) => {
     if (postered.length && window.AppDataStore.resolveAttachmentSrc) {
         await Promise.all(postered.map(async e => {
             try { e._posterSigned = await window.AppDataStore.resolveAttachmentSrc(e.poster_url); }
-            catch(_) { e._posterSigned = e.poster_url; }
+            catch(_) { e._posterSigned = e.poster_url; /* intentional: pre-sign best-effort, fall back to raw url */ }
         }));
     } else {
         postered.forEach(e => { e._posterSigned = e.poster_url; });
@@ -6978,7 +6978,7 @@ window._fv.showNoticeboardView = async (container) => {
         try {
             const opts = { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' };
             return dt.toLocaleDateString('zh-CN', opts);
-        } catch(_) { return dt.toLocaleDateString(); }
+        } catch(_) { return dt.toLocaleDateString(); /* intentional: zh-CN locale unsupported → default-locale date */ }
     };
     const fmtTime = (s, e) => {
         if (!s && !e) return '';
@@ -7080,7 +7080,7 @@ window._fv.showMilestonesView = async (container, targetUserId = null) => {
     let adminPicker = '';
     if (isAdmin) {
         let allUsers = [];
-        try { allUsers = (await window.AppDataStore.getAll('users')).filter(u => u.role && u.role.match(/Level\s+1[34]/i)); } catch(e) {}
+        try { allUsers = (await window.AppDataStore.getAll('users')).filter(u => u.role && u.role.match(/Level\s+1[34]/i)); } catch(e) { /* intentional: admin picker optional, skip if users unfetchable */ }
         if (allUsers.length) {
             adminPicker = `
                 <div class="milestone-admin-picker">
@@ -7172,20 +7172,20 @@ window._fv.showFudeView = async (container) => {
         highlights = isAdmin
             ? await window.AppDataStore.getAll('news_highlights')
             : await window.AppDataStore.query('news_highlights', { is_active: true });
-    } catch(e) {}
-    try { myRewards = await window.AppDataStore.query('recommendation_rewards', { user_id: currentUser.id }); } catch(e) {}
+    } catch(e) { /* intentional: offline/unprovisioned → render with no highlights */ }
+    try { myRewards = await window.AppDataStore.query('recommendation_rewards', { user_id: currentUser.id }); } catch(e) { /* intentional: rewards optional, default to empty list */ }
     if (isCustomer && currentUser.customer_id) {
-        try { myPurchases = await window.AppDataStore.query('purchases', { customer_id: currentUser.customer_id }); } catch(e) {}
+        try { myPurchases = await window.AppDataStore.query('purchases', { customer_id: currentUser.customer_id }); } catch(e) { /* intentional: purchases optional, default to empty list */ }
     }
     let allUsersForReward = [];
     if (isAdmin) {
-        try { allUsersForReward = (await window.AppDataStore.getAll('users')).filter(u => u.role && u.role.match(/Level\s*1[34]/i)); } catch(e) {}
-        try { allRewards = await window.AppDataStore.getAll('recommendation_rewards'); } catch(e) {}
+        try { allUsersForReward = (await window.AppDataStore.getAll('users')).filter(u => u.role && u.role.match(/Level\s*1[34]/i)); } catch(e) { /* intentional: admin reward picker optional, skip if users unfetchable */ }
+        try { allRewards = await window.AppDataStore.getAll('recommendation_rewards'); } catch(e) { /* intentional: admin rewards list optional, default to empty */ }
     }
 
     // --- Helpers ---
-    const fmtDate = d => { try { return new Date(d).toLocaleDateString(); } catch(e) { return d || '-'; } };
-    const fmtAmt  = v => { try { return 'RM ' + parseFloat(v || 0).toLocaleString('en-MY', { minimumFractionDigits: 2 }); } catch(e) { return v; } };
+    const fmtDate = d => { try { return new Date(d).toLocaleDateString(); } catch(e) { return d || '-'; /* intentional: invalid date → show raw value */ } };
+    const fmtAmt  = v => { try { return 'RM ' + parseFloat(v || 0).toLocaleString('en-MY', { minimumFractionDigits: 2 }); } catch(e) { return v; /* intentional: locale format failure → show raw value */ } };
     const badge   = (txt, bg, col) => `<span style="padding:2px 8px;border-radius:12px;font-size:0.78rem;background:${bg};color:${col};">${escapeHtml(txt)}</span>`;
 
     // --- Content filters ---
@@ -7200,14 +7200,14 @@ window._fv.showFudeView = async (container) => {
     const withImg = [...publicNews, ...successStories].filter(h => h.image_url);
     if (withImg.length && window.AppDataStore.resolveAttachmentSrc) {
         await Promise.all(withImg.map(async h => {
-            try { h._signedUrl = await window.AppDataStore.resolveAttachmentSrc(h.image_url); } catch(e) {}
+            try { h._signedUrl = await window.AppDataStore.resolveAttachmentSrc(h.image_url); } catch(e) { /* intentional: image pre-sign best-effort, render falls back to raw url */ }
         }));
     }
 
     // --- Totals & summary sync ---
     const totalPoints  = myRewards.reduce((s, r) => s + (parseInt(r.fudi_points)    || 0), 0);
     const totalReturns = myRewards.reduce((s, r) => s + (parseFloat(r.sharing_return) || 0), 0);
-    if (myRewards.length > 0) { try { await window._fv.syncFudiSummary(currentUser.id, totalPoints, totalReturns); } catch(e) {} }
+    if (myRewards.length > 0) { try { await window._fv.syncFudiSummary(currentUser.id, totalPoints, totalReturns); } catch(e) { /* intentional: summary cache sync best-effort, non-blocking */ } }
 
     // --- Helper: pre-signed image src attr ---
     const imgSrc = (h) => h._signedUrl ? `src="${h._signedUrl}"` : '';
@@ -7683,7 +7683,7 @@ window._fv.showKnowledgeView = async (container) => {
         try {
             const { data: { session } } = await window.supabase.auth.getSession();
             return session?.user?.id || null;
-        } catch (_) { return null; }
+        } catch (_) { return null; /* intentional: no session/auth unavailable → treat as logged-out */ }
     };
 
     const _kbTodayISO = () => {
@@ -7693,7 +7693,7 @@ window._fv.showKnowledgeView = async (container) => {
 
     const _kbFmtDate = (iso) => {
         if (!iso) return '';
-        try { return new Date(iso).toLocaleDateString(); } catch (_) { return iso; }
+        try { return new Date(iso).toLocaleDateString(); } catch (_) { return iso; /* intentional: unparseable date → show raw ISO string */ }
     };
 
     const _kbTypeLabel = (t) => ({
@@ -7946,8 +7946,8 @@ window._fv.showKnowledgeView = async (container) => {
         if (!entry) { slot.innerHTML = `<div class="kb-empty">Entry not found.</div>`; return; }
         const owner = await _kbOwnerId();
         let backlinks = [], outlinks = [];
-        try { backlinks = await window.AppDataStore.query('knowledge_links', { to_entry_id: id }) || []; } catch (_) {}
-        try { outlinks  = await window.AppDataStore.query('knowledge_links', { from_entry_id: id }) || []; } catch (_) {}
+        try { backlinks = await window.AppDataStore.query('knowledge_links', { to_entry_id: id }) || []; } catch (_) { /* intentional: backlinks optional, default to none */ }
+        try { outlinks  = await window.AppDataStore.query('knowledge_links', { from_entry_id: id }) || []; } catch (_) { /* intentional: outlinks optional, default to none */ }
         const linkedIds = [...backlinks.map(l=>l.from_entry_id), ...outlinks.map(l=>l.to_entry_id)];
         let linkedRows = [];
         if (linkedIds.length) {
@@ -7955,7 +7955,7 @@ window._fv.showKnowledgeView = async (container) => {
                 const all = await window.AppDataStore.query('knowledge_entries', { owner_id: owner }) || [];
                 const idx = new Map(all.map(r=>[r.id, r]));
                 linkedRows = linkedIds.map(lid => idx.get(lid)).filter(Boolean);
-            } catch (_) {}
+            } catch (_) { /* intentional: linked-entry resolution best-effort, omit on failure */ }
         }
         slot.innerHTML = `
             <div class="kb-detail">

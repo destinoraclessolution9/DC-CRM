@@ -165,10 +165,10 @@ class DataStore {
         // to clear site data manually). The cached table snapshots are
         // recoverable from Supabase, so they're safe to drop — pick the
         // largest fs_crm_ keys first.
-        try { this._pruneStorageIfFull(); } catch (_) {}
+        try { this._pruneStorageIfFull(); } catch (_) { /* intentional: startup pruning is best-effort; never block construction */ }
 
         // Clear delta cursors poisoned by pre-guard builds (see method docs).
-        try { this._healPoisonedSyncCursors(); } catch (_) {}
+        try { this._healPoisonedSyncCursors(); } catch (_) { /* intentional: cursor heal is best-effort; never block construction */ }
     }
 
     // Drop fs_crm_ snapshots when localStorage usage approaches the quota.
@@ -213,7 +213,7 @@ class DataStore {
                 localStorage.removeItem(c.k);
                 freed += c.bytes;
                 dropped.push(c.k);
-            } catch (_) {}
+            } catch (_) { /* intentional: skip un-removable key, keep pruning others */ }
         }
         if (dropped.length) {
             console.warn(
@@ -283,7 +283,7 @@ class DataStore {
                 } else {
                     setTimeout(start, 1);
                 }
-            } catch (_) {}
+            } catch (_) { /* intentional: Realtime SWR is best-effort, must not block ready */ }
             this.emit('ready');
             return true;
         } catch (err) {
@@ -331,6 +331,7 @@ class DataStore {
             const exp = (s && s.expires_at) || (s && s.currentSession && s.currentSession.expires_at);
             return !exp || (exp * 1000) > Date.now();
         } catch (_) {
+            /* intentional: corrupt/absent auth token JSON ⇒ treat as no live session */
             return false;
         }
     }
@@ -369,7 +370,7 @@ class DataStore {
                 }
             }
             if (dirty) localStorage.setItem('fs_crm_tombstones', JSON.stringify(tombstones));
-        } catch (_) {}
+        } catch (_) { /* intentional: best-effort tombstone seed; storage unavailable/corrupt is non-fatal */ }
     }
 
     // ── Dashboard RPC: single-call calendar boot ─────────────────────────
@@ -432,7 +433,7 @@ class DataStore {
                         try {
                             localStorage.setItem(`fs_crm_${t}`, JSON.stringify(this._sanitizeForStorage(t, rows)));
                             localStorage.setItem(`fs_crm_${t}_last_sync`, new Date().toISOString());
-                        } catch (_) {}
+                        } catch (_) { /* intentional: snapshot persist is a cache optimization; quota/storage failure is non-fatal */ }
                     }, 0);
                 }
             }
@@ -489,8 +490,8 @@ class DataStore {
                     cached.ts = Date.now();
                     // Defer the localStorage write off the realtime tick.
                     setTimeout(() => {
-                        try { localStorage.setItem(`fs_crm_${table}`, JSON.stringify(this._sanitizeForStorage(table, cached.data))); } catch (_) {}
-                        try { localStorage.setItem(`fs_crm_${table}_last_sync`, new Date().toISOString()); } catch (_) {}
+                        try { localStorage.setItem(`fs_crm_${table}`, JSON.stringify(this._sanitizeForStorage(table, cached.data))); } catch (_) { /* intentional: realtime snapshot persist is best-effort cache write */ }
+                        try { localStorage.setItem(`fs_crm_${table}_last_sync`, new Date().toISOString()); } catch (_) { /* intentional: cursor persist is best-effort; next read re-syncs */ }
                     }, 0);
                 } else {
                     // Table not in cache yet — just mark the table dirty so the
@@ -520,7 +521,7 @@ class DataStore {
 
     _stopRealtimeSWR() {
         if (this._realtimeChannel) {
-            try { window.supabase.removeChannel(this._realtimeChannel); } catch (_) {}
+            try { window.supabase.removeChannel(this._realtimeChannel); } catch (_) { /* intentional: best-effort channel teardown */ }
             this._realtimeChannel = null;
         }
     }
@@ -543,7 +544,7 @@ class DataStore {
             if (this._inflightController) {
                 this._inflightController.abort(reason || 'navigate');
             }
-        } catch (_) {}
+        } catch (_) { /* intentional: aborting an already-settled controller is harmless */ }
         this._inflightController = (typeof AbortController === 'function') ? new AbortController() : null;
         // Clear in-flight dedupe map so the next view gets fresh promises
         // even if the old aborted promises haven't settled yet.
@@ -659,7 +660,7 @@ class DataStore {
         try {
             localStorage.removeItem(`fs_crm_${tableName}`);
             localStorage.removeItem(`fs_crm_${tableName}_last_sync`);
-        } catch (_) {}
+        } catch (_) { /* intentional: best-effort snapshot eviction; in-memory cache already cleared */ }
         // Drop any primed rows for this table — they're a side cache and must
         // never outlive a write or a deliberate refresh.
         this._primedRows.delete(tableName);
@@ -686,7 +687,7 @@ class DataStore {
                     )) toRemove.push(lsKey);
                 }
                 for (const k of toRemove) localStorage.removeItem(k);
-            } catch (_) {}
+            } catch (_) { /* intentional: best-effort derived-snapshot eviction */ }
         }
     }
 
@@ -713,6 +714,7 @@ class DataStore {
                 !(tableName === 'users' && r.status === 'deleted')
             );
         } catch (_) {
+            /* intentional: missing/corrupt snapshot ⇒ no stale data, fall through to network */
             return null;
         }
     }
@@ -752,6 +754,7 @@ class DataStore {
                 !(tableName === 'users' && r.status === 'deleted')
             );
         } catch (_) {
+            /* intentional: Cache API miss/unavailable ⇒ overflow tier empty, fall through */
             return null;
         }
     }
@@ -767,7 +770,7 @@ class DataStore {
                     headers: { 'Content-Type': 'application/json' }
                 })
             );
-        } catch (_) {}
+        } catch (_) { /* intentional: overflow-tier write is best-effort; data still in memory/server */ }
     }
 
     // Background fetch that refreshes stale data. Dedupes with _inFlightGetAll
@@ -837,16 +840,17 @@ class DataStore {
                             try {
                                 localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(this._sanitizeForStorage(tableName, result)));
                                 localStorage.setItem(`fs_crm_${tableName}_last_sync`, now);
-                            } catch (_) {}
+                            } catch (_) { /* intentional: delta-merge persist is best-effort cache write */ }
                         }, 0);
                         if (window.__FS_DEBUG_SWR) console.log(`[SWR] ${tableName}: delta sync — ${delta.length} changed rows merged`);
                         this.emit('dataChanged', { action: 'revalidate', table: tableName });
                     } else {
                         // No changes since last sync — just refresh the timestamp.
-                        try { localStorage.setItem(`fs_crm_${tableName}_last_sync`, now); } catch (_) {}
+                        try { localStorage.setItem(`fs_crm_${tableName}_last_sync`, now); } catch (_) { /* intentional: cursor refresh is best-effort; stale cursor just re-fetches same window */ }
                     }
                     return; // Delta path succeeded — skip full fetch below.
                 } catch (_) {
+                    /* intentional: delta fetch failed (no updated_at / network) — fall through to full fetch */
                     // Delta fetch failed (e.g. table has no updated_at column,
                     // or network hiccup). Fall through to full fetch.
                 }
@@ -875,6 +879,7 @@ class DataStore {
                 this.emit('dataChanged', { action: 'revalidate', table: tableName });
             }
         } catch (_) {
+            /* intentional: background revalidation is best-effort — user keeps the stale snapshot */
             // Silent failure — user keeps seeing the stale data
         } finally {
             this._swrInFlight.delete(tableName);
@@ -978,8 +983,8 @@ class DataStore {
                 // Serve the last-known local snapshot (tombstone-filtered) or [].
                 try {
                     console.warn(`[DataStore] getAll('${tableName}') hard-failed — serving local snapshot/[]:`, err && err.message || err);
-                } catch (_) {}
-                try { return this._swrGetLocal(tableName) || []; } catch (_) { return []; }
+                } catch (_) { /* intentional: console unavailable is non-fatal to the fallback */ }
+                try { return this._swrGetLocal(tableName) || []; } catch (_) { /* intentional: snapshot read failed ⇒ serve empty array */ return []; }
             })
             .finally(() => {
                 this._inFlightGetAll.delete(tableName);
@@ -1135,7 +1140,7 @@ class DataStore {
             // flipped (cold boot / SW update) — leaving it stuck on a healthy
             // connection. A successful read is the authoritative "back online".
             if (window._offlineNotified) {
-                try { document.getElementById('offline-banner')?.remove(); } catch (_) {}
+                try { document.getElementById('offline-banner')?.remove(); } catch (_) { /* intentional: best-effort banner removal */ }
                 window._offlineNotified = false;
             }
             // Supabase caps getAll() implicitly at 1000 rows per request. When
@@ -1189,11 +1194,11 @@ class DataStore {
                             localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(this._sanitizeForStorage(tableName, merged)));
                             // Record sync time so _swrRevalidate can use delta fetch next time
                             localStorage.setItem(`fs_crm_${tableName}_last_sync`, new Date().toISOString());
-                        } catch (_) {}
+                        } catch (_) { /* intentional: snapshot persist is best-effort cache write */ }
                     }, 0);
                     return merged;
                 }
-            } catch (_) {}
+            } catch (_) { /* intentional: local-field merge is an enhancement; fall through to plain server result */ }
             this._cacheSet(tableName, result);
             setTimeout(() => {
                 try {
@@ -1292,11 +1297,11 @@ class DataStore {
                     if (!window._offlineNotified) { _offlineRecoverStopped = true; return; }
                     try {
                         await this._readClient().from('users').select('id').limit(1);
-                        try { document.getElementById('offline-banner')?.remove(); } catch (_) {}
+                        try { document.getElementById('offline-banner')?.remove(); } catch (_) { /* intentional: best-effort banner removal */ }
                         window._offlineNotified = false;
                         _offlineRecoverStopped = true;
                         return;
-                    } catch (_) { /* still offline — back off and retry */ }
+                    } catch (_) { /* intentional: still offline — back off and retry */ }
                     _offlineRecoverDelay = Math.min(_offlineRecoverDelay * 2, 60000);
                     setTimeout(_offlineRecoverTick, _offlineRecoverDelay * (0.7 + Math.random() * 0.6));
                 };
@@ -1355,7 +1360,7 @@ class DataStore {
             const dead = JSON.parse(localStorage.getItem('fs_crm_sync_queue_dead') || '[]');
             dead.push({ ...item, parkedAt: new Date().toISOString(), reason: String(reason || '').slice(0, 300) });
             localStorage.setItem('fs_crm_sync_queue_dead', JSON.stringify(dead.slice(-200)));
-        } catch (_) {}
+        } catch (_) { /* intentional: dead-letter persist is best-effort; warn below still fires */ }
         console.warn(`DataStore: parked unsyncable ${item.tableName} record ${item.record && item.record.id} — ${reason}. Kept in fs_crm_sync_queue_dead.`);
     }
 
@@ -1401,6 +1406,7 @@ class DataStore {
                         stillPending.push(item);
                     }
                 } catch (_) {
+                    /* intentional: network throw ⇒ keep item queued for the next drain */
                     stillPending.push(item);
                 }
             }
@@ -1413,7 +1419,7 @@ class DataStore {
             const _freshQueue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
             const _keptOther = _freshQueue.filter(q => q.tableName !== tableName);
             localStorage.setItem('fs_crm_sync_queue', JSON.stringify([..._keptOther, ...stillPending]));
-        } catch (_) {}
+        } catch (_) { /* intentional: fire-and-forget drain; queue persists and retries on next read */ }
     }
 
     // Auto-sync: pushes locally-saved (offline/network-error) records to Supabase
@@ -1476,7 +1482,7 @@ class DataStore {
                             if (tableName === 'activities'
                                 && item.record.client_request_id
                                 && typeof window._confirmOptimisticActivity === 'function') {
-                                try { window._confirmOptimisticActivity(item.record.client_request_id); } catch (_) {}
+                                try { window._confirmOptimisticActivity(item.record.client_request_id); } catch (_) { /* intentional: optimistic-chip clear is best-effort UI */ }
                             }
                         } else {
                             const kind = uErr ? this._classifyQueueError(uErr) : 'transient';
@@ -1512,6 +1518,7 @@ class DataStore {
                             stillPending.push(item);
                         }
                     } catch (_) {
+                        /* intentional: network throw ⇒ keep item locally-visible + queued for retry */
                         if (!serverIds.has(String(item.record.id))) merged.push(item.record);
                         stillPending.push(item);
                     }
@@ -1534,7 +1541,7 @@ class DataStore {
                             if (!tomb[tableName].includes(id)) tomb[tableName].push(id);
                         }
                         localStorage.setItem('fs_crm_tombstones', JSON.stringify(tomb));
-                    } catch (_) {}
+                    } catch (_) { /* intentional: best-effort tombstone persist; re-derived next pass */ }
                 }
             }
 
@@ -1555,10 +1562,11 @@ class DataStore {
                         if (Object.keys(extra).length > 0) merged[i] = { ...merged[i], ...extra };
                     }
                 }
-            } catch (_) {}
+            } catch (_) { /* intentional: local-only field re-merge is an enhancement; skip on failure */ }
 
             return merged;
         } catch (_) {
+            /* intentional: auto-sync is opportunistic — any failure ⇒ return untouched server rows */
             return serverData;
         }
     }
@@ -1626,7 +1634,7 @@ class DataStore {
                         const localRecord = records.find(r => String(r.id) === String(id));
                         if (localRecord) result = { ...localRecord, ...data };
                     }
-                } catch (_) {}
+                } catch (_) { /* intentional: local-field merge is an enhancement; return server row on failure */ }
                 return tableName === 'users' ? this._sanitizeUserRecord(result) : result;
             }
             // Not found in Supabase — check localStorage fallback (schema-mismatch saves).
@@ -1705,7 +1713,7 @@ class DataStore {
                 dataToInsert.client_request_id = (window.Perf && window.Perf.uuid)
                     ? window.Perf.uuid()
                     : (crypto && crypto.randomUUID ? crypto.randomUUID() : null);
-            } catch (_) { /* non-fatal */ }
+            } catch (_) { /* intentional: non-fatal — idempotency key is optional */ }
         }
 
         // Phase J: optimistic UI for activities — push the row into the calendar
@@ -1713,7 +1721,7 @@ class DataStore {
         // instantly. Cleared on success; flagged 'failed' on error.
         const _isActivityInsert = tableName === 'activities' && dataToInsert.client_request_id;
         if (_isActivityInsert && typeof window._addOptimisticActivity === 'function') {
-            try { window._addOptimisticActivity(dataToInsert); } catch (_) {}
+            try { window._addOptimisticActivity(dataToInsert); } catch (_) { /* intentional: optimistic overlay is best-effort UI */ }
         }
 
         // Try inserting, stripping unknown columns one-by-one on schema errors
@@ -1733,7 +1741,7 @@ class DataStore {
                 // is now orphaned from its referenced record — tell the user so a
                 // missing prospect/customer link isn't silently lost.
                 if (_strippedFKCols.length && window.UI?.toast?.warning) {
-                    try { window.UI.toast.warning(`Saved, but couldn't link to ${_strippedFKCols.join(', ')} — that record no longer exists.`); } catch (_) {}
+                    try { window.UI.toast.warning(`Saved, but couldn't link to ${_strippedFKCols.join(', ')} — that record no longer exists.`); } catch (_) { /* intentional: toast is best-effort UI feedback */ }
                 }
                 // Save full record (including stripped fields) to localStorage
                 try {
@@ -1741,13 +1749,13 @@ class DataStore {
                     const all = JSON.parse(localStorage.getItem(key) || '[]');
                     all.push({ ...insertData, ...dataToInsert, ...data });
                     localStorage.setItem(key, JSON.stringify(this._sanitizeForStorage(tableName, all)));
-                } catch (_) {}
+                } catch (_) { /* intentional: local mirror is best-effort; server insert already succeeded */ }
                 this._writeAudit('insert', tableName, data.id || insertData.id, null, data);
                 this.invalidateCache(tableName);
                 this.emit('dataChanged', { action: 'add', table: tableName, record: data });
                 // Phase J: confirm optimistic row — clears the ⏳ overlay.
                 if (_isActivityInsert && typeof window._confirmOptimisticActivity === 'function') {
-                    try { window._confirmOptimisticActivity(dataToInsert.client_request_id); } catch (_) {}
+                    try { window._confirmOptimisticActivity(dataToInsert.client_request_id); } catch (_) { /* intentional: optimistic-chip clear is best-effort UI */ }
                 }
                 return data;
             } catch (e) {
@@ -1810,13 +1818,13 @@ class DataStore {
             const all = JSON.parse(localStorage.getItem(key) || '[]');
             all.push(dataToInsert);
             localStorage.setItem(key, JSON.stringify(this._sanitizeForStorage(tableName, all)));
-        } catch (_) {}
+        } catch (_) { /* intentional: offline local mirror is best-effort */ }
         // Queue for auto-sync to Supabase on next successful getAll()
         try {
             const syncQueue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
             syncQueue.push({ tableName, record: dataToInsert, timestamp: Date.now() });
             localStorage.setItem('fs_crm_sync_queue', JSON.stringify(syncQueue));
-        } catch (_) {}
+        } catch (_) { /* intentional: sync-queue persist is best-effort; offline write may not auto-sync */ }
         this.invalidateCache(tableName);
         this.emit('dataChanged', { action: 'add', table: tableName, record: dataToInsert });
         // Phase J: mark optimistic row as failed so the calendar shows ⚠.
@@ -1840,7 +1848,7 @@ class DataStore {
                                 : _code === '23503'
                                     ? 'Linked record no longer exists'
                                     : (_rawMsg || 'Save failed') + (lastError.code ? ` (${lastError.code})` : '');
-            try { window._failOptimisticActivity(dataToInsert.client_request_id, _humanMsg, _code, _rawMsg); } catch (_) {}
+            try { window._failOptimisticActivity(dataToInsert.client_request_id, _humanMsg, _code, _rawMsg); } catch (_) { /* intentional: failure-chip update is best-effort UI */ }
         }
         return dataToInsert;
     }
@@ -1871,7 +1879,7 @@ class DataStore {
                 const all = JSON.parse(localStorage.getItem(key) || '[]');
                 for (const d of saved) all.push(d);
                 localStorage.setItem(key, JSON.stringify(this._sanitizeForStorage(tableName, all)));
-            } catch (_) {}
+            } catch (_) { /* intentional: local mirror is best-effort; bulk insert already succeeded */ }
             for (const d of saved) this._writeAudit('insert', tableName, d.id, null, d);
             this.invalidateCache(tableName);
             this.emit('dataChanged', { action: 'add', table: tableName, records: saved });
@@ -1962,7 +1970,7 @@ class DataStore {
                     const existing = cached.find(r => String(r.id) === String(id));
                     if (existing) _auditOldData = { ...existing };
                 }
-            } catch (_) {}
+            } catch (_) { /* intentional: audit-diff baseline is best-effort; skip old_data on miss */ }
         }
         for (let attempt = 0; attempt < 15; attempt++) {
             try {
@@ -1980,7 +1988,7 @@ class DataStore {
                     // Server response wins: spread updates first so data (server-canonical) takes precedence.
                     const full = { ...updates, ...data };
                     if (idx >= 0) { all[idx] = full; localStorage.setItem(key, JSON.stringify(this._sanitizeForStorage(tableName, all))); }
-                } catch (_) {}
+                } catch (_) { /* intentional: local mirror is best-effort; server update already succeeded */ }
                 this._writeAudit('update', tableName, id, _auditOldData, data);
                 this.invalidateCache(tableName);
                 this.emit('dataChanged', { action: 'update', table: tableName, record: data });
@@ -2008,7 +2016,7 @@ class DataStore {
                         const tRaw = localStorage.getItem('fs_crm_tombstones');
                         const tombstones = tRaw ? JSON.parse(tRaw) : {};
                         isTombstoned = (tombstones[tableName] || []).map(String).includes(String(id));
-                    } catch (_) {}
+                    } catch (_) { /* intentional: tombstone read is best-effort; treat as not-tombstoned on failure */ }
                     if (isTombstoned) {
                         // Case (b): row was explicitly deleted — honor it, clean up the stale
                         // local copy, return null so the caller can show "deleted" feedback.
@@ -2017,7 +2025,7 @@ class DataStore {
                             const all = JSON.parse(localStorage.getItem(key) || '[]');
                             const filtered = all.filter(r => String(r.id) !== String(id));
                             if (filtered.length !== all.length) localStorage.setItem(key, JSON.stringify(filtered));
-                        } catch (_) {}
+                        } catch (_) { /* intentional: stale-row cleanup is best-effort */ }
                         this.invalidateCache(tableName);
                         return null;
                     }
@@ -2033,7 +2041,7 @@ class DataStore {
                         const all = JSON.parse(localStorage.getItem(key) || '[]');
                         const existing = all.find(r => String(r.id) === String(id));
                         if (existing) baseRow = existing;
-                    } catch (_) {}
+                    } catch (_) { /* intentional: pulling local base fields is best-effort; insert proceeds with updates only */ }
                     let insertPayload = { ...baseRow, ...updateData, id };
                     let inserted = null;
                     let lastInsertErr = null;
@@ -2080,7 +2088,7 @@ class DataStore {
                             const full = { ...inserted, ...updates };
                             if (idx >= 0) all[idx] = full; else all.push(full);
                             localStorage.setItem(key, JSON.stringify(this._sanitizeForStorage(tableName, all)));
-                        } catch (_) {}
+                        } catch (_) { /* intentional: local mirror is best-effort; server insert already succeeded */ }
                         this.invalidateCache(tableName);
                         this.emit('dataChanged', { action: 'update', table: tableName, record: inserted });
                         return inserted;
@@ -2105,7 +2113,7 @@ class DataStore {
             updatedRecord = idx >= 0 ? { ...all[idx], ...updates } : { id, ...updates };
             if (idx >= 0) all[idx] = updatedRecord; else all.push(updatedRecord);
             localStorage.setItem(key, JSON.stringify(this._sanitizeForStorage(tableName, all)));
-        } catch (_) { updatedRecord = { id, ...updates }; }
+        } catch (_) { /* intentional: storage unavailable ⇒ return the in-memory update result */ updatedRecord = { id, ...updates }; }
         // Queue for auto-sync to Supabase on next successful getAll()
         try {
             const syncQueue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
@@ -2114,7 +2122,7 @@ class DataStore {
             const qEntry = { tableName, record: updatedRecord, timestamp: Date.now() };
             if (qIdx >= 0) syncQueue[qIdx] = qEntry; else syncQueue.push(qEntry);
             localStorage.setItem('fs_crm_sync_queue', JSON.stringify(syncQueue));
-        } catch (_) {}
+        } catch (_) { /* intentional: sync-queue persist is best-effort; offline edit may not auto-sync */ }
         const record = { id, ...updates };
         this.invalidateCache(tableName);
         this.emit('dataChanged', { action: 'update', table: tableName, record });
@@ -2131,7 +2139,7 @@ class DataStore {
                     const existing = cached.find(r => String(r.id) === String(id));
                     if (existing) _auditOldData = { ...existing };
                 }
-            } catch (_) {}
+            } catch (_) { /* intentional: audit baseline is best-effort; skip old_data on miss */ }
         }
         // Hard delete: must succeed in Supabase first — no silent failures.
         // Use .select('id') so PostgREST returns the deleted rows; an empty array
@@ -2151,21 +2159,21 @@ class DataStore {
             const key = `fs_crm_${tableName}`;
             const all = JSON.parse(localStorage.getItem(key) || '[]');
             localStorage.setItem(key, JSON.stringify(all.filter(r => String(r.id) !== String(id))));
-        } catch (_) {}
+        } catch (_) { /* intentional: local cache cleanup is best-effort; server delete confirmed */ }
         // Remove from sync queue — no point syncing a deleted item
         try {
             const syncQueue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
             localStorage.setItem('fs_crm_sync_queue', JSON.stringify(
                 syncQueue.filter(q => !(q.tableName === tableName && String(q.record.id) === String(id)))
             ));
-        } catch (_) {}
+        } catch (_) { /* intentional: sync-queue cleanup is best-effort */ }
         // Tombstone so the record never re-surfaces from a stale cache on next getAll
         try {
             const tombstones = JSON.parse(localStorage.getItem('fs_crm_tombstones') || '{}');
             if (!tombstones[tableName]) tombstones[tableName] = [];
             if (!tombstones[tableName].includes(String(id))) tombstones[tableName].push(String(id));
             localStorage.setItem('fs_crm_tombstones', JSON.stringify(tombstones));
-        } catch (_) {}
+        } catch (_) { /* intentional: tombstone persist is best-effort; a stale cache could briefly resurface the row */ }
 
         this.invalidateCache(tableName);
         this.emit('dataChanged', { action: 'delete', table: tableName, id });
@@ -2179,7 +2187,7 @@ class DataStore {
     // could leave the banner stuck even while the server is perfectly reachable.
     _clearOfflineNotice() {
         if (window._offlineNotified) {
-            try { document.getElementById('offline-banner')?.remove(); } catch (_) {}
+            try { document.getElementById('offline-banner')?.remove(); } catch (_) { /* intentional: best-effort banner removal */ }
             window._offlineNotified = false;
         }
     }
@@ -2195,7 +2203,7 @@ class DataStore {
             const del = new Set((JSON.parse(raw)[tableName] || []).map(String));
             if (!del.size) return rows;
             return rows.filter(r => !del.has(String(r.id)));
-        } catch (_) { return rows; }
+        } catch (_) { /* intentional: corrupt tombstone store ⇒ return rows unfiltered */ return rows; }
     }
 
     async query(tableName, filters = {}) {
@@ -2476,14 +2484,14 @@ class DataStore {
             const all = JSON.parse(localStorage.getItem(key) || '[]');
             const idSet = new Set(ids.map(String));
             localStorage.setItem(key, JSON.stringify(all.filter(r => !idSet.has(String(r.id)))));
-        } catch (_) {}
+        } catch (_) { /* intentional: local cache cleanup is best-effort; server delete confirmed */ }
         try {
             const syncQueue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
             const idSet = new Set(ids.map(String));
             localStorage.setItem('fs_crm_sync_queue', JSON.stringify(
                 syncQueue.filter(q => !(q.tableName === tableName && idSet.has(String(q.record.id))))
             ));
-        } catch (_) {}
+        } catch (_) { /* intentional: sync-queue cleanup is best-effort */ }
         try {
             const tombstones = JSON.parse(localStorage.getItem('fs_crm_tombstones') || '{}');
             if (!tombstones[tableName]) tombstones[tableName] = [];
@@ -2491,7 +2499,7 @@ class DataStore {
                 if (!tombstones[tableName].includes(String(id))) tombstones[tableName].push(String(id));
             }
             localStorage.setItem('fs_crm_tombstones', JSON.stringify(tombstones));
-        } catch (_) {}
+        } catch (_) { /* intentional: tombstone persist is best-effort; a stale cache could briefly resurface rows */ }
         this.invalidateCache(tableName);
         this.emit('dataChanged', { action: 'deleteMany', table: tableName, ids });
     }
@@ -2588,7 +2596,7 @@ class DataStore {
             // Persist for next session — non-blocking. setTimeout defers the
             // JSON.stringify off the critical path.
             setTimeout(() => {
-                try { localStorage.setItem(`fs_crm_${cacheKey}`, JSON.stringify(result)); } catch (_) {}
+                try { localStorage.setItem(`fs_crm_${cacheKey}`, JSON.stringify(result)); } catch (_) { /* intentional: derived-snapshot persist is best-effort cache write */ }
             }, 0);
             return result;
         } catch (e) {
@@ -2618,6 +2626,7 @@ class DataStore {
             const deletedIds = new Set(tombstones[tombstoneTable] || []);
             return data.filter(r => !deletedIds.has(String(r.id)));
         } catch (_) {
+            /* intentional: missing/corrupt derived snapshot ⇒ no stale data, fall through to network */
             return null;
         }
     }
@@ -2639,6 +2648,7 @@ class DataStore {
                 this.emit('dataChanged', { action: 'revalidate', table: 'prospects' });
             }
         } catch (_) {
+            /* intentional: background refresh is best-effort — user keeps the stale view */
             // Silent — user keeps the stale view
         } finally {
             this._swrInFlight.delete(cacheKey);
@@ -2752,6 +2762,7 @@ class DataStore {
             const deletedIds = new Set(tombstones[tableName] || []);
             return all.filter(r => !deletedIds.has(String(r.id)));
         } catch (_) {
+            /* intentional: corrupt tombstone store ⇒ return paged rows unfiltered */
             return all;
         }
     }
@@ -2830,7 +2841,7 @@ class DataStore {
                     return staleMap;
                 }
             }
-        } catch (_) {}
+        } catch (_) { /* intentional: corrupt/missing stale snapshot ⇒ fall through to cold network fetch */ }
 
         // Tier 3: cold network fetch
         return this._fetchAndCacheLatestActivities(cacheKey, ids, result);
@@ -2854,7 +2865,7 @@ class DataStore {
             setTimeout(() => {
                 try {
                     localStorage.setItem(`fs_crm_${cacheKey}`, JSON.stringify([...result.entries()]));
-                } catch (_) {}
+                } catch (_) { /* intentional: per-page activity snapshot persist is best-effort */ }
             }, 0);
             return result;
         } catch (e) {

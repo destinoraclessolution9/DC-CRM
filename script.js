@@ -16,7 +16,7 @@ window.app.register = function (domain, methods) {
         for (const k of Object.keys(methods)) {
             const prev = window.app._registry[k];
             if (prev && prev !== domain) {
-                try { console.warn('[app.register] "' + k + '" redefined: ' + prev + ' -> ' + domain); } catch (_) {}
+                try { console.warn('[app.register] "' + k + '" redefined: ' + prev + ' -> ' + domain); } catch (_) { /* intentional: console may be unavailable; redefinition still proceeds */ }
             }
             window.app._registry[k] = domain;
         }
@@ -44,11 +44,11 @@ window.app.register = function (domain, methods) {
             // _autoSync (inside getAll) will either confirm (chip disappears) or
             // _failOptimisticActivity (chip goes back to ⚠ with a fresh error).
             if (typeof window._markOptimisticRetrying === 'function') {
-                try { window._markOptimisticRetrying(); } catch (_) {}
+                try { window._markOptimisticRetrying(); } catch (_) { /* intentional: optional UI overlay hook; drain proceeds without it */ }
             }
             // getAll triggers _autoSync which upserts queued records.
             for (const t of tables) {
-                try { await window.AppDataStore.getAll(t); } catch (_) {}
+                try { await window.AppDataStore.getAll(t); } catch (_) { /* intentional: per-table drain is best-effort; failed rows stay queued with ⚠ */ }
             }
             // After drain, refresh the calendar — pending rows have either synced
             // (and will appear in the real fetch) or remain failed (overlay shows ⚠).
@@ -132,7 +132,7 @@ window.Perf = window.Perf || (function () {
         guardAsync(key, fn) {
             if (inflight.has(key)) {
                 if (window.UI && UI.toast && UI.toast.info) {
-                    try { UI.toast.info('Already saving — please wait…'); } catch (_) {}
+                    try { UI.toast.info('Already saving — please wait…'); } catch (_) { /* intentional: toast is cosmetic; re-entrancy guard still returns */ }
                 }
                 console.debug('[Perf] duplicate suppressed:', key);
                 return Promise.resolve(undefined);
@@ -383,15 +383,15 @@ const UserPreferences = {
     async remove(key) {
         const existing = this._cache[key];
         if (existing && existing.id) {
-            try { await AppDataStore.delete('user_preferences', existing.id); } catch (_) {}
+            try { await AppDataStore.delete('user_preferences', existing.id); } catch (_) { /* intentional: best-effort remote delete; local cache cleared regardless */ }
         }
         delete this._cache[key];
     },
 
     async _migrateFromLocalStorage(userId) {
         const migrations = [
-            { lsKey: 'voice_settings', prefKey: 'voice_settings', parse: v => { try { return JSON.parse(v); } catch(_) { return null; } } },
-            { lsKey: `hidden_top_referrers_v2_${userId}`, prefKey: 'hidden_referrers', parse: v => { try { return JSON.parse(v); } catch(_) { return null; } } },
+            { lsKey: 'voice_settings', prefKey: 'voice_settings', parse: v => { try { return JSON.parse(v); } catch(_) { return null; /* intentional: JSON.parse fallback on corrupt value */ } } },
+            { lsKey: `hidden_top_referrers_v2_${userId}`, prefKey: 'hidden_referrers', parse: v => { try { return JSON.parse(v); } catch(_) { return null; /* intentional: JSON.parse fallback on corrupt value */ } } },
             { lsKey: 'session_timeout', prefKey: 'session_timeout', parse: v => parseInt(v) || 30 },
             { lsKey: 'biometric_enabled', prefKey: 'biometric_enabled', parse: v => v === 'true' },
             { lsKey: 'offline_mode', prefKey: 'offline_mode', parse: v => v === 'true' },
@@ -406,9 +406,9 @@ const UserPreferences = {
                     const value = m.parse(raw);
                     if (value != null) await this.save(m.prefKey, value);
                 }
-            } catch (_) {}
+            } catch (_) { /* intentional: best-effort per-key migration, skip on read/parse failure */ }
         }
-        try { await this.save('_migrated', true); } catch (_) {}
+        try { await this.save('_migrated', true); } catch (_) { /* intentional: best-effort migration-flag write */ }
     }
 };
 window.UserPreferences = UserPreferences;
@@ -773,7 +773,7 @@ const appLogic = (() => {
             if (window.__SERVER_VISIBILITY === false) return false;
             if (typeof location !== 'undefined' && /[?&]novis=1/.test(location.search || '')) return false;
             if (typeof localStorage !== 'undefined' && localStorage.getItem('crm_visibility_off') === '1') return false;
-        } catch (_) {}
+        } catch (_) { /* intentional: kill-switch probe; default ON when storage/location unreadable */ }
         return true;
     };
 
@@ -1289,7 +1289,7 @@ const appLogic = (() => {
     // then only delegate if the registration actually changed.
     const ensureReferralFields  = async () => {
         if (typeof window._loadChunk !== 'function') return;
-        try { await window._loadChunk('chunks/script-search.min.js'); } catch (_) { return; }
+        try { await window._loadChunk('chunks/script-search.min.js'); } catch (_) { return; /* intentional: bail if lazy chunk fails to load */ }
         const fn = window.app && window.app.ensureReferralFields;
         if (typeof fn === 'function' && fn !== ensureReferralFields) return fn();
     };
@@ -1299,7 +1299,7 @@ const appLogic = (() => {
     // the header Search button is clicked before the (tier-2, 3s-delayed) search
     // chunk loads. Self-load the chunk, then delegate only if the real fn exists.
     const toggleSearchPanel     = async () => {
-        if (typeof window._loadChunk === 'function') { try { await window._loadChunk('chunks/script-search.min.js'); } catch (_) { return; } }
+        if (typeof window._loadChunk === 'function') { try { await window._loadChunk('chunks/script-search.min.js'); } catch (_) { return; /* intentional: bail if lazy chunk fails to load */ } }
         const fn = window.app && window.app.toggleSearchPanel;
         if (typeof fn === 'function' && fn !== toggleSearchPanel) return fn();
     };
@@ -1308,7 +1308,7 @@ const appLogic = (() => {
         if (typeof fn === 'function' && fn !== hideSearchPanel) return fn();
     };
     const showSearchPanel       = async () => {
-        if (typeof window._loadChunk === 'function') { try { await window._loadChunk('chunks/script-search.min.js'); } catch (_) { return; } }
+        if (typeof window._loadChunk === 'function') { try { await window._loadChunk('chunks/script-search.min.js'); } catch (_) { return; /* intentional: bail if lazy chunk fails to load */ } }
         const fn = window.app && window.app.showSearchPanel;
         if (typeof fn === 'function' && fn !== showSearchPanel) return fn();
     };
@@ -1352,7 +1352,7 @@ const appLogic = (() => {
                     .slice(-50);
                 localStorage.setItem('offline_queue', JSON.stringify(_offlineQueue));
             }
-        } catch (e) { _offlineQueue = []; }
+        } catch (e) { _offlineQueue = []; /* intentional: reset queue if saved JSON is corrupt */ }
 
         updateOfflineIndicator();
     };
@@ -1492,7 +1492,7 @@ const appLogic = (() => {
     // customer-profile WhatsApp icon (prospects chunk, tier-1) is reachable before
     // the whatsapp chunk loads. Load it, then delegate to the real modal.
     const openSendWhatsAppModal = async (...a) => {
-        if (typeof window._loadChunk === 'function') { try { await window._loadChunk('chunks/script-whatsapp.min.js'); } catch (_) { return; } }
+        if (typeof window._loadChunk === 'function') { try { await window._loadChunk('chunks/script-whatsapp.min.js'); } catch (_) { return; /* intentional: bail if lazy chunk fails to load */ } }
         const fn = window.app && window.app.openSendWhatsAppModal;
         if (typeof fn === 'function' && fn !== openSendWhatsAppModal) return fn(...a);
     };
@@ -1502,7 +1502,7 @@ const appLogic = (() => {
     // role — self-load the chunk, then delegate. uploadProfilePhoto/loginAs are
     // reached only from inside the rendered menu, so the chunk is loaded by then.
     const toggleUserMenu = async (...a) => {
-        if (typeof window._loadChunk === 'function') { try { await window._loadChunk('chunks/script-marketing.min.js'); } catch (_) { return; } }
+        if (typeof window._loadChunk === 'function') { try { await window._loadChunk('chunks/script-marketing.min.js'); } catch (_) { return; /* intentional: bail if lazy chunk fails to load */ } }
         const fn = window.app && window.app.toggleUserMenu;
         if (typeof fn === 'function' && fn !== toggleUserMenu) return fn(...a);
     };
@@ -1661,8 +1661,8 @@ const Auth = {
     async function logout() {
         await Auth.logout();
         _currentUser = null;
-        try { (window.app._clearMobileSnapshots || (() => {}))(); } catch (_) {} // wipe per-user mobile Home/Calendar caches (shared-device leak)
-        try { localStorage.removeItem('remember_me'); } catch (_) {} // clear "keep me logged in" on explicit logout
+        try { (window.app._clearMobileSnapshots || (() => {}))(); } catch (_) { /* intentional: best-effort cache wipe */ } // wipe per-user mobile Home/Calendar caches (shared-device leak)
+        try { localStorage.removeItem('remember_me'); } catch (_) { /* intentional: best-effort storage clear on logout */ } // clear "keep me logged in" on explicit logout
         document.getElementById('app-shell').style.display = 'none';
         document.getElementById('login-container').style.display = 'flex';
         UI.hideModal();      // close the user menu modal
@@ -1680,9 +1680,9 @@ const Auth = {
             await Auth.logout();
         } catch (_) { /* sign out even if the network call fails */ }
         _currentUser = null;
-        try { (window.app._clearMobileSnapshots || (() => {}))(); } catch (_) {} // wipe per-user mobile caches (shared-device leak)
-        try { localStorage.removeItem('remember_me'); } catch (_) {}
-        try { localStorage.removeItem('remember_me_email'); } catch (_) {}
+        try { (window.app._clearMobileSnapshots || (() => {}))(); } catch (_) { /* intentional: best-effort cache wipe */ } // wipe per-user mobile caches (shared-device leak)
+        try { localStorage.removeItem('remember_me'); } catch (_) { /* intentional: best-effort storage cleanup on account switch */ }
+        try { localStorage.removeItem('remember_me_email'); } catch (_) { /* intentional: best-effort storage cleanup on account switch */ }
         const emailField = document.getElementById('loginEmail') || document.getElementById('email');
         if (emailField) emailField.value = '';
         const pwField = document.getElementById('loginPassword') || document.getElementById('password');
@@ -1706,7 +1706,7 @@ function _wireLoginBtn() {
     // unwired (btn._supabaseSetup was just set true, so the fallback retry
     // in app-init.js sees the flag and bails out).
     let rememberedEmail = null;
-    try { rememberedEmail = localStorage.getItem('remember_me_email'); } catch (_) {}
+    try { rememberedEmail = localStorage.getItem('remember_me_email'); } catch (_) { /* intentional: prefill is optional; blank field when storage unreadable */ }
     if (rememberedEmail) {
         const emailField = document.getElementById('email') || document.getElementById('loginEmail');
         if (emailField && !emailField.value) emailField.value = rememberedEmail;
@@ -1724,9 +1724,9 @@ function _wireLoginBtn() {
                 if (k.startsWith('fs_crm_')) toRemove.push(k);
             }
             for (const k of toRemove) {
-                try { localStorage.removeItem(k); } catch (_) {}
+                try { localStorage.removeItem(k); } catch (_) { /* intentional: per-key best-effort purge; continue on failure */ }
             }
-        } catch (_) {}
+        } catch (_) { /* intentional: cache purge is best-effort; recoverable from server */ }
     };
     const _isQuotaErr = (e) => {
         if (!e) return false;
@@ -1788,7 +1788,7 @@ function _wireLoginBtn() {
             window.localStorage.removeItem(probe);
             return !ok;
         } catch (_) {
-            return true;
+            return true; /* intentional: feature-detection — storage blocked if probe throws */
         }
     };
     if (_detectStorageBlocked()) {
@@ -1994,8 +1994,8 @@ function _wireLoginBtn() {
             // from a previous session that may pre-date admin reassignments.
             _visibleUserIdsCache.clear();
             ['prospects', '__prospects_active_500', 'customers', 'users'].forEach(k => {
-                try { localStorage.removeItem(`fs_crm_${k}`); } catch (_) {}
-                try { localStorage.removeItem(`fs_crm_${k}_last_sync`); } catch (_) {}
+                try { localStorage.removeItem(`fs_crm_${k}`); } catch (_) { /* intentional: best-effort SWR flush; in-memory invalidate below still runs */ }
+                try { localStorage.removeItem(`fs_crm_${k}_last_sync`); } catch (_) { /* intentional: best-effort SWR flush */ }
             });
             AppDataStore.invalidateCache('prospects');
             AppDataStore.invalidateCache('__prospects_active_500');
@@ -2013,8 +2013,8 @@ function _wireLoginBtn() {
                 // attempt to free space and retry — each call individually guarded so
                 // a broken localStorage can't throw out of the catch block and
                 // mis-route us into the login-failed error path AFTER a successful login.
-                try { localStorage.removeItem('offline_queue'); } catch (_) {}
-                try { localStorage.setItem('remember_me', '1'); } catch (_) {}
+                try { localStorage.removeItem('offline_queue'); } catch (_) { /* intentional: best-effort space-free retry; must not throw out of catch */ }
+                try { localStorage.setItem('remember_me', '1'); } catch (_) { /* intentional: best-effort retry; must not re-throw post-login */ }
             }
             document.getElementById('login-container').style.display = 'none';
             document.getElementById('app-shell').style.display = 'block';
@@ -2058,7 +2058,7 @@ function _wireLoginBtn() {
                 } catch (navErr) {
                     console.warn('[mobile-init] home view render failed:', navErr);
                     // Last resort: full navigateTo with reload
-                    try { await navigateTo('home'); } catch (_) {}
+                    try { await navigateTo('home'); } catch (_) { /* intentional: last-resort fallback nav; nothing more to recover to */ }
                 }
             } else {
                 await navigateTo('calendar');
@@ -2161,7 +2161,7 @@ function _wireLoginBtn() {
                 // Last-ditch: cache wipe didn't fix it. Drop EVERYTHING in
                 // localStorage and reload — the user is locked out otherwise.
                 btn.textContent = 'Clearing storage…';
-                try { localStorage.clear(); } catch (_) {}
+                try { localStorage.clear(); } catch (_) { /* intentional: best-effort wipe; reload follows regardless */ }
                 setTimeout(() => window.location.reload(true), 600);
             } else {
                 // Show inline error on the form instead of alert()
@@ -2343,14 +2343,14 @@ function _wireLoginBtn() {
                     _currentUser = profile;
                     // Ensure the inactivity-timer guard is always set for restored sessions,
                     // even if localStorage was partially cleared between visits.
-                    try { localStorage.setItem('remember_me', '1'); } catch (_) {}
+                    try { localStorage.setItem('remember_me', '1'); } catch (_) { /* intentional: best-effort guard flag; session restore proceeds */ }
                     _runPredictivePrefetch();
                     // Flush stale SWR snapshots so the user always sees fresh data,
                     // not a cached view from a previous session that may pre-date reassignments.
                     _visibleUserIdsCache.clear();
                     ['prospects', '__prospects_active_500', 'customers', 'users'].forEach(k => {
-                        try { localStorage.removeItem(`fs_crm_${k}`); } catch (_) {}
-                        try { localStorage.removeItem(`fs_crm_${k}_last_sync`); } catch (_) {}
+                        try { localStorage.removeItem(`fs_crm_${k}`); } catch (_) { /* intentional: best-effort SWR flush; in-memory invalidate below still runs */ }
+                        try { localStorage.removeItem(`fs_crm_${k}_last_sync`); } catch (_) { /* intentional: best-effort SWR flush */ }
                     });
                     AppDataStore.invalidateCache('prospects');
                     AppDataStore.invalidateCache('__prospects_active_500');
@@ -2376,7 +2376,7 @@ function _wireLoginBtn() {
                         status: 'active',
                         _placeholder: true,
                     };
-                    try { localStorage.setItem('remember_me', '1'); } catch (_) {}
+                    try { localStorage.setItem('remember_me', '1'); } catch (_) { /* intentional: best-effort guard flag on minimal-profile fallback */ }
                 } else {
                     // Auth session exists but no matching user profile in DB — force sign out
                     console.warn('No user profile found for:', authUser.email, '— signing out.');
@@ -2753,7 +2753,7 @@ function _wireLoginBtn() {
             await AppDataStore.create(table, data);
             return true;
         } catch (err) {
-            return false;
+            return false; /* intentional: conflict-ignoring demo insert; caller treats false as "skipped" */
         }
     };
 
@@ -3082,8 +3082,8 @@ function _wireLoginBtn() {
                 // this chunk just registered. They run once at boot and only wrap
                 // the forwarding stubs; without re-running, every chunk's real
                 // save*/filter* impl ships UNGUARDED (duplicate-submit risk).
-                try { window._autoGuardAppMutations && window._autoGuardAppMutations(); } catch (_) {}
-                try { window._autoDebounceAppSearch && window._autoDebounceAppSearch(); } catch (_) {}
+                try { window._autoGuardAppMutations && window._autoGuardAppMutations(); } catch (_) { /* intentional: optional post-load instrumentation hook */ }
+                try { window._autoDebounceAppSearch && window._autoDebounceAppSearch(); } catch (_) { /* intentional: optional post-load instrumentation hook */ }
                 resolve();
             };
             s.onerror = (e) => {
@@ -3093,7 +3093,7 @@ function _wireLoginBtn() {
                 // chunk a silent no-op for the whole session.
                 _chunkInFlight.delete(src);
                 console.warn('[chunk] failed to load', src, e);
-                try { if (window.UI?.toast?.error) window.UI.toast.error('A module failed to load — check your connection and try again.'); } catch (_) {}
+                try { if (window.UI?.toast?.error) window.UI.toast.error('A module failed to load — check your connection and try again.'); } catch (_) { /* intentional: toast is cosmetic; load already failed and resolves */ }
                 resolve();
             };
             document.body.appendChild(s);
@@ -3179,7 +3179,7 @@ function _wireLoginBtn() {
                         // instead of leaving every non-core view permanently dead.
                         console.warn('[perf] script-features failed to load — will retry on next navigation', e);
                         _promise = null;
-                        try { if (window.UI?.toast?.error) window.UI.toast.error('Failed to load features — check your connection and try again.'); } catch (_) {}
+                        try { if (window.UI?.toast?.error) window.UI.toast.error('Failed to load features — check your connection and try again.'); } catch (_) { /* intentional: toast is cosmetic; load already failed and resolves */ }
                         resolve();
                     };
                     document.body.appendChild(s);
@@ -3197,10 +3197,10 @@ function _wireLoginBtn() {
         try {
             for (const k of Object.keys(window)) {
                 if (/^_sync\w*User$/.test(k) && typeof window[k] === 'function') {
-                    try { window[k](); } catch (_) {}
+                    try { window[k](); } catch (_) { /* intentional: per-chunk user re-sync is best-effort */ }
                 }
             }
-        } catch (_) {}
+        } catch (_) { /* intentional: window enumeration guard; identity sync is best-effort */ }
     };
     window._syncAllChunkUsers = _syncAllChunkUsers;
 
@@ -3214,7 +3214,7 @@ function _wireLoginBtn() {
         // No-op if AppDataStore isn't ready yet (first navigate during boot).
         try { if (window.AppDataStore && typeof window.AppDataStore.abortInflight === 'function') {
             window.AppDataStore.abortInflight('navigate:' + viewId);
-        } } catch (_) {}
+        } } catch (_) { /* intentional: abort is an optimization; navigation proceeds if it throws */ }
         // ── Lazy-load per-view chunk (Code-Split Design Option A) ────────────
         // If this view has a dedicated chunk registered in _CHUNK_VIEWS, fetch
         // it before attempting to render. _loadChunkOnce deduplicates — the
@@ -3238,8 +3238,8 @@ function _wireLoginBtn() {
         // Supabase realtime channel and any active camera stream so we don't
         // pin a websocket / camera handle in the background.
         if (_currentView === 'stock_take' && viewId !== 'stock_take') {
-            try { if (typeof window.app?.stStopRealtime === 'function') await window.app.stStopRealtime(); } catch (e) {}
-            try { if (typeof window.app?._stCancelScanner === 'function') await window.app._stCancelScanner(); } catch (e) {}
+            try { if (typeof window.app?.stStopRealtime === 'function') await window.app.stStopRealtime(); } catch (e) { /* intentional: best-effort realtime teardown on view exit */ }
+            try { if (typeof window.app?._stCancelScanner === 'function') await window.app._stCancelScanner(); } catch (e) { /* intentional: best-effort camera teardown on view exit */ }
         }
         // ── View HTML cache: save the outgoing view's DOM before we replace it.
         // Lets the user bounce back to it within TTL without paying the rebuild
@@ -3640,7 +3640,7 @@ function _wireLoginBtn() {
     const extendProtection = async (...a) => { const _r = window.app.extendProtection; if (_r && _r !== extendProtection) return _r(...a); };
     const transferProspect = async (...a) => { const _r = window.app.transferProspect; if (_r && _r !== transferProspect) return _r(...a); };
     const reassignProspect = async (...a) => { const _r = window.app.reassignProspect; if (_r && _r !== reassignProspect) return _r(...a); };
-    const quickReassign = async (...a) => { if (typeof window._loadChunk === 'function') { try { await window._loadChunk('chunks/script-import.min.js'); } catch (_) { return; } } const _r = window.app.quickReassign; if (_r && _r !== quickReassign) return _r(...a); };
+    const quickReassign = async (...a) => { if (typeof window._loadChunk === 'function') { try { await window._loadChunk('chunks/script-import.min.js'); } catch (_) { return; /* intentional: bail if lazy chunk fails to load */ } } const _r = window.app.quickReassign; if (_r && _r !== quickReassign) return _r(...a); };
     const openReviveProspectModal = async (...a) => { const _r = window.app.openReviveProspectModal; if (_r && _r !== openReviveProspectModal) return _r(...a); };
     const saveReviveProspect = async (...a) => { const _r = window.app.saveReviveProspect; if (_r && _r !== saveReviveProspect) return _r(...a); };
     const convertToCustomer = async (...a) => { const _r = window.app.convertToCustomer; if (_r && _r !== convertToCustomer) return _r(...a); };
@@ -4811,7 +4811,7 @@ const monitorLoginAttempts = async () => {
         if (!rows || rows.length === 0 || updated === null) {
             await AppDataStore.create('login_attempts', { attempts_data: failedAttempts, updated_at: new Date().toISOString() });
         }
-    } catch (_) {}
+    } catch (_) { /* intentional: best-effort prune-persist; lockout reads remain server-authoritative */ }
     // No localStorage fallback — failed login attempts must be server-authoritative to
     // prevent client-side bypass by clearing storage. Previously written to localStorage
     // which allowed attackers to reset the lockout counter at will.
@@ -4873,7 +4873,7 @@ const scheduleRetentionJobs = async () => {
             const configs = await AppDataStore.getAll('system_config');
             const retentionConfig = (configs || []).find(c => c.config_key === 'last_retention_run');
             if (retentionConfig) lastRun = retentionConfig.config_value;
-        } catch (_) {}
+        } catch (_) { /* intentional: missing last-run read just causes retention to run (idempotent) */ }
         if (!lastRun || Date.now() - parseInt(lastRun) > 24 * 60 * 60 * 1000) {
             RetentionPolicy.applyRetention();
             const now = Date.now().toString();
@@ -4885,7 +4885,7 @@ const scheduleRetentionJobs = async () => {
                 } else {
                     await AppDataStore.create('system_config', { config_key: 'last_retention_run', config_value: now, updated_at: new Date().toISOString() });
                 }
-            } catch (_) {}
+            } catch (_) { /* intentional: best-effort timestamp write; worst case retention re-runs next cycle */ }
             // No localStorage fallback — retention run timestamp must be shared across
             // all admin devices so the job doesn't run multiple times per day.
         }

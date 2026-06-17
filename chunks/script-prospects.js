@@ -468,7 +468,7 @@ const _reactCustomersOn = () => {
         if (/[?&]react=0/.test(location.search)) return false;
         if (localStorage.getItem('crm_react_off') === '1') return false;
         return !!(window.CRMReact && typeof window.CRMReact.mountCustomersTable === 'function');
-    } catch (_) { return false; }
+    } catch (_) { /* intentional: feature-detection probe — any failure means React island unavailable */ return false; }
 };
 
 // Swap visibility between the React mount root and the legacy table container.
@@ -520,6 +520,7 @@ const _bffGetCustomers = async ({ limit, offset, search, gua, type }) => {
         const j = await res.json();
         return { data: j.rows || [], count: j.count || 0, used: true };
     } catch (_) {
+        /* intentional: BFF unreachable → signal caller to fall back to _serverPage/legacy */
         return { used: false };
     }
 };
@@ -813,7 +814,7 @@ const renderApprovalQueue = async () => {
     tbody.innerHTML = html;
     } catch (e) {
         console.warn('[renderApprovalQueue] non-fatal — approval queue load failed:', e?.message || e);
-        try { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--gray-400);">Approval queue temporarily unavailable — refresh to retry</td></tr>'; } catch (_) {}
+        try { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--gray-400);">Approval queue temporarily unavailable — refresh to retry</td></tr>'; } catch (_) { /* intentional: even the fallback DOM write failed — nothing more to do */ }
     }
 };
 
@@ -1207,7 +1208,7 @@ const _reactProspectsOn = () => {
         if (/[?&]react=0/.test(location.search)) return false;
         if (localStorage.getItem('crm_react_off') === '1') return false;
         return !!(window.CRMReact && typeof window.CRMReact.mountProspectsTable === 'function');
-    } catch (_) { return false; }
+    } catch (_) { /* intentional: feature-detection probe — any failure means React island unavailable */ return false; }
 };
 const _showProspectsReactRoot = (useReact) => {
     const root   = document.getElementById('prospects-react-root');
@@ -3918,7 +3919,7 @@ const showProspectDetail = async (prospectId) => {
                     badge.style.display = 'none';
                 }
             }
-        } catch (e) {}
+        } catch (e) { /* intentional: best-effort pending-solution badge — absent badge is harmless */ }
     }, 100);
 
     container.innerHTML = buildProspectDetailHeaderHtml(prospect, cpsPhoto) + buildProspectDetailTabsHtml(prospect);
@@ -4129,7 +4130,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             try {
                 const { data: _pd } = await _sb.from('activities').select('id,photo_urls').eq('prospect_id', prospectId);
                 if (_pd) _pd.forEach(r => { if (r.photo_urls?.length) photoMap[r.id] = r.photo_urls; });
-            } catch (_) {}
+            } catch (_) { /* intentional: optional photo_urls enrichment — activities still render without it */ }
         }
         activities.forEach(a => { if (photoMap[a.id]) a.photo_urls = photoMap[a.id]; });
 
@@ -4513,7 +4514,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         try {
             const src = prospect.closing_record?.pre2025_purchases || prospect.pre2025_purchases;
             pre2025 = Array.isArray(src) ? src : JSON.parse(src || '[]');
-        } catch(_) {}
+        } catch(_) { /* intentional: JSON.parse fallback — malformed/empty stays [] */ }
         const pre2025Rows = pre2025.length
             ? pre2025.map((r, i) => `
                 <tr>
@@ -4798,7 +4799,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         try {
             const src = prospect.closing_record?.[cfg.key];
             records = Array.isArray(src) ? src : JSON.parse(src || '[]');
-        } catch(_) {}
+        } catch(_) { /* intentional: JSON.parse fallback — malformed/empty stays [] */ }
 
         // ── Formula Healthcare: include refill reminder columns + product dropdown ──
         // Reads from the 'formula' Marketing List table (Marketing → Lists → Formula).
@@ -4810,7 +4811,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             try {
                 hcProducts = ((await AppDataStore.getAll('formula')) || [])
                     .filter(f => f.is_active !== false && f.capsules_per_bottle && f.daily_dosage);
-            } catch(_) { hcProducts = []; }
+            } catch(_) { /* intentional: best-effort formula-master load — dropdown just stays empty */ hcProducts = []; }
         }
 
         const fmtFinish = (r) => {
@@ -4908,7 +4909,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         try {
             orders = await AppDataStore.query('purchases', { prospect_id: prospect.id });
             orders.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-        } catch(_) {}
+        } catch(_) { /* intentional: best-effort orders fetch — empty list renders the "no orders" state */ }
         if (!orders.length) {
             container.innerHTML = `<div style="padding:16px;color:var(--gray-400);font-size:13px;text-align:center;">No sales orders on record.</div>`;
             return;
@@ -4963,7 +4964,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         try {
             const src = prospect.feng_shui_audits;
             audits = Array.isArray(src) ? src : JSON.parse(src || '[]');
-        } catch(_) { audits = []; }
+        } catch(_) { /* intentional: JSON.parse fallback — malformed/empty stays [] */ audits = []; }
         // Newest first
         audits = [...audits].sort((a, b) =>
             new Date(b.audit_date || 0) - new Date(a.audit_date || 0) || (b.id || 0) - (a.id || 0)
@@ -5220,7 +5221,7 @@ const renderCustomerClosingTab = async (customer, container) => {
     try {
         const src = prospect.closing_record?.pre2025_purchases || prospect.pre2025_purchases;
         pre2025 = Array.isArray(src) ? src : JSON.parse(src || '[]');
-    } catch(_) {}
+    } catch(_) { /* intentional: JSON.parse fallback — malformed/empty stays [] */ }
     const pre2025Rows = pre2025.length
         ? pre2025.map((r, i) => `
             <tr>
@@ -5539,7 +5540,7 @@ const checkPhotoUrlsColumn = async () => {
         if (!error) return true;
         if (error.message && /photo_urls/i.test(error.message)) return false;
         return false;
-    } catch (e) { return false; }
+    } catch (e) { /* intentional: column-existence probe — treat any error as "column absent" */ return false; }
 };
 
 const attachActivityPhoto = async (activityId) => {
@@ -6057,7 +6058,7 @@ const addPrePurchaseRow = async (prospectId) => {
         try {
             const src = prospect.closing_record?.pre2025_purchases || prospect.pre2025_purchases;
             records = Array.isArray(src) ? [...src] : JSON.parse(src || '[]');
-        } catch(_) {}
+        } catch(_) { /* intentional: JSON.parse fallback — malformed/empty stays [] */ }
         records.push({ product, notes, attachment_data: attachment_data || null, attachment_name: attachment_name || null });
         const cr = { ...(prospect.closing_record || {}), pre2025_purchases: records };
         await AppDataStore.update('prospects', prospectId, { closing_record: cr });
@@ -6101,7 +6102,7 @@ const addPrePurchaseAttachment = async (prospectId, index, fileInput) => {
         try {
             const src = prospect.closing_record?.pre2025_purchases || prospect.pre2025_purchases;
             records = Array.isArray(src) ? [...src] : JSON.parse(src || '[]');
-        } catch(_) {}
+        } catch(_) { /* intentional: JSON.parse fallback — malformed/empty stays [] */ }
         if (records[index]) {
             records[index].attachment_name = attachmentName;
             records[index].attachment_data = attachmentData;
@@ -6141,7 +6142,7 @@ const deletePrePurchaseRecord = async (prospectId, index) => {
     try {
         const src = prospect.closing_record?.pre2025_purchases || prospect.pre2025_purchases;
         records = Array.isArray(src) ? [...src] : JSON.parse(src || '[]');
-    } catch(_) {}
+    } catch(_) { /* intentional: JSON.parse fallback — malformed/empty stays [] */ }
     records.splice(index, 1);
     const cr = { ...(prospect.closing_record || {}), pre2025_purchases: records };
     await AppDataStore.update('prospects', prospectId, { closing_record: cr });
@@ -6157,7 +6158,7 @@ const _readProductPurchases = (prospect, type) => {
     try {
         const src = prospect.closing_record?.[_productPurchaseKey(type)];
         return Array.isArray(src) ? [...src] : JSON.parse(src || '[]');
-    } catch(_) { return []; }
+    } catch(_) { /* intentional: JSON.parse fallback — malformed/empty returns [] */ return []; }
 };
 const _writeProductPurchases = async (prospectId, prospect, type, records) => {
     const cr = { ...(prospect.closing_record || {}), [_productPurchaseKey(type)]: records };
@@ -6237,7 +6238,7 @@ const addProductPurchaseRow = async (prospectId, type) => {
     // Fetch Formula master from the 'formula' Marketing List table for finish-date calc
     let productRecord = null;
     if (isFormula && productId) {
-        try { productRecord = await AppDataStore.getById('formula', productId); } catch(_) {}
+        try { productRecord = await AppDataStore.getById('formula', productId); } catch(_) { /* intentional: best-effort master lookup — finish-date calc just skipped */ }
     }
 
     const estimated_finish_date = isFormula
@@ -6343,7 +6344,7 @@ const _readFengShuiAudits = (prospect) => {
     try {
         const src = prospect?.feng_shui_audits;
         return Array.isArray(src) ? src.map(x => ({ ...x })) : JSON.parse(src || '[]');
-    } catch(_) { return []; }
+    } catch(_) { /* intentional: JSON.parse fallback — malformed/empty returns [] */ return []; }
 };
 
 const _writeFengShuiAudits = async (prospectId, audits) => {
@@ -6772,7 +6773,7 @@ const _mirrorCrToActivity = async (prospectId, cr) => {
 
     let acts = [];
     try { acts = await AppDataStore.query('activities', { prospect_id: prospectId }); }
-    catch (_) { return; }
+    catch (_) { /* intentional: optional calendar mirror — abort quietly, closing_record already saved */ return; }
     if (!Array.isArray(acts) || !acts.length) return;
 
     const meetingTypes = new Set(['CPS', 'FTF', 'FSA', 'EVENT']);
@@ -7162,7 +7163,7 @@ const _reactPurchasesOn = () => {
         if (/[?&]react=0/.test(location.search)) return false;
         if (localStorage.getItem('crm_react_off') === '1') return false;
         return !!(window.CRMReact && typeof window.CRMReact.mountPurchasesHistory === 'function');
-    } catch (_) { return false; }
+    } catch (_) { /* intentional: feature-detection probe — any failure means React island unavailable */ return false; }
 };
 
 const _renderPurchasesHistory = (viewport) => {
@@ -7803,7 +7804,7 @@ const saveSolution = async (prospectId) => {
 
 const openEditSolutionModal = async (solutionId, entityId, isProspect = true) => {
     let sol;
-    try { sol = (await AppDataStore.getAll('proposed_solutions')).find(s => String(s.id) === String(solutionId)); } catch (e) {}
+    try { sol = (await AppDataStore.getAll('proposed_solutions')).find(s => String(s.id) === String(solutionId)); } catch (e) { /* intentional: fetch failure leaves sol undefined → handled by the not-found guard below */ }
     if (!sol) { UI.toast.error('Solution not found'); return; }
 
     const content = `
@@ -8222,7 +8223,7 @@ const _reactAgentsOn = () => {
         if (/[?&]react=0/.test(location.search)) return false;
         if (localStorage.getItem('crm_react_off') === '1') return false;
         return !!(window.CRMReact && typeof window.CRMReact.mountAgentsTable === 'function');
-    } catch (_) { return false; }
+    } catch (_) { /* intentional: feature-detection probe — any failure means React island unavailable */ return false; }
 };
 
 // Swap visibility between the React mount root and the legacy table container.
@@ -9384,7 +9385,7 @@ const _loadPhoneDupes = async () => {
     try {
         const { data, error } = await Promise.resolve(window.supabase.rpc('_fs_phone_dupes')).catch(() => ({ data: null, error: 'no-rpc' }));
         if (data && !error) return data;
-    } catch (_) {}
+    } catch (_) { /* intentional: RPC probe — fall through to the client-side scan below */ }
     // Fallback: pull phone list via PostgREST, group client-side. Uses the
     // light-select cache if available so subsequent opens are instant.
     const rows = await AppDataStore.getActiveProspects({ includeDormant: true, limit: 50000 });
@@ -9417,7 +9418,7 @@ const _loadEmailDupes = async () => {
                 group: Array.isArray(row.group_json) ? row.group_json : (row.group_json || [])
             }));
         }
-    } catch (_) {}
+    } catch (_) { /* intentional: RPC probe — fall through to the client-side scan below */ }
     const rows = await AppDataStore.getActiveProspects({ includeDormant: true, limit: 50000 });
     const byEmail = new Map();
     for (const p of rows) {
