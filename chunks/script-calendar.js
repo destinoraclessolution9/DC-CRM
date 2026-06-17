@@ -5045,7 +5045,10 @@
                 if (updates.unable_to_serve) _uSync.unable_reason = updates.unable_reason || '';
                 await AppDataStore.update('prospects', _uta.prospect_id, _uSync);
             }
-        } catch (_) {}
+        } catch (e) {
+            console.warn('[unable_to_serve] prospect flag sync failed', e);
+            try{ if(window.UI&&UI.toast)(UI.toast.warning||UI.toast.error)('Outcome saved, but the prospect status flag did not sync — list filters may be stale.'); }catch(_){}
+        }
 
         // ── Mirror to prospect's DC Closing Record ──
         // When the activity is linked to a prospect AND the user marked the

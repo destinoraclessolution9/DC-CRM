@@ -4808,7 +4808,7 @@ const monitorLoginAttempts = async () => {
         if (!rows || rows.length === 0 || updated === null) {
             await AppDataStore.create('login_attempts', { attempts_data: failedAttempts, updated_at: new Date().toISOString() });
         }
-    } catch (_) { /* intentional: best-effort prune-persist; lockout reads remain server-authoritative */ }
+    } catch (e) { console.warn('[login_attempts] counter persist failed', e); /* intentional: best-effort prune-persist; lockout reads remain server-authoritative */ }
     // No localStorage fallback — failed login attempts must be server-authoritative to
     // prevent client-side bypass by clearing storage. Previously written to localStorage
     // which allowed attackers to reset the lockout counter at will.

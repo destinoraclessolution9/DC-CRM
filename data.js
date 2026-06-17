@@ -1677,6 +1677,7 @@ class DataStore {
             if (error) throw error;
             return data || null;
         } catch (e) {
+            console.warn('[getByIdFull] fetch failed for', tableName, id, e);
             return null;
         }
     }

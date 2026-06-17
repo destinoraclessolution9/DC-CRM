@@ -2429,7 +2429,10 @@ const saveProspect = async () => {
                         snapshot_after: data,
                         description: `Information update for ${name}`
                     });
-                } catch (e) { /* approval queue write failed silently */ }
+                } catch (e) {
+                    console.warn('[approval_queue] info_update insert failed', e);
+                    try { if (window.UI && UI.toast) (UI.toast.warning || UI.toast.error)('Changes saved, but the approval record could not be created. Please retry or notify an admin.'); } catch (_) {}
+                }
             }
         } else {
             data.id = window.AppDataStore._generateId();
@@ -6897,7 +6900,10 @@ const submitClosingRecord = async (prospectId) => {
                     description: `New customer conversion for ${freshProspect?.full_name} (auto-triggered by sale RM ${saleAmount.toLocaleString()})`
                 });
             }
-        } catch (e) { /* approval queue write failed silently */ }
+        } catch (e) {
+            console.warn('[approval_queue] new_customer (auto-conversion-on-sale) insert failed', e);
+            try { if (window.UI && UI.toast) (UI.toast.warning || UI.toast.error)('Sale recorded, but the conversion approval record could not be created.'); } catch (_) {}
+        }
     }
 
     // A manager is themselves the conversion approver — so a qualifying first
@@ -7982,7 +7988,10 @@ const requestProspectConversion = async (prospectId) => {
             snapshot_after: prospect,
             description: `New customer conversion for ${prospect?.full_name || 'prospect'}`
         });
-    } catch (e) { /* approval queue write failed silently */ }
+    } catch (e) {
+        console.warn('[approval_queue] new_customer (manual submit-for-conversion) insert failed', e);
+        try { if (window.UI && UI.toast) (UI.toast.warning || UI.toast.error)('Submitted, but the conversion approval record could not be created.'); } catch (_) {}
+    }
 
     UI.hideModal();
     UI.toast.success('Conversion request submitted. A manager will review and approve shortly.');
@@ -8105,7 +8114,10 @@ const approveProspectConversion = async (prospectId) => {
                 reviewed_at: now
             });
         }
-    } catch (e) { /* queue sync failed silently */ }
+    } catch (e) {
+        console.warn('[approval_queue] status->approved update failed', e);
+        try { if (window.UI && UI.toast) (UI.toast.warning || UI.toast.error)('Approved, but the queue entry status could not be updated.'); } catch (_) {}
+    }
 
     UI.hideModal();
     UI.toast.success(`${prospect.full_name} is now a Customer!`);
@@ -8132,7 +8144,10 @@ const rejectProspectConversion = async (prospectId) => {
                 reviewed_at: now
             });
         }
-    } catch (e) { /* queue sync failed silently */ }
+    } catch (e) {
+        console.warn('[approval_queue] status->rejected update failed', e);
+        try { if (window.UI && UI.toast) (UI.toast.warning || UI.toast.error)('Rejected, but the queue entry status could not be updated.'); } catch (_) {}
+    }
 
     UI.hideModal();
     UI.toast.info('Conversion rejected. Agent can resubmit after reviewing.');
