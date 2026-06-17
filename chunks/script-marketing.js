@@ -1293,6 +1293,201 @@
         } catch (_) { return false; }
     };
 
+    // ── NEW: full-JSX render path for Marketing Automation (default-OFF) ──
+    // Third render path: when ON, the island receives a serializable `data`
+    // payload (built by buildMarketingAutomationIslandData below) and renders
+    // ALL tabs as real JSX with React-state tab switching — instead of the
+    // scaffold-shell + by-id #marketing-tab-content fill. Opt-in ONLY via
+    // ?react_mktauto_jsx=1 OR localStorage crm_react_mktauto_jsx='1'. Same
+    // detection idiom as the sibling flags, just a different param.
+    const _reactMktAutoJsxOn = () => {
+        try {
+            if (/[?&]react_mktauto_jsx=1/.test(location.search)) return true;
+            if (localStorage.getItem('crm_react_mktauto_jsx') === '1') return true;
+            return false;
+        } catch (_) { return false; }
+    };
+
+    // Build a PLAIN-SERIALIZABLE payload describing the FULL content of every
+    // tab the JSX view renders. Mirrors exactly what the legacy renderX() funcs
+    // pull (same tables, same role gating). No HTML strings — objects/arrays/
+    // primitives only; the JSX view owns markup + escaping. Throwing here is
+    // caught at the call site → degrades to the existing by-id onReady fill.
+    const buildMarketingAutomationIslandData = async () => {
+        const _safeAll = async (table) => { try { return (await AppDataStore.getAll(table)) || []; } catch (_) { return []; } };
+        const isAdmin = isSystemAdmin(_state.cu) || isMarketingManager(_state.cu);
+        const canManage = isMarketingManager(_state.cu) || isSystemAdmin(_state.cu);
+
+        // ── Forms tab (mirrors renderFormsTab in script-fude.js) ──
+        const _quickFetch = (table, ms = 4000) => Promise.race([
+            AppDataStore.getAll(table).catch(() => []),
+            new Promise(resolve => setTimeout(() => resolve([]), ms))
+        ]);
+        let formsRows = [];
+        try {
+            const [prospects, surveys, cps, apus, blueprints] = await Promise.all([
+                _quickFetch('prospects', 6000),
+                _quickFetch('customer_surveys'),
+                _quickFetch('cps_analyses'),
+                _quickFetch('apu_appraisals'),
+                _quickFetch('destiny_blueprints')
+            ]);
+            const byProspect = new Map();
+            (prospects || []).forEach(p => byProspect.set(p.id, {
+                id: p.id,
+                name: p.full_name || p.nickname || '(no name)',
+                phone: p.phone || '',
+                survey: null, cps: null, apu: null, blueprint: null
+            }));
+            (surveys || []).forEach(s => { const e = byProspect.get(s.prospect_id); if (e) e.survey = { id: s.id, created_at: s.created_at }; });
+            (cps || []).forEach(c => { const e = byProspect.get(c.prospect_id); if (e) e.cps = { id: c.id, created_at: c.created_at }; });
+            (apus || []).forEach(a => { const e = byProspect.get(a.prospect_id); if (e) e.apu = { id: a.id, created_at: a.created_at }; });
+            (blueprints || []).forEach(b => { const e = byProspect.get(b.prospect_id); if (e) e.blueprint = { id: b.id, created_at: b.created_at }; });
+            formsRows = Array.from(byProspect.values())
+                .sort((a, b) => {
+                    const ax = (a.survey || a.cps || a.apu || a.blueprint) ? 0 : 1;
+                    const bx = (b.survey || b.cps || b.apu || b.blueprint) ? 0 : 1;
+                    return ax - bx || a.name.localeCompare(b.name);
+                })
+                .slice(0, 200);
+        } catch (_) { formsRows = []; }
+
+        // ── Templates tab (mirrors renderTemplatesTab) ──
+        let templates = await _safeAll('whatsapp_templates');
+        if (!templates.length) {
+            templates = [
+                { id: 1, template_name: 'Happy Birthday Wishes', category: 'Birthday', content: 'Hi {{name}}, wishing you a very happy birthday...', variables: ['name', 'zodiac'] },
+                { id: 2, template_name: 'Post-Consultation Thank You', category: 'Follow-up', content: 'Dear {{name}}, it was a pleasure meeting you...', variables: ['name', 'agent'] }
+            ];
+        }
+        const templateRows = templates.map(t => ({
+            id: t.id,
+            template_name: t.template_name || '',
+            category: t.category || '',
+            content: t.content || '',
+            variables: Array.isArray(t.variables) ? t.variables : []
+        }));
+
+        // ── Campaigns tab (mirrors renderCampaignsTab + renderCampaignRow) ──
+        const campaignsRaw = await _safeAll('whatsapp_campaigns');
+        const tplNameById = new Map(templateRows.map(t => [t.id, t.template_name]));
+        const campaignRows = campaignsRaw.map(c => ({
+            id: c.id,
+            campaign_name: c.campaign_name || '',
+            template_name: tplNameById.get(c.template_id) || 'No Template',
+            status: c.status || 'draft',
+            scheduled_date: c.scheduled_date || null,
+            total_recipients: c.total_recipients || 0,
+            sent_count: c.sent_count || 0,
+            opened_count: c.opened_count || 0,
+            replied_count: c.replied_count || 0
+        }));
+
+        // ── Automation tab (mirrors renderAutomationTab) ──
+        let followUps = [];
+        try { followUps = (await loadFollowUpTemplates()) || []; } catch (_) { followUps = []; }
+        const followUpRows = [...followUps].sort((a, b) => (a.sort_order || 99) - (b.sort_order || 99)).map(t => ({
+            id: t.id,
+            sort_order: t.sort_order || 0,
+            icon: t.icon || '📩',
+            template_name: t.template_name || t.trigger_type || '',
+            trigger_type: t.trigger_type || '',
+            description: t.description || '',
+            trigger_category: t.trigger_category || '',
+            event_keywords: t.event_keywords || '',
+            cps_interest_match: t.cps_interest_match || '',
+            solution_match: t.solution_match || '',
+            message_template: t.message_template || '',
+            delay_days: t.delay_days || 0,
+            event_window_days: t.event_window_days || 0,
+            is_active: !!t.is_active
+        }));
+        const drafts = await _safeAll('follow_up_drafts');
+        const draftStats = {
+            sent: drafts.filter(d => d.status === 'sent').length,
+            pending: drafts.filter(d => d.status === 'pending').length,
+            dismissed: drafts.filter(d => d.status === 'dismissed').length
+        };
+        const workflowsRaw = await _safeAll('automation_workflows');
+        // renderWorkflowCard lives in script-performance.js — render to HTML
+        // strings here (legacy parity) so the JSX path can inject them; this is
+        // the only HTML allowed in the payload, mirroring the legacy card markup.
+        try { if (window._loadChunk) await window._loadChunk('chunks/script-performance.min.js'); } catch (_) {}
+        const workflowCardsHtml = workflowsRaw.map(w => { try { return renderWorkflowCard(w); } catch (_) { return ''; } });
+
+        // ── Analytics tab (mirrors renderAnalyticsTab → getRealAnalyticsData) ──
+        let analytics = { totalCampaigns: 0, avgOpenRate: 0, avgResponseRate: 0, avgConversionRate: 0, topCampaigns: [], openRateTrend: 0 };
+        try {
+            const a = await getRealAnalyticsData();
+            analytics = {
+                totalCampaigns: a.totalCampaigns,
+                avgOpenRate: a.avgOpenRate,
+                avgResponseRate: a.avgResponseRate,
+                avgConversionRate: a.avgConversionRate,
+                openRateTrend: a.openRateTrend,
+                topCampaigns: (a.topCampaigns || []).map(c => ({
+                    campaign_name: c.campaign_name || '',
+                    sent_count: c.sent_count || 0,
+                    opened_count: c.opened_count || 0
+                }))
+            };
+        } catch (_) { /* keep defaults */ }
+
+        // ── Products tab (admin/MM only — mirrors renderProductsTab) ──
+        let productRows = [];
+        if (canManage) {
+            const products = await _safeAll('products');
+            productRows = products.map(p => ({
+                id: p.id,
+                name: p.name || '',
+                category: p.category || '',
+                is_active: p.is_active !== false
+            }));
+        }
+
+        // ── Monthly Promotions tab (admin/MM only — mirrors renderMonthlyPromotionsTab) ──
+        let promotionRows = [];
+        if (canManage) {
+            const promos = await _safeAll('monthly_promotions');
+            promos.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            promotionRows = promos.map(p => {
+                let paymentModes = [];
+                try { paymentModes = JSON.parse(p.payment_modes || '[]'); } catch (_) { paymentModes = p.payment_modes ? [String(p.payment_modes)] : []; }
+                return {
+                    id: p.id,
+                    name: p.name || '',
+                    month_year: p.month_year || null,
+                    start_date: p.start_date || null,
+                    end_date: p.end_date || null,
+                    special_package: p.special_package || '',
+                    payment_modes: paymentModes,
+                    target_customer: p.target_customer || '',
+                    entitlement_requirement: p.entitlement_requirement || '',
+                    status: p.status || 'Draft'
+                };
+            });
+        }
+
+        return {
+            activeTab: _state.cmt || 'forms',
+            isAdmin,
+            canManage,
+            canExport: isManagement(_state.cu) || isSystemAdmin(_state.cu),
+            forms: { rows: formsRows },
+            templates: { rows: templateRows },
+            campaigns: { rows: campaignRows },
+            automation: {
+                followUps: followUpRows,
+                draftStats,
+                workflowCardsHtml,
+                hasWorkflows: workflowsRaw.length > 0
+            },
+            analytics,
+            products: { rows: productRows },
+            promotions: { rows: promotionRows }
+        };
+    };
+
     const showMarketingAutomationView = async (container) => {
         // React scaffold-shell — island renders shell; STEP-2 below fills
         // #marketing-tab-content by id after awaiting the island useEffect-ready
@@ -1301,11 +1496,35 @@
             container.innerHTML = '<div id="mkt-auto-react-root"></div>';
             let _maReady; const _maReadyP = new Promise(res => { _maReady = res; });
             const _maGuard = setTimeout(() => _maReady(), 4000);
+
+            // NEW full-JSX path (default-OFF). When the flag is on AND the payload
+            // builds without throwing, hand the island a serializable `data` prop
+            // and (via the early `return` after the handshake) suppress the STEP-2
+            // by-id #marketing-tab-content fill — the JSX view owns the DOM. On any
+            // build error — or when the flag is off — `_maPayload` stays undefined,
+            // so `data:undefined` is passed (the scaffold branch in the view), the
+            // EXACT existing onReady by-id handshake runs, and STEP-2 fills
+            // #marketing-tab-content exactly as today (byte-for-byte unchanged).
+            let _maPayload;
+            if (_reactMktAutoJsxOn()) {
+                try { _maPayload = await buildMarketingAutomationIslandData(); }
+                catch (e2) {
+                    console.warn('[marketing-automation] JSX payload build failed, falling back to scaffold fill:', e2 && e2.message);
+                    _maPayload = undefined;
+                }
+            }
+            const _maHasJsx = !!_maPayload;
+
             try {
                 window.CRMReact.mountMarketingAutomation(document.getElementById('mkt-auto-react-root'), {
                     canExport: isManagement(_state.cu) || isSystemAdmin(_state.cu),
                     canTabs: isMarketingManager(_state.cu) || isSystemAdmin(_state.cu),
                     activeTab: _state.cmt,
+                    data: _maPayload,
+                    // onReady resolves the mount handshake in BOTH paths. When the
+                    // JSX view owns the DOM we `return` before STEP-2, so the by-id
+                    // fill never runs against a React-owned node; when it's off this
+                    // is the EXACT existing handshake, unchanged.
                     onReady: () => { clearTimeout(_maGuard); _maReady(); },
                 });
             } catch (e) {
@@ -1313,6 +1532,10 @@
                 clearTimeout(_maGuard); _maReady();
             }
             await _maReadyP;
+
+            // The JSX view renders all tab content itself — skip the STEP-2 by-id
+            // fill entirely so we never write into a React-owned node.
+            if (_maHasJsx) return;
         } else {
         // ── STEP 1: Paint shell + skeleton immediately so the page never
         // looks frozen, even if the inner tab data fetch is slow/timing out.

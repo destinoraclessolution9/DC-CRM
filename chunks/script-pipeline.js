@@ -678,6 +678,302 @@ const _reactPipelineOn = () => {
     } catch (_) { return false; }
 };
 
+// NEW (default-OFF): full real-JSX render path for the pipeline view. Same
+// detection idiom as _reactPipelineOn, just a different opt-in param. When ON
+// the chunk passes a plain-serializable `data` payload to mountPipeline and the
+// JSX view owns the DOM (no by-id fills). Opt in via ?react_pipeline_jsx=1 or
+// localStorage crm_react_pipeline_jsx='1'. Defaults to FALSE → unchanged path.
+const _reactPipelineJsxOn = () => {
+    try {
+        if (/[?&]react_pipeline_jsx=1/.test(location.search)) return true;
+        if (localStorage.getItem('crm_react_pipeline_jsx') === '1') return true;
+        return false;
+    } catch (_) { return false; }
+};
+
+// ── Plain-serializable row builders for the JSX render path ──────────────────
+// These MIRROR renderFocusRow / renderSystemRow / renderArchiveFocusRow but emit
+// plain objects (strings/numbers/arrays/booleans — NEVER HTML strings) so the
+// JSX view can render them as real React with auto-escaping. The legacy render*
+// functions above are left untouched and still drive the flag-off by-id fill.
+const _plProbMeta = (prob) => ({
+    prob,
+    color: prob >= 80 ? '#DC2626' : prob >= 60 ? '#F59E0B' : '#6B7280',
+    label: prob >= 80 ? '🔥 HOT' : prob >= 50 ? '⚡ WARM' : '❄️ COLD',
+});
+
+const _buildFocusRowData = async (rec, idx, allActivities, readOnly, prefetched) => {
+    const prospect = await AppDataStore.getById('prospects', rec.prospect_id);
+    if (!prospect) return null;
+    const acts = allActivities.filter(a => a.prospect_id === prospect.id);
+    const entry = await calcPipelineEntry(prospect, acts, prefetched);
+    const systemAmount = await getPipelineAmount(prospect, entry.category, prefetched?.allSolutions);
+    const noteCount = await getNoteCount(prospect.id);
+
+    const displayAmount = rec.custom_amount != null ? rec.custom_amount : systemAmount;
+    const isCustomAmount = rec.custom_amount != null;
+    const systemAction = entry.latestNextAction || entry.action || '';
+    const displayAction = rec.custom_action != null ? rec.custom_action : systemAction;
+    const isCustomAction = rec.custom_action != null;
+
+    const _pCfg = await loadPipelineConfig();
+    const _allCats = _pCfg.categories || [];
+    const _oppPotentials = [...new Set(acts.filter(a => a.opportunity_potential?.trim()).map(a => a.opportunity_potential.trim()))];
+    const _currentTarget = rec.target_product || entry.category?.name || '';
+    const editable = !readOnly && _allCats.length > 1;
+    let productOptions = [];
+    if (editable) {
+        const catNames = new Set(_allCats.map(c => c.name));
+        productOptions = _allCats.map(c => c.name);
+        for (const opp of _oppPotentials) if (!catNames.has(opp)) productOptions.push(opp);
+    }
+    const detailVal = rec.target_product_detail ?? entry.latestOppPotential ?? entry.category?.products ?? '';
+
+    return {
+        recId: rec.id,
+        prospectId: prospect.id,
+        idx,
+        readOnly: !!readOnly,
+        name: prospect.name || prospect.full_name || '',
+        lastActivity: entry.lastActivityDate ? entry.lastActivityDate.toLocaleDateString('en-GB') : 'None',
+        product: {
+            editable,
+            options: productOptions,
+            current: _currentTarget,
+            detail: detailVal,
+            staticName: _currentTarget || entry.category?.name || 'Unknown',
+            staticSub: entry.latestOppPotential || entry.category?.products || '',
+        },
+        amount: displayAmount == null ? null : Number(displayAmount),
+        isCustomAmount,
+        prob: _plProbMeta(entry.probability),
+        action: displayAction,
+        isCustomAction,
+        noteCount,
+    };
+};
+
+const _buildSystemRowData = async (prospect, prefetched) => {
+    const entry = prospect._pipeline;
+    const amount = await getPipelineAmount(prospect, entry.category, prefetched?.allSolutions);
+    const noteCount = await getNoteCount(prospect.id);
+
+    let signals = [];
+    if (entry.fromPotential) {
+        signals = [{ kind: 'potential', label: (entry.potentialLevel || 'Potential') + ' Potential' }];
+    } else if (Array.isArray(entry.breakdown) && entry.breakdown.length) {
+        const top = [...entry.breakdown].sort((a, b) => b.contribution - a.contribution).slice(0, 3);
+        signals = top.map(c => ({
+            kind: 'signal',
+            label: (c.activity_type === 'EVENT' && c.event_title ? c.event_title.slice(0, 18) : c.activity_type)
+                + (c.multiplier > 1 ? ` ×${c.multiplier}` : ''),
+        }));
+    }
+    return {
+        prospectId: prospect.id,
+        name: prospect.name || prospect.full_name || '',
+        lastActivity: entry.lastActivityDate ? entry.lastActivityDate.toLocaleDateString('en-GB') : 'None',
+        target: entry.fromPotential ? 'Prospect Potential' : (entry.category?.name || ''),
+        referral: entry.referralInfo?.applied ? { bonusPct: entry.referralInfo.bonusPct } : null,
+        signals,
+        latestOppPotential: entry.latestOppPotential || '',
+        amount: amount == null ? null : Number(amount),
+        prob: _plProbMeta(entry.probability),
+        action: entry.latestNextAction || entry.action || '',
+    };
+};
+
+const _buildArchiveRowData = async (arc, idx) => {
+    const prospect = await AppDataStore.getById('prospects', arc.prospect_id);
+    const prob = parseInt(arc.probability || 0, 10);
+    return {
+        idx,
+        prospectId: arc.prospect_id,
+        hasProspect: !!prospect,
+        name: prospect ? (prospect.name || prospect.full_name || '') : 'Unknown',
+        target: arc.target_product || '',
+        amount: arc.amount != null ? Number(arc.amount) : null,
+        prob: { prob, color: prob >= 80 ? '#DC2626' : prob >= 60 ? '#F59E0B' : '#6B7280', label: prob >= 80 ? 'HOT' : prob >= 50 ? 'WARM' : 'COLD' },
+        action: arc.action_needed || '',
+    };
+};
+
+// Builds the FULL plain-serializable payload describing every section the
+// pipeline view renders (header controls, action plan, month-focus / archive,
+// team sections, auto-generated table). Mirrors STEP 2-7 of showPipelineView
+// WITHOUT touching the DOM. Returns null on any failure so the caller can fall
+// back to the legacy by-id fill path.
+const buildPipelineIslandData = async () => {
+    const userId = _currentUser?.id || 5;
+
+    const [allActivities, allProspects, allUsers] = await Promise.all([
+        withTimeout(getVisibleActivities(), 15000, [], 'pipelineJsx:getVisibleActivities'),
+        withTimeout(getVisibleProspects(), 15000, [], 'pipelineJsx:getVisibleProspects'),
+        withTimeout(AppDataStore.getAll('users'), 15000, [], 'pipelineJsx:getAll(users)'),
+        withTimeout(loadPipelineConfig(), 15000, null, 'pipelineJsx:loadPipelineConfig'),
+    ]);
+
+    const agents = (allUsers || []).filter(isAgentOrLeader);
+
+    let prospects = allProspects ? [...allProspects] : [];
+    if (_pipelineAgentFilter !== 'all') prospects = prospects.filter(p => p.responsible_agent_id == _pipelineAgentFilter);
+    if (_pipelineStatusFilter !== 'all') prospects = prospects.filter(p => p.status === _pipelineStatusFilter);
+    const activeProspects = prospects.filter(p => p.status !== 'converted' && p.status !== 'lost' && !p.unable_to_serve);
+
+    const _focusCurrentMonth = new Date().toISOString().slice(0, 7);
+    const _focusMonthLabel = new Date().toLocaleString('default', { month: 'long', year: 'numeric' });
+    const _apCurrentMonth = _focusCurrentMonth + '-01';
+
+    const [_allMyFocusItemsRaw, _apPlanListRaw, _archiveItems] = await Promise.all([
+        AppDataStore.query('my_potential_list', { user_id: userId }).catch(() => []),
+        AppDataStore.query('action_plans', { user_id: userId, month_year: _apCurrentMonth }).catch(() => []),
+        AppDataStore.query('monthly_focus_archive', { user_id: userId }).catch(() => []),
+    ]);
+
+    // Hide expired items from this render (read-only mirror of STEP 3 — the
+    // legacy path owns the actual archive migration / tagging side effects).
+    let _allMyFocusItems = _allMyFocusItemsRaw.filter(i => !(i.focus_month && i.focus_month < _focusCurrentMonth));
+
+    const _archiveMonths = [...new Set(_archiveItems.map(a => a.month))].sort().reverse()
+        .map(m => ({ value: m, label: new Date(m + '-01').toLocaleString('default', { month: 'long', year: 'numeric' }) }));
+    const _isArchiveView = _focusViewMonth !== 'current';
+
+    // Action plan
+    const _activePlan = _apPlanListRaw[0] || null;
+    let _apItems = [], _apChecks = [];
+    if (_activePlan) {
+        try {
+            const _today = new Date();
+            const _diff = (_today.getDay() === 0 ? 6 : _today.getDay() - 1);
+            const _monday = new Date(_today);
+            _monday.setDate(_today.getDate() - _diff);
+            const _mondayStr = _monday.toISOString().slice(0, 10);
+            [_apItems, _apChecks] = await Promise.all([
+                AppDataStore.query('action_plan_items', { plan_id: _activePlan.id }),
+                AppDataStore.query('action_plan_checks', { plan_id: _activePlan.id, check_date: _mondayStr }),
+            ]);
+            _apItems.sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
+        } catch (e) { /* offline fallback */ }
+    }
+    const actionPlan = {
+        monthLabel: _focusMonthLabel,
+        hasPlan: !!_activePlan,
+        planId: _activePlan?.id ?? null,
+        status: _activePlan ? (_activePlan.status || 'active').toUpperCase() : null,
+        mainTarget: _activePlan ? Number(_activePlan.main_target || 0) : 0,
+        items: _apItems.map(item => ({
+            id: item.id,
+            eventName: item.event_name || '',
+            objective: item.objective || '',
+            target: item.target_to_achieve || '',
+            when: item.when_to_achieve || '-',
+            remarks: item.remarks || '',
+            done: !!(_apChecks.find(c => c.item_id === item.id)?.is_done),
+        })),
+    };
+
+    // Prefetch relational data (same as STEP 5 pre-fetch)
+    const [_plAllReferrals, _plAllPurchases, _plAllSolutions] = await Promise.all([
+        AppDataStore.getAll('referrals').catch(() => []),
+        AppDataStore.getAll('purchases').catch(() => []),
+        AppDataStore.getAll('proposed_solutions').catch(() => []),
+    ]);
+    const _plPrefetched = { allReferrals: _plAllReferrals, allPurchases: _plAllPurchases, allSolutions: _plAllSolutions };
+
+    // Focus list (current or archived month)
+    let focusRows;
+    let focusCount;
+    if (_isArchiveView) {
+        const focusList = _archiveItems
+            .filter(a => a.month === _focusViewMonth)
+            .sort((a, b) => (a.priority_order || 0) - (b.priority_order || 0));
+        focusCount = focusList.length;
+        focusRows = (await Promise.all(focusList.map((arc, idx) => _buildArchiveRowData(arc, idx))));
+    } else {
+        const focusList = _allMyFocusItems
+            .filter(rec => activeProspects.some(p => p.id == rec.prospect_id))
+            .sort((a, b) => a.priority_order - b.priority_order);
+        focusCount = focusList.length;
+        focusRows = (await Promise.all(focusList.map((rec, idx) => _buildFocusRowData(rec, idx, allActivities, false, _plPrefetched)))).filter(Boolean);
+    }
+
+    // Auto-generated (system) table — enriched + sorted exactly as STEP 6
+    const enrichedRaw = await Promise.all(activeProspects.map(async (p) => {
+        const acts = allActivities.filter(a => a.prospect_id === p.id);
+        const pipeline = await calcPipelineEntry(p, acts, _plPrefetched);
+        if (!pipeline.qualified && (p.close_probability > 0 || p.potential_level)) {
+            const potentialProb = p.close_probability > 0
+                ? p.close_probability
+                : (String(p.potential_level) === 'High' ? 70 : String(p.potential_level) === 'Medium' ? 40 : 20);
+            pipeline.qualified = true;
+            pipeline.probability = potentialProb;
+            pipeline.fromPotential = true;
+            pipeline.potentialLevel = p.potential_level;
+            if (!pipeline.action || pipeline.action.startsWith('Complete prerequisite') || pipeline.action.startsWith('Book CPS')) {
+                pipeline.action = `Potential: ${p.potential_level || 'Set'} – follow up to advance to close`;
+            }
+        }
+        return { ...p, _pipeline: pipeline };
+    }));
+    const enriched = enrichedRaw
+        .filter(p => p._pipeline.qualified)
+        .sort((a, b) => {
+            if (b._pipeline.probability !== a._pipeline.probability) return b._pipeline.probability - a._pipeline.probability;
+            const da = a._pipeline.lastActivityDate ? a._pipeline.lastActivityDate.getTime() : 0;
+            const db = b._pipeline.lastActivityDate ? b._pipeline.lastActivityDate.getTime() : 0;
+            if (db !== da) return db - da;
+            return (a.name || a.full_name || '').localeCompare(b.name || b.full_name || '');
+        });
+    const systemRows = await Promise.all(enriched.map(p => _buildSystemRowData(p, _plPrefetched)));
+
+    // Team sections (leader+, current month only)
+    let teamSections = [];
+    if (isTeamLeaderOrAbove(_currentUser) && !_isArchiveView) {
+        const _visIds = await getVisibleUserIds(_currentUser);
+        let _subUsers;
+        if (_visIds === 'all') {
+            _subUsers = allUsers.filter(u => u.id !== userId && (isAgent(u) || isTeamLeaderOrAbove(u)));
+        } else {
+            _subUsers = allUsers.filter(u => _visIds.includes(u.id) && u.id !== userId);
+        }
+        let agentCount = 0;
+        for (const sub of _subUsers) {
+            if (agentCount >= 30) break;
+            const subFocus = (await AppDataStore.query('my_potential_list', { user_id: sub.id }))
+                .filter(rec => activeProspects.some(p => p.id == rec.prospect_id))
+                .sort((a, b) => a.priority_order - b.priority_order);
+            if (subFocus.length === 0) continue;
+            agentCount++;
+            const subRows = (await Promise.all(subFocus.map((rec, idx) => _buildFocusRowData(rec, idx, allActivities, true, _plPrefetched)))).filter(Boolean);
+            teamSections.push({
+                agentName: sub.full_name || sub.username || 'Agent',
+                count: subFocus.length,
+                rows: subRows,
+            });
+        }
+    }
+
+    return {
+        agentFilter: String(_pipelineAgentFilter),
+        statusFilter: _pipelineStatusFilter,
+        agents: agents.map(a => ({ id: a.id, name: a.full_name || '' })),
+        actionPlan,
+        focus: {
+            isArchiveView: _isArchiveView,
+            viewMonth: _focusViewMonth,
+            currentMonthLabel: _focusMonthLabel,
+            archiveMonths: _archiveMonths,
+            count: focusCount,
+            rows: focusRows,
+        },
+        teamSections,
+        system: {
+            qualifiedCount: enriched.length,
+            rows: systemRows,
+        },
+    };
+};
+
 const showPipelineView = async (container) => {
     const userId = _currentUser?.id || 5;
     runHuiJiMigration(); // fire-and-forget
@@ -697,13 +993,39 @@ const showPipelineView = async (container) => {
         // getElementById returned null → fills skipped → skeleton stuck.
         let _plReady; const _plReadyP = new Promise(res => { _plReady = res; });
         const _plGuard = setTimeout(() => _plReady(), 4000); // safety: never hang
+
+        // NEW full-JSX path (default OFF). When _reactPipelineJsxOn() the JSX view
+        // owns the DOM: build the plain payload, pass data:<payload> and a no-op
+        // onReady (the by-id STEP-2 fills below find no #pl-* containers in the
+        // JSX render and are skipped). If the build throws, fall back to
+        // data:undefined + the EXACT existing onReady by-id fill — unchanged.
+        let _plData;
+        if (_reactPipelineJsxOn()) {
+            try {
+                _plData = await buildPipelineIslandData();
+            } catch (e) {
+                console.warn('[pipeline] JSX payload build failed, falling back to scaffold fill:', e && e.message);
+                _plData = undefined;
+            }
+        }
+        // onReady releases the await gate (PipelineFullJsx fires it from its own
+        // useEffect on the JSX path; the scaffold path fires it from its useEffect).
+        const _plOnReady = () => { clearTimeout(_plGuard); _plReady(); };
+
         try {
-            window.CRMReact.mountPipeline(document.getElementById('pl-react-root'), { onReady: () => { clearTimeout(_plGuard); _plReady(); } });
+            window.CRMReact.mountPipeline(document.getElementById('pl-react-root'), { data: _plData, onReady: _plOnReady });
         } catch (e) {
             console.warn('[pipeline] island mount failed, falling back to legacy:', e && e.message);
             clearTimeout(_plGuard); _plReady();
         }
         await _plReadyP;
+        // JSX path: PipelineFullJsx already rendered EVERY section (header / action
+        // plan / focus / system table / team sections) from buildPipelineIslandData()
+        // using the same #pl-* ids. STEP-2+ below would re-query and innerHTML-clobber
+        // those React-owned nodes (torn DOM). Skip the whole by-id fill on the JSX
+        // path (also avoids the redundant second data load). The scaffold path
+        // (_plData undefined) falls through and fills the skeleton exactly as today.
+        if (_plData) return;
     } else {
     container.innerHTML = `
 <div class="pipeline-dual-view">

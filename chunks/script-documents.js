@@ -42,6 +42,136 @@
         } catch (_) { return false; }
     };
 
+    // NEW (default-OFF) flag: full real-JSX render path. ON only when the URL has
+    // ?react_dms_jsx=1 OR localStorage crm_react_dms_jsx==='1' (same detection
+    // idiom as the existing flag, different param). When OFF the view keeps the
+    // current scaffold-shell + by-id onReady fill BYTE-FOR-BYTE. The JSX path is
+    // best-effort and gated entirely behind this flag.
+    const _reactDmsJsxOn = () => {
+        try {
+            if (/[?&]react_dms_jsx=1/.test(location.search)) return true;
+            if (localStorage.getItem('crm_react_dms_jsx') === '1') return true;
+            return false;
+        } catch (_) { return false; }
+    };
+
+    // ── Builder: full plain-serializable payload for the JSX render path ──
+    // Returns objects/arrays/strings/numbers (NEVER HTML strings) describing the
+    // complete explorer content: the recursive folder tree (flattened with depth),
+    // the breadcrumb trail, the current folder's filtered+sorted files, the active
+    // view mode, the current selection, and the toolbar/sort state. Mirrors exactly
+    // what renderFolderTree() / loadFolderContents() / renderBreadcrumb() /
+    // updateBatchActions() pull today. Throwing is caught by the caller, which then
+    // degrades to data:undefined + the existing onReady fill.
+    const buildDocumentsIslandData = async () => {
+        const [allFolders, allDocs] = await Promise.all([
+            AppDataStore.getAll('folders'),
+            AppDataStore.getAll('documents'),
+        ]);
+        const folders = (allFolders || []);
+        const docs = (allDocs || []);
+
+        // Flattened folder tree (pre-order DFS) with depth + hasChildren + active.
+        const childrenOf = (pid) => folders
+            .filter(f => f.parent_id === pid)
+            .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+        const tree = [];
+        const walk = (pid, level) => {
+            for (const f of childrenOf(pid)) {
+                const hasChildren = folders.some(c => c.parent_id === f.id);
+                tree.push({
+                    id: f.id,
+                    name: f.name || '',
+                    color: f.color || '#f59e0b',
+                    level,
+                    hasChildren,
+                    active: _currentFolder === f.id,
+                });
+                if (hasChildren) walk(f.id, level + 1);
+            }
+        };
+        walk(null, 0);
+
+        // Breadcrumb trail (Root + ancestors of current folder, when in a real folder).
+        const breadcrumb = [];
+        if (_currentFolder && _currentFolder !== 'recent' && _currentFolder !== 'all' && _currentFolder !== 'starred') {
+            const byId = new Map(folders.map(f => [String(f.id), f]));
+            let curr = byId.get(String(_currentFolder));
+            const seen = new Set();
+            const trail = [];
+            while (curr && !seen.has(String(curr.id))) {
+                seen.add(String(curr.id));
+                trail.unshift({ id: curr.id, name: curr.name || '' });
+                curr = curr.parent_id ? byId.get(String(curr.parent_id)) : null;
+            }
+            breadcrumb.push(...trail);
+        }
+
+        // Current folder's files — replicate getFilesInCurrentFolder() + sort.
+        let files;
+        if (_currentFolder === 'recent') {
+            files = docs.slice().sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at)).slice(0, 20);
+        } else if (_currentFolder === 'all') {
+            files = docs.slice();
+        } else if (_currentFolder === 'starred') {
+            files = docs.filter(d => d.is_starred);
+        } else {
+            if (_currentFolder) {
+                files = docs.filter(f => f.folder_id === _currentFolder);
+            } else {
+                files = docs.filter(f => !f.folder_id || f.folder_id === 'root');
+            }
+            if (_fileFilter) {
+                const q = _fileFilter.toLowerCase();
+                files = files.filter(f =>
+                    (f.filename && f.filename.toLowerCase().includes(q)) ||
+                    (f.description && f.description.toLowerCase().includes(q)));
+            }
+        }
+        // recent/all/starred views skip the search filter in the legacy path
+        // (they call renderFileListView directly), so only the folder branch above
+        // applies _fileFilter — matching legacy behavior.
+        files = files.slice().sort((a, b) => {
+            let valA, valB;
+            if (_fileSortBy === 'name') {
+                valA = a.filename ? a.filename.toLowerCase() : '';
+                valB = b.filename ? b.filename.toLowerCase() : '';
+            } else if (_fileSortBy === 'date') {
+                valA = new Date(a.updated_at || a.created_at);
+                valB = new Date(b.updated_at || b.created_at);
+            } else if (_fileSortBy === 'size') {
+                valA = a.size || 0;
+                valB = b.size || 0;
+            }
+            if (_fileSortDirection === 'asc') return valA > valB ? 1 : -1;
+            return valA < valB ? 1 : -1;
+        });
+
+        const fileRows = files.map(f => ({
+            id: f.id,
+            filename: f.filename || '',
+            iconClass: getFileIcon(f.filename),
+            isStarred: !!f.is_starred,
+            sizeLabel: (f.size > 1048576 ? (f.size / 1048576).toFixed(1) + ' MB' : (f.size / 1024).toFixed(0) + ' KB'),
+            modifiedLabel: new Date(f.updated_at || f.created_at).toLocaleString(),
+            modifiedDateLabel: new Date(f.updated_at || f.created_at).toLocaleDateString(),
+            selected: _selectedFiles.includes(f.id),
+        }));
+
+        return {
+            viewMode: _viewMode,
+            sortBy: _fileSortBy,
+            sortDirection: _fileSortDirection,
+            fileFilter: _fileFilter,
+            currentFolder: _currentFolder,
+            tree,
+            breadcrumb,
+            files: fileRows,
+            selectedCount: _selectedFiles.length,
+            allSelected: _selectedFiles.length === fileRows.length && fileRows.length > 0,
+        };
+    };
+
     const showDocumentManagementView = async (container) => {
         // React scaffold-shell — island renders the static shell; the chunk then
         // populates #folder-tree + #file-container via the SAME renderFolderTree()
@@ -50,11 +180,32 @@
         if (_reactDocumentsOn()) {
             try {
                 container.innerHTML = '<div id="dms-react-root"></div>';
+
+                // NEW JSX path (default-OFF): when _reactDmsJsxOn() AND the payload
+                // builds without throwing, pass data:<payload> and suppress the
+                // by-id onReady fill (the JSX view owns the DOM). On ANY build throw,
+                // OR when the flag is off, fall back to data:undefined + the EXACT
+                // existing onReady by-id fill — byte-for-byte the current behavior.
+                let _jsxData; // undefined unless the new flag is on AND build succeeds
+                if (_reactDmsJsxOn()) {
+                    try {
+                        _jsxData = await buildDocumentsIslandData();
+                    } catch (be) {
+                        _jsxData = undefined; // degrade to legacy scaffold fill, never blank
+                        try { console.warn('[documents] JSX payload build failed, falling back to scaffold fill:', be && be.message); } catch (_) {}
+                    }
+                }
+
                 // Populate via the island's useEffect (post-commit) — reliable, unlike
                 // the chunk-side rAF that left the view empty in the 2026-06-16 incident.
                 window.CRMReact.mountDocuments(document.getElementById('dms-react-root'), {
                     viewMode: _viewMode,
-                    onReady: () => { renderFolderTree(); loadFolderContents(); },
+                    data: _jsxData,
+                    // When the JSX path is active the view renders from props.data and
+                    // owns the DOM, so the by-id fill must NOT run (it would write into
+                    // React-owned nodes). When data is undefined, pass the EXACT existing
+                    // onReady so the scaffold-fill path is unchanged.
+                    onReady: _jsxData ? (() => {}) : (() => { renderFolderTree(); loadFolderContents(); }),
                 });
                 return;
             } catch (e) {

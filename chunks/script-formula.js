@@ -40,6 +40,20 @@
         } catch (_) { return false; }
     };
 
+    // Full-JSX render path flag (default-OFF — opt-in only). When ON, the island
+    // receives a plain-serializable data payload and renders ALL 6 tabs as REAL
+    // JSX (React-state tab switching), instead of the scaffold-shell + by-id
+    // #fp-tab-content fill. Same opt-in idiom as _reactFpOn: ?react_fp_jsx=1 in
+    // the URL OR localStorage crm_react_fp_jsx='1'. Defaults FALSE so live
+    // behaviour is byte-for-byte the existing scaffold-shell path.
+    const _reactFpJsxOn = () => {
+        try {
+            if (/[?&]react_fp_jsx=1/.test(location.search)) return true;
+            if (localStorage.getItem('crm_react_fp_jsx') === '1') return true;
+            return false;
+        } catch (_) { return false; }
+    };
+
     // ==================== FORMULA PURCHASER ====================
     // Stock replenishment & multi-outlet distribution system.
     // Super Admin only. See formula_purchaser_schema.sql for backing tables.
@@ -301,6 +315,125 @@
         return out.sort((a, b) => (b.outletMin - b.currentStock) - (a.outletMin - a.currentStock));
     };
 
+    // ---------- Full-JSX island payload builder ----------
+    // Returns a PLAIN-SERIALIZABLE object (objects/arrays/strings/numbers — NO
+    // HTML strings) describing the FULL content of all 6 tabs. The JSX view owns
+    // the DOM on this path and renders each tab from this data via React state.
+    // Mirrors exactly what each fpRenderX(c) pulls (read those functions for the
+    // field list). Numbers/strings only — text is auto-escaped by JSX as a child.
+    const buildFormulaPurchaserIslandData = () => {
+        // ----- Dashboard -----
+        const lowStock = fpCalcReplenishmentNeeds();
+        const negStock = _fpState.stockBalance.filter(sb => (parseInt(sb.physical_stock) || 0) < 0);
+        const dashboard = {
+            totalSkus: _fpState.skus.length,
+            lowStockCount: lowStock.length,
+            pendingPos: _fpState.purchaseOrders.filter(p => p.status === 'draft' || p.status === 'submitted').length,
+            pendingTransfers: _fpState.transferOrders.filter(t => t.status === 'pending' || t.status === 'in_transit').length,
+            negStockCount: negStock.length,
+            lowStock: lowStock.slice(0, 200).map(r => ({
+                code: r.sku.product_code || '',
+                name: (r.sku.product_name || '').slice(0, 60),
+                totalStock: r.totalStock,
+                minStock: r.minStock,
+                shortage: r.shortage,
+                recommendedQty: r.recommendedQty,
+                freeQty: r.freeQty,
+                deal: r.deal ? { x: r.deal.x_quantity, y: r.deal.y_free } : null,
+                refundRate: r.refundRate,
+            })),
+        };
+
+        // ----- Purchase Orders -----
+        const pos = {
+            orders: [..._fpState.purchaseOrders]
+                .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
+                .map(p => ({
+                    id: p.id,
+                    poNumber: p.po_number || '',
+                    vendor: _fpState.vendors.find(v => v.id === p.vendor_id)?.name || '—',
+                    branch: _fpState.locations.find(l => l.id === p.branch_location_id)?.name || '—',
+                    orderDate: p.order_date || '',
+                    items: _fpState.poItems.filter(i => i.po_id === p.id).length,
+                    status: p.status || 'draft',
+                })),
+        };
+
+        // ----- Transfers -----
+        const transferRecs = _fpState.lastTransferRecs.length ? _fpState.lastTransferRecs : fpCalcTransferNeeds();
+        _fpState.lastTransferRecs = transferRecs;
+        const transfers = {
+            recs: transferRecs.slice(0, 200).map((r, i) => ({
+                idx: i,
+                outlet: r.outlet.name || '',
+                code: r.sku.product_code || '',
+                name: (r.sku.product_name || '').slice(0, 30),
+                currentStock: r.currentStock,
+                outletMin: Number(r.outletMin.toFixed(0)),
+                hubStock: r.hubStock,
+                transferQty: r.transferQty,
+            })),
+            history: [..._fpState.transferOrders]
+                .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
+                .map(t => ({
+                    transferDate: t.transfer_date || '',
+                    from: fpGetLocationById(t.from_location_id)?.name || '—',
+                    to: fpGetLocationById(t.to_location_id)?.name || '—',
+                    items: _fpState.transferItems.filter(i => i.transfer_id === t.id).length,
+                    status: t.status || 'pending',
+                })),
+        };
+
+        // ----- Stock Inquiry -----
+        const locs = fpActiveLocations();
+        const stockLocs = locs.map(l => ({ id: l.id, name: l.name, short: l.name.replace(/^00\d /, '').slice(0, 18) }));
+        const stockSkus = _fpState.skus.slice(0, 300).map(s => ({
+            id: s.id,
+            code: s.product_code || '',
+            name: (s.product_name || '').slice(0, 50),
+            perLoc: locs.map(l => fpGetStockAtLocation(s.id, l.id)),
+            total: fpGetTotalStock(s.id),
+            autoMin: s.auto_min_stock || 0,
+            actualMin: s.actual_min_stock ?? '',
+            unitCost: s.unit_cost ?? '',
+        }));
+        const stock = { locs: stockLocs, skus: stockSkus, totalSkus: _fpState.skus.length, search: _fpStockSearch || '' };
+
+        // ----- Vendors -----
+        const vendors = {
+            rows: _fpState.vendors.map(v => ({
+                id: v.id,
+                name: v.name || '',
+                address: [v.address_line1, v.address_line2, v.address_line3].filter(Boolean).join(', '),
+                phone: v.phone || '',
+                email: v.email || '',
+                isActive: v.is_active !== false,
+            })),
+        };
+
+        // ----- Exclusions & Deals -----
+        const exclusions = {
+            exclusions: _fpState.exclusions.map(e => ({
+                id: e.id,
+                productCode: e.product_code || '',
+                matchType: e.match_type || 'exact',
+                reason: e.reason || '',
+                isActive: e.is_active !== false,
+            })),
+            deals: _fpState.orderReqs.map(d => ({
+                id: d.id,
+                code: fpGetSkuById(d.sku_id)?.product_code || d.sku_id || '',
+                requirementType: d.requirement_type || '',
+                buy: d.x_quantity || d.min_order_qty || '',
+                free: d.y_free || '',
+                effectiveFrom: d.effective_from || '',
+                effectiveTo: d.effective_to || '',
+            })),
+        };
+
+        return { dashboard, pos, transfers, stock, vendors, exclusions };
+    };
+
     // ---------- Main View ----------
     const showFormulaPurchaserView = async (container) => {
         _state.cv = 'formula_purchaser';
@@ -323,9 +456,32 @@
                 ];
                 const _fpTab = _fpState.currentTab || 'dashboard';
                 container.innerHTML = '<div id="fp-react-root"></div>';
+
+                // Full-JSX path (new flag, default-OFF): build a plain-serializable
+                // payload describing all 6 tabs and hand it to the view, which then
+                // owns the DOM and renders REAL JSX with React-state tab switching.
+                // We must load data first (the payload is computed from _fpState),
+                // then suppress the by-id onReady fill (pass a no-op) since the JSX
+                // view owns #fp-tab-content. Built in try/catch — on ANY throw we
+                // leave _fpIslandData null and fall through to data:undefined + the
+                // EXACT existing onReady by-id fill (byte-for-byte legacy behaviour).
+                let _fpIslandData;
+                if (_reactFpJsxOn()) {
+                    try {
+                        await fpLoadData();
+                        _fpIslandData = buildFormulaPurchaserIslandData();
+                    } catch (e) {
+                        _fpIslandData = undefined;
+                        console.warn('[fp] island data build failed, using by-id fill fallback:', e && e.message);
+                    }
+                }
+
                 window.CRMReact.mountFormulaPurchaser(document.getElementById('fp-react-root'), {
                     tabs: _fpTabs, activeTab: _fpTab,
-                    onReady: async () => { await fpLoadData(); await fpSwitchTab(_fpTab); },
+                    data: _fpIslandData || undefined,
+                    onReady: _fpIslandData
+                        ? () => {}
+                        : async () => { await fpLoadData(); await fpSwitchTab(_fpTab); },
                 });
                 return;
             } catch (e) {

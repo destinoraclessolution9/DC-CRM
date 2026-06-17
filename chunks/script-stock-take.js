@@ -46,6 +46,20 @@
         } catch (_) { return false; }
     };
 
+    // NEW third render path — full real-JSX render of every tab from a serializable
+    // data payload (build<X>IslandData below), instead of the scaffold-shell +
+    // by-id onReady fill. DEFAULT OFF: only ON when the URL has ?react_st_jsx=1 OR
+    // localStorage crm_react_st_jsx==='1'. Same detection idiom as _reactStockTakeOn,
+    // just an opt-in (no kill-switch). When OFF, the mount keeps the EXACT existing
+    // scaffold/onReady behavior — flag-off is byte-for-byte identical to before.
+    const _reactStJsxOn = () => {
+        try {
+            if (/[?&]react_st_jsx=1/.test(location.search)) return true;
+            if (localStorage.getItem('crm_react_st_jsx') === '1') return true;
+            return false;
+        } catch (_) { return false; }
+    };
+
     // ==================== STOCK TAKE (Super Admin, Level 1) ====================
     // Shelf-by-shelf physical count reconciliation against imported system balances.
     // Storage: localStorage (key prefix `stockTake.v1.*`) — Supabase tables can be
@@ -113,6 +127,120 @@
         return sid;
     };
 
+    // ── Full-JSX island data payload (build<X>IslandData) ────────────────────
+    // Returns a PLAIN-SERIALIZABLE object (objects/arrays/strings/numbers — NEVER
+    // HTML strings) describing the full content of every tab the view renders, so
+    // the React view can render real JSX instead of receiving by-id innerHTML.
+    // Mirrors the data the _stRender* fns pull (sessions/import/count/exclusions/
+    // bulk/reconcile/recount/summary + v2 shelves snapshot). Used ONLY on the new
+    // _reactStJsxOn() path; built inside a try/catch at the mount so any throw
+    // degrades back to the legacy scaffold fill (never a blank screen).
+    const buildStockTakeIslandData = () => {
+        const isAdmin = isSystemAdmin(_state.cu);
+        const sid = _stState.sessionId;
+        const threshold = _stGetThreshold();
+        const exclusions = _stExclusions();
+
+        // chip (active session badge) — mirrors stSwitchTab chip block.
+        const chipSess = _stSessions().find(s => s.id === sid) || null;
+
+        // Sessions tab rows (mirror _stRenderSessions).
+        const sessionsList = _stSessions().slice()
+            .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+            .map(s => {
+                const method = _stSessionMethod(s.id);
+                const partial = _stPartialInfo(s.id);
+                return {
+                    id: s.id,
+                    createdAt: s.createdAt || '',
+                    locations: (s.locations || []).slice(),
+                    qrCounts: _stCounts(s.id).length,
+                    systemSkus: _stSystemStock(s.id).length,
+                    bulkRows: (_stBulkData(s.id).rows || []).length,
+                    method,
+                    methodLabel: ({ qr_only: 'QR', excel_import: 'Excel', mixed: 'Mixed', none: '—' })[method],
+                    partial: !!partial.partial,
+                    status: s.status,
+                };
+            });
+
+        // Import tab (mirror _stRenderImport) — only meaningful when a session is active.
+        const systemStock = sid ? _stSystemStock(sid) : [];
+
+        // Count tab (mirror _stRenderCount + _stRenderCountsList).
+        const countLocations = sid ? ((_stSessions().find(s => s.id === sid)?.locations) || []) : [];
+        const allCounts = sid ? _stCounts(sid) : [];
+        const recentCounts = allCounts.slice().reverse().slice(0, 50).map(c => ({
+            id: c.id,
+            timeShort: (c.timestamp || '').slice(11, 16),
+            counter: c.counter || '',
+            location: c.location || '',
+            shelf: c.shelf || '',
+            sku: c.sku || '',
+            qty: c.qty,
+            recount: !!c.recount,
+        }));
+        const defaultCounter = _state.cu?.name || _state.cu?.email || '';
+
+        // Bulk tab (mirror _stRenderBulk).
+        const bulkData = sid ? _stBulkData(sid) : { rows: [], file: '', uploadedAt: '', uploadedBy: '' };
+        const exSet = _stExclusionSet();
+        const bulkRows = (bulkData.rows || []).map(r => ({
+            SKU: r.SKU, Location: r.Location || '', Physical_Qty: r.Physical_Qty, excluded: exSet.has(r.SKU),
+        }));
+
+        // Reconcile + Recount (mirror _stReconcile).
+        const recRows = sid ? _stReconcile(sid, threshold) : [];
+
+        // Summary (mirror _stRenderSummary).
+        const bySku = sid ? _stReconcileBySku(sid, threshold) : [];
+        const partialInfo = sid ? _stPartialInfo(sid) : { partial: false, covered: 0, uncovered: 0, uncountedLocations: [], countedLocations: [] };
+        const summaryMethod = sid ? _stSessionMethod(sid) : 'none';
+        const reasons = sid ? _stReasons(sid) : {};
+
+        // v2 shelves snapshot — only when already loaded (sync, never throws/awaits).
+        // When not loaded the JSX shows a spinner + a "load shelves" trigger that
+        // re-opens the view; we never block the payload build on Supabase here.
+        const v2Available = _stV2Available();
+        const shelvesLoaded = !!_stV2.loaded;
+        const v2Stores = shelvesLoaded ? _stV2.stores.map(s => ({ id: s.id, store_code: s.store_code, name: s.name })) : [];
+        const v2Shelves = shelvesLoaded ? _stV2.shelves.map(sh => ({
+            id: sh.id, store_id: sh.store_id, shelf_code: sh.shelf_code, qr_payload: sh.qr_payload, description: sh.description || '',
+        })) : [];
+
+        return {
+            isAdmin,
+            sessionId: sid || null,
+            threshold,
+            chip: chipSess ? { id: chipSess.id, status: chipSess.status } : null,
+            sessions: sessionsList,
+            systemStock: systemStock.map(r => ({ Location: r.Location, SKU: r.SKU, System_Qty: r.System_Qty })),
+            count: {
+                locations: countLocations.slice(),
+                defaultCounter,
+                totalCounts: allCounts.length,
+                recent: recentCounts,
+            },
+            exclusions: exclusions.slice().sort((a, b) => (b.addedAt || '').localeCompare(a.addedAt || ''))
+                .map(e => ({ sku: e.sku, reason: e.reason || '', addedAt: e.addedAt || '', addedBy: e.addedBy || '' })),
+            bulk: { rows: bulkRows, file: bulkData.file || '', uploadedAt: bulkData.uploadedAt || '', uploadedBy: bulkData.uploadedBy || '' },
+            reconcile: recRows,
+            recount: recRows.filter(r => r.Status === 'Recount Required'),
+            summary: {
+                bySku,
+                partial: partialInfo,
+                method: summaryMethod,
+                reasons,
+                exclusionCount: exclusions.length,
+                bulkFile: bulkData.file || '',
+                createdBy: chipSess?.createdBy || (_stSessions().find(s => s.id === sid)?.createdBy) || '',
+                createdAt: chipSess?.createdAt || (_stSessions().find(s => s.id === sid)?.createdAt) || '',
+                status: chipSess?.status || (_stSessions().find(s => s.id === sid)?.status) || '',
+            },
+            shelves: { v2Available, loaded: shelvesLoaded, stores: v2Stores, shelves: v2Shelves },
+        };
+    };
+
     const showStockTakeView = async (container) => {
         if (!_stRequireAdmin()) { await navigateTo('calendar'); return; }
         _state.cv = 'stock_take';
@@ -171,9 +299,26 @@
                 const _stDefault = isSystemAdmin(_state.cu) ? 'sessions' : 'count';
                 const _stTab = new Set(_stKeys).has(_stState.tab) ? _stState.tab : _stDefault;
                 container.innerHTML = '<div id="st-react-root"></div>';
+                // NEW third path: when _reactStJsxOn() and the payload builds without
+                // throwing, hand the JSX view a full serializable data payload AND
+                // suppress the by-id onReady fill (the JSX view owns #st-tab-body /
+                // #st-session-chip now). On any build error — or when the flag is OFF —
+                // fall back to data:undefined + the EXACT existing onReady scaffold fill,
+                // i.e. byte-for-byte the current behavior.
+                let _stIslandData;
+                if (_reactStJsxOn()) {
+                    try { _stIslandData = buildStockTakeIslandData(); }
+                    catch (e) {
+                        _stIslandData = undefined;
+                        try { console.warn('[stock-take] JSX payload build failed, using legacy onReady fill:', e && e.message); } catch (_) {}
+                    }
+                }
                 window.CRMReact.mountStockTake(document.getElementById('st-react-root'), {
                     tabs: _stKeys.map(k => ({ key: k, label: _stLabels[k] })),
-                    onReady: () => { stSwitchTab(_stTab); },
+                    data: _stIslandData,
+                    // JSX path owns the DOM → no-op onReady (no by-id fill). Legacy/flag-off
+                    // path keeps the exact stSwitchTab(_stTab) fill as today.
+                    onReady: _stIslandData ? (() => {}) : (() => { stSwitchTab(_stTab); }),
                 });
                 return;
             } catch (e) {
@@ -213,6 +358,30 @@
             : new Set(['count','recount','summary']);
         const tab = allowed.has(_stState.tab) ? _stState.tab : defaultTab;
         await stSwitchTab(tab);
+    };
+
+    // Re-render helper for the NEW full-JSX path: rebuilds the serializable payload
+    // and re-mounts the island into the existing #st-react-root so data-mutating
+    // app.* handlers can refresh the JSX view after they resolve. No-op (and never
+    // throws) on the legacy scaffold path or when the root is absent — the legacy
+    // handlers' own stSwitchTab() calls already cover the by-id fill there.
+    const stJsxRefresh = () => {
+        try {
+            if (!_reactStJsxOn()) return;
+            const root = document.getElementById('st-react-root');
+            if (!root || !window.CRMReact || typeof window.CRMReact.mountStockTake !== 'function') return;
+            const _stKeys = isSystemAdmin(_state.cu)
+                ? ['sessions', 'shelves', 'import', 'exclusions', 'count', 'bulk', 'reconcile', 'recount', 'summary']
+                : ['count', 'recount', 'summary'];
+            const _stLabels = { sessions: 'Sessions', shelves: 'Shelves (v2)', import: 'System Stock', exclusions: 'Exclusions', count: 'Per-shelf Count', bulk: 'Bulk Physical', reconcile: 'Reconciliation', recount: 'Recount', summary: 'Final Summary' };
+            let data;
+            try { data = buildStockTakeIslandData(); } catch (e) { return; }
+            window.CRMReact.mountStockTake(root, {
+                tabs: _stKeys.map(k => ({ key: k, label: _stLabels[k] })),
+                data,
+                onReady: () => {},
+            });
+        } catch (_) { /* noop */ }
     };
 
     const stSwitchTab = async (tab) => {
@@ -1937,6 +2106,7 @@
     Object.assign(window.app, {
         showStockTakeView,
         stSwitchTab,
+        stJsxRefresh,
         stNewSession,
         stSaveNewSession,
         stActivateSession,

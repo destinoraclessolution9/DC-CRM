@@ -43,6 +43,23 @@
             return !!(window.CRMReact && typeof window.CRMReact.mountEggPurchasing === 'function');
         } catch (_) { return false; }
     };
+
+    // NEW full-JSX render path flag — DEFAULT-OFF. Opt-in ONLY via ?react_egg_jsx=1
+    // OR localStorage crm_react_egg_jsx='1' (same detection idiom as _reactEggOn,
+    // inverted to opt-IN). When ON, showEggPurchasingView hands the island a
+    // structured `data` payload so EggPurchasingView renders ALL tabs as REAL JSX
+    // (React-state tab switching) and suppresses the by-id #egg-tab-content fill.
+    // When OFF (the live default), behavior is byte-for-byte the existing
+    // scaffold-shell path (empty #egg-tab-content filled by eggSwitchTab on
+    // useEffect onReady). Requires _reactEggOn() to be true as well — this flag
+    // only upgrades the EXISTING island block, it never enables the island alone.
+    const _reactEggJsxOn = () => {
+        try {
+            if (/[?&]react_egg_jsx=1/.test(location.search)) return true;
+            if (localStorage.getItem('crm_react_egg_jsx') === '1') return true;
+            return false;
+        } catch (_) { return false; }
+    };
     // AppDataStore, UI, supabase are global — no alias needed.
 
     // ==================== EGG PURCHASING SYSTEM (Super Admin only) ====================
@@ -561,6 +578,215 @@ JB 星期二到
         return out;
     };
 
+    // ── React full-JSX data payload (default-OFF, _reactEggJsxOn) ───────────
+    // Build a PLAIN-SERIALIZABLE snapshot of EVERY tab's content (objects/arrays/
+    // strings/numbers — never HTML strings) so EggPurchasingView can render the
+    // whole view as REAL JSX. ONE source of truth: the same _eggState the legacy
+    // eggRender*Tab fns read, plus the same DB reads they do (urgent/history/
+    // config). Mirrors the legacy formulas/labels/sort/order 1:1 so flag-on looks
+    // identical to flag-off. The async DB reads are awaited by the caller before
+    // this runs (it receives them as args) so this fn itself never throws on I/O.
+    //
+    // Drag-drop, file parse, reconcile, commit, Sheets push all STAY in the chunk
+    // handlers — the JSX path only wires onclick/onDrop to the existing app.* fns.
+    const _eggChannelSectionData = (rows) => {
+        // Mirror eggRenderChannelBreakdownHtml section computation as data.
+        const sections = _EGG_CHANNEL_SECTIONS.map(sec => {
+            const sectionRows = rows.filter(r => r.region === sec.region && r.channel === sec.channel);
+            const totalGold = sectionRows.filter(r => r.product === 'GOLD').reduce((s, r) => s + Number(r.quantity || 0), 0);
+            const totalKing = sectionRows.filter(r => r.product === 'KING').reduce((s, r) => s + Number(r.quantity || 0), 0);
+            return {
+                title: sec.title,
+                totalGold,
+                totalKing,
+                rows: sectionRows.map(r => ({
+                    agent_name: r.agent_name || '-',
+                    dateStr: r.order_date_parsed ? eggFormatDateShort(r.order_date_parsed) : '-',
+                    order_no: r.order_no || '-',
+                    product_code: r.product_code || '-',
+                    product: r.product,
+                    quantity: r.quantity,
+                })),
+            };
+        });
+        // Mirror eggRenderGroupBreakdownHtml ordering.
+        const byGroup = eggGroupBreakdownFromRows(rows);
+        const seen = new Set();
+        const groupRows = [];
+        for (const g of _EGG_WHOLESALE_GROUP_ORDER) {
+            if (byGroup[g] !== undefined) { groupRows.push({ group: g, qty: byGroup[g] }); seen.add(g); }
+        }
+        for (const [g, qty] of Object.entries(byGroup)) {
+            if (!seen.has(g)) groupRows.push({ group: g, qty });
+        }
+        return { sections, groupRows };
+    };
+
+    // Builds the Run tab (3-phase wizard) state as plain data.
+    const _eggBuildRunTabData = () => {
+        const phase = _eggState.currentPhase || 1;
+        const weekIso = eggFormatDateIso(_eggState.weekStartDate || eggGetCurrentMonday());
+        const newRows = _eggState.newRows || [];
+        const topUp = _eggState.lastWeekTopUp || { GOLD: 0, KING: 0 };
+        const excludedKeys = Array.from(_eggState.excludedKeys || []);
+        const excludedSet = new Set(excludedKeys);
+
+        // Phase 2 candidate rows (same sort as eggRenderPhase2).
+        const candidateRows = [...newRows].sort((a, b) => {
+            const da = a.order_date_parsed || '￿';
+            const db = b.order_date_parsed || '￿';
+            if (da !== db) return da < db ? -1 : 1;
+            return (a.order_no || '').localeCompare(b.order_no || '');
+        }).map(r => ({
+            unique_key: r.unique_key,
+            pushed: excludedSet.has(r.unique_key),
+            agent_name: r.agent_name || '-',
+            dateStr: r.order_date_parsed ? eggFormatDateShort(r.order_date_parsed) : '-',
+            order_no: r.order_no || '-',
+            product: r.product,
+            region: r.region,
+            quantity: r.quantity,
+            channel: r.channel,
+        }));
+
+        // Push-up counter (mirror eggPushUpCounterHtml).
+        const pushed = newRows.filter(r => excludedSet.has(r.unique_key));
+        const goldSum = pushed.filter(r => r.product === 'GOLD').reduce((s, r) => s + Number(r.quantity || 0), 0);
+        const kingSum = pushed.filter(r => r.product === 'KING').reduce((s, r) => s + Number(r.quantity || 0), 0);
+
+        // Previous run reference (mirror eggRenderPhase2 prev block).
+        const prev = _eggState.prevRunOrders || [];
+        const meta = _eggState.prevRunMeta;
+        const prevGold = prev.filter(r => r.product === 'GOLD').reduce((s, r) => s + Number(r.quantity || 0), 0);
+        const prevKing = prev.filter(r => r.product === 'KING').reduce((s, r) => s + Number(r.quantity || 0), 0);
+        const sortedPrev = [...prev].sort((a, b) => {
+            const da = a.order_date || '';
+            const db = b.order_date || '';
+            if (da !== db) return da.localeCompare(db);
+            return (a.order_no || '').localeCompare(b.order_no || '');
+        });
+        const PREV_ROW_LIMIT = 10;
+        const shownPrev = sortedPrev.slice(-PREV_ROW_LIMIT);
+        const prevHiddenCount = Math.max(0, sortedPrev.length - shownPrev.length);
+
+        return {
+            phase,
+            weekIso,
+            csv: _eggState.csvFile ? { name: _eggState.csvFile.name, rows: _eggState.csvRows.length } : null,
+            xlsx: _eggState.xlsxFile ? { name: _eggState.xlsxFile.name, rows: _eggState.xlsxRows.length } : null,
+            ready: !!(_eggState.csvFile && _eggState.xlsxFile),
+            topUp: { GOLD: Number(topUp.GOLD) || 0, KING: Number(topUp.KING) || 0 },
+            candidateRows,
+            newRowCount: newRows.length,
+            pushUp: { goldSum, kingSum, goldTarget: Number(topUp.GOLD) || 0, kingTarget: Number(topUp.KING) || 0 },
+            prev: {
+                hasMeta: !!meta,
+                weekLabel: (meta && meta.week_start_date) ? eggFormatDateShort(new Date(meta.week_start_date + 'T00:00:00')) : '',
+                count: prev.length,
+                goldTotal: prevGold,
+                kingTotal: prevKing,
+                hiddenCount: prevHiddenCount,
+                shownCount: shownPrev.length,
+                totalCount: sortedPrev.length,
+                rows: shownPrev.map(r => ({
+                    agent_name: r.agent_name || '-',
+                    dateStr: r.order_date ? eggFormatDateShort(new Date(r.order_date)) : '-',
+                    order_no: r.order_no || '-',
+                    product: r.product || '-',
+                    region: r.region || '-',
+                    quantity: r.quantity,
+                    channel: r.channel || '-',
+                })),
+            },
+            stats: _eggState.stats || {},
+            farmOrderText: _eggState.farmOrderText || '',
+            channelBreakdown: _eggChannelSectionData((_eggState.newRows || []).filter(r => !excludedSet.has(r.unique_key))),
+        };
+    };
+
+    // Top-level payload builder. `dbData` is { urgents, runs, config } the caller
+    // fetched (async) before mount so this stays synchronous and pure.
+    const buildEggIslandData = (dbData) => {
+        const db = dbData || {};
+
+        // ── URGENT tab (mirror eggRenderUrgentTab) ──
+        const filter = _eggState.urgentFilter || 'active';
+        const urgents = (db.urgents || []).slice().sort((a, b) =>
+            String(b.week_start_date || '').localeCompare(String(a.week_start_date || '')));
+        const filterFn = {
+            active: u => ['pending', 'applied'].includes(u.status),
+            resolved: u => ['reconciled', 'absorbed'].includes(u.status),
+            stale: u => ['expired', 'cancelled'].includes(u.status),
+            all: () => true,
+        };
+        const filtered = urgents.filter(filterFn[filter] || filterFn.all);
+        const activeCount = urgents.filter(filterFn.active).length;
+        const appliedCount = urgents.filter(u => u.status === 'applied').length;
+        const urgentTab = {
+            filter,
+            activeCount,
+            appliedCount,
+            rows: filtered.map(u => ({
+                id: u.id,
+                week_start_date: u.week_start_date || '-',
+                agent_name: u.agent_name || '-',
+                product: u.product,
+                region: u.region,
+                quantity: u.quantity,
+                channel: u.channel || 'Wholesale',
+                status: u.status,
+                notes: u.notes || '',
+            })),
+        };
+
+        // ── HISTORY tab (mirror eggRenderHistoryTab) ──
+        const runs = (db.runs || []).slice().sort((a, b) =>
+            String(b.run_at || '').localeCompare(String(a.run_at || '')));
+        const historyTab = {
+            rows: runs.map(r => {
+                const totals = r.totals || {};
+                const tot = (totals.KL?.GOLD || 0) + (totals.KL?.KING || 0) + (totals.PG?.GOLD || 0) + (totals.PG?.KING || 0);
+                return {
+                    id: r.id,
+                    runAtLabel: r.run_at ? new Date(r.run_at).toLocaleString() : '-',
+                    week_start_date: r.week_start_date || '-',
+                    files: `${r.csv_filename || '-'} / ${r.excel_filename || '-'}`,
+                    rows_new: r.rows_new || 0,
+                    rows_excluded: r.rows_excluded || 0,
+                    cartons: tot,
+                    run_by: r.run_by || '-',
+                };
+            }),
+        };
+
+        // ── CONFIG tab (mirror eggRenderConfigTab) ──
+        const cfg = db.config || _eggState.config || eggDefaultConfig();
+        const configTab = { json: JSON.stringify(cfg, null, 2) };
+
+        return {
+            activeTab: _eggState.currentTab || 'run',
+            run: _eggBuildRunTabData(),
+            urgent: urgentTab,
+            history: historyTab,
+            config: configTab,
+        };
+    };
+
+    // Re-render the full-JSX island after a mutating handler. Rebuilds the payload
+    // from the (already-updated) _eggState + fresh DB reads and remounts into the
+    // captured container. No-op unless the JSX flag is on AND we have a container.
+    // Self-contained: never touches the legacy #egg-tab-content path.
+    const eggRerenderJsx = async () => {
+        if (!_reactEggJsxOn()) return;
+        const container = _eggState._lastContainer;
+        if (!container || !(window.CRMReact && typeof window.CRMReact.mountEggPurchasing === 'function')) return;
+        try {
+            await showEggPurchasingView(container);
+        } catch (e) {
+            console.warn('[egg] JSX re-render failed:', e && e.message);
+        }
+    };
+
     // ==================== MAIN VIEW RENDERER ====================
 
     const showEggPurchasingView = async (container) => {
@@ -582,10 +808,38 @@ JB 星期二到
                     { key: 'config', label: 'Configuration', icon: 'fa-cog' },
                 ];
                 const _eggTab = _eggState.currentTab || 'run';
+
+                // NEW full-JSX path (default-OFF, _reactEggJsxOn). Build a plain
+                // structured payload of ALL tabs; when present, EggPurchasingView
+                // renders REAL JSX (React-state tab switching) and we SUPPRESS the
+                // by-id #egg-tab-content fill (the JSX view owns the DOM). Built in
+                // try/catch: on ANY throw we leave _islandData null and fall back to
+                // the EXACT existing scaffold-shell onReady fill below — byte-for-
+                // byte the current behavior, never a blank screen. When the flag is
+                // OFF, _islandData stays null and nothing about the existing path
+                // changes. Remember the container so mutating handlers can re-render.
+                _eggState._lastContainer = container;
+                let _islandData;
+                if (_reactEggJsxOn()) {
+                    try {
+                        const [_urgents, _runs] = await Promise.all([
+                            AppDataStore.query('egg_urgent_orders', {}).catch(() => []),
+                            AppDataStore.query('egg_run_history', {}).catch(() => []),
+                        ]);
+                        _islandData = buildEggIslandData({ urgents: _urgents || [], runs: _runs || [], config: _eggState.config });
+                    } catch (e) {
+                        _islandData = undefined;
+                        console.warn('[egg] JSX payload build failed, using by-id fill fallback:', e && e.message);
+                    }
+                }
+
                 container.innerHTML = '<div id="egg-react-root"></div>';
                 window.CRMReact.mountEggPurchasing(document.getElementById('egg-react-root'), {
                     tabs: _eggTabs, activeTab: _eggTab,
-                    onReady: () => { eggSwitchTab(_eggTab); },
+                    data: _islandData || undefined,
+                    // JSX path owns the DOM → no by-id fill (no-op onReady). Off /
+                    // fallback path keeps the EXACT existing eggSwitchTab fill.
+                    onReady: _islandData ? (() => {}) : (() => { eggSwitchTab(_eggTab); }),
                 });
                 return;
             } catch (e) {
@@ -2098,6 +2352,7 @@ JB 星期二到
         showEggPurchasingView,
         eggSwitchTab,
         eggRefresh,
+        eggRerenderJsx,
         eggHandleCsvDrop,
         eggHandleCsvInput,
         eggHandleXlsxDrop,

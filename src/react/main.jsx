@@ -336,7 +336,7 @@ function mountMarketingLists(container, opts) {
 // owns all interactivity incl. drag-drop). ───────────────────────────────────
 function mountDocuments(container, opts) {
     const o = opts || {};
-    _mountSimple(container, <DocumentManagementView viewMode={o.viewMode || 'list'} onReady={o.onReady} />);
+    _mountSimple(container, <DocumentManagementView viewMode={o.viewMode || 'list'} onReady={o.onReady} data={o.data} />);
     window.__REACT_DMS_MOUNTED = true;
 }
 
@@ -344,7 +344,7 @@ function mountDocuments(container, opts) {
 // via stSwitchTab on useEffect onReady; owns all 9 tabs/QR/reconcile/realtime). ──
 function mountStockTake(container, opts) {
     const o = opts || {};
-    _mountSimple(container, <StockTakeView tabs={o.tabs || []} onReady={o.onReady} />);
+    _mountSimple(container, <StockTakeView tabs={o.tabs || []} onReady={o.onReady} data={o.data} />);
     window.__REACT_ST_MOUNTED = true;
 }
 
@@ -352,7 +352,7 @@ function mountStockTake(container, opts) {
 // eggSwitchTab on useEffect onReady; owns wizard/file-IO/reconcile). ───────────
 function mountEggPurchasing(container, opts) {
     const o = opts || {};
-    _mountSimple(container, <EggPurchasingView tabs={o.tabs || []} activeTab={o.activeTab || 'run'} onReady={o.onReady} />);
+    _mountSimple(container, <EggPurchasingView tabs={o.tabs || []} activeTab={o.activeTab || 'run'} onReady={o.onReady} data={o.data} />);
     window.__REACT_EGG_MOUNTED = true;
 }
 
@@ -360,7 +360,7 @@ function mountEggPurchasing(container, opts) {
 // fpLoadData + fpSwitchTab on useEffect onReady; owns imports/PO/transfers). ────
 function mountFormulaPurchaser(container, opts) {
     const o = opts || {};
-    _mountSimple(container, <FormulaPurchaserView tabs={o.tabs || []} activeTab={o.activeTab || 'dashboard'} onReady={o.onReady} />);
+    _mountSimple(container, <FormulaPurchaserView tabs={o.tabs || []} activeTab={o.activeTab || 'dashboard'} onReady={o.onReady} data={o.data} />);
     window.__REACT_FP_MOUNTED = true;
 }
 
@@ -376,7 +376,7 @@ function mountReports(container, opts) {
 // stable-id containers + owns drag-drop + the v6 scoring engine). ─────────────
 function mountPipeline(container, opts) {
     const o = opts || {};
-    _mountSimple(container, <PipelineView onReady={o.onReady} />);
+    _mountSimple(container, <PipelineView onReady={o.onReady} data={o.data} />);
     window.__REACT_PIPELINE_MOUNTED = true;
 }
 
@@ -384,7 +384,7 @@ function mountPipeline(container, opts) {
 // via renderMarketingTabContent after awaiting island useEffect-ready). ──────────
 function mountMarketingAutomation(container, opts) {
     const o = opts || {};
-    _mountSimple(container, <MarketingAutomationView canExport={!!o.canExport} canTabs={!!o.canTabs} activeTab={o.activeTab || 'forms'} onReady={o.onReady} />);
+    _mountSimple(container, <MarketingAutomationView canExport={!!o.canExport} canTabs={!!o.canTabs} activeTab={o.activeTab || 'forms'} onReady={o.onReady} data={o.data} />);
     window.__REACT_MKTAUTO_MOUNTED = true;
 }
 
