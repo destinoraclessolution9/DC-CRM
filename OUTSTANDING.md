@@ -1,9 +1,11 @@
 # CRM — Outstanding / Backlog
 
-_Last updated: 2026-06-16. **SW-98 + SW-100 + SW-102 + SW-103 are all LIVE + verified-present on production.** This file tracks what remains._
+_Last updated: 2026-06-17. **SW-98/100/102/103/104/105/106/107 all LIVE + verified on production.** §3.2 JSX componentization **Waves 1 + 2 shipped** — all 6 interactive views (formula/stock_take/egg/documents/pipeline/marketing_automation) promoted default-on in SW-107 (per-view kill-switch `?react_<x>_jsx=0`). This file tracks what remains._
 
 > **Critical bugs (SW-98) AND tier-2 bug fixes (SW-100) are DONE + LIVE.**
 > Legend — **Effort:** S (≤1h) · M (a few h) · L (day+). **Priority:** P1 (do next) · P2 · P3.
+>
+> **Doc hygiene (2026-06-17):** §2 (React migration last-2-paths) is **DONE + LIVE** (SW-102) — section kept for history. §5 placeholders are mostly **built** (AI Insights, Export KPI, Batch DMS, Mobile calendar all real now) — only OAuth integrations remain. See per-section banners.
 
 ---
 
@@ -54,9 +56,11 @@ Pushed (commits `9fa1b31` additive + `a528976` 3.1-deletion, deployed via the pa
 
 ---
 
-## 2. React migration — last 2 render paths (plans now READY)
+## 2. React migration — ✅ DONE + LIVE (SW-102)
 
-> Both are **safe to implement** per the deep-dive. Both touch `src/react/main.jsx` (additive exports only) so they need a **vite react rebuild + `?v=` bump**, and they must ship **opt-in (default-off) → authenticated-verify → promote default-on** (the established migration protocol). Bundle them into ONE react-inclusive deploy.
+> **✅ BOTH SHIPPED (SW-102) — section kept for history only.** 2.1 kb-slot editors and 2.2 journey aux widgets were migrated to React and the rebuilt `react-island.js` was committed (which also re-synced the stale `mountFudeContent`/`mountJourneyContent`). The "STALE react-island" warning below is RESOLVED. Nothing here is outstanding.
+
+> _(historical plan — both implemented as described)_ Both were **safe to implement** per the deep-dive. Both touch `src/react/main.jsx` (additive exports only) so they need a **vite react rebuild + `?v=` bump**, and they must ship **opt-in (default-off) → authenticated-verify → promote default-on** (the established migration protocol). Bundle them into ONE react-inclusive deploy.
 
 > **⚠️ READ FIRST — the committed `react-dist/react-island.js` is STALE.** It's missing `mountFudeContent` (SW-92) and `mountJourneyContent` (SW-93/97) — those promotions flipped the chunk flags but the rebuilt bundle was never committed. So **on live, the fude main dashboard and the journey timeline currently run their LEGACY render path, not React** (no user-visible breakage — the passthrough renders the same HTML). A local working-tree rebuild already has both mounts but is uncommitted. **The next react deploy MUST `npx vite build` from committed `src/react` and commit the fresh bundle** — doing so will *activate* the fude-view + journey React passthrough on live for the first time, so **verify those two alongside** whatever ships (low risk — identical HTML). Lesson: a chunk flag flip ≠ live activation; the mount fn must be in the committed bundle (Vercel build = `node build.mjs` only; it does NOT run vite).
 
@@ -78,7 +82,13 @@ Pushed (commits `9fa1b31` additive + `a528976` 3.1-deletion, deployed via the pa
 
 ## 3. Architecture — the "D" goal (god-object retirement). Biggest, lowest-urgency.
 
-### 3.1 Delete legacy fallback renderers — **P2, L** (multi-session; the real shrink)
+### 3.1 Delete legacy fallback renderers — **✅ DONE + LIVE (SW-102) — verified 2026-06-17**
+- **✅ SHIPPED:** the prerequisite gate-rework + Class-A legacy deletion were done in SW-102 (~1,500 LOC removed across all 16 Class-A views). A **10-agent read-only audit (2026-06-17)** re-confirmed: **every** Class-A view (`security`, `monthly_promotion`, `org_chart`, `ranking`, `noticeboard`, `lead_forms`, `surveys`, `contracts`, `purchases_history`, `agents`, `custom_fields` [in script-forms.js], `milestones`, `booking_settings`, `knowledge_dashboard`, `knowledge_all_entries`, `cases`) now uses the target gate `if(_reactXOn()){try{mount;return}catch{reload-card;return}} reload-card;` — **zero substantial legacy templates remain**, shared helpers (`cardModel`/`applySharedFilters`) preserved, no orphaned cross-chunk callers. The "13 vs 16" in the SW-102 note was a grouping artifact.
+- **✅ Residual orphan cleanup (SW after 107):** removed two confirmed-dead pre-split renderers `window._fv.showLeadFormsView` + `window._fv.showContractsView` from the eager `script-features.js` bundle (zero callers — the live views route to the `chunks/script-forms.js` React versions on `window.app`). **KEPT (verified LIVE, do NOT delete):** `_fv.showSurveysView` (called internally in script-features.js) and `_kbReloadAll` in script-knowledge.js (the knowledge "all entries" **search/filter** re-render path, reached via the exported `searchKnowledgeEntries`/`filterKnowledgeEntries`). `node --check` + `build.mjs` + `ci/regression.js` green.
+- **❌ Correctly NOT deleted (reachable / shared / not default-on) — unchanged:** `customers` + `prospects` legacy (reachable via unsupported-filter fall-through; entangled with `__USE_BFF_CUSTOMERS`/`__SERVER_TABLES`); Class-B scaffold/passthrough; `journey`; `ai`/`search`/`fude`/`modal-content`.
+
+<details><summary>Historical plan (now executed) — original §3.1 reachability model + tiers</summary>
+
 - **Reachability model (verified):** each migrated view does `if (_reactXOn()){ mount; return } ` then a self-contained legacy block. `_reactXOn()` is false only on the 3 kill-switches (`__REACT_X===false` / `?react=0` / `crm_react_off='1'`), enforced at **bundle load** in `index.html` — so in normal default-on operation the legacy blocks are dead, reachable only via the debug kill-switch or a caught mount-throw.
 - **⚠️ PREREQUISITE (do FIRST, or rollback breaks):** the kill-switch is the documented instant-rollback path. If you delete legacy WITHOUT reworking it, turning React off → blank screen for every migrated view (no legacy to fall to). Rework each Class-A gate to `if(_reactXOn()){ try{mount;return}catch{ render minimal inline error card; return } }` and drop the per-view `__REACT_X`/`?react=0`/`crm_react_off` branch (or route it to the same error card). Verify `?react=0` no longer blanks.
 - **SAFE to delete (Class-A — React owns render via props, legacy is a standalone dead renderer), tiered, one deploy + live-verify each:**
@@ -89,6 +99,8 @@ Pushed (commits `9fa1b31` additive + `a528976` 3.1-deletion, deployed via the pa
   5. `agents` (`script-prospects.js`, largest Class-A block — deploy alone)
 - **❌ DO NOT delete (reachable / shared / not default-on):** `customers` + `prospects` legacy — REACHABLE in normal use via unsupported-filter fall-through (Regular/deficiency/min-events/purchase-status/house-audit/Agent-Eligible) + prospects card view, and entangled with `__USE_BFF_CUSTOMERS`/`__SERVER_TABLES`. Class-B scaffold/passthrough legacy (calendar/pipeline/reports/stock_take/egg/formula/marketing_automation/referrals/home/mobile/boss_report/protection + marketing_lists promotions/special_programs) — shares by-id population logic. `journey` (opt-in, not default-on). `ai`/`search`/`fude`/`modal-content` (dangerouslySetInnerHTML passthrough — the "legacy" IS the live HTML).
 - **Risk:** MEDIUM (the prerequisite, and misclassification). Mitigate: tiered deploys, `node ci/regression.js` gate, live `?react=0` smoke-test after each batch. ~1.5–2.5k LOC removable.
+
+</details>
 
 ### 3.2 Full JSX componentization of the passthrough/scaffold views — **P3, L (multi-week)**
 - **✅ Wave 1 done + live (SW-105, commit `91a3b5b`):** AI Insights (stats grid + clickable insight cards + predictions tbody), Reports KPI cards, Marketing `promotions`/`special_programs` tabs → real JSX (prop-fed via the new `main.jsx` `data` channel). All guarded: `_islandData` build in try/catch → by-id fallback on throw; `refreshAIPredictions` re-mounts via `showAIInsightsDashboard()` (never writes by-id into a React-owned node); filters re-render via React, not by-id. Chart.js canvas + agent dropdown (Reports) and the timeline chart (AI) intentionally left by-id (the view never owns them).
@@ -112,13 +124,13 @@ Pushed (commits `9fa1b31` additive + `a528976` 3.1-deletion, deployed via the pa
 
 ---
 
-## 5. Unbuilt "coming soon" features (placeholders — build only if you actually want them)
-These show a "coming soon" toast and do nothing. They were never implemented — not bugs.
-- **AI Insights dashboard** (entire feature: Lead Scoring, Sales Forecast, Churn Risk, Performance Insights + ~22 action buttons, `chunks/script-ai.js`) — currently mock data + stubs. Largest effort if you want it real.
-- **Export KPI Dashboard** button (`chunks/script-fude.js` ~992).
-- **Batch Move / Share / Download** (Marketing, `chunks/script-marketing.js` ~4314).
-- **3rd-party integrations** — Outlook/Slack/GitHub/etc. (`chunks/script-gcal.js` ~399); only Google Calendar is real.
-- **Mobile calendar Week/Day/Agenda tabs** (`chunks/script-mobile.js` ~1812) — only Month works on mobile.
+## 5. "Coming soon" placeholders — ✅ mostly BUILT (SW-102/103); only OAuth remains
+> **Most of this section is DONE** — kept for history with status tags. The only genuinely-unbuilt item is full OAuth integrations (infeasible client-side; see §"still outstanding" above).
+- **AI Insights dashboard** — ✅ **DONE (SW-102/103):** real deterministic heuristics + real React cards/timeline/predictions + all ~17 action buttons do real work. No mock/stubs left.
+- **Export KPI Dashboard** button (`chunks/script-fude.js`) — ✅ **DONE (SW-102):** real CSV/XLSX export of the 福气 leaderboard.
+- **Batch Move / Share / Download** (Marketing/DMS, `chunks/script-documents.js`) — ✅ **DONE (SW-102):** wired into the real file-explorer toolbar + `confirmDeleteFolder` fixed.
+- **3rd-party integrations** — Outlook/Slack/GitHub/etc. (`chunks/script-gcal.js` ~399) — ⏳ **STILL OUTSTANDING:** only Google Calendar is real; Slack/Discord **webhooks** now fire (SW-103), but full OAuth services need a server backend (infeasible client-side) and honestly show "needs backend".
+- **Mobile calendar Week/Day/Agenda tabs** (`chunks/script-mobile.js`) — ✅ **DONE (SW-102):** Week/Day/Agenda tabs + cold-load repaint-guard fix.
 
 ---
 
