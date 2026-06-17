@@ -1301,11 +1301,13 @@
     // ?react_mktauto_jsx=1 OR localStorage crm_react_mktauto_jsx='1'. Same
     // detection idiom as the sibling flags, just a different param.
     const _reactMktAutoJsxOn = () => {
+        // PROMOTED (SW-107): full-JSX render is the DEFAULT.
+        // Kill-switch: ?react_mktauto_jsx=0 or localStorage crm_react_mktauto_jsx='0'.
         try {
-            if (/[?&]react_mktauto_jsx=1/.test(location.search)) return true;
-            if (localStorage.getItem('crm_react_mktauto_jsx') === '1') return true;
-            return false;
-        } catch (_) { return false; }
+            if (/[?&]react_mktauto_jsx=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_mktauto_jsx') === '0') return false;
+            return true;
+        } catch (_) { return true; }
     };
 
     // Build a PLAIN-SERIALIZABLE payload describing the FULL content of every

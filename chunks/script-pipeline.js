@@ -684,11 +684,13 @@ const _reactPipelineOn = () => {
 // JSX view owns the DOM (no by-id fills). Opt in via ?react_pipeline_jsx=1 or
 // localStorage crm_react_pipeline_jsx='1'. Defaults to FALSE → unchanged path.
 const _reactPipelineJsxOn = () => {
+    // PROMOTED (SW-107): full-JSX render is the DEFAULT.
+    // Kill-switch: ?react_pipeline_jsx=0 or localStorage crm_react_pipeline_jsx='0'.
     try {
-        if (/[?&]react_pipeline_jsx=1/.test(location.search)) return true;
-        if (localStorage.getItem('crm_react_pipeline_jsx') === '1') return true;
-        return false;
-    } catch (_) { return false; }
+        if (/[?&]react_pipeline_jsx=0/.test(location.search)) return false;
+        if (localStorage.getItem('crm_react_pipeline_jsx') === '0') return false;
+        return true;
+    } catch (_) { return true; }
 };
 
 // ── Plain-serializable row builders for the JSX render path ──────────────────

@@ -53,11 +53,13 @@
     // just an opt-in (no kill-switch). When OFF, the mount keeps the EXACT existing
     // scaffold/onReady behavior — flag-off is byte-for-byte identical to before.
     const _reactStJsxOn = () => {
+        // PROMOTED (SW-107): full-JSX render is the DEFAULT.
+        // Kill-switch: ?react_st_jsx=0 or localStorage crm_react_st_jsx='0'.
         try {
-            if (/[?&]react_st_jsx=1/.test(location.search)) return true;
-            if (localStorage.getItem('crm_react_st_jsx') === '1') return true;
-            return false;
-        } catch (_) { return false; }
+            if (/[?&]react_st_jsx=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_st_jsx') === '0') return false;
+            return true;
+        } catch (_) { return true; }
     };
 
     // ==================== STOCK TAKE (Super Admin, Level 1) ====================

@@ -54,11 +54,13 @@
     // useEffect onReady). Requires _reactEggOn() to be true as well — this flag
     // only upgrades the EXISTING island block, it never enables the island alone.
     const _reactEggJsxOn = () => {
+        // PROMOTED (SW-107): full-JSX render is the DEFAULT.
+        // Kill-switch: ?react_egg_jsx=0 or localStorage crm_react_egg_jsx='0'.
         try {
-            if (/[?&]react_egg_jsx=1/.test(location.search)) return true;
-            if (localStorage.getItem('crm_react_egg_jsx') === '1') return true;
-            return false;
-        } catch (_) { return false; }
+            if (/[?&]react_egg_jsx=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_egg_jsx') === '0') return false;
+            return true;
+        } catch (_) { return true; }
     };
     // AppDataStore, UI, supabase are global — no alias needed.
 

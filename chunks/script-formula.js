@@ -47,11 +47,13 @@
     // the URL OR localStorage crm_react_fp_jsx='1'. Defaults FALSE so live
     // behaviour is byte-for-byte the existing scaffold-shell path.
     const _reactFpJsxOn = () => {
+        // PROMOTED (SW-107): full-JSX render is the DEFAULT.
+        // Kill-switch: ?react_fp_jsx=0 or localStorage crm_react_fp_jsx='0'.
         try {
-            if (/[?&]react_fp_jsx=1/.test(location.search)) return true;
-            if (localStorage.getItem('crm_react_fp_jsx') === '1') return true;
-            return false;
-        } catch (_) { return false; }
+            if (/[?&]react_fp_jsx=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_fp_jsx') === '0') return false;
+            return true;
+        } catch (_) { return true; }
     };
 
     // ==================== FORMULA PURCHASER ====================

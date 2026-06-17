@@ -48,11 +48,13 @@
     // current scaffold-shell + by-id onReady fill BYTE-FOR-BYTE. The JSX path is
     // best-effort and gated entirely behind this flag.
     const _reactDmsJsxOn = () => {
+        // PROMOTED (SW-107): full-JSX render is the DEFAULT.
+        // Kill-switch: ?react_dms_jsx=0 or localStorage crm_react_dms_jsx='0'.
         try {
-            if (/[?&]react_dms_jsx=1/.test(location.search)) return true;
-            if (localStorage.getItem('crm_react_dms_jsx') === '1') return true;
-            return false;
-        } catch (_) { return false; }
+            if (/[?&]react_dms_jsx=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_dms_jsx') === '0') return false;
+            return true;
+        } catch (_) { return true; }
     };
 
     // ── Builder: full plain-serializable payload for the JSX render path ──
