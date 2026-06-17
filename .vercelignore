@@ -59,3 +59,11 @@ PHASE_3_4_PLAN.md
 tsconfig.json
 types/
 ci/
+
+# Internal refactor/audit working docs — never publicly served (disclosure risk).
+REFACTOR_PLAN.md
+_audit_findings.txt
+_audit_findings_compact.json
+_audit_targetarch.txt
+_audit_roadmap.txt
+_reval_merged.json
