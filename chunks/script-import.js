@@ -2293,7 +2293,7 @@ if (reassignmentsAll.length === 0) {
 }
 };
 
-    Object.assign(window.app, {
+    app.register('import', {
         showImportDashboard,
         renderRecentImports,
         openImportWizard,

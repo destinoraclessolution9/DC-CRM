@@ -1918,7 +1918,7 @@ const exportResults = (format) => {
         }
     };
 
-    Object.assign(window.app, {
+    app.register('search', {
         ensureReferralFields,
         viewEntityDetail,
         toggleSearchPanel,

@@ -831,7 +831,7 @@ const openNoticeboardDetail = async (eventId) => {
     ]);
 };
     // ── Attach public functions to window.app ────────────────────────────
-    Object.assign(window.app, {
+    app.register('performance', {
         // Ranking Performance
         showRankingPerformanceView,
         // Workflow Automation

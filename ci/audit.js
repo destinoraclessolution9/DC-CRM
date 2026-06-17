@@ -34,7 +34,9 @@ chunkFiles.forEach(cf => {
   const src  = fs.readFileSync(path.join(chunkDir, cf), 'utf8');
   // Use matchAll + take last match so inline comments like
   // "// Object.assign(window.app, { ... })" don't shadow the real one.
-  const allMatches = [...src.matchAll(/Object\.assign\(window\.app\s*,\s*\{([^}]+)\}/gs)];
+  // Match BOTH the legacy Object.assign(window.app, {...}) export and the new
+  // ownership-registry form app.register('domain', {...}) (#1 god-object).
+  const allMatches = [...src.matchAll(/(?:Object\.assign\(window\.app|(?:window\.)?app\.register\(\s*['"][^'"]*['"])\s*,\s*\{([^}]+)\}/gs)];
   const m = allMatches.length ? allMatches[allMatches.length - 1] : null;
   if (!m) return;
 

@@ -3084,7 +3084,7 @@ const fudeShowAllStories = () => {
     if (searchInput) searchInput.value = '';          // clear search when Explore More clicked
 };
 
-    Object.assign(window.app, {
+    app.register('fude', {
         showFudeView,
         openStoryDetail,
         fudeSearchStories,

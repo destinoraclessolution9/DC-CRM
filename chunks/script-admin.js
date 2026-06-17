@@ -125,7 +125,7 @@
     // Note: initSecurity, initSessionTimeout, logoutDueToInactivity, monitorLoginAttempts,
     // checkForSecurityIncidents, addSecurityAlertIcon, checkExpiredConsents, scheduleRetentionJobs
     // are defined in script.js and already on window.app — do NOT reference them as bare vars here.
-    Object.assign(window.app, {
+    app.register('admin', {
         showSecurityDashboard,
         showAuditLogs,
         showComplianceCenter,
@@ -520,7 +520,7 @@
     
     
     // Add new Admin UI Functions to window.app
-    Object.assign(window.app, {
+    app.register('admin', {
         showAdminDashboard,
         showTenantManagement,
         openCreateTenantModal,

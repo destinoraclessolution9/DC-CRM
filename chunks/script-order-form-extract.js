@@ -1194,7 +1194,7 @@
         `;
     };
 
-    Object.assign(window.app, {
+    app.register('order-form-extract', {
         showOrderFormExtractView,
         ofeShowTab,
         ofeHandleFile,

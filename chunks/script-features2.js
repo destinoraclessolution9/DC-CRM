@@ -1499,7 +1499,7 @@ const resetMilestone = async (userId, milestoneName) => {
     }
 };
 
-    Object.assign(window.app, {
+    app.register('features2', {
         initMobileApp,
         addMobileMetaTags,
         refreshPipelineCalculations,

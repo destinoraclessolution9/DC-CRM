@@ -3344,7 +3344,7 @@ const viewJustification = async (overrideId) => {
 
 
 
-    Object.assign(window.app, {
+    app.register('pipeline', {
         loadPipelineConfig,
         savePipelineConfigJson,
         _pipelineDecayFactor,

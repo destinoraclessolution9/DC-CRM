@@ -3149,7 +3149,7 @@
 
 
     // ── Attach public functions to window.app ────────────────────────────
-    Object.assign(window.app, {
+    app.register('mobile', {
         addCustomerNote,
         deleteCustomerNote,
         addAgentNote,

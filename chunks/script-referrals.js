@@ -1692,7 +1692,7 @@
     // ── Register public surface on window.app ────────────────────────────
     // Complete list of top-level definitions in this chunk (scanned by
     // _patch_v2.mjs — includes column-0 definitions the extractor missed).
-    Object.assign(window.app, {
+    app.register('referrals', {
         searchTreePerson,
         openAddReferralModal,
         toggleLeaderboard,

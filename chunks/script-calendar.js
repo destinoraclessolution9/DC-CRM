@@ -5788,7 +5788,7 @@
     };
 
     // ========== PHASE 2: ACTIVITY MODAL + APPT + PUSH + PAST RECORD ==========
-    Object.assign(window.app, {
+    app.register('calendar', {
         showCalendarView,
         loadFollowUpTemplates,
         invalidateFollowUpTemplatesCache,

@@ -4881,7 +4881,7 @@
         }
     };
 
-    Object.assign(window.app, {
+    app.register('activities', {
         openActivityModal,
         fillActivityForm,
         // typeSelect, setField — local vars inside fillActivityForm, not chunk-scope

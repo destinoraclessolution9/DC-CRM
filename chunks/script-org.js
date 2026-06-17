@@ -646,7 +646,7 @@
         }
     };
     
-    Object.assign(window.app, {
+    app.register('org', {
         showOrgChartView,
         openNewOrgConsultation,
         _orgUpdatePricePreview,

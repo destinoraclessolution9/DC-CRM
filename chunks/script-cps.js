@@ -1315,7 +1315,7 @@ const applyCpsScanSelection = async () => {
     }
 };
 
-    Object.assign(window.app, {
+    app.register('cps', {
         _refreshNotifBadge,
         _buildNotifPanel,
         toggleNotifPanel,

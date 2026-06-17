@@ -1260,7 +1260,7 @@
 
     // ── Expose ────────────────────────────────────────────────────────────────
 
-    Object.assign(window.app, {
+    app.register('journey', {
         renderJourneyTab,
         markJourneyTouchpointDone,
         skipJourneyTouchpoint,

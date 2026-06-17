@@ -2405,7 +2405,7 @@
     // Secondary dashboard actions — now REAL (implemented above). Each builds a
     // CSV download, opens an existing screen/modal, creates follow-up activity
     // records, or copies a summary to the clipboard. No "coming soon" stubs.
-    Object.assign(window.app, {
+    app.register('ai', {
         executeAction,                        // generic prediction-action acknowledge
         recalculateLeadScores:        refreshAIPredictions,
         exportLeads,                          // CSV of scored leads
@@ -2430,7 +2430,7 @@
         generatePerformanceReport,            // CSV per-agent performance report
         shareInsights,                        // clipboard summary of the dashboard
     });
-    Object.assign(window.app, {
+    app.register('ai', {
         showAIInsightsDashboard,
         showLeadScoring,
         predictLeadScore,

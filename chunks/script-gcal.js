@@ -1167,7 +1167,7 @@
         }, 1000);
     });
 
-    Object.assign(window.app, {
+    app.register('gcal', {
         showIntegrationHub,
         showIntegrationDetails,
         showGoogleCalendarIntegration,

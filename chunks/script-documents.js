@@ -1332,7 +1332,7 @@ In a production system, this would show the actual file contents.
     console.log('App initializing...');
 
     // ── Attach public functions to window.app ────────────────────────────
-    Object.assign(window.app, {
+    app.register('documents', {
         showDocumentManagementView,
         renderFolderTree,
         renderBreadcrumb,

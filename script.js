@@ -2,6 +2,28 @@
 window.app = window.app || {};
 window.DataStore = window.AppDataStore; // Alias for backward compatibility
 
+// God-object ownership registry (#1). Lazy chunks call
+//   app.register('calendar', { renderCalendar, ... })
+// instead of Object.assign(window.app, { ... }). Runtime effect is IDENTICAL —
+// the methods land on window.app, preserving the inline onclick="app.fn(id)"
+// contract — but each key's owning domain is recorded in app._registry and a
+// cross-domain redefinition (the old silent last-loader-wins overwrite the
+// audit flagged) now logs a warning. Defined here, before any chunk loads
+// (script.js is deferred ahead of the lazy chunks), so it is always available.
+window.app._registry = window.app._registry || {};
+window.app.register = function (domain, methods) {
+    if (methods) {
+        for (const k of Object.keys(methods)) {
+            const prev = window.app._registry[k];
+            if (prev && prev !== domain) {
+                try { console.warn('[app.register] "' + k + '" redefined: ' + prev + ' -> ' + domain); } catch (_) {}
+            }
+            window.app._registry[k] = domain;
+        }
+    }
+    return Object.assign(window.app, methods || {});
+};
+
 // ==================== OFFLINE QUEUE DRAIN (Phase O) ====================
 // AppDataStore already queues failed inserts to fs_crm_sync_queue and drains
 // on every successful getAll(). What was missing: triggering a drain the instant

@@ -758,7 +758,7 @@
     // 1:1 with the names that were in script.js's return statement before
     // extraction. Called at chunk-load time so onclick="app.X(id)" works
     // immediately after the chunk's <script> tag fires.
-    Object.assign(window.app, {
+    app.register('knowledge', {
         showKnowledgeView,
         switchKnowledgeSegment,
         showKnowledgeDashboard,

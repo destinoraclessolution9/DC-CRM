@@ -603,7 +603,7 @@
 
     // [CHUNK: cases] 20 functions extracted to chunks/script-cases.js — loaded role-gated by navigateTo().
 
-    Object.assign(window.app, {
+    app.register('forms', {
         showLeadFormsView,
         openFormBuilderModal,
         addFormField,

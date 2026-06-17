@@ -10043,7 +10043,7 @@ const viewInactiveProspects = (agentId) => {
 };
 
     // Attach to window.app
-    Object.assign(window.app, {
+    app.register('prospects', {
         sortProspects,
         showProspectsView,
         switchCustomerTab,
