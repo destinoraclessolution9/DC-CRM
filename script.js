@@ -470,7 +470,11 @@ const appLogic = (() => {
     // Warmed in parallel with the light calendar fetch so taps on near-term
     // activity cards open the detail modal instantly — no extra network round-trip.
     // Keyed by activity id (string). Refreshed on every renderCalendar.
-    const _hotActivityCache = new Map();
+    // MEMO-3: bounded drop-in Map — reinsert refreshes recency, evict oldest over cap; a dropped entry just refetches.
+    class _BoundedMap extends Map {
+        set(k, v) { if (super.has(k)) super.delete(k); super.set(k, v); if (this.size > 500) super.delete(super.keys().next().value); return this; }
+    }
+    const _hotActivityCache = new _BoundedMap();
     // Tracks the open detail view so pull-to-refresh can re-open it instead of jumping to the list.
     let _currentDetailView = null; // { type: 'prospect'|'customer', id: number }
 
@@ -3094,18 +3098,22 @@ function _wireLoginBtn() {
     //             agent is most likely to open first (prospects/customers/agents
     //             share one chunk, plus calendar, pipeline, performance — and the
     //             mobile shell so the first mobile paint isn't a cold load).
-    //   Tier 2 (idle) — everything else pre-warms during browser idle time via
-    //             requestIdleCallback (setTimeout fallback for older engines), so
-    //             rarely-first chunks no longer pile into a single 3 s burst that
-    //             saturated the main-thread task queue and timed out Supabase fetch
-    //             callbacks. The on-demand window._loadChunk path is unchanged, so
-    //             every view still loads on nav whether or not it pre-warmed.
+    //   (No Tier 2.) LOAD-1: the former Tier-2 idle pass iterated EVERY
+    //             role-permitted chunk and prefetched all of them (~2.75 MB min
+    //             per session), which defeated code-splitting. The default
+    //             landing-view chunk for every role is already in the Tier-1 burst
+    //             below — desktop lands on 'calendar' (script-calendar), mobile on
+    //             'home' (script-mobile), force-password on 'settings'
+    //             (script-settings), and all three are in the list — so there is
+    //             nothing left for a Tier-2 pass to usefully pre-warm. Every other
+    //             view now loads on demand via window._loadChunk on first nav,
+    //             which is unchanged and remains the fallback so no view can fail
+    //             to load.
     let _predictivePrefetchRan = false;
     const _runPredictivePrefetch = () => {
         if (_predictivePrefetchRan || !_currentUser) return;
         _predictivePrefetchRan = true;
         try {
-            const lvl  = _getUserLevel(_currentUser);
             const seen = new Set();
             const _load = (src) => { if (!seen.has(src)) { seen.add(src); _loadChunkOnce(src); } };
 
@@ -3114,6 +3122,9 @@ function _wireLoginBtn() {
             // first-nav Prospects/Customers screens and call each other across the
             // file boundary, so they must be in memory together right after login
             // (approvals has no VIEWS entry, so it would never warm otherwise).
+            // This set also already contains every role's default landing chunk
+            // (calendar / mobile / settings), so the single landing view is warm
+            // immediately without prefetching the whole permitted set.
             [
                 'chunks/script-mobile.min.js',
                 'chunks/script-prospects.min.js',
@@ -3125,21 +3136,6 @@ function _wireLoginBtn() {
                 'chunks/script-pipeline.min.js',
                 'chunks/script-performance.min.js',
             ].forEach(_load);
-
-            // Tier 2 — idle: everything else, pre-warmed without blocking the burst.
-            // requestIdleCallback runs each chunk when the main thread is free;
-            // setTimeout is the fallback when rIC isn't available.
-            const _warmTier2 = () => {
-                for (const def of Object.values(_CHUNK_VIEWS)) {
-                    const ok = !def.exactLevels || def.exactLevels.includes(lvl);
-                    if (ok) _load(def.src);
-                }
-            };
-            if (typeof window.requestIdleCallback === 'function') {
-                window.requestIdleCallback(_warmTier2, { timeout: 5000 });
-            } else {
-                setTimeout(_warmTier2, 3000);
-            }
         } catch (e) { console.warn('eager chunk load failed', e); }
     };
 

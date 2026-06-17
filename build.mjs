@@ -96,6 +96,16 @@ const CSS_TARGETS = [
   'styles-theme.css',
 ];
 
+// Already-minified vendored/built assets that ship eagerly but aren't in
+// JS_TARGETS/CSS_TARGETS — brotli-11 IN PLACE (no re-minify, no hash), each
+// existence-guarded so a missing file (e.g. react-dist) never fails the build.
+const VENDOR_BR_TARGETS = [
+  'react-dist/react-island.js',           // ~567 KB — built by `vite build`, may be absent
+  'lunar-calendar.min.js',                // ~15 KB vendored, root
+  'libs/supabase-js-2.106.2.min.js',      // ~200 KB vendored
+  'libs/fontawesome/css/all.min.css',     // ~74 KB vendored (optional)
+];
+
 async function size(p) {
   try { return (await fs.stat(p)).size; } catch { return 0; }
 }
@@ -162,6 +172,13 @@ async function compressAll() {
   for (const f of CSS_TARGETS) {
     const min = path.join(ROOT, f.replace(/\.css$/, '.min.css'));
     if (await size(min)) await brotliFile(min);
+  }
+  // Pre-compress already-minified vendored / externally-built assets in place.
+  // Brotli-only: no re-minify, no content-hashing. Skip any that don't exist
+  // (e.g. react-dist when vite wasn't run) so the build never fails.
+  for (const f of VENDOR_BR_TARGETS) {
+    const abs = path.join(ROOT, f);
+    if (await size(abs)) await brotliFile(abs);
   }
 }
 

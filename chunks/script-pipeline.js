@@ -180,6 +180,22 @@ const savePipelineConfigJson = async (newConfig, note = '') => {
     return newConfig;
 };
 
+// ---- Perf helper: bucket activities by prospect_id ONCE (O(n)) so callers can
+// do a Map lookup per prospect instead of a full-array .filter() per prospect
+// (de-quadratifies the pipeline render). Preserves insertion order within each
+// bucket, so `_actsByProspect.get(p.id) || []` is element-for-element identical
+// to the old `allActivities.filter(a => a.prospect_id === p.id)` (raw `===` key).
+const _groupActivitiesByProspect = (allActivities) => {
+    const m = new Map();
+    for (const a of (allActivities || [])) {
+        const k = a.prospect_id;          // RAW key — preserve existing `=== p.id` semantics
+        let bucket = m.get(k);
+        if (!bucket) { bucket = []; m.set(k, bucket); }
+        bucket.push(a);
+    }
+    return m;
+};
+
 // ---- Scoring helper: decay factor for a given activity age in days ----
 const _pipelineDecayFactor = (days, config) => {
     for (const tier of config.decay_tiers) {
@@ -235,6 +251,21 @@ const _getPipelineEventsMap = async () => {
 };
 const _invalidatePipelineEventsCache = () => { _pipelineEventsCache = null; };
 
+// ---- Perf helper: compile a case-insensitive RegExp ONCE per pattern string.
+// _pipelineActivityMultiplier runs per (category × activity); recompiling the
+// same booster patterns inside that loop was wasteful. Caching by pattern string
+// is behavior-identical — these patterns carry no `g`/`y` flag, so `.test()` is
+// stateless and a cached instance returns the same result as a fresh `new RegExp`.
+// A bad pattern caches `null` so we skip it exactly as the old try/catch did.
+const _pipelineRegexCache = new Map();
+const _pipelineCompileRegex = (pattern) => {
+    if (_pipelineRegexCache.has(pattern)) return _pipelineRegexCache.get(pattern);
+    let re;
+    try { re = new RegExp(pattern, 'i'); } catch (_) { re = null; }
+    _pipelineRegexCache.set(pattern, re);
+    return re;
+};
+
 // ---- Scoring helper: how much does this activity multiply category X? ----
 const _pipelineActivityMultiplier = (activity, categoryId, config, text) => {
     const type = activity.activity_type;
@@ -242,22 +273,20 @@ const _pipelineActivityMultiplier = (activity, categoryId, config, text) => {
     if (type === 'EVENT') {
         // Match event boosters by regex in priority order
         for (const booster of (config.event_boosters || [])) {
-            try {
-                if (new RegExp(booster.pattern, 'i').test(title)) {
-                    return booster.multipliers[categoryId] || 1.0;
-                }
-            } catch (_) { /* bad regex — skip */ }
+            const _re = _pipelineCompileRegex(booster.pattern);
+            if (_re && _re.test(title)) {
+                return booster.multipliers[categoryId] || 1.0;
+            }
         }
         return 1.0;
     }
     if (type === 'FTF') {
         const handsOn = config.activity_multipliers?.FTF_HANDS_ON;
         if (handsOn && handsOn._pattern) {
-            try {
-                if (new RegExp(handsOn._pattern, 'i').test(title)) {
-                    return handsOn[categoryId] || 1.0;
-                }
-            } catch (_) {}
+            const _re = _pipelineCompileRegex(handsOn._pattern);
+            if (_re && _re.test(title)) {
+                return handsOn[categoryId] || 1.0;
+            }
         }
     }
     const row = config.activity_multipliers?.[type];
@@ -354,6 +383,7 @@ const calcPipelineEntry = async (prospect, prospectActivities, prefetched) => {
     let latestOppPotential = '';
     let latestNextAction = '';
     if (prospectActivities.length > 0) {
+        // MUST copy before sort: prospectActivities is a SHARED bucket from _actsByProspect (perf de-quad). In-place sort would corrupt other prospects' lookups.
         const sorted = [...prospectActivities].sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
         lastActivityDate = new Date(sorted[0].activity_date);
         latestOppPotential = sorted.find(a => a.opportunity_potential?.trim())?.opportunity_potential || '';
@@ -382,10 +412,16 @@ const calcPipelineEntry = async (prospect, prospectActivities, prefetched) => {
         };
     }
 
-    // Pre-resolve activity text so we don't rebuild it per-category
+    // Pre-resolve activity text AND parse each activity's date ONCE so we don't
+    // rebuild text / re-parse Dates per-category in the scoring loop below.
+    // (now - new Date(d)) === (now.getTime() - new Date(d).getTime()), so caching
+    // the parsed timestamp keeps the computed `age` byte-identical.
+    const nowMs = now.getTime();
     const activityTexts = new Map();
+    const activityTs = new Map();
     for (const act of prospectActivities) {
         activityTexts.set(act, _pipelineActivityText(act, eventsMap));
+        activityTs.set(act, new Date(act.activity_date).getTime());
     }
 
     // Score every category using weights × decay × multiplier
@@ -398,7 +434,7 @@ const calcPipelineEntry = async (prospect, prospectActivities, prefetched) => {
         for (const act of prospectActivities) {
             const base = config.activity_weights?.[act.activity_type] || 0;
             if (base === 0) continue;
-            const age = Math.floor((now - new Date(act.activity_date)) / (1000 * 60 * 60 * 24));
+            const age = Math.floor((nowMs - activityTs.get(act)) / (1000 * 60 * 60 * 24));
             const decay = _pipelineDecayFactor(age, config);
             if (decay === 0) continue;
             const text = activityTexts.get(act) || '';
@@ -556,7 +592,7 @@ const runHuiJiMigration = async () => {
 //  - ordered per item: confirm/create archive row FIRST; only delete source if archived
 //  - idempotent: skips items already present in monthly_focus_archive (or already done this session)
 //  - never swallows silently: every failure is console.warn'd and counted
-const _runPipelineArchive = async (expiredItems, userId, allActivities) => {
+const _runPipelineArchive = async (expiredItems, userId, actsByProspect) => {
     if (!expiredItems || expiredItems.length === 0) return;
     if (_pipelineArchiveInFlight) return; // another run is already processing
     _pipelineArchiveInFlight = true;
@@ -586,7 +622,7 @@ const _runPipelineArchive = async (expiredItems, userId, allActivities) => {
                 }
                 let archiveConfirmed = existing.length > 0;
                 if (!archiveConfirmed) {
-                    const eActs = (allActivities || []).filter(a => a.prospect_id === ep.id);
+                    const eActs = (actsByProspect && actsByProspect.get(ep.id)) || [];
                     const eEntry = await calcPipelineEntry(ep, eActs);
                     const eAmt = await getPipelineAmount(ep, eEntry.category);
                     try {
@@ -704,10 +740,10 @@ const _plProbMeta = (prob) => ({
     label: prob >= 80 ? '🔥 HOT' : prob >= 50 ? '⚡ WARM' : '❄️ COLD',
 });
 
-const _buildFocusRowData = async (rec, idx, allActivities, readOnly, prefetched) => {
+const _buildFocusRowData = async (rec, idx, actsByProspect, readOnly, prefetched) => {
     const prospect = await AppDataStore.getById('prospects', rec.prospect_id);
     if (!prospect) return null;
-    const acts = allActivities.filter(a => a.prospect_id === prospect.id);
+    const acts = actsByProspect.get(prospect.id) || [];
     const entry = await calcPipelineEntry(prospect, acts, prefetched);
     const systemAmount = await getPipelineAmount(prospect, entry.category, prefetched?.allSolutions);
     const noteCount = await getNoteCount(prospect.id);
@@ -814,6 +850,9 @@ const buildPipelineIslandData = async () => {
         withTimeout(AppDataStore.getAll('users'), 15000, [], 'pipelineJsx:getAll(users)'),
         withTimeout(loadPipelineConfig(), 15000, null, 'pipelineJsx:loadPipelineConfig'),
     ]);
+    // Bucket activities by prospect_id ONCE — row builders + the system table all
+    // look up `_actsByProspect.get(p.id)` instead of re-scanning allActivities.
+    const _actsByProspect = _groupActivitiesByProspect(allActivities);
 
     const agents = (allUsers || []).filter(isAgentOrLeader);
 
@@ -896,12 +935,12 @@ const buildPipelineIslandData = async () => {
             .filter(rec => activeProspects.some(p => p.id == rec.prospect_id))
             .sort((a, b) => a.priority_order - b.priority_order);
         focusCount = focusList.length;
-        focusRows = (await Promise.all(focusList.map((rec, idx) => _buildFocusRowData(rec, idx, allActivities, false, _plPrefetched)))).filter(Boolean);
+        focusRows = (await Promise.all(focusList.map((rec, idx) => _buildFocusRowData(rec, idx, _actsByProspect, false, _plPrefetched)))).filter(Boolean);
     }
 
     // Auto-generated (system) table — enriched + sorted exactly as STEP 6
     const enrichedRaw = await Promise.all(activeProspects.map(async (p) => {
-        const acts = allActivities.filter(a => a.prospect_id === p.id);
+        const acts = _actsByProspect.get(p.id) || [];
         const pipeline = await calcPipelineEntry(p, acts, _plPrefetched);
         if (!pipeline.qualified && (p.close_probability > 0 || p.potential_level)) {
             const potentialProb = p.close_probability > 0
@@ -946,7 +985,7 @@ const buildPipelineIslandData = async () => {
                 .sort((a, b) => a.priority_order - b.priority_order);
             if (subFocus.length === 0) continue;
             agentCount++;
-            const subRows = (await Promise.all(subFocus.map((rec, idx) => _buildFocusRowData(rec, idx, allActivities, true, _plPrefetched)))).filter(Boolean);
+            const subRows = (await Promise.all(subFocus.map((rec, idx) => _buildFocusRowData(rec, idx, _actsByProspect, true, _plPrefetched)))).filter(Boolean);
             teamSections.push({
                 agentName: sub.full_name || sub.username || 'Agent',
                 count: subFocus.length,
@@ -1259,6 +1298,10 @@ const showPipelineView = async (container) => {
         withTimeout(AppDataStore.getAll('users'), 15000, [], 'pipeline:getAll(users)'),
         withTimeout(loadPipelineConfig(), 15000, null, 'pipeline:loadPipelineConfig'), // warms cache
     ]);
+    // Bucket activities by prospect_id ONCE — renderFocusRow + the system table
+    // (STEP 6) + the archive migration all look up `_actsByProspect.get(p.id)`
+    // instead of re-scanning allActivities per prospect.
+    const _actsByProspect = _groupActivitiesByProspect(allActivities);
 
     const agents = (allUsers || []).filter(isAgentOrLeader);
 
@@ -1305,7 +1348,7 @@ const showPipelineView = async (container) => {
     const _expiredFocusItems = _allMyFocusItems.filter(i => i.focus_month && i.focus_month < _focusCurrentMonth);
     if (_expiredFocusItems.length > 0) {
         // Do not block render: fire the guarded routine and let it await internally.
-        _runPipelineArchive([..._expiredFocusItems], userId, allActivities)
+        _runPipelineArchive([..._expiredFocusItems], userId, _actsByProspect)
             .catch(e => console.warn('[pipeline-archive] run failed', e));
         _allMyFocusItems = _allMyFocusItems.filter(i => !_expiredFocusItems.includes(i));
     }
@@ -1367,7 +1410,7 @@ const showPipelineView = async (container) => {
 
     const focusRows = _isArchiveView
         ? (await Promise.all(focusList.map((arc, idx) => renderArchiveFocusRow(arc, idx)))).join('')
-        : (await Promise.all(focusList.map((rec, idx) => renderFocusRow(rec, idx, allActivities, probBadge, false, _plPrefetched)))).join('');
+        : (await Promise.all(focusList.map((rec, idx) => renderFocusRow(rec, idx, _actsByProspect, probBadge, false, _plPrefetched)))).join('');
 
     // Fill focus section — visible before expensive table 2 loads
     const _plFocusSection = document.getElementById('pl-focus-section');
@@ -1378,7 +1421,7 @@ const showPipelineView = async (container) => {
     // ── STEP 6: Expensive enrichment — Table 2 tbody has skeleton, fill after ──
     // (_plPrefetched already populated above before focusRows was computed)
     const enrichedRaw = await Promise.all(activeProspects.map(async (p) => {
-        const acts = allActivities.filter(a => a.prospect_id === p.id);
+        const acts = _actsByProspect.get(p.id) || [];
         const pipeline = await calcPipelineEntry(p, acts, _plPrefetched);
         // Also qualify prospects with explicit potential data set (manual override)
         if (!pipeline.qualified && (p.close_probability > 0 || p.potential_level)) {
@@ -1436,7 +1479,7 @@ const showPipelineView = async (container) => {
                 .sort((a, b) => a.priority_order - b.priority_order);
             if (subFocus.length === 0) continue;
             agentCount++;
-            const subRows = (await Promise.all(subFocus.map((rec, idx) => renderFocusRow(rec, idx, allActivities, probBadge, true, _plPrefetched)))).join('');
+            const subRows = (await Promise.all(subFocus.map((rec, idx) => renderFocusRow(rec, idx, _actsByProspect, probBadge, true, _plPrefetched)))).join('');
             _teamAgentSections += buildPipelineTeamSectionRowHtml(sub, subFocus, subRows);
         }
         const _plTeamSections = document.getElementById('pl-team-sections');
@@ -1451,11 +1494,11 @@ const showPipelineView = async (container) => {
     }
 };
 
-const renderFocusRow = async (rec, idx, allActivities, probBadge, readOnly = false, prefetched) => {
+const renderFocusRow = async (rec, idx, actsByProspect, probBadge, readOnly = false, prefetched) => {
     const prospect = await AppDataStore.getById('prospects', rec.prospect_id);
     if (!prospect) return '';
 
-    const acts = allActivities.filter(a => a.prospect_id === prospect.id);
+    const acts = actsByProspect.get(prospect.id) || [];
     const entry = await calcPipelineEntry(prospect, acts, prefetched);
     const systemAmount = await getPipelineAmount(prospect, entry.category, prefetched?.allSolutions);
     const noteCount = await getNoteCount(prospect.id);
@@ -2902,11 +2945,16 @@ const openExpiredSearchModal = async () => {
     const allActs = await getVisibleActivities();
     const currentFocus = await AppDataStore.query('my_potential_list', { user_id: userId });
     const currentFocusIds = new Set(currentFocus.map(f => f.prospect_id));
+    // Bucket activities by prospect_id ONCE — both the "has activity" membership
+    // check and the per-prospect activity lookup below read this Map instead of
+    // re-scanning allActs per prospect. `.has(p.id)` is true iff a bucket exists,
+    // which is exactly when the old `allActs.some(a => a.prospect_id === p.id)` was.
+    const _actsByProspect = _groupActivitiesByProspect(allActs);
 
     // Prospects with activity history not in current focus
     const availableProspects = allProspects.filter(p => {
         if (currentFocusIds.has(p.id)) return false;
-        return allActs.some(a => a.prospect_id === p.id);
+        return _actsByProspect.has(p.id);
     });
 
     // Build archive rows grouped by month — reuse the already-fetched allProspects
@@ -2966,7 +3014,7 @@ const openExpiredSearchModal = async () => {
     // Build available prospects (expired pipeline) rows
     let availRows = '';
     for (const p of availableProspects.slice(0, 50)) {
-        const pActs = allActs.filter(a => a.prospect_id === p.id);
+        const pActs = _actsByProspect.get(p.id) || [];
         const pEntry = await calcPipelineEntry(p, pActs);
         const lastDate = pEntry.lastActivityDate ? pEntry.lastActivityDate.toLocaleDateString('en-GB') : 'None';
         availRows += `<tr style="border-bottom:1px solid #F3F4F6;">
