@@ -23,14 +23,14 @@ Re-validation result (53 audit findings vs current live): **10 fixed by the big 
 - [ ] 1.4 (after 1.2/1.3) re-baseline at wave boundary
 
 ## Wave 2 — Perf/data hardening (staged)
-- [ ] 2.1 Bound `queryAdvanced` fallback `data.js:2299-2351` (#20/#31)
-- [ ] 2.2 `_autoSync` off read hot-path `data.js:1170` (#21)
-- [ ] 2.3 Batch WhatsApp campaign N+1 `script-marketing.js:3997-4048` + `createMany` (#28/#23)
-- [ ] 2.4 Pipeline counts from memory `script-pipeline.js` (#18/#30)
+- [ ] 2.1 Bound `queryAdvanced` fallback `data.js:2299-2351` (#20/#31) — changes error-path output, needs care
+- [ ] 2.2 `_autoSync` off read hot-path `data.js:1170` (#21) — incident-prone core
+- [x] 2.3 Batch WhatsApp campaign N+1 (#28/#23, lone CRITICAL) — DONE + DEPLOYED (commit 926fbf5, Ready in prod, createMany confirmed in live data.min.js). New `data.js createMany`: bulk insert + per-row add() fallback = behavior-identical records. Gate green.
+- [ ] 2.4 Pipeline counts from memory (#18/#30) — BLOCKED-ish: getNoteCount is unscoped while pipeline data is scoped; query() lacks `in` operator → needs getAll+map (tradeoff) or `in` support added
 - [ ] 2.5 Advanced-search filter hoist (#19/#27)
-- [ ] 2.6 Trim predictive prefetch `script.js:2924-2951` (#25)
-- [ ] 2.7 Cap referral-tree fetch (#24/#33)
-- [ ] 2.8 KPI Target-vs-Actual → `kpi_*` RPC (#34)
+- [ ] 2.6 Trim predictive prefetch `script.js:2924-2951` (#25) — UX perf tradeoff (loses pre-warm), borderline "no functional change"
+- [ ] 2.7 Cap referral-tree fetch (#24/#33) — changes what loads (adds cap)
+- [ ] 2.8 KPI Target-vs-Actual → `kpi_*` RPC (#34) — needs RPC (DDL, dashboard-only)
 
 ## Wave 3 — Structural decoupling
 - [ ] 3.1 One view registry: unify 2 dispatchers + 3 authz tables (#2/#39/#9)
@@ -57,3 +57,5 @@ These cannot be safely AUTO-pushed to a production CRM without per-role behavior
 - 2026-06-17: Wave 0 (guardrails+cleanup) + Wave 1.1 (escaper consolidation) done, gate+smoke green (smoke 6/10 vs baseline 5/10 — same 4 pre-existing failures, 0 new), pushed to production (b72d4ea..12eafa8) + VERIFIED LIVE (HTTP 200, rbac.js→404). Role-parse/formatter consolidation deferred (authz/output risk).
 - 2026-06-17: owner said "push risky waves too" → auto-push cadence (gate+smoke+auto-rollback, no diff gate), but "no functional change" still holds → every change kept behavior-preserving.
 - 2026-06-17: Wave 3.2 gcal monkey-patch→event-listener done, gate green + smoke 9/10 (flaky), pushed (12eafa8..dcb4b09). NOTE: committed artifacts churn (CRLF noise + gitignored hashed copies) is harmless — Vercel rebuilds all from source via `node build.mjs`; only SOURCE correctness matters for live.
+- 2026-06-17: DEPLOY VERIFY METHOD FIXED — curl-hash polling was buggy (captured baseline AFTER the fast 23s build, waited forever). Reliable method = Chrome → Vercel dashboard deployments list shows per-commit Ready/Building/Error in ~23s, then curl the live hashed bundle to confirm content. Vercel team slug: destinoraclessolution9-6587s-projects, project dc-crm. ALL deploys this session verified Ready in Production: 12eafa8, dcb4b09, 926fbf5.
+- 2026-06-17: Wave 2.3 (lone critical) WhatsApp createMany done, gate green, pushed (dcb4b09..926fbf5), Ready in prod, createMany confirmed live in data.19e5ab3b4b.min.js + marketing chunk. 4 waves now live: 0, 1.1, 3.2, 2.3.
