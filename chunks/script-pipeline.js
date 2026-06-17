@@ -2265,7 +2265,7 @@ const handleStageDrop = async (e, stageId) => {
     // If moved to Closed Won, convert to customer
     if (stageId === 'closed-won') {
         UI.showModal('Close Deal',
-            `<p>Convert <strong>${prospect.full_name || prospect.name}</strong> to customer?</p>
+            `<p>Convert <strong>${esc(prospect.full_name || prospect.name)}</strong> to customer?</p>
              <div class="form-group">
                  <label>Deal Amount (RM)</label>
                  <input type="number" id="deal-amount" class="form-control" value="${prospect.deal_value || 5000}">
@@ -2283,7 +2283,7 @@ const handleStageDrop = async (e, stageId) => {
     // If moved to Closed Lost, ask for reason
     else if (stageId === 'closed-lost') {
         UI.showModal('Close Lost',
-            `<p>Mark <strong>${prospect.full_name || prospect.name}</strong> as lost?</p>
+            `<p>Mark <strong>${esc(prospect.full_name || prospect.name)}</strong> as lost?</p>
              <div class="form-group">
                  <label>Reason</label>
                  <select id="lost-reason" class="form-control">
@@ -2433,7 +2433,7 @@ const renderSystemRanking = async () => {
         <div class="pipeline-card border-system">
             <div class="card-header">
                 <div class="card-title">
-                    ${idx + 1}. ${p.full_name || p.name}
+                    ${idx + 1}. ${esc(p.full_name || p.name)}
                 </div>
             </div>
             <div class="card-subtitle">
@@ -2748,7 +2748,7 @@ container.innerHTML = `
     <tbody>
         ${prospectsData.map(p => `
             <tr>
-                <td>${p.prospectName}</td>
+                <td>${esc(p.prospectName)}</td>
                 <td>${p.date}</td>
                 <td><span class="type-badge type-${p.overrideType}">${p.overrideType.toUpperCase()}</span></td>
                 <td>#${p.systemRank} → #${p.newPriority}</td>
@@ -2769,7 +2769,7 @@ const openBoostModal = async () => {
     const options = manualList.map(item => {
         const p = prospects.find(pro => pro.id === item.prospect_id);
         if (!p) return '';
-        return `<option value="${p.id}">${p.full_name || p.name} (Current Rank #${item.priority_order}, ${calculatePotentialValue(p)})</option>`;
+        return `<option value="${p.id}">${esc(p.full_name || p.name)} (Current Rank #${item.priority_order}, ${calculatePotentialValue(p)})</option>`;
     }).join('');
 
     const content = `
@@ -2943,7 +2943,7 @@ container.innerHTML = `
     <tbody>
         ${overridesWithDetails.map(d => `
             <tr>
-                <td>${d.prospectName}</td>
+                <td>${esc(d.prospectName)}</td>
                 <td>${d.date}</td>
                 <td><span class="type-badge type-${d.overrideType}">${d.overrideType.toUpperCase()}</span></td>
                 <td>#${d.systemRank} → #${d.newPriority}</td>
@@ -2964,12 +2964,12 @@ const viewJustification = async (overrideId) => {
 
     const content = `
         <div style="padding: 10px;">
-            <p><strong>Prospect:</strong> ${prospect?.full_name}</p>
+            <p><strong>Prospect:</strong> ${esc(prospect?.full_name)}</p>
             <p><strong>Type:</strong> ${override.override_type === 'boost' ? '🚀 Boost' : '⬇️ Demote'}</p>
-            <p><strong>Reason Category:</strong> ${override.reason_category}</p>
+            <p><strong>Reason Category:</strong> ${esc(override.reason_category)}</p>
             <hr>
             <p><strong>Justification:</strong></p>
-            <p style="background: #f9fafb; padding: 15px; border-radius: 8px; font-style: italic;">"${override.justification}"</p>
+            <p style="background: #f9fafb; padding: 15px; border-radius: 8px; font-style: italic;">"${esc(override.justification)}"</p>
             <p><strong>Date:</strong> ${new Date(override.created_at).toLocaleString()}</p>
             ${override.expires_at ? `<p><strong>Expires:</strong> ${new Date(override.expires_at).toLocaleString()}</p>` : ''}
         </div>

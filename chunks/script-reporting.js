@@ -1004,7 +1004,7 @@ const renderDetailTable = (headers, rows, emptyMsg = 'No records in this period'
                     <tr>${headers.map(h => `<th scope="col" style="padding:10px 12px;text-align:left;font-weight:600;color:var(--gray-500);border-bottom:1px solid var(--border,#e5e0d8);">${h}</th>`).join('')}</tr>
                 </thead>
                 <tbody>
-                    ${rows.map(r => `<tr>${r.map(cell => `<td style="padding:10px 12px;border-bottom:1px solid var(--gray-100,#f1ede3);">${cell ?? '—'}</td>`).join('')}</tr>`).join('')}
+                    ${rows.map(r => `<tr>${r.map(cell => `<td style="padding:10px 12px;border-bottom:1px solid var(--gray-100,#f1ede3);">${escapeHtml(cell ?? '—')}</td>`).join('')}</tr>`).join('')}
                 </tbody>
             </table>
         </div>

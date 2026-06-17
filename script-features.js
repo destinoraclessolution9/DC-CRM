@@ -80,7 +80,7 @@ window._fv.showDocumentManagementView = async (container) => {
                      ondragleave="this.parentElement.classList.remove('drag-over')"
                      ondrop="app.handleDropOnFolder(event, ${folder.id})">
                     <i class="fas fa-folder" style="color: ${folder.color || '#f59e0b'}"></i>
-                    <span class="folder-name">${folder.name}</span>
+                    <span class="folder-name">${escapeHtml(folder.name || '')}</span>
                 </div>
                 <div class="folder-actions">
                     <button class="btn-icon" aria-label="Rename folder" onclick="app.renameFolder(${folder.id}); event.stopPropagation()"><i class="fas fa-edit" aria-hidden="true"></i></button>
@@ -216,7 +216,7 @@ window._fv.showDocumentManagementView = async (container) => {
                             </td>
                             <td ondblclick="app.previewFile(${file.id})">
                                 <i class="fas ${getFileIcon(file.filename)} file-icon"></i>
-                                <span class="file-name">${file.filename}</span>
+                                <span class="file-name">${escapeHtml(file.filename || '')}</span>
                                 ${file.is_starred ? '<i class="fas fa-star starred"></i>' : ''}
                             </td>
                             <td>${new Date(file.updated_at || file.created_at).toLocaleString()}</td>
@@ -293,7 +293,7 @@ window._fv.showDocumentManagementView = async (container) => {
                     <div class="file-card-icon" ondblclick="app.previewFile(${file.id})">
                         <i class="fas ${getFileIcon(file.filename)} fa-4x"></i>
                     </div>
-                    <div class="file-card-name" title="${file.filename}">${truncateFilename(file.filename, 20)}</div>
+                    <div class="file-card-name" title="${escapeHtml(file.filename || '')}">${escapeHtml(truncateFilename(file.filename, 20))}</div>
                     <div class="file-card-meta">
                         <span>${(file.size > 1048576 ? (file.size / 1048576).toFixed(1) + " MB" : (file.size / 1024).toFixed(0) + " KB")}</span>
                         <span>${new Date(file.updated_at || file.created_at).toLocaleDateString()}</span>
@@ -387,7 +387,7 @@ window._fv.showDocumentManagementView = async (container) => {
 
     window.app.renameFolder = async (id) => {
         const folder = await window.AppDataStore.getById('folders', id);
-        window.UI.showModal('Rename Folder', `<div class="form-group"><label>New Name</label><input type="text" id="rename-folder-input" class="form-control" value="${folder.name}"></div>`,
+        window.UI.showModal('Rename Folder', `<div class="form-group"><label>New Name</label><input type="text" id="rename-folder-input" class="form-control" value="${escapeHtml(folder.name || '')}"></div>`,
             [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Rename', type: 'primary', action: `(async () => { await app.confirmRenameFolder(${id}); })()` }]);
     };
 
@@ -496,7 +496,7 @@ window._fv.showDocumentManagementView = async (container) => {
         const verUserMap = new Map(allUsersForVer.map(u => [String(u.id), u.full_name]));
         const content = `
             <div class="version-history">
-                <div class="version-header"><h3>Version History: ${file.filename}</h3><p>Current: v${file.current_version || 1}</p></div>
+                <div class="version-header"><h3>Version History: ${escapeHtml(file.filename || '')}</h3><p>Current: v${file.current_version || 1}</p></div>
                 <table class="version-table">
                     <thead><tr><th scope="col">Version</th><th scope="col">Date</th><th scope="col">Size</th><th scope="col">By</th><th scope="col">Notes</th><th scope="col">Actions</th></tr></thead>
                     <tbody>
@@ -505,8 +505,8 @@ window._fv.showDocumentManagementView = async (container) => {
                                 <td>v${v.version_number}</td>
                                 <td>${new Date(v.created_at).toLocaleString()}</td>
                                 <td>${formatFileSize(v.size)}</td>
-                                <td>${verUserMap.get(String(v.created_by)) || 'System'}</td>
-                                <td>${v.change_note || '-'}</td>
+                                <td>${escapeHtml(verUserMap.get(String(v.created_by)) || 'System')}</td>
+                                <td>${escapeHtml(v.change_note || '-')}</td>
                                 <td>
                                     <button class="btn-icon" aria-label="Download version" onclick="app.downloadVersion(${v.id})"><i class="fas fa-download" aria-hidden="true"></i></button>
                                     <button class="btn-icon" aria-label="Restore version" onclick="app.restoreVersion(${v.id})"><i class="fas fa-undo" aria-hidden="true"></i></button>
@@ -535,7 +535,7 @@ window._fv.showDocumentManagementView = async (container) => {
     window.app.compareVersions = async (fileId) => {
         const v1 = await window.AppDataStore.getById('document_versions', parseInt(document.getElementById('v1').value));
         const v2 = await window.AppDataStore.getById('document_versions', parseInt(document.getElementById('v2').value));
-        window.UI.showModal('Comparison', `<div class="diff-view"><pre>${v1.data || ''}</pre><pre>${v2.data || ''}</pre></div>`, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
+        window.UI.showModal('Comparison', `<div class="diff-view"><pre>${escapeHtml(v1.data || '')}</pre><pre>${escapeHtml(v2.data || '')}</pre></div>`, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
     };
 
     window.app.downloadVersion = (versionId) => { window.UI.toast.info(`Downloading version ${versionId}...`); };
@@ -862,7 +862,7 @@ In a production system, this would show the actual file contents.
                     <div class="metadata-grid">
                         <div class="metadata-row">
                             <span class="metadata-label">Name:</span>
-                            <span class="metadata-value">${file.filename}</span>
+                            <span class="metadata-value">${escapeHtml(file.filename || '')}</span>
                         </div>
                         <div class="metadata-row">
                             <span class="metadata-label">Size:</span>
@@ -870,11 +870,11 @@ In a production system, this would show the actual file contents.
                         </div>
                         <div class="metadata-row">
                             <span class="metadata-label">Type:</span>
-                            <span class="metadata-value">${file.mime_type || 'Unknown'}</span>
+                            <span class="metadata-value">${escapeHtml(file.mime_type || 'Unknown')}</span>
                         </div>
                         <div class="metadata-row">
                             <span class="metadata-label">Location:</span>
-                            <span class="metadata-value">${await getFolderPath(file.folder_id)}</span>
+                            <span class="metadata-value">${escapeHtml(await getFolderPath(file.folder_id))}</span>
                         </div>
                     </div>
                 </div>
@@ -906,7 +906,7 @@ In a production system, this would show the actual file contents.
                     <div class="metadata-grid">
                         <div class="metadata-row">
                             <span class="metadata-label">Created By:</span>
-                            <span class="metadata-value">${creator?.full_name || 'Unknown'}</span>
+                            <span class="metadata-value">${escapeHtml(creator?.full_name || 'Unknown')}</span>
                         </div>
                         <div class="metadata-row">
                             <span class="metadata-label">User ID:</span>
@@ -918,7 +918,7 @@ In a production system, this would show the actual file contents.
                 ${file.description ? `
                     <div class="metadata-section">
                         <h4>Description</h4>
-                        <p class="metadata-description">${file.description}</p>
+                        <p class="metadata-description">${escapeHtml(file.description)}</p>
                     </div>
                 ` : ''}
             </div>
@@ -932,7 +932,7 @@ In a production system, this would show the actual file contents.
 
     window.app.editFileDescription = async (fileId) => {
         const file = await window.AppDataStore.getById('documents', fileId);
-        window.UI.showModal('Edit Description', `<div class="form-group"><label>Description</label><textarea id="edit-file-desc" class="form-control" rows="4">${file.description || ''}</textarea></div>`,
+        window.UI.showModal('Edit Description', `<div class="form-group"><label>Description</label><textarea id="edit-file-desc" class="form-control" rows="4">${escapeHtml(file.description || '')}</textarea></div>`,
             [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Save', type: 'primary', action: `(async () => { await app.saveFileDescription(${fileId}); })()` }]);
     };
 
@@ -1080,10 +1080,10 @@ window._fv.showBookingSettingsView = async (container) => {
                         <div style="background:white; border:1px solid var(--gray-200); border-radius:8px; padding:12px 16px; margin-bottom:8px;">
                             <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                                 <div>
-                                    <strong>${appt.prospect_name}</strong>
-                                    <div style="font-size:12px; color:var(--gray-500);">${appt.booking_date} ${appt.start_time} · ${appt.prospect_phone || appt.prospect_email || ''}</div>
-                                    ${appt.referred_by ? `<div style="font-size:11px; color:var(--gray-400); margin-top:2px;"><i class="fas fa-user-friends" style="margin-right:3px;"></i>Ref: ${appt.referred_by}${appt.referral_relationship ? ` (${appt.referral_relationship})` : ''}</div>` : ''}
-                                    ${appt.prospect_occupation || appt.prospect_company ? `<div style="font-size:11px; color:var(--gray-400); margin-top:2px;">${[appt.prospect_occupation, appt.prospect_company].filter(Boolean).join(' · ')}</div>` : ''}
+                                    <strong>${escapeHtml(appt.prospect_name || '')}</strong>
+                                    <div style="font-size:12px; color:var(--gray-500);">${appt.booking_date} ${appt.start_time} · ${escapeHtml(appt.prospect_phone || appt.prospect_email || '')}</div>
+                                    ${appt.referred_by ? `<div style="font-size:11px; color:var(--gray-400); margin-top:2px;"><i class="fas fa-user-friends" style="margin-right:3px;"></i>Ref: ${escapeHtml(appt.referred_by)}${appt.referral_relationship ? ` (${escapeHtml(appt.referral_relationship)})` : ''}</div>` : ''}
+                                    ${appt.prospect_occupation || appt.prospect_company ? `<div style="font-size:11px; color:var(--gray-400); margin-top:2px;">${escapeHtml([appt.prospect_occupation, appt.prospect_company].filter(Boolean).join(' · '))}</div>` : ''}
                                 </div>
                                 <div style="display:flex; gap:6px;">
                                     ${appt.status === 'pending' ? `
@@ -1246,11 +1246,12 @@ window._fv.cancelBookingAppointment = async (apptId) => {
 };
 
 window._fv.openShareCpsIntakeLinkModal = async () => {
+    const { escapeHtml } = window._crmUtils || {};
     const _currentUser = window._appState?.cu;
     const venueData = await window.AppDataStore.getAll('venues').catch(() => []);
     const venueOptions = (venueData || [])
         .sort((a, b) => (a.sequence || 0) - (b.sequence || 0))
-        .map(v => `<option value="${v.id}" data-name="${(v.name || '').replace(/"/g, '&quot;')}" data-address="${(v.address || v.location || '').replace(/"/g, '&quot;')}" data-waze="${(v.waze_link || '').replace(/"/g, '&quot;')}">${v.name} | ${v.location || ''}</option>`)
+        .map(v => `<option value="${v.id}" data-name="${(v.name || '').replace(/"/g, '&quot;')}" data-address="${(v.address || v.location || '').replace(/"/g, '&quot;')}" data-waze="${(v.waze_link || '').replace(/"/g, '&quot;')}">${escapeHtml(v.name || '')} | ${escapeHtml(v.location || '')}</option>`)
         .join('');
 
     const today = new Date().toISOString().split('T')[0];
@@ -1405,6 +1406,7 @@ window._fv.shareCpsIntakeWhatsApp = () => {
 };
 
 window._fv.renderPendingCpsIntakes = async () => {
+    const { escapeHtml } = window._crmUtils || {};
     const _currentUser = window._appState?.cu;
     const host = document.getElementById('pending-cps-intakes');
     if (!host) return;
@@ -1439,14 +1441,14 @@ window._fv.renderPendingCpsIntakes = async () => {
                     <div style="background:white; border:1px solid #fde68a; border-radius:8px; padding:12px;">
                         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
                             <div style="flex:1; min-width:200px;">
-                                <div style="font-weight:600; font-size:14px; margin-bottom:2px;">${i.prospect_name || 'Unknown'}</div>
+                                <div style="font-weight:600; font-size:14px; margin-bottom:2px;">${escapeHtml(i.prospect_name || 'Unknown')}</div>
                                 <div style="font-size:12px; color:var(--gray-600);">
-                                    <i class="fas fa-phone" style="margin-right:4px;"></i>${i.prospect_phone || '—'}
-                                    ${i.prospect_email ? ` · <i class="fas fa-envelope" style="margin-right:4px;"></i>${i.prospect_email}` : ''}
+                                    <i class="fas fa-phone" style="margin-right:4px;"></i>${escapeHtml(i.prospect_phone || '—')}
+                                    ${i.prospect_email ? ` · <i class="fas fa-envelope" style="margin-right:4px;"></i>${escapeHtml(i.prospect_email)}` : ''}
                                 </div>
                                 <div style="font-size:12px; color:var(--gray-500); margin-top:4px;">
                                     <i class="far fa-calendar" style="margin-right:4px;"></i>${i.activity_date} · ${(i.start_time || '').slice(0,5)}–${(i.end_time || '').slice(0,5)}
-                                    ${i.venue_name ? ` · <i class="fas fa-map-marker-alt" style="margin-right:4px;"></i>${i.venue_name}` : ''}
+                                    ${i.venue_name ? ` · <i class="fas fa-map-marker-alt" style="margin-right:4px;"></i>${escapeHtml(i.venue_name)}` : ''}
                                 </div>
                             </div>
                             <div style="display:flex; gap:6px;">
@@ -1865,6 +1867,7 @@ window._fv._uploadCpsFormFile = async (file, prospectId) => {
 
 // ══════════════ showLeadFormsView ══════════════
 window._fv.showLeadFormsView = async (container) => {
+    const { escapeHtml } = window._crmUtils || {};
     const _currentUser = window._appState?.cu;
     window._appState = window._appState || {};
     window._appState.cv = 'lead_forms';
@@ -1891,8 +1894,8 @@ window._fv.showLeadFormsView = async (container) => {
                         <div style="background:white; border:1px solid var(--gray-200); border-radius:12px; padding:20px;">
                             <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
                                 <div>
-                                    <h3 style="margin:0; font-size:16px;">${form.name}</h3>
-                                    <p style="margin:4px 0 0; color:var(--gray-500); font-size:13px;">${form.description || 'No description'}</p>
+                                    <h3 style="margin:0; font-size:16px;">${escapeHtml(form.name || '')}</h3>
+                                    <p style="margin:4px 0 0; color:var(--gray-500); font-size:13px;">${escapeHtml(form.description || 'No description')}</p>
                                 </div>
                                 <span style="padding:3px 10px; border-radius:20px; font-size:12px; background:${form.is_active ? '#d1fae5' : '#f3f4f6'}; color:${form.is_active ? '#065f46' : '#6b7280'};">${form.is_active ? 'Active' : 'Inactive'}</span>
                             </div>
@@ -1912,6 +1915,7 @@ window._fv.showLeadFormsView = async (container) => {
 
 // ══════════════ showSurveysView ══════════════
 window._fv.showSurveysView = async (container) => {
+    const { escapeHtml } = window._crmUtils || {};
     const _currentUser = window._appState?.cu;
 
     window._appState.cv = 'surveys';
@@ -1937,12 +1941,12 @@ window._fv.showSurveysView = async (container) => {
                         <div style="background:white; border:1px solid var(--gray-200); border-radius:12px; padding:20px;">
                             <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
                                 <div>
-                                    <h3 style="margin:0; font-size:16px;">${survey.name}</h3>
-                                    <span style="font-size:12px; color:var(--gray-400); text-transform:uppercase;">${survey.type}</span>
+                                    <h3 style="margin:0; font-size:16px;">${escapeHtml(survey.name || '')}</h3>
+                                    <span style="font-size:12px; color:var(--gray-400); text-transform:uppercase;">${escapeHtml(survey.type || '')}</span>
                                 </div>
                                 <span style="padding:3px 10px; border-radius:20px; font-size:12px; background:${survey.is_active ? '#d1fae5' : '#f3f4f6'}; color:${survey.is_active ? '#065f46' : '#6b7280'};">${survey.is_active ? 'Active' : 'Inactive'}</span>
                             </div>
-                            <p style="color:var(--gray-600); font-size:13px; margin:0 0 16px;">${survey.question}</p>
+                            <p style="color:var(--gray-600); font-size:13px; margin:0 0 16px;">${escapeHtml(survey.question || '')}</p>
                             <div style="display:flex; gap:8px; flex-wrap:wrap;">
                                 <button class="btn secondary" style="flex:1; font-size:12px; padding:6px;" onclick="app.copySurveyLink(${survey.id})"><i class="fas fa-copy"></i> Copy Link</button>
                                 <button class="btn secondary" style="flex:1; font-size:12px; padding:6px;" onclick="app.showSurveyResults(${survey.id})"><i class="fas fa-chart-bar"></i> Results</button>
@@ -2019,6 +2023,7 @@ window._fv.copySurveyLink = (surveyId) => {
 };
 
 window._fv.showSurveyResults = async (surveyId) => {
+    const { escapeHtml } = window._crmUtils || {};
     const survey = await window.AppDataStore.getById('surveys', surveyId);
     const responses = (await window.AppDataStore.getAll('survey_responses').catch(() => [])).filter(r => r.survey_id == surveyId);
     const promoters = responses.filter(r => r.score >= 9).length;
@@ -2029,7 +2034,7 @@ window._fv.showSurveyResults = async (surveyId) => {
     const npsColor = nps === null ? '#9ca3af' : nps >= 50 ? '#10b981' : nps >= 0 ? '#f59e0b' : '#ef4444';
     const html = `
         <div>
-            <p style="color:var(--gray-600); margin:0 0 20px;">${survey?.question}</p>
+            <p style="color:var(--gray-600); margin:0 0 20px;">${escapeHtml(survey?.question || '')}</p>
             <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:20px;">
                 <div style="text-align:center; padding:16px; background:var(--gray-50); border-radius:8px;">
                     <div style="font-size:28px; font-weight:700; color:${npsColor};">${nps !== null ? nps : '—'}</div>
@@ -2058,9 +2063,9 @@ window._fv.showSurveyResults = async (surveyId) => {
                     </tr></thead>
                     <tbody>${responses.slice(0,20).map(r => `
                         <tr style="border-bottom:1px solid var(--gray-100);">
-                            <td style="padding:10px;">${r.respondent_name || 'Anonymous'}</td>
+                            <td style="padding:10px;">${escapeHtml(r.respondent_name || 'Anonymous')}</td>
                             <td style="padding:10px;"><span style="font-weight:700; color:${r.score>=9?'#10b981':r.score>=7?'#f59e0b':'#ef4444'};">${r.score}/10</span></td>
-                            <td style="padding:10px; color:var(--gray-600); font-size:13px;">${r.feedback || '—'}</td>
+                            <td style="padding:10px; color:var(--gray-600); font-size:13px;">${escapeHtml(r.feedback || '—')}</td>
                             <td style="padding:10px; color:var(--gray-400); font-size:12px;">${r.submitted_at ? new Date(r.submitted_at).toLocaleDateString() : '—'}</td>
                         </tr>
                     `).join('')}</tbody>
@@ -2073,6 +2078,7 @@ window._fv.showSurveyResults = async (surveyId) => {
 
 // ══════════════ showContractsView ══════════════
 window._fv.showContractsView = async (container) => {
+    const { escapeHtml } = window._crmUtils || {};
     const _currentUser = window._appState?.cu;
 
     const renderContractStatusBadge = (status) => {
@@ -2110,8 +2116,8 @@ window._fv.showContractsView = async (container) => {
                     </tr></thead>
                     <tbody>${contracts.map(c => `
                         <tr style="border-bottom:1px solid var(--gray-100);">
-                            <td style="padding:12px 16px;"><i class="fas fa-file-contract" style="color:var(--primary); margin-right:8px;"></i>${c.title}</td>
-                            <td style="padding:12px 16px; color:var(--gray-600);">${c.signer_name || (c.customer_id ? `Customer #${c.customer_id}` : '—')}</td>
+                            <td style="padding:12px 16px;"><i class="fas fa-file-contract" style="color:var(--primary); margin-right:8px;"></i>${escapeHtml(c.title || '')}</td>
+                            <td style="padding:12px 16px; color:var(--gray-600);">${c.signer_name ? escapeHtml(c.signer_name) : (c.customer_id ? `Customer #${c.customer_id}` : '—')}</td>
                             <td style="padding:12px 16px;">${renderContractStatusBadge(c.status)}</td>
                             <td style="padding:12px 16px; color:var(--gray-400); font-size:13px;">${c.created_at ? new Date(c.created_at).toLocaleDateString() : '—'}</td>
                             <td style="padding:12px 16px;">
@@ -2135,6 +2141,7 @@ window._fv.showContractsView = async (container) => {
 window._fv = window._fv || {};
 
 (function () {
+    const esc = (v) => window._crmUtils.escapeHtml(v);
     // State that was previously shared via the IIFE closure
     let _leaderboardPeriod   = 'all';   // 'all' | 'year' | 'month'
     let _treeZoom            = null;
@@ -2199,7 +2206,7 @@ window._fv = window._fv || {};
                 <div class="strip-label"><i class="fas fa-fire"></i> Top Referrers:</div>
                 <div class="strip-items">
                     ${top3.map((t, i) => `
-                        <div class="strip-item"><span class="rank">#${i + 1}</span> ${t.name} (${t.count})</div>
+                        <div class="strip-item"><span class="rank">#${i + 1}</span> ${esc(t.name || '')} (${t.count})</div>
                     `).join('')}
                     ${top3.length === 0 ? '<div class="text-muted" style="font-size:12px">No referrals yet.</div>' : ''}
                 </div>
@@ -2266,7 +2273,7 @@ window._fv = window._fv || {};
                 <tr class="rank-${idx + 1}">
                     <td data-label="Rank" class="rank-cell">${idx + 1}</td>
                     <td data-label="Referrer" class="name-cell" onclick="app.showReferralTree(${item.id}, '${item.type || 'prospect'}')">
-                        ${item.name}
+                        ${esc(item.name || '')}
                         ${item.type === 'customer' ? '<span class="badge" style="background:#dcfce7; color:#166534">C</span>' : ''}
                         ${item.type === 'user' ? '<span class="badge" style="background:#dbeafe; color:#1e40af">Agent</span>' : ''}
                     </td>
@@ -2372,8 +2379,8 @@ window._fv = window._fv || {};
                         <i class="fas ${p.type === 'customer' ? 'fa-user-check' : 'fa-user'}" style="color:${p.type === 'customer' ? '#166534' : '#64748b'}; font-size:12px;"></i>
                     </div>
                     <div style="flex-grow:1">
-                        <div style="font-weight:600; font-size:14px;">${p.full_name}</div>
-                        <div style="font-size:11px; color:var(--gray-500)">${p.phone || 'No phone'}</div>
+                        <div style="font-weight:600; font-size:14px;">${esc(p.full_name || '')}</div>
+                        <div style="font-size:11px; color:var(--gray-500)">${p.phone ? esc(p.phone) : 'No phone'}</div>
                     </div>
                     <span class="badge ${p.type === 'customer' ? 'success' : 'secondary'}">${p.type}</span>
                 </div>
@@ -2804,8 +2811,8 @@ window._fv = window._fv || {};
 
         const ancestors = await getAncestorPath(id);
         const pathHtml = ancestors.length > 0
-            ? ancestors.map(a => `<span>${a.name}</span>`).join(' <span style="color:var(--gray-300)">›</span> ') + ` <span style="color:var(--gray-300)">›</span> <strong>${person.full_name}</strong>`
-            : `<strong>${person.full_name}</strong> <span style="color:var(--gray-400); font-size:10px">(root)</span>`;
+            ? ancestors.map(a => `<span>${esc(a.name || '')}</span>`).join(' <span style="color:var(--gray-300)">›</span> ') + ` <span style="color:var(--gray-300)">›</span> <strong>${esc(person.full_name || '')}</strong>`
+            : `<strong>${esc(person.full_name || '')}</strong> <span style="color:var(--gray-400); font-size:10px">(root)</span>`;
 
         const _currentUser = window._appState?.cu;
         const currentUserId = _currentUser?.id;
@@ -2850,7 +2857,7 @@ window._fv = window._fv || {};
         sidebar.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px">
                 <div style="flex:1; min-width:0">
-                    <div style="font-size:15px; font-weight:700; color:var(--gray-800); white-space:normal; word-break:break-word">${person.full_name}</div>
+                    <div style="font-size:15px; font-weight:700; color:var(--gray-800); white-space:normal; word-break:break-word">${esc(person.full_name || '')}</div>
                     <span style="background:${stageColor}; color:${stageColor === '#ffffff' || stageColor === '#eab308' ? '#374151' : 'white'}; font-size:10px; padding:2px 8px; border-radius:10px; text-transform:uppercase; display:inline-block; margin-top:4px; ${stageColor === '#ffffff' ? 'border:1px solid #d1d5db;' : ''}">${stageName}</span>
                 </div>
                 <button onclick="app.toggleTreeInterested(${id}, '${type}')" class="interested-heart-btn" id="heart-btn-${id}" title="${isInterested ? 'Remove bookmark' : 'Add bookmark'}">
@@ -2866,9 +2873,9 @@ window._fv = window._fv || {};
                 </div>
             </div>
 
-            ${person.phone ? `<div class="sidebar-field"><label>Phone</label><div class="value">${person.phone}</div></div>` : ''}
-            ${person.email ? `<div class="sidebar-field"><label>Email</label><div class="value" style="font-size:12px">${person.email}</div></div>` : ''}
-            ${person.occupation ? `<div class="sidebar-field"><label>Occupation</label><div class="value">${person.occupation}</div></div>` : ''}
+            ${person.phone ? `<div class="sidebar-field"><label>Phone</label><div class="value">${esc(person.phone)}</div></div>` : ''}
+            ${person.email ? `<div class="sidebar-field"><label>Email</label><div class="value" style="font-size:12px">${esc(person.email)}</div></div>` : ''}
+            ${person.occupation ? `<div class="sidebar-field"><label>Occupation</label><div class="value">${esc(person.occupation)}</div></div>` : ''}
 
             <div class="sidebar-field">
                 <label>Referrals Made</label>
@@ -2957,7 +2964,7 @@ window._fv = window._fv || {};
         const rows = bookmarks.map(b => `
             <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 4px; border-bottom:1px solid var(--gray-100); gap:8px">
                 <div style="flex:1; min-width:0">
-                    <div style="font-weight:600; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${b.interested_person_name || 'ID: ' + b.interested_person_id}</div>
+                    <div style="font-weight:600; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${esc(b.interested_person_name || 'ID: ' + b.interested_person_id)}</div>
                     <div style="font-size:11px; color:var(--gray-500); text-transform:uppercase">${b.interested_person_type}</div>
                 </div>
                 <div style="display:flex; gap:6px; flex-shrink:0">
@@ -3074,7 +3081,7 @@ window._fv = window._fv || {};
             resultsDiv.innerHTML = filtered.map(p => `
                 <div class="result-item-v2" onclick="app.selectReferrerForModal(${p.id}, '${p.type}', '${modalType}')">
                     <div style="flex-grow:1">
-                        <strong>${p.full_name}</strong>
+                        <strong>${esc(p.full_name || '')}</strong>
                         <div style="font-size:10px">${p.type.toUpperCase()}</div>
                     </div>
                 </div>
@@ -3099,7 +3106,7 @@ window._fv = window._fv || {};
         const display = document.getElementById(`selected-${modalType}-info`);
         display.innerHTML = `
             <div class="entity-chip">
-                <span><i class="fas fa-check-circle" style="color:#10b981"></i> <strong>${person.full_name}</strong> (${type})</span>
+                <span><i class="fas fa-check-circle" style="color:#10b981"></i> <strong>${esc(person.full_name || '')}</strong> (${type})</span>
                 <button class="btn-icon" onclick="app.clearSelectedForModal('${modalType}')"><i class="fas fa-times"></i></button>
             </div>
         `;
@@ -3163,11 +3170,11 @@ window._fv = window._fv || {};
         const content = `
             <div class="form-section">
                 <div style="display:grid; gap:8px;">
-                    <div class="info-row"><div class="info-label">Referrer</div><div class="info-value">${referrer?.full_name || 'N/A'}</div></div>
-                    <div class="info-row"><div class="info-label">Referred Person</div><div class="info-value">${prospect?.full_name || 'N/A'}</div></div>
-                    <div class="info-row"><div class="info-label">Relationship</div><div class="info-value">${r.relationship || '-'}</div></div>
+                    <div class="info-row"><div class="info-label">Referrer</div><div class="info-value">${escapeHtml(referrer?.full_name || 'N/A')}</div></div>
+                    <div class="info-row"><div class="info-label">Referred Person</div><div class="info-value">${escapeHtml(prospect?.full_name || 'N/A')}</div></div>
+                    <div class="info-row"><div class="info-label">Relationship</div><div class="info-value">${escapeHtml(r.relationship || '-')}</div></div>
                     <div class="info-row"><div class="info-label">Date</div><div class="info-value">${r.date || '-'}</div></div>
-                    <div class="info-row"><div class="info-label">Source</div><div class="info-value">${r.source || '-'}</div></div>
+                    <div class="info-row"><div class="info-label">Source</div><div class="info-value">${escapeHtml(r.source || '-')}</div></div>
                     <div class="info-row"><div class="info-label">Status</div><div class="info-value"><span class="score-badge ${r.status === 'Active' ? 'score-A+' : 'score-A'}">${r.status}</span></div></div>
                     <div class="info-row"><div class="info-label">Reward Status</div><div class="info-value">${r.reward_status || '-'}</div></div>
                     ${r.notes ? `<div class="info-row"><div class="info-label">Notes</div><div class="info-value">${escapeHtml(r.notes)}</div></div>` : ''}
@@ -3187,7 +3194,7 @@ window._fv = window._fv || {};
         const prospect = await window.AppDataStore.getById('prospects', r.referred_prospect_id);
         const content = `
             <div class="form-section">
-                <p style="margin-bottom:16px; color:var(--gray-600);">Referred: <strong>${prospect?.full_name || 'N/A'}</strong></p>
+                <p style="margin-bottom:16px; color:var(--gray-600);">Referred: <strong>${escapeHtml(prospect?.full_name || 'N/A')}</strong></p>
                 <div class="form-group">
                     <label>Status</label>
                     <select id="ref-update-status" class="form-control">
@@ -3242,9 +3249,9 @@ window._fv = window._fv || {};
             <div style="padding:10px">
                 <h4>Latest Memo/Note</h4>
                 <div style="background:#f1f5f9; padding:16px; border-radius:8px; margin:16px 0; border-left:4px solid #3b82f6">
-                    ${latest ? latest.content : 'No memos found for this person.'}
+                    ${latest ? esc(latest.content || '') : 'No memos found for this person.'}
                     <div style="font-size:11px; color:#64748b; margin-top:8px">
-                        ${latest ? 'Written by ' + ((await window.AppDataStore.getById('users', latest.created_by))?.full_name || 'Admin') + ' on ' + window.UI.formatDate(latest.created_at) : ''}
+                        ${latest ? 'Written by ' + esc((await window.AppDataStore.getById('users', latest.created_by))?.full_name || 'Admin') + ' on ' + window.UI.formatDate(latest.created_at) : ''}
                     </div>
                 </div>
                 <button class="btn secondary btn-block" onclick="window.UI.hideModal(); ${profileCall}">View Full Profile</button>
@@ -3527,7 +3534,7 @@ window._fv.showCasesView = async (container) => {
                 <i class="fas fa-search cases-search-icon"></i>
                 <input type="text" id="case-search" class="cases-search-input"
                     placeholder="Search cases, prospects, customers…"
-                    value="${_caseFilters.search}"
+                    value="${escapeHtml(_caseFilters.search || '')}"
                     onkeyup="app.handleCaseSearch(event)">
                 <button class="cases-search-clear" title="Clear search"
                     onclick="document.getElementById('case-search').value=''; app.handleCaseSearch({target:{value:''}})">
@@ -3546,14 +3553,14 @@ window._fv.showCasesView = async (container) => {
                     <label>Product</label>
                     <select id="case-product-filter" onchange="app.handleCaseFilterChange()">
                         <option value="all">All Products</option>
-                        ${products.map(p => `<option value="${p.name}" ${_caseFilters.product === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
+                        ${products.map(p => `<option value="${escapeHtml(p.name || '')}" ${_caseFilters.product === p.name ? 'selected' : ''}>${escapeHtml(p.name || '')}</option>`).join('')}
                     </select>
                 </div>
                 <div class="adv-field">
                     <label>Agent</label>
                     <select id="case-agent-filter" onchange="app.handleCaseFilterChange()">
                         <option value="all">All Agents</option>
-                        ${agents.map(u => `<option value="${u.id}" ${_caseFilters.agent === String(u.id) ? 'selected' : ''}>${u.full_name || u.username}</option>`).join('')}
+                        ${agents.map(u => `<option value="${u.id}" ${_caseFilters.agent === String(u.id) ? 'selected' : ''}>${escapeHtml(u.full_name || u.username || '')}</option>`).join('')}
                     </select>
                 </div>
                 <div class="adv-field">
@@ -3568,7 +3575,7 @@ window._fv.showCasesView = async (container) => {
                     <label>Tag</label>
                     <select id="case-tag-filter" onchange="app.handleCaseFilterChange()">
                         <option value="all">All Tags</option>
-                        ${allTags.map(t => `<option value="${t.id}" ${_caseFilters.tag === String(t.id) ? 'selected' : ''}>${t.name}</option>`).join('')}
+                        ${allTags.map(t => `<option value="${t.id}" ${_caseFilters.tag === String(t.id) ? 'selected' : ''}>${escapeHtml(t.name || '')}</option>`).join('')}
                     </select>
                 </div>
                 <div class="adv-field">
@@ -3938,11 +3945,11 @@ window._fv.showCaseStudyDetail = async (id) => {
     let prospectProfile = null;
     if (c.customer_id) {
         const cust = await window.AppDataStore.getById('customers', c.customer_id);
-        if (!isCpsCase) entityInfo = cust ? `Customer: ${cust.full_name}` : 'Unknown Customer';
+        if (!isCpsCase) entityInfo = cust ? `Customer: ${escapeHtml(cust.full_name || '')}` : 'Unknown Customer';
     } else if (c.prospect_id) {
         const pros = await window.AppDataStore.getById('prospects', c.prospect_id);
         prospectProfile = pros || null;
-        if (!isCpsCase) entityInfo = pros ? `Prospect: ${pros.full_name}` : 'Unknown Prospect';
+        if (!isCpsCase) entityInfo = pros ? `Prospect: ${escapeHtml(pros.full_name || '')}` : 'Unknown Prospect';
     }
 
     const creator = await window.AppDataStore.getById('users', c.created_by);
@@ -3954,7 +3961,7 @@ window._fv.showCaseStudyDetail = async (id) => {
     const caseTags = caseMappings.map(m => allTags.find(t => t.id === m.tag_id)).filter(Boolean);
     const tagPills = caseTags.map(t => `
         <span class="badge" style="background:${t.color || '#e5e7eb'};color:#1f2937;margin-right:4px;">
-            ${t.name}
+            ${escapeHtml(t.name || '')}
             <span style="cursor:pointer;margin-left:4px;" onclick="app.removeTagFromCase(${c.id}, ${t.id})">&times;</span>
         </span>`).join('');
 
@@ -3984,14 +3991,14 @@ window._fv.showCaseStudyDetail = async (id) => {
                         ? Math.floor((Date.now() - new Date(prospectProfile.date_of_birth)) / (365.25 * 24 * 60 * 60 * 1000)) + 'y'
                         : null;
                     return [
-                        prospectProfile?.referral_relationship ? `<span><i class="fas fa-people-arrows"></i> ${prospectProfile.referral_relationship}</span>` : '',
-                        prospectProfile?.occupation ? `<span><i class="fas fa-briefcase"></i> ${prospectProfile.occupation}</span>` : '',
+                        prospectProfile?.referral_relationship ? `<span><i class="fas fa-people-arrows"></i> ${escapeHtml(prospectProfile.referral_relationship)}</span>` : '',
+                        prospectProfile?.occupation ? `<span><i class="fas fa-briefcase"></i> ${escapeHtml(prospectProfile.occupation)}</span>` : '',
                         age ? `<span><i class="fas fa-birthday-cake"></i> ${age}</span>` : '',
-                        prospectProfile?.gender ? `<span><i class="fas fa-venus-mars"></i> ${prospectProfile.gender}</span>` : '',
+                        prospectProfile?.gender ? `<span><i class="fas fa-venus-mars"></i> ${escapeHtml(prospectProfile.gender)}</span>` : '',
                     ].filter(Boolean).join('');
                 })() : `<span><i class="fas fa-user-circle"></i> ${entityInfo}</span>
                 <span><i class="fas fa-calendar-alt"></i> Closed: ${c.closing_date || 'N/A'}</span>
-                <span><i class="fas fa-box"></i> ${c.product || 'N/A'}</span>
+                <span><i class="fas fa-box"></i> ${escapeHtml(c.product || 'N/A')}</span>
                 <span><i class="fas fa-money-bill-wave"></i> RM ${parseFloat(c.amount || 0).toLocaleString()}</span>`}
                 ${c.is_public ? '<span class="badge badge-success">Public</span>' : ''}
             </div>
@@ -4006,8 +4013,8 @@ window._fv.showCaseStudyDetail = async (id) => {
 
             <div class="case-section card" style="margin-bottom:12px;">
                 <h3 style="font-size:14px;font-weight:600;margin-bottom:8px;"><i class="fas fa-handshake"></i> Part 1: CPS Invitation</h3>
-                ${c.cps_invitation_method ? `<p style="font-size:12px;color:var(--gray-500);margin-bottom:6px;"><strong>Method:</strong> ${c.cps_invitation_method}</p>` : ''}
-                <p style="white-space:pre-wrap;">${c.cps_invitation_details || '<em style="color:var(--gray-400);">No details provided.</em>'}</p>
+                ${c.cps_invitation_method ? `<p style="font-size:12px;color:var(--gray-500);margin-bottom:6px;"><strong>Method:</strong> ${escapeHtml(c.cps_invitation_method)}</p>` : ''}
+                <p style="white-space:pre-wrap;">${c.cps_invitation_details ? escapeHtml(c.cps_invitation_details) : '<em style="color:var(--gray-400);">No details provided.</em>'}</p>
             </div>
 
             <div class="case-section card" style="margin-bottom:12px;">
@@ -4015,19 +4022,19 @@ window._fv.showCaseStudyDetail = async (id) => {
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                     <div>
                         <h4 style="font-size:12px;font-weight:600;color:var(--gray-500);text-transform:uppercase;margin-bottom:4px;">Closing Details</h4>
-                        <p style="white-space:pre-wrap;">${c.closing_details || '-'}</p>
+                        <p style="white-space:pre-wrap;">${c.closing_details ? escapeHtml(c.closing_details) : '-'}</p>
                     </div>
                     <div>
                         <h4 style="font-size:12px;font-weight:600;color:var(--gray-500);text-transform:uppercase;margin-bottom:4px;">The Sales Idea</h4>
-                        <p style="white-space:pre-wrap;">${c.sales_idea || '-'}</p>
+                        <p style="white-space:pre-wrap;">${c.sales_idea ? escapeHtml(c.sales_idea) : '-'}</p>
                     </div>
                     <div>
                         <h4 style="font-size:12px;font-weight:600;color:var(--gray-500);text-transform:uppercase;margin-bottom:4px;">Execution Plan</h4>
-                        <p style="white-space:pre-wrap;">${c.plan_details || '-'}</p>
+                        <p style="white-space:pre-wrap;">${c.plan_details ? escapeHtml(c.plan_details) : '-'}</p>
                     </div>
                     <div>
                         <h4 style="font-size:12px;font-weight:600;color:var(--gray-500);text-transform:uppercase;margin-bottom:4px;">Success Story & Lessons</h4>
-                        <p style="white-space:pre-wrap;">${c.success_story || '-'}</p>
+                        <p style="white-space:pre-wrap;">${c.success_story ? escapeHtml(c.success_story) : '-'}</p>
                     </div>
                 </div>
             </div>
@@ -4038,19 +4045,19 @@ window._fv.showCaseStudyDetail = async (id) => {
                 ${c.key_success_factor ? `
                 <div style="margin-bottom:12px;">
                     <h4 style="font-size:12px;font-weight:600;color:var(--gray-500);text-transform:uppercase;margin-bottom:4px;">Key Success Factor</h4>
-                    <p style="white-space:pre-wrap;">${c.key_success_factor}</p>
+                    <p style="white-space:pre-wrap;">${escapeHtml(c.key_success_factor)}</p>
                 </div>` : ''}
                 ${c.script ? `
                 <div>
                     <h4 style="font-size:12px;font-weight:600;color:var(--gray-500);text-transform:uppercase;margin-bottom:4px;">Sales Script</h4>
                     <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:6px;padding:12px;">
-                        <p style="white-space:pre-wrap;font-family:monospace;font-size:13px;">${c.script}</p>
+                        <p style="white-space:pre-wrap;font-family:monospace;font-size:13px;">${escapeHtml(c.script)}</p>
                     </div>
                 </div>` : ''}
             </div>` : ''}
 
             <div style="font-size:12px;color:var(--gray-400);margin-top:8px;">
-                <span>Created by <strong>${creatorName}</strong> on ${new Date(c.created_at).toLocaleDateString()}</span>
+                <span>Created by <strong>${escapeHtml(creatorName)}</strong> on ${new Date(c.created_at).toLocaleDateString()}</span>
                 ${c.updated_at ? ` &middot; Updated ${new Date(c.updated_at).toLocaleString()}` : ''}
             </div>
         </div>
@@ -4174,7 +4181,7 @@ window._fv.openCaseStudyModal = async (id = null, defaultType = null) => {
                         <label>Product</label>
                         <select id="case-product" class="form-control">
                             <option value="">Select Product...</option>
-                            ${((await window.AppDataStore.getAll('products')) || []).map(p => `<option value="${p.name}" ${c && c.product === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
+                            ${((await window.AppDataStore.getAll('products')) || []).map(p => `<option value="${escapeHtml(p.name || '')}" ${c && c.product === p.name ? 'selected' : ''}>${escapeHtml(p.name || '')}</option>`).join('')}
                         </select>
                     </div>
                 </div>
@@ -4208,34 +4215,34 @@ window._fv.openCaseStudyModal = async (id = null, defaultType = null) => {
                 <div class="form-group">
                     <label>CPS Invitation Details</label>
                     <p class="help-text">Who invited? Call/Event/Referral? Special circumstances?</p>
-                    <textarea id="case-cps-details" class="form-control" rows="8">${c ? (c.cps_invitation_details || '') : ''}</textarea>
+                    <textarea id="case-cps-details" class="form-control" rows="8">${c ? escapeHtml(c.cps_invitation_details || '') : ''}</textarea>
                 </div>
             </div>
 
             <div id="case-tab-closing" class="modal-tab-content">
                 <div class="form-group">
                     <label>Closing Details</label>
-                    <textarea id="case-closing-details" class="form-control" rows="3" placeholder="Key discussions, objections overcome...">${c ? (c.closing_details || '') : ''}</textarea>
+                    <textarea id="case-closing-details" class="form-control" rows="3" placeholder="Key discussions, objections overcome...">${c ? escapeHtml(c.closing_details || '') : ''}</textarea>
                 </div>
                 <div class="form-group">
                     <label>The Sales Idea</label>
-                    <textarea id="case-sales-idea" class="form-control" rows="3" placeholder="The core logic that worked...">${c ? (c.sales_idea || '') : ''}</textarea>
+                    <textarea id="case-sales-idea" class="form-control" rows="3" placeholder="The core logic that worked...">${c ? escapeHtml(c.sales_idea || '') : ''}</textarea>
                 </div>
                 <div class="form-group">
                     <label>Plan Details</label>
-                    <textarea id="case-plan-details" class="form-control" rows="3" placeholder="Follow-up sequence, bundling...">${c ? (c.plan_details || '') : ''}</textarea>
+                    <textarea id="case-plan-details" class="form-control" rows="3" placeholder="Follow-up sequence, bundling...">${c ? escapeHtml(c.plan_details || '') : ''}</textarea>
                 </div>
                 <div class="form-group">
                     <label>Overall Success Story</label>
-                    <textarea id="case-success-story" class="form-control" rows="3" placeholder="Testimonial, lessons learned...">${c ? (c.success_story || '') : ''}</textarea>
+                    <textarea id="case-success-story" class="form-control" rows="3" placeholder="Testimonial, lessons learned...">${c ? escapeHtml(c.success_story || '') : ''}</textarea>
                 </div>
                 <div class="form-group">
                     <label>Key Success Factor</label>
-                    <textarea id="case-key-success-factor" class="form-control" rows="3" placeholder="The single most important factor that made this case succeed...">${c ? (c.key_success_factor || '') : ''}</textarea>
+                    <textarea id="case-key-success-factor" class="form-control" rows="3" placeholder="The single most important factor that made this case succeed...">${c ? escapeHtml(c.key_success_factor || '') : ''}</textarea>
                 </div>
                 <div class="form-group">
                     <label>Sales Script</label>
-                    <textarea id="case-script" class="form-control" rows="4" placeholder="The exact words, pitch, or script that worked...">${c ? (c.script || '') : ''}</textarea>
+                    <textarea id="case-script" class="form-control" rows="4" placeholder="The exact words, pitch, or script that worked...">${c ? escapeHtml(c.script || '') : ''}</textarea>
                 </div>
             </div>
         </div>
@@ -4328,6 +4335,7 @@ window._fv.switchModalTab = (e, tabId) => {
 };
 
 window._fv.searchCaseEntities = async (query) => {
+    const { escapeHtml } = window._crmUtils || {};
     const results = document.getElementById('case-entity-results');
     if (!results) return;
     if (!query || query.length < 2) {
@@ -4346,11 +4354,11 @@ window._fv.searchCaseEntities = async (query) => {
     let html = '';
     if (prospects.length > 0) {
         html += '<div class="search-category">Prospects</div>';
-        html += prospects.map(p => `<div class="search-result-item" onclick="app.selectCaseEntity('${p.id}', 'prospect', '${p.full_name.replace("'", "\\'")}')">${p.full_name}</div>`).join('');
+        html += prospects.map(p => `<div class="search-result-item" onclick="app.selectCaseEntity('${p.id}', 'prospect', '${p.full_name.replace("'", "\\'")}')">${escapeHtml(p.full_name || '')}</div>`).join('');
     }
     if (customers.length > 0) {
         html += '<div class="search-category">Customers</div>';
-        html += customers.map(c => `<div class="search-result-item" onclick="app.selectCaseEntity('${c.id}', 'customer', '${c.full_name.replace("'", "\\'")}')">${c.full_name}</div>`).join('');
+        html += customers.map(c => `<div class="search-result-item" onclick="app.selectCaseEntity('${c.id}', 'customer', '${c.full_name.replace("'", "\\'")}')">${escapeHtml(c.full_name || '')}</div>`).join('');
     }
 
     if (html === '') {
@@ -5170,9 +5178,9 @@ window._fv._showAgentProfile = async (agentId) => {
                     <span class="status-badge status-${agent.status}">${agent.status?.toUpperCase() || 'ACTIVE'}</span>
                 </div>
                 <div style="display:flex; gap:12px; color:var(--gray-500); font-size:14px;">
-                    <span>Agent ID: ${agent.agent_code || '—'}</span>
-                    <span><i class="fas fa-user-tie"></i> ${agent.role || 'Consultant'}</span>
-                    <span><i class="fas fa-users"></i> ${agent.team || 'Sales'}</span>
+                    <span>Agent ID: ${escapeHtml(agent.agent_code || '—')}</span>
+                    <span><i class="fas fa-user-tie"></i> ${escapeHtml(agent.role || 'Consultant')}</span>
+                    <span><i class="fas fa-users"></i> ${escapeHtml(agent.team || 'Sales')}</span>
                 </div>
             </div>
             <div class="header-actions">
@@ -5219,11 +5227,11 @@ window._fv._showAgentProfile = async (agentId) => {
                 <div class="performance-stats">
                     <div class="stat-row">
                         <span class="stat-label">Phone:</span>
-                        <span class="stat-value">${agent.phone || '012-1234567'}</span>
+                        <span class="stat-value">${escapeHtml(agent.phone || '012-1234567')}</span>
                     </div>
                     <div class="stat-row">
                         <span class="stat-label">Email:</span>
-                        <span class="stat-value">${agent.email || 'agent@fengshui.com'}</span>
+                        <span class="stat-value">${escapeHtml(agent.email || 'agent@fengshui.com')}</span>
                     </div>
                     <div class="stat-row">
                         <span class="stat-label">Join Date:</span>
@@ -5984,7 +5992,7 @@ window._fv.showPipelineView = async (container) => {
 // ══════════════ showMarketingListsView ══════════════
 window._fv.showMarketingListsView = async (container) => {
     const _currentUser = window._appState?.cu;
-    const { isSystemAdmin, isMarketingManager } = window._crmUtils || {};
+    const { isSystemAdmin, isMarketingManager, escapeHtml } = window._crmUtils || {};
     const _getUserLevelLocal = (user) => {
         if (!user?.role) return 99;
         const m = String(user.role).match(/Level\s+(\d+)\b/i);
@@ -6111,17 +6119,17 @@ window._fv.showMarketingListsView = async (container) => {
                                         ? `<img loading="lazy" decoding="async" src="${item.poster_url}" crossorigin="anonymous" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer;" onclick="app.viewProductImage('${item.poster_url}','Poster')" title="View poster">`
                                         : `<span style="color:var(--gray-300);font-size:18px;" title="No poster">🖼️</span>`}
                                 </td>
-                                <td><strong>${item.name}</strong><br><small class="text-muted">${item.remarks || ''}</small></td>
-                                <td>${item.category || '-'}</td>
-                                <td>${item.functions_description || '-'}</td>
-                                <td>${item.description || '-'}</td>
+                                <td><strong>${escapeHtml(item.name || '')}</strong><br><small class="text-muted">${escapeHtml(item.remarks || '')}</small></td>
+                                <td>${escapeHtml(item.category || '-')}</td>
+                                <td>${escapeHtml(item.functions_description || '-')}</td>
+                                <td>${escapeHtml(item.description || '-')}</td>
                                 <td>
                                     <span style="font-weight:600;">RM ${item.price || 0}</span>
                                     <button class="btn-icon" style="margin-left:4px;opacity:0.6;" onclick="app.showProductPriceHistory(${item.id})" title="Price history"><i class="fas fa-history"></i></button>
                                 </td>
-                                <td>${item.delivery_lead_time || '-'}</td>
-                                <td>${item.product_dimension || '-'}</td>
-                                <td>${item.product_weight || '-'}</td>
+                                <td>${escapeHtml(item.delivery_lead_time || '-')}</td>
+                                <td>${escapeHtml(item.product_dimension || '-')}</td>
+                                <td>${escapeHtml(item.product_weight || '-')}</td>
                                 <td>
                                     <span class="status-badge ${item.is_active ? 'status-active' : 'status-inactive'}">
                                         ${item.is_active ? 'Active' : 'Inactive'}
@@ -6161,7 +6169,7 @@ window._fv.showMarketingListsView = async (container) => {
                             const isActive = item.is_active || item.status === 'active' || item.status === 'Active';
                             const cats = parseEventCategories(item.categories);
                             const catsHtml = cats.length
-                                ? cats.map(c => `<span style="display:inline-block;background:var(--primary-50,#fef3c7);color:var(--primary-700,#92400e);border:1px solid var(--primary-200,#fde68a);border-radius:10px;padding:2px 8px;margin:2px 2px 2px 0;font-size:11px;white-space:nowrap;">${c}</span>`).join('')
+                                ? cats.map(c => `<span style="display:inline-block;background:var(--primary-50,#fef3c7);color:var(--primary-700,#92400e);border:1px solid var(--primary-200,#fde68a);border-radius:10px;padding:2px 8px;margin:2px 2px 2px 0;font-size:11px;white-space:nowrap;">${escapeHtml(c)}</span>`).join('')
                                 : '<span class="text-muted">-</span>';
                             return `
                             <tr style="${!isActive ? 'opacity: 0.6; background: #f9fafb;' : ''}">
@@ -6171,15 +6179,15 @@ window._fv.showMarketingListsView = async (container) => {
                                         ? `<img loading="lazy" decoding="async" src="${item.poster_url}" crossorigin="anonymous" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer;" onclick="app.viewProductImage('${item.poster_url}','Poster')" title="View poster">`
                                         : `<span style="color:var(--gray-300);font-size:18px;" title="No poster">🖼️</span>`}
                                 </td>
-                                <td><strong>${item.event_title || item.title || ''}</strong><br><small class="text-muted">${item.description || ''}</small></td>
+                                <td><strong>${escapeHtml(item.event_title || item.title || '')}</strong><br><small class="text-muted">${escapeHtml(item.description || '')}</small></td>
                                 <td>${item.ticket_price || '-'}</td>
                                 <td>${item.early_bird_price || '-'}</td>
                                 <td>${item.group_purchase_price || '-'}</td>
-                                <td>${item.duration || '-'}</td>
-                                <td>${item.target_group || '-'}</td>
-                                <td>${item.location || '-'}</td>
-                                <td>${item.speaker || '-'}</td>
-                                <td>${item.remarks || '-'}</td>
+                                <td>${escapeHtml(item.duration || '-')}</td>
+                                <td>${escapeHtml(item.target_group || '-')}</td>
+                                <td>${escapeHtml(item.location || '-')}</td>
+                                <td>${escapeHtml(item.speaker || '-')}</td>
+                                <td>${escapeHtml(item.remarks || '-')}</td>
                                 <td>
                                     <span class="status-badge ${isActive ? 'status-active' : 'status-inactive'}">
                                         ${isActive ? 'Active' : 'Inactive'}
@@ -6216,9 +6224,9 @@ window._fv.showMarketingListsView = async (container) => {
                                         ${seqOptions.map(n => `<option value="${n}" ${(item.sequence || idx + 1) === n ? 'selected' : ''}>${n}</option>`).join('')}
                                     </select>
                                 </td>
-                                <td><strong>${item.name}</strong></td>
-                                <td>${item.location || '-'}</td>
-                                <td>${item.address || '-'}</td>
+                                <td><strong>${escapeHtml(item.name || '')}</strong></td>
+                                <td>${escapeHtml(item.location || '-')}</td>
+                                <td>${escapeHtml(item.address || '-')}</td>
                                 <td>${item.waze_link ? `<a href="${item.waze_link}" target="_blank" rel="noopener" style="color: var(--primary); text-decoration: none;" title="Open in Waze"><i class="fas fa-map-marker-alt"></i> Waze</a>` : '-'}</td>
                                 <td>
                                     <button class="btn-icon" onclick="app.openMarketingListEditModal('${item.id}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
@@ -6248,13 +6256,13 @@ window._fv.showMarketingListsView = async (container) => {
                     <tbody>
                         ${data.length === 0 ? '<tr><td colspan="9" style="text-align:center; color: var(--gray-400); padding: 32px;">No Bujishu items added yet.</td></tr>' : data.map(item => `
                             <tr style="${!item.is_active ? 'opacity: 0.6; background: #f9fafb;' : ''}">
-                                <td><strong>${item.name}</strong></td>
-                                <td>${item.category || '-'}</td>
-                                <td>${item.function_desc || '-'}</td>
+                                <td><strong>${escapeHtml(item.name || '')}</strong></td>
+                                <td>${escapeHtml(item.category || '-')}</td>
+                                <td>${escapeHtml(item.function_desc || '-')}</td>
                                 <td>${item.price || 0}</td>
-                                <td>${item.delivery_lead_time || '-'}</td>
-                                <td>${item.product_dimension || '-'}</td>
-                                <td>${item.product_weight || '-'}</td>
+                                <td>${escapeHtml(item.delivery_lead_time || '-')}</td>
+                                <td>${escapeHtml(item.product_dimension || '-')}</td>
+                                <td>${escapeHtml(item.product_weight || '-')}</td>
                                 <td>
                                     <span class="status-badge ${item.is_active ? 'status-active' : 'status-inactive'}">
                                         ${item.is_active ? 'Active' : 'Inactive'}
@@ -6292,13 +6300,13 @@ window._fv.showMarketingListsView = async (container) => {
                                 : '<span class="text-muted" style="font-size:11px;">Not configured</span>';
                             return `
                             <tr style="${!item.is_active ? 'opacity: 0.6; background: #f9fafb;' : ''}">
-                                <td><strong>${item.name}</strong></td>
-                                <td>${item.category || '-'}</td>
-                                <td>${item.functions || '-'}</td>
-                                <td>${item.pills_bottles || '-'}</td>
+                                <td><strong>${escapeHtml(item.name || '')}</strong></td>
+                                <td>${escapeHtml(item.category || '-')}</td>
+                                <td>${escapeHtml(item.functions || '-')}</td>
+                                <td>${escapeHtml(item.pills_bottles || '-')}</td>
                                 <td>${dosageHtml}</td>
                                 <td>${item.price || 0}</td>
-                                <td>${item.delivery_lead_time || '-'}</td>
+                                <td>${escapeHtml(item.delivery_lead_time || '-')}</td>
                                 <td>
                                     <span class="status-badge ${item.is_active ? 'status-active' : 'status-inactive'}">
                                         ${item.is_active ? 'Active' : 'Inactive'}
@@ -6386,6 +6394,7 @@ window._fv.showMarketingListsView = async (container) => {
 
 // ══════════════ showMonthlyPromotionView ══════════════
 window._fv.showMonthlyPromotionView = async (container) => {
+    const { escapeHtml } = window._crmUtils || {};
     const today = new Date(); today.setHours(0,0,0,0);
     const allPromos = await window.AppDataStore.getAll('promotions');
 
@@ -6423,7 +6432,7 @@ window._fv.showMonthlyPromotionView = async (container) => {
         // Payment types
         const paymentHtml = (p.payment_types || []).length > 0
             ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">${(p.payment_types || []).map(pt =>
-                `<span style="font-size:11px;background:#f3f4f6;border:1px solid #e5e7eb;border-radius:4px;padding:1px 7px;color:#555;">${pt}</span>`
+                `<span style="font-size:11px;background:#f3f4f6;border:1px solid #e5e7eb;border-radius:4px;padding:1px 7px;color:#555;">${escapeHtml(pt)}</span>`
               ).join('')}</div>`
             : '';
 
@@ -6436,15 +6445,15 @@ window._fv.showMonthlyPromotionView = async (container) => {
             <div style="background:#fff;border:1px solid var(--gray-200);border-radius:10px;padding:18px 22px;box-shadow:var(--shadow-sm);">
                 <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;">
                     <div style="flex:1;min-width:0;">
-                        <div style="font-size:17px;font-weight:700;color:#8B1A1A;margin-bottom:4px;">${p.package_name || p.name || 'Promotion'}</div>
-                        ${validProductNames.length > 0 ? `<div style="font-size:12px;color:var(--gray-500);margin-bottom:6px;"><i class="fas fa-box" style="margin-right:4px;"></i>${validProductNames.join(', ')}</div>` : ''}
-                        ${p.requirement ? `<div style="font-size:12px;color:var(--gray-600);margin-bottom:4px;"><i class="fas fa-check-circle" style="color:#8B1A1A;margin-right:4px;"></i>${p.requirement}</div>` : ''}
+                        <div style="font-size:17px;font-weight:700;color:#8B1A1A;margin-bottom:4px;">${escapeHtml(p.package_name || p.name || 'Promotion')}</div>
+                        ${validProductNames.length > 0 ? `<div style="font-size:12px;color:var(--gray-500);margin-bottom:6px;"><i class="fas fa-box" style="margin-right:4px;"></i>${escapeHtml(validProductNames.join(', '))}</div>` : ''}
+                        ${p.requirement ? `<div style="font-size:12px;color:var(--gray-600);margin-bottom:4px;"><i class="fas fa-check-circle" style="color:#8B1A1A;margin-right:4px;"></i>${escapeHtml(p.requirement)}</div>` : ''}
                         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px;">
                             ${timeFrame}
                             ${slotsHtml}
                         </div>
                         ${paymentHtml}
-                        ${p.remarks ? `<div style="font-size:11px;color:var(--gray-400);margin-top:6px;"><i class="fas fa-info-circle" style="margin-right:4px;"></i>${p.remarks}</div>` : ''}
+                        ${p.remarks ? `<div style="font-size:11px;color:var(--gray-400);margin-top:6px;"><i class="fas fa-info-circle" style="margin-right:4px;"></i>${escapeHtml(p.remarks)}</div>` : ''}
                     </div>
                     <div style="text-align:right;flex-shrink:0;min-width:90px;">
                         ${p.price ? `<div style="font-size:20px;font-weight:800;color:#8B1A1A;">RM ${parseFloat(p.price).toFixed(2)}</div>` : ''}
@@ -6464,6 +6473,7 @@ window._fv.showMonthlyPromotionView = async (container) => {
 
 // ══════════════ showRankingPerformanceView ══════════════
 window._fv.showRankingPerformanceView = async (container) => {
+    const { escapeHtml } = window._crmUtils || {};
     window._appState.cv = 'ranking';
     // ── Paint skeleton immediately ──────────────────────────────────────
     const _rSkelR = (cols) => `<tr>${Array.from({length:cols},(_,i)=>`<td style="padding:10px 12px;"><div class="skeleton" style="height:14px;border-radius:4px;width:${[30,70,45,40,35,50,45,40,35,35][i%10]}%;"></div></td>`).join('')}</tr>`;
@@ -6586,8 +6596,8 @@ window._fv.showRankingPerformanceView = async (container) => {
                 ${agentStats.slice(0, 3).map((a, i) => `
                     <div style="background:var(--white); border-radius:12px; padding:20px; text-align:center; box-shadow:0 2px 8px rgba(0,0,0,0.06); border-top:4px solid ${i === 0 ? '#FFD700' : i === 1 ? '#C0C0C0' : '#CD7F32'};">
                         <div style="font-size:32px; margin-bottom:8px;">${rankBadge(i)}</div>
-                        <div style="font-size:16px; font-weight:600;">${a.name}</div>
-                        <div style="color:var(--gray-500); font-size:12px; margin-bottom:12px;">${a.team}</div>
+                        <div style="font-size:16px; font-weight:600;">${escapeHtml(a.name)}</div>
+                        <div style="color:var(--gray-500); font-size:12px; margin-bottom:12px;">${escapeHtml(a.team)}</div>
                         <div style="font-size:24px; font-weight:700; color:var(--primary);">${a.performanceScore} pts</div>
                         <div style="font-size:12px; color:var(--gray-500); margin-top:8px;">Sales: RM ${a.sales.toLocaleString()} · CPS: ${a.cps} · Rate: ${a.closingRate}%</div>
                     </div>
@@ -6616,8 +6626,8 @@ window._fv.showRankingPerformanceView = async (container) => {
                         ${agentStats.map((a, i) => `
                             <tr style="${i < 3 ? 'background:var(--primary-50);' : ''}">
                                 <td>${rankBadge(i)}</td>
-                                <td>${a.name}</td>
-                                <td>${a.team}</td>
+                                <td>${escapeHtml(a.name)}</td>
+                                <td>${escapeHtml(a.team)}</td>
                                 <td style="text-align:right; font-weight:600;">${a.performanceScore}</td>
                                 <td style="text-align:right;">${a.cps}</td>
                                 <td style="text-align:right;">RM ${a.sales.toLocaleString()}</td>
@@ -6636,6 +6646,7 @@ window._fv.showRankingPerformanceView = async (container) => {
 // ══════════════ showWorkflowAutomationView ══════════════
 window._fv.showWorkflowAutomationView = async (container) => {
     const _currentUser = window._appState?.cu;
+    const { escapeHtml } = window._crmUtils || {};
 
     // ========== FEATURE: WORKFLOW AUTOMATION ENGINE ==========
 
@@ -6669,7 +6680,7 @@ window._fv.showWorkflowAutomationView = async (container) => {
         return `
             <div style="background:var(--white); border-radius:8px; padding:16px; margin-bottom:12px; border:1px solid var(--gray-200); display:flex; justify-content:space-between; align-items:center;">
                 <div>
-                    <div style="font-weight:600; font-size:14px;">${w.workflow_name}</div>
+                    <div style="font-weight:600; font-size:14px;">${escapeHtml(w.workflow_name || '')}</div>
                     <div style="font-size:12px; color:var(--gray-500); margin-top:4px;">
                         Trigger: <strong>${w.trigger_type}</strong> → Action: <strong>${w.action_type || 'Multiple'}</strong>
                     </div>
@@ -6752,7 +6763,7 @@ window._fv.showWorkflowAutomationView = async (container) => {
             <div style="max-height:70vh; overflow-y:auto;">
                 <div class="form-group">
                     <label>Workflow Name *</label>
-                    <input type="text" id="wf-name" class="form-control" value="${existing?.workflow_name || ''}" placeholder="e.g. Birthday Greeting Workflow">
+                    <input type="text" id="wf-name" class="form-control" value="${escapeHtml(existing?.workflow_name || '')}" placeholder="e.g. Birthday Greeting Workflow">
                 </div>
                 <div class="form-group">
                     <label>Trigger *</label>
@@ -6764,7 +6775,7 @@ window._fv.showWorkflowAutomationView = async (container) => {
                 <div class="form-group" id="wf-conditions-container" style="display:${existing?.trigger_conditions ? 'block' : 'none'};">
                     <label>Conditions (optional)</label>
                     <div id="wf-conditions">
-                        ${existing?.trigger_conditions ? `<input type="text" id="wf-condition-value" class="form-control" value="${existing.trigger_conditions.value || ''}" placeholder="e.g. score threshold: 600">` : ''}
+                        ${existing?.trigger_conditions ? `<input type="text" id="wf-condition-value" class="form-control" value="${escapeHtml(existing.trigger_conditions.value || '')}" placeholder="e.g. score threshold: 600">` : ''}
                     </div>
                 </div>
                 <hr style="margin:16px 0;">
@@ -6777,7 +6788,7 @@ window._fv.showWorkflowAutomationView = async (container) => {
                 </div>
                 <div class="form-group">
                     <label>Action Configuration</label>
-                    <textarea id="wf-action-config" class="form-control" rows="3" placeholder="e.g. Message: Happy Birthday {{name}}! or Tag: VIP Customer">${existing?.action_config || ''}</textarea>
+                    <textarea id="wf-action-config" class="form-control" rows="3" placeholder="e.g. Message: Happy Birthday {{name}}! or Tag: VIP Customer">${escapeHtml(existing?.action_config || '')}</textarea>
                 </div>
                 <div class="form-group">
                     <label>Delay (days after trigger)</label>
@@ -7108,6 +7119,7 @@ window._fv.showNoticeboardView = async (container) => {
 // ══════════════ showMilestonesView ══════════════
 window._fv.showMilestonesView = async (container, targetUserId = null) => {
     const _currentUser = window._appState?.cu;
+    const { escapeHtml } = window._crmUtils || {};
 
     const currentUser = _currentUser;
     if (!currentUser) return;
@@ -7166,7 +7178,7 @@ window._fv.showMilestonesView = async (container, targetUserId = null) => {
                     <span>View:</span>
                     <select onchange="(async()=>{ const vp=document.getElementById('content-viewport'); if(vp) await app.showMilestonesView(vp, this.value||null); })()">
                         <option value="">— My own —</option>
-                        ${allUsers.map(u => `<option value="${u.id}" ${u.id === subjectUserId && viewingOther ? 'selected' : ''}>${u.full_name}</option>`).join('')}
+                        ${allUsers.map(u => `<option value="${u.id}" ${u.id === subjectUserId && viewingOther ? 'selected' : ''}>${escapeHtml(u.full_name || '')}</option>`).join('')}
                     </select>
                 </div>`;
         }
@@ -7194,7 +7206,7 @@ window._fv.showMilestonesView = async (container, targetUserId = null) => {
                 <div class="milestone-inner">
                     <div class="milestone-header">
                         <h1>增运九法</h1>
-                        ${viewingOther ? `<div class="viewer-note">Viewing: ${subjectUser.full_name}</div>` : ''}
+                        ${viewingOther ? `<div class="viewer-note">Viewing: ${escapeHtml(subjectUser.full_name || '')}</div>` : ''}
                     </div>
                     ${adminPicker}
                     <div class="nine-method-grid">
@@ -7232,6 +7244,7 @@ window._fv.showMilestonesView = async (container, targetUserId = null) => {
 // ══════════════ showFudeView ══════════════
 window._fv.showFudeView = async (container) => {
     const _currentUser = window._appState?.cu;
+    const { escapeHtml } = window._crmUtils || {};
 
     const currentUser = _currentUser;
     if (!currentUser) return;
@@ -7264,7 +7277,7 @@ window._fv.showFudeView = async (container) => {
     // --- Helpers ---
     const fmtDate = d => { try { return new Date(d).toLocaleDateString(); } catch(e) { return d || '-'; } };
     const fmtAmt  = v => { try { return 'RM ' + parseFloat(v || 0).toLocaleString('en-MY', { minimumFractionDigits: 2 }); } catch(e) { return v; } };
-    const badge   = (txt, bg, col) => `<span style="padding:2px 8px;border-radius:12px;font-size:0.78rem;background:${bg};color:${col};">${txt}</span>`;
+    const badge   = (txt, bg, col) => `<span style="padding:2px 8px;border-radius:12px;font-size:0.78rem;background:${bg};color:${col};">${escapeHtml(txt)}</span>`;
 
     // --- Content filters ---
     // Sort highlights/news by created_at desc so the newest one is slide 0
@@ -7323,7 +7336,7 @@ window._fv.showFudeView = async (container) => {
             </tr></thead><tbody>
                 ${ranked.map((r, i) => `<tr>
                     <td>${medals[i] || (i + 1)}</td>
-                    <td style="font-weight:600;">${r.name}</td>
+                    <td style="font-weight:600;">${escapeHtml(r.name)}</td>
                     <td>${r.pts}</td>
                     <td>${r.ret.toFixed(2)}</td>
                 </tr>`).join('')}
@@ -7342,7 +7355,7 @@ window._fv.showFudeView = async (container) => {
                 <th scope="col">Title</th><th scope="col">Type</th><th scope="col">Status</th><th scope="col">Created</th><th scope="col">Actions</th>
             </tr></thead><tbody>
                 ${highlights.length ? highlights.map(h => `<tr>
-                    <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;">${h.title}</td>
+                    <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(h.title || '')}</td>
                     <td>${badge(h.type || '-', '#e0e7ff', '#3730a3')}</td>
                     <td>${badge(h.is_active ? 'Active' : 'Hidden', h.is_active ? '#d1fae5' : '#f3f4f6', h.is_active ? '#065f46' : '#6b7280')}</td>
                     <td>${fmtDate(h.created_at)}</td>
@@ -7367,11 +7380,11 @@ window._fv.showFudeView = async (container) => {
                 ${allRewards.length ? allRewards.map(r => {
                     const u = allUsersForReward.find(u => u.id === r.user_id);
                     return `<tr>
-                        <td style="font-weight:600;">${u ? u.full_name : 'User ' + r.user_id}</td>
+                        <td style="font-weight:600;">${u ? escapeHtml(u.full_name || '') : 'User ' + r.user_id}</td>
                         <td>${badge(r.action_type || '-', '#e0e7ff', '#3730a3')}</td>
                         <td>${r.fudi_points || 0}</td>
                         <td>${parseFloat(r.sharing_return || 0).toFixed(2)}</td>
-                        <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;">${r.description || '-'}</td>
+                        <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(r.description || '-')}</td>
                         <td>${fmtDate(r.created_at)}</td>
                         <td><button class="btn danger btn-sm" onclick="event.stopPropagation();app.deleteReward(${r.id})"><i class="fas fa-trash"></i></button></td>
                     </tr>`;
@@ -7384,7 +7397,7 @@ window._fv.showFudeView = async (container) => {
     if (isCustomer) {
         const rows = myPurchases.length
             ? myPurchases.map(p => `<tr>
-                <td>${p.product_name || p.package_name || p.solution || '-'}</td>
+                <td>${escapeHtml(p.product_name || p.package_name || p.solution || '-')}</td>
                 <td>${fmtAmt(p.amount || p.total_amount)}</td>
                 <td>${badge(p.status || 'pending', p.status === 'completed' ? '#d1fae5' : '#fef3c7', p.status === 'completed' ? '#065f46' : '#92400e')}</td>
                 <td>${fmtDate(p.purchase_date || p.created_at)}</td>
@@ -7409,8 +7422,8 @@ window._fv.showFudeView = async (container) => {
                 ${n._signedUrl ? `<img loading="lazy" decoding="async" ${imgSrc(n)} alt="" onerror="this.style.display='none'">` : ''}
                 <div class="fude-carousel-overlay">
                     <span class="fude-carousel-badge">${i === 0 ? 'Latest News' : 'News'}</span>
-                    <h3>${n.title}</h3>
-                    ${n.content ? `<p>${n.content}</p>` : ''}
+                    <h3>${escapeHtml(n.title || '')}</h3>
+                    ${n.content ? `<p>${escapeHtml(n.content)}</p>` : ''}
                     <span class="fude-carousel-date">📅 ${fmtDate(n.created_at)}</span>
                     <button class="fude-carousel-readmore" onclick="event.stopPropagation(); app.openStoryDetail(${n.id})">Read More</button>
                 </div>
@@ -7460,16 +7473,16 @@ window._fv.showFudeView = async (container) => {
                 : '';
             const ph = `<div class="fude-story-card-img-ph" style="display:${s._signedUrl ? 'none' : 'flex'};">📖</div>`;
             const tags = (s.tags || '').split(',').filter(Boolean).slice(0, 2)
-                .map(t => `<span class="fude-story-tag">${t.trim()}</span>`).join('');
+                .map(t => `<span class="fude-story-tag">${escapeHtml(t.trim())}</span>`).join('');
             return `<div class="fude-story-card" onclick="app.openStoryDetail(${s.id})" style="cursor:pointer;">
                 ${imgEl}${ph}
                 <div class="fude-story-card-body">
                     ${tags ? `<div class="fude-story-card-tags">${tags}</div>` : ''}
-                    <h3>${s.title}</h3>
-                    ${s.content ? `<p>${s.content}</p>` : '<p style="flex:1"></p>'}
+                    <h3>${escapeHtml(s.title || '')}</h3>
+                    ${s.content ? `<p>${escapeHtml(s.content)}</p>` : '<p style="flex:1"></p>'}
                     <div class="fude-story-card-footer">
                         <div class="fude-story-card-meta">
-                            <div class="fude-story-card-avatar">${(s.title || 'D')[0].toUpperCase()}</div>
+                            <div class="fude-story-card-avatar">${escapeHtml((s.title || 'D')[0].toUpperCase())}</div>
                             <span>${fmtDate(s.created_at)}</span>
                         </div>
                         <button class="fude-story-readmore" onclick="event.stopPropagation(); app.openStoryDetail(${s.id})">Read More →</button>
@@ -7500,8 +7513,8 @@ window._fv.showFudeView = async (container) => {
         if (dynamicTips.length) {
             tipCols.push(`<div class="fude-tip-col">
                 <div class="fude-tip-icon">💡</div>
-                <h3>${dynamicTips[0].title}</h3>
-                ${dynamicTips[0].content ? `<p>${dynamicTips[0].content}</p>` : ''}
+                <h3>${escapeHtml(dynamicTips[0].title || '')}</h3>
+                ${dynamicTips[0].content ? `<p>${escapeHtml(dynamicTips[0].content)}</p>` : ''}
                 <button class="fude-tip-link">Learn More →</button>
             </div>`);
         } else {
@@ -7544,7 +7557,7 @@ window._fv.showFudeView = async (container) => {
                 <td>${badge(r.action_type || '-', '#e0e7ff', '#3730a3')}</td>
                 <td style="font-weight:600;">${r.fudi_points || 0}</td>
                 <td>${parseFloat(r.sharing_return || 0).toFixed(2)}</td>
-                <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;">${r.description || '-'}</td>
+                <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(r.description || '-')}</td>
                 <td>${fmtDate(r.created_at)}</td>
             </tr>`).join('')}
            </tbody></table></div>`;

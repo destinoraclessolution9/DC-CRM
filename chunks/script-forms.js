@@ -264,7 +264,7 @@
         const npsColor = nps === null ? '#9ca3af' : nps >= 50 ? '#10b981' : nps >= 0 ? '#f59e0b' : '#ef4444';
         const html = `
             <div>
-                <p style="color:var(--gray-600); margin:0 0 20px;">${survey?.question}</p>
+                <p style="color:var(--gray-600); margin:0 0 20px;">${esc(survey?.question)}</p>
                 <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:20px;">
                     <div style="text-align:center; padding:16px; background:var(--gray-50); border-radius:8px;">
                         <div style="font-size:28px; font-weight:700; color:${npsColor};">${nps !== null ? nps : '—'}</div>
@@ -293,9 +293,9 @@
                         </tr></thead>
                         <tbody>${responses.slice(0,20).map(r => `
                             <tr style="border-bottom:1px solid var(--gray-100);">
-                                <td style="padding:10px;">${r.respondent_name || 'Anonymous'}</td>
+                                <td style="padding:10px;">${esc(r.respondent_name || 'Anonymous')}</td>
                                 <td style="padding:10px;"><span style="font-weight:700; color:${r.score>=9?'#10b981':r.score>=7?'#f59e0b':'#ef4444'};">${r.score}/10</span></td>
-                                <td style="padding:10px; color:var(--gray-600); font-size:13px;">${r.feedback || '—'}</td>
+                                <td style="padding:10px; color:var(--gray-600); font-size:13px;">${esc(r.feedback || '—')}</td>
                                 <td style="padding:10px; color:var(--gray-400); font-size:12px;">${r.submitted_at ? new Date(r.submitted_at).toLocaleDateString() : '—'}</td>
                             </tr>
                         `).join('')}</tbody>
@@ -395,9 +395,9 @@
             <div>
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">
                     <div><span style="color:var(--gray-500);">Status:</span> ${renderContractStatusBadge(c.status)}</div>
-                    <div><span style="color:var(--gray-500);">Signed by:</span> <strong>${c.signer_name || '—'}</strong></div>
+                    <div><span style="color:var(--gray-500);">Signed by:</span> <strong>${esc(c.signer_name || '—')}</strong></div>
                     <div><span style="color:var(--gray-500);">Signed at:</span> <span>${c.signed_at ? new Date(c.signed_at).toLocaleString() : '—'}</span></div>
-                    <div><span style="color:var(--gray-500);">File:</span> ${c.file_name || '—'}</div>
+                    <div><span style="color:var(--gray-500);">File:</span> ${esc(c.file_name || '—')}</div>
                 </div>
                 ${c.signature_data_url ? `
                     <div>
@@ -426,9 +426,9 @@
                         ${contracts.map(c => `
                             <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 16px; background:var(--gray-50); border-radius:8px; border:1px solid var(--gray-200);">
                                 <div>
-                                    <strong>${c.title}</strong>
+                                    <strong>${esc(c.title)}</strong>
                                     <span style="margin-left:8px;">${renderContractStatusBadge(c.status)}</span>
-                                    <div style="font-size:12px; color:var(--gray-400); margin-top:2px;">${c.file_name || ''} ${c.created_at ? '· '+new Date(c.created_at).toLocaleDateString() : ''}</div>
+                                    <div style="font-size:12px; color:var(--gray-400); margin-top:2px;">${esc(c.file_name || '')} ${c.created_at ? '· '+new Date(c.created_at).toLocaleDateString() : ''}</div>
                                 </div>
                                 <div style="display:flex; gap:6px;">
                                     ${c.status === 'draft' ? `<button class="btn secondary" style="font-size:12px; padding:4px 10px;" onclick="app.sendContractForSigning(${c.id})">Send</button>` : ''}
@@ -537,15 +537,15 @@
             const val = values[def.field_key] || '';
             let input = '';
             if (def.type === 'dropdown') {
-                input = `<select id="cf-input-${def.field_key}" class="form-control">${(def.options||[]).map(o=>`<option value="${o}" ${val===o?'selected':''}>${o}</option>`).join('')}</select>`;
+                input = `<select id="cf-input-${def.field_key}" class="form-control">${(def.options||[]).map(o=>`<option value="${esc(o)}" ${val===o?'selected':''}>${esc(o)}</option>`).join('')}</select>`;
             } else if (def.type === 'number') {
-                input = `<input type="number" id="cf-input-${def.field_key}" class="form-control" value="${val}">`;
+                input = `<input type="number" id="cf-input-${def.field_key}" class="form-control" value="${esc(val)}">`;
             } else if (def.type === 'date') {
-                input = `<input type="date" id="cf-input-${def.field_key}" class="form-control" value="${val}">`;
+                input = `<input type="date" id="cf-input-${def.field_key}" class="form-control" value="${esc(val)}">`;
             } else {
-                input = `<input type="text" id="cf-input-${def.field_key}" class="form-control" value="${val}">`;
+                input = `<input type="text" id="cf-input-${def.field_key}" class="form-control" value="${esc(val)}">`;
             }
-            return `<div style="margin-bottom:12px;"><label style="display:block; font-weight:500; margin-bottom:4px; font-size:14px;">${def.label}${def.is_required?' <span style="color:var(--error);">*</span>':''}</label>${input}</div>`;
+            return `<div style="margin-bottom:12px;"><label style="display:block; font-weight:500; margin-bottom:4px; font-size:14px;">${esc(def.label)}${def.is_required?' <span style="color:var(--error);">*</span>':''}</label>${input}</div>`;
         }).join('');
         return `<div style="border-top:1px solid var(--gray-200); margin-top:16px; padding-top:16px;"><h4 style="font-size:13px; text-transform:uppercase; color:var(--gray-400); letter-spacing:0.5px; margin:0 0 12px;">Custom Fields</h4>${inputs}</div>`;
     };
@@ -571,7 +571,7 @@
         const vals = (await AppDataStore.getAll('custom_field_values').catch(() => [])).filter(v => v.entity_type === entityType && v.entity_id == entityId);
         const valueMap = {};
         vals.forEach(v => { valueMap[v.field_key] = v.value; });
-        const rows = defs.map(def => `<div style="display:flex; justify-content:space-between; margin-bottom:8px;"><span style="color:var(--gray-500);">${def.label}:</span><strong>${valueMap[def.field_key] || '—'}</strong></div>`).join('');
+        const rows = defs.map(def => `<div style="display:flex; justify-content:space-between; margin-bottom:8px;"><span style="color:var(--gray-500);">${esc(def.label)}:</span><strong>${esc(valueMap[def.field_key] || '—')}</strong></div>`).join('');
         return `<div style="border-top:1px solid var(--gray-100); margin-top:16px; padding-top:16px;"><h5 style="font-size:13px; text-transform:uppercase; color:var(--gray-400); letter-spacing:0.5px; margin:0 0 12px;">Custom Fields</h5>${rows}</div>`;
     };
 
@@ -589,7 +589,7 @@
         const portalUrl = `${window.location.origin}/portal.html?token=${token}`;
         UI.showModal('Customer Portal Link', `
             <div>
-                <p>Share this link with <strong>${customer.full_name}</strong>. It expires in 7 days.</p>
+                <p>Share this link with <strong>${esc(customer.full_name)}</strong>. It expires in 7 days.</p>
                 <div style="display:flex; gap:8px; margin-bottom:12px;">
                     <input type="text" id="portal-link-input" value="${portalUrl}" readonly style="flex:1; padding:8px; border:1px solid var(--border); border-radius:6px; font-size:13px; background:var(--gray-50);">
                     <button class="btn primary" onclick="navigator.clipboard.writeText(document.getElementById('portal-link-input').value).then(()=>UI.toast.success('Copied!'))"><i class="fas fa-copy"></i></button>

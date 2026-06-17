@@ -231,7 +231,7 @@ const renderWorkflowCard = (w) => {
     return `
         <div style="background:var(--white); border-radius:8px; padding:16px; margin-bottom:12px; border:1px solid var(--gray-200); display:flex; justify-content:space-between; align-items:center;">
             <div>
-                <div style="font-weight:600; font-size:14px;">${w.workflow_name}</div>
+                <div style="font-weight:600; font-size:14px;">${escapeHtml(w.workflow_name)}</div>
                 <div style="font-size:12px; color:var(--gray-500); margin-top:4px;">
                     Trigger: <strong>${w.trigger_type}</strong> → Action: <strong>${w.action_type || 'Multiple'}</strong>
                 </div>
@@ -289,7 +289,7 @@ const openCreateWorkflowModal = async (workflowId = null) => {
         <div style="max-height:70vh; overflow-y:auto;">
             <div class="form-group">
                 <label>Workflow Name *</label>
-                <input type="text" id="wf-name" class="form-control" value="${existing?.workflow_name || ''}" placeholder="e.g. Birthday Greeting Workflow">
+                <input type="text" id="wf-name" class="form-control" value="${escapeHtml(existing?.workflow_name || '')}" placeholder="e.g. Birthday Greeting Workflow">
             </div>
             <div class="form-group">
                 <label>Trigger *</label>
@@ -301,7 +301,7 @@ const openCreateWorkflowModal = async (workflowId = null) => {
             <div class="form-group" id="wf-conditions-container" style="display:${existing?.trigger_conditions ? 'block' : 'none'};">
                 <label>Conditions (optional)</label>
                 <div id="wf-conditions">
-                    ${existing?.trigger_conditions ? `<input type="text" id="wf-condition-value" class="form-control" value="${existing.trigger_conditions.value || ''}" placeholder="e.g. score threshold: 600">` : ''}
+                    ${existing?.trigger_conditions ? `<input type="text" id="wf-condition-value" class="form-control" value="${escapeHtml(existing.trigger_conditions.value || '')}" placeholder="e.g. score threshold: 600">` : ''}
                 </div>
             </div>
             <hr style="margin:16px 0;">
@@ -314,7 +314,7 @@ const openCreateWorkflowModal = async (workflowId = null) => {
             </div>
             <div class="form-group">
                 <label>Action Configuration</label>
-                <textarea id="wf-action-config" class="form-control" rows="3" placeholder="e.g. Message: Happy Birthday {{name}}! or Tag: VIP Customer">${existing?.action_config || ''}</textarea>
+                <textarea id="wf-action-config" class="form-control" rows="3" placeholder="e.g. Message: Happy Birthday {{name}}! or Tag: VIP Customer">${escapeHtml(existing?.action_config || '')}</textarea>
             </div>
             <div class="form-group">
                 <label>Delay (days after trigger)</label>

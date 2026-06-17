@@ -560,14 +560,14 @@ const renderProspectCustomerFilters = async (isCustomer = false) => {
                 <label>Has Purchased</label>
                 <select id="filter-prospect-has-purchased" class="form-control">
                     <option value="">Select Product</option>
-                    ${products.map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
+                    ${products.map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join('')}
                 </select>
             </div>
             <div class="filter-group">
                 <label>Has Not Purchased</label>
                 <select id="filter-prospect-not-purchased" class="form-control">
                     <option value="">Select Product</option>
-                    ${products.map(p => `<option value="${p.name}">${p.name}</option>`).join('')}
+                    ${products.map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join('')}
                 </select>
             </div>
         </div>
@@ -956,7 +956,7 @@ const renderConditionGroups = () => {
                             <option value="not_contains" ${cond.operator === 'not_contains' ? 'selected' : ''}>Not Contains</option>
                         </select>
                         
-                        <input type="text" class="condition-value" value="${cond.value || ''}" 
+                        <input type="text" class="condition-value" value="${esc(cond.value || '')}"
                                onchange="app.updateConditionValue(${gIdx}, ${cIdx}, this.value)"
                                placeholder="Value...">
                                

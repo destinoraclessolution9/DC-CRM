@@ -831,26 +831,26 @@ const showApprovalDetail = async (entryId) => {
         detailHtml = `
             <div style="background:#dbeafe; border:1px solid #93c5fd; border-radius:8px; padding:12px; font-size:13px; color:#1e40af; margin-bottom:14px;">
                 <i class="fas fa-user-plus" style="margin-right:6px;"></i>
-                New customer conversion requested by <strong>${agentName}</strong>. Approving will create a permanent Customer profile.
+                New customer conversion requested by <strong>${escapeHtml(agentName)}</strong>. Approving will create a permanent Customer profile.
             </div>
             <div style="font-size:13px; display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                <div><span style="color:var(--gray-500);">Name:</span> <strong>${snapshot.full_name || '-'}</strong></div>
-                <div><span style="color:var(--gray-500);">Phone:</span> ${snapshot.phone || '-'}</div>
-                <div><span style="color:var(--gray-500);">IC:</span> ${snapshot.ic_number || '-'}</div>
-                <div><span style="color:var(--gray-500);">DOB:</span> ${snapshot.date_of_birth || '-'}</div>
-                <div><span style="color:var(--gray-500);">Email:</span> ${snapshot.email || '-'}</div>
-                <div><span style="color:var(--gray-500);">Occupation:</span> ${snapshot.occupation || '-'}</div>
-                <div><span style="color:var(--gray-500);">Ming Gua:</span> ${snapshot.ming_gua || '-'}</div>
-                <div><span style="color:var(--gray-500);">Referrer:</span> ${snapshot.referred_by || '-'}</div>
+                <div><span style="color:var(--gray-500);">Name:</span> <strong>${escapeHtml(snapshot.full_name || '-')}</strong></div>
+                <div><span style="color:var(--gray-500);">Phone:</span> ${escapeHtml(snapshot.phone || '-')}</div>
+                <div><span style="color:var(--gray-500);">IC:</span> ${escapeHtml(snapshot.ic_number || '-')}</div>
+                <div><span style="color:var(--gray-500);">DOB:</span> ${escapeHtml(snapshot.date_of_birth || '-')}</div>
+                <div><span style="color:var(--gray-500);">Email:</span> ${escapeHtml(snapshot.email || '-')}</div>
+                <div><span style="color:var(--gray-500);">Occupation:</span> ${escapeHtml(snapshot.occupation || '-')}</div>
+                <div><span style="color:var(--gray-500);">Ming Gua:</span> ${escapeHtml(snapshot.ming_gua || '-')}</div>
+                <div><span style="color:var(--gray-500);">Referrer:</span> ${escapeHtml(snapshot.referred_by || '-')}</div>
             </div>
             ${cr ? `
                 <div style="border-top:1px solid var(--gray-200); padding-top:12px; margin-top:12px;">
                     <div style="font-weight:600; margin-bottom:8px; font-size:13px;">Sales Record</div>
                     <div style="font-size:13px; display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                        <div><span style="color:var(--gray-500);">Product:</span> ${cr.product || '-'}</div>
+                        <div><span style="color:var(--gray-500);">Product:</span> ${escapeHtml(cr.product || '-')}</div>
                         <div><span style="color:var(--gray-500);">Amount:</span> <strong style="color:#166534;">RM ${saleAmount.toLocaleString()}</strong></div>
-                        <div><span style="color:var(--gray-500);">Invoice:</span> ${cr.invoice_number || '-'}</div>
-                        <div><span style="color:var(--gray-500);">Date:</span> ${cr.closing_date || '-'}</div>
+                        <div><span style="color:var(--gray-500);">Invoice:</span> ${escapeHtml(cr.invoice_number || '-')}</div>
+                        <div><span style="color:var(--gray-500);">Date:</span> ${escapeHtml(cr.closing_date || '-')}</div>
                     </div>
                 </div>
             ` : ''}`;
@@ -1442,7 +1442,7 @@ const renderProspectsTable = async () => {
             return true;
         }).sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''));
         agentFilterEl.innerHTML = '<option value="">All Agents</option>' +
-            visibleAgents.map(a => `<option value="${a.id}"${String(a.id) === currentAgentVal ? ' selected' : ''}>${a.full_name || 'Agent'}</option>`).join('');
+            visibleAgents.map(a => `<option value="${a.id}"${String(a.id) === currentAgentVal ? ' selected' : ''}>${escapeHtml(a.full_name || 'Agent')}</option>`).join('');
         agentFilterEl.dataset.hydrated = '1';
     }
 
@@ -1527,7 +1527,7 @@ const renderProspectsTable = async () => {
         const daysLabel = daysLeft <= 0 ? 'Expired' : `${daysLeft}d left`;
         const relTime = timeAgo(p.last_activity_date);
         const lastActivityHtml = p.last_activity_date
-            ? `<span style="font-weight:600;color:var(--text-primary);">${relTime}</span><br><span class="la-date" style="font-size:11px;color:var(--text-secondary);">${p.last_activity_date}</span>`
+            ? `<span style="font-weight:600;color:var(--text-primary);">${relTime}</span><br><span class="la-date" style="font-size:11px;color:var(--text-secondary);">${escapeHtml(p.last_activity_date)}</span>`
             : '<span style="color:var(--text-secondary);font-style:italic;">No activity</span>';
         const agent = userById.get(String(p.responsible_agent_id));
         const agentName = agent ? agent.full_name : '—';
@@ -1837,7 +1837,7 @@ const openProspectGradePicker = async (prospectId) => {
     };
     const content = `
         <div style="padding:4px 0;">
-            <p style="margin:0 0 14px;color:var(--gray-600);font-size:14px;">Select a grade for <strong>${prospect.full_name || 'this prospect'}</strong>.</p>
+            <p style="margin:0 0 14px;color:var(--gray-600);font-size:14px;">Select a grade for <strong>${escapeHtml(prospect.full_name || 'this prospect')}</strong>.</p>
             <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">
                 ${grades.map(btn).join('')}
                 <button type="button" onclick="(async () => { await app.setProspectGrade(${prospectId}, null); })()" style="padding:14px;font-weight:600;font-size:14px;border-radius:10px;border:2px solid var(--gray-300);background:#fff;color:var(--gray-500);cursor:pointer;" title="Clear grade">None</button>
@@ -2712,7 +2712,7 @@ const switchProfileTab = async (btn, tabName, cId) => {
             html += '<table class="events-table"><thead><tr><th scope="col">Event</th><th scope="col">Date</th><th scope="col">Status</th><th scope="col">Points</th></tr></thead><tbody>';
             for (const r of registrations) {
                 const event = eventsById.get(String(r.event_id));
-                html += `<tr><td>${event?.title || 'Unknown'}</td><td>${r.event_date || '-'}</td><td>${r.attendance_status}</td><td>${r.points_awarded || 0}</td></tr>`;
+                html += `<tr><td>${escapeHtml(event?.title || 'Unknown')}</td><td>${escapeHtml(r.event_date || '-')}</td><td>${r.attendance_status}</td><td>${r.points_awarded || 0}</td></tr>`;
             }
             html += '</tbody></table>';
         }
@@ -2751,10 +2751,10 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
     else if (tab === 'bank') {
         container.innerHTML = `
             <div class="pv-sub">Bank &amp; Payment</div>
-            <div class="pv-row"><span class="pv-lbl">Bank Name</span><span class="pv-val">${customer.bank_name || '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Account Number</span><span class="pv-val">${customer.account_number ? customer.account_number.replace(/^(\d{4}).*(\d{4})$/, '$1-****-$2') : '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Account Holder</span><span class="pv-val">${customer.account_holder || '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Payment Method</span><span class="pv-val">${customer.payment_methods || '-'}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Bank Name</span><span class="pv-val">${escapeHtml(customer.bank_name || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Account Number</span><span class="pv-val">${customer.account_number ? escapeHtml(customer.account_number.replace(/^(\d{4}).*(\d{4})$/, '$1-****-$2')) : '-'}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Account Holder</span><span class="pv-val">${escapeHtml(customer.account_holder || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Payment Method</span><span class="pv-val">${escapeHtml(customer.payment_methods || '-')}</span></div>
             <div class="pv-sub">Customer Metrics</div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px;">
                 <div style="background:var(--gray-50);padding:12px;border-radius:8px;text-align:center;">
@@ -2771,7 +2771,7 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
                 </div>
                 <div style="background:var(--gray-50);padding:12px;border-radius:8px;text-align:center;">
                     <div style="font-size:12px;color:var(--gray-500);">Last Purchase</div>
-                    <div style="font-size:14px;font-weight:600;">${customer.last_purchase_date || '-'}</div>
+                    <div style="font-size:14px;font-weight:600;">${escapeHtml(customer.last_purchase_date || '-')}</div>
                 </div>
             </div>
         `;
@@ -2809,7 +2809,7 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
                 const event = eventsById.get(String(r.event_id));
                 const pts = r.points_awarded || 0;
                 totalPts += pts;
-                rows += `<div class="pv-row"><span class="pv-lbl">${r.event_date || '-'}</span><span class="pv-val" style="display:flex;justify-content:space-between;">${event?.title || 'Unknown'} <span style="color:var(--success);font-weight:600;flex-shrink:0;">+${pts} pts</span></span></div>`;
+                rows += `<div class="pv-row"><span class="pv-lbl">${escapeHtml(r.event_date || '-')}</span><span class="pv-val" style="display:flex;justify-content:space-between;">${escapeHtml(event?.title || 'Unknown')} <span style="color:var(--success);font-weight:600;flex-shrink:0;">+${pts} pts</span></span></div>`;
             }
             container.innerHTML = `
                 ${rows}
@@ -2994,7 +2994,7 @@ const renderPlatformIdsTab = async (customer, containerId = 'profile-tab-content
                 <h4>Internal Platforms</h4>
                 ${internal.map(p => `
                     <div class="platform-row">
-                        <span class="platform-label">${p.platform} ID</span>
+                        <span class="platform-label">${escapeHtml(p.platform || '')} ID</span>
                         <span class="platform-value">${escapeHtml(p.platform_id || '')} <button class="copy-btn" data-copy="${escapeHtml(p.platform_id || '')}" onclick="app.copyToClipboard(this.dataset.copy)"><i class="fas fa-copy"></i></button></span>
                     </div>
                 `).join('')}
@@ -3003,7 +3003,7 @@ const renderPlatformIdsTab = async (customer, containerId = 'profile-tab-content
                 <h4>External Platforms</h4>
                 ${external.map(p => `
                     <div class="platform-row">
-                        <span class="platform-label">${p.platform} ID</span>
+                        <span class="platform-label">${escapeHtml(p.platform || '')} ID</span>
                         <span class="platform-value">${escapeHtml(p.platform_id || '')} <button class="copy-btn" data-copy="${escapeHtml(p.platform_id || '')}" onclick="app.copyToClipboard(this.dataset.copy)"><i class="fas fa-copy"></i></button></span>
                     </div>
                 `).join('')}
@@ -3125,9 +3125,9 @@ const renderPurchaseHistoryTab = async (customer, containerId = 'profile-tab-con
         totalPaid += amt;
         return `
             <tr style="background:#f0fdf4;">
-                <td>${cr.closing_date || customer.customer_since || '-'}</td>
-                <td>${cr.invoice_number || '-'}</td>
-                <td><strong>${cr.product || '-'}</strong> <span style="font-size:11px;color:var(--gray-400);">(Conversion Sale)</span></td>
+                <td>${escapeHtml(cr.closing_date || customer.customer_since || '-')}</td>
+                <td>${escapeHtml(cr.invoice_number || '-')}</td>
+                <td><strong>${escapeHtml(cr.product || '-')}</strong> <span style="font-size:11px;color:var(--gray-400);">(Conversion Sale)</span></td>
                 <td>RM ${amt.toLocaleString()}</td>
                 <td><span class="score-badge" style="font-size:11px;background:#dcfce7;color:#166534;">PAID</span></td>
                 <td>${cr.invoice_file ? `<a href="${cr.invoice_file}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">View</a>` : '-'}</td>
@@ -3193,11 +3193,11 @@ const renderReferralsTab = async (customer, containerId = 'profile-tab-content')
         const prospect = await AppDataStore.getById('prospects', r.referred_prospect_id);
         return `
             <tr>
-                <td><strong>${prospect?.full_name || 'N/A'}</strong></td>
-                <td>${r.relationship}</td>
-                <td>${r.date}</td>
+                <td><strong>${escapeHtml(prospect?.full_name || 'N/A')}</strong></td>
+                <td>${escapeHtml(r.relationship || '')}</td>
+                <td>${escapeHtml(r.date || '')}</td>
                 <td><span class="score-badge ${r.status === 'Active' ? 'score-A+' : 'score-A'}">${r.status}</span></td>
-                <td>${r.reward_status}</td>
+                <td>${escapeHtml(r.reward_status || '')}</td>
                 <td>
                     <button class="btn-sm secondary" onclick="app.viewReferralDetail(${r.id})">View</button>
                     <button class="btn-sm secondary" onclick="app.editReferral(${r.id}, ${customer.id})">Update</button>
@@ -3326,11 +3326,11 @@ const viewReferralDetail = async (referralId) => {
     UI.showModal('Referral Detail', `
         <div style="display:grid;gap:12px;">
             <div><strong>Referred Person:</strong> ${escapeHtml(prospect?.full_name || 'N/A')}</div>
-            <div><strong>Phone:</strong> ${prospect?.phone || '—'}</div>
-            <div><strong>Relationship:</strong> ${ref.relationship}</div>
-            <div><strong>Referral Date:</strong> ${ref.date}</div>
+            <div><strong>Phone:</strong> ${escapeHtml(prospect?.phone || '—')}</div>
+            <div><strong>Relationship:</strong> ${escapeHtml(ref.relationship || '')}</div>
+            <div><strong>Referral Date:</strong> ${escapeHtml(ref.date || '')}</div>
             <div><strong>Status:</strong> <span class="score-badge ${ref.status === 'Active' ? 'score-A+' : 'score-A'}">${ref.status}</span></div>
-            <div><strong>Reward Status:</strong> ${ref.reward_status}</div>
+            <div><strong>Reward Status:</strong> ${escapeHtml(ref.reward_status || '')}</div>
         </div>
     `, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
 };
@@ -3559,7 +3559,7 @@ const renderCustomerTags = async (customer) => {
             const tag = await AppDataStore.getById('tags', et.tag_id);
             return tag ? `
                 <span class="score-badge" style="background:${tag.color || 'var(--primary)'}; color:white; display:flex; align-items:center; gap:4px; font-size:11px;">
-                    ${tag.name} <span style="cursor:pointer;" onclick="app.removeTagFromCustomer(${customer.id}, ${tag.id})">&times;</span>
+                    ${escapeHtml(tag.name)} <span style="cursor:pointer;" onclick="app.removeTagFromCustomer(${customer.id}, ${tag.id})">&times;</span>
                 </span>
             ` : '';
         }));
@@ -3928,8 +3928,8 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         const isImage = cpsUrl && /\.(jpe?g|png|gif|webp|heic|heif)(\?|$)/i.test(cpsUrl);
         const cpsHtml = cpsUrl ? `
             <div class="pv-sub">CPS Form</div>
-            <div class="pv-row"><span class="pv-lbl">Uploaded</span><span class="pv-val">${prospect.cps_form_date || '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">File</span><span class="pv-val">${prospect.cps_form_name || 'CPS Form'}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Uploaded</span><span class="pv-val">${escapeHtml(prospect.cps_form_date || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">File</span><span class="pv-val">${escapeHtml(prospect.cps_form_name || 'CPS Form')}</span></div>
             ${isImage ? `
                 <div style="margin-top:10px;text-align:center;">
                     <img loading="lazy" decoding="async" src="${cpsUrl}" alt="CPS Form" style="max-width:100%;max-height:280px;border-radius:8px;border:1px solid var(--border);cursor:pointer;" onclick="window.open(this.src,'_blank')">
@@ -3937,21 +3937,21 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 </div>
             ` : `
                 <div style="margin-top:8px;">
-                    <a href="${cpsUrl}" target="_blank" rel="noopener" download="${prospect.cps_form_name || 'cps_form.pdf'}" class="btn secondary btn-sm"><i class="fas fa-download"></i> Download</a>
+                    <a href="${cpsUrl}" target="_blank" rel="noopener" download="${escapeHtml(prospect.cps_form_name || 'cps_form.pdf')}" class="btn secondary btn-sm"><i class="fas fa-download"></i> Download</a>
                 </div>
             `}
         ` : '';
         container.innerHTML = `
             <div class="pv-sub">Contact</div>
-            <div class="pv-row"><span class="pv-lbl">Phone</span><span class="pv-val">${prospect.phone || '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Email</span><span class="pv-val">${prospect.email || '-'}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Phone</span><span class="pv-val">${escapeHtml(prospect.phone || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Email</span><span class="pv-val">${escapeHtml(prospect.email || '-')}</span></div>
             <div class="pv-sub">Identity</div>
-            <div class="pv-row"><span class="pv-lbl">Title</span><span class="pv-val">${prospect.title || '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Gender</span><span class="pv-val">${prospect.gender || '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Nationality</span><span class="pv-val">${prospect.nationality || '-'}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Title</span><span class="pv-val">${escapeHtml(prospect.title || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Gender</span><span class="pv-val">${escapeHtml(prospect.gender || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Nationality</span><span class="pv-val">${escapeHtml(prospect.nationality || '-')}</span></div>
             <div class="pv-sub">Registration</div>
-            <div class="pv-row"><span class="pv-lbl">Referrer</span><span class="pv-val">${prospect.referred_by || '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Relation</span><span class="pv-val">${prospect.referral_relationship || '-'}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Referrer</span><span class="pv-val">${escapeHtml(prospect.referred_by || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Relation</span><span class="pv-val">${escapeHtml(prospect.referral_relationship || '-')}</span></div>
             <div class="pv-row"><span class="pv-lbl">Created</span><span class="pv-val">${new Date(prospect.created_at).toLocaleDateString()}</span></div>
             ${cpsHtml}
         `;
@@ -3959,12 +3959,12 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
     else if (tab === 'personal') {
         container.innerHTML = `
             <div class="pv-sub">Birth &amp; Identity</div>
-            <div class="pv-row"><span class="pv-lbl" style="${prospect.life_chart_type === 'solar' ? 'font-weight:700;' : ''}">Date of Birth</span><span class="pv-val" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" ${prospect.life_chart_type === 'solar' ? 'checked' : ''} onchange="event.stopPropagation();app.toggleLifeChartType(${prospect.id},'solar',this.checked)" title="Use for life chart">${prospect.date_of_birth || '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl" style="${prospect.life_chart_type === 'lunar' ? 'font-weight:700;' : ''}">Lunar Birth</span><span class="pv-val" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" ${prospect.life_chart_type === 'lunar' ? 'checked' : ''} onchange="event.stopPropagation();app.toggleLifeChartType(${prospect.id},'lunar',this.checked)" title="Use for life chart">${prospect.lunar_birth || '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">IC Number</span><span class="pv-val">${prospect.ic_number || '-'}</span></div>
+            <div class="pv-row"><span class="pv-lbl" style="${prospect.life_chart_type === 'solar' ? 'font-weight:700;' : ''}">Date of Birth</span><span class="pv-val" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" ${prospect.life_chart_type === 'solar' ? 'checked' : ''} onchange="event.stopPropagation();app.toggleLifeChartType(${prospect.id},'solar',this.checked)" title="Use for life chart">${escapeHtml(prospect.date_of_birth || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl" style="${prospect.life_chart_type === 'lunar' ? 'font-weight:700;' : ''}">Lunar Birth</span><span class="pv-val" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" ${prospect.life_chart_type === 'lunar' ? 'checked' : ''} onchange="event.stopPropagation();app.toggleLifeChartType(${prospect.id},'lunar',this.checked)" title="Use for life chart">${escapeHtml(prospect.lunar_birth || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">IC Number</span><span class="pv-val">${escapeHtml(prospect.ic_number || '-')}</span></div>
             <div class="pv-row"><span class="pv-lbl">Ming Gua</span><span class="pv-val"><span class="badge info">${prospect.ming_gua || 'MG4'}</span></span></div>
             <div class="pv-sub">Family</div>
-            <div class="pv-row"><span class="pv-lbl">Marital Status</span><span class="pv-val">${prospect.marital_status || '-'}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Marital Status</span><span class="pv-val">${escapeHtml(prospect.marital_status || '-')}</span></div>
             ${(() => {
                 let kids = [];
                 try { kids = Array.isArray(prospect.children) ? prospect.children : (prospect.children ? JSON.parse(prospect.children) : []); } catch(e) { kids = []; }
@@ -3973,31 +3973,31 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 kids.forEach((c, i) => {
                     const age = c.age || '-';
                     const gender = c.gender || '-';
-                    html += `<div class="pv-row"><span class="pv-lbl">Child ${i + 1}</span><span class="pv-val">${age} y/o · ${gender}</span></div>`;
+                    html += `<div class="pv-row"><span class="pv-lbl">Child ${i + 1}</span><span class="pv-val">${escapeHtml(String(age))} y/o · ${escapeHtml(String(gender))}</span></div>`;
                 });
                 return html;
             })()}
             <div class="pv-sub">Employment</div>
-            <div class="pv-row"><span class="pv-lbl">Occupation</span><span class="pv-val">${prospect.occupation || '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Company</span><span class="pv-val">${prospect.company_name || '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Job Description</span><span class="pv-val">${prospect.job_description || '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Title &amp; Role</span><span class="pv-val">${prospect.emp_title_role || '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Income Range</span><span class="pv-val">${prospect.income_range || '-'}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Occupation</span><span class="pv-val">${escapeHtml(prospect.occupation || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Company</span><span class="pv-val">${escapeHtml(prospect.company_name || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Job Description</span><span class="pv-val">${escapeHtml(prospect.job_description || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Title &amp; Role</span><span class="pv-val">${escapeHtml(prospect.emp_title_role || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Income Range</span><span class="pv-val">${escapeHtml(prospect.income_range || '-')}</span></div>
             <div class="pv-sub">Own Business</div>
             <div class="pv-row"><span class="pv-lbl">Own Business?</span><span class="pv-val">${prospect.is_own_business ? '✅ Yes' : (prospect.is_own_business === false ? 'No' : '-')}</span></div>
             ${prospect.is_own_business ? `
-            <div class="pv-row"><span class="pv-lbl">Business Name</span><span class="pv-val">${prospect.business_name || '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Industry</span><span class="pv-val">${prospect.business_industry || '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Business Area</span><span class="pv-val">${prospect.business_area || '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Customer Title</span><span class="pv-val">${prospect.business_title_role || '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Operating Since</span><span class="pv-val">${prospect.business_started || '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Company Size</span><span class="pv-val">${prospect.company_size || '-'}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Business Name</span><span class="pv-val">${escapeHtml(prospect.business_name || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Industry</span><span class="pv-val">${escapeHtml(prospect.business_industry || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Business Area</span><span class="pv-val">${escapeHtml(prospect.business_area || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Customer Title</span><span class="pv-val">${escapeHtml(prospect.business_title_role || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Operating Since</span><span class="pv-val">${escapeHtml(prospect.business_started || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Company Size</span><span class="pv-val">${escapeHtml(prospect.company_size || '-')}</span></div>
             ` : ''}
             <div class="pv-sub">Address</div>
-            <div class="pv-row"><span class="pv-lbl">Address</span><span class="pv-val">${prospect.address || '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">City</span><span class="pv-val">${prospect.city || '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">State</span><span class="pv-val">${prospect.state || '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Postal Code</span><span class="pv-val">${prospect.postal_code || '-'}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Address</span><span class="pv-val">${escapeHtml(prospect.address || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">City</span><span class="pv-val">${escapeHtml(prospect.city || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">State</span><span class="pv-val">${escapeHtml(prospect.state || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Postal Code</span><span class="pv-val">${escapeHtml(prospect.postal_code || '-')}</span></div>
         `;
     }
     else if (tab === 'forms') {
@@ -4069,17 +4069,17 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             ${names.length > 0 ? names.map(n => `
                 <div style="background:var(--gray-50);border-radius:8px;padding:12px;margin-bottom:8px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-                        <span style="font-weight:600;font-size:15px;">${n.full_name}</span>
+                        <span style="font-weight:600;font-size:15px;">${escapeHtml(n.full_name || '')}</span>
                         <div style="display:flex;gap:6px;">
                             <button class="btn-icon" onclick="app.openAddNameModal(${prospect.id},${n.id})"><i class="fas fa-edit"></i></button>
                             <button class="btn-icon" onclick="app.deleteName(${prospect.id},${n.id})"><i class="fas fa-trash"></i></button>
                         </div>
                     </div>
                     <div style="font-size:13px;color:var(--gray-600);">
-                        <span style="margin-right:12px;"><i class="fas fa-user-tag" style="color:var(--gray-400);margin-right:4px;"></i>${n.relation}</span>
-                        ${n.date_of_birth ? `<span><i class="fas fa-birthday-cake" style="color:var(--gray-400);margin-right:4px;"></i>${n.date_of_birth}</span>` : ''}
+                        <span style="margin-right:12px;"><i class="fas fa-user-tag" style="color:var(--gray-400);margin-right:4px;"></i>${escapeHtml(n.relation || '')}</span>
+                        ${n.date_of_birth ? `<span><i class="fas fa-birthday-cake" style="color:var(--gray-400);margin-right:4px;"></i>${escapeHtml(n.date_of_birth)}</span>` : ''}
                     </div>
-                    ${n.notes ? `<div style="font-size:13px;color:var(--gray-500);margin-top:6px;font-style:italic;">${n.notes}</div>` : ''}
+                    ${n.notes ? `<div style="font-size:13px;color:var(--gray-500);margin-top:6px;font-style:italic;">${escapeHtml(n.notes)}</div>` : ''}
                 </div>
             `).join('') : '<p style="text-align:center;padding:20px;color:var(--gray-400);">No names added yet.</p>'}
         `;
@@ -4112,13 +4112,13 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 <div class="meet-card">
                     <div class="meet-card-hdr">
                         <div>
-                            <span class="meet-type"><i class="fas fa-user-friends"></i> ${a.activity_type || 'Meeting'}${a.activity_title ? ' — ' + a.activity_title : ''}</span>
-                            ${a.co_agents && a.co_agents.length > 0 ? `<span style="font-size:11px;color:var(--gray-500);margin-top:2px;display:block;"><i class="fas fa-user-plus"></i> ${a.co_agents.map(c => c.name || c.full_name).join(', ')}</span>` : ''}
+                            <span class="meet-type"><i class="fas fa-user-friends"></i> ${a.activity_type || 'Meeting'}${a.activity_title ? ' — ' + escapeHtml(a.activity_title) : ''}</span>
+                            ${a.co_agents && a.co_agents.length > 0 ? `<span style="font-size:11px;color:var(--gray-500);margin-top:2px;display:block;"><i class="fas fa-user-plus"></i> ${escapeHtml(a.co_agents.map(c => c.name || c.full_name).join(', '))}</span>` : ''}
                             ${a.consultants && a.consultants.length > 0 ? `<span style="font-size:11px;color:var(--gray-500);margin-top:2px;display:block;">${a.consultants.map(c => {
                                 const icon = c.status === 'accepted' ? '✅' : c.status === 'rejected' ? '❌' : '⏳';
-                                return `${icon} ${c.name}`;
+                                return `${icon} ${escapeHtml(c.name || '')}`;
                             }).join(' &nbsp; ')}</span>` : ''}
-                            <span class="meet-date">${a.activity_date || ''}</span>
+                            <span class="meet-date">${escapeHtml(a.activity_date || '')}</span>
                         </div>
                         <div style="display:flex;align-items:center;gap:6px;">
                             ${(a.photo_urls && a.photo_urls.length > 0) ? `<button class="btn btn-sm secondary" style="font-size:12px;padding:4px 8px;color:var(--primary);border-color:var(--primary);" title="${a.photo_urls.length} discussion photo${a.photo_urls.length > 1 ? 's' : ''}" onclick="event.stopPropagation();app.viewActivityPhotos(${a.id})"><i class="fas fa-camera"></i> ${a.photo_urls.length}</button>` : ''}
@@ -4167,10 +4167,10 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 ${notes.length > 0 ? notes.map(n => `
                     <div class="notes-item">
                         <div class="notes-header">
-                            <span>${n.date} - ${n.author}${n.is_voice_note ? ' <i class="fas fa-microphone voice-note-icon" title="Voice note"></i>' : ''}</span>
+                            <span>${escapeHtml(n.date || '')} - ${escapeHtml(n.author || '')}${n.is_voice_note ? ' <i class="fas fa-microphone voice-note-icon" title="Voice note"></i>' : ''}</span>
                             <button class="btn-icon" onclick="app.deleteNote(${prospect.id}, ${n.id})"><i class="fas fa-trash"></i></button>
                         </div>
-                        <div>"${n.text}"</div>
+                        <div>"${escapeHtml(n.text || '')}"</div>
                     </div>
                 `).join('') : '<p style="text-align:center;padding:20px;color:var(--gray-400);">No notes yet.</p>'}
             </div>
@@ -4318,7 +4318,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             </div>
             <div class="tags-container" id="prospect-tags-container">
                 ${prospect.tags && prospect.tags.length > 0 ? prospect.tags.map(t => `
-                    <span class="tag ${t.color}">${t.name} <i class="fas fa-times remove" onclick="app.removeTagFromProspect(${prospect.id}, ${t.id})"></i></span>
+                    <span class="tag ${t.color}">${escapeHtml(t.name)} <i class="fas fa-times remove" onclick="app.removeTagFromProspect(${prospect.id}, ${t.id})"></i></span>
                 `).join('') : '<span style="color:var(--gray-400);">No tags yet</span>'}
             </div>
         `;
@@ -4375,8 +4375,8 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 <div class="progress-fill" style="width:${prospect.close_probability || 0}%;background:var(--${(prospect.close_probability || 0) >= 60 ? 'success' : (prospect.close_probability || 0) >= 30 ? 'warning' : 'danger'});"></div>
             </div>
             <div class="pv-row"><span class="pv-lbl">Est. Value</span><span class="pv-val">${prospect.estimated_value_min || prospect.estimated_value_max ? 'RM ' + (prospect.estimated_value_min || 0).toLocaleString() + ' – RM ' + (prospect.estimated_value_max || 0).toLocaleString() : '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Budget</span><span class="pv-val">${prospect.budget_range || '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Timeline</span><span class="pv-val">${prospect.decision_timeline || '-'}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Budget</span><span class="pv-val">${escapeHtml(prospect.budget_range || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Timeline</span><span class="pv-val">${escapeHtml(prospect.decision_timeline || '-')}</span></div>
             <div class="pv-row"><span class="pv-lbl">Decision Maker</span><span class="pv-val">${prospect.decision_maker === 'yes' ? 'Yes' : prospect.decision_maker === 'no' ? 'No' : 'Unknown'}</span></div>
 
             ${(meetups.length > 0 || fengShuiAudits.length > 0) ? `
@@ -4385,25 +4385,25 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             ${allPains.length > 0 ? `
             <div style="background:#fff3f3;border-left:3px solid #ef4444;border-radius:0 8px 8px 0;padding:10px 12px;margin-bottom:8px;">
                 <div class="meet-lbl" style="color:#ef4444;margin-bottom:4px;"><i class="fas fa-exclamation-circle"></i> Pain Points / Core Problem</div>
-                ${allPains.map(p => `<div style="font-size:13px;color:var(--gray-700);margin-bottom:3px;">• ${p}</div>`).join('')}
+                ${allPains.map(p => `<div style="font-size:13px;color:var(--gray-700);margin-bottom:3px;">• ${escapeHtml(p)}</div>`).join('')}
             </div>` : ''}
 
             ${allNeeds.length > 0 ? `
             <div style="background:#fff8e1;border-left:3px solid #f59e0b;border-radius:0 8px 8px 0;padding:10px 12px;margin-bottom:8px;">
                 <div class="meet-lbl" style="color:#d97706;margin-bottom:4px;"><i class="fas fa-lightbulb"></i> Customer Needs / Interests</div>
-                ${allNeeds.map(n => `<div style="font-size:13px;color:var(--gray-700);margin-bottom:3px;">• ${n}</div>`).join('')}
+                ${allNeeds.map(n => `<div style="font-size:13px;color:var(--gray-700);margin-bottom:3px;">• ${escapeHtml(n)}</div>`).join('')}
             </div>` : ''}
 
             ${allSolutions.length > 0 ? `
             <div style="background:#f0fdf4;border-left:3px solid #22c55e;border-radius:0 8px 8px 0;padding:10px 12px;margin-bottom:8px;">
                 <div class="meet-lbl" style="color:#16a34a;margin-bottom:4px;"><i class="fas fa-hand-holding-heart"></i> Solution Proposed / Opportunity</div>
-                ${allSolutions.map(s => `<div style="font-size:13px;color:var(--gray-700);margin-bottom:3px;">• ${s}</div>`).join('')}
+                ${allSolutions.map(s => `<div style="font-size:13px;color:var(--gray-700);margin-bottom:3px;">• ${escapeHtml(s)}</div>`).join('')}
             </div>` : ''}
 
             ${allNextSteps.length > 0 ? `
             <div style="background:#eff6ff;border-left:3px solid var(--primary);border-radius:0 8px 8px 0;padding:10px 12px;margin-bottom:8px;">
                 <div class="meet-lbl" style="color:var(--primary);margin-bottom:4px;"><i class="fas fa-arrow-right"></i> Next Steps to Close</div>
-                ${allNextSteps.map(s => `<div style="font-size:13px;color:var(--gray-700);margin-bottom:3px;">• ${s}</div>`).join('')}
+                ${allNextSteps.map(s => `<div style="font-size:13px;color:var(--gray-700);margin-bottom:3px;">• ${escapeHtml(s)}</div>`).join('')}
             </div>` : ''}
 
             ${(dealCards.length === 0 && allNeeds.length === 0 && allSolutions.length === 0) ? '<p style="text-align:center;padding:12px;color:var(--gray-400);font-size:13px;">No deal analysis recorded yet. Add notes during meet ups or log a feng shui audit.</p>' : ''}
@@ -4443,8 +4443,8 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                     <input type="checkbox" class="na-cb" id="na-cb-${item.id}" ${isDone ? 'checked' : ''}
                         onchange="app.toggleNextActionItem(${prospectId}, '${item.id}', this.checked)">
                     <div style="flex:1;">
-                        <div class="na-text" id="na-text-${item.id}">${item.text}</div>
-                        <div style="font-size:11px;color:var(--gray-400);margin-top:2px;">${item.date || ''} — ${item.type || 'Meeting'}${item.title ? ' · ' + item.title : ''} <span style="background:var(--gray-100);border-radius:3px;padding:1px 4px;">${item.source}</span></div>
+                        <div class="na-text" id="na-text-${item.id}">${escapeHtml(item.text || '')}</div>
+                        <div style="font-size:11px;color:var(--gray-400);margin-top:2px;">${escapeHtml(item.date || '')} — ${item.type || 'Meeting'}${item.title ? ' · ' + escapeHtml(item.title) : ''} <span style="background:var(--gray-100);border-radius:3px;padding:1px 4px;">${item.source}</span></div>
                     </div>
                 </div>
             `;
@@ -4473,7 +4473,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         const isManager = isSystemAdmin(_currentUser) || isMarketingManager(_currentUser);
         const products = (await AppDataStore.getAll('products')).filter(p => p.is_active !== false);
         const productOptions = products.length
-            ? products.map(p => `<option value="${p.name}" ${(cr?.product === p.name) ? 'selected' : ''}>${p.name}</option>`).join('')
+            ? products.map(p => `<option value="${escapeHtml(p.name)}" ${(cr?.product === p.name) ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')
             : '<option value="">No products available</option>';
 
         // ── Before 2025 Purchase Record (stored inside closing_record to reuse existing JSONB column) ──
@@ -4598,16 +4598,16 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                     <i class="fas fa-edit"></i> Draft — Fill in details and submit for manager approval
                 </div>
                 <div class="pv-sub">Customer Information</div>
-                <div class="form-group" style="margin-bottom:10px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Full Name</label><input id="cr-full-name" class="form-control" value="${d.full_name || prospect.full_name || ''}" placeholder="Full name"></div>
+                <div class="form-group" style="margin-bottom:10px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Full Name</label><input id="cr-full-name" class="form-control" value="${escapeHtml(d.full_name || prospect.full_name || '')}" placeholder="Full name"></div>
                 <div class="form-row" style="display:flex;gap:8px;margin-bottom:10px;">
-                    <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Phone</label><input id="cr-phone" class="form-control" value="${d.phone || prospect.phone || ''}" placeholder="Phone"></div>
-                    <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Email</label><input id="cr-email" class="form-control" value="${d.email || prospect.email || ''}" placeholder="Email"></div>
+                    <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Phone</label><input id="cr-phone" class="form-control" value="${escapeHtml(d.phone || prospect.phone || '')}" placeholder="Phone"></div>
+                    <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Email</label><input id="cr-email" class="form-control" value="${escapeHtml(d.email || prospect.email || '')}" placeholder="Email"></div>
                 </div>
                 <div class="form-row" style="display:flex;gap:8px;margin-bottom:10px;">
-                    <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">IC Number</label><input id="cr-ic" class="form-control" value="${d.ic_number || prospect.ic_number || ''}" placeholder="NRIC/Passport"></div>
+                    <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">IC Number</label><input id="cr-ic" class="form-control" value="${escapeHtml(d.ic_number || prospect.ic_number || '')}" placeholder="NRIC/Passport"></div>
                     <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Date of Birth</label><input id="cr-dob" type="date" class="form-control" value="${d.date_of_birth || prospect.date_of_birth || ''}"></div>
                 </div>
-                <div class="form-group" style="margin-bottom:14px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Address</label><textarea id="cr-address" class="form-control" rows="2" placeholder="Full address">${d.address || [prospect.address, prospect.city, prospect.state, prospect.postal_code].filter(Boolean).join(', ') || ''}</textarea></div>
+                <div class="form-group" style="margin-bottom:14px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Address</label><textarea id="cr-address" class="form-control" rows="2" placeholder="Full address">${escapeHtml(d.address || [prospect.address, prospect.city, prospect.state, prospect.postal_code].filter(Boolean).join(', ') || '')}</textarea></div>
 
                 <div class="pv-sub">📝 Meeting Outcome</div>
                 <div class="form-row" style="display:flex;gap:8px;margin-bottom:10px;">
@@ -4642,10 +4642,10 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                     <div class="form-group"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Down Payment (RM)</label><input id="cr-pop-down" type="number" class="form-control" value="${d.pop_down_payment || ''}" placeholder="0.00"></div>
                 </div>
                 <div class="form-row" style="display:flex;gap:8px;margin-bottom:10px;">
-                    <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Invoice Number</label><input id="cr-invoice" class="form-control" value="${d.invoice_number || ''}" placeholder="INV-2026-001"></div>
+                    <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Invoice Number</label><input id="cr-invoice" class="form-control" value="${escapeHtml(d.invoice_number || '')}" placeholder="INV-2026-001"></div>
                     <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Collection Date</label><input id="cr-close-date" type="date" class="form-control" value="${d.closing_date || ''}"></div>
                 </div>
-                <div class="form-group" style="margin-bottom:10px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Remarks</label><textarea id="cr-remarks" class="form-control" rows="2" placeholder="e.g. Ring Size, Special Request...">${d.closing_remarks || ''}</textarea></div>
+                <div class="form-group" style="margin-bottom:10px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Remarks</label><textarea id="cr-remarks" class="form-control" rows="2" placeholder="e.g. Ring Size, Special Request...">${escapeHtml(d.closing_remarks || '')}</textarea></div>
                 <div class="form-group" style="margin-bottom:14px;">
                     <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Upload Purchased Invoice <span style="font-size:11px;color:var(--gray-400);font-weight:normal;">(AI auto-fill on upload)</span></label>
                     <input id="cr-invoice-file" type="file" class="form-control" accept="image/png,image/jpeg,application/pdf" onchange="app.scanInvoiceWithAI(this,'cr','cr')">
@@ -4653,9 +4653,9 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 </div>
 
                 <div class="pv-sub">📁 Case Study (Optional)</div>
-                <div class="form-group" style="margin-bottom:10px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Sales Idea</label><textarea id="cr-sales-idea" class="form-control" rows="2" placeholder="Describe the sales idea...">${d.sales_idea || ''}</textarea></div>
-                <div class="form-group" style="margin-bottom:10px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Plan Details</label><textarea id="cr-plan-details" class="form-control" rows="2" placeholder="Details of the plan proposed...">${d.plan_details || ''}</textarea></div>
-                <div class="form-group" style="margin-bottom:14px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Success Story</label><textarea id="cr-success-story" class="form-control" rows="2" placeholder="What made this a success?">${d.success_story || ''}</textarea></div>
+                <div class="form-group" style="margin-bottom:10px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Sales Idea</label><textarea id="cr-sales-idea" class="form-control" rows="2" placeholder="Describe the sales idea...">${escapeHtml(d.sales_idea || '')}</textarea></div>
+                <div class="form-group" style="margin-bottom:10px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Plan Details</label><textarea id="cr-plan-details" class="form-control" rows="2" placeholder="Details of the plan proposed...">${escapeHtml(d.plan_details || '')}</textarea></div>
+                <div class="form-group" style="margin-bottom:14px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Success Story</label><textarea id="cr-success-story" class="form-control" rows="2" placeholder="What made this a success?">${escapeHtml(d.success_story || '')}</textarea></div>
 
                 <div style="display:flex;gap:8px;">
                     <button class="btn secondary btn-sm" style="flex:1;" onclick="event.stopPropagation();app.saveClosingRecord(${prospect.id})"><i class="fas fa-save"></i> Save Draft</button>
@@ -4676,30 +4676,30 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                     <i class="fas fa-clock"></i> Submitted — Pending manager approval
                 </div>
                 <div class="pv-sub">Customer Information</div>
-                <div class="pv-row"><span class="pv-lbl">Full Name</span><span class="pv-val">${d.full_name || '-'}</span></div>
-                <div class="pv-row"><span class="pv-lbl">Phone</span><span class="pv-val">${d.phone || '-'}</span></div>
-                <div class="pv-row"><span class="pv-lbl">Email</span><span class="pv-val">${d.email || '-'}</span></div>
-                <div class="pv-row"><span class="pv-lbl">IC Number</span><span class="pv-val">${d.ic_number || '-'}</span></div>
-                <div class="pv-row"><span class="pv-lbl">Date of Birth</span><span class="pv-val">${d.date_of_birth || '-'}</span></div>
-                <div class="pv-row"><span class="pv-lbl">Address</span><span class="pv-val">${d.address || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Full Name</span><span class="pv-val">${escapeHtml(d.full_name || '-')}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Phone</span><span class="pv-val">${escapeHtml(d.phone || '-')}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Email</span><span class="pv-val">${escapeHtml(d.email || '-')}</span></div>
+                <div class="pv-row"><span class="pv-lbl">IC Number</span><span class="pv-val">${escapeHtml(d.ic_number || '-')}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Date of Birth</span><span class="pv-val">${escapeHtml(d.date_of_birth || '-')}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Address</span><span class="pv-val">${escapeHtml(d.address || '-')}</span></div>
                 <div class="pv-sub">Meeting Outcome</div>
-                <div class="pv-row"><span class="pv-lbl">Product/Service</span><span class="pv-val">${d.product || '-'}</span></div>
-                <div class="pv-row"><span class="pv-lbl">Order Date</span><span class="pv-val">${d.order_date || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Product/Service</span><span class="pv-val">${escapeHtml(d.product || '-')}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Order Date</span><span class="pv-val">${escapeHtml(d.order_date || '-')}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Amount Closed</span><span class="pv-val">${d.sale_amount ? 'RM ' + parseFloat(d.sale_amount).toLocaleString() : '-'}</span></div>
-                <div class="pv-row"><span class="pv-lbl">Payment Method</span><span class="pv-val">${d.payment_method || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Payment Method</span><span class="pv-val">${escapeHtml(d.payment_method || '-')}</span></div>
                 ${d.payment_method === 'POP' ? `
                 <div class="pv-row"><span class="pv-lbl">Monthly (RM)</span><span class="pv-val">${d.pop_monthly || '-'}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Tenure</span><span class="pv-val">${d.pop_tenure ? d.pop_tenure + ' months' : '-'}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Down Payment</span><span class="pv-val">${d.pop_down_payment ? 'RM ' + parseFloat(d.pop_down_payment).toLocaleString() : '-'}</span></div>
                 ` : ''}
-                <div class="pv-row"><span class="pv-lbl">Invoice No.</span><span class="pv-val">${d.invoice_number || '-'}</span></div>
-                <div class="pv-row"><span class="pv-lbl">Collection Date</span><span class="pv-val">${d.closing_date || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Invoice No.</span><span class="pv-val">${escapeHtml(d.invoice_number || '-')}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Collection Date</span><span class="pv-val">${escapeHtml(d.closing_date || '-')}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Invoice File</span><span class="pv-val">${d.invoice_file ? `<a href="${d.invoice_file}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(d.invoice_file_name || 'View')}</a>` : '-'}</span></div>
                 ${(d.sales_idea || d.plan_details || d.success_story) ? `
                 <div class="pv-sub">Case Study</div>
-                ${d.sales_idea ? `<div class="pv-row"><span class="pv-lbl">Sales Idea</span><span class="pv-val">${d.sales_idea}</span></div>` : ''}
-                ${d.plan_details ? `<div class="pv-row"><span class="pv-lbl">Plan Details</span><span class="pv-val">${d.plan_details}</span></div>` : ''}
-                ${d.success_story ? `<div class="pv-row"><span class="pv-lbl">Success Story</span><span class="pv-val">${d.success_story}</span></div>` : ''}
+                ${d.sales_idea ? `<div class="pv-row"><span class="pv-lbl">Sales Idea</span><span class="pv-val">${escapeHtml(d.sales_idea)}</span></div>` : ''}
+                ${d.plan_details ? `<div class="pv-row"><span class="pv-lbl">Plan Details</span><span class="pv-val">${escapeHtml(d.plan_details)}</span></div>` : ''}
+                ${d.success_story ? `<div class="pv-row"><span class="pv-lbl">Success Story</span><span class="pv-val">${escapeHtml(d.success_story)}</span></div>` : ''}
                 ` : ''}
                 ${managerButtons}
             `;
@@ -4713,23 +4713,23 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                     <button class="btn secondary btn-sm" style="font-size:11px;" onclick="event.stopPropagation();app.archiveAndNewClosingRecord(${prospect.id})"><i class="fas fa-plus"></i> New Closing</button>
                 </div>
                 <div class="pv-sub">Last Closing</div>
-                <div class="pv-row"><span class="pv-lbl">Product/Service</span><span class="pv-val">${d.product || '-'}</span></div>
-                <div class="pv-row"><span class="pv-lbl">Order Date</span><span class="pv-val">${d.order_date || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Product/Service</span><span class="pv-val">${escapeHtml(d.product || '-')}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Order Date</span><span class="pv-val">${escapeHtml(d.order_date || '-')}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Amount Closed</span><span class="pv-val">${d.sale_amount ? 'RM ' + parseFloat(d.sale_amount).toLocaleString() : '-'}</span></div>
-                <div class="pv-row"><span class="pv-lbl">Payment Method</span><span class="pv-val">${d.payment_method || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Payment Method</span><span class="pv-val">${escapeHtml(d.payment_method || '-')}</span></div>
                 ${d.payment_method === 'POP' ? `
                 <div class="pv-row"><span class="pv-lbl">Monthly (RM)</span><span class="pv-val">${d.pop_monthly || '-'}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Tenure</span><span class="pv-val">${d.pop_tenure ? d.pop_tenure + ' months' : '-'}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Down Payment</span><span class="pv-val">${d.pop_down_payment ? 'RM ' + parseFloat(d.pop_down_payment).toLocaleString() : '-'}</span></div>
                 ` : ''}
-                <div class="pv-row"><span class="pv-lbl">Invoice No.</span><span class="pv-val">${d.invoice_number || '-'}</span></div>
-                <div class="pv-row"><span class="pv-lbl">Collection Date</span><span class="pv-val">${d.closing_date || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Invoice No.</span><span class="pv-val">${escapeHtml(d.invoice_number || '-')}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Collection Date</span><span class="pv-val">${escapeHtml(d.closing_date || '-')}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Invoice File</span><span class="pv-val">${d.invoice_file ? `<a href="${d.invoice_file}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(d.invoice_file_name || 'View')}</a>` : '-'}</span></div>
                 ${(d.sales_idea || d.plan_details || d.success_story) ? `
                 <div class="pv-sub">Case Study</div>
-                ${d.sales_idea ? `<div class="pv-row"><span class="pv-lbl">Sales Idea</span><span class="pv-val">${d.sales_idea}</span></div>` : ''}
-                ${d.plan_details ? `<div class="pv-row"><span class="pv-lbl">Plan Details</span><span class="pv-val">${d.plan_details}</span></div>` : ''}
-                ${d.success_story ? `<div class="pv-row"><span class="pv-lbl">Success Story</span><span class="pv-val">${d.success_story}</span></div>` : ''}
+                ${d.sales_idea ? `<div class="pv-row"><span class="pv-lbl">Sales Idea</span><span class="pv-val">${escapeHtml(d.sales_idea)}</span></div>` : ''}
+                ${d.plan_details ? `<div class="pv-row"><span class="pv-lbl">Plan Details</span><span class="pv-val">${escapeHtml(d.plan_details)}</span></div>` : ''}
+                ${d.success_story ? `<div class="pv-row"><span class="pv-lbl">Success Story</span><span class="pv-val">${escapeHtml(d.success_story)}</span></div>` : ''}
                 ` : ''}
                 <div class="pv-sub" style="margin-top:14px;">📦 Service Delivery Status</div>
                 <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-top:6px;">
@@ -4895,11 +4895,11 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         };
         const fmtAmt = (v) => v ? 'RM ' + Number(v).toLocaleString('en-MY', {minimumFractionDigits:0,maximumFractionDigits:0}) : '-';
         const rows = orders.map(o => `<tr style="border-bottom:1px solid var(--border);">
-            <td style="padding:7px 8px;font-size:11px;color:var(--gray-500);white-space:nowrap;">${o.date || '-'}</td>
-            <td style="padding:7px 8px;font-size:11px;color:var(--gray-400);white-space:nowrap;">${o.invoice || '-'}</td>
-            <td style="padding:7px 8px;font-size:12px;font-weight:500;color:var(--gray-800);">${o.item || '-'}</td>
+            <td style="padding:7px 8px;font-size:11px;color:var(--gray-500);white-space:nowrap;">${escapeHtml(o.date || '-')}</td>
+            <td style="padding:7px 8px;font-size:11px;color:var(--gray-400);white-space:nowrap;">${escapeHtml(o.invoice || '-')}</td>
+            <td style="padding:7px 8px;font-size:12px;font-weight:500;color:var(--gray-800);">${escapeHtml(o.item || '-')}</td>
             <td style="padding:7px 8px;font-size:12px;font-weight:600;color:var(--primary);white-space:nowrap;">${fmtAmt(o.amount)}</td>
-            <td style="padding:7px 8px;font-size:11px;color:var(--gray-500);">${o.payment_method || '-'}</td>
+            <td style="padding:7px 8px;font-size:11px;color:var(--gray-500);">${escapeHtml(o.payment_method || '-')}</td>
             <td style="padding:7px 8px;">${dsBadge(o.delivery_status)}</td>
         </tr>`).join('');
         const total = orders.reduce((s, o) => s + (parseFloat(o.amount) || 0), 0);
@@ -5103,7 +5103,7 @@ const renderCustomerClosingTab = async (customer, container) => {
             totalPaid += amt0;
             conversionRow = `
                 <tr style="background:#f0fdf4;">
-                    <td style="padding:6px 10px;">${cr0.closing_date || customer.customer_since || '-'}</td>
+                    <td style="padding:6px 10px;">${escapeHtml(cr0.closing_date || customer.customer_since || '-')}</td>
                     <td style="padding:6px 10px;">${escapeHtml(cr0.invoice_number || '-')}</td>
                     <td style="padding:6px 10px;"><strong>${escapeHtml(cr0.product || '-')}</strong> <span style="font-size:11px;color:var(--gray-400);">(Conversion)</span></td>
                     <td style="padding:6px 10px;">RM ${amt0.toLocaleString('en-MY',{minimumFractionDigits:2})}</td>
@@ -5121,7 +5121,7 @@ const renderCustomerClosingTab = async (customer, container) => {
         const statusColor = p.status === 'PAID' ? '#dcfce7;color:#166534' : p.status === 'PENDING' ? '#fef9c3;color:#854d0e' : '#e0e7ff;color:#3730a3';
         return `
             <tr>
-                <td style="padding:6px 10px;">${p.date || '-'}</td>
+                <td style="padding:6px 10px;">${escapeHtml(p.date || '-')}</td>
                 <td style="padding:6px 10px;">${escapeHtml(p.invoice || '-')}</td>
                 <td style="padding:6px 10px;">${escapeHtml(p.item || '-')}</td>
                 <td style="padding:6px 10px;">RM ${amt.toLocaleString('en-MY',{minimumFractionDigits:2})}</td>
@@ -5306,11 +5306,11 @@ const renderCustomerClosingTab = async (customer, container) => {
                     <i class="fas fa-clock"></i> Active submission pending approval
                 </div>
                 <div class="pv-sub">Meeting Outcome</div>
-                <div class="pv-row"><span class="pv-lbl">Product/Service</span><span class="pv-val">${d.product || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Product/Service</span><span class="pv-val">${escapeHtml(d.product || '-')}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Amount</span><span class="pv-val">${d.sale_amount ? 'RM ' + parseFloat(d.sale_amount).toLocaleString() : '-'}</span></div>
-                <div class="pv-row"><span class="pv-lbl">Payment</span><span class="pv-val">${d.payment_method || '-'}</span></div>
-                <div class="pv-row"><span class="pv-lbl">Invoice</span><span class="pv-val">${d.invoice_number || '-'}</span></div>
-                <div class="pv-row"><span class="pv-lbl">Collection Date</span><span class="pv-val">${d.closing_date || '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Payment</span><span class="pv-val">${escapeHtml(d.payment_method || '-')}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Invoice</span><span class="pv-val">${escapeHtml(d.invoice_number || '-')}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Collection Date</span><span class="pv-val">${escapeHtml(d.closing_date || '-')}</span></div>
                 <div style="display:flex;gap:8px;margin-top:12px;">
                     <button class="btn primary btn-sm" style="flex:1;" onclick="event.stopPropagation();app.approveClosingRecord(${pid})"><i class="fas fa-check"></i> ${isConverted ? 'Approve Sale' : 'Approve & Create Customer'}</button>
                     <button class="btn danger btn-sm" style="flex:1;" onclick="event.stopPropagation();app.rejectClosingRecord(${pid})"><i class="fas fa-times"></i> Reject</button>
@@ -7919,10 +7919,10 @@ const convertToCustomer = async (prospectId) => {
                     Your request will be reviewed by a manager before the customer profile is created.
                 </div>
                 <div style="font-size:13px; display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                    <div><span style="color:var(--gray-500);">Prospect:</span> <strong>${prospect.full_name}</strong></div>
-                    <div><span style="color:var(--gray-500);">Phone:</span> ${prospect.phone}</div>
+                    <div><span style="color:var(--gray-500);">Prospect:</span> <strong>${escapeHtml(prospect.full_name)}</strong></div>
+                    <div><span style="color:var(--gray-500);">Phone:</span> ${escapeHtml(prospect.phone)}</div>
                     ${saleAmount > 0 ? `<div><span style="color:var(--gray-500);">Sale Amount:</span> <strong>RM ${saleAmount.toLocaleString()}</strong></div>` : ''}
-                    <div><span style="color:var(--gray-500);">Referrer:</span> ${prospect.referred_by || '-'}</div>
+                    <div><span style="color:var(--gray-500);">Referrer:</span> ${escapeHtml(prospect.referred_by || '-')}</div>
                 </div>
             </div>
         `, [
@@ -7973,26 +7973,26 @@ const showConversionApprovalModal = async (prospectId) => {
         <div style="display:flex; flex-direction:column; gap:14px;">
             <div style="background:#fef3c7; border:1px solid #fcd34d; border-radius:8px; padding:12px; font-size:13px; color:#92400e;">
                 <i class="fas fa-user-clock" style="margin-right:6px;"></i>
-                Conversion requested by <strong>${requestedBy}</strong>. Review all data before approving.
+                Conversion requested by <strong>${escapeHtml(requestedBy)}</strong>. Review all data before approving.
             </div>
             <div style="font-size:13px; display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                <div><span style="color:var(--gray-500);">Name:</span> <strong>${prospect.full_name}</strong></div>
-                <div><span style="color:var(--gray-500);">Phone:</span> ${prospect.phone}</div>
-                <div><span style="color:var(--gray-500);">IC:</span> ${prospect.ic_number || '-'}</div>
-                <div><span style="color:var(--gray-500);">DOB:</span> ${prospect.date_of_birth || '-'}</div>
-                <div><span style="color:var(--gray-500);">Occupation:</span> ${prospect.occupation || '-'}</div>
-                <div><span style="color:var(--gray-500);">Ming Gua:</span> ${prospect.ming_gua || '-'}</div>
-                <div><span style="color:var(--gray-500);">Referrer:</span> ${prospect.referred_by || '-'}</div>
-                <div><span style="color:var(--gray-500);">Relation:</span> ${prospect.referral_relationship || '-'}</div>
+                <div><span style="color:var(--gray-500);">Name:</span> <strong>${escapeHtml(prospect.full_name)}</strong></div>
+                <div><span style="color:var(--gray-500);">Phone:</span> ${escapeHtml(prospect.phone)}</div>
+                <div><span style="color:var(--gray-500);">IC:</span> ${escapeHtml(prospect.ic_number || '-')}</div>
+                <div><span style="color:var(--gray-500);">DOB:</span> ${escapeHtml(prospect.date_of_birth || '-')}</div>
+                <div><span style="color:var(--gray-500);">Occupation:</span> ${escapeHtml(prospect.occupation || '-')}</div>
+                <div><span style="color:var(--gray-500);">Ming Gua:</span> ${escapeHtml(prospect.ming_gua || '-')}</div>
+                <div><span style="color:var(--gray-500);">Referrer:</span> ${escapeHtml(prospect.referred_by || '-')}</div>
+                <div><span style="color:var(--gray-500);">Relation:</span> ${escapeHtml(prospect.referral_relationship || '-')}</div>
             </div>
             ${cr ? `
                 <div style="border-top:1px solid var(--gray-200); padding-top:12px;">
                     <div style="font-weight:600; margin-bottom:8px; font-size:13px;">Sales Record</div>
                     <div style="font-size:13px; display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                        <div><span style="color:var(--gray-500);">Product:</span> ${cr.product || '-'}</div>
+                        <div><span style="color:var(--gray-500);">Product:</span> ${escapeHtml(cr.product || '-')}</div>
                         <div><span style="color:var(--gray-500);">Amount:</span> <strong style="color:#166534;">RM ${saleAmount.toLocaleString()}</strong></div>
-                        <div><span style="color:var(--gray-500);">Invoice:</span> ${cr.invoice_number || '-'}</div>
-                        <div><span style="color:var(--gray-500);">Date:</span> ${cr.closing_date || '-'}</div>
+                        <div><span style="color:var(--gray-500);">Invoice:</span> ${escapeHtml(cr.invoice_number || '-')}</div>
+                        <div><span style="color:var(--gray-500);">Date:</span> ${escapeHtml(cr.closing_date || '-')}</div>
                     </div>
                 </div>
             ` : '<div style="color:var(--gray-400); font-size:13px; font-style:italic;">No closing record submitted yet.</div>'}
@@ -8295,7 +8295,7 @@ const renderCurrentAssignments = async (agentId) => {
                     <div>
                         <div class="assignment-prospect">${escapeHtml(p.full_name || '(No Name)')}</div>
                         <div class="next-action" style="font-size:12px;color:var(--gray-500);">
-                            ${p.last_activity_date ? 'Last: ' + p.last_activity_date : 'No activity yet'}
+                            ${p.last_activity_date ? 'Last: ' + escapeHtml(p.last_activity_date) : 'No activity yet'}
                         </div>
                     </div>
                     <span class="assignment-status status-${(p.status || 'prospect').toLowerCase()}">${p.status || 'Prospect'}</span>
@@ -8320,9 +8320,9 @@ viewport.innerHTML = `
                 <span class="status-badge status-${agent.status}">${agent.status?.toUpperCase() || 'ACTIVE'}</span>
             </div>
             <div style="display:flex; gap:12px; color:var(--gray-500); font-size:14px;">
-                <span>Agent ID: ${agent.agent_code || '—'}</span>
-                <span><i class="fas fa-user-tie"></i> ${agent.role || 'Consultant'}</span>
-                <span><i class="fas fa-users"></i> ${agent.team || 'Sales'}</span>
+                <span>Agent ID: ${escapeHtml(agent.agent_code || '—')}</span>
+                <span><i class="fas fa-user-tie"></i> ${escapeHtml(agent.role || 'Consultant')}</span>
+                <span><i class="fas fa-users"></i> ${escapeHtml(agent.team || 'Sales')}</span>
             </div>
         </div>
         <div class="header-actions">
@@ -8369,11 +8369,11 @@ viewport.innerHTML = `
             <div class="performance-stats">
                 <div class="stat-row">
                     <span class="stat-label">Phone:</span>
-                    <span class="stat-value">${agent.phone || '012-1234567'}</span>
+                    <span class="stat-value">${escapeHtml(agent.phone || '012-1234567')}</span>
                 </div>
                 <div class="stat-row">
                     <span class="stat-label">Email:</span>
-                    <span class="stat-value">${agent.email || 'agent@fengshui.com'}</span>
+                    <span class="stat-value">${escapeHtml(agent.email || 'agent@fengshui.com')}</span>
                 </div>
                 <div class="stat-row">
                     <span class="stat-label">Join Date:</span>
@@ -8497,13 +8497,13 @@ const showAgentDetail = async (agentId) => {
             <div class="profile-header" style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:24px;">
                 <div>
                     <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
-                        <h1 style="font-size:32px; font-weight:700;">${agent.full_name}</h1>
+                        <h1 style="font-size:32px; font-weight:700;">${escapeHtml(agent.full_name)}</h1>
                         <span class="status-badge status-${agent.status}">${agent.status.toUpperCase()}</span>
                     </div>
                     <div style="display:flex; gap:12px; color:var(--gray-500); font-size:14px;">
-                        <span>Agent ID: ${agent.agent_code || '—'}</span>
+                        <span>Agent ID: ${escapeHtml(agent.agent_code || '—')}</span>
                         <span><i class="fas fa-user-tie"></i> Senior Consultant</span>
-                        <span><i class="fas fa-users"></i> ${agent.team}</span>
+                        <span><i class="fas fa-users"></i> ${escapeHtml(agent.team || '')}</span>
                     </div>
                 </div>
                 <div class="header-actions">
@@ -8552,11 +8552,11 @@ const showAgentDetail = async (agentId) => {
                     <div class="performance-stats">
                         <div class="stat-row">
                             <span class="stat-label">Phone:</span>
-                            <span class="stat-value">${agent.phone || '012-1234567'}</span>
+                            <span class="stat-value">${escapeHtml(agent.phone || '012-1234567')}</span>
                         </div>
                         <div class="stat-row">
                             <span class="stat-label">Email:</span>
-                            <span class="stat-value">${agent.email || 'agent@fengshui.com'}</span>
+                            <span class="stat-value">${escapeHtml(agent.email || 'agent@fengshui.com')}</span>
                         </div>
                         <div class="stat-row">
                             <span class="stat-label">Join Date:</span>
@@ -8668,8 +8668,8 @@ const renderCustomerHistory = async (agentId) => {
     ${customers.map(c => `
                 <div class="assignment-item" onclick="app.showCustomerDetail(${c.id})">
                     <div>
-                        <div class="assignment-prospect">${c.full_name}</div>
-                        <div class="next-action">Customer Since: ${c.customer_since}</div>
+                        <div class="assignment-prospect">${escapeHtml(c.full_name || '')}</div>
+                        <div class="next-action">Customer Since: ${escapeHtml(c.customer_since || '')}</div>
                     </div>
                     <span class="assignment-status status-active">RM ${c.lifetime_value.toLocaleString()}</span>
                 </div>
@@ -8779,7 +8779,7 @@ for (const a of assignments) {
         <div class="assignment-item" onclick="app.showProspectDetail(${a.prospect_id})">
             <div>
                 <div class="assignment-prospect">${p ? escapeHtml(p.full_name) : 'Unknown'}</div>
-                <div class="next-action">Next: ${a.next_action || 'None'}</div>
+                <div class="next-action">Next: ${escapeHtml(a.next_action || 'None')}</div>
             </div>
             <span class="assignment-status status-${(a.status || 'active').toLowerCase()}">${a.status || 'Active'}</span>
         </div>

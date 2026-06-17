@@ -481,7 +481,7 @@
                     if (container) {
                         container.innerHTML = `
                             <div class="selected-entity-badge">
-                                <span>${_state.se.type}: <strong>${entityName}</strong></span>
+                                <span>${escapeHtml(_state.se.type)}: <strong>${escapeHtml(entityName)}</strong></span>
                                 <button class="btn btn-sm secondary" onclick="app.clearSelectedEntity()">Clear</button>
                             </div>
                         `;
@@ -2566,7 +2566,7 @@
                 const allEvents = await AppDataStore.getAll('events');
                 const activeEvents = allEvents.filter(e => e.is_active !== false && e.status !== 'inactive');
                 dropdown.innerHTML = '<option value="">-- Select --</option>' +
-                    activeEvents.map(e => `<option value="${e.id}" ${e.id === newEvent.id ? 'selected' : ''}>${e.event_title || e.title || 'Untitled Event'}</option>`).join('');
+                    activeEvents.map(e => `<option value="${e.id}" ${e.id === newEvent.id ? 'selected' : ''}>${escapeHtml(e.event_title || e.title || 'Untitled Event')}</option>`).join('');
                 showSelectedEventDetails(newEvent.id);
             }
 
@@ -2604,16 +2604,16 @@
             <div style="margin-top:12px; padding:12px; background:var(--gray-50,#faf9f7); border:1px solid var(--border,#e5e0d8); border-radius:8px; font-size:13px;">
                 <div style="font-weight:600; margin-bottom:8px; color:var(--primary);">Event Details</div>
                 <div style="display:grid; grid-template-columns:110px 1fr; gap:4px 8px;">
-                    <span style="color:var(--gray-400);">Type:</span><span>${ev.event_type || '-'}</span>
-                    <span style="color:var(--gray-400);">Title:</span><span><strong>${ev.event_title || ev.title || '-'}</strong></span>
-                    <span style="color:var(--gray-400);">Speaker:</span><span>${ev.speaker || '-'}</span>
-                    <span style="color:var(--gray-400);">Duration:</span><span>${ev.duration || '-'}</span>
-                    <span style="color:var(--gray-400);">Venue:</span><span>${ev.location || ev.venue || '-'}</span>
-                    <span style="color:var(--gray-400);">Ticket Price:</span><span>${ev.ticket_price ? 'RM ' + ev.ticket_price : '-'}</span>
-                    <span style="color:var(--gray-400);">Early Bird:</span><span>${ev.early_bird_price || '-'}</span>
-                    <span style="color:var(--gray-400);">Group Price:</span><span>${ev.group_purchase_price || '-'}</span>
-                    <span style="color:var(--gray-400);">Target Group:</span><span>${ev.target_group || '-'}</span>
-                    <span style="color:var(--gray-400);">Description:</span><span>${ev.description || '-'}</span>
+                    <span style="color:var(--gray-400);">Type:</span><span>${escapeHtml(ev.event_type || '-')}</span>
+                    <span style="color:var(--gray-400);">Title:</span><span><strong>${escapeHtml(ev.event_title || ev.title || '-')}</strong></span>
+                    <span style="color:var(--gray-400);">Speaker:</span><span>${escapeHtml(ev.speaker || '-')}</span>
+                    <span style="color:var(--gray-400);">Duration:</span><span>${escapeHtml(ev.duration || '-')}</span>
+                    <span style="color:var(--gray-400);">Venue:</span><span>${escapeHtml(ev.location || ev.venue || '-')}</span>
+                    <span style="color:var(--gray-400);">Ticket Price:</span><span>${ev.ticket_price ? 'RM ' + escapeHtml(ev.ticket_price) : '-'}</span>
+                    <span style="color:var(--gray-400);">Early Bird:</span><span>${escapeHtml(ev.early_bird_price || '-')}</span>
+                    <span style="color:var(--gray-400);">Group Price:</span><span>${escapeHtml(ev.group_purchase_price || '-')}</span>
+                    <span style="color:var(--gray-400);">Target Group:</span><span>${escapeHtml(ev.target_group || '-')}</span>
+                    <span style="color:var(--gray-400);">Description:</span><span>${escapeHtml(ev.description || '-')}</span>
                 </div>
             </div>
         `;
@@ -3201,7 +3201,7 @@
         if (container) {
             container.innerHTML = _state.sat.map(a => `
                 <div class="co-agent-tag" style="display:inline-flex; align-items:center; gap:8px; padding:6px 12px; margin-bottom:8px; background:var(--gray-100); border-radius:4px; border:1px solid var(--gray-200);">
-                    <span>${a.name}</span>
+                    <span>${escapeHtml(a.name || '')}</span>
                     <select class="form-control" style="width: auto; padding: 2px 6px; font-size: 11px; height: 24px;" onchange="app.updateAttendeeStatus(${a.id}, this.value)">
                         <option value="Registered" ${a.status === 'Registered' ? 'selected' : ''}>Registered</option>
                         <option value="Attended" ${a.status === 'Attended' ? 'selected' : ''}>Attended</option>
@@ -3298,7 +3298,7 @@
         if (infoDiv) {
             infoDiv.innerHTML = `
                 <div class="selected-entity-badge">
-                    <span>${type}: <strong>${name}</strong></span>
+                    <span>${escapeHtml(type)}: <strong>${escapeHtml(name)}</strong></span>
                     <button class="btn btn-sm secondary" onclick="app.clearSelectedReferrer()">Clear</button>
                 </div>
             `;
@@ -3371,7 +3371,7 @@
                     : '<i class="fas fa-clock" style="color:#f59e0b;" title="Pending"></i>';
             return `
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:#fff;border:1px solid var(--gray-200);border-radius:6px;margin-bottom:4px;">
-                    <span style="font-size:13px;">${icon} <strong>${c.name}</strong> <span style="color:#888;font-size:11px;">${c.role||''}</span></span>
+                    <span style="font-size:13px;">${icon} <strong>${escapeHtml(c.name || '')}</strong> <span style="color:#888;font-size:11px;">${escapeHtml(c.role||'')}</span></span>
                     <button class="btn-icon text-danger" onclick="event.stopPropagation();app.removeConsultant(${c.id})" title="Remove"><i class="fas fa-times"></i></button>
                 </div>`;
         }).join('');
@@ -3634,7 +3634,7 @@
                         : '<i class="fas fa-clock" style="color:#f59e0b;" title="Pending response"></i>';
                 return `
                 <div class="co-agent-tag" style="display:inline-flex; align-items:center; gap:8px; padding:6px 12px; margin-bottom:8px;">
-                    <span>${statusIcon} ${a.name}</span>
+                    <span>${statusIcon} ${escapeHtml(a.name || '')}</span>
                     <select class="form-control" style="width: auto; padding: 2px 6px; font-size: 11px; height: 24px;" onchange="app.updateCoAgentRole(${a.id}, this.value)">
                         <option value="Supporting" ${a.co_role === 'Supporting' ? 'selected' : ''}>Supporting</option>
                         <option value="Observer" ${a.co_role === 'Observer' ? 'selected' : ''}>Observer</option>

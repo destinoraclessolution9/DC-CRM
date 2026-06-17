@@ -563,9 +563,9 @@
                             const items  = _fpState.poItems.filter(i => i.po_id === p.id).length;
                             return `
                                 <tr style="border-top:1px solid var(--gray-100);">
-                                    <td style="padding:8px 10px;font-family:monospace;font-weight:600;">${p.po_number}</td>
-                                    <td style="padding:8px 10px;">${vendor}</td>
-                                    <td style="padding:8px 10px;">${branch}</td>
+                                    <td style="padding:8px 10px;font-family:monospace;font-weight:600;">${fpEsc(p.po_number)}</td>
+                                    <td style="padding:8px 10px;">${fpEsc(vendor)}</td>
+                                    <td style="padding:8px 10px;">${fpEsc(branch)}</td>
                                     <td style="padding:8px 10px;">${p.order_date || ''}</td>
                                     <td style="padding:8px 10px;text-align:right;">${items}</td>
                                     <td style="padding:8px 10px;text-align:center;">${statusBadge(p.status || 'draft')}</td>
@@ -1094,7 +1094,7 @@
         const fld = (id, label, val = '', type = 'text') => `
             <div style="margin-bottom:10px;">
                 <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">${label}</label>
-                <input id="fp-vd-${id}" type="${type}" value="${(val || '').toString().replace(/"/g, '&quot;')}" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;">
+                <input id="fp-vd-${id}" type="${type}" value="${fpEsc(val || '')}" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;">
             </div>
         `;
         const content = `

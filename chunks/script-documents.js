@@ -156,7 +156,7 @@
                      ondragleave="this.parentElement.classList.remove('drag-over')"
                      ondrop="app.handleDropOnFolder(event, ${folder.id})">
                     <i class="fas fa-folder" style="color: ${folder.color || '#f59e0b'}"></i>
-                    <span class="folder-name">${folder.name}</span>
+                    <span class="folder-name">${escapeHtml(folder.name || '')}</span>
                 </div>
                 <div class="folder-actions">
                     <button class="btn-icon" aria-label="Rename folder" onclick="app.renameFolder(${folder.id}); event.stopPropagation()"><i class="fas fa-edit" aria-hidden="true"></i></button>
@@ -213,7 +213,7 @@
     const renameFolder = async (id) => {
         const folder = await AppDataStore.getById('folders', id);
         if (!folder) { UI.toast.error("Folder not found"); return; }
-        UI.showModal('Rename Folder', `<div class="form-group"><label>New Name</label><input type="text" id="rename-folder-input" class="form-control" value="${folder.name}"></div>`,
+        UI.showModal('Rename Folder', `<div class="form-group"><label>New Name</label><input type="text" id="rename-folder-input" class="form-control" value="${escapeHtml(folder.name || '')}"></div>`,
             [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Rename', type: 'primary', action: `(async () => { await app.confirmRenameFolder(${id}); })()` }]);
     };
     window.app.confirmRenameFolder = async (id) => {
@@ -290,7 +290,7 @@
         const verUserMap = new Map(allUsersForVer.map(u => [String(u.id), u.full_name]));
         const content = `
             <div class="version-history">
-                <div class="version-header"><h3>Version History: ${file.filename}</h3><p>Current: v${file.current_version || 1}</p></div>
+                <div class="version-header"><h3>Version History: ${escapeHtml(file.filename || '')}</h3><p>Current: v${file.current_version || 1}</p></div>
                 <table class="version-table">
                     <thead><tr><th scope="col">Version</th><th scope="col">Date</th><th scope="col">Size</th><th scope="col">By</th><th scope="col">Notes</th><th scope="col">Actions</th></tr></thead>
                     <tbody>
@@ -299,8 +299,8 @@
                                 <td>v${v.version_number}</td>
                                 <td>${new Date(v.created_at).toLocaleString()}</td>
                                 <td>${formatFileSize(v.size)}</td>
-                                <td>${verUserMap.get(String(v.created_by)) || 'System'}</td>
-                                <td>${v.change_note || '-'}</td>
+                                <td>${escapeHtml(verUserMap.get(String(v.created_by)) || 'System')}</td>
+                                <td>${escapeHtml(v.change_note || '-')}</td>
                                 <td>
                                     <button class="btn-icon" aria-label="Download version" onclick="app.downloadVersion(${v.id})"><i class="fas fa-download" aria-hidden="true"></i></button>
                                     <button class="btn-icon" aria-label="Restore version" onclick="app.restoreVersion(${v.id})"><i class="fas fa-undo" aria-hidden="true"></i></button>
@@ -332,7 +332,7 @@
         if (!v1El || !v2El) return;
         const v1 = await AppDataStore.getById('document_versions', parseInt(v1El.value));
         const v2 = await AppDataStore.getById('document_versions', parseInt(v2El.value));
-        UI.showModal('Comparison', `<div class="diff-view"><pre>${v1.data || ''}</pre><pre>${v2.data || ''}</pre></div>`, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
+        UI.showModal('Comparison', `<div class="diff-view"><pre>${escapeHtml(v1.data || '')}</pre><pre>${escapeHtml(v2.data || '')}</pre></div>`, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
     };
 
     const downloadVersion = (versionId) => { UI.toast.info(`Downloading version ${versionId}...`); };
@@ -519,7 +519,7 @@
                             </td>
                             <td ondblclick="app.previewFile(${file.id})">
                                 <i class="fas ${getFileIcon(file.filename)} file-icon"></i>
-                                <span class="file-name">${file.filename}</span>
+                                <span class="file-name">${escapeHtml(file.filename || '')}</span>
                                 ${file.is_starred ? '<i class="fas fa-star starred"></i>' : ''}
                             </td>
                             <td>${new Date(file.updated_at || file.created_at).toLocaleString()}</td>
@@ -595,7 +595,7 @@
                     <div class="file-card-icon" ondblclick="app.previewFile(${file.id})">
                         <i class="fas ${getFileIcon(file.filename)} fa-4x"></i>
                     </div>
-                    <div class="file-card-name" title="${file.filename}">${truncateFilename(file.filename, 20)}</div>
+                    <div class="file-card-name" title="${escapeHtml(file.filename || '')}">${escapeHtml(truncateFilename(file.filename, 20))}</div>
                     <div class="file-card-meta">
                         <span>${(file.size > 1048576 ? (file.size / 1048576).toFixed(1) + " MB" : (file.size / 1024).toFixed(0) + " KB")}</span>
                         <span>${new Date(file.updated_at || file.created_at).toLocaleDateString()}</span>
@@ -1013,7 +1013,7 @@
             previewContent = `
                 <div class="image-preview" style="text-align: center;">
                     <img loading="lazy" decoding="async" src="${file.data || 'https://via.placeholder.com/800x600?text=Image+Preview'}" 
-                         alt="${filename}" style="max-width: 100%; max-height: 70vh; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                         alt="${escapeHtml(filename || '')}" style="max-width: 100%; max-height: 70vh; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
                 </div>
             `;
         } else if (isPdfFile(filename)) {
@@ -1027,7 +1027,7 @@
                 <div class="text-preview">
                     <pre style="white-space: pre-wrap; font-family: monospace; padding: 20px; 
                                background: #f5f5f5; border-radius: 8px; max-height: 500px; overflow: auto; border: 1px solid #ddd;">
-This is a preview of ${file.filename}
+This is a preview of ${escapeHtml(file.filename || '')}
 Size: ${(file.size > 1048576 ? (file.size / 1048576).toFixed(1) + " MB" : (file.size / 1024).toFixed(0) + " KB")}
             Created: ${new Date(file.created_at).toLocaleString()}
             Modified: ${new Date(file.updated_at || file.created_at).toLocaleString()}
@@ -1071,7 +1071,7 @@ In a production system, this would show the actual file contents.
                     <div class="metadata-grid">
                         <div class="metadata-row">
                             <span class="metadata-label">Name:</span>
-                            <span class="metadata-value">${file.filename}</span>
+                            <span class="metadata-value">${escapeHtml(file.filename || '')}</span>
                         </div>
                         <div class="metadata-row">
                             <span class="metadata-label">Size:</span>
@@ -1079,11 +1079,11 @@ In a production system, this would show the actual file contents.
                         </div>
                         <div class="metadata-row">
                             <span class="metadata-label">Type:</span>
-                            <span class="metadata-value">${file.mime_type || 'Unknown'}</span>
+                            <span class="metadata-value">${escapeHtml(file.mime_type || 'Unknown')}</span>
                         </div>
                         <div class="metadata-row">
                             <span class="metadata-label">Location:</span>
-                            <span class="metadata-value">${await getFolderPath(file.folder_id)}</span>
+                            <span class="metadata-value">${escapeHtml(await getFolderPath(file.folder_id))}</span>
                         </div>
                     </div>
                 </div>
@@ -1115,7 +1115,7 @@ In a production system, this would show the actual file contents.
                     <div class="metadata-grid">
                         <div class="metadata-row">
                             <span class="metadata-label">Created By:</span>
-                            <span class="metadata-value">${creator?.full_name || 'Unknown'}</span>
+                            <span class="metadata-value">${escapeHtml(creator?.full_name || 'Unknown')}</span>
                         </div>
                         <div class="metadata-row">
                             <span class="metadata-label">User ID:</span>
@@ -1127,7 +1127,7 @@ In a production system, this would show the actual file contents.
                 ${file.description ? `
                     <div class="metadata-section">
                         <h4>Description</h4>
-                        <p class="metadata-description">${file.description}</p>
+                        <p class="metadata-description">${escapeHtml(file.description)}</p>
                     </div>
                 ` : ''}
             </div>
@@ -1157,7 +1157,7 @@ In a production system, this would show the actual file contents.
 
     const editFileDescription = async (fileId) => {
         const file = await AppDataStore.getById('documents', fileId);
-        UI.showModal('Edit Description', `<div class="form-group"><label>Description</label><textarea id="edit-file-desc" class="form-control" rows="4">${file.description || ''}</textarea></div>`,
+        UI.showModal('Edit Description', `<div class="form-group"><label>Description</label><textarea id="edit-file-desc" class="form-control" rows="4">${escapeHtml(file.description || '')}</textarea></div>`,
             [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Save', type: 'primary', action: `(async () => { await app.saveFileDescription(${fileId}); })()` }]);
     };
 

@@ -225,7 +225,7 @@ const showFudeView = async (container) => {
                 <th scope="col">Title</th><th scope="col">Type</th><th scope="col">Status</th><th scope="col">Created</th><th scope="col">Actions</th>
             </tr></thead><tbody>
                 ${highlights.length ? highlights.map(h => `<tr>
-                    <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;">${h.title}</td>
+                    <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;">${esc(h.title)}</td>
                     <td>${badge(h.type || '-', '#e0e7ff', '#3730a3')}</td>
                     <td>${badge(h.is_active ? 'Active' : 'Hidden', h.is_active ? '#d1fae5' : '#f3f4f6', h.is_active ? '#065f46' : '#6b7280')}</td>
                     <td>${fmtDate(h.created_at)}</td>
@@ -250,11 +250,11 @@ const showFudeView = async (container) => {
                 ${allRewards.length ? allRewards.map(r => {
                     const u = allUsersForReward.find(u => u.id === r.user_id);
                     return `<tr>
-                        <td style="font-weight:600;">${u ? u.full_name : 'User ' + r.user_id}</td>
+                        <td style="font-weight:600;">${u ? esc(u.full_name) : 'User ' + r.user_id}</td>
                         <td>${badge(r.action_type || '-', '#e0e7ff', '#3730a3')}</td>
                         <td>${r.fudi_points || 0}</td>
                         <td>${parseFloat(r.sharing_return || 0).toFixed(2)}</td>
-                        <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;">${r.description || '-'}</td>
+                        <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;">${esc(r.description || '-')}</td>
                         <td>${fmtDate(r.created_at)}</td>
                         <td><button class="btn danger btn-sm" onclick="event.stopPropagation();app.deleteReward(${r.id})"><i class="fas fa-trash"></i></button></td>
                     </tr>`;
@@ -267,7 +267,7 @@ const showFudeView = async (container) => {
     if (isCustomer) {
         const rows = myPurchases.length
             ? myPurchases.map(p => `<tr>
-                <td>${p.product_name || p.package_name || p.solution || '-'}</td>
+                <td>${esc(p.product_name || p.package_name || p.solution || '-')}</td>
                 <td>${fmtAmt(p.amount || p.total_amount)}</td>
                 <td>${badge(p.status || 'pending', p.status === 'completed' ? '#d1fae5' : '#fef3c7', p.status === 'completed' ? '#065f46' : '#92400e')}</td>
                 <td>${fmtDate(p.purchase_date || p.created_at)}</td>
@@ -292,8 +292,8 @@ const showFudeView = async (container) => {
                 ${n._signedUrl ? `<img loading="lazy" decoding="async" ${imgSrc(n)} alt="" onerror="this.style.display='none'">` : ''}
                 <div class="fude-carousel-overlay">
                     <span class="fude-carousel-badge">${i === 0 ? 'Latest News' : 'News'}</span>
-                    <h3>${n.title}</h3>
-                    ${n.content ? `<p>${n.content}</p>` : ''}
+                    <h3>${esc(n.title)}</h3>
+                    ${n.content ? `<p>${esc(n.content)}</p>` : ''}
                     <span class="fude-carousel-date">📅 ${fmtDate(n.created_at)}</span>
                     <button class="fude-carousel-readmore" onclick="event.stopPropagation(); app.openStoryDetail(${n.id})">Read More</button>
                 </div>
@@ -342,7 +342,7 @@ const showFudeView = async (container) => {
         const filterBar = allTags.length ? `
             <div class="fude-story-filter-bar">
                 <button class="fude-story-filter-chip active" data-tag="*" onclick="app.fudeFilterStories('*')">All</button>
-                ${allTags.map(t => `<button class="fude-story-filter-chip" data-tag="${t.replace(/"/g,'&quot;').replace(/'/g,'&#39;')}" onclick="app.fudeFilterStories(${JSON.stringify(t)})">#${t}</button>`).join('')}
+                ${allTags.map(t => `<button class="fude-story-filter-chip" data-tag="${t.replace(/"/g,'&quot;').replace(/'/g,'&#39;')}" onclick="app.fudeFilterStories(${JSON.stringify(t)})">#${esc(t)}</button>`).join('')}
             </div>` : '';
         const cards = successStories.map((s, idx) => {
             const imgEl = s._signedUrl
@@ -350,18 +350,18 @@ const showFudeView = async (container) => {
                 : '';
             const ph = `<div class="fude-story-card-img-ph" style="display:${s._signedUrl ? 'none' : 'flex'};">📖</div>`;
             const tagArr = (s.tags || '').split(',').filter(Boolean).map(t => t.trim());
-            const tagSpans = tagArr.slice(0, 2).map(t => `<span class="fude-story-tag">#${t}</span>`).join('');
+            const tagSpans = tagArr.slice(0, 2).map(t => `<span class="fude-story-tag">#${esc(t)}</span>`).join('');
             const tagData = tagArr.map(t => t.toLowerCase()).join('|');
             const isOverflow = idx >= PREVIEW;
             return `<div class="fude-story-card${isOverflow ? ' fude-story-card--hidden' : ''}" data-tags="${tagData}" data-overflow="${isOverflow ? '1' : '0'}" onclick="app.openStoryDetail(${s.id})" style="cursor:pointer;">
                 ${imgEl}${ph}
                 <div class="fude-story-card-body">
                     ${tagSpans ? `<div class="fude-story-card-tags">${tagSpans}</div>` : ''}
-                    <h3>${s.title}</h3>
-                    ${s.content ? `<p>${s.content}</p>` : '<p style="flex:1"></p>'}
+                    <h3>${esc(s.title)}</h3>
+                    ${s.content ? `<p>${esc(s.content)}</p>` : '<p style="flex:1"></p>'}
                     <div class="fude-story-card-footer">
                         <div class="fude-story-card-meta">
-                            <div class="fude-story-card-avatar">${(s.title || 'D')[0].toUpperCase()}</div>
+                            <div class="fude-story-card-avatar">${esc((s.title || 'D')[0].toUpperCase())}</div>
                             <span>${fmtDate(s.created_at)}</span>
                         </div>
                         <button class="fude-story-readmore" onclick="event.stopPropagation(); app.openStoryDetail(${s.id})">Read More →</button>
@@ -396,8 +396,8 @@ const showFudeView = async (container) => {
         if (dynamicTips.length) {
             tipCols.push(`<div class="fude-tip-col">
                 <div class="fude-tip-icon">💡</div>
-                <h3>${dynamicTips[0].title}</h3>
-                ${dynamicTips[0].content ? `<p>${dynamicTips[0].content}</p>` : ''}
+                <h3>${esc(dynamicTips[0].title)}</h3>
+                ${dynamicTips[0].content ? `<p>${esc(dynamicTips[0].content)}</p>` : ''}
                 <button class="fude-tip-link">Learn More →</button>
             </div>`);
         } else {
@@ -440,7 +440,7 @@ const showFudeView = async (container) => {
                 <td>${badge(r.action_type || '-', '#e0e7ff', '#3730a3')}</td>
                 <td style="font-weight:600;">${r.fudi_points || 0}</td>
                 <td>${parseFloat(r.sharing_return || 0).toFixed(2)}</td>
-                <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;">${r.description || '-'}</td>
+                <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;">${esc(r.description || '-')}</td>
                 <td>${fmtDate(r.created_at)}</td>
             </tr>`).join('')}
            </tbody></table></div>`;
@@ -517,14 +517,14 @@ const openStoryDetail = async (highlightId) => {
         try { imgSrc = h.image_url ? await AppDataStore.resolveAttachmentSrc(h.image_url) : null; } catch (_) {}
         const fmtDate = d => { try { return new Date(d).toLocaleDateString(); } catch (e) { return d || ''; } };
         const tags = (h.tags || '').split(',').filter(Boolean)
-            .map(t => `<span style="display:inline-block;background:var(--primary-50,#fef3c7);color:var(--primary-700,#92400e);border:1px solid var(--primary-200,#fde68a);border-radius:10px;padding:2px 8px;margin:2px 4px 2px 0;font-size:11px;">${t.trim()}</span>`).join('');
+            .map(t => `<span style="display:inline-block;background:var(--primary-50,#fef3c7);color:var(--primary-700,#92400e);border:1px solid var(--primary-200,#fde68a);border-radius:10px;padding:2px 8px;margin:2px 4px 2px 0;font-size:11px;">${esc(t.trim())}</span>`).join('');
         const content = `
             <div style="max-height:75vh;overflow-y:auto;padding-right:4px;">
                 ${imgSrc ? `<div style="margin:-4px -4px 16px;"><img loading="lazy" decoding="async" src="${imgSrc}" style="width:100%;max-height:320px;object-fit:cover;border-radius:8px;display:block;"></div>` : ''}
                 ${tags ? `<div style="margin-bottom:8px;">${tags}</div>` : ''}
-                <h2 style="margin:0 0 8px;font-size:1.4rem;">${h.title || ''}</h2>
+                <h2 style="margin:0 0 8px;font-size:1.4rem;">${esc(h.title || '')}</h2>
                 <div style="font-size:12px;color:var(--gray-500,#6b7280);margin-bottom:14px;">📅 ${fmtDate(h.created_at)}</div>
-                <div style="font-size:14px;line-height:1.7;color:var(--gray-700,#374151);white-space:pre-wrap;">${h.content || '<em>No content.</em>'}</div>
+                <div style="font-size:14px;line-height:1.7;color:var(--gray-700,#374151);white-space:pre-wrap;">${h.content ? esc(h.content) : '<em>No content.</em>'}</div>
             </div>`;
         _rxShowModal(h.title || 'Story', content, [
             { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
@@ -544,15 +544,15 @@ const openHighlightModal = async (highlightId = null) => {
             <input type="hidden" id="edit-highlight-id" value="${highlightId || ''}">
             <div class="form-group">
                 <label>Title <span class="required">*</span></label>
-                <input type="text" id="highlight-title" class="form-control" value="${h?.title || ''}" placeholder="Enter title">
+                <input type="text" id="highlight-title" class="form-control" value="${esc(h?.title || '')}" placeholder="Enter title">
             </div>
             <div class="form-group">
                 <label>Content</label>
-                <textarea id="highlight-content" class="form-control" rows="4" placeholder="Enter content...">${h?.content || ''}</textarea>
+                <textarea id="highlight-content" class="form-control" rows="4" placeholder="Enter content...">${esc(h?.content || '')}</textarea>
             </div>
             <div class="form-group">
                 <label>Tags <span style="font-weight:400;color:var(--gray-500,#6b7280);font-size:12px;">(comma-separated, e.g. 风水,卧室,案例)</span></label>
-                <input type="text" id="highlight-tags" class="form-control" value="${h?.tags || ''}" placeholder="逆转胜, 卧室, 风水">
+                <input type="text" id="highlight-tags" class="form-control" value="${esc(h?.tags || '')}" placeholder="逆转胜, 卧室, 风水">
             </div>
             <div class="form-group">
                 <label>Photo</label>
@@ -575,7 +575,7 @@ const openHighlightModal = async (highlightId = null) => {
                     </label>
                     <img loading="lazy" decoding="async" id="highlight-image-preview" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;display:none;" onerror="this.style.display='none'">
                     <div style="display:flex;align-items:center;gap:8px;color:var(--gray-400,#9ca3af);font-size:13px;"><span style="flex:1;height:1px;background:currentColor;opacity:.4;"></span>or paste a URL<span style="flex:1;height:1px;background:currentColor;opacity:.4;"></span></div>
-                    <input type="url" id="highlight-image-url" class="form-control" value="${h?.image_url || ''}" placeholder="https://example.com/photo.jpg" oninput="
+                    <input type="url" id="highlight-image-url" class="form-control" value="${esc(h?.image_url || '')}" placeholder="https://example.com/photo.jpg" oninput="
                         const prev = document.getElementById('highlight-url-preview');
                         if (this.value) { prev.src = this.value; prev.style.display='block'; document.getElementById('highlight-image-file').value=''; document.getElementById('highlight-image-preview').style.display='none'; }
                         else { prev.style.display='none'; }
@@ -699,7 +699,7 @@ const openRewardModal = async (rewardId = null) => {
     let eligibleUsers = [];
     try { eligibleUsers = (await AppDataStore.getAll('users')).filter(u => u.role && u.role.match(/Level\s*1[34]/i)); } catch(e) {}
     const userOptions = eligibleUsers.map(u =>
-        `<option value="${u.id}" ${r?.user_id === u.id ? 'selected' : ''}>${u.full_name} (${u.role})</option>`
+        `<option value="${u.id}" ${r?.user_id === u.id ? 'selected' : ''}>${esc(u.full_name)} (${esc(u.role)})</option>`
     ).join('');
 
     const content = `
@@ -730,7 +730,7 @@ const openRewardModal = async (rewardId = null) => {
             </div>
             <div class="form-group">
                 <label>Description</label>
-                <input type="text" id="reward-desc" class="form-control" value="${r?.description || ''}" placeholder="e.g. Referred Tan Ah Kow to CPS session">
+                <input type="text" id="reward-desc" class="form-control" value="${esc(r?.description || '')}" placeholder="e.g. Referred Tan Ah Kow to CPS session">
             </div>
         </div>
     `;

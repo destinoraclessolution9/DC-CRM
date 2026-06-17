@@ -107,7 +107,7 @@ const _buildNotifPanel = async () => {
         intakes = intakes.filter(i => !i.agent_id || vStrs.includes(String(i.agent_id)));
     }
     for (const i of intakes) {
-        items.push({ icon: '📋', title: `CPS Intake: ${i.prospect_name || 'Unknown'}`, sub: `${i.activity_date || ''} · Pending approval`, action: `app.openApproveCpsIntakeModal(${i.id})` });
+        items.push({ icon: '📋', title: `CPS Intake: ${esc(i.prospect_name || 'Unknown')}`, sub: `${esc(i.activity_date || '')} · Pending approval`, action: `app.openApproveCpsIntakeModal(${i.id})` });
     }
 
     // Birthdays
@@ -122,7 +122,7 @@ const _buildNotifPanel = async () => {
         const isToday = md === todayMD;
         const isTom   = md === tomMD;
         if (!isToday && !isTom) return;
-        items.push({ icon: '🎂', title: `${p.full_name || 'Someone'}'s Birthday`, sub: isToday ? 'Today!' : 'Tomorrow' });
+        items.push({ icon: '🎂', title: `${esc(p.full_name || 'Someone')}'s Birthday`, sub: isToday ? 'Today!' : 'Tomorrow' });
         bdayClientSet.add(p.id);
     });
     allUsers.forEach(u => {
@@ -132,14 +132,14 @@ const _buildNotifPanel = async () => {
         const isToday = md === todayMD;
         const isTom   = md === tomMD;
         if (!isToday && !isTom) return;
-        items.push({ icon: '🎂', title: `${u.full_name || 'Agent'}'s Birthday`, sub: (isToday ? 'Today!' : 'Tomorrow') + ' · Agent' });
+        items.push({ icon: '🎂', title: `${esc(u.full_name || 'Agent')}'s Birthday`, sub: (isToday ? 'Today!' : 'Tomorrow') + ' · Agent' });
     });
 
     // Refill reminders
     try {
         const reminders = await AppDataStore.query('refill_reminders', { status: 'pending' });
         for (const r of (reminders || []).slice(0, 5)) {
-            items.push({ icon: '💊', title: `Refill due: ${r.product_name || 'Product'}`, sub: `Customer needs reorder · Due ${r.due_date || ''}` });
+            items.push({ icon: '💊', title: `Refill due: ${esc(r.product_name || 'Product')}`, sub: `Customer needs reorder · Due ${esc(r.due_date || '')}` });
         }
     } catch (_) {}
 
@@ -156,8 +156,8 @@ const _buildNotifPanel = async () => {
                 const actId = act.id;
                 items.push({
                     icon: '🤝',
-                    title: `Co-agent invitation: ${typeLabel}`,
-                    sub: `${act.activity_title || typeLabel}${dateLabel}
+                    title: `Co-agent invitation: ${esc(typeLabel)}`,
+                    sub: `${esc(act.activity_title || typeLabel)}${esc(dateLabel)}
                         <span style="display:inline-flex;gap:6px;margin-top:6px;">
                             <button onclick="event.stopPropagation();app.respondCoAgentInvite(${actId},'accepted');document.querySelector('.notif-panel')?.remove()" style="background:#16a34a;color:#fff;border:none;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:11px;">✓ Accept</button>
                             <button onclick="event.stopPropagation();app.respondCoAgentInvite(${actId},'rejected');document.querySelector('.notif-panel')?.remove()" style="background:#dc2626;color:#fff;border:none;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:11px;">✗ Reject</button>
@@ -513,7 +513,7 @@ const openShareCpsIntakeLinkModal = async () => {
     const venueData = await AppDataStore.getAll('venues').catch(() => []);
     const venueOptions = (venueData || [])
         .sort((a, b) => (a.sequence || 0) - (b.sequence || 0))
-        .map(v => `<option value="${v.id}" data-name="${(v.name || '').replace(/"/g, '&quot;')}" data-address="${(v.address || v.location || '').replace(/"/g, '&quot;')}" data-waze="${(v.waze_link || '').replace(/"/g, '&quot;')}">${v.name} | ${v.location || ''}</option>`)
+        .map(v => `<option value="${v.id}" data-name="${(v.name || '').replace(/"/g, '&quot;')}" data-address="${(v.address || v.location || '').replace(/"/g, '&quot;')}" data-waze="${(v.waze_link || '').replace(/"/g, '&quot;')}">${esc(v.name)} | ${esc(v.location || '')}</option>`)
         .join('');
 
     const today = new Date().toISOString().split('T')[0];
@@ -708,14 +708,14 @@ const renderPendingCpsIntakes = async () => {
                     <div style="background:white; border:1px solid #fde68a; border-radius:8px; padding:12px;">
                         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
                             <div style="flex:1; min-width:200px;">
-                                <div style="font-weight:600; font-size:14px; margin-bottom:2px;">${i.prospect_name || 'Unknown'}</div>
+                                <div style="font-weight:600; font-size:14px; margin-bottom:2px;">${esc(i.prospect_name || 'Unknown')}</div>
                                 <div style="font-size:12px; color:var(--gray-600);">
-                                    <i class="fas fa-phone" style="margin-right:4px;"></i>${i.prospect_phone || '—'}
-                                    ${i.prospect_email ? ` · <i class="fas fa-envelope" style="margin-right:4px;"></i>${i.prospect_email}` : ''}
+                                    <i class="fas fa-phone" style="margin-right:4px;"></i>${esc(i.prospect_phone || '—')}
+                                    ${i.prospect_email ? ` · <i class="fas fa-envelope" style="margin-right:4px;"></i>${esc(i.prospect_email)}` : ''}
                                 </div>
                                 <div style="font-size:12px; color:var(--gray-500); margin-top:4px;">
-                                    <i class="far fa-calendar" style="margin-right:4px;"></i>${i.activity_date} · ${(i.start_time || '').slice(0,5)}–${(i.end_time || '').slice(0,5)}
-                                    ${i.venue_name ? ` · <i class="fas fa-map-marker-alt" style="margin-right:4px;"></i>${i.venue_name}` : ''}
+                                    <i class="far fa-calendar" style="margin-right:4px;"></i>${esc(i.activity_date)} · ${(i.start_time || '').slice(0,5)}–${(i.end_time || '').slice(0,5)}
+                                    ${i.venue_name ? ` · <i class="fas fa-map-marker-alt" style="margin-right:4px;"></i>${esc(i.venue_name)}` : ''}
                                 </div>
                             </div>
                             <div style="display:flex; gap:6px;">

@@ -78,9 +78,9 @@
                             <tr>
                                 <td>${new Date(log.timestamp).toLocaleString()}</td>
                                 <td><span class="log-level ${log.level}">${log.level}</span></td>
-                                <td>${log.category}</td>
-                                <td>${log.action}</td>
-                                <td>${log.user_id || 'System'}</td>
+                                <td>${esc(log.category)}</td>
+                                <td>${esc(log.action)}</td>
+                                <td>${esc(log.user_id || 'System')}</td>
                             </tr>
                         `).join('')}
                         ${!logs.length ? '<tr><td colspan="5">No logs found.</td></tr>' : ''}
@@ -257,9 +257,9 @@
                         <tbody>
                             ${tenants.map(t => `
                                 <tr>
-                                    <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">${t.tenant_id}</td>
-                                    <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);"><strong>${t.name}</strong></td>
-                                    <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">${t.plan}</td>
+                                    <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">${esc(t.tenant_id)}</td>
+                                    <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);"><strong>${esc(t.name)}</strong></td>
+                                    <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">${esc(t.plan)}</td>
                                     <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);"><span class="status-badge status-${t.status.toLowerCase()}">${t.status}</span></td>
                                     <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">${new Date(t.created_at).toLocaleDateString()}</td>
                                     <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">

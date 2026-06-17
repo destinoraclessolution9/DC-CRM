@@ -486,7 +486,7 @@
                     <div class="status-text">
                         <h3>${isConnected ? 'Connected' : 'Disconnected'}</h3>
                         ${isConnected ? `
-                            <p>Connected as: ${connection.user_email || 'user@gmail.com'}</p>
+                            <p>Connected as: ${esc(connection.user_email || 'user@gmail.com')}</p>
                             <p>Last Sync: ${connection.last_sync ? new Date(connection.last_sync).toLocaleString() : 'Never'}</p>
                         ` : `
                             <p>Connect your Google Calendar to sync activities both ways.</p>
@@ -748,7 +748,7 @@
                 tableHtml += `
                     <tr style="border-bottom:1px solid var(--gray-100);">
                         <td style="padding:12px;">${index + 1}</td>
-                        <td style="padding:12px;">${activity ? activity.activity_title : 'Unknown activity'}</td>
+                        <td style="padding:12px;">${activity ? esc(activity.activity_title) : 'Unknown activity'}</td>
                         <td style="padding:12px;">CRM ${directionIcon} Google</td>
                         <td style="padding:12px;"><span style="color:${statusColor};font-weight:600;">${statusIcon} ${item.status}</span></td>
                         <td style="padding:12px;">${new Date(item.synced_at).toLocaleTimeString()}</td>

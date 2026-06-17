@@ -438,7 +438,7 @@
                             <input type="date" id="kb-d-due" value="${entry.due_date||''}" onchange="app.saveKnowledgeEntry()">
                         </div>
                         <div class="kb-prop"><label>Tags (comma-separated)</label>
-                            <input type="text" id="kb-d-tags" value="${(entry.tags||[]).join(', ')}" oninput="app.scheduleKnowledgeAutosave()" placeholder="strategy, q2-2026">
+                            <input type="text" id="kb-d-tags" value="${escapeHtml((entry.tags||[]).join(', '))}" oninput="app.scheduleKnowledgeAutosave()" placeholder="strategy, q2-2026">
                         </div>
                         <div class="kb-prop"><label>Convert</label>
                             <div class="kb-convert">

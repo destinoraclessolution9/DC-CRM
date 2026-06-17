@@ -81,10 +81,10 @@
                     <!-- Welcome banner -->
                     <div class="cal-welcome-banner">
                         <div class="cal-welcome-text">
-                            <h2>${greeting}, <span class="welcome-name">${userName}!</span> 👋</h2>
+                            <h2>${greeting}, <span class="welcome-name">${esc(userName)}!</span> 👋</h2>
                             <p>Stay on top of your schedule and never miss an important follow-up.</p>
                             ${userEmail ? `<p class="cal-account-line" style="margin-top:6px;font-size:12px;color:#9ca3af;">
-                                Logged in as <strong style="color:#6b7280;">${userEmail}</strong> —
+                                Logged in as <strong style="color:#6b7280;">${esc(userEmail)}</strong> —
                                 <a href="#" onclick="event.preventDefault(); app.switchAccount();" style="color:#dc2626;font-weight:600;text-decoration:underline;cursor:pointer;">not you? Switch account</a>
                             </p>` : ''}
                         </div>
@@ -1420,9 +1420,9 @@
                             <div style="flex:1; min-width:0;">
                                 <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
                                     <span style="font-size:16px;">${triggerIcons[d.trigger_type] || '📩'}</span>
-                                    <strong style="font-size:13px; color:var(--gray-800,#1f2937);">${d.prospect_name || 'Unknown'}</strong>
-                                    <span style="font-size:11px; background:#dbeafe; color:#1d4ed8; padding:2px 8px; border-radius:10px;">${triggerLabels[d.trigger_type] || d.trigger_type}</span>
-                                    ${d.event_name ? `<span style="font-size:11px; color:var(--gray-500,#6b7280);">${d.event_name}${d.event_date ? ' — ' + d.event_date : ''}</span>` : ''}
+                                    <strong style="font-size:13px; color:var(--gray-800,#1f2937);">${esc(d.prospect_name || 'Unknown')}</strong>
+                                    <span style="font-size:11px; background:#dbeafe; color:#1d4ed8; padding:2px 8px; border-radius:10px;">${esc(triggerLabels[d.trigger_type] || d.trigger_type)}</span>
+                                    ${d.event_name ? `<span style="font-size:11px; color:var(--gray-500,#6b7280);">${esc(d.event_name)}${d.event_date ? ' — ' + esc(d.event_date) : ''}</span>` : ''}
                                     ${d.attachment_url ? '<span style="font-size:11px; background:#dcfce7; color:#059669; padding:2px 8px; border-radius:10px;"><i class="fas fa-paperclip"></i> Photo</span>' : ''}
                                 </div>
                             </div>
@@ -2393,7 +2393,7 @@
                     <label>Agent</label>
                     <select id="cal-filter-agent" class="form-control">
                         <option value="all" ${_filters.agent === 'all' ? 'selected' : ''}>All Agents</option>
-                        ${agents.map(a => `<option value="${a.id}" ${String(_filters.agent) === String(a.id) ? 'selected' : ''}>${a.full_name}</option>`).join('')}
+                        ${agents.map(a => `<option value="${a.id}" ${String(_filters.agent) === String(a.id) ? 'selected' : ''}>${esc(a.full_name)}</option>`).join('')}
                     </select>
                 </div>
                 <div class="form-group">
@@ -2851,7 +2851,7 @@
                             <div style="font-weight:600;font-size:13px;">${escapeHtml(name)}${sentBadge}</div>
                             <div style="font-size:12px;color:var(--gray-600);margin-top:2px;">💊 ${escapeHtml(r.product_name || 'Product')}</div>
                             <div style="font-size:11px;color:var(--gray-500);margin-top:2px;">Est. finish: ${r.estimated_finish_date} · ${daysText}</div>
-                            <div style="font-size:10px;color:var(--gray-400);margin-top:2px;">Agent: ${agent?.full_name || 'Unassigned'}</div>
+                            <div style="font-size:10px;color:var(--gray-400);margin-top:2px;">Agent: ${esc(agent?.full_name || 'Unassigned')}</div>
                         </div>
                     </div>
                     <div style="display:flex;gap:6px;margin-top:8px;">
@@ -3524,8 +3524,8 @@
                 html += `
                     <div class="timeline-activity ${a.activity_type.toLowerCase()}" onclick="app.viewActivityDetails(${a.id})">
                         <div class="activity-time">${a.start_time} - ${a.end_time || '?'}</div>
-                        <div class="activity-title"><strong>${a.activity_title || a.activity_type}</strong> ${name}</div>
-                        <div class="activity-agent">Agent: ${agent?.full_name || 'Unknown'}</div>
+                        <div class="activity-title"><strong>${esc(a.activity_title || a.activity_type)}</strong> ${esc(name)}</div>
+                        <div class="activity-agent">Agent: ${esc(agent?.full_name || 'Unknown')}</div>
                     </div>
                 `;
             }
@@ -3557,11 +3557,11 @@
                 let prospectInfo = '';
                 if (a.prospect_id) {
                     const p = prospectMapGDH.get(String(a.prospect_id));
-                    if (p) prospectInfo = `(${p.full_name})`;
+                    if (p) prospectInfo = `(${esc(p.full_name)})`;
                 }
                 return `
                     <div class="day-act-item">
-                        <strong>${a.activity_type}</strong>: ${a.activity_title} ${prospectInfo}
+                        <strong>${esc(a.activity_type)}</strong>: ${esc(a.activity_title)} ${prospectInfo}
                     </div>
                 `;
             });
@@ -3812,9 +3812,9 @@
                 return `
                     <div class="info-row" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:8px; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
                         <div>
-                            <strong style="cursor:pointer;color:var(--primary);text-decoration:underline;" onclick="event.stopPropagation();app.showAttendeeDetails(${entityId},'${att.attendee_type||'prospect'}')">${name}</strong>
+                            <strong style="cursor:pointer;color:var(--primary);text-decoration:underline;" onclick="event.stopPropagation();app.showAttendeeDetails(${entityId},'${att.attendee_type||'prospect'}')">${esc(name)}</strong>
                             <span style="font-size:10px; margin-left:5px; background:var(--gray-100); padding:1px 6px; border-radius:10px;">${att.attendee_type || 'prospect'}</span>
-                            <div style="font-size:11px; color:gray;">Added by: ${agentName}</div>
+                            <div style="font-size:11px; color:gray;">Added by: ${esc(agentName)}</div>
                         </div>
                         <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
                             <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
@@ -3843,14 +3843,14 @@
                 const addedByName = addedBy?.full_name || att.added_by_name || 'Unknown';
                 const attendedChecked = (att.attended || att.attendance_status === 'Attended') ? 'checked' : '';
                 const unattendedChecked = att.attendance_status === 'No Show' ? 'checked' : '';
-                const nameDisplay = `<strong>${name}</strong>`;
+                const nameDisplay = `<strong>${esc(name)}</strong>`;
                 const roleLabel = person?.role || 'consultant';
                 return `
                     <div class="info-row" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:8px; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
                         <div>
                             ${nameDisplay}
                             <span style="font-size:10px; margin-left:5px; background:#E0F2FE; color:#075985; padding:1px 6px; border-radius:10px;">${escapeHtml(roleLabel)}</span>
-                            <div style="font-size:11px; color:gray;">Added by: ${addedByName}</div>
+                            <div style="font-size:11px; color:gray;">Added by: ${esc(addedByName)}</div>
                         </div>
                         <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
                             <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
@@ -3942,9 +3942,9 @@
                     ${marketingEvent.ticket_price ? `<div class="info-row"><span class="info-label">Ticket Price:</span> <span>RM ${marketingEvent.ticket_price}</span></div>` : ''}
                     ${marketingEvent.early_bird_price ? `<div class="info-row"><span class="info-label">Early Bird Price:</span> <span>RM ${marketingEvent.early_bird_price}</span></div>` : ''}
                     ${marketingEvent.group_purchase_price ? `<div class="info-row"><span class="info-label">Group Purchase Price:</span> <span>RM ${marketingEvent.group_purchase_price}</span></div>` : ''}
-                    ${marketingEvent.duration ? `<div class="info-row"><span class="info-label">Duration:</span> <span>${marketingEvent.duration}</span></div>` : ''}
-                    ${marketingEvent.target_group ? `<div class="info-row"><span class="info-label">Target Group:</span> <span>${marketingEvent.target_group}</span></div>` : ''}
-                    ${marketingEvent.remarks ? `<div class="info-row"><span class="info-label">Remarks:</span> <span>${marketingEvent.remarks}</span></div>` : ''}
+                    ${marketingEvent.duration ? `<div class="info-row"><span class="info-label">Duration:</span> <span>${esc(marketingEvent.duration)}</span></div>` : ''}
+                    ${marketingEvent.target_group ? `<div class="info-row"><span class="info-label">Target Group:</span> <span>${esc(marketingEvent.target_group)}</span></div>` : ''}
+                    ${marketingEvent.remarks ? `<div class="info-row"><span class="info-label">Remarks:</span> <span>${esc(marketingEvent.remarks)}</span></div>` : ''}
                 </div>
                 ` : ''}
 
@@ -3952,7 +3952,7 @@
                 <div class="detail-section">
                     <h4>Consultant</h4>
                     ${_consultantId
-                        ? `<div class="info-row"><span class="info-label">Consultant Name:</span> <span>✅ ${_consultantName || 'Unknown'}</span></div>`
+                        ? `<div class="info-row"><span class="info-label">Consultant Name:</span> <span>✅ ${esc(_consultantName || 'Unknown')}</span></div>`
                         : `<div class="info-row"><span class="info-label">Consultant Name:</span> <span>❌ Not Assigned</span></div>`}
                 </div>
                 `}
@@ -3960,7 +3960,7 @@
                 ${activity.activity_type !== 'EVENT' ? `
                 <div class="detail-section">
                     <h4>Agents</h4>
-                    <div class="info-row"><span class="info-label">Lead:</span> <span>${_leadAgentName || 'Unknown'}</span></div>
+                    <div class="info-row"><span class="info-label">Lead:</span> <span>${esc(_leadAgentName || 'Unknown')}</span></div>
                     ${activity.co_agents?.length ? `
                         <div class="info-row" style="flex-direction:column;align-items:flex-start;gap:6px;">
                             <span class="info-label">Co-Agents:</span>
@@ -3975,7 +3975,7 @@
                                     const isMe = _state.cu && String(_state.cu.id) === String(ca.id);
                                     const canRespond = isMe && caStatus === 'pending';
                                     return `<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--gray-100);">
-                                        <span>${statusIcon}<strong>${ca.name}</strong> <span style="font-size:11px;color:#888;">${ca.co_role || ''}</span></span>
+                                        <span>${statusIcon}<strong>${esc(ca.name)}</strong> <span style="font-size:11px;color:#888;">${esc(ca.co_role || '')}</span></span>
                                         ${canRespond ? `
                                         <span>
                                             <button class="btn btn-sm" style="background:#dcfce7;color:#166534;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;margin-right:4px;" onclick="event.stopPropagation();app.respondCoAgentInvite(${activityId},'accepted')"><i class="fas fa-check"></i> Accept</button>
@@ -3999,7 +3999,7 @@
                                     const isCurrentConsultant = _state.cu && _state.cu.id === c.id;
                                     const canRespond = isCurrentConsultant && c.status === 'pending';
                                     return `<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--gray-100);">
-                                        <span>${statusIcon}<strong>${c.name}</strong> <span style="font-size:11px;color:#888;">${c.role||''}</span></span>
+                                        <span>${statusIcon}<strong>${esc(c.name)}</strong> <span style="font-size:11px;color:#888;">${esc(c.role||'')}</span></span>
                                         ${canRespond ? `
                                         <span>
                                             <button class="btn btn-sm" style="background:#dcfce7;color:#166534;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;margin-right:4px;" onclick="event.stopPropagation();app.respondConsultantInvite(${activityId},${c.id},'accepted')"><i class="fas fa-check"></i> Accept</button>
@@ -4258,7 +4258,7 @@
                 <div style="font-size:18px;line-height:1.4;">${it.emoji}</div>
                 <div style="flex:1;min-width:0;">
                     <div style="font-size:11px;color:#64748b;font-weight:600;">${it.time} · ${it.label}</div>
-                    <div style="font-size:13px;color:#1e293b;margin-top:2px;word-break:break-word;">${it.text}</div>
+                    <div style="font-size:13px;color:#1e293b;margin-top:2px;word-break:break-word;">${esc(it.text)}</div>
                 </div>
                 <button onclick="app.mcRemoveItem(${i})" style="background:none;border:none;color:#cbd5e1;cursor:pointer;font-size:16px;padding:0 4px;flex-shrink:0;">✕</button>
             </div>
@@ -4603,7 +4603,7 @@
                 <label>Venue${venueRequired ? ' <span class="required">*</span>' : ''}</label>
                 <select id="edit-timing-venue" class="form-control">
                     <option value="">-- Select Venue --</option>
-                    ${venues.sort((a, b) => (a.sequence || 0) - (b.sequence || 0)).map(v => `<option value="${v.name} | ${v.location}" ${activity.venue === v.name + ' | ' + v.location ? 'selected' : ''}>${v.name} | ${v.location}</option>`).join('')}
+                    ${venues.sort((a, b) => (a.sequence || 0) - (b.sequence || 0)).map(v => `<option value="${esc(v.name + ' | ' + v.location)}" ${activity.venue === v.name + ' | ' + v.location ? 'selected' : ''}>${esc(v.name + ' | ' + v.location)}</option>`).join('')}
                 </select>
             </div>
             <div class="form-section">
@@ -4706,14 +4706,14 @@
         const notes = await AppDataStore.getAll('notes');
         const existing_outcome = notes.find(n => n.activity_id == activityId && n.note_type === 'outcome' && n.prospect_id == prospectId);
         const existing_postmtup = notes.find(n => n.activity_id == activityId && n.note_type === 'post_meetup' && n.prospect_id == prospectId);
-        UI.showModal(`📝 Post MtUp — ${name}`, `
+        UI.showModal(`📝 Post MtUp — ${esc(name)}`, `
             <div class="form-group">
                 <label><strong>📝 Meeting Outcome</strong></label>
-                <textarea id="post-mtup-outcome" class="form-control" rows="3" placeholder="Outcome of this meeting...">${existing_outcome?.text || ''}</textarea>
+                <textarea id="post-mtup-outcome" class="form-control" rows="3" placeholder="Outcome of this meeting...">${esc(existing_outcome?.text || '')}</textarea>
             </div>
             <div class="form-group" style="margin-top:12px;">
                 <label><strong>📝 Post-Meetup Notes</strong></label>
-                <textarea id="post-mtup-notes" class="form-control" rows="3" placeholder="Key points, next steps, follow-up actions...">${existing_postmtup?.text || ''}</textarea>
+                <textarea id="post-mtup-notes" class="form-control" rows="3" placeholder="Key points, next steps, follow-up actions...">${esc(existing_postmtup?.text || '')}</textarea>
             </div>
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
@@ -5568,8 +5568,8 @@
 
         const content = `
             <div class="form-group">
-                <label>Outcome for ${attendee?.full_name || 'Attendee'} (${attendeeType})</label>
-                <textarea id="attendee-outcome-text" class="form-control" rows="4" placeholder="Enter meeting outcome for this attendee...">${existingNote?.text || ''}</textarea>
+                <label>Outcome for ${esc(attendee?.full_name || 'Attendee')} (${attendeeType})</label>
+                <textarea id="attendee-outcome-text" class="form-control" rows="4" placeholder="Enter meeting outcome for this attendee...">${esc(existingNote?.text || '')}</textarea>
             </div>
         `;
 
@@ -5591,8 +5591,8 @@
 
         const content = `
             <div class="form-group">
-                <label>Post-Meetup Notes for ${attendee?.full_name || 'Attendee'} (${attendeeType})</label>
-                <textarea id="attendee-notes-text" class="form-control" rows="4" placeholder="Enter key points, next steps, etc...">${existingNote?.text || ''}</textarea>
+                <label>Post-Meetup Notes for ${esc(attendee?.full_name || 'Attendee')} (${attendeeType})</label>
+                <textarea id="attendee-notes-text" class="form-control" rows="4" placeholder="Enter key points, next steps, etc...">${esc(existingNote?.text || '')}</textarea>
             </div>
         `;
 

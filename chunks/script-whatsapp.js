@@ -65,7 +65,7 @@
                     <div class="status-text">
                         <h3>${isConnected ? 'Connected' : 'Disconnected'}</h3>
                         ${isConnected ? `
-                            <p>Connected as: ${connection.business_phone || '+60 XXX XXXX'}</p>
+                            <p>Connected as: ${esc(connection.business_phone || '+60 XXX XXXX')}</p>
                             <p>Last Sync: ${connection.last_sync ? new Date(connection.last_sync).toLocaleString() : 'Never'}</p>
                         ` : `
                             <p>Connect your WhatsApp Business account to send messages and track conversations.</p>
@@ -76,15 +76,15 @@
                     <h3>Connection Details</h3>
                     <div class="form-group">
                         <label>WhatsApp Business Account ID</label>
-                        <input type="text" id="waba-id" class="form-control" value="${connection?.business_account_id || ''}" placeholder="123456789012345">
+                        <input type="text" id="waba-id" class="form-control" value="${esc(connection?.business_account_id || '')}" placeholder="123456789012345">
                     </div>
                     <div class="form-group">
                         <label>Phone Number ID</label>
-                        <input type="text" id="phone-id" class="form-control" value="${connection?.phone_number_id || ''}" placeholder="123456789012345">
+                        <input type="text" id="phone-id" class="form-control" value="${esc(connection?.phone_number_id || '')}" placeholder="123456789012345">
                     </div>
                     <div class="form-group">
                         <label>Business Phone Number</label>
-                        <input type="text" id="business-phone" class="form-control" value="${connection?.business_phone || ''}" placeholder="+60 12-345 6789">
+                        <input type="text" id="business-phone" class="form-control" value="${esc(connection?.business_phone || '')}" placeholder="+60 12-345 6789">
                     </div>
                     <div class="form-group">
                         <label>Access Token</label>
@@ -104,7 +104,7 @@
                     <div class="form-group">
                         <label>Verification Token</label>
                         <div class="token-input">
-                            <input type="password" id="verify-token" class="form-control" value="${connection?.verify_token || ''}" placeholder="Enter verification token">
+                            <input type="password" id="verify-token" class="form-control" value="${esc(connection?.verify_token || '')}" placeholder="Enter verification token">
                             <button class="btn secondary" onclick="app.verifyWebhook()">Verify</button>
                         </div>
                     </div>
@@ -332,7 +332,7 @@
         UI.showModal('Message Details', `
             <div class="message-details">
                 <div class="message-metadata" style="background:var(--gray-50);padding:16px;border-radius:8px;margin-bottom:16px;">
-                    <div><strong>To:</strong> ${message.to || ''}</div>
+                    <div><strong>To:</strong> ${esc(message.to || '')}</div>
                     <div><strong>Direction:</strong> ${message.direction}</div>
                     <div><strong>Message ID:</strong> ${message.id}</div>
                     <div><strong>Sent:</strong> ${new Date(message.sent_at || message.created_at).toLocaleString()}</div>

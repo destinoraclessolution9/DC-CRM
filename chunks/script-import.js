@@ -115,7 +115,7 @@ const renderRecentImports = async () => {
     if (imports.length === 0) return `<tr><td colspan="7" style="text-align:center;padding:40px;"><i class="fas fa-cloud-upload-alt" style="font-size:48px;color:var(--gray-300);display:block;margin-bottom:16px;"></i><h3>No imports yet</h3><p>Click "IMPORT NEW DATA" to start your first import</p></td></tr>`;
     return imports.map(imp => {
         const pct = imp.total_rows > 0 ? Math.round((imp.valid_rows / imp.total_rows) * 100) : 0;
-        return `<tr><td><strong>${imp.file_name}</strong></td><td>${imp.import_type}</td><td>${imp.total_rows} (${imp.created_records} new)</td><td>${pct}%</td><td><span class="import-status status-${imp.status}">${imp.status.toUpperCase()}</span></td><td>${UI.formatDate(imp.created_at)}</td><td><button class="btn-icon" onclick="app.viewImportDetails(${imp.id})" title="View"><i class="fas fa-eye"></i></button><button class="btn-icon" onclick="app.downloadImportLog(${imp.id})" title="Download Log"><i class="fas fa-download"></i></button></td></tr>`;
+        return `<tr><td><strong>${esc(imp.file_name)}</strong></td><td>${imp.import_type}</td><td>${imp.total_rows} (${imp.created_records} new)</td><td>${pct}%</td><td><span class="import-status status-${imp.status}">${imp.status.toUpperCase()}</span></td><td>${UI.formatDate(imp.created_at)}</td><td><button class="btn-icon" onclick="app.viewImportDetails(${imp.id})" title="View"><i class="fas fa-eye"></i></button><button class="btn-icon" onclick="app.downloadImportLog(${imp.id})" title="Download Log"><i class="fas fa-download"></i></button></td></tr>`;
     }).join('');
 };
 
@@ -274,8 +274,8 @@ const getStep4Html = async () => {
         const importName  = nameCol  !== undefined ? (d.row[nameCol]  || '').toString().trim() : '(no name)';
         const importPhone = phoneCol !== undefined ? (d.row[phoneCol] || '').toString().trim() : '';
         return `<tr>
-            <td>${existName}${existPhone ? ' (' + existPhone + ')' : ''}</td>
-            <td>${importName}${importPhone ? ' (' + importPhone + ')' : ''}</td>
+            <td>${esc(existName)}${existPhone ? ' (' + esc(existPhone) + ')' : ''}</td>
+            <td>${esc(importName)}${importPhone ? ' (' + esc(importPhone) + ')' : ''}</td>
             <td><span style="color:var(--gray-500);font-size:12px">Pending action below</span></td>
         </tr>`;
     }).join('') || '<tr><td colspan="3" style="text-align:center;color:var(--gray-400)">No duplicates found</td></tr>';
@@ -329,7 +329,7 @@ const getStep5Html = async () => {
                 </div>
                 <div class="assignment-options" style="margin:16px 0">
                     <h4>Assignment Options</h4>
-                    <label class="radio-label"><input type="radio" name="assign-to" value="myself" checked onchange="document.getElementById('team-opts').style.display='none'"> Assign to myself (${assignLabel})</label>
+                    <label class="radio-label"><input type="radio" name="assign-to" value="myself" checked onchange="document.getElementById('team-opts').style.display='none'"> Assign to myself (${esc(assignLabel)})</label>
                     <label class="radio-label"><input type="radio" name="assign-to" value="team" onchange="document.getElementById('team-opts').style.display='block'"> Assign to team</label>
                     <label class="radio-label"><input type="radio" name="assign-to" value="unassigned" onchange="document.getElementById('team-opts').style.display='none'"> Leave unassigned</label>
                     <div id="team-opts" style="display:none;margin-top:12px">
@@ -362,7 +362,7 @@ const renderMappingRows = () => {
     const crmFields = getCRMFieldsForType(_importData.importType);
     return headers.map((header, index) => {
         const matched = autoMatchField(header, _importData.importType);
-        return `<tr><td><strong>${header}</strong></td><td>
+        return `<tr><td><strong>${esc(header)}</strong></td><td>
             <select class="form-control mapping-select" data-col="${index}" style="width:200px">
                 <option value="">-- Ignore column --</option>
                 ${crmFields.map(f => `<option value="${f.value}" ${f.value === matched ? 'selected' : ''}>${f.label}${f.required ? ' *' : ''}</option>`).join('')}
@@ -1203,7 +1203,7 @@ const renderTeamSummaryCards = ({ visibleProspects, agentMap, lastActivityMap })
     const cards = teamNames.map((name, i) => {
         const t = teamStats[name];
         const color = teamColors[i % teamColors.length];
-        return `<div class="summary-card ${color}"><h4>${name}</h4><div class="summary-stats"><div><span class="stat-label">Active:</span><span class="stat-value">${t.active}</span></div><div><span class="stat-label">Attention:</span><span class="stat-value warning">${t.attention}</span></div><div><span class="stat-label">Inactive:</span><span class="stat-value danger">${t.inactive}</span></div><div><span class="stat-label">Critical:</span><span class="stat-value danger">${t.critical}</span></div></div></div>`;
+        return `<div class="summary-card ${color}"><h4>${esc(name)}</h4><div class="summary-stats"><div><span class="stat-label">Active:</span><span class="stat-value">${t.active}</span></div><div><span class="stat-label">Attention:</span><span class="stat-value warning">${t.attention}</span></div><div><span class="stat-label">Inactive:</span><span class="stat-value danger">${t.inactive}</span></div><div><span class="stat-label">Critical:</span><span class="stat-value danger">${t.critical}</span></div></div></div>`;
     });
     cards.push(`<div class="summary-card total"><h4>Total</h4><div class="summary-stats"><div><span class="stat-label">Active:</span><span class="stat-value">${totals.active}</span></div><div><span class="stat-label">Attention:</span><span class="stat-value warning">${totals.attention}</span></div><div><span class="stat-label">Inactive:</span><span class="stat-value danger">${totals.inactive}</span></div><div><span class="stat-label">Critical:</span><span class="stat-value danger">${totals.critical}</span></div></div></div>`);
     return cards.join('');
@@ -1224,7 +1224,7 @@ const renderAgentPerformanceRows = ({ visibleAgents, visibleProspects, lastActiv
         const rate = assigned > 0 ? Math.round((followedUp7d / assigned) * 100) : 0;
         const cls = rate < 70 ? 'rate-bad' : rate < 90 ? 'rate-warning' : 'rate-good';
         const teamName = agent.team || 'Unassigned';
-        return `<tr><td><strong>${agent.full_name || 'Unknown'}</strong></td><td>${teamName}</td><td>${assigned}</td><td>${followedUp7d}</td><td><span class="rate-badge ${cls}">${rate}%</span></td><td>${i37}</td><td>${i814}</td><td>${i15}</td><td><button class="btn-icon" onclick="app.viewAgentDetails(${agent.id})" title="View"><i class="fas fa-eye"></i></button><button class="btn-icon" onclick="app.bulkReassign(${agent.id})" title="Reassign"><i class="fas fa-exchange-alt"></i></button><button class="btn-icon" onclick="app.bulkReassign(${agent.id})" title="Bulk Reassign"><i class="fas fa-users"></i></button></td></tr>`;
+        return `<tr><td><strong>${esc(agent.full_name || 'Unknown')}</strong></td><td>${esc(teamName)}</td><td>${assigned}</td><td>${followedUp7d}</td><td><span class="rate-badge ${cls}">${rate}%</span></td><td>${i37}</td><td>${i814}</td><td>${i15}</td><td><button class="btn-icon" onclick="app.viewAgentDetails(${agent.id})" title="View"><i class="fas fa-eye"></i></button><button class="btn-icon" onclick="app.bulkReassign(${agent.id})" title="Reassign"><i class="fas fa-exchange-alt"></i></button><button class="btn-icon" onclick="app.bulkReassign(${agent.id})" title="Bulk Reassign"><i class="fas fa-users"></i></button></td></tr>`;
     }).join('');
 };
 
@@ -1239,7 +1239,7 @@ const renderInactiveProspectsRows = ({ visibleProspects, agentMap, lastActivityM
         const protDays = (window.app.calculateProtectionDays || (() => 0))(p);
         const status = days > 14 || protDays <= 0 ? 'critical' : 'warning';
         const deadline = p.protection_deadline ? UI.formatDate(p.protection_deadline) : 'N/A';
-        return `<tr><td><strong>${p.full_name || 'Unknown'}</strong></td><td>${agentName}</td><td class="${days > 14 ? 'critical' : 'warning'}">${days === 999 ? 'Never' : days + ' days'}</td><td>${p.score || 0}</td><td>${deadline}</td><td><span class="status-badge status-${status}">${status === 'critical' ? '🔴 Critical' : '🟡 Warning'}</span></td><td><button class="btn-icon" onclick="app.openReassignModal(${p.id})" title="Reassign"><i class="fas fa-exchange-alt"></i></button><button class="btn-icon" onclick="app.contactProspect(${p.id})" title="Contact"><i class="fas fa-phone"></i></button></td></tr>`;
+        return `<tr><td><strong>${esc(p.full_name || 'Unknown')}</strong></td><td>${esc(agentName)}</td><td class="${days > 14 ? 'critical' : 'warning'}">${days === 999 ? 'Never' : days + ' days'}</td><td>${p.score || 0}</td><td>${deadline}</td><td><span class="status-badge status-${status}">${status === 'critical' ? '🔴 Critical' : '🟡 Warning'}</span></td><td><button class="btn-icon" onclick="app.openReassignModal(${p.id})" title="Reassign"><i class="fas fa-exchange-alt"></i></button><button class="btn-icon" onclick="app.contactProspect(${p.id})" title="Contact"><i class="fas fa-phone"></i></button></td></tr>`;
     }).join('');
 };
 
@@ -1256,7 +1256,7 @@ const renderReassignmentHistory = async () => {
     const userMap = new Map((allUsers || []).map(u => [String(u.id), u]));
     const nameOf = (id) => userMap.get(String(id))?.full_name || `Agent #${id}`;
 
-    const rows = history.map(r => `<tr><td>${UI.formatDate(r.reassignment_date)}</td><td>#${r.prospect_id}</td><td>${nameOf(r.from_agent_id)}</td><td>${nameOf(r.to_agent_id)}</td><td>${r.reassignment_reason}</td><td>${nameOf(r.reassigned_by)}</td></tr>`);
+    const rows = history.map(r => `<tr><td>${UI.formatDate(r.reassignment_date)}</td><td>#${r.prospect_id}</td><td>${esc(nameOf(r.from_agent_id))}</td><td>${esc(nameOf(r.to_agent_id))}</td><td>${esc(r.reassignment_reason)}</td><td>${esc(nameOf(r.reassigned_by))}</td></tr>`);
 
     return `<table class="agent-performance-table"><thead><tr><th scope="col">Date</th><th scope="col">Prospect ID</th><th scope="col">From Agent</th><th scope="col">To Agent</th><th scope="col">Reason</th><th scope="col">By</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
 };
@@ -1600,7 +1600,7 @@ const openReassignModal = async (prospectId) => {
         const assignedCount = allProspectsForCap.filter(p => String(p.responsible_agent_id) === String(a.id)).length;
         const capacity = Math.max(0, 60 - assignedCount);
         const icon = capacity > 10 ? '🟢' : capacity > 0 ? '🟡' : '🔴';
-        return `<option value="${a.id}">${a.full_name || 'Agent'} (${assignedCount} assigned, capacity +${capacity}) ${icon}</option>`;
+        return `<option value="${a.id}">${esc(a.full_name || 'Agent')} (${assignedCount} assigned, capacity +${capacity}) ${icon}</option>`;
     }).join('');
     const content = `
         <div class="reassign-modal">
@@ -1609,7 +1609,7 @@ const openReassignModal = async (prospectId) => {
             <div class="current-info">
                 <h4>Current Information</h4>
                 <div class="info-grid">
-                    <div><strong>Prospect:</strong> ${prospect.full_name || 'Unknown'}</div><div><strong>Current Agent:</strong> ${currentAgent?.full_name || 'Unassigned'}</div>
+                    <div><strong>Prospect:</strong> ${esc(prospect.full_name || 'Unknown')}</div><div><strong>Current Agent:</strong> ${esc(currentAgent?.full_name || 'Unassigned')}</div>
                     <div><strong>Days Inactive:</strong> <span data-days-inactive="${daysSince}">${daysSince === 999 ? 'Never contacted' : daysSince}</span></div><div><strong>Score:</strong> ${prospect.score || 0}</div>
                     <div><strong>Protection Deadline:</strong> ${prospect.protection_deadline ? UI.formatDate(prospect.protection_deadline) : 'N/A'}</div><div><strong>Last Activity:</strong> ${lastAct ? UI.formatDate(lastAct.activity_date) + ' (' + (lastAct.activity_type || 'Unknown') + ')' : 'Never'}</div>
                 </div>
@@ -1923,18 +1923,18 @@ const bulkReassign = async (agentId) => {
         return lvl >= 3 && lvl <= 11 && u.status !== 'deleted' && u.id !== agentId;
     });
     const prospectCheckboxes = inactiveProspects.map(p =>
-        `<label class="checkbox-label"><input type="checkbox" checked data-prospect-id="${p.id}"> ${p.full_name || 'Unknown'} (${p._daysSince === 999 ? 'Never' : p._daysSince + 'd'}, Score ${p.score || 0})</label>`
+        `<label class="checkbox-label"><input type="checkbox" checked data-prospect-id="${p.id}"> ${esc(p.full_name || 'Unknown')} (${p._daysSince === 999 ? 'Never' : p._daysSince + 'd'}, Score ${p.score || 0})</label>`
     ).join('');
     const perAgent = otherAgents.length ? Math.ceil(inactiveProspects.length / otherAgents.length) : 0;
     const distPreview = otherAgents.map((a, i) => {
         const share = i < inactiveProspects.length % otherAgents.length ? perAgent : Math.floor(inactiveProspects.length / otherAgents.length);
-        return `<li>${a.full_name || 'Agent'}: ${share} prospects</li>`;
+        return `<li>${esc(a.full_name || 'Agent')}: ${share} prospects</li>`;
     }).join('');
-    const singleAgentOptions = otherAgents.map(a => `<option value="${a.id}">${a.full_name || 'Agent'}</option>`).join('');
+    const singleAgentOptions = otherAgents.map(a => `<option value="${a.id}">${esc(a.full_name || 'Agent')}</option>`).join('');
     const content = `<div class="bulk-reassign-modal">
         <input type="hidden" id="bulk-reassign-from-agent" value="${agentId}">
         <div style="background:var(--gray-50);padding:16px;border-radius:8px;margin-bottom:16px">
-            <div><strong>From Agent:</strong> ${agent.full_name || 'Unknown'}</div><div><strong>Average inactive days:</strong> ${avgDays}</div><div><strong>Prospects selected:</strong> ${inactiveProspects.length}</div>
+            <div><strong>From Agent:</strong> ${esc(agent.full_name || 'Unknown')}</div><div><strong>Average inactive days:</strong> ${avgDays}</div><div><strong>Prospects selected:</strong> ${inactiveProspects.length}</div>
         </div>
         <div class="selected-prospects"><h4>Selected Prospects</h4><div class="prospects-list" style="max-height:200px;overflow-y:auto">
             ${prospectCheckboxes}
@@ -1948,7 +1948,7 @@ const bulkReassign = async (agentId) => {
             <select id="bulk-single-agent" class="form-control" style="display:none;margin-top:8px">${singleAgentOptions}</select>
         </div>
         <div class="distribution-preview"><h4>Distribution Preview</h4><ul>${distPreview || '<li>No agents available</li>'}</ul></div>
-        <div class="form-group"><label>Justification</label><textarea class="form-control" rows="3">${agent.full_name || 'Agent'} has ${inactiveProspects.length} inactive prospect${inactiveProspects.length !== 1 ? 's' : ''}. Redistributing to other agents.</textarea></div>
+        <div class="form-group"><label>Justification</label><textarea class="form-control" rows="3">${esc(agent.full_name || 'Agent')} has ${inactiveProspects.length} inactive prospect${inactiveProspects.length !== 1 ? 's' : ''}. Redistributing to other agents.</textarea></div>
         <div class="form-group" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;">
             <label style="font-weight:600;display:block;margin-bottom:8px;font-size:13px;">What else should follow the new agent?</label>
             <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;">

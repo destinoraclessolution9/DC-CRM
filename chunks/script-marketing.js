@@ -306,17 +306,17 @@
                                         ? `<img loading="lazy" decoding="async" src="${item.poster_url}" crossorigin="anonymous" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer;" onclick="app.viewProductImage('${item.poster_url}','Poster')" title="View poster">`
                                         : `<span style="color:var(--gray-300);font-size:18px;" title="No poster">🖼️</span>`}
                                 </td>
-                                <td><strong>${item.name}</strong><br><small class="text-muted">${item.remarks || ''}</small></td>
-                                <td>${item.category || '-'}</td>
-                                <td>${item.functions_description || '-'}</td>
-                                <td>${item.description || '-'}</td>
+                                <td><strong>${escapeHtml(item.name)}</strong><br><small class="text-muted">${escapeHtml(item.remarks || '')}</small></td>
+                                <td>${escapeHtml(item.category || '-')}</td>
+                                <td>${escapeHtml(item.functions_description || '-')}</td>
+                                <td>${escapeHtml(item.description || '-')}</td>
                                 <td>
                                     <span style="font-weight:600;">RM ${item.price || 0}</span>
                                     <button class="btn-icon" style="margin-left:4px;opacity:0.6;" onclick="app.showProductPriceHistory(${item.id})" title="Price history"><i class="fas fa-history"></i></button>
                                 </td>
-                                <td>${item.delivery_lead_time || '-'}</td>
-                                <td>${item.product_dimension || '-'}</td>
-                                <td>${item.product_weight || '-'}</td>
+                                <td>${escapeHtml(item.delivery_lead_time || '-')}</td>
+                                <td>${escapeHtml(item.product_dimension || '-')}</td>
+                                <td>${escapeHtml(item.product_weight || '-')}</td>
                                 <td>
                                     <span class="status-badge ${item.is_active ? 'status-active' : 'status-inactive'}">
                                         ${item.is_active ? 'Active' : 'Inactive'}
@@ -356,7 +356,7 @@
                             const isActive = item.is_active || item.status === 'active' || item.status === 'Active';
                             const cats = parseEventCategories(item.categories);
                             const catsHtml = cats.length
-                                ? cats.map(c => `<span style="display:inline-block;background:var(--primary-50,#fef3c7);color:var(--primary-700,#92400e);border:1px solid var(--primary-200,#fde68a);border-radius:10px;padding:2px 8px;margin:2px 2px 2px 0;font-size:11px;white-space:nowrap;">${c}</span>`).join('')
+                                ? cats.map(c => `<span style="display:inline-block;background:var(--primary-50,#fef3c7);color:var(--primary-700,#92400e);border:1px solid var(--primary-200,#fde68a);border-radius:10px;padding:2px 8px;margin:2px 2px 2px 0;font-size:11px;white-space:nowrap;">${escapeHtml(c)}</span>`).join('')
                                 : '<span class="text-muted">-</span>';
                             return `
                             <tr style="${!isActive ? 'opacity: 0.6; background: #f9fafb;' : ''}">
@@ -366,15 +366,15 @@
                                         ? `<img loading="lazy" decoding="async" src="${item.poster_url}" crossorigin="anonymous" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer;" onclick="app.viewProductImage('${item.poster_url}','Poster')" title="View poster">`
                                         : `<span style="color:var(--gray-300);font-size:18px;" title="No poster">🖼️</span>`}
                                 </td>
-                                <td><strong>${item.event_title || item.title || ''}</strong><br><small class="text-muted">${item.description || ''}</small></td>
+                                <td><strong>${escapeHtml(item.event_title || item.title || '')}</strong><br><small class="text-muted">${escapeHtml(item.description || '')}</small></td>
                                 <td>${item.ticket_price || '-'}</td>
-                                <td>${item.early_bird_price || '-'}</td>
-                                <td>${item.group_purchase_price || '-'}</td>
-                                <td>${item.duration || '-'}</td>
-                                <td>${item.target_group || '-'}</td>
-                                <td>${item.location || '-'}</td>
-                                <td>${item.speaker || '-'}</td>
-                                <td>${item.remarks || '-'}</td>
+                                <td>${escapeHtml(item.early_bird_price || '-')}</td>
+                                <td>${escapeHtml(item.group_purchase_price || '-')}</td>
+                                <td>${escapeHtml(item.duration || '-')}</td>
+                                <td>${escapeHtml(item.target_group || '-')}</td>
+                                <td>${escapeHtml(item.location || '-')}</td>
+                                <td>${escapeHtml(item.speaker || '-')}</td>
+                                <td>${escapeHtml(item.remarks || '-')}</td>
                                 <td>
                                     <span class="status-badge ${isActive ? 'status-active' : 'status-inactive'}">
                                         ${isActive ? 'Active' : 'Inactive'}
@@ -411,9 +411,9 @@
                                         ${seqOptions.map(n => `<option value="${n}" ${(item.sequence || idx + 1) === n ? 'selected' : ''}>${n}</option>`).join('')}
                                     </select>
                                 </td>
-                                <td><strong>${item.name}</strong></td>
-                                <td>${item.location || '-'}</td>
-                                <td>${item.address || '-'}</td>
+                                <td><strong>${escapeHtml(item.name)}</strong></td>
+                                <td>${escapeHtml(item.location || '-')}</td>
+                                <td>${escapeHtml(item.address || '-')}</td>
                                 <td>${item.waze_link ? `<a href="${item.waze_link}" target="_blank" rel="noopener" style="color: var(--primary); text-decoration: none;" title="Open in Waze"><i class="fas fa-map-marker-alt"></i> Waze</a>` : '-'}</td>
                                 <td>
                                     <button class="btn-icon" onclick="app.openMarketingListEditModal('${item.id}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
@@ -443,13 +443,13 @@
                     <tbody>
                         ${data.length === 0 ? '<tr><td colspan="9" style="text-align:center; color: var(--gray-400); padding: 32px;">No Bujishu items added yet.</td></tr>' : data.map(item => `
                             <tr style="${!item.is_active ? 'opacity: 0.6; background: #f9fafb;' : ''}">
-                                <td><strong>${item.name}</strong></td>
-                                <td>${item.category || '-'}</td>
-                                <td>${item.function_desc || '-'}</td>
+                                <td><strong>${escapeHtml(item.name)}</strong></td>
+                                <td>${escapeHtml(item.category || '-')}</td>
+                                <td>${escapeHtml(item.function_desc || '-')}</td>
                                 <td>${item.price || 0}</td>
-                                <td>${item.delivery_lead_time || '-'}</td>
-                                <td>${item.product_dimension || '-'}</td>
-                                <td>${item.product_weight || '-'}</td>
+                                <td>${escapeHtml(item.delivery_lead_time || '-')}</td>
+                                <td>${escapeHtml(item.product_dimension || '-')}</td>
+                                <td>${escapeHtml(item.product_weight || '-')}</td>
                                 <td>
                                     <span class="status-badge ${item.is_active ? 'status-active' : 'status-inactive'}">
                                         ${item.is_active ? 'Active' : 'Inactive'}
@@ -487,13 +487,13 @@
                                 : '<span class="text-muted" style="font-size:11px;">Not configured</span>';
                             return `
                             <tr style="${!item.is_active ? 'opacity: 0.6; background: #f9fafb;' : ''}">
-                                <td><strong>${item.name}</strong></td>
-                                <td>${item.category || '-'}</td>
-                                <td>${item.functions || '-'}</td>
-                                <td>${item.pills_bottles || '-'}</td>
+                                <td><strong>${escapeHtml(item.name)}</strong></td>
+                                <td>${escapeHtml(item.category || '-')}</td>
+                                <td>${escapeHtml(item.functions || '-')}</td>
+                                <td>${escapeHtml(item.pills_bottles || '-')}</td>
                                 <td>${dosageHtml}</td>
                                 <td>${item.price || 0}</td>
-                                <td>${item.delivery_lead_time || '-'}</td>
+                                <td>${escapeHtml(item.delivery_lead_time || '-')}</td>
                                 <td>
                                     <span class="status-badge ${item.is_active ? 'status-active' : 'status-inactive'}">
                                         ${item.is_active ? 'Active' : 'Inactive'}
@@ -640,37 +640,37 @@
                     ${item.poster_url ? `<div style="margin-bottom:6px;"><img loading="lazy" decoding="async" src="${item.poster_url}" crossorigin="anonymous" style="height:64px;border-radius:4px;object-fit:cover;"> <small class="text-muted">Current poster</small></div>` : ''}
                     <input type="file" id="mkt-poster" class="form-control" accept="image/*">
                 </div>
-                <div class="form-group"><label>Remarks</label><input type="text" id="mkt-remarks" class="form-control" value="${item.remarks || ''}"></div>
-                <div class="form-group"><label>Delivery Lead Time</label><input type="text" id="mkt-lead" class="form-control" value="${item.delivery_lead_time || ''}"></div>
-                <div class="form-group"><label>Product Dimension</label><input type="text" id="mkt-dimension" class="form-control" value="${item.product_dimension || ''}" placeholder="e.g. 30cm x 20cm x 10cm"></div>
-                <div class="form-group"><label>Product Weight</label><input type="text" id="mkt-weight" class="form-control" value="${item.product_weight || ''}" placeholder="e.g. 500g, 1.2kg"></div>
+                <div class="form-group"><label>Remarks</label><input type="text" id="mkt-remarks" class="form-control" value="${escapeHtml(item.remarks || '')}"></div>
+                <div class="form-group"><label>Delivery Lead Time</label><input type="text" id="mkt-lead" class="form-control" value="${escapeHtml(item.delivery_lead_time || '')}"></div>
+                <div class="form-group"><label>Product Dimension</label><input type="text" id="mkt-dimension" class="form-control" value="${escapeHtml(item.product_dimension || '')}" placeholder="e.g. 30cm x 20cm x 10cm"></div>
+                <div class="form-group"><label>Product Weight</label><input type="text" id="mkt-weight" class="form-control" value="${escapeHtml(item.product_weight || '')}" placeholder="e.g. 500g, 1.2kg"></div>
                 <div class="form-group"><label><input type="checkbox" id="mkt-active" ${item.is_active ? 'checked' : ''}> Is Active</label></div>
             `;
         } else if (type === 'events') {
             content = `
                 ${buildEventCategoriesField(parseEventCategories(item.categories))}
-                <div class="form-group"><label>Title*</label><input type="text" id="mkt-title" class="form-control" value="${item.event_title || item.title || ''}"></div>
+                <div class="form-group"><label>Title*</label><input type="text" id="mkt-title" class="form-control" value="${escapeHtml(item.event_title || item.title || '')}"></div>
                 <div class="form-group"><label>Ticket Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="${item.ticket_price || 0}"></div>
-                <div class="form-group"><label>Early Bird Price (RM)</label><input type="text" id="mkt-early-bird-price" class="form-control" value="${item.early_bird_price || ''}" placeholder="e.g. 199"></div>
-                <div class="form-group"><label>Group Purchase Price (RM)</label><input type="text" id="mkt-group-price" class="form-control" value="${item.group_purchase_price || ''}" placeholder="e.g. 299 (min 5 pax)"></div>
-                <div class="form-group"><label>Duration</label><input type="text" id="mkt-duration" class="form-control" value="${item.duration || ''}"></div>
-                <div class="form-group"><label>Target Group</label><input type="text" id="mkt-target" class="form-control" value="${item.target_group || ''}"></div>
-                <div class="form-group"><label>Location</label><input type="text" id="mkt-location" class="form-control" value="${item.location || ''}" placeholder="e.g. KL, Online"></div>
-                <div class="form-group"><label>Speaker</label><input type="text" id="mkt-speaker" class="form-control" value="${item.speaker || ''}" placeholder="e.g. Master Tan"></div>
-                <div class="form-group"><label>Description</label><textarea id="mkt-desc" class="form-control">${item.description || ''}</textarea></div>
+                <div class="form-group"><label>Early Bird Price (RM)</label><input type="text" id="mkt-early-bird-price" class="form-control" value="${escapeHtml(item.early_bird_price || '')}" placeholder="e.g. 199"></div>
+                <div class="form-group"><label>Group Purchase Price (RM)</label><input type="text" id="mkt-group-price" class="form-control" value="${escapeHtml(item.group_purchase_price || '')}" placeholder="e.g. 299 (min 5 pax)"></div>
+                <div class="form-group"><label>Duration</label><input type="text" id="mkt-duration" class="form-control" value="${escapeHtml(item.duration || '')}"></div>
+                <div class="form-group"><label>Target Group</label><input type="text" id="mkt-target" class="form-control" value="${escapeHtml(item.target_group || '')}"></div>
+                <div class="form-group"><label>Location</label><input type="text" id="mkt-location" class="form-control" value="${escapeHtml(item.location || '')}" placeholder="e.g. KL, Online"></div>
+                <div class="form-group"><label>Speaker</label><input type="text" id="mkt-speaker" class="form-control" value="${escapeHtml(item.speaker || '')}" placeholder="e.g. Master Tan"></div>
+                <div class="form-group"><label>Description</label><textarea id="mkt-desc" class="form-control">${escapeHtml(item.description || '')}</textarea></div>
                 <div class="form-group">
                     <label>Event Poster</label>
                     ${item.poster_url ? `<div style="margin-bottom:6px;"><img loading="lazy" decoding="async" src="${item.poster_url}" crossorigin="anonymous" style="height:64px;border-radius:4px;object-fit:cover;"> <small class="text-muted">Current poster</small></div>` : ''}
                     <input type="file" id="mkt-poster" class="form-control" accept="image/*">
                 </div>
-                <div class="form-group"><label>Remarks</label><input type="text" id="mkt-remarks" class="form-control" value="${item.remarks || ''}"></div>
+                <div class="form-group"><label>Remarks</label><input type="text" id="mkt-remarks" class="form-control" value="${escapeHtml(item.remarks || '')}"></div>
                 <div class="form-group"><label><input type="checkbox" id="mkt-active" ${(item.is_active || item.status === 'active' || item.status === 'Active') ? 'checked' : ''}> Is Active</label></div>
             `;
         } else if (type === 'venues') {
             content = `
-                <div class="form-group"><label>Venue Name*</label><input type="text" id="mkt-vname" class="form-control" value="${item.name || ''}"></div>
-                <div class="form-group"><label>Location*</label><input type="text" id="mkt-vlocation" class="form-control" value="${item.location || ''}"></div>
-                <div class="form-group"><label>Address</label><input type="text" id="mkt-vaddress" class="form-control" value="${item.address || ''}" placeholder="e.g. No. 5, Jalan Bukit Jalil, 57000 KL"></div>
+                <div class="form-group"><label>Venue Name*</label><input type="text" id="mkt-vname" class="form-control" value="${escapeHtml(item.name || '')}"></div>
+                <div class="form-group"><label>Location*</label><input type="text" id="mkt-vlocation" class="form-control" value="${escapeHtml(item.location || '')}"></div>
+                <div class="form-group"><label>Address</label><input type="text" id="mkt-vaddress" class="form-control" value="${escapeHtml(item.address || '')}" placeholder="e.g. No. 5, Jalan Bukit Jalil, 57000 KL"></div>
                 <div class="form-group"><label>Waze Link</label><input type="url" id="mkt-vwaze" class="form-control" value="${item.waze_link || ''}" placeholder="https://waze.com/ul/..."></div>
             `;
             UI.showModal('Edit Venue', content, [
@@ -680,21 +680,21 @@
             return;
         } else if (type === 'bujishu') {
             content = `
-                <div class="form-group"><label>Name*</label><input type="text" id="mkt-name" class="form-control" value="${item.name || ''}"></div>
-                <div class="form-group"><label>Category</label><input type="text" id="mkt-category" class="form-control" value="${item.category || ''}"></div>
-                <div class="form-group"><label>Function</label><textarea id="mkt-function-desc" class="form-control" placeholder="Describe function...">${item.function_desc || ''}</textarea></div>
+                <div class="form-group"><label>Name*</label><input type="text" id="mkt-name" class="form-control" value="${escapeHtml(item.name || '')}"></div>
+                <div class="form-group"><label>Category</label><input type="text" id="mkt-category" class="form-control" value="${escapeHtml(item.category || '')}"></div>
+                <div class="form-group"><label>Function</label><textarea id="mkt-function-desc" class="form-control" placeholder="Describe function...">${escapeHtml(item.function_desc || '')}</textarea></div>
                 <div class="form-group"><label>Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="${item.price || 0}"></div>
-                <div class="form-group"><label>Delivery Lead Time</label><input type="text" id="mkt-lead" class="form-control" value="${item.delivery_lead_time || ''}"></div>
-                <div class="form-group"><label>Product Dimension</label><input type="text" id="mkt-dimension" class="form-control" value="${item.product_dimension || ''}" placeholder="e.g. 30cm x 20cm x 10cm"></div>
-                <div class="form-group"><label>Product Weight</label><input type="text" id="mkt-weight" class="form-control" value="${item.product_weight || ''}" placeholder="e.g. 500g, 1.2kg"></div>
+                <div class="form-group"><label>Delivery Lead Time</label><input type="text" id="mkt-lead" class="form-control" value="${escapeHtml(item.delivery_lead_time || '')}"></div>
+                <div class="form-group"><label>Product Dimension</label><input type="text" id="mkt-dimension" class="form-control" value="${escapeHtml(item.product_dimension || '')}" placeholder="e.g. 30cm x 20cm x 10cm"></div>
+                <div class="form-group"><label>Product Weight</label><input type="text" id="mkt-weight" class="form-control" value="${escapeHtml(item.product_weight || '')}" placeholder="e.g. 500g, 1.2kg"></div>
                 <div class="form-group"><label><input type="checkbox" id="mkt-active" ${item.is_active ? 'checked' : ''}> Is Active</label></div>
             `;
         } else if (type === 'formula') {
             content = `
-                <div class="form-group"><label>Name*</label><input type="text" id="mkt-name" class="form-control" value="${item.name || ''}"></div>
-                <div class="form-group"><label>Category</label><input type="text" id="mkt-category" class="form-control" value="${item.category || ''}"></div>
-                <div class="form-group"><label>Functions</label><textarea id="mkt-functions" class="form-control" placeholder="Describe functions...">${item.functions || ''}</textarea></div>
-                <div class="form-group"><label>Pills/Bottles (description)</label><input type="text" id="mkt-pills-bottles" class="form-control" value="${item.pills_bottles || ''}" placeholder="e.g. 60 pills, 1 bottle"></div>
+                <div class="form-group"><label>Name*</label><input type="text" id="mkt-name" class="form-control" value="${escapeHtml(item.name || '')}"></div>
+                <div class="form-group"><label>Category</label><input type="text" id="mkt-category" class="form-control" value="${escapeHtml(item.category || '')}"></div>
+                <div class="form-group"><label>Functions</label><textarea id="mkt-functions" class="form-control" placeholder="Describe functions...">${escapeHtml(item.functions || '')}</textarea></div>
+                <div class="form-group"><label>Pills/Bottles (description)</label><input type="text" id="mkt-pills-bottles" class="form-control" value="${escapeHtml(item.pills_bottles || '')}" placeholder="e.g. 60 pills, 1 bottle"></div>
                 <div class="form-row">
                     <div class="form-group half"><label>Capsules per bottle*</label><input type="number" min="1" step="1" id="mkt-capsules" class="form-control" value="${item.capsules_per_bottle || ''}" placeholder="e.g. 60"></div>
                     <div class="form-group half"><label>Daily dosage (caps/day)*</label><input type="number" min="0.5" step="0.5" id="mkt-dosage" class="form-control" value="${item.daily_dosage || ''}" placeholder="e.g. 2"></div>
@@ -704,18 +704,18 @@
                     <div class="form-group half"><label>Safety buffer (%)</label><input type="number" min="0" step="1" id="mkt-buffer-pct" class="form-control" value="${((item.reminder_buffer_percent ?? 0.10) * 100).toFixed(0)}"></div>
                 </div>
                 <div class="form-group"><label>Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="${item.price || 0}"></div>
-                <div class="form-group"><label>Delivery Lead Time</label><input type="text" id="mkt-lead" class="form-control" value="${item.delivery_lead_time || ''}"></div>
+                <div class="form-group"><label>Delivery Lead Time</label><input type="text" id="mkt-lead" class="form-control" value="${escapeHtml(item.delivery_lead_time || '')}"></div>
                 <div class="form-group"><label><input type="checkbox" id="mkt-active" ${item.is_active ? 'checked' : ''}> Is Active</label></div>
                 <p style="font-size:11px;color:#15803d;margin:8px 0 0;"><i class="fas fa-info-circle"></i> Capsules & dosage power the auto refill reminder on the dashboard.</p>
             `;
         } else {
             content = `
-                <div class="form-group"><label>Package Name*</label><input type="text" id="mkt-pkname" class="form-control" value="${item.package_name}"></div>
+                <div class="form-group"><label>Package Name*</label><input type="text" id="mkt-pkname" class="form-control" value="${escapeHtml(item.package_name || '')}"></div>
                 <div class="form-group"><label>Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="${item.price || 0}"></div>
-                <div class="form-group"><label>Details</label><textarea id="mkt-details" class="form-control">${item.details || ''}</textarea></div>
-                <div class="form-group"><label>Requirement</label><input type="text" id="mkt-req" class="form-control" value="${item.requirement || ''}"></div>
-                <div class="form-group"><label>Remarks</label><input type="text" id="mkt-remarks" class="form-control" value="${item.remarks || ''}"></div>
-                <div class="form-group"><label>Delivery Lead Time</label><input type="text" id="mkt-lead" class="form-control" value="${item.delivery_lead_time || ''}"></div>
+                <div class="form-group"><label>Details</label><textarea id="mkt-details" class="form-control">${escapeHtml(item.details || '')}</textarea></div>
+                <div class="form-group"><label>Requirement</label><input type="text" id="mkt-req" class="form-control" value="${escapeHtml(item.requirement || '')}"></div>
+                <div class="form-group"><label>Remarks</label><input type="text" id="mkt-remarks" class="form-control" value="${escapeHtml(item.remarks || '')}"></div>
+                <div class="form-group"><label>Delivery Lead Time</label><input type="text" id="mkt-lead" class="form-control" value="${escapeHtml(item.delivery_lead_time || '')}"></div>
                 <div class="form-group"><label><input type="checkbox" id="mkt-active" ${item.is_active ? 'checked' : ''}> Is Active</label></div>
             `;
         }
@@ -1344,19 +1344,19 @@
                 html += `
                         <tr>
                             <td style="color:var(--gray-400);">${tpl.sort_order || '—'}</td>
-                            <td style="font-size:18px; text-align:center;">${tpl.icon || '📩'}</td>
+                            <td style="font-size:18px; text-align:center;">${escapeHtml(tpl.icon || '📩')}</td>
                             <td>
-                                <strong>${tpl.template_name || tpl.trigger_type}</strong>
-                                <div style="font-size:11px; color:var(--gray-500); max-width:250px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${tpl.description || ''}</div>
+                                <strong>${escapeHtml(tpl.template_name || tpl.trigger_type)}</strong>
+                                <div style="font-size:11px; color:var(--gray-500); max-width:250px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(tpl.description || '')}</div>
                             </td>
                             <td><span style="font-size:11px; padding:2px 8px; border-radius:10px; background:${catColor}20; color:${catColor}; white-space:nowrap;">${catLabel}</span></td>
                             <td style="font-size:12px; color:var(--gray-600); max-width:220px;">${(() => {
                                 const cats = (tpl.event_keywords || '').split(',').map(s => s.trim()).filter(Boolean);
                                 if (!cats.length) return '<span style="color:var(--gray-300);">—</span>';
-                                return cats.map(c => `<span style="display:inline-block;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:10px;padding:1px 6px;margin:1px 2px 1px 0;font-size:10px;">${c}</span>`).join('');
+                                return cats.map(c => `<span style="display:inline-block;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:10px;padding:1px 6px;margin:1px 2px 1px 0;font-size:10px;">${escapeHtml(c)}</span>`).join('');
                             })()}</td>
-                            <td style="font-size:12px; color:var(--gray-600); max-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${(tpl.cps_interest_match || '').replace(/"/g, '&quot;')}">${tpl.cps_interest_match || '<span style="color:var(--gray-300);">—</span>'}</td>
-                            <td style="font-size:12px; color:var(--gray-600); max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${(tpl.solution_match || '').replace(/"/g, '&quot;')}">${tpl.solution_match || '<span style="color:var(--gray-300);">—</span>'}</td>
+                            <td style="font-size:12px; color:var(--gray-600); max-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${(tpl.cps_interest_match || '').replace(/"/g, '&quot;')}">${escapeHtml(tpl.cps_interest_match) || '<span style="color:var(--gray-300);">—</span>'}</td>
+                            <td style="font-size:12px; color:var(--gray-600); max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${(tpl.solution_match || '').replace(/"/g, '&quot;')}">${escapeHtml(tpl.solution_match) || '<span style="color:var(--gray-300);">—</span>'}</td>
                             <td style="text-align:center;">${tpl.delay_days || 0}d</td>
                             <td style="text-align:center;">${tpl.event_window_days || 0}d</td>
                             <td style="text-align:center;">
@@ -1380,12 +1380,12 @@
                 <div style="background:var(--white,#fff); border:1px solid var(--gray-200,#e5e7eb); border-radius:10px; padding:16px; position:relative;">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
                         <div>
-                            <h3 style="margin:0; font-size:15px; color:var(--gray-800);">${tpl.icon || '📩'} ${tpl.template_name || tpl.trigger_type}</h3>
-                            <p style="margin:4px 0 0; font-size:12px; color:var(--gray-500);">${tpl.description || ''}</p>
+                            <h3 style="margin:0; font-size:15px; color:var(--gray-800);">${escapeHtml(tpl.icon || '📩')} ${escapeHtml(tpl.template_name || tpl.trigger_type)}</h3>
+                            <p style="margin:4px 0 0; font-size:12px; color:var(--gray-500);">${escapeHtml(tpl.description || '')}</p>
                         </div>
                         <span style="font-size:12px; padding:2px 8px; border-radius:10px; background:${tpl.is_active ? '#dcfce7' : '#f3f4f6'}; color:${tpl.is_active ? '#059669' : 'var(--gray-400)'};">${tpl.is_active ? 'Active' : 'Inactive'}</span>
                     </div>
-                    <div style="background:var(--gray-50,#f9fafb); border-radius:6px; padding:10px 12px; font-size:13px; color:var(--gray-700); white-space:pre-wrap; max-height:80px; overflow:hidden; line-height:1.5;">${tpl.message_template || ''}</div>
+                    <div style="background:var(--gray-50,#f9fafb); border-radius:6px; padding:10px 12px; font-size:13px; color:var(--gray-700); white-space:pre-wrap; max-height:80px; overflow:hidden; line-height:1.5;">${escapeHtml(tpl.message_template || '')}</div>
                     <div style="display:flex; gap:16px; margin-top:10px; font-size:12px; color:var(--gray-500);">
                         ${tpl.delay_days > 0 ? `<span><i class="fas fa-clock"></i> Delay: ${tpl.delay_days} day${tpl.delay_days > 1 ? 's' : ''}</span>` : ''}
                         ${tpl.event_window_days > 0 ? `<span><i class="fas fa-calendar-alt"></i> Event window: ${tpl.event_window_days} days</span>` : ''}
@@ -1497,7 +1497,7 @@
                     </div>
                     <div class="form-group half">
                         <label>Icon / Emoji</label>
-                        <input type="text" id="fu-tpl-icon" class="form-control" value="${tpl.icon || ''}" placeholder="e.g. ⭐" style="font-size:18px;">
+                        <input type="text" id="fu-tpl-icon" class="form-control" value="${escapeHtml(tpl.icon || '')}" placeholder="e.g. ⭐" style="font-size:18px;">
                     </div>
                 </div>
                 <div class="form-row">
@@ -1548,7 +1548,7 @@
                 </div>
                 <div class="form-group">
                     <label>Message Template *</label>
-                    <textarea id="fu-tpl-message" class="form-control" rows="5" style="white-space:pre-wrap;">${tpl.message_template || ''}</textarea>
+                    <textarea id="fu-tpl-message" class="form-control" rows="5" style="white-space:pre-wrap;">${escapeHtml(tpl.message_template || '')}</textarea>
                     <small style="color:var(--gray-500); font-size:11px;">Variables: {name}, {date}, {time}, {venue}, {event_name}, {agent_name}, {photo_url}</small>
                 </div>
                 <div class="form-row">
@@ -1673,8 +1673,8 @@
                     <tbody>
                         ${products.map(p => `
                             <tr>
-                                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);"><strong>${p.name}</strong></td>
-                                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">${p.category || 'N/A'}</td>
+                                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);"><strong>${escapeHtml(p.name)}</strong></td>
+                                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">${escapeHtml(p.category || 'N/A')}</td>
                                 <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
                                     <span class="status-badge ${p.is_active !== false ? 'status-active' : 'status-inactive'}">${p.is_active !== false ? 'Active' : 'Inactive'}</span>
                                 </td>
@@ -1700,11 +1700,11 @@
         const content = `
             <div class="form-group">
                 <label>Product/Service Name <span class="required">*</span></label>
-                <input type="text" id="prod-name" class="form-control" value="${p.name}">
+                <input type="text" id="prod-name" class="form-control" value="${escapeHtml(p.name || '')}">
             </div>
             <div class="form-group">
                 <label>Category</label>
-                <input type="text" id="prod-category" class="form-control" value="${p.category || ''}" placeholder="e.g. Ring, Service, Consultation">
+                <input type="text" id="prod-category" class="form-control" value="${escapeHtml(p.category || '')}" placeholder="e.g. Ring, Service, Consultation">
             </div>
             <p style="font-size:11px;color:var(--gray-500);margin:8px 0 0;"><i class="fas fa-info-circle"></i> Formula Healthcare products (with refill reminders) are managed in <strong>Marketing → Lists → Formula</strong>, not here.</p>
 `;
@@ -1881,12 +1881,12 @@
         return `
             <tr style="${rowStyle}" onmouseover="if(!this.style.opacity||this.style.opacity==1)this.style.background='#fdf8f8'" onmouseout="if(!this.style.opacity||this.style.opacity==1)this.style.background=''">
                 <td class="pkg-td">
-                    <a href="javascript:void(0)" onclick="app.viewPackageCustomers(${p.id})" style="font-weight:600;color:#8B1A1A;">${p.package_name || p.name || '—'}</a>
+                    <a href="javascript:void(0)" onclick="app.viewPackageCustomers(${p.id})" style="font-weight:600;color:#8B1A1A;">${escapeHtml(p.package_name || p.name || '—')}</a>
                 </td>
-                <td class="pkg-td" title="${productNames}" style="color:#555;">${shortProducts || '—'}</td>
+                <td class="pkg-td" title="${escapeHtml(productNames)}" style="color:#555;">${escapeHtml(shortProducts || '—')}</td>
                 <td class="pkg-td" style="font-weight:700;">RM ${UI.formatNumber(p.price || 0)}</td>
                 <td class="pkg-td">${discountHtml}</td>
-                <td class="pkg-td" style="font-size:12px;color:#555;max-width:140px;">${p.requirement || '<span style="color:#aaa;">—</span>'}</td>
+                <td class="pkg-td" style="font-size:12px;color:#555;max-width:140px;">${escapeHtml(p.requirement) || '<span style="color:#aaa;">—</span>'}</td>
                 <td class="pkg-td" style="text-align:center;">${limitedSets}</td>
                 <td class="pkg-td" style="font-size:12px;">${timeFrame}</td>
                 <td class="pkg-td">
@@ -2029,7 +2029,7 @@
         try {
             const modes = JSON.parse(p.payment_modes || '[]');
             paymentBadges = modes.map(m => `<span class="badge badge-gray" style="font-size:10px; margin:1px;">${escapeHtml(String(m))}</span>`).join('');
-        } catch(e) { paymentBadges = p.payment_modes || '—'; }
+        } catch(e) { paymentBadges = escapeHtml(p.payment_modes) || '—'; }
 
         const statusClass = `status-${(p.status || 'draft').toLowerCase()}`;
 
@@ -2109,20 +2109,20 @@
             const products = JSON.parse(p.package_product_details || '[]');
             if (products.length > 0) {
                 productList = `<ul style="margin: 0; padding-left: 20px;">
-                    ${products.map(prod => `<li style="margin-bottom: 4px;"><strong>${prod.product}</strong>${prod.detail ? ` — ${prod.detail}` : ''}</li>`).join('')}
+                    ${products.map(prod => `<li style="margin-bottom: 4px;"><strong>${escapeHtml(prod.product)}</strong>${prod.detail ? ` — ${escapeHtml(prod.detail)}` : ''}</li>`).join('')}
                 </ul>`;
             }
         } catch(e) {
-            if (p.package_product_details) productList = `<p>${p.package_product_details}</p>`;
+            if (p.package_product_details) productList = `<p>${escapeHtml(p.package_product_details)}</p>`;
         }
 
         let paymentBadges = '—';
         try {
             const modes = JSON.parse(p.payment_modes || '[]');
             if (modes.length > 0) {
-                paymentBadges = `<div style="display:flex; flex-wrap:wrap; gap:5px;">${modes.map(m => `<span class="badge badge-gray">${m}</span>`).join('')}</div>`;
+                paymentBadges = `<div style="display:flex; flex-wrap:wrap; gap:5px;">${modes.map(m => `<span class="badge badge-gray">${escapeHtml(m)}</span>`).join('')}</div>`;
             }
-        } catch(e) { paymentBadges = p.payment_modes || '—'; }
+        } catch(e) { paymentBadges = escapeHtml(p.payment_modes) || '—'; }
 
         const statusClass = `status-${(p.status || 'draft').toLowerCase()}`;
         const isArchived = p.status === 'Archived';
@@ -2140,7 +2140,7 @@
                     </div>
                     <div>
                         <label style="font-size: 11px; font-weight: 600; color: var(--gray-500); text-transform: uppercase;">Special Package</label>
-                        <p style="margin: 4px 0;"><i class="fas fa-gift" style="color: var(--primary); margin-right: 6px;"></i>${p.special_package || '—'}</p>
+                        <p style="margin: 4px 0;"><i class="fas fa-gift" style="color: var(--primary); margin-right: 6px;"></i>${escapeHtml(p.special_package || '—')}</p>
                     </div>
                 </div>
                 <div style="margin-bottom: 16px;">
@@ -2156,12 +2156,12 @@
                     </div>
                     <div>
                         <label style="font-size: 11px; font-weight: 600; color: var(--gray-500); text-transform: uppercase;">Target Customer</label>
-                        <p style="margin: 4px 0;"><i class="fas fa-bullseye" style="color: var(--primary); margin-right: 6px;"></i>${p.target_customer || '—'}</p>
+                        <p style="margin: 4px 0;"><i class="fas fa-bullseye" style="color: var(--primary); margin-right: 6px;"></i>${escapeHtml(p.target_customer || '—')}</p>
                     </div>
                 </div>
                 <div style="margin-bottom: 16px;">
                     <label style="font-size: 11px; font-weight: 600; color: var(--gray-500); text-transform: uppercase;">Entitlement Requirement</label>
-                    <p style="margin: 4px 0;"><i class="fas fa-check-circle" style="color: var(--primary); margin-right: 6px;"></i>${p.entitlement_requirement || '—'}</p>
+                    <p style="margin: 4px 0;"><i class="fas fa-check-circle" style="color: var(--primary); margin-right: 6px;"></i>${escapeHtml(p.entitlement_requirement || '—')}</p>
                 </div>
                 ${p.promotion_script ? `
                 <div style="margin-bottom: 16px;">
@@ -2496,7 +2496,7 @@
         const content = `
             <div class="form-group">
                 <label>Package Name <span class="required">*</span></label>
-                <input type="text" id="pkg-name" class="form-control" value="${pkg.package_name || ''}" placeholder="e.g., Anniversary Special Bundle">
+                <input type="text" id="pkg-name" class="form-control" value="${escapeHtml(pkg.package_name || '')}" placeholder="e.g., Anniversary Special Bundle">
             </div>
 
             <div class="form-group">
@@ -2504,7 +2504,7 @@
                 <div class="multi-select-container" style="border:1px solid var(--gray-300);border-radius:4px;padding:10px;max-height:140px;overflow-y:auto;">
                     ${allProducts.map(p => `
                         <label style="display:block;margin-bottom:5px;cursor:pointer;font-size:13px;">
-                            <input type="checkbox" name="pkg-products" value="${p.id}" ${(pkg.product_ids||[]).includes(p.id) ? 'checked' : ''}> ${p.name}
+                            <input type="checkbox" name="pkg-products" value="${p.id}" ${(pkg.product_ids||[]).includes(p.id) ? 'checked' : ''}> ${escapeHtml(p.name)}
                         </label>
                     `).join('')}
                     ${allProducts.length === 0 ? '<p class="text-muted">No active products found.</p>' : ''}
@@ -2552,12 +2552,12 @@
 
             <div class="form-group">
                 <label>Requirement</label>
-                <textarea id="pkg-requirement" class="form-control" rows="2" placeholder="e.g. Minimum 3 referrals required">${pkg.requirement || ''}</textarea>
+                <textarea id="pkg-requirement" class="form-control" rows="2" placeholder="e.g. Minimum 3 referrals required">${escapeHtml(pkg.requirement || '')}</textarea>
             </div>
 
             <div class="form-group">
                 <label>Remarks (Internal Notes)</label>
-                <textarea id="pkg-remarks" class="form-control" rows="2" placeholder="Internal notes…">${pkg.remarks || ''}</textarea>
+                <textarea id="pkg-remarks" class="form-control" rows="2" placeholder="Internal notes…">${escapeHtml(pkg.remarks || '')}</textarea>
             </div>
 
             <div class="form-group">
@@ -2896,17 +2896,17 @@ ALTER TABLE public.promotions
         return `
             <div class="template-card" onclick="app.previewTemplate(${template.id})">
                 <div class="template-card-header">
-                    <span class="template-badge ${colorClass}">${template.category}</span>
+                    <span class="template-badge ${colorClass}">${escapeHtml(template.category)}</span>
                     <div class="template-card-actions">
                         <button class="btn-icon" onclick="event.stopPropagation(); app.editTemplate(${template.id})" title="Edit"><i class="fas fa-edit"></i></button>
                         <button class="btn-icon" onclick="event.stopPropagation(); app.copyTemplate(${template.id})" title="Copy"><i class="fas fa-copy"></i></button>
                         <button class="btn-icon" onclick="event.stopPropagation(); app.deleteTemplate(${template.id})" title="Delete"><i class="fas fa-trash"></i></button>
                     </div>
                 </div>
-                <h4 class="template-title">${template.template_name}</h4>
-                <p class="template-preview">${template.content.substring(0, 80)}${template.content.length > 80 ? '...' : ''}</p>
+                <h4 class="template-title">${escapeHtml(template.template_name)}</h4>
+                <p class="template-preview">${escapeHtml(template.content.substring(0, 80))}${template.content.length > 80 ? '...' : ''}</p>
                 <div class="template-variables">
-                    ${template.variables.map(v => `<span class="variable-tag">{{${v}}}</span>`).join('')}
+                    ${template.variables.map(v => `<span class="variable-tag">{{${escapeHtml(v)}}}</span>`).join('')}
                 </div>
             </div>
         `;
@@ -2920,7 +2920,7 @@ ALTER TABLE public.promotions
             <div class="template-modal">
                 <div class="form-group">
                     <label>Template Name <span class="required">*</span></label>
-                    <input type="text" id="template-name" class="form-control" value="${template?.template_name || ''}" placeholder="e.g., Birthday Greeting Template" required>
+                    <input type="text" id="template-name" class="form-control" value="${escapeHtml(template?.template_name || '')}" placeholder="e.g., Birthday Greeting Template" required>
                 </div>
                 
                 <div class="form-group">
@@ -2950,7 +2950,7 @@ ALTER TABLE public.promotions
                         <button type="button" class="btn-sm secondary" onclick="app.insertVariable('{{event_title}}')">{{event_title}}</button>
                         <button type="button" class="btn-sm secondary" onclick="app.insertVariable('{{location}}')">{{location}}</button>
                     </div>
-                    <textarea id="template-content" class="form-control" rows="6" placeholder="Type your message here...">${template?.content || ''}</textarea>
+                    <textarea id="template-content" class="form-control" rows="6" placeholder="Type your message here...">${escapeHtml(template?.content || '')}</textarea>
                 </div>
                 
                 <div class="form-group">
@@ -2965,7 +2965,7 @@ ALTER TABLE public.promotions
                 
                 <div class="form-group">
                     <label>Footer Text (optional)</label>
-                    <input type="text" id="template-footer" class="form-control" value="${template?.footer_text || ''}" placeholder="e.g., Reply STOP to opt out">
+                    <input type="text" id="template-footer" class="form-control" value="${escapeHtml(template?.footer_text || '')}" placeholder="e.g., Reply STOP to opt out">
                 </div>
             </div>
         `;
@@ -3002,7 +3002,7 @@ ALTER TABLE public.promotions
 
         return buttons.map((btn, index) => `
             <div class="button-field-row">
-                <input type="text" class="form-control" placeholder="Button ${index + 1} text" value="${btn.text}">
+                <input type="text" class="form-control" placeholder="Button ${index + 1} text" value="${escapeHtml(btn.text)}">
                 <select class="form-control" style="width: 120px;">
                     <option value="quick_reply" ${btn.type === 'quick_reply' ? 'selected' : ''}>Quick Reply</option>
                     <option value="url" ${btn.type === 'url' ? 'selected' : ''}>URL</option>
@@ -3105,7 +3105,7 @@ ALTER TABLE public.promotions
                 </div>
                 <div class="whatsapp-body">
                     <div class="message-bubble received">
-                        ${previewContent}
+                        ${escapeHtml(previewContent)}
                         <div class="message-time">10:24 PM</div>
                     </div>
                 </div>
@@ -3239,8 +3239,8 @@ ALTER TABLE public.promotions
         return `
             <tr onclick="app.viewCampaignDetails(${campaign.id})">
                 <td>
-                    <strong>${campaign.campaign_name}</strong><br>
-                    <small class="text-muted">${template?.template_name || 'No Template'}</small>
+                    <strong>${escapeHtml(campaign.campaign_name)}</strong><br>
+                    <small class="text-muted">${escapeHtml(template?.template_name || 'No Template')}</small>
                 </td>
                 <td><span class="status-badge status-${campaign.status}">${campaign.status.toUpperCase()}</span></td>
                 <td>${campaign.scheduled_date ? UI.formatDate(campaign.scheduled_date) : 'Not scheduled'}</td>
@@ -3283,11 +3283,11 @@ ALTER TABLE public.promotions
                     <div class="campaign-step" id="step-1">
                         <div class="form-group">
                             <label>Campaign Name <span class="required">*</span></label>
-                            <input type="text" id="campaign-name" class="form-control" value="${campaign?.campaign_name || ''}" placeholder="e.g., March Birthday Wishes">
+                            <input type="text" id="campaign-name" class="form-control" value="${escapeHtml(campaign?.campaign_name || '')}" placeholder="e.g., March Birthday Wishes">
                         </div>
                         <div class="form-group">
                             <label>Description</label>
-                            <textarea id="campaign-description" class="form-control" rows="3" placeholder="Notes about this campaign...">${campaign?.description || ''}</textarea>
+                            <textarea id="campaign-description" class="form-control" rows="3" placeholder="Notes about this campaign...">${escapeHtml(campaign?.description || '')}</textarea>
                         </div>
                         <div class="form-group">
                             <label>Time Zone</label>
@@ -3400,11 +3400,11 @@ ALTER TABLE public.promotions
                 <div class="campaign-step" id="step-1">
                     <div class="form-group">
                         <label>Campaign Name <span class="required">*</span></label>
-                        <input type="text" id="campaign-name" class="form-control" value="${_campaignData.campaign_name}" placeholder="e.g., March Birthday Wishes">
+                        <input type="text" id="campaign-name" class="form-control" value="${escapeHtml(_campaignData.campaign_name)}" placeholder="e.g., March Birthday Wishes">
                     </div>
                     <div class="form-group">
                         <label>Description</label>
-                        <textarea id="campaign-description" class="form-control" rows="3" placeholder="Notes about this campaign...">${_campaignData.description || ''}</textarea>
+                        <textarea id="campaign-description" class="form-control" rows="3" placeholder="Notes about this campaign...">${escapeHtml(_campaignData.description || '')}</textarea>
                     </div>
                 </div>
             `;
@@ -3417,10 +3417,10 @@ ALTER TABLE public.promotions
                             <div class="template-card mini ${t.id === _campaignData.template_id ? 'selected' : ''}" onclick="this.querySelector('input').click()">
                                 <input type="radio" name="template-select" value="${t.id}" ${t.id === _campaignData.template_id ? 'checked' : ''} style="display:none;">
                                 <div class="template-card-header">
-                                    <span class="template-badge">${t.category}</span>
+                                    <span class="template-badge">${escapeHtml(t.category)}</span>
                                 </div>
-                                <h4 class="template-title">${t.template_name}</h4>
-                                <p class="template-preview">${t.content.substring(0, 60)}...</p>
+                                <h4 class="template-title">${escapeHtml(t.template_name)}</h4>
+                                <p class="template-preview">${escapeHtml(t.content.substring(0, 60))}...</p>
                             </div>
                         `).join('')}
                     </div>
@@ -3443,12 +3443,12 @@ ALTER TABLE public.promotions
                         
                         <h5>Tags</h5>
                         <div class="checkbox-group grid">
-                            ${tags.map(t => `<label><input type="checkbox" name="audience-tag" value="${t.id}" ${(_campaignData.audience_config.tags || []).includes(t.id) ? 'checked' : ''}> ${t.name}</label>`).join('')}
+                            ${tags.map(t => `<label><input type="checkbox" name="audience-tag" value="${t.id}" ${(_campaignData.audience_config.tags || []).includes(t.id) ? 'checked' : ''}> ${escapeHtml(t.name)}</label>`).join('')}
                         </div>
                         
                         <h5>Agents</h5>
                         <div class="checkbox-group grid">
-                            ${agents.map(a => `<label><input type="checkbox" name="agent-filter" value="${a.id}" ${(_campaignData.audience_config.agents || []).includes(a.id) ? 'checked' : ''}> ${a.full_name}</label>`).join('')}
+                            ${agents.map(a => `<label><input type="checkbox" name="agent-filter" value="${a.id}" ${(_campaignData.audience_config.agents || []).includes(a.id) ? 'checked' : ''}> ${escapeHtml(a.full_name)}</label>`).join('')}
                         </div>
                     </div>
                     <div class="audience-size" id="audience-size-preview">
@@ -3477,7 +3477,7 @@ ALTER TABLE public.promotions
                     
                     <div class="campaign-summary-box" style="background:var(--gray-50); padding:16px; border-radius:8px; margin-top:20px;">
                         <h5>Campaign Summary</h5>
-                        <p><strong>Name:</strong> ${_campaignData.campaign_name}</p>
+                        <p><strong>Name:</strong> ${escapeHtml(_campaignData.campaign_name)}</p>
                         <p><strong>Template:</strong> ${escapeHtml((await AppDataStore.getById('whatsapp_templates', _campaignData.template_id))?.template_name || 'N/A')}</p>
                         <p><strong>Estimated Audience:</strong> <span id="final-audience-size">...</span></p>
                     </div>
@@ -3957,10 +3957,10 @@ const simulateCampaignSending = async (campaignId) => {
             <div class="campaign-details">
                 <div class="campaign-header">
                     <div>
-                        <h2>${campaign.campaign_name}</h2>
+                        <h2>${escapeHtml(campaign.campaign_name)}</h2>
                         <div class="campaign-meta">
                             <span><i class="fas fa-calendar"></i> Created: ${UI.formatDate(campaign.created_at)}</span>
-                            <span><i class="fas fa-layer-group"></i> Template: ${template?.template_name || 'N/A'}</span>
+                            <span><i class="fas fa-layer-group"></i> Template: ${escapeHtml(template?.template_name || 'N/A')}</span>
                             <span class="status-badge status-${campaign.status}">${campaign.status.toUpperCase()}</span>
                         </div>
                     </div>
@@ -4011,7 +4011,7 @@ const simulateCampaignSending = async (campaignId) => {
                                 <div class="timeline-item">
                                     <div class="timeline-time">${UI.formatDate(m.sent_at || m.created_at)}</div>
                                     <div class="timeline-event">
-                                        <strong>${await getEntityName('prospects', m.prospect_id)}</strong>
+                                        <strong>${escapeHtml(await getEntityName('prospects', m.prospect_id))}</strong>
                                         <span class="status-badge status-${m.status}">${m.status}</span>
                                     </div>
                                 </div>
@@ -4064,8 +4064,8 @@ const simulateCampaignSending = async (campaignId) => {
         const prospect = await AppDataStore.getById('prospects', msg.prospect_id);
         return `
             <tr>
-                <td><strong>${prospect?.full_name || 'Unknown'}</strong></td>
-                <td>${prospect?.phone || 'N/A'}</td>
+                <td><strong>${escapeHtml(prospect?.full_name || 'Unknown')}</strong></td>
+                <td>${escapeHtml(prospect?.phone || 'N/A')}</td>
                 <td><span class="status-badge status-${msg.status}">${msg.status}</span></td>
                 <td>${msg.sent_at ? UI.formatDate(msg.sent_at) : '-'}</td>
                 <td>
@@ -4104,7 +4104,7 @@ const simulateCampaignSending = async (campaignId) => {
 
         const content = `
             <div class="recipient-history">
-                <h4>Message History for ${prospect?.full_name}</h4>
+                <h4>Message History for ${escapeHtml(prospect?.full_name)}</h4>
                 <div class="history-timeline">
                     <div class="history-item">
                         <small>${UI.formatDate(msg.sent_at || msg.created_at)}</small>
@@ -4261,9 +4261,9 @@ const simulateCampaignSending = async (campaignId) => {
                                     <div class="avatar-sm" style="width: 28px; height: 28px; background: var(--primary-color); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 11px;">
                                         ${(u.full_name || 'U').split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)}
                                     </div>
-                                    <div style="font-weight: 600; font-size: 13px; color: var(--gray-900); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${u.full_name}</div>
+                                    <div style="font-weight: 600; font-size: 13px; color: var(--gray-900); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(u.full_name)}</div>
                                 </div>
-                                <div style="font-size: 11px; color: var(--gray-500); text-transform: capitalize; background: var(--gray-100); padding: 2px 8px; border-radius: 4px; display: inline-block;">${u.role}</div>
+                                <div style="font-size: 11px; color: var(--gray-500); text-transform: capitalize; background: var(--gray-100); padding: 2px 8px; border-radius: 4px; display: inline-block;">${escapeHtml(u.role)}</div>
                             </div>
                         `).join('')}
                     </div>
@@ -4286,7 +4286,7 @@ const simulateCampaignSending = async (campaignId) => {
                     <div style="position:relative; width:80px; height:80px; margin: 0 auto 16px; cursor:pointer; display:inline-block;" onclick="document.getElementById('avatar-file-input').click()" title="Tap to change profile photo">
                         <img id="account-avatar-preview"
                              src="${avatarSrc}"
-                             alt="${initials}"
+                             alt="${escapeHtml(initials)}"
                              loading="lazy"
                              decoding="async"
                              onerror="this.src='${svgFallback}'"
@@ -4298,8 +4298,8 @@ const simulateCampaignSending = async (campaignId) => {
                     <input type="file" id="avatar-file-input" accept="image/*" style="display:none;" onchange="(async()=>{ await app.uploadProfilePhoto(this); })()">
                     <div id="avatar-upload-status" style="font-size:12px;color:var(--gray-500);margin-top:6px;margin-bottom:4px;min-height:16px;"></div>
 
-                    <h2 style="margin-bottom: 4px; font-size: 20px;">${currentUser.full_name}</h2>
-                    <p style="color: var(--primary,#8B1A1A); text-transform: capitalize; margin-bottom: 32px; font-weight: 500;">${currentUser.role}</p>
+                    <h2 style="margin-bottom: 4px; font-size: 20px;">${escapeHtml(currentUser.full_name)}</h2>
+                    <p style="color: var(--primary,#8B1A1A); text-transform: capitalize; margin-bottom: 32px; font-weight: 500;">${escapeHtml(currentUser.role)}</p>
 
                     <div style="border-top: 1px solid var(--gray-100); padding-top: 20px;">
                         <button class="btn danger" onclick="app.logout()" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 14px; font-weight: 600;">

@@ -409,15 +409,15 @@ const openEditPotentialModal = async (prospectId) => {
             </div>
             <div class="form-group" style="grid-column:1/3;">
                 <label>Decision Timeline</label>
-                <input type="text" id="pot-timeline" class="form-control" placeholder="e.g. Within 1 month" value="${prospect.decision_timeline || ''}">
+                <input type="text" id="pot-timeline" class="form-control" placeholder="e.g. Within 1 month" value="${esc(prospect.decision_timeline || '')}">
             </div>
             <div class="form-group" style="grid-column:1/3;">
                 <label>Pain Points</label>
-                <textarea id="pot-pain" class="form-control" rows="2" placeholder="e.g. Declining revenue, team morale">${prospect.pain_points || ''}</textarea>
+                <textarea id="pot-pain" class="form-control" rows="2" placeholder="e.g. Declining revenue, team morale">${esc(prospect.pain_points || '')}</textarea>
             </div>
             <div class="form-group" style="grid-column:1/3;">
                 <label>Interests</label>
-                <input type="text" id="pot-interests" class="form-control" placeholder="e.g. PR4, Office Audit, Career Consultation" value="${prospect.interests || ''}">
+                <input type="text" id="pot-interests" class="form-control" placeholder="e.g. PR4, Office Audit, Career Consultation" value="${esc(prospect.interests || '')}">
             </div>
             <div class="form-group">
                 <label>Decision Maker?</label>
@@ -429,7 +429,7 @@ const openEditPotentialModal = async (prospectId) => {
             </div>
             <div class="form-group">
                 <label>Budget Range</label>
-                <input type="text" id="pot-budget" class="form-control" placeholder="e.g. RM 15k-20k/mo" value="${prospect.budget_range || ''}">
+                <input type="text" id="pot-budget" class="form-control" placeholder="e.g. RM 15k-20k/mo" value="${esc(prospect.budget_range || '')}">
             </div>
         </div>
     `;
@@ -467,12 +467,12 @@ const sendBirthdayWish = async (personName, phone) => {
 
     UI.showModal('Send Birthday Wish', `
         <div class="form-group">
-            <label>To: ${personName}</label>
-            <input type="text" class="form-control" value="${phone || ''}" readonly>
+            <label>To: ${esc(personName)}</label>
+            <input type="text" class="form-control" value="${esc(phone || '')}" readonly>
         </div>
         <div class="form-group">
             <label>Message</label>
-            <textarea id="bday-msg" class="form-control" rows="5">${message}</textarea>
+            <textarea id="bday-msg" class="form-control" rows="5">${esc(message)}</textarea>
         </div>
         <div class="form-group">
             <label>Channel</label>
@@ -495,7 +495,7 @@ const scheduleBirthdayFollowup = async (personName, entityId, entityType) => {
 
     UI.showModal('Schedule Birthday Follow-up', `
         <div class="form-group">
-            <label>For: ${personName}</label>
+            <label>For: ${esc(personName)}</label>
         </div>
         <div class="form-group">
             <label>Action Type</label>
@@ -941,7 +941,7 @@ const renderSpecialPrograms = async () => {
                             : '<span style="background:#fef3c7;color:#92400e;padding:3px 10px;border-radius:12px;font-size:11px;">In Progress</span>';
                         return `
                             <tr>
-                                <td style="padding:8px;border-bottom:1px solid var(--gray-100);"><strong>${p.agentName}</strong><br/><span style="font-size:10px;color:var(--gray-400);">${p.agentRole}</span></td>
+                                <td style="padding:8px;border-bottom:1px solid var(--gray-100);"><strong>${esc(p.agentName)}</strong><br/><span style="font-size:10px;color:var(--gray-400);">${esc(p.agentRole)}</span></td>
                                 ${program.sales_target > 0 ? barsHtml('Total Sales') : ''}
                                 ${program.new_customers_target > 0 ? barsHtml('New Customers') : ''}
                                 ${program.cps_target > 0 ? barsHtml('CPS Count') : ''}
@@ -961,16 +961,16 @@ const renderSpecialPrograms = async () => {
                 <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
                     <div style="flex:1;">
                         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                            <h3 style="margin:0;font-size:16px;">🏆 ${program.program_name || 'Untitled Program'}</h3>
+                            <h3 style="margin:0;font-size:16px;">🏆 ${esc(program.program_name || 'Untitled Program')}</h3>
                             ${isExpired ? '<span style="background:#f3f4f6;color:#6b7280;padding:3px 8px;border-radius:10px;font-size:11px;">EXPIRED</span>' : `<span style="background:#fef3c7;color:#92400e;padding:3px 8px;border-radius:10px;font-size:11px;">${daysLeft} days left</span>`}
                         </div>
                         <div style="font-size:13px;color:var(--gray-500);margin-top:4px;">
-                            🎁 <strong>${program.reward || '—'}</strong>
+                            🎁 <strong>${esc(program.reward || '—')}</strong>
                             &nbsp;·&nbsp; ${program.start_date || '?'} to ${program.end_date || '?'}
                             &nbsp;·&nbsp; ${parts.length} participant${parts.length===1?'':'s'}
                             ${qualifiedCount > 0 ? `&nbsp;·&nbsp; <span style="color:#16a34a;font-weight:600;">${qualifiedCount} qualified</span>` : ''}
                         </div>
-                        ${program.description ? `<p style="font-size:12px;color:var(--gray-500);margin:6px 0 0;">${program.description}</p>` : ''}
+                        ${program.description ? `<p style="font-size:12px;color:var(--gray-500);margin:6px 0 0;">${esc(program.description)}</p>` : ''}
                     </div>
                     <div style="display:flex;gap:6px;">${manageBtns}</div>
                 </div>
@@ -1072,14 +1072,14 @@ const renderSpecialProgramsTable = async () => {
         return `
             <tr style="${r.isExpired ? 'opacity:0.6;background:#f9fafb;' : ''}">
                 <td style="padding:10px;border-bottom:1px solid var(--gray-100);min-width:200px;">
-                    <strong style="font-size:13px;">🏆 ${r.program.program_name || 'Untitled'}</strong>${expiredBadge}
-                    <div style="font-size:11px;color:var(--gray-500);margin-top:3px;">🎁 ${r.program.reward || '—'}</div>
+                    <strong style="font-size:13px;">🏆 ${esc(r.program.program_name || 'Untitled')}</strong>${expiredBadge}
+                    <div style="font-size:11px;color:var(--gray-500);margin-top:3px;">🎁 ${esc(r.program.reward || '—')}</div>
                     <div style="font-size:10px;color:var(--gray-400);margin-top:2px;">${r.program.start_date || '?'} → ${r.program.end_date || '?'}</div>
                 </td>
                 <td style="padding:10px;border-bottom:1px solid var(--gray-100);min-width:160px;">
                     ${r.noParticipants ? '<span style="color:var(--gray-400);font-style:italic;">No participants</span>' : `
-                        <strong style="font-size:13px;">${r.agentName}</strong>
-                        <div style="font-size:11px;color:var(--gray-500);margin-top:2px;">${r.agentRole}</div>
+                        <strong style="font-size:13px;">${esc(r.agentName)}</strong>
+                        <div style="font-size:11px;color:var(--gray-500);margin-top:2px;">${esc(r.agentRole)}</div>
                     `}
                 </td>
                 ${cell(salesT)}
@@ -1136,19 +1136,19 @@ const openSpecialProgramModal = async (programId = null) => {
     const agentRows = eligible.map(u => `
         <tr>
             <td style="padding:6px 8px;"><input type="checkbox" class="sp-agent-cb" value="${u.id}" ${selectedIds.has(u.id) ? 'checked' : ''}></td>
-            <td style="padding:6px 8px;"><strong>${u.full_name || u.username || '—'}</strong></td>
-            <td style="padding:6px 8px;font-size:11px;color:var(--gray-500);">${u.role || '—'}</td>
+            <td style="padding:6px 8px;"><strong>${esc(u.full_name || u.username || '—')}</strong></td>
+            <td style="padding:6px 8px;font-size:11px;color:var(--gray-500);">${esc(u.role || '—')}</td>
         </tr>`).join('');
 
     const content = `
         <div style="max-height:75vh;overflow-y:auto;padding-right:4px;">
             <h4 style="margin:0 0 10px;">Program Details</h4>
             <div class="form-group"><label>Program Name *</label>
-                <input type="text" id="sp-name" class="form-control" value="${existing?.program_name || ''}" placeholder="e.g. China Trip Challenge"></div>
+                <input type="text" id="sp-name" class="form-control" value="${esc(existing?.program_name || '')}" placeholder="e.g. China Trip Challenge"></div>
             <div class="form-group"><label>Reward *</label>
-                <input type="text" id="sp-reward" class="form-control" value="${existing?.reward || ''}" placeholder="e.g. China 5D4N Trip"></div>
+                <input type="text" id="sp-reward" class="form-control" value="${esc(existing?.reward || '')}" placeholder="e.g. China 5D4N Trip"></div>
             <div class="form-group"><label>Description</label>
-                <textarea id="sp-desc" class="form-control" rows="2" placeholder="Optional details about the program">${existing?.description || ''}</textarea></div>
+                <textarea id="sp-desc" class="form-control" rows="2" placeholder="Optional details about the program">${esc(existing?.description || '')}</textarea></div>
             <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
                 <div class="form-group"><label>Start Date *</label>
                     <input type="date" id="sp-start" class="form-control" value="${existing?.start_date || todayStr}"></div>
@@ -1325,8 +1325,8 @@ const checkSpecialProgramPopup = async () => {
 
         cards.push(`
             <div style="background:var(--white,#fff);border:2px solid #8B1A1A;border-radius:10px;padding:16px;margin-bottom:14px;">
-                <h3 style="margin:0 0 4px;color:#8B1A1A;">🏆 ${program.program_name}</h3>
-                <p style="font-size:13px;color:var(--gray-500);margin:0 0 10px;">🎁 Reward: <strong>${program.reward}</strong></p>
+                <h3 style="margin:0 0 4px;color:#8B1A1A;">🏆 ${esc(program.program_name)}</h3>
+                <p style="font-size:13px;color:var(--gray-500);margin:0 0 10px;">🎁 Reward: <strong>${esc(program.reward)}</strong></p>
                 ${statusBanner}
                 ${barsHtml}
             </div>`);

@@ -318,7 +318,7 @@
                 <div class="strip-label"><i class="fas fa-fire"></i> Top Referrers:</div>
                 <div class="strip-items">
                     ${top3.map((t, i) => `
-                        <div class="strip-item"><span class="rank">#${i + 1}</span> ${t.name} (${t.count})</div>
+                        <div class="strip-item"><span class="rank">#${i + 1}</span> ${escapeHtml(t.name)} (${t.count})</div>
                     `).join('')}
                     ${top3.length === 0 ? '<div class="text-muted" style="font-size:12px">No referrals yet.</div>' : ''}
                 </div>
@@ -390,7 +390,7 @@
                 <tr class="rank-${idx + 1}">
                     <td data-label="Rank" class="rank-cell">${idx + 1}</td>
                     <td data-label="Referrer" class="name-cell" onclick="app.showReferralTree(${item.id}, '${item.type || 'prospect'}')">
-                        ${item.name}
+                        ${escapeHtml(item.name)}
                         ${item.type === 'customer' ? '<span class="badge" style="background:#dcfce7; color:#166534">C</span>' : ''}
                         ${item.type === 'user' ? '<span class="badge" style="background:#dbeafe; color:#1e40af">Agent</span>' : ''}
                     </td>
@@ -496,8 +496,8 @@
                         <i class="fas ${p.type === 'customer' ? 'fa-user-check' : 'fa-user'}" style="color:${p.type === 'customer' ? '#166534' : '#64748b'}; font-size:12px;"></i>
                     </div>
                     <div style="flex-grow:1">
-                        <div style="font-weight:600; font-size:14px;">${p.full_name}</div>
-                        <div style="font-size:11px; color:var(--gray-500)">${p.phone || 'No phone'}</div>
+                        <div style="font-weight:600; font-size:14px;">${escapeHtml(p.full_name)}</div>
+                        <div style="font-size:11px; color:var(--gray-500)">${escapeHtml(p.phone || 'No phone')}</div>
                     </div>
                     <span class="badge ${p.type === 'customer' ? 'success' : 'secondary'}">${p.type}</span>
                 </div>
@@ -1008,8 +1008,8 @@
         // Ancestor path
         const ancestors = await getAncestorPath(id);
         const pathHtml = ancestors.length > 0
-            ? ancestors.map(a => `<span>${a.name}</span>`).join(' <span style="color:var(--gray-300)">›</span> ') + ` <span style="color:var(--gray-300)">›</span> <strong>${person.full_name}</strong>`
-            : `<strong>${person.full_name}</strong> <span style="color:var(--gray-400); font-size:10px">(root)</span>`;
+            ? ancestors.map(a => `<span>${escapeHtml(a.name)}</span>`).join(' <span style="color:var(--gray-300)">›</span> ') + ` <span style="color:var(--gray-300)">›</span> <strong>${escapeHtml(person.full_name)}</strong>`
+            : `<strong>${escapeHtml(person.full_name)}</strong> <span style="color:var(--gray-400); font-size:10px">(root)</span>`;
 
         // Check bookmark status in Supabase
         const currentUserId = _state.cu?.id;
@@ -1056,7 +1056,7 @@
         sidebar.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px">
                 <div style="flex:1; min-width:0">
-                    <div style="font-size:15px; font-weight:700; color:var(--gray-800); white-space:normal; word-break:break-word">${person.full_name}</div>
+                    <div style="font-size:15px; font-weight:700; color:var(--gray-800); white-space:normal; word-break:break-word">${escapeHtml(person.full_name)}</div>
                     <span style="background:${stageColor}; color:${stageColor === '#ffffff' || stageColor === '#eab308' ? '#374151' : 'white'}; font-size:10px; padding:2px 8px; border-radius:10px; text-transform:uppercase; display:inline-block; margin-top:4px; ${stageColor === '#ffffff' ? 'border:1px solid #d1d5db;' : ''}">${stageName}</span>
                 </div>
                 <button onclick="app.toggleTreeInterested(${id}, '${type}')" class="interested-heart-btn" id="heart-btn-${id}" title="${isInterested ? 'Remove bookmark' : 'Add bookmark'}">
@@ -1072,9 +1072,9 @@
                 </div>
             </div>
 
-            ${person.phone ? `<div class="sidebar-field"><label>Phone</label><div class="value">${person.phone}</div></div>` : ''}
-            ${person.email ? `<div class="sidebar-field"><label>Email</label><div class="value" style="font-size:12px">${person.email}</div></div>` : ''}
-            ${person.occupation ? `<div class="sidebar-field"><label>Occupation</label><div class="value">${person.occupation}</div></div>` : ''}
+            ${person.phone ? `<div class="sidebar-field"><label>Phone</label><div class="value">${escapeHtml(person.phone)}</div></div>` : ''}
+            ${person.email ? `<div class="sidebar-field"><label>Email</label><div class="value" style="font-size:12px">${escapeHtml(person.email)}</div></div>` : ''}
+            ${person.occupation ? `<div class="sidebar-field"><label>Occupation</label><div class="value">${escapeHtml(person.occupation)}</div></div>` : ''}
 
             <div class="sidebar-field">
                 <label>Referrals Made</label>
@@ -1163,7 +1163,7 @@
         const rows = bookmarks.map(b => `
             <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 4px; border-bottom:1px solid var(--gray-100); gap:8px">
                 <div style="flex:1; min-width:0">
-                    <div style="font-weight:600; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${b.interested_person_name || 'ID: ' + b.interested_person_id}</div>
+                    <div style="font-weight:600; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${escapeHtml(b.interested_person_name || 'ID: ' + b.interested_person_id)}</div>
                     <div style="font-size:11px; color:var(--gray-500); text-transform:uppercase">${b.interested_person_type}</div>
                 </div>
                 <div style="display:flex; gap:6px; flex-shrink:0">
@@ -1291,7 +1291,7 @@
             resultsDiv.innerHTML = filtered.map(p => `
                 <div class="result-item-v2" onclick="app.selectReferrerForModal(${p.id}, '${p.type}', '${modalType}')">
                     <div style="flex-grow:1">
-                        <strong>${p.full_name}</strong>
+                        <strong>${escapeHtml(p.full_name)}</strong>
                         <div style="font-size:10px">${p.type.toUpperCase()}</div>
                     </div>
                 </div>
@@ -1319,7 +1319,7 @@
         if (!display) return;
         display.innerHTML = `
             <div class="entity-chip">
-                <span><i class="fas fa-check-circle" style="color:#10b981"></i> <strong>${person.full_name}</strong> (${type})</span>
+                <span><i class="fas fa-check-circle" style="color:#10b981"></i> <strong>${escapeHtml(person.full_name)}</strong> (${type})</span>
                 <button class="btn-icon" onclick="app.clearSelectedForModal('${modalType}')"><i class="fas fa-times"></i></button>
             </div>
         `;
@@ -1383,11 +1383,11 @@
         const content = `
             <div class="form-section">
                 <div style="display:grid; gap:8px;">
-                    <div class="info-row"><div class="info-label">Referrer</div><div class="info-value">${referrer?.full_name || 'N/A'}</div></div>
-                    <div class="info-row"><div class="info-label">Referred Person</div><div class="info-value">${prospect?.full_name || 'N/A'}</div></div>
-                    <div class="info-row"><div class="info-label">Relationship</div><div class="info-value">${r.relationship || '-'}</div></div>
+                    <div class="info-row"><div class="info-label">Referrer</div><div class="info-value">${escapeHtml(referrer?.full_name || 'N/A')}</div></div>
+                    <div class="info-row"><div class="info-label">Referred Person</div><div class="info-value">${escapeHtml(prospect?.full_name || 'N/A')}</div></div>
+                    <div class="info-row"><div class="info-label">Relationship</div><div class="info-value">${escapeHtml(r.relationship || '-')}</div></div>
                     <div class="info-row"><div class="info-label">Date</div><div class="info-value">${r.date || '-'}</div></div>
-                    <div class="info-row"><div class="info-label">Source</div><div class="info-value">${r.source || '-'}</div></div>
+                    <div class="info-row"><div class="info-label">Source</div><div class="info-value">${escapeHtml(r.source || '-')}</div></div>
                     <div class="info-row"><div class="info-label">Status</div><div class="info-value"><span class="score-badge ${r.status === 'Active' ? 'score-A+' : 'score-A'}">${r.status}</span></div></div>
                     <div class="info-row"><div class="info-label">Reward Status</div><div class="info-value">${r.reward_status || '-'}</div></div>
                     ${r.notes ? `<div class="info-row"><div class="info-label">Notes</div><div class="info-value">${escapeHtml(r.notes)}</div></div>` : ''}
@@ -1406,7 +1406,7 @@
         const prospect = await AppDataStore.getById('prospects', r.referred_prospect_id);
         const content = `
             <div class="form-section">
-                <p style="margin-bottom:16px; color:var(--gray-600);">Referred: <strong>${prospect?.full_name || 'N/A'}</strong></p>
+                <p style="margin-bottom:16px; color:var(--gray-600);">Referred: <strong>${escapeHtml(prospect?.full_name || 'N/A')}</strong></p>
                 <div class="form-group">
                     <label>Status</label>
                     <select id="ref-update-status" class="form-control">
@@ -1468,9 +1468,9 @@
             <div style="padding:10px">
                 <h4>Latest Memo/Note</h4>
                 <div style="background:#f1f5f9; padding:16px; border-radius:8px; margin:16px 0; border-left:4px solid #3b82f6">
-                    ${latest ? latest.content : 'No memos found for this person.'}
+                    ${latest ? escapeHtml(latest.content) : 'No memos found for this person.'}
                     <div style="font-size:11px; color:#64748b; margin-top:8px">
-                        ${latest ? 'Written by ' + ((await AppDataStore.getById('users', latest.created_by))?.full_name || 'Admin') + ' on ' + UI.formatDate(latest.created_at) : ''}
+                        ${latest ? 'Written by ' + escapeHtml((await AppDataStore.getById('users', latest.created_by))?.full_name || 'Admin') + ' on ' + UI.formatDate(latest.created_at) : ''}
                     </div>
                 </div>
                 <button class="btn secondary btn-block" onclick="UI.hideModal(); ${profileCall}">View Full Profile</button>

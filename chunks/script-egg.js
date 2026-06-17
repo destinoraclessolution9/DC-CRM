@@ -451,11 +451,11 @@ JB 星期二到
                     const dateStr = r.order_date_parsed ? eggFormatDateShort(r.order_date_parsed) : '-';
                     return `
                         <tr style="border-top:1px solid var(--gray-200);">
-                            <td style="padding:6px 8px;">${r.agent_name || '-'}</td>
+                            <td style="padding:6px 8px;">${escapeHtml(r.agent_name || '-')}</td>
                             <td style="padding:6px 8px;font-size:12px;">${dateStr}</td>
-                            <td style="padding:6px 8px;font-family:monospace;font-size:12px;">${r.order_no || '-'}</td>
-                            <td style="padding:6px 8px;font-family:monospace;font-size:12px;color:var(--gray-500);">${r.product_code || '-'}</td>
-                            <td style="padding:6px 8px;">${r.product}</td>
+                            <td style="padding:6px 8px;font-family:monospace;font-size:12px;">${escapeHtml(r.order_no || '-')}</td>
+                            <td style="padding:6px 8px;font-family:monospace;font-size:12px;color:var(--gray-500);">${escapeHtml(r.product_code || '-')}</td>
+                            <td style="padding:6px 8px;">${escapeHtml(r.product)}</td>
                             <td style="padding:6px 8px;text-align:right;">${r.quantity}</td>
                         </tr>
                     `;
@@ -920,13 +920,13 @@ JB 星期二到
                     return `
                         <tr data-egg-key="${r.unique_key}" style="border-top:1px solid var(--gray-200);${rowStyle}">
                             <td style="padding:8px;"><input type="checkbox" ${checked} onchange="app.eggToggleExclude('${r.unique_key}')"></td>
-                            <td style="padding:8px;">${r.agent_name || '-'}</td>
+                            <td style="padding:8px;">${escapeHtml(r.agent_name || '-')}</td>
                             <td style="padding:8px;font-size:12px;">${dateStr}</td>
-                            <td style="padding:8px;font-family:monospace;font-size:12px;">${r.order_no || '-'}</td>
-                            <td style="padding:8px;">${r.product}</td>
-                            <td style="padding:8px;">${r.region}</td>
+                            <td style="padding:8px;font-family:monospace;font-size:12px;">${escapeHtml(r.order_no || '-')}</td>
+                            <td style="padding:8px;">${escapeHtml(r.product)}</td>
+                            <td style="padding:8px;">${escapeHtml(r.region)}</td>
                             <td style="padding:8px;text-align:right;">${r.quantity}</td>
-                            <td style="padding:8px;">${r.channel}</td>
+                            <td style="padding:8px;">${escapeHtml(r.channel)}</td>
                             <td class="egg-match-cell" style="padding:8px;">${matchBadge}</td>
                         </tr>
                     `;
@@ -987,13 +987,13 @@ JB 星期二到
                 const hiddenCount = Math.max(0, sortedPrev.length - shownPrev.length);
                 const rows = shownPrev.map(r => `
                     <tr style="border-top:1px solid var(--gray-100);">
-                        <td style="padding:6px 8px;">${r.agent_name || '-'}</td>
+                        <td style="padding:6px 8px;">${escapeHtml(r.agent_name || '-')}</td>
                         <td style="padding:6px 8px;font-size:12px;">${r.order_date ? eggFormatDateShort(new Date(r.order_date)) : '-'}</td>
-                        <td style="padding:6px 8px;font-family:monospace;font-size:12px;">${r.order_no || '-'}</td>
-                        <td style="padding:6px 8px;">${r.product || '-'}</td>
-                        <td style="padding:6px 8px;">${r.region || '-'}</td>
+                        <td style="padding:6px 8px;font-family:monospace;font-size:12px;">${escapeHtml(r.order_no || '-')}</td>
+                        <td style="padding:6px 8px;">${escapeHtml(r.product || '-')}</td>
+                        <td style="padding:6px 8px;">${escapeHtml(r.region || '-')}</td>
                         <td style="padding:6px 8px;text-align:right;">${r.quantity}</td>
-                        <td style="padding:6px 8px;">${r.channel || '-'}</td>
+                        <td style="padding:6px 8px;">${escapeHtml(r.channel || '-')}</td>
                     </tr>`).join('');
                 const titleText = hasMeta ? `Last Week's Orders — Week of ${weekLabel}` : `Last Week's Orders`;
                 const shownNote = hiddenCount > 0 ? ` &nbsp;•&nbsp; showing last ${shownPrev.length} of ${sortedPrev.length}` : '';
@@ -1642,13 +1642,13 @@ JB 星期二到
                 return `
                     <tr style="border-top:1px solid var(--gray-200);">
                         <td style="padding:8px;">${u.week_start_date || '-'}</td>
-                        <td style="padding:8px;">${u.agent_name || '-'}</td>
+                        <td style="padding:8px;">${escapeHtml(u.agent_name || '-')}</td>
                         <td style="padding:8px;">${u.product}</td>
                         <td style="padding:8px;">${u.region}</td>
                         <td style="padding:8px;text-align:right;">${u.quantity}</td>
                         <td style="padding:8px;">${u.channel || 'Wholesale'}</td>
                         <td style="padding:8px;"><span style="background:${statusColor};color:white;padding:2px 8px;border-radius:10px;font-size:11px;">${u.status}</span></td>
-                        <td style="padding:8px;font-size:12px;color:var(--gray-600);">${u.notes || ''}</td>
+                        <td style="padding:8px;font-size:12px;color:var(--gray-600);">${escapeHtml(u.notes || '')}</td>
                         <td style="padding:8px;">${actions}</td>
                     </tr>
                 `;
@@ -1708,7 +1708,7 @@ JB 星期二到
                 <input type="hidden" id="egg-urg-id" value="${editId || ''}">
                 <div>
                     <label style="font-weight:600;display:block;margin-bottom:4px;">Agent Name</label>
-                    <input type="text" id="egg-urg-agent" class="form-control" value="${existing?.agent_name || ''}">
+                    <input type="text" id="egg-urg-agent" class="form-control" value="${escapeHtml(existing?.agent_name || '')}">
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                     <div>
@@ -1745,7 +1745,7 @@ JB 星期二到
                 </div>
                 <div>
                     <label style="font-weight:600;display:block;margin-bottom:4px;">Notes (optional)</label>
-                    <textarea id="egg-urg-notes" class="form-control" rows="2">${existing?.notes || ''}</textarea>
+                    <textarea id="egg-urg-notes" class="form-control" rows="2">${escapeHtml(existing?.notes || '')}</textarea>
                 </div>
             </div>
         `;
@@ -1857,8 +1857,8 @@ JB 星期二到
                             ${recentSlice.map(c => `
                                 <tr style="border-top:1px solid var(--gray-200);">
                                     <td style="padding:6px;"><input type="radio" name="egg-reconcile-pick" value="${c.id}" data-key="${c.unique_key}"></td>
-                                    <td style="padding:6px;font-family:monospace;font-size:12px;">${c.order_no || '-'}</td>
-                                    <td style="padding:6px;">${c.agent_name || '-'}</td>
+                                    <td style="padding:6px;font-family:monospace;font-size:12px;">${escapeHtml(c.order_no || '-')}</td>
+                                    <td style="padding:6px;">${escapeHtml(c.agent_name || '-')}</td>
                                     <td style="padding:6px;">${c.quantity}</td>
                                     <td style="padding:6px;">${c.week_start || '-'}</td>
                                 </tr>
@@ -1922,11 +1922,11 @@ JB 星期二到
                     <tr style="border-top:1px solid var(--gray-200);">
                         <td style="padding:8px;font-size:12px;">${r.run_at ? new Date(r.run_at).toLocaleString() : '-'}</td>
                         <td style="padding:8px;">${r.week_start_date || '-'}</td>
-                        <td style="padding:8px;font-size:12px;">${r.csv_filename || '-'} / ${r.excel_filename || '-'}</td>
+                        <td style="padding:8px;font-size:12px;">${escapeHtml(r.csv_filename || '-')} / ${escapeHtml(r.excel_filename || '-')}</td>
                         <td style="padding:8px;text-align:right;">${r.rows_new || 0}</td>
                         <td style="padding:8px;text-align:right;">${r.rows_excluded || 0}</td>
                         <td style="padding:8px;text-align:right;">${tot}</td>
-                        <td style="padding:8px;">${r.run_by || '-'}</td>
+                        <td style="padding:8px;">${escapeHtml(r.run_by || '-')}</td>
                         <td style="padding:8px;">
                             <button class="btn-icon" title="View" onclick="app.eggViewRun(${r.id})"><i class="fas fa-eye"></i></button>
                             <button class="btn-icon" title="Re-push to Google Sheets" onclick="app.eggRePushRunToSheets(${r.id})"><i class="fas fa-share-square" style="color:#0ea5e9;"></i></button>
@@ -1979,9 +1979,9 @@ JB 星期二到
                         </div>
                     </div>
                     <h4>Farm Order</h4>
-                    <pre style="background:#f8fafc;padding:16px;border-radius:6px;font-family:monospace;font-size:13px;white-space:pre-wrap;">${r.farm_order_text || ''}</pre>
+                    <pre style="background:#f8fafc;padding:16px;border-radius:6px;font-family:monospace;font-size:13px;white-space:pre-wrap;">${escapeHtml(r.farm_order_text || '')}</pre>
                     <h4>Channel Breakdown</h4>
-                    <pre style="background:#f8fafc;padding:16px;border-radius:6px;font-family:monospace;font-size:13px;white-space:pre-wrap;">${r.channel_breakdown_text || ''}</pre>
+                    <pre style="background:#f8fafc;padding:16px;border-radius:6px;font-family:monospace;font-size:13px;white-space:pre-wrap;">${escapeHtml(r.channel_breakdown_text || '')}</pre>
                     ${(() => {
                         const byGroup = r.totals?.by_group;
                         if (!byGroup || !Object.keys(byGroup).length) return '';
@@ -1989,10 +1989,10 @@ JB 星期二到
                         const seen = new Set();
                         let rows = '';
                         for (const g of groupOrder) {
-                            if (byGroup[g] !== undefined) { rows += `<div style="display:flex;justify-content:space-between;padding:7px 12px;border-bottom:1px solid var(--gray-100);"><span>${g}</span><strong>${byGroup[g]} cartons</strong></div>`; seen.add(g); }
+                            if (byGroup[g] !== undefined) { rows += `<div style="display:flex;justify-content:space-between;padding:7px 12px;border-bottom:1px solid var(--gray-100);"><span>${escapeHtml(g)}</span><strong>${byGroup[g]} cartons</strong></div>`; seen.add(g); }
                         }
                         for (const [g, qty] of Object.entries(byGroup)) {
-                            if (!seen.has(g)) rows += `<div style="display:flex;justify-content:space-between;padding:7px 12px;border-bottom:1px solid var(--gray-100);"><span>${g}</span><strong>${qty} cartons</strong></div>`;
+                            if (!seen.has(g)) rows += `<div style="display:flex;justify-content:space-between;padding:7px 12px;border-bottom:1px solid var(--gray-100);"><span>${escapeHtml(g)}</span><strong>${qty} cartons</strong></div>`;
                         }
                         return `<h4>Wholesales Group Summary</h4><div style="border:1px solid #d1fae5;border-radius:8px;overflow:hidden;margin-bottom:16px;"><div style="background:#ecfdf5;padding:8px 12px;font-weight:600;font-size:13px;color:#065f46;"><i class="fas fa-layer-group"></i> Wholesales Group Summary</div>${rows}</div>`;
                     })()}

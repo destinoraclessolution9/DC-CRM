@@ -71,7 +71,7 @@
                     <i class="fas fa-search cases-search-icon"></i>
                     <input type="text" id="case-search" class="cases-search-input"
                         placeholder="Search cases, prospects, customers…"
-                        value="${_caseFilters.search}"
+                        value="${escapeHtml(_caseFilters.search)}"
                         onkeyup="app.handleCaseSearch(event)">
                     <button class="cases-search-clear" title="Clear search"
                         onclick="document.getElementById('case-search').value=''; app.handleCaseSearch({target:{value:''}})">
@@ -90,14 +90,14 @@
                         <label>Product</label>
                         <select id="case-product-filter" onchange="app.handleCaseFilterChange()">
                             <option value="all">All Products</option>
-                            ${products.map(p => `<option value="${p.name}" ${_caseFilters.product === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
+                            ${products.map(p => `<option value="${escapeHtml(p.name)}" ${_caseFilters.product === p.name ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}
                         </select>
                     </div>
                     <div class="adv-field">
                         <label>Agent</label>
                         <select id="case-agent-filter" onchange="app.handleCaseFilterChange()">
                             <option value="all">All Agents</option>
-                            ${agents.map(u => `<option value="${u.id}" ${_caseFilters.agent === String(u.id) ? 'selected' : ''}>${u.full_name || u.username}</option>`).join('')}
+                            ${agents.map(u => `<option value="${u.id}" ${_caseFilters.agent === String(u.id) ? 'selected' : ''}>${escapeHtml(u.full_name || u.username)}</option>`).join('')}
                         </select>
                     </div>
                     <div class="adv-field">
@@ -112,7 +112,7 @@
                         <label>Tag</label>
                         <select id="case-tag-filter" onchange="app.handleCaseFilterChange()">
                             <option value="all">All Tags</option>
-                            ${allTags.map(t => `<option value="${t.id}" ${_caseFilters.tag === String(t.id) ? 'selected' : ''}>${t.name}</option>`).join('')}
+                            ${allTags.map(t => `<option value="${t.id}" ${_caseFilters.tag === String(t.id) ? 'selected' : ''}>${escapeHtml(t.name)}</option>`).join('')}
                         </select>
                     </div>
                     <div class="adv-field">
@@ -475,7 +475,7 @@
         const caseTags = caseMappings.map(m => allTags.find(t => t.id === m.tag_id)).filter(Boolean);
         const tagPills = caseTags.map(t => `
             <span class="badge" style="background:${t.color || '#e5e7eb'};color:#1f2937;margin-right:4px;">
-                ${t.name}
+                ${escapeHtml(t.name)}
                 <span style="cursor:pointer;margin-left:4px;" onclick="app.removeTagFromCase(${c.id}, ${t.id})">&times;</span>
             </span>`).join('');
 
@@ -505,14 +505,14 @@
                             ? Math.floor((Date.now() - new Date(prospectProfile.date_of_birth)) / (365.25 * 24 * 60 * 60 * 1000)) + 'y'
                             : null;
                         return [
-                            prospectProfile?.referral_relationship ? `<span><i class="fas fa-people-arrows"></i> ${prospectProfile.referral_relationship}</span>` : '',
-                            prospectProfile?.occupation ? `<span><i class="fas fa-briefcase"></i> ${prospectProfile.occupation}</span>` : '',
+                            prospectProfile?.referral_relationship ? `<span><i class="fas fa-people-arrows"></i> ${escapeHtml(prospectProfile.referral_relationship)}</span>` : '',
+                            prospectProfile?.occupation ? `<span><i class="fas fa-briefcase"></i> ${escapeHtml(prospectProfile.occupation)}</span>` : '',
                             age ? `<span><i class="fas fa-birthday-cake"></i> ${age}</span>` : '',
-                            prospectProfile?.gender ? `<span><i class="fas fa-venus-mars"></i> ${prospectProfile.gender}</span>` : '',
+                            prospectProfile?.gender ? `<span><i class="fas fa-venus-mars"></i> ${escapeHtml(prospectProfile.gender)}</span>` : '',
                         ].filter(Boolean).join('');
-                    })() : `<span><i class="fas fa-user-circle"></i> ${entityInfo}</span>
+                    })() : `<span><i class="fas fa-user-circle"></i> ${escapeHtml(entityInfo)}</span>
                     <span><i class="fas fa-calendar-alt"></i> Closed: ${c.closing_date || 'N/A'}</span>
-                    <span><i class="fas fa-box"></i> ${c.product || 'N/A'}</span>
+                    <span><i class="fas fa-box"></i> ${escapeHtml(c.product || 'N/A')}</span>
                     <span><i class="fas fa-money-bill-wave"></i> RM ${parseFloat(c.amount || 0).toLocaleString()}</span>`}
                     ${c.is_public ? '<span class="badge badge-success">Public</span>' : ''}
                 </div>
@@ -527,8 +527,8 @@
 
                 <div class="case-section card" style="margin-bottom:12px;">
                     <h3 style="font-size:14px;font-weight:600;margin-bottom:8px;"><i class="fas fa-handshake"></i> Part 1: CPS Invitation</h3>
-                    ${c.cps_invitation_method ? `<p style="font-size:12px;color:var(--gray-500);margin-bottom:6px;"><strong>Method:</strong> ${c.cps_invitation_method}</p>` : ''}
-                    <p style="white-space:pre-wrap;">${c.cps_invitation_details || '<em style="color:var(--gray-400);">No details provided.</em>'}</p>
+                    ${c.cps_invitation_method ? `<p style="font-size:12px;color:var(--gray-500);margin-bottom:6px;"><strong>Method:</strong> ${escapeHtml(c.cps_invitation_method)}</p>` : ''}
+                    <p style="white-space:pre-wrap;">${c.cps_invitation_details ? escapeHtml(c.cps_invitation_details) : '<em style="color:var(--gray-400);">No details provided.</em>'}</p>
                 </div>
 
                 <div class="case-section card" style="margin-bottom:12px;">
@@ -536,19 +536,19 @@
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                         <div>
                             <h4 style="font-size:12px;font-weight:600;color:var(--gray-500);text-transform:uppercase;margin-bottom:4px;">Closing Details</h4>
-                            <p style="white-space:pre-wrap;">${c.closing_details || '-'}</p>
+                            <p style="white-space:pre-wrap;">${escapeHtml(c.closing_details || '-')}</p>
                         </div>
                         <div>
                             <h4 style="font-size:12px;font-weight:600;color:var(--gray-500);text-transform:uppercase;margin-bottom:4px;">The Sales Idea</h4>
-                            <p style="white-space:pre-wrap;">${c.sales_idea || '-'}</p>
+                            <p style="white-space:pre-wrap;">${escapeHtml(c.sales_idea || '-')}</p>
                         </div>
                         <div>
                             <h4 style="font-size:12px;font-weight:600;color:var(--gray-500);text-transform:uppercase;margin-bottom:4px;">Execution Plan</h4>
-                            <p style="white-space:pre-wrap;">${c.plan_details || '-'}</p>
+                            <p style="white-space:pre-wrap;">${escapeHtml(c.plan_details || '-')}</p>
                         </div>
                         <div>
                             <h4 style="font-size:12px;font-weight:600;color:var(--gray-500);text-transform:uppercase;margin-bottom:4px;">Success Story & Lessons</h4>
-                            <p style="white-space:pre-wrap;">${c.success_story || '-'}</p>
+                            <p style="white-space:pre-wrap;">${escapeHtml(c.success_story || '-')}</p>
                         </div>
                     </div>
                 </div>
@@ -559,19 +559,19 @@
                     ${c.key_success_factor ? `
                     <div style="margin-bottom:12px;">
                         <h4 style="font-size:12px;font-weight:600;color:var(--gray-500);text-transform:uppercase;margin-bottom:4px;">Key Success Factor</h4>
-                        <p style="white-space:pre-wrap;">${c.key_success_factor}</p>
+                        <p style="white-space:pre-wrap;">${escapeHtml(c.key_success_factor)}</p>
                     </div>` : ''}
                     ${c.script ? `
                     <div>
                         <h4 style="font-size:12px;font-weight:600;color:var(--gray-500);text-transform:uppercase;margin-bottom:4px;">Sales Script</h4>
                         <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:6px;padding:12px;">
-                            <p style="white-space:pre-wrap;font-family:monospace;font-size:13px;">${c.script}</p>
+                            <p style="white-space:pre-wrap;font-family:monospace;font-size:13px;">${escapeHtml(c.script)}</p>
                         </div>
                     </div>` : ''}
                 </div>` : ''}
 
                 <div style="font-size:12px;color:var(--gray-400);margin-top:8px;">
-                    <span>Created by <strong>${creatorName}</strong> on ${new Date(c.created_at).toLocaleDateString()}</span>
+                    <span>Created by <strong>${escapeHtml(creatorName)}</strong> on ${new Date(c.created_at).toLocaleDateString()}</span>
                     ${c.updated_at ? ` &middot; Updated ${new Date(c.updated_at).toLocaleString()}` : ''}
                 </div>
             </div>
@@ -680,14 +680,14 @@
                 <div id="case-tab-basic" class="modal-tab-content active">
                     <div class="form-group">
                         <label>Title <span class="required">*</span></label>
-                        <input type="text" id="case-title" class="form-control" value="${c ? c.title : ''}" placeholder="e.g. How I closed PR4 with career focus">
+                        <input type="text" id="case-title" class="form-control" value="${c ? escapeHtml(c.title) : ''}" placeholder="e.g. How I closed PR4 with career focus">
                     </div>
 
                     <div class="form-row">
                         <div class="form-group half">
                             <label>Link Prospect/Customer</label>
                             <div class="search-select-container">
-                                <input type="text" id="case-entity-search" class="form-control" placeholder="Type name..." value="${entityName}" onkeyup="app.debounceCall('case-entity-search', () => app.searchCaseEntities(this.value), 220)">
+                                <input type="text" id="case-entity-search" class="form-control" placeholder="Type name..." value="${escapeHtml(entityName)}" onkeyup="app.debounceCall('case-entity-search', () => app.searchCaseEntities(this.value), 220)">
                                 <div id="case-entity-results" class="search-results-dropdown"></div>
                                 <input type="hidden" id="case-prospect-id" value="${c ? (c.prospect_id || '') : ''}">
                                 <input type="hidden" id="case-customer-id" value="${c ? (c.customer_id || '') : ''}">
@@ -697,7 +697,7 @@
                             <label>Product</label>
                             <select id="case-product" class="form-control">
                                 <option value="">Select Product...</option>
-                                ${((await AppDataStore.getAll('products')) || []).map(p => `<option value="${p.name}" ${c && c.product === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
+                                ${((await AppDataStore.getAll('products')) || []).map(p => `<option value="${escapeHtml(p.name)}" ${c && c.product === p.name ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}
                             </select>
                         </div>
                     </div>
@@ -731,34 +731,34 @@
                     <div class="form-group">
                         <label>CPS Invitation Details</label>
                         <p class="help-text">Who invited? Call/Event/Referral? Special circumstances?</p>
-                        <textarea id="case-cps-details" class="form-control" rows="8">${c ? (c.cps_invitation_details || '') : ''}</textarea>
+                        <textarea id="case-cps-details" class="form-control" rows="8">${c ? escapeHtml(c.cps_invitation_details || '') : ''}</textarea>
                     </div>
                 </div>
 
                 <div id="case-tab-closing" class="modal-tab-content">
                     <div class="form-group">
                         <label>Closing Details</label>
-                        <textarea id="case-closing-details" class="form-control" rows="3" placeholder="Key discussions, objections overcome...">${c ? (c.closing_details || '') : ''}</textarea>
+                        <textarea id="case-closing-details" class="form-control" rows="3" placeholder="Key discussions, objections overcome...">${c ? escapeHtml(c.closing_details || '') : ''}</textarea>
                     </div>
                     <div class="form-group">
                         <label>The Sales Idea</label>
-                        <textarea id="case-sales-idea" class="form-control" rows="3" placeholder="The core logic that worked...">${c ? (c.sales_idea || '') : ''}</textarea>
+                        <textarea id="case-sales-idea" class="form-control" rows="3" placeholder="The core logic that worked...">${c ? escapeHtml(c.sales_idea || '') : ''}</textarea>
                     </div>
                     <div class="form-group">
                         <label>Plan Details</label>
-                        <textarea id="case-plan-details" class="form-control" rows="3" placeholder="Follow-up sequence, bundling...">${c ? (c.plan_details || '') : ''}</textarea>
+                        <textarea id="case-plan-details" class="form-control" rows="3" placeholder="Follow-up sequence, bundling...">${c ? escapeHtml(c.plan_details || '') : ''}</textarea>
                     </div>
                     <div class="form-group">
                         <label>Overall Success Story</label>
-                        <textarea id="case-success-story" class="form-control" rows="3" placeholder="Testimonial, lessons learned...">${c ? (c.success_story || '') : ''}</textarea>
+                        <textarea id="case-success-story" class="form-control" rows="3" placeholder="Testimonial, lessons learned...">${c ? escapeHtml(c.success_story || '') : ''}</textarea>
                     </div>
                     <div class="form-group">
                         <label>Key Success Factor</label>
-                        <textarea id="case-key-success-factor" class="form-control" rows="3" placeholder="The single most important factor that made this case succeed...">${c ? (c.key_success_factor || '') : ''}</textarea>
+                        <textarea id="case-key-success-factor" class="form-control" rows="3" placeholder="The single most important factor that made this case succeed...">${c ? escapeHtml(c.key_success_factor || '') : ''}</textarea>
                     </div>
                     <div class="form-group">
                         <label>Sales Script</label>
-                        <textarea id="case-script" class="form-control" rows="4" placeholder="The exact words, pitch, or script that worked...">${c ? (c.script || '') : ''}</textarea>
+                        <textarea id="case-script" class="form-control" rows="4" placeholder="The exact words, pitch, or script that worked...">${c ? escapeHtml(c.script || '') : ''}</textarea>
                     </div>
                 </div>
             </div>
@@ -863,11 +863,11 @@
         let html = '';
         if (prospects.length > 0) {
             html += '<div class="search-category">Prospects</div>';
-            html += prospects.map(p => `<div class="search-result-item" onclick="app.selectCaseEntity('${p.id}', 'prospect', '${p.full_name.replace("'", "\\'")}')">${p.full_name}</div>`).join('');
+            html += prospects.map(p => `<div class="search-result-item" onclick="app.selectCaseEntity('${p.id}', 'prospect', '${p.full_name.replace("'", "\\'")}')">${escapeHtml(p.full_name)}</div>`).join('');
         }
         if (customers.length > 0) {
             html += '<div class="search-category">Customers</div>';
-            html += customers.map(c => `<div class="search-result-item" onclick="app.selectCaseEntity('${c.id}', 'customer', '${c.full_name.replace("'", "\\'")}')">${c.full_name}</div>`).join('');
+            html += customers.map(c => `<div class="search-result-item" onclick="app.selectCaseEntity('${c.id}', 'customer', '${c.full_name.replace("'", "\\'")}')">${escapeHtml(c.full_name)}</div>`).join('');
         }
 
         if (html === '') {
