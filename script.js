@@ -1112,8 +1112,8 @@ const appLogic = (() => {
     // Exposed for script-activities.js updateLunarBirth (lunar DOB auto-fill).
     Object.assign(window._crmUtils, { convertSolarToLunar: (d) => convertSolarToLunar(d) });
 	const escapeHtml = (unsafe) => {
-    if (!unsafe || typeof unsafe !== 'string') return unsafe || '';
-    return unsafe
+    if (unsafe === null || unsafe === undefined) return '';
+    return String(unsafe)
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")

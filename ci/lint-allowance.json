@@ -1,6 +1,6 @@
 {
-  "_comment": "Current violation counts as of Wave 0. Ratchet DOWN as Wave 1 lands; never up. Enforced by: node ci/lint-patterns.js --enforce",
+  "_comment": "Ratchet DOWN as waves land; never up. Enforced by: node ci/lint-patterns.js --enforce. R2=0 after Wave 1 escaper consolidation. R1 (inline role parse) intentionally left — those sites gate authorization and need per-site review before consolidation (not a behavior-preserving find-replace).",
   "R1": 24,
-  "R2": 3,
+  "R2": 0,
   "R3": 1
 }

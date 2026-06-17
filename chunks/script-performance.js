@@ -804,7 +804,7 @@ const openNoticeboardDetail = async (eventId) => {
         catch(_) { posterSrc = e.poster_url; }
     }
 
-    const esc = (s) => String(s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    const esc = (s) => window._crmUtils.escapeHtml(s);
     const fmtDate = (d) => { try { return new Date(d).toLocaleDateString('en-MY', { weekday:'long', day:'numeric', month:'long', year:'numeric' }); } catch(_) { return d || ''; } };
     const time = (e.start_time && e.end_time) ? `${e.start_time} – ${e.end_time}` : (e.start_time || e.end_time || '');
     const evTitle = e.title || e.event_title || 'Event Details';

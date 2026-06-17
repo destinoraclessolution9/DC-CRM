@@ -6957,7 +6957,7 @@ window._fv.showNoticeboardView = async (container) => {
         postered.forEach(e => { e._posterSigned = e.poster_url; });
     }
 
-    const esc = (s) => String(s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    const esc = (s) => window._crmUtils.escapeHtml(s);
     const titleOf = (e) => e.event_title || e.title || 'Untitled Event';
     const fmtDate = (d) => {
         const dt = new Date(d);

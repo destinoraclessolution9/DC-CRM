@@ -682,7 +682,7 @@
         const d = data || {};
         const sel = (v, opt) => v === opt ? 'selected' : '';
         const chk = (cond) => cond ? 'checked' : '';
-        const esc = (s) => (s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'));
+        const esc = (s) => window._crmUtils.escapeHtml(s);
         const relOther = d.referral_relationship
             && !BASIC_INFO_RELATIONS.includes(d.referral_relationship)
             && d.referral_relationship !== 'Other';
