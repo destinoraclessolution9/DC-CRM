@@ -2471,8 +2471,13 @@ function _wireLoginBtn() {
         // in-memory cache instead of hitting Supabase. The 2s delay keeps startup
         // bandwidth available for the first view's own SWR revalidation.
         setTimeout(() => {
+            // event_attendees added (Phase 6 / 2.7): it was the ONLY referral-tree
+            // table not pre-warmed, forcing a cold full-table download on first
+            // tree open; it also backs the default calendar view. Warming it here
+            // (zero behavior change — same SWR cache) makes the tree's last cold
+            // table warm like the other five, no risky buildTreeData/RPC change.
             ['activities', 'prospects', 'customers', 'users',
-             'products', 'events', 'names', 'referrals', 'purchases']
+             'products', 'events', 'names', 'referrals', 'purchases', 'event_attendees']
                 .forEach(t => AppDataStore.getAll(t).catch(() => {}));
         }, 2000);
 
