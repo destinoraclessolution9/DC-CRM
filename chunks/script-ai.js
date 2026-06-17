@@ -608,6 +608,80 @@
                     </div>`;
     };
 
+    // ── React-island data payload (componentization, SW-103+) ──────────────
+    // Build the SAME display values the by-id fills (renderAIStatsCards /
+    // _aiInsightCardsHtml / renderTopPredictions) compute, but as a plain
+    // structured object the React view renders as REAL JSX. ONE source of
+    // truth: identical formulas/labels/order, so flag-on === flag-off 1:1.
+    // The timeline chart is intentionally NOT included here — it stays a by-id
+    // fill (#ai-timeline-chart) in BOTH paths. Never throws to the caller is
+    // the caller's job (try/catch in showAIInsightsDashboard); here we just
+    // compute from the warm snapshot.
+    const _aiBuildIslandData = (snap) => {
+        const fc = snap.forecast;
+
+        // STATS GRID — mirror renderAIStatsCards()
+        const fcVal = fc.hasData ? _fmtMoney(fc.nextMonth) : '—';
+        const statsFcDelta = fc.lastActual ? Math.round(((fc.nextMonth - fc.lastActual) / fc.lastActual) * 100) : 0;
+        const statsFcUp = statsFcDelta >= 0;
+        const highValueLeads = snap.leads.filter(l => l.score >= 80).length;
+        const statsWarmLeads = snap.leads.filter(l => l.score >= 50 && l.score < 80).length;
+        const statsHighRisk = snap.churn.filter(c => c.level === 'high').length;
+        const mediumRisk = snap.churn.filter(c => c.level === 'medium').length;
+
+        // INSIGHT CARDS — mirror _aiInsightCardsHtml()
+        const cardWarmLeads = snap.leads.filter(l => l.score >= 50 && l.score < 80).length;
+        const cardFcDelta = fc.lastActual ? Math.round(((fc.nextMonth - fc.lastActual) / fc.lastActual) * 100) : 0;
+        const cardHighRisk = snap.churn.filter(c => c.level === 'high').length;
+        const cardMedRisk = snap.churn.filter(c => c.level === 'medium').length;
+        const atRisk = cardHighRisk + cardMedRisk;
+        const agentCount = snap.agents.rows.length;
+        const topName = snap.agents.topPerformer ? snap.agents.topPerformer.name : null;
+
+        // PREDICTIONS — mirror renderTopPredictions()
+        const confOf = (score) => _clamp(60 + Math.round(Math.abs(score - 50) * 0.76), 60, 98);
+        const predictions = [];
+        for (const l of snap.leads.slice(0, 3)) {
+            predictions.push({ id: l.id, kind: 'lead', name: l.name, type: 'Lead Score', score: l.score, confidence: confOf(l.score), action: l.action, icon: '🔥' });
+        }
+        for (const c of snap.churn.filter(c => c.level !== 'low').slice(0, 2)) {
+            predictions.push({ id: c.id, kind: 'churn', name: c.name, type: 'Churn Risk', score: c.riskScore, confidence: confOf(c.riskScore), action: c.action, icon: '⚠️' });
+        }
+        predictions.sort((a, b) => b.score - a.score);
+        const predRows = predictions.map(p => ({
+            id: String(p.id), kind: p.kind, name: p.name, type: p.type, score: p.score,
+            confidence: p.confidence, action: p.action, icon: p.icon,
+            confidenceClass: p.confidence >= 85 ? 'high' : p.confidence >= 70 ? 'medium' : 'low',
+            scoreClass: p.score >= 80 ? 'high' : p.score >= 60 ? 'medium' : 'low',
+            fn: p.kind === 'lead' ? 'viewLeadDetails' : 'contactAtRiskCustomer',
+        }));
+
+        return {
+            stats: {
+                fcHasData: fc.hasData,
+                fcVal,
+                fcDelta: statsFcDelta,
+                fcUp: statsFcUp,
+                highValueLeads,
+                warmLeads: statsWarmLeads,
+                highRisk: statsHighRisk,
+                mediumRisk,
+            },
+            cards: {
+                highLeads: highValueLeads,
+                warmLeads: cardWarmLeads,
+                fcHasData: fc.hasData,
+                fcNextMonthLabel: fc.hasData ? _fmtMoney(fc.nextMonth) : null,
+                fcDelta: cardFcDelta,
+                atRisk,
+                highRisk: cardHighRisk,
+                agentCount,
+                topName,
+            },
+            predictions: predRows,
+        };
+    };
+
     const _aiBuildContent = async () => {
         // Warm the snapshot up front so the cards AND the (sync) timeline render
         // off the same real-data pass.
@@ -676,12 +750,29 @@
             UI.showModal('AI Insights Dashboard', '<div id="ai-insights-react-root"></div>', closeBtn, 'fullscreen');
             const rootEl = document.getElementById('ai-insights-react-root');
             let _mounted = false;
+            // Componentization payload (SW-103+): build the structured data ONCE
+            // from the warm snapshot and hand it to the view so it renders REAL
+            // JSX (stats grid + clickable insight cards + predictions tbody). The
+            // timeline chart is NOT included — it stays a by-id fill below in BOTH
+            // paths. Built in try/catch: on ANY throw we leave _islandData null
+            // and DO NOT pass it, so the view renders the empty stable-id
+            // containers exactly as before and the by-id fills below take over
+            // (byte-for-byte the legacy scaffold-fill behavior).
+            let _islandData = null;
+            try {
+                const _snap = await _getSnapshot();
+                _islandData = _aiBuildIslandData(_snap);
+            } catch (e) {
+                _islandData = null;
+                console.warn('[ai] island data build failed, using by-id fill fallback:', e && e.message);
+            }
             try {
                 if (!rootEl) throw new Error('react root missing');
                 let _aReady; const _aReadyP = new Promise(res => { _aReady = res; });
                 const _aGuard = setTimeout(() => _aReady(), 4000);
                 window.CRMReact.mountAIInsights(rootEl, {
                     onReady: () => { clearTimeout(_aGuard); _aReady(); },
+                    data: _islandData || undefined,
                 });
                 await _aReadyP;
                 _mounted = true;
@@ -697,14 +788,23 @@
                 // Warm the snapshot once so the (sync) timeline fill has real
                 // data even if an earlier section throws independently.
                 try { await _getSnapshot(); } catch (e) { console.warn('[ai] snapshot build failed:', e && e.message); }
-                const sg = document.getElementById('ai-stats-grid');
-                if (sg) { try { sg.innerHTML = await renderAIStatsCards(); } catch (e) { console.warn('[ai] stats fill failed:', e && e.message); } }
+                // When the JSX data payload was passed, the view OWNS the stats
+                // grid / insight cards / predictions tbody — do NOT by-id fill
+                // those React-owned nodes (React vs imperative write = torn DOM).
+                // Only fill them by id on the fallback path (no payload). The
+                // timeline chart is by-id in BOTH paths (the view never owns it).
+                if (!_islandData) {
+                    const sg = document.getElementById('ai-stats-grid');
+                    if (sg) { try { sg.innerHTML = await renderAIStatsCards(); } catch (e) { console.warn('[ai] stats fill failed:', e && e.message); } }
+                }
                 const tc = document.getElementById('ai-timeline-chart');
                 if (tc) { try { tc.innerHTML = renderAITimelineChart(); } catch (e) { console.warn('[ai] timeline fill failed:', e && e.message); } }
-                const ig = document.getElementById('ai-insights-grid');
-                if (ig) { try { ig.innerHTML = _aiInsightCardsHtml(await _getSnapshot()); } catch (e) { console.warn('[ai] insight cards fill failed:', e && e.message); } }
-                const tb = document.getElementById('ai-predictions-tbody');
-                if (tb) { try { tb.innerHTML = await renderTopPredictions(); } catch (e) { console.warn('[ai] predictions fill failed:', e && e.message); } }
+                if (!_islandData) {
+                    const ig = document.getElementById('ai-insights-grid');
+                    if (ig) { try { ig.innerHTML = _aiInsightCardsHtml(await _getSnapshot()); } catch (e) { console.warn('[ai] insight cards fill failed:', e && e.message); } }
+                    const tb = document.getElementById('ai-predictions-tbody');
+                    if (tb) { try { tb.innerHTML = await renderTopPredictions(); } catch (e) { console.warn('[ai] predictions fill failed:', e && e.message); } }
+                }
                 if (window._resolveAttachmentImages) window._resolveAttachmentImages(rootEl);
                 return;
             }
@@ -1729,20 +1829,15 @@
     const refreshAIPredictions = async () => {
         _invalidateSnapshot();
         try { await _getSnapshot(true); } catch (_) { /* degrade gracefully */ }
-        const sg = document.getElementById('ai-stats-grid');
-        const tc = document.getElementById('ai-timeline-chart');
-        const tb = document.getElementById('ai-predictions-tbody');
-        if (sg || tc || tb) {
-            if (sg) { try { sg.innerHTML = await renderAIStatsCards(); } catch (e) { console.warn('[ai] stats fill failed:', e && e.message); } }
-            if (tc) { try { tc.innerHTML = renderAITimelineChart(); } catch (e) { console.warn('[ai] timeline fill failed:', e && e.message); } }
-            const ig2 = document.getElementById('ai-insights-grid');
-            if (ig2) { try { ig2.innerHTML = _aiInsightCardsHtml(await _getSnapshot()); } catch (e) { console.warn('[ai] insight cards fill failed:', e && e.message); } }
-            if (tb) { try { tb.innerHTML = await renderTopPredictions(); } catch (e) { console.warn('[ai] predictions fill failed:', e && e.message); } }
-            UI.toast.success('AI insights refreshed');
-        } else {
-            // Not on the dashboard (e.g. called from a drill-down) — just reopen.
-            await showAIInsightsDashboard();
-        }
+        // Re-render through the canonical mount path. When the React data path
+        // owns the dashboard nodes (#ai-stats-grid / #ai-insights-grid /
+        // #ai-predictions-tbody render as JSX), a by-id innerHTML refresh would
+        // tear React's DOM (reconciliation NotFoundError on any later re-render).
+        // So ALWAYS re-mount via showAIInsightsDashboard, which renders fresh
+        // JSX (data path), by-id fallback, or legacy inline — each correctly,
+        // and never writes by-id into a React-owned node.
+        await showAIInsightsDashboard();
+        try { UI.toast.success('AI insights refreshed'); } catch (_) {}
     };
 
     // Drill-down navigation for prediction/insight rows.

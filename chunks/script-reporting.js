@@ -42,6 +42,34 @@
         } catch (_) { return false; }
     };
 
+    // ── Per-view kill-switch for the KPI CARD GRID componentization (default ON,
+    // PROMOTED 2026-06-17). When ON, the grid is rendered as real JSX in
+    // ReportsView from opts.data.kpiCards (fed up-front at mount + re-passed on
+    // every filter change via a React RE-MOUNT — never a by-id innerHTML of the
+    // now-React-owned #kpi-stats-grid). When OFF (or data build throws), the
+    // legacy renderKPIStats() by-id innerHTML fill runs UNCHANGED. Requires the
+    // base reports island to also be on. Kill grid only: window.__REACT_REPORTS_GRID
+    // ===false, ?reactgrid=0, localStorage crm_react_grid_off='1'. Killing the
+    // whole island (_reactReportsOn flags) also disables this.
+    const _reactKpiGridOn = () => {
+        try {
+            if (!_reactReportsOn()) return false;
+            if (window.__REACT_REPORTS_GRID === false) return false;
+            if (/[?&]reactgrid=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_grid_off') === '1') return false;
+            return true;
+        } catch (_) { return false; }
+    };
+
+    // Captured at mount so a filter change can RE-MOUNT the report through React
+    // (re-passing fresh opts.data.kpiCards) instead of writing into the
+    // React-owned grid node by id. Set in showKPIDashboard's island branch.
+    let _reportsContainer = null;
+    let _reportsMountOpts = null;
+    // Guard: a re-mount fires the view's onReady again → without this flag the
+    // onReady→refreshKPIDashboard→re-mount cycle would recurse infinitely.
+    let _kpiRemounting = false;
+
     // ==================== PHASE 9: REPORTING & KPI DASHBOARD ====================
 
     const KPI_DEFINITIONS = {
@@ -81,17 +109,22 @@
         // Post-shell populate (cached-stats snapshot inject + async agent-dropdown
         // fill + refreshKPIDashboard) — shared by the React island and legacy paths.
         const _kpiPopulate = async (fillAgents = true) => {
-            const _kpiSnapKey = `kpi-stats-snap-${_state.cu?.id || 'anon'}-${_currentTimeFilter}`;
-            try {
-                const _kpiRaw = localStorage.getItem(_kpiSnapKey);
-                if (_kpiRaw) {
-                    const { ts, val } = JSON.parse(_kpiRaw);
-                    if (Date.now() - ts < 60 * 60 * 1000) {
-                        const _sg = document.getElementById('kpi-stats-grid');
-                        if (_sg) _sg.innerHTML = val;
-                    } else { localStorage.removeItem(_kpiSnapKey); }
-                }
-            } catch (_) {}
+            // Cached-snapshot inject is a LEGACY by-id grid optimization only.
+            // In React-grid mode #kpi-stats-grid is React-owned (fed via opts.data
+            // on re-mount), so an innerHTML write here would fight React — skip it.
+            if (!_reactKpiGridOn()) {
+                const _kpiSnapKey = `kpi-stats-snap-${_state.cu?.id || 'anon'}-${_currentTimeFilter}`;
+                try {
+                    const _kpiRaw = localStorage.getItem(_kpiSnapKey);
+                    if (_kpiRaw) {
+                        const { ts, val } = JSON.parse(_kpiRaw);
+                        if (Date.now() - ts < 60 * 60 * 1000) {
+                            const _sg = document.getElementById('kpi-stats-grid');
+                            if (_sg) _sg.innerHTML = val;
+                        } else { localStorage.removeItem(_kpiSnapKey); }
+                    }
+                } catch (_) {}
+            }
             // Legacy path fills the agent dropdown via innerHTML; the React island
             // owns its options via state (loadAgents), so skip the fill there.
             if (fillAgents) {
@@ -111,7 +144,12 @@
         if (_reactReportsOn()) {
             try {
                 container.innerHTML = '<div id="reports-react-root"></div>';
-                window.CRMReact.mountReports(document.getElementById('reports-react-root'), {
+                const _root = document.getElementById('reports-react-root');
+                // Stable mount opts re-used by grid re-mounts on filter change
+                // (so a control change re-renders the KPI grid THROUGH React with
+                // fresh opts.data — never a by-id innerHTML of the React node).
+                _reportsContainer = _root;
+                _reportsMountOpts = {
                     isTeamLeader: isTeamLeaderOrAbove(_state.cu),
                     currentTimeFilter: _currentTimeFilter,
                     roles: _utils.USER_ROLES || [],
@@ -126,11 +164,19 @@
                             .filter(u => isAgent(u) || u.role === 'team_leader' || (u.role || '').includes('Level 7'))
                             .map(a => ({ id: a.id, name: a.full_name || '' })))
                         .catch(() => []),
+                };
+                window.CRMReact.mountReports(_root, {
+                    ..._reportsMountOpts,
+                    // First mount paints the shell + empty/spinner grid; onReady →
+                    // _kpiPopulate(false) → refreshKPIDashboard which (in grid mode)
+                    // builds opts.data.kpiCards and re-mounts with the data.
                     onReady: () => { _kpiPopulate(false); },
                 });
                 return;
             } catch (e) {
                 console.warn('[reports] island mount failed, falling back to legacy:', e && e.message);
+                _reportsContainer = null;
+                _reportsMountOpts = null;
                 // fall through to the legacy render below
             }
         }
@@ -444,19 +490,66 @@
         ]);
         const perfKpis = isQuarterlyView ? kpis : quarterlyKpis;
 
-        renderKPIStats(kpis, prevKpis);
-        // Persist stats grid so next open is instant
-        try {
-            const _sg = document.getElementById('kpi-stats-grid');
-            if (_sg) {
-                const _k = `kpi-stats-snap-${_state.cu?.id || 'anon'}-${_currentTimeFilter}`;
-                localStorage.setItem(_k, JSON.stringify({ ts: Date.now(), val: _sg.innerHTML }));
+        // ── KPI CARD GRID ──────────────────────────────────────────────────
+        // React-grid mode: feed the grid through React (fresh opts.data) by
+        // RE-MOUNTING the view — NEVER by-id innerHTML the React-owned node.
+        // The re-mount rebuilds every by-id container + the Chart.js canvas, so
+        // the non-grid renders below run inside the re-mount's onReady against
+        // the fresh DOM. _kpiRemounting breaks the onReady→refresh→re-mount loop.
+        if (_reactKpiGridOn() && _reportsContainer && window.CRMReact && typeof window.CRMReact.mountReports === 'function') {
+            let cards = null;
+            try { cards = _buildKpiCards(kpis, prevKpis); } catch (e) { console.warn('[reports] _buildKpiCards failed:', e && e.message); }
+            if (cards) {
+                _kpiRemounting = true;
+                try {
+                    window.CRMReact.mountReports(_reportsContainer, {
+                        ..._reportsMountOpts,
+                        currentTimeFilter: _currentTimeFilter,
+                        currentRoleFilter: _currentRoleFilter,
+                        currentAgentFilter: _currentAgentFilter,
+                        customDateFrom: ranges.current.from,
+                        customDateTo: ranges.current.to,
+                        data: { kpiCards: cards },
+                        onReady: () => {
+                            // Fills-only (charts/tables/dropdowns) into the freshly
+                            // re-mounted by-id containers; guard prevents re-entry.
+                            _renderNonGrid(perfKpis, ranges).finally(() => { _kpiRemounting = false; });
+                        },
+                    });
+                } catch (e) {
+                    console.warn('[reports] grid re-mount failed, falling back to by-id fill:', e && e.message);
+                    _kpiRemounting = false;
+                    // Fallback: force the legacy by-id grid fill + non-grid renders.
+                    renderKPIStats(kpis, prevKpis, true);
+                    await _renderNonGrid(perfKpis, ranges);
+                }
+                return;
             }
-        } catch(_) {}
-        // These four renders are independent — they paint into different
-        // DOM containers and don't read each other's results. Awaiting
-        // them sequentially serialized ~4 separate getAll() round trips
-        // and chart-rendering work that should run in parallel.
+            // cards build failed → fall through to legacy by-id fill below.
+        }
+
+        renderKPIStats(kpis, prevKpis);
+        // Persist stats grid so next open is instant (legacy by-id grid only —
+        // skipped in React-grid mode where renderKPIStats is a no-op).
+        if (!_reactKpiGridOn()) {
+            try {
+                const _sg = document.getElementById('kpi-stats-grid');
+                if (_sg) {
+                    const _k = `kpi-stats-snap-${_state.cu?.id || 'anon'}-${_currentTimeFilter}`;
+                    localStorage.setItem(_k, JSON.stringify({ ts: Date.now(), val: _sg.innerHTML }));
+                }
+            } catch(_) {}
+        }
+        await _renderNonGrid(perfKpis, ranges);
+    };
+
+    // The non-grid renders — they paint into by-id containers that are NOT
+    // componentized (target overview, perf table, leaderboard, Chart.js canvas,
+    // cases/headcount/attendance tables, hierarchical target comparison). These
+    // are independent (different DOM nodes, don't read each other) so they run in
+    // parallel. Called from refreshKPIDashboard (legacy) AND from the grid
+    // re-mount's onReady (React-grid mode) against the freshly mounted DOM.
+    const _renderNonGrid = async (perfKpis, ranges) => {
         await Promise.all([
             renderTargetOverview().catch(e => console.warn('renderTargetOverview failed:', e)),
             renderPerformanceTable(perfKpis).catch(e => console.warn('renderPerformanceTable failed:', e)),
@@ -1807,22 +1900,24 @@ const showKPIDetails = async (key) => {
         'fullscreen');
 };
 
-    const renderKPIStats = (kpis, prevKpis) => {
-        const grid = document.getElementById('kpi-stats-grid');
-        if (!grid) return;
-
-        const eppDetailsHtml = (kpis.eppDetails || []).length > 0
-            ? (kpis.eppDetails || []).map(d => `<div style="font-size:11px;color:var(--gray-500);line-height:1.6;">${d.bank} &middot; ${d.months} months &times;${d.count}</div>`).join('')
-            : '';
-
-        const cards = [
+    // Shared base card definitions — single source of truth for BOTH the legacy
+    // HTML grid (renderKPIStats) and the React JSX grid payload (_buildKpiCards),
+    // so the two paths can never drift in label/value/order/icon/color.
+    const _kpiCardDefs = (kpis, prevKpis) => {
+        const eppDetails = (kpis.eppDetails || []).map(d => ({ bank: d.bank, months: d.months, count: d.count }));
+        return [
             { label: 'CPS Consultations', value: kpis.cpsCount, prev: prevKpis.cpsCount, icon: '📞', color: 'blue', key: 'cpsCount' },
             { label: 'Total Sales', value: `RM ${kpis.totalSales.toLocaleString()} `, prev: prevKpis.totalSales, icon: '💰', color: 'green', key: 'totalSales' },
             { label: 'POP Cases', value: kpis.popCaseCount, prev: prevKpis.popCaseCount, icon: '📦', color: 'orange', key: 'popCaseCount',
+              subType: 'pop', popTotal: (kpis.popSales || 0).toLocaleString(),
               subHtml: `<div style="font-size:12px;color:var(--gray-500);margin-top:2px;">RM ${(kpis.popSales || 0).toLocaleString()} total</div>` },
             { label: 'EPP Cases', value: kpis.eppCaseCount, prev: prevKpis.eppCaseCount, icon: '💳', color: 'purple', key: 'eppCaseCount',
-              subHtml: eppDetailsHtml },
+              subType: 'epp', eppDetails,
+              subHtml: (kpis.eppDetails || []).length > 0
+                ? (kpis.eppDetails || []).map(d => `<div style="font-size:11px;color:var(--gray-500);line-height:1.6;">${d.bank} &middot; ${d.months} months &times;${d.count}</div>`).join('')
+                : '' },
             { label: 'Active Agents', value: kpis.activeAgents || 0, prev: prevKpis.activeAgents || 0, icon: '⚡', color: 'green', key: 'activeAgents',
+              subType: 'active',
               subHtml: `<div style="font-size:12px;color:var(--gray-500);margin-top:2px;">Past 60 days · click for team breakdown</div>` },
             { label: 'New Agents', value: kpis.newAgents, prev: prevKpis.newAgents, icon: '👤', color: 'blue', key: 'newAgents' },
             { label: 'New Customers', value: kpis.newCustomers, prev: prevKpis.newCustomers, icon: '👥', color: 'green', key: 'newCustomers' },
@@ -1831,11 +1926,48 @@ const showKPIDetails = async (key) => {
             { label: 'Client Meetings', value: kpis.clientMeetings, prev: prevKpis.clientMeetings, icon: '🤝', color: 'blue', key: 'clientMeetings' },
             { label: 'Activity Attendance', value: kpis.activityHeadcount, prev: prevKpis.activityHeadcount, icon: '📊', color: 'purple', key: 'activityHeadcount' }
         ];
+    };
+
+    // Per-card derived trend fields (identical math to the legacy inline block).
+    const _kpiCardTrend = (c, kpis, prevKpis) => {
+        const diff = c.prev > 0 ? ((kpis[c.key] - prevKpis[c.key]) / prevKpis[c.key] * 100).toFixed(1) : (kpis[c.key] > 0 ? '100' : '0');
+        return {
+            trendClass: diff >= 0 ? 'trend-up' : 'trend-down',
+            trendIcon: diff >= 0 ? 'fa-arrow-up' : 'fa-arrow-down',
+            trendAbs: Math.abs(diff),
+        };
+    };
+
+    // JSX-ready KPI cards payload for the React grid. Pre-computes every derived
+    // field so ReportsView stays a pure 1:1 render of renderKPIStats's HTML.
+    // Throws are caught by the caller → fall back to the legacy by-id fill.
+    const _buildKpiCards = (kpis, prevKpis) =>
+        _kpiCardDefs(kpis, prevKpis).map(c => {
+            const t = _kpiCardTrend(c, kpis, prevKpis);
+            return {
+                key: c.key, label: c.label, value: c.value, icon: c.icon, color: c.color,
+                definition: KPI_DEFINITIONS[c.key],
+                trendClass: t.trendClass, trendIcon: t.trendIcon, trendAbs: t.trendAbs,
+                subType: c.subType || null,
+                popTotal: c.popTotal,
+                eppDetails: c.eppDetails || [],
+            };
+        });
+
+    const renderKPIStats = (kpis, prevKpis, force = false) => {
+        // React owns #kpi-stats-grid when the grid kill-switch is on — the grid
+        // is fed via opts.data + a React re-mount (handled in refreshKPIDashboard),
+        // NOT by-id innerHTML. Never write into the React-owned node here. The
+        // `force` arg is used ONLY by the re-mount-failure fallback, where React
+        // has bailed and the node is plain DOM again.
+        if (_reactKpiGridOn() && !force) return;
+        const grid = document.getElementById('kpi-stats-grid');
+        if (!grid) return;
+
+        const cards = _kpiCardDefs(kpis, prevKpis);
 
         grid.innerHTML = cards.map(c => {
-            const diff = c.prev > 0 ? ((kpis[c.key] - prevKpis[c.key]) / prevKpis[c.key] * 100).toFixed(1) : (kpis[c.key] > 0 ? '100' : '0');
-            const trendClass = diff >= 0 ? 'trend-up' : 'trend-down';
-            const trendIcon = diff >= 0 ? 'fa-arrow-up' : 'fa-arrow-down';
+            const t = _kpiCardTrend(c, kpis, prevKpis);
 
             return `
                 <div class="stat-card stat-card-clickable" onclick="app.showKPIDetails('${c.key}')" title="Click to view breakdown">
@@ -1849,9 +1981,9 @@ const showKPIDetails = async (key) => {
                         </h3>
                         <div class="stat-value">${c.value}</div>
                         ${c.subHtml || ''}
-                        <div class="stat-trend ${trendClass}">
-                            <i class="fas ${trendIcon}"></i>
-                            <span>${Math.abs(diff)}% vs last period</span>
+                        <div class="stat-trend ${t.trendClass}">
+                            <i class="fas ${t.trendIcon}"></i>
+                            <span>${t.trendAbs}% vs last period</span>
                         </div>
                     </div>
                     <div class="stat-icon ${c.color}">

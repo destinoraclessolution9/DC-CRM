@@ -13,7 +13,7 @@ const app = () => window.app || {};
 const call = (name, ...args) => { const f = app()[name]; if (typeof f === 'function') f(...args); };
 const byId = (id) => { const el = document.getElementById(id); return el ? el.value : ''; };
 
-export function ReportsView({ isTeamLeader = false, currentTimeFilter = 'monthly', roles = [], currentRoleFilter = 'All', customDateFrom = '', customDateTo = '', agents = [], currentAgentFilter = 'all', loadAgents, onReady }) {
+export function ReportsView({ isTeamLeader = false, currentTimeFilter = 'monthly', roles = [], currentRoleFilter = 'All', customDateFrom = '', customDateTo = '', agents = [], currentAgentFilter = 'all', loadAgents, onReady, data }) {
     try { window.__REACT_REPORTS_STATE = 'ready'; } catch (_) { /* noop */ }
 
     // Agent-filter options are owned by React state (rendered options, not an
@@ -35,6 +35,28 @@ export function ReportsView({ isTeamLeader = false, currentTimeFilter = 'monthly
     }, [onReady]);
 
     const TIMES = ['weekly', 'monthly', 'quarterly', 'yearly'];
+
+    // KPI metric cards — rendered as real JSX from props.data.kpiCards when the
+    // chunk passes it (flag-on). The chunk pre-computes every derived field
+    // (value string, trend class/icon/abs, sub-content) so this stays a pure
+    // 1:1 render of the legacy renderKPIStats() HTML. When data is absent we
+    // fall back to the empty stable-id container + spinner exactly as today, so
+    // the chunk's by-id innerHTML fill keeps working unchanged.
+    const kpiCards = (data && Array.isArray(data.kpiCards)) ? data.kpiCards : null;
+    const renderCardSub = (c) => {
+        if (c.subType === 'pop') {
+            return <div style={{ fontSize: '12px', color: 'var(--gray-500)', marginTop: '2px' }}>RM {c.popTotal} total</div>;
+        }
+        if (c.subType === 'active') {
+            return <div style={{ fontSize: '12px', color: 'var(--gray-500)', marginTop: '2px' }}>Past 60 days · click for team breakdown</div>;
+        }
+        if (c.subType === 'epp') {
+            return (c.eppDetails || []).map((d, i) => (
+                <div key={i} style={{ fontSize: '11px', color: 'var(--gray-500)', lineHeight: '1.6' }}>{d.bank} · {d.months} months ×{d.count}</div>
+            ));
+        }
+        return null;
+    };
 
     return (
         <div className="kpi-dashboard">
@@ -85,9 +107,36 @@ export function ReportsView({ isTeamLeader = false, currentTimeFilter = 'monthly
                 </div>
             </div>
 
-            <div id="kpi-stats-grid" className="stats-grid">
-                <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '32px', color: 'var(--gray-400)' }}><i className="fas fa-spinner fa-spin"></i> Loading KPI data...</div>
-            </div>
+            {kpiCards ? (
+                <div id="kpi-stats-grid" className="stats-grid">
+                    {kpiCards.map((c) => (
+                        <div key={c.key} className="stat-card stat-card-clickable" onClick={() => call('showKPIDetails', c.key)} title="Click to view breakdown">
+                            <div className="stat-info">
+                                <h3>
+                                    {c.label}
+                                    <div className="kpi-tooltip" onClick={(e) => e.stopPropagation()}>
+                                        <i className="fas fa-info-circle"></i>
+                                        <span className="tooltip-text">{c.definition}</span>
+                                    </div>
+                                </h3>
+                                <div className="stat-value">{c.value}</div>
+                                {renderCardSub(c)}
+                                <div className={`stat-trend ${c.trendClass}`}>
+                                    <i className={`fas ${c.trendIcon}`}></i>
+                                    <span>{c.trendAbs}% vs last period</span>
+                                </div>
+                            </div>
+                            <div className={`stat-icon ${c.color}`}>
+                                {c.icon}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            ) : (
+                <div id="kpi-stats-grid" className="stats-grid">
+                    <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '32px', color: 'var(--gray-400)' }}><i className="fas fa-spinner fa-spin"></i> Loading KPI data...</div>
+                </div>
+            )}
 
             <div className="dashboard-charts-row">
                 <div className="chart-container">

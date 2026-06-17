@@ -368,7 +368,7 @@ function mountFormulaPurchaser(container, opts) {
 // + Chart.js canvas via _kpiPopulate/refreshKPIDashboard on useEffect onReady). ─
 function mountReports(container, opts) {
     const o = opts || {};
-    _mountSimple(container, <ReportsView isTeamLeader={!!o.isTeamLeader} currentTimeFilter={o.currentTimeFilter || 'monthly'} roles={o.roles || []} currentRoleFilter={o.currentRoleFilter || 'All'} customDateFrom={o.customDateFrom || ''} customDateTo={o.customDateTo || ''} agents={o.agents || []} currentAgentFilter={o.currentAgentFilter || 'all'} loadAgents={o.loadAgents} onReady={o.onReady} />);
+    _mountSimple(container, <ReportsView isTeamLeader={!!o.isTeamLeader} currentTimeFilter={o.currentTimeFilter || 'monthly'} roles={o.roles || []} currentRoleFilter={o.currentRoleFilter || 'All'} customDateFrom={o.customDateFrom || ''} customDateTo={o.customDateTo || ''} agents={o.agents || []} currentAgentFilter={o.currentAgentFilter || 'all'} loadAgents={o.loadAgents} onReady={o.onReady} data={o.data} />);
     window.__REACT_REPORTS_MOUNTED = true;
 }
 
@@ -400,7 +400,7 @@ function mountCalendar(container, opts) {
 // leaderboard fills + style injection; populates by id after useEffect-ready). ──
 function mountReferrals(container, opts) {
     const o = opts || {};
-    _mountSimple(container, <ReferralsView onReady={o.onReady} />);
+    _mountSimple(container, <ReferralsView onReady={o.onReady} data={o.data} />);
     window.__REACT_REFERRALS_MOUNTED = true;
 }
 
@@ -423,7 +423,7 @@ function mountAIInsights(container, opts) {
     const o = opts || {};
     const root = createRoot(container);
     _aiInsightsRoot = root;
-    root.render(<AIInsightsView onReady={o.onReady} />);
+    root.render(<AIInsightsView onReady={o.onReady} data={o.data} />);
     window.__REACT_AI_MOUNTED = true;
 }
 function unmountAIInsights() {

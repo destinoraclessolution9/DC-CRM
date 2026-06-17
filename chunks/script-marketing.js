@@ -31,6 +31,8 @@
     // Cross-chunk helpers — defined in sibling chunks, exported to window.app.
     const renderWorkflowCard         = (...a) => (window.app.renderWorkflowCard         || (() => ''))(...a);                  // script-performance.js
     const renderSpecialProgramsTable = (...a) => (window.app.renderSpecialProgramsTable || (() => Promise.resolve()))(...a);  // script-features2.js
+    const calculateProgramProgress   = (...a) => (window.app.calculateProgramProgress   || (() => Promise.resolve({ targets: [], qualified: false })))(...a); // script-features2.js
+    const _spToday                   = (...a) => (window.app._today                     || (() => new Date().toISOString().slice(0,10)))(...a);                 // script-features2.js
     const renderFormsTab             = (...a) => (window.app.renderFormsTab             || (() => Promise.resolve()))(...a);  // script-fude.js
     const loadFollowUpTemplates      = (...a) => (window.app.loadFollowUpTemplates      || (() => Promise.resolve([])))(...a); // script-calendar.js
     const invalidateFollowUpTemplatesCache = (...a) => (window.app.invalidateFollowUpTemplatesCache || (() => {}))(...a);     // script-calendar.js
@@ -56,6 +58,162 @@
             return !!(window.CRMReact && typeof window.CRMReact.mountMarketingLists === 'function');
         } catch (_) { return false; }
     };
+
+    // Per-view kill-switch (default-on) for the JSX-componentized passthrough
+    // tabs (promotions + special_programs). When OFF (or the payload build
+    // throws), the chunk falls back to the UNCHANGED legacy-HTML string the view
+    // renders via dangerouslySetInnerHTML. Off via: window.__REACT_MKTLISTS_PASSTHROUGH===false,
+    // ?react_mktpass=0, crm_react_off='1' (also disabled if the master island flag is off).
+    const _reactMktPassthroughOn = () => {
+        try {
+            if (window.__REACT_MKTLISTS_PASSTHROUGH === false) return false;
+            if (/[?&]react_mktpass=0/.test(location.search)) return false;
+            if (localStorage.getItem('crm_react_off') === '1') return false;
+            return true;
+        } catch (_) { return false; }
+    };
+
+    // Build a serializable payload mirroring renderPackagesTab() 1:1 — every field
+    // pre-formatted here so the JSX is pure rendering (no UI.* / async in render).
+    const _buildPromotionsPayload = async () => {
+        const [packages, allProds] = await Promise.all([
+            AppDataStore.getAll('promotions'),
+            AppDataStore.getAll('products'),
+        ]);
+        const pkgProductMap = new Map(allProds.map(pr => [pr.id, pr.name]));
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        const isExpired = p => p.end_date && (() => { const e = new Date(p.end_date); e.setHours(0, 0, 0, 0); return e < today; })();
+
+        const activeList  = packages.filter(p => !isExpired(p)).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+        const expiredList = packages.filter(p =>  isExpired(p)).sort((a, b) => new Date(b.end_date || 0)   - new Date(a.end_date || 0));
+
+        const toRow = (p, isExpiredGroup) => {
+            const productNamesList = (p.product_ids || []).map(id => pkgProductMap.get(id) || 'Unknown Product');
+            const productNames  = productNamesList.join(', ');
+            const shortProducts = productNames.length > 38 ? productNames.substring(0, 35) + '…' : productNames;
+            const st = _getPackageStatus(p);
+
+            let timeFrame = null;
+            if (p.start_date || p.end_date) {
+                const s = p.start_date ? UI.formatDate(p.start_date) : '—';
+                const e = p.end_date   ? UI.formatDate(p.end_date)   : 'No End';
+                timeFrame = `${s} – ${e}`;
+            }
+
+            // Discounted Value Worth → { kind: 'none'|'save'|'plain', ... }
+            let discount = { kind: 'none' };
+            if (p.original_value) {
+                if (p.original_value > (p.price || 0)) {
+                    discount = { kind: 'save', original: UI.formatNumber(p.original_value), savePct: Math.round(((p.original_value - p.price) / p.original_value) * 100) };
+                } else {
+                    discount = { kind: 'plain', original: UI.formatNumber(p.original_value) };
+                }
+            }
+
+            const dimmed = isExpiredGroup || st.label === 'Expired';
+            return {
+                id: p.id,
+                name: p.package_name || p.name || '—',
+                productNames,                 // full (title attr)
+                shortProducts: shortProducts || '—',
+                priceFmt: UI.formatNumber(p.price || 0),
+                discount,
+                requirement: p.requirement || '',
+                limitedSlots: p.limited_slots || null,
+                timeFrame,                    // null → "Ongoing"
+                status: { label: st.label, cls: st.cls, style: st.style },
+                dimmed,
+            };
+        };
+
+        return {
+            kind: 'promotions',
+            empty: packages.length === 0,
+            active:  activeList.map(p  => toRow(p, false)),
+            expired: expiredList.map(p => toRow(p, true)),
+        };
+    };
+
+    // Build a serializable payload mirroring renderSpecialProgramsTable() 1:1.
+    // Reuses calculateProgramProgress + _today from script-features2.js (window.app).
+    const _buildSpecialProgramsPayload = async () => {
+        const [programs, allParts, users] = await Promise.all([
+            AppDataStore.getAll('special_programs'),
+            AppDataStore.getAll('special_program_participants'),
+            AppDataStore.getAll('users'),
+        ]);
+        const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
+        const active = programs.filter(p => p.status !== 'cancelled' && p.status !== 'deleted');
+        active.sort((a, b) => (a.end_date || '').localeCompare(b.end_date || ''));
+
+        const canManage = isTeamLeaderOrAbove(_state.cu);
+        const today = _spToday();
+
+        if (active.length === 0) {
+            return { kind: 'special_programs', empty: true, canManage, rows: [] };
+        }
+
+        const rows = [];
+        for (const program of active) {
+            const parts = allParts.filter(p => p.program_id === program.id);
+            const isExpired = !!(program.end_date && today > program.end_date);
+            const daysLeft = program.end_date ? Math.max(0, Math.ceil((new Date(program.end_date) - new Date(today)) / 86400000)) : 0;
+
+            if (parts.length === 0) {
+                rows.push({
+                    program, isExpired, daysLeft,
+                    agentName: '—', agentRole: '',
+                    progress: { targets: [], qualified: false },
+                    noParticipants: true,
+                });
+                continue;
+            }
+            for (const part of parts) {
+                const progress = await calculateProgramProgress(program, part.agent_id);
+                rows.push({
+                    program, isExpired, daysLeft,
+                    agentId: part.agent_id,
+                    agentName: userMap[part.agent_id]?.full_name || `Agent #${part.agent_id}`,
+                    agentRole: userMap[part.agent_id]?.role || '',
+                    progress,
+                });
+            }
+        }
+
+        // Flatten each row to the exact fields the table renders, with pre-picked
+        // target cells (Total Sales / New Customers / CPS Count).
+        const flat = rows.map(r => {
+            const pick = (lbl) => {
+                const t = (r.progress.targets || []).find(x => x.label === lbl);
+                if (!t) return null;
+                const color = t.actual >= t.target ? '#16a34a' : (t.pct >= 60 ? '#f59e0b' : '#dc2626');
+                const remaining = Math.max(0, t.target - t.actual);
+                const remainingDisplay = t.label === 'Total Sales'
+                    ? ('RM ' + (Number(remaining) || 0).toLocaleString())
+                    : remaining;
+                return { display: t.display, pct: t.pct, color, remaining, remainingDisplay };
+            };
+            return {
+                programId: r.program.id,
+                programName: r.program.program_name || 'Untitled',
+                reward: r.program.reward || '—',
+                startDate: r.program.start_date || '?',
+                endDate: r.program.end_date || '?',
+                isExpired: r.isExpired,
+                daysLeft: r.daysLeft,
+                noParticipants: !!r.noParticipants,
+                agentName: r.agentName,
+                agentRole: r.agentRole,
+                qualified: !!r.progress.qualified,
+                sales: pick('Total Sales'),
+                customers: pick('New Customers'),
+                cps: pick('CPS Count'),
+            };
+        });
+
+        return { kind: 'special_programs', empty: false, canManage, rows: flat };
+    };
+
     const renderFolderTree           = (...a) => (window.app.renderFolderTree           || (() => Promise.resolve()))(...a);  // script-documents.js
     const loadFolderContents         = (...a) => (window.app.loadFolderContents         || (() => Promise.resolve()))(...a);  // script-documents.js
     // renderWorkflowTemplate defined in script-performance.js IIFE (private). Redeclare locally.
@@ -172,8 +330,23 @@
                     }
                     rows = data;
                 } else {
-                    // promotions → renderPackagesTab, special_programs → renderSpecialProgramsTable
+                    // Passthrough tabs (promotions / special_programs). Always build
+                    // the legacy HTML string as the by-id fallback (UNCHANGED). When
+                    // the per-view kill-switch is on, ALSO build a serializable payload
+                    // (passed through the existing `rows` prop) so the view renders
+                    // real JSX. On any payload-build error we keep `rows` empty and the
+                    // view falls back to the legacy HTML via dangerouslySetInnerHTML.
                     legacyHtml = await renderMarketingListTable();
+                    if (_reactMktPassthroughOn()) {
+                        try {
+                            rows = tab === 'promotions'
+                                ? await _buildPromotionsPayload()
+                                : await _buildSpecialProgramsPayload();
+                        } catch (e2) {
+                            console.warn('[marketing-lists] passthrough payload build failed, using legacy HTML:', e2 && e2.message);
+                            rows = [];
+                        }
+                    }
                 }
                 container.innerHTML = '<div id="ml-react-root"></div>';
                 window.CRMReact.mountMarketingLists(document.getElementById('ml-react-root'), {
