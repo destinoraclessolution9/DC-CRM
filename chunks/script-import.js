@@ -561,7 +561,7 @@ const mapRowToRecord = (row, reverseMap, agentId, importType = 'prospects') => {
         referral_relationship: get('referral_relationship'),
         pipeline_stage: pipelineStage,
         expected_close_date: get('expected_close_date') || null,
-        deal_value: dealVal ? parseFloat(dealVal) || null : null,
+        deal_value: dealVal === '' ? null : (Number.isFinite(parseFloat(dealVal)) ? parseFloat(dealVal) : null),
         responsible_agent_id: agentId,
         source: 'import'
     };

@@ -233,12 +233,12 @@ const renderWorkflowCard = (w) => {
             <div>
                 <div style="font-weight:600; font-size:14px;">${escapeHtml(w.workflow_name)}</div>
                 <div style="font-size:12px; color:var(--gray-500); margin-top:4px;">
-                    Trigger: <strong>${w.trigger_type}</strong> → Action: <strong>${w.action_type || 'Multiple'}</strong>
+                    Trigger: <strong>${escapeHtml(w.trigger_type)}</strong> → Action: <strong>${escapeHtml(w.action_type || 'Multiple')}</strong>
                 </div>
-                <div style="font-size:11px; color:var(--gray-400); margin-top:2px;">Runs: ${w.run_count || 0} times · Last: ${w.last_run || 'Never'}</div>
+                <div style="font-size:11px; color:var(--gray-400); margin-top:2px;">Runs: ${w.run_count || 0} times · Last: ${escapeHtml(w.last_run || 'Never')}</div>
             </div>
             <div style="display:flex; gap:8px; align-items:center;">
-                <span class="badge ${statusColor}">${w.status}</span>
+                <span class="badge ${statusColor}">${escapeHtml(w.status)}</span>
                 <button class="btn btn-sm secondary" onclick="app.toggleWorkflow(${w.id})">${w.status === 'active' ? 'Pause' : 'Activate'}</button>
                 <button class="btn btn-sm secondary" onclick="app.editWorkflow(${w.id})"><i class="fas fa-edit"></i></button>
                 <button class="btn btn-sm secondary" style="color:var(--danger);" onclick="app.deleteWorkflow(${w.id})"><i class="fas fa-trash"></i></button>

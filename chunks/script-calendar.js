@@ -3319,14 +3319,61 @@
         html += '</div>';
         html += '<div class="week-body">';
 
-        // Pre-load all lookup data in parallel
-        const [activities, allProspectsWV, allCustomersWV] = await Promise.all([
-            AppDataStore.getAll('activities'),
-            AppDataStore.getAll('prospects'),
-            AppDataStore.getAll('customers'),
+        // Scope the fetch to THIS week's date range + the viewer's visible user
+        // set — mirrors _renderCalendarLegacy / renderTodayActivities. The prior
+        // code did three unscoped getAll() calls, pulling EVERY org activity/
+        // prospect/customer into browser memory + the network response (a privacy
+        // over-fetch; the _wvOwned gate below only masks the rendered NAME, not
+        // the data that reached the client). queryAdvanced gte/lte + scopeFields
+        // is the same proven path the month view uses.
+        const _wkEndWV = new Date(startOfWeek); _wkEndWV.setDate(startOfWeek.getDate() + 6);
+        const _fmtWV = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        const _wkStartStr = _fmtWV(startOfWeek);
+        const _wkEndStr = _fmtWV(_wkEndWV);
+        const visibleIdsWV = await getVisibleUserIds(_state.cu);
+        const wvQueryOpts = {
+            gte: { activity_date: _wkStartStr },
+            lte: { activity_date: _wkEndStr },
+            sort: 'start_time', sortDir: 'asc',
+            limit: 5000, offset: 0, countMode: null,
+            filters: {},
+        };
+        if (!isSystemAdmin(_state.cu) && _filters && _filters.agent && _filters.agent !== 'all') {
+            wvQueryOpts.filters.lead_agent_id = _filters.agent;
+        }
+        if (_filters && _filters.type && _filters.type !== 'all') {
+            wvQueryOpts.filters.activity_type = _filters.type;
+        }
+        if (!isSystemAdmin(_state.cu) && visibleIdsWV !== 'all') {
+            wvQueryOpts.scopeFields = [
+                { field: 'lead_agent_id', values: visibleIdsWV },
+                { field: 'visibility', values: ['open', 'public'] }
+            ];
+        }
+        const needsCoAgentMergeWV = !isSystemAdmin(_state.cu) && _state.cu?.id != null;
+        const [wvActResult, wvCoAgentRows] = await Promise.all([
+            AppDataStore.queryAdvanced('activities', wvQueryOpts),
+            needsCoAgentMergeWV ? _fetchActivitiesAsCoAgent(_wkStartStr, _wkEndStr) : Promise.resolve([]),
         ]);
-        const prospectMapWV = new Map((allProspectsWV || []).map(p => [String(p.id), p]));
-        const customerMapWV = new Map((allCustomersWV || []).map(c => [String(c.id), c]));
+        const activities = (wvActResult && wvActResult.data) || [];
+        if (wvCoAgentRows && wvCoAgentRows.length > 0) {
+            const _seenWV = new Set(activities.map(a => String(a.id)));
+            for (const a of wvCoAgentRows) {
+                if (!_seenWV.has(String(a.id)) && a.activity_date >= _wkStartStr && a.activity_date <= _wkEndStr) {
+                    _seenWV.add(String(a.id));
+                    activities.push(a);
+                }
+            }
+        }
+        // Fetch ONLY the prospect/customer names these scoped activities reference.
+        const _wvPIds = [...new Set(activities.filter(a => a.prospect_id).map(a => a.prospect_id))];
+        const _wvCIds = [...new Set(activities.filter(a => a.customer_id).map(a => a.customer_id))];
+        const [_wvPRes, _wvCRes] = await Promise.all([
+            _wvPIds.length > 0 ? AppDataStore.queryAdvanced('prospects', { scopeField: 'id', scopeValues: _wvPIds, limit: 5000, select: 'id,full_name', countMode: null }) : Promise.resolve({ data: [] }),
+            _wvCIds.length > 0 ? AppDataStore.queryAdvanced('customers', { scopeField: 'id', scopeValues: _wvCIds, limit: 5000, select: 'id,full_name', countMode: null }) : Promise.resolve({ data: [] }),
+        ]);
+        const prospectMapWV = new Map(((_wvPRes && _wvPRes.data) || []).map(p => [String(p.id), p]));
+        const customerMapWV = new Map(((_wvCRes && _wvCRes.data) || []).map(c => [String(c.id), c]));
 
         // Pre-bucket activities ONCE by "<date> <hour>" so each of the ~91
         // (13 hours × 7 days) grid cells is an O(1) Map.get instead of an O(n)

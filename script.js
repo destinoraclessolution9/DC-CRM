@@ -2641,15 +2641,15 @@ function _wireLoginBtn() {
                 </div>
                 <div class="form-group">
                     <label>Full Name <span class="required">*</span></label>
-                    <input type="text" id="name-full" class="form-control" value="${nameData?.full_name || ''}" required>
+                    <input type="text" id="name-full" class="form-control" value="${escapeHtml(nameData?.full_name || '')}" required>
                 </div>
                 <div class="form-group">
                     <label>Date of Birth</label>
-                    <input type="date" id="name-dob" class="form-control" value="${nameData?.date_of_birth || ''}">
+                    <input type="date" id="name-dob" class="form-control" value="${escapeHtml(nameData?.date_of_birth || '')}">
                 </div>
                 <div class="form-group">
                     <label>Notes</label>
-                    <textarea id="name-notes" class="form-control" rows="2">${nameData?.notes || ''}</textarea>
+                    <textarea id="name-notes" class="form-control" rows="2">${escapeHtml(nameData?.notes || '')}</textarea>
                 </div>
             </div>
         `;
