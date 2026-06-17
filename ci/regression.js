@@ -136,6 +136,24 @@ console.log('\n── Step 4: React-island defineProperty canary ─────
   }
 }
 
+// ── Step 5: Anti-duplication pattern lint ──────────────────────────────────
+console.log('\n── Step 5: Pattern lint ──────────────────────────────────');
+try {
+  execSync(`node "${path.join(__dirname,'lint-patterns.js')}" --enforce`, { stdio: 'inherit' });
+  pass('lint-patterns within allowance');
+} catch {
+  fail('lint-patterns exceeded allowance (ci/lint-allowance.json)');
+}
+
+// ── Step 6: Size budgets ───────────────────────────────────────────────────
+console.log('\n── Step 6: Size budgets ──────────────────────────────────');
+try {
+  execSync(`node "${path.join(__dirname,'size-budget.js')}"`, { stdio: 'inherit' });
+  pass('all files within size budget');
+} catch {
+  fail('a source file exceeded its size budget (ci/size-budgets.json)');
+}
+
 // ── Summary ────────────────────────────────────────────────────────────────
 console.log('\n─────────────────────────────────────────────────────────');
 if (fails === 0) {

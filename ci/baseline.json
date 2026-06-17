@@ -1,9 +1,9 @@
 {
-  "generated": "2026-06-09T09:59:56.250Z",
+  "generated": "2026-06-17T08:32:54.120Z",
   "script": {
-    "lines": 4749,
-    "hash": "55d82dc1",
-    "definedCount": 607,
+    "lines": 5092,
+    "hash": "9315efba",
+    "definedCount": 614,
     "stateVars": [
       "_currentView",
       "_currentUser",
@@ -78,6 +78,7 @@
     "returnKeys": [
       "init",
       "navigateTo",
+      "goBackFromDetail",
       "todo",
       "showRoadmap",
       "exportRelationshipTree",
@@ -92,6 +93,8 @@
       "canViewNode",
       "initWhatsAppIntegration",
       "addWhatsAppButtonToProfile",
+      "openSendWhatsAppModal",
+      "toggleUserMenu",
       "handleProspectDrag",
       "handleStageDrop",
       "closeDealWon",
@@ -529,7 +532,7 @@
   "chunks": [
     {
       "file": "script-activities.js",
-      "lines": 4811,
+      "lines": 4893,
       "exports": [
         "openActivityModal",
         "fillActivityForm",
@@ -631,7 +634,7 @@
     },
     {
       "file": "script-admin.js",
-      "lines": 560,
+      "lines": 574,
       "exports": [
         "showAdminDashboard",
         "showTenantManagement",
@@ -651,7 +654,7 @@
     },
     {
       "file": "script-ai.js",
-      "lines": 1371,
+      "lines": 2456,
       "exports": [
         "showAIInsightsDashboard",
         "showLeadScoring",
@@ -668,12 +671,17 @@
         "startModelTraining",
         "showAIPredictionDashboard",
         "ensureAIModelsExist",
-        "batchUpdateLeadScores"
+        "refreshAIPredictions",
+        "refreshPerformanceInsights",
+        "changeForecastPeriod",
+        "viewLeadDetails",
+        "contactAtRiskCustomer",
+        "viewAgentDetails"
       ]
     },
     {
       "file": "script-boss-report.js",
-      "lines": 495,
+      "lines": 531,
       "exports": [
         "showBossReportView",
         "brLoadSales",
@@ -687,7 +695,7 @@
     },
     {
       "file": "script-calendar.js",
-      "lines": 5588,
+      "lines": 5907,
       "exports": [
         "showCalendarView",
         "loadFollowUpTemplates",
@@ -786,12 +794,14 @@
         "openAttendeeNotesModal",
         "saveAttendeeNote",
         "addCoAgentToActivity",
-        "getAgentName"
+        "getAgentName",
+        "showSyncErrorModal",
+        "discardFailedActivity"
       ]
     },
     {
       "file": "script-cases.js",
-      "lines": 976,
+      "lines": 963,
       "exports": [
         "handleCaseSearch",
         "toggleCaseAdvFilters",
@@ -815,7 +825,7 @@
     },
     {
       "file": "script-cps.js",
-      "lines": 1379,
+      "lines": 1351,
       "exports": [
         "_refreshNotifBadge",
         "_buildNotifPanel",
@@ -860,7 +870,7 @@
     },
     {
       "file": "script-documents.js",
-      "lines": 1051,
+      "lines": 1373,
       "exports": [
         "showDocumentManagementView",
         "renderFolderTree",
@@ -900,6 +910,7 @@
         "downloadSelected",
         "copySelected",
         "moveSelected",
+        "confirmMoveSelected",
         "openUploadModal",
         "handleFileSelect",
         "uploadFiles",
@@ -911,11 +922,12 @@
     },
     {
       "file": "script-egg.js",
-      "lines": 2099,
+      "lines": 2392,
       "exports": [
         "showEggPurchasingView",
         "eggSwitchTab",
         "eggRefresh",
+        "eggRerenderJsx",
         "eggHandleCsvDrop",
         "eggHandleCsvInput",
         "eggHandleXlsxDrop",
@@ -952,7 +964,7 @@
     },
     {
       "file": "script-features2.js",
-      "lines": 1583,
+      "lines": 1545,
       "exports": [
         "initMobileApp",
         "addMobileMetaTags",
@@ -999,7 +1011,7 @@
     },
     {
       "file": "script-forms.js",
-      "lines": 726,
+      "lines": 640,
       "exports": [
         "showLeadFormsView",
         "openFormBuilderModal",
@@ -1037,7 +1049,7 @@
     },
     {
       "file": "script-formula.js",
-      "lines": 1774,
+      "lines": 1970,
       "exports": [
         "fpToggleImportMenu",
         "fpImportStock",
@@ -1075,10 +1087,13 @@
     },
     {
       "file": "script-fude.js",
-      "lines": 2590,
+      "lines": 3131,
       "exports": [
         "showFudeView",
         "openStoryDetail",
+        "fudeSearchStories",
+        "fudeFilterStories",
+        "fudeShowAllStories",
         "openHighlightModal",
         "saveHighlight",
         "deleteHighlight",
@@ -1119,12 +1134,18 @@
         "openDestinyBlueprintInTab",
         "openDestinyBlueprintModal",
         "saveDestinyBlueprint",
-        "openFudeRedeemModal"
+        "openFudeRedeemModal",
+        "_fudeRedeemPickPreset",
+        "confirmRedeemPoints",
+        "showRedemptionQueue",
+        "redemptionApprove",
+        "redemptionReject",
+        "redemptionFulfil"
       ]
     },
     {
       "file": "script-gcal.js",
-      "lines": 813,
+      "lines": 1201,
       "exports": [
         "showIntegrationHub",
         "showIntegrationDetails",
@@ -1140,12 +1161,18 @@
         "disconnectGoogle",
         "confirmDisconnectGoogle",
         "resolveConflict",
-        "initGoogleIntegration"
+        "initGoogleIntegration",
+        "showWebhookIntegration",
+        "saveWebhookSettings",
+        "testWebhook",
+        "disconnectWebhook",
+        "confirmDisconnectWebhook",
+        "dispatchWebhookEvent"
       ]
     },
     {
       "file": "script-import.js",
-      "lines": 2078,
+      "lines": 2343,
       "exports": [
         "showImportDashboard",
         "renderRecentImports",
@@ -1215,7 +1242,7 @@
     },
     {
       "file": "script-journey.js",
-      "lines": 1169,
+      "lines": 1283,
       "exports": [
         "renderJourneyTab",
         "markJourneyTouchpointDone",
@@ -1240,7 +1267,7 @@
     },
     {
       "file": "script-knowledge.js",
-      "lines": 696,
+      "lines": 786,
       "exports": [
         "showKnowledgeView",
         "switchKnowledgeSegment",
@@ -1272,7 +1299,7 @@
     },
     {
       "file": "script-marketing.js",
-      "lines": 4386,
+      "lines": 4875,
       "exports": [
         "openMarketingListAddModal",
         "switchMarketingListTab",
@@ -1335,9 +1362,11 @@
         "filterRecipients",
         "viewRecipientHistory",
         "retryMessage",
+        "toggleUserMenu",
         "loginAs",
         "uploadProfilePhoto",
         "confirmRenameFolder",
+        "confirmDeleteFolder",
         "showMarketingAutomationView",
         "showMarketingListsView",
         "showMonthlyPromotionView",
@@ -1346,7 +1375,7 @@
     },
     {
       "file": "script-mobile.js",
-      "lines": 2375,
+      "lines": 2984,
       "exports": [
         "addCustomerNote",
         "deleteCustomerNote",
@@ -1374,10 +1403,16 @@
         "showMobileHomeView",
         "mhomeWa",
         "showMobileCalendarView",
+        "showMobileCalendarWeek",
+        "showMobileCalendarDay",
+        "showMobileCalendarAgenda",
         "mcalPrevMonth",
         "mcalNextMonth",
+        "mcalPrev",
+        "mcalNext",
         "mcalToday",
         "mcalDayClick",
+        "mcalOpenDay",
         "mcalAddMeetUp",
         "mcalTab",
         "mcalFilter",
@@ -1403,7 +1438,7 @@
     },
     {
       "file": "script-order-form-extract.js",
-      "lines": 1198,
+      "lines": 1214,
       "exports": [
         "showOrderFormExtractView",
         "ofeShowTab",
@@ -1422,7 +1457,7 @@
     },
     {
       "file": "script-org.js",
-      "lines": 677,
+      "lines": 666,
       "exports": [
         "showOrgChartView",
         "openNewOrgConsultation",
@@ -1443,7 +1478,7 @@
     },
     {
       "file": "script-performance.js",
-      "lines": 912,
+      "lines": 858,
       "exports": [
         "showRankingPerformanceView",
         "showWorkflowAutomationView",
@@ -1454,6 +1489,7 @@
         "toggleWorkflow",
         "editWorkflow",
         "deleteWorkflow",
+        "renderWorkflowCard",
         "showNoticeboardView",
         "openNoticeboardDetail",
         "computeNineMethodStatuses",
@@ -1464,7 +1500,7 @@
     },
     {
       "file": "script-pipeline.js",
-      "lines": 2951,
+      "lines": 3395,
       "exports": [
         "loadPipelineConfig",
         "savePipelineConfigJson",
@@ -1549,7 +1585,7 @@
     },
     {
       "file": "script-prospects.js",
-      "lines": 9887,
+      "lines": 10251,
       "exports": [
         "sortProspects",
         "showProspectsView",
@@ -1612,6 +1648,8 @@
         "renderReferralsTab",
         "openCustomerReferralModal",
         "saveCustomerReferral",
+        "searchReferralProspect",
+        "selectReferralProspect",
         "viewReferralDetail",
         "editReferral",
         "saveEditReferral",
@@ -1704,6 +1742,7 @@
         "_setDelivery",
         "updatePurchaseDelivery",
         "updateConversionDelivery",
+        "deletePurchase",
         "openRecruitModal",
         "confirmDelete",
         "executeDelete",
@@ -1785,7 +1824,7 @@
     },
     {
       "file": "script-referrals.js",
-      "lines": 1474,
+      "lines": 1712,
       "exports": [
         "searchTreePerson",
         "openAddReferralModal",
@@ -1809,12 +1848,15 @@
         "clearSelectedForModal",
         "openUpdateReferralModal",
         "saveReferralUpdate",
-        "showReferralsView"
+        "showReferralsView",
+        "getReferralLeaderboardData",
+        "toggleHideReferrerData",
+        "resetHiddenReferrersData"
       ]
     },
     {
       "file": "script-reporting.js",
-      "lines": 2140,
+      "lines": 2791,
       "exports": [
         "openTargetManagementModal",
         "exportKPIReport",
@@ -1833,9 +1875,10 @@
     },
     {
       "file": "script-search.js",
-      "lines": 1816,
+      "lines": 1965,
       "exports": [
         "ensureReferralFields",
+        "viewEntityDetail",
         "toggleSearchPanel",
         "showSearchPanel",
         "hideSearchPanel",
@@ -1888,10 +1931,11 @@
     },
     {
       "file": "script-stock-take.js",
-      "lines": 1944,
+      "lines": 2152,
       "exports": [
         "showStockTakeView",
         "stSwitchTab",
+        "stJsxRefresh",
         "stNewSession",
         "stSaveNewSession",
         "stActivateSession",
@@ -1934,7 +1978,7 @@
     },
     {
       "file": "script-whatsapp.js",
-      "lines": 538,
+      "lines": 588,
       "exports": [
         "showWhatsAppIntegration",
         "saveWhatsAppConnection",

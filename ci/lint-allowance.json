@@ -1,0 +1,6 @@
+{
+  "_comment": "Current violation counts as of Wave 0. Ratchet DOWN as Wave 1 lands; never up. Enforced by: node ci/lint-patterns.js --enforce",
+  "R1": 24,
+  "R2": 3,
+  "R3": 1
+}

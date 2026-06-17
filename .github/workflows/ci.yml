@@ -16,8 +16,12 @@
 # IMPORTANT: this workflow is REPORTING-ONLY. It does NOT gate the Vercel
 # deployment (Vercel builds independently on push). A red check here surfaces a
 # regression for a human to look at; it never blocks or breaks the live site.
-# Build + snapshot (ci/regression.js, needs esbuild devDeps + baseline) stays a
-# local pre-push gate to keep this workflow fast and install-free.
+#
+# The `gates` job stays fast + install-free (audit + tsc/contract). The
+# `regression` job (added for the quality refactor) installs devDeps and runs
+# the full gate — build + snapshot-vs-baseline + anti-duplication pattern lint +
+# size budgets — so an export drop, god-file re-bloat, or a re-introduced
+# duplicate pattern is caught automatically instead of relying on a local run.
 
 name: CI Gates
 
@@ -29,7 +33,7 @@ on:
       - 'marketing/**'
       - '_*'
   push:
-    branches: [main]
+    branches: [main, refactor/quality]
     paths-ignore:
       - '**.md'
       - 'docs/**'
@@ -55,3 +59,22 @@ jobs:
 
       - name: TypeScript + data-layer contract tests
         run: node ci/test.mjs
+
+  regression:
+    name: Full regression gate (build + snapshot + lint + size)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Run full regression gate
+        run: npm run ci
