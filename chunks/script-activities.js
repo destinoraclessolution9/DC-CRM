@@ -67,6 +67,38 @@
         _state.pcts = Date.now();
         return _state.pc;
     };
+    // Entity-search lookup cache (prospects + customers + agents) for the
+    // "Select Existing Prospect/Customer" box. Re-fetching + re-mapping all three
+    // tables on EVERY keystroke is what made the search freeze for seconds on
+    // mobile — and for scoped users each call fired 3 server round-trips. Fetch
+    // once per modal session, dedupe concurrent callers, and reuse for typing.
+    // Invalidated on openActivityModal so a just-added prospect still shows up.
+    const _getSearchEntitiesCached = async () => {
+        const now = Date.now();
+        if (_state.sec && (now - _state.sects) < _LOOKUP_CACHE_TTL_MS) return _state.sec;
+        if (_state.secp) return _state.secp; // in-flight dedup — avoid parallel fetches
+        _state.secp = (async () => {
+            const [visibleProspects, visibleCustomers, allUsers] = await Promise.all([
+                getVisibleProspects(),
+                getVisibleCustomers(),
+                AppDataStore.getAll('users'),
+            ]);
+            const visibleAgents = (allUsers || []).filter(u => isAgent(u));
+            const combined = [
+                ...(visibleProspects || []).map(p => ({ ...p, type: 'Prospect' })),
+                ...(visibleCustomers || []).map(c => ({ ...c, type: 'Customer' })),
+                ...visibleAgents.map(a => ({ ...a, type: 'Agent' })),
+            ];
+            _state.sec = combined;
+            _state.sects = Date.now();
+            return combined;
+        })();
+        try {
+            return await _state.secp;
+        } finally {
+            _state.secp = null;
+        }
+    };
 
     // ========== PHASE 2: ACTIVITY MODAL FUNCTIONS ==========
 
@@ -80,6 +112,13 @@
         _state.se = null;
         _state.sr = null;
         window._cpsDuplicateConfirmed = false;
+
+        // Warm the prospect/customer search cache in the background so the
+        // "Select Existing Prospect/Customer" box answers instantly on the first
+        // keystroke instead of freezing on a multi-table fetch mid-typing.
+        // Reset the timestamp first so a freshly-added prospect is re-fetched.
+        _state.sects = 0;
+        _getSearchEntitiesCached().catch(() => {});
 
         // Pre-fetch lookup data BEFORE building the template (safer than await inside template literals).
         // Cached helpers turn this from two network round-trips per modal open into
@@ -3488,7 +3527,24 @@
         return out;
     };
 
-    const searchEntities = async () => {
+    // Debounced entry point bound to the search box's oninput. Collapses fast
+    // typing into a single search (one per ~220ms idle) instead of one per
+    // keystroke, and hides the dropdown immediately when the box is cleared.
+    let _entitySearchTimer = null;
+    let _entitySearchSeq = 0;
+    const searchEntities = () => {
+        const raw = document.getElementById('entity-search')?.value || '';
+        if (raw.trim().length < 2) {
+            clearTimeout(_entitySearchTimer);
+            const resultsDiv = document.getElementById('search-results');
+            if (resultsDiv) resultsDiv.style.display = 'none';
+            return;
+        }
+        clearTimeout(_entitySearchTimer);
+        _entitySearchTimer = setTimeout(() => { _runEntitySearch(); }, 220);
+    };
+
+    const _runEntitySearch = async () => {
         const raw = document.getElementById('entity-search')?.value || '';
         const searchTerm = raw.toLowerCase().trim();
         const resultsDiv = document.getElementById('search-results');
@@ -3497,20 +3553,13 @@
             return;
         }
 
-        // Search prospects, customers, and agents
-        const [visibleProspects, visibleCustomers, allUsers] = await Promise.all([
-            getVisibleProspects(),
-            getVisibleCustomers(),
-            AppDataStore.getAll('users'),
-        ]);
-
-        const visibleAgents = allUsers.filter(u => isAgent(u));
-
-        const all = [
-            ...visibleProspects.map(p => ({ ...p, type: 'Prospect' })),
-            ...visibleCustomers.map(c => ({ ...c, type: 'Customer' })),
-            ...visibleAgents.map(a => ({ ...a, type: 'Agent' })),
-        ];
+        // Search prospects, customers, and agents — served from the per-session
+        // cache (warmed on modal open) so this is an instant in-memory filter.
+        const seq = ++_entitySearchSeq;
+        const all = await _getSearchEntitiesCached();
+        // A newer keystroke superseded this search while data loaded — drop it
+        // so a slow response can never clobber fresher results.
+        if (seq !== _entitySearchSeq) return;
 
         // Normalise phone digits for phone-number queries
         const termDigits = searchTerm.replace(/\D/g, '');

@@ -1082,19 +1082,19 @@
         ${_attBuild()}
 
         <div class="mhome-tiles">
-            <button class="mhome-tile red" onclick="app.navigateTo('calendar')">
+            <button class="mhome-tile red" onclick="app.mhomeOpenFollowups()">
                 <div class="mhome-tile-ico"><i class="fas fa-user-clock"></i></div>
                 <div class="mhome-tile-lbl">Overdue Follow-ups</div>
                 <div class="mhome-tile-num">${overdueFollowups}</div>
                 <div class="mhome-tile-arrow"><i class="fas fa-chevron-right"></i></div>
             </button>
-            <button class="mhome-tile wood" onclick="app.navigateTo('prospects')">
+            <button class="mhome-tile wood" onclick="app.mhomeOpenRefills()">
                 <div class="mhome-tile-ico"><i class="fas fa-prescription-bottle-medical"></i></div>
                 <div class="mhome-tile-lbl">Refills Due</div>
                 <div class="mhome-tile-num">${refillCount}</div>
                 <div class="mhome-tile-arrow"><i class="fas fa-chevron-right"></i></div>
             </button>
-            <button class="mhome-tile purple" onclick="app.navigateTo('prospects')">
+            <button class="mhome-tile purple" onclick="app.mhomeOpenInactive()">
                 <div class="mhome-tile-ico"><i class="fas fa-chart-column"></i></div>
                 <div class="mhome-tile-lbl">Inactive Clients</div>
                 <div class="mhome-tile-num">${peoplePending ? _pendNum : inactiveCount}</div>
@@ -1302,6 +1302,191 @@
         } else if (id) {
             navigateTo('prospects').catch(() => {});
         }
+    };
+
+    // ── Mobile dashboard tile sheets (SW-109) ────────────────────────────
+    // The home quick-action tiles (Overdue Follow-ups / Refills Due /
+    // Inactive Clients) previously all navigated to 'calendar'/'prospects'.
+    // On mobile that's a dead end: the desktop follow-up + refill panels live
+    // in the desktop calendar's DOM, which the custom mobile calendar never
+    // renders — so the user saw a number but could never reach the list behind
+    // it. These openers surface the real list in a bottom-sheet (UI.showModal
+    // is sheet-styled on mobile) and reuse the calendar-chunk action handlers
+    // verbatim, so Send / Mark-sent / Dismiss / WhatsApp behave identically.
+    const _mhomeToday = () => {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+    const _mhomeOverlayOpen = () =>
+        !!document.getElementById('global-modal-overlay')?.classList.contains('active');
+    const _mhomeSheetScroll = (inner) =>
+        `<div style="max-height:64vh;overflow-y:auto;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column;gap:10px;padding:2px 2px 4px;">${inner}</div>`;
+    const _mhomeSheetLoading =
+        `<div style="padding:40px;text-align:center;color:var(--gray-400,#9ca3af);"><i class="fas fa-spinner fa-spin" style="font-size:20px;"></i></div>`;
+    const _mhomeSheetEmpty = (icon, msg) =>
+        `<div style="text-align:center;padding:38px 16px;color:var(--gray-500,#6b7280);">
+            <div style="font-size:34px;margin-bottom:10px;opacity:.45;"><i class="${icon}"></i></div>
+            <div style="font-size:14px;">${_mhomeEsc(msg)}</div>
+        </div>`;
+    const _mhomeSheetBtns = [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }];
+
+    // Overdue follow-up drafts — same predicate as the home tile count
+    // (pending · due before today · owned by viewer). Rows carry the SAME
+    // followup-row-${id} id the desktop panel uses, so the reused
+    // markFollowUpSent / dismissFollowUp handlers animate them out in place.
+    const mhomeOpenFollowups = async () => {
+        UI.showModal('Overdue Follow-ups', _mhomeSheetLoading, _mhomeSheetBtns);
+        try { await window._loadChunk('chunks/script-calendar.min.js'); } catch (_) {}
+        let drafts = [], people = [];
+        try {
+            const [dR, pR, cR] = await Promise.all([
+                AppDataStore.query('follow_up_drafts', { status: 'pending' }).catch(() => []),
+                AppDataStore.getAll('prospects').catch(() => []),
+                AppDataStore.getAll('customers').catch(() => []),
+            ]);
+            drafts = dR || [];
+            people = [...(pR || []), ...(cR || [])];
+        } catch (_) {}
+        if (!_mhomeOverlayOpen()) return; // user closed the sheet while it loaded
+        const personMap = new Map(people.map(p => [String(p.id), p]));
+        const today = _mhomeToday();
+        const mine = (d) => isSystemAdmin(_state.cu) || String(d.agent_id) === String(_state.cu?.id);
+        const rows = drafts
+            .filter(d => d.status === 'pending' && (d.due_date || '') < today && mine(d))
+            .sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''));
+        if (!rows.length) {
+            UI.showModal('Overdue Follow-ups', _mhomeSheetEmpty('fas fa-circle-check', 'All caught up — no overdue follow-ups.'), _mhomeSheetBtns);
+            return;
+        }
+        const body = rows.map(d => {
+            const person = d.prospect_id ? personMap.get(String(d.prospect_id)) : personMap.get(String(d.customer_id));
+            const name = d.prospect_name || person?.full_name || 'Unknown';
+            const days = Math.max(0, Math.round((new Date(today) - new Date(d.due_date)) / 86400000));
+            const due = days <= 0 ? 'Due today' : `${days} day${days === 1 ? '' : 's'} overdue`;
+            return `
+            <div id="followup-row-${d.id}" style="display:flex;align-items:center;gap:12px;padding:12px;background:var(--gray-50,#f9fafb);border-radius:12px;border-left:4px solid #ef4444;transition:opacity .4s ease,max-height .4s ease;">
+                <div style="width:38px;height:38px;border-radius:50%;background:#fee2e2;color:#b91c1c;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0;">${_mhomeEsc(_mhomeInitials(name))}</div>
+                <div style="flex:1;min-width:0;">
+                    <div style="font-weight:600;font-size:14px;color:var(--gray-800,#1f2937);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_mhomeEsc(name)}</div>
+                    <div style="font-size:12px;color:#dc2626;font-weight:500;margin-top:2px;">${due}</div>
+                </div>
+                <div style="display:flex;gap:6px;flex-shrink:0;">
+                    <button class="btn primary btn-sm" style="font-size:13px;padding:8px 12px;white-space:nowrap;" onclick="event.stopPropagation();(async()=>{await app.sendFollowUpInvite(${d.id});})();" title="Send WhatsApp"><i class="fab fa-whatsapp"></i></button>
+                    <button class="btn secondary btn-sm" style="font-size:13px;padding:8px 10px;" onclick="event.stopPropagation();app.markFollowUpSent(${d.id});" title="Mark as sent"><i class="fas fa-check"></i></button>
+                    <button class="btn secondary btn-sm" style="font-size:13px;padding:8px 10px;" onclick="event.stopPropagation();app.dismissFollowUp(${d.id});" title="Dismiss"><i class="fas fa-times"></i></button>
+                </div>
+            </div>`;
+        }).join('');
+        const head = `<div style="font-size:13px;color:var(--gray-500,#6b7280);margin:0 2px 2px;">${rows.length} overdue · oldest first</div>`;
+        UI.showModal('Overdue Follow-ups', _mhomeSheetScroll(head + body), _mhomeSheetBtns);
+    };
+
+    // Pending refill reminders — joins refill_reminders to the prospect/
+    // customer for name + phone (mirrors the desktop renderRefillReminders
+    // join). Non-admin agents only see reminders for their own clients.
+    // Reuses sendRefillWhatsApp / viewRefillProspect from the calendar chunk.
+    const mhomeOpenRefills = async () => {
+        UI.showModal('Refills Due', _mhomeSheetLoading, _mhomeSheetBtns);
+        try { await window._loadChunk('chunks/script-calendar.min.js'); } catch (_) {}
+        let reminders = [], prospects = [], customers = [];
+        try {
+            const [rR, pR, cR] = await Promise.all([
+                AppDataStore.query('refill_reminders', { status: 'pending' }).catch(() => []),
+                AppDataStore.getAll('prospects').catch(() => []),
+                AppDataStore.getAll('customers').catch(() => []),
+            ]);
+            reminders = rR || []; prospects = pR || []; customers = cR || [];
+        } catch (_) {}
+        if (!_mhomeOverlayOpen()) return;
+        const pMap = new Map(prospects.map(p => [String(p.id), p]));
+        const cMap = new Map(customers.map(c => [String(c.id), c]));
+        const isAdmin = isSystemAdmin(_state.cu);
+        const myId = String(_state.cu?.id);
+        const entityOf = (r) => r.prospect_id ? pMap.get(String(r.prospect_id)) : cMap.get(String(r.customer_id));
+        const rows = reminders
+            .map(r => ({ r, e: entityOf(r) }))
+            .filter(({ e }) => {
+                if (!e) return false;
+                if (isAdmin) return true;
+                const owner = e.responsible_agent_id || e.lead_agent_id;
+                return owner && String(owner) === myId;
+            })
+            .sort((a, b) => (Number(a.r.days_until_finish) || 0) - (Number(b.r.days_until_finish) || 0));
+        if (!rows.length) {
+            UI.showModal('Refills Due', _mhomeSheetEmpty('fas fa-prescription-bottle-medical', 'No refills due right now.'), _mhomeSheetBtns);
+            return;
+        }
+        const body = rows.map(({ r, e }) => {
+            const name = e?.full_name || 'Unknown contact';
+            const phone = e?.phone || '';
+            const dleft = Number(r.days_until_finish);
+            const days = !isNaN(dleft)
+                ? (dleft < 0 ? `<span style="color:#dc2626;font-weight:600;">${Math.abs(dleft)}d overdue</span>`
+                    : dleft === 0 ? `<span style="color:#dc2626;font-weight:600;">Due today</span>`
+                    : `<span style="color:#d97706;font-weight:600;">${dleft}d left</span>`)
+                : '';
+            const sent = r.status === 'whatsapp_sent' ? ' <span style="background:#dcfce7;color:#15803d;padding:1px 6px;border-radius:6px;font-size:10px;">✓ Sent</span>' : '';
+            return `
+            <div style="display:flex;align-items:center;gap:12px;padding:12px;background:var(--gray-50,#f9fafb);border-radius:12px;border-left:4px solid #f59e0b;">
+                <div style="flex:1;min-width:0;">
+                    <div style="font-weight:600;font-size:14px;color:var(--gray-800,#1f2937);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_mhomeEsc(name)}${sent}</div>
+                    <div style="font-size:12px;color:var(--gray-600,#4b5563);margin-top:2px;">💊 ${_mhomeEsc(r.product_name || 'Product')}</div>
+                    <div style="font-size:11px;margin-top:2px;">${days}</div>
+                </div>
+                <div style="display:flex;gap:6px;flex-shrink:0;">
+                    <button class="btn primary btn-sm" style="font-size:13px;padding:8px 12px;" onclick="event.stopPropagation();app.sendRefillWhatsApp(${r.id});" ${phone ? '' : 'disabled title="No phone number"'}><i class="fab fa-whatsapp"></i></button>
+                    <button class="btn secondary btn-sm" style="font-size:13px;padding:8px 10px;" onclick="event.stopPropagation();UI.hideModal();app.viewRefillProspect(${r.prospect_id || 'null'}, ${r.customer_id || 'null'});" title="View profile"><i class="fas fa-user"></i></button>
+                </div>
+            </div>`;
+        }).join('');
+        const head = `<div style="font-size:13px;color:var(--gray-500,#6b7280);margin:0 2px 2px;">${rows.length} pending refill${rows.length === 1 ? '' : 's'}</div>`;
+        UI.showModal('Refills Due', _mhomeSheetScroll(head + body), _mhomeSheetBtns);
+    };
+
+    // Inactive customers — same predicate as the home tile (status 'inactive',
+    // or last contact > 60 days ago). Tap a row to open the customer profile.
+    const mhomeOpenInactive = async () => {
+        UI.showModal('Inactive Clients', _mhomeSheetLoading, _mhomeSheetBtns);
+        let customers = [];
+        try { customers = await AppDataStore.getAll('customers').catch(() => []); } catch (_) {}
+        if (!_mhomeOverlayOpen()) return;
+        const sixtyAgo = Date.now() - 60 * 86400000;
+        const isInactive = (c) => {
+            if (c.status === 'inactive') return true;
+            const lc = c.last_contact_date || c.updated_at || c.created_at;
+            if (!lc) return false;
+            const t = new Date(lc).getTime();
+            return !isNaN(t) && t < sixtyAgo;
+        };
+        const daysSince = (c) => {
+            const lc = c.last_contact_date || c.updated_at || c.created_at;
+            const t = lc ? new Date(lc).getTime() : NaN;
+            return isNaN(t) ? null : Math.floor((Date.now() - t) / 86400000);
+        };
+        const rows = (customers || [])
+            .filter(isInactive)
+            .sort((a, b) => (daysSince(b) ?? 99999) - (daysSince(a) ?? 99999));
+        if (!rows.length) {
+            UI.showModal('Inactive Clients', _mhomeSheetEmpty('fas fa-user-check', 'No inactive clients — nicely kept up!'), _mhomeSheetBtns);
+            return;
+        }
+        const body = rows.map(c => {
+            const d = daysSince(c);
+            const sub = d == null ? 'Never contacted' : `Last contact ${d} day${d === 1 ? '' : 's'} ago`;
+            const phone = _mhomeEsc(c.phone || '');
+            return `
+            <div style="display:flex;align-items:center;gap:12px;padding:12px;background:var(--gray-50,#f9fafb);border-radius:12px;border-left:4px solid #8b5cf6;cursor:pointer;" onclick="UI.hideModal();app.showCustomerDetail(${c.id});">
+                <div style="width:38px;height:38px;border-radius:50%;background:#ede9fe;color:#6d28d9;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0;">${_mhomeEsc(_mhomeInitials(c.full_name))}</div>
+                <div style="flex:1;min-width:0;">
+                    <div style="font-weight:600;font-size:14px;color:var(--gray-800,#1f2937);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_mhomeEsc(c.full_name || 'Unknown')}</div>
+                    <div style="font-size:12px;color:var(--gray-500,#6b7280);margin-top:2px;">${_mhomeEsc(sub)}</div>
+                </div>
+                ${phone ? `<button class="btn primary btn-sm" style="font-size:13px;padding:8px 12px;flex-shrink:0;" onclick="event.stopPropagation();app.mhomeWa(${c.id ?? 'null'},'${phone}');" title="WhatsApp"><i class="fab fa-whatsapp"></i></button>` : ''}
+                <i class="fas fa-chevron-right" style="color:var(--gray-300,#d1d5db);font-size:12px;flex-shrink:0;"></i>
+            </div>`;
+        }).join('');
+        const head = `<div style="font-size:13px;color:var(--gray-500,#6b7280);margin:0 2px 2px;">${rows.length} inactive · longest first</div>`;
+        UI.showModal('Inactive Clients', _mhomeSheetScroll(head + body), _mhomeSheetBtns);
     };
 
     // ── Mobile Calendar (month grid) ─────────────────────────
@@ -1744,14 +1929,14 @@
                             <div class="mcal-coming-lbl">Tomorrow</div>
                         </div>
                     </button>
-                    <button class="mcal-coming-item refill" onclick="app.navigateTo('home')">
+                    <button class="mcal-coming-item refill" onclick="app.mhomeOpenRefills()">
                         <div class="ico"><i class="fas fa-prescription-bottle-medical"></i></div>
                         <div class="mcal-coming-text">
                             <div class="mcal-coming-num">${refillCount}<small>Refills</small></div>
                             <div class="mcal-coming-lbl">This Week</div>
                         </div>
                     </button>
-                    <button class="mcal-coming-item followup" onclick="app.navigateTo('home')">
+                    <button class="mcal-coming-item followup" onclick="app.mhomeOpenFollowups()">
                         <div class="ico"><i class="fas fa-user-clock"></i></div>
                         <div class="mcal-coming-text">
                             <div class="mcal-coming-num">${overdueFollowups}<small>Follow-ups</small></div>
@@ -1986,6 +2171,43 @@
         if (_mcalView === 'list') return showMobileCalendarAgenda(document.getElementById('content-viewport'));
         await showMobileCalendarView(document.getElementById('content-viewport'));
     };
+
+    // Re-render whichever mobile calendar sub-view (month/week/day/list) is
+    // currently on screen, keeping the same anchor month/day. Called by
+    // refreshCurrentView (script.js _VIEW_REFRESH.month) after an activity
+    // mutation: on mobile _currentView is always 'month', so the desktop
+    // renderCalendar() the map used before never touched this custom DOM —
+    // a deleted/created/edited event would linger until a full re-navigation.
+    // The dataChanged listener clears the mcal-acts cache *before* this runs,
+    // so the re-render refetches fresh and the stale row disappears.
+    const mcalRefreshActiveView = async () => {
+        const vp = document.getElementById('content-viewport');
+        if (!vp) return;
+        if (_mcalView === 'week') return showMobileCalendarWeek(vp);
+        if (_mcalView === 'day')  return showMobileCalendarDay(vp);
+        if (_mcalView === 'list') return showMobileCalendarAgenda(vp);
+        return showMobileCalendarView(vp);
+    };
+    // Tapping a calendar event jumps straight to the linked prospect/customer
+    // profile — the richer destination where the full timeline, meeting notes
+    // and follow-up actions live. Entity-less rows (events, agent meetings /
+    // trainings) and rows the viewer doesn't own fall back to the activity
+    // detail modal, which keeps the same privacy masking. Robust against a
+    // deleted/orphaned contact: if the lookup misses we drop back to details.
+    const mcalOpenEvent = async (activityId, prospectId, customerId) => {
+        try { UI.hideModal(); } catch (_) {}
+        try {
+            if (prospectId) {
+                const p = await AppDataStore.getById('prospects', prospectId);
+                if (p) { await window.app.showProspectDetail(prospectId); return; }
+            } else if (customerId) {
+                const c = await AppDataStore.getById('customers', customerId);
+                if (c) { await window.app.showCustomerDetail(customerId); return; }
+            }
+        } catch (e) { console.error(e); }
+        // No linked contact (or it was removed) — show the activity details.
+        try { if (window.app.viewActivityDetails) await window.app.viewActivityDetails(activityId); } catch (e) { console.error(e); }
+    };
     const mcalDayClick = (dateStr) => {
         const allDay    = _mcalByDate.get(dateStr) || [];
         const dayBdays  = allDay.filter(a => a._isBirthday);
@@ -2022,12 +2244,16 @@
             const type = a.activity_type || '';
             const pid = a.prospect_id || a.customer_id;
             const person = pid ? _mcalPersonMap.get(String(pid)) : null;
-            // Ownership gate: non-owners never see another agent's client name.
-            const name = (_mcalOwned(a) && person?.full_name) ? person.full_name : (a.activity_title || a.activity_type || '—');
+            // Ownership gate: non-owners never see another agent's client name
+            // — nor get routed into that agent's prospect/customer profile.
+            const owned = _mcalOwned(a);
+            const name = (owned && person?.full_name) ? person.full_name : (a.activity_title || a.activity_type || '—');
+            const _pArg = (owned && a.prospect_id) ? a.prospect_id : 'null';
+            const _cArg = (owned && a.customer_id) ? a.customer_id : 'null';
             const venue = a.venue_name || a.venue || a.location_address || '';
             const color = _mcalColorForType(type);
             return `
-                <div style="display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--gray-100);cursor:pointer;" onclick="(async()=>{try{UI.hideModal();await app.viewActivityDetails(${a.id});}catch(e){console.error(e);}})();">
+                <div style="display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--gray-100);cursor:pointer;" onclick="app.mcalOpenEvent(${a.id}, ${_pArg}, ${_cArg});">
                     <div style="min-width:42px;font-size:13px;font-weight:600;color:var(--gray-700);">${_mhomeEsc(time)}</div>
                     <span class="mcal-evt ${color}" style="white-space:nowrap;font-size:11px;padding:2px 7px;border-radius:4px;flex-shrink:0;">${_mhomeEsc(type)}</span>
                     <div style="flex:1;min-width:0;">
@@ -2133,15 +2359,20 @@
         const type = a.activity_type || '';
         const pid = a.prospect_id || a.customer_id;
         const person = pid ? _mcalPersonMap.get(String(pid)) : null;
-        const name = (_mcalOwned(a) && person?.full_name)
+        const owned = _mcalOwned(a);
+        const name = (owned && person?.full_name)
             ? person.full_name
             : (a.activity_title || a.activity_type || '—');
         const venue = a.venue_name || a.venue || a.location_address || '';
         const color = _mcalColorForType(type);
         const pendingClass = a._syncFailed ? ' sync-failed' : (a._pending ? ' pending' : '');
         const warnIcon = a._syncFailed ? '<i class="fas fa-exclamation-triangle" title="Not synced — will retry"></i> ' : '';
+        // Tap → linked prospect/customer profile (owner-only); entity-less or
+        // unsynced rows fall back to the activity detail modal via mcalOpenEvent.
+        const _pArg = (owned && a.prospect_id) ? a.prospect_id : 'null';
+        const _cArg = (owned && a.customer_id) ? a.customer_id : 'null';
         const click = a.id != null
-            ? `onclick="(async()=>{try{await app.viewActivityDetails(${a.id});}catch(e){console.error(e);}})();"`
+            ? `onclick="app.mcalOpenEvent(${a.id}, ${_pArg}, ${_cArg});"`
             : '';
         return `
             <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--gray-100);${a.id != null ? 'cursor:pointer;' : ''}" ${click}>
@@ -2945,6 +3176,9 @@
         showMobileMenu,
         showMobileHomeView,
         mhomeWa,
+        mhomeOpenFollowups,
+        mhomeOpenRefills,
+        mhomeOpenInactive,
         showMobileCalendarView,
         showMobileCalendarWeek,
         showMobileCalendarDay,
@@ -2954,7 +3188,9 @@
         mcalPrev,
         mcalNext,
         mcalToday,
+        mcalRefreshActiveView,
         mcalDayClick,
+        mcalOpenEvent,
         mcalOpenDay,
         mcalAddMeetUp,
         mcalTab,

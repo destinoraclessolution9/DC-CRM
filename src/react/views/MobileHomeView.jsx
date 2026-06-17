@@ -171,19 +171,19 @@ function AttentionCard({ rows }) {
 function Tiles({ tiles, peoplePending }) {
     return (
         <div className="mhome-tiles">
-            <button className="mhome-tile red" onClick={() => callArgs('navigateTo', 'calendar')}>
+            <button className="mhome-tile red" onClick={() => call('mhomeOpenFollowups')}>
                 <div className="mhome-tile-ico"><i className="fas fa-user-clock"></i></div>
                 <div className="mhome-tile-lbl">Overdue Follow-ups</div>
                 <div className="mhome-tile-num">{tiles.overdueFollowups}</div>
                 <div className="mhome-tile-arrow"><i className="fas fa-chevron-right"></i></div>
             </button>
-            <button className="mhome-tile wood" onClick={() => callArgs('navigateTo', 'prospects')}>
+            <button className="mhome-tile wood" onClick={() => call('mhomeOpenRefills')}>
                 <div className="mhome-tile-ico"><i className="fas fa-prescription-bottle-medical"></i></div>
                 <div className="mhome-tile-lbl">Refills Due</div>
                 <div className="mhome-tile-num">{tiles.refillCount}</div>
                 <div className="mhome-tile-arrow"><i className="fas fa-chevron-right"></i></div>
             </button>
-            <button className="mhome-tile purple" onClick={() => callArgs('navigateTo', 'prospects')}>
+            <button className="mhome-tile purple" onClick={() => call('mhomeOpenInactive')}>
                 <div className="mhome-tile-ico"><i className="fas fa-chart-column"></i></div>
                 <div className="mhome-tile-lbl">Inactive Clients</div>
                 <div className="mhome-tile-num">{peoplePending ? <Pend /> : tiles.inactiveCount}</div>
