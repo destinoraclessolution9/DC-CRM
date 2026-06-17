@@ -2346,8 +2346,16 @@ class DataStore {
             return { data: this._stripTombstones(tableName, data || []), count: count || 0, limit, offset };
         } catch (e) {
             console.error(`queryAdvanced error on ${tableName}:`, e);
-            // Fallback: filter cached/local data client-side with pagination
+            // Fallback: filter cached/local data client-side with pagination.
             const all = await this.getAll(tableName);
+            // Telemetry only (no cap — capping before the filter would return
+            // WRONG rows when matches sit beyond the slice). Surfaces the
+            // unbounded client-side fallback so a slow/large table is visible
+            // instead of silently degrading (the queryAdvanced server path is
+            // the place to fix with an index/RPC, not a lossy client cap).
+            if (all.length > 500) {
+                console.warn(`[DataStore] queryAdvanced fell back to client-side filter for '${tableName}' over ${all.length} rows (server path failed) — view may be slow; consider a server-side index/RPC.`);
+            }
             let filtered = [...all];
             // Multi-field OR scoping mirrors the PostgREST `or(...)` path above
             // so offline / fallback queries yield the same row set as the
