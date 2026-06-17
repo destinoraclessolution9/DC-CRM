@@ -44,7 +44,7 @@ Re-validation result (53 audit findings vs current live): **10 fixed by the big 
 - [ ] 3.4 Silent-catch sweep (~175 no-op `catch{}`) (#40) — low value + behavior-change risk; recommend skipping or doing last
 
 ## Wave 4 — Largest refactors (explicit go each)
-- [ ] 4.1 Namespace god-object: `app.register(...)` + aliases (#1)
+- [x] 4.1 God-object ownership registry (#1) — DONE + DEPLOYED (0774b24). All 30 `Object.assign(window.app,{...})` → `app.register('domain',{...})` across 29 chunks; register() (with dup-key warn + _registry) added top of script.js (loads before chunks). ci/audit.js + ci/snapshot.js parsers updated to recognize register() (verified 1303 exports still detected). Validated incrementally (gcal first), gate green, smoke 9/10 (only pre-existing Calendar get_calendar_window error — confirmed identical on HEAD via stash-compare). Runtime-equivalent. ⚠️ CI tooling now parses BOTH Object.assign AND app.register forms.
 - [ ] 4.2 Split `AppDataStore` into Net/Cache/Sync/Queue (#5)
 - [ ] 4.3 Split 9,965-line `script-prospects.js` (#36)
 - [ ] 4.4 `_appState` read-only + inline-onclick → delegation (#3/#6)
