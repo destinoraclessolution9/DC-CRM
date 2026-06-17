@@ -3846,6 +3846,151 @@
         return activity;
     };
 
+    // Pure HTML builder for viewActivityDetails — extracted verbatim so the
+    // orchestrator below keeps the same template string while staying a thin
+    // function. `esc`, `escapeHtml`, and `_state` are read from the enclosing
+    // closure (same as the inline code). Takes the locals the template reads.
+    const buildActivityDetailsContent = (activity, marketingEvent, _isOwnActivity, entityName, _entityIconBtn, _consultantId, _consultantName, _leadAgentName, attendeeHtml, isAttendeeType, entityOrphaned, activityId) => {
+        return `
+            <div class="activity-details">
+                <div class="detail-section">
+                    <h4>Activity Information</h4>
+                    <div class="info-row"><span class="info-label">Type:</span> <span>${escapeHtml(activity.activity_type || '')}</span></div>
+                    <div class="info-row"><span class="info-label">Title:</span> <span>${escapeHtml(marketingEvent?.event_title || marketingEvent?.title || activity.activity_title || 'N/A')}</span></div>
+                    <div class="info-row"><span class="info-label">Date:</span> <span>${escapeHtml(activity.activity_date || '')}</span></div>
+                    <div class="info-row"><span class="info-label">Time:</span> <span>${escapeHtml(activity.start_time || '')} - ${escapeHtml(activity.end_time || '')}</span></div>
+                    ${activity.activity_type !== 'EVENT' && _isOwnActivity ? `<div class="info-row"><span class="info-label">Entity:</span> <span style="display:inline-flex; align-items:center; flex-wrap:wrap; gap:4px;">${escapeHtml(entityName || '')}${_entityIconBtn}</span></div>` : ''}
+                    ${activity.location_address ? `<div class="info-row"><span class="info-label">Location:</span> <span>${escapeHtml(activity.location_address)}</span></div>` : ''}
+                    ${marketingEvent?.description ? `<div class="info-row" style="flex-direction:column; align-items:flex-start; gap:4px;"><div style="display:flex; align-items:center; gap:8px; width:100%;"><span class="info-label">Description:</span><button style="width:30px;height:30px;border-radius:50%;border:none;background:#25d366;color:#fff;font-size:17px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 8px rgba(37,211,102,0.4);flex-shrink:0;" onclick="event.stopPropagation();app.sendDescriptionInvite(${activity.id})" title="Send WhatsApp Invite"><i class="fab fa-whatsapp"></i></button></div><span style="white-space:pre-wrap; color:var(--gray-700);">${escapeHtml(marketingEvent.description)}</span></div>` : ''}
+                    ${activity.summary ? `<div class="info-row"><span class="info-label">Summary:</span> <span>${escapeHtml(activity.summary)}</span></div>` : ''}
+                </div>
+
+                ${marketingEvent ? `
+                <div class="detail-section">
+                    <h4>Event Details</h4>
+                    ${marketingEvent.ticket_price ? `<div class="info-row"><span class="info-label">Ticket Price:</span> <span>RM ${marketingEvent.ticket_price}</span></div>` : ''}
+                    ${marketingEvent.early_bird_price ? `<div class="info-row"><span class="info-label">Early Bird Price:</span> <span>RM ${marketingEvent.early_bird_price}</span></div>` : ''}
+                    ${marketingEvent.group_purchase_price ? `<div class="info-row"><span class="info-label">Group Purchase Price:</span> <span>RM ${marketingEvent.group_purchase_price}</span></div>` : ''}
+                    ${marketingEvent.duration ? `<div class="info-row"><span class="info-label">Duration:</span> <span>${esc(marketingEvent.duration)}</span></div>` : ''}
+                    ${marketingEvent.target_group ? `<div class="info-row"><span class="info-label">Target Group:</span> <span>${esc(marketingEvent.target_group)}</span></div>` : ''}
+                    ${marketingEvent.remarks ? `<div class="info-row"><span class="info-label">Remarks:</span> <span>${esc(marketingEvent.remarks)}</span></div>` : ''}
+                </div>
+                ` : ''}
+
+                ${isAttendeeType || !_isOwnActivity ? '' : `
+                <div class="detail-section">
+                    <h4>Consultant</h4>
+                    ${_consultantId
+                        ? `<div class="info-row"><span class="info-label">Consultant Name:</span> <span>✅ ${esc(_consultantName || 'Unknown')}</span></div>`
+                        : `<div class="info-row"><span class="info-label">Consultant Name:</span> <span>❌ Not Assigned</span></div>`}
+                </div>
+                `}
+
+                ${activity.activity_type !== 'EVENT' ? `
+                <div class="detail-section">
+                    <h4>Agents</h4>
+                    <div class="info-row"><span class="info-label">Lead:</span> <span>${esc(_leadAgentName || 'Unknown')}</span></div>
+                    ${activity.co_agents?.length ? `
+                        <div class="info-row" style="flex-direction:column;align-items:flex-start;gap:6px;">
+                            <span class="info-label">Co-Agents:</span>
+                            <div style="width:100%;">
+                                ${activity.co_agents.map(ca => {
+                                    const caStatus = ca.status || 'accepted';
+                                    const statusIcon = caStatus === 'accepted'
+                                        ? '<i class="fas fa-check-circle" style="color:#16a34a;margin-right:4px;" title="Accepted"></i>'
+                                        : caStatus === 'rejected'
+                                            ? '<i class="fas fa-times-circle" style="color:#dc2626;margin-right:4px;" title="Rejected"></i>'
+                                            : '<i class="fas fa-clock" style="color:#f59e0b;margin-right:4px;" title="Pending response"></i>';
+                                    const isMe = _state.cu && String(_state.cu.id) === String(ca.id);
+                                    const canRespond = isMe && caStatus === 'pending';
+                                    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--gray-100);">
+                                        <span>${statusIcon}<strong>${esc(ca.name)}</strong> <span style="font-size:11px;color:#888;">${esc(ca.co_role || '')}</span></span>
+                                        ${canRespond ? `
+                                        <span>
+                                            <button class="btn btn-sm" style="background:#dcfce7;color:#166534;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;margin-right:4px;" onclick="event.stopPropagation();app.respondCoAgentInvite(${activityId},'accepted')"><i class="fas fa-check"></i> Accept</button>
+                                            <button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;" onclick="event.stopPropagation();app.respondCoAgentInvite(${activityId},'rejected')"><i class="fas fa-times"></i> Reject</button>
+                                        </span>` : ''}
+                                    </div>`;
+                                }).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+                    ${activity.consultants?.length ? `
+                        <div class="info-row" style="flex-direction:column;align-items:flex-start;gap:6px;">
+                            <span class="info-label">Consultants:</span>
+                            <div style="width:100%;">
+                                ${activity.consultants.map(c => {
+                                    const statusIcon = c.status === 'accepted'
+                                        ? '<i class="fas fa-check-circle" style="color:#16a34a;margin-right:4px;" title="Accepted"></i>'
+                                        : c.status === 'rejected'
+                                            ? '<i class="fas fa-times-circle" style="color:#dc2626;margin-right:4px;" title="Rejected"></i>'
+                                            : '<i class="fas fa-clock" style="color:#f59e0b;margin-right:4px;" title="Pending response"></i>';
+                                    const isCurrentConsultant = _state.cu && _state.cu.id === c.id;
+                                    const canRespond = isCurrentConsultant && c.status === 'pending';
+                                    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--gray-100);">
+                                        <span>${statusIcon}<strong>${esc(c.name)}</strong> <span style="font-size:11px;color:#888;">${esc(c.role||'')}</span></span>
+                                        ${canRespond ? `
+                                        <span>
+                                            <button class="btn btn-sm" style="background:#dcfce7;color:#166534;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;margin-right:4px;" onclick="event.stopPropagation();app.respondConsultantInvite(${activityId},${c.id},'accepted')"><i class="fas fa-check"></i> Accept</button>
+                                            <button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;" onclick="event.stopPropagation();app.respondConsultantInvite(${activityId},${c.id},'rejected')"><i class="fas fa-times"></i> Reject</button>
+                                        </span>` : ''}
+                                    </div>`;
+                                }).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+                </div>
+                ` : ''}
+                ${attendeeHtml}
+                <div class="detail-section act-actions-section">
+                    <h4>Actions</h4>
+                    <div class="act-actions-list">
+                        ${(() => {
+                            const _MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP'];
+                            const _isMeetup = _MEETUP_TYPES.includes(activity.activity_type);
+                            const _entityId = activity.prospect_id || activity.customer_id;
+                            const _isProspect = !!activity.prospect_id;
+                            const _entityKind = _isProspect ? 'prospect' : 'customer';
+                            const _entityLabel = _isProspect ? 'Prospect' : 'Customer';
+                            // Orphaned link: skip the entity-dependent buttons (they would just
+                            // surface "record not found") and offer a single Repair action.
+                            if (entityOrphaned) {
+                                return `
+                            <button class="act-action-btn act-btn-profile" style="background:#fef3c7;border-color:#f59e0b;color:#92400e;" onclick="(async () => { await app.openActivityRepairModal(${activityId}); })()"><span class="act-icon"><i class="fas fa-link"></i></span><span class="act-label">Repair Link</span></button>
+                            <button class="act-action-btn act-btn-edit" onclick="app.editActivityTiming(${activityId})"><span class="act-icon"><i class="fas fa-pen"></i></span><span class="act-label">Edit</span></button>
+                            <button class="act-action-btn act-action-delete" onclick="(async () => { await app.deleteActivity(${activityId}); })()"><i class="fas fa-trash-alt"></i> Delete</button>`;
+                            }
+                            const _profileBtn = (_isMeetup && _entityId)
+                                ? `<button class="act-action-btn act-btn-profile" onclick="(async()=>{ const p=await AppDataStore.getById('${_entityKind}s',${_entityId}); if(!p){UI.toast.error('${_entityLabel} record not found');return;} UI.hideModal(); app.${_isProspect ? 'showProspectDetail' : 'showCustomerDetail'}(${_entityId}); })()"><span class="act-icon"><i class="fas fa-user"></i></span><span class="act-label">${_entityLabel}</span></button>`
+                                : '';
+                            const _cpsBtns = (activity.activity_type === 'CPS' && activity.prospect_id)
+                                ? `<button class="act-action-btn act-btn-doc" onclick="app.uploadCPSForm(${activityId}, ${activity.prospect_id})"><span class="act-icon"><i class="fas fa-file-upload"></i></span><span class="act-label">Upload CPS</span></button>
+                                   <button class="act-action-btn act-btn-doc" onclick="app.uploadAPUForm(${activityId}, ${activity.prospect_id})"><span class="act-icon"><i class="fas fa-file-alt"></i></span><span class="act-label">APU</span></button>`
+                                : '';
+                            const _outcomeBtn = (_isMeetup && _entityId)
+                                ? `<button class="act-action-btn act-btn-outcome" onclick="(async () => { await app.openMeetingOutcomeModal(${activityId}); })()"><span class="act-icon"><i class="fas fa-clipboard-check"></i></span><span class="act-label">Closing</span></button>`
+                                : '';
+                            const _notesBtn = (_isMeetup && _entityId)
+                                ? `<button class="act-action-btn act-btn-notes" onclick="(async () => { await app.openPostMeetupNotesModal(${activityId}, ${_entityId}); })()"><span class="act-icon"><i class="fas fa-sticky-note"></i></span><span class="act-label">Minutes</span></button>`
+                                : '';
+                            const _liveBtn = (_isMeetup || activity.activity_type === 'AGENT_TRAINING')
+                                ? `<button class="act-action-btn act-btn-edit" onclick="(async()=>{ UI.hideModal(); await app.openMeetingCapture(${activityId}); })()"><span class="act-icon"><i class="fas fa-microphone-alt"></i></span><span class="act-label">Live Notes</span></button>`
+                                : '';
+                            return `
+                            ${_profileBtn}
+                            ${_cpsBtns}
+                            <button class="act-action-btn act-btn-edit" onclick="app.editActivityTiming(${activityId})"><span class="act-icon"><i class="fas fa-pen"></i></span><span class="act-label">Edit</span></button>
+                            ${_outcomeBtn}
+                            ${_notesBtn}
+                            ${_liveBtn}
+                            <button class="act-action-btn act-action-delete" onclick="(async () => { await app.deleteActivity(${activityId}); })()"><i class="fas fa-trash-alt"></i> Delete</button>`;
+                        })()}
+                    </div>
+                </div>
+            </div>
+        `;
+    };
+
     const viewActivityDetails = async (activityId) => {
         // Hot cache hit: activity is in the yesterday→today+7 window pre-warmed by
         // the last renderCalendar(). Skip the network round-trip entirely so the
@@ -4051,144 +4196,7 @@
                 : `<button title="Open ${_entityIsProspect ? 'prospect' : 'customer'} profile" style="margin-left:8px; width:26px; height:26px; border-radius:50%; border:none; background:#dbeafe; color:#1e40af; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; font-size:13px;" onclick="event.stopPropagation();(async()=>{ const p=await AppDataStore.getById('${_entityIsProspect ? 'prospects' : 'customers'}', ${_entityActionId}); if(!p){UI.toast.error('${_entityIsProspect ? 'Prospect' : 'Customer'} record not found'); return;} UI.hideModal(); app.${_entityProfileFn}(${_entityActionId}); })()"><i class="fas fa-user-circle"></i></button>`)
             : '';
 
-        const content = `
-            <div class="activity-details">
-                <div class="detail-section">
-                    <h4>Activity Information</h4>
-                    <div class="info-row"><span class="info-label">Type:</span> <span>${escapeHtml(activity.activity_type || '')}</span></div>
-                    <div class="info-row"><span class="info-label">Title:</span> <span>${escapeHtml(marketingEvent?.event_title || marketingEvent?.title || activity.activity_title || 'N/A')}</span></div>
-                    <div class="info-row"><span class="info-label">Date:</span> <span>${escapeHtml(activity.activity_date || '')}</span></div>
-                    <div class="info-row"><span class="info-label">Time:</span> <span>${escapeHtml(activity.start_time || '')} - ${escapeHtml(activity.end_time || '')}</span></div>
-                    ${activity.activity_type !== 'EVENT' && _isOwnActivity ? `<div class="info-row"><span class="info-label">Entity:</span> <span style="display:inline-flex; align-items:center; flex-wrap:wrap; gap:4px;">${escapeHtml(entityName || '')}${_entityIconBtn}</span></div>` : ''}
-                    ${activity.location_address ? `<div class="info-row"><span class="info-label">Location:</span> <span>${escapeHtml(activity.location_address)}</span></div>` : ''}
-                    ${marketingEvent?.description ? `<div class="info-row" style="flex-direction:column; align-items:flex-start; gap:4px;"><div style="display:flex; align-items:center; gap:8px; width:100%;"><span class="info-label">Description:</span><button style="width:30px;height:30px;border-radius:50%;border:none;background:#25d366;color:#fff;font-size:17px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 8px rgba(37,211,102,0.4);flex-shrink:0;" onclick="event.stopPropagation();app.sendDescriptionInvite(${activity.id})" title="Send WhatsApp Invite"><i class="fab fa-whatsapp"></i></button></div><span style="white-space:pre-wrap; color:var(--gray-700);">${escapeHtml(marketingEvent.description)}</span></div>` : ''}
-                    ${activity.summary ? `<div class="info-row"><span class="info-label">Summary:</span> <span>${escapeHtml(activity.summary)}</span></div>` : ''}
-                </div>
-
-                ${marketingEvent ? `
-                <div class="detail-section">
-                    <h4>Event Details</h4>
-                    ${marketingEvent.ticket_price ? `<div class="info-row"><span class="info-label">Ticket Price:</span> <span>RM ${marketingEvent.ticket_price}</span></div>` : ''}
-                    ${marketingEvent.early_bird_price ? `<div class="info-row"><span class="info-label">Early Bird Price:</span> <span>RM ${marketingEvent.early_bird_price}</span></div>` : ''}
-                    ${marketingEvent.group_purchase_price ? `<div class="info-row"><span class="info-label">Group Purchase Price:</span> <span>RM ${marketingEvent.group_purchase_price}</span></div>` : ''}
-                    ${marketingEvent.duration ? `<div class="info-row"><span class="info-label">Duration:</span> <span>${esc(marketingEvent.duration)}</span></div>` : ''}
-                    ${marketingEvent.target_group ? `<div class="info-row"><span class="info-label">Target Group:</span> <span>${esc(marketingEvent.target_group)}</span></div>` : ''}
-                    ${marketingEvent.remarks ? `<div class="info-row"><span class="info-label">Remarks:</span> <span>${esc(marketingEvent.remarks)}</span></div>` : ''}
-                </div>
-                ` : ''}
-
-                ${isAttendeeType || !_isOwnActivity ? '' : `
-                <div class="detail-section">
-                    <h4>Consultant</h4>
-                    ${_consultantId
-                        ? `<div class="info-row"><span class="info-label">Consultant Name:</span> <span>✅ ${esc(_consultantName || 'Unknown')}</span></div>`
-                        : `<div class="info-row"><span class="info-label">Consultant Name:</span> <span>❌ Not Assigned</span></div>`}
-                </div>
-                `}
-
-                ${activity.activity_type !== 'EVENT' ? `
-                <div class="detail-section">
-                    <h4>Agents</h4>
-                    <div class="info-row"><span class="info-label">Lead:</span> <span>${esc(_leadAgentName || 'Unknown')}</span></div>
-                    ${activity.co_agents?.length ? `
-                        <div class="info-row" style="flex-direction:column;align-items:flex-start;gap:6px;">
-                            <span class="info-label">Co-Agents:</span>
-                            <div style="width:100%;">
-                                ${activity.co_agents.map(ca => {
-                                    const caStatus = ca.status || 'accepted';
-                                    const statusIcon = caStatus === 'accepted'
-                                        ? '<i class="fas fa-check-circle" style="color:#16a34a;margin-right:4px;" title="Accepted"></i>'
-                                        : caStatus === 'rejected'
-                                            ? '<i class="fas fa-times-circle" style="color:#dc2626;margin-right:4px;" title="Rejected"></i>'
-                                            : '<i class="fas fa-clock" style="color:#f59e0b;margin-right:4px;" title="Pending response"></i>';
-                                    const isMe = _state.cu && String(_state.cu.id) === String(ca.id);
-                                    const canRespond = isMe && caStatus === 'pending';
-                                    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--gray-100);">
-                                        <span>${statusIcon}<strong>${esc(ca.name)}</strong> <span style="font-size:11px;color:#888;">${esc(ca.co_role || '')}</span></span>
-                                        ${canRespond ? `
-                                        <span>
-                                            <button class="btn btn-sm" style="background:#dcfce7;color:#166534;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;margin-right:4px;" onclick="event.stopPropagation();app.respondCoAgentInvite(${activityId},'accepted')"><i class="fas fa-check"></i> Accept</button>
-                                            <button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;" onclick="event.stopPropagation();app.respondCoAgentInvite(${activityId},'rejected')"><i class="fas fa-times"></i> Reject</button>
-                                        </span>` : ''}
-                                    </div>`;
-                                }).join('')}
-                            </div>
-                        </div>
-                    ` : ''}
-                    ${activity.consultants?.length ? `
-                        <div class="info-row" style="flex-direction:column;align-items:flex-start;gap:6px;">
-                            <span class="info-label">Consultants:</span>
-                            <div style="width:100%;">
-                                ${activity.consultants.map(c => {
-                                    const statusIcon = c.status === 'accepted'
-                                        ? '<i class="fas fa-check-circle" style="color:#16a34a;margin-right:4px;" title="Accepted"></i>'
-                                        : c.status === 'rejected'
-                                            ? '<i class="fas fa-times-circle" style="color:#dc2626;margin-right:4px;" title="Rejected"></i>'
-                                            : '<i class="fas fa-clock" style="color:#f59e0b;margin-right:4px;" title="Pending response"></i>';
-                                    const isCurrentConsultant = _state.cu && _state.cu.id === c.id;
-                                    const canRespond = isCurrentConsultant && c.status === 'pending';
-                                    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--gray-100);">
-                                        <span>${statusIcon}<strong>${esc(c.name)}</strong> <span style="font-size:11px;color:#888;">${esc(c.role||'')}</span></span>
-                                        ${canRespond ? `
-                                        <span>
-                                            <button class="btn btn-sm" style="background:#dcfce7;color:#166534;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;margin-right:4px;" onclick="event.stopPropagation();app.respondConsultantInvite(${activityId},${c.id},'accepted')"><i class="fas fa-check"></i> Accept</button>
-                                            <button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;" onclick="event.stopPropagation();app.respondConsultantInvite(${activityId},${c.id},'rejected')"><i class="fas fa-times"></i> Reject</button>
-                                        </span>` : ''}
-                                    </div>`;
-                                }).join('')}
-                            </div>
-                        </div>
-                    ` : ''}
-                </div>
-                ` : ''}
-                ${attendeeHtml}
-                <div class="detail-section act-actions-section">
-                    <h4>Actions</h4>
-                    <div class="act-actions-list">
-                        ${(() => {
-                            const _MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP'];
-                            const _isMeetup = _MEETUP_TYPES.includes(activity.activity_type);
-                            const _entityId = activity.prospect_id || activity.customer_id;
-                            const _isProspect = !!activity.prospect_id;
-                            const _entityKind = _isProspect ? 'prospect' : 'customer';
-                            const _entityLabel = _isProspect ? 'Prospect' : 'Customer';
-                            // Orphaned link: skip the entity-dependent buttons (they would just
-                            // surface "record not found") and offer a single Repair action.
-                            if (entityOrphaned) {
-                                return `
-                            <button class="act-action-btn act-btn-profile" style="background:#fef3c7;border-color:#f59e0b;color:#92400e;" onclick="(async () => { await app.openActivityRepairModal(${activityId}); })()"><span class="act-icon"><i class="fas fa-link"></i></span><span class="act-label">Repair Link</span></button>
-                            <button class="act-action-btn act-btn-edit" onclick="app.editActivityTiming(${activityId})"><span class="act-icon"><i class="fas fa-pen"></i></span><span class="act-label">Edit</span></button>
-                            <button class="act-action-btn act-action-delete" onclick="(async () => { await app.deleteActivity(${activityId}); })()"><i class="fas fa-trash-alt"></i> Delete</button>`;
-                            }
-                            const _profileBtn = (_isMeetup && _entityId)
-                                ? `<button class="act-action-btn act-btn-profile" onclick="(async()=>{ const p=await AppDataStore.getById('${_entityKind}s',${_entityId}); if(!p){UI.toast.error('${_entityLabel} record not found');return;} UI.hideModal(); app.${_isProspect ? 'showProspectDetail' : 'showCustomerDetail'}(${_entityId}); })()"><span class="act-icon"><i class="fas fa-user"></i></span><span class="act-label">${_entityLabel}</span></button>`
-                                : '';
-                            const _cpsBtns = (activity.activity_type === 'CPS' && activity.prospect_id)
-                                ? `<button class="act-action-btn act-btn-doc" onclick="app.uploadCPSForm(${activityId}, ${activity.prospect_id})"><span class="act-icon"><i class="fas fa-file-upload"></i></span><span class="act-label">Upload CPS</span></button>
-                                   <button class="act-action-btn act-btn-doc" onclick="app.uploadAPUForm(${activityId}, ${activity.prospect_id})"><span class="act-icon"><i class="fas fa-file-alt"></i></span><span class="act-label">APU</span></button>`
-                                : '';
-                            const _outcomeBtn = (_isMeetup && _entityId)
-                                ? `<button class="act-action-btn act-btn-outcome" onclick="(async () => { await app.openMeetingOutcomeModal(${activityId}); })()"><span class="act-icon"><i class="fas fa-clipboard-check"></i></span><span class="act-label">Closing</span></button>`
-                                : '';
-                            const _notesBtn = (_isMeetup && _entityId)
-                                ? `<button class="act-action-btn act-btn-notes" onclick="(async () => { await app.openPostMeetupNotesModal(${activityId}, ${_entityId}); })()"><span class="act-icon"><i class="fas fa-sticky-note"></i></span><span class="act-label">Minutes</span></button>`
-                                : '';
-                            const _liveBtn = (_isMeetup || activity.activity_type === 'AGENT_TRAINING')
-                                ? `<button class="act-action-btn act-btn-edit" onclick="(async()=>{ UI.hideModal(); await app.openMeetingCapture(${activityId}); })()"><span class="act-icon"><i class="fas fa-microphone-alt"></i></span><span class="act-label">Live Notes</span></button>`
-                                : '';
-                            return `
-                            ${_profileBtn}
-                            ${_cpsBtns}
-                            <button class="act-action-btn act-btn-edit" onclick="app.editActivityTiming(${activityId})"><span class="act-icon"><i class="fas fa-pen"></i></span><span class="act-label">Edit</span></button>
-                            ${_outcomeBtn}
-                            ${_notesBtn}
-                            ${_liveBtn}
-                            <button class="act-action-btn act-action-delete" onclick="(async () => { await app.deleteActivity(${activityId}); })()"><i class="fas fa-trash-alt"></i> Delete</button>`;
-                        })()}
-                    </div>
-                </div>
-            </div>
-        `;
+        const content = buildActivityDetailsContent(activity, marketingEvent, _isOwnActivity, entityName, _entityIconBtn, _consultantId, _consultantName, _leadAgentName, attendeeHtml, isAttendeeType, entityOrphaned, activityId);
 
         UI.showModal('Activity Details', content, []);
     };

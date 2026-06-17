@@ -102,39 +102,8 @@
 
     // ========== PHASE 2: ACTIVITY MODAL FUNCTIONS ==========
 
-    const openActivityModal = async (prefillDate = null, prospectId = null, activity = null) => {
-        const today = new Date().toISOString().split('T')[0];
-
-        // Reset all temporary state to avoid interference between uses
-        _state.sat = [];
-        _state.sca = [];
-        _state.scon = [];
-        _state.se = null;
-        _state.sr = null;
-        window._cpsDuplicateConfirmed = false;
-
-        // Warm the prospect/customer search cache in the background so the
-        // "Select Existing Prospect/Customer" box answers instantly on the first
-        // keystroke instead of freezing on a multi-table fetch mid-typing.
-        // Reset the timestamp first so a freshly-added prospect is re-fetched.
-        _state.sects = 0;
-        _getSearchEntitiesCached().catch(() => {});
-
-        // Pre-fetch lookup data BEFORE building the template (safer than await inside template literals).
-        // Cached helpers turn this from two network round-trips per modal open into
-        // an instant cache hit after the first call — which is the difference
-        // between a snappy day-tap and a 1-3s freeze on mobile.
-        const _venueData = await _getVenuesCached();
-        const _venueOptions = (_venueData || [])
-            .sort((a, b) => (a.sequence || 0) - (b.sequence || 0))
-            .map(v => `<option value="${v.name} | ${v.location}">${v.name} | ${v.location}</option>`)
-            .join('');
-        const _productOptions = (await _getProductsCached())
-            .filter(p => p.is_active !== false)
-            .map(p => `<option value="${p.name}">${p.name}</option>`)
-            .join('') || '<option value="">No products available</option>';
-
-        const modalContent = `
+    const buildActivityModalContent = (prefillDate, today, _venueOptions, _productOptions) => {
+        return `
             <div class="activity-modal-form">
                 <div class="form-group">
                     <label>Activity Type <span class="required">*</span></label>
@@ -378,6 +347,41 @@
                 </div>
             </div>
         `;
+    };
+
+    const openActivityModal = async (prefillDate = null, prospectId = null, activity = null) => {
+        const today = new Date().toISOString().split('T')[0];
+
+        // Reset all temporary state to avoid interference between uses
+        _state.sat = [];
+        _state.sca = [];
+        _state.scon = [];
+        _state.se = null;
+        _state.sr = null;
+        window._cpsDuplicateConfirmed = false;
+
+        // Warm the prospect/customer search cache in the background so the
+        // "Select Existing Prospect/Customer" box answers instantly on the first
+        // keystroke instead of freezing on a multi-table fetch mid-typing.
+        // Reset the timestamp first so a freshly-added prospect is re-fetched.
+        _state.sects = 0;
+        _getSearchEntitiesCached().catch(() => {});
+
+        // Pre-fetch lookup data BEFORE building the template (safer than await inside template literals).
+        // Cached helpers turn this from two network round-trips per modal open into
+        // an instant cache hit after the first call — which is the difference
+        // between a snappy day-tap and a 1-3s freeze on mobile.
+        const _venueData = await _getVenuesCached();
+        const _venueOptions = (_venueData || [])
+            .sort((a, b) => (a.sequence || 0) - (b.sequence || 0))
+            .map(v => `<option value="${v.name} | ${v.location}">${v.name} | ${v.location}</option>`)
+            .join('');
+        const _productOptions = (await _getProductsCached())
+            .filter(p => p.is_active !== false)
+            .map(p => `<option value="${p.name}">${p.name}</option>`)
+            .join('') || '<option value="">No products available</option>';
+
+        const modalContent = buildActivityModalContent(prefillDate, today, _venueOptions, _productOptions);
 
         UI.showModal('Quick Add Activity', modalContent, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },

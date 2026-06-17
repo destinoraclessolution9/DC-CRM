@@ -863,6 +863,77 @@ const calculateProgramProgress = async (program, agentId) => {
     return { targets, qualified: allHit };
 };
 
+// Pure HTML builder for a single Special Program card — extracted from the
+// renderSpecialPrograms loop body (runs after the per-program await resolves;
+// no awaits / no DOM / no early returns of its own).
+const buildSpecialProgramCardHtml = (program, partProgress, qualifiedCount, parts, daysLeft, isExpired, canManage) => {
+    const partsHtml = partProgress.length > 0 ? `
+            <table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:12px;">
+                <thead>
+                    <tr style="background:var(--gray-50,#f7f4ed);">
+                        <th scope="col" style="text-align:left;padding:8px;border-bottom:1px solid var(--gray-200);">Agent</th>
+                        ${program.sales_target > 0 ? '<th scope="col" style="text-align:left;padding:8px;border-bottom:1px solid var(--gray-200);">Sales</th>' : ''}
+                        ${program.new_customers_target > 0 ? '<th scope="col" style="text-align:left;padding:8px;border-bottom:1px solid var(--gray-200);">New Customers</th>' : ''}
+                        ${program.cps_target > 0 ? '<th scope="col" style="text-align:left;padding:8px;border-bottom:1px solid var(--gray-200);">CPS</th>' : ''}
+                        <th scope="col" style="text-align:center;padding:8px;border-bottom:1px solid var(--gray-200);">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${partProgress.map(p => {
+                        const barsHtml = (metric) => {
+                            const t = p.progress.targets.find(t => t.label === metric);
+                            if (!t) return '';
+                            const color = t.actual >= t.target ? '#16a34a' : (t.pct >= 60 ? '#f59e0b' : '#dc2626');
+                            return `
+                                <td style="padding:8px;border-bottom:1px solid var(--gray-100);">
+                                    <div style="font-size:11px;margin-bottom:2px;">${t.display}</div>
+                                    <div style="background:#eee;border-radius:4px;height:6px;overflow:hidden;">
+                                        <div style="background:${color};height:100%;width:${t.pct}%;transition:width .3s;"></div>
+                                    </div>
+                                </td>`;
+                        };
+                        const statusBadge = p.progress.qualified
+                            ? '<span style="background:#dcfce7;color:#166534;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;">✓ Qualified</span>'
+                            : '<span style="background:#fef3c7;color:#92400e;padding:3px 10px;border-radius:12px;font-size:11px;">In Progress</span>';
+                        return `
+                            <tr>
+                                <td style="padding:8px;border-bottom:1px solid var(--gray-100);"><strong>${esc(p.agentName)}</strong><br/><span style="font-size:10px;color:var(--gray-400);">${esc(p.agentRole)}</span></td>
+                                ${program.sales_target > 0 ? barsHtml('Total Sales') : ''}
+                                ${program.new_customers_target > 0 ? barsHtml('New Customers') : ''}
+                                ${program.cps_target > 0 ? barsHtml('CPS Count') : ''}
+                                <td style="padding:8px;border-bottom:1px solid var(--gray-100);text-align:center;">${statusBadge}</td>
+                            </tr>`;
+                    }).join('')}
+                </tbody>
+            </table>` : '<p style="color:var(--gray-400);text-align:center;padding:16px;margin:12px 0 0;">No participants assigned yet.</p>';
+
+    const manageBtns = canManage ? `
+            <button class="btn secondary btn-sm" onclick="app.openSpecialProgramModal(${program.id})" title="Edit"><i class="fas fa-edit"></i></button>
+            <button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;" onclick="app.deleteSpecialProgram(${program.id})" title="Delete"><i class="fas fa-trash"></i></button>
+        ` : '';
+
+    return `
+            <div class="card" style="padding:20px;margin-bottom:16px;${isExpired ? 'opacity:0.75;' : ''}">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+                    <div style="flex:1;">
+                        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                            <h3 style="margin:0;font-size:16px;">🏆 ${esc(program.program_name || 'Untitled Program')}</h3>
+                            ${isExpired ? '<span style="background:#f3f4f6;color:#6b7280;padding:3px 8px;border-radius:10px;font-size:11px;">EXPIRED</span>' : `<span style="background:#fef3c7;color:#92400e;padding:3px 8px;border-radius:10px;font-size:11px;">${daysLeft} days left</span>`}
+                        </div>
+                        <div style="font-size:13px;color:var(--gray-500);margin-top:4px;">
+                            🎁 <strong>${esc(program.reward || '—')}</strong>
+                            &nbsp;·&nbsp; ${program.start_date || '?'} to ${program.end_date || '?'}
+                            &nbsp;·&nbsp; ${parts.length} participant${parts.length===1?'':'s'}
+                            ${qualifiedCount > 0 ? `&nbsp;·&nbsp; <span style="color:#16a34a;font-weight:600;">${qualifiedCount} qualified</span>` : ''}
+                        </div>
+                        ${program.description ? `<p style="font-size:12px;color:var(--gray-500);margin:6px 0 0;">${esc(program.description)}</p>` : ''}
+                    </div>
+                    <div style="display:flex;gap:6px;">${manageBtns}</div>
+                </div>
+                ${partsHtml}
+            </div>`;
+};
+
 // Render the Special Programs section on the KPI dashboard
 const renderSpecialPrograms = async () => {
     const [programs, allParts, users] = await Promise.all([
@@ -911,71 +982,7 @@ const renderSpecialPrograms = async () => {
         // Count how many qualified
         const qualifiedCount = partProgress.filter(p => p.progress.qualified).length;
 
-        const partsHtml = partProgress.length > 0 ? `
-            <table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:12px;">
-                <thead>
-                    <tr style="background:var(--gray-50,#f7f4ed);">
-                        <th scope="col" style="text-align:left;padding:8px;border-bottom:1px solid var(--gray-200);">Agent</th>
-                        ${program.sales_target > 0 ? '<th scope="col" style="text-align:left;padding:8px;border-bottom:1px solid var(--gray-200);">Sales</th>' : ''}
-                        ${program.new_customers_target > 0 ? '<th scope="col" style="text-align:left;padding:8px;border-bottom:1px solid var(--gray-200);">New Customers</th>' : ''}
-                        ${program.cps_target > 0 ? '<th scope="col" style="text-align:left;padding:8px;border-bottom:1px solid var(--gray-200);">CPS</th>' : ''}
-                        <th scope="col" style="text-align:center;padding:8px;border-bottom:1px solid var(--gray-200);">Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${partProgress.map(p => {
-                        const barsHtml = (metric) => {
-                            const t = p.progress.targets.find(t => t.label === metric);
-                            if (!t) return '';
-                            const color = t.actual >= t.target ? '#16a34a' : (t.pct >= 60 ? '#f59e0b' : '#dc2626');
-                            return `
-                                <td style="padding:8px;border-bottom:1px solid var(--gray-100);">
-                                    <div style="font-size:11px;margin-bottom:2px;">${t.display}</div>
-                                    <div style="background:#eee;border-radius:4px;height:6px;overflow:hidden;">
-                                        <div style="background:${color};height:100%;width:${t.pct}%;transition:width .3s;"></div>
-                                    </div>
-                                </td>`;
-                        };
-                        const statusBadge = p.progress.qualified
-                            ? '<span style="background:#dcfce7;color:#166534;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;">✓ Qualified</span>'
-                            : '<span style="background:#fef3c7;color:#92400e;padding:3px 10px;border-radius:12px;font-size:11px;">In Progress</span>';
-                        return `
-                            <tr>
-                                <td style="padding:8px;border-bottom:1px solid var(--gray-100);"><strong>${esc(p.agentName)}</strong><br/><span style="font-size:10px;color:var(--gray-400);">${esc(p.agentRole)}</span></td>
-                                ${program.sales_target > 0 ? barsHtml('Total Sales') : ''}
-                                ${program.new_customers_target > 0 ? barsHtml('New Customers') : ''}
-                                ${program.cps_target > 0 ? barsHtml('CPS Count') : ''}
-                                <td style="padding:8px;border-bottom:1px solid var(--gray-100);text-align:center;">${statusBadge}</td>
-                            </tr>`;
-                    }).join('')}
-                </tbody>
-            </table>` : '<p style="color:var(--gray-400);text-align:center;padding:16px;margin:12px 0 0;">No participants assigned yet.</p>';
-
-        const manageBtns = canManage ? `
-            <button class="btn secondary btn-sm" onclick="app.openSpecialProgramModal(${program.id})" title="Edit"><i class="fas fa-edit"></i></button>
-            <button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;" onclick="app.deleteSpecialProgram(${program.id})" title="Delete"><i class="fas fa-trash"></i></button>
-        ` : '';
-
-        cards.push(`
-            <div class="card" style="padding:20px;margin-bottom:16px;${isExpired ? 'opacity:0.75;' : ''}">
-                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
-                    <div style="flex:1;">
-                        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                            <h3 style="margin:0;font-size:16px;">🏆 ${esc(program.program_name || 'Untitled Program')}</h3>
-                            ${isExpired ? '<span style="background:#f3f4f6;color:#6b7280;padding:3px 8px;border-radius:10px;font-size:11px;">EXPIRED</span>' : `<span style="background:#fef3c7;color:#92400e;padding:3px 8px;border-radius:10px;font-size:11px;">${daysLeft} days left</span>`}
-                        </div>
-                        <div style="font-size:13px;color:var(--gray-500);margin-top:4px;">
-                            🎁 <strong>${esc(program.reward || '—')}</strong>
-                            &nbsp;·&nbsp; ${program.start_date || '?'} to ${program.end_date || '?'}
-                            &nbsp;·&nbsp; ${parts.length} participant${parts.length===1?'':'s'}
-                            ${qualifiedCount > 0 ? `&nbsp;·&nbsp; <span style="color:#16a34a;font-weight:600;">${qualifiedCount} qualified</span>` : ''}
-                        </div>
-                        ${program.description ? `<p style="font-size:12px;color:var(--gray-500);margin:6px 0 0;">${esc(program.description)}</p>` : ''}
-                    </div>
-                    <div style="display:flex;gap:6px;">${manageBtns}</div>
-                </div>
-                ${partsHtml}
-            </div>`);
+        cards.push(buildSpecialProgramCardHtml(program, partProgress, qualifiedCount, parts, daysLeft, isExpired, canManage));
     }
 
     return `
@@ -986,57 +993,9 @@ const renderSpecialPrograms = async () => {
         ${cards.join('')}`;
 };
 
-// ===== Special Programs Table (Marketing List tab) =====
-// Flat KPI-style table — one row per (program × agent), showing how much they made and how far to target
-const renderSpecialProgramsTable = async () => {
-    const [programs, allParts, users] = await Promise.all([
-        AppDataStore.getAll('special_programs'),
-        AppDataStore.getAll('special_program_participants'),
-        AppDataStore.getAll('users')
-    ]);
-    const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
-    const active = programs.filter(p => p.status !== 'cancelled' && p.status !== 'deleted');
-    active.sort((a, b) => (a.end_date || '').localeCompare(b.end_date || ''));
-
-    const canManage = isTeamLeaderOrAbove(_currentUser);
-    const today = _today();
-
-    if (active.length === 0) {
-        return `
-            <div class="card" style="padding:32px;border:2px dashed var(--gray-200);text-align:center;">
-                <h3 style="margin:0 0 8px;">🏆 No Active Special Programs</h3>
-                <p style="color:var(--gray-400);margin:0;">${canManage ? 'Click "New Program" to launch a new challenge for selected agents.' : 'No special programs have been launched yet.'}</p>
-            </div>`;
-    }
-
-    // Build flat rows: one per (program, participant)
-    const rows = [];
-    for (const program of active) {
-        const parts = allParts.filter(p => p.program_id === program.id);
-        const isExpired = program.end_date && today > program.end_date;
-        const daysLeft = program.end_date ? Math.max(0, Math.ceil((new Date(program.end_date) - new Date(today)) / 86400000)) : 0;
-
-        if (parts.length === 0) {
-            rows.push({
-                program, isExpired, daysLeft,
-                agentName: '—', agentRole: '',
-                progress: { targets: [], qualified: false },
-                noParticipants: true
-            });
-            continue;
-        }
-        for (const part of parts) {
-            const progress = await calculateProgramProgress(program, part.agent_id);
-            rows.push({
-                program, isExpired, daysLeft,
-                agentId: part.agent_id,
-                agentName: userMap[part.agent_id]?.full_name || `Agent #${part.agent_id}`,
-                agentRole: userMap[part.agent_id]?.role || '',
-                progress
-            });
-        }
-    }
-
+// Pure HTML builder for the Special Programs flat table — extracted from
+// renderSpecialProgramsTable (no awaits / no DOM / no early returns).
+const buildSpecialProgramsTableHtml = (rows, canManage) => {
     const fmtRM = (n) => 'RM ' + (Number(n) || 0).toLocaleString();
     const cell = (t) => {
         if (!t) return '<td style="padding:10px;color:var(--gray-300);text-align:center;">—</td>';
@@ -1112,27 +1071,63 @@ const renderSpecialProgramsTable = async () => {
         </div>`;
 };
 
-// Open create/edit modal for a special program
-const openSpecialProgramModal = async (programId = null) => {
-    const existing = programId ? (await AppDataStore.getAll('special_programs')).find(p => p.id === programId) : null;
-    const participants = programId
-        ? (await AppDataStore.getAll('special_program_participants')).filter(p => p.program_id === programId)
-        : [];
-    const selectedIds = new Set(participants.map(p => p.agent_id));
+// ===== Special Programs Table (Marketing List tab) =====
+// Flat KPI-style table — one row per (program × agent), showing how much they made and how far to target
+const renderSpecialProgramsTable = async () => {
+    const [programs, allParts, users] = await Promise.all([
+        AppDataStore.getAll('special_programs'),
+        AppDataStore.getAll('special_program_participants'),
+        AppDataStore.getAll('users')
+    ]);
+    const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
+    const active = programs.filter(p => p.status !== 'cancelled' && p.status !== 'deleted');
+    active.sort((a, b) => (a.end_date || '').localeCompare(b.end_date || ''));
 
-    // Pull eligible agents: Level 6-12 (Senior Consultant through Ambassador)
-    const allUsers = await AppDataStore.getAll('users');
-    const eligible = allUsers.filter(u => {
-        if (u.status === 'deleted') return false;
-        const m = u.role?.match(/Level\s*(\d+)/);
-        if (!m) return false;
-        const lvl = parseInt(m[1]);
-        return lvl >= 6 && lvl <= 12;
-    });
+    const canManage = isTeamLeaderOrAbove(_currentUser);
+    const today = _today();
 
-    const todayStr = _today();
-    const defaultEnd = (() => { const d = new Date(); d.setDate(d.getDate() + 60); return d.toISOString().slice(0, 10); })();
+    if (active.length === 0) {
+        return `
+            <div class="card" style="padding:32px;border:2px dashed var(--gray-200);text-align:center;">
+                <h3 style="margin:0 0 8px;">🏆 No Active Special Programs</h3>
+                <p style="color:var(--gray-400);margin:0;">${canManage ? 'Click "New Program" to launch a new challenge for selected agents.' : 'No special programs have been launched yet.'}</p>
+            </div>`;
+    }
 
+    // Build flat rows: one per (program, participant)
+    const rows = [];
+    for (const program of active) {
+        const parts = allParts.filter(p => p.program_id === program.id);
+        const isExpired = program.end_date && today > program.end_date;
+        const daysLeft = program.end_date ? Math.max(0, Math.ceil((new Date(program.end_date) - new Date(today)) / 86400000)) : 0;
+
+        if (parts.length === 0) {
+            rows.push({
+                program, isExpired, daysLeft,
+                agentName: '—', agentRole: '',
+                progress: { targets: [], qualified: false },
+                noParticipants: true
+            });
+            continue;
+        }
+        for (const part of parts) {
+            const progress = await calculateProgramProgress(program, part.agent_id);
+            rows.push({
+                program, isExpired, daysLeft,
+                agentId: part.agent_id,
+                agentName: userMap[part.agent_id]?.full_name || `Agent #${part.agent_id}`,
+                agentRole: userMap[part.agent_id]?.role || '',
+                progress
+            });
+        }
+    }
+
+    return buildSpecialProgramsTableHtml(rows, canManage);
+};
+
+// Pure HTML builder for the Special Program create/edit modal body — extracted
+// from openSpecialProgramModal (no awaits / no DOM / no early returns).
+const buildSpecialProgramModalContent = (existing, eligible, selectedIds, todayStr, defaultEnd) => {
     const agentRows = eligible.map(u => `
         <tr>
             <td style="padding:6px 8px;"><input type="checkbox" class="sp-agent-cb" value="${u.id}" ${selectedIds.has(u.id) ? 'checked' : ''}></td>
@@ -1140,7 +1135,7 @@ const openSpecialProgramModal = async (programId = null) => {
             <td style="padding:6px 8px;font-size:11px;color:var(--gray-500);">${esc(u.role || '—')}</td>
         </tr>`).join('');
 
-    const content = `
+    return `
         <div style="max-height:75vh;overflow-y:auto;padding-right:4px;">
             <h4 style="margin:0 0 10px;">Program Details</h4>
             <div class="form-group"><label>Program Name *</label>
@@ -1182,6 +1177,30 @@ const openSpecialProgramModal = async (programId = null) => {
                 </table>
             </div>
         </div>`;
+};
+
+// Open create/edit modal for a special program
+const openSpecialProgramModal = async (programId = null) => {
+    const existing = programId ? (await AppDataStore.getAll('special_programs')).find(p => p.id === programId) : null;
+    const participants = programId
+        ? (await AppDataStore.getAll('special_program_participants')).filter(p => p.program_id === programId)
+        : [];
+    const selectedIds = new Set(participants.map(p => p.agent_id));
+
+    // Pull eligible agents: Level 6-12 (Senior Consultant through Ambassador)
+    const allUsers = await AppDataStore.getAll('users');
+    const eligible = allUsers.filter(u => {
+        if (u.status === 'deleted') return false;
+        const m = u.role?.match(/Level\s*(\d+)/);
+        if (!m) return false;
+        const lvl = parseInt(m[1]);
+        return lvl >= 6 && lvl <= 12;
+    });
+
+    const todayStr = _today();
+    const defaultEnd = (() => { const d = new Date(); d.setDate(d.getDate() + 60); return d.toISOString().slice(0, 10); })();
+
+    const content = buildSpecialProgramModalContent(existing, eligible, selectedIds, todayStr, defaultEnd);
 
     UI.showModal(existing ? 'Edit Special Program' : 'New Special Program', content, [
         { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },

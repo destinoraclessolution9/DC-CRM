@@ -178,11 +178,11 @@ const showRankingPerformanceView = async (container) => {
 };
 
 // ========== FEATURE: WORKFLOW AUTOMATION ENGINE ==========
-const showWorkflowAutomationView = async (container) => {
-    _state.cv = 'workflows';
-    const workflows = await AppDataStore.getAll('automation_workflows');
-
-    container.innerHTML = `
+// Pure HTML builder for the workflow automation view shell. Reads the fetched
+// `workflows` array; calls renderWorkflowCard/renderWorkflowTemplate (defined
+// below in this same module scope, initialized before this runs at render time)
+// and escapeHtml. No awaits / DOM mutation — orchestrator assigns the result.
+const buildWorkflowAutomationHtml = (workflows) => `
         <div class="workflow-view">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
                 <div>
@@ -224,6 +224,12 @@ const showWorkflowAutomationView = async (container) => {
             </div>
         </div>
     `;
+
+const showWorkflowAutomationView = async (container) => {
+    _state.cv = 'workflows';
+    const workflows = await AppDataStore.getAll('automation_workflows');
+
+    container.innerHTML = buildWorkflowAutomationHtml(workflows);
 };
 
 const renderWorkflowCard = (w) => {
@@ -642,6 +648,33 @@ const computeFourPillarStatuses = async (subject) => {
 // event_date < today). Sourced from the `events` table; admins publish via the
 // Calendar event modal (poster_url + published_to_noticeboard checkbox) or
 // from the Quick Add Activity → Event flow.
+// Pure HTML builder for the noticeboard skeleton paint. Takes the prepared
+// inline <style> block and the admin flag; returns the shell markup. No awaits
+// / DOM mutation — the orchestrator assigns the result to container.innerHTML.
+const buildNoticeboardSkeletonHtml = (styleBlock, isAdmin) => `
+        ${styleBlock}
+        <div class="nb-page">
+            <div class="nb-topbar">
+                <div class="nb-topbar-brand">📢 公告栏 · Noticeboard</div>
+                <div class="nb-topbar-tagline">探索过去 · 启迪未来</div>
+            </div>
+            <div class="nb-hero">
+                <h1 class="nb-hero-title">即将举行的活动</h1>
+                <div class="nb-hero-sub">探索风水智慧与人文之美</div>
+            </div>
+            ${isAdmin ? `<div class="nb-admin-bar"><button class="btn primary" onclick="(async()=>{ if(app.openCreateEventModal) await app.openCreateEventModal(); })()"><i class="fas fa-plus"></i> Post Event</button></div>` : ''}
+            <div id="noticeboard-grid" class="nb-grid">
+                <div class="nb-empty"><div style="opacity:0.5;">Loading events…</div></div>
+            </div>
+            <div class="nb-footer">
+                <div class="nb-footer-brand">
+                    <div class="nb-footer-brand-icon">🏛️</div>
+                    <div>DestinOraclesSolution · 玄空风水博物馆</div>
+                </div>
+                <div class="nb-footer-meta">destinoraclessolution.com</div>
+            </div>
+        </div>`;
+
 const showNoticeboardView = async (container) => {
     const currentUser = _state.cu;
     if (!currentUser) return;
@@ -689,29 +722,7 @@ const showNoticeboardView = async (container) => {
     </style>`;
 
     // Skeleton paint
-    container.innerHTML = `
-        ${styleBlock}
-        <div class="nb-page">
-            <div class="nb-topbar">
-                <div class="nb-topbar-brand">📢 公告栏 · Noticeboard</div>
-                <div class="nb-topbar-tagline">探索过去 · 启迪未来</div>
-            </div>
-            <div class="nb-hero">
-                <h1 class="nb-hero-title">即将举行的活动</h1>
-                <div class="nb-hero-sub">探索风水智慧与人文之美</div>
-            </div>
-            ${isAdmin ? `<div class="nb-admin-bar"><button class="btn primary" onclick="(async()=>{ if(app.openCreateEventModal) await app.openCreateEventModal(); })()"><i class="fas fa-plus"></i> Post Event</button></div>` : ''}
-            <div id="noticeboard-grid" class="nb-grid">
-                <div class="nb-empty"><div style="opacity:0.5;">Loading events…</div></div>
-            </div>
-            <div class="nb-footer">
-                <div class="nb-footer-brand">
-                    <div class="nb-footer-brand-icon">🏛️</div>
-                    <div>DestinOraclesSolution · 玄空风水博物馆</div>
-                </div>
-                <div class="nb-footer-meta">destinoraclessolution.com</div>
-            </div>
-        </div>`;
+    container.innerHTML = buildNoticeboardSkeletonHtml(styleBlock, isAdmin);
 
     // Fetch events
     let events = [];

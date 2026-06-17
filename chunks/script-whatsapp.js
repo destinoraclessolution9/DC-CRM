@@ -47,12 +47,7 @@
 
     // ── Public view ──────────────────────────────────────────────────────
 
-    const showWhatsAppIntegration = async (container) => {
-        const connection  = await getWhatsAppConnection();
-        const isConnected = connection && connection.status === 'connected';
-        const viewport    = container || document.getElementById('content-viewport');
-
-        const content = `
+    const buildWhatsAppIntegrationHtml = (connection, isConnected) => `
             <div class="whatsapp-integration">
                 <div class="detail-header" style="margin-bottom:24px;display:flex;align-items:center;gap:16px;">
                     <button class="btn secondary" onclick="app.showIntegrationHub(document.getElementById('content-viewport'))">
@@ -121,6 +116,13 @@
                     ` : ''}
                 </div>
             </div>`;
+
+    const showWhatsAppIntegration = async (container) => {
+        const connection  = await getWhatsAppConnection();
+        const isConnected = connection && connection.status === 'connected';
+        const viewport    = container || document.getElementById('content-viewport');
+
+        const content = buildWhatsAppIntegrationHtml(connection, isConnected);
 
         if (viewport) viewport.innerHTML = content;
         else UI.showModal('WhatsApp Business Integration', content, [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }]);

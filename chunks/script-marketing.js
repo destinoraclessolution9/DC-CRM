@@ -2180,29 +2180,10 @@
             : { label: 'Inactive', cls: 'status-inactive', style: '' };
     };
 
-    const renderPackagesTab = async () => {
-        const [packages, allProds] = await Promise.all([
-            AppDataStore.getAll('promotions'),
-            AppDataStore.getAll('products')
-        ]);
-        const pkgProductMap = new Map(allProds.map(pr => [pr.id, pr.name]));
-        const today = new Date(); today.setHours(0,0,0,0);
-
-        const isExpired = p => p.end_date && (() => { const e = new Date(p.end_date); e.setHours(0,0,0,0); return e < today; })();
-
-        const activeList   = packages.filter(p => !isExpired(p)).sort((a,b) => new Date(b.created_at||0) - new Date(a.created_at||0));
-        const expiredList  = packages.filter(p =>  isExpired(p)).sort((a,b) => new Date(b.end_date||0)   - new Date(a.end_date||0));
-
-        const activeRows  = (await Promise.all(activeList.map(p  => renderPackageRow(p, false, pkgProductMap)))).join('');
-        const expiredRows = (await Promise.all(expiredList.map(p => renderPackageRow(p, true,  pkgProductMap)))).join('');
-
-        const divider = expiredList.length > 0 ? `
-            <tr>
-                <td colspan="9" style="padding:7px 14px;background:#f7f7f7;color:#999;font-size:11px;text-align:center;letter-spacing:1.5px;font-weight:700;border-bottom:1px solid var(--gray-200);">
-                    ── EXPIRED PROMOTIONS ──
-                </td>
-            </tr>` : '';
-
+    // Pure HTML-string builder for renderPackagesTab — extracted verbatim so the
+    // orchestrator keeps all data fetching/awaits/row-mapping. Returns the full
+    // tab markup; takes exactly the values it reads.
+    const _buildPackagesTabHtml = (packages, activeRows, divider, expiredRows) => {
         return `
             <style>
                 .pkg-th { padding:11px 14px; font-size:12px; font-weight:700; white-space:nowrap; color:#fff; background:#8B1A1A; border-right:1px solid rgba(255,255,255,0.15); }
@@ -2256,6 +2237,32 @@
                 </div>
             </div>
         `;
+    };
+
+    const renderPackagesTab = async () => {
+        const [packages, allProds] = await Promise.all([
+            AppDataStore.getAll('promotions'),
+            AppDataStore.getAll('products')
+        ]);
+        const pkgProductMap = new Map(allProds.map(pr => [pr.id, pr.name]));
+        const today = new Date(); today.setHours(0,0,0,0);
+
+        const isExpired = p => p.end_date && (() => { const e = new Date(p.end_date); e.setHours(0,0,0,0); return e < today; })();
+
+        const activeList   = packages.filter(p => !isExpired(p)).sort((a,b) => new Date(b.created_at||0) - new Date(a.created_at||0));
+        const expiredList  = packages.filter(p =>  isExpired(p)).sort((a,b) => new Date(b.end_date||0)   - new Date(a.end_date||0));
+
+        const activeRows  = (await Promise.all(activeList.map(p  => renderPackageRow(p, false, pkgProductMap)))).join('');
+        const expiredRows = (await Promise.all(expiredList.map(p => renderPackageRow(p, true,  pkgProductMap)))).join('');
+
+        const divider = expiredList.length > 0 ? `
+            <tr>
+                <td colspan="9" style="padding:7px 14px;background:#f7f7f7;color:#999;font-size:11px;text-align:center;letter-spacing:1.5px;font-weight:700;border-bottom:1px solid var(--gray-200);">
+                    ── EXPIRED PROMOTIONS ──
+                </td>
+            </tr>` : '';
+
+        return _buildPackagesTabHtml(packages, activeRows, divider, expiredRows);
     };
 
     const renderPackageRow = async (p, isExpiredGroup = false, productMap = null) => {
@@ -2371,13 +2378,10 @@
 
     // ========== MONTHLY PROMOTIONS TAB ==========
 
-    const renderMonthlyPromotionsTab = async () => {
-        let promotions = [];
-        try { promotions = await AppDataStore.getAll('monthly_promotions'); } catch(e) { promotions = []; }
-        promotions.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-
-        const canManage = isMarketingManager(_state.cu) || isSystemAdmin(_state.cu);
-
+    // Pure HTML-string builder for renderMonthlyPromotionsTab — extracted verbatim
+    // so the orchestrator keeps data fetching/sort/authz. Returns the tab markup;
+    // takes exactly the values it reads.
+    const _buildMonthlyPromotionsTabHtml = (promotions, canManage) => {
         return `
             <div style="padding: 24px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
@@ -2432,6 +2436,16 @@
                 </div>
             </div>
         `;
+    };
+
+    const renderMonthlyPromotionsTab = async () => {
+        let promotions = [];
+        try { promotions = await AppDataStore.getAll('monthly_promotions'); } catch(e) { promotions = []; }
+        promotions.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+        const canManage = isMarketingManager(_state.cu) || isSystemAdmin(_state.cu);
+
+        return _buildMonthlyPromotionsTabHtml(promotions, canManage);
     };
 
     const renderMonthlyPromotionRow = (p) => {
@@ -3242,12 +3256,10 @@ ALTER TABLE public.promotions
 
     // ========== TEMPLATES TAB ==========
 
-    const renderTemplatesTab = async () => {
-        const templates = await AppDataStore.getAll('whatsapp_templates');
-        const templatesHtml = templates.length > 0 
-            ? (await Promise.all(templates.map(t => renderTemplateCard(t)))).join('') 
-            : await renderSampleTemplates();
-
+    // Pure HTML-string builder for renderTemplatesTab — extracted verbatim so the
+    // orchestrator keeps the fetch + sample-fallback await. Returns the tab markup;
+    // takes exactly the value it reads.
+    const _buildTemplatesTabHtml = (templatesHtml) => {
         return `
             <div class="templates-layout">
                 <div class="templates-list">
@@ -3291,6 +3303,15 @@ ALTER TABLE public.promotions
                 </div>
             </div>
         `;
+    };
+
+    const renderTemplatesTab = async () => {
+        const templates = await AppDataStore.getAll('whatsapp_templates');
+        const templatesHtml = templates.length > 0
+            ? (await Promise.all(templates.map(t => renderTemplateCard(t)))).join('')
+            : await renderSampleTemplates();
+
+        return _buildTemplatesTabHtml(templatesHtml);
     };
 
     const renderSampleTemplates = async () => {

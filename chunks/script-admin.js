@@ -137,23 +137,8 @@
     
     // ========== PHASE 20: SYSTEM ADMINISTRATION & DEPLOYMENT ==========
     
-    const showAdminDashboard = async () => {
-        // Gate on the app PROFILE user (_state.cu), not Auth.getCurrentUser():
-        // the latter returns the raw Supabase auth user whose .role is the
-        // Postgres claim "authenticated" — never "Level 1 …" — so a real Super
-        // Admin was being denied. isSystemAdmin() defaults to _state.cu, matching
-        // every other Super-Admin-gated view (boss-report, egg, formula).
-        if (!isSystemAdmin()) {
-            if (window.UI) window.UI.toast.error("Access Denied. Super Admins only.");
-            return;
-        }
-    
-        const health = typeof SystemHealth !== 'undefined' ? SystemHealth.checkAll() : { status: 'UNKNOWN' };
-        const tenants = typeof TenantManager !== 'undefined' ? TenantManager.listTenants() : [];
-        const activeTenants = tenants.filter(t => t.status === 'ACTIVE').length;
-        const updates = typeof DeploymentManager !== 'undefined' ? DeploymentManager.checkForUpdates() : null;
-    
-        let content = `
+    const buildAdminDashboardHtml = (health, activeTenants, tenants, updates) => {
+        return `
             <div class="admin-dashboard fade-in" style="padding: 24px;">
                 <div class="header-actions" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
                     <h2>System Administration</h2>
@@ -219,11 +204,30 @@
                 </div>
             </div>
         `;
-    
+    };
+
+    const showAdminDashboard = async () => {
+        // Gate on the app PROFILE user (_state.cu), not Auth.getCurrentUser():
+        // the latter returns the raw Supabase auth user whose .role is the
+        // Postgres claim "authenticated" — never "Level 1 …" — so a real Super
+        // Admin was being denied. isSystemAdmin() defaults to _state.cu, matching
+        // every other Super-Admin-gated view (boss-report, egg, formula).
+        if (!isSystemAdmin()) {
+            if (window.UI) window.UI.toast.error("Access Denied. Super Admins only.");
+            return;
+        }
+
+        const health = typeof SystemHealth !== 'undefined' ? SystemHealth.checkAll() : { status: 'UNKNOWN' };
+        const tenants = typeof TenantManager !== 'undefined' ? TenantManager.listTenants() : [];
+        const activeTenants = tenants.filter(t => t.status === 'ACTIVE').length;
+        const updates = typeof DeploymentManager !== 'undefined' ? DeploymentManager.checkForUpdates() : null;
+
+        let content = buildAdminDashboardHtml(health, activeTenants, tenants, updates);
+
         const view = document.getElementById('content-viewport');
         if (view) view.innerHTML = content;
     };
-    
+
     const showTenantManagement = () => {
         let tenants = typeof TenantManager !== 'undefined' ? TenantManager.listTenants() : [];
         if (tenants.length === 0) {
