@@ -21,12 +21,12 @@
       "exactLevels": null
     },
     "customers": {
-      "src": "chunks/script-prospects.min.js",
+      "src": "chunks/script-customers.min.js",
       "minLevel": null,
       "exactLevels": null
     },
     "agents": {
-      "src": "chunks/script-prospects.min.js",
+      "src": "chunks/script-agents.min.js",
       "minLevel": null,
       "exactLevels": null
     },
@@ -259,7 +259,7 @@
       "exactLevels": null
     },
     "settings": {
-      "src": "chunks/script-prospects.min.js",
+      "src": "chunks/script-settings.min.js",
       "minLevel": null,
       "exactLevels": null
     },

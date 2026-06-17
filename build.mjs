@@ -62,6 +62,11 @@ const JS_TARGETS = [
   'chunks/script-calendar.js',
   // Phase 4J: Prospect & Customer Management (extracted 2026-06-05)
   'chunks/script-prospects.js',
+  // Phase 4J.2: split out of script-prospects.js 2026-06-18
+  'chunks/script-customers.js',
+  'chunks/script-agents.js',
+  'chunks/script-approvals.js',
+  'chunks/script-settings.js',
   // Phase 4K: Pipeline & Sales Force Module (extracted 2026-06-05)
   'chunks/script-pipeline.js',
   // Phase 4L: Import System + Follow-up Monitoring (extracted 2026-06-05)

@@ -2886,8 +2886,8 @@ function _wireLoginBtn() {
         'calendar':             { chunk: 'chunks/script-calendar.min.js',    minLevel: null, exactLevels: null, navId: 'calendar',            navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], title: 'Calendar' },
         'month':                { chunk: 'chunks/script-calendar.min.js',    minLevel: null, exactLevels: null, navId: 'calendar',            navLevels: '@calendar', title: 'Calendar' },
         'prospects':            { chunk: 'chunks/script-prospects.min.js',   minLevel: null, exactLevels: null, navId: 'prospects',           navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], title: 'Prospects & Customers' },
-        'customers':            { chunk: 'chunks/script-prospects.min.js',   minLevel: null, exactLevels: null, navId: 'customers',           navLevels: _VIEW_NO_NAV, title: undefined },
-        'agents':               { chunk: 'chunks/script-prospects.min.js',   minLevel: null, exactLevels: null, navId: 'agents',              navLevels: [1, 2], title: 'Consultants' },
+        'customers':            { chunk: 'chunks/script-customers.min.js',   minLevel: null, exactLevels: null, navId: 'customers',           navLevels: _VIEW_NO_NAV, title: undefined },
+        'agents':               { chunk: 'chunks/script-agents.min.js',      minLevel: null, exactLevels: null, navId: 'agents',              navLevels: [1, 2], title: 'Consultants' },
         'purchases_history':    { chunk: 'chunks/script-prospects.min.js',   minLevel: null, exactLevels: null, navId: 'purchases_history',   navLevels: [1], title: 'Purchases History' },
         'lead_forms':           { chunk: 'chunks/script-forms.min.js',       minLevel: null, exactLevels: null, navId: 'lead_forms',          navLevels: [1, 2], title: 'Lead Capture Forms' },
         'surveys':              { chunk: 'chunks/script-forms.min.js',       minLevel: null, exactLevels: null, navId: 'surveys',             navLevels: [1, 2], title: 'NPS Surveys' },
@@ -2925,7 +2925,7 @@ function _wireLoginBtn() {
         'order_form_extract':   { chunk: 'chunks/script-order-form-extract.min.js', minLevel: null, exactLevels: null, navId: 'order-form-extract', navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], title: 'Order Form Extract' },
         'journey':              { chunk: 'chunks/script-journey.min.js',    minLevel: null, exactLevels: null, navId: 'journey',             navLevels: _VIEW_NO_NAV, title: undefined },
         'promotions':           { chunk: 'chunks/script-marketing.min.js',  minLevel: null, exactLevels: null, navId: 'promotions',          navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], title: 'Monthly Promotion' },
-        'settings':             { chunk: 'chunks/script-prospects.min.js',  minLevel: null, exactLevels: null, navId: 'settings',            navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], title: 'Settings' },
+        'settings':             { chunk: 'chunks/script-settings.min.js',   minLevel: null, exactLevels: null, navId: 'settings',            navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], title: 'Settings' },
         '_activities':          { chunk: 'chunks/script-activities.min.js', minLevel: null, exactLevels: null, navId: '_activities',         navLevels: _VIEW_NO_NAV, title: undefined },
     };
 
@@ -3108,11 +3108,18 @@ function _wireLoginBtn() {
             const seen = new Set();
             const _load = (src) => { if (!seen.has(src)) { seen.add(src); _loadChunkOnce(src); } };
 
-            // Tier 1 — immediate: essential first-nav views (prospects/customers/
-            // agents all live in script-prospects.min.js)
+            // Tier 1 — immediate: essential first-nav views. prospects-core +
+            // its four siblings (customers/agents/approvals/settings) all back the
+            // first-nav Prospects/Customers screens and call each other across the
+            // file boundary, so they must be in memory together right after login
+            // (approvals has no VIEWS entry, so it would never warm otherwise).
             [
                 'chunks/script-mobile.min.js',
                 'chunks/script-prospects.min.js',
+                'chunks/script-customers.min.js',
+                'chunks/script-agents.min.js',
+                'chunks/script-approvals.min.js',
+                'chunks/script-settings.min.js',
                 'chunks/script-calendar.min.js',
                 'chunks/script-pipeline.min.js',
                 'chunks/script-performance.min.js',
@@ -3534,6 +3541,16 @@ function _wireLoginBtn() {
         // ── CPS photo upload pending ─────────────────────────────────────
         get cppf()  { return _cpsPendingPhotoFiles; },
 
+        // ── Purchases-history cache (shared: prospects-core ↔ approvals) ──
+        // Written/invalidated by approveProspectConversion / queue approvals in
+        // the approvals chunk; read + populated by the purchases-history code in
+        // the prospects-core chunk. Promoted from a chunk-local `let` so both
+        // chunks see the same value across the file boundary (SEAM-3).
+        get phc()   { return _purchasesHistoryCache; },
+        set phc(v)  { _purchasesHistoryCache = v; },
+        get phcts() { return _purchasesHistoryCacheTs; },
+        set phcts(v){ _purchasesHistoryCacheTs = v; },
+
         // ── Cache timestamps (shared with calendar + activities chunks) ──
         get vcts()  { return _venuesCacheTs; },
         set vcts(v) { _venuesCacheTs = v; },
@@ -3557,10 +3574,10 @@ function _wireLoginBtn() {
     const getScoreGrade = (s) => window.app.getScoreGrade ? window.app.getScoreGrade(s) : { grade: "N/A", label: "N/A", color: "#888" };
     const calculateProtectionDays = (p) => (window.app.calculateProtectionDays || (() => 0))(p);
     const showProspectDetail      = async (...a) => { await _loadChunkOnce('chunks/script-prospects.min.js'); const _r = window.app.showProspectDetail;      if (_r && _r !== showProspectDetail)      return _r(...a); };
-    const showCustomerDetail      = async (...a) => { await _loadChunkOnce('chunks/script-prospects.min.js'); const _r = window.app.showCustomerDetail;      if (_r && _r !== showCustomerDetail)      return _r(...a); };
+    const showCustomerDetail      = async (...a) => { await _loadChunkOnce('chunks/script-customers.min.js'); const _r = window.app.showCustomerDetail;      if (_r && _r !== showCustomerDetail)      return _r(...a); };
     const showPurchasesHistoryView = async (...a) => { await _loadChunkOnce('chunks/script-prospects.min.js'); const _r = window.app.showPurchasesHistoryView; if (_r && _r !== showPurchasesHistoryView) return _r(...a); };
-    const showAgentsView          = async (...a) => { await _loadChunkOnce('chunks/script-prospects.min.js'); const _r = window.app.showAgentsView;          if (_r && _r !== showAgentsView)          return _r(...a); };
-    const showAgentDetail         = async (...a) => { await _loadChunkOnce('chunks/script-prospects.min.js'); const _r = window.app.showAgentDetail;         if (_r && _r !== showAgentDetail)         return _r(...a); };
+    const showAgentsView          = async (...a) => { await _loadChunkOnce('chunks/script-agents.min.js'); const _r = window.app.showAgentsView;          if (_r && _r !== showAgentsView)          return _r(...a); };
+    const showAgentDetail         = async (...a) => { await _loadChunkOnce('chunks/script-agents.min.js'); const _r = window.app.showAgentDetail;         if (_r && _r !== showAgentDetail)         return _r(...a); };
     const showForcePasswordChangeModal = () => (window.app.showForcePasswordChangeModal || (() => {}))();
     // ========== PHASE 6: PIPELINE & SALES FORCE MODULE ==========
     // [CHUNK: pipeline] ~2837 lines extracted to chunks/script-pipeline.js
