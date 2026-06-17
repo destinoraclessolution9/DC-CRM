@@ -2916,9 +2916,13 @@ function _wireLoginBtn() {
     // registry — navigateTo's render dispatch + _CHUNK_VIEWS/title data fold in
     // here next (Wave 3.1 cont.).
     const _VIEW_REFRESH = {
-        month:                (vp) => (window.app.renderCalendar || (() => {}))(),
-        week:                 (vp) => (window.app.renderWeekView || (() => {}))(),
-        day:                  (vp) => (window.app.renderTodayActivities || (() => {}))(),
+        // Mobile uses a custom calendar DOM (.mcal) that the desktop
+        // renderCalendar/renderWeekView/renderTodayActivities never touch, so on
+        // mobile we must re-render the active mobile sub-view instead — otherwise
+        // a deleted/created/edited activity lingers on screen until full re-nav.
+        month:                (vp) => isMobile() ? (window.app.mcalRefreshActiveView || (() => {}))() : (window.app.renderCalendar || (() => {}))(),
+        week:                 (vp) => isMobile() ? (window.app.mcalRefreshActiveView || (() => {}))() : (window.app.renderWeekView || (() => {}))(),
+        day:                  (vp) => isMobile() ? (window.app.mcalRefreshActiveView || (() => {}))() : (window.app.renderTodayActivities || (() => {}))(),
         prospects:            (vp) => { if (_currentDetailView) return; return (window.app.showProspectsViewSmart || (() => {}))(vp); },
         pipeline:             (vp) => window.app.showPipelineView && window.app.showPipelineView(vp),
         reports:              (vp) => (typeof window.app.refreshKPIDashboard === 'function') && window.app.refreshKPIDashboard(),
@@ -2935,6 +2939,60 @@ function _wireLoginBtn() {
         egg_purchasing:       (vp) => window.app.showEggPurchasingView && window.app.showEggPurchasingView(vp),
         purchases_history:    (vp) => (window.app.showPurchasesHistoryView || (() => {}))(vp),
     };
+
+    // Declarative render map — the single source for navigateTo's view dispatch
+    // (replaces the ~180-line if/else). Each fn sets _currentView and renders its
+    // view, mirroring its old branch EXACTLY: mobile-vs-desktop branch, the three
+    // fire-and-forget views (pipeline/reports/referrals — no await + .catch), the
+    // inline authz gates (bounce to calendar + return), the settings no-await
+    // quirk, and the org_chart loading fallback. Called from inside
+    // _withViewTransition, so a gate's `return` exits the same callback the old
+    // `return` did. Unknown viewId falls through to the placeholder (see navigateTo).
+    const _VIEW_RENDER = {
+        home:                 async (vp) => { _currentView = 'home'; await (window.app.showMobileHomeView || (() => {}))(vp); },
+        calendar:             async (vp) => { _currentView = 'month'; if (isMobile()) { await (window.app.showMobileCalendarView || (() => {}))(vp); } else { await (window.app.showCalendarView || (() => {}))(vp); } },
+        prospects:            async (vp) => { _currentView = 'prospects'; if (isMobile()) { await (window.app.showMobileProspectsView || (() => {}))(vp); } else { await (window.app.showProspectsView || (() => {}))(vp); } },
+        pipeline:             async (vp) => { _currentView = 'pipeline'; (window.app.showPipelineView || (() => Promise.resolve()))(vp).catch(e => console.warn('pipeline failed:', e)); },
+        agents:               async (vp) => { _currentView = 'agents'; await (window.app.showAgentsView || (() => {}))(vp); },
+        promotions:           async (vp) => { _currentView = 'promotions'; await (window.app.showMonthlyPromotionView || (() => {}))(vp); },
+        marketing_automation: async (vp) => { _currentView = 'marketing_automation'; await (window.app.showMarketingAutomationView || (() => {}))(vp); },
+        reports:              async (vp) => { _currentView = 'reports'; (window.app.showKPIDashboard || (() => Promise.resolve()))(vp).catch(e => console.warn('KPI dashboard failed:', e)); },
+        documents:            async (vp) => { _currentView = 'documents'; await (window.app.showDocumentManagementView || (() => {}))(vp); },
+        protection:           async (vp) => { _currentView = 'protection'; await (window.app.showProtectionMonitoringView || (() => {}))(vp); },
+        import:               async (vp) => { _currentView = 'import'; await (window.app.showImportDashboard || (() => {}))(vp); },
+        integrations:         async (vp) => { _currentView = 'integrations'; await (window.app.showIntegrationHub || (() => {}))(vp); },
+        referrals:            async (vp) => { _currentView = 'referrals'; (window.app.showReferralsView || (() => Promise.resolve()))(vp).catch(e => console.warn('referrals failed:', e)); },
+        cases:                async (vp) => { _currentView = 'cases'; await (window.app.showCasesView || (() => {}))(vp); },
+        marketing_lists:      async (vp) => { _currentView = 'marketing_lists'; await (window.app.showMarketingListsView || (() => {}))(vp); },
+        ranking:              async (vp) => { _currentView = 'ranking'; await (window.app.showRankingPerformanceView || (() => {}))(vp); },
+        workflows:            async (vp) => { _currentMarketingTab = 'automation'; _currentView = 'marketing_automation'; await (window.app.showMarketingAutomationView || (() => {}))(vp); },
+        booking_settings:     async (vp) => { _currentView = 'booking_settings'; await (window.app.showBookingSettingsView || (() => {}))(vp); },
+        lead_forms:           async (vp) => { _currentView = 'lead_forms'; await (window.app.showLeadFormsView || (() => {}))(vp); },
+        surveys:              async (vp) => { _currentView = 'surveys'; await (window.app.showSurveysView || (() => {}))(vp); },
+        contracts:            async (vp) => { _currentView = 'contracts'; await (window.app.showContractsView || (() => {}))(vp); },
+        custom_fields:        async (vp) => { _currentView = 'custom_fields'; await (window.app.showCustomFieldsAdmin || (() => {}))(vp); },
+        settings:             async (vp) => { _currentView = 'settings'; (window.app.showSettingsView || (() => {}))(vp); },
+        milestones:           async (vp) => { _currentView = 'milestones'; await (window.app.showMilestonesView || (() => {}))(vp); },
+        fude:                 async (vp) => { _currentView = 'fude'; await (window.app.showFudeView || (() => {}))(vp); },
+        noticeboard:          async (vp) => { _currentView = 'noticeboard'; await (window.app.showNoticeboardView || (() => {}))(vp); },
+        whatsapp:             async (vp) => { _currentView = 'whatsapp'; await (window.app.showWhatsAppIntegration || (() => {}))(vp); },
+        ai_insights:          async (vp) => { _currentView = 'ai_insights'; await (window.app.showAIInsightsDashboard || (() => {}))(vp); },
+        egg_purchasing:       async (vp) => { if (!isSystemAdmin(_currentUser)) { UI.toast.error('Super Admin only'); await navigateTo('calendar'); return; } _currentView = 'egg_purchasing'; await (window.app.showEggPurchasingView || (() => {}))(vp); },
+        standard_functions:   async (vp) => { if (!isSystemAdmin(_currentUser)) { UI.toast.error('Super Admin only'); await navigateTo('calendar'); return; } _currentView = 'standard_functions'; await (window.app.showStandardFunctionsView || (() => {}))(vp); },
+        formula_purchaser:    async (vp) => { if (!isSystemAdmin(_currentUser)) { UI.toast.error('Super Admin only'); await navigateTo('calendar'); return; } _currentView = 'formula_purchaser'; await (window.app.showFormulaPurchaserView || (() => {}))(vp); },
+        purchases_history:    async (vp) => { _currentView = 'purchases_history'; await (window.app.showPurchasesHistoryView || (() => {}))(vp); },
+        knowledge:            async (vp) => { _currentView = 'knowledge'; await (window.app.showKnowledgeView || (() => {}))(vp); },
+        stock_take:           async (vp) => { if (!canAccessStockTake(_currentUser)) { UI.toast.error('Not permitted'); await navigateTo('calendar'); return; } _currentView = 'stock_take'; await (window.app.showStockTakeView || (() => {}))(vp); },
+        boss_report:          async (vp) => { if (!isSystemAdmin(_currentUser)) { UI.toast.error('Super Admin only'); await navigateTo('calendar'); return; } _currentView = 'boss_report'; await (window.app.showBossReportView || (() => {}))(vp); },
+        org_chart:            async (vp) => { const lvl = _currentUser ? _getUserLevel(_currentUser) : 99; if (lvl > 2) { UI.toast.error('Admin only'); await navigateTo('calendar'); return; } _currentView = 'org_chart'; if (typeof window.app?.showOrgChartView === 'function') { await window.app.showOrgChartView(vp); } else { vp.innerHTML = '<div style="padding:24px;color:var(--gray-500);">Org Chart Consultant module is loading…</div>'; } },
+        order_form_extract:   async (vp) => { _currentView = 'order_form_extract'; await (window.app.showOrderFormExtractView || (() => {}))(vp); },
+        journey:              async (vp) => { _currentView = 'journey'; await (window.app.showAgentJourneyDashboard || (() => {}))(vp); },
+    };
+    // Canonical-view aliases — secondary viewId shares the primary's render fn
+    // (matches the old `viewId === 'a' || viewId === 'b'` branches).
+    _VIEW_RENDER.month = _VIEW_RENDER.calendar;
+    _VIEW_RENDER.performance = _VIEW_RENDER.ranking;
+    _VIEW_RENDER.ai_prediction = _VIEW_RENDER.ai_insights;
 
     // Eager chunk loader — after login, execute every permitted chunk so all
     // functions are in memory before the user taps anything (same feel as the
@@ -3279,176 +3337,9 @@ function _wireLoginBtn() {
         }
 
         await _withViewTransition(async () => {
-        if (viewId === 'home') {
-            _currentView = 'home';
-            await (window.app.showMobileHomeView || (() => {}))(viewport);
-        } else if (viewId === 'calendar' || viewId === 'month') {
-            _currentView = 'month';
-            if (isMobile()) {
-                await (window.app.showMobileCalendarView || (() => {}))(viewport);
-            } else {
-                await (window.app.showCalendarView || (() => {}))(viewport);
-            }
-        } else if (viewId === 'prospects') {
-            _currentView = 'prospects';
-            if (isMobile()) {
-                await (window.app.showMobileProspectsView || (() => {}))(viewport);
-            } else {
-                await (window.app.showProspectsView || (() => {}))(viewport);
-            }
-        } else if (viewId === 'pipeline') {
-            _currentView = 'pipeline';
-            // Skeleton is painted synchronously before the first await inside
-            // showPipelineView, so the user sees it instantly. Heavy scoring
-            // runs in the background; navigateTo returns after skeleton paint.
-            (window.app.showPipelineView || (() => Promise.resolve()))(viewport).catch(e => console.warn('pipeline failed:', e));
-        } else if (viewId === 'agents') {
-            _currentView = 'agents';
-            await (window.app.showAgentsView || (() => {}))(viewport);
-        } else if (viewId === 'promotions') {
-            _currentView = 'promotions';
-            await (window.app.showMonthlyPromotionView || (() => {}))(viewport);
-        } else if (viewId === 'marketing_automation') {
-            _currentView = 'marketing_automation';
-            await (window.app.showMarketingAutomationView || (() => {}))(viewport);
-        } else if (viewId === 'reports') {
-            _currentView = 'reports';
-            // Shell is painted synchronously before the first await inside
-            // showKPIDashboard; navigateTo returns after shell paint.
-            (window.app.showKPIDashboard || (() => Promise.resolve()))(viewport).catch(e => console.warn('KPI dashboard failed:', e));
-        } else if (viewId === 'documents') {
-            _currentView = 'documents';
-            await (window.app.showDocumentManagementView || (() => {}))(viewport);
-        } else if (viewId === 'protection') {
-            _currentView = 'protection';
-            await (window.app.showProtectionMonitoringView || (() => {}))(viewport);
-        } else if (viewId === 'import') {
-            _currentView = 'import';
-            await (window.app.showImportDashboard || (() => {}))(viewport);
-        } else if (viewId === 'integrations') {
-            _currentView = 'integrations';
-            await (window.app.showIntegrationHub || (() => {}))(viewport);
-        } else if (viewId === 'referrals') {
-            _currentView = 'referrals';
-            // Same pattern as pipeline — skeleton paints synchronously, data loads async.
-            (window.app.showReferralsView || (() => Promise.resolve()))(viewport).catch(e => console.warn('referrals failed:', e));
-        } else if (viewId === 'cases') {
-            _currentView = 'cases';
-            await (window.app.showCasesView               || (() => {}))(viewport);
-        } else if (viewId === 'marketing_lists') {
-            _currentView = 'marketing_lists';
-            await (window.app.showMarketingListsView      || (() => {}))(viewport);
-        } else if (viewId === 'ranking' || viewId === 'performance') {
-            _currentView = 'ranking';
-            await (window.app.showRankingPerformanceView || (() => {}))(viewport);
-        } else if (viewId === 'workflows') {
-            // Redirect legacy workflows route to Marketing Automation → Automation tab
-            _currentMarketingTab = 'automation';
-            _currentView = 'marketing_automation';
-            await (window.app.showMarketingAutomationView || (() => {}))(viewport);
-        } else if (viewId === 'booking_settings') {
-            _currentView = 'booking_settings';
-            await (window.app.showBookingSettingsView || (() => {}))(viewport);
-        } else if (viewId === 'lead_forms') {
-            _currentView = 'lead_forms';
-            await (window.app.showLeadFormsView || (() => {}))(viewport);
-        } else if (viewId === 'surveys') {
-            _currentView = 'surveys';
-            await (window.app.showSurveysView || (() => {}))(viewport);
-        } else if (viewId === 'contracts') {
-            _currentView = 'contracts';
-            await (window.app.showContractsView || (() => {}))(viewport);
-        } else if (viewId === 'custom_fields') {
-            _currentView = 'custom_fields';
-            await (window.app.showCustomFieldsAdmin || (() => {}))(viewport);
-        } else if (viewId === 'settings') {
-            _currentView = 'settings';
-            (window.app.showSettingsView || (() => {}))(viewport);
-        } else if (viewId === 'milestones') {
-            _currentView = 'milestones';
-            await (window.app.showMilestonesView || (() => {}))(viewport);
-        } else if (viewId === 'fude') {
-            _currentView = 'fude';
-            await (window.app.showFudeView || (() => {}))(viewport);
-        } else if (viewId === 'noticeboard') {
-            _currentView = 'noticeboard';
-            await (window.app.showNoticeboardView || (() => {}))(viewport);
-        } else if (viewId === 'whatsapp') {
-            _currentView = 'whatsapp';
-            await (window.app.showWhatsAppIntegration || (() => {}))(viewport);
-        } else if (viewId === 'ai_insights' || viewId === 'ai_prediction') {
-            _currentView = 'ai_insights';
-            await (window.app.showAIInsightsDashboard || (() => {}))(viewport);
-        } else if (viewId === 'egg_purchasing') {
-            // Super Admin only gate — bounce non-admins to calendar
-            if (!isSystemAdmin(_currentUser)) {
-                UI.toast.error('Super Admin only');
-                await navigateTo('calendar');
-                return;
-            }
-            _currentView = 'egg_purchasing';
-            await (window.app.showEggPurchasingView || (() => {}))(viewport);
-        } else if (viewId === 'standard_functions') {
-            if (!isSystemAdmin(_currentUser)) {
-                UI.toast.error('Super Admin only');
-                await navigateTo('calendar');
-                return;
-            }
-            _currentView = 'standard_functions';
-            await (window.app.showStandardFunctionsView || (() => {}))(viewport);
-        } else if (viewId === 'formula_purchaser') {
-            if (!isSystemAdmin(_currentUser)) {
-                UI.toast.error('Super Admin only');
-                await navigateTo('calendar');
-                return;
-            }
-            _currentView = 'formula_purchaser';
-            await (window.app.showFormulaPurchaserView    || (() => {}))(viewport);
-        } else if (viewId === 'purchases_history') {
-            _currentView = 'purchases_history';
-            await (window.app.showPurchasesHistoryView || (() => {}))(viewport);
-        } else if (viewId === 'knowledge') {
-            _currentView = 'knowledge';
-            await (window.app.showKnowledgeView || (() => {}))(viewport);
-        } else if (viewId === 'stock_take') {
-            // Level 1 (Super Admin) or Level 15 (Stock Take Staff). Staff get
-            // a restricted tab strip inside the module — see showStockTakeView.
-            if (!canAccessStockTake(_currentUser)) {
-                UI.toast.error('Not permitted');
-                await navigateTo('calendar');
-                return;
-            }
-            _currentView = 'stock_take';
-            await (window.app.showStockTakeView || (() => {}))(viewport);
-        } else if (viewId === 'boss_report') {
-            if (!isSystemAdmin(_currentUser)) {
-                UI.toast.error('Super Admin only');
-                await navigateTo('calendar');
-                return;
-            }
-            _currentView = 'boss_report';
-            await (window.app.showBossReportView || (() => {}))(viewport);
-        } else if (viewId === 'org_chart') {
-            // Org Chart Consultant — admin / level 1-2 only.
-            // Implementation is top-level (post-IIFE) so we call via window.app.
-            const lvl = _currentUser ? _getUserLevel(_currentUser) : 99;
-            if (lvl > 2) {
-                UI.toast.error('Admin only');
-                await navigateTo('calendar');
-                return;
-            }
-            _currentView = 'org_chart';
-            if (typeof window.app?.showOrgChartView === 'function') {
-                await window.app.showOrgChartView(viewport);
-            } else {
-                viewport.innerHTML = '<div style="padding:24px;color:var(--gray-500);">Org Chart Consultant module is loading…</div>';
-            }
-        } else if (viewId === 'order_form_extract') {
-            _currentView = 'order_form_extract';
-            await (window.app.showOrderFormExtractView || (() => {}))(viewport);
-        } else if (viewId === 'journey') {
-            _currentView = 'journey';
-            await (window.app.showAgentJourneyDashboard || (() => {}))(viewport);
+        const _render = _VIEW_RENDER[viewId];
+        if (_render) {
+            await _render(viewport);
         } else {
             viewport.innerHTML = `
                 <div class="placeholder-view">
