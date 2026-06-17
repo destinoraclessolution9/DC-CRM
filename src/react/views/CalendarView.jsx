@@ -41,15 +41,14 @@ function QuickAction({ onClickName, icon, color, title, sub }) {
     );
 }
 
-export function CalendarView({ greeting = 'Hello', userName = 'there', userEmail = '', onReady }) {
-    try { window.__REACT_CAL_STATE = 'ready'; } catch (_) { /* noop */ }
-
-    useEffect(() => {
-        if (typeof onReady === 'function') {
-            try { onReady(); } catch (_) { /* noop */ }
-        }
-    }, [onReady]);
-
+// Shared static shell (welcome banner + header toolbar + section headers +
+// glance / pipeline / quick-action panel). Every dynamic part stays a stable-id
+// container that the chunk fills (grid / days-header / today / birthdays /
+// refills / glance counts / pending widgets) — the privacy-scoped grid render +
+// name-masking live in the chunk and are reused verbatim by BOTH the scaffold
+// path and the full-JSX path. The only difference between the two paths is the
+// source of greeting / userName / userEmail.
+function CalendarShell({ greeting, userName, userEmail }) {
     return (
         <div className="calendar-page-layout">
             <div className="calendar-main">
@@ -167,4 +166,53 @@ export function CalendarView({ greeting = 'Hello', userName = 'there', userEmail
             </aside>
         </div>
     );
+}
+
+// ── Full real-JSX render (props.data present, default-OFF flag _reactCalJsxOn).
+// Renders the static chrome from props.data (greeting/userName/userEmail) as
+// real React with auto-escaping. The month/week/day GRID + every dynamic list
+// remain stable-id containers inside CalendarShell, so the chunk's by-id fills
+// (privacy-scoped queryAdvanced + name-masking) run identically — this path
+// never calls the legacy by-id switch fns. Fires onReady from its own useEffect
+// (post-commit) so the chunk awaits the committed shell before filling.
+function CalendarFullJsx({ data, onReady }) {
+    try { window.__REACT_CAL_STATE = 'ready-jsx'; } catch (_) { /* noop */ }
+
+    useEffect(() => {
+        if (typeof onReady === 'function') {
+            try { onReady(); } catch (_) { /* noop */ }
+        }
+    }, [onReady]);
+
+    const greeting = data.greeting || 'Hello';
+    const userName = data.userName || 'there';
+    const userEmail = data.userEmail || '';
+    return <CalendarShell greeting={greeting} userName={userName} userEmail={userEmail} />;
+}
+
+// Scaffold-shell render (UNCHANGED default — props.data absent). Identical to
+// the original CalendarView body: signals onReady from useEffect, renders the
+// shell from the greeting/userName/userEmail props, chunk fills the by-id
+// containers. Extracted into its own component so each render path keeps a
+// single, consistent set of hooks (no conditional-hook rule violation).
+function CalendarScaffold({ greeting, userName, userEmail, onReady }) {
+    try { window.__REACT_CAL_STATE = 'ready'; } catch (_) { /* noop */ }
+
+    useEffect(() => {
+        if (typeof onReady === 'function') {
+            try { onReady(); } catch (_) { /* noop */ }
+        }
+    }, [onReady]);
+
+    return <CalendarShell greeting={greeting} userName={userName} userEmail={userEmail} />;
+}
+
+export function CalendarView({ greeting = 'Hello', userName = 'there', userEmail = '', data, onReady }) {
+    // NEW full-JSX path: when the chunk supplied a built payload (flag ON), the
+    // FullJsx component owns the static chrome from props.data. The scaffold
+    // branch is UNCHANGED for the default (flag-OFF / data absent) path.
+    if (data) {
+        return <CalendarFullJsx data={data} onReady={onReady} />;
+    }
+    return <CalendarScaffold greeting={greeting} userName={userName} userEmail={userEmail} onReady={onReady} />;
 }

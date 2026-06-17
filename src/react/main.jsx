@@ -392,7 +392,7 @@ function mountMarketingAutomation(container, opts) {
 // widgets by id after awaiting island useEffect-ready). ──────────────────────
 function mountCalendar(container, opts) {
     const o = opts || {};
-    _mountSimple(container, <CalendarView greeting={o.greeting || 'Hello'} userName={o.userName || 'there'} userEmail={o.userEmail || ''} onReady={o.onReady} />);
+    _mountSimple(container, <CalendarView greeting={o.greeting || 'Hello'} userName={o.userName || 'there'} userEmail={o.userEmail || ''} onReady={o.onReady} data={o.data} />);
     window.__REACT_CAL_MOUNTED = true;
 }
 
@@ -408,7 +408,7 @@ function mountReferrals(container, opts) {
 // fills #mhome-body by id after useEffect-ready). ──────────────────────────────
 function mountMobileHome(container, opts) {
     const o = opts || {};
-    _mountSimple(container, <MobileHomeView greetWord={o.greetWord || 'Hello'} userName={o.userName || 'there'} dateStr={o.dateStr || ''} avatarUrl={o.avatarUrl || ''} initBody={o.initBody || ''} onReady={o.onReady} />);
+    _mountSimple(container, <MobileHomeView greetWord={o.greetWord || 'Hello'} userName={o.userName || 'there'} dateStr={o.dateStr || ''} avatarUrl={o.avatarUrl || ''} initBody={o.initBody || ''} onReady={o.onReady} data={o.data} />);
     window.__REACT_HOME_MOUNTED = true;
 }
 

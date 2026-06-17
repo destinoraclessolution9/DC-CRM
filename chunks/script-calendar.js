@@ -47,6 +47,36 @@
         } catch (_) { return false; }
     };
 
+    // ── NEW full-JSX render flag (default OFF). Opt in via ?react_cal_jsx=1 or
+    // localStorage crm_react_cal_jsx==='1'. Same idiom as _reactCalendarOn but
+    // DEFAULT FALSE: when off, the existing scaffold + by-id fill path runs
+    // BYTE-FOR-BYTE unchanged. When on, CalendarFullJsx owns the static shell
+    // (welcome banner / header toolbar / section headers / glance / quick
+    // actions) from a plain-serializable payload, and the chunk STILL fills the
+    // privacy-sensitive month/week/day GRID + activity/birthday/refill/glance
+    // lists by id (the grid render's scoped queryAdvanced + name-masking is
+    // preserved untouched — the JSX path only owns static chrome).
+    const _reactCalJsxOn = () => {
+        try {
+            if (/[?&]react_cal_jsx=1/.test(location.search)) return true;
+            if (localStorage.getItem('crm_react_cal_jsx') === '1') return true;
+            return false;
+        } catch (_) { return false; }
+    };
+
+    // Plain-serializable payload (NO HTML strings) for the parts CalendarFullJsx
+    // renders as real JSX. Only the static chrome text is JSX-owned; every
+    // dynamic list/grid/count is left as a stable-id container the chunk fills
+    // exactly as the scaffold path (so the privacy scoping/masking is reused
+    // verbatim). Kept tiny + synchronous so it cannot throw on the hot path.
+    const buildCalendarIslandData = () => {
+        const userName = _state.cu?.display_name || _state.cu?.name || _state.cu?.email?.split('@')[0] || 'there';
+        const userEmail = _state.cu?.email || '';
+        const hour = new Date().getHours();
+        const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+        return { greeting, userName, userEmail };
+    };
+
     const showCalendarView = async (container) => {
         const userName = _state.cu?.display_name || _state.cu?.name || _state.cu?.email?.split('@')[0] || 'there';
         const userEmail = _state.cu?.email || '';
@@ -61,9 +91,28 @@
             container.innerHTML = '<div id="cal-react-root"></div>';
             let _calReady; const _calReadyP = new Promise(res => { _calReady = res; });
             const _calGuard = setTimeout(() => _calReady(), 4000);
+
+            // NEW full-JSX path (default OFF — _reactCalJsxOn). When on AND the
+            // payload builds, pass data:<payload> so CalendarFullJsx renders the
+            // static chrome (banner/toolbar/section headers/glance/quick actions)
+            // as real JSX. The grid + every dynamic list are STILL stable-id
+            // containers in that JSX view, so the by-id fills below run
+            // identically — DO NOT suppress them (the privacy-scoped grid render
+            // is reused verbatim). If the build throws, fall back to
+            // data:undefined → the scaffold-shell island, behavior unchanged.
+            let _calData;
+            if (_reactCalJsxOn()) {
+                try {
+                    _calData = buildCalendarIslandData();
+                } catch (e) {
+                    console.warn('[calendar] JSX payload build failed, falling back to scaffold shell:', e && e.message);
+                    _calData = undefined;
+                }
+            }
             try {
                 window.CRMReact.mountCalendar(document.getElementById('cal-react-root'), {
                     greeting, userName, userEmail,
+                    data: _calData,
                     onReady: () => { clearTimeout(_calGuard); _calReady(); },
                 });
             } catch (e) {

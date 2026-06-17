@@ -50,8 +50,175 @@
         } catch (_) { return false; }
     };
 
+    // ── NEW: full-JSX render path for the referrals view (default-OFF) ──
+    // Third render path. When ON, the island receives a serializable `data`
+    // payload (built by buildReferralsIslandData below) and renders the
+    // SURROUNDING parts — header / summary cards / Top Referrers strip /
+    // leaderboard — as real JSX with React-state for the leaderboard period
+    // selector + hidden-referrer toggles. The D3 zoom/pan relationship TREE is
+    // NOT componentized: the JSX view still renders the stable-id container
+    // (#referral-tree-container / #referral-tree-svg / #referral-tree-placeholder
+    // / #tree-node-sidebar) and the chunk fills it by id on BOTH paths exactly
+    // as today. Opt-in ONLY via ?react_ref_jsx=1 OR localStorage
+    // crm_react_ref_jsx='1' — same detection idiom as _reactReferralsOn, just a
+    // different param and DEFAULT FALSE. Throwing in the payload build degrades
+    // to the existing by-id summary/leaderboard fill (byte-for-byte unchanged).
+    const _reactRefJsxOn = () => {
+        try {
+            if (/[?&]react_ref_jsx=1/.test(location.search)) return true;
+            if (localStorage.getItem('crm_react_ref_jsx') === '1') return true;
+            return false;
+        } catch (_) { return false; }
+    };
+
+    // Compute the ranked leaderboard rows as PLAIN data (no HTML). Mirrors the
+    // data logic of renderLeaderboard() exactly (RPC fast-path + JS fallback)
+    // but returns objects so the JSX view owns markup + escaping. renderLeaderboard
+    // itself is left UNTOUCHED so the flag-OFF path stays byte-identical.
+    const _computeLeaderboardRows = async (period) => {
+        let sorted = null;
+        try {
+            const sb = window.supabase;
+            if (sb && sb.rpc) {
+                const { data, error } = await sb.rpc('get_referral_leaderboard', { p_period: period });
+                if (!error && Array.isArray(data)) {
+                    sorted = data.map(r => ({
+                        id: r.referrer_id,
+                        type: r.referrer_type,
+                        name: r.referrer_name,
+                        count: Number(r.referral_count) || 0,
+                        converted: Number(r.converted_count) || 0,
+                        latest: r.latest_at
+                    }));
+                }
+            }
+        } catch (_) { /* fall through to JS path */ }
+
+        if (!sorted) {
+            const allReferrals = await getVisibleReferrals();
+            const now = new Date();
+            let cutoff = null;
+            if (period === 'year') cutoff = new Date(now.getFullYear(), 0, 1);
+            else if (period === 'month') cutoff = new Date(now.getFullYear(), now.getMonth(), 1);
+            const referrals = cutoff
+                ? allReferrals.filter(r => r.created_at && new Date(r.created_at) >= cutoff)
+                : allReferrals;
+            const grouped = {};
+            referrals.forEach(r => {
+                if (!r.referrer_id) return;
+                if (!grouped[r.referrer_id]) {
+                    grouped[r.referrer_id] = { id: r.referrer_id, type: r.referrer_type, count: 0, converted: 0, latest: r.created_at };
+                }
+                grouped[r.referrer_id].count++;
+                if (r.status === 'Active' || r.is_converted) grouped[r.referrer_id].converted++;
+                if (new Date(r.created_at) > new Date(grouped[r.referrer_id].latest)) grouped[r.referrer_id].latest = r.created_at;
+            });
+            sorted = Object.values(grouped).sort((a, b) => b.count - a.count);
+            for (const item of sorted) {
+                const person = await AppDataStore.getById('customers', item.id)
+                    || await AppDataStore.getById('prospects', item.id)
+                    || await AppDataStore.getById('users', item.id);
+                item.name = person?.full_name || '';
+            }
+        }
+
+        // Drop unnamed rows up front (the legacy renderer skips them too) and
+        // pre-format the "latest" date so the JSX view stays presentation-only.
+        return sorted
+            .filter(item => item.name)
+            .map(item => ({
+                id: item.id,
+                type: item.type || 'prospect',
+                name: item.name,
+                count: item.count,
+                converted: item.converted,
+                latest: item.latest,
+                latestLabel: UI.formatDate(item.latest)
+            }));
+    };
+
+    // Public JSX-path handler: recompute leaderboard rows for a period WITHOUT
+    // touching the DOM (so it never clobbers the React-owned leaderboard node).
+    // Also flips _state.lbp so app.* mutation handlers that read it stay
+    // consistent. Returns the plain rows for the JSX view to set into state.
+    const getReferralLeaderboardData = async (period) => {
+        const p = period || _state.lbp || 'all';
+        _state.lbp = p;
+        return await _computeLeaderboardRows(p);
+    };
+
+    // DOM-free siblings of toggleHideReferrer / resetHiddenReferrers for the
+    // JSX path: persist the hidden-referrer preference WITHOUT re-running the
+    // by-id renderLeaderboard() (which would clobber the React-owned node), and
+    // return the new hidden-id list so the JSX view can update its own state.
+    // The legacy by-id variants stay untouched for the flag-OFF path.
+    const toggleHideReferrerData = async (id) => {
+        let hiddenIds = UserPreferences.getSync('hidden_referrers', []);
+        id = String(id);
+        if (hiddenIds.includes(id)) hiddenIds = hiddenIds.filter(hid => hid !== id);
+        else hiddenIds.push(id);
+        await UserPreferences.save('hidden_referrers', hiddenIds);
+        UI.toast.info('Leaderboard preferences updated.');
+        return hiddenIds.map(String);
+    };
+    const resetHiddenReferrersData = async () => {
+        await UserPreferences.save('hidden_referrers', []);
+        UI.toast.success('Hidden referrers reset.');
+        return [];
+    };
+
+    // Build a PLAIN-SERIALIZABLE payload for the JSX-owned surrounding parts
+    // (summary cards + Top Referrers strip + leaderboard). No HTML strings —
+    // objects/arrays/primitives only. Throwing here is caught at the call site
+    // → the view gets data:undefined and the existing by-id fills run unchanged.
+    const buildReferralsIslandData = async () => {
+        // ── Summary cards + Top Referrers strip (mirrors renderSummary) ──
+        const referrals = await getVisibleReferrals();
+        const totalReferrals = referrals.length;
+        const totalReferrers = new Set(referrals.map(r => r.referrer_id)).size;
+        const convertedCount = referrals.filter(r => r.status === 'Active' || r.is_converted).length;
+        const conversionRate = totalReferrals > 0 ? Math.round((convertedCount / totalReferrals) * 100) : 0;
+
+        const grouped = {};
+        referrals.forEach(r => {
+            if (!r.referrer_id) return;
+            grouped[r.referrer_id] = (grouped[r.referrer_id] || 0) + 1;
+        });
+        const top3Promises = Object.entries(grouped)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 3)
+            .map(async ([id, count]) => {
+                const person = await AppDataStore.getById('customers', id) || await AppDataStore.getById('prospects', id) || await AppDataStore.getById('users', id);
+                return { name: person?.full_name || `ID: ${id}`, count };
+            });
+        const top3 = await Promise.all(top3Promises);
+
+        // ── Leaderboard (mirrors renderLeaderboard data) ──
+        const period = _state.lbp || 'all';
+        const leaderboardRows = await _computeLeaderboardRows(period);
+        const hiddenIds = (UserPreferences.getSync('hidden_referrers', []) || []).map(String);
+
+        return {
+            summary: {
+                totalReferrers,
+                totalReferrals,
+                conversionRate,
+                top3
+            },
+            leaderboard: {
+                period,
+                rows: leaderboardRows,
+                hiddenIds
+            }
+        };
+    };
+
     const showReferralsView = async (container) => {
         _state.cv = 'referrals';
+        // When the NEW full-JSX path is active, the React view owns the summary
+        // cards + leaderboard DOM, so the shared tail skips that by-id fill. Stays
+        // false on every legacy / scaffold-only path → tail behaves exactly as today.
+        let _suppressByIdSummary = false;
         // React scaffold-shell — island renders shell; the style-inject + summary/
         // leaderboard + D3 tree fills below populate by id after awaiting island
         // useEffect-ready (rAF-too-early lesson). D3/search/filters stay in chunk.
@@ -59,13 +226,41 @@
             container.innerHTML = '<div id="ref-react-root"></div>';
             let _refReady; const _refReadyP = new Promise(res => { _refReady = res; });
             const _refGuard = setTimeout(() => _refReady(), 4000);
+
+            // NEW full-JSX path (default-OFF). When the flag is on AND the
+            // payload builds without throwing, hand the island a serializable
+            // `data` prop — the JSX view then owns the header/summary/leaderboard
+            // DOM, so we SUPPRESS the renderReferralSummaryAndLeaderboard() by-id
+            // fill below for those parts. On any build error — or when the flag is
+            // off — `_refPayload` stays undefined, so `data:undefined` is passed
+            // (the scaffold branch in the view), the EXACT existing onReady
+            // handshake runs, and the by-id summary/leaderboard fills run exactly
+            // as today (byte-for-byte unchanged). The D3 relationship TREE fill
+            // (showReferralTree → #referral-tree-svg) ALWAYS runs on BOTH paths.
+            let _refPayload;
+            if (_reactRefJsxOn()) {
+                try { _refPayload = await buildReferralsIslandData(); }
+                catch (e2) {
+                    console.warn('[referrals] JSX payload build failed, falling back to scaffold fill:', e2 && e2.message);
+                    _refPayload = undefined;
+                }
+            }
+            const _refHasJsx = !!_refPayload;
+
             try {
-                window.CRMReact.mountReferrals(document.getElementById('ref-react-root'), { onReady: () => { clearTimeout(_refGuard); _refReady(); } });
+                window.CRMReact.mountReferrals(document.getElementById('ref-react-root'), { data: _refPayload, onReady: () => { clearTimeout(_refGuard); _refReady(); } });
             } catch (e) {
                 console.warn('[referrals] island mount failed, falling back to legacy:', e && e.message);
                 clearTimeout(_refGuard); _refReady();
             }
             await _refReadyP;
+
+            // Tell the shared tail (below) the JSX view already rendered the
+            // summary cards + leaderboard, so it skips the by-id fill for those
+            // parts (never writes into a React-owned node). The style-inject and
+            // the D3 tree render (showReferralTree → #referral-tree-svg) below
+            // still run on this path, exactly as today.
+            _suppressByIdSummary = _refHasJsx;
         } else {
         container.innerHTML = `
             <div class="referrals-view-v2">
@@ -258,7 +453,11 @@
             document.head.appendChild(style);
         }
 
-        renderReferralSummaryAndLeaderboard().catch(e => console.warn('referral summary failed:', e));
+        // Skip the by-id summary/leaderboard fill only when the JSX view owns
+        // those nodes; on every other path this runs exactly as before.
+        if (!_suppressByIdSummary) {
+            renderReferralSummaryAndLeaderboard().catch(e => console.warn('referral summary failed:', e));
+        }
 
         // Every user sees themselves as the first node of their own tree
         const user = _state.cu;
@@ -1505,5 +1704,8 @@
         openUpdateReferralModal,
         saveReferralUpdate,
         showReferralsView,
+        getReferralLeaderboardData,
+        toggleHideReferrerData,
+        resetHiddenReferrersData,
     });
 })();

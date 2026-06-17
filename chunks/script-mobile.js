@@ -624,6 +624,16 @@
         return digits;
     };
 
+    // Push channel for the full-JSX home body (SW-108, default-off). The JSX
+    // island registers an `update(payload)` setter here on mount; the chunk's
+    // progressive repaints push fresh plain payloads through it (React-state
+    // re-render) instead of the by-id _composeBody innerHTML fill. The setter is
+    // cleared on unmount/navigate. Only used when _reactHomeJsxOn() is true.
+    let _mhomeJsxUpdate = null;
+    const _mhomeJsxPush = (payload) => {
+        try { if (typeof _mhomeJsxUpdate === 'function') _mhomeJsxUpdate(payload); } catch (_) { /* noop */ }
+    };
+
     // React-island flag — DEFAULT-ON (parity-verified live, SW-82). Kill-switch:
     // window.__REACT_HOME=false | ?react_home=0 | localStorage crm_react_home='0'
     // (plus the global ?react=0 / crm_react_off='1').
@@ -636,6 +646,21 @@
             if (/[?&]react_home=0/.test(location.search)) return false;
             if (localStorage.getItem('crm_react_home') === '0') return false;
             return true;
+        } catch (_) { return false; }
+    };
+
+    // Full real-JSX render path for the mobile home body — DEFAULT-OFF opt-in
+    // (SW-108). When ON, the #mhome-body content (greeting/snapshot cards/quick
+    // actions) is rendered as real React JSX from a plain-serializable payload
+    // instead of the by-id _composeBody innerHTML fill. Same idiom as the
+    // existing flag: ?react_home_jsx=1 or localStorage crm_react_home_jsx==='1'.
+    // Requires _reactHomeOn() (the JSX path only exists inside the island).
+    const _reactHomeJsxOn = () => {
+        try {
+            if (!_reactHomeOn()) return false;
+            if (/[?&]react_home_jsx=1/.test(location.search)) return true;
+            if (localStorage.getItem('crm_react_home_jsx') === '1') return true;
+            return false;
         } catch (_) { return false; }
     };
 
@@ -682,6 +707,15 @@
                     </div>
                 </div></div>`;
 
+        // Full-JSX home body opt-in (SW-108). Captured ONCE here so the choice
+        // is stable across this view's async flow. When on, the island renders
+        // the #mhome-body parts as real JSX from the pushed payload and we
+        // suppress the by-id _composeBody innerHTML fills (the JSX owns the
+        // body). When off — byte-for-byte the existing scaffold path.
+        const _jsxOn = _reactHomeJsxOn();
+        // Reset any prior registration so a stale unmounted setter never fires.
+        _mhomeJsxUpdate = null;
+
         // React scaffold-shell — island renders greeting + #mhome-body (seeded
         // with the cached snapshot); the foreground fetch + _composeBody below
         // fill #mhome-body by id (after awaiting island useEffect-ready).
@@ -689,9 +723,21 @@
             viewport.innerHTML = '<div id="mhome-react-root"></div>';
             let _hReady; const _hReadyP = new Promise(res => { _hReady = res; });
             const _hGuard = setTimeout(() => _hReady(), 4000);
+            // Control channel for the JSX body — only populated when the opt-in
+            // flag is on. registerUpdate lets the island hand us its setState so
+            // progressive payloads re-render via React state; initBody is the
+            // same loading-card HTML the off-path seeds, so the very first JSX
+            // paint matches the scaffold's instant-restore.
+            const _jsxData = _jsxOn ? {
+                body: null,
+                initBody: _mhomeInitBody,
+                registerUpdate: (fn) => { _mhomeJsxUpdate = fn; },
+                unregister: () => { _mhomeJsxUpdate = null; },
+            } : undefined;
             try {
                 window.CRMReact.mountMobileHome(document.getElementById('mhome-react-root'), {
                     greetWord, userName, dateStr, avatarUrl, initBody: _mhomeInitBody,
+                    data: _jsxData,
                     onReady: () => { clearTimeout(_hGuard); _hReady(); },
                 });
             } catch (e) {
@@ -800,7 +846,7 @@
         const _mhomeRepaint = () => {
             if (_state.cv !== 'home') return;
             if (!document.getElementById('mhome-body')) return;
-            _composeBody(cachedPeople || [], cachedUsers || [], cachedCustomers || [], !cachedPeople);
+            _mhomePaint(cachedPeople || [], cachedUsers || [], cachedCustomers || [], !cachedPeople);
         };
         if (_needDrafts) {
             AppDataStore.query('follow_up_drafts', { status: 'pending' })
@@ -1059,9 +1105,141 @@
         if (!peoplePending) _mhomeSaveSnap(body.innerHTML);
         }; // end _composeBody
 
+        // ── Full-JSX payload builder (SW-108, default-off) ───────
+        // Re-derives the SAME model _composeBody renders, but as a plain,
+        // serializable object (numbers + strings + small arrays — NO HTML
+        // strings, NO DOM, NO functions). The JSX island renders these parts
+        // with React-state and wires interactions to window.app.* directly, so
+        // text is auto-escaped by React (no _mhomeEsc here). Only invoked when
+        // _jsxOn is true; never touches the DOM, so it cannot affect the
+        // off-path. Mirrors _composeBody's derivation 1:1 for parity.
+        const buildHomeIslandData = (allPeople, cachedUsers, cachedCustomers, peoplePending) => {
+            allPeople = allPeople || [];
+            cachedUsers = cachedUsers || [];
+            cachedCustomers = cachedCustomers || [];
+            const personMap = new Map(allPeople.map(p => [String(p.id), p]));
+            const _isMine = (d) => isSystemAdmin(_state.cu) || String(d.agent_id) === String(_state.cu?.id);
+            const visibleDrafts = cachedDrafts.filter(d =>
+                d.status === 'pending' && (d.due_date || '') <= todayStr && _isMine(d)
+            );
+            const _bdayOwnerVisible = (ownerId) => {
+                if (visibleIds === 'all') return true;
+                if (!ownerId) return false;
+                return Array.isArray(visibleIds) && visibleIds.some(id => String(id) === String(ownerId));
+            };
+            const _bdayMatch = (p) => {
+                const dob = p.date_of_birth || '';
+                if (!dob || dob.length < 5) return false;
+                const md = dob.slice(5, 10);
+                return md === todayMD || md === tomMD;
+            };
+            const birthdays = [
+                ...allPeople.filter(p => _bdayMatch(p) && _bdayOwnerVisible(p.responsible_agent_id || p.lead_agent_id)),
+                ...cachedUsers.filter(_bdayMatch),
+            ];
+            const refills = cachedRefills;
+
+            const apptCount = activities.length;
+            const followCount = visibleDrafts.length;
+            const refillCount = refills.length;
+
+            const oldestDraft = [...visibleDrafts].sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''))[0];
+            const draftPerson = (d) => {
+                if (!d) return null;
+                if (d.prospect_id) return personMap.get(String(d.prospect_id));
+                if (d.customer_id) return personMap.get(String(d.customer_id));
+                return null;
+            };
+            const oldestPerson = draftPerson(oldestDraft);
+            const suggestedName = oldestPerson?.full_name || (birthdays[0]?.full_name) || '—';
+            // Plain action descriptor — the JSX maps {kind} to a window.app.* call.
+            let suggestedAction;
+            if (oldestPerson) suggestedAction = { kind: 'wa', id: oldestPerson.id ?? null, phone: oldestPerson.phone || '' };
+            else if (birthdays[0]) suggestedAction = { kind: 'wa', id: birthdays[0].id ?? null, phone: birthdays[0].phone || '' };
+            else suggestedAction = { kind: 'nav', view: 'calendar' };
+
+            const scheduleRows = activities.slice(0, 4).map(a => {
+                const personId = a.prospect_id || a.customer_id;
+                const person = personId ? personMap.get(String(personId)) : null;
+                const time = (a.start_time || '00:00').slice(0, 5);
+                const title = a.activity_type || 'Activity';
+                const sub = person ? person.full_name : (a.notes || a.title || '—');
+                return { time, title, sub, icon: _mhomeIcon(title) };
+            });
+
+            const daysAgo = (dateLike) => {
+                if (!dateLike) return null;
+                const t = new Date(dateLike).getTime();
+                if (isNaN(t)) return null;
+                return Math.floor((Date.now() - t) / 86400000);
+            };
+            const attention = [];
+            if (oldestPerson) {
+                const d = daysAgo(oldestDraft.due_date);
+                const sub = (d != null && d >= 0) ? `Last contact ${d} day${d === 1 ? '' : 's'} ago` : 'Awaiting follow-up';
+                attention.push({
+                    type: 'followup',
+                    initials: _mhomeInitials(oldestPerson.full_name),
+                    name: oldestPerson.full_name || '—',
+                    need: 'Needs follow-up',
+                    sub,
+                    waId: oldestPerson.id ?? null,
+                    waPhone: oldestPerson.phone || '',
+                });
+            }
+            const bday = birthdays[0];
+            if (bday) {
+                const isToday = (bday.date_of_birth || '').slice(5, 10) === todayMD;
+                attention.push({
+                    type: 'birthday',
+                    name: bday.full_name || '—',
+                    isAgent: !!bday.role,
+                    need: isToday ? 'Birthday today' : 'Birthday tomorrow',
+                    sub: 'Send your wishes',
+                    waId: bday.id ?? null,
+                    waPhone: bday.phone || '',
+                });
+            }
+
+            const inactiveCount = (() => {
+                const sixtyAgo = Date.now() - 60 * 86400000;
+                return (cachedCustomers || []).filter(c => {
+                    if (c.status === 'inactive') return true;
+                    const lc = c.last_contact_date || c.updated_at || c.created_at;
+                    if (!lc) return false;
+                    const t = new Date(lc).getTime();
+                    return !isNaN(t) && t < sixtyAgo;
+                }).length;
+            })();
+            const overdueFollowups = visibleDrafts.filter(d => (d.due_date || '') < todayStr).length;
+
+            return {
+                peoplePending: !!peoplePending,
+                stats: { apptCount, followCount, refillCount, bdayCount: birthdays.length },
+                suggestedName,
+                suggestedAction,
+                scheduleRows,
+                attention,
+                tiles: { overdueFollowups, refillCount, inactiveCount },
+            };
+        };
+
+        // Single paint dispatcher. OFF (default): byte-for-byte the existing
+        // _composeBody by-id fill. ON: build the plain payload and push it to
+        // the JSX island via the registered React-state setter — never touches
+        // #mhome-body, so the JSX-owned DOM is left intact. A build throw is
+        // swallowed (ON path is best-effort) and the off-path is unaffected.
+        const _mhomePaint = (allPeople, cachedUsers, cachedCustomers, peoplePending) => {
+            if (_jsxOn) {
+                try { _mhomeJsxPush(buildHomeIslandData(allPeople, cachedUsers, cachedCustomers, peoplePending)); } catch (_) { /* noop */ }
+                return;
+            }
+            _composeBody(allPeople, cachedUsers, cachedCustomers, peoplePending);
+        };
+
         if (cachedPeople) {
             // Warm base → render everything in one pass.
-            _composeBody(cachedPeople, cachedUsers, cachedCustomers, false);
+            _mhomePaint(cachedPeople, cachedUsers, cachedCustomers, false);
         } else {
             // ── Mobile Home Tier 1.2: paint NOW, fill people in async ──
             // Cold-base: previously we awaited two queryAdvanced round-trips
@@ -1071,7 +1249,7 @@
             // each layer of person data lands — first the refId-scoped names
             // (cheap, only the people referenced today), then the full base
             // (for birthdays + inactive count).
-            _composeBody([], cachedUsers, cachedCustomers || [], true);
+            _mhomePaint([], cachedUsers, cachedCustomers || [], true);
             _mhomePerf('cold-paint:partial');
 
             // Background pass 1: just the people referenced by today's
@@ -1089,7 +1267,7 @@
                 const partialPeople = [...(pp.data || []), ...(cc.data || [])];
                 _mhomePerf('cold-bg:refids:done');
                 if (_state.cv === 'home' && document.getElementById('mhome-body')) {
-                    _composeBody(partialPeople, cachedUsers, cachedCustomers || [], true);
+                    _mhomePaint(partialPeople, cachedUsers, cachedCustomers || [], true);
                 }
             })().catch(() => {});
 
@@ -1109,7 +1287,7 @@
                 }
                 _mhomePerf('cold-bg:full:done');
                 if (_state.cv === 'home' && document.getElementById('mhome-body')) {
-                    _composeBody(cachedPeople, cachedUsers, cachedCustomers, false);
+                    _mhomePaint(cachedPeople, cachedUsers, cachedCustomers, false);
                 }
             })().catch(() => {});
         }
