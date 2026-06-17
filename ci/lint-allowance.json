@@ -1,6 +1,6 @@
 {
-  "_comment": "Ratchet DOWN as waves land; never up. Enforced by: node ci/lint-patterns.js --enforce. R2=0 after Wave 1 escaper consolidation. R1 (inline role parse) intentionally left — those sites gate authorization and need per-site review before consolidation (not a behavior-preserving find-replace).",
-  "R1": 24,
+  "_comment": "Ratchet DOWN as waves land; never up. Enforced by: node ci/lint-patterns.js --enforce. R2=0 after Wave 1 escaper consolidation. R1: Wave 1.2 (authorized authz FIX 2026-06-18) folded 14 buggy inline /Level/ parses onto canonical _getUserLevel (24->10). Remaining 10 = 1 canonical def + 9 multi-threshold/list-filter sites with no single clean fold.",
+  "R1": 10,
   "R2": 0,
   "R3": 1
 }

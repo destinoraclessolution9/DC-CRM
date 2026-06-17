@@ -1561,8 +1561,7 @@ const renderProspectsTable = async () => {
         agentFilterEl.dataset.hydrated = '1';
     }
 
-    const _userLvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
-    const _userLevel = _userLvlMatch ? parseInt(_userLvlMatch[1]) : 99;
+    const _userLevel = _getUserLevel(_currentUser);
     const canDelete = _userLevel <= 5;
     const canReassign = _userLevel <= 5;
     const activeAgents = canReassign ? allUsers.filter(u => {
@@ -1778,8 +1777,7 @@ const deleteProspect = async (id) => {
     // Server-side gate: Supabase RLS restrictive policy
     // `prospects_delete_lead_only` rejects DELETEs from users with Level > 5.
     // The client-side check below is still a UX/defence-in-depth layer.
-    const userLvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
-    const userLevel = userLvlMatch ? parseInt(userLvlMatch[1]) : 99;
+    const userLevel = _getUserLevel(_currentUser);
     if (userLevel > 5) {
         UI.toast.error('You do not have permission to delete prospects.');
         return;
@@ -1792,8 +1790,7 @@ const deleteProspect = async (id) => {
 const confirmDeleteProspect = async (id) => {
     // Re-check the role here too — the modal action runs through a global
     // callback and could theoretically be invoked directly.
-    const userLvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
-    const userLevel = userLvlMatch ? parseInt(userLvlMatch[1]) : 99;
+    const userLevel = _getUserLevel(_currentUser);
     if (userLevel > 5) {
         UI.hideModal();
         UI.toast.error('You do not have permission to delete prospects.');
@@ -8252,7 +8249,6 @@ const renderAgentsTable = async () => {
         const reactRoot = document.getElementById('agents-react-root');
         if (reactRoot) {
             try {
-                const _curLvlR = _currentUser?.role?.match(/Level\s+(\d+)/i);
                 // Per-agent count + stats maps from the SAME warm getAll the legacy
                 // path below uses (byte-identical loops) — passed as props so the
                 // island never re-fetches them (React Query paused these as offline).
@@ -8275,7 +8271,7 @@ const renderAgentsTable = async () => {
                         role:   document.getElementById('filter-agent-role')?.value || '',
                         status: document.getElementById('filter-agent-status')?.value || '',
                     },
-                    meta: { canAssignUpline: _curLvlR ? parseInt(_curLvlR[1]) <= 4 : false },
+                    meta: { canAssignUpline: _getUserLevel(_currentUser) <= 4 },
                 });
                 return;
             } catch (e) {
@@ -8297,8 +8293,7 @@ if (!agent) {
     return;
 }
 
-const lvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
-const isAdminOrLead = lvlMatch ? parseInt(lvlMatch[1]) <= 4 : false;
+const isAdminOrLead = _getUserLevel(_currentUser) <= 4;
 
 // Resolve reporting_to name dynamically
 const allUsers = await AppDataStore.getAll('users');

@@ -793,8 +793,7 @@
 
         // 2. Resolve permissions once. For level 1-2 we short-circuit to full
         // access; otherwise we compute the visible user-id set a single time.
-        const lvlMatch = _state.cu?.role?.match(/Level\s+(\d+)/i);
-        const level = lvlMatch ? parseInt(lvlMatch[1]) : 10;
+        const level = _utils.getUserLevel(_state.cu);
         const fullAccess = level <= 2;
         let visibleUserIds = null;
         if (!fullAccess) {

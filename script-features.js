@@ -2349,8 +2349,7 @@ window._fv = window._fv || {};
             }
         }
 
-        const lvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
-        const level = lvlMatch ? parseInt(lvlMatch[1]) : 10;
+        const level = window._crmUtils.getUserLevel(_currentUser);
         const fullAccess = level <= 2;
         let visibleUserIds = null;
         if (!fullAccess) {
@@ -4833,8 +4832,7 @@ window._fv._renderAgentsTable = async () => {
     const roleFilter = document.getElementById('filter-agent-role')?.value || '';
     const statusFilter = document.getElementById('filter-agent-status')?.value || '';
 
-    const curLvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
-    const canAssignUpline = curLvlMatch ? parseInt(curLvlMatch[1]) <= 4 : false;
+    const canAssignUpline = window._crmUtils.getUserLevel(_currentUser) <= 4;
 
     const [allProspects, allCustomers, allAgentStats] = await Promise.all([
         window.AppDataStore.getAll('prospects'),
@@ -4926,8 +4924,7 @@ window._fv._showAgentProfile = async (agentId) => {
         return;
     }
 
-    const lvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
-    const isAdminOrLead = lvlMatch ? parseInt(lvlMatch[1]) <= 4 : false;
+    const isAdminOrLead = window._crmUtils.getUserLevel(_currentUser) <= 4;
 
     const reportingToUser = agent.reporting_to ? allUsers.find(u => u.id == agent.reporting_to) : null;
     const reportingToName = reportingToUser ? reportingToUser.full_name : '—';
@@ -5890,26 +5887,7 @@ window._fv.showPipelineView = async (container) => {
 window._fv.showMarketingListsView = async (container) => {
     const _currentUser = window._appState?.cu;
     const { isSystemAdmin, isMarketingManager, escapeHtml } = window._crmUtils || {};
-    const _getUserLevelLocal = (user) => {
-        if (!user?.role) return 99;
-        const m = String(user.role).match(/Level\s+(\d+)\b/i);
-        if (m) return parseInt(m[1], 10);
-        const r = String(user.role).toLowerCase();
-        if (r === 'super_admin' || r === 'admin') return 1;
-        if (r === 'marketing_manager') return 2;
-        if (r === 'manager') return 4;
-        if (r === 'team_leader') return 5;
-        if (r === 'consultant') return 7;
-        if (r === 'agent') return 10;
-        if (r === 'stock_take_staff' || r === 'stock_take') return 15;
-        if (r === 'customer') return 13;
-        if (r === 'referrer') return 14;
-        const raw = String(user.role).trim();
-        if (raw === '传福大使')   return 12;
-        if (raw === '改命客户')   return 13;
-        if (raw === '准传福大使') return 14;
-        return 99;
-    };
+    const _getUserLevelLocal = window._crmUtils.getUserLevel;
     const isTeamLeaderOrAbove = (user) => _getUserLevelLocal(user) <= 5;
 
     // _currentMarketingListTab lives in window._appState.mlt (readable/writable)
@@ -7053,10 +7031,7 @@ window._fv.showMilestonesView = async (container, targetUserId = null) => {
         </div>`;
 
     // Determine admin status
-    const viewerLevel = (() => {
-        const m = (currentUser.role || '').match(/Level\s+(\d+)/i);
-        return m ? parseInt(m[1]) : 12;
-    })();
+    const viewerLevel = window._crmUtils.getUserLevel(currentUser);
     const isAdmin = viewerLevel <= 2;
 
     // Resolve subject (whose milestones to show)

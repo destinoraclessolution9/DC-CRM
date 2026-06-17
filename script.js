@@ -700,8 +700,7 @@ const appLogic = (() => {
             _visibleUserIdsCache.set(key, { data: 'all', ts: Date.now() });
             return 'all';
         }
-        const lvlMatch = user.role?.match(/Level\s+(\d+)/i);
-        const level = lvlMatch ? parseInt(lvlMatch[1]) : 99;
+        const level = _getUserLevel(user);
         // Levels 1–2 see everything (fallback, already covered above)
         if (level <= 2) {
             _visibleUserIdsCache.set(key, { data: 'all', ts: Date.now() });
@@ -1041,8 +1040,7 @@ const appLogic = (() => {
     const canEditProspect = async (prospect) => {
         const user = _currentUser;
         if (!user) return false;
-        const lvlMatch = user.role?.match(/Level\s+(\d+)/i);
-        const level = lvlMatch ? parseInt(lvlMatch[1]) : 99;
+        const level = _getUserLevel(user);
         // Levels 1-2: full edit access
         if (level <= 2) return true;
         // Levels 3-10: can edit team/subordinate records
@@ -1058,8 +1056,7 @@ const appLogic = (() => {
     // Similar for customers, activities, etc. – you can add as needed.
 
     const canViewNode = async (personId, personType) => {
-        const lvlMatch = _currentUser?.role?.match(/Level\s+(\d+)/i);
-        const level = lvlMatch ? parseInt(lvlMatch[1]) : 10;
+        const level = _getUserLevel(_currentUser);
         // Level 1-2: Super Admin / Marketing Manager — can view every node
         if (level <= 2) return true;
         // 'user' type: can view self or any subordinate in the reporting tree
