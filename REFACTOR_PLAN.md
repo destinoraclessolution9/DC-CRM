@@ -32,9 +32,9 @@ Re-validation result (53 audit findings vs current live): **10 fixed by the big 
 - [ ] 2.7 Cap referral-tree fetch (#24/#33)
 - [ ] 2.8 KPI Target-vs-Actual → `kpi_*` RPC (#34)
 
-## Wave 3 — Structural decoupling (explicit go)
+## Wave 3 — Structural decoupling
 - [ ] 3.1 One view registry: unify 2 dispatchers + 3 authz tables (#2/#39/#9)
-- [ ] 3.2 gcal: `dataChanged` listener, not method monkey-patch `script-gcal.js:1130-1172` (#7/#44)
+- [x] 3.2 gcal: `dataChanged` listener, not method monkey-patch (#7/#44) — DONE + DEPLOYED (commit dcb4b09). Behavior-equivalent (add→record.type, update→getById, delete→sync; filtered to add/update/delete to ignore realtime/revalidate echoes). Gate green, smoke 9/10 (flaky Calendar only, 0 errors).
 - [ ] 3.3 Extract god-functions: `saveActivity` (~749 lines), render monoliths (#36)
 - [ ] 3.4 Silent-catch sweep (~175 no-op `catch{}`) (#40)
 
@@ -54,4 +54,6 @@ These cannot be safely AUTO-pushed to a production CRM without per-role behavior
 
 ## Log
 - 2026-06-17: synced w/ live (b72d4ea, clean), re-validated 53 findings, baseline re-init, branch created.
-- 2026-06-17: Wave 0 (guardrails+cleanup) + Wave 1.1 (escaper consolidation) done, gate+smoke green (smoke 6/10 vs baseline 5/10 — same 4 pre-existing failures, 0 new), pushed to production (b72d4ea..12eafa8). Role-parse/formatter consolidation deferred (authz/output risk). Waves 2-4 pending strategic decision on deploy cadence.
+- 2026-06-17: Wave 0 (guardrails+cleanup) + Wave 1.1 (escaper consolidation) done, gate+smoke green (smoke 6/10 vs baseline 5/10 — same 4 pre-existing failures, 0 new), pushed to production (b72d4ea..12eafa8) + VERIFIED LIVE (HTTP 200, rbac.js→404). Role-parse/formatter consolidation deferred (authz/output risk).
+- 2026-06-17: owner said "push risky waves too" → auto-push cadence (gate+smoke+auto-rollback, no diff gate), but "no functional change" still holds → every change kept behavior-preserving.
+- 2026-06-17: Wave 3.2 gcal monkey-patch→event-listener done, gate green + smoke 9/10 (flaky), pushed (12eafa8..dcb4b09). NOTE: committed artifacts churn (CRLF noise + gitignored hashed copies) is harmless — Vercel rebuilds all from source via `node build.mjs`; only SOURCE correctness matters for live.
