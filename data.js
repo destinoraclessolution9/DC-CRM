@@ -1845,6 +1845,45 @@ class DataStore {
         return dataToInsert;
     }
 
+    // Batched insert: one round-trip for N rows on the happy path, falling back
+    // to per-row add() (full schema-strip / FK / uuid-PK / offline-queue recovery)
+    // on ANY error — so behavior matches a sequential add() loop whenever the bulk
+    // path can't be used. Emits a single 'add' event (records[]) instead of N.
+    // Used for bulk inserts like WhatsApp campaign_messages where the per-recipient
+    // loop was an N+1 (and was sequential to avoid the sync-queue race a parallel
+    // loop would cause). Safe there: nothing listens per-record to that table.
+    async createMany(tableName, records) {
+        if (!Array.isArray(records) || records.length === 0) return [];
+        const rows = records.map(r => {
+            const row = { ...r };
+            if (!row.id) row.id = this._generateId(tableName);
+            return row;
+        });
+        try {
+            const { data, error } = await this._writeClient()
+                .from(tableName)
+                .insert(rows)
+                .select();
+            if (error) throw error;
+            const saved = (data && data.length) ? data : rows;
+            try {
+                const key = `fs_crm_${tableName}`;
+                const all = JSON.parse(localStorage.getItem(key) || '[]');
+                for (const d of saved) all.push(d);
+                localStorage.setItem(key, JSON.stringify(this._sanitizeForStorage(tableName, all)));
+            } catch (_) {}
+            for (const d of saved) this._writeAudit('insert', tableName, d.id, null, d);
+            this.invalidateCache(tableName);
+            this.emit('dataChanged', { action: 'add', table: tableName, records: saved });
+            return saved;
+        } catch (e) {
+            console.warn(`createMany bulk insert failed for ${tableName}, falling back to per-row add: ${e?.message || e}`);
+            const out = [];
+            for (const r of records) out.push(await this.add(tableName, r));
+            return out;
+        }
+    }
+
     // ── Audit trail (fire-and-forget) ────────────────────────────────────
     // Writes a row to audit_logs for every update/delete on business-critical
     // tables. Non-blocking: a failure here (e.g. audit_logs unreachable, RLS

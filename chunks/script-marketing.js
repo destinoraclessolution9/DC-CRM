@@ -3994,20 +3994,20 @@ ALTER TABLE public.promotions
 
         const campaign = await AppDataStore.create('whatsapp_campaigns', _campaignData);
 
-        // Create initial message tracking for each recipient
-        for (const rpId of recipients) {
-            await AppDataStore.create('campaign_messages', {
-                campaign_id: campaign.id,
-                prospect_id: rpId,
-                status: launchType === 'now' ? 'queued' : 'scheduled',
-                sent_at: launchType === 'now' ? new Date().toISOString() : null,
-                delivered_at: null,
-                opened_at: null,
-                replied_at: null,
-                last_error: null,
-                retry_count: 0
-            });
-        }
+        // Create initial message tracking for all recipients in ONE batched insert
+        // (was an N+1: one round-trip per recipient). createMany falls back to
+        // per-row add() on any error, so the persisted records are unchanged.
+        await AppDataStore.createMany('campaign_messages', recipients.map(rpId => ({
+            campaign_id: campaign.id,
+            prospect_id: rpId,
+            status: launchType === 'now' ? 'queued' : 'scheduled',
+            sent_at: launchType === 'now' ? new Date().toISOString() : null,
+            delivered_at: null,
+            opened_at: null,
+            replied_at: null,
+            last_error: null,
+            retry_count: 0
+        })));
 
         if (launchType === 'now') {
             await simulateCampaignSending(campaign.id);
