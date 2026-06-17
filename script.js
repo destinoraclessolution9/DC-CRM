@@ -1547,19 +1547,9 @@ const appLogic = (() => {
 
         // Map Level 1-14 to visible nav IDs (suffix after 'nav-')
         // Order in array = display order in nav (first item leftmost / top).
-        const _l12 = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'documents', 'knowledge', 'settings', 'fude', 'milestones', 'order-form-extract'];
-        const levelPermissions = {
-            1: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'purchases_history', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'knowledge', 'import', 'integrations', 'settings', 'fude', 'milestones', 'noticeboard', 'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser', 'stock-take', 'boss-report', 'org-chart', 'ai-insights', 'security', 'workflows', 'lead_forms', 'surveys', 'contracts', 'booking_settings', 'order-form-extract'],
-            2: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'knowledge', 'import', 'integrations', 'settings', 'fude', 'milestones', 'noticeboard', 'custom_fields', 'org-chart', 'ai-insights', 'security', 'lead_forms', 'surveys', 'contracts', 'booking_settings', 'order-form-extract'],
-            3: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'knowledge', 'settings', 'fude', 'order-form-extract'],
-            4: ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'performance', 'reports', 'protection', 'documents', 'knowledge', 'settings', 'fude', 'order-form-extract'],
-            5: _l12, 6: _l12, 7: _l12, 8: _l12, 9: _l12, 10: _l12,
-            11: ['calendar', 'prospects', 'referrals', 'promotions', 'cases', 'knowledge', 'settings', 'fude', 'milestones'],
-            12: ['noticeboard', 'fude', 'milestones', 'prospects', 'referrals'],          // 传福大使
-            13: ['noticeboard', 'fude', 'milestones', 'prospects'],                       // 改命客户
-            14: ['noticeboard', 'fude', 'milestones', 'prospects'],                       // 准传福大使
-            15: ['stock-take']                                                            // Stock Take Staff (per-store counters)
-        };
+        // Derived from the VIEWS registry (single source of truth) — byte-identical
+        // to the former hand-maintained literal (_l12 + the 1..15 nav-id arrays).
+        const levelPermissions = _deriveLevelPermissions();
 
         // Determine level from role (e.g., "Level 1 Super Admin" -> 1)
         // Delegates to the centralized _getUserLevel helper so legacy names
@@ -2877,65 +2867,134 @@ function _wireLoginBtn() {
     // To add a chunk: move functions to chunks/<viewId>.js, ensure they only
     // touch stable globals, run build.mjs (it auto-picks up chunks/*.js), then
     // add the viewId entry below.
-    const _CHUNK_VIEWS = {
-        // Core view chunks (extracted 2026-06-05)
-        'home':                 { src: 'chunks/script-mobile.min.js',      minLevel: null, exactLevels: null },
-        'calendar':             { src: 'chunks/script-calendar.min.js',    minLevel: null, exactLevels: null },
-        'month':                { src: 'chunks/script-calendar.min.js',    minLevel: null, exactLevels: null },
-        // Prospect/Customer management (Phase 4J)
-        'prospects':            { src: 'chunks/script-prospects.min.js',   minLevel: null, exactLevels: null },
-        'customers':            { src: 'chunks/script-prospects.min.js',   minLevel: null, exactLevels: null },
-        'agents':               { src: 'chunks/script-prospects.min.js',   minLevel: null, exactLevels: null },
-        'purchases_history':    { src: 'chunks/script-prospects.min.js',   minLevel: null, exactLevels: null },
-        // Forms + Surveys + Contracts (Phase 4F)
-        'lead_forms':           { src: 'chunks/script-forms.min.js',       minLevel: null, exactLevels: null },
-        'surveys':              { src: 'chunks/script-forms.min.js',       minLevel: null, exactLevels: null },
-        'contracts':            { src: 'chunks/script-forms.min.js',       minLevel: null, exactLevels: null },
-        'custom_fields':        { src: 'chunks/script-forms.min.js',       minLevel: null, exactLevels: null },
-        'booking_settings':     { src: 'chunks/script-cps.min.js',          minLevel: null, exactLevels: null },
-        // Phase 5A: Notifications + CPS + Scheduler
-        'cps_intake':           { src: 'chunks/script-cps.min.js',         minLevel: null, exactLevels: null },
-        // Phase 5D: Advanced Search + Filter Panel
-        'search':               { src: 'chunks/script-search.min.js',      minLevel: null, exactLevels: null },
-        // Phase 5B+C: Admin + Org Chart (Super Admin only)
-        'admin':                { src: 'chunks/script-admin.min.js',        minLevel: null, exactLevels: [1] },
-        'security':             { src: 'chunks/script-admin.min.js',        minLevel: null, exactLevels: [1] },
-        'org_chart':            { src: 'chunks/script-org.min.js',          minLevel: null, exactLevels: [1, 2] },
-        // Phase 4K-N: new operation chunks
-        'pipeline':             { src: 'chunks/script-pipeline.min.js',    minLevel: null, exactLevels: null },
-        'import':               { src: 'chunks/script-import.min.js',      minLevel: null, exactLevels: null },
-        'protection':           { src: 'chunks/script-import.min.js',      minLevel: null, exactLevels: null },
-        'fude':                 { src: 'chunks/script-fude.min.js',        minLevel: null, exactLevels: null },
-        'milestones':           { src: 'chunks/script-features2.min.js',   minLevel: null, exactLevels: null },
-        // Existing role-gated chunks
-        'stock_take':           { src: 'chunks/script-stock-take.min.js',  minLevel: null, exactLevels: [1, 15] },
-        'egg_purchasing':       { src: 'chunks/script-egg.min.js',         minLevel: null, exactLevels: [1] },
-        'boss_report':          { src: 'chunks/script-boss-report.min.js', minLevel: null, exactLevels: [1, 2] },
-        'knowledge':            { src: 'chunks/script-knowledge.min.js',   minLevel: null, exactLevels: null },
-        'formula_purchaser':    { src: 'chunks/script-formula.min.js',     minLevel: null, exactLevels: [1] },
-        'marketing_automation': { src: 'chunks/script-marketing.min.js',   minLevel: null, exactLevels: [1, 2] },
-        'marketing_lists':      { src: 'chunks/script-marketing.min.js',   minLevel: null, exactLevels: [1, 2] },
-        'workflows':            { src: 'chunks/script-marketing.min.js',   minLevel: null, exactLevels: [1, 2] },
-        'reports':              { src: 'chunks/script-reporting.min.js',   minLevel: null, exactLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] },
-        'cases':                { src: 'chunks/script-cases.min.js',       minLevel: null, exactLevels: null },
-        'referrals':            { src: 'chunks/script-referrals.min.js',   minLevel: null, exactLevels: null },
-        // Phase: Ranking + Workflow Automation + Noticeboard (extracted 2026-06-05)
-        'ranking':              { src: 'chunks/script-performance.min.js', minLevel: null, exactLevels: null },
-        'performance':          { src: 'chunks/script-performance.min.js', minLevel: null, exactLevels: null },
-        'noticeboard':          { src: 'chunks/script-performance.min.js',  minLevel: null, exactLevels: null },
-        'whatsapp':             { src: 'chunks/script-whatsapp.min.js',    minLevel: 1,    exactLevels: [1, 2] },
-        'ai_insights':          { src: 'chunks/script-ai.min.js',          minLevel: 1,    exactLevels: [1, 2] },
-        'documents':            { src: 'chunks/script-documents.min.js', minLevel: null, exactLevels: null },
-        'integrations':         { src: 'chunks/script-gcal.min.js',       minLevel: 1,    exactLevels: null },
-        'order_form_extract':   { src: 'chunks/script-order-form-extract.min.js', minLevel: null, exactLevels: null },
-        // Phase 6A: Journey System — 5-year automated follow-up (2026-06-06)
-        'journey':              { src: 'chunks/script-journey.min.js',    minLevel: null, exactLevels: null },
-        // Views whose render function lives in an existing chunk (no dedicated entry above)
-        'promotions':           { src: 'chunks/script-marketing.min.js',  minLevel: null, exactLevels: null },
-        'settings':             { src: 'chunks/script-prospects.min.js',  minLevel: null, exactLevels: null },
-        // Modal-bound chunks (not tied to a view — underscore prefix prevents nav matching)
-        '_activities':          { src: 'chunks/script-activities.min.js', minLevel: null, exactLevels: null },
+    // ── Unified view registry (single source of truth) ──────────────────
+    // VIEWS is the ONE table that drives the three derived view tables below:
+    //   _CHUNK_VIEWS (chunk-load gate), VIEW_TITLES (document title), and the
+    //   levelPermissions nav-visibility map (derived in updateNavVisibility).
+    // Previously these three drifted apart by hand; now each is computed from
+    // VIEWS so a view is described in exactly one place. Per entry:
+    //   chunk       — the chunks/<name>.min.js file (was _CHUNK_VIEWS.src)
+    //   minLevel    — min role level for the chunk-load gate (was _CHUNK_VIEWS.minLevel)
+    //   exactLevels — exact role levels for the chunk-load gate (was _CHUNK_VIEWS.exactLevels)
+    //   navId       — dash-form nav id (the levelPermissions key space)
+    //   navLevels   — levels whose nav shows this id; _VIEW_NO_NAV = no nav entry
+    //                 (default-visible view); '@<viewId>' = share another view's set
+    //   title       — document title (was VIEW_TITLES[viewId]); undefined = no title
+    const _VIEW_NO_NAV = null;
+    const VIEWS = {
+        'home':                 { chunk: 'chunks/script-mobile.min.js',      minLevel: null, exactLevels: null, navId: 'home',                navLevels: _VIEW_NO_NAV, title: 'Home' },
+        'calendar':             { chunk: 'chunks/script-calendar.min.js',    minLevel: null, exactLevels: null, navId: 'calendar',            navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], title: 'Calendar' },
+        'month':                { chunk: 'chunks/script-calendar.min.js',    minLevel: null, exactLevels: null, navId: 'calendar',            navLevels: '@calendar', title: 'Calendar' },
+        'prospects':            { chunk: 'chunks/script-prospects.min.js',   minLevel: null, exactLevels: null, navId: 'prospects',           navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], title: 'Prospects & Customers' },
+        'customers':            { chunk: 'chunks/script-prospects.min.js',   minLevel: null, exactLevels: null, navId: 'customers',           navLevels: _VIEW_NO_NAV, title: undefined },
+        'agents':               { chunk: 'chunks/script-prospects.min.js',   minLevel: null, exactLevels: null, navId: 'agents',              navLevels: [1, 2], title: 'Consultants' },
+        'purchases_history':    { chunk: 'chunks/script-prospects.min.js',   minLevel: null, exactLevels: null, navId: 'purchases_history',   navLevels: [1], title: 'Purchases History' },
+        'lead_forms':           { chunk: 'chunks/script-forms.min.js',       minLevel: null, exactLevels: null, navId: 'lead_forms',          navLevels: [1, 2], title: 'Lead Capture Forms' },
+        'surveys':              { chunk: 'chunks/script-forms.min.js',       minLevel: null, exactLevels: null, navId: 'surveys',             navLevels: [1, 2], title: 'NPS Surveys' },
+        'contracts':            { chunk: 'chunks/script-forms.min.js',       minLevel: null, exactLevels: null, navId: 'contracts',           navLevels: [1, 2], title: 'Contracts' },
+        'custom_fields':        { chunk: 'chunks/script-forms.min.js',       minLevel: null, exactLevels: null, navId: 'custom_fields',       navLevels: [1, 2], title: 'Custom Fields' },
+        'booking_settings':     { chunk: 'chunks/script-cps.min.js',          minLevel: null, exactLevels: null, navId: 'booking_settings',    navLevels: [1, 2], title: 'Booking Scheduler' },
+        'cps_intake':           { chunk: 'chunks/script-cps.min.js',         minLevel: null, exactLevels: null, navId: 'cps_intake',          navLevels: _VIEW_NO_NAV, title: undefined },
+        'search':               { chunk: 'chunks/script-search.min.js',      minLevel: null, exactLevels: null, navId: 'search',              navLevels: _VIEW_NO_NAV, title: undefined },
+        'admin':                { chunk: 'chunks/script-admin.min.js',        minLevel: null, exactLevels: [1], navId: 'admin',               navLevels: [1, 2], title: 'Admin' },
+        'security':             { chunk: 'chunks/script-admin.min.js',        minLevel: null, exactLevels: [1], navId: 'security',            navLevels: [1, 2], title: 'Security' },
+        'org_chart':            { chunk: 'chunks/script-org.min.js',          minLevel: null, exactLevels: [1, 2], navId: 'org-chart',        navLevels: [1, 2], title: 'Org Chart Consultant' },
+        'pipeline':             { chunk: 'chunks/script-pipeline.min.js',    minLevel: null, exactLevels: null, navId: 'pipeline',            navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], title: 'Pipeline' },
+        'import':               { chunk: 'chunks/script-import.min.js',      minLevel: null, exactLevels: null, navId: 'import',              navLevels: [1, 2], title: 'Import / Export' },
+        'protection':           { chunk: 'chunks/script-import.min.js',      minLevel: null, exactLevels: null, navId: 'protection',          navLevels: [1, 2, 3, 4], title: 'Protection Monitoring' },
+        'fude':                 { chunk: 'chunks/script-fude.min.js',        minLevel: null, exactLevels: null, navId: 'fude',                navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], title: '福运相随' },
+        'milestones':           { chunk: 'chunks/script-features2.min.js',   minLevel: null, exactLevels: null, navId: 'milestones',          navLevels: [1, 2, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], title: 'Milestones' },
+        'stock_take':           { chunk: 'chunks/script-stock-take.min.js',  minLevel: null, exactLevels: [1, 15], navId: 'stock-take',       navLevels: [1, 15], title: 'Stock Take' },
+        'egg_purchasing':       { chunk: 'chunks/script-egg.min.js',         minLevel: null, exactLevels: [1], navId: 'egg-purchasing',       navLevels: [1], title: 'Egg Purchasing' },
+        'boss_report':          { chunk: 'chunks/script-boss-report.min.js', minLevel: null, exactLevels: [1, 2], navId: 'boss-report',       navLevels: [1], title: 'Boss Report' },
+        'knowledge':            { chunk: 'chunks/script-knowledge.min.js',   minLevel: null, exactLevels: null, navId: 'knowledge',           navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], title: 'Knowledge HQ' },
+        'formula_purchaser':    { chunk: 'chunks/script-formula.min.js',     minLevel: null, exactLevels: [1], navId: 'formula-purchaser',    navLevels: [1], title: 'Formula Purchaser' },
+        'marketing_automation': { chunk: 'chunks/script-marketing.min.js',   minLevel: null, exactLevels: [1, 2], navId: 'marketing-automation', navLevels: [1, 2], title: 'Marketing Automation' },
+        'marketing_lists':      { chunk: 'chunks/script-marketing.min.js',   minLevel: null, exactLevels: [1, 2], navId: 'marketing-lists',   navLevels: [1, 2], title: 'Marketing Lists' },
+        'workflows':            { chunk: 'chunks/script-marketing.min.js',   minLevel: null, exactLevels: [1, 2], navId: 'workflows',         navLevels: [1], title: 'Workflow Automation' },
+        'reports':              { chunk: 'chunks/script-reporting.min.js',   minLevel: null, exactLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], navId: 'reports', navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], title: 'Reporting KPI' },
+        'cases':                { chunk: 'chunks/script-cases.min.js',       minLevel: null, exactLevels: null, navId: 'cases',               navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], title: 'Success Cases' },
+        'referrals':            { chunk: 'chunks/script-referrals.min.js',   minLevel: null, exactLevels: null, navId: 'referrals',           navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14], title: 'Referral Relationships' },
+        'ranking':              { chunk: 'chunks/script-performance.min.js', minLevel: null, exactLevels: null, navId: 'ranking',             navLevels: _VIEW_NO_NAV, title: 'Ranking Performance' },
+        'performance':          { chunk: 'chunks/script-performance.min.js', minLevel: null, exactLevels: null, navId: 'performance',         navLevels: [1, 2, 3, 4], title: 'Ranking Performance' },
+        'noticeboard':          { chunk: 'chunks/script-performance.min.js',  minLevel: null, exactLevels: null, navId: 'noticeboard',        navLevels: [1, 2, 12, 13, 14], title: '公告栏 Noticeboard' },
+        'whatsapp':             { chunk: 'chunks/script-whatsapp.min.js',    minLevel: 1,    exactLevels: [1, 2], navId: 'whatsapp',          navLevels: _VIEW_NO_NAV, title: undefined },
+        'ai_insights':          { chunk: 'chunks/script-ai.min.js',          minLevel: 1,    exactLevels: [1, 2], navId: 'ai-insights',       navLevels: [1, 2], title: undefined },
+        'documents':            { chunk: 'chunks/script-documents.min.js', minLevel: null, exactLevels: null, navId: 'documents',            navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], title: 'Documents' },
+        'integrations':         { chunk: 'chunks/script-gcal.min.js',       minLevel: 1,    exactLevels: null, navId: 'integrations',        navLevels: [1, 2], title: 'Integrations' },
+        'order_form_extract':   { chunk: 'chunks/script-order-form-extract.min.js', minLevel: null, exactLevels: null, navId: 'order-form-extract', navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], title: 'Order Form Extract' },
+        'journey':              { chunk: 'chunks/script-journey.min.js',    minLevel: null, exactLevels: null, navId: 'journey',             navLevels: _VIEW_NO_NAV, title: undefined },
+        'promotions':           { chunk: 'chunks/script-marketing.min.js',  minLevel: null, exactLevels: null, navId: 'promotions',          navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], title: 'Monthly Promotion' },
+        'settings':             { chunk: 'chunks/script-prospects.min.js',  minLevel: null, exactLevels: null, navId: 'settings',            navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], title: 'Settings' },
+        '_activities':          { chunk: 'chunks/script-activities.min.js', minLevel: null, exactLevels: null, navId: '_activities',         navLevels: _VIEW_NO_NAV, title: undefined },
     };
+
+    // Nav ids present in levelPermissions but with NO VIEWS entry (legacy /
+    // dropdown-only items). Kept so the derived nav map stays byte-identical.
+    const _VIEW_EXTRA_NAV = {
+        'risk':               { navLevels: [1, 2] },
+        'standard-functions': { navLevels: [1] },
+    };
+
+    // Canonical nav display order (= the level-1 ordering). Every level-1..11/15
+    // nav array is a subsequence of this, so filtering by membership rebuilds each
+    // byte-identically. Levels 12/13/14 reorder, hence _VIEW_NAV_ORDER_OVERRIDE.
+    const _VIEW_NAV_ORDER = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'purchases_history', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'knowledge', 'import', 'integrations', 'settings', 'fude', 'milestones', 'noticeboard', 'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser', 'stock-take', 'boss-report', 'org-chart', 'ai-insights', 'security', 'workflows', 'lead_forms', 'surveys', 'contracts', 'booking_settings', 'order-form-extract'];
+    const _VIEW_NAV_ORDER_OVERRIDE = {
+        12: ['noticeboard', 'fude', 'milestones', 'prospects', 'referrals'],
+        13: ['noticeboard', 'fude', 'milestones', 'prospects'],
+        14: ['noticeboard', 'fude', 'milestones', 'prospects'],
+    };
+
+    // Title-only ids that have no VIEWS entry (aliases / legacy view ids that
+    // still need a document title). Kept so VIEW_TITLES stays byte-identical.
+    const _VIEW_EXTRA_TITLES = {
+        standard_functions: 'Standard Functions',
+        ai: 'AI Insights',
+        risk: 'Attrition Risk',
+        nps: 'NPS Surveys',
+    };
+
+    // ── Derivations: rebuild the three legacy tables from VIEWS (byte-identical
+    // to the former hand-written literals; verified deep-equal). Consumer code is
+    // unchanged — it still reads _CHUNK_VIEWS / VIEW_TITLES / levelPermissions.
+    const _deriveChunkViews = () => {
+        const out = {};
+        for (const id in VIEWS) {
+            const v = VIEWS[id];
+            out[id] = { src: v.chunk, minLevel: v.minLevel, exactLevels: v.exactLevels };
+        }
+        return out;
+    };
+    const _deriveViewTitles = () => {
+        const out = {};
+        for (const id in VIEWS) { if (VIEWS[id].title !== undefined) out[id] = VIEWS[id].title; }
+        for (const id in _VIEW_EXTRA_TITLES) out[id] = _VIEW_EXTRA_TITLES[id];
+        return out;
+    };
+    const _deriveLevelPermissions = () => {
+        const navLevelsByNav = {};
+        for (const id in VIEWS) {
+            const v = VIEWS[id];
+            let lv = v.navLevels;
+            if (lv === _VIEW_NO_NAV) continue;
+            if (typeof lv === 'string' && lv.charAt(0) === '@') lv = VIEWS[lv.slice(1)].navLevels;
+            if (!(v.navId in navLevelsByNav)) navLevelsByNav[v.navId] = lv;
+        }
+        for (const navId in _VIEW_EXTRA_NAV) {
+            if (!(navId in navLevelsByNav)) navLevelsByNav[navId] = _VIEW_EXTRA_NAV[navId].navLevels;
+        }
+        const levels = new Set();
+        for (const navId in navLevelsByNav) navLevelsByNav[navId].forEach((l) => levels.add(l));
+        const out = {};
+        [...levels].sort((a, b) => a - b).forEach((level) => {
+            if (_VIEW_NAV_ORDER_OVERRIDE[level]) { out[level] = _VIEW_NAV_ORDER_OVERRIDE[level].slice(); return; }
+            out[level] = _VIEW_NAV_ORDER.filter((navId) => navLevelsByNav[navId].includes(level));
+        });
+        return out;
+    };
+
+    const _CHUNK_VIEWS = _deriveChunkViews();
 
     // Declarative refresh map — the single source for refreshCurrentView (replaces
     // the parallel switch(_currentView)). Each entry re-renders its view in place
@@ -3323,26 +3382,9 @@ function _wireLoginBtn() {
         // Update document title BEFORE awaiting the view render. If the render
         // hangs or throws, the browser tab title still reflects the user's
         // last click — previously the title would lag on the prior view.
-        const VIEW_TITLES = {
-            home: 'Home',
-            calendar: 'Calendar', month: 'Calendar', prospects: 'Prospects & Customers',
-            pipeline: 'Pipeline', agents: 'Consultants', promotions: 'Monthly Promotion',
-            marketing_automation: 'Marketing Automation', reports: 'Reporting KPI',
-            documents: 'Documents', protection: 'Protection Monitoring', import: 'Import / Export',
-            integrations: 'Integrations', referrals: 'Referral Relationships', cases: 'Success Cases',
-            marketing_lists: 'Marketing Lists', ranking: 'Ranking Performance', performance: 'Ranking Performance',
-            workflows: 'Workflow Automation', booking_settings: 'Booking Scheduler',
-            lead_forms: 'Lead Capture Forms', surveys: 'NPS Surveys', contracts: 'Contracts',
-            custom_fields: 'Custom Fields', settings: 'Settings', milestones: 'Milestones',
-            fude: '福运相随', noticeboard: '公告栏 Noticeboard',
-            egg_purchasing: 'Egg Purchasing', standard_functions: 'Standard Functions',
-            formula_purchaser: 'Formula Purchaser', purchases_history: 'Purchases History',
-            stock_take: 'Stock Take', boss_report: 'Boss Report', ai: 'AI Insights', security: 'Security', admin: 'Admin',
-            risk: 'Attrition Risk', nps: 'NPS Surveys',
-            knowledge: 'Knowledge HQ',
-            org_chart: 'Org Chart Consultant',
-            order_form_extract: 'Order Form Extract',
-        };
+        // Derived from the VIEWS registry (single source of truth) — byte-identical
+        // to the former hand-maintained literal.
+        const VIEW_TITLES = _deriveViewTitles();
         document.title = `${VIEW_TITLES[viewId] || viewId} — 悅客匯 CRM`;
 
         // ── URL hash deep linking ──────────────────────────────────────────

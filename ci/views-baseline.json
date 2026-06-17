@@ -1,0 +1,546 @@
+{
+  "chunkViews": {
+    "home": {
+      "src": "chunks/script-mobile.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "calendar": {
+      "src": "chunks/script-calendar.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "month": {
+      "src": "chunks/script-calendar.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "prospects": {
+      "src": "chunks/script-prospects.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "customers": {
+      "src": "chunks/script-prospects.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "agents": {
+      "src": "chunks/script-prospects.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "purchases_history": {
+      "src": "chunks/script-prospects.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "lead_forms": {
+      "src": "chunks/script-forms.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "surveys": {
+      "src": "chunks/script-forms.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "contracts": {
+      "src": "chunks/script-forms.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "custom_fields": {
+      "src": "chunks/script-forms.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "booking_settings": {
+      "src": "chunks/script-cps.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "cps_intake": {
+      "src": "chunks/script-cps.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "search": {
+      "src": "chunks/script-search.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "admin": {
+      "src": "chunks/script-admin.min.js",
+      "minLevel": null,
+      "exactLevels": [
+        1
+      ]
+    },
+    "security": {
+      "src": "chunks/script-admin.min.js",
+      "minLevel": null,
+      "exactLevels": [
+        1
+      ]
+    },
+    "org_chart": {
+      "src": "chunks/script-org.min.js",
+      "minLevel": null,
+      "exactLevels": [
+        1,
+        2
+      ]
+    },
+    "pipeline": {
+      "src": "chunks/script-pipeline.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "import": {
+      "src": "chunks/script-import.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "protection": {
+      "src": "chunks/script-import.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "fude": {
+      "src": "chunks/script-fude.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "milestones": {
+      "src": "chunks/script-features2.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "stock_take": {
+      "src": "chunks/script-stock-take.min.js",
+      "minLevel": null,
+      "exactLevels": [
+        1,
+        15
+      ]
+    },
+    "egg_purchasing": {
+      "src": "chunks/script-egg.min.js",
+      "minLevel": null,
+      "exactLevels": [
+        1
+      ]
+    },
+    "boss_report": {
+      "src": "chunks/script-boss-report.min.js",
+      "minLevel": null,
+      "exactLevels": [
+        1,
+        2
+      ]
+    },
+    "knowledge": {
+      "src": "chunks/script-knowledge.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "formula_purchaser": {
+      "src": "chunks/script-formula.min.js",
+      "minLevel": null,
+      "exactLevels": [
+        1
+      ]
+    },
+    "marketing_automation": {
+      "src": "chunks/script-marketing.min.js",
+      "minLevel": null,
+      "exactLevels": [
+        1,
+        2
+      ]
+    },
+    "marketing_lists": {
+      "src": "chunks/script-marketing.min.js",
+      "minLevel": null,
+      "exactLevels": [
+        1,
+        2
+      ]
+    },
+    "workflows": {
+      "src": "chunks/script-marketing.min.js",
+      "minLevel": null,
+      "exactLevels": [
+        1,
+        2
+      ]
+    },
+    "reports": {
+      "src": "chunks/script-reporting.min.js",
+      "minLevel": null,
+      "exactLevels": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ]
+    },
+    "cases": {
+      "src": "chunks/script-cases.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "referrals": {
+      "src": "chunks/script-referrals.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "ranking": {
+      "src": "chunks/script-performance.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "performance": {
+      "src": "chunks/script-performance.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "noticeboard": {
+      "src": "chunks/script-performance.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "whatsapp": {
+      "src": "chunks/script-whatsapp.min.js",
+      "minLevel": 1,
+      "exactLevels": [
+        1,
+        2
+      ]
+    },
+    "ai_insights": {
+      "src": "chunks/script-ai.min.js",
+      "minLevel": 1,
+      "exactLevels": [
+        1,
+        2
+      ]
+    },
+    "documents": {
+      "src": "chunks/script-documents.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "integrations": {
+      "src": "chunks/script-gcal.min.js",
+      "minLevel": 1,
+      "exactLevels": null
+    },
+    "order_form_extract": {
+      "src": "chunks/script-order-form-extract.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "journey": {
+      "src": "chunks/script-journey.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "promotions": {
+      "src": "chunks/script-marketing.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "settings": {
+      "src": "chunks/script-prospects.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
+    "_activities": {
+      "src": "chunks/script-activities.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    }
+  },
+  "viewTitles": {
+    "home": "Home",
+    "calendar": "Calendar",
+    "month": "Calendar",
+    "prospects": "Prospects & Customers",
+    "pipeline": "Pipeline",
+    "agents": "Consultants",
+    "promotions": "Monthly Promotion",
+    "marketing_automation": "Marketing Automation",
+    "reports": "Reporting KPI",
+    "documents": "Documents",
+    "protection": "Protection Monitoring",
+    "import": "Import / Export",
+    "integrations": "Integrations",
+    "referrals": "Referral Relationships",
+    "cases": "Success Cases",
+    "marketing_lists": "Marketing Lists",
+    "ranking": "Ranking Performance",
+    "performance": "Ranking Performance",
+    "workflows": "Workflow Automation",
+    "booking_settings": "Booking Scheduler",
+    "lead_forms": "Lead Capture Forms",
+    "surveys": "NPS Surveys",
+    "contracts": "Contracts",
+    "custom_fields": "Custom Fields",
+    "settings": "Settings",
+    "milestones": "Milestones",
+    "fude": "福运相随",
+    "noticeboard": "公告栏 Noticeboard",
+    "egg_purchasing": "Egg Purchasing",
+    "standard_functions": "Standard Functions",
+    "formula_purchaser": "Formula Purchaser",
+    "purchases_history": "Purchases History",
+    "stock_take": "Stock Take",
+    "boss_report": "Boss Report",
+    "ai": "AI Insights",
+    "security": "Security",
+    "admin": "Admin",
+    "risk": "Attrition Risk",
+    "nps": "NPS Surveys",
+    "knowledge": "Knowledge HQ",
+    "org_chart": "Org Chart Consultant",
+    "order_form_extract": "Order Form Extract"
+  },
+  "levelPermissions": {
+    "1": [
+      "calendar",
+      "prospects",
+      "referrals",
+      "pipeline",
+      "promotions",
+      "marketing-automation",
+      "marketing-lists",
+      "cases",
+      "purchases_history",
+      "agents",
+      "performance",
+      "reports",
+      "risk",
+      "admin",
+      "protection",
+      "documents",
+      "knowledge",
+      "import",
+      "integrations",
+      "settings",
+      "fude",
+      "milestones",
+      "noticeboard",
+      "custom_fields",
+      "egg-purchasing",
+      "standard-functions",
+      "formula-purchaser",
+      "stock-take",
+      "boss-report",
+      "org-chart",
+      "ai-insights",
+      "security",
+      "workflows",
+      "lead_forms",
+      "surveys",
+      "contracts",
+      "booking_settings",
+      "order-form-extract"
+    ],
+    "2": [
+      "calendar",
+      "prospects",
+      "referrals",
+      "pipeline",
+      "promotions",
+      "marketing-automation",
+      "marketing-lists",
+      "cases",
+      "agents",
+      "performance",
+      "reports",
+      "risk",
+      "admin",
+      "protection",
+      "documents",
+      "knowledge",
+      "import",
+      "integrations",
+      "settings",
+      "fude",
+      "milestones",
+      "noticeboard",
+      "custom_fields",
+      "org-chart",
+      "ai-insights",
+      "security",
+      "lead_forms",
+      "surveys",
+      "contracts",
+      "booking_settings",
+      "order-form-extract"
+    ],
+    "3": [
+      "calendar",
+      "prospects",
+      "referrals",
+      "pipeline",
+      "promotions",
+      "cases",
+      "performance",
+      "reports",
+      "protection",
+      "documents",
+      "knowledge",
+      "settings",
+      "fude",
+      "order-form-extract"
+    ],
+    "4": [
+      "calendar",
+      "prospects",
+      "referrals",
+      "pipeline",
+      "promotions",
+      "cases",
+      "performance",
+      "reports",
+      "protection",
+      "documents",
+      "knowledge",
+      "settings",
+      "fude",
+      "order-form-extract"
+    ],
+    "5": [
+      "calendar",
+      "prospects",
+      "referrals",
+      "pipeline",
+      "promotions",
+      "cases",
+      "reports",
+      "documents",
+      "knowledge",
+      "settings",
+      "fude",
+      "milestones",
+      "order-form-extract"
+    ],
+    "6": [
+      "calendar",
+      "prospects",
+      "referrals",
+      "pipeline",
+      "promotions",
+      "cases",
+      "reports",
+      "documents",
+      "knowledge",
+      "settings",
+      "fude",
+      "milestones",
+      "order-form-extract"
+    ],
+    "7": [
+      "calendar",
+      "prospects",
+      "referrals",
+      "pipeline",
+      "promotions",
+      "cases",
+      "reports",
+      "documents",
+      "knowledge",
+      "settings",
+      "fude",
+      "milestones",
+      "order-form-extract"
+    ],
+    "8": [
+      "calendar",
+      "prospects",
+      "referrals",
+      "pipeline",
+      "promotions",
+      "cases",
+      "reports",
+      "documents",
+      "knowledge",
+      "settings",
+      "fude",
+      "milestones",
+      "order-form-extract"
+    ],
+    "9": [
+      "calendar",
+      "prospects",
+      "referrals",
+      "pipeline",
+      "promotions",
+      "cases",
+      "reports",
+      "documents",
+      "knowledge",
+      "settings",
+      "fude",
+      "milestones",
+      "order-form-extract"
+    ],
+    "10": [
+      "calendar",
+      "prospects",
+      "referrals",
+      "pipeline",
+      "promotions",
+      "cases",
+      "reports",
+      "documents",
+      "knowledge",
+      "settings",
+      "fude",
+      "milestones",
+      "order-form-extract"
+    ],
+    "11": [
+      "calendar",
+      "prospects",
+      "referrals",
+      "promotions",
+      "cases",
+      "knowledge",
+      "settings",
+      "fude",
+      "milestones"
+    ],
+    "12": [
+      "noticeboard",
+      "fude",
+      "milestones",
+      "prospects",
+      "referrals"
+    ],
+    "13": [
+      "noticeboard",
+      "fude",
+      "milestones",
+      "prospects"
+    ],
+    "14": [
+      "noticeboard",
+      "fude",
+      "milestones",
+      "prospects"
+    ],
+    "15": [
+      "stock-take"
+    ]
+  }
+}
