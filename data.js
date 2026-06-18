@@ -1341,9 +1341,17 @@ class DataStore {
             // cache, persist, or bump last_sync — the result is RLS-filtered
             // junk and _autoSync could tombstone or push against it.
             if (!hasSession) return serverData;
-            // Auto-sync: push any locally-saved (offline) items to Supabase so ALL users can see them,
-            // then return the merged result (includes items still pending sync).
-            const result = await this._autoSync(tableName, serverData);
+            // (Phase 11.1) Reconcile SYNCHRONOUSLY for the rows we return/display
+            // (optimistic merge of pending offline items + tombstone filter + local-
+            // only fields — NO network), then drain the write-queue to Supabase in the
+            // BACKGROUND so a pending offline write never blocks the read hot-path.
+            // The common case (empty sync queue) is byte-identical to the prior awaited
+            // path; only when offline writes are pending does the push move off-read.
+            // _autoSync is unchanged and still owns the push/classify/park/tombstone
+            // logic; we just no longer await it (its return value is now redundant with
+            // _reconcile, which produces the same optimistic display set without network).
+            const result = this._reconcile(tableName, serverData);
+            this._autoSync(tableName, serverData).catch(() => { /* background push; transient failures retried on the next read */ });
             // Merge with prior localStorage cache so extra fields saved locally
             // (that Supabase stripped due to schema mismatch) are preserved.
             // Server fields always win; local-only fields (extra columns) are kept.
@@ -1598,6 +1606,56 @@ class DataStore {
     // Handles BOTH:
     //   (a) Items in the sync queue (fs_crm_sync_queue) — new mechanism
     //   (b) Pre-existing localStorage items not in Supabase — migration for old offline saves
+    // (Phase 11.1) Synchronous read-path reconcile — produces the rows getAll
+    // returns WITHOUT any network. Mirrors _autoSync's NON-network merge exactly:
+    //   • start from serverData
+    //   • optimistically include each pending sync-queue item for this table that
+    //     is NOT already on the server, NOT tombstoned, and NOT a confirmed-pushed
+    //     ghost (item.pushed && missing from server → externally deleted; excluded,
+    //     and _autoSync's background pass tombstones it permanently)
+    //   • re-merge local-only extra fields (schema-mismatch columns Supabase stripped)
+    // For an EMPTY queue (the common online case) this returns exactly what _autoSync
+    // returned (serverData + local-field merge), byte-for-byte. The push itself is
+    // done by _autoSync in the background (fired, not awaited, by getAll).
+    _reconcile(tableName, serverData) {
+        try {
+            const serverIds = new Set(serverData.map(r => String(r.id)));
+            const merged = [...serverData];
+            const _tombstoneRaw = localStorage.getItem('fs_crm_tombstones');
+            const _tombstones = _tombstoneRaw ? JSON.parse(_tombstoneRaw) : {};
+            const deletedIds = new Set(_tombstones[tableName] || []);
+            const queue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
+            for (const item of queue) {
+                if (item.tableName !== tableName) continue;
+                const idStr = String(item.record.id);
+                if (serverIds.has(idStr)) continue;   // already confirmed on the server
+                if (deletedIds.has(idStr)) continue;   // intentionally deleted
+                if (item.pushed) continue;             // pushed before but gone from server → ghost (drain tombstones it)
+                merged.push(item.record);              // optimistic local row, still pending sync
+            }
+            // Re-merge local-only extra fields (same as _autoSync Step 3).
+            try {
+                const localRaw = localStorage.getItem(`fs_crm_${tableName}`);
+                if (localRaw) {
+                    const localMap = new Map(JSON.parse(localRaw).map(r => [String(r.id), r]));
+                    for (let i = 0; i < merged.length; i++) {
+                        const localRec = localMap.get(String(merged[i].id));
+                        if (!localRec) continue;
+                        const extra = {};
+                        for (const [k, v] of Object.entries(localRec)) {
+                            if (!(k in merged[i]) && v != null) extra[k] = v;
+                        }
+                        if (Object.keys(extra).length > 0) merged[i] = { ...merged[i], ...extra };
+                    }
+                }
+            } catch (_) { /* intentional: local-only field re-merge is an enhancement; skip on failure */ }
+            return merged;
+        } catch (_) {
+            /* intentional: reconcile is opportunistic — any failure ⇒ return untouched server rows */
+            return serverData;
+        }
+    }
+
     async _autoSync(tableName, serverData) {
         try {
             const serverIds = new Set(serverData.map(r => String(r.id)));
