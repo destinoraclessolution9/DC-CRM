@@ -2,7 +2,7 @@
   "script.js": 5059,
   "data.js": 3560,
   "data-helpers.js": 80,
-  "ui.js": 337,
+  "ui.js": 600,
   "app-init.js": 630,
   "auth.js": 119,
   "supabase-init.js": 67,

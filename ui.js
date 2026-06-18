@@ -297,6 +297,219 @@ window.UI = (() => {
         return num.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     };
 
+    // ═══════════════════════════════════════════════════════════════════════
+    //  UI-System foundation (Phase 1) — ADDITIVE. Nothing below mutates the
+    //  existing toast / modal code paths. These are NEW reusable primitives the
+    //  component library builds on: the vanilla "UI.kit.*" string-builders +
+    //  shared a11y behaviors (focus-trap, live announcer, roving tabindex).
+    //  The React track (src/react/ui/*) mirrors the same names & token classes.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // JS mirror of the --bp-md CSS token so JS render-path branching and CSS
+    // media queries can never disagree on the breakpoint.
+    try { window.CRM_BP = Object.freeze({ md: 768 }); } catch (_) {}
+
+    const _KIT_FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
+    // ── Shared focus management ──────────────────────────────────────────────
+    // One reusable focus-trap for modals, drawers and bottom-sheets. Self-
+    // contained — does NOT touch the existing modal _trapFocus. trap() returns
+    // a release() that removes the trap and restores focus to the opener.
+    const focus = {
+        getFocusable(container) {
+            if (!container) return [];
+            return Array.from(container.querySelectorAll(_KIT_FOCUSABLE))
+                .filter(el => el.offsetParent !== null || el === document.activeElement);
+        },
+        trap(container, opts = {}) {
+            if (!container) return () => {};
+            const restoreTo = opts.restoreTo || document.activeElement;
+            const onEscape = typeof opts.onEscape === 'function' ? opts.onEscape : null;
+            const onKey = (e) => {
+                if (e.key === 'Escape' && onEscape) { e.preventDefault(); onEscape(e); return; }
+                if (e.key !== 'Tab') return;
+                const f = focus.getFocusable(container);
+                if (!f.length) return;
+                const first = f[0], last = f[f.length - 1];
+                if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+                else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+            };
+            container.addEventListener('keydown', onKey);
+            // Initial focus after paint so screen readers announce in DOM order.
+            const target = opts.initialFocus || focus.getFocusable(container)[0];
+            if (target) requestAnimationFrame(() => { try { target.focus(); } catch (_) {} });
+            return function release() {
+                container.removeEventListener('keydown', onKey);
+                if (restoreTo && typeof restoreTo.focus === 'function') {
+                    try { restoreTo.focus(); } catch (_) {}
+                }
+            };
+        }
+    };
+
+    // ── Polite / assertive route + status announcer ──────────────────────────
+    // Singleton visually-hidden live regions (.sr-only already in styles-fixed).
+    // Toasts keep their OWN regions; use this for view-load / async-state copy.
+    const _ensureLiveRegion = (assertive) => {
+        const id = assertive ? 'ui-live-assertive' : 'ui-live-polite';
+        let el = document.getElementById(id);
+        if (!el) {
+            el = document.createElement('div');
+            el.id = id;
+            el.className = 'sr-only';
+            el.setAttribute('role', assertive ? 'alert' : 'status');
+            el.setAttribute('aria-live', assertive ? 'assertive' : 'polite');
+            el.setAttribute('aria-atomic', 'true');
+            document.body.appendChild(el);
+        }
+        return el;
+    };
+    const live = (message, opts = {}) => {
+        const el = _ensureLiveRegion(!!opts.assertive);
+        // Clear then set next frame so identical consecutive messages re-announce.
+        el.textContent = '';
+        requestAnimationFrame(() => { el.textContent = String(message ?? ''); });
+    };
+
+    // ── Roving-tabindex behavior (menus / tabs / toolbars) ───────────────────
+    const a11y = {
+        roving(container, opts = {}) {
+            if (!container) return () => {};
+            const selector = opts.selector || '[role="menuitem"],[role="tab"],[data-roving]';
+            const orientation = opts.orientation || 'vertical';
+            const items = () => Array.from(container.querySelectorAll(selector))
+                .filter(el => !el.hasAttribute('disabled'));
+            const setTab = (list, idx) => list.forEach((el, i) => { el.tabIndex = i === idx ? 0 : -1; });
+            setTab(items(), 0);
+            const nextKey = orientation === 'horizontal' ? 'ArrowRight' : 'ArrowDown';
+            const prevKey = orientation === 'horizontal' ? 'ArrowLeft' : 'ArrowUp';
+            const onKey = (e) => {
+                const list = items();
+                const cur = list.indexOf(document.activeElement);
+                if (cur < 0) return;
+                let next = -1;
+                if (e.key === nextKey) next = (cur + 1) % list.length;
+                else if (e.key === prevKey) next = (cur - 1 + list.length) % list.length;
+                else if (e.key === 'Home') next = 0;
+                else if (e.key === 'End') next = list.length - 1;
+                if (next >= 0) { e.preventDefault(); setTab(list, next); list[next].focus(); }
+            };
+            container.addEventListener('keydown', onKey);
+            return function destroy() { container.removeEventListener('keydown', onKey); };
+        }
+    };
+
+    // ── Formatters: currency / compact — one home, en-MY / RM ────────────────
+    const formatCurrency = (n, opts = {}) => {
+        const num = Number(n);
+        if (!Number.isFinite(num)) return '—';
+        const dp = opts.dp == null ? 0 : opts.dp;
+        return 'RM ' + num.toLocaleString('en-MY', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+    };
+    const formatCompact = (n) => {
+        const num = Number(n);
+        if (!Number.isFinite(num)) return '—';
+        const abs = Math.abs(num);
+        if (abs >= 1e6) return 'RM ' + (num / 1e6).toFixed(abs >= 1e7 ? 0 : 1) + 'M';
+        if (abs >= 1e3) return 'RM ' + (num / 1e3).toFixed(abs >= 1e4 ? 0 : 1) + 'K';
+        return formatCurrency(num);
+    };
+
+    // ── Vanilla UI kit: escaped string-builders that REUSE existing classes ──
+    // Every interpolation routes through escapeHtml; onClick strings are the
+    // caller's responsibility (build them with requireNumericId / escJsAttr).
+    const _BADGE_TONES = {
+        neutral: 'color:var(--text-secondary);background:var(--bg-sunken);',
+        info:    'color:var(--info-text);background:rgba(31,111,178,0.10);',
+        success: 'color:var(--success-text);background:rgba(46,125,91,0.12);',
+        warning: 'color:var(--warning-text);background:rgba(199,119,0,0.12);',
+        danger:  'color:var(--danger-text);background:rgba(232,67,147,0.10);'
+    };
+    const _btnVariantClass = (v) =>
+        v === 'primary' ? 'primary' : v === 'danger' ? 'danger'
+        : v === 'ghost' ? 'ghost' : v === 'link' ? 'link' : 'secondary';
+    const kit = {
+        button(o = {}) {
+            const cls = ['btn', _btnVariantClass(o.variant)];
+            if (o.size === 'sm') cls.push('btn-sm');
+            if (o.size === 'lg') cls.push('btn-lg');
+            if (o.fullWidth) cls.push('btn-block');
+            const onclick = o.onClick ? ` onclick="${String(o.onClick).replace(/"/g, '&quot;')}"` : '';
+            const aria = o.ariaLabel ? ` aria-label="${escapeHtml(o.ariaLabel)}"` : '';
+            const busy = o.loading ? ' aria-busy="true"' : '';
+            const dis = (o.disabled || o.loading) ? ' disabled' : '';
+            const noLoad = o.noLoad ? ' data-no-load' : '';
+            const type = ` type="${o.type === 'submit' ? 'submit' : o.type === 'reset' ? 'reset' : 'button'}"`;
+            const icon = o.loading ? '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> '
+                       : o.iconClass ? `<i class="${escapeHtml(o.iconClass)}" aria-hidden="true"></i> ` : '';
+            return `<button class="${cls.join(' ')}"${type}${onclick}${aria}${busy}${dis}${noLoad}>${icon}${escapeHtml(o.label ?? '')}</button>`;
+        },
+        iconButton(o = {}) {
+            const aria = o.ariaLabel || o['aria-label'];
+            if (!aria) throw new Error('UI.kit.iconButton: ariaLabel is required for icon-only buttons');
+            const onclick = o.onClick ? ` onclick="${String(o.onClick).replace(/"/g, '&quot;')}"` : '';
+            const dis = o.disabled ? ' disabled' : '';
+            const extra = o.className ? ' ' + escapeHtml(o.className) : '';
+            return `<button class="btn-icon${extra}" type="button" aria-label="${escapeHtml(aria)}"${onclick}${dis}><i class="${escapeHtml(o.icon || '')}" aria-hidden="true"></i></button>`;
+        },
+        badge(o = {}) {
+            const tone = _BADGE_TONES[o.tone] ? o.tone : 'neutral';
+            const style = _BADGE_TONES[tone] + 'display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;line-height:1.5;';
+            return `<span class="ui-badge" style="${style}">${escapeHtml(o.label ?? '')}</span>`;
+        },
+        scoreBadge(grade) {
+            const g = String(grade || '').trim();
+            const safe = g.replace(/[^A-Za-z+\-]/g, '');
+            return `<span class="score-badge score-${escapeHtml(safe)}">${escapeHtml(g || '—')}</span>`;
+        },
+        spinner(o = {}) {
+            const label = escapeHtml(o.label || 'Loading');
+            return `<span class="ui-spinner" role="status"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i><span class="sr-only">${label}</span></span>`;
+        },
+        skeleton(o = {}) {
+            const rows = Math.max(1, o.rows || 3);
+            let out = '<div class="ui-skeleton" aria-hidden="true">';
+            for (let i = 0; i < rows; i++) out += `<div class="skeleton-block skeleton-row" style="width:${60 + (i * 13) % 35}%"></div>`;
+            return out + '</div>';
+        },
+        field(o = {}) {
+            const id = o.id || ('fld-' + Math.random().toString(36).slice(2, 9));
+            const type = o.type || 'text';
+            const label = o.label
+                ? `<label for="${id}" class="form-label">${escapeHtml(o.label)}${o.required ? ' <span aria-hidden="true" style="color:var(--danger-text)">*</span>' : ''}</label>`
+                : '';
+            const name = o.name ? ` name="${escapeHtml(o.name)}"` : '';
+            const ph = o.placeholder ? ` placeholder="${escapeHtml(o.placeholder)}"` : '';
+            const req = o.required ? ' aria-required="true" required' : '';
+            const hintId = o.hint ? id + '-hint' : '';
+            const errId = o.error ? id + '-err' : '';
+            const describedBy = [hintId, errId].filter(Boolean).join(' ');
+            const desc = describedBy ? ` aria-describedby="${describedBy}"` : '';
+            const invalid = o.error ? ' aria-invalid="true"' : '';
+            const aria = (!o.label && o.ariaLabel) ? ` aria-label="${escapeHtml(o.ariaLabel)}"` : '';
+            const control = type === 'textarea'
+                ? `<textarea id="${id}" class="form-control"${name}${ph}${req}${desc}${invalid}${aria}>${escapeHtml(o.value ?? '')}</textarea>`
+                : `<input id="${id}" type="${escapeHtml(type)}" class="form-control"${o.value != null ? ` value="${escapeHtml(o.value)}"` : ''}${name}${ph}${req}${desc}${invalid}${aria}>`;
+            const hint = o.hint ? `<small id="${hintId}" class="form-hint" style="color:var(--text-muted)">${escapeHtml(o.hint)}</small>` : '';
+            const err = o.error ? `<small id="${errId}" class="form-error" role="alert" style="color:var(--danger-text)">${escapeHtml(o.error)}</small>` : '';
+            return `<div class="form-group">${label}${control}${hint}${err}</div>`;
+        },
+        emptyState(o = {}) {
+            const icon = o.icon || 'fa-inbox';
+            const title = escapeHtml(o.title || 'Nothing here yet');
+            const desc = o.description ? `<p style="color:var(--text-muted);margin:6px 0 14px">${escapeHtml(o.description)}</p>` : '';
+            return `<div class="ui-empty-state" role="status" style="text-align:center;padding:40px 20px"><i class="fas ${escapeHtml(icon)}" aria-hidden="true" style="font-size:34px;color:var(--text-muted);opacity:.6"></i><h4 style="margin:14px 0 0">${title}</h4>${desc}${o.actionHtml || ''}</div>`;
+        },
+        errorState(o = {}) {
+            const title = escapeHtml(o.title || 'Something went wrong');
+            const desc = escapeHtml(o.description || 'Please try again.');
+            const retry = o.onRetry
+                ? `<div style="margin-top:14px">${kit.button({ variant: 'secondary', label: o.retryLabel || 'Retry', onClick: o.onRetry, iconClass: 'fas fa-rotate-right' })}</div>`
+                : '';
+            return `<div class="ui-error-state" role="alert" style="text-align:center;padding:40px 20px"><i class="fas fa-triangle-exclamation" aria-hidden="true" style="font-size:34px;color:var(--danger-text)"></i><h4 style="margin:14px 0 4px">${title}</h4><p style="color:var(--text-muted);margin:0">${desc}</p>${retry}</div>`;
+        }
+    };
+
     return {
         toast,
         showModal,
@@ -304,8 +517,15 @@ window.UI = (() => {
         confirm,
         formatDate,
         formatNumber,
+        formatCurrency,
+        formatCompact,
         escapeHtml,
         escJsAttr,
-        requireNumericId
+        requireNumericId,
+        // ── UI-system foundation (Phase 1) ──
+        kit,
+        focus,
+        live,
+        a11y
     };
 })();
