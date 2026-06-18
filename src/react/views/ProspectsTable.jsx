@@ -18,6 +18,8 @@
 // bulk bar + bulk actions keep working.
 import { useState } from 'react';
 import { useProspects } from '../data/useProspects.js';
+import { EmptyState } from '../ui/EmptyState.jsx';
+import { ErrorState } from '../ui/ErrorState.jsx';
 
 const app = () => window.app || {};
 const SORT_TO_BFF = { name: 'full_name', score: 'score', activity: 'last_activity_date' };
@@ -210,13 +212,11 @@ export function ProspectsTable({ params, meta, pageSize = 50, onNavigate }) {
     if (isLoading && rows.length === 0) {
         body = <tr><td colSpan="9" style={{ textAlign: 'center', padding: 40, color: 'var(--text-secondary)' }}>Loading prospects…</td></tr>;
     } else if (isError) {
-        // error.message is now a classified, human message (bffError); a transient
-        // outage shows neutral, a genuine session expiry shows danger red.
-        const retryable = !error || error.retryable;
-        const msg = (error && error.message) || 'Failed to load prospects.';
-        body = <tr><td colSpan="9" style={{ textAlign: 'center', padding: 40, color: retryable ? 'var(--text-secondary)' : 'var(--danger, #dc2626)' }}>{msg}</td></tr>;
+        // Classified, human message (bffError) via the shared <ErrorState>: a
+        // transient outage reads neutral+retryable, a genuine session expiry fatal.
+        body = <tr><td colSpan="9" style={{ padding: 0 }}><ErrorState title="Couldn't load prospects" description={(error && error.message) || 'Failed to load prospects.'} retryable={!error || error.retryable} /></td></tr>;
     } else if (rows.length === 0) {
-        body = <tr><td colSpan="9" style={{ textAlign: 'center', padding: 40 }}>No active prospects. Check "Include dormant" or type a name/phone to search older records.</td></tr>;
+        body = <tr><td colSpan="9" style={{ padding: 0 }}><EmptyState icon="fa-user-plus" title="No active prospects" description={'Check "Include dormant" or search a name / phone to find older records.'} /></td></tr>;
     } else {
         body = rows.map((p) => <Row key={p.id} p={p} meta={meta} selected={sel.has(Number(p.id))} onToggle={toggle} />);
     }

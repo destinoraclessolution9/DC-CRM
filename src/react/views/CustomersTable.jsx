@@ -14,6 +14,8 @@
 // as legacy). Pagination/reassign metadata (scope, agent list) is passed in by
 // the chunk via props so the island never re-derives the visibility scope.
 import { useCustomers } from '../data/useCustomers.js';
+import { EmptyState } from '../ui/EmptyState.jsx';
+import { ErrorState } from '../ui/ErrorState.jsx';
 
 const app = () => window.app || {};
 
@@ -137,13 +139,10 @@ export function CustomersTable({ params, meta, pageSize = 50, onNavigate }) {
     if (isLoading && rows.length === 0) {
         body = <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-secondary)' }}>Loading customers…</td></tr>;
     } else if (isError) {
-        // error.message is now a classified, human message (bffError); a transient
-        // outage shows neutral, a genuine session expiry shows danger red.
-        const retryable = !error || error.retryable;
-        const msg = (error && error.message) || 'Failed to load customers.';
-        body = <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: retryable ? 'var(--text-secondary)' : 'var(--danger, #dc2626)' }}>{msg}</td></tr>;
+        // Classified, human message (bffError) via the shared <ErrorState>.
+        body = <tr><td colSpan="8" style={{ padding: 0 }}><ErrorState title="Couldn't load customers" description={(error && error.message) || 'Failed to load customers.'} retryable={!error || error.retryable} /></td></tr>;
     } else if (rows.length === 0) {
-        body = <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px' }}>No customers found</td></tr>;
+        body = <tr><td colSpan="8" style={{ padding: 0 }}><EmptyState icon="fa-user-group" title="No customers found" description="Try adjusting your search or filters." /></td></tr>;
     } else {
         body = rows.map((c) => <Row key={c.id} c={c} meta={meta} />);
     }
