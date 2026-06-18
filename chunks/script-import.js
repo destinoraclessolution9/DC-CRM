@@ -819,11 +819,18 @@ const startImport = async () => {
     const table = { customers: 'customers', prospects: 'prospects', products: 'products', events: 'events', promotions: 'promotions' }[_importData.importType] || 'prospects';
     let created = 0, updated = 0, skipped = 0, errorCount = 0, convertedCount = 0;
 
+    // COMP-7: batch inserts via AppDataStore.createMany (bulk insert with a
+    // per-row add() fallback) instead of one serial round-trip per row.
+    // Pass 1 builds the records (handling dedup-skip and dedup-update inline,
+    // since those don't create); Pass 2 flushes the create candidates in
+    // chunks of ~500 — one cache-invalidate / progress tick per chunk, never
+    // per row. Resulting records, dedup/validation behaviour and the
+    // success/skip/error tallies are identical to the old per-row path.
+    const CHUNK_SIZE = 500;
+    const pendingCreates = []; // { record, rowIndex, purchaseAmount }
+
+    // ── Pass 1: map rows → records, resolve duplicates ───────────────────
     for (let i = 0; i < rowsToProcess.length; i++) {
-        if (i % 10 === 0) {
-            updateImportProgress(Math.round((i / total) * 100), i, total);
-            await new Promise(r => setTimeout(r, 0));
-        }
         const vr = rowsToProcess[i];
         const record = isMarketingType ? mapRowToMarketingRecord(vr.row, reverseMap, _importData.importType) : mapRowToRecord(vr.row, reverseMap, assignedAgentId, _importData.importType);
         const dup = dupMap.get(vr.rowIndex);
@@ -842,46 +849,70 @@ const startImport = async () => {
             const idx = reverseMap['lifetime_value'];
             return idx !== undefined ? _parseAmount(vr.row[idx]) : 0;
         })();
+        record.created_at = new Date().toISOString();
+        if (table === 'prospects') {
+            // Same prospect defaults the per-row path applied just before insert.
+            record.status = 'New';
+            record.protection_deadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+            record.score = 5;
+        }
+        pendingCreates.push({ record, rowIndex: vr.rowIndex, purchaseAmount });
+    }
+
+    // Imported prospect that already purchased → auto-approve the conversion
+    // right away: mark the prospect converted and create the linked permanent
+    // Customer (skip manager approval for imports). Identical record shape to
+    // the old inline path; runs after the prospect row is saved so we have id.
+    const autoConvertProspect = async (record, savedProspect, purchaseAmount, rowIndex) => {
+        if (!(purchaseAmount > 0 && savedProspect?.id)) return;
         try {
-            record.created_at = new Date().toISOString();
-            if (table === 'customers') {
-                // Imported customers go in directly as ACTIVE, visible records —
-                // no prospect→approval dance. lifetime_value / customer_since /
-                // status are already set by mapRowToRecord.
-                await AppDataStore.create('customers', record);
-                created++;
-            } else if (table === 'prospects') {
-                record.status = 'New';
-                record.protection_deadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-                record.score = 5;
-                const newProspect = await AppDataStore.create('prospects', record);
-                created++;
-                // Imported prospect that already purchased → auto-approve the
-                // conversion right away: mark the prospect converted and create
-                // the linked permanent Customer (skip manager approval for imports).
-                if (purchaseAmount > 0 && newProspect?.id) {
-                    try {
-                        await AppDataStore.create('customers', {
-                            full_name: record.full_name, gender: record.gender || '', nationality: record.nationality || '',
-                            phone: record.phone || '', email: record.email || '', ic_number: record.ic_number || '',
-                            date_of_birth: record.date_of_birth || null, lunar_birth: record.lunar_birth || '',
-                            occupation: record.occupation || '', company_name: record.company_name || '',
-                            income_range: record.income_range || '', address: record.address || '', city: record.city || '',
-                            state: record.state || '', postal_code: record.postal_code || '', ming_gua: record.ming_gua || '',
-                            responsible_agent_id: assignedAgentId, lifetime_value: purchaseAmount,
-                            customer_since: new Date().toISOString().split('T')[0],
-                            converted_from_prospect_id: newProspect.id, status: 'active',
-                            created_at: new Date().toISOString()
-                        });
-                        await AppDataStore.update('prospects', newProspect.id, { status: 'converted', conversion_status: 'approved' });
-                        convertedCount++;
-                    } catch (convErr) { console.error('Auto-convert failed row', vr.rowIndex, convErr); }
+            await AppDataStore.create('customers', {
+                full_name: record.full_name, gender: record.gender || '', nationality: record.nationality || '',
+                phone: record.phone || '', email: record.email || '', ic_number: record.ic_number || '',
+                date_of_birth: record.date_of_birth || null, lunar_birth: record.lunar_birth || '',
+                occupation: record.occupation || '', company_name: record.company_name || '',
+                income_range: record.income_range || '', address: record.address || '', city: record.city || '',
+                state: record.state || '', postal_code: record.postal_code || '', ming_gua: record.ming_gua || '',
+                responsible_agent_id: assignedAgentId, lifetime_value: purchaseAmount,
+                customer_since: new Date().toISOString().split('T')[0],
+                converted_from_prospect_id: savedProspect.id, status: 'active',
+                created_at: new Date().toISOString()
+            });
+            await AppDataStore.update('prospects', savedProspect.id, { status: 'converted', conversion_status: 'approved' });
+            convertedCount++;
+        } catch (convErr) { console.error('Auto-convert failed row', rowIndex, convErr); }
+    };
+
+    // ── Pass 2: flush create candidates in chunks of ~500 ────────────────
+    for (let start = 0; start < pendingCreates.length; start += CHUNK_SIZE) {
+        const chunk = pendingCreates.slice(start, start + CHUNK_SIZE);
+        const records = chunk.map(c => c.record);
+        try {
+            // createMany returns the saved rows in input order; on bulk failure
+            // it already falls back to per-row add() internally.
+            const saved = await AppDataStore.createMany(table, records);
+            created += saved.length;
+            if (table === 'prospects') {
+                for (let j = 0; j < chunk.length; j++) {
+                    await autoConvertProspect(chunk[j].record, saved[j], chunk[j].purchaseAmount, chunk[j].rowIndex);
                 }
-            } else {
-                await AppDataStore.create(table, record);
-                created++;
             }
-        } catch (e) { console.error('Insert failed row', vr.rowIndex, e); errorCount++; }
+        } catch (e) {
+            // Whole-chunk reject (createMany re-threw): fall back to per-row
+            // inserts for THIS chunk so one bad row can't lose the batch.
+            console.warn('createMany rejected chunk, falling back to per-row insert:', e?.message || e);
+            for (const c of chunk) {
+                try {
+                    const savedOne = await AppDataStore.create(table, c.record);
+                    created++;
+                    if (table === 'prospects') await autoConvertProspect(c.record, savedOne, c.purchaseAmount, c.rowIndex);
+                } catch (rowErr) { console.error('Insert failed row', c.rowIndex, rowErr); errorCount++; }
+            }
+        }
+        // One progress tick + cooperative yield per chunk (not per row), so the
+        // UI stays responsive without a per-row full-localStorage scan.
+        updateImportProgress(Math.round(Math.min(start + chunk.length, total) / total * 100), Math.min(start + chunk.length, total), total);
+        await new Promise(r => setTimeout(r, 0));
     }
 
     updateImportProgress(100, total, total);

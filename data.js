@@ -108,6 +108,18 @@ class DataStore {
             'products', 'appointment_locations', 'venues', 'ai_models',
         ]);
 
+        // ── Append-only high-volume tables ────────────────────────────────
+        // These grow without bound and must be read with a date/scope window
+        // (getActivitiesInRange / getPurchasesInRange), never whole via getAll.
+        // Canonical set adapted to this schema: `calendar_events` is not a real
+        // table (calendar data lives in `activities` keyed by activity_date) and
+        // the audit table is `audit_logs` (not `audit_trail`); only names that
+        // exist in this.tables are listed so a caller can't window a phantom
+        // table.
+        this.HIGH_VOLUME_TABLES = new Set([
+            'activities', 'purchases', 'notes', 'audit_logs',
+        ]);
+
         // ── Heavy-column exclusions for getAll() ─────────────────────────
         // Some columns carry large base64 BLOBs (CPS form PDFs stored as text)
         // that bloat every getAll('prospects') call into a ~10 MB download,
@@ -1071,6 +1083,75 @@ class DataStore {
         }
         this._clearOfflineNotice();
         return this._stripTombstones(tableName, out);
+    }
+
+    // ── Bounded, server-side date+scope-windowed readers ────────────────────
+    // Append-only high-volume tables grow without bound; pulling them whole
+    // (getAll) is a memory/bandwidth hazard at scale. The set of such tables is
+    // declared as this.HIGH_VOLUME_TABLES in the constructor (matching the
+    // _staticTables / _lightSelects instance-property style). The readers below
+    // push a mandatory date window (and optional scope) to PostgREST so callers
+    // fetch only the slice they render, never the whole table.
+
+    // Shared windowed reader: pages explicit .range() windows between
+    // fromISO..toISO (inclusive) on `dateCol`, newest-first, optionally scoped via
+    // `scopeCol IN opts.scopeIds`. Mirrors _getAllImpl's RLS empty-read guard +
+    // abort/error/tombstone handling. NEVER pulls the whole table — on overflow it
+    // throws so the caller narrows the window (no silent truncation).
+    async _getInRange(table, dateCol, scopeCol, fromISO, toISO, opts = {}) {
+        if (!fromISO || !toISO) throw new Error(`_getInRange(${table}): fromISO and toISO are required`);
+        const pageSize = 1000;
+        const max = Math.max(1000, Math.min(50000, opts.max || 20000));
+        const selectClause = opts.select || this._selectClauseForGetAll(table);
+        const scopeIds = (scopeCol && Array.isArray(opts.scopeIds) && opts.scopeIds.length)
+            ? opts.scopeIds.map(String) : null;
+
+        if (!this.hasLiveSession()) {   // RLS empty-read guard — serve a filtered local slice
+            const local = this._swrGetLocal(table);
+            if (local && local.length > 0) {
+                const slice = local.filter(r => {
+                    const d = r && r[dateCol];
+                    if (!d || d < fromISO || d > toISO) return false;
+                    if (scopeIds && !scopeIds.includes(String(r[scopeCol]))) return false;
+                    return true;
+                });
+                if (slice.length > 0) return slice;
+            }
+        }
+
+        const signal = this._inflightSignal();
+        const out = [];
+        for (let offset = 0; offset < max; offset += pageSize) {
+            const end = Math.min(offset + pageSize - 1, max - 1);
+            let q = this._readClient().from(table).select(selectClause)
+                .gte(dateCol, fromISO).lte(dateCol, toISO)
+                .order(dateCol, { ascending: false }).range(offset, end);
+            if (scopeIds) q = q.in(scopeCol, scopeIds);
+            if (signal && typeof q.abortSignal === 'function') q = q.abortSignal(signal);
+            let data, error;
+            try { ({ data, error } = await q); }
+            catch (e) { if (this._isAbortError(e)) return this._stripTombstones(table, out); throw e; }
+            if (this._isAbortError(error)) return this._stripTombstones(table, out);
+            if (error) throw error;
+            if (!data || data.length === 0) break;
+            out.push(...data);
+            if (data.length < pageSize) break;   // last page
+            // Budget filled but server has more — refuse to silently truncate.
+            if (offset + pageSize >= max) throw new Error(`_getInRange(${table}): window exceeds ${max} rows — narrow the date range or scope`);
+        }
+        this._clearOfflineNotice();
+        return this._stripTombstones(table, out);
+    }
+
+    // Windowed `activities` read (inclusive date window + optional agent scope via lead_agent_id).
+    async getActivitiesInRange(fromISO, toISO, opts = {}) {
+        return this._getInRange('activities', 'activity_date', 'lead_agent_id', fromISO, toISO, { ...opts, scopeIds: opts.agentIds });
+    }
+
+    // Windowed `purchases` read (inclusive date window + optional customer scope;
+    // purchases has no agent_id — agent is resolved via customer.responsible_agent_id).
+    async getPurchasesInRange(fromISO, toISO, opts = {}) {
+        return this._getInRange('purchases', 'purchase_date', 'customer_id', fromISO, toISO, { ...opts, scopeIds: opts.customerIds });
     }
 
     // Fetch only rows where updated_at > sinceISO. Used by _swrRevalidate for

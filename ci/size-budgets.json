@@ -1,7 +1,7 @@
 {
   "script.js": 5054,
   "script-features.js": 8492,
-  "data.js": 3397,
+  "data.js": 3450,
   "ui.js": 337,
   "app-init.js": 630,
   "auth.js": 119,
@@ -21,7 +21,7 @@
   "chunks/script-formula.js": 2010,
   "chunks/script-fude.js": 3194,
   "chunks/script-gcal.js": 1212,
-  "chunks/script-import.js": 2390,
+  "chunks/script-import.js": 2400,
   "chunks/script-journey.js": 1309,
   "chunks/script-knowledge.js": 811,
   "chunks/script-marketing.js": 4973,
