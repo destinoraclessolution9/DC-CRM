@@ -1,7 +1,7 @@
 {
   "script.js": 5054,
   "script-features.js": 8492,
-  "data.js": 3450,
+  "data.js": 3560,
   "ui.js": 337,
   "app-init.js": 630,
   "auth.js": 119,
@@ -29,7 +29,7 @@
   "chunks/script-order-form-extract.js": 1239,
   "chunks/script-org.js": 691,
   "chunks/script-performance.js": 883,
-  "chunks/script-pipeline.js": 3497,
+  "chunks/script-pipeline.js": 3540,
   "chunks/script-prospects.js": 6800,
   "chunks/script-customers.js": 2300,
   "chunks/script-agents.js": 1700,

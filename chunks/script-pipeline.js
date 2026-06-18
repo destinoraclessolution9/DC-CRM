@@ -196,6 +196,24 @@ const _groupActivitiesByProspect = (allActivities) => {
     return m;
 };
 
+// ---- Perf helper: bucket an array by a String()-coerced key field ONCE (O(n))
+// so bulk-calc callers can do a Map lookup per id instead of a full-array
+// .filter() per id (de-quadratifies the pipeline prefetch scans). Iterates in
+// order + pushes, so `m.get(String(id)) || []` is element-for-element / order
+// identical to the old `arr.filter(x => String(x[field]) === String(id))`.
+// Uses String() keys to EXACTLY match the existing `String(...) === String(...)`
+// comparisons in checkReferralBonus / getPipelineAmount (loose-on-coercion).
+const _bucketByStringKey = (arr, field) => {
+    const m = new Map();
+    for (const x of (arr || [])) {
+        const k = String(x[field]);       // String() — matches existing `String(x.k) === String(id)`
+        let bucket = m.get(k);
+        if (!bucket) { bucket = []; m.set(k, bucket); }
+        bucket.push(x);
+    }
+    return m;
+};
+
 // ---- Scoring helper: decay factor for a given activity age in days ----
 const _pipelineDecayFactor = (days, config) => {
     for (const tier of config.decay_tiers) {
@@ -297,7 +315,10 @@ const _pipelineActivityMultiplier = (activity, categoryId, config, text) => {
 // ---- Referral bonus: +20% if prospect was referred by a customer with a purchase
 // in the last N days (default 180) ----
 // allReferrals / allPurchases are optional pre-fetched arrays (avoids N+1 in bulk calcs).
-const checkReferralBonus = async (prospect, config, allReferrals, allPurchases) => {
+// referralsByProspect / purchasesByCustomer are optional pre-bucketed Maps (DE-QUAD:
+// O(1) lookup per prospect instead of re-scanning the whole array each call). When a
+// Map is present it wins; else fall back to the array .filter; else the network query.
+const checkReferralBonus = async (prospect, config, allReferrals, allPurchases, referralsByProspect, purchasesByCustomer) => {
     const windowDays = config.constants?.referral_customer_purchase_window_days || 180;
     const bonusPct = config.constants?.referral_customer_bonus_pct || 20;
     const result = { applied: false, bonusPct, reason: '' };
@@ -306,7 +327,9 @@ const checkReferralBonus = async (prospect, config, allReferrals, allPurchases) 
     let referrerCustomerId = null;
     try {
         let referrals;
-        if (allReferrals) {
+        if (referralsByProspect) {
+            referrals = referralsByProspect.get(String(prospect.id)) || [];
+        } else if (allReferrals) {
             referrals = allReferrals.filter(r => String(r.referred_prospect_id) === String(prospect.id));
         } else {
             referrals = await AppDataStore.query('referrals', { referred_prospect_id: prospect.id });
@@ -345,7 +368,9 @@ const checkReferralBonus = async (prospect, config, allReferrals, allPurchases) 
     // Verify at least one purchase within the purchase window
     let purchases = [];
     try {
-        if (allPurchases) {
+        if (purchasesByCustomer) {
+            purchases = purchasesByCustomer.get(String(referrerCustomerId)) || [];
+        } else if (allPurchases) {
             purchases = allPurchases.filter(p => String(p.customer_id) === String(referrerCustomerId));
         } else {
             purchases = await AppDataStore.query('purchases', { customer_id: referrerCustomerId });
@@ -489,7 +514,7 @@ const calcPipelineEntry = async (prospect, prospectActivities, prefetched) => {
     let probability = Math.min(100, Math.round(bestScore * K));
 
     // Apply customer referral bonus
-    const referralInfo = await checkReferralBonus(prospect, config, prefetched?.allReferrals, prefetched?.allPurchases);
+    const referralInfo = await checkReferralBonus(prospect, config, prefetched?.allReferrals, prefetched?.allPurchases, prefetched?.referralsByProspect, prefetched?.purchasesByCustomer);
     if (referralInfo.applied) {
         probability = Math.min(100, probability + referralInfo.bonusPct);
     }
@@ -680,10 +705,15 @@ const getProspectOutcome = async (prospect) => {
     return 'Open';
 };
 
-// allSolutions: optional pre-fetched array to avoid N+1 in bulk calcs
-const getPipelineAmount = async (prospect, category, allSolutions) => {
+// allSolutions: optional pre-fetched array to avoid N+1 in bulk calcs.
+// solutionsByProspect: optional pre-bucketed Map (DE-QUAD: O(1) lookup per prospect
+// instead of re-scanning the whole array each call). Map wins; else array .filter;
+// else network query. Only [0].amount / .length are read — shared bucket is safe.
+const getPipelineAmount = async (prospect, category, allSolutions, solutionsByProspect) => {
     let solutions;
-    if (allSolutions) {
+    if (solutionsByProspect) {
+        solutions = solutionsByProspect.get(String(prospect.id)) || [];
+    } else if (allSolutions) {
         solutions = allSolutions.filter(s => String(s.prospect_id) === String(prospect.id));
     } else {
         solutions = await AppDataStore.query('proposed_solutions', { prospect_id: prospect.id });
@@ -745,7 +775,7 @@ const _buildFocusRowData = async (rec, idx, actsByProspect, readOnly, prefetched
     if (!prospect) return null;
     const acts = actsByProspect.get(prospect.id) || [];
     const entry = await calcPipelineEntry(prospect, acts, prefetched);
-    const systemAmount = await getPipelineAmount(prospect, entry.category, prefetched?.allSolutions);
+    const systemAmount = await getPipelineAmount(prospect, entry.category, prefetched?.allSolutions, prefetched?.solutionsByProspect);
     const noteCount = await getNoteCount(prospect.id);
 
     const displayAmount = rec.custom_amount != null ? rec.custom_amount : systemAmount;
@@ -793,7 +823,7 @@ const _buildFocusRowData = async (rec, idx, actsByProspect, readOnly, prefetched
 
 const _buildSystemRowData = async (prospect, prefetched) => {
     const entry = prospect._pipeline;
-    const amount = await getPipelineAmount(prospect, entry.category, prefetched?.allSolutions);
+    const amount = await getPipelineAmount(prospect, entry.category, prefetched?.allSolutions, prefetched?.solutionsByProspect);
     const noteCount = await getNoteCount(prospect.id);
 
     let signals = [];
@@ -919,7 +949,15 @@ const buildPipelineIslandData = async () => {
         AppDataStore.getAll('purchases').catch(() => []),
         AppDataStore.getAll('proposed_solutions').catch(() => []),
     ]);
-    const _plPrefetched = { allReferrals: _plAllReferrals, allPurchases: _plAllPurchases, allSolutions: _plAllSolutions };
+    // DE-QUAD: bucket each prefetched table ONCE so per-prospect lookups are O(1)
+    // (matched on referred_prospect_id / customer_id / prospect_id with String()
+    // keys — same strictness as the old per-call .filter scans).
+    const _plPrefetched = {
+        allReferrals: _plAllReferrals, allPurchases: _plAllPurchases, allSolutions: _plAllSolutions,
+        referralsByProspect: _bucketByStringKey(_plAllReferrals, 'referred_prospect_id'),
+        purchasesByCustomer: _bucketByStringKey(_plAllPurchases, 'customer_id'),
+        solutionsByProspect: _bucketByStringKey(_plAllSolutions, 'prospect_id'),
+    };
 
     // Focus list (current or archived month)
     let focusRows;
@@ -1406,7 +1444,15 @@ const showPipelineView = async (container) => {
         AppDataStore.getAll('purchases').catch(() => []),
         AppDataStore.getAll('proposed_solutions').catch(() => []),
     ]);
-    const _plPrefetched = { allReferrals: _plAllReferrals, allPurchases: _plAllPurchases, allSolutions: _plAllSolutions };
+    // DE-QUAD: bucket each prefetched table ONCE so per-prospect lookups are O(1)
+    // (matched on referred_prospect_id / customer_id / prospect_id with String()
+    // keys — same strictness as the old per-call .filter scans).
+    const _plPrefetched = {
+        allReferrals: _plAllReferrals, allPurchases: _plAllPurchases, allSolutions: _plAllSolutions,
+        referralsByProspect: _bucketByStringKey(_plAllReferrals, 'referred_prospect_id'),
+        purchasesByCustomer: _bucketByStringKey(_plAllPurchases, 'customer_id'),
+        solutionsByProspect: _bucketByStringKey(_plAllSolutions, 'prospect_id'),
+    };
 
     const focusRows = _isArchiveView
         ? (await Promise.all(focusList.map((arc, idx) => renderArchiveFocusRow(arc, idx)))).join('')
@@ -1500,7 +1546,7 @@ const renderFocusRow = async (rec, idx, actsByProspect, probBadge, readOnly = fa
 
     const acts = actsByProspect.get(prospect.id) || [];
     const entry = await calcPipelineEntry(prospect, acts, prefetched);
-    const systemAmount = await getPipelineAmount(prospect, entry.category, prefetched?.allSolutions);
+    const systemAmount = await getPipelineAmount(prospect, entry.category, prefetched?.allSolutions, prefetched?.solutionsByProspect);
     const noteCount = await getNoteCount(prospect.id);
 
     // Use custom override if agent set one, otherwise system value
@@ -1581,7 +1627,7 @@ const renderFocusRow = async (rec, idx, actsByProspect, probBadge, readOnly = fa
 
 const renderSystemRow = async (prospect, probBadge, prefetched) => {
     const entry = prospect._pipeline;
-    const amount = await getPipelineAmount(prospect, entry.category, prefetched?.allSolutions);
+    const amount = await getPipelineAmount(prospect, entry.category, prefetched?.allSolutions, prefetched?.solutionsByProspect);
     const noteCount = await getNoteCount(prospect.id);
 
     // v6: show top-3 contributing activities instead of prereq pills

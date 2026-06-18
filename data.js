@@ -120,6 +120,29 @@ class DataStore {
             'activities', 'purchases', 'notes', 'audit_logs',
         ]);
 
+        // ── Realtime SWR persistence coalescing (MEMO-1) ──────────────────
+        // The realtime push handler used to re-stringify the ENTIRE cached
+        // array to localStorage on every single org-wide INSERT (one full
+        // JSON.stringify of a 10K-row table per event). Under a burst of
+        // inserts this stalled the main thread and thrashed localStorage.
+        // Instead we now COALESCE writes: each event marks the table dirty
+        // and (re)arms a single debounced flush. One write lands per
+        // ~REALTIME_PERSIST_DEBOUNCE_MS quiet window (or immediately on
+        // visibilitychange/pagehide so a backgrounded/closing tab still
+        // persists). Correctness is unchanged: the in-memory cache is updated
+        // synchronously per event (callers read live data), and on the next
+        // reload the delta poll fetches anything that wasn't flushed.
+        this._realtimePersistDebounceMs = 4000;       // one write per ~4s quiet window
+        this._realtimePersistDirty = new Set();        // table names pending a snapshot write
+        this._realtimePersistTimer = null;             // setTimeout handle for the debounced flush
+        // Hard cap on the in-memory realtime-grown list for high-volume tables
+        // so a long-lived tab receiving a flood of org-wide inserts can't grow
+        // the cached array without bound. Past the cap we drop the OLDEST rows
+        // (the realtime handler unshifts newest to the front, so the tail is
+        // oldest). The next reload re-syncs from server truth regardless.
+        this._realtimeListCap = 10000;
+        this._installRealtimePersistFlushHooks();
+
         // ── Heavy-column exclusions for getAll() ─────────────────────────
         // Some columns carry large base64 BLOBs (CPS form PDFs stored as text)
         // that bloat every getAll('prospects') call into a ~10 MB download,
@@ -499,12 +522,18 @@ class DataStore {
                         if (idx >= 0) cached.data[idx] = { ...cached.data[idx], ...row };
                         else cached.data.unshift(row);
                     }
+                    // Cap the in-memory list for high-volume tables so a flood
+                    // of org-wide inserts on a long-lived tab can't grow the
+                    // cached array without bound. Newest rows are unshifted to
+                    // the front, so the tail is oldest — drop from the tail.
+                    if (this.HIGH_VOLUME_TABLES.has(table) && cached.data.length > this._realtimeListCap) {
+                        cached.data.length = this._realtimeListCap;
+                    }
                     cached.ts = Date.now();
-                    // Defer the localStorage write off the realtime tick.
-                    setTimeout(() => {
-                        try { localStorage.setItem(`fs_crm_${table}`, JSON.stringify(this._sanitizeForStorage(table, cached.data))); } catch (_) { /* intentional: realtime snapshot persist is best-effort cache write */ }
-                        try { localStorage.setItem(`fs_crm_${table}_last_sync`, new Date().toISOString()); } catch (_) { /* intentional: cursor persist is best-effort; next read re-syncs */ }
-                    }, 0);
+                    // Coalesce the localStorage write: mark the table dirty and
+                    // (re)arm a single debounced flush instead of re-stringifying
+                    // the whole array on every event. (MEMO-1)
+                    this._queueRealtimePersist(table);
                 } else {
                     // Table not in cache yet — just mark the table dirty so the
                     // next getAll() does a fresh fetch instead of an old snapshot.
@@ -536,6 +565,63 @@ class DataStore {
             try { window.supabase.removeChannel(this._realtimeChannel); } catch (_) { /* intentional: best-effort channel teardown */ }
             this._realtimeChannel = null;
         }
+    }
+
+    // ── Realtime SWR persistence coalescing helpers (MEMO-1) ──────────────
+    // Mark a table's in-memory snapshot dirty and (re)arm a single debounced
+    // flush. Coalesces a burst of realtime events into ONE localStorage write
+    // per quiet window instead of one full-array re-stringify per event.
+    _queueRealtimePersist(table) {
+        if (!table) return;
+        this._realtimePersistDirty.add(table);
+        if (this._realtimePersistTimer) return; // a flush is already armed
+        if (typeof setTimeout !== 'function') { this._flushRealtimePersist(); return; }
+        this._realtimePersistTimer = setTimeout(() => {
+            this._realtimePersistTimer = null;
+            this._flushRealtimePersist();
+        }, this._realtimePersistDebounceMs);
+    }
+
+    // Write every dirty table's current in-memory snapshot to localStorage in
+    // one pass, then clear the dirty set. Best-effort: quota/storage failures
+    // are non-fatal (the next reload delta-syncs from server truth).
+    _flushRealtimePersist() {
+        if (!this._realtimePersistDirty || this._realtimePersistDirty.size === 0) return;
+        const tables = Array.from(this._realtimePersistDirty);
+        this._realtimePersistDirty.clear();
+        const nowIso = new Date().toISOString();
+        for (const table of tables) {
+            const cached = this._cache.get(table);
+            if (!cached || !Array.isArray(cached.data)) continue;
+            try { localStorage.setItem(`fs_crm_${table}`, JSON.stringify(this._sanitizeForStorage(table, cached.data))); } catch (_) { /* intentional: realtime snapshot persist is best-effort cache write */ }
+            try { localStorage.setItem(`fs_crm_${table}_last_sync`, nowIso); } catch (_) { /* intentional: cursor persist is best-effort; next read re-syncs */ }
+        }
+    }
+
+    // Flush pending realtime snapshots when the tab is backgrounded or closing
+    // so a tab that never hits a quiet window (continuous inserts then close)
+    // still persists. Registered once at construction; guarded for non-DOM.
+    _installRealtimePersistFlushHooks() {
+        if (this._realtimePersistHooksInstalled) return;
+        if (typeof document === 'undefined' && typeof window === 'undefined') return;
+        const flush = () => {
+            if (this._realtimePersistTimer) {
+                try { clearTimeout(this._realtimePersistTimer); } catch (_) { /* intentional: best-effort timer clear */ }
+                this._realtimePersistTimer = null;
+            }
+            try { this._flushRealtimePersist(); } catch (_) { /* intentional: flush on hide/unload is best-effort */ }
+        };
+        try {
+            if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+                document.addEventListener('visibilitychange', () => {
+                    if (document.visibilityState === 'hidden') flush();
+                });
+            }
+            if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+                window.addEventListener('pagehide', flush);
+            }
+        } catch (_) { /* intentional: hook registration is best-effort */ }
+        this._realtimePersistHooksInstalled = true;
     }
 
     // ── In-flight abort helpers ──────────────────────────────────────────
@@ -2861,6 +2947,20 @@ class DataStore {
         }
     }
 
+    // ── Bounded source for the activities indexed-read fallbacks (MEMO-8) ──
+    // When the indexed primary query above throws (network hiccup / stale
+    // index / malformed order), the fallback must NOT whole-table-scan via
+    // getAll('activities'). Prefer the already-resident local snapshot
+    // (_swrGetLocal — no extra network, capped scan); only when no snapshot
+    // exists do we fall back to the original getAll('activities') source so no
+    // result set is ever lost. The caller still applies the SAME filter / sort
+    // / slice(limit), so the materialized output is identical — just bounded.
+    async _activitiesFallbackRows() {
+        const local = this._swrGetLocal('activities');
+        if (Array.isArray(local) && local.length > 0) return local;
+        return this.getAll('activities');
+    }
+
     // ── Per-entity activity fetch (indexed) ───────────────────────────────
     // Replaces the `getAll('activities').filter(a => a.prospect_id == id)`
     // pattern that appears ~8 times in script.js (meet-up history, protection
@@ -2885,7 +2985,7 @@ class DataStore {
             return data || [];
         } catch (e) {
             console.warn('getActivitiesForProspect fallback (cache):', e?.message);
-            const all = await this.getAll('activities');
+            const all = await this._activitiesFallbackRows();
             return all
                 .filter(a => String(a.prospect_id) === String(prospectId))
                 .sort((a, b) => {
@@ -2928,8 +3028,11 @@ class DataStore {
                 const pairs = JSON.parse(raw);
                 if (Array.isArray(pairs) && pairs.length > 0) {
                     const staleMap = new Map(pairs);
-                    // Prime memory cache and fire background refresh
-                    this._cache.set(cacheKey, { data: staleMap, ts: Date.now() });
+                    // Prime memory cache and fire background refresh.
+                    // Route through _cacheSet so __latact_ entries obey the same
+                    // LRU cap as every other cache key (MEMO-2) — _cacheSet wraps
+                    // the value as { data, ts }, identical to the prior shape.
+                    this._cacheSet(cacheKey, staleMap);
                     this._refreshLatestActivitiesBg(cacheKey, ids).catch(() => {});
                     if (window.__FS_DEBUG_SWR) console.log(`[SWR] ${cacheKey}: served from localStorage`);
                     return staleMap;
@@ -2955,7 +3058,9 @@ class DataStore {
                 const key = String(row.prospect_id);
                 if (!result.has(key)) result.set(key, row);
             }
-            this._cache.set(cacheKey, { data: result, ts: Date.now() });
+            // Route through _cacheSet so __latact_ entries obey the LRU cap
+            // (MEMO-2) — _cacheSet wraps as { data, ts }, identical shape.
+            this._cacheSet(cacheKey, result);
             setTimeout(() => {
                 try {
                     localStorage.setItem(`fs_crm_${cacheKey}`, JSON.stringify([...result.entries()]));
@@ -2964,7 +3069,10 @@ class DataStore {
             return result;
         } catch (e) {
             console.warn('getLatestActivitiesForProspects fallback (cache):', e?.message);
-            const all = await this.getAll('activities');
+            // Bounded fallback (MEMO-8): prefer the resident local snapshot
+            // (capped scan) over a fresh whole-table getAll; only fall back to
+            // the original getAll('activities') source when no snapshot exists.
+            const all = await this._activitiesFallbackRows();
             const idSet = new Set(ids);
             const sorted = all
                 .filter(a => a.prospect_id != null && idSet.has(String(a.prospect_id)))
@@ -3015,7 +3123,7 @@ class DataStore {
             return data || [];
         } catch (e) {
             console.warn('getActivitiesForCustomer fallback (cache):', e?.message);
-            const all = await this.getAll('activities');
+            const all = await this._activitiesFallbackRows();
             return all
                 .filter(a => String(a.customer_id) === String(customerId))
                 .sort((a, b) => {

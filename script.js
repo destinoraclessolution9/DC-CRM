@@ -3117,17 +3117,20 @@ function _wireLoginBtn() {
             const seen = new Set();
             const _load = (src) => { if (!seen.has(src)) { seen.add(src); _loadChunkOnce(src); } };
 
-            // Tier 1 — immediate: essential first-nav views. prospects-core +
-            // its four siblings (customers/agents/approvals/settings) all back the
-            // first-nav Prospects/Customers screens and call each other across the
-            // file boundary, so they must be in memory together right after login
+            // Tier 1 — immediate: essential first-nav views. The
+            // customers/agents/approvals/settings siblings back the first-nav
+            // Customers/Agents screens and call each other across the file
+            // boundary, so they must be in memory together right after login
             // (approvals has no VIEWS entry, so it would never warm otherwise).
             // This set also already contains every role's default landing chunk
             // (calendar / mobile / settings), so the single landing view is warm
             // immediately without prefetching the whole permitted set.
+            //
+            // LOAD-5: script-prospects (~446 KB) dropped from this eager burst —
+            // it's NO role's default landing view, so pre-warming only bloated
+            // login; it lazy-loads on first navigateTo('prospects'). Identical past first paint.
             [
                 'chunks/script-mobile.min.js',
-                'chunks/script-prospects.min.js',
                 'chunks/script-customers.min.js',
                 'chunks/script-agents.min.js',
                 'chunks/script-approvals.min.js',

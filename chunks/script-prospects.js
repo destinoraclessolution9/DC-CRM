@@ -447,8 +447,25 @@ const _showProspectsReactRoot = (useReact) => {
 // ── Internal render-builders (extracted from renderProspectsTable) ─────────
 // Pure string assembly — no DOM mutation, no fetches, no control-flow side
 // effects. Kept byte-for-byte equivalent to the inline templates they replace.
+// REND-5: the agent <select> renders one <option> per active agent in EVERY
+// row. The value + escaped name are identical across rows — only the `selected`
+// flag varies by p.responsible_agent_id. Build the per-agent option parts ONCE
+// (pre/post split so we inject `selected` without re-escaping names per row) and
+// reuse them. Output is byte-identical to the old inline map: not-selected →
+// `<option value="ID" >NAME</option>`, selected → `<option value="ID" selected>NAME</option>`.
+const _buildAgentOptionParts = (activeAgents) =>
+    activeAgents.map(a => ({
+        idStr: String(a.id),
+        pre: `<option value="${a.id}" `,
+        post: `>${escapeHtml(a.full_name || 'Agent')}</option>`,
+    }));
+
 const buildProspectRowHtml = (p, ctx) => {
     const { userById, canReassign, canDelete, activeAgents } = ctx;
+    // Reuse the cached option parts when present (built once per render); fall
+    // back to building them on the fly so the function stays correct if called
+    // without a prepared cache (e.g. future callers).
+    const _agentOptParts = ctx.agentOptionParts || _buildAgentOptionParts(activeAgents);
     const grade = getScoreGrade(p.score);
     const daysLeft = calculateProtectionDays(p);
     const protectionStatus = getProtectionStatus(daysLeft);
@@ -485,7 +502,12 @@ const buildProspectRowHtml = (p, ctx) => {
                         const u = userById.get(cid);
                         if (!u || !u.full_name) return '<option value="" selected></option>';
                         return `<option value="${escapeHtml(cid)}" selected>${escapeHtml(u.full_name)}</option>`;
-                    })()}${activeAgents.map(a => `<option value="${a.id}" ${String(a.id) === String(p.responsible_agent_id) ? 'selected' : ''}>${escapeHtml(a.full_name || 'Agent')}</option>`).join('')}</select>`
+                    })()}${(() => {
+                        const _pid = String(p.responsible_agent_id);
+                        let _opts = '';
+                        for (const o of _agentOptParts) _opts += o.pre + (o.idStr === _pid ? 'selected' : '') + o.post;
+                        return _opts;
+                    })()}</select>`
                     : (p.responsible_agent_id ? escapeHtml(agentName) : '')}</td>
                 <td data-label="Score">
                     <span class="score-badge score-${grade.replace('+', '-plus')}">${p.score || 0} (${grade})</span>
@@ -526,14 +548,20 @@ const buildProspectsEmptyHtml = (searchQueryRaw, agentFilter, includeDormantTogg
 };
 
 const buildProspectsStatsHtml = (prospects, totalCount) => {
+    // REND-6: fold the three full-array passes (highScore filter + active30
+    // filter + avgScore reduce) into a single loop over the whole set so we
+    // scan `prospects` once per render instead of three times. Numbers are
+    // identical — same per-item predicates, same `now` captured once.
     const totalAll = prospects.length;
-    const highScore = prospects.filter(p => (p.score || 0) >= 70).length;
     const now = Date.now();
-    const active30 = prospects.filter(p => {
-        if (!p.last_activity_date) return false;
-        return (now - new Date(p.last_activity_date).getTime()) <= 30 * 86400000;
-    }).length;
-    const avgScore = totalAll ? Math.round(prospects.reduce((s, p) => s + (p.score || 0), 0) / totalAll) : 0;
+    let highScore = 0, active30 = 0, scoreSum = 0;
+    for (const p of prospects) {
+        const s = p.score || 0;
+        scoreSum += s;
+        if (s >= 70) highScore++;
+        if (p.last_activity_date && (now - new Date(p.last_activity_date).getTime()) <= 30 * 86400000) active30++;
+    }
+    const avgScore = totalAll ? Math.round(scoreSum / totalAll) : 0;
     return `
             <div class="prospect-stat-card">
                 <div class="prospect-stat-icon pink"><i class="fas fa-users"></i></div>
@@ -856,7 +884,13 @@ const renderProspectsTable = async () => {
     // This decouples the 307 ms activities query from the table's first paint.
     _mark('latest-activities-loaded'); // updated once background fetch resolves
 
-    const _rowCtx = { userById, canReassign, canDelete, activeAgents };
+    // REND-5: build the agent <select> option parts ONCE (escapes each agent
+    // name a single time) and share them across every row via the ctx, instead
+    // of re-mapping + re-escaping activeAgents inside buildProspectRowHtml per row.
+    const _rowCtx = {
+        userById, canReassign, canDelete, activeAgents,
+        agentOptionParts: canReassign ? _buildAgentOptionParts(activeAgents) : [],
+    };
     let html = '';
     for (const p of pageProspects) {
         html += buildProspectRowHtml(p, _rowCtx);

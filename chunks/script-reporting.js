@@ -349,9 +349,20 @@
             AppDataStore.getAll('events'),
             AppDataStore.getAll('event_registrations'),
         ]);
+        // De-quad: bucket registrations by event_id ONCE (O(n), source insertion
+        // order preserved) so the per-event lookup is O(1) instead of a full-array
+        // .filter scan per event (was O(events × registrations)). RAW key + strict
+        // === parity with the old `r.event_id === ev.id` comparison.
+        const regsByEvent = new Map();
+        for (const r of registrations) {
+            const k = r.event_id; // RAW key
+            let bucket = regsByEvent.get(k);
+            if (!bucket) { bucket = []; regsByEvent.set(k, bucket); }
+            bucket.push(r);
+        }
         const result = [];
         for (const ev of events) {
-            const regs = registrations.filter(r => r.event_id === ev.id && r.event_date >= from && r.event_date <= to);
+            const regs = (regsByEvent.get(ev.id) || []).filter(r => r.event_date >= from && r.event_date <= to);
             if (regs.length === 0) continue;
             let prospectCount = 0, agentCount = 0;
             for (const r of regs) {
@@ -425,13 +436,24 @@
             AppDataStore.getAll('events'),
             AppDataStore.getAll('event_registrations'),
         ]);
+        // De-quad: bucket registrations by event_id ONCE (O(n), source insertion
+        // order preserved) so the per-event lookup is O(1) instead of a full-array
+        // .filter scan per event (was O(events × registrations)). RAW key + strict
+        // === parity with the old `r.event_id === ev.id` comparison.
+        const regsByEvent = new Map();
+        for (const r of registrations) {
+            const k = r.event_id; // RAW key
+            let bucket = regsByEvent.get(k);
+            if (!bucket) { bucket = []; regsByEvent.set(k, bucket); }
+            bucket.push(r);
+        }
         const result = {};
         for (const type of eventTypes) result[type] = { prospects: 0, agents: 0, total: 0 };
         for (const ev of events) {
             const matchedType = eventTypes.find(t => ev.title.toLowerCase().includes(t.toLowerCase()) || ev.category === t);
             if (!matchedType) continue;
-            const regs = registrations.filter(r =>
-                r.event_id === ev.id && r.event_date >= from && r.event_date <= to && r.attendance_status === 'Attended'
+            const regs = (regsByEvent.get(ev.id) || []).filter(r =>
+                r.event_date >= from && r.event_date <= to && r.attendance_status === 'Attended'
             );
             for (const r of regs) {
                 if (r.attendee_type === 'prospect' || r.attendee_type === 'customer') { result[matchedType].prospects++; result[matchedType].total++; }
@@ -2346,22 +2368,28 @@ const renderAgentLeaderboard = async () => {
             actualData = Array(days).fill(0);
 
             const _byDay = await _trySalesByDay(range.from, range.to);
-            const _dayTotals = _byDay ? new Map(_byDay.map(r => [r.sale_date, Number(r.total) || 0])) : null;
-            let _allPurchases = null;
+            let _dayTotals = _byDay ? new Map(_byDay.map(r => [r.sale_date, Number(r.total) || 0])) : null;
+            // De-quad fallback: bucket purchases by day ONCE (sum amount||0 per
+            // p.date, RAW key + strict === parity, non-agent-package prefilter) so
+            // the per-day fill is O(1) instead of a full-array .filter+.reduce per
+            // day (was O(days × purchases)). Built lazily only when the RPC fast
+            // path is unavailable.
+            if (!_dayTotals) {
+                const _allPurchases = await AppDataStore.getAll('purchases');
+                _dayTotals = new Map();
+                for (const p of _allPurchases) {
+                    if (p.is_agent_package) continue;
+                    const k = p.date; // RAW key
+                    _dayTotals.set(k, (_dayTotals.get(k) || 0) + (p.amount || 0));
+                }
+            }
             for (let i = 0; i < days; i++) {
                 const d = new Date(start);
                 d.setDate(start.getDate() + i);
                 const dStr = d.toISOString().split('T')[0];
                 labels.push(dStr.split('-').slice(1).join('/'));
 
-                if (_dayTotals) {
-                    actualData[i] = _dayTotals.get(dStr) || 0;
-                } else {
-                    if (!_allPurchases) _allPurchases = await AppDataStore.getAll('purchases');
-                    actualData[i] = _allPurchases.filter(p =>
-                        p.date === dStr && !p.is_agent_package
-                    ).reduce((sum, p) => sum + (p.amount || 0), 0);
-                }
+                actualData[i] = _dayTotals.get(dStr) || 0;
             }
 
             const dailyTarget = (yTarget.total_sales_target || 0) / 365;

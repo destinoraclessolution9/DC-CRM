@@ -174,14 +174,55 @@ const renderAgentsTable = async () => {
         const reactRoot = document.getElementById('agents-react-root');
         if (reactRoot) {
             try {
-                // Per-agent count + stats maps from the SAME warm getAll the legacy
-                // path below uses (byte-identical loops) — passed as props so the
-                // island never re-fetches them (React Query paused these as offline).
-                const [_allP, _allC, _allS] = await Promise.all([
-                    AppDataStore.getAll('prospects'),
-                    AppDataStore.getAll('customers'),
-                    AppDataStore.getAll('agent_stats'),
-                ]);
+                // Per-agent count maps (REND-3). The displayed Prospects/Customers
+                // counts are NOT taken from agent_stats (its `total_assigned` is a
+                // precomputed summary, not provably equal to the live count the
+                // island shows) — they are bucketed live PER VISIBLE AGENT from the
+                // prospects/customers tables. So we only need the rows whose owning
+                // agent is one of the rows in this table — NOT the whole tables.
+                // `agents` is already identity-filtered + visibility-scoped (above),
+                // so its ids form the exact bound; the maps are read only for these
+                // ids. We push that bound as a scoped query (compiles to `.in()`),
+                // KEEP the byte-identical bucket loops, and FALL BACK to the original
+                // whole-table getAll on cap-overflow / error so the maps stay a
+                // superset narrowed by the unchanged loops → counts identical.
+                // agent_stats is a tiny one-row-per-agent summary (not a whole-table
+                // scan concern) and feeds the followup-rate map where row ORDER
+                // decides last-wins on any duplicate agent_id — so it keeps getAll
+                // unchanged to preserve that exact ordering.
+                const FETCH_CAP = 10000;
+                const _agentIds = agents.map(a => a.id);
+                const _allS = await AppDataStore.getAll('agent_stats');
+                let _allP, _allC;
+                if (_agentIds.length === 0) {
+                    // No table rows to count for — empty count maps. (An empty scope
+                    // IN () would be malformed, and getAll has nothing readable here.)
+                    _allP = []; _allC = [];
+                } else {
+                    try {
+                        const [_rp, _rc] = await Promise.all([
+                            // prospects: bucket key = responsible_agent_id
+                            AppDataStore.queryAdvanced('prospects', { scopeField: 'responsible_agent_id', scopeValues: _agentIds, select: 'id,responsible_agent_id', countMode: null, limit: FETCH_CAP + 1, offset: 0 }),
+                            // customers: bucket key = responsible_agent_id || agent_id —
+                            // capture rows where EITHER field is a visible agent (OR scope);
+                            // the unchanged loop below still picks the same single key.
+                            AppDataStore.queryAdvanced('customers', { scopeFields: [{ field: 'responsible_agent_id', values: _agentIds }, { field: 'agent_id', values: _agentIds }], select: 'id,responsible_agent_id,agent_id', countMode: null, limit: FETCH_CAP + 1, offset: 0 }),
+                        ]);
+                        const _dp = (_rp && Array.isArray(_rp.data)) ? _rp.data : null;
+                        const _dc = (_rc && Array.isArray(_rc.data)) ? _rc.data : null;
+                        if (_dp && _dc && _dp.length <= FETCH_CAP && _dc.length <= FETCH_CAP) {
+                            _allP = _dp; _allC = _dc;
+                        } else {
+                            throw new Error('agent count source exceeds fetch cap — whole-table fallback');
+                        }
+                    } catch (_ce) {
+                        console.warn('[agents] bounded count source unavailable — getAll fallback', _ce && _ce.message);
+                        [_allP, _allC] = await Promise.all([
+                            AppDataStore.getAll('prospects'),
+                            AppDataStore.getAll('customers'),
+                        ]);
+                    }
+                }
                 const _pcm = {}, _ccm = {}, _sba = {};
                 for (const _p of _allP) { const _aid = String(_p.responsible_agent_id); _pcm[_aid] = (_pcm[_aid] || 0) + 1; }
                 for (const _c of _allC) { const _aid = String(_c.responsible_agent_id || _c.agent_id); if (_aid) _ccm[_aid] = (_ccm[_aid] || 0) + 1; }
@@ -235,8 +276,32 @@ const calculateDaysDiff = (expiryDate) => {
 };
 
 const renderCurrentAssignments = async (agentId) => {
-    // fresh:true bypasses SWR cache so stale localStorage data never hides prospects
-    const allP = await AppDataStore.getAll('prospects', { fresh: true });
+    // REND-7: this card lists ONLY this agent's prospects, so fetch a bounded
+    // scoped slice (responsible_agent_id == agentId) instead of the whole
+    // prospects table. The scope is exactly the agent being profiled (no
+    // broadening of visibility), and queryAdvanced always hits the server (no
+    // SWR), preserving the original fresh:true bypass. The unchanged client
+    // filter below keeps the result byte-identical to legacy. On cap-overflow /
+    // error we FALL BACK to the original whole-table getAll('prospects',{fresh}).
+    const FETCH_CAP = 10000;
+    let allP;
+    try {
+        const _r = await AppDataStore.queryAdvanced('prospects', {
+            scopeField: 'responsible_agent_id', scopeValues: [agentId],
+            select: 'id,full_name,status,last_activity_date,responsible_agent_id',
+            countMode: null, limit: FETCH_CAP + 1, offset: 0,
+        });
+        const _d = (_r && Array.isArray(_r.data)) ? _r.data : null;
+        if (_d && _d.length <= FETCH_CAP) {
+            allP = _d;
+        } else {
+            throw new Error('agent prospect slice exceeds fetch cap — whole-table fallback');
+        }
+    } catch (_ce) {
+        console.warn('[agents] bounded assignment source unavailable — getAll fallback', _ce && _ce.message);
+        // fresh:true bypasses SWR cache so stale localStorage data never hides prospects
+        allP = await AppDataStore.getAll('prospects', { fresh: true });
+    }
     const agentProspects = allP.filter(p => String(p.responsible_agent_id) === String(agentId));
     if (agentProspects.length === 0) return '<p style="color:var(--gray-400);font-size:13px;">No prospects assigned.</p>';
     agentProspects.sort((a, b) => (b.last_activity_date || '').localeCompare(a.last_activity_date || ''));

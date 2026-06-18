@@ -430,8 +430,18 @@ const renderCustomersTable = async () => {
     if (!_usedServer) {
         // ── Legacy client path (full-table fetch + filter + slice) ──
         const customers = await getVisibleCustomers();
-        let allEventRegs = [];
-        if (minEventsFilter > 0) allEventRegs = await AppDataStore.getAll('event_registrations');
+        // REND-11 DE-QUAD: bucket event_registrations by attendee_id ONCE into a
+        // count Map (only the .length per customer is consumed) instead of a full
+        // per-customer array scan (N×M). Raw key preserves the original strict
+        // `r.attendee_id === c.id` comparison (Map distinguishes 5 from "5").
+        let eventCountByAttendee = null;
+        if (minEventsFilter > 0) {
+            const allEventRegs = await AppDataStore.getAll('event_registrations');
+            eventCountByAttendee = new Map();
+            for (const r of allEventRegs) {
+                eventCountByAttendee.set(r.attendee_id, (eventCountByAttendee.get(r.attendee_id) || 0) + 1);
+            }
+        }
         let filtered = [];
         for (const c of customers) {
             if (searchQuery && !(
@@ -453,7 +463,7 @@ const renderCustomersTable = async () => {
                 if (auditStatus !== houseAuditFilter) continue;
             }
             if (minEventsFilter > 0) {
-                const attendedCount = allEventRegs.filter(r => r.attendee_id === c.id).length;
+                const attendedCount = eventCountByAttendee.get(c.id) || 0;
                 if (attendedCount < minEventsFilter) continue;
             }
             filtered.push(c);
@@ -461,6 +471,18 @@ const renderCustomersTable = async () => {
         totalCount = filtered.length;
         pageCustomers = filtered.slice(pageStart, pageStart + _customerPageSize);
     }
+
+    // REND-5: build the agent <option> pieces ONCE (escapeHtml + value are
+    // agent-only) instead of rebuilding the full <select> option list in every
+    // row. Per row only the ` selected` token varies — `head` ends right where
+    // the original placed it (`value="X" `) and `tail` carries the rest, so the
+    // emitted markup (incl. the trailing space before `>` on non-selected
+    // options) is byte-identical to the previous inline .map().join('').
+    const _custAgentOptPieces = activeAgentsCust.map(a => ({
+        idStr: String(a.id),
+        head: `<option value="${a.id}" `,
+        tail: `>${escapeHtml(a.full_name || 'Agent')}</option>`,
+    }));
 
     let html = '';
     for (const c of pageCustomers) {
@@ -481,7 +503,10 @@ const renderCustomersTable = async () => {
                         const u = userById.get(cid);
                         if (!u || !u.full_name) return '<option value="" selected></option>';
                         return `<option value="${escapeHtml(cid)}" selected>${escapeHtml(u.full_name)}</option>`;
-                    })()}${activeAgentsCust.map(a => `<option value="${a.id}" ${String(a.id) === String(c.responsible_agent_id || c.agent_id) ? 'selected' : ''}>${escapeHtml(a.full_name || 'Agent')}</option>`).join('')}</select>`
+                    })()}${(() => {
+                        const _selId = String(c.responsible_agent_id || c.agent_id);
+                        return _custAgentOptPieces.map(o => o.head + (o.idStr === _selId ? 'selected' : '') + o.tail).join('');
+                    })()}</select>`
                     : ((c.responsible_agent_id || c.agent_id) ? escapeHtml(agentName) : '')}</td>
                 <td data-label="Health">${renderQuickHealthBadge(c)}</td>
                 <td data-label="Status"><span class="score-badge score-A+">${(c.status || 'active').toUpperCase()}</span></td>
