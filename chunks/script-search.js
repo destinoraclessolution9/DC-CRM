@@ -1360,7 +1360,98 @@ const _buildPurchasedProductIdSet = async (productName, candidateIds) => {
 };
 
 const performCustomerSearch = async (filters) => {
-    let items = await getVisibleCustomers();
+    // Scale-safe SOURCE: instead of downloading the ENTIRE visible customer set per
+    // search, push the provably-equivalent predicates to Supabase so we fetch only the
+    // matching+visible subset. Mirrors performProspectSearch, but customers are scoped
+    // by an OR over TWO columns (responsible_agent_id OR legacy agent_id) — identical
+    // to getVisibleCustomers (script.js:823, two queryPaged calls merged+deduped).
+    // SCOPE replication:
+    //   • visibleIds === 'all' (admin)     → ONE unscoped query (admin sees all)
+    //   • visibleIds non-empty array       → TWO queries, scopeField responsible_agent_id
+    //                                          and scopeField agent_id (same predicates),
+    //                                          merged + deduped by id → reproduces the OR
+    //   • visibleIds empty []              → no visible customers → return []
+    //   • visibleIds unobtainable / error  → fall back to getVisibleCustomers() (legacy)
+    // Pushed predicates are AND-combined and equivalent-or-looser than the client filters
+    // below, so {server result} ⊇ {client matches}; the UNCHANGED client chain narrows to
+    // the exact legacy set. KEYWORD is deliberately NOT pushed: the client keyword ORs
+    // over full_name/nickname/phone/email/occupation/company_name/notes, but `notes` is a
+    // separate table on customers (no customers.notes column — see script-customers.js
+    // notes-tab uses AppDataStore.query('notes', …)), so an ilike on it would either error
+    // or under-return. Leaving keyword fully client-side is still superset-safe (it only
+    // AND-narrows). On cap-overflow / error / unknown-scope we fall back to
+    // getVisibleCustomers() (byte-identical to legacy).
+    const FETCH_CAP = 10000;
+    let items;
+    try {
+        const visibleIds = await getVisibleUserIds(_currentUser);
+        if (Array.isArray(visibleIds) && visibleIds.length === 0) {
+            // No visible customers — matches getVisibleCustomers → empty set.
+            return applyComplexConditions([], filters.complex);
+        }
+        if (visibleIds !== 'all' && !(Array.isArray(visibleIds) && visibleIds.length)) {
+            // Scope could not be reliably obtained — never push an unscoped query.
+            throw new Error('customer visibility scope unavailable — visibility-scoped fallback');
+        }
+        // Shared search predicates (AND-combined, equivalent-or-looser than the client
+        // filters). eq filters (scalars; == the client === checks below).
+        const baseFilters = {};
+        if (filters.basic.minggua) baseFilters.ming_gua = filters.basic.minggua;
+        if (filters.basic.status)  baseFilters.status = filters.basic.status;
+        if (filters.basic.agent)   baseFilters.responsible_agent_id = filters.basic.agent; // == client resp==agent; union over both scope branches stays exact
+        if (filters.basic.gender)  baseFilters.gender = filters.basic.gender;
+        if (filters.basic.income)  baseFilters.income_range = filters.basic.income;
+        if (filters.basic.state)   baseFilters.state = filters.basic.state;
+        const baseGte = {}, baseLte = {};
+        if (filters.basic['score-min']) { const v = parseInt(filters.basic['score-min']);   if (!isNaN(v)) baseGte.score = v; }
+        if (filters.basic['score-max']) { const v = parseInt(filters.basic['score-max']);   if (!isNaN(v)) baseLte.score = v; }
+        if (filters.basic['ltv-min'])   { const v = parseFloat(filters.basic['ltv-min']);   if (!isNaN(v)) baseGte.lifetime_value = v; }
+        if (filters.basic['ltv-max'])   { const v = parseFloat(filters.basic['ltv-max']);   if (!isNaN(v)) baseLte.lifetime_value = v; }
+        // ONE text group — name (client matches full_name OR nickname) pushed in full via
+        // searchFields. phone/email/occupation/city contains-filters AND keyword are left
+        // to the client re-filter (superset still holds AND-wise).
+        const baseSearch = filters.basic.name ? filters.basic.name : null;
+        const baseSearchFields = filters.basic.name ? ['full_name', 'nickname'] : null;
+        const mkOpts = (scopeField) => {
+            const o = { sort: 'id', sortDir: 'asc', countMode: null, limit: FETCH_CAP + 1, offset: 0,
+                filters: { ...baseFilters }, gte: { ...baseGte }, lte: { ...baseLte } };
+            if (scopeField) { o.scopeField = scopeField; o.scopeValues = visibleIds; }
+            if (baseSearch) { o.search = baseSearch; o.searchFields = baseSearchFields; }
+            return o;
+        };
+        if (visibleIds === 'all') {
+            // Admin — ONE unscoped query.
+            const res = await AppDataStore.queryAdvanced('customers', mkOpts(null));
+            const data = (res && Array.isArray(res.data)) ? res.data : null;
+            if (data && data.length <= FETCH_CAP) {
+                items = data;
+            } else {
+                throw new Error('matched customers exceed fetch cap — visibility-scoped fallback for completeness');
+            }
+        } else {
+            // Scoped — TWO queries (responsible_agent_id OR legacy agent_id), merged + deduped
+            // by id, mirroring getVisibleCustomers' OR-scope (script.js:838-844).
+            const [byResp, byAgent] = await Promise.all([
+                AppDataStore.queryAdvanced('customers', mkOpts('responsible_agent_id')),
+                AppDataStore.queryAdvanced('customers', mkOpts('agent_id')),
+            ]);
+            const dResp  = (byResp  && Array.isArray(byResp.data))  ? byResp.data  : null;
+            const dAgent = (byAgent && Array.isArray(byAgent.data)) ? byAgent.data : null;
+            if (!dResp || !dAgent || dResp.length > FETCH_CAP || dAgent.length > FETCH_CAP) {
+                throw new Error('matched customers exceed fetch cap — visibility-scoped fallback for completeness');
+            }
+            const seen = new Set();
+            const out = [];
+            for (const c of [...dResp, ...dAgent]) {
+                const k = String(c.id);
+                if (!seen.has(k)) { seen.add(k); out.push(c); }
+            }
+            items = out;
+        }
+    } catch (e) {
+        console.warn('performCustomerSearch: server filter unavailable — getVisibleCustomers fallback', e);
+        items = await getVisibleCustomers();
+    }
 
     if (filters.basic.name) {
         const q = filters.basic.name.toLowerCase();
