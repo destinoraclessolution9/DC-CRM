@@ -1,9 +1,9 @@
 {
-  "generated": "2026-06-17T18:44:04.778Z",
+  "generated": "2026-06-18T10:51:46.958Z",
   "script": {
-    "lines": 5053,
-    "hash": "c68dc602",
-    "definedCount": 628,
+    "lines": 5021,
+    "hash": "bc17ff55",
+    "definedCount": 627,
     "stateVars": [
       "_currentView",
       "_currentUser",
@@ -656,7 +656,7 @@
     },
     {
       "file": "script-agents.js",
-      "lines": 1423,
+      "lines": 1488,
       "exports": [
         "assignProspectToAgent",
         "calculateDaysDiff",
@@ -925,7 +925,7 @@
     },
     {
       "file": "script-customers.js",
-      "lines": 1950,
+      "lines": 1975,
       "exports": [
         "_setDelivery",
         "copyToClipboard",
@@ -972,7 +972,7 @@
     },
     {
       "file": "script-documents.js",
-      "lines": 1383,
+      "lines": 1399,
       "exports": [
         "showDocumentManagementView",
         "renderFolderTree",
@@ -1066,7 +1066,7 @@
     },
     {
       "file": "script-features2.js",
-      "lines": 1564,
+      "lines": 1626,
       "exports": [
         "initMobileApp",
         "addMobileMetaTags",
@@ -1151,7 +1151,7 @@
     },
     {
       "file": "script-formula.js",
-      "lines": 1975,
+      "lines": 2095,
       "exports": [
         "fpToggleImportMenu",
         "fpImportStock",
@@ -1274,7 +1274,7 @@
     },
     {
       "file": "script-import.js",
-      "lines": 2362,
+      "lines": 2393,
       "exports": [
         "showImportDashboard",
         "renderRecentImports",
@@ -1401,7 +1401,7 @@
     },
     {
       "file": "script-marketing.js",
-      "lines": 4921,
+      "lines": 4906,
       "exports": [
         "openMarketingListAddModal",
         "switchMarketingListTab",
@@ -1467,8 +1467,6 @@
         "toggleUserMenu",
         "loginAs",
         "uploadProfilePhoto",
-        "confirmRenameFolder",
-        "confirmDeleteFolder",
         "showMarketingAutomationView",
         "showMarketingListsView",
         "showMonthlyPromotionView",
@@ -1607,7 +1605,7 @@
     },
     {
       "file": "script-pipeline.js",
-      "lines": 3428,
+      "lines": 3522,
       "exports": [
         "loadPipelineConfig",
         "savePipelineConfigJson",
@@ -1692,7 +1690,7 @@
     },
     {
       "file": "script-prospects.js",
-      "lines": 5898,
+      "lines": 5932,
       "exports": [
         "EXPORT_HARD_LIMIT",
         "EXPORT_WARN_THRESHOLD",
@@ -1860,7 +1858,7 @@
     },
     {
       "file": "script-reporting.js",
-      "lines": 2810,
+      "lines": 2833,
       "exports": [
         "openTargetManagementModal",
         "exportKPIReport",
@@ -1879,7 +1877,7 @@
     },
     {
       "file": "script-search.js",
-      "lines": 1993,
+      "lines": 2145,
       "exports": [
         "ensureReferralFields",
         "viewEntityDetail",
@@ -2036,7 +2034,6 @@
   ],
   "manifest": [
     "script.min.js",
-    "script-features.min.js",
     "data.min.js",
     "app-init.min.js",
     "ui.min.js",

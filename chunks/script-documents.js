@@ -392,6 +392,22 @@
         if (hasSub || hasFiles) return UI.toast.error('Cannot delete: Folder is not empty');
         UI.showModal('Delete Folder', '<p>Are you sure?</p>', [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Delete', type: 'primary', action: `(async () => { await app.confirmDeleteFolder(${id}); })()` }]);
     };
+    // Self-provided here (Phase 8) — mirrors confirmRenameFolder above. Previously
+    // this DMS handler lived only in the marketing chunk + the retired
+    // script-features.js, so on the Documents-delete path it could be undefined
+    // (load-order bug). Bound to THIS chunk's folder helpers/_currentFolder.
+    window.app.confirmDeleteFolder = async (id) => {
+        try {
+            await AppDataStore.delete('folders', id);
+            UI.hideModal();
+            if (_currentFolder === id) _currentFolder = null;
+            UI.toast.success('Folder deleted');
+            await renderFolderTree();
+            await loadFolderContents();
+        } catch (err) {
+            UI.toast.error('Delete failed: ' + (err.message || 'Unknown error'));
+        }
+    };
 
     const showRecentFiles = async () => {
         const allFiles = (await AppDataStore.getAll('documents')).sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));

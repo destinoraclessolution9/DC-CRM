@@ -4659,27 +4659,14 @@ const simulateCampaignSending = async (campaignId) => {
         AppDataStore.invalidateCache('manual_overrides');
     };
 
-    // ========== MISSING STUB FUNCTIONS (confirm variants not defined elsewhere) ==========
-    const confirmRenameFolder = async (folderId) => {
-        const name = document.getElementById('rename-folder-input')?.value;
-        if (!name) return;
-        await AppDataStore.update('folders', folderId, { name, updated_at: new Date().toISOString() });
-        UI.hideModal(); UI.toast.success('Folder renamed');
-        if (typeof renderFolderTree === 'function') await renderFolderTree();
-        if (typeof loadFolderContents === 'function') await loadFolderContents();
-    };
-    const confirmDeleteFolder = async (folderId) => {
-        try {
-            await AppDataStore.delete('folders', folderId);
-            UI.hideModal();
-            if (_currentFolder === folderId) _currentFolder = null;
-            UI.toast.success('Folder deleted');
-            if (typeof renderFolderTree === 'function') await renderFolderTree();
-            if (typeof loadFolderContents === 'function') await loadFolderContents();
-        } catch (err) {
-            UI.toast.error('Delete failed: ' + (err.message || 'Unknown error'));
-        }
-    };
+    // (Phase 8) confirmRenameFolder REMOVED from marketing — same orphan/relocation
+    // as confirmDeleteFolder below: no marketing caller, sole consumer is the
+    // Documents view, which self-provides it (chunks/script-documents.js:382).
+    // (Phase 8) confirmDeleteFolder REMOVED from marketing — it was an orphan here
+    // (no marketing caller; sole consumer is the Documents view) and now lives in
+    // its proper home, chunks/script-documents.js, bound to that chunk's folder
+    // state. Keeping a 2nd copy would let a marketing load cross-chunk-override the
+    // documents handler with marketing's closure, misrendering folder deletes.
     // NOTE: The DMS batch Move/Share/Download actions were previously stubbed here
     // (batchMove/confirmBatchMove/batchShare/batchDownload) reading selection by
     // DOM-scraping. They had no callers and have been removed — the real,
@@ -4910,8 +4897,6 @@ const simulateCampaignSending = async (campaignId) => {
         toggleUserMenu,
         loginAs,
         uploadProfilePhoto,
-        confirmRenameFolder,
-        confirmDeleteFolder,
         showMarketingAutomationView,
         showMarketingListsView,
         showMonthlyPromotionView,

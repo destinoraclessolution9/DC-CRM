@@ -3227,47 +3227,9 @@ function _wireLoginBtn() {
         if (el) _prefetchChunkForView(el.dataset.view);
     }, { passive: true });
 
-    // One-shot promise-based loader for script-features.js.
-    // Returns immediately if already loaded. Shows inline loading ring
-    // in the viewport while waiting so the user sees feedback.
-    const _loadFeatures = (() => {
-        let _promise = null;
-        return (viewport) => {
-            if (window._appFeaturesLoaded) return Promise.resolve();
-            if (!_promise) {
-                if (viewport) {
-                    viewport.innerHTML =
-                        '<div style="display:flex;align-items:center;justify-content:center;' +
-                        'height:200px;gap:12px;color:var(--text-secondary);">' +
-                        '<i class="fas fa-circle-notch fa-spin" style="font-size:20px;color:var(--primary,#800020);"></i>' +
-                        '<span style="font-size:15px;">Loading...</span></div>';
-                }
-                _promise = new Promise((resolve, reject) => {
-                    const s = document.createElement('script');
-                    // Resolve the content-hashed filename from the manifest injected
-                    // by build.mjs into index.html (window.__ASSET_MANIFEST). Falls back
-                    // to the canonical non-hashed name (no ?v= needed — Vercel serves
-                    // the latest and the SW caches it stale-while-revalidate).
-                    const _manifest = window.__ASSET_MANIFEST || {};
-                    s.src = _manifest['script-features.min.js'] || 'script-features.min.js';
-                    s.async = false; // preserve execution order
-                    s.onload = () => { window._appFeaturesLoaded = true; resolve(); };
-                    s.onerror = (e) => {
-                        // Post code-split, script.js no longer contains these view
-                        // implementations — there is no fallback. Reset _promise (and
-                        // leave _appFeaturesLoaded false) so the NEXT navigation retries
-                        // instead of leaving every non-core view permanently dead.
-                        console.warn('[perf] script-features failed to load — will retry on next navigation', e);
-                        _promise = null;
-                        try { if (window.UI?.toast?.error) window.UI.toast.error('Failed to load features — check your connection and try again.'); } catch (_) { /* intentional: toast is cosmetic; load already failed and resolves */ }
-                        resolve();
-                    };
-                    document.body.appendChild(s);
-                });
-            }
-            return _promise;
-        };
-    })();
+    // (Phase 8) _loadFeatures REMOVED — the legacy script-features.js monolith is
+    // retired; all views are owned by their dedicated chunks (see _CHUNK_VIEWS +
+    // the eager post-login chunk loader).
 
     // Re-sync every lazy chunk's cached _currentUser snapshot to the live user.
     // Chunks capture `let _currentUser = _state.cu` at load time and expose a
@@ -3307,13 +3269,13 @@ function _wireLoginBtn() {
                 await _loadChunkOnce(_chunkDef.src);
             }
         }
-        // ── Lazy-load non-core views ──────────────────────────────────────────
-        // script-features.min.js is only fetched when the user first navigates
-        // away from home/calendar. After that it's cached + immutable.
-        if (!_CORE_VIEWS.has(viewId) && !window._appFeaturesLoaded) {
-            const vp = document.getElementById('content-viewport');
-            await _loadFeatures(vp);
-        }
+        // ── Non-core views ────────────────────────────────────────────────────
+        // (Phase 8) The legacy script-features.js monolith was RETIRED — every
+        // view is now owned by its dedicated chunk (loaded above via _CHUNK_VIEWS
+        // + eagerly post-login), so there is no longer a features fallback to
+        // fetch here. This also removes the prior load-order ambiguity where the
+        // stale features bundle could re-register DMS/Knowledge handlers over the
+        // maintained chunk versions depending on navigation order.
         // Stock Take v2 teardown — when leaving the stock_take view, stop the
         // Supabase realtime channel and any active camera stream so we don't
         // pin a websocket / camera handle in the background.

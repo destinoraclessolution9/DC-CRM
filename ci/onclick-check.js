@@ -274,7 +274,7 @@ function main() {
 
   // ---- 4. Report -------------------------------------------------------------
   console.log('\nonclick-check  (DEAD inline-handler guard)');
-  console.log(`  files scanned      : ${files.length} (script.js, script-features.js, ${files.length - 2} chunks)`);
+  console.log(`  files scanned      : ${files.length} (script.js + ${files.length - 1} chunks)`);
   console.log(`  referenced names   : ${referencedNames.length}`);
   console.log(`  registered methods : ${registered.size}`);
   console.log(`  DEAD handlers      : ${dead.length}`);

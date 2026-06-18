@@ -24,7 +24,7 @@ const INIT = process.argv.includes('--init');
 
 function sourceFiles() {
   const out = [];
-  for (const f of ['script.js', 'script-features.js', 'data.js', 'ui.js', 'app-init.js', 'auth.js', 'supabase-init.js', 'build.mjs']) {
+  for (const f of ['script.js', 'data.js', 'ui.js', 'app-init.js', 'auth.js', 'supabase-init.js', 'build.mjs']) {
     if (fs.existsSync(path.join(ROOT, f))) out.push(f);
   }
   const chunkDir = path.join(ROOT, 'chunks');

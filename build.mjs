@@ -21,7 +21,6 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 
 const JS_TARGETS = [
   'script.js',
-  'script-features.js',
   'data.js',
   'app-init.js',
   'ui.js',

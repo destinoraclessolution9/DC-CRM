@@ -33,7 +33,7 @@ const ALLOWANCE_PATH = path.join(__dirname, 'lint-allowance.json');
 // Canonical source files only (never *.min.js, never temp/_ scratch).
 function sourceFiles() {
   const out = [];
-  for (const f of ['script.js', 'script-features.js', 'data.js', 'ui.js', 'app-init.js', 'auth.js', 'supabase-init.js']) {
+  for (const f of ['script.js', 'data.js', 'ui.js', 'app-init.js', 'auth.js', 'supabase-init.js']) {
     if (fs.existsSync(path.join(ROOT, f))) out.push(f);
   }
   const chunkDir = path.join(ROOT, 'chunks');
