@@ -626,6 +626,10 @@
     <script defer src="libs/supabase-js-2.106.2.min.js"></script>
     <script defer src="supabase-init.8d7c8f6e83.min.js"></script>
     <script defer src="lunar-calendar.min.js"></script>
+    <!-- data-helpers.js: pure data-layer classifiers (queue-error/schema/abort/snapshot)
+         extracted from data.js for separation + independent testability. Loads before data.js.
+         (build.mjs hashes this ref; rewriteHtml resolves the content-hashed name.) -->
+    <script defer src="data-helpers.min.js"></script>
     <script defer src="data.9f924c99b7.min.js"></script>
     <script defer src="auth.086af91e84.min.js"></script>
     <script defer src="ui.252b9cc93b.min.js"></script>

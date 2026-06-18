@@ -1,9 +1,9 @@
 {
-  "generated": "2026-06-18T10:51:46.958Z",
+  "generated": "2026-06-18T16:05:02.571Z",
   "script": {
-    "lines": 5021,
-    "hash": "bc17ff55",
-    "definedCount": 627,
+    "lines": 5010,
+    "hash": "c2c3030e",
+    "definedCount": 626,
     "stateVars": [
       "_currentView",
       "_currentUser",
@@ -636,7 +636,7 @@
     },
     {
       "file": "script-admin.js",
-      "lines": 578,
+      "lines": 576,
       "exports": [
         "showAdminDashboard",
         "showTenantManagement",
@@ -656,7 +656,7 @@
     },
     {
       "file": "script-agents.js",
-      "lines": 1488,
+      "lines": 1484,
       "exports": [
         "assignProspectToAgent",
         "calculateDaysDiff",
@@ -719,7 +719,7 @@
     },
     {
       "file": "script-approvals.js",
-      "lines": 657,
+      "lines": 653,
       "exports": [
         "approveClosingRecord",
         "approveProspectConversion",
@@ -880,7 +880,7 @@
     },
     {
       "file": "script-cps.js",
-      "lines": 1359,
+      "lines": 1356,
       "exports": [
         "_refreshNotifBadge",
         "_buildNotifPanel",
@@ -925,7 +925,7 @@
     },
     {
       "file": "script-customers.js",
-      "lines": 1975,
+      "lines": 1971,
       "exports": [
         "_setDelivery",
         "copyToClipboard",
@@ -1066,7 +1066,7 @@
     },
     {
       "file": "script-features2.js",
-      "lines": 1626,
+      "lines": 1624,
       "exports": [
         "initMobileApp",
         "addMobileMetaTags",
@@ -1189,7 +1189,7 @@
     },
     {
       "file": "script-fude.js",
-      "lines": 3136,
+      "lines": 3134,
       "exports": [
         "showFudeView",
         "openStoryDetail",
@@ -1274,7 +1274,7 @@
     },
     {
       "file": "script-import.js",
-      "lines": 2393,
+      "lines": 2391,
       "exports": [
         "showImportDashboard",
         "renderRecentImports",
@@ -1562,7 +1562,7 @@
     },
     {
       "file": "script-org.js",
-      "lines": 668,
+      "lines": 666,
       "exports": [
         "showOrgChartView",
         "openNewOrgConsultation",
@@ -1605,7 +1605,7 @@
     },
     {
       "file": "script-pipeline.js",
-      "lines": 3522,
+      "lines": 3519,
       "exports": [
         "loadPipelineConfig",
         "savePipelineConfigJson",
@@ -1690,7 +1690,7 @@
     },
     {
       "file": "script-prospects.js",
-      "lines": 5932,
+      "lines": 5928,
       "exports": [
         "EXPORT_HARD_LIMIT",
         "EXPORT_WARN_THRESHOLD",
@@ -1877,7 +1877,7 @@
     },
     {
       "file": "script-search.js",
-      "lines": 2145,
+      "lines": 2142,
       "exports": [
         "ensureReferralFields",
         "viewEntityDetail",
@@ -1933,7 +1933,7 @@
     },
     {
       "file": "script-settings.js",
-      "lines": 671,
+      "lines": 667,
       "exports": [
         "_loadEmailDupes",
         "_loadPhoneDupes",
@@ -2034,6 +2034,7 @@
   ],
   "manifest": [
     "script.min.js",
+    "data-helpers.min.js",
     "data.min.js",
     "app-init.min.js",
     "ui.min.js",

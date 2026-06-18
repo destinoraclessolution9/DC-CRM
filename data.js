@@ -674,12 +674,7 @@ class DataStore {
     //   - postgrest-js:    err.code === '20' or err.message includes 'aborted'
     // Cheap, defensive — false positives are fine since the caller treats
     // it as "view changed, drop silently".
-    _isAbortError(err) {
-        if (!err) return false;
-        if (err.name === 'AbortError') return true;
-        const msg = String(err.message || err.toString() || '').toLowerCase();
-        return msg.includes('abort') || msg.includes('cancel') || err.code === '20';
-    }
+    _isAbortError(err) { return window._dataHelpers.isAbortError(err); }
 
     // ── Cache helpers ────────────────────────────────────────────────────
     _cacheGet(tableName) {
@@ -986,14 +981,7 @@ class DataStore {
 
     // Cheap change detection: fingerprint rows by id + last-modified stamp
     // and compare as a single string. O(n log n) on row count.
-    _snapshotsDiffer(a, b) {
-        if (!Array.isArray(a) || !Array.isArray(b)) return true;
-        if (a.length !== b.length) return true;
-        const fingerprint = (arr) =>
-            arr.map(r => `${r.id}:${r.updated_at || r.created_at || r.modified_at || ''}`)
-               .sort().join('|');
-        return fingerprint(a) !== fingerprint(b);
-    }
+    _snapshotsDiffer(a, b) { return window._dataHelpers.snapshotsDiffer(a, b); }
 
     async getAll(tableName, options = {}) {
         // Opt-in: include soft-deleted user rows in the result. _getAllImpl
@@ -1514,23 +1502,8 @@ class DataStore {
     //                 queue instead of retrying on every read forever (this
     //                 was the egg_processed_orders 409 / fp_* 400 storm).
     //   'transient' — network/5xx/everything else: keep and retry later.
-    _classifyQueueError(error) {
-        const code = String((error && error.code) || '');
-        const msg = [error && error.message, error && error.details, error && error.hint]
-            .filter(Boolean).join(' ');
-        if (code === '23505' || /duplicate key value/i.test(msg)) return 'duplicate';
-        // FK violation (23503): the referenced parent row may simply not have
-        // synced YET — e.g. an activity created offline replays before its
-        // prospect. Dead-lettering it loses the record even though a later pass
-        // (once the parent lands) would succeed. Classify as bounded-retry 'fk';
-        // the caller retries a few times before parking.
-        if (code === '23503' || /violates foreign key constraint/i.test(msg)) return 'fk';
-        if (/^22/.test(code) || /^23/.test(code) || code === '42501' || code === '42703' || code === 'PGRST204'
-            || /invalid input syntax|violates (not-null|check) constraint|row-level security|schema cache/i.test(msg)) {
-            return 'permanent';
-        }
-        return 'transient';
-    }
+    // Thin delegator — pure logic extracted to data-helpers.js (window._dataHelpers).
+    _classifyQueueError(error) { return window._dataHelpers.classifyQueueError(error); }
 
     // Move an unsyncable queue item to fs_crm_sync_queue_dead so its data is
     // preserved for inspection without retrying (and failing) on every read.
@@ -1911,23 +1884,9 @@ class DataStore {
         }
     }
 
-    _extractUnknownCol(e) {
-        // Check all error fields: message, details, hint
-        const sources = [e?.message, e?.details, e?.hint, e?.error].filter(Boolean).join(' ');
-        if (!sources) return null;
-        // PostgREST/Supabase: "Could not find the 'col' column of 'table' in the schema cache"
-        return sources.match(/find the '(\w+)' column/)?.[1]
-            || sources.match(/find the "(\w+)" column/)?.[1]
-            // PostgreSQL: column "col" of relation / column "col" does not exist
-            || sources.match(/column "?(\w+)"? of relation/)?.[1]
-            || sources.match(/column "?(\w+)"? does not exist/)?.[1]
-            || null;
-    }
+    _extractUnknownCol(e) { return window._dataHelpers.extractUnknownCol(e); }
 
-    _isSchemaError(e) {
-        const s = [e?.code, e?.message, e?.details].filter(Boolean).join(' ');
-        return /PGRST204|42703|schema cache|does not exist|could not find/i.test(s);
-    }
+    _isSchemaError(e) { return window._dataHelpers.isSchemaError(e); }
 
     async add(tableName, record) {
         const dataToInsert = { ...record };
