@@ -1158,7 +1158,68 @@ const performAgentSearch = async (filters) => {
 };
 
 const performProspectSearch = async (filters) => {
-    let items = await getVisibleProspects();
+    // Scale-safe SOURCE: instead of downloading the ENTIRE visible set (up to 200k)
+    // per search, push the provably-equivalent predicates to Supabase so we fetch
+    // only the matching+visible subset. Mirrors the proven performTransactionSearch
+    // pattern. SCOPE is enforced with the SAME mechanism as getVisibleProspects:
+    //   • visibleIds === 'all' (admin)        → no scope filter (admin sees all)
+    //   • visibleIds is a non-empty array     → scopeField responsible_agent_id IN visibleIds
+    //                                            (identical column + IN to getVisibleProspects)
+    //   • visibleIds is empty []              → no visible prospects → return []
+    //   • visibleIds unobtainable / unknown   → fall back to getVisibleProspects() (legacy)
+    // Pushed search predicates are AND-combined and equivalent-or-looser than the
+    // client filters below, so {server result} ⊇ {client matches}; the UNCHANGED
+    // client chain narrows to the exact legacy set. On cap-overflow / error /
+    // unknown-scope we fall back to getVisibleProspects() (byte-identical to legacy).
+    const FETCH_CAP = 10000;
+    let items;
+    try {
+        const visibleIds = await getVisibleUserIds(_currentUser);
+        if (Array.isArray(visibleIds) && visibleIds.length === 0) {
+            // No visible prospects — matches getVisibleProspects → empty set.
+            return applyComplexConditions([], filters.complex);
+        }
+        if (visibleIds !== 'all' && !(Array.isArray(visibleIds) && visibleIds.length)) {
+            // Scope could not be reliably obtained — never push an unscoped query.
+            throw new Error('prospect visibility scope unavailable — visibility-scoped fallback');
+        }
+        const opts = { sort: 'id', sortDir: 'asc', countMode: null, limit: FETCH_CAP + 1, offset: 0, filters: {}, gte: {}, lte: {} };
+        // SCOPE — identical to getVisibleProspects' `.in(responsible_agent_id, visibleIds)`.
+        // queryAdvanced's `filters` use `.eq()` (no array-IN), so the scope IN must
+        // go through scopeField/scopeValues, which compiles to `.in()`. Admin ('all')
+        // pushes NO scope.
+        if (Array.isArray(visibleIds)) {
+            opts.scopeField = 'responsible_agent_id';
+            opts.scopeValues = visibleIds;
+        }
+        // eq filters (scalars; == the client === / === String checks below).
+        if (filters.basic.minggua)  opts.filters.ming_gua = filters.basic.minggua;
+        if (filters.basic.status)   opts.filters.status = filters.basic.status;
+        if (filters.basic.agent)    opts.filters.responsible_agent_id = filters.basic.agent; // within scope; AND-combined with scope .in()
+        if (filters.basic.pipeline) opts.filters.pipeline_stage = filters.basic.pipeline;
+        if (filters.basic.gender)   opts.filters.gender = filters.basic.gender;
+        if (filters.basic.income)   opts.filters.income_range = filters.basic.income;
+        if (filters.basic.state)    opts.filters.state = filters.basic.state;
+        // ranges (== the client parseInt/parseFloat >= / <= checks below).
+        if (filters.basic['score-min']) { const v = parseInt(filters.basic['score-min']); if (!isNaN(v)) opts.gte.score = v; }
+        if (filters.basic['score-max']) { const v = parseInt(filters.basic['score-max']); if (!isNaN(v)) opts.lte.score = v; }
+        if (filters.basic['deal-min'])  { const v = parseFloat(filters.basic['deal-min']); if (!isNaN(v)) opts.gte.deal_value = v; }
+        if (filters.basic['deal-max'])  { const v = parseFloat(filters.basic['deal-max']); if (!isNaN(v)) opts.lte.deal_value = v; }
+        // ONE text group — name (client matches full_name OR nickname) pushed in full
+        // via searchFields. phone/email/occupation/city contains-filters are left to
+        // the client re-filter (unnecessary to push; superset still holds AND-wise).
+        if (filters.basic.name) { opts.search = filters.basic.name; opts.searchFields = ['full_name', 'nickname']; }
+        const res = await AppDataStore.queryAdvanced('prospects', opts);
+        const data = (res && Array.isArray(res.data)) ? res.data : null;
+        if (data && data.length <= FETCH_CAP) {
+            items = data;
+        } else {
+            throw new Error('matched prospects exceed fetch cap — visibility-scoped fallback for completeness');
+        }
+    } catch (e) {
+        console.warn('performProspectSearch: server filter unavailable — getVisibleProspects fallback', e);
+        items = await getVisibleProspects();
+    }
 
     if (filters.basic.name) {
         const q = filters.basic.name.toLowerCase();
