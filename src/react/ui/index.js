@@ -41,6 +41,12 @@ export { HealthBadge } from './HealthBadge.jsx';
 export { RoleGate } from './RoleGate.jsx';
 export { StatCard } from './StatCard.jsx';
 
+// ── Data table at scale (Phase 3) ────────────────────────────────────────────
+export { VirtualizedDataTable } from './VirtualizedDataTable.jsx';
+export { InfiniteList } from './InfiniteList.jsx';
+export { useWindowedRows } from './useWindowedRows.js';
+export { useInfiniteRows } from './useInfiniteRows.js';
+
 // ── Hooks ──────────────────────────────────────────────────────────────────
 export { useFocusTrap } from './useFocusTrap.js';
 export { useRovingTabIndex } from './useRovingTabIndex.js';
