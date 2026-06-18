@@ -52,6 +52,17 @@
     --danger:         #E84393;
     --info:           #1F6FB2;
 
+    /* AA-compliant FOREGROUND (text / icon / glyph) status variants.
+       The raw status colors above are tuned for fills & borders; several
+       fail WCAG AA as text on light surfaces (--danger #E84393 ≈3.3:1,
+       --warning #C77700 ≈3.9:1). Use these *-text tokens for any status
+       label, icon or glyph rendered as foreground. Never put a status
+       message in the raw --danger/--warning color. */
+    --danger-text:    #C2185B;   /* ≈6.0:1 on #FFF, ≈5.7:1 on --bg-app */
+    --warning-text:   #8A5200;   /* ≈6.5:1 */
+    --success-text:   #1B6B47;   /* ≈6.2:1 */
+    --info-text:      #1A5F96;   /* ≈5.4:1 */
+
     --shadow-xs:      0 1px 2px rgba(232, 67, 147, 0.06);
     --shadow-sm:      0 2px 6px rgba(232, 67, 147, 0.09);
     --shadow-md:      0 6px 20px rgba(232, 67, 147, 0.12);
@@ -97,6 +108,12 @@
     --danger:         #F06292;
     --info:           #60A5FA;
 
+    /* AA-compliant foreground status variants for DARK surfaces (~#1E1115). */
+    --danger-text:    #F8A8CC;   /* light rose ≈8:1 on dark surface */
+    --warning-text:   #F6C667;   /* ≈9:1 */
+    --success-text:   #5EE0A8;   /* ≈9:1 */
+    --info-text:      #8FC2FB;   /* ≈8:1 */
+
     --shadow-xs:      0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-sm:      0 2px 8px rgba(0, 0, 0, 0.45);
     --shadow-md:      0 8px 24px rgba(0, 0, 0, 0.55);
@@ -120,6 +137,15 @@
     --gray-700:      var(--text-primary);
     --gray-800:      var(--text-primary);
     --error:         var(--danger);
+
+    /* ── UI-system foundation tokens (Phase 0) — theme-neutral ──
+       Consumed by the new component library (vanilla UI.kit.* + React
+       src/react/ui/*). Purely additive: no existing rule references these
+       yet, so adding them changes nothing visually. */
+    --focus-ring-color: var(--accent);
+    --focus-ring:       0 0 0 3px var(--accent-glow);  /* keyboard focus halo */
+    --touch-target:     44px;    /* min interactive hit area (WCAG 2.5.5) */
+    --bp-md:            768px;   /* breakpoint token; JS mirrors as window.CRM_BP.md */
 }
 
 /* ---------- Base ---------- */
