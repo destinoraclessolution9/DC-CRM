@@ -10,15 +10,21 @@ window.DataStore = window.AppDataStore; // Alias for backward compatibility
 // cross-domain redefinition (the old silent last-loader-wins overwrite the
 // audit flagged) now logs a warning. Defined here, before any chunk loads
 // (script.js is deferred ahead of the lazy chunks), so it is always available.
+// Phase 7: methods are ALSO mirrored under app._modules[domain][key] as the
+// SAME reference (additive — app.fn is unchanged), giving an explicit, queryable
+// module boundary without alias-wrapper `this`/identity/perf hazards.
 window.app._registry = window.app._registry || {};
+window.app._modules = window.app._modules || {};
 window.app.register = function (domain, methods) {
     if (methods) {
+        const ns = (window.app._modules[domain] = window.app._modules[domain] || {});
         for (const k of Object.keys(methods)) {
             const prev = window.app._registry[k];
             if (prev && prev !== domain) {
                 try { console.warn('[app.register] "' + k + '" redefined: ' + prev + ' -> ' + domain); } catch (_) { /* intentional: console may be unavailable; redefinition still proceeds */ }
             }
             window.app._registry[k] = domain;
+            ns[k] = methods[k]; // same reference as the flat app[k] — additive mirror, not a wrapper
         }
     }
     return Object.assign(window.app, methods || {});
