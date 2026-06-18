@@ -1150,8 +1150,12 @@ class DataStore {
 
     // Windowed `purchases` read (inclusive date window + optional customer scope;
     // purchases has no agent_id — agent is resolved via customer.responsible_agent_id).
+    // Date column is `date` (NOT purchase_date — that lives on refill_reminders).
+    // CAVEAT: a gte/lte window EXCLUDES null-date rows. Reporting deliberately KEEPS
+    // null-date purchases (see report_purchase_details RPC), so those getters must
+    // NOT use this — use the RPC or getAll for null-inclusive purchase reads.
     async getPurchasesInRange(fromISO, toISO, opts = {}) {
-        return this._getInRange('purchases', 'purchase_date', 'customer_id', fromISO, toISO, { ...opts, scopeIds: opts.customerIds });
+        return this._getInRange('purchases', 'date', 'customer_id', fromISO, toISO, { ...opts, scopeIds: opts.customerIds });
     }
 
     // Fetch only rows where updated_at > sinceISO. Used by _swrRevalidate for

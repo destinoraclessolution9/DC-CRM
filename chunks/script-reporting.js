@@ -96,6 +96,15 @@
     let _customDateTo = toLocalDateStr(new Date());
     let _revenueChart = null;
 
+    // Date-windowed activities read with a defensive whole-table fallback. Pushes the
+    // date filter server-side (getActivitiesInRange, inclusive from..to) so reports
+    // don't download the full table; on any error logs + falls back to getAll so a
+    // report never hard-errors. All downstream JS filters (scope/type/date) are unchanged.
+    const _reportActsInRange = async (from, to, ctx) => {
+        try { return await AppDataStore.getActivitiesInRange(from, to); }
+        catch (e) { console.warn(`[reports] getActivitiesInRange fallback (${ctx}):`, e && e.message); return await AppDataStore.getAll('activities'); }
+    };
+
     // Pure HTML-string builder for the legacy KPI dashboard shell. Extracted
     // verbatim from showKPIDashboard's container.innerHTML assignment — same
     // IIFE scope, so it reads _state/_utils/_currentTimeFilter/_currentRoleFilter/
@@ -335,10 +344,10 @@
     };
 
     const getActivityAttendanceDetails = async (from, to) => {
-        const [events, registrations, activities] = await Promise.all([
+        const activities = await _reportActsInRange(from, to, 'getActivityAttendanceDetails');
+        const [events, registrations] = await Promise.all([
             AppDataStore.getAll('events'),
             AppDataStore.getAll('event_registrations'),
-            AppDataStore.getAll('activities'),
         ]);
         const result = [];
         for (const ev of events) {
@@ -772,10 +781,8 @@
 
 const getCPSCount = async (from, to) => {
     const needUsers = _currentRoleFilter !== 'All' || _visibleUserIds !== 'all';
-    const [activities, users] = await Promise.all([
-        AppDataStore.getAll('activities'),
-        needUsers ? AppDataStore.getAll('users') : Promise.resolve([])
-    ]);
+    const activities = await _reportActsInRange(from, to, 'getCPSCount');
+    const users = needUsers ? await AppDataStore.getAll('users') : [];
     const userMap = {};
     users.forEach(u => { userMap[u.id] = u; });
     let count = 0;
@@ -969,10 +976,8 @@ const CLIENT_MEETING_TYPES = ['FTF', 'FSA'];
 
 const getTotalMeetings = async (from, to) => {
     const needUsers = _currentRoleFilter !== 'All' || _visibleUserIds !== 'all';
-    const [activities, users] = await Promise.all([
-        AppDataStore.getAll('activities'),
-        needUsers ? AppDataStore.getAll('users') : Promise.resolve([])
-    ]);
+    const activities = await _reportActsInRange(from, to, 'getTotalMeetings');
+    const users = needUsers ? await AppDataStore.getAll('users') : [];
     const userMap = {};
     users.forEach(u => { userMap[u.id] = u; });
     let count = 0;
@@ -991,10 +996,8 @@ const getTotalMeetings = async (from, to) => {
 
 const getClientMeetings = async (from, to) => {
     const needUsers = _currentRoleFilter !== 'All' || _visibleUserIds !== 'all';
-    const [activities, users] = await Promise.all([
-        AppDataStore.getAll('activities'),
-        needUsers ? AppDataStore.getAll('users') : Promise.resolve([])
-    ]);
+    const activities = await _reportActsInRange(from, to, 'getClientMeetings');
+    const users = needUsers ? await AppDataStore.getAll('users') : [];
     const userMap = {};
     users.forEach(u => { userMap[u.id] = u; });
     let count = 0;
@@ -1013,10 +1016,8 @@ const getClientMeetings = async (from, to) => {
 
 const getMeetUpExistingCustomerCount = async (from, to) => {
     const needUsers = _currentRoleFilter !== 'All' || _visibleUserIds !== 'all';
-    const [activities, users] = await Promise.all([
-        AppDataStore.getAll('activities'),
-        needUsers ? AppDataStore.getAll('users') : Promise.resolve([])
-    ]);
+    const activities = await _reportActsInRange(from, to, 'getMeetUpExistingCustomerCount');
+    const users = needUsers ? await AppDataStore.getAll('users') : [];
     const userMap = {};
     users.forEach(u => { userMap[String(u.id)] = u; });
     let count = 0;
@@ -1039,10 +1040,8 @@ const getCFHeadcount = async (from, to) => {
     // CF Headcount = unique existing customers who referred someone to a CPS session.
     // One customer who brought 3 referrals still counts as 1.
     const needUsers = _currentRoleFilter !== 'All' || _visibleUserIds !== 'all';
-    const [activities, users] = await Promise.all([
-        AppDataStore.getAll('activities'),
-        needUsers ? AppDataStore.getAll('users') : Promise.resolve([])
-    ]);
+    const activities = await _reportActsInRange(from, to, 'getCFHeadcount');
+    const users = needUsers ? await AppDataStore.getAll('users') : [];
     const userMap = {};
     users.forEach(u => { userMap[String(u.id)] = u; });
     const uniqueReferrers = new Set();
@@ -1060,9 +1059,9 @@ const getCFHeadcount = async (from, to) => {
 };
 
 const getActivityHeadcount = async (from, to) => {
-    const [attendees, activities, prospects, customers] = await Promise.all([
+    const activities = await _reportActsInRange(from, to, 'getActivityHeadcount');
+    const [attendees, prospects, customers] = await Promise.all([
         AppDataStore.getAll('event_attendees'),
-        AppDataStore.getAll('activities'),
         _visibleUserIds !== 'all' ? AppDataStore.getAll('prospects') : Promise.resolve([]),
         _visibleUserIds !== 'all' ? AppDataStore.getAll('customers') : Promise.resolve([])
     ]);
@@ -1170,8 +1169,8 @@ const buildCPSDetails = async (from, to) => {
 };
 
 const _buildCPSDetailsLegacy = async (from, to) => {
-    const [activities, users, customers, prospects] = await Promise.all([
-        AppDataStore.getAll('activities'),
+    const activities = await AppDataStore.getAll('activities');
+    const [users, customers, prospects] = await Promise.all([
         AppDataStore.getAll('users'),
         AppDataStore.getAll('customers'),
         AppDataStore.getAll('prospects')
@@ -1591,10 +1590,8 @@ const buildMeetingsDetails = async (from, to) => {
 };
 
 const _buildMeetingsDetailsLegacy = async (from, to) => {
-    const [activities, users] = await Promise.all([
-        AppDataStore.getAll('activities'),
-        AppDataStore.getAll('users')
-    ]);
+    const activities = await AppDataStore.getAll('activities');
+    const users = await AppDataStore.getAll('users');
     const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
     const rows = [];
     for (const a of activities) {
@@ -1621,8 +1618,8 @@ const buildClientMeetingsDetails = async (from, to) => {
 };
 
 const _buildClientMeetingsDetailsLegacy = async (from, to) => {
-    const [activities, users, customers, prospects] = await Promise.all([
-        AppDataStore.getAll('activities'),
+    const activities = await AppDataStore.getAll('activities');
+    const [users, customers, prospects] = await Promise.all([
         AppDataStore.getAll('users'),
         AppDataStore.getAll('customers'),
         AppDataStore.getAll('prospects')
@@ -1658,10 +1655,8 @@ const buildMeetUpExistingDetails = async (from, to) => {
 };
 
 const _buildMeetUpExistingDetailsLegacy = async (from, to) => {
-    const [activities, users] = await Promise.all([
-        AppDataStore.getAll('activities'),
-        AppDataStore.getAll('users')
-    ]);
+    const activities = await AppDataStore.getAll('activities');
+    const users = await AppDataStore.getAll('users');
     const userMap = {}; users.forEach(u => { userMap[String(u.id)] = u; });
     const rows = [];
     for (const a of activities) {
@@ -1700,8 +1695,8 @@ const buildCFHeadcountDetails = async (from, to) => {
 };
 
 const _buildCFHeadcountDetailsLegacy = async (from, to) => {
-    const [activities, users, customers] = await Promise.all([
-        AppDataStore.getAll('activities'),
+    const activities = await AppDataStore.getAll('activities');
+    const [users, customers] = await Promise.all([
         AppDataStore.getAll('users'),
         AppDataStore.getAll('customers')
     ]);
@@ -1752,9 +1747,9 @@ const buildActivityHeadcountDetails = async (from, to) => {
 };
 
 const _buildActivityHeadcountDetailsLegacy = async (from, to) => {
-    const [allAttendees, activities, events, prospects, customers, users] = await Promise.all([
+    const activities = await _reportActsInRange(from, to, '_buildActivityHeadcountDetailsLegacy');
+    const [allAttendees, events, prospects, customers, users] = await Promise.all([
         AppDataStore.getAll('event_attendees'),
-        AppDataStore.getAll('activities'),
         AppDataStore.getAll('events'),
         AppDataStore.getAll('prospects'),
         AppDataStore.getAll('customers'),
