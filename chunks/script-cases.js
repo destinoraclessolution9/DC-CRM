@@ -876,11 +876,11 @@
         let html = '';
         if (prospects.length > 0) {
             html += '<div class="search-category">Prospects</div>';
-            html += prospects.map(p => `<div class="search-result-item" onclick="app.selectCaseEntity('${p.id}', 'prospect', '${p.full_name.replace(/'/g, "\\'")}')">${escapeHtml(p.full_name)}</div>`).join('');
+            html += prospects.map(p => `<div class="search-result-item" onclick="app.selectCaseEntity('${p.id}', 'prospect', '${UI.escJsAttr(p.full_name)}')">${escapeHtml(p.full_name)}</div>`).join('');
         }
         if (customers.length > 0) {
             html += '<div class="search-category">Customers</div>';
-            html += customers.map(c => `<div class="search-result-item" onclick="app.selectCaseEntity('${c.id}', 'customer', '${c.full_name.replace(/'/g, "\\'")}')">${escapeHtml(c.full_name)}</div>`).join('');
+            html += customers.map(c => `<div class="search-result-item" onclick="app.selectCaseEntity('${c.id}', 'customer', '${UI.escJsAttr(c.full_name)}')">${escapeHtml(c.full_name)}</div>`).join('');
         }
 
         if (html === '') {
