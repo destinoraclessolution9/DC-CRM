@@ -798,36 +798,86 @@ const saveQuarterlyTargets = async (year) => {
 
 const _today = () => new Date().toISOString().slice(0, 10);
 
-// Compute one participant's progress toward a program's targets
-const calculateProgramProgress = async (program, agentId) => {
-    const from = program.start_date;
-    const to = program.end_date;
-    const [purchases, customers, activities] = await Promise.all([
-        AppDataStore.getAll('purchases'),
-        AppDataStore.getAll('customers'),
-        AppDataStore.getAll('activities')
-    ]);
+// ---- Perf helper: bucket purchases / customers / activities ONCE (O(n)) so the
+// per-participant calc can do Map lookups instead of a full-array scan per agent
+// (de-quadratifies the Special Programs render: O(participants × programs × rows)
+// → O(rows + participants)). Each bucket preserves source insertion order, so the
+// per-agent iteration is element-for-element identical to the old `.filter`-style
+// scans. Buckets use the RAW key matching the existing `===`/`!==` comparisons
+// (no String() coercion — that would change strict-equality semantics).
+//   - purchasesByAgent: keyed by `p.agent_id || customerMap[p.customer_id]?.responsible_agent_id`
+//     (same derived expression as the old loop), computed at bucket time.
+//   - customersByAgent: keyed by `c.responsible_agent_id`.
+//   - cpsByAgent: keyed by `a.lead_agent_id`, PREFILTERED to `activity_type === 'CPS'`
+//     (the old loop's program-independent guard) at bucket time.
+// Program-dependent guards (date range, is_agent_package) are NOT pre-applied —
+// they stay in calculateProgramProgress because `from`/`to` vary per program.
+const _buildSpecialProgramIndex = (purchases, customers, activities) => {
     // Build customer map for agent fallback (old purchases may lack agent_id)
     const customerMap = {};
-    customers.forEach(c => { customerMap[c.id] = c; });
+    (customers || []).forEach(c => { customerMap[c.id] = c; });
+
+    const purchasesByAgent = new Map();
+    for (const p of (purchases || [])) {
+        const pAgent = p.agent_id || customerMap[p.customer_id]?.responsible_agent_id; // RAW derived key
+        let bucket = purchasesByAgent.get(pAgent);
+        if (!bucket) { bucket = []; purchasesByAgent.set(pAgent, bucket); }
+        bucket.push(p);
+    }
+
+    const customersByAgent = new Map();
+    for (const c of (customers || [])) {
+        const k = c.responsible_agent_id; // RAW key — preserve existing `=== agentId` semantics
+        let bucket = customersByAgent.get(k);
+        if (!bucket) { bucket = []; customersByAgent.set(k, bucket); }
+        bucket.push(c);
+    }
+
+    const cpsByAgent = new Map();
+    for (const a of (activities || [])) {
+        if (a.activity_type !== 'CPS') continue; // program-independent prefilter (same guard as old loop)
+        const k = a.lead_agent_id; // RAW key
+        let bucket = cpsByAgent.get(k);
+        if (!bucket) { bucket = []; cpsByAgent.set(k, bucket); }
+        bucket.push(a);
+    }
+
+    return { purchasesByAgent, customersByAgent, cpsByAgent };
+};
+
+// Compute one participant's progress toward a program's targets.
+// Optional trailing `index` (from _buildSpecialProgramIndex) lets a render build
+// the buckets ONCE and thread them in; when omitted (null) it builds internally
+// so existing 2-arg callers (checkSpecialProgramPopup, cross-chunk script-marketing.js)
+// keep working unchanged.
+const calculateProgramProgress = async (program, agentId, index = null) => {
+    const from = program.start_date;
+    const to = program.end_date;
+    let idx = index;
+    if (!idx) {
+        const [purchases, customers, activities] = await Promise.all([
+            AppDataStore.getAll('purchases'),
+            AppDataStore.getAll('customers'),
+            AppDataStore.getAll('activities')
+        ]);
+        idx = _buildSpecialProgramIndex(purchases, customers, activities);
+    }
     let salesActual = 0;
-    for (const p of purchases) {
-        const pAgent = p.agent_id || customerMap[p.customer_id]?.responsible_agent_id;
-        if (pAgent !== agentId) continue;
+    for (const p of (idx.purchasesByAgent.get(agentId) || [])) {
+        // key (pAgent === agentId) already matched at bucket time
         if (p.date < from || p.date > to) continue;
         if (p.is_agent_package) continue;
         salesActual += (p.amount || 0);
     }
     let customersActual = 0;
-    for (const c of customers) {
-        if (c.responsible_agent_id !== agentId) continue;
+    for (const c of (idx.customersByAgent.get(agentId) || [])) {
+        // key (responsible_agent_id === agentId) already matched at bucket time
         if (!c.customer_since || c.customer_since < from || c.customer_since > to) continue;
         customersActual++;
     }
     let cpsActual = 0;
-    for (const a of activities) {
-        if (a.activity_type !== 'CPS') continue;
-        if (a.lead_agent_id !== agentId) continue;
+    for (const a of (idx.cpsByAgent.get(agentId) || [])) {
+        // activity_type === 'CPS' and lead_agent_id === agentId already matched at bucket time
         if (a.activity_date < from || a.activity_date > to) continue;
         cpsActual++;
     }
@@ -936,10 +986,13 @@ const buildSpecialProgramCardHtml = (program, partProgress, qualifiedCount, part
 
 // Render the Special Programs section on the KPI dashboard
 const renderSpecialPrograms = async () => {
-    const [programs, allParts, users] = await Promise.all([
+    const [programs, allParts, users, purchases, customers, activities] = await Promise.all([
         AppDataStore.getAll('special_programs'),
         AppDataStore.getAll('special_program_participants'),
-        AppDataStore.getAll('users')
+        AppDataStore.getAll('users'),
+        AppDataStore.getAll('purchases'),
+        AppDataStore.getAll('customers'),
+        AppDataStore.getAll('activities')
     ]);
     const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
     const active = programs.filter(p => p.status !== 'cancelled' && p.status !== 'deleted');
@@ -961,6 +1014,9 @@ const renderSpecialPrograms = async () => {
             </div>`;
     }
 
+    // Build the bucket index ONCE per render (de-quadratifies the per-participant calc)
+    const spIndex = _buildSpecialProgramIndex(purchases, customers, activities);
+
     const cards = [];
     for (const program of active) {
         const parts = allParts.filter(p => p.program_id === program.id);
@@ -968,9 +1024,9 @@ const renderSpecialPrograms = async () => {
         const daysLeft = program.end_date ? Math.max(0, Math.ceil((new Date(program.end_date) - new Date(today)) / 86400000)) : 0;
         const isExpired = program.end_date && today > program.end_date;
 
-        // Calculate progress for each participant (concurrent)
+        // Calculate progress for each participant (concurrent) — reuse the shared index
         const partProgress = await Promise.all(parts.map(async (part) => {
-            const progress = await calculateProgramProgress(program, part.agent_id);
+            const progress = await calculateProgramProgress(program, part.agent_id, spIndex);
             return {
                 agentId: part.agent_id,
                 agentName: userMap[part.agent_id]?.full_name || `Agent #${part.agent_id}`,
@@ -1074,10 +1130,13 @@ const buildSpecialProgramsTableHtml = (rows, canManage) => {
 // ===== Special Programs Table (Marketing List tab) =====
 // Flat KPI-style table — one row per (program × agent), showing how much they made and how far to target
 const renderSpecialProgramsTable = async () => {
-    const [programs, allParts, users] = await Promise.all([
+    const [programs, allParts, users, purchases, customers, activities] = await Promise.all([
         AppDataStore.getAll('special_programs'),
         AppDataStore.getAll('special_program_participants'),
-        AppDataStore.getAll('users')
+        AppDataStore.getAll('users'),
+        AppDataStore.getAll('purchases'),
+        AppDataStore.getAll('customers'),
+        AppDataStore.getAll('activities')
     ]);
     const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
     const active = programs.filter(p => p.status !== 'cancelled' && p.status !== 'deleted');
@@ -1093,6 +1152,9 @@ const renderSpecialProgramsTable = async () => {
                 <p style="color:var(--gray-400);margin:0;">${canManage ? 'Click "New Program" to launch a new challenge for selected agents.' : 'No special programs have been launched yet.'}</p>
             </div>`;
     }
+
+    // Build the bucket index ONCE per render (de-quadratifies the per-participant calc)
+    const spIndex = _buildSpecialProgramIndex(purchases, customers, activities);
 
     // Build flat rows: one per (program, participant)
     const rows = [];
@@ -1111,7 +1173,7 @@ const renderSpecialProgramsTable = async () => {
             continue;
         }
         for (const part of parts) {
-            const progress = await calculateProgramProgress(program, part.agent_id);
+            const progress = await calculateProgramProgress(program, part.agent_id, spIndex);
             rows.push({
                 program, isExpired, daysLeft,
                 agentId: part.agent_id,

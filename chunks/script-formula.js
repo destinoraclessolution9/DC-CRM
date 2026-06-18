@@ -244,13 +244,103 @@
         });
     };
 
+    // ---------- Planner-local bucket / regex builders (perf only) ----------
+    // These exist to de-quadratify the two planner loops below. They build
+    // lookup Maps ONCE per planner invocation so the inner per-(outlet,SKU)
+    // scans become O(1) instead of full-array .filter/.find each time. The
+    // SHARED helpers above (fpGetTotalStock / fpGetStockAtLocation /
+    // fpCalcWeeklyVelocity / fpCalcRefundRate / fpIsExcluded) are left
+    // UNTOUCHED — their other callers (renderers/exports) are unaffected.
+    //
+    // Parity rules honoured everywhere below:
+    //  • buckets are filled by iterating the source array in order + push, so
+    //    each per-key array is element-and-order-identical to the old .filter;
+    //  • keys are matched with strict === (no String() coercion), via a real
+    //    Map (handles any key type, incl. null/undefined, like === would);
+    //  • composite keys use a nested Map (outer key → inner Map) so BOTH key
+    //    parts keep strict === and there are no string-join collisions;
+    //  • date cutoffs are computed once (identical strings to the helpers);
+    //  • a missing key yields an empty array, so reduce/[0] behave as before;
+    //  • consumers below only read buckets (no sort/mutate) so no copy needed.
+
+    // Single-key bucket: field value → array of rows (in source order).
+    const _fpBucketBy = (arr, keyFn) => {
+        const m = new Map();
+        for (const row of arr) {
+            const k = keyFn(row);
+            let b = m.get(k);
+            if (!b) { b = []; m.set(k, b); }
+            b.push(row);
+        }
+        return m;
+    };
+    const _fpFromBucket = (m, k) => m.get(k) || [];
+
+    // Composite (two-part) bucket via nested Maps: outerKey → (innerKey → array).
+    const _fpBucketBy2 = (arr, outerFn, innerFn) => {
+        const m = new Map();
+        for (const row of arr) {
+            const ok = outerFn(row);
+            let inner = m.get(ok);
+            if (!inner) { inner = new Map(); m.set(ok, inner); }
+            const ik = innerFn(row);
+            let b = inner.get(ik);
+            if (!b) { b = []; inner.set(ik, b); }
+            b.push(row);
+        }
+        return m;
+    };
+    const _fpFromBucket2 = (m, ok, ik) => {
+        const inner = m.get(ok);
+        return inner ? (inner.get(ik) || []) : [];
+    };
+
+    // Hoisted fpIsExcluded: compiles each DISTINCT regex pattern ONCE (cached
+    // by pattern string) and returns a closure reused across the loop. Logic
+    // is reproduced byte-for-byte from fpIsExcluded above (same is_active skip,
+    // same toUpperCase target, same branch set, same .some short-circuit,
+    // same per-entry try/catch → invalid pattern = null = contributes false).
+    // Patterns carry no g/y flags so .test() is stateless / reusable.
+    const _fpBuildIsExcluded = () => {
+        const reCache = new Map();
+        const getRe = (pattern) => {
+            if (reCache.has(pattern)) return reCache.get(pattern);
+            let re;
+            try { re = new RegExp(pattern); } catch { re = null; }
+            reCache.set(pattern, re);
+            return re;
+        };
+        return (productCode) => {
+            const code = (productCode || '').toUpperCase();
+            return _fpState.exclusions.some(e => {
+                if (e.is_active === false) return false;
+                const target = (e.product_code || '').toUpperCase();
+                switch (e.match_type) {
+                    case 'starts_with': return code.startsWith(target);
+                    case 'contains':    return code.includes(target);
+                    case 'regex': { const re = getRe(e.product_code); return re ? re.test(productCode) : false; }
+                    default:            return code === target;
+                }
+            });
+        };
+    };
+
     // Returns array: { sku, totalStock, minStock, shortage, recommendedQty, freeQty, deal, refundRate }
     const fpCalcReplenishmentNeeds = () => {
         const out = [];
+        // ── Build lookup Maps ONCE (de-quadratify the inner per-SKU scans) ──
+        const isExcluded   = _fpBuildIsExcluded();                                // hoisted regex compile (== fpIsExcluded)
+        const stockBySku   = _fpBucketBy(_fpState.stockBalance, sb => sb.sku_id); // == fpGetTotalStock filter
+        const posBySku     = _fpBucketBy(_fpState.posTransactions, p => p.sku_id);// == fpCalcRefundRate sales filter
+        const refundsBySku = _fpBucketBy(_fpState.refunds, r => r.sku_id);        // == fpCalcRefundRate refs filter
+        // fpCalcRefundRate default days=90 → cutoff hoisted once (identical string).
+        const refundCutoff = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
         for (const sku of _fpState.skus) {
             if (sku.is_active === false) continue;
-            if (fpIsExcluded(sku.product_code)) continue;
-            const total = fpGetTotalStock(sku.id);
+            if (isExcluded(sku.product_code)) continue;
+            // total == fpGetTotalStock(sku.id): same filter (now bucketed) + same reduce
+            const total = _fpFromBucket(stockBySku, sku.id)
+                .reduce((sum, sb) => sum + (parseInt(sb.physical_stock) || 0), 0);
             const min   = fpGetActualMinStock(sku);
             if (total >= min) continue;
 
@@ -270,7 +360,15 @@
                 qty = Math.max(qty, deal.min_order_qty);
             }
 
-            const refundRate = fpCalcRefundRate(sku.id);
+            // refundRate == fpCalcRefundRate(sku.id): same date-cutoff filter (now
+            // over the bucketed rows) + same reduce + same Math.min(refs/sales, 1).
+            const sales = _fpFromBucket(posBySku, sku.id)
+                .filter(p => p.transaction_date >= refundCutoff)
+                .reduce((s, p) => s + (parseInt(p.quantity_sold) || 0), 0);
+            const refs = _fpFromBucket(refundsBySku, sku.id)
+                .filter(r => r.refund_date >= refundCutoff)
+                .reduce((s, r) => s + (parseInt(r.quantity_refunded) || 0), 0);
+            const refundRate = sales > 0 ? Math.min(refs / sales, 1) : 0;
             if (refundRate > 0.05) {
                 qty = Math.ceil(qty * (1 - refundRate));
             }
@@ -290,16 +388,36 @@
         if (!hub) return [];
         const today = new Date().toISOString().slice(0, 10);
         const out = [];
+        // ── Build lookup Maps ONCE (de-quadratify the outlet×SKU inner scans) ──
+        const isExcluded = _fpBuildIsExcluded();                                              // hoisted regex compile (== fpIsExcluded)
+        // composite (sku_id → location_id) so both key parts keep strict ===:
+        const stockByLoc = _fpBucketBy2(_fpState.stockBalance, s => s.sku_id, s => s.location_id);   // == fpGetStockAtLocation
+        const posByLoc   = _fpBucketBy2(_fpState.posTransactions, p => p.sku_id, p => p.location_id); // == fpCalcWeeklyVelocity filter
+        // composite (outlet_id → sku_id) to mirror the outletSettings.find order:
+        const settingByOutletSku = _fpBucketBy2(_fpState.outletSettings, s => s.outlet_id, s => s.sku_id);
+        // fpCalcWeeklyVelocity default weeks=4 → cutoff hoisted once (identical string).
+        const velWeeks  = 4;
+        const velCutoff = new Date(Date.now() - velWeeks * 7 * 86400000).toISOString().slice(0, 10);
         for (const outlet of fpRetailOutlets()) {
             if (outlet.id === hub.id) continue;
             for (const sku of _fpState.skus) {
-                if (sku.is_active === false || fpIsExcluded(sku.product_code)) continue;
-                const velocity = fpCalcWeeklyVelocity(sku.id, outlet.id);
-                const setting  = _fpState.outletSettings.find(s => s.outlet_id === outlet.id && s.sku_id === sku.id);
+                if (sku.is_active === false || isExcluded(sku.product_code)) continue;
+                // velocity == fpCalcWeeklyVelocity(sku.id, outlet.id): same sku+loc+date
+                // filter (now over bucketed rows) + same reduce + same / weeks.
+                const sold = _fpFromBucket2(posByLoc, sku.id, outlet.id)
+                    .filter(p => p.transaction_date >= velCutoff)
+                    .reduce((s, p) => s + (parseInt(p.quantity_sold) || 0), 0);
+                const velocity = sold / velWeeks;
+                // setting == outletSettings.find(s => s.outlet_id===outlet.id && s.sku_id===sku.id):
+                // .find returns the first match → bucket[0] (rows kept in source order).
+                const setting  = _fpFromBucket2(settingByOutletSku, outlet.id, sku.id)[0];
                 const manualMin = setting?.manual_min_stock || 0;
                 const globalMin = fpGetActualMinStock(sku);
                 const outletMin = Math.max(velocity * 2, manualMin, globalMin);
-                const current   = fpGetStockAtLocation(sku.id, outlet.id);
+                // current == fpGetStockAtLocation(sku.id, outlet.id): .find first match
+                // → bucket[0]; same (parseInt(...)||0) / 0-default.
+                const currentSb = _fpFromBucket2(stockByLoc, sku.id, outlet.id)[0];
+                const current   = currentSb ? (parseInt(currentSb.physical_stock) || 0) : 0;
                 if (current >= outletMin) continue;
 
                 if (setting?.last_transfer_date) {
@@ -308,7 +426,9 @@
                 }
 
                 const targetQty = Math.ceil(outletMin * 1.5 - current);
-                const hubStock  = fpGetStockAtLocation(sku.id, hub.id);
+                // hubStock == fpGetStockAtLocation(sku.id, hub.id): same bucket lookup.
+                const hubSb     = _fpFromBucket2(stockByLoc, sku.id, hub.id)[0];
+                const hubStock  = hubSb ? (parseInt(hubSb.physical_stock) || 0) : 0;
                 const transferQty = Math.min(targetQty, hubStock);
                 if (transferQty <= 0) continue;
                 out.push({ outlet, sku, currentStock: current, outletMin, transferQty, hubStock, hub });
