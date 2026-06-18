@@ -23,9 +23,6 @@
     const isAgentOrLeader      = (u) => _utils.isAgentOrLeader(u || _state.cu);
     const getVisibleProspects  = () => _utils.getVisibleProspects();
     const getVisibleActivities = () => _utils.getVisibleActivities();
-    // Live references to state
-    let _currentUser = _state.cu;
-    window._syncPipelineUser = () => { _currentUser = _state.cu; };
     let _draggedId = null; // shared between handleDragStart and handleDrop
     // Guards for the expired-focus archive migration (see _runPipelineArchive).
     // _pipelineArchiveInFlight: prevents concurrent runs racing into double-archive.
@@ -143,7 +140,7 @@ const savePipelineConfigJson = async (newConfig, note = '') => {
         ...newConfig,
         version: (newConfig.version || 0) + 1,
         updated_at: new Date().toISOString(),
-        updated_by: _currentUser?.id || null,
+        updated_by: _state.cu?.id || null,
     };
     // 1. Write current config
     try {
@@ -872,7 +869,7 @@ const _buildArchiveRowData = async (arc, idx) => {
 // WITHOUT touching the DOM. Returns null on any failure so the caller can fall
 // back to the legacy by-id fill path.
 const buildPipelineIslandData = async () => {
-    const userId = _currentUser?.id || 5;
+    const userId = _state.cu?.id || 5;
 
     const [allActivities, allProspects, allUsers] = await Promise.all([
         withTimeout(getVisibleActivities(), 15000, [], 'pipelineJsx:getVisibleActivities'),
@@ -1007,8 +1004,8 @@ const buildPipelineIslandData = async () => {
 
     // Team sections (leader+, current month only)
     let teamSections = [];
-    if (isTeamLeaderOrAbove(_currentUser) && !_isArchiveView) {
-        const _visIds = await getVisibleUserIds(_currentUser);
+    if (isTeamLeaderOrAbove(_state.cu) && !_isArchiveView) {
+        const _visIds = await getVisibleUserIds(_state.cu);
         let _subUsers;
         if (_visIds === 'all') {
             _subUsers = allUsers.filter(u => u.id !== userId && (isAgent(u) || isTeamLeaderOrAbove(u)));
@@ -1271,7 +1268,7 @@ const buildPipelineTeamSectionRowHtml = (sub, subFocus, subRows) => {
 };
 
 const showPipelineView = async (container) => {
-    const userId = _currentUser?.id || 5;
+    const userId = _state.cu?.id || 5;
     runHuiJiMigration(); // fire-and-forget
 
     // ── STEP 1: Paint skeleton immediately so the page feels alive ────────
@@ -1508,8 +1505,8 @@ const showPipelineView = async (container) => {
     }
 
     // ── STEP 7: Team sections (uses enriched + allUsers, fill last) ────────
-    if (isTeamLeaderOrAbove(_currentUser) && !_isArchiveView) {
-        const _visIds = await getVisibleUserIds(_currentUser);
+    if (isTeamLeaderOrAbove(_state.cu) && !_isArchiveView) {
+        const _visIds = await getVisibleUserIds(_state.cu);
         let _subUsers;
         if (_visIds === 'all') {
             _subUsers = allUsers.filter(u => u.id !== userId && (isAgent(u) || isTeamLeaderOrAbove(u)));
@@ -1723,7 +1720,7 @@ const renderPlanItemRow = (item = null, index = 0) => {
 };
 
 const openActionPlanModal = async (planId = null) => {
-    const currentUser = _currentUser;
+    const currentUser = _state.cu;
     const currentMonth = new Date().toISOString().slice(0, 7) + '-01';
     let plan = null;
     let items = [];
@@ -1769,7 +1766,7 @@ const addPlanItemRow = () => {
 };
 
 const saveActionPlan = async (planId) => {
-    const currentUser = _currentUser;
+    const currentUser = _state.cu;
     const mainTarget = parseFloat(document.getElementById('main-target')?.value) || 0;
     const monthYear = document.getElementById('plan-month')?.value;
     if (!monthYear) {
@@ -1855,7 +1852,7 @@ const updatePlanCheck = async (planId, itemId, isDone) => {
 };
 
 const sendPlanReminder = async () => {
-    const currentUser = _currentUser;
+    const currentUser = _state.cu;
     const currentMonth = new Date().toISOString().slice(0,7) + '-01';
     const planList = await AppDataStore.query('action_plans', { user_id: currentUser.id, month_year: currentMonth });
     const plan = planList[0];
@@ -1881,7 +1878,7 @@ const sendPlanReminder = async () => {
 };
 
 const showActionPlanHistory = async () => {
-    const currentUser = _currentUser;
+    const currentUser = _state.cu;
     const plans = await AppDataStore.query('action_plans', { user_id: currentUser.id });
     plans.sort((a, b) => b.month_year > a.month_year ? 1 : -1);
     let html = `
@@ -2013,7 +2010,7 @@ const resetFocusField = async (recId, field) => {
 };
 
 const addToFocusList = async (prospectId) => {
-    const userId = _currentUser?.id || 5;
+    const userId = _state.cu?.id || 5;
     const currentMonth = new Date().toISOString().slice(0, 7);
     const currentList = await AppDataStore.query('my_potential_list', { user_id: userId });
     if (currentList.some(item => item.prospect_id == prospectId)) {
@@ -2065,7 +2062,7 @@ const _pipelineDraftClone = (cfg) => JSON.parse(JSON.stringify(cfg));
 
 const openPipelineConfigModal = async () => {
     const config = await loadPipelineConfig();
-    const isAdmin = isSystemAdmin(_currentUser);
+    const isAdmin = isSystemAdmin(_state.cu);
     _pipelineEditDraft = _pipelineDraftClone(config);
     _renderPipelineConfigModal(isAdmin);
 };
@@ -2373,7 +2370,7 @@ const _readPipelineDraftFromDom = () => {
 };
 
 const savePipelineRules = async () => {
-    if (!isSystemAdmin(_currentUser)) {
+    if (!isSystemAdmin(_state.cu)) {
         UI.toast.error('Super Admin only');
         return;
     }
@@ -2489,7 +2486,7 @@ const showPipelineConfigHistory = async () => {
 };
 
 const rollbackPipelineConfig = async (historyId) => {
-    if (!isSystemAdmin(_currentUser)) { UI.toast.error('Super Admin only'); return; }
+    if (!isSystemAdmin(_state.cu)) { UI.toast.error('Super Admin only'); return; }
     if (!confirm('Roll back to this version? The current rules will be replaced.')) return;
     try {
         const rec = await AppDataStore.getById('pipeline_config_history', historyId);
@@ -2664,7 +2661,7 @@ const addPipelineNote = async (prospectId) => {
         prospect_id: prospectId,
         content: content.trim(),
         created_at: new Date().toISOString(),
-        created_by: _currentUser?.id || 5
+        created_by: _state.cu?.id || 5
     });
     UI.toast.success('Note added.');
     await showComments(prospectId);
@@ -2890,7 +2887,7 @@ const renderSystemRanking = async () => {
 };
 
 const renderManualPriority = async () => {
-const userId = _currentUser?.id || 5;
+const userId = _state.cu?.id || 5;
 const [potentialRecords, allProspects] = await Promise.all([
     AppDataStore.query('my_potential_list', { user_id: userId }),
     AppDataStore.getAll('prospects'),
@@ -2924,7 +2921,7 @@ const handleDrop = async (e, targetId) => {
 
     if (_draggedId === targetId) return;
 
-    const userId = _currentUser?.id || 5;
+    const userId = _state.cu?.id || 5;
     const list = (await AppDataStore.query('my_potential_list', { user_id: userId }))
         .sort((a, b) => a.priority_order - b.priority_order);
 
@@ -2983,7 +2980,7 @@ const switchFocusMonth = async (month) => {
 };
 
 const openExpiredSearchModal = async () => {
-    const userId = _currentUser?.id || 5;
+    const userId = _state.cu?.id || 5;
     let archiveItems = [];
     try { archiveItems = await AppDataStore.query('monthly_focus_archive', { user_id: userId }); } catch(e) {}
 
@@ -3157,7 +3154,7 @@ const renderRecentOverrides = async () => {
     const container = document.getElementById('recent-overrides-table');
     if (!container) return;
 
-    const overrides = (await AppDataStore.query('manual_overrides', { user_id: _currentUser?.id || 5 }))
+    const overrides = (await AppDataStore.query('manual_overrides', { user_id: _state.cu?.id || 5 }))
         .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
         .slice(0, 3);
 
@@ -3215,7 +3212,7 @@ container.innerHTML = `
 // Boost Logic
 const openBoostModal = async () => {
     const prospects = await getVisibleProspects();
-    const manualList = await AppDataStore.query('my_potential_list', { user_id: _currentUser?.id || 5 });
+    const manualList = await AppDataStore.query('my_potential_list', { user_id: _state.cu?.id || 5 });
 
     const options = manualList.map(item => {
         const p = prospects.find(pro => pro.id === item.prospect_id);
@@ -3262,7 +3259,7 @@ const submitBoost = async () => {
         return;
     }
 
-    const manualList = (await AppDataStore.query('my_potential_list', { user_id: _currentUser?.id || 5 }))
+    const manualList = (await AppDataStore.query('my_potential_list', { user_id: _state.cu?.id || 5 }))
         .sort((a, b) => a.priority_order - b.priority_order);
 
     const currentItem = manualList.find(i => i.prospect_id === prospectId);
@@ -3280,7 +3277,7 @@ const submitBoost = async () => {
 
     // Log override
     const override = {
-        user_id: _currentUser?.id || 5,
+        user_id: _state.cu?.id || 5,
         prospect_id: prospectId,
         override_type: 'boost',
         system_rank: oldRank, // For demo, we use current rank as system rank surrogate if not stored
@@ -3353,7 +3350,7 @@ const loadOverrideHistory = async () => {
     const type = t.value;
     const status = s.value;
 
-    let overrides = await AppDataStore.query('manual_overrides', { user_id: _currentUser?.id || 5 });
+    let overrides = await AppDataStore.query('manual_overrides', { user_id: _state.cu?.id || 5 });
 
     if (type !== 'all') overrides = overrides.filter(o => o.override_type === type);
     if (status !== 'all') overrides = overrides.filter(o => o.status === status);

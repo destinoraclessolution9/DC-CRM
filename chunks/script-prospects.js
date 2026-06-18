@@ -59,10 +59,6 @@
     const SCORING_RULES = window.app.SCORING_RULES || { CREATE_PROSPECT: 5, MARK_NOT_INTERESTED: -500 };
     // addWhatsAppButtonToProfile — defined in script.js IIFE, exported to window.app.
     const addWhatsAppButtonToProfile = (...a) => (window.app.addWhatsAppButtonToProfile || (() => Promise.resolve()))(...a);
-    // Live reference to current user (refreshed on each navigation via _syncProspectsUser)
-    let _currentUser = _state.cu;
-    const _syncUser = () => { _currentUser = _state.cu; };
-    window._syncProspectsUser = _syncUser;
     // Current view (read-only reference)
     const _getCurrentView = () => _state.cv;
 
@@ -93,7 +89,7 @@ const _serverPage = async (table, opts = {}) => {
         const scopeBy = opts.scopeBy;
         delete o.scopeBy;
         if (scopeBy && !o.scopeFields && !o.scopeField) {
-            const visible = await getVisibleUserIds(_currentUser);
+            const visible = await getVisibleUserIds(_state.cu);
             if (visible && visible !== 'all' && Array.isArray(visible)) {
                 o.scopeFields = scopeBy.map(field => ({ field, values: visible }));
             }
@@ -116,8 +112,8 @@ const _serverPage = async (table, opts = {}) => {
 const _serverProspectsPage = async ({ search, mingGua, agentFilter, includeDormant, sortField, sortDir, limit, offset }) => {
     try {
         let visibleAgentIds = null; // null = unrestricted (admin/manager)
-        if (!isSystemAdmin(_currentUser)) {
-            const visible = await getVisibleUserIds(_currentUser);
+        if (!isSystemAdmin(_state.cu)) {
+            const visible = await getVisibleUserIds(_state.cu);
             if (visible && visible !== 'all' && Array.isArray(visible)) {
                 visibleAgentIds = visible.map(Number).filter(n => Number.isFinite(n));
             }
@@ -341,9 +337,9 @@ const _confirmLargeExport = async (rowCount, label) => {
 // getVisibleProspects() so non-admins only export what they can see.
 const _getAllProspectsForExport = async () => {
     const all = await AppDataStore.getAllPaged('prospects', { pageSize: 1000 });
-    if (!_currentUser) return [];
-    if (isSystemAdmin(_currentUser)) return all;
-    const visibleIds = await getVisibleUserIds(_currentUser);
+    if (!_state.cu) return [];
+    if (isSystemAdmin(_state.cu)) return all;
+    const visibleIds = await getVisibleUserIds(_state.cu);
     if (visibleIds === 'all') return all;
     const visible = new Set(visibleIds.map(String));
     return all.filter(p => visible.has(String(p.responsible_agent_id)));
@@ -351,8 +347,8 @@ const _getAllProspectsForExport = async () => {
 
 const _getAllActivitiesForExport = async () => {
     const all = await AppDataStore.getAllPaged('activities', { pageSize: 1000 });
-    if (!_currentUser) return [];
-    if (isSystemAdmin(_currentUser)) return all;
+    if (!_state.cu) return [];
+    if (isSystemAdmin(_state.cu)) return all;
     const allUsersForVis = await AppDataStore.getAll('users');
     const canView = await buildActivityVisibilityChecker(allUsersForVis);
     return all.filter(canView);
@@ -391,10 +387,10 @@ const exportData = async (type, format) => {
 
     } else if (type === 'customers') {
         const all = await AppDataStore.getAllPaged('customers', { pageSize: 1000 });
-        const data = isSystemAdmin(_currentUser)
+        const data = isSystemAdmin(_state.cu)
             ? all
             : await (async () => {
-                const visIds = await getVisibleUserIds(_currentUser);
+                const visIds = await getVisibleUserIds(_state.cu);
                 if (visIds === 'all') return all;
                 const vis = new Set(visIds.map(String));
                 return all.filter(c => vis.has(String(c.responsible_agent_id)) || vis.has(String(c.agent_id)));
@@ -526,7 +522,7 @@ const buildProspectRowHtml = (p, ctx) => {
                     <button class="btn-icon" title="Add Activity" onclick="app.openActivityModal('', ${p.id})"><i class="fas fa-calendar-plus"></i></button>
                     ${p.conversion_status === 'pending_approval' ? `
                         <span title="Conversion pending manager approval" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;background:#fef3c7;border-radius:6px;cursor:default;"><i class="fas fa-user-clock" style="color:#d97706;font-size:12px;"></i></span>
-                        ${(isSystemAdmin(_currentUser) || isMarketingManager(_currentUser)) ? `<button class="btn-icon" title="Review & Approve Conversion" style="color:#d97706;" onclick="event.stopPropagation();app.showConversionApprovalModal(${p.id})"><i class="fas fa-check-circle"></i></button>` : ''}
+                        ${(isSystemAdmin(_state.cu) || isMarketingManager(_state.cu)) ? `<button class="btn-icon" title="Review & Approve Conversion" style="color:#d97706;" onclick="event.stopPropagation();app.showConversionApprovalModal(${p.id})"><i class="fas fa-check-circle"></i></button>` : ''}
                     ` : (p.status !== 'converted' ? `
                         <button class="btn-icon" title="Convert to Customer" onclick="app.convertToCustomer(${p.id})"><i class="fas fa-user-check"></i></button>
                     ` : '')}
@@ -664,9 +660,9 @@ const renderProspectsTable = async () => {
         if (reactRoot) {
             try {
                 const allUsersR = await AppDataStore.getAll('users', { includeDeleted: true });
-                const _lvlR = _getUserLevel(_currentUser);
+                const _lvlR = _getUserLevel(_state.cu);
                 const _canReassignR = _lvlR <= 5;
-                const _scopeIdsR = _lvlR <= 2 ? null : await getVisibleUserIds(_currentUser);
+                const _scopeIdsR = _lvlR <= 2 ? null : await getVisibleUserIds(_state.cu);
                 const _scopeSetR = (_scopeIdsR && _scopeIdsR !== 'all' && Array.isArray(_scopeIdsR)) ? new Set(_scopeIdsR.map(String)) : null;
                 const _visAgentsR = allUsersR.filter(u => {
                     const lvl = _getUserLevel(u);
@@ -705,8 +701,8 @@ const renderProspectsTable = async () => {
                     meta: {
                         canReassign: _canReassignR,
                         canDelete: _lvlR <= 5,
-                        isAdmin: isSystemAdmin(_currentUser),
-                        isMktMgr: isMarketingManager(_currentUser),
+                        isAdmin: isSystemAdmin(_state.cu),
+                        isMktMgr: isMarketingManager(_state.cu),
                         agents: _canReassignR ? _visAgentsR.map(a => ({ id: a.id, full_name: a.full_name || 'Agent' })) : [],
                         agentNames: Object.fromEntries(allUsersR.map(u => [String(u.id), u.full_name || ''])),
                         selectedIds: Array.from(_selectedProspects),
@@ -759,10 +755,10 @@ const renderProspectsTable = async () => {
     // ── Scope by role hierarchy ──
     let prospects;
     let _scopeVisibleIds = 'all'; // 'all' = no restriction; array = restrict to these agent IDs
-    if (isSystemAdmin(_currentUser)) {
+    if (isSystemAdmin(_state.cu)) {
         prospects = allProspects;
     } else {
-        _scopeVisibleIds = await getVisibleUserIds(_currentUser);
+        _scopeVisibleIds = await getVisibleUserIds(_state.cu);
         if (_scopeVisibleIds === 'all') {
             prospects = allProspects;
         } else {
@@ -814,7 +810,7 @@ const renderProspectsTable = async () => {
         agentFilterEl.dataset.hydrated = '1';
     }
 
-    const _userLevel = _getUserLevel(_currentUser);
+    const _userLevel = _getUserLevel(_state.cu);
     const canDelete = _userLevel <= 5;
     const canReassign = _userLevel <= 5;
     const activeAgents = canReassign ? allUsers.filter(u => {
@@ -1036,7 +1032,7 @@ const deleteProspect = async (id) => {
     // Server-side gate: Supabase RLS restrictive policy
     // `prospects_delete_lead_only` rejects DELETEs from users with Level > 5.
     // The client-side check below is still a UX/defence-in-depth layer.
-    const userLevel = _getUserLevel(_currentUser);
+    const userLevel = _getUserLevel(_state.cu);
     if (userLevel > 5) {
         UI.toast.error('You do not have permission to delete prospects.');
         return;
@@ -1049,7 +1045,7 @@ const deleteProspect = async (id) => {
 const confirmDeleteProspect = async (id) => {
     // Re-check the role here too — the modal action runs through a global
     // callback and could theoretically be invoked directly.
-    const userLevel = _getUserLevel(_currentUser);
+    const userLevel = _getUserLevel(_state.cu);
     if (userLevel > 5) {
         UI.hideModal();
         UI.toast.error('You do not have permission to delete prospects.');
@@ -1096,7 +1092,7 @@ const getScoreGrade = (score) => {
 const openProspectGradePicker = async (prospectId) => {
     const prospect = await AppDataStore.getById('prospects', prospectId);
     if (!prospect) { UI.toast.error('Prospect not found'); return; }
-    const currentUser = _currentUser || await Auth.getCurrentUser();
+    const currentUser = _state.cu || await Auth.getCurrentUser();
     const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || currentUser.role?.includes('Level 3') || currentUser.role?.includes('Level 7') || currentUser.role === 'team_leader';
     const isOwner = prospect.responsible_agent_id == currentUser.id;
     if (!isAdmin && !isOwner) {
@@ -1274,7 +1270,7 @@ const updateProspectBulkBar = () => {
     if (countEl) countEl.textContent = n;
     const delBtn = document.getElementById('prospect-bulk-delete-btn');
     if (delBtn) {
-        const lvl = _getUserLevel(_currentUser);
+        const lvl = _getUserLevel(_state.cu);
         delBtn.style.display = lvl <= 5 ? '' : 'none';
     }
 };
@@ -1288,7 +1284,7 @@ const clearProspectSelection = () => {
 };
 
 const bulkDeleteProspects = async () => {
-    const lvl = _getUserLevel(_currentUser);
+    const lvl = _getUserLevel(_state.cu);
     if (lvl > 5) { UI.toast.error('You do not have permission to delete prospects.'); return; }
     const n = _selectedProspects.size;
     if (!n) return;
@@ -1460,7 +1456,7 @@ const openProspectModal = async (prospectId = null) => {
             UI.toast.error('Prospect not found.');
             return;
         }
-        const currentUser = _currentUser || await Auth.getCurrentUser();
+        const currentUser = _state.cu || await Auth.getCurrentUser();
         const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || currentUser.role?.includes('Level 3') || currentUser.role?.includes('Level 7') || currentUser.role === 'team_leader';
         const isOwner = String(prospect.responsible_agent_id) === String(currentUser.id);
         if (!isAdmin && !isOwner) {
@@ -1673,7 +1669,7 @@ const saveProspect = async () => {
             // not to gate every agent's edit on a prospect that isn't even a
             // customer yet. (Without this guard the super admin's queue gets
             // flooded with meaningless "Info Update" entries.)
-            const isManager = isSystemAdmin(_currentUser) || isMarketingManager(_currentUser);
+            const isManager = isSystemAdmin(_state.cu) || isMarketingManager(_state.cu);
             const isConverted = snapshotBefore?.status === 'converted';
             if (!isManager && isConverted) {
                 try {
@@ -1682,7 +1678,7 @@ const saveProspect = async () => {
                         status: 'pending',
                         prospect_id: parseInt(editId),
                         customer_id: null,
-                        submitted_by: _currentUser?.id,
+                        submitted_by: _state.cu?.id,
                         submitted_at: new Date().toISOString(),
                         snapshot_before: snapshotBefore,
                         snapshot_after: data,
@@ -1698,7 +1694,7 @@ const saveProspect = async () => {
             data.protection_deadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
             data.score = SCORING_RULES.CREATE_PROSPECT;
             // Create-only fields — never overwritten on edit so the original agent keeps ownership
-            data.responsible_agent_id = _currentUser?.id || null;
+            data.responsible_agent_id = _state.cu?.id || null;
             data.cps_assignment_date  = new Date().toISOString().split('T')[0];
             data.pipeline_stage       = 'new';
             data.created_at = new Date().toISOString();
@@ -2641,7 +2637,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
     else if (tab === 'closing') {
         const cr = prospect.closing_record || null;
         const status = cr?.status || 'draft';
-        const isManager = isSystemAdmin(_currentUser) || isMarketingManager(_currentUser);
+        const isManager = isSystemAdmin(_state.cu) || isMarketingManager(_state.cu);
         const products = (await AppDataStore.getAll('products')).filter(p => p.is_active !== false);
         const productOptions = products.length
             ? products.map(p => `<option value="${escapeHtml(p.name)}" ${(cr?.product === p.name) ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')
@@ -3352,7 +3348,7 @@ const renderCustomerClosingTab = async (customer, container) => {
 
     const cr = prospect.closing_record || null;
     const status = cr?.status || 'draft';
-    const isManager = isSystemAdmin(_currentUser) || isMarketingManager(_currentUser);
+    const isManager = isSystemAdmin(_state.cu) || isMarketingManager(_state.cu);
     const pid = prospect.id;
 
     // Before 2025 Purchase Record
@@ -4989,7 +4985,7 @@ const submitClosingRecord = async (prospectId) => {
 
     const saleAmount = parseFloat(data.sale_amount) || 0;
     const isAlreadyConverted = prospect.status === 'converted' || prospect.conversion_status === 'approved';
-    const isManager = isSystemAdmin(_currentUser) || isMarketingManager(_currentUser);
+    const isManager = isSystemAdmin(_state.cu) || isMarketingManager(_state.cu);
     const qualifiesForConversion = saleAmount >= 2000 && !isAlreadyConverted;
     const submittedCr = { ...existingCr, ...data, status: 'submitted', submitted_at: new Date().toISOString() };
     const updates = {
@@ -5000,7 +4996,7 @@ const submitClosingRecord = async (prospectId) => {
     if (qualifiesForConversion) {
         updates.conversion_status = 'pending_approval';
         updates.conversion_requested_at = new Date().toISOString();
-        updates.conversion_requested_by = _currentUser?.id;
+        updates.conversion_requested_by = _state.cu?.id;
     }
 
     await AppDataStore.update('prospects', prospectId, updates);
@@ -5018,7 +5014,7 @@ const submitClosingRecord = async (prospectId) => {
                 status: 'pending',
                 prospect_id: prospectId,
                 customer_id: null,
-                submitted_by: _currentUser?.id,
+                submitted_by: _state.cu?.id,
                 submitted_at: new Date().toISOString(),
                 snapshot_before: null,
                 snapshot_after: { ...data, sale_amount: saleAmount, prospect_name: freshProspect?.full_name },
@@ -5032,7 +5028,7 @@ const submitClosingRecord = async (prospectId) => {
                     status: 'pending',
                     prospect_id: prospectId,
                     customer_id: null,
-                    submitted_by: _currentUser?.id,
+                    submitted_by: _state.cu?.id,
                     submitted_at: new Date().toISOString(),
                     snapshot_before: null,
                     snapshot_after: freshProspect,
@@ -5769,7 +5765,7 @@ const convertToCustomer = async (prospectId) => {
     if (prospect.status === 'converted') return UI.toast.info('This prospect has already been converted to a customer.');
     if (prospect.conversion_status === 'pending_approval') return UI.toast.info('Conversion is already pending manager approval.');
 
-    const isManager = isSystemAdmin(_currentUser) || isMarketingManager(_currentUser);
+    const isManager = isSystemAdmin(_state.cu) || isMarketingManager(_state.cu);
 
     if (isManager) {
         await window.app.showConversionApprovalModal(prospectId);

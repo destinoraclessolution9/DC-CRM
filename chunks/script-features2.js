@@ -32,8 +32,6 @@
         }
         return (window.app.computeFourPillarStatuses || (() => Promise.resolve({})))(...a);
     };
-    let _currentUser = _state.cu;
-    window._syncFeatures2User = () => { _currentUser = _state.cu; };
 
 
 // ========== PHASE 18: MOBILE APP & OFFLINE SYNC ==========
@@ -532,7 +530,7 @@ const executeBirthdayAction = async (personName, entityId, entityType) => {
             start_time: '10:00',
             end_time: '10:30',
             activity_title: `Birthday follow-up with ${personName}`,
-            lead_agent_id: _currentUser?.id || 5,
+            lead_agent_id: _state.cu?.id || 5,
             discussion_summary: `Birthday follow-up. ${notes}`
         };
         if (entityType === 'prospect') activity.prospect_id = entityId;
@@ -547,7 +545,7 @@ const executeBirthdayAction = async (personName, entityId, entityType) => {
             entity_type: entityType,
             entity_id: entityId,
             content: `[Birthday ${actionType === 'gift' ? 'Gift' : 'Task'}] ${personName} — ${notes || 'Prepare birthday follow-up'}`,
-            created_by: _currentUser?.id || 5,
+            created_by: _state.cu?.id || 5,
             created_at: new Date().toISOString(),
             due_date: actionDate
         });
@@ -998,7 +996,7 @@ const renderSpecialPrograms = async () => {
     const active = programs.filter(p => p.status !== 'cancelled' && p.status !== 'deleted');
     active.sort((a, b) => (a.end_date || '').localeCompare(b.end_date || ''));
 
-    const canManage = isTeamLeaderOrAbove(_currentUser);
+    const canManage = isTeamLeaderOrAbove(_state.cu);
     const newBtn = canManage
         ? `<button class="btn primary btn-sm" onclick="app.openSpecialProgramModal()"><i class="fas fa-plus"></i> New Program</button>`
         : '';
@@ -1142,7 +1140,7 @@ const renderSpecialProgramsTable = async () => {
     const active = programs.filter(p => p.status !== 'cancelled' && p.status !== 'deleted');
     active.sort((a, b) => (a.end_date || '').localeCompare(b.end_date || ''));
 
-    const canManage = isTeamLeaderOrAbove(_currentUser);
+    const canManage = isTeamLeaderOrAbove(_state.cu);
     const today = _today();
 
     if (active.length === 0) {
@@ -1299,7 +1297,7 @@ const saveSpecialProgram = async (programId = null) => {
         cps_target: cpsTarget,
         qualify_mode: 'all',
         status: 'active',
-        created_by: _currentUser?.id || null,
+        created_by: _state.cu?.id || null,
         created_at: new Date().toISOString()
     };
 
@@ -1362,7 +1360,7 @@ const confirmDeleteSpecialProgram = async (programId) => {
 
 // Calendar popup — show on first calendar visit per session if current user is in any active program
 const checkSpecialProgramPopup = async () => {
-    if (!_currentUser) return;
+    if (!_state.cu) return;
     if (sessionStorage.getItem('specialProgramPopupShown') === '1') return;
 
     const [programs, parts] = await Promise.all([
@@ -1370,7 +1368,7 @@ const checkSpecialProgramPopup = async () => {
         AppDataStore.getAll('special_program_participants')
     ]);
     const today = _today();
-    const myParts = parts.filter(p => p.agent_id === _currentUser.id);
+    const myParts = parts.filter(p => p.agent_id === _state.cu.id);
     if (myParts.length === 0) return;
 
     const myActive = [];
@@ -1385,7 +1383,7 @@ const checkSpecialProgramPopup = async () => {
     // Build progress cards
     const cards = [];
     for (const program of myActive) {
-        const progress = await calculateProgramProgress(program, _currentUser.id);
+        const progress = await calculateProgramProgress(program, _state.cu.id);
         const daysLeft = program.end_date ? Math.max(0, Math.ceil((new Date(program.end_date) - new Date(today)) / 86400000)) : 0;
         const barsHtml = progress.targets.map(t => {
             const color = t.actual >= t.target ? '#16a34a' : (t.pct >= 60 ? '#f59e0b' : '#dc2626');
@@ -1493,7 +1491,7 @@ const _reactMilestonesOn = () => {
 // showMilestonesView(container, targetUserId?)
 // If targetUserId is supplied (admin use), shows that user's progress instead of the current user's.
 const showMilestonesView = async (container, targetUserId = null) => {
-    const currentUser = _currentUser;
+    const currentUser = _state.cu;
     if (!currentUser) return;
 
     // ── Paint skeleton immediately ──────────────────────────────────────

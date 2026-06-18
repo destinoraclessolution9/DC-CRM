@@ -3231,24 +3231,13 @@ function _wireLoginBtn() {
     // retired; all views are owned by their dedicated chunks (see _CHUNK_VIEWS +
     // the eager post-login chunk loader).
 
-    // Re-sync every lazy chunk's cached _currentUser snapshot to the live user.
-    // Chunks capture `let _currentUser = _state.cu` at load time and expose a
-    // window._sync*User refresher; without this they keep a stale identity after
-    // an in-tab logout→login (shared-device identity bleed).
-    const _syncAllChunkUsers = () => {
-        try {
-            for (const k of Object.keys(window)) {
-                if (/^_sync\w*User$/.test(k) && typeof window[k] === 'function') {
-                    try { window[k](); } catch (_) { /* intentional: per-chunk user re-sync is best-effort */ }
-                }
-            }
-        } catch (_) { /* intentional: window enumeration guard; identity sync is best-effort */ }
-    };
-    window._syncAllChunkUsers = _syncAllChunkUsers;
+    // (Phase 9) _syncAllChunkUsers REMOVED — chunks no longer snapshot _currentUser;
+    // they read window._appState.cu live (via _state.cu), so there is nothing to
+    // re-sync. This also fixes the prior latent bug where 5 chunks shared the
+    // window._syncProspectsUser key (only the last-loaded was ever re-synced).
 
     const navigateTo = async (viewId) => {
         UI.hideModal();
-        _syncAllChunkUsers();
         // Cancel any in-flight Supabase reads tied to the OUTGOING view so
         // their late-arriving responses can't overwrite the new view's cache
         // ~800ms after navigation. AppDataStore catches AbortError internally

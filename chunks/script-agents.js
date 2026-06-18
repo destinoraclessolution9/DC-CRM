@@ -57,10 +57,6 @@
     const SCORING_RULES = window.app.SCORING_RULES || { CREATE_PROSPECT: 5, MARK_NOT_INTERESTED: -500 };
     // addWhatsAppButtonToProfile — defined in script.js IIFE, exported to window.app.
     const addWhatsAppButtonToProfile = (...a) => (window.app.addWhatsAppButtonToProfile || (() => Promise.resolve()))(...a);
-    // Live reference to current user (refreshed on each navigation via _syncProspectsUser)
-    let _currentUser = _state.cu;
-    const _syncUser = () => { _currentUser = _state.cu; };
-    window._syncProspectsUser = _syncUser;
     // Current view (read-only reference)
     const _getCurrentView = () => _state.cv;
 
@@ -164,7 +160,7 @@ const renderAgentsTable = async () => {
     }
 
     const allAgents = (await AppDataStore.getAll('users')).filter(u => isAgent(u) || u.agent_code);
-    const visibleIds = await getVisibleUserIds(_currentUser);
+    const visibleIds = await getVisibleUserIds(_state.cu);
     const agents = visibleIds === 'all' ? allAgents : allAgents.filter(a => visibleIds.map(String).includes(String(a.id)));
 
     // React island reuses the SAME identity+scope `agents` list above; it applies
@@ -237,7 +233,7 @@ const renderAgentsTable = async () => {
                         role:   document.getElementById('filter-agent-role')?.value || '',
                         status: document.getElementById('filter-agent-status')?.value || '',
                     },
-                    meta: { canAssignUpline: _getUserLevel(_currentUser) <= 4 },
+                    meta: { canAssignUpline: _getUserLevel(_state.cu) <= 4 },
                 });
                 return;
             } catch (e) {
@@ -259,7 +255,7 @@ if (!agent) {
     return;
 }
 
-const isAdminOrLead = _getUserLevel(_currentUser) <= 4;
+const isAdminOrLead = _getUserLevel(_state.cu) <= 4;
 
 // Resolve reporting_to name dynamically
 const allUsers = await AppDataStore.getAll('users');
@@ -493,7 +489,7 @@ const showAgentDetail = async (agentId) => {
     if (!agent) return;
 
     // --- NEW: define isAdminOrLead ---
-    const currentUser = _currentUser || await Auth.getCurrentUser();
+    const currentUser = _state.cu || await Auth.getCurrentUser();
     const isAdminOrLead = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || 
                           currentUser?.role?.includes('Level 3') || 
                           currentUser?.role?.includes('Level 7') || 
@@ -1160,11 +1156,11 @@ const submitForcePasswordChange = async () => {
         // Offline fallback — update users table only
         console.warn('Supabase updateUser failed (offline?):', e?.message || e);
     }
-    await AppDataStore.update('users', _currentUser.id, {
+    await AppDataStore.update('users', _state.cu.id, {
         force_password_change: false,
         password: newPwd
     });
-    _currentUser.force_password_change = false;
+    _state.cu.force_password_change = false;
     UI.hideModal();
     UI.toast.success('Password set successfully. Welcome!');
     await navigateTo('calendar');
@@ -1262,7 +1258,7 @@ const executePasswordReset = async (agentId) => {
 const deleteAgent = async (agentId) => {
     // Re-check role here. RLS policies also gate writes, but client-side
     // gating gives a cleaner error and avoids wasting a round trip.
-    if (!(isSystemAdmin(_currentUser) || isMarketingManager(_currentUser))) {
+    if (!(isSystemAdmin(_state.cu) || isMarketingManager(_state.cu))) {
         return UI.toast.error('You do not have permission to delete agents.');
     }
     const agent = await AppDataStore.getById('users', agentId);
@@ -1279,7 +1275,7 @@ const deleteAgent = async (agentId) => {
 };
 
 const confirmDeleteAgent = async (agentId) => {
-    if (!(isSystemAdmin(_currentUser) || isMarketingManager(_currentUser))) {
+    if (!(isSystemAdmin(_state.cu) || isMarketingManager(_state.cu))) {
         UI.hideModal();
         return UI.toast.error('You do not have permission to delete agents.');
     }

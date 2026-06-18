@@ -10,8 +10,6 @@
     const esc    = (...a) => _utils.escapeHtml(...a);
     const isSystemAdmin      = (u) => _utils.isSystemAdmin(u || _state.cu);
     const navigateTo         = (v) => window.app.navigateTo(v);
-    let _currentUser = _state.cu;
-    window._syncOrgUser = () => { _currentUser = _state.cu; };
 
     const ORG_TIERS = [
         { code: 't1_5',   min: 1,  max: 5,  price: 99 },

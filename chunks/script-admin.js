@@ -12,8 +12,6 @@
     const isSystemAdmin      = (u) => _utils.isSystemAdmin(u || _state.cu);
     const isMarketingManager = (u) => _utils.isMarketingManager(u || _state.cu);
     const navigateTo         = (v) => window.app.navigateTo(v);
-    let _currentUser = _state.cu;
-    window._syncAdminUser = () => { _currentUser = _state.cu; };
 
     // React-island Security dashboard. DEFAULT-ON (read-only, admin-only, low risk);
     // kill-switch → legacy: window.__REACT_SECURITY===false, ?react=0, crm_react_off='1'.

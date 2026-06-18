@@ -20,9 +20,6 @@
     const isCustomer           = (u) => _utils.isCustomer(u || _state.cu);
     const _getUserLevel        = (u) => _utils.getUserLevel(u);
     const navigateTo           = (v) => window.app.navigateTo(v);
-    // Live user reference
-    let _currentUser = _state.cu;
-    window._syncCpsUser = () => { _currentUser = _state.cu; };
 
 // ========== NOTIFICATION BELL ==========
 const _refreshNotifBadge = async () => {
@@ -31,7 +28,7 @@ const _refreshNotifBadge = async () => {
     let count = 0;
     try {
         // Pending CPS intakes
-        const visibleIds = await getVisibleUserIds(_currentUser);
+        const visibleIds = await getVisibleUserIds(_state.cu);
         let intakes = [];
         try {
             intakes = await AppDataStore.query('cps_intake_requests', { status: 'submitted' });
@@ -70,11 +67,11 @@ const _refreshNotifBadge = async () => {
 
         // Pending co-agent invitations for current user
         try {
-            if (_currentUser?.id) {
+            if (_state.cu?.id) {
                 const { data: coInvites } = await window.supabase
                     .from('activities')
                     .select('id')
-                    .filter('co_agents', 'cs', JSON.stringify([{ id: String(_currentUser.id), status: 'pending' }]));
+                    .filter('co_agents', 'cs', JSON.stringify([{ id: String(_state.cu.id), status: 'pending' }]));
                 count += (coInvites || []).length;
             }
         } catch (_) {}
@@ -94,7 +91,7 @@ const _buildNotifPanel = async () => {
     const tomMD = mmdd(tom);
 
     // CPS intakes
-    const visibleIds = await getVisibleUserIds(_currentUser);
+    const visibleIds = await getVisibleUserIds(_state.cu);
     let intakes = [];
     try {
         intakes = await AppDataStore.query('cps_intake_requests', { status: 'submitted' });
@@ -145,11 +142,11 @@ const _buildNotifPanel = async () => {
 
     // Pending co-agent invitations for current user
     try {
-        if (_currentUser?.id) {
+        if (_state.cu?.id) {
             const { data: coInvites } = await window.supabase
                 .from('activities')
                 .select('id, activity_type, activity_title, activity_date')
-                .filter('co_agents', 'cs', JSON.stringify([{ id: String(_currentUser.id), status: 'pending' }]));
+                .filter('co_agents', 'cs', JSON.stringify([{ id: String(_state.cu.id), status: 'pending' }]));
             for (const act of (coInvites || []).slice(0, 5)) {
                 const typeLabel = act.activity_type || 'Activity';
                 const dateLabel = act.activity_date ? ` · ${act.activity_date}` : '';
@@ -324,13 +321,13 @@ const _reactBookingOn = () => {
 
 const showBookingSettingsView = async (container) => {
     _state.cv = 'booking_settings';
-    if (!_currentUser?.id) { UI.toast.error('Session not ready — please refresh.'); return; }
+    if (!_state.cu?.id) { UI.toast.error('Session not ready — please refresh.'); return; }
     const allSlots = await AppDataStore.getAll('booking_slots').catch(() => []);
-    const agentSlots = allSlots.filter(s => s.agent_id === _currentUser.id);
+    const agentSlots = allSlots.filter(s => s.agent_id === _state.cu.id);
     const allAppts = await AppDataStore.getAll('booking_appointments').catch(() => []);
-    const appointments = allAppts.filter(a => a.agent_id === _currentUser.id)
+    const appointments = allAppts.filter(a => a.agent_id === _state.cu.id)
         .sort((a, b) => (b.booking_date || '').localeCompare(a.booking_date || ''));
-    const bookingUrl = `${window.location.origin}/booking.html?agent=${_currentUser.id}`;
+    const bookingUrl = `${window.location.origin}/booking.html?agent=${_state.cu.id}`;
 
     if (_reactBookingOn()) {
         try {
@@ -385,7 +382,7 @@ const saveBookingSlot = async () => {
     const end = endEl.value;
     if (!start || !end || start >= end) { UI.toast.error('End time must be after start time.'); return; }
     await AppDataStore.create('booking_slots', {
-        agent_id: _currentUser?.id,
+        agent_id: _state.cu?.id,
         day_of_week: parseInt(dayEl.value),
         start_time: start, end_time: end,
         duration_minutes: parseInt(durEl.value),
@@ -416,12 +413,12 @@ const toggleSlotActive = async (slotId, isActive) => {
 };
 
 const copyBookingLink = () => {
-    const url = `${window.location.origin}/booking.html?agent=${_currentUser?.id}`;
+    const url = `${window.location.origin}/booking.html?agent=${_state.cu?.id}`;
     navigator.clipboard.writeText(url).then(() => UI.toast.success('Booking link copied!')).catch(() => UI.toast.info(`Link: ${url}`));
 };
 
 const openShareBookingLinkModal = () => {
-    const baseUrl = `${window.location.origin}/booking.html?agent=${_currentUser?.id}`;
+    const baseUrl = `${window.location.origin}/booking.html?agent=${_state.cu?.id}`;
     UI.showModal('Share Booking Link', `
         <div style="display:flex; flex-direction:column; gap:16px;">
             <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:12px; font-size:13px; color:#166534;">
@@ -462,7 +459,7 @@ const openShareBookingLinkModal = () => {
 };
 
 const updateShareLinkPreview = () => {
-    const baseUrl = `${window.location.origin}/booking.html?agent=${_currentUser?.id}`;
+    const baseUrl = `${window.location.origin}/booking.html?agent=${_state.cu?.id}`;
     const ref = document.getElementById('share-referrer')?.value.trim();
     const rel = document.getElementById('share-relation')?.value;
     let url = baseUrl;
@@ -474,7 +471,7 @@ const updateShareLinkPreview = () => {
 
 const copySmartBookingLink = () => {
     const linkEl = document.getElementById('share-link-preview');
-    const url = linkEl?.value || `${window.location.origin}/booking.html?agent=${_currentUser?.id}`;
+    const url = linkEl?.value || `${window.location.origin}/booking.html?agent=${_state.cu?.id}`;
     navigator.clipboard.writeText(url).then(() => {
         UI.hideModal();
         UI.toast.success('Booking link copied!');
@@ -590,7 +587,7 @@ const saveCpsIntakeLink = async () => {
 
     try {
         const row = await AppDataStore.create('cps_intake_requests', {
-            agent_id: _currentUser?.id || null,
+            agent_id: _state.cu?.id || null,
             activity_date: date,
             start_time: startTime,
             end_time: endTime,
@@ -722,7 +719,7 @@ const renderPendingCpsIntakes = async () => {
 
     // Filter: only show intakes created by the current user or their subordinates.
     // Records with no agent_id are always shown to any logged-in leader.
-    const visibleIds = await getVisibleUserIds(_currentUser);
+    const visibleIds = await getVisibleUserIds(_state.cu);
     if (visibleIds !== 'all') {
         const visibleStrs = visibleIds.map(String);
         intakes = intakes.filter(i => !i.agent_id || visibleStrs.includes(String(i.agent_id)));

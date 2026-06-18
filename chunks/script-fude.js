@@ -22,8 +22,6 @@
     // News-highlight push notification — defined in script-activities.js, exported to window.app.
     // Fire-and-forget after a highlight is created/edited.
     const _notifyHighlightSaved = (...a) => (window.app._notifyHighlightSaved || (() => Promise.resolve()))(...a);
-    let _currentUser = _state.cu;
-    window._syncFudeUser = () => { _currentUser = _state.cu; };
 
     // React modal-content passthrough — DEFAULT-ON (parity-verified live, SW-89:
     // all 8 fude modals render through the React root with signature pads bound,
@@ -260,7 +258,7 @@ const _buildFudeTips = (dynamicTips) => {
 
 // ========== LEVEL 13/14: 福德 VIEW ==========
 const showFudeView = async (container) => {
-    const currentUser = _currentUser;
+    const currentUser = _state.cu;
     if (!currentUser) return;
 
     // Show skeleton immediately — don't block first paint on data fetches
@@ -649,7 +647,7 @@ const saveHighlight = async () => {
         image_url: imageUrl,
         type:      document.getElementById('highlight-type')?.value || 'highlight',
         is_active: document.getElementById('highlight-active')?.checked ?? true,
-        author_id: _currentUser?.id || null
+        author_id: _state.cu?.id || null
     };
 
     try {
@@ -945,7 +943,7 @@ const uploadProspectDocument = async (prospectId) => {
                 mime_type: file.type || 'application/octet-stream',
                 data: String(dataUrl || ''),
                 current_version: 1,
-                created_by: _currentUser?.id || null,
+                created_by: _state.cu?.id || null,
                 description: `Uploaded for prospect #${prospectId}`,
                 is_starred: false
             });
@@ -980,7 +978,7 @@ const submitRecruitmentApproval = async () => {
         await AppDataStore.create('approval_queue', {
             approval_type: 'recruitment',
             status: 'pending',
-            submitted_by: _currentUser?.id || null,
+            submitted_by: _state.cu?.id || null,
             submitted_at: new Date().toISOString(),
             description: 'Recruitment: Convert customer to agent',
             snapshot_after: snapshot,
@@ -1036,7 +1034,7 @@ const showProfile = async (id, type) => {
 // CSV-injection-safe (leading =,+,-,@ in a cell is prefixed with a single quote)
 // and Excel-friendly (UTF-8 BOM so Chinese names render).
 const exportKPIDashboard = async () => {
-    const currentUser = _currentUser || _state.cu;
+    const currentUser = _state.cu || _state.cu;
     // Same role gate as the dashboard's leaderboard surface.
     const _canonAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser);
     if (!_canonAdmin) { UI.toast.error('You do not have permission to export the KPI dashboard.'); return; }
@@ -1733,7 +1731,7 @@ const saveCustomerSurvey = async () => {
         q6_share: document.querySelector('input[name="q6_share"]:checked')?.value || null,
         signature_data_url: _getSignatureDataUrl('cf-survey-sig'),
         signed_at: _getSignatureDataUrl('cf-survey-sig') ? new Date().toISOString() : null,
-        created_by: _currentUser?.id || null
+        created_by: _state.cu?.id || null
     };
 
     try {
@@ -2032,7 +2030,7 @@ const saveCpsAnalysis = async () => {
         cps_signature_data_url: cpsSig,
         cps_signed_name: document.getElementById('cf-cps-by-name')?.value?.trim() || null,
         cps_signed_at: cpsSig ? new Date().toISOString() : null,
-        created_by: _currentUser?.id || null
+        created_by: _state.cu?.id || null
     };
 
     try {
@@ -2292,11 +2290,11 @@ const saveApuAppraisal = async () => {
         customer_signed_at: custSig ? new Date().toISOString() : null,
         apu_signature_data_url: apuSig,
         apu_signed_at: apuSig ? new Date().toISOString() : null,
-        apu_signed_by: apuSig ? (_currentUser?.id || null) : null,
+        apu_signed_by: apuSig ? (_state.cu?.id || null) : null,
         head_apu_signature_data_url: headSig,
         head_apu_signed_at: headSig ? new Date().toISOString() : null,
-        head_apu_signed_by: headSig ? (_currentUser?.id || null) : null,
-        created_by: _currentUser?.id || null
+        head_apu_signed_by: headSig ? (_state.cu?.id || null) : null,
+        created_by: _state.cu?.id || null
     };
 
     try {
@@ -2706,7 +2704,7 @@ const saveDestinyBlueprint = async () => {
         consultant_signature_data_url: consSig,
         consultant_signed_at: consSig ? new Date().toISOString() : null,
 
-        created_by: _currentUser?.id || null
+        created_by: _state.cu?.id || null
     };
 
     try {
@@ -2816,7 +2814,7 @@ const _fudeRedeemPickPreset = (cost, item) => {
 // table exists, so we do NOT debit points here — the awarding ledger
 // (recommendation_rewards) is admin-managed; the admin reconciles on approval.
 const confirmRedeemPoints = async () => {
-    const user = _currentUser || _state.cu;
+    const user = _state.cu || _state.cu;
     if (!user || !user.id) { UI.toast.error('无法识别当前用户，请重新登录后再试。'); return; }
 
     const bal  = Math.max(0, parseInt(_fudeRedeemBalance, 10) || 0);

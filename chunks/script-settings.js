@@ -58,10 +58,6 @@
     const SCORING_RULES = window.app.SCORING_RULES || { CREATE_PROSPECT: 5, MARK_NOT_INTERESTED: -500 };
     // addWhatsAppButtonToProfile — defined in script.js IIFE, exported to window.app.
     const addWhatsAppButtonToProfile = (...a) => (window.app.addWhatsAppButtonToProfile || (() => Promise.resolve()))(...a);
-    // Live reference to current user (refreshed on each navigation via _syncProspectsUser)
-    let _currentUser = _state.cu;
-    const _syncUser = () => { _currentUser = _state.cu; };
-    window._syncProspectsUser = _syncUser;
     // Current view (read-only reference)
     const _getCurrentView = () => _state.cv;
 
@@ -77,7 +73,7 @@ const selfChangePassword = async () => {
     // Verify current password via re-auth
     try {
         const verifyRes = await window.supabase.auth.signInWithPassword({
-            email: _currentUser.email,
+            email: _state.cu.email,
             password: currentPwd
         });
         const verifyErr = verifyRes && verifyRes.error;
@@ -88,11 +84,11 @@ const selfChangePassword = async () => {
     } catch (e) {
         console.warn('Supabase password change (offline?):', e?.message || e);
     }
-    await AppDataStore.update('users', _currentUser.id, {
+    await AppDataStore.update('users', _state.cu.id, {
         password: newPwd,
         force_password_change: false
     });
-    _currentUser.force_password_change = false;
+    _state.cu.force_password_change = false;
     document.getElementById('settings-current-pwd').value = '';
     document.getElementById('settings-new-pwd').value = '';
     document.getElementById('settings-confirm-pwd').value = '';
@@ -100,13 +96,13 @@ const selfChangePassword = async () => {
 };
 
 const saveSelfPreferredName = async () => {
-    if (!_currentUser) return UI.toast.error('Not logged in');
+    if (!_state.cu) return UI.toast.error('Not logged in');
     const input = document.getElementById('settings-preferred-name');
     const newName = (input?.value || '').trim();
     if (newName.length > 60) return UI.toast.error('Preferred name must be 60 characters or less');
     try {
-        await AppDataStore.update('users', _currentUser.id, { preferred_name: newName || null });
-        _currentUser.preferred_name = newName || null;
+        await AppDataStore.update('users', _state.cu.id, { preferred_name: newName || null });
+        _state.cu.preferred_name = newName || null;
         updateUserDisplay();
         UI.toast.success(newName ? 'Display name updated' : 'Display name cleared');
     } catch (e) {
@@ -124,10 +120,10 @@ const showSettingsView = (container) => {
         <div class="performance-card" style="margin-bottom:24px;">
             <h4><i class="fas fa-user"></i> Profile</h4>
             <div class="performance-stats">
-                <div class="stat-row"><span class="stat-label">Name:</span><span class="stat-value">${escapeHtml(_currentUser?.full_name || '')}</span></div>
-                <div class="stat-row"><span class="stat-label">Email:</span><span class="stat-value">${escapeHtml(_currentUser?.email || '')}</span></div>
-                <div class="stat-row"><span class="stat-label">Role:</span><span class="stat-value">${escapeHtml(_currentUser?.role || '')}</span></div>
-                <div class="stat-row"><span class="stat-label">Agent Code:</span><span class="stat-value">${escapeHtml(_currentUser?.agent_code || '—')}</span></div>
+                <div class="stat-row"><span class="stat-label">Name:</span><span class="stat-value">${escapeHtml(_state.cu?.full_name || '')}</span></div>
+                <div class="stat-row"><span class="stat-label">Email:</span><span class="stat-value">${escapeHtml(_state.cu?.email || '')}</span></div>
+                <div class="stat-row"><span class="stat-label">Role:</span><span class="stat-value">${escapeHtml(_state.cu?.role || '')}</span></div>
+                <div class="stat-row"><span class="stat-label">Agent Code:</span><span class="stat-value">${escapeHtml(_state.cu?.agent_code || '—')}</span></div>
             </div>
         </div>
 
@@ -136,7 +132,7 @@ const showSettingsView = (container) => {
             <p style="color:var(--gray-500); font-size:13px; margin:8px 0 12px;">This is the name shown in the top-right header. Leave blank to use your full name.</p>
             <div class="form-group" style="margin-bottom:12px;">
                 <label>Preferred Name</label>
-                <input type="text" id="settings-preferred-name" class="form-control" placeholder="e.g. Mian" value="${escapeHtml(_currentUser?.preferred_name || '')}" maxlength="60">
+                <input type="text" id="settings-preferred-name" class="form-control" placeholder="e.g. Mian" value="${escapeHtml(_state.cu?.preferred_name || '')}" maxlength="60">
             </div>
             <button class="btn primary" onclick="(async()=>{ await app.saveSelfPreferredName(); })()">
                 <i class="fas fa-save"></i> Save Display Name
@@ -229,7 +225,7 @@ const showSettingsView = (container) => {
             </div>
         </div>
 
-        ${isSystemAdmin(_currentUser) ? `
+        ${isSystemAdmin(_state.cu) ? `
         <!-- ========== Data Quality (Super Admin only) ========== -->
         <div class="performance-card" style="margin-top:24px;">
             <h4><i class="fas fa-broom"></i> Data Quality</h4>
@@ -394,7 +390,7 @@ const _renderPhoneDupesBody = (phoneDupes, emailDupes, users) => {
 };
 
 const showPhoneDupesModal = async () => {
-    if (!isSystemAdmin(_currentUser)) {
+    if (!isSystemAdmin(_state.cu)) {
         UI.toast.error('Super Admin only.');
         return;
     }
@@ -567,11 +563,11 @@ const disablePushNotifications = async () => {
 
 const sendTestPushNotification = async () => {
     if (!window.PushNotif) { UI.toast.error('Push module not loaded'); return; }
-    if (!_currentUser?.id) { UI.toast.error('Log in first'); return; }
+    if (!_state.cu?.id) { UI.toast.error('Log in first'); return; }
     try {
         const res = await window.PushNotif.sendActivityPush(
             { id: 'test_' + Date.now(), activity_type: 'Test', activity_title: 'Test notification' },
-            [String(_currentUser.id)],
+            [String(_state.cu.id)],
             {
                 title: 'Feng Shui CRM — Test',
                 body: 'If you can read this on your phone, notifications are working.',
@@ -592,12 +588,12 @@ const sendTestPushNotification = async () => {
 
 // ========== Notification reminder preferences ==========
 const loadNotificationPreferences = async () => {
-    if (!_currentUser?.id) return;
+    if (!_state.cu?.id) return;
     try {
         const { data } = await window.supabase
             .from('notification_preferences')
             .select('reminder_minutes,daily_summary')
-            .eq('user_id', _currentUser.id)
+            .eq('user_id', _state.cu.id)
             .maybeSingle();
         const minutes = (data && data.reminder_minutes) ? data.reminder_minutes : [15];
         const dailySummary = data ? !!data.daily_summary : true;
@@ -613,7 +609,7 @@ const loadNotificationPreferences = async () => {
 };
 
 const saveNotificationPreferences = async () => {
-    if (!_currentUser?.id) { UI.toast.error('Log in first'); return; }
+    if (!_state.cu?.id) { UI.toast.error('Log in first'); return; }
     const minutes = [1440, 60, 15, 10].filter(m => {
         const el = document.getElementById(`reminder-${m}`);
         return el && el.checked;
@@ -623,7 +619,7 @@ const saveNotificationPreferences = async () => {
     try {
         const { error } = await window.supabase
             .from('notification_preferences')
-            .upsert({ user_id: _currentUser.id, reminder_minutes: minutes, daily_summary: dailySummary, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+            .upsert({ user_id: _state.cu.id, reminder_minutes: minutes, daily_summary: dailySummary, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
         if (error) throw error;
         const saveBtn = document.getElementById('notif-prefs-save-btn');
         const savedMsg = document.getElementById('notif-prefs-saved');

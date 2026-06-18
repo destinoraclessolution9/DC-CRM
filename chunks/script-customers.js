@@ -57,14 +57,10 @@
     const SCORING_RULES = window.app.SCORING_RULES || { CREATE_PROSPECT: 5, MARK_NOT_INTERESTED: -500 };
     // addWhatsAppButtonToProfile — defined in script.js IIFE, exported to window.app.
     const addWhatsAppButtonToProfile = (...a) => (window.app.addWhatsAppButtonToProfile || (() => Promise.resolve()))(...a);
-    // Live reference to current user (refreshed on each navigation via _syncProspectsUser)
-    let _currentUser = _state.cu;
-    const _syncUser = () => { _currentUser = _state.cu; };
-    window._syncProspectsUser = _syncUser;
     // Current view (read-only reference)
     const _getCurrentView = () => _state.cv;
 
-    // ── Duplicated from prospects-core: shared server-pagination helper.    // Reads only header globals (getVisibleUserIds/_currentUser/AppDataStore),    // so a verbatim copy is safe and keeps _bffGetCustomers an intra-chunk call.
+    // ── Duplicated from prospects-core: shared server-pagination helper.    // Reads only header globals (getVisibleUserIds/_state.cu/AppDataStore),    // so a verbatim copy is safe and keeps _bffGetCustomers an intra-chunk call.
 const _serverPage = async (table, opts = {}) => {
     try {
         const o = { countMode: 'planned', ...opts };
@@ -72,7 +68,7 @@ const _serverPage = async (table, opts = {}) => {
         const scopeBy = opts.scopeBy;
         delete o.scopeBy;
         if (scopeBy && !o.scopeFields && !o.scopeField) {
-            const visible = await getVisibleUserIds(_currentUser);
+            const visible = await getVisibleUserIds(_state.cu);
             if (visible && visible !== 'all' && Array.isArray(visible)) {
                 o.scopeFields = scopeBy.map(field => ({ field, values: visible }));
             }
@@ -125,7 +121,7 @@ const showCustomersView = async (container) => {
                 <span>⚠️ DELETE IS NOT AVAILABLE - Customer records are permanent and cannot be deleted under any circumstances.</span>
             </div>
 
-            ${(_getUserLevel(_currentUser) <= 4) ? `
+            ${(_getUserLevel(_state.cu) <= 4) ? `
             <div id="approval-queue-section" style="margin-bottom:24px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
                     <h2 style="font-size:18px; font-weight:600; display:flex; align-items:center; gap:8px; margin:0;">
@@ -275,7 +271,7 @@ const _showCustomersReactRoot = (useReact) => {
 // variable remains authoritative; chunks read/write via this object.
 //
 // Key conventions (short to minimise minified output):
-//   cu    → _currentUser        cv    → _currentView
+//   cu    → _state.cu        cv    → _currentView
 //   pp    → _prospectPage       cp    → _customerPage
 //   cmt   → _currentMarketingTab  cmlt → _currentMarketingListTab
 //   ial   → isAdminOrL2 check
@@ -323,13 +319,13 @@ const renderCustomersTable = async () => {
     const allUsers = await AppDataStore.getAll('users');
     const userById = new Map(allUsers.map(u => [String(u.id), u]));
 
-    const _custUserLevel = _getUserLevel(_currentUser);
+    const _custUserLevel = _getUserLevel(_state.cu);
     const canReassignCust = _custUserLevel <= 5;
     let activeAgentsCust = [];
     if (canReassignCust) {
         const _custScopeIds = _custUserLevel <= 2
             ? null
-            : await getVisibleUserIds(_currentUser);
+            : await getVisibleUserIds(_state.cu);
         const _custScopeSet = (_custScopeIds && _custScopeIds !== 'all' && Array.isArray(_custScopeIds))
             ? new Set(_custScopeIds.map(String)) : null;
         activeAgentsCust = allUsers.filter(u => {
@@ -631,7 +627,7 @@ const showCustomerDetail = async (customerId) => {
                     </div>
                     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0 4px;">
                         <span style="font-size:22px;font-weight:700;line-height:1.3;flex-shrink:0;">${escapeHtml(customer.full_name)}</span>
-                        ${(isSystemAdmin(_currentUser) || isMarketingManager(_currentUser)) ? iconBtn('Edit', 'fas fa-edit', `app.openProspectModal(${customer.id})`) : ''}
+                        ${(isSystemAdmin(_state.cu) || isMarketingManager(_state.cu)) ? iconBtn('Edit', 'fas fa-edit', `app.openProspectModal(${customer.id})`) : ''}
                         ${iconBtn('Add Purchase', 'fas fa-plus', `app.openAddPurchaseModal(${customer.id})`)}
                         ${iconBtn('Refer a Friend', 'fas fa-user-plus', `app.openCustomerReferralModal(${customer.id})`)}
                         ${iconBtn('WhatsApp', 'fab fa-whatsapp', `app.openSendWhatsAppModal('customer',${customer.id})`, {color:'#25d366'})}
@@ -1186,7 +1182,7 @@ const saveDocument = async (entityId, entityType) => {
         url,
         notes,
         uploaded_at: new Date().toISOString(),
-        uploaded_by: _currentUser?.id
+        uploaded_by: _state.cu?.id
     });
     UI.hideModal();
     UI.toast.success('Document saved.');
@@ -1726,7 +1722,7 @@ const saveCustomer = async () => {
         lifetime_value: parseFloat(document.getElementById('cust-init-amt')?.value) || 0,
         status: 'active',
         customer_since: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
-        responsible_agent_id: _currentUser?.id || null,
+        responsible_agent_id: _state.cu?.id || null,
     });
     UI.hideModal();
     UI.toast.success('Customer created (Legacy)');

@@ -58,10 +58,6 @@
     const SCORING_RULES = window.app.SCORING_RULES || { CREATE_PROSPECT: 5, MARK_NOT_INTERESTED: -500 };
     // addWhatsAppButtonToProfile — defined in script.js IIFE, exported to window.app.
     const addWhatsAppButtonToProfile = (...a) => (window.app.addWhatsAppButtonToProfile || (() => Promise.resolve()))(...a);
-    // Live reference to current user (refreshed on each navigation via _syncProspectsUser)
-    let _currentUser = _state.cu;
-    const _syncUser = () => { _currentUser = _state.cu; };
-    window._syncProspectsUser = _syncUser;
     // Current view (read-only reference)
     const _getCurrentView = () => _state.cv;
 
@@ -306,7 +302,7 @@ const approveQueueEntry = async (entryId) => {
 
     await AppDataStore.update('approval_queue', entryId, {
         status: 'approved',
-        reviewed_by: _currentUser?.id,
+        reviewed_by: _state.cu?.id,
         reviewed_at: now
     });
 
@@ -358,7 +354,7 @@ const confirmRejectQueueEntry = async (entryId) => {
         await AppDataStore.update('prospects', entry.prospect_id, {
             conversion_status: 'rejected',
             conversion_rejected_at: new Date().toISOString(),
-            conversion_rejected_by: _currentUser?.id
+            conversion_rejected_by: _state.cu?.id
         });
     }
 
@@ -373,7 +369,7 @@ const confirmRejectQueueEntry = async (entryId) => {
 
     await AppDataStore.update('approval_queue', entryId, {
         status: 'rejected',
-        reviewed_by: _currentUser?.id,
+        reviewed_by: _state.cu?.id,
         reviewed_at: new Date().toISOString(),
         reject_reason: reason
     });
@@ -456,7 +452,7 @@ const requestProspectConversion = async (prospectId) => {
     await AppDataStore.update('prospects', prospectId, {
         conversion_status: 'pending_approval',
         conversion_requested_at: new Date().toISOString(),
-        conversion_requested_by: _currentUser?.id
+        conversion_requested_by: _state.cu?.id
     });
 
     // Create approval queue entry for new customer conversion
@@ -467,7 +463,7 @@ const requestProspectConversion = async (prospectId) => {
             status: 'pending',
             prospect_id: prospectId,
             customer_id: null,
-            submitted_by: _currentUser?.id,
+            submitted_by: _state.cu?.id,
             submitted_at: new Date().toISOString(),
             snapshot_before: null,
             snapshot_after: prospect,
@@ -566,7 +562,7 @@ const approveProspectConversion = async (prospectId) => {
         status: 'active',
         customer_since: cr?.closing_date || now.split('T')[0],
         converted_from_prospect_id: prospectId,
-        approved_by: _currentUser?.id,
+        approved_by: _state.cu?.id,
         approved_at: now,
         created_at: now
     };
@@ -577,7 +573,7 @@ const approveProspectConversion = async (prospectId) => {
         status: 'converted',
         conversion_status: 'approved',
         conversion_approved_at: now,
-        conversion_approved_by: _currentUser?.id
+        conversion_approved_by: _state.cu?.id
     };
     // Archive closing record to history and reset so a new closing can be started
     if (cr) {
@@ -595,7 +591,7 @@ const approveProspectConversion = async (prospectId) => {
         if (matchingEntry) {
             await AppDataStore.update('approval_queue', matchingEntry.id, {
                 status: 'approved',
-                reviewed_by: _currentUser?.id,
+                reviewed_by: _state.cu?.id,
                 reviewed_at: now
             });
         }
@@ -615,7 +611,7 @@ const rejectProspectConversion = async (prospectId) => {
     await AppDataStore.update('prospects', prospectId, {
         conversion_status: 'rejected',
         conversion_rejected_at: now,
-        conversion_rejected_by: _currentUser?.id
+        conversion_rejected_by: _state.cu?.id
     });
 
     // Sync approval queue — mark matching new_customer entry as rejected
@@ -625,7 +621,7 @@ const rejectProspectConversion = async (prospectId) => {
         if (matchingEntry) {
             await AppDataStore.update('approval_queue', matchingEntry.id, {
                 status: 'rejected',
-                reviewed_by: _currentUser?.id,
+                reviewed_by: _state.cu?.id,
                 reviewed_at: now
             });
         }

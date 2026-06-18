@@ -24,9 +24,6 @@
     const getVisibleCustomers  = (...a) => _utils.getVisibleCustomers(...a);
     const getVisibleActivities = (...a) => _utils.getVisibleActivities(...a);
     const navigateTo           = (v) => window.app.navigateTo(v);
-    // Live user reference
-    let _currentUser = _state.cu;
-    window._syncSearchUser = () => { _currentUser = _state.cu; };
     // Chunk-local search state (mirrors IIFE vars)
     let _searchPanelVisible = false;
     let _currentSearchEntity = 'prospects';
@@ -405,7 +402,7 @@ const updateFilterSections = async () => {
     if (agentSelects.length > 0) {
         try {
             const allUsers = await AppDataStore.getAll('users');
-            const visibleIds = await getVisibleUserIds(_currentUser);
+            const visibleIds = await getVisibleUserIds(_state.cu);
             const agents = allUsers.filter(u => {
                 if (!(isAgent(u) || u.role === 'team_leader' || u.role?.includes('Level 7'))) return false;
                 if (visibleIds === 'all') return true;
@@ -1126,7 +1123,7 @@ const executeSearch = async () => {
 
 const performAgentSearch = async (filters) => {
     const allAgentUsers = await getAgentsAndLeaders();
-    const visibleAgentIds = await getVisibleUserIds(_currentUser);
+    const visibleAgentIds = await getVisibleUserIds(_state.cu);
     let items = visibleAgentIds === 'all' ? allAgentUsers : allAgentUsers.filter(u => visibleAgentIds.map(String).includes(String(u.id)));
 
     if (filters.basic.name) {
@@ -1174,7 +1171,7 @@ const performProspectSearch = async (filters) => {
     const FETCH_CAP = 10000;
     let items;
     try {
-        const visibleIds = await getVisibleUserIds(_currentUser);
+        const visibleIds = await getVisibleUserIds(_state.cu);
         if (Array.isArray(visibleIds) && visibleIds.length === 0) {
             // No visible prospects — matches getVisibleProspects → empty set.
             return applyComplexConditions([], filters.complex);
@@ -1384,7 +1381,7 @@ const performCustomerSearch = async (filters) => {
     const FETCH_CAP = 10000;
     let items;
     try {
-        const visibleIds = await getVisibleUserIds(_currentUser);
+        const visibleIds = await getVisibleUserIds(_state.cu);
         if (Array.isArray(visibleIds) && visibleIds.length === 0) {
             // No visible customers — matches getVisibleCustomers → empty set.
             return applyComplexConditions([], filters.complex);

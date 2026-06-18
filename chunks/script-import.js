@@ -16,8 +16,6 @@
     const isAgent              = (u) => _utils.isAgent(u || _state.cu);
     const _getUserLevel        = (u) => _utils.getUserLevel(u);
     const navigateTo           = (v) => window.app.navigateTo(v);
-    let _currentUser = _state.cu;
-    window._syncImportUser = () => { _currentUser = _state.cu; };
 
     // React-island flag (default-on) for the Protection Monitoring view.
     // Kill-switch → legacy: window.__REACT_PROTECTION===false, ?react=0, crm_react_off='1'.
@@ -129,7 +127,7 @@ const renderRecentImports = async () => {
 
 const openImportWizard = async () => {
     // R9: Only system admin, marketing manager, or team leader may import
-    const u = _currentUser;
+    const u = _state.cu;
     const canImport = isTeamLeaderOrAbove(u);
     if (!canImport) { UI.toast.error('You do not have permission to import data.'); return; }
 
@@ -323,7 +321,7 @@ const getStep5Html = async () => {
     const { valid, warnings, errors } = _importData.validation;
     const processable = valid + warnings;
     const dupCount    = _importData.duplicates.total;
-    const assignLabel = _currentUser?.full_name || _currentUser?.name || 'Me';
+    const assignLabel = _state.cu?.full_name || _state.cu?.name || 'Me';
     return `
         <div class="import-wizard">
             ${getWizardStepsHtml(5)}
@@ -812,7 +810,7 @@ const startImport = async () => {
     _importData.duplicates.list.forEach(d => dupMap.set(d.rowIndex, d));
 
     let assignedAgentId = null;
-    if (assignTo === 'myself') assignedAgentId = _currentUser?.id;
+    if (assignTo === 'myself') assignedAgentId = _state.cu?.id;
 
     const reverseMap = buildReverseMapping();
     const isMarketingType = ['products', 'events', 'promotions'].includes(_importData.importType);
@@ -932,7 +930,7 @@ const startImport = async () => {
             mapping_config:     _importData.mapping,
             duplicate_handling: duplicateAction,
             assignment_config:  { assignTo, agentId: assignedAgentId },
-            created_by:         _currentUser?.id,
+            created_by:         _state.cu?.id,
             created_at:         new Date().toISOString(),
             completed_at:       new Date().toISOString()
         });
@@ -1071,7 +1069,7 @@ const showProtectionMonitoringView = async (container) => {
         AppDataStore.getAll('prospects'),
         AppDataStore.getAll('users'),
         AppDataStore.getAll('activities'),
-        getVisibleUserIds(_currentUser)
+        getVisibleUserIds(_state.cu)
     ]);
     const agentMap = {};
     for (const u of allUsers) agentMap[u.id] = u;
@@ -1442,7 +1440,7 @@ const cascadeProspectReassign = async (prospectId, toAgentId, opts = {}) => {
             prospect_id: pid,
             from_agent_id: fromAgentId,
             to_agent_id: newAgentId,
-            reassigned_by: _currentUser?.id,
+            reassigned_by: _state.cu?.id,
             reassignment_date: now,
             reassignment_reason: opts.reason || 'manual',
             reason_notes: notes,
@@ -1494,7 +1492,7 @@ const cascadeCustomerReassign = async (customerId, toAgentId) => {
                         prospect_id: sourceProspectId,
                         from_agent_id: sourceProspect.responsible_agent_id || null,
                         to_agent_id: newAgentId,
-                        reassigned_by: _currentUser?.id,
+                        reassigned_by: _state.cu?.id,
                         reassignment_date: new Date().toISOString(),
                         reassignment_reason: 'customer_dropdown_sync',
                         reason_notes: `Synced from customer #${cid} reassignment`,
