@@ -82,6 +82,16 @@ fill_remaining_2025.py
 make_paste.py
 merge_*.py
 
+# DevOps autopilot: data-recovery session scratch (queues + one-off scripts).
+# Conservative — only matches obvious transient code/queue artifacts, never .xlsx
+# data deliverables the user may want to keep.
+*_queue.json
+*_queue_*.json
+apply_*.py
+*_tmp.py
+audit*_tmp.py
+build_floorpla*.py
+
 # Stray temp files written by Windows tools
 "C\357\200\272UsersDCAppDataLocalTempcps_stash_out.txt"
 
