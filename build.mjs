@@ -254,7 +254,13 @@ async function rewriteHtml(manifest) {
   // Both are JSON.stringify'd so an empty value renders as a valid `""` literal.
   const sentryDsn = process.env.SENTRY_DSN || '';
   const appRelease = process.env.VERCEL_GIT_COMMIT_SHA || '';
-  const manifestScript = `<script>window.__ASSET_MANIFEST=${JSON.stringify(manifest)};window.__SENTRY_DSN=${JSON.stringify(sentryDsn)};window.__APP_RELEASE=${JSON.stringify(appRelease)};</script>`;
+  // Safe-inline-JSON: JSON.stringify escapes quotes but NOT a literal `</script>`
+  // or bare `<`. An HTML parser terminates the inline script at the first
+  // `</script>` inside the string, which would truncate this block and corrupt
+  // window.__ASSET_MANIFEST + the obs-init globals. Escape `<` to `<` (and
+  // `>` for symmetry against `]]>` / `-->` cases) — fully equivalent for valid JS.
+  const safeJson = (x) => JSON.stringify(x).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+  const manifestScript = `<script>window.__ASSET_MANIFEST=${safeJson(manifest)};window.__SENTRY_DSN=${safeJson(sentryDsn)};window.__APP_RELEASE=${safeJson(appRelease)};</script>`;
   // Replace existing manifest injection if present, or insert before </head>.
   // The regex spans the whole injected block (manifest + observability globals)
   // so re-runs stay idempotent regardless of which globals were present before.

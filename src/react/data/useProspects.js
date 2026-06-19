@@ -13,7 +13,10 @@ async function fetchProspects({ q = '', gua = '', agent = '', sort = 'score', di
     const sb = window.supabase;
     const { data } = sb && sb.auth ? await sb.auth.getSession() : { data: null };
     const token = data && data.session && data.session.access_token;
-    if (!token) throw new Error('not authenticated');
+    // No token yet = TRANSIENT auth-bootstrap state, not a hard failure. Throw a
+    // classified retryable error (409, like the BFF's caller_unresolved race) so
+    // bffRetry retries it and the views treat it as recoverable rather than fatal.
+    if (!token) throw bffError(409, 'prospects');
     const p = new URLSearchParams();
     p.set('limit', String(limit));
     p.set('offset', String(offset));

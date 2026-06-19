@@ -219,11 +219,20 @@ function formatTime(activityDate: string, startTime: string): string {
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
 
-  // Shared-secret guard: only the pg_cron caller (which sends matching
-  // x-reminder-secret header) may trigger the reminder fan-out. Fail closed
-  // (401) if REMINDER_SECRET is unset or the header does not match.
+  // Shared-secret guard: only an authorized cron caller may trigger the fan-out.
+  // Accept EITHER of two secret-gated paths so the documented pg_cron jobs work:
+  //   1. a matching x-reminder-secret header (REMINDER_SECRET), or
+  //   2. Authorization: Bearer <SERVICE_ROLE_KEY> — the header the pg_cron jobs
+  //      in migrations/add_notification_preferences.sql actually send.
+  // Both are secrets, so we still fail closed (401) for unauthenticated callers.
+  // Without (2) the as-documented cron sent only the Bearer header and every
+  // invocation 401'd, so reminders/daily summaries never fired.
   const _secret = Deno.env.get("REMINDER_SECRET") || "";
-  if (!_secret || req.headers.get("x-reminder-secret") !== _secret) {
+  const _authHeader = req.headers.get("authorization") || "";
+  const _secretOk = !!_secret && req.headers.get("x-reminder-secret") === _secret;
+  // Constant-string compare against the service-role bearer the cron sends.
+  const _serviceOk = !!SERVICE_ROLE && _authHeader === `Bearer ${SERVICE_ROLE}`;
+  if (!_secretOk && !_serviceOk) {
     return new Response(JSON.stringify({ error: "unauthorized" }), {
       status: 401, headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });
@@ -410,6 +419,27 @@ Deno.serve(async (req: Request) => {
 
         const hasAnything = myActs.length > 0 || dedupedEvents.length > 0 || birthdayNames.length > 0;
         if (!hasAnything) continue;
+
+        // Server-side dedupe: the daily summary can satisfy the ±WINDOW_MIN
+        // window on two consecutive 5-min cron runs (e.g. 09:58 and 10:03 MYT),
+        // and a separate mode=daily_summary cron can also fire. The notification
+        // `tag` only coalesces on-device, not server resends. Guard on
+        // daily_summary_log keyed by (user_id, summary_date) so each user gets
+        // at most one digest per day. Check-then-mark-before-send so concurrent
+        // runs can't both pass the check; ignore-duplicates upsert is atomic.
+        // Gracefully degrade if daily_summary_log is absent (send WITHOUT the dedup
+        // guarantee rather than 500-ing the whole reminder run) — the table is created
+        // by migrations/daily_summary_log_2026-06-20.sql.
+        try {
+          const sentToday: any[] = await pgSelect("daily_summary_log",
+            `select=user_id&user_id=eq.${userId}&summary_date=eq.${todayMYT}&limit=1`);
+          if (sentToday.length > 0) continue; // already sent today
+          await pgUpsert("daily_summary_log",
+            [{ user_id: userId, summary_date: todayMYT }],
+            "user_id,summary_date");
+        } catch (dedupErr) {
+          console.warn("[reminders] daily_summary_log dedupe unavailable — sending without dedup:", (dedupErr as any)?.message);
+        }
 
         const bodyLines: string[] = [];
 

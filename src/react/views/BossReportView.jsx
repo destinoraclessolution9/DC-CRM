@@ -41,8 +41,11 @@ function NumRow({ idPrefix, g, value, labelWidth }) {
     return (
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
             <label style={{ width: labelWidth, fontSize: '13px', color: 'var(--gray-700)' }}>{g.label}</label>
+            {/* nullish-aware default: a stored 0 is a meaningful value (sold out /
+                zero carryover), so `0 || ''` must NOT blank the field. Only render
+                '' when there is genuinely no saved value (null/undefined). */}
             <input type="number" id={`${idPrefix}-${g.key}`} className="form-control" style={{ width: '110px' }}
-                defaultValue={value || ''} placeholder="0" min="0" />
+                defaultValue={value == null ? '' : value} placeholder="0" min="0" />
         </div>
     );
 }

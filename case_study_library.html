@@ -1023,6 +1023,17 @@
   const btnReset  = document.getElementById('btn-reset');
   const statsEl   = document.getElementById('filter-stats');
 
+  // ── HTML-escape helper (prevents DOM-based XSS from user-typed
+  //    keyword/referral being concatenated into innerHTML chips) ──
+  function esc(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   // ── Core filter function ─────────────────────────────────────
   function updateFilters() {
     const kw       = fKeyword.value.trim().toLowerCase();
@@ -1108,9 +1119,9 @@
 
     // Stats line
     const activeTags = [];
-    if (kw)               activeTags.push('Keyword: "' + fKeyword.value.trim() + '"');
-    if (product !== 'all') activeTags.push('Product: ' + product);
-    if (referral)          activeTags.push('Referral: "' + fReferral.value.trim() + '"');
+    if (kw)               activeTags.push('Keyword: "' + esc(fKeyword.value.trim()) + '"');
+    if (product !== 'all') activeTags.push('Product: ' + esc(product));
+    if (referral)          activeTags.push('Referral: "' + esc(fReferral.value.trim()) + '"');
 
     if (activeTags.length === 0) {
       statsEl.innerHTML = 'Showing all <strong>' + totalRows + '</strong> entries across 5 tables.';
@@ -1195,9 +1206,9 @@
 
     // Stats line
     const tags = [];
-    if (kw)                tags.push('Keyword: "' + fKeyword.value.trim() + '"');
-    if (product !== 'all') tags.push('Product: ' + product);
-    if (referral)          tags.push('Referral: "' + fReferral.value.trim() + '"');
+    if (kw)                tags.push('Keyword: "' + esc(fKeyword.value.trim()) + '"');
+    if (product !== 'all') tags.push('Product: ' + esc(product));
+    if (referral)          tags.push('Referral: "' + esc(fReferral.value.trim()) + '"');
 
     if (tags.length === 0) {
       statsEl.innerHTML = 'Showing all <strong>' + totalRows + '</strong> entries across 5 tables.';

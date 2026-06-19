@@ -38,10 +38,16 @@ export function ProtectionBar({ prospect, max = DEFAULT_WINDOW_DAYS }) {
   // Recompute only when the prospect identity or window changes — the bridge
   // call is cheap but we avoid re-deriving on unrelated parent re-renders.
   const days = useMemo(() => {
-    const raw = app().calculateProtectionDays?.(prospect);
+    // Prefer the live app calculation; fall back to the row's own field when the
+    // bridge is absent (gallery / early-render / offline) so we don't render a
+    // false "0d / expired" for a prospect that actually has days remaining.
+    const raw =
+      app().calculateProtectionDays?.(prospect) ??
+      prospect?.protection_days_remaining;
     const n = Number(raw);
     return Number.isFinite(n) && n > 0 ? n : 0;
-  }, [prospect, windowDays]);
+    // windowDays is not read here, so it's intentionally not a dependency.
+  }, [prospect]);
 
   const pct = clamp((days / windowDays) * 100, 0, 100);
   const fillColor = toneFor(days);

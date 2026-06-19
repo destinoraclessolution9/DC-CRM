@@ -10,7 +10,10 @@ const SIZE_PX = { sm: 24, md: 36, lg: 48 };
  * Empty/whitespace name => '?' so the circle is never blank.
  */
 function initialsOf(name) {
-  const words = (name || '').trim().split(/\s+/).filter(Boolean);
+  // Coerce to string at entry: a truthy non-string (e.g. a numeric id passed as
+  // name) would pass the `name ||` guard and then throw on `.trim()` (not a
+  // Number method) during render. String() handles numbers/null/undefined safely.
+  const words = String(name == null ? '' : name).trim().split(/\s+/).filter(Boolean);
   if (words.length === 0) return '?';
   const first = words[0][0] || '';
   const last = words.length > 1 ? words[words.length - 1][0] || '' : '';

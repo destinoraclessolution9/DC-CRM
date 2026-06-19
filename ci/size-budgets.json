@@ -3,7 +3,7 @@
   "data.js": 3950,
   "data-helpers.js": 130,
   "ui.js": 600,
-  "app-init.js": 630,
+  "app-init.js": 712,
   "auth.js": 119,
   "supabase-init.js": 67,
   "build.mjs": 290,

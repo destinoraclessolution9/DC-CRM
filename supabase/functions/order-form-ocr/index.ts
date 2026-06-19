@@ -21,6 +21,9 @@ const GEMINI_API_KEY: string = Deno.env.get("GEMINI_API_KEY") || "";
 const GEMINI_MODEL = "gemini-2.5-flash";
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
+// Only allow trusted image MIME types through to Gemini (mirror cps-form-ocr).
+const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"];
+
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -258,19 +261,26 @@ async function callGemini(imageBase64: string, mimeType: string, hintFormType?: 
     body: JSON.stringify(body),
   });
 
+  // Log upstream detail server-side only; throw a generic error so raw Gemini
+  // response fragments are never returned to the client (mirror cps-form-ocr).
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Gemini API error ${res.status}: ${errText.slice(0, 500)}`);
+    console.error(`[order-form-ocr] Gemini API error ${res.status}:`, errText.slice(0, 500));
+    throw new Error("upstream_error");
   }
 
   const data = await res.json();
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error("Gemini returned no text: " + JSON.stringify(data).slice(0, 500));
+  if (!text) {
+    console.error("[order-form-ocr] Gemini returned no text:", JSON.stringify(data).slice(0, 500));
+    throw new Error("upstream_error");
+  }
 
   try {
     return JSON.parse(text);
   } catch (e) {
-    throw new Error("Gemini returned non-JSON: " + text.slice(0, 500));
+    console.error("[order-form-ocr] Gemini returned non-JSON:", text.slice(0, 500));
+    throw new Error("upstream_error");
   }
 }
 
@@ -298,6 +308,14 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: "bad_request", detail: String(e?.message || e) }, 400);
   }
 
+  // Reject any non-image MIME type before forwarding to Gemini (mirror cps-form-ocr).
+  const normalizedMime = mimeType.split(";")[0].trim().toLowerCase();
+  if (!ALLOWED_MIME_TYPES.includes(normalizedMime)) {
+    console.error("[order-form-ocr] rejected mime type:", mimeType);
+    return json({ ok: false, error: "unsupported_image_type" }, 400);
+  }
+  mimeType = normalizedMime;
+
   const approxBytes = (imageBase64.length * 3) / 4;
   if (approxBytes > 8 * 1024 * 1024) {
     return json({ ok: false, error: "image_too_large", detail: "Max 8 MB. Try a smaller photo." }, 413);
@@ -308,6 +326,8 @@ Deno.serve(async (req: Request) => {
     const detectedType = result?.fields?.form_type || "unknown";
     return json({ ok: true, form_type: detectedType, ...result });
   } catch (e: any) {
-    return json({ ok: false, error: "ocr_failed", detail: String(e?.message || e) }, 500);
+    // Log detail server-side; return only a generic error to the client (mirror cps-form-ocr).
+    console.error("[order-form-ocr] ocr failed:", String(e?.message || e));
+    return json({ ok: false, error: "ocr_failed" }, 500);
   }
 });

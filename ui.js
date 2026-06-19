@@ -42,29 +42,38 @@ window.UI = (() => {
     };
 
     // --- Button Loading State ---
-    const _loadingBtns = new Map(); // btn element -> original innerHTML
-    let _loadTimer = null;
+    // Per-button entry: { origHTML, timerId }. Each loading button owns its own
+    // 10s safety-net deadline so staggered clicks can't reset/extend another
+    // button's auto-restore (a single shared timer let the earliest stuck button
+    // stay disabled far past 10s).
+    const _loadingBtns = new Map(); // btn element -> { origHTML, timerId }
+
+    // Restore a single button and clear its own timer.
+    const _endBtnLoad = (btn) => {
+        const entry = _loadingBtns.get(btn);
+        if (!entry) return;
+        if (entry.timerId) clearTimeout(entry.timerId);
+        _loadingBtns.delete(btn);
+        if (btn.isConnected) {
+            btn.disabled = false;
+            btn.innerHTML = entry.origHTML;
+        }
+    };
 
     const _startBtnLoad = (btn) => {
         if (!btn || btn.disabled || _loadingBtns.has(btn)) return;
-        _loadingBtns.set(btn, btn.innerHTML);
+        const origHTML = btn.innerHTML;
         btn.disabled = true;
         const label = btn.textContent.trim().replace(/\s+/g, ' ');
         btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${label}`;
-        // Safety net: auto-restore after 10s
-        if (_loadTimer) clearTimeout(_loadTimer);
-        _loadTimer = setTimeout(_endAllBtnLoads, 10000);
+        // Safety net: auto-restore THIS button after 10s on its own deadline.
+        const timerId = setTimeout(() => _endBtnLoad(btn), 10000);
+        _loadingBtns.set(btn, { origHTML, timerId });
     };
 
     const _endAllBtnLoads = () => {
-        if (_loadTimer) { clearTimeout(_loadTimer); _loadTimer = null; }
-        _loadingBtns.forEach((origHTML, btn) => {
-            if (btn.isConnected) {
-                btn.disabled = false;
-                btn.innerHTML = origHTML;
-            }
-        });
-        _loadingBtns.clear();
+        // Snapshot keys first since _endBtnLoad mutates the map during iteration.
+        Array.from(_loadingBtns.keys()).forEach(_endBtnLoad);
     };
 
     // Global capture-phase listener: intercepts clicks on action buttons before onclick fires
@@ -273,7 +282,12 @@ window.UI = (() => {
     };
 
     // --- Confirm dialog ---
-    const confirm = (title, message, onConfirm) => {
+    // _confirm wires up the callback + buttons; bodyHtml is the already-built
+    // (and already-escaped where appropriate) modal body so showModal renders it
+    // verbatim. Callers go through confirm() (escapes plain text by default) or
+    // confirmHtml() (intentional markup — caller is responsible for escaping any
+    // interpolated user data with escapeHtml).
+    const _confirm = (title, bodyHtml, onConfirm) => {
         window._uiConfirmCb = async () => {
             hideModal();
             delete window._uiConfirmCb;
@@ -288,13 +302,25 @@ window.UI = (() => {
         };
         showModal(
             title,
-            `<p style="margin:0;line-height:1.6;">${message}</p>`,
+            `<p style="margin:0;line-height:1.6;">${bodyHtml}</p>`,
             [
                 { label: 'Confirm', type: 'primary', action: 'window._uiConfirmCb && window._uiConfirmCb()' },
                 { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }
             ]
         );
     };
+
+    // Plain-text confirm: message is HTML-escaped so callers can pass raw
+    // user-derived text (prospect name, note text) without an XSS sink. This is
+    // the safe default — nearly all confirm messages are plain text.
+    const confirm = (title, message, onConfirm) =>
+        _confirm(title, escapeHtml(message), onConfirm);
+
+    // Markup confirm: message is interpolated as raw HTML. Use ONLY when the
+    // caller intentionally includes markup (e.g. <strong>) and has escaped every
+    // interpolated value with UI.escapeHtml() itself.
+    const confirmHtml = (title, message, onConfirm) =>
+        _confirm(title, String(message ?? ''), onConfirm);
 
     // --- Formatters ---
     const formatDate = (d) => {
@@ -431,6 +457,24 @@ window.UI = (() => {
     // ── Vanilla UI kit: escaped string-builders that REUSE existing classes ──
     // Every interpolation routes through escapeHtml; onClick strings are the
     // caller's responsibility (build them with requireNumericId / escJsAttr).
+    //
+    // _onclickAttr builds the onclick="" attribute for a kit-rendered button.
+    // CONTRACT (loud reminder): o.onClick is a raw JS expression and is NOT a
+    // text sink — the CALLER must escape every interpolated user value with
+    // escJsAttr()/requireNumericId() before building the string. This helper
+    // only HTML-escapes the four attribute-breaking characters (" & < >) so a
+    // forwarded value can't break out of the attribute / confuse the HTML
+    // parser. It deliberately does NOT touch ' or \ — those are legitimate JS
+    // string syntax in onClick and rewriting them would corrupt valid handlers.
+    const _onclickAttr = (onClick) => {
+        if (!onClick) return '';
+        const safe = String(onClick)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+        return ` onclick="${safe}"`;
+    };
     const _BADGE_TONES = {
         neutral: 'color:var(--text-secondary);background:var(--bg-sunken);',
         info:    'color:var(--info-text);background:rgba(31,111,178,0.10);',
@@ -447,7 +491,7 @@ window.UI = (() => {
             if (o.size === 'sm') cls.push('btn-sm');
             if (o.size === 'lg') cls.push('btn-lg');
             if (o.fullWidth) cls.push('btn-block');
-            const onclick = o.onClick ? ` onclick="${String(o.onClick).replace(/"/g, '&quot;')}"` : '';
+            const onclick = _onclickAttr(o.onClick);
             const aria = o.ariaLabel ? ` aria-label="${escapeHtml(o.ariaLabel)}"` : '';
             const busy = o.loading ? ' aria-busy="true"' : '';
             const dis = (o.disabled || o.loading) ? ' disabled' : '';
@@ -460,7 +504,7 @@ window.UI = (() => {
         iconButton(o = {}) {
             const aria = o.ariaLabel || o['aria-label'];
             if (!aria) throw new Error('UI.kit.iconButton: ariaLabel is required for icon-only buttons');
-            const onclick = o.onClick ? ` onclick="${String(o.onClick).replace(/"/g, '&quot;')}"` : '';
+            const onclick = _onclickAttr(o.onClick);
             const dis = o.disabled ? ' disabled' : '';
             const extra = o.className ? ' ' + escapeHtml(o.className) : '';
             return `<button class="btn-icon${extra}" type="button" aria-label="${escapeHtml(aria)}"${onclick}${dis}><i class="${escapeHtml(o.icon || '')}" aria-hidden="true"></i></button>`;
@@ -528,6 +572,7 @@ window.UI = (() => {
         showModal,
         hideModal,
         confirm,
+        confirmHtml,
         formatDate,
         formatNumber,
         formatCurrency,

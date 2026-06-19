@@ -12,7 +12,9 @@ export async function fetchProspectsPage({ params = {}, pageParam = 0, limit = 5
     const sb = window.supabase;
     const sess = sb && sb.auth ? await sb.auth.getSession() : { data: null };
     const token = sess && sess.data && sess.data.session && sess.data.session.access_token;
-    if (!token) throw new Error('not authenticated');
+    // No token yet = TRANSIENT auth-bootstrap state, not a hard failure — throw a
+    // retryable bff error so the list shows a spinner/retry, not a fatal state.
+    if (!token) throw bffError(409, 'prospects');
     const p = new URLSearchParams();
     p.set('limit', String(limit));
     p.set('offset', String(pageParam || 0));

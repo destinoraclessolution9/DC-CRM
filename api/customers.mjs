@@ -115,8 +115,11 @@ export default async function handler(req, res) {
   if (Array.isArray(visible) && visible.length === 0) return send(409, { error: 'caller_unresolved' });
 
   // (3) Service-role query — scoped + searched + offset-paginated (full_name asc,
-  //     matching the customers list). count=planned gives a cheap total for the
-  //     page-number UI (returned in the Content-Range header).
+  //     matching the customers list). count=exact gives the ACTUAL matching total
+  //     (returned in the Content-Range header) so the page-number UI shows the
+  //     right number of pages — count=planned is only a planner estimate that can
+  //     diverge on filtered queries / un-ANALYZEd tables, leaving empty/unreachable
+  //     last pages. One extra count scan is acceptable for this bounded list.
   const params = new URLSearchParams();
   params.set('select', LIST_COLUMNS);
   params.set('order', 'full_name.asc');
@@ -126,18 +129,22 @@ export default async function handler(req, res) {
   if (gua) params.append('ming_gua', `eq.${gua}`);
   if (type === 'VIP') params.append('lifetime_value', 'gte.5000');
   if (q) {
-    const safe = q.replace(/[(),*]/g, ' ').trim();
+    // Strip PostgREST grammar chars `( ) , *` (filter-injection guard), THEN escape
+    // SQL LIKE metacharacters `%` and `_` so a literal search for "100%" or "a_b"
+    // matches literally instead of being treated as ilike wildcards (% = any run,
+    // _ = any single char). PostgREST ilike honors backslash escaping.
+    const safe = q.replace(/[(),*]/g, ' ').replace(/[%_]/g, (m) => '\\' + m).trim();
     if (safe) params.append('or', `(full_name.ilike.*${safe}*,nickname.ilike.*${safe}*,phone.ilike.*${safe}*,email.ilike.*${safe}*)`);
   }
 
   let rows, count = 0;
   try {
     const dataRes = await fetchT(`${SUPABASE_URL}/rest/v1/customers?${params.toString()}`, {
-      headers: svc({ Prefer: 'count=planned' }),
+      headers: svc({ Prefer: 'count=exact' }),
     });
     if (!dataRes.ok) return send(503, { error: 'query_unavailable', status: dataRes.status });
     rows = await dataRes.json();
-    // Content-Range: "0-49/1234"  (the part after '/' is the planned total)
+    // Content-Range: "0-49/1234"  (the part after '/' is the exact total)
     const cr = dataRes.headers.get('content-range') || '';
     const total = cr.split('/')[1];
     count = (total && total !== '*') ? (parseInt(total, 10) || 0) : (Array.isArray(rows) ? rows.length : 0);
@@ -175,7 +182,12 @@ function rateLimited(req) {
   try {
     if (RL_MAX <= 0) return false; // disabled
     const xff = String((req.headers && (req.headers['x-forwarded-for'] || req.headers['x-real-ip'])) || '');
-    const ip = (xff.split(',')[0] || '').trim() || 'unknown';
+    const ip = (xff.split(',')[0] || '').trim();
+    // No forwarded IP (internal call, misconfigured proxy, or a runtime that
+    // doesn't inject XFF) → fail-open and skip limiting for THIS request rather
+    // than collapsing all such traffic into one shared 'unknown' counter that
+    // would throttle unrelated callers together. Limiter stays best-effort.
+    if (!ip) return false;
     const now = Date.now();
     const arr = (_rlHits.get(ip) || []).filter((t) => now - t < RL_WINDOW_MS);
     arr.push(now);

@@ -25,6 +25,11 @@ const Auth = (() => {
         if (_topBreached.has(s.toLowerCase())) {
             errors.push('This password is in the most-commonly-breached list.');
         }
+        // breachCheckRan tells the caller whether the HIBP lookup actually
+        // completed: false when not requested, skipped (local errors present),
+        // or when the network/HTTP request failed. A non-OK status (e.g. 429
+        // rate-limit) counts as "did not run" — it is NOT treated as "clean".
+        let breachCheckRan = false;
         if (opts.checkBreach && errors.length === 0) {
             try {
                 const buf = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(s));
@@ -32,14 +37,17 @@ const Auth = (() => {
                 const prefix = hex.slice(0, 5), suffix = hex.slice(5);
                 const res = await fetch(`https://api.pwnedpasswords.com/range/${prefix}`, { cache: 'no-store' });
                 if (res.ok) {
+                    breachCheckRan = true; // only a 2xx response means the check truly ran
                     const body = await res.text();
                     if (body.split('\n').some(l => l.startsWith(suffix))) {
                         errors.push('This password has appeared in a known breach. Choose another.');
                     }
                 }
-            } catch (_) { /* network issue — skip silently */ }
+                // res.ok === false (e.g. 429/5xx): leave breachCheckRan false so the
+                // caller can distinguish "not breached" from "could not verify".
+            } catch (_) { /* network issue — breachCheckRan stays false (non-fatal) */ }
         }
-        return { ok: errors.length === 0, errors };
+        return { ok: errors.length === 0, errors, breachCheckRan };
     };
 
     const getCurrentUser = async () => {
@@ -76,18 +84,30 @@ const Auth = (() => {
 
     // Rate-limited password reset: 1 request per email per hour (client-side
     // guard; the server should also enforce this via Supabase Auth settings).
-    const _resetAttempts = new Map(); // email -> lastAttemptMs
+    const _resetAttempts = new Map(); // normalized-email -> lastAttemptMs
+    const _RESET_WINDOW_MS = 60 * 60 * 1000;
     const requestPasswordReset = async (email) => {
         const now = Date.now();
-        const last = _resetAttempts.get(email) || 0;
-        if (now - last < 60 * 60 * 1000) {
+        // Normalize the key: trim + lowercase so 'User@Example.com ' and
+        // 'user@example.com' share one throttle bucket (Supabase normalizes
+        // server-side, so these all hit the same real mailbox).
+        const key = String(email ?? '').trim().toLowerCase();
+        // Prune expired entries so the Map can't grow unbounded over a
+        // long-lived SPA tab.
+        for (const [k, ts] of _resetAttempts) {
+            if (now - ts >= _RESET_WINDOW_MS) _resetAttempts.delete(k);
+        }
+        const last = _resetAttempts.get(key) || 0;
+        if (now - last < _RESET_WINDOW_MS) {
             throw new Error('A reset link was already sent. Please wait an hour before trying again.');
         }
-        _resetAttempts.set(email, now);
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
             redirectTo: `${window.location.origin}/#reset-password`
         });
         if (error) throw error;
+        // Record the attempt ONLY after a successful send, so a transient/offline
+        // failure does not lock the user out of reset for an hour.
+        _resetAttempts.set(key, now);
     };
 
     return { getCurrentUser, login, logout, logoutAll, requestPasswordReset, validatePasswordStrength };

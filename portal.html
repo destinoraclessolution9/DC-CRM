@@ -216,7 +216,8 @@ async function renderActivities() {
 async function renderPurchases() {
     const container = document.getElementById('tab-content');
     container.innerHTML = '<p style="color:#6b7280; padding:16px 0;">Loading...</p>';
-    const { data } = await supabase.from('purchases').select('*').eq('customer_id', portalCustomer.id).order('purchase_date', { ascending: false });
+    // purchases table column is `date`, not `purchase_date` — ordering by a non-existent column 42703-errors → empty tab
+    const { data } = await supabase.from('purchases').select('*').eq('customer_id', portalCustomer.id).order('date', { ascending: false });
     if (!data || data.length === 0) {
         container.innerHTML = `<div class="empty-state"><i class="fas fa-shopping-bag"></i><p>No purchases on record.</p></div>`;
         return;
@@ -226,9 +227,9 @@ async function renderPurchases() {
             <thead><tr><th>Item</th><th>Amount</th><th>Date</th><th>Status</th></tr></thead>
             <tbody>${data.map(p => `
                 <tr>
-                    <td><strong>${esc(p.product_name || p.package_name || 'Service')}</strong></td>
+                    <td><strong>${esc(p.item || 'Service')}</strong></td>
                     <td style="font-weight:600;">RM ${esc((p.amount||0).toLocaleString())}</td>
-                    <td>${esc(p.purchase_date || '—')}</td>
+                    <td>${esc(p.date || '—')}</td>
                     <td><span class="badge badge-green">${esc(p.status || 'Completed')}</span></td>
                 </tr>
             `).join('')}</tbody>

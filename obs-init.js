@@ -57,6 +57,10 @@
         var s = document.createElement('script');
         s.src = src;
         s.crossOrigin = 'anonymous';
+        // SRI: pin the exact 7.120.0 bundle so a compromised/MITM'd CDN response
+        // can't execute arbitrary JS in the authed CRM origin. Hash computed from
+        // the pinned bundle.tracing.min.js (sha384). Must be updated if `src` bumps.
+        s.integrity = 'sha384-qcwbea4ny6qhrhRBPu+pNH1T7WSXwcaxP5mUNeYCnHiJ5BUfyFyJzB41byw7i8BV';
         s.onload = function () {
             try {
                 if (!window.Sentry || typeof window.Sentry.init !== 'function') return;

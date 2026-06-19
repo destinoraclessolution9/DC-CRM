@@ -15,17 +15,24 @@ export function useWindowedRows({ scrollRef, rowCount, rowHeight = 48, overscan 
     const [range, setRange] = useState({ start: 0, end: Math.min(rowCount, 30) });
     const rangeRef = useRef(range);
     rangeRef.current = range;
+    // Read rowCount through a ref inside recompute so a page append (rowCount
+    // change) does NOT change recompute's identity — otherwise the subscribe
+    // effect below tears down + re-adds the scroll listener / ResizeObserver on
+    // every page load, churning during fast scroll and dropping scroll events.
+    const rowCountRef = useRef(rowCount);
+    rowCountRef.current = rowCount;
 
     const recompute = useCallback(() => {
         const el = scrollRef.current;
         if (!el) return;
+        const count = rowCountRef.current;
         const viewport = el.clientHeight || 600;
         const start = Math.max(0, Math.floor(el.scrollTop / rowHeight) - overscan);
         const visible = Math.ceil(viewport / rowHeight) + overscan * 2;
-        const end = Math.min(rowCount, start + visible);
+        const end = Math.min(count, start + visible);
         const prev = rangeRef.current;
         if (prev.start !== start || prev.end !== end) setRange({ start, end });
-    }, [scrollRef, rowCount, rowHeight, overscan]);
+    }, [scrollRef, rowHeight, overscan]);
 
     useEffect(() => {
         const el = scrollRef.current;

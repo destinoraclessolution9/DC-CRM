@@ -29,6 +29,29 @@ function json(body: unknown, status = 200) {
   });
 }
 
+// Build a curated client response from a GoTrue admin result. The raw provider
+// `body` can carry internal error messages, validation detail, and identifiers;
+// spreading it into the CORS:* response leaked implementation detail. Return
+// only ok/action/status plus a sanitized error code, and log the full body
+// server-side for diagnostics.
+function sanitizeAuthResult(
+  action: string,
+  result: { ok: boolean; status: number; body?: any },
+): Record<string, unknown> {
+  if (!result.ok) {
+    console.error(`admin-auth-ops ${action} failed:`, JSON.stringify(result.body ?? null));
+  }
+  const out: Record<string, unknown> = { ok: result.ok, action, status: result.status };
+  if (!result.ok) {
+    // Surface a short, non-sensitive error code (e.g. GoTrue's error_code /
+    // error / msg field) without echoing the entire provider body.
+    const b = result.body || {};
+    const code = b.error_code || b.code || b.error || b.msg || b.message;
+    out.error = code ? String(code).slice(0, 200) : "auth_admin_error";
+  }
+  return out;
+}
+
 // Verify the caller is an admin by using their JWT to look up their own row
 // in public.users. Level 1 = Super Admin, 2 = Marketing Manager.
 async function requireAdmin(req: Request): Promise<{ ok: true; userId: string } | { ok: false; reason: string; status: number }> {
@@ -57,23 +80,65 @@ async function requireAdmin(req: Request): Promise<{ ok: true; userId: string } 
   const me = Array.isArray(rows) ? rows[0] : null;
   if (!me) return { ok: false, reason: "not_in_crm", status: 403 };
 
-  const role = String(me.role || "").toLowerCase();
-  const isAdmin = role.includes("super admin") || role.includes("marketing manager") || role.includes("system admin");
-  if (!isAdmin) return { ok: false, reason: "not_admin", status: 403 };
+  // Derive the numeric role level the same way the front-end does
+  // (see _getUserLevel in script.js) instead of substring-matching the role
+  // string. Substring `includes()` granted full service-role auth powers to any
+  // role merely CONTAINING 'super admin'/'marketing manager' (e.g. a future
+  // 'Assistant Marketing Manager'). Gate strictly on level 1-2.
+  const level = deriveRoleLevel(me.role);
+  if (!(level >= 1 && level <= 2)) return { ok: false, reason: "not_admin", status: 403 };
 
   return { ok: true, userId: String(me.id) };
 }
 
+// Mirror of script.js _getUserLevel: parse "Level N" first, then fall back to
+// an explicit exact-match map of named roles. Anything unrecognised => 99 (deny).
+function deriveRoleLevel(roleRaw: unknown): number {
+  if (!roleRaw) return 99;
+  const role = String(roleRaw);
+  const m = role.match(/Level\s+(\d+)\b/i);
+  if (m) return parseInt(m[1], 10);
+  const r = role.toLowerCase();
+  if (r === "super_admin" || r === "admin") return 1;
+  if (r === "marketing_manager") return 2;
+  if (r === "manager") return 4;
+  if (r === "team_leader") return 5;
+  if (r === "consultant") return 7;
+  if (r === "agent") return 10;
+  if (r === "stock_take_staff" || r === "stock_take") return 15;
+  if (r === "customer") return 13;
+  if (r === "referrer") return 14;
+  const raw = role.trim();
+  if (raw === "传福大使") return 12;
+  if (raw === "改命客户") return 13;
+  if (raw === "准传福大使") return 14;
+  return 99;
+}
+
 async function findAuthUserByEmail(email: string): Promise<{ id: string } | null> {
-  const res = await fetch(
-    `${SUPABASE_URL}/auth/v1/admin/users?per_page=1000`,
-    { headers: { "apikey": SERVICE_ROLE, "Authorization": `Bearer ${SERVICE_ROLE}` } },
-  );
-  if (!res.ok) return null;
-  const data = await res.json();
-  const list = Array.isArray(data?.users) ? data.users : [];
-  const match = list.find((u: any) => String(u?.email || "").toLowerCase() === email.toLowerCase());
-  return match?.id ? { id: String(match.id) } : null;
+  const target = email.toLowerCase();
+  const PER_PAGE = 1000;
+
+  // The GoTrue admin list endpoint paginates; a single page only contains the
+  // first `per_page` users. Capping at the first page silently returns false
+  // 'not found' for any account beyond it (which made create/reset/delete
+  // misbehave past 1000 auth users). Walk every page until the email is found
+  // or the list is exhausted. A small safety cap prevents an unbounded loop if
+  // the backend never reports an empty page.
+  for (let page = 1; page <= 1000; page++) {
+    const res = await fetch(
+      `${SUPABASE_URL}/auth/v1/admin/users?page=${page}&per_page=${PER_PAGE}`,
+      { headers: { "apikey": SERVICE_ROLE, "Authorization": `Bearer ${SERVICE_ROLE}` } },
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const list = Array.isArray(data?.users) ? data.users : [];
+    const match = list.find((u: any) => String(u?.email || "").toLowerCase() === target);
+    if (match?.id) return { id: String(match.id) };
+    // Exhausted: a short (or empty) page means there are no further pages.
+    if (list.length < PER_PAGE) break;
+  }
+  return null;
 }
 
 async function createAuthUser(email: string, password: string, fullName?: string) {
@@ -140,10 +205,10 @@ Deno.serve(async (req: Request) => {
       const existing = await findAuthUserByEmail(email);
       if (existing) {
         const upd = await updateAuthPassword(existing.id, password);
-        return json({ ok: upd.ok, action: "updated_existing", status: upd.status, ...upd.body }, upd.ok ? 200 : 502);
+        return json(sanitizeAuthResult("updated_existing", upd), upd.ok ? 200 : 502);
       }
       const created = await createAuthUser(email, password, payload?.full_name);
-      return json({ ok: created.ok, action: "created", status: created.status, ...created.body }, created.ok ? 200 : 502);
+      return json(sanitizeAuthResult("created", created), created.ok ? 200 : 502);
     }
 
     if (op === "update-password" || op === "reset-password") {
@@ -152,12 +217,14 @@ Deno.serve(async (req: Request) => {
 
       const existing = await findAuthUserByEmail(email);
       if (!existing) {
-        // Create account on the fly so admin-triggered resets also seed missing auth rows.
-        const created = await createAuthUser(email, newPassword, payload?.full_name);
-        return json({ ok: created.ok, action: "created_on_reset", status: created.status, ...created.body }, created.ok ? 200 : 502);
+        // Do NOT mint a new account on reset. A 'reset' silently becoming a
+        // 'create' (on a typo'd email or a lookup miss) bypasses the create-user
+        // path and any invite/verification step. Resetting a non-existent user
+        // is a clean 404; account creation must go through op:'create-user'.
+        return json({ ok: false, action: "not_found", error: "user_not_found" }, 404);
       }
       const upd = await updateAuthPassword(existing.id, newPassword);
-      return json({ ok: upd.ok, action: "updated", status: upd.status, ...upd.body }, upd.ok ? 200 : 502);
+      return json(sanitizeAuthResult("updated", upd), upd.ok ? 200 : 502);
     }
 
     if (op === "delete-auth-user") {

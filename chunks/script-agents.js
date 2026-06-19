@@ -1411,7 +1411,9 @@ const resetAgentPassword = async (agentId) => {
     const agent = await AppDataStore.getById('users', agentId);
     if (!agent) return;
     const newPassword = generatePassword();
-    UI.confirm(
+    // confirmHtml (not confirm): this message intentionally contains <strong> markup;
+    // confirm() now HTML-escapes by default (full_name is already escaped above).
+    UI.confirmHtml(
         'Reset Password',
         `Generate a new temporary password for <strong>${escapeHtml(agent.full_name)}</strong>? They will need to change it on next login.`,
         async () => {

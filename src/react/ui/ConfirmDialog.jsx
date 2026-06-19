@@ -19,6 +19,7 @@ export function ConfirmDialog({
   confirmLabel = 'Confirm',
   cancelLabel = 'Cancel',
   onConfirm,
+  onError,
   tone = 'danger',
 }) {
   // Tracks the in-flight confirm so the button can show a spinner and
@@ -31,11 +32,18 @@ export function ConfirmDialog({
     try {
       await onConfirm?.();
       onClose?.();
+    } catch (e) {
+      // A rejecting onConfirm (async Supabase delete/save: RLS denial /
+      // "Failed to fetch") would otherwise escape as an unhandledrejection with
+      // no user feedback. Surface it, keep the dialog OPEN (don't call onClose),
+      // and let the user retry or cancel.
+      if (typeof onError === 'function') onError(e);
+      else window.UI?.toast?.error?.('Action failed. Please try again.');
     } finally {
       // Reset even if onConfirm threw, so the dialog stays usable.
       setPending(false);
     }
-  }, [pending, onConfirm, onClose]);
+  }, [pending, onConfirm, onClose, onError]);
 
   // Don't allow dismissing (Esc / overlay) while the confirm is settling.
   const handleClose = useCallback(() => {

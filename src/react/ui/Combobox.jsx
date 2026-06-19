@@ -12,6 +12,10 @@ import { Spinner } from './Spinner.jsx';
  *   id           — optional input id (else auto via useId)
  *   label        — field label (wired to the input via htmlFor)
  *   value        — controlled selected value (string | number | null)
+ *   valueLabel   — display label for the controlled `value` (so an edit form
+ *                  pre-populated from saved data shows the selected label
+ *                  instead of a blank input). Mirrored into the visible text
+ *                  whenever `value`/`valueLabel` change and the input isn't focused.
  *   onChange     — called with the selected option's `value` on selection
  *   loadOptions  — (query, { signal, limit, offset }) => Promise<{ items: [{ value, label }] }>
  *   placeholder  — input placeholder
@@ -33,6 +37,7 @@ export const Combobox = forwardRef(function Combobox(
     id: idProp,
     label,
     value,
+    valueLabel,
     onChange,
     loadOptions,
     placeholder,
@@ -172,6 +177,21 @@ export const Combobox = forwardRef(function Combobox(
 
   // Tear down any pending request/timer on unmount.
   useEffect(() => cancelInFlight, [cancelInFlight]);
+
+  // Mirror the controlled `value`'s label into the visible input. Without this,
+  // a Combobox mounted with a pre-existing `value` (an edit form pre-populated
+  // from saved data) renders blank because `query` only changes on typing/select.
+  // Only sync while the input is NOT focused so we never clobber what the user is
+  // actively typing; when `value` is cleared, clear the displayed text too.
+  useEffect(() => {
+    if (innerRef.current && document.activeElement === innerRef.current) return;
+    if (value == null) {
+      setQuery('');
+    } else if (valueLabel != null) {
+      setQuery(String(valueLabel));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, valueLabel]);
 
   // Click-outside closes the popup (mousedown so it beats option onClick? — no:
   // option selection uses onMouseDown to commit before the input blurs, and the

@@ -176,7 +176,11 @@ function rateLimited(req) {
   try {
     if (RL_MAX <= 0) return false; // disabled
     const xff = String((req.headers && (req.headers['x-forwarded-for'] || req.headers['x-real-ip'])) || '');
-    const ip = (xff.split(',')[0] || '').trim() || 'unknown';
+    const ip = (xff.split(',')[0] || '').trim();
+    // No forwarded IP (internal call / misconfigured proxy / runtime without it):
+    // skip rate limiting rather than collapsing all such traffic into one shared
+    // 'unknown' counter that would throttle every IP-less request together.
+    if (!ip) return false;
     const now = Date.now();
     const arr = (_rlHits.get(ip) || []).filter((t) => now - t < RL_WINDOW_MS);
     arr.push(now);

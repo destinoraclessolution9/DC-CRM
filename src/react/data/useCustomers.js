@@ -13,7 +13,9 @@ async function fetchCustomers({ q = '', gua = '', type = '', limit = 50, offset 
     const sb = window.supabase;
     const { data } = sb && sb.auth ? await sb.auth.getSession() : { data: null };
     const token = data && data.session && data.session.access_token;
-    if (!token) throw new Error('not authenticated');
+    // No token yet = TRANSIENT auth-bootstrap state, not a hard failure — throw a
+    // retryable bff error so the table shows a spinner/retry, not a fatal state.
+    if (!token) throw bffError(409, 'customers');
     const p = new URLSearchParams();
     p.set('limit', String(limit));
     p.set('offset', String(offset));

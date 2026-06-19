@@ -49,6 +49,16 @@ async function pgPatch(table: string, qs: string, body: object): Promise<void> {
     await pgFetch(`${table}?${qs}`, { method: "PATCH", body: JSON.stringify(body) });
 }
 
+// Compare-and-set PATCH: returns the rows actually updated (via return=representation).
+// Used to atomically claim a touchpoint so two concurrent invocations can't both send.
+async function pgPatchReturning<T>(table: string, qs: string, body: object): Promise<T[]> {
+    return (await pgFetch(`${table}?${qs}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+        headers: { "Prefer": "return=representation" },
+    })) || [];
+}
+
 function interpolate(template: string, vars: Record<string, string>): string {
     return template.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? `{${k}}`);
 }
@@ -106,6 +116,25 @@ Deno.serve(async (req: Request) => {
             );
         }
 
+        // Atomically claim the touchpoint to prevent double-send (race fix).
+        // Two concurrent invocations (cron + manual button, or a double-click) could both
+        // pass the pending/overdue check above and both call the WhatsApp API. The status
+        // CHECK constraint only allows pending/done/skipped/snoozed/overdue/auto_sent (NO
+        // 'sending'), so we claim straight to the terminal 'auto_sent' with a conditional
+        // WHERE — exactly one invocation wins; whatsapp_message_id stays NULL until the send
+        // actually completes (and the claim is reverted on failure so it can be retried).
+        const claimed = await pgPatchReturning<any>(
+            "journey_touchpoints",
+            `id=eq.${touchpoint_id}&status=in.(pending,overdue)&select=id`,
+            { status: "auto_sent" }
+        );
+        if (claimed.length === 0) {
+            return new Response(
+                JSON.stringify({ ok: false, error: "Touchpoint already being processed" }),
+                { headers: { ...CORS, "Content-Type": "application/json" }, status: 409 }
+            );
+        }
+
         // Resolve entity (prospect or customer) for phone + name
         let phone = "", name = "";
         if (tp.prospect_id) {
@@ -124,20 +153,37 @@ Deno.serve(async (req: Request) => {
             name  = c?.full_name || "there";
         }
 
-        if (!phone) throw new Error("No phone number on record");
+        // We hold the 'sending' claim from here on. If anything fails before the
+        // final auto_sent commit, release the lock back to its prior state so the
+        // touchpoint can be retried instead of being stranded in 'sending'.
+        let messageId: string;
+        try {
+            if (!phone) throw new Error("No phone number on record");
 
-        // Interpolate template
-        const firstName = name.split(" ")[0];
-        const text = interpolate(tp.message_template || tp.title, { name: firstName });
+            // Interpolate template
+            const firstName = name.split(" ")[0];
+            const text = interpolate(tp.message_template || tp.title, { name: firstName });
 
-        const messageId = await sendWhatsApp(phone, text);
+            messageId = await sendWhatsApp(phone, text);
+        } catch (sendErr) {
+            // Release the claim (revert to the prior sendable state) ONLY if it is still
+            // our unsent claim (auto_sent with no message id yet) — never clobber a
+            // concurrent successful send that has already stamped a message id.
+            await pgPatch(
+                "journey_touchpoints",
+                `id=eq.${touchpoint_id}&status=eq.auto_sent&whatsapp_message_id=is.null`,
+                { status: tp.status }
+            ).catch(() => {});
+            throw sendErr;
+        }
 
-        // Mark touchpoint as auto_sent
+        // Stamp the message id + completion time on our claim (status is already
+        // 'auto_sent'; the whatsapp_message_id=is.null filter ensures we only write
+        // our own claim and not a concurrent send's row).
         await pgPatch(
             "journey_touchpoints",
-            `id=eq.${touchpoint_id}`,
+            `id=eq.${touchpoint_id}&status=eq.auto_sent&whatsapp_message_id=is.null`,
             {
-                status:               "auto_sent",
                 completed_at:         new Date().toISOString(),
                 whatsapp_message_id:  messageId,
             }

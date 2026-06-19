@@ -1,4 +1,4 @@
-import { cloneElement, useId, useState, useCallback, useRef, useEffect } from 'react';
+import { cloneElement, isValidElement, useId, useState, useCallback, useRef, useEffect } from 'react';
 
 // Static placement offset map. Tip is absolutely positioned relative to a
 // position:relative wrapper, so we anchor each edge and nudge with a transform.
@@ -72,14 +72,25 @@ export function Tooltip({ content, children, placement = 'top' }) {
     ? [childProps['aria-describedby'], tipId].filter(Boolean).join(' ')
     : childProps['aria-describedby'];
 
-  const trigger = cloneElement(child, {
-    'aria-describedby': describedBy,
+  // cloneElement requires a single valid React element. A string/number/null
+  // child, or multiple children, would make it throw. Guard with isValidElement:
+  // when the child isn't a valid single element, wrap it in a focusable <span>
+  // so it can still receive hover/focus handlers + the aria-describedby link.
+  const handlers = {
     onMouseEnter: compose(show, childProps.onMouseEnter),
     onMouseLeave: compose(hide, childProps.onMouseLeave),
     onFocus: compose(show, childProps.onFocus),
     onBlur: compose(hide, childProps.onBlur),
     onKeyDown: compose(onKeyDown, childProps.onKeyDown),
-  });
+  };
+
+  const trigger = isValidElement(child)
+    ? cloneElement(child, { 'aria-describedby': describedBy, ...handlers })
+    : (
+        <span tabIndex={0} aria-describedby={describedBy} {...handlers}>
+          {children}
+        </span>
+      );
 
   return (
     <span style={{ position: 'relative', display: 'inline-flex' }}>

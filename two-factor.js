@@ -158,16 +158,11 @@ const TOTPManager = {
             return { success: false, error: 'encryption_unavailable' };
         }
 
-        user.mfa_secret = encryptedSecret;
-        user.mfa_enabled = true;
-        user.mfa_method = TwoFactorMethod.TOTP;
-        user.mfa_enabled_at = new Date().toISOString();
-
         // Generate backup codes — return plaintext to the user (one-time
         // display) but persist only SHA-256 hashes with per-code random salt.
         // This way a DB read never yields a usable backup code.
         const backupCodes = TOTPManager.generateBackupCodes();
-        user.mfa_backup_codes = await Promise.all(
+        const hashedBackupCodes = await Promise.all(
             backupCodes.map(async code => {
                 const salt = Array.from(crypto.getRandomValues(new Uint8Array(16)),
                     b => b.toString(16).padStart(2, '0')).join('');
@@ -176,7 +171,17 @@ const TOTPManager = {
             })
         );
         try {
-            await AppDataStore.update('users', userId, user);
+            // Patch ONLY the MFA columns. Writing the whole stale user snapshot
+            // back would clobber any column (role, team_id, status, LTV) changed
+            // on the server between this read and write — the same non-atomic
+            // read-modify-write class the repo already hit on LTV.
+            await AppDataStore.update('users', userId, {
+                mfa_secret: encryptedSecret,
+                mfa_enabled: true,
+                mfa_method: TwoFactorMethod.TOTP,
+                mfa_enabled_at: new Date().toISOString(),
+                mfa_backup_codes: hashedBackupCodes
+            });
         } catch (e) {
             console.error('[2FA] enableTOTP persist failed:', e);
             return { success: false, error: 'save_failed' };
@@ -209,7 +214,10 @@ const TOTPManager = {
     // Constant-time backup-code check. Marks the matching slot as used so a
     // code can never be replayed. Returns true on success.
     consumeBackupCode: async (userId, code) => {
-        const user = await AppDataStore.getById('users', userId);
+        // getByIdFull forces a select=* network read so the mfa_backup_codes
+        // JSONB column is present — getById may return a light cached row from
+        // the users lean select (data.js:188) that omits the MFA columns.
+        const user = await AppDataStore.getByIdFull('users', userId);
         if (!user || !Array.isArray(user.mfa_backup_codes)) return false;
         const normalized = (code || '').trim().toUpperCase();
         let matchedIdx = -1;
@@ -231,7 +239,9 @@ const TOTPManager = {
         // If we can't persist the "used" flag, fail closed — granting login on an
         // unpersisted consumption would let the same code be replayed.
         try {
-            await AppDataStore.update('users', userId, user);
+            // Patch ONLY the backup-codes column, not the whole row, so a column
+            // changed on the server since the read isn't clobbered with stale data.
+            await AppDataStore.update('users', userId, { mfa_backup_codes: user.mfa_backup_codes });
         } catch (e) {
             console.error('[2FA] consumeBackupCode persist failed:', e);
             return false;
@@ -245,12 +255,14 @@ const TOTPManager = {
         const user = await AppDataStore.getById('users', userId);
         if (!user) return false;
 
-        user.mfa_enabled = false;
-        user.mfa_secret = null;
-        user.mfa_backup_codes = null;
-
         try {
-            await AppDataStore.update('users', userId, user);
+            // Patch ONLY the MFA columns so concurrent changes to other columns
+            // (role, status, team_id, …) aren't overwritten with a stale snapshot.
+            await AppDataStore.update('users', userId, {
+                mfa_enabled: false,
+                mfa_secret: null,
+                mfa_backup_codes: null
+            });
         } catch (e) {
             console.error('[2FA] disableMFA persist failed:', e);
             return false;
@@ -314,6 +326,10 @@ const SMS2FAManager = {
             if (error || !data?.hash) throw error || new Error('no_hash_returned');
 
             sessionStorage.setItem('mfa_code_hash', data.hash);
+            // The server salts the hash per send (hash = sha256(code:salt)); store the
+            // salt so verifyCode can reproduce the same digest. Without it the compare
+            // always failed (server salted, client did not).
+            sessionStorage.setItem('mfa_code_salt', data.salt || '');
             sessionStorage.setItem('mfa_code_expires', String(Date.now() + 5 * 60 * 1000));
             if (window.UI?.toast) UI.toast.info('Verification code sent via SMS.');
             return true;
@@ -333,16 +349,20 @@ const SMS2FAManager = {
 
         if (Date.now() > parseInt(expires, 10)) {
             sessionStorage.removeItem('mfa_code_hash');
+            sessionStorage.removeItem('mfa_code_salt');
             sessionStorage.removeItem('mfa_code_expires');
             return false;
         }
 
-        const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(code)));
+        // Reproduce the server's salted digest: sha256(code + ':' + salt).
+        const salt = sessionStorage.getItem('mfa_code_salt') || '';
+        const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(code) + ':' + salt));
         const submittedHash = Array.from(new Uint8Array(buf))
             .map(b => b.toString(16).padStart(2, '0')).join('');
         const ok = SMS2FAManager._constantEq(submittedHash, storedHash);
         if (ok) {
             sessionStorage.removeItem('mfa_code_hash');
+            sessionStorage.removeItem('mfa_code_salt');
             sessionStorage.removeItem('mfa_code_expires');
         }
         return ok;
@@ -482,8 +502,17 @@ const showTwoFactorLogin = (username, password) => {
 const verifyTwoFactorLogin = async (username, password) => {
     const code = document.getElementById('2fa-code')?.value || '';
 
+    // The users lean select (data.js:188) has no `username` column and omits the
+    // MFA columns. Identify the row by a field that IS selected (email, then
+    // full_name), then re-fetch the FULL row via getByIdFull so mfa_enabled /
+    // mfa_secret are actually present.
+    const ident = String(username || '').trim().toLowerCase();
     const users = await AppDataStore.getAll('users');
-    const user = (users || []).find(u => u.username === username);
+    const lite = (users || []).find(u =>
+        (u.email && u.email.trim().toLowerCase() === ident) ||
+        (u.full_name && u.full_name.trim().toLowerCase() === ident)
+    );
+    const user = lite ? await AppDataStore.getByIdFull('users', lite.id) : null;
     if (!user || !user.mfa_enabled || !user.mfa_secret) {
         if (window.UI && window.UI.toast) UI.toast.error('Invalid verification code');
         return;
@@ -498,13 +527,22 @@ const verifyTwoFactorLogin = async (username, password) => {
 
     const ok = await TOTPManager.verifyTOTP(secret, code);
     if (ok) {
-        UI.hideModal();
-        if (typeof Auth !== 'undefined') {
-            if (typeof Encryption !== 'undefined' && typeof Encryption.generateToken === 'function') {
-                Auth.setToken(Encryption.generateToken());
+        // Complete login through the REAL session path. Auth has no setToken/setUser
+        // (auth.js:93 exposes only login/logout/etc.) — calling them threw a
+        // TypeError that aborted login. A genuine Supabase session must be created
+        // via Auth.login (signInWithPassword); then publish the user via the app
+        // state setter rather than a fictional Auth setter.
+        try {
+            if (typeof Auth !== 'undefined' && typeof Auth.login === 'function') {
+                await Auth.login(username, password);
             }
-            Auth.setUser(user);
+            if (window._appState) window._appState.cu = user;
+        } catch (e) {
+            console.error('[2FA] session completion failed:', e);
+            if (window.UI && window.UI.toast) UI.toast.error('Could not complete sign-in. Please try again.');
+            return;
         }
+        UI.hideModal();
         window.location.href = '#dashboard';
     } else {
         if (window.UI && window.UI.toast) UI.toast.error('Invalid verification code');
@@ -549,8 +587,16 @@ const verifyBackupCodeLogin = async (username, password) => {
 
     let user;
     try {
+        // Match by email/full_name (present in the lean select) — there is no
+        // `username` column in getAll — then re-fetch the full row so mfa_enabled
+        // and mfa_backup_codes are present for verification.
+        const ident = String(username || '').trim().toLowerCase();
         const users = await AppDataStore.getAll('users');
-        user = (users || []).find(u => u.username === username);
+        const lite = (users || []).find(u =>
+            (u.email && u.email.trim().toLowerCase() === ident) ||
+            (u.full_name && u.full_name.trim().toLowerCase() === ident)
+        );
+        user = lite ? await AppDataStore.getByIdFull('users', lite.id) : null;
     } catch (e) {
         if (window.UI && window.UI.toast) UI.toast.error('Could not verify backup code. Try again.');
         return;
@@ -569,13 +615,20 @@ const verifyBackupCodeLogin = async (username, password) => {
     }
 
     if (ok) {
-        UI.hideModal();
-        if (typeof Auth !== 'undefined') {
-            if (typeof Encryption !== 'undefined' && typeof Encryption.generateToken === 'function') {
-                Auth.setToken(Encryption.generateToken());
+        // Complete login through the REAL session path — Auth has no setToken/setUser
+        // (auth.js:93); the old calls threw a TypeError. Create a genuine Supabase
+        // session via Auth.login, then publish the user via the app state setter.
+        try {
+            if (typeof Auth !== 'undefined' && typeof Auth.login === 'function') {
+                await Auth.login(username, password);
             }
-            Auth.setUser(user);
+            if (window._appState) window._appState.cu = user;
+        } catch (e) {
+            console.error('[2FA] session completion failed:', e);
+            if (window.UI && window.UI.toast) UI.toast.error('Could not complete sign-in. Please try again.');
+            return;
         }
+        UI.hideModal();
         window.location.href = '#dashboard';
     } else {
         if (window.UI && window.UI.toast) UI.toast.error('Invalid or already-used backup code');

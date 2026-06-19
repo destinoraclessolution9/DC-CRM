@@ -77,7 +77,10 @@ export function Drawer({ open, onClose, side = 'right', size = 'md', title, chil
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label={title || undefined}
+        // Label by EXACTLY one mechanism: the visible heading when a title
+        // exists, else a plain aria-label. Setting both is an ARIA violation
+        // (aria-labelledby wins, leaving aria-label redundant/confusing).
+        aria-label={title ? undefined : 'Dialog'}
         aria-labelledby={title ? titleId : undefined}
         style={panelStyle}
       >

@@ -16,7 +16,19 @@
 import React, { useEffect } from 'react';
 
 const app = () => window.app || {};
-const callA = (name, ...args) => { const f = app()[name]; if (typeof f === 'function') f(...args); };
+// Several search handlers (executeSearch, loadPreset, openSaveSearchModal,
+// updateFilterSections, exportResults…) are async. The legacy chunk markup wrapped
+// each in `(async()=>{try{await app.X();}catch(e){console.error(e);}})()`; calling
+// f(...) here discards the returned promise, so a rejection (Supabase offline /
+// RLS deny) becomes an unhandled rejection. Catch it to mirror the legacy behaviour.
+const callA = (name, ...args) => {
+    const f = app()[name];
+    if (typeof f !== 'function') return;
+    const r = f(...args);
+    if (r && typeof r.then === 'function') {
+        r.catch((e) => console.error('[search] handler ' + name + ' failed:', e));
+    }
+};
 
 export function SearchPanelView({ onReady }) {
     try { window.__REACT_SEARCH_STATE = 'ready'; } catch (_) { /* noop */ }

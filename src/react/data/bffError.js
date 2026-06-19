@@ -24,8 +24,16 @@ export function bffError(status, what) {
 }
 
 // React Query retry predicate: never retry a genuine auth failure (pointless,
-// just hammers a dead token), retry transient errors once.
+// just hammers a dead token). Give deliberately-transient/race statuses a larger
+// retry budget: 409 ('caller_unresolved' SW-activation/uid-resolution race) and
+// 408/429/5xx (backend overload/outage) can span a couple seconds / several
+// fetches during a cold-boot reload — a single retry can exhaust before the uid
+// resolves and park the view on the 'Finishing sign-in — retrying…' error state.
+// Everything else (unknown/4xx) keeps the original single-retry behaviour.
 export function bffRetry(failureCount, err) {
     if (err && (err.status === 401 || err.status === 403)) return false;
+    const s = err && err.status;
+    const isTransient = s === 409 || s === 408 || s === 429 || (s >= 500 && s <= 599);
+    if (isTransient) return failureCount < 3;
     return failureCount < 1;
 }

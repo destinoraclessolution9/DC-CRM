@@ -19,6 +19,11 @@ export function useInfiniteRows({ queryKey, fetchPage, pageSize = 50, mode = 'of
         initialPageParam: mode === 'cursor' ? null : 0,
         getNextPageParam: (lastPage, allPages) => {
             if (mode === 'cursor') return lastPage && lastPage.nextCursor != null ? lastPage.nextCursor : undefined;
+            // Stop if the last page returned no rows, even when loaded < count.
+            // A count/rows mismatch (RLS post-count filtering, a stale over-count,
+            // or an empty page) would otherwise pin the offset and keep hasNextPage
+            // true forever, producing an unbounded refetch loop that hammers the API.
+            if (!lastPage || !lastPage.rows || lastPage.rows.length === 0) return undefined;
             const loaded = allPages.reduce((n, p) => n + (p && p.rows ? p.rows.length : 0), 0);
             const total = (lastPage && lastPage.count) || 0;
             return loaded < total ? loaded : undefined; // next offset

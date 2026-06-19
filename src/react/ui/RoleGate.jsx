@@ -4,17 +4,17 @@
 // passes when their level is numerically <= the gate's level.
 // No DOM wrapper is emitted — children render inline (fragment) or the fallback.
 
-// Bridge to live app logic without holding a hard dependency on it.
-const app = () => window.app || {};
-
 export function RoleGate({ level, userLevel, children, fallback = null }) {
-  // Prefer the explicit prop; otherwise ask the app for the current user's level.
-  // Default to 99 (effectively "no privileges") so an unknown viewer is locked
-  // out rather than accidentally granted access — fail closed, not open.
+  // Prefer the explicit prop; otherwise resolve the current user's level off the
+  // real app surface: window._appState.cu (live current user) → window._crmUtils
+  // .getUserLevel(user). There is no zero-arg app.getCurrentUserLevel() in the
+  // codebase, so calling it always returned undefined and the ?? 99 fallback
+  // permanently locked everyone out. Default to 99 ("no privileges") only when
+  // the level genuinely can't be resolved — fail closed, not open.
   const lvl =
     typeof userLevel === 'number'
       ? userLevel
-      : app().getCurrentUserLevel?.() ?? 99;
+      : (window._crmUtils?.getUserLevel?.(window._appState?.cu) ?? 99);
 
   // Numeric guard: a non-numeric or missing `level` should also fail closed.
   const gate = typeof level === 'number' ? level : -1;

@@ -47,8 +47,13 @@ async function getReportingChain(
   while (current && current.reporting_to != null && hops < 10) {
     const managerId = String(current.reporting_to);
     if (chain.includes(managerId)) break; // cycle guard
+    // Only add the manager if it resolves to a real user; a dangling/stale
+    // reporting_to FK must not be forwarded as a push target. Stop the walk
+    // there since we can't continue up a chain we can't resolve.
+    const manager = userMap.get(managerId);
+    if (!manager) break;
     chain.push(managerId);
-    current = userMap.get(managerId);
+    current = manager;
     hops++;
   }
   return chain;
@@ -80,11 +85,17 @@ Deno.serve(async (req: Request) => {
     }
 
     // Fetch all users once — needed for reporting chain traversal and name lookup.
+    // If this fetch fails, the reporting chain would silently resolve to empty
+    // and managers would never be notified. Return a non-ok (503) status so the
+    // DB trigger / pg_net retries instead of recording a false success.
     let allUsers: any[] = [];
     try {
       allUsers = await pgSelect("users", { select: "id,full_name,name,email,role,reporting_to" });
     } catch (e) {
-      console.warn("notify-on-activity: users fetch failed:", e);
+      console.error("notify-on-activity: users fetch failed:", e);
+      return new Response(JSON.stringify({ ok: false, reason: "users_fetch_failed", detail: String((e as any)?.message ?? e) }), {
+        status: 503, headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      });
     }
 
     // Build a map for O(1) lookups.
@@ -122,6 +133,12 @@ Deno.serve(async (req: Request) => {
       } catch (e) {
         console.warn("notify-on-activity: reporting chain failed:", e);
       }
+    }
+
+    // Drop any target (lead agent, co-agent, or manager) that doesn't resolve
+    // to a real user — dangling/stale ids must never be forwarded as push targets.
+    for (const id of targets) {
+      if (!userMap.has(id)) targets.delete(id);
     }
 
     if (targets.size === 0) {

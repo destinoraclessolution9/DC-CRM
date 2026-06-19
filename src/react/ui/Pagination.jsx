@@ -38,8 +38,17 @@ export function Pagination({
   const clampedPage = Math.min(Math.max(0, page), totalPages - 1);
 
   // Human-facing 1-based range; empty result set shows "0–0 of 0".
-  const from = count === 0 ? 0 : clampedPage * pageSize + 1;
-  const to = count === 0 ? 0 : Math.min(count, (clampedPage + 1) * pageSize);
+  // When pageSize <= 0 (the default — caller omitted it in offset mode), there's
+  // effectively a single page covering every row, so the range is 1–count.
+  // Without this guard `to` collapsed to Math.min(count, 0) = 0, rendering the
+  // nonsensical "Showing 1–0 of N".
+  const usablePageSize = mode === 'offset' && pageSize > 0;
+  const from = count === 0 ? 0 : usablePageSize ? clampedPage * pageSize + 1 : 1;
+  const to = count === 0
+    ? 0
+    : usablePageSize
+    ? Math.min(count, (clampedPage + 1) * pageSize)
+    : count;
   const currentPage = clampedPage + 1; // 1-based for display
 
   const atFirst = clampedPage <= 0;

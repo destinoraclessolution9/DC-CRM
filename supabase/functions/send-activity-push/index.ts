@@ -26,15 +26,23 @@ async function pgSelect(
   return await res.json();
 }
 
-async function pgDelete(table: string, params: Record<string, string>): Promise<void> {
+async function pgDelete(table: string, params: Record<string, string>): Promise<boolean> {
   const qs = new URLSearchParams(params).toString();
-  await fetch(`${SUPABASE_URL}/rest/v1/${table}?${qs}`, {
+  // Surface delete failures: pgSelect throws on !res.ok, but a silently-swallowed
+  // DELETE failure (RLS/network/400) leaves expired subscriptions un-pruned while the
+  // caller still reports them as removed. Return a boolean so the prune count is honest.
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${qs}`, {
     method: "DELETE",
     headers: {
       "apikey": SERVICE_ROLE,
       "Authorization": `Bearer ${SERVICE_ROLE}`,
     },
   });
+  if (!res.ok) {
+    console.warn(`pg_delete ${table} ${res.status}: ${await res.text().catch(() => "")}`);
+    return false;
+  }
+  return true;
 }
 
 const CORS_HEADERS = {
@@ -364,12 +372,16 @@ serve(async (req: Request) => {
       else console.warn("push err", r.status, r.error);
     });
 
+    let pruned = 0;
     if (toDelete.length > 0) {
       const idList = `(${toDelete.map((i) => `"${i}"`).join(",")})`;
-      await pgDelete("push_subscriptions", { id: `in.${idList}` });
+      // Only count as pruned if the DELETE actually succeeded — a failed prune now
+      // reports 0 (and logs a warning) instead of falsely claiming cleanup happened.
+      const ok = await pgDelete("push_subscriptions", { id: `in.${idList}` });
+      if (ok) pruned = toDelete.length;
     }
 
-    return new Response(JSON.stringify({ ok: true, sent, pruned: toDelete.length }), {
+    return new Response(JSON.stringify({ ok: true, sent, pruned }), {
       status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });
   } catch (e: any) {

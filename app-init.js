@@ -13,10 +13,21 @@
 const __idle = (function () {
     if (typeof window.scheduler !== 'undefined' && typeof window.scheduler.postTask === 'function') {
         return function (cb, opts) {
+            // postTask has no `timeout` option — `delay` only postpones the START
+            // of scheduling, it does not promote a 'background' task that is being
+            // starved by sustained higher-priority work. To honor the documented
+            // escape hatch, race a real deadline (default 2000ms, matching the
+            // requestIdleCallback fallback) against the background task: whichever
+            // fires first runs cb once (guarded by `ran`).
+            var ran = false;
+            var deadline = (opts && opts.timeout) ? opts.timeout : 2000;
+            var run = function () { if (ran) return; ran = true; cb(); };
+            var t = setTimeout(run, deadline);
             try {
-                return window.scheduler.postTask(cb, { priority: 'background', delay: (opts && opts.timeout) ? opts.timeout : 0 });
+                return window.scheduler.postTask(function () { clearTimeout(t); run(); }, { priority: 'background' });
             } catch (_) {
-                return setTimeout(cb, 1);
+                clearTimeout(t);
+                return setTimeout(run, 1);
             }
         };
     }
@@ -257,15 +268,39 @@ window.addEventListener('beforeinstallprompt', function (e) {
     let activeIdx = 0;
     let filtered = [];
 
+    // Authz guard: the cmdk markup lives inside #app-shell (display:none until
+    // login but still in the DOM), so the global Ctrl+K/Ctrl+Shift+N handlers
+    // would otherwise expose the full nav surface and invoke navigateTo/logout
+    // pre-auth. Bail unless a session exists. The current user is NOT on
+    // window.app — script.js exposes it via window._appState.cu (getter over the
+    // closure-scoped _currentUser); also require #app-shell to be visible.
+    function _isAuthed() {
+        const cu = window._appState && window._appState.cu;
+        if (!cu) return false;
+        const shell = document.getElementById('app-shell');
+        if (shell) {
+            const cs = window.getComputedStyle(shell);
+            if (cs && cs.display === 'none') return false;
+        }
+        return true;
+    }
+
     function open() {
-        document.getElementById('cmdk-overlay').classList.add('active');
+        // Null-guard the palette DOM: these nodes live in #app-shell today, but
+        // mirror the careful `if (input)` pattern so a stripped page (ui-gallery,
+        // public) or a React-owned shell can't TypeError here.
+        const ov = document.getElementById('cmdk-overlay');
+        if (!ov) return;
         const input = document.getElementById('cmdk-input');
+        if (!input) return;
+        ov.classList.add('active');
         input.value = '';
         render('');
         setTimeout(function () { input.focus(); }, 30);
     }
     function close() {
-        document.getElementById('cmdk-overlay').classList.remove('active');
+        const ov = document.getElementById('cmdk-overlay');
+        if (ov) ov.classList.remove('active');
     }
     function score(label, q) {
         if (!q) return 1;
@@ -284,6 +319,7 @@ window.addEventListener('beforeinstallprompt', function (e) {
             .map(function (x) { return x.c; });
         activeIdx = 0;
         const root = document.getElementById('cmdk-results');
+        if (!root) return; // null-guard: results container may be absent on stripped pages
         if (!filtered.length) {
             root.innerHTML = '<div class="cmdk-empty">No matches. Try another query.</div>';
             return;
@@ -325,10 +361,11 @@ window.addEventListener('beforeinstallprompt', function (e) {
 
     document.addEventListener('keydown', function (e) {
         const isCmdK = (e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K');
-        if (isCmdK) { e.preventDefault(); open(); return; }
-        // Ctrl+Shift+N — Quick capture for Knowledge HQ (works from anywhere)
+        // Only expose the command palette / quick-capture once authenticated.
+        if (isCmdK) { if (!_isAuthed()) return; e.preventDefault(); open(); return; }
+        // Ctrl+Shift+N — Quick capture for Knowledge HQ (works from anywhere, post-auth)
         if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'N' || e.key === 'n')) {
-            if (window.app && window.app.openCaptureModal) { e.preventDefault(); window.app.openCaptureModal(); return; }
+            if (_isAuthed() && window.app && window.app.openCaptureModal) { e.preventDefault(); window.app.openCaptureModal(); return; }
         }
         const overlay = document.getElementById('cmdk-overlay');
         if (!overlay || !overlay.classList.contains('active')) return;
@@ -350,7 +387,7 @@ window.addEventListener('beforeinstallprompt', function (e) {
             });
         }
         const trigger = document.getElementById('cmdk-trigger');
-        if (trigger) trigger.addEventListener('click', open);
+        if (trigger) trigger.addEventListener('click', function () { if (_isAuthed()) open(); });
     });
 })();
 
@@ -376,7 +413,13 @@ window.addEventListener('beforeinstallprompt', function (e) {
 // ── Mobile bottom nav active sync ─────────────────────────────────────────
 (function () {
     function sync() {
-        const view = (window.app && window.app._currentView) || 'calendar';
+        // Read the real source of truth: script.js maintains the active view as
+        // the closure var _currentView, exposed via window._appState.cv (getter).
+        // window.app._currentView is only ever set by the wrapper below, so it
+        // desyncs whenever the core navigates via its internal closure binding
+        // (e.g. navigateTo('home') calls inside script.js). Prefer _appState.cv.
+        const view = (window._appState && window._appState.cv) ||
+                     (window.app && window.app._currentView) || 'calendar';
         document.querySelectorAll('.mobile-bottom-nav-item[data-view]').forEach(function (el) {
             el.classList.toggle('active', el.dataset.view === view);
         });
@@ -385,9 +428,16 @@ window.addEventListener('beforeinstallprompt', function (e) {
         if (!window.app || !window.app.navigateTo || window.app._navHooked) return;
         const original = window.app.navigateTo.bind(window.app);
         window.app.navigateTo = function (v) {
+            // navigateTo is async (returns a Promise). Move the highlight only
+            // after a successful render so a rejected navigation doesn't leave
+            // the bottom-nav optimistically pointing at a view that never loaded.
+            // Swallow rejections here so inline onclick="app.navigateTo()" callers
+            // don't surface an unhandledrejection; awaiting callers still get `r`.
             const r = original(v);
-            window.app._currentView = v;
-            sync();
+            Promise.resolve(r).then(function () {
+                window.app._currentView = v;
+                sync();
+            }).catch(function () {});
             return r;
         };
         window.app._navHooked = true;
@@ -469,18 +519,29 @@ window.addEventListener('beforeinstallprompt', function (e) {
     async function resolveAttachmentImages(root) {
         if (!window.AppDataStore || !window.AppDataStore.resolveAttachmentSrc) return;
         const scope = root || document;
-        const imgs = Array.from(scope.querySelectorAll('img[data-attach-src]:not([data-attach-resolved])'));
-        const bgs  = Array.from(scope.querySelectorAll('[data-attach-bg]:not([data-attach-resolved])'));
+        // Skip elements already permanently resolved OR currently in-flight, so we
+        // don't re-process concurrently — but DON'T stamp the permanent
+        // data-attach-resolved up front. A failed resolve (RLS deny / offline /
+        // signed-URL failure) must stay retryable by a later runAll() once the
+        // user is back online. We mark a transient data-attach-inflight instead
+        // and only stamp data-attach-resolved on success.
+        const imgs = Array.from(scope.querySelectorAll('img[data-attach-src]:not([data-attach-resolved]):not([data-attach-inflight])'));
+        const bgs  = Array.from(scope.querySelectorAll('[data-attach-bg]:not([data-attach-resolved]):not([data-attach-inflight])'));
         if (!imgs.length && !bgs.length) return;
-        [...imgs, ...bgs].forEach(function (el) { el.setAttribute('data-attach-resolved', '1'); });
+        [...imgs, ...bgs].forEach(function (el) { el.setAttribute('data-attach-inflight', '1'); });
         await Promise.all([
             ...imgs.map(async function (img) {
                 const url = await window.AppDataStore.resolveAttachmentSrc(img.getAttribute('data-attach-src')).catch(function () { return null; });
-                if (url) img.src = url; else img.style.display = 'none';
+                img.removeAttribute('data-attach-inflight');
+                if (url) { img.src = url; img.setAttribute('data-attach-resolved', '1'); }
+                else img.style.display = 'none'; // hidden but left unresolved so a later runAll() retries
             }),
             ...bgs.map(async function (el) {
                 const url = await window.AppDataStore.resolveAttachmentSrc(el.getAttribute('data-attach-bg')).catch(function () { return null; });
-                if (url) el.style.backgroundImage = "url('" + url.replace(/'/g, "\\'") + "')";
+                el.removeAttribute('data-attach-inflight');
+                // Symmetric with the img path: only stamp resolved on success;
+                // on failure leave it unresolved so it retries when back online.
+                if (url) { el.style.backgroundImage = "url('" + url.replace(/'/g, "\\'") + "')"; el.setAttribute('data-attach-resolved', '1'); }
             })
         ]);
     }

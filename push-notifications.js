@@ -24,8 +24,11 @@
         return outputArray;
     };
 
-    // Get a Supabase client that can actually WRITE (service-role, bypasses RLS).
-    // The anon-key client (window.supabase) is blocked by RLS on push_subscriptions.
+    // Get the Supabase client used for push_subscriptions writes. This is the
+    // anon/session client (AppDataStore._writeClient() returns window.supabase) —
+    // NOT a service-role client. Writes succeed because the RLS policy on
+    // push_subscriptions grants the `authenticated` role full access; the live
+    // auth-session JWT is attached automatically by the JS client.
     let _writeClient = null;
     const getWriteClient = () => {
         if (_writeClient) return _writeClient;
@@ -155,6 +158,18 @@
                 if (session && session.access_token) authKey = session.access_token;
             } catch (_) {}
             if (!authKey && sb && sb.supabaseKey) authKey = sb.supabaseKey;
+            // Guard: with no session token and no anon key (e.g. offline/local-only
+            // mode where window.supabase is null) the fetch would go out with an
+            // empty `Authorization: Bearer ` header. send-activity-push has
+            // verify_jwt and rejects it, and the caller discards {ok:false}, so the
+            // push silently never fires. Bail out with a diagnosable reason instead.
+            if (!authKey) {
+                if (!sendActivityPush._warnedNoAuth) {
+                    console.warn('[Push] send skipped: no auth token available (no session, no anon key)');
+                    sendActivityPush._warnedNoAuth = true;
+                }
+                return { ok: false, error: 'no_auth' };
+            }
             const res = await fetch(
                 `${window.SUPABASE_URL}/functions/v1/send-activity-push`,
                 {
@@ -206,7 +221,37 @@
         try {
             const reg = window._swRegistration || (await navigator.serviceWorker.ready);
             const sub = reg && (await reg.pushManager.getSubscription());
-            subscribed = !!sub;
+            // Cross-check the DB: a browser subscription alone is not enough — the
+            // push_subscriptions row can be absent (deleted server-side, RLS
+            // empty-read, or account switch on the same device). Only report
+            // subscribed:true when BOTH the browser sub AND an enabled DB row for
+            // the current user + this endpoint exist, so the UI/auto-subscribe
+            // logic doesn't believe the user is subscribed when the backend has
+            // no row to fan out to.
+            if (sub) {
+                const sb = getWriteClient();
+                const userId = getCurrentUserId();
+                if (sb && userId) {
+                    try {
+                        const { data, error } = await sb
+                            .from('push_subscriptions')
+                            .select('endpoint')
+                            .eq('user_id', userId)
+                            .eq('endpoint', sub.endpoint)
+                            .eq('enabled', true)
+                            .limit(1);
+                        subscribed = !error && Array.isArray(data) && data.length > 0;
+                    } catch (_) {
+                        // On query failure, fall back to the browser-local signal
+                        // rather than incorrectly reporting unsubscribed.
+                        subscribed = true;
+                    }
+                } else {
+                    // No DB client/user available (offline/local-only) — rely on
+                    // the browser subscription as before.
+                    subscribed = true;
+                }
+            }
         } catch (_) {}
         return { supported: true, permission, subscribed };
     };

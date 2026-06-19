@@ -255,7 +255,24 @@ export function MobileHomeView({ greetWord = 'Hello', userName = 'there', dateSt
     // Full-JSX opt-in path (SW-108, default-off). The chunk only passes `data`
     // when _reactHomeJsxOn() is true and the payload builds; otherwise data is
     // undefined and we fall through to the unchanged scaffold branch below.
-    if (data) {
+    const isJsx = !!data;
+
+    try { window.__REACT_HOME_STATE = 'ready'; } catch (_) { /* noop */ }
+
+    // Rules of Hooks: this hook must run on EVERY render of MobileHomeView, in the
+    // same order, regardless of which branch the `data` prop selects — otherwise
+    // toggling `data` truthy↔falsy across re-renders throws "Rendered fewer/more
+    // hooks". We therefore call useEffect unconditionally here and branch INSIDE
+    // it: in the JSX path FullJsxHome owns the onReady signal, so we skip it to
+    // avoid firing onReady twice; in the scaffold path we fire it as before.
+    useEffect(() => {
+        if (isJsx) return;
+        if (typeof onReady === 'function') {
+            try { onReady(); } catch (_) { /* noop */ }
+        }
+    }, [isJsx, onReady]);
+
+    if (isJsx) {
         return (
             <FullJsxHome
                 greetWord={greetWord}
@@ -268,15 +285,7 @@ export function MobileHomeView({ greetWord = 'Hello', userName = 'there', dateSt
         );
     }
 
-    // ── Existing scaffold branch — UNCHANGED ─────────────────────────────────
-    try { window.__REACT_HOME_STATE = 'ready'; } catch (_) { /* noop */ }
-
-    useEffect(() => {
-        if (typeof onReady === 'function') {
-            try { onReady(); } catch (_) { /* noop */ }
-        }
-    }, [onReady]);
-
+    // ── Existing scaffold branch — markup UNCHANGED ──────────────────────────
     return (
         <div className="mhome">
             <div className="mhome-greet">
