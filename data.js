@@ -932,7 +932,13 @@ class DataStore {
                             tombstoneRaw ? (JSON.parse(tombstoneRaw)[tableName] || []) : []
                         );
                         const result = Array.from(merged.values())
-                            .filter(r => !deletedIds.has(String(r.id)));
+                            // Mirror the full-fetch filter (see _getAllImpl): the delta
+                            // path only ADDS/UPDATES, so a user soft-deleted on the server
+                            // (status='deleted') arrives as an updated row and would
+                            // otherwise resurface here — the full path drops it, the delta
+                            // path must too.
+                            .filter(r => !deletedIds.has(String(r.id))
+                                && !(tableName === 'users' && r.status === 'deleted'));
                         this._cacheSet(tableName, result);
                         setTimeout(() => {
                             try {
@@ -1574,8 +1580,17 @@ class DataStore {
             // would resurrect them. Read fresh and replace only THIS table's rows —
             // a synchronous read+write is atomic relative to other passes.
             const _freshQueue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
-            const _keptOther = _freshQueue.filter(q => q.tableName !== tableName);
-            localStorage.setItem('fs_crm_sync_queue', JSON.stringify([..._keptOther, ...stillPending]));
+            const _qKey = (q) => `${q.tableName}|${q.record && q.record.id}|${q.timestamp}`;
+            // Remove ONLY the items consumed this pass (synced / dropped / tombstoned /
+            // parked) plus the pre-await copies of still-pending items (re-appended below
+            // carrying their mutated _fkRetries). Everything ELSE in the CURRENT queue is
+            // preserved — crucially, this-table writes ENQUEUED DURING our network awaits,
+            // which the old `[..._keptOther, ...stillPending]` rebuild silently DROPPED by
+            // reconstructing from the stale pre-await snapshot (= lost offline writes).
+            const _consumedKeys = new Set(forTable.filter(it => !stillPending.includes(it)).map(_qKey));
+            const _stillKeys = new Set(stillPending.map(_qKey));
+            const _next = _freshQueue.filter(q => !_consumedKeys.has(_qKey(q)) && !_stillKeys.has(_qKey(q)));
+            localStorage.setItem('fs_crm_sync_queue', JSON.stringify([..._next, ...stillPending]));
         } catch (_) { /* intentional: fire-and-forget drain; queue persists and retries on next read */ }
     }
 
@@ -1737,8 +1752,17 @@ class DataStore {
             // would resurrect them. Read fresh and replace only THIS table's rows —
             // a synchronous read+write is atomic relative to other passes.
             const _freshQueue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
-            const _keptOther = _freshQueue.filter(q => q.tableName !== tableName);
-            localStorage.setItem('fs_crm_sync_queue', JSON.stringify([..._keptOther, ...stillPending]));
+            const _qKey = (q) => `${q.tableName}|${q.record && q.record.id}|${q.timestamp}`;
+            // Remove ONLY the items consumed this pass (synced / dropped / tombstoned /
+            // parked) plus the pre-await copies of still-pending items (re-appended below
+            // carrying their mutated _fkRetries). Everything ELSE in the CURRENT queue is
+            // preserved — crucially, this-table writes ENQUEUED DURING our network awaits,
+            // which the old `[..._keptOther, ...stillPending]` rebuild silently DROPPED by
+            // reconstructing from the stale pre-await snapshot (= lost offline writes).
+            const _consumedKeys = new Set(forTable.filter(it => !stillPending.includes(it)).map(_qKey));
+            const _stillKeys = new Set(stillPending.map(_qKey));
+            const _next = _freshQueue.filter(q => !_consumedKeys.has(_qKey(q)) && !_stillKeys.has(_qKey(q)));
+            localStorage.setItem('fs_crm_sync_queue', JSON.stringify([..._next, ...stillPending]));
                 // Persist any new tombstones discovered during this pass
                 if (newTombstones.length > 0) {
                     try {

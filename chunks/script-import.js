@@ -586,6 +586,35 @@ const mapRowToMarketingRecord = (row, reverseMap, type) => {
     return { package_name: get('package_name'), price: parseFloat(get('price')) || 0, details: get('details') || null, requirement: get('requirement') || null, remarks: get('remarks') || null, delivery_lead_time: get('delivery_lead_time') || null, is_active: parseActive(get('is_active')) };
 };
 
+// BUG #6: build a PARTIAL update payload for the "Update existing records" path.
+// Unlike mapRowToRecord (which emits EVERY column + synthesized defaults like
+// status/customer_since/source/responsible_agent_id), this reads ONLY the columns
+// the user actually mapped AND whose cell is non-empty after trim — so blank
+// cells and unmapped columns never overwrite populated DB values, and no
+// synthesized default ever clobbers existing status/customer_since/agent. There
+// is no mappable agent column (responsible_agent_id is never in reverseMap), so
+// the agent is intentionally left untouched. Money fields use the same numeric
+// coercion as mapRowToRecord; deal_value with a blank cell is skipped (handled
+// by the non-empty guard). Returns {} when nothing real was mapped → caller skips.
+const buildUpdatePayload = (row, reverseMap, importType = 'prospects') => {
+    const moneyFields = new Set(['lifetime_value', 'deal_value', 'price', 'ticket_price']);
+    const payload = {};
+    Object.keys(reverseMap).forEach(field => {
+        const idx = reverseMap[field];
+        if (idx === undefined) return;
+        const raw = (row[idx] || '').toString().trim();
+        if (raw === '') return; // never overwrite with a blank cell
+        if (field === 'deal_value') {
+            const n = parseFloat(raw);
+            if (Number.isFinite(n)) payload[field] = n;
+            return;
+        }
+        if (moneyFields.has(field)) { payload[field] = _parseAmount(raw); return; }
+        payload[field] = raw;
+    });
+    return payload;
+};
+
 const updateImportProgress = (pct, current, total) => {
     const bar = document.getElementById('progress-bar');
     if (bar) { bar.style.width = pct + '%'; bar.textContent = pct + '%'; }
@@ -830,6 +859,21 @@ const startImport = async () => {
     // success/skip/error tallies are identical to the old per-row path.
     const CHUNK_SIZE = 500;
     const pendingCreates = []; // { record, rowIndex, purchaseAmount }
+    // BUG #15: intra-file dedup — runDuplicateCheck only compares rows against
+    // EXISTING DB rows, so the SAME person listed twice in one spreadsheet would
+    // be inserted twice. Track the natural key of every row already queued THIS
+    // batch and skip a later create whose key collides. Conservative: a row with
+    // no usable key (no ic/phone/name — e.g. marketing rows) is NEVER deduped.
+    const seenKeys = new Set();
+    const naturalKeyForCreate = (rec) => {
+        const ic = (rec.ic_number || '').toString().replace(/[-\s]/g, '').toLowerCase();
+        if (ic) return 'ic:' + ic;
+        const phone = normalisePhone(rec.phone);
+        if (phone) return 'ph:' + phone;
+        const name = (rec.full_name || '').toString().toLowerCase().trim();
+        if (name) return 'np:' + name + '|' + phone;
+        return ''; // no usable key → do not dedup
+    };
 
     // ── Pass 1: map rows → records, resolve duplicates ───────────────────
     for (let i = 0; i < rowsToProcess.length; i++) {
@@ -840,7 +884,11 @@ const startImport = async () => {
         if (dup) {
             if (duplicateAction === 'skip') { skipped++; continue; }
             if (duplicateAction === 'update') {
-                try { await AppDataStore.update(table, dup.existingRec.id, record); updated++; }
+                // BUG #6: patch ONLY the mapped, non-empty cells — never the full
+                // record (which would wipe populated columns with blanks/defaults).
+                const patch = buildUpdatePayload(vr.row, reverseMap, _importData.importType);
+                if (Object.keys(patch).length === 0) { skipped++; continue; }
+                try { await AppDataStore.update(table, dup.existingRec.id, patch); updated++; }
                 catch (e) { console.error('Update failed row', vr.rowIndex, e); errorCount++; }
                 continue;
             }
@@ -857,6 +905,12 @@ const startImport = async () => {
             record.status = 'New';
             record.protection_deadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
             record.score = 5;
+        }
+        // BUG #15: skip a second occurrence of the same person within this file.
+        const natKey = naturalKeyForCreate(record);
+        if (natKey) {
+            if (seenKeys.has(natKey)) { skipped++; continue; }
+            seenKeys.add(natKey);
         }
         pendingCreates.push({ record, rowIndex: vr.rowIndex, purchaseAmount });
     }

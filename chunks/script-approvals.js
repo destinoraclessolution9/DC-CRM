@@ -61,6 +61,13 @@
     // Current view (read-only reference)
     const _getCurrentView = () => _state.cv;
 
+    // Bug #7: in-flight guard for prospect->customer conversion. Prevents a rapid
+    // double-click / queue+modal race from creating two customer rows (and doubling
+    // lifetime_value) before the persisted 'converted' status lands. Module-scoped
+    // so every entry point (modal, approveQueueEntry, approveClosingRecord, manager
+    // auto-convert) shares the same lock.
+    const _convInFlight = window._convInFlight || (window._convInFlight = new Set());
+
 const renderApprovalQueue = async () => {
     const tbody = document.getElementById('approval-queue-body');
     if (!tbody) return;
@@ -527,8 +534,22 @@ const showConversionApprovalModal = async (prospectId) => {
 };
 
 const approveProspectConversion = async (prospectId) => {
+    // Bug #7 layer 1: synchronous in-flight guard. Set BEFORE the first await so a
+    // rapid second invocation (double-click / queue+modal race) is dropped instead
+    // of racing to create a duplicate customer.
+    const _convKey = String(prospectId);
+    if (_convInFlight.has(_convKey)) return;
+    _convInFlight.add(_convKey);
+    try {
     const prospect = await AppDataStore.getById('prospects', prospectId);
     if (!prospect) return;
+    // Bug #7 layer 2: persisted already-converted guard. If this prospect already
+    // became a customer, do NOT create a second customer / double the lifetime_value.
+    if (prospect.status === 'converted' || prospect.conversion_status === 'approved') {
+        UI.toast.info(`${prospect.full_name || 'This prospect'} is already a customer.`);
+        UI.hideModal();
+        return;
+    }
     const cr = prospect.closing_record;
     const saleAmount = parseFloat(cr?.sale_amount) || 0;
     const now = new Date().toISOString();
@@ -604,6 +625,10 @@ const approveProspectConversion = async (prospectId) => {
     UI.toast.success(`${prospect.full_name} is now a Customer!`);
     const viewport = document.getElementById('content-viewport');
     if (viewport && _state.cv === 'prospects') await (window.app.showProspectsViewSmart || (() => {}))(viewport);
+    } finally {
+        // Always release the in-flight lock, even on early-return / throw.
+        _convInFlight.delete(_convKey);
+    }
 };
 
 const rejectProspectConversion = async (prospectId) => {
