@@ -69,6 +69,13 @@ tmra_*.csv
 # is verifiable from the file content + build.mjs).
 dist-manifest.json
 
+# Vite/full build output dir — entirely build-generated. Vercel rebuilds it on
+# every deploy (vite outDir is react-dist; root .min.* are build.mjs outputs),
+# and nothing tracked references dist/. It was committed by accident (e662b24)
+# and its vite-hashed names (e.g. script.f9775f9654.min-C2iBUsW7.js) slip past
+# the *.??????????.min.js rule above. Never track it.
+dist/
+
 # Python build artefacts
 __pycache__/
 **/__pycache__/
