@@ -46,6 +46,7 @@ import { MobileHomeView } from './views/MobileHomeView.jsx';
 import { AIInsightsView } from './views/AIInsightsView.jsx';
 import { SearchPanelView } from './views/SearchPanelView.jsx';
 import { ModalContentIsland } from './views/ModalContentIsland.jsx';
+import { ErrorBoundary } from './ui/ErrorBoundary.jsx';
 
 const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -85,7 +86,7 @@ function mountProbe() {
     const el = document.getElementById('react-island-root');
     if (!el) return;
     try {
-        createRoot(el).render(<ProbeApp />);
+        createRoot(el).render(_boundary(<ProbeApp />));
         window.__REACT_ISLAND_MOUNTED = true;
         window.__REACT_VERSION = 'bundled-19';
     } catch (e) {
@@ -99,15 +100,43 @@ function mountProbe() {
 // active; React Query dedups + caches the underlying fetches by query key.
 const _roots = new Map();
 
-function mountCustomersTable(container, opts) {
-    if (!container) return;
+// #17 — prune roots whose container has detached from the document. navigateTo
+// replaces content-viewport.innerHTML, orphaning old containers; their roots
+// would otherwise linger in _roots (and keep their React tree/effects alive)
+// forever. Run before every mount so stale roots are unmounted + dropped.
+function _pruneDetachedRoots() {
+    for (const [container, root] of _roots) {
+        if (!document.contains(container)) {
+            try { root.unmount(); } catch (_) {}
+            _roots.delete(container);
+        }
+    }
+}
+
+// Shared get-or-create: prune detached roots first, then REUSE the live
+// container's existing root (so re-mounting the same on-screen container keeps
+// its state/render-in-place) or create a fresh one.
+function _getOrCreateRoot(container) {
+    _pruneDetachedRoots();
     let root = _roots.get(container);
     if (!root) {
         root = createRoot(container);
         _roots.set(container, root);
     }
+    return root;
+}
+
+// #24 — wrap every island render in an error boundary so a single render throw
+// degrades to a small fallback instead of blanking the whole view.
+function _boundary(element) {
+    return <ErrorBoundary>{element}</ErrorBoundary>;
+}
+
+function mountCustomersTable(container, opts) {
+    if (!container) return;
+    const root = _getOrCreateRoot(container);
     const o = opts || {};
-    root.render(
+    root.render(_boundary(
         <QueryClientProvider client={queryClient}>
             <CustomersTable
                 params={o.params || {}}
@@ -116,7 +145,7 @@ function mountCustomersTable(container, opts) {
                 onNavigate={o.onNavigate || (() => {})}
             />
         </QueryClientProvider>
-    );
+    ));
     window.__REACT_CUSTOMERS_MOUNTED = true;
 }
 
@@ -133,15 +162,11 @@ function unmountCustomersTable(container) {
 // re-seeds from the chunk's _selectedProspects on page/sort/filter change.
 function mountProspectsTable(container, opts) {
     if (!container) return;
-    let root = _roots.get(container);
-    if (!root) {
-        root = createRoot(container);
-        _roots.set(container, root);
-    }
+    const root = _getOrCreateRoot(container);
     const o = opts || {};
     const p = o.params || {};
     const key = `${p.page || 0}|${p.sortField || ''}|${p.sortDir || ''}|${p.q || ''}|${p.gua || ''}|${p.agent || ''}|${p.dormant ? 1 : 0}`;
-    root.render(
+    root.render(_boundary(
         <QueryClientProvider client={queryClient}>
             <ProspectsTable
                 key={key}
@@ -151,7 +176,7 @@ function mountProspectsTable(container, opts) {
                 onNavigate={o.onNavigate || (() => {})}
             />
         </QueryClientProvider>
-    );
+    ));
     window.__REACT_PROSPECTS_MOUNTED = true;
 }
 
@@ -170,15 +195,11 @@ function unmountProspectsTable(container) {
 // `key` per filter-set remounts so the view re-derives cleanly on filter change.
 function mountAgentsTable(container, opts) {
     if (!container) return;
-    let root = _roots.get(container);
-    if (!root) {
-        root = createRoot(container);
-        _roots.set(container, root);
-    }
+    const root = _getOrCreateRoot(container);
     const o = opts || {};
     const f = o.filters || {};
     const key = `${f.search || ''}|${f.team || ''}|${f.role || ''}|${f.status || ''}|${(o.agents || []).length}`;
-    root.render(
+    root.render(_boundary(
         <QueryClientProvider client={queryClient}>
             <AgentsTable
                 key={key}
@@ -188,7 +209,7 @@ function mountAgentsTable(container, opts) {
                 meta={o.meta || { canAssignUpline: false }}
             />
         </QueryClientProvider>
-    );
+    ));
     window.__REACT_AGENTS_MOUNTED = true;
 }
 
@@ -203,13 +224,9 @@ function unmountAgentsTable(container) {
 // ── Security dashboard island (read-only; incidents passed as a prop) ─────────
 function mountSecurityDashboard(container, opts) {
     if (!container) return;
-    let root = _roots.get(container);
-    if (!root) {
-        root = createRoot(container);
-        _roots.set(container, root);
-    }
+    const root = _getOrCreateRoot(container);
     const o = opts || {};
-    root.render(<SecurityDashboard incidents={o.incidents || []} />);
+    root.render(_boundary(<SecurityDashboard incidents={o.incidents || []} />));
     window.__REACT_SECURITY_MOUNTED = true;
 }
 
@@ -224,10 +241,9 @@ function unmountSecurityDashboard(container) {
 // ── Ranking Performance island (read-only; computed agentStats passed as props) ─
 function mountRankingView(container, opts) {
     if (!container) return;
-    let root = _roots.get(container);
-    if (!root) { root = createRoot(container); _roots.set(container, root); }
+    const root = _getOrCreateRoot(container);
     const o = opts || {};
-    root.render(<RankingView agentStats={o.agentStats || []} monthLabel={o.monthLabel || ''} />);
+    root.render(_boundary(<RankingView agentStats={o.agentStats || []} monthLabel={o.monthLabel || ''} />));
     window.__REACT_RANKING_MOUNTED = true;
 }
 
@@ -239,10 +255,9 @@ function unmountRankingView(container) {
 // ── Noticeboard card grid island (read-only; prepared events passed as props) ──
 function mountNoticeboardGrid(container, opts) {
     if (!container) return;
-    let root = _roots.get(container);
-    if (!root) { root = createRoot(container); _roots.set(container, root); }
+    const root = _getOrCreateRoot(container);
     const o = opts || {};
-    root.render(<NoticeboardGrid events={o.events || []} isAdmin={!!o.isAdmin} />);
+    root.render(_boundary(<NoticeboardGrid events={o.events || []} isAdmin={!!o.isAdmin} />));
     window.__REACT_NOTICEBOARD_MOUNTED = true;
 }
 
@@ -254,9 +269,8 @@ function unmountNoticeboardGrid(container) {
 // ── Forms-chunk islands (Lead Forms / Surveys / Contracts) — data via props ────
 function _mountSimple(container, element) {
     if (!container) return;
-    let root = _roots.get(container);
-    if (!root) { root = createRoot(container); _roots.set(container, root); }
-    root.render(element);
+    const root = _getOrCreateRoot(container);
+    root.render(_boundary(element));
 }
 function _unmountSimple(container) {
     const root = container && _roots.get(container);
@@ -423,7 +437,7 @@ function mountAIInsights(container, opts) {
     const o = opts || {};
     const root = createRoot(container);
     _aiInsightsRoot = root;
-    root.render(<AIInsightsView onReady={o.onReady} data={o.data} />);
+    root.render(_boundary(<AIInsightsView onReady={o.onReady} data={o.data} />));
     window.__REACT_AI_MOUNTED = true;
 }
 function unmountAIInsights() {
@@ -440,7 +454,7 @@ function mountSearchPanel(container, opts) {
     const o = opts || {};
     const root = createRoot(container);
     _searchPanelRoot = root;
-    root.render(<SearchPanelView onReady={o.onReady} />);
+    root.render(_boundary(<SearchPanelView onReady={o.onReady} />));
     window.__REACT_SEARCH_MOUNTED = true;
 }
 function unmountSearchPanel() {
@@ -460,7 +474,7 @@ function mountModalContent(container, opts) {
     const o = opts || {};
     const root = createRoot(container);
     _modalContentRoot = root;
-    const el = <ModalContentIsland html={o.html || ''} onReady={o.onReady} />;
+    const el = _boundary(<ModalContentIsland html={o.html || ''} onReady={o.onReady} />);
     try {
         flushSync(() => { root.render(el); });
     } catch (_) {
@@ -488,7 +502,7 @@ function mountFudeContent(container, opts) {
     const o = opts || {};
     const root = createRoot(container);
     _fudeContentRoot = root;
-    const el = <ModalContentIsland html={o.html || ''} onReady={o.onReady} />;
+    const el = _boundary(<ModalContentIsland html={o.html || ''} onReady={o.onReady} />);
     try { flushSync(() => { root.render(el); }); }
     catch (_) { root.render(el); }
     window.__REACT_FUDEVIEW_MOUNTED = true;
@@ -509,7 +523,7 @@ function mountJourneyContent(container, opts) {
     const o = opts || {};
     const root = createRoot(container);
     _journeyContentRoot = root;
-    const el = <ModalContentIsland html={o.html || ''} onReady={o.onReady} />;
+    const el = _boundary(<ModalContentIsland html={o.html || ''} onReady={o.onReady} />);
     try { flushSync(() => { root.render(el); }); }
     catch (_) { root.render(el); }
     window.__REACT_JOURNEY_MOUNTED = true;
@@ -534,7 +548,7 @@ function mountKbEditor(container, opts) {
     const o = opts || {};
     const root = createRoot(container);
     _kbEditorRoot = root;
-    const el = <ModalContentIsland html={o.html || ''} onReady={o.onReady} />;
+    const el = _boundary(<ModalContentIsland html={o.html || ''} onReady={o.onReady} />);
     try { flushSync(() => { root.render(el); }); }
     catch (_) { root.render(el); }
     window.__REACT_KBEDITOR_MOUNTED = true;

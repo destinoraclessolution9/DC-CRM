@@ -250,6 +250,19 @@ window.UI = (() => {
         const overlay = document.getElementById('global-modal-overlay');
         if (overlay) {
             overlay.classList.remove('active');
+            // #23 — unmount any React modal root BEFORE blanking the overlay.
+            // Clearing innerHTML alone detaches the React tree without unmounting
+            // it, leaking its effects/timers/listeners. These mount fns render
+            // into the modal content area, so tear them down first; the
+            // innerHTML clear below stays the final step.
+            try {
+                const R = window.CRMReact;
+                if (R) {
+                    if (R.unmountModalContent) R.unmountModalContent();
+                    if (R.unmountAIInsights) R.unmountAIInsights();
+                    if (R.unmountKbEditor) R.unmountKbEditor();
+                }
+            } catch (_) {}
             overlay.innerHTML = '';
         }
         // Restore focus to element that opened the modal

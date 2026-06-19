@@ -1566,7 +1566,13 @@ class DataStore {
                             continue;
                         }
                         console.warn(`DataStore: force-push failed for ${item.record.id}: ${error.message}`);
-                        stillPending.push(item);
+                        // Bounded transient retry (audit #19): an unclassified server error
+                        // retried on every read forever is a latent poison-queue storm. The
+                        // offline network-throw is the catch below and stays uncapped; only a
+                        // persistently-failing server RESPONSE parks (preserved in dead-letter).
+                        item._txRetries = (item._txRetries || 0) + 1;
+                        if (item._txRetries < 50) stillPending.push(item);
+                        else this._parkQueueItem({ tableName, ...item }, `transient error after 50 retries: ${error.message}`);
                     }
                 } catch (_) {
                     /* intentional: network throw ⇒ keep item queued for the next drain */
@@ -1735,9 +1741,18 @@ class DataStore {
                                 this._parkQueueItem({ tableName, ...item }, uErr && uErr.message);
                                 continue;
                             }
-                            // Transient — include item locally but keep in queue for next attempt
-                            if (!serverIds.has(String(item.record.id))) merged.push(item.record);
-                            stillPending.push(item);
+                            // Transient — include item locally but keep in queue, BOUNDED
+                            // (audit #19): an unclassified server error retried on every read
+                            // forever is a latent poison-queue storm. The offline network-throw
+                            // (catch below) stays uncapped; only a persistently-failing server
+                            // RESPONSE parks (preserved in dead-letter).
+                            item._txRetries = (item._txRetries || 0) + 1;
+                            if (item._txRetries < 50) {
+                                if (!serverIds.has(String(item.record.id))) merged.push(item.record);
+                                stillPending.push(item);
+                            } else {
+                                this._parkQueueItem({ tableName, ...item }, `transient error after 50 retries: ${uErr && uErr.message}`);
+                            }
                         }
                     } catch (_) {
                         /* intentional: network throw ⇒ keep item locally-visible + queued for retry */
