@@ -2864,7 +2864,12 @@
         const userMap = new Map(allUsers.map(u => [String(u.id), u]));
 
         // RBAC: non-admin agents only see their own customers
-        const isAdminOrLead = _state.cu && (isSystemAdmin(_state.cu) || isMarketingManager(_state.cu) || /manager|team_leader/i.test(_state.cu.role || ''));
+        // Admin/lead = canonical level helper (L1-L5: admin, marketing, senior mgr,
+        // manager, team leader). Owner-confirmed 2026-06-19: replaces the brittle
+        // /manager|team_leader/ regex, which never matched the canonical "Level 5
+        // Team Leader" string (space vs underscore) — so Team Leaders now correctly
+        // see all refill reminders, not just their own.
+        const isAdminOrLead = !!_state.cu && _utils.isTeamLeaderOrAbove(_state.cu);
         const visibleReminders = all.filter(r => {
             const entity = r.prospect_id
                 ? prospectMap.get(String(r.prospect_id))

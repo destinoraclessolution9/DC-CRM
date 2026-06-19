@@ -2757,24 +2757,11 @@ function _wireLoginBtn() {
         // Wire notification bell
         (window.app._initNotifBell || (() => {}))();
 
-        // Session inactivity timeout — auto-logout after 60 min of no interaction
-        // (skipped for "remember me" users who explicitly opted into persistence)
-        if (localStorage.getItem('remember_me') !== '1') {
-            const SESSION_TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes
-            let _sessionTimer = null;
-            const _resetSessionTimer = () => {
-                clearTimeout(_sessionTimer);
-                _sessionTimer = setTimeout(async () => {
-                    UI.toast.warning('Session expired due to inactivity. Logging out...');
-                    await new Promise(r => setTimeout(r, 2000));
-                    await logout();
-                }, SESSION_TIMEOUT_MS);
-            };
-            ['click', 'keydown', 'mousemove', 'touchstart', 'scroll'].forEach(evt =>
-                window.addEventListener(evt, _resetSessionTimer, { passive: true })
-            );
-            _resetSessionTimer();
-        }
+        // Session inactivity timeout is owned by initSessionTimeout() (the canonical,
+        // configurable [UserPreferences session_timeout, default 30 min], throttled,
+        // audit-logged implementation, web-only). The cruder 60-min duplicate that
+        // used to live here was superseded 2026-06-19 — keeping two timers risked
+        // double-arming and conflicting logout toasts.
         // App initialized
     } catch (err) {
         console.error('App init failed:', err);
@@ -4925,7 +4912,15 @@ const initSessionTimeout = async () => {
     // same binding. Without this, initSessionTimeout threw ReferenceError on every
     // initSecurity() call after login (silently — the unhandled-rejection didn't
     // surface to the UI, but the inactivity timer never armed).
-    if (localStorage.getItem('remember_me') === '1') return;
+    // Inactivity auto-logout applies to the WEB browser ONLY — never the installed
+    // PWA / mobile app (standalone display mode), where a one-time login persists
+    // (owner spec 2026-06-19). Decoupled from remember_me (which only governs
+    // cross-restart session persistence, NOT the idle timeout) so a logged-in web
+    // user is now actually protected by the timer that the remember_me gate had
+    // silently disabled.
+    const _isStandaloneApp = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+        || window.navigator.standalone === true;
+    if (_isStandaloneApp) return;
     if (!window._appState?.cu) return;
     const timeoutMinutes = parseInt(UserPreferences.getSync('session_timeout', 30));
     const resetTimeout = () => {
