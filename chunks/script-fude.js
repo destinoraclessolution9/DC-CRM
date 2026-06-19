@@ -272,17 +272,11 @@ const showFudeView = async (container) => {
     // no new band (e.g. L3/L4 agents) silently gains access. Chose L1||L2 (not the broader
     // isManagement L4+) to stay faithful and err on the MORE restrictive side.
     const _canonAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser);
-    // DEPRECATED legacy email allowlist — kept ONLY as an OR-ed fallback so the three known
-    // admins do NOT lose access while their DB role level is still unset/stale (this is live).
-    // TODO(fude-authz): set the correct role level for these users in the DB, then delete this.
-    const _LEGACY_ADMIN_EMAILS = ['mianformula@gmail.com', 'destinyoracles@gmail.com', 'shilynateh7689@gmail.com'];
-    const _email = (currentUser.email || '').toLowerCase();
-    const _legacyAdmin = _LEGACY_ADMIN_EMAILS.includes(_email);
-    // Surface the drift: warn whenever the legacy fallback is the ONLY thing granting access.
-    if (_legacyAdmin && !_canonAdmin) {
-        console.warn('[fude-authz] falling back to legacy email allowlist for', _email);
-    }
-    const isAdmin   = _canonAdmin || _legacyAdmin;
+    // (2026-06-19) The deprecated legacy email-allowlist fallback was removed: its three
+    // emails (mianformula / destinyoracles / shilynateh7689) now hold canonical L1 in the DB,
+    // so isSystemAdmin covers them and the allowlist is redundant. The fude admin gate is now
+    // purely the canonical L1||L2 helpers — no email special-casing.
+    const isAdmin   = _canonAdmin;
     const isL1314   = userLevel >= 13;
     const isCustomer = userLevel === 13;
 
