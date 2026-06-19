@@ -147,6 +147,16 @@
         return String(name).trim().toLowerCase().replace(/\s+/g, ' ');
     };
 
+    // Tolerant numeric parser — CSV/XLSX exports often format quantities with
+    // thousands separators (e.g. "1,200") or stray spaces, which Number() turns
+    // into NaN → silently dropped as qty<=0. Strip grouping commas/spaces first.
+    const eggParseQty = (val) => {
+        if (val == null || val === '') return 0;
+        if (typeof val === 'number') return isNaN(val) ? 0 : val;
+        const n = Number(String(val).replace(/[,\s]/g, ''));
+        return isNaN(n) ? 0 : n;
+    };
+
     // --- Config ---
     const eggDefaultConfig = () => ({
         region_mapping: [
@@ -247,7 +257,7 @@
         order_no: String(eggGetField(row, ['Order No.', 'Order No', 'OrderNo', 'order_no'])).trim(),
         product_name: String(eggGetField(row, ['Product Name', 'product_name', 'Product'])).trim(),
         product_code: String(eggGetField(row, ['Product Code', 'Item Code', 'SKU', 'Code', 'product_code', 'Item No', 'Item No.'])).trim(),
-        quantity: Number(eggGetField(row, ['Quantity', 'Qty', 'quantity'])) || 0,
+        quantity: eggParseQty(eggGetField(row, ['Quantity', 'Qty', 'quantity'])),
         outlet: String(eggGetField(row, ['Self Collection', 'Outlet', 'Outlet Name', 'outlet'])).trim(),
         order_date: eggGetField(row, ['Order Date', 'order_date', 'Date']),
         group_name: String(eggGetField(row, ['Group', 'Group Name', 'group_name'])).trim(),
@@ -260,7 +270,7 @@
         order_no: String(eggGetField(row, ['Purchase Number', 'Order No.', 'order_no', 'Purchase No'])).trim(),
         product_name: String(eggGetField(row, ['Product Name', 'product_name'])).trim(),
         product_code: String(eggGetField(row, ['Product Code', 'Item Code', 'SKU', 'Code', 'product_code', 'Item No', 'Item No.'])).trim(),
-        quantity: Number(eggGetField(row, ['Product Quantity', 'Quantity', 'Qty', 'quantity'])) || 0,
+        quantity: eggParseQty(eggGetField(row, ['Product Quantity', 'Quantity', 'Qty', 'quantity'])),
         outlet: String(eggGetField(row, ['Outlet Name', 'Outlet', 'Self Collection', 'outlet'])).trim(),
         order_date: eggGetField(row, ['Purchase Date Time', 'Order Date', 'Purchase Date', 'order_date']),
         group_name: String(eggGetField(row, ['Group Name', 'Group', 'group_name'])).trim(),
@@ -314,9 +324,14 @@
     // --- Pipeline step: filter + map all raw rows to the standard shape, apply drop rules ---
     const eggProcessRows = (rawRows, config) => {
         const now = new Date();
+        // Future-date cutoff = end of today in local time, so a same-day order
+        // with a later clock time (or a timezone-boundary parse) isn't dropped
+        // as "future". Anything strictly after today is still excluded.
+        const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
         const out = [];
         const seenInBatch = new Set();  // in-batch dedup: prevent same row appearing in both CSV + XLSX
         let droppedDupes = 0;
+        let droppedFutureDated = 0;
         for (const r of rawRows) {
             // Product mapping first (needed for JB drop rule)
             const product = eggMapProduct(r.product_name, config);
@@ -326,20 +341,24 @@
             const region = eggAssignRegion(r.outlet, r.state, config);
             if (region === 'IGNORE') continue;
 
-            // Drop JB entirely (both GOLD and KING)
-            if (region === 'JB') {
-                if (product === 'KING' && config.ignore_jb_king) continue;
-                if (product === 'GOLD' && config.ignore_jb_gold) continue;
-            }
+            // Drop JB entirely (both GOLD and KING). JB is a MANUAL channel —
+            // the farm-order template hardcodes JB to 0 for the super admin to
+            // fill in by hand, and NONE of the downstream renderers (eggAggregate,
+            // channel breakdown, Google Sheets push) emit a JB section. Letting
+            // JB rows survive only persisted them to egg_processed_orders while
+            // they vanished from every output, so drop them regardless of the
+            // ignore_jb_* flags to keep history consistent with what ships.
+            if (region === 'JB') continue;
 
-            // Quantity sanity
-            const qty = Number(r.quantity) || 0;
+            // Quantity sanity — tolerant parse so thousands-separated values
+            // (e.g. "1,200") aren't NaN→0→silently dropped below.
+            const qty = eggParseQty(r.quantity);
             if (qty <= 0) continue;
 
-            // Date filter: only include orders with date <= now
+            // Date filter: only include orders dated on or before end-of-today.
             const od = eggParseFlexibleDate(r.order_date);
             // If date is unparseable, include it (don't drop) — better to show than hide
-            if (od && od > now) continue;
+            if (od && od > todayEnd) { droppedFutureDated++; continue; }
 
             const channel = eggClassifyChannel(r.group_name, config);
             const normalized = {
@@ -359,28 +378,38 @@
             out.push(normalized);
         }
         _eggState.droppedDupes = droppedDupes;
+        _eggState.droppedFutureDated = droppedFutureDated;
         return out;
     };
 
     // --- Dedup against full history ---
-    // Three-tier check: unique_key → order_no → agent+date+product+qty.
+    // Three-tier check: unique_key → order_no → agent+date+product+qty+region.
     // The fallback tiers handle cases where region mapping changed or order_no
-    // was not stored in older history records.
+    // was not stored in older history records. Only SHIPPED rows (no
+    // excluded_reason) populate the seen-sets — pushed-up/reconciled rows must
+    // not permanently dedup a legitimately-recurring future order line.
     const eggDedupAgainstHistory = async (rows) => {
         try {
             const history = await AppDataStore.query('egg_processed_orders', {});
-            const seenKeys = new Set((history || []).map(h => h.unique_key).filter(Boolean));
-            const seenOrderNos = new Set((history || []).map(h => h.order_no).filter(Boolean));
+            // Pushed-up / reconciled rows were NOT shipped — they carry an
+            // excluded_reason. They must not block a legitimately-recurring
+            // identical order line in a later week, so exclude them from every
+            // seen-set used for dedup.
+            const shipped = (history || []).filter(h => !h.excluded_reason);
+            const seenKeys = new Set(shipped.map(h => h.unique_key).filter(Boolean));
+            const seenOrderNos = new Set(shipped.map(h => h.order_no).filter(Boolean));
             const seenAgentLines = new Set(
-                (history || [])
+                shipped
                     .filter(h => h.agent_name && h.order_date && h.product && h.quantity != null)
-                    .map(h => `${String(h.agent_name).trim().toUpperCase()}|${String(h.order_date).slice(0,10)}|${h.product}|${h.quantity}`)
+                    // Include region in the fallback key — two orders that differ
+                    // only by region (KL vs PG) are NOT duplicates.
+                    .map(h => `${String(h.agent_name).trim().toUpperCase()}|${String(h.order_date).slice(0,10)}|${h.product}|${h.quantity}|${h.region || ''}`)
             );
             return rows.filter(r => {
                 if (seenKeys.has(r.unique_key)) return false;
                 if (r.order_no && seenOrderNos.has(r.order_no)) return false;
                 if (r.agent_name && r.order_date_parsed) {
-                    const line = `${String(r.agent_name).trim().toUpperCase()}|${String(r.order_date_parsed).slice(0,10)}|${r.product}|${r.quantity}`;
+                    const line = `${String(r.agent_name).trim().toUpperCase()}|${String(r.order_date_parsed).slice(0,10)}|${r.product}|${r.quantity}|${r.region || ''}`;
                     if (seenAgentLines.has(line)) return false;
                 }
                 return true;
@@ -1077,6 +1106,7 @@ JB 星期二到
         _eggState.channelBreakdownHtml = '';
         _eggState.stats = {};
         _eggState.droppedDupes = 0;
+        _eggState.droppedFutureDated = 0;
         _eggState.currentPhase = 1;
         // Reset any live file inputs so the same file can be re-picked
         const csvInp = document.getElementById('egg-csv-input'); if (csvInp) csvInp.value = '';
@@ -1179,9 +1209,15 @@ JB 星期二到
                         `<span style="background:#dc2626;color:white;padding:2px 8px;border-radius:10px;font-size:11px;">PUSHED UP</span>` :
                         '-';
                     const dateStr = r.order_date_parsed ? eggFormatDateShort(r.order_date_parsed) : '-';
+                    // unique_key embeds order_no taken verbatim from the uploaded file —
+                    // escape it for the HTML attribute (data-egg-key) and the inline
+                    // onchange JS-string arg so a quote in the order number can't break
+                    // the attribute / terminate the handler string or inject app.* calls.
+                    const keyAttr = escapeHtml(r.unique_key || '');
+                    const keyJs = UI.escJsAttr(String(r.unique_key || ''));
                     return `
-                        <tr data-egg-key="${r.unique_key}" style="border-top:1px solid var(--gray-200);${rowStyle}">
-                            <td style="padding:8px;"><input type="checkbox" ${checked} onchange="app.eggToggleExclude('${r.unique_key}')"></td>
+                        <tr data-egg-key="${keyAttr}" style="border-top:1px solid var(--gray-200);${rowStyle}">
+                            <td style="padding:8px;"><input type="checkbox" ${checked} onchange="app.eggToggleExclude('${keyJs}')"></td>
                             <td style="padding:8px;">${escapeHtml(r.agent_name || '-')}</td>
                             <td style="padding:8px;font-size:12px;">${dateStr}</td>
                             <td style="padding:8px;font-family:monospace;font-size:12px;">${escapeHtml(r.order_no || '-')}</td>
@@ -1362,7 +1398,12 @@ JB 星期二到
         }
         // Partial DOM update — avoids full re-render so the user's scroll
         // position and the top-up input focus are preserved.
-        const tr = document.querySelector(`tr[data-egg-key="${uniqueKey}"]`);
+        // CSS.escape the key (built from raw file order_no) so a quote/bracket
+        // in the value can't break the attribute selector and silently no-op.
+        const escSel = (typeof CSS !== 'undefined' && CSS.escape)
+            ? CSS.escape(String(uniqueKey))
+            : String(uniqueKey).replace(/["\\]/g, '\\$&');
+        const tr = document.querySelector(`tr[data-egg-key="${escSel}"]`);
         if (tr) {
             const pushed = _eggState.excludedKeys.has(uniqueKey);
             tr.style.background = pushed ? '#fef2f2' : '';
@@ -1416,7 +1457,11 @@ JB 星期二到
             newAfterDedup: (_eggState.newRows || []).length,
             excluded: _eggState.excludedKeys.size,
             finalCount: keep.length,
-            totalCartons: keep.reduce((s, r) => s + Number(r.quantity||0), 0)
+            totalCartons: keep.reduce((s, r) => s + Number(r.quantity||0), 0),
+            // Surface silently-dropped row counts so the operator can explain
+            // why totals look short (in-batch dups + future-dated rows).
+            droppedDupes: _eggState.droppedDupes || 0,
+            droppedFutureDated: _eggState.droppedFutureDated || 0
         };
         _eggState.currentPhase = 3;
         await eggRenderRunTab(document.getElementById('egg-tab-content'));
@@ -1459,6 +1504,11 @@ JB 星期二到
                     <div style="font-size:22px;font-weight:700;">${s.totalCartons || 0}</div>
                 </div>
             </div>
+            ${(s.droppedDupes || s.droppedFutureDated) ? `
+            <div style="background:#fffbeb;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:12px;color:#92400e;">
+                <i class="fas fa-info-circle"></i> Rows dropped before this preview:
+                ${s.droppedDupes ? `<strong>${s.droppedDupes}</strong> duplicate (same line in both files)` : ''}${(s.droppedDupes && s.droppedFutureDated) ? ' · ' : ''}${s.droppedFutureDated ? `<strong>${s.droppedFutureDated}</strong> future-dated (order date after today)` : ''}.
+            </div>` : ''}
 
             <div style="background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);margin-bottom:16px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
@@ -1903,13 +1953,13 @@ JB 星期二到
                 ` : '';
                 return `
                     <tr style="border-top:1px solid var(--gray-200);">
-                        <td style="padding:8px;">${u.week_start_date || '-'}</td>
+                        <td style="padding:8px;">${escapeHtml(u.week_start_date || '-')}</td>
                         <td style="padding:8px;">${escapeHtml(u.agent_name || '-')}</td>
-                        <td style="padding:8px;">${u.product}</td>
-                        <td style="padding:8px;">${u.region}</td>
-                        <td style="padding:8px;text-align:right;">${u.quantity}</td>
-                        <td style="padding:8px;">${u.channel || 'Wholesale'}</td>
-                        <td style="padding:8px;"><span style="background:${statusColor};color:white;padding:2px 8px;border-radius:10px;font-size:11px;">${u.status}</span></td>
+                        <td style="padding:8px;">${escapeHtml(u.product || '-')}</td>
+                        <td style="padding:8px;">${escapeHtml(u.region || '-')}</td>
+                        <td style="padding:8px;text-align:right;">${escapeHtml(String(u.quantity ?? ''))}</td>
+                        <td style="padding:8px;">${escapeHtml(u.channel || 'Wholesale')}</td>
+                        <td style="padding:8px;"><span style="background:${statusColor};color:white;padding:2px 8px;border-radius:10px;font-size:11px;">${escapeHtml(u.status || '')}</span></td>
                         <td style="padding:8px;font-size:12px;color:var(--gray-600);">${escapeHtml(u.notes || '')}</td>
                         <td style="padding:8px;">${actions}</td>
                     </tr>
@@ -2103,7 +2153,7 @@ JB 星期二到
             const content = `
                 <div style="max-height:60vh;overflow-y:auto;">
                     <div style="padding:10px;background:#fef3c7;border-left:4px solid #f59e0b;border-radius:6px;margin-bottom:12px;">
-                        Link urgent #${id} (${urgent.agent_name} • ${urgent.product} • ${urgent.region} • ${urgent.quantity} cartons) to one of these processed orders:
+                        Link urgent #${id} (${escapeHtml(urgent.agent_name || '-')} • ${escapeHtml(urgent.product || '-')} • ${escapeHtml(urgent.region || '-')} • ${escapeHtml(String(urgent.quantity ?? ''))} cartons) to one of these processed orders:
                     </div>
                     <table style="width:100%;border-collapse:collapse;">
                         <thead>
@@ -2183,7 +2233,7 @@ JB 星期二到
                 return `
                     <tr style="border-top:1px solid var(--gray-200);">
                         <td style="padding:8px;font-size:12px;">${r.run_at ? new Date(r.run_at).toLocaleString() : '-'}</td>
-                        <td style="padding:8px;">${r.week_start_date || '-'}</td>
+                        <td style="padding:8px;">${escapeHtml(r.week_start_date || '-')}</td>
                         <td style="padding:8px;font-size:12px;">${escapeHtml(r.csv_filename || '-')} / ${escapeHtml(r.excel_filename || '-')}</td>
                         <td style="padding:8px;text-align:right;">${r.rows_new || 0}</td>
                         <td style="padding:8px;text-align:right;">${r.rows_excluded || 0}</td>

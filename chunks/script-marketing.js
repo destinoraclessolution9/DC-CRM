@@ -21,6 +21,12 @@
     const isTeamLeaderOrAbove  = (u) => _utils.isTeamLeaderOrAbove(u || _state.cu);
     const isStockTakeStaff     = (u) => _utils.isStockTakeStaff(u || _state.cu);
     const escapeHtml           = (...a) => _utils.escapeHtml(...a);
+    // Safe href: only allow http(s) and escape for attribute context; blocks
+    // javascript:/data:text-html and attribute-breakout via the escapeHtml pass.
+    const _safeHref = (u) => {
+        const s = String(u || '').trim();
+        return /^https?:\/\//i.test(s) ? escapeHtml(s) : '';
+    };
     const isMobile             = () => _utils.isMobile();
     const withTimeout          = (...a) => _utils.withTimeout(...a);
     const timeAgo              = (...a) => _utils.timeAgo(...a);
@@ -28,6 +34,10 @@
     const debounceCall         = (...a) => window.app.debounceCall(...a);
     const navigateTo           = (v)   => window.app.navigateTo(v);
     const getVisibleProspects  = (...a) => _utils.getVisibleProspects(...a);
+    // Core-IIFE shell helpers (script.js) — both now exported on window.app (Wave A/B).
+    // loginAs() runs in THIS IIFE and must reach them through window.app, not as bare refs.
+    const updateUserDisplay    = (...a) => (window.app.updateUserDisplay   || (() => {}))(...a);
+    const updateNavVisibility  = (...a) => (window.app.updateNavVisibility || (() => {}))(...a);
     // Cross-chunk helpers — defined in sibling chunks, exported to window.app.
     const renderWorkflowCard         = (...a) => (window.app.renderWorkflowCard         || (() => ''))(...a);                  // script-performance.js
     const renderSpecialProgramsTable = (...a) => (window.app.renderSpecialProgramsTable || (() => Promise.resolve()))(...a);  // script-features2.js
@@ -587,7 +597,7 @@
                                 <td><strong>${escapeHtml(item.name)}</strong></td>
                                 <td>${escapeHtml(item.location || '-')}</td>
                                 <td>${escapeHtml(item.address || '-')}</td>
-                                <td>${item.waze_link ? `<a href="${item.waze_link}" target="_blank" rel="noopener" style="color: var(--primary); text-decoration: none;" title="Open in Waze"><i class="fas fa-map-marker-alt"></i> Waze</a>` : '-'}</td>
+                                <td>${_safeHref(item.waze_link) ? `<a href="${_safeHref(item.waze_link)}" target="_blank" rel="noopener" style="color: var(--primary); text-decoration: none;" title="Open in Waze"><i class="fas fa-map-marker-alt"></i> Waze</a>` : '-'}</td>
                                 <td>
                                     <button class="btn-icon" onclick="app.openMarketingListEditModal('${item.id}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
                                     <button class="btn-icon text-danger" onclick="app.deleteMarketingListItem('${item.id}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
@@ -844,7 +854,7 @@
                 <div class="form-group"><label>Venue Name*</label><input type="text" id="mkt-vname" class="form-control" value="${escapeHtml(item.name || '')}"></div>
                 <div class="form-group"><label>Location*</label><input type="text" id="mkt-vlocation" class="form-control" value="${escapeHtml(item.location || '')}"></div>
                 <div class="form-group"><label>Address</label><input type="text" id="mkt-vaddress" class="form-control" value="${escapeHtml(item.address || '')}" placeholder="e.g. No. 5, Jalan Bukit Jalil, 57000 KL"></div>
-                <div class="form-group"><label>Waze Link</label><input type="url" id="mkt-vwaze" class="form-control" value="${item.waze_link || ''}" placeholder="https://waze.com/ul/..."></div>
+                <div class="form-group"><label>Waze Link</label><input type="url" id="mkt-vwaze" class="form-control" value="${escapeHtml(item.waze_link || '')}" placeholder="https://waze.com/ul/..."></div>
             `;
             UI.showModal('Edit Venue', content, [
                 { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
@@ -3073,13 +3083,21 @@ ALTER TABLE public.promotions
             UI.toast.error("Please fill in all required fields (Name, Price, and at least one Product)");
             return;
         }
+        // Reject negatives — they break renderPackageRow's discount math and render as negative RM.
+        if (price < 0 || (originalVal !== null && originalVal < 0)) {
+            UI.toast.error("Price and Original Value cannot be negative");
+            return;
+        }
         if (startDate && endDate && endDate < startDate) {
             UI.toast.error("End Date cannot be before Start Date");
             return;
         }
 
-        // Ensure Supabase promotions table has all required columns before saving
-        await migratePromotionsTable();
+        // NOTE: do NOT call migratePromotionsTable() here — it ALWAYS pops the
+        // 'Database Migration Required' modal (no column-presence check) and DDL
+        // cannot run client-side anyway, so it only flashed over the save UX on
+        // every Create/Update. The missing-column case is handled below by catching
+        // the PostgREST "column does not exist" error and surfacing the modal then.
 
         const data = {
             package_name:   name,
@@ -3098,14 +3116,27 @@ ALTER TABLE public.promotions
             updated_at:     new Date().toISOString()
         };
 
-        if (id) {
-            await AppDataStore.update('promotions', id, data);
-            UI.toast.success("Package updated successfully");
-        } else {
-            data.created_by = _state.cu ? _state.cu.id : null;
-            data.created_at = new Date().toISOString();
-            await AppDataStore.create('promotions', data);
-            UI.toast.success("Package created successfully");
+        try {
+            if (id) {
+                await AppDataStore.update('promotions', id, data);
+                UI.toast.success("Package updated successfully");
+            } else {
+                data.created_by = _state.cu ? _state.cu.id : null;
+                data.created_at = new Date().toISOString();
+                await AppDataStore.create('promotions', data);
+                UI.toast.success("Package created successfully");
+            }
+        } catch (e) {
+            // Only surface the migration modal when the table is actually missing a
+            // column (PostgREST 42703 / "column ... does not exist") — never on every save.
+            const msg = String(e && (e.message || e));
+            if (/column .* does not exist/i.test(msg) || (e && e.code === '42703')) {
+                await migratePromotionsTable();
+                return;
+            }
+            console.error('savePackage failed', e);
+            UI.toast.error('Failed to save package');
+            return;
         }
 
         UI.hideModal();
@@ -3228,7 +3259,7 @@ ALTER TABLE public.promotions
         <div class="package-customers-view">
             <div style="margin-bottom: 20px; padding: 15px; background: var(--gray-50); border-radius: 8px; border-left: 4px solid var(--primary-500);">
                 <h4 style="margin: 0; color: var(--primary-700);">${escapeHtml(pkg.package_name || pkg.name)}</h4>
-                <p style="margin: 5px 0 0; font-size: 13px;">Total Customers: <strong>${purchases.length}</strong></p>
+                <p style="margin: 5px 0 0; font-size: 13px;">Total Customers: <strong>${memberIds.length}</strong> · Purchases: <strong>${purchases.length}</strong></p>
             </div>
             
             <table class="data-table" style="width: 100%; border-collapse: collapse;">
@@ -3621,7 +3652,9 @@ ALTER TABLE public.promotions
         const viewport = document.getElementById('content-viewport');
         await showMarketingAutomationView(viewport);
         await openCreateCampaignModal();
-        (() => {
+        // setTimeout, not a comma-expression: the previous (fn, 100) discarded the
+        // arrow and never pre-selected the template after the modal opened.
+        setTimeout(() => {
             const sel = document.getElementById('campaign-template');
             if (sel) sel.value = id;
         }, 100);
@@ -3771,6 +3804,10 @@ ALTER TABLE public.promotions
 
     let _currentCampaignStep = 1;
     let _campaignData = {};
+    // Re-entrancy guards: prevent a programmatic / cross-tab double save or double
+    // launch from inserting duplicate campaigns + double-counting simulate stats.
+    let _campaignSaveInFlight = false;
+    const _sendingCampaignIds = new Set();
 
     const nextCampaignStep = async () => {
         if (_currentCampaignStep === 1) {
@@ -3927,7 +3964,9 @@ ALTER TABLE public.promotions
                     </div>
                 </div>
             `;
-            (() => {
+            // setTimeout, not a comma-expression: the previous (fn, 500) discarded the
+            // arrow and never ran, so #final-audience-size stayed at '...'.
+            setTimeout(() => {
                 const size = document.getElementById('audience-size-preview')?.getAttribute('data-size') || '85';
                 const el = document.getElementById('final-audience-size');
                 if (el) el.textContent = size + ' recipients';
@@ -3969,6 +4008,12 @@ ALTER TABLE public.promotions
                     const diff = (now - created) / (1000 * 60 * 60 * 24);
                     if (diff <= 7) match = true;
                 }
+                if (config.segments.includes('inactive-30')) {
+                    // Dormancy: no activity for 30+ days (mirrors the Step-3 checkbox).
+                    const last = new Date(p.last_activity_at || p.updated_at || p.created_at || 0);
+                    const days = (now - last) / (1000 * 60 * 60 * 24);
+                    if (days >= 30) match = true;
+                }
                 if (match) filtered.push(p.id);
             });
         }
@@ -4004,15 +4049,27 @@ ALTER TABLE public.promotions
     };
 
     const saveCampaignDraft = async () => {
-        _campaignData.campaign_name = document.getElementById('campaign-name')?.value || 'Untitled Campaign';
-        _campaignData.status = 'draft';
-        await AppDataStore.create('whatsapp_campaigns', _campaignData);
-        UI.toast.success('Campaign saved as draft');
-        UI.hideModal();
-        await refreshCampaignsTab();
+        if (_campaignSaveInFlight) return; // guard against double-save (Save Draft + Save race)
+        _campaignSaveInFlight = true;
+        try {
+            _campaignData.campaign_name = document.getElementById('campaign-name')?.value || 'Untitled Campaign';
+            _campaignData.status = 'draft';
+            // Edit mode keeps the existing id on _campaignData → update, don't duplicate.
+            if (_campaignData.id) {
+                await AppDataStore.update('whatsapp_campaigns', _campaignData.id, _campaignData);
+            } else {
+                await AppDataStore.create('whatsapp_campaigns', _campaignData);
+            }
+            UI.toast.success('Campaign saved as draft');
+            UI.hideModal();
+            await refreshCampaignsTab();
+        } finally {
+            _campaignSaveInFlight = false;
+        }
     };
 
     const saveCampaign = async () => {
+        if (_campaignSaveInFlight) return; // guard against concurrent launch → duplicate campaign/messages
         _campaignData.status = 'scheduled';
         const launchType = document.querySelector('input[name="launch-type"]:checked')?.value;
         if (launchType === 'now') {
@@ -4027,44 +4084,62 @@ ALTER TABLE public.promotions
             _campaignData.scheduled_date = time;
         }
 
-        const recipients = await calculateAudienceSize();
-        _campaignData.total_recipients = recipients.length;
-        _campaignData.sent_count = 0;
-        _campaignData.delivered_count = 0;
-        _campaignData.opened_count = 0;
-        _campaignData.replied_count = 0;
-        _campaignData.clicked_count = 0;
-        _campaignData.converted_count = 0;
-        _campaignData.created_by = _state.cu ? _state.cu.id : 5;
-        _campaignData.created_at = new Date().toISOString();
+        _campaignSaveInFlight = true;
+        try {
+            const recipients = await calculateAudienceSize();
+            _campaignData.total_recipients = recipients.length;
+            _campaignData.sent_count = 0;
+            _campaignData.delivered_count = 0;
+            _campaignData.opened_count = 0;
+            _campaignData.replied_count = 0;
+            _campaignData.clicked_count = 0;
+            _campaignData.converted_count = 0;
+            _campaignData.created_by = _state.cu ? _state.cu.id : 5;
+            _campaignData.created_at = new Date().toISOString();
 
-        const campaign = await AppDataStore.create('whatsapp_campaigns', _campaignData);
+            // Edit mode keeps the existing id on _campaignData → update the row in place
+            // rather than inserting a duplicate campaign.
+            let campaign;
+            if (_campaignData.id) {
+                await AppDataStore.update('whatsapp_campaigns', _campaignData.id, _campaignData);
+                campaign = _campaignData;
+            } else {
+                campaign = await AppDataStore.create('whatsapp_campaigns', _campaignData);
+            }
 
-        // Create initial message tracking for all recipients in ONE batched insert
-        // (was an N+1: one round-trip per recipient). createMany falls back to
-        // per-row add() on any error, so the persisted records are unchanged.
-        await AppDataStore.createMany('campaign_messages', recipients.map(rpId => ({
-            campaign_id: campaign.id,
-            prospect_id: rpId,
-            status: launchType === 'now' ? 'queued' : 'scheduled',
-            sent_at: launchType === 'now' ? new Date().toISOString() : null,
-            delivered_at: null,
-            opened_at: null,
-            replied_at: null,
-            last_error: null,
-            retry_count: 0
-        })));
+            // Create initial message tracking for all recipients in ONE batched insert
+            // (was an N+1: one round-trip per recipient). createMany falls back to
+            // per-row add() on any error, so the persisted records are unchanged.
+            await AppDataStore.createMany('campaign_messages', recipients.map(rpId => ({
+                campaign_id: campaign.id,
+                prospect_id: rpId,
+                status: launchType === 'now' ? 'queued' : 'scheduled',
+                sent_at: launchType === 'now' ? new Date().toISOString() : null,
+                delivered_at: null,
+                opened_at: null,
+                replied_at: null,
+                last_error: null,
+                retry_count: 0
+            })));
 
-        if (launchType === 'now') {
-            await simulateCampaignSending(campaign.id);
+            if (launchType === 'now') {
+                await simulateCampaignSending(campaign.id);
+            }
+
+            UI.toast.success(launchType === 'now' ? 'Campaign launched successfully!' : 'Campaign scheduled successfully!');
+            UI.hideModal();
+            await refreshCampaignsTab();
+        } finally {
+            _campaignSaveInFlight = false;
         }
-
-        UI.toast.success(launchType === 'now' ? 'Campaign launched successfully!' : 'Campaign scheduled successfully!');
-        UI.hideModal();
-        await refreshCampaignsTab();
     };
 
 const simulateCampaignSending = async (campaignId) => {
+    // Per-campaign in-flight guard: a concurrent/cross-tab second run would double-count
+    // sent/delivered counters off the same stale getById read (non-atomic RMW).
+    if (_sendingCampaignIds.has(campaignId)) return;
+    _sendingCampaignIds.add(campaignId);
+    try {
     const messages = (await AppDataStore.getAll('campaign_messages')).filter(m => m.campaign_id === campaignId);
 
     // Use sequential async loop instead of setInterval to prevent overlapping DB calls
@@ -4081,8 +4156,9 @@ const simulateCampaignSending = async (campaignId) => {
             sent_at: new Date().toISOString()
         });
 
-        // Update campaign stats
+        // Update campaign stats (getById can return null on RLS deny/offline)
         const campaign = await AppDataStore.getById('whatsapp_campaigns', campaignId);
+        if (!campaign) break;
         const updates = { sent_count: (campaign.sent_count || 0) + 1 };
         if (['delivered', 'opened', 'replied'].includes(status)) updates.delivered_count = (campaign.delivered_count || 0) + 1;
         if (['opened', 'replied'].includes(status)) updates.opened_count = (campaign.opened_count || 0) + 1;
@@ -4096,6 +4172,9 @@ const simulateCampaignSending = async (campaignId) => {
 
     await AppDataStore.update('whatsapp_campaigns', campaignId, { status: 'completed', completed_date: new Date().toISOString() });
     await refreshCampaignsTab();
+    } finally {
+        _sendingCampaignIds.delete(campaignId);
+    }
 };
 
     const refreshCampaignsTab = async () => {
@@ -4596,6 +4675,8 @@ const simulateCampaignSending = async (campaignId) => {
             AppDataStore.getAll('campaign_messages'),
             AppDataStore.getAll('prospects'),
         ]);
+        // getById can resolve null (RLS deny / deleted / offline fallback) — guard before deref.
+        if (!campaign) { UI.toast.error('Campaign not found'); return; }
         const messages = (allMessages || []).filter(m => m.campaign_id === campaignId);
         const prospectsById = new Map((allProspects || []).map(p => [String(p.id), p]));
 
@@ -4609,7 +4690,7 @@ const simulateCampaignSending = async (campaignId) => {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `Campaign_Report_${campaign.campaign_name.replace(/\s+/g, '_')}_${new Date().toLocaleDateString()}.csv`;
+        a.download = `Campaign_Report_${(campaign.campaign_name || 'campaign').replace(/\s+/g, '_')}_${new Date().toLocaleDateString()}.csv`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -4901,5 +4982,11 @@ const simulateCampaignSending = async (campaignId) => {
         showMarketingListsView,
         showMonthlyPromotionView,
         buildEventCategoriesField,
+        // script-features2.js reaches this via window.app.renderMarketingListTable.
+        renderMarketingListTable,
+        expireOldOverrides,
     });
+    // expireOldOverrides is exported on window.app (above); script.js startup calls
+    // it via window.app.expireOldOverrides so the manual-override auto-expiry runs
+    // once the marketing chunk is loaded (previously the bare ref was always dead).
 })();

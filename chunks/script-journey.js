@@ -309,7 +309,16 @@
 
             for (const act of activities) {
                 const actType = act.activity_type?.toLowerCase() || '';
-                const eventCat = act.event_category?.toLowerCase() || '';
+                // event_category lives on the joined `events` row, NOT on `activities`
+                // (the activities table only has event_category_id). The light-select
+                // used by getActivitiesForProspect does not project it, so prefer an
+                // embedded events relation when present and fall back to any direct
+                // field. CROSS-FILE: data.js must join events(event_category) into the
+                // activities reader for the event-funnel weights to actually fire.
+                const eventCat = (act.event_category
+                    || act.events?.event_category
+                    || act.event?.event_category
+                    || '').toLowerCase();
 
                 // Map activity_type + event_category to score weight
                 let w = SCORE_WEIGHTS[actType] || SCORE_WEIGHTS[eventCat] || 5;
@@ -435,7 +444,11 @@
                         d.setDate(d.getDate() - reduceDays);
                         const newDate = d.toISOString().slice(0, 10);
                         if (newDate >= today) {
+                            // Persist the moved-earlier due_date — updateTouchpointStatus
+                            // now writes opts.due_date. Previously newDate was computed but
+                            // never saved, so accelerate was a silent no-op.
                             await AppDataStore.updateTouchpointStatus(tp.id, 'pending', {
+                                due_date: newDate,
                                 notes: `Accelerated by ${reduceDays}d (score > 70)`
                             });
                         }
@@ -457,8 +470,14 @@
                     const reason = rule.action_payload?.reason || '需要关注';
                     const notify = rule.action_payload?.notify || 'team_leader';
                     console.log(`[journey] ESCALATE: ${entityType} ${entityId} — ${reason}`);
-                    // Creates a high-priority touchpoint assigned to TL for review
-                    await window.supabase?.from('journey_touchpoints').insert({
+                    // Route the review task to the actual supervisor named by `notify`
+                    // (team_leader/manager) — NOT back to _cu(), the agent who fired the
+                    // event. Otherwise the escalation lands on the same agent's queue.
+                    const assignee = await _resolveEscalationAssignee(notify);
+                    // Go through AppDataStore.create (not a raw window.supabase insert):
+                    // create() queues to fs_crm_sync_queue when offline and returns the
+                    // row, so we only toast success when a row was actually written.
+                    const escRow = await AppDataStore.create('journey_touchpoints', {
                         [entityType === 'customer' ? 'customer_id' : 'prospect_id']: entityId,
                         stage_name:     'escalation',
                         track:          'active',
@@ -467,11 +486,15 @@
                         due_date:       new Date().toISOString().slice(0, 10),
                         priority:       'high',
                         status:         'pending',
-                        assigned_to:    _cu()?.id || null,
+                        assigned_to:    assignee,
                         follow_mode:    'active',
                         notes:          `Triggered by: ${triggerEvent}`,
                     });
-                    UI.toast.warning(`⚠️ 已升级至 ${notify}: ${reason}`);
+                    if (escRow) {
+                        UI.toast.warning(`⚠️ 已升级至 ${notify}: ${reason}`);
+                    } else {
+                        UI.toast.error('升级处理失败 — 请重试');
+                    }
                 }
 
                 // ── role_upgrade ──────────────────────────────────────────
@@ -585,17 +608,72 @@
         return map[stageName] || null;
     }
 
-    // Helper: update follow_mode on all pending touchpoints for an entity
-    async function _updatePendingFollowMode(entityType, entityId, newMode) {
+    // Helper: resolve the user id an escalation should be routed to.
+    // `notify` is 'team_leader' (default) or 'manager' (seeded conditional rules).
+    // Picks, from the triggering agent's team, the lowest-privilege user that still
+    // satisfies the requested tier — a same-team team-leader/manager — so the review
+    // task lands on a supervisor's queue rather than back on the agent who fired it.
+    // Falls back to any user of the right tier, then to the current user (so the
+    // touchpoint is never orphaned with a null assignee).
+    async function _resolveEscalationAssignee(notify) {
+        const cu = _cu();
+        const fallback = cu?.id || null;
         try {
-            const col = entityType === 'customer' ? 'customer_id' : 'prospect_id';
-            await window.supabase
-                ?.from('journey_touchpoints')
-                .update({ follow_mode: newMode })
-                .eq(col, entityId)
-                .in('status', ['pending', 'snoozed']);
+            const all = await AppDataStore.getAll('users');
+            if (!Array.isArray(all) || !all.length) return fallback;
+            const wantManager = notify === 'manager';
+            // Tier predicate: 'manager' → L≤4, otherwise team-leader-or-above (L≤5).
+            const tierOk = (u) => wantManager ? isManagement(u) : isTeamLeaderOrAbove(u);
+            const candidates = all.filter(u => tierOk(u) && String(u.id) !== String(cu?.id));
+            if (!candidates.length) return fallback;
+            // Prefer a supervisor on the same team as the triggering agent.
+            const sameTeam = cu?.team_id != null
+                ? candidates.filter(u => String(u.team_id) === String(cu.team_id))
+                : [];
+            const pool = sameTeam.length ? sameTeam : candidates;
+            // Of those who qualify, route to the LEAST-senior supervisor that still
+            // meets the tier (highest level number, e.g. an L5 team-leader rather than
+            // the L1 super-admin) — that is the agent's immediate escalation owner.
+            const getLvl = window._crmUtils?.getUserLevel || (() => 99);
+            pool.sort((a, b) => getLvl(a) - getLvl(b));
+            return pool[pool.length - 1]?.id || pool[0]?.id || fallback;
         } catch (e) {
-            console.warn('[journey] _updatePendingFollowMode', e?.message);
+            console.warn('[journey] _resolveEscalationAssignee', e?.message);
+            return fallback;
+        }
+    }
+
+    // Helper: update follow_mode on all pending touchpoints for an entity.
+    // Fast path is a single bulk UPDATE; but a raw window.supabase update with `?.`
+    // silently short-circuits to `undefined` when offline (supabase null) — the
+    // write would vanish with no retry. So when the bulk write is unavailable or
+    // errors, fall back to per-row AppDataStore.update(), which queues each change
+    // to fs_crm_sync_queue for replay when the connection returns.
+    async function _updatePendingFollowMode(entityType, entityId, newMode) {
+        const col = entityType === 'customer' ? 'customer_id' : 'prospect_id';
+        const sb = window.supabase;
+        if (sb) {
+            try {
+                const { error } = await sb
+                    .from('journey_touchpoints')
+                    .update({ follow_mode: newMode })
+                    .eq(col, entityId)
+                    .in('status', ['pending', 'snoozed']);
+                if (!error) { AppDataStore.invalidateCache?.('journey_touchpoints'); return; }
+                console.warn('[journey] _updatePendingFollowMode bulk', error?.message);
+            } catch (e) {
+                console.warn('[journey] _updatePendingFollowMode bulk', e?.message);
+            }
+        }
+        // Offline / bulk failed → queue each row individually so nothing is lost.
+        try {
+            const tps = await AppDataStore.getJourneyTouchpoints(entityType, entityId);
+            const targets = (tps || []).filter(t => ['pending', 'snoozed'].includes(t.status));
+            for (const t of targets) {
+                await AppDataStore.update('journey_touchpoints', t.id, { follow_mode: newMode });
+            }
+        } catch (e) {
+            console.warn('[journey] _updatePendingFollowMode fallback', e?.message);
         }
     }
 
@@ -839,8 +917,12 @@
                 ${order.map((stage, i) => {
                     const st = stageStatus[stage] || 'future';
                     const lbl = STAGE_LABELS[stage] || stage;
-                    // Strip emoji + product prefix for compact label
-                    const shortLbl = lbl.replace(/^[^\s—]+\s—\s/, '').replace('Step ','S').replace(' — ','·').slice(0,12);
+                    // Strip emoji + product prefix for compact label. The old regex
+                    // (/^[^\s—]+\s—\s/) required a single space-less token before the
+                    // em-dash, so '💍 改命戒指 — CPS后' (space inside the prefix) never
+                    // matched and the stage name was truncated away. Strip everything
+                    // up to and including the FIRST em-dash instead, keeping the stage.
+                    const shortLbl = lbl.replace(/^.*?—\s*/, '').replace('Step ','S').replace(' — ','·').slice(0,12);
                     return (i > 0 ? '<div class="jny-ts-conn"></div>' : '') +
                         `<div class="jny-ts-stage" title="${esc(lbl)}">
                             <div class="jny-ts-dot ${st}">
@@ -1171,7 +1253,7 @@
                     const trackBadge = tp.product_track ? `<span style="background:#e0f2fe;color:#0369a1;padding:1px 5px;border-radius:6px;font-size:9px;font-weight:700;">${tp.product_track.toUpperCase()}</span>` : '';
                     return `
                         <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--gray-200);border-radius:8px;background:#fff;${tp.status==='overdue'?'border-color:#fca5a5;background:#fff5f5;':''}cursor:pointer;"
-                             onclick="app.navigateTo('${tp.prospect_id ? 'prospects' : 'customers'}')">
+                             onclick="app.openJourneyEntity('${tp.prospect_id ? 'prospect' : 'customer'}', ${Number(tp.prospect_id || tp.customer_id) || 'null'})">
                             <i class="${TYPE_ICON[tp.touchpoint_type] || 'fas fa-tasks'}" style="color:${pColor};width:16px;text-align:center;flex-shrink:0;"></i>
                             <div style="flex:1;min-width:0;">
                                 <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(tp.title)}</div>
@@ -1258,6 +1340,26 @@
         if (bodyEl) await renderJourneyTab(entityType, entityId, bodyEl);
     }
 
+    // Open the specific prospect/customer behind a dashboard "due today" row.
+    // Previously the row only ran navigateTo('prospects'|'customers'), landing the
+    // user on the unfiltered list instead of the record the touchpoint is about.
+    // Navigate to the list first, then open the record detail (same deferred-open
+    // pattern the calendar dispatcher uses, so the view has mounted before we open).
+    const openJourneyEntity = async (entityType, entityId) => {
+        if (entityId == null) return;
+        const isCustomer = entityType === 'customer';
+        try {
+            await (window.app.navigateTo || (() => {}))(isCustomer ? 'customers' : 'prospects');
+        } catch (_) { /* intentional: best-effort navigation */ }
+        const openFn = isCustomer
+            ? (window.app.showCustomerDetail || (() => {}))
+            : (window.app.showProspectDetail || (() => {}));
+        setTimeout(() => {
+            try { openFn(entityId); }
+            catch (_) { /* intentional: best-effort deferred detail open */ }
+        }, 200);
+    };
+
     // ── Expose ────────────────────────────────────────────────────────────────
 
     app.register('journey', {
@@ -1275,6 +1377,7 @@
         spawnAnnualTouchpoints,
         showAgentJourneyDashboard,
         showAgentJourneyLoad,
+        openJourneyEntity,
         evaluateJourneyRules: evaluateConditionalRules,
         recalcProspectScore,
         getTrackForStage,

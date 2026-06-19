@@ -6,6 +6,10 @@
 (() => {
     const _state = window._appState;
     const esc = (s) => window._crmUtils.escapeHtml(s);
+    // Defensive aliases to core role helpers (live-bound via _crmUtils) — used to
+    // gate token-minting / PII-exposing handlers at the handler level (audit L369).
+    const isManagement = (u) => window._crmUtils.isManagement(u || _state.cu);
+    const isAgent      = (u) => window._crmUtils.isAgent(u || _state.cu);
     // ========== LEAD CAPTURE FORMS ==========
 
     // React-island flag for the forms-chunk views (default-on). Kill-switch → legacy:
@@ -88,11 +92,16 @@
         const name = _nameEl.value.trim();
         if (!name) { UI.toast.error('Form name is required.'); return; }
         const fields = [];
-        document.querySelectorAll('#form-fields-list .form-field-row').forEach((row, i) => {
+        document.querySelectorAll('#form-fields-list .form-field-row').forEach((row) => {
             const label = (row.querySelector('.field-label')?.value || '').trim();
             const type = row.querySelector('.field-type')?.value || 'text';
             const required = row.querySelector('.field-required')?.checked || false;
-            if (label) fields.push({ id: `field_${i}`, label, type, required });
+            // Stable, label-derived id with a random suffix — independent of DOM
+            // render order/gaps so empty-label or removed rows can't collide ids.
+            if (label) fields.push({
+                id: 'field_' + label.toLowerCase().replace(/[^a-z0-9]/g, '_') + '_' + Math.random().toString(36).slice(2, 7),
+                label, type, required
+            });
         });
         if (fields.length === 0) { UI.toast.error('Add at least one field.'); return; }
         const slug = name.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Date.now();
@@ -110,10 +119,14 @@
     const deleteLeadForm = async (formId) => {
         try {
             const submissions = await AppDataStore.getAll('lead_submissions').catch(() => []);
-            for (const s of submissions.filter(s => String(s.form_id) === String(formId)))
-                await AppDataStore.delete('lead_submissions', s.id);
+            const children = submissions.filter(s => String(s.form_id) === String(formId));
+            // Delete children in parallel and tolerate partial failure instead of
+            // aborting mid-cleanup (which would leave orphaned submissions).
+            const results = await Promise.allSettled(children.map(s => AppDataStore.delete('lead_submissions', s.id)));
+            const failed = results.filter(r => r.status === 'rejected').length;
             await AppDataStore.delete('lead_forms', formId);
-            UI.toast.success('Form deleted.');
+            if (failed) UI.toast.error(`Form deleted, but ${failed} submission(s) could not be removed.`);
+            else UI.toast.success('Form deleted.');
             await showLeadFormsView(document.getElementById('content-viewport'));
         } catch (err) {
             UI.toast.error('Delete failed: ' + (err.message || 'Unknown error'));
@@ -166,7 +179,10 @@
             status: 'New', source: 'lead_form',
             lead_agent_id: _state.cu?.id || 1, created_at: new Date().toISOString()
         });
-        await AppDataStore.update('lead_submissions', submissionId, { status: 'processed', prospect_id: prospect?.id });
+        // Don't mark the submission processed (with a null prospect_id) if the
+        // create silently failed — otherwise the row is "Done" with no prospect.
+        if (!prospect?.id) { UI.toast.error('Could not create prospect.'); return; }
+        await AppDataStore.update('lead_submissions', submissionId, { status: 'processed', prospect_id: prospect.id });
         UI.toast.success(`Prospect "${name}" created.`);
         UI.hideModal();
     };
@@ -238,10 +254,13 @@
     const deleteSurvey = async (surveyId) => {
         try {
             const responses = await AppDataStore.getAll('survey_responses').catch(() => []);
-            for (const r of responses.filter(r => String(r.survey_id) === String(surveyId)))
-                await AppDataStore.delete('survey_responses', r.id);
+            const children = responses.filter(r => String(r.survey_id) === String(surveyId));
+            // Parallel child deletes with partial-failure tolerance (no mid-cleanup abort).
+            const results = await Promise.allSettled(children.map(r => AppDataStore.delete('survey_responses', r.id)));
+            const failed = results.filter(r => r.status === 'rejected').length;
             await AppDataStore.delete('surveys', surveyId);
-            UI.toast.success('Survey deleted.');
+            if (failed) UI.toast.error(`Survey deleted, but ${failed} response(s) could not be removed.`);
+            else UI.toast.success('Survey deleted.');
             await showSurveysView(document.getElementById('content-viewport'));
         } catch (err) {
             UI.toast.error('Delete failed: ' + (err.message || 'Unknown error'));
@@ -255,11 +274,16 @@
 
     const showSurveyResults = async (surveyId) => {
         const survey = await AppDataStore.getById('surveys', surveyId);
+        // getById can return null (deleted / RLS deny / offline) — guard before deref.
+        if (!survey) { UI.toast.error('Survey not found.'); return; }
         const responses = (await AppDataStore.getAll('survey_responses').catch(() => [])).filter(r => r.survey_id == surveyId);
-        const promoters = responses.filter(r => r.score >= 9).length;
-        const passives = responses.filter(r => r.score >= 7 && r.score <= 8).length;
-        const detractors = responses.filter(r => r.score <= 6).length;
-        const total = responses.length;
+        // Only numeric-scored rows are NPS-eligible — null/undefined scores (CSAT /
+        // free-text rows) must not be coerced into the detractor bucket or denominator.
+        const scored = responses.filter(r => typeof r.score === 'number');
+        const promoters = scored.filter(r => r.score >= 9).length;
+        const passives = scored.filter(r => r.score >= 7 && r.score <= 8).length;
+        const detractors = scored.filter(r => r.score <= 6).length;
+        const total = scored.length;
         const nps = total > 0 ? Math.round(((promoters - detractors) / total) * 100) : null;
         const npsColor = nps === null ? '#9ca3af' : nps >= 50 ? '#10b981' : nps >= 0 ? '#f59e0b' : '#ef4444';
         const html = `
@@ -354,8 +378,8 @@
         const title = _titleEl.value.trim();
         if (!title) { UI.toast.error('Contract title is required.'); return; }
         const customerId = document.getElementById('contract-customer-id')?.value.trim() ?? '';
-        const fileInput = document.getElementById('contract-file');
-        const fileName = fileInput.files?.[0]?.name || null;
+        // Optional-chain the file input so a missing element can't throw a TypeError.
+        const fileName = document.getElementById('contract-file')?.files?.[0]?.name || null;
         await AppDataStore.create('contracts', {
             title, customer_id: customerId ? parseInt(customerId) : null,
             file_name: fileName, file_url: fileName ? `local:${fileName}` : null,
@@ -366,8 +390,27 @@
         await showContractsView(document.getElementById('content-viewport'));
     };
 
+    // Cryptographically-strong, unguessable bearer token (replaces Math.random +
+    // Date.now). Falls back to layered Math.random only if crypto is unavailable.
+    const _secureToken = (prefix) => {
+        try {
+            if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+                return prefix + (window.crypto.randomUUID() + window.crypto.randomUUID()).replace(/-/g, '');
+            }
+            if (window.crypto && window.crypto.getRandomValues) {
+                const buf = new Uint8Array(32);
+                window.crypto.getRandomValues(buf);
+                return prefix + Array.from(buf, b => b.toString(16).padStart(2, '0')).join('');
+            }
+        } catch (_) { /* fall through */ }
+        return prefix + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+    };
+
     const sendContractForSigning = async (contractId) => {
-        const token = 'tok-' + Math.random().toString(36).substr(2, 16) + Date.now().toString(36);
+        // Token-minting handler — gate to agents/management so a lower-privileged
+        // context can't issue a signing link (defence-in-depth atop view gate + RLS).
+        if (!isManagement(_state.cu) && !isAgent(_state.cu)) { UI.toast.error('Not authorized'); return; }
+        const token = _secureToken('tok-');
         await AppDataStore.update('contracts', contractId, { status: 'sent', signing_token: token, sent_at: new Date().toISOString() });
         const signingUrl = `${window.location.origin}/sign.html?token=${token}`;
         UI.showModal('Contract Sent for Signing', `
@@ -382,6 +425,8 @@
     };
 
     const copySigningLink = async (contractId) => {
+        // Exposes a bearer signing link — gate consistently with sendContractForSigning.
+        if (!isManagement(_state.cu) && !isAgent(_state.cu)) { UI.toast.error('Not authorized'); return; }
         const contract = await AppDataStore.getById('contracts', contractId);
         if (!contract?.signing_token) { UI.toast.error('No signing token found.'); return; }
         const url = `${window.location.origin}/sign.html?token=${contract.signing_token}`;
@@ -501,7 +546,8 @@
         const options = type === 'dropdown' ? optionsRaw.split(',').map(o => o.trim()).filter(Boolean) : [];
         await AppDataStore.create('custom_field_definitions', {
             entity_type: entityType, label, field_key: fieldKey, type, options,
-            is_required: document.getElementById('cf-required').checked,
+            // Optional-chain so a missing checkbox can't throw after label validation passed.
+            is_required: !!document.getElementById('cf-required')?.checked,
             sort_order: 0, created_at: new Date().toISOString()
         });
         UI.hideModal();
@@ -511,14 +557,18 @@
 
     const deleteCustomFieldDefinition = async (fieldId) => {
         try {
+            let failed = 0;
             const def = await AppDataStore.getById('custom_field_definitions', fieldId);
             if (def) {
                 const allVals = await AppDataStore.getAll('custom_field_values').catch(() => []);
-                for (const v of allVals.filter(v => v.field_key === def.field_key && v.entity_type === def.entity_type))
-                    await AppDataStore.delete('custom_field_values', v.id);
+                const children = allVals.filter(v => v.field_key === def.field_key && v.entity_type === def.entity_type);
+                // Parallel child deletes with partial-failure tolerance (no mid-cleanup abort).
+                const results = await Promise.allSettled(children.map(v => AppDataStore.delete('custom_field_values', v.id)));
+                failed = results.filter(r => r.status === 'rejected').length;
             }
             await AppDataStore.delete('custom_field_definitions', fieldId);
-            UI.toast.success('Field removed.');
+            if (failed) UI.toast.error(`Field removed, but ${failed} stored value(s) could not be deleted.`);
+            else UI.toast.success('Field removed.');
             await showCustomFieldsAdmin(document.getElementById('content-viewport'));
         } catch (err) {
             UI.toast.error('Delete failed: ' + (err.message || 'Unknown error'));
@@ -535,15 +585,19 @@
         }
         const inputs = defs.map(def => {
             const val = values[def.field_key] || '';
+            // Re-sanitize field_key for use in the element id — legacy/imported keys
+            // are NOT guaranteed sanitized, so an unescaped key could corrupt the id
+            // attribute (selector miss = silent data loss) or allow attribute breakout.
+            const key = String(def.field_key).replace(/[^a-z0-9_]/g, '_');
             let input = '';
             if (def.type === 'dropdown') {
-                input = `<select id="cf-input-${def.field_key}" class="form-control">${(def.options||[]).map(o=>`<option value="${esc(o)}" ${val===o?'selected':''}>${esc(o)}</option>`).join('')}</select>`;
+                input = `<select id="cf-input-${key}" class="form-control">${(def.options||[]).map(o=>`<option value="${esc(o)}" ${val===o?'selected':''}>${esc(o)}</option>`).join('')}</select>`;
             } else if (def.type === 'number') {
-                input = `<input type="number" id="cf-input-${def.field_key}" class="form-control" value="${esc(val)}">`;
+                input = `<input type="number" id="cf-input-${key}" class="form-control" value="${esc(val)}">`;
             } else if (def.type === 'date') {
-                input = `<input type="date" id="cf-input-${def.field_key}" class="form-control" value="${esc(val)}">`;
+                input = `<input type="date" id="cf-input-${key}" class="form-control" value="${esc(val)}">`;
             } else {
-                input = `<input type="text" id="cf-input-${def.field_key}" class="form-control" value="${esc(val)}">`;
+                input = `<input type="text" id="cf-input-${key}" class="form-control" value="${esc(val)}">`;
             }
             return `<div style="margin-bottom:12px;"><label style="display:block; font-weight:500; margin-bottom:4px; font-size:14px;">${esc(def.label)}${def.is_required?' <span style="color:var(--error);">*</span>':''}</label>${input}</div>`;
         }).join('');
@@ -554,7 +608,10 @@
         const defs = (await AppDataStore.getAll('custom_field_definitions').catch(() => [])).filter(d => d.entity_type === entityType);
         const existingVals = (await AppDataStore.getAll('custom_field_values').catch(() => [])).filter(v => v.entity_type === entityType && v.entity_id == entityId);
         for (const def of defs) {
-            const input = document.getElementById(`cf-input-${def.field_key}`);
+            // Mirror renderCustomFieldInputs' key sanitization so the lookup matches
+            // the rendered id even for legacy/imported field_keys (else value is lost).
+            const key = String(def.field_key).replace(/[^a-z0-9_]/g, '_');
+            const input = document.getElementById(`cf-input-${key}`);
             if (!input) continue;
             const existing = existingVals.find(v => v.field_key === def.field_key);
             if (existing) {
@@ -578,9 +635,13 @@
     // ========== CUSTOMER SELF-SERVICE PORTAL ==========
 
     const sendPortalLink = async (customerId) => {
+        // Mints a bearer token granting external access to full customer PII —
+        // gate at the handler level (defence-in-depth atop view gate + RLS).
+        if (!isManagement(_state.cu) && !isAgent(_state.cu)) { UI.toast.error('Not authorized'); return; }
         const customer = await AppDataStore.getById('customers', customerId);
         if (!customer) return;
-        const token = 'portal-' + Math.random().toString(36).substr(2, 16) + '-' + Date.now().toString(36);
+        // Cryptographically-strong, unguessable session token (not Math.random/Date.now).
+        const token = _secureToken('portal-');
         const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
         await AppDataStore.create('portal_sessions', {
             customer_id: customerId, email: customer.email, token,

@@ -17,6 +17,11 @@
     const isTeamLeaderOrAbove  = (u) => _utils.isTeamLeaderOrAbove(u || _state.cu);
     const _getUserLevel        = (u) => _utils.getUserLevel(u);
     const navigateTo           = (v) => window.app.navigateTo(v);
+    // renderMarketingListTable is a const private to the script-marketing.js IIFE,
+    // exported on window.app there. refreshSpecialProgramView (below) referenced it
+    // as a bare identifier → ReferenceError. Defensive cross-chunk alias resolves
+    // it lazily; returns '' if the marketing chunk hasn't loaded yet.
+    const renderMarketingListTable = (...a) => (window.app.renderMarketingListTable || (() => Promise.resolve('')))(...a);
     // computeNineMethodStatuses / computeFourPillarStatuses live in script-performance.js.
     // Ensure that chunk is loaded before calling them (milestones view may load features2
     // before performance). Falls back to empty objects so the view degrades gracefully.
@@ -140,44 +145,73 @@ const SCORING_RULES = {
 // be raised to Infinity (effectively disabling client-side logging).
 const _SCORE_HISTORY_MIN_ABS = 20;
 
+// Lost-update guard: the client-side score adjustment is a non-atomic
+// read-modify-write (getById → compute → update). saveActivity fires the
+// MARK_NOT_INTERESTED penalty and applyActivityScoring on the SAME prospect
+// without awaiting one relative to the other, so both could read the same
+// oldScore and the second write would clobber the first delta. We serialize
+// every read-modify-write on a given entity through a per-id promise chain so
+// concurrent calls (two deltas, two tabs, batch overlapping a manual save)
+// run sequentially and each one reads the freshly-written score. Keyed by
+// "<table>:<id>"; the chain self-prunes once the tail settles.
+const _scoreChains = new Map();
+const _serializeScoreUpdate = (chainKey, work) => {
+    const prior = _scoreChains.get(chainKey) || Promise.resolve();
+    // Chain onto the prior update; swallow the prior's rejection so one failed
+    // delta does not poison every subsequent delta on the same entity.
+    const next = prior.catch(() => {}).then(work);
+    _scoreChains.set(chainKey, next);
+    // Prune the map entry once this is the tail, so it doesn't grow unbounded.
+    next.catch(() => {}).finally(() => {
+        if (_scoreChains.get(chainKey) === next) _scoreChains.delete(chainKey);
+    });
+    return next;
+};
+
 const addScoreToProspect = async (prospectId, points, reason) => {
     if (!prospectId || !points) return;
-    const prospect = await AppDataStore.getById('prospects', prospectId);
-    if (!prospect) return;
-    const oldScore = prospect.score || 0;
-    const newScore = Math.max(0, oldScore + points);
-    await AppDataStore.update('prospects', prospectId, { score: newScore });
-    if (Math.abs(points) >= _SCORE_HISTORY_MIN_ABS) {
-        AppDataStore.create('score_history', {
-            entity_type: 'prospect',
-            entity_id: prospectId,
-            old_score: oldScore,
-            new_score: newScore,
-            points_change: points,
-            reason: reason,
-            created_at: new Date().toISOString()
-        }).catch(() => {});
-    }
+    return _serializeScoreUpdate(`prospects:${prospectId}`, async () => {
+        // Read fresh INSIDE the serialized step so we never operate on a stale
+        // score that a queued-ahead delta already changed.
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return;
+        const oldScore = prospect.score || 0;
+        const newScore = Math.max(0, oldScore + points);
+        await AppDataStore.update('prospects', prospectId, { score: newScore });
+        if (Math.abs(points) >= _SCORE_HISTORY_MIN_ABS) {
+            AppDataStore.create('score_history', {
+                entity_type: 'prospect',
+                entity_id: prospectId,
+                old_score: oldScore,
+                new_score: newScore,
+                points_change: points,
+                reason: reason,
+                created_at: new Date().toISOString()
+            }).catch(() => {});
+        }
+    });
 };
 
 const addScoreToCustomer = async (customerId, points, reason) => {
     if (!customerId || !points) return;
-    const customer = await AppDataStore.getById('customers', customerId);
-    if (!customer) return;
-    const oldScore = customer.score || 0;
-    const newScore = Math.max(0, oldScore + points);
-    await AppDataStore.update('customers', customerId, { score: newScore });
-    if (Math.abs(points) >= _SCORE_HISTORY_MIN_ABS) {
-        AppDataStore.create('score_history', {
-            entity_type: 'customer',
-            entity_id: customerId,
-            old_score: oldScore,
-            new_score: newScore,
-            points_change: points,
-            reason: reason,
-            created_at: new Date().toISOString()
-        }).catch(() => {});
-    }
+    return _serializeScoreUpdate(`customers:${customerId}`, async () => {
+        const customer = await AppDataStore.getById('customers', customerId);
+        if (!customer) return;
+        const oldScore = customer.score || 0;
+        const newScore = Math.max(0, oldScore + points);
+        await AppDataStore.update('customers', customerId, { score: newScore });
+        if (Math.abs(points) >= _SCORE_HISTORY_MIN_ABS) {
+            AppDataStore.create('score_history', {
+                entity_type: 'customer',
+                entity_id: customerId,
+                old_score: oldScore,
+                new_score: newScore,
+                points_change: points,
+                reason: reason,
+                created_at: new Date().toISOString()
+            }).catch(() => {});
+        }
+    });
 };
 
 const scoreActivityType = (activityType) => {
@@ -242,6 +276,15 @@ const _runWeeklyInactivityCheck = async () => {
     };
     const thisWeek = getISOWeek(new Date());
     if (localStorage.getItem('_inactivityCheckWeek') === thisWeek) return;
+    // Claim the week BEFORE mutating any score. Previously the flag was written
+    // only after the loop finished, so a mid-loop reload/navigation (or a second
+    // tab opened before the first finished) re-ran the whole sweep and
+    // double-deducted -5 from already-processed prospects. Setting the flag
+    // first makes the once-per-week deduction idempotent for this browser even
+    // on a partial run. NOTE: this is still a per-browser guard; a true
+    // multi-client-safe sweep needs a server-side per-prospect penalty-week
+    // marker (cron/RPC) — tracked separately.
+    localStorage.setItem('_inactivityCheckWeek', thisWeek);
     try {
         const prospects = await AppDataStore.getAll('prospects');
         const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
@@ -254,9 +297,15 @@ const _runWeeklyInactivityCheck = async () => {
                 count++;
             }
         }
-        localStorage.setItem('_inactivityCheckWeek', thisWeek);
         if (count > 0) console.log(`[Scoring] Weekly inactivity applied to ${count} prospects`);
-    } catch (e) { console.warn('[Scoring] Weekly inactivity check failed:', e); }
+    } catch (e) {
+        // The sweep failed before touching anything meaningful (e.g. the
+        // getAll('prospects') read threw): release the week-claim so a later
+        // session can retry. We only release on a top-level failure, not on a
+        // partial loop, to avoid re-deducting prospects already processed.
+        localStorage.removeItem('_inactivityCheckWeek');
+        console.warn('[Scoring] Weekly inactivity check failed:', e);
+    }
 };
 
 // Manual score adjustment modal — agents/admins can add or deduct points with a reason.
@@ -482,7 +531,12 @@ const sendBirthdayWish = async (personName, phone) => {
         </div>
     `, [
         { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-        { label: 'Send', type: 'primary', action: `(async () => { const ch = document.getElementById('bday-channel')?.value || 'whatsapp'; UI.hideModal(); UI.toast.success('Birthday wish sent to ${personName} via ' + ch); })()` }
+        // personName is user-controlled (full_name); it lands inside an onclick
+        // attribute string, so escape it with escJsAttr (backslash-escape the
+        // quote AND HTML-escape) — plain esc() decodes back to a quote before JS
+        // parse. Apostrophe names would otherwise break the Send button or
+        // allow arbitrary JS on click.
+        { label: 'Send', type: 'primary', action: `(async () => { const ch = document.getElementById('bday-channel')?.value || 'whatsapp'; UI.hideModal(); UI.toast.success('Birthday wish sent to ${UI.escJsAttr(String(personName || ''))} via ' + ch); })()` }
     ]);
 };
 
@@ -514,11 +568,20 @@ const scheduleBirthdayFollowup = async (personName, entityId, entityType) => {
         </div>
     `, [
         { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-        { label: 'Create', type: 'primary', action: `(async () => { await app.executeBirthdayAction('${personName}', ${entityId}, '${entityType || 'prospect'}'); })()` }
+        // escJsAttr personName + entityType (user/DB-derived) before embedding
+        // into the onclick action string — apostrophe names would otherwise
+        // produce malformed JS (Create button silently dead) or execute
+        // arbitrary JS. entityId is the numeric id, embedded unquoted.
+        { label: 'Create', type: 'primary', action: `(async () => { await app.executeBirthdayAction('${UI.escJsAttr(String(personName || ''))}', ${entityId}, '${UI.escJsAttr(String(entityType || 'prospect'))}'); })()` }
     ]);
 };
 
 const executeBirthdayAction = async (personName, entityId, entityType) => {
+    // Never fall back to a hardcoded owner id (was 5): if the session isn't
+    // hydrated (RLS empty-read / transient logout), attributing the created
+    // activity/note to whoever owns id 5 pollutes that agent's
+    // scoring/leaderboard/ownership scoping. Abort instead.
+    if (!_state.cu?.id) { UI.toast.error('Session expired — please re-login'); return; }
     const actionType = document.getElementById('bday-action-type')?.value || 'task';
     const actionDate = document.getElementById('bday-action-date')?.value || new Date().toISOString().split('T')[0];
     const notes = document.getElementById('bday-action-notes')?.value || '';
@@ -530,7 +593,7 @@ const executeBirthdayAction = async (personName, entityId, entityType) => {
             start_time: '10:00',
             end_time: '10:30',
             activity_title: `Birthday follow-up with ${personName}`,
-            lead_agent_id: _state.cu?.id || 5,
+            lead_agent_id: _state.cu.id,
             discussion_summary: `Birthday follow-up. ${notes}`
         };
         if (entityType === 'prospect') activity.prospect_id = entityId;
@@ -545,7 +608,8 @@ const executeBirthdayAction = async (personName, entityId, entityType) => {
             entity_type: entityType,
             entity_id: entityId,
             content: `[Birthday ${actionType === 'gift' ? 'Gift' : 'Task'}] ${personName} — ${notes || 'Prepare birthday follow-up'}`,
-            created_by: _state.cu?.id || 5,
+            // Guarded above: _state.cu.id is guaranteed present here (no id-5 fallback).
+            created_by: _state.cu.id,
             created_at: new Date().toISOString(),
             due_date: actionDate
         });
@@ -1429,6 +1493,22 @@ const checkSpecialProgramPopup = async () => {
 
 // Workflow execution engine — called from activity save and prospect create paths;
 // must live in the main IIFE so it's available without navigating to the ranking view.
+//
+// HONEST-STUB: the action dispatch (send WhatsApp / create task / add score /
+// add tag / notify / reassign — see WORKFLOW_ACTIONS in script-performance.js)
+// is NOT yet implemented. Two blockers make a correct in-file dispatch
+// impossible right now: (1) the call sites (script-activities.js,
+// script-prospects.js) pass only cosmetic context (name / activityType) with
+// NO entity id, so an entity-scoped action can't be targeted; (2) there is no
+// in-app notification table or WhatsApp send queue reachable from this chunk.
+// Previously this function interpolated the action template, threw it away
+// (`void config`), then bumped run_count/last_run anyway — so the Workflow
+// Automation view reported "Runs: N times · Last: <date>" for automations that
+// did nothing. We now do NOT increment run_count/last_run for an unfired
+// action, so the UI reports the truth (an honestly-disabled workflow shows
+// "Runs: 0 · Last: Never"). When real dispatch lands (callers passing entity
+// ids + a send pipeline), perform the action and bump run_count only on success.
+let _workflowStubNoticeShown = false;
 const executeWorkflows = async (triggerType, context = {}) => {
     const workflows = (await AppDataStore.getAll('automation_workflows')).filter(w => w.trigger_type === triggerType && w.status === 'active');
     for (const wf of workflows) {
@@ -1437,17 +1517,13 @@ const executeWorkflows = async (triggerType, context = {}) => {
                 if (triggerType === 'score_change' && context.score < parseInt(wf.trigger_conditions.value)) continue;
                 if (triggerType === 'inactivity' && context.daysInactive < parseInt(wf.trigger_conditions.value)) continue;
             }
-            const config = (wf.action_config || '')
-                .replace(/\{\{name\}\}/g, context.name || '')
-                .replace(/\{\{prospect_name\}\}/g, context.name || '')
-                .replace(/\{\{score\}\}/g, context.score || '')
-                .replace(/\{\{days\}\}/g, context.days || '')
-                .replace(/\{\{event_name\}\}/g, context.eventName || '');
-            void config;
-            await AppDataStore.update('automation_workflows', wf.id, {
-                run_count: (wf.run_count || 0) + 1,
-                last_run: new Date().toISOString()
-            });
+            // Action dispatch is deferred (see HONEST-STUB note above). We do NOT
+            // perform any side effect and deliberately do NOT bump run_count /
+            // last_run, so the UI never misreports a no-op as a real execution.
+            if (!_workflowStubNoticeShown) {
+                _workflowStubNoticeShown = true;
+                console.warn('[Workflows] Automation action dispatch is not yet implemented; matched workflows are not executed (run_count left unchanged).');
+            }
         } catch (err) {
             console.error(`Workflow execution error for "${wf.workflow_name}":`, err);
         }

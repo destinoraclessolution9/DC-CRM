@@ -194,13 +194,10 @@
         await renderCasesList();
     };
 
-    const switchCaseTab = async (type) => {
-        _caseActiveTab = type;
-        _caseFilters.agent = 'all';
-        _caseFilters.tag = 'all';
-        _caseFilters.search = '';
-        await showCasesView(document.getElementById('content-viewport'));
-    };
+    // NOTE: switchCaseTab removed — the tabbed CPS/Closed UI was dropped
+    // (buildCasesViewShell renders both sections together), so this had no
+    // caller and was never exported. _caseActiveTab is retained as the default
+    // case_type seed for openCaseStudyModal / saveCaseStudy.
 
     const handleCaseSearch = (e) => {
         const val = e.target.value;
@@ -295,8 +292,10 @@
                 });
             }
             if (_caseFilters.product !== 'all') cases = cases.filter(c => c.product === _caseFilters.product);
-            if (_caseFilters.from) cases = cases.filter(c => c.closing_date >= _caseFilters.from);
-            if (_caseFilters.to) cases = cases.filter(c => c.closing_date <= _caseFilters.to);
+            // CPS invitation cases may have no closing_date — fall back to created_at
+            // so the date filter doesn't silently drop them (undefined >= from is false).
+            if (_caseFilters.from) cases = cases.filter(c => (c.closing_date || c.created_at || '') >= _caseFilters.from);
+            if (_caseFilters.to) cases = cases.filter(c => (c.closing_date || c.created_at || '') <= _caseFilters.to);
             return cases;
         };
 
@@ -924,21 +923,26 @@
             updated_at: new Date().toISOString()
         };
         const photos = Array.isArray(_casePendingPhotos) ? _casePendingPhotos : [];
-        data.is_public = !!(
-            data.cps_invitation_details?.trim() ||
-            data.closing_details?.trim() ||
-            data.sales_idea?.trim() ||
-            data.plan_details?.trim() ||
-            data.success_story?.trim() ||
-            data.key_success_factor?.trim() ||
-            data.script?.trim() ||
-            photos.length > 0
-        );
 
         if (id) {
+            // On UPDATE: preserve the stored is_public — do NOT re-derive it.
+            // Auto-deriving here silently re-publishes a case the owner made
+            // private via toggleCasePublic. Privacy is changed only through
+            // the dedicated Make Private / Share Publicly control.
             await AppDataStore.update('case_studies', id, data);
             UI.toast.success("Case updated.");
         } else {
+            // On CREATE only: seed is_public from whether any shareable content exists.
+            data.is_public = !!(
+                data.cps_invitation_details?.trim() ||
+                data.closing_details?.trim() ||
+                data.sales_idea?.trim() ||
+                data.plan_details?.trim() ||
+                data.success_story?.trim() ||
+                data.key_success_factor?.trim() ||
+                data.script?.trim() ||
+                photos.length > 0
+            );
             data.created_by = _state.cu?.id || 1;
             data.created_at = new Date().toISOString();
             const newCase = await AppDataStore.create('case_studies', data);

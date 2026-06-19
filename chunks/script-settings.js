@@ -32,6 +32,10 @@
     const getVisibleCustomers = ()  => _utils.getVisibleCustomers();
     // navigateTo lives in the script.js IIFE — reach it via window.app.
     const navigateTo          = (v) => window.app.navigateTo(v);
+    // updateUserDisplay lives in the script.js IIFE (exported to window.app, see script.js:4911).
+    // Aliased here so saveSelfPreferredName's post-save header refresh no longer throws a
+    // ReferenceError (which previously fired the false "Failed to save display name" toast).
+    const updateUserDisplay   = (...a) => (window.app.updateUserDisplay || (() => {}))(...a);
     // Constants defined in script.js IIFE — redeclare locally for chunk scope.
     const USER_ROLES    = _utils.USER_ROLES || [];
     const _PH_PAGE_SIZE = 50;

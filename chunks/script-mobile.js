@@ -31,6 +31,11 @@
     let _recordingStartTime = null;
     let _recordingTimer = null;
     let _recordingStream = null;
+    // Voice transcription is NOT wired to a real speech-to-text backend. The flag
+    // stays false so processRecording() never fabricates random sample text and
+    // saveTranscription() never persists un-transcribed placeholder notes. Flip to
+    // true only once _audioChunks is actually sent to a transcription endpoint.
+    const VOICE_TRANSCRIPTION_ENABLED = (typeof window !== 'undefined' && window._VOICE_TRANSCRIPTION_ENABLED === true);
     // ── Pull-to-refresh flag — consumed by Home/Calendar/People renders ──
     let _mobileForceFresh = false;
     // ==================== PHASE 14: CUSTOMER & AGENT NOTE HELPERS ====================
@@ -226,32 +231,42 @@
     };
 
     const processRecording = async () => {
-        const voiceSettings = UserPreferences.getSync('voice_settings', {});
-        const delay = voiceSettings.quality === 'high' ? 3000 : voiceSettings.quality === 'fast' ? 1000 : 2000;
+        const transcribedEl = document.getElementById('voice-transcribed-text');
+        const micIcon = document.getElementById('voice-mic-icon');
+        const actionsEl = document.getElementById('voice-recorder-actions');
 
-        return new Promise(resolve => setTimeout(() => {
-            const samples = [
-                "Customer is facing career stagnation and financial difficulties. Interested in PR4 solution. Office located in Bangsar with main entrance facing North-West.",
-                "Discussed upcoming Feng Shui workshop. Client wants to bring two friends. Follow up next week with registration details.",
-                "Property audit completed. Main entrance faces South, which is favorable for career. Recommended placing water feature in North area.",
-                "Client interested in Harmony Painting for living room. Wants to know if it matches their Wood element.",
-                "Follow-up call: Client decided to proceed with PR4 purchase. Payment scheduled for next Friday. Need to prepare invoice.",
-                "Birthday greeting sent. Client replied with thanks and mentioned interest in office audit for new company premises."
-            ];
+        // No real speech-to-text backend is wired up. Do NOT fabricate transcription
+        // text — let the user type the note manually instead of persisting random
+        // sample text as a real customer note (data-integrity fix).
+        if (!VOICE_TRANSCRIPTION_ENABLED) {
+            if (micIcon) micIcon.className = 'fas fa-microphone';
+            if (transcribedEl) {
+                transcribedEl.value = '';
+                transcribedEl.placeholder = 'Automatic transcription is not available yet — please type your note here.';
+                transcribedEl.readOnly = false;
+            }
+            // Allow saving whatever the user typed manually.
+            if (actionsEl) actionsEl.style.display = 'flex';
+            UI.toast.error('Voice transcription is not available — type the note manually.');
+            return;
+        }
 
-            const transcribedText = samples[Math.floor(Math.random() * samples.length)];
-
-            const transcribedEl = document.getElementById('voice-transcribed-text');
-            const micIcon = document.getElementById('voice-mic-icon');
-            const actionsEl = document.getElementById('voice-recorder-actions');
-
-            if (transcribedEl) { transcribedEl.value = transcribedText; transcribedEl.placeholder = ''; }
+        // Real backend path: send the recorded audio for transcription. This branch
+        // is inert until VOICE_TRANSCRIPTION_ENABLED is flipped on AND a real
+        // transcription endpoint is implemented below.
+        try {
+            const blob = new Blob(_audioChunks, { type: 'audio/webm' });
+            const transcribedText = await (window.app.transcribeAudio || (async () => { throw new Error('No transcription backend'); }))(blob);
+            if (transcribedEl) { transcribedEl.value = transcribedText || ''; transcribedEl.placeholder = ''; }
             if (micIcon) micIcon.className = 'fas fa-microphone';
             if (actionsEl) actionsEl.style.display = 'flex';
-
             UI.toast.success('Transcription complete!');
-            resolve();
-        }, delay));
+        } catch (e) {
+            if (micIcon) micIcon.className = 'fas fa-microphone';
+            if (transcribedEl) { transcribedEl.placeholder = 'Transcription failed — please type your note here.'; transcribedEl.readOnly = false; }
+            if (actionsEl) actionsEl.style.display = 'flex';
+            UI.toast.error('Transcription failed: ' + (e?.message || e));
+        }
     };
 
     const saveTranscription = async () => {
@@ -686,8 +701,11 @@
         const avatarUrl = _state.cu?.avatar_url
             || `https://ui-avatars.com/api/?name=${encodeURIComponent(_state.cu?.full_name || 'U')}&background=8B0000&color=fff`;
 
-        // Instant snapshot restore — localStorage persists across app close (8hr TTL)
-        const _mhomeSnapKey = `mhome-snap-${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
+        // Instant snapshot restore — localStorage persists across app close (8hr TTL).
+        // User-scoped: the snapshot embeds the rendered home-dashboard HTML (people /
+        // refill cards) for THIS user, so on a shared device it must not be served to
+        // the next account (mirrors the other mhome-*-${uid} keys below).
+        const _mhomeSnapKey = `mhome-snap-${String(_state.cu?.id || 'anon')}-${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
         let _mhomeCached;
         try {
             const _snapRaw = localStorage.getItem(_mhomeSnapKey);
@@ -790,7 +808,11 @@
 
         // 1-hour people cache — prospects+customers rarely change mid-session and
         // are only needed for birthday lookup + activity name display on this view.
-        const _mhomePeopleKey = 'mhome-people-v1';
+        // Suffix every cache key with the current user id: the cached rows are
+        // RLS/scope-filtered to the viewer, so a stale session-restore onto a
+        // different profile must NOT surface the prior user's private data.
+        const _mhomeUid = String(_state.cu?.id || 'anon');
+        const _mhomePeopleKey = 'mhome-people-v1-' + _mhomeUid;
         const _mhomeLsGet = (key, ttl) => {
             try {
                 const raw = localStorage.getItem(key);
@@ -811,10 +833,10 @@
         let cachedPeople    = _mhomeForce ? null : _mhomeLsGet(_mhomePeopleKey,    8 * 60 * 60 * 1000);
         const _needPeople = !cachedPeople;
 
-        const _mhomeDraftsKey     = 'mhome-drafts-v1';
-        const _mhomeRefillsKey    = 'mhome-refills-v1';
-        const _mhomeUsersKey      = 'mhome-users-v1';
-        const _mhomeCustomersKey  = 'mhome-customers-v1';
+        const _mhomeDraftsKey     = 'mhome-drafts-v1-' + _mhomeUid;
+        const _mhomeRefillsKey    = 'mhome-refills-v1-' + _mhomeUid;
+        const _mhomeUsersKey      = 'mhome-users-v1-' + _mhomeUid;
+        const _mhomeCustomersKey  = 'mhome-customers-v1-' + _mhomeUid;
         let cachedDrafts     = _mhomeForce ? null : _mhomeLsGet(_mhomeDraftsKey,     5 * 60 * 1000);
         let cachedRefills    = _mhomeForce ? null : _mhomeLsGet(_mhomeRefillsKey,    5 * 60 * 1000);
         let cachedUsers      = _mhomeForce ? null : _mhomeLsGet(_mhomeUsersKey,      8 * 60 * 60 * 1000);
@@ -886,7 +908,10 @@
         cachedCustomers = cachedCustomers || [];
         const _pendNum = '<i class="fas fa-spinner fa-spin" style="font-size:11px;opacity:.55"></i>';
         const personMap = new Map(allPeople.map(p => [String(p.id), p]));
-        const _isMine = (d) => isSystemAdmin(_state.cu) || String(d.agent_id) === String(_state.cu?.id);
+        // Match the desktop follow-up predicate (script-calendar.js:1381): a draft
+        // with a null agent_id is treated as belonging to the current user, so
+        // null-owned/imported drafts are not hidden from non-admins.
+        const _isMine = (d) => isSystemAdmin(_state.cu) || !d.agent_id || String(d.agent_id) === String(_state.cu?.id);
         const visibleDrafts = cachedDrafts.filter(d =>
             d.status === 'pending' && (d.due_date || '') <= todayStr && _isMine(d)
         );
@@ -1118,7 +1143,10 @@
             cachedUsers = cachedUsers || [];
             cachedCustomers = cachedCustomers || [];
             const personMap = new Map(allPeople.map(p => [String(p.id), p]));
-            const _isMine = (d) => isSystemAdmin(_state.cu) || String(d.agent_id) === String(_state.cu?.id);
+            // Match the desktop follow-up predicate (script-calendar.js:1381): a draft
+        // with a null agent_id is treated as belonging to the current user, so
+        // null-owned/imported drafts are not hidden from non-admins.
+        const _isMine = (d) => isSystemAdmin(_state.cu) || !d.agent_id || String(d.agent_id) === String(_state.cu?.id);
             const visibleDrafts = cachedDrafts.filter(d =>
                 d.status === 'pending' && (d.due_date || '') <= todayStr && _isMine(d)
             );
@@ -1301,7 +1329,13 @@
             const _q = (typeof text === 'string' && text.length) ? `?text=${encodeURIComponent(text)}` : '';
             window.open(`https://wa.me/${num}${_q}`, '_blank', 'noopener');
         } else if (id) {
-            navigateTo('prospects').catch(() => {});
+            // No usable phone → open the SPECIFIC record (id may be a prospect OR a
+            // customer), not the generic Clients list. Resolve the entity type the
+            // same way mcalOpenPerson does, and surface a toast either way.
+            UI.toast.error('No phone number on file — opening profile.');
+            mcalOpenPerson(id).catch(() => navigateTo('prospects').catch(() => {}));
+        } else {
+            UI.toast.error('No phone number on file.');
         }
     };
 
@@ -1351,7 +1385,8 @@
         if (!_mhomeOverlayOpen()) return; // user closed the sheet while it loaded
         const personMap = new Map(people.map(p => [String(p.id), p]));
         const today = _mhomeToday();
-        const mine = (d) => isSystemAdmin(_state.cu) || String(d.agent_id) === String(_state.cu?.id);
+        // null agent_id → treat as current user's (desktop parity, script-calendar.js:1381)
+        const mine = (d) => isSystemAdmin(_state.cu) || !d.agent_id || String(d.agent_id) === String(_state.cu?.id);
         const rows = drafts
             .filter(d => d.status === 'pending' && (d.due_date || '') < today && mine(d))
             .sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''));
@@ -1372,9 +1407,9 @@
                     <div style="font-size:12px;color:#dc2626;font-weight:500;margin-top:2px;">${due}</div>
                 </div>
                 <div style="display:flex;gap:6px;flex-shrink:0;">
-                    <button class="btn primary btn-sm" style="font-size:13px;padding:8px 12px;white-space:nowrap;" onclick="event.stopPropagation();(async()=>{await app.sendFollowUpInvite(${d.id});})();" title="Send WhatsApp"><i class="fab fa-whatsapp"></i></button>
-                    <button class="btn secondary btn-sm" style="font-size:13px;padding:8px 10px;" onclick="event.stopPropagation();app.markFollowUpSent(${d.id});" title="Mark as sent"><i class="fas fa-check"></i></button>
-                    <button class="btn secondary btn-sm" style="font-size:13px;padding:8px 10px;" onclick="event.stopPropagation();app.dismissFollowUp(${d.id});" title="Dismiss"><i class="fas fa-times"></i></button>
+                    <button class="btn primary btn-sm" style="font-size:13px;padding:8px 12px;white-space:nowrap;" onclick="event.stopPropagation();(async()=>{ if(app.sendFollowUpInvite){await app.sendFollowUpInvite(${d.id});}else{UI.toast.error('Action unavailable — please retry.');} })();" title="Send WhatsApp"><i class="fab fa-whatsapp"></i></button>
+                    <button class="btn secondary btn-sm" style="font-size:13px;padding:8px 10px;" onclick="event.stopPropagation();app.markFollowUpSent ? app.markFollowUpSent(${d.id}) : UI.toast.error('Action unavailable — please retry.');" title="Mark as sent"><i class="fas fa-check"></i></button>
+                    <button class="btn secondary btn-sm" style="font-size:13px;padding:8px 10px;" onclick="event.stopPropagation();app.dismissFollowUp ? app.dismissFollowUp(${d.id}) : UI.toast.error('Action unavailable — please retry.');" title="Dismiss"><i class="fas fa-times"></i></button>
                 </div>
             </div>`;
         }).join('');
@@ -1435,8 +1470,8 @@
                     <div style="font-size:11px;margin-top:2px;">${days}</div>
                 </div>
                 <div style="display:flex;gap:6px;flex-shrink:0;">
-                    <button class="btn primary btn-sm" style="font-size:13px;padding:8px 12px;" onclick="event.stopPropagation();app.sendRefillWhatsApp(${r.id});" ${phone ? '' : 'disabled title="No phone number"'}><i class="fab fa-whatsapp"></i></button>
-                    <button class="btn secondary btn-sm" style="font-size:13px;padding:8px 10px;" onclick="event.stopPropagation();UI.hideModal();app.viewRefillProspect(${r.prospect_id || 'null'}, ${r.customer_id || 'null'});" title="View profile"><i class="fas fa-user"></i></button>
+                    <button class="btn primary btn-sm" style="font-size:13px;padding:8px 12px;" onclick="event.stopPropagation();app.sendRefillWhatsApp ? app.sendRefillWhatsApp(${r.id}) : UI.toast.error('Action unavailable — please retry.');" ${phone ? '' : 'disabled title="No phone number"'}><i class="fab fa-whatsapp"></i></button>
+                    <button class="btn secondary btn-sm" style="font-size:13px;padding:8px 10px;" onclick="event.stopPropagation();app.viewRefillProspect ? (UI.hideModal(),app.viewRefillProspect(${r.prospect_id || 'null'}, ${r.customer_id || 'null'})) : UI.toast.error('Action unavailable — please retry.');" title="View profile"><i class="fas fa-user"></i></button>
                 </div>
             </div>`;
         }).join('');
@@ -1521,6 +1556,11 @@
     // Supabase. Each entry: { tmpId, table, data, attempts, lastAttemptAt }.
     // Drained on page load, on `online` events, and on a slow backoff timer.
     const _MCAL_RETRY_QUEUE_KEY = 'mcal-retry-queue-v1';
+    // In-flight guard: three triggers (5s timeout, 'online' event, 60s interval)
+    // can fire _mcalDrainRetryQueue concurrently. Without this lock two drains
+    // read the same pending entry and both call AppDataStore.create → duplicate
+    // activity rows, plus racing _mcalRetryQueueWrite clobbers each other.
+    let _mcalDraining = false;
     const _mcalRetryQueueRead = () => {
         try { return JSON.parse(localStorage.getItem(_MCAL_RETRY_QUEUE_KEY) || '[]'); } catch(_) { return []; /* intentional: corrupt queue treated as empty */ }
     };
@@ -1541,6 +1581,10 @@
             for (let i = 0; i < localStorage.length; i++) {
                 const k = localStorage.key(i);
                 if (!k) continue;
+                // NEVER wipe the durable retry queue — it shares the 'mcal-' prefix
+                // but holds offline/failed activity inserts that must survive
+                // pull-to-refresh (which clears with the default prefix list).
+                if (k === _MCAL_RETRY_QUEUE_KEY) continue;
                 if (pfx.some(p => k.startsWith(p))) toRemove.push(k);
             }
             toRemove.forEach(k => { try { localStorage.removeItem(k); } catch(_) { /* intentional: per-key removal is best-effort */ } });
@@ -1927,14 +1971,14 @@
                         <div class="ico"><i class="fas fa-cake-candles"></i></div>
                         <div class="mcal-coming-text">
                             <div class="mcal-coming-num">${bdayCount}<small>Birthday${bdayCount===1?'':'s'}</small></div>
-                            <div class="mcal-coming-lbl">Tomorrow</div>
+                            <div class="mcal-coming-lbl">Today &amp; Tomorrow</div>
                         </div>
                     </button>
                     <button class="mcal-coming-item refill" onclick="app.mhomeOpenRefills()">
                         <div class="ico"><i class="fas fa-prescription-bottle-medical"></i></div>
                         <div class="mcal-coming-text">
                             <div class="mcal-coming-num">${refillCount}<small>Refills</small></div>
-                            <div class="mcal-coming-lbl">This Week</div>
+                            <div class="mcal-coming-lbl">Pending</div>
                         </div>
                     </button>
                     <button class="mcal-coming-item followup" onclick="app.mhomeOpenFollowups()">
@@ -2083,37 +2127,45 @@
     // success the optimistic row is swapped + the entry removed, on failure
     // attempts++ and the entry stays for a future drain.
     const _mcalDrainRetryQueue = async () => {
-        const q = _mcalRetryQueueRead();
-        if (!q.length) return;
-        const remaining = [];
-        for (const entry of q) {
-            // Backoff: skip if attempted in the last 30s × 2^attempts
-            const backoff = Math.min(30_000 * Math.pow(2, entry.attempts), 10 * 60_000);
-            if (Date.now() - (entry.lastAttemptAt || 0) < backoff) {
-                remaining.push(entry);
-                continue;
-            }
-            try {
-                const saved = await AppDataStore.create(entry.table, entry.data);
-                if (saved && saved.id) {
-                    _mcalOptimisticSwap(entry.tmpId, saved);
-                    // success → drop from queue
+        // Single-flight: bail if another drain is already in progress so concurrent
+        // triggers can't double-create the same queued activity.
+        if (_mcalDraining) return;
+        _mcalDraining = true;
+        try {
+            const q = _mcalRetryQueueRead();
+            if (!q.length) return;
+            const remaining = [];
+            for (const entry of q) {
+                // Backoff: skip if attempted in the last 30s × 2^attempts
+                const backoff = Math.min(30_000 * Math.pow(2, entry.attempts), 10 * 60_000);
+                if (Date.now() - (entry.lastAttemptAt || 0) < backoff) {
+                    remaining.push(entry);
                     continue;
                 }
-                throw new Error('create returned no id');
-            } catch (_) {
-                entry.attempts = (entry.attempts || 0) + 1;
-                entry.lastAttemptAt = Date.now();
-                if (entry.attempts >= 8) {
-                    // Give up after ~8 tries (~30s + 60s + 2m + 4m + 8m + 10m + 10m).
-                    // Leave the row in cache marked as failed; user can edit/delete.
-                    _mcalOptimisticMarkFailed(entry.tmpId);
-                    continue;
+                try {
+                    const saved = await AppDataStore.create(entry.table, entry.data);
+                    if (saved && saved.id) {
+                        _mcalOptimisticSwap(entry.tmpId, saved);
+                        // success → drop from queue
+                        continue;
+                    }
+                    throw new Error('create returned no id');
+                } catch (_) {
+                    entry.attempts = (entry.attempts || 0) + 1;
+                    entry.lastAttemptAt = Date.now();
+                    if (entry.attempts >= 8) {
+                        // Give up after ~8 tries (~30s + 60s + 2m + 4m + 8m + 10m + 10m).
+                        // Leave the row in cache marked as failed; user can edit/delete.
+                        _mcalOptimisticMarkFailed(entry.tmpId);
+                        continue;
+                    }
+                    remaining.push(entry);
                 }
-                remaining.push(entry);
             }
+            _mcalRetryQueueWrite(remaining);
+        } finally {
+            _mcalDraining = false;
         }
-        _mcalRetryQueueWrite(remaining);
     };
 
     // Auto-drain triggers: page load (deferred so we don't compete with the
@@ -2367,9 +2419,11 @@
         let personMap = _mcalPersonMap;
         if (!personMap || personMap.size === 0) {
             try {
+                // Include `phone` so the appointment-WhatsApp sheet (mcalWa) has a
+                // contactable number even when the Month grid never populated the map.
                 const [p, c] = await Promise.all([
-                    AppDataStore.queryAdvanced('prospects', { select: 'id,full_name', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []),
-                    AppDataStore.queryAdvanced('customers', { select: 'id,full_name', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []),
+                    AppDataStore.queryAdvanced('prospects', { select: 'id,full_name,phone', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []),
+                    AppDataStore.queryAdvanced('customers', { select: 'id,full_name,phone', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []),
                 ]);
                 personMap = new Map([...(p || []), ...(c || [])].map(x => [String(x.id), x]));
                 if (personMap.size) _mcalPersonMap = personMap;
@@ -2674,7 +2728,7 @@
     // today) and let them fire a bilingual reminder. Owner-gated via _mcalOwned
     // (the same gate the day-detail / week / day views use) so non-owners never
     // see another agent's client name or phone here.
-    const mcalWa = () => {
+    const mcalWa = async () => {
         const d = (_mcalSelDate instanceof Date && !isNaN(_mcalSelDate.getTime()))
             ? new Date(_mcalSelDate.getFullYear(), _mcalSelDate.getMonth(), _mcalSelDate.getDate())
             : new Date();
@@ -2683,7 +2737,13 @@
         const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
         const dateLabel = `${days[d.getDay()]}, ${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
 
-        const allDay  = _mcalByDate.get(dateStr) || [];
+        // Fetch the SELECTED day fresh — _mcalByDate is only populated by the
+        // Month grid, so on Week/Day/List (or a fresh load that started on an alt
+        // view) it holds a stale/empty month and the sheet showed "No appointments"
+        // for days that actually have some. _mcalFetchRangeByDate also primes
+        // _mcalPersonMap (incl. phone) so the reminder can be composed.
+        const dayMap = await _mcalFetchRangeByDate(dateStr, dateStr).catch(() => new Map());
+        const allDay  = dayMap.get(dateStr) || [];
         const sorted  = allDay
             .filter(a => !a._isBirthday)
             .sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));

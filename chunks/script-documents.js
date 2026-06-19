@@ -20,6 +20,17 @@
     const getFileIcon = (filename) => window._crmUtils.getFileIcon(filename);
     const formatFileSize = (bytes) => window._crmUtils.formatFileSize(bytes);
     const getFileExtension = (filename) => (filename || '').split('.').pop().toLowerCase();
+    // File-type predicates live as private `const`s inside the script.js IIFE and
+    // were never exported, so previewFile() threw `isImageFile is not defined`.
+    // Define them locally here (mirroring getFileExtension above).
+    const isImageFile = (fn) => ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp'].includes(getFileExtension(fn));
+    const isPdfFile = (fn) => getFileExtension(fn) === 'pdf';
+    const isTextFile = (fn) => ['txt', 'csv', 'json', 'xml', 'html', 'css', 'js', 'md', 'rtf'].includes(getFileExtension(fn));
+    // Scheme guard for untrusted file.data values flowing into href/src/iframe sinks.
+    // Only allow inline data: URLs and http(s) — blocks javascript:/data:text/html XSS.
+    const isSafeFileData = (s) => typeof s === 'string' && /^(data:|https?:)/i.test(s) && !/^data:text\/html/i.test(s);
+    const isSafeImageData = (s) => typeof s === 'string' && (/^data:image\//i.test(s) || /^https?:/i.test(s));
+    const isSafePdfData = (s) => typeof s === 'string' && (/^data:application\/pdf/i.test(s) || /^https?:/i.test(s));
     // ── Chunk-local state (documents view only) ──
     let _currentFolder = null;
     let _viewMode = 'list';
@@ -303,7 +314,7 @@
         const allFolders = _cachedFolders || await AppDataStore.getAll('folders');
         const folders = allFolders
             .filter(f => f.parent_id === parentId)
-            .sort((a, b) => a.name.localeCompare(b.name));
+            .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
 
         for (const folder of folders) {
             const hasChildren = allFolders.some(f => f.parent_id === folder.id);
@@ -369,7 +380,10 @@
     const createFolder = async () => {
         const name = document.getElementById('new-folder-name')?.value;
         if (!name) return UI.toast.error('Name required');
-        await AppDataStore.create('folders', { id: Date.now(), name, parent_id: _currentFolder, color: document.getElementById('new-folder-color').value, created_by: _state.cu?.id, created_at: new Date().toISOString() });
+        // Omit client-generated id — let the DB assign a uuid/serial (Date.now()
+        // collides under concurrency). Optional-chain the color input (modal may
+        // have been torn down between click and async resolution).
+        await AppDataStore.create('folders', { name, parent_id: _currentFolder, color: document.getElementById('new-folder-color')?.value || '#f59e0b', created_by: _state.cu?.id, created_at: new Date().toISOString() });
         UI.hideModal(); UI.toast.success('Folder created'); await renderFolderTree();
     };
 
@@ -409,14 +423,13 @@
         }
     };
 
-    const showRecentFiles = async () => {
-        const allFiles = (await AppDataStore.getAll('documents')).sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
-        await renderFileListView(allFiles.slice(0, 20)); // Show top 20
-        _currentFolder = 'recent'; await renderBreadcrumb();
-    };
-
-    const showAllFiles = async () => { await renderFileListView(await AppDataStore.getAll('documents')); _currentFolder = 'all'; await renderBreadcrumb(); };
-    const showStarredFiles = async () => { await renderFileListView((await AppDataStore.getAll('documents')).filter(d => d.is_starred)); _currentFolder = 'starred'; await renderBreadcrumb(); };
+    // Set state FIRST, then let loadFolderContents() handle rendering — this honors
+    // _viewMode (grid vs list), refreshes the breadcrumb and batch-action bar, and
+    // keeps _currentFolder consistent for any concurrent re-render (matches
+    // navigateToFolder). getFilesInCurrentFolder() resolves the special modes.
+    const showRecentFiles = async () => { _currentFolder = 'recent'; await loadFolderContents(); };
+    const showAllFiles = async () => { _currentFolder = 'all'; await loadFolderContents(); };
+    const showStarredFiles = async () => { _currentFolder = 'starred'; await loadFolderContents(); };
 
     const toggleStar = async (id) => {
         // Optimistic: flip the star icon in-place immediately, persist + refresh in background.
@@ -442,6 +455,8 @@
         if (!file) { UI.toast.error('File not found'); return; }
         const src = file.data;
         if (!src || src === '#') { UI.toast.error('File content not available — please re-upload the file'); return; }
+        // Reject non-data/http(s) schemes (e.g. javascript:) before assigning to href.
+        if (!isSafeFileData(src)) { UI.toast.error('File content not available — please re-upload the file'); return; }
         const a = document.createElement('a');
         a.href = src;
         a.download = file.filename || 'download';
@@ -511,13 +526,19 @@
         if (!v1El || !v2El) return;
         const v1 = await AppDataStore.getById('document_versions', parseInt(v1El.value));
         const v2 = await AppDataStore.getById('document_versions', parseInt(v2El.value));
+        // getById can return null (RLS deny / offline / removed) — guard before deref.
+        if (!v1 || !v2) { UI.toast.error('Version not found'); return; }
         UI.showModal('Comparison', `<div class="diff-view"><pre>${escapeHtml(v1.data || '')}</pre><pre>${escapeHtml(v2.data || '')}</pre></div>`, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
     };
 
     const downloadVersion = (versionId) => { UI.toast.info(`Downloading version ${versionId}...`); };
     const restoreVersion = async (versionId) => {
         const ver = await AppDataStore.getById('document_versions', versionId);
-        await AppDataStore.update('documents', ver.document_id, { current_version: ver.version_number, updatedAt: new Date().toISOString() });
+        // getById can return null (RLS deny / offline / removed) — guard before deref.
+        if (!ver) { UI.toast.error('Version not found'); return; }
+        // Column is snake_case `updated_at` (matches the rest of this file); camelCase
+        // `updatedAt` targets a non-existent column and the modified time never bumps.
+        await AppDataStore.update('documents', ver.document_id, { current_version: ver.version_number, updated_at: new Date().toISOString() });
         UI.toast.success(`Restored to version ${ver.version_number}`); UI.hideModal(); await loadFolderContents();
     };
 
@@ -531,7 +552,14 @@
             AppDataStore.getAll('document_shares'),
         ]);
         const userMap = new Map((allUsers || []).map(u => [String(u.id), u]));
-        const users = (allUsers || []).filter(u => u.id !== _state.cu?.id);
+        // Scope share targets to the current user's visibility set (role system) —
+        // a low-level agent must not be able to enumerate / share to the whole org.
+        // getVisibleUserIds is ASYNC (await it) and returns the string 'all' for
+        // admins (L1-2) — treat that as "no restriction" rather than Set('all').
+        const _visibleIds = await getVisibleUserIds(_state.cu);
+        const _allVisible = _visibleIds === 'all';
+        const visible = _allVisible ? null : new Set((_visibleIds || []).map(String));
+        const users = (allUsers || []).filter(u => u.id !== _state.cu?.id && (_allVisible || visible.has(String(u.id))));
         const shares = (allShares || []).filter(s => s.document_id === fileId);
         const shareItems = shares.map(s => {
             const user = userMap.get(String(s.shared_with));
@@ -554,9 +582,12 @@
     };
 
     const createShare = async (fileId) => {
-        const userId = parseInt(document.getElementById('share-user').value);
+        // Optional-chain the select (modal DOM may be gone before the async handler).
+        const userId = parseInt(document.getElementById('share-user')?.value);
         if (!userId) return;
-        await AppDataStore.create('document_shares', { id: Date.now(), document_id: fileId, shared_with: userId, permission: 'view', shared_by: _state.cu?.id });
+        // Omit client-generated id — let the DB assign it (Date.now() collides under
+        // concurrency / skewed clocks → PK 409 or silent overwrite).
+        await AppDataStore.create('document_shares', { document_id: fileId, shared_with: userId, permission: 'view', shared_by: _state.cu?.id });
         await openShareModal(fileId);
     };
 
@@ -587,10 +618,20 @@
     const getFilesInCurrentFolder = async () => {
         let files = await AppDataStore.getAll('documents');
 
+        // Special views — mirror buildDocumentsIslandData so loadFolderContents()
+        // can drive Recent/All/Starred uniformly (honoring _viewMode + batch actions).
+        if (_currentFolder === 'recent') {
+            return files.slice().sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at)).slice(0, 20);
+        } else if (_currentFolder === 'all') {
+            return files.slice();
+        } else if (_currentFolder === 'starred') {
+            return files.filter(d => d.is_starred);
+        }
+
         // Filter by current folder
-        if (_currentFolder && _currentFolder !== 'recent' && _currentFolder !== 'all' && _currentFolder !== 'starred') {
+        if (_currentFolder) {
             files = files.filter(f => f.folder_id === _currentFolder);
-        } else if (!_currentFolder) {
+        } else {
             files = files.filter(f => !f.folder_id || f.folder_id === 'root'); // Root folder
         }
 
@@ -997,7 +1038,8 @@
             let skipped = 0;
             for (const d of docs) {
                 const src = d.data;
-                if (!src || src === '#') { skipped++; continue; }
+                // Skip empty or non-data/http(s) scheme values (XSS / navigation guard).
+                if (!src || src === '#' || !isSafeFileData(src)) { skipped++; continue; }
                 const a = document.createElement('a');
                 a.href = src;
                 a.download = d.filename || ('download_' + d.id);
@@ -1189,16 +1231,23 @@
         let previewContent = '';
 
         if (isImageFile(filename)) {
+            // Only allow data:image/* or http(s) src; escape it too. A raw file.data
+            // with a double-quote could break out of the attribute and inject onerror.
+            const imgSrc = isSafeImageData(file.data) ? file.data : 'https://via.placeholder.com/800x600?text=Image+Preview';
             previewContent = `
                 <div class="image-preview" style="text-align: center;">
-                    <img loading="lazy" decoding="async" src="${file.data || 'https://via.placeholder.com/800x600?text=Image+Preview'}" 
+                    <img loading="lazy" decoding="async" src="${escapeHtml(imgSrc)}"
                          alt="${escapeHtml(filename || '')}" style="max-width: 100%; max-height: 70vh; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
                 </div>
             `;
         } else if (isPdfFile(filename)) {
+            // Only allow data:application/pdf or http(s); reject data:text/html and
+            // javascript: payloads (stored cross-user XSS via shared documents).
+            // Sandbox the iframe (no allow-scripts/allow-same-origin) as defense in depth.
+            const pdfSrc = isSafePdfData(file.data) ? file.data : 'about:blank';
             previewContent = `
                 <div class="pdf-preview">
-                    <iframe src="${file.data || 'about:blank'}" width="100%" height="600px" style="border: 1px solid #ddd; border-radius: 8px;"></iframe>
+                    <iframe src="${escapeHtml(pdfSrc)}" sandbox width="100%" height="600px" style="border: 1px solid #ddd; border-radius: 8px;"></iframe>
                 </div>
             `;
         } else if (isTextFile(filename)) {
@@ -1336,6 +1385,8 @@ In a production system, this would show the actual file contents.
 
     const editFileDescription = async (fileId) => {
         const file = await AppDataStore.getById('documents', fileId);
+        // getById can return null (deleted between modal-open and click / RLS / offline).
+        if (!file) { UI.toast.error('File not found'); return; }
         UI.showModal('Edit Description', `<div class="form-group"><label>Description</label><textarea id="edit-file-desc" class="form-control" rows="4">${escapeHtml(file.description || '')}</textarea></div>`,
             [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Save', type: 'primary', action: `(async () => { await app.saveFileDescription(${fileId}); })()` }]);
     };

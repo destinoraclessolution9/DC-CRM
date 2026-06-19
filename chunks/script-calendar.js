@@ -540,13 +540,50 @@
     const interpolateTemplate = (template, vars) => {
         let msg = template;
         for (const [key, val] of Object.entries(vars)) {
-            msg = msg.replace(new RegExp(`\\{${key}\\}`, 'g'), val || '');
+            // Use a function replacer so '$' sequences in user values (names,
+            // venues, prices like "$5", or literal "$&") are inserted verbatim.
+            // String.replace's string-arg form treats $&/$1/$`/$'/$$ specially,
+            // which silently corrupts the interpolated message.
+            const replacement = val || '';
+            msg = msg.replace(new RegExp(`\\{${key}\\}`, 'g'), () => replacement);
         }
         return msg;
     };
 
+    // Session-scoped in-flight guard for createFollowUpDraft. The dedup below is
+    // a check-then-create (getAll → find dup → create) with no DB lock, so two
+    // concurrent producers (solution reminders, overdue escalation, birthday/
+    // event/APU generators, or two open tabs) can both read a stale snapshot,
+    // both miss the dup, and both insert. Keying an in-flight Set by the same
+    // natural dedup key collapses the window for the common same-tab burst:
+    // the second caller bails before its create commits.
+    const _followUpDraftInFlight = new Set();
+    const _followUpDedupKey = (opts) => {
+        const _n = (s) => String(s || '').trim().toLowerCase();
+        const person = opts.prospectId ? `p:${opts.prospectId}`
+                     : opts.customerId ? `c:${opts.customerId}` : 'n:?';
+        if (opts.triggerType === 'birthday') return `${person}|birthday|${opts.dueDate || ''}`;
+        if (opts.eventId) return `${person}|eid:${opts.eventId}`;
+        if (opts.eventName && opts.eventDate) return `${person}|en:${_n(opts.eventName)}|ed:${opts.eventDate}`;
+        return `${person}|t:${opts.triggerType}`;
+    };
+
     const createFollowUpDraft = async (opts) => {
         const { prospectId, customerId, triggerType, messageText, phone, prospectName, eventId, eventDate, eventName, dueDate, attachmentUrl } = opts;
+        // Resolve the owning agent. Callers may pass an explicit agentId (e.g.
+        // the prospect/customer responsible_agent_id) to attribute the draft
+        // even when _state.cu is the dispatching user. Falling back to a NULL
+        // agent_id is unsafe: renderFollowUpReminders shows null-agent drafts to
+        // EVERY agent, leaking a prospect's name/phone/message cross-agent. So
+        // refuse to create the draft when no agent can be attributed.
+        const _draftAgentId = (opts.agentId != null ? opts.agentId : _state.cu?.id) || null;
+        if (_draftAgentId == null) {
+            console.warn('createFollowUpDraft: no agent_id resolvable — skipping to avoid a cross-agent-visible draft', { triggerType });
+            return null;
+        }
+        const _inflightKey = _followUpDedupKey(opts);
+        if (_followUpDraftInFlight.has(_inflightKey)) return null; // a concurrent call is already creating this exact draft
+        _followUpDraftInFlight.add(_inflightKey);
         try {
             // Dedup regardless of status — once a draft exists (pending/sent/
             // dismissed), don't recreate it. The agent's decision sticks.
@@ -590,7 +627,7 @@
             return await AppDataStore.create('follow_up_drafts', {
                 prospect_id: prospectId || null,
                 customer_id: customerId || null,
-                agent_id: _state.cu?.id || null,
+                agent_id: _draftAgentId,
                 trigger_type: triggerType,
                 message_text: messageText,
                 phone: phone || '',
@@ -605,6 +642,8 @@
         } catch (e) {
             console.warn('createFollowUpDraft failed:', e);
             return null;
+        } finally {
+            _followUpDraftInFlight.delete(_inflightKey); // release the in-flight guard once this create resolves/fails
         }
     };
 
@@ -1280,11 +1319,35 @@
 
             // ── Sequence reminders (day 1/3/7/14) based on next_follow_up_date ──
             if (sol.next_follow_up_date && sol.next_follow_up_date <= todayStr) {
-                // Find which sequence template matches this solution
-                for (const tpl of solutionTpls) {
+                // Days elapsed since the solution was proposed — drives WHICH
+                // sequence step is due. The four 画作 templates share an
+                // identical solution_match, so without gating on delay_days they
+                // would ALL fire at once (each has a distinct trigger_type, so
+                // createFollowUpDraft's non-event dedup does NOT collapse them),
+                // dumping day-1/3/7/14 reminders on the agent simultaneously.
+                const daysSinceProposed = proposedDate
+                    ? Math.floor((new Date(todayStr) - new Date(proposedDate)) / 86400000)
+                    : null;
+                // Find which sequence template matches this solution AND is the
+                // step due now. Fire only the template whose delay_days has been
+                // reached but whose NEXT step (if any) has not — so each drip
+                // step lands on its own date as the sequence progresses.
+                const matchingTpls = solutionTpls.filter(tpl => {
                     const matchList = (tpl.solution_match || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-                    if (matchList.length && !matchList.some(m => solutionLower.includes(m))) continue;
-
+                    return !matchList.length || matchList.some(m => solutionLower.includes(m));
+                });
+                // The single step whose delay_days is the largest value already
+                // reached (delay_days <= daysSinceProposed). When proposed_date
+                // is unknown, fall back to the smallest-delay (first) step.
+                const sortedSteps = matchingTpls.slice().sort((a, b) => (a.delay_days || 0) - (b.delay_days || 0));
+                let dueTpls;
+                if (daysSinceProposed == null) {
+                    dueTpls = sortedSteps.length ? [sortedSteps[0]] : [];
+                } else {
+                    const reached = sortedSteps.filter(t => (t.delay_days || 0) <= daysSinceProposed);
+                    dueTpls = reached.length ? [reached[reached.length - 1]] : [];
+                }
+                for (const tpl of dueTpls) {
                     const msg = interpolateTemplate(tpl.message_template, {
                         name: person.full_name || '',
                         solution: sol.solution || '',
@@ -1371,6 +1434,12 @@
             const _unableC = new Set(
                 (allCustomersR || []).filter(c => c.unable_to_serve).map(c => String(c.id))
             );
+            // Null/empty agent_id drafts (legacy/imported, or created during an
+            // identity flap) must NOT be broadcast to every agent — that leaks a
+            // prospect's name/phone/event/message cross-agent. Only show them to
+            // admins, who already see the whole org. Owned drafts stay scoped to
+            // their agent as before.
+            const _isAdminViewer = isSystemAdmin(_state.cu);
             const visible = (all || []).filter(d =>
                 d.status === 'pending' &&
                 d.due_date <= todayStr &&
@@ -1378,7 +1447,7 @@
                 // invite is moot once the date passes. Non-event reminders
                 // (no event_date) are unaffected.
                 (!d.event_date || d.event_date >= todayStr) &&
-                (!d.agent_id || d.agent_id == _state.cu?.id) &&
+                (d.agent_id ? d.agent_id == _state.cu?.id : _isAdminViewer) &&
                 // Hide drafts for prospects/customers marked unable to serve.
                 !(d.prospect_id && _unableP.has(String(d.prospect_id))) &&
                 !(d.customer_id && _unableC.has(String(d.customer_id)))
@@ -1798,8 +1867,8 @@
         }
 
         return `
-            <div class="calendar-appointment ${a.activity_type.toLowerCase()} ${(a.closing_amount || a.is_closing) ? 'closed-case' : ''} ${isPendingInvite ? 'pending-invite' : ''} ${isRejectedInvite ? 'rejected-invite' : ''} ${a._optimistic === 'pending' ? 'optimistic-pending' : ''} ${a._optimistic === 'failed' ? 'optimistic-failed' : ''}"
-                onclick="event.stopPropagation(); ${a._optimistic === 'failed' ? `app.showSyncErrorModal(${JSON.stringify(a.id)},${JSON.stringify(a._errorMsg||'')},${JSON.stringify(a._errorCode||'')})` : a._optimistic ? '' : `app.viewActivityDetails(${a.id})`}">
+            <div class="calendar-appointment ${(a.activity_type || '').toLowerCase()} ${(a.closing_amount || a.is_closing) ? 'closed-case' : ''} ${isPendingInvite ? 'pending-invite' : ''} ${isRejectedInvite ? 'rejected-invite' : ''} ${a._optimistic === 'pending' ? 'optimistic-pending' : ''} ${a._optimistic === 'failed' ? 'optimistic-failed' : ''}"
+                onclick="event.stopPropagation(); ${a._optimistic === 'failed' ? `app.showSyncErrorModal(${escapeHtml(JSON.stringify(a.id))},${escapeHtml(JSON.stringify(a._errorMsg||''))},${escapeHtml(JSON.stringify(a._errorCode||''))})` : a._optimistic ? '' : `app.viewActivityDetails(${a.id})`}">
                 <div class="appointment-time">${(a.start_time || '00:00').slice(0,5)}${_optBadge}</div>
                 ${isEvent
                     ? `<div class="appointment-customer">${esc(eventTitle || a.activity_title || 'Event')}</div>`
@@ -2447,13 +2516,9 @@
                         ${types.map(t => `<option value="${t}" ${_filters.type === t ? 'selected' : ''}>${t}</option>`).join('')}
                     </select>
                 </div>
-                <div class="form-group">
-                    <label>Date Range (Optional)</label>
-                    <div style="display:flex; gap:10px;">
-                        <input type="date" id="cal-filter-from" class="form-control" value="${_filters.from || ''}">
-                        <input type="date" id="cal-filter-to" class="form-control" value="${_filters.to || ''}">
-                    </div>
-                </div>
+                <!-- Date-range inputs removed: the month view is inherently
+                     month-scoped and no render path ever consumed _filters.from/
+                     _filters.to, so they were a no-op control. -->
                 <!-- Phase 21: Case Closed Filter -->
                 <div class="form-group">
                     <label>Case Status</label>
@@ -2480,8 +2545,8 @@
     const applyCalendarFilters = async () => {
         _filters.agent = document.getElementById('cal-filter-agent')?.value ?? 'all';
         _filters.type = document.getElementById('cal-filter-type')?.value ?? 'all';
-        _filters.from = document.getElementById('cal-filter-from')?.value ?? '';
-        _filters.to = document.getElementById('cal-filter-to')?.value ?? '';
+        // from/to intentionally NOT collected: the date-range inputs were removed
+        // because no calendar render path consumed them (dead control).
 
         const caseStatus = document.querySelector('input[name="case-status"]:checked');
         _filters.caseStatus = caseStatus ? caseStatus.value : 'all';
@@ -2841,9 +2906,12 @@
             checkRefillReminderTable(),
             AppDataStore.query('refill_reminders', { status: 'pending' }).catch(() => []),
             AppDataStore.query('refill_reminders', { status: 'whatsapp_sent' }).catch(() => []),
-            AppDataStore.getAll('prospects'),
-            AppDataStore.getAll('customers'),
-            AppDataStore.getAll('users'),
+            // Guard each lookup so one table failing (RLS deny / Failed to fetch)
+            // doesn't reject Promise.all and wipe out the whole refills widget —
+            // mirrors renderBirthdaySection's per-table .catch pattern.
+            AppDataStore.getAll('prospects').catch(() => []),
+            AppDataStore.getAll('customers').catch(() => []),
+            AppDataStore.getAll('users').catch(() => []),
         ]);
 
         if (!tableOk) {
@@ -2880,11 +2948,32 @@
             return agentId && String(agentId) === String(_state.cu?.id);
         });
 
-        // Split into overdue vs. due this week
-        const overdue = visibleReminders.filter(r => r.days_until_finish < 0)
-            .sort((a, b) => a.days_until_finish - b.days_until_finish);
-        const soon = visibleReminders.filter(r => r.days_until_finish >= 0 && r.days_until_finish <= 7)
-            .sort((a, b) => a.days_until_finish - b.days_until_finish);
+        // days_until_finish is a STATIC integer the pg_cron job wrote once; if
+        // the cron hasn't run for N days it's N days stale and misclassifies
+        // overdue/soon. estimated_finish_date (a DATE) is the reliable source of
+        // truth, so derive days-left from it relative to today and fall back to
+        // the stored integer only when the date is missing/unparseable.
+        const _refillTodayMs = (() => {
+            const t = new Date();
+            return new Date(t.getFullYear(), t.getMonth(), t.getDate()).getTime();
+        })();
+        const _refillDaysLeft = (r) => {
+            const efd = r.estimated_finish_date;
+            if (efd) {
+                const parts = String(efd).slice(0, 10).split('-').map(Number);
+                if (parts.length === 3 && parts.every(n => !isNaN(n))) {
+                    const finishMs = new Date(parts[0], parts[1] - 1, parts[2]).getTime();
+                    return Math.floor((finishMs - _refillTodayMs) / 86400000);
+                }
+            }
+            return r.days_until_finish; // fallback: stored integer
+        };
+
+        // Split into overdue vs. due this week using the recomputed value.
+        const overdue = visibleReminders.filter(r => _refillDaysLeft(r) < 0)
+            .sort((a, b) => _refillDaysLeft(a) - _refillDaysLeft(b));
+        const soon = visibleReminders.filter(r => _refillDaysLeft(r) >= 0 && _refillDaysLeft(r) <= 7)
+            .sort((a, b) => _refillDaysLeft(a) - _refillDaysLeft(b));
 
         const renderRow = (r) => {
             const entity = r.prospect_id
@@ -2893,11 +2982,12 @@
             const name = entity?.full_name || 'Unknown contact';
             const phone = entity?.phone || '';
             const agent = userMap.get(String(entity?.responsible_agent_id || entity?.lead_agent_id));
-            const daysText = r.days_until_finish < 0
-                ? `<span style="color:#dc2626;font-weight:600;">${Math.abs(r.days_until_finish)}d overdue</span>`
-                : r.days_until_finish === 0
+            const _daysLeft = _refillDaysLeft(r);
+            const daysText = _daysLeft < 0
+                ? `<span style="color:#dc2626;font-weight:600;">${Math.abs(_daysLeft)}d overdue</span>`
+                : _daysLeft === 0
                     ? `<span style="color:#dc2626;font-weight:600;">Today</span>`
-                    : `<span style="color:#d97706;font-weight:600;">${r.days_until_finish}d left</span>`;
+                    : `<span style="color:#d97706;font-weight:600;">${_daysLeft}d left</span>`;
             const sentBadge = r.status === 'whatsapp_sent'
                 ? `<span style="background:#dcfce7;color:#15803d;padding:2px 6px;border-radius:4px;font-size:10px;margin-left:4px;">✓ SENT</span>`
                 : '';
@@ -3120,7 +3210,10 @@
             await navigateTo('prospects');
             setTimeout(() => { try { (window.app.showProspectDetail || (() => {}))(prospectId); } catch(_) { /* intentional: best-effort deferred navigation */ } }, 200);
         } else if (customerId) {
-            await navigateTo('prospects');
+            // Navigate to the CUSTOMERS view (not prospects) so showCustomerDetail
+            // captures the correct back-destination — closing returns to the
+            // customers list, not the prospects list.
+            await navigateTo('customers');
             setTimeout(() => { try { (window.app.showCustomerDetail || (() => {}))(customerId); } catch(_) { /* intentional: best-effort deferred navigation */ } }, 200);
         }
     };
@@ -3225,12 +3318,11 @@
     const switchView = async (view) => {
         _state.cv = view;
 
-        document.querySelectorAll('.btn-toggle').forEach(btn => {
-            btn.classList.remove('active');
-            if (btn.textContent.toLowerCase() === view) {
-                btn.classList.add('active');
-            }
-        });
+        // NOTE: the React-era calendar shell renders no .btn-toggle month/week/day
+        // switcher, so the old querySelectorAll('.btn-toggle') activation loop was
+        // a dead no-op and has been removed. The week/day views themselves stay
+        // reachable via openDayView ("+N more") and goToPrevious/Next, which
+        // preserve _state.cv — so the renderWeek/Day code below is NOT orphaned.
 
         if (view === 'month') {
             await renderMonthView();
@@ -3320,9 +3412,8 @@
         updateMonthHeader(_state.cd);
         // Show skeleton immediately so tapping "+N more" feels instant
         _state.cv = 'day';
-        document.querySelectorAll('.btn-toggle').forEach(btn => {
-            btn.classList.toggle('active', btn.textContent.trim().toLowerCase() === 'day');
-        });
+        // (Removed dead .btn-toggle activation loop — no such switcher exists in
+        //  the current calendar shell, matching the switchView cleanup above.)
         const grid = document.getElementById('calendar-grid');
         if (grid) {
             const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][_state.cd.getMonth()];
@@ -3360,7 +3451,7 @@
     };
     const buildWeekActivityHtml = (a, name) => {
         return `
-    <div class="week-activity ${esc(a.activity_type.toLowerCase())}" onclick="app.viewActivityDetails(${a.id})">
+    <div class="week-activity ${esc(String(a.activity_type || '').toLowerCase())}" onclick="app.viewActivityDetails(${a.id})">
         ${esc(a.start_time)} ${esc(name)}
     </div>
     `;
@@ -3591,9 +3682,13 @@
         const customerMapDV = new Map(((_dvCRes && _dvCRes.data) || []).map(c => [String(c.id), c]));
         const userMapDV = new Map((allUsersDV || []).map(u => [String(u.id), u]));
 
-        // Calculate summary stats
-        const totalMeetings = dayActivities.filter(a => a.activity_type === 'FTF').length;
-        const totalCalls = dayActivities.filter(a => a.activity_type === 'CALL' || a.activity_type === 'WHATSAPP').length;
+        // Calculate summary stats over ONLY the activities the timeline actually
+        // renders (those with a start_time). Counting start_time-less rows in the
+        // headline totals made the summary claim more than the grid showed.
+        const timedActivities = dayActivities.filter(a => a.start_time);
+        const totalActivities = timedActivities.length;
+        const totalMeetings = timedActivities.filter(a => a.activity_type === 'FTF').length;
+        const totalCalls = timedActivities.filter(a => a.activity_type === 'CALL' || a.activity_type === 'WHATSAPP').length;
 
         let html = '<div class="enhanced-day-view">';
         html += `
@@ -3607,7 +3702,7 @@
                 <div class="day-summary">
                     <div class="summary-card">
                         <div class="summary-label">Total Activities</div>
-                        <div class="summary-value">${dayActivities.length}</div>
+                        <div class="summary-value">${totalActivities}</div>
                     </div>
                     <div class="summary-card">
                         <div class="summary-label">Meetings</div>
@@ -3644,7 +3739,7 @@
                 const agent = userMapDV.get(String(a.lead_agent_id));
 
                 html += `
-                    <div class="timeline-activity ${a.activity_type.toLowerCase()}" onclick="app.viewActivityDetails(${a.id})">
+                    <div class="timeline-activity ${String(a.activity_type || '').toLowerCase()}" onclick="app.viewActivityDetails(${a.id})">
                         <div class="activity-time">${a.start_time} - ${a.end_time || '?'}</div>
                         <div class="activity-title"><strong>${esc(a.activity_title || a.activity_type)}</strong> ${esc(name)}</div>
                         <div class="activity-agent">Agent: ${esc(agent?.full_name || 'Unknown')}</div>
@@ -3659,121 +3754,20 @@
         grid.innerHTML = html;
     };
 
-    const generateDayHours = async () => {
-        let hoursHtml = '';
-        // Use local date parts — toISOString() gives UTC which yields yesterday for MY (UTC+8) before 08:00
-        const _gdy = _state.cd.getFullYear(), _gdm = String(_state.cd.getMonth()+1).padStart(2,'0'), _gdd = String(_state.cd.getDate()).padStart(2,'0');
-        const todayStr = `${_gdy}-${_gdm}-${_gdd}`;
-        const [allActsGDH, allProspectsGDH] = await Promise.all([
-            AppDataStore.getAll('activities'),
-            AppDataStore.getAll('prospects'),
-        ]);
-        const dayActs = (allActsGDH || []).filter(a => a.activity_date === todayStr);
-        const prospectMapGDH = new Map((allProspectsGDH || []).map(p => [String(p.id), p]));
-
-        for (let i = 8; i <= 20; i++) {
-            const hourStr = `${i.toString().padStart(2, '0')}:00`;
-            const actsAtHour = dayActs.filter(a => a.start_time && a.start_time.startsWith(i.toString().padStart(2, '0')));
-
-            const hourContent = actsAtHour.map(a => {
-                let prospectInfo = '';
-                if (a.prospect_id) {
-                    const p = prospectMapGDH.get(String(a.prospect_id));
-                    if (p) prospectInfo = `(${esc(p.full_name)})`;
-                }
-                return `
-                    <div class="day-act-item">
-                        <strong>${esc(a.activity_type)}</strong>: ${esc(a.activity_title)} ${prospectInfo}
-                    </div>
-                `;
-            });
-
-            hoursHtml += `
-                <div class="day-view-hour">
-                    <div class="hour-label">${hourStr}</div>
-                    <div class="hour-content">
-                        ${hourContent.join('')}
-                    </div>
-                </div>
-            `;
-        }
-        return hoursHtml;
-    };
-
-    const openFilterModal = async () => {
-        const content = `
-            <div class="filter-modal">
-                <div class="form-group">
-                    <label>Search Activities</label>
-                    <input type="text" id="filter-search" class="form-control" placeholder="Search by title or summary..." value="${_filters.search || ''}">
-                </div>
-                <div class="form-group">
-                    <label>Filter by Agent</label>
-                    <select id="filter-agent" class="form-control">
-                        <option value="all" ${_filters.agent === 'all' ? 'selected' : ''}>All Agents</option>
-                        <option value="5" ${_filters.agent == '5' ? 'selected' : ''}>Michelle Tan</option>
-                        <option value="6" ${_filters.agent == '6' ? 'selected' : ''}>Ah Seng</option>
-                        <option value="7" ${_filters.agent == '7' ? 'selected' : ''}>Mei Ling</option>
-                        <option value="8" ${_filters.agent == '8' ? 'selected' : ''}>Raj Kumar</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>Filter by Activity Type</label>
-                    <select id="filter-activity-type" class="form-control">
-                        <option value="all" ${_filters.type === 'all' ? 'selected' : ''}>All Types</option>
-                        <option value="CPS" ${_filters.type === 'CPS' ? 'selected' : ''}>CPS</option>
-                        <option value="FTF" ${_filters.type === 'FTF' ? 'selected' : ''}>FTF</option>
-                        <option value="FSA" ${_filters.type === 'FSA' ? 'selected' : ''}>FSA</option>
-                        <option value="EVENT" ${_filters.type === 'EVENT' ? 'selected' : ''}>Event</option>
-                        <option value="CALL" ${_filters.type === 'CALL' ? 'selected' : ''}>Call</option>
-                        <option value="EMAIL" ${_filters.type === 'EMAIL' ? 'selected' : ''}>Email</option>
-                        <option value="WHATSAPP" ${_filters.type === 'WHATSAPP' ? 'selected' : ''}>WhatsApp</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>Date Range</label>
-                    <div class="form-row">
-                        <div class="form-group half">
-                            <input type="date" id="filter-date-from" class="form-control" value="${_filters.from}">
-                        </div>
-                        <div class="form-group half">
-                            <input type="date" id="filter-date-to" class="form-control" value="${_filters.to}">
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        UI.showModal('Filter Calendar', content, [
-            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Apply Filters', type: 'primary', action: '(async () => { await app.applyFilters(); })()' },
-            { label: 'Clear Filters', type: 'secondary', action: '(async () => { await app.clearFilters(); })()' }
-        ]);
-    };
-
-    const applyFilters = async () => {
-        _filters.agent = document.getElementById('filter-agent')?.value || 'all';
-        _filters.type = document.getElementById('filter-activity-type')?.value || 'all';
-        _filters.from = document.getElementById('filter-date-from')?.value || '';
-        _filters.to = document.getElementById('filter-date-to')?.value || '';
-        _filters.search = document.getElementById('filter-search')?.value || '';
-
-        sessionStorage.setItem('calendar_filters', JSON.stringify(_filters));
-        UI.hideModal();
-        UI.toast.success('Filters applied');
-
-        await renderCalendar();
-        await renderTodayActivities();
-    };
-
-    const clearFilters = async () => {
-        Object.assign(_filters, { agent: 'all', type: 'all', from: '', to: '', search: '' });
-        sessionStorage.setItem('calendar_filters', JSON.stringify(_filters));
-        UI.hideModal();
-        await renderCalendar();
-        await renderTodayActivities();
-        UI.toast.success('Filters cleared');
-    };
+    // generateDayHours / openFilterModal / applyFilters / clearFilters were
+    // REMOVED here (2026-06-20 audit): all four were dead/legacy and unsafe —
+    //   • generateDayHours did an unscoped getAll('activities'/'prospects') and
+    //     rendered every agent's prospect names with NO ownership masking (the
+    //     cross-agent name-leak class the live renderers were fixed for); no
+    //     caller existed.
+    //   • openFilterModal hardcoded four fictional demo agents (ids 5-8 Michelle
+    //     Tan / Ah Seng / Mei Ling / Raj Kumar) that match no production
+    //     lead_agent_id, a "Search by title or summary" input never consumed by
+    //     any query path, and a Date Range never applied — a fully non-functional
+    //     control with no HTML caller.
+    //   • applyFilters/clearFilters were its only siblings, superseded by the
+    //     live openCalendarFilterModal / applyCalendarFilters / clearCalendarFilters.
+    // Their exports are removed from the register() tail below.
 
     const todo = (msg = 'Coming in Phase 2') => {
         UI.toast.info(msg);
@@ -4688,14 +4682,19 @@
                 current[key] = prospect?.[dbCol] != null ? String(prospect[dbCol]) : '';
             });
 
-            _cpsScanCache = {
+            // The CPS-scan review state lives in the cps chunk (module-local
+            // `_cpsScanCache`). The old bare `_cpsScanCache = {...}` here created
+            // a leaked implicit GLOBAL that renderCpsScanReview never reads —
+            // breaking this flow cross-chunk. Hand the payload to the cps chunk's
+            // setter so it populates its own state before rendering the review.
+            (window.app._setCpsScanCache || (() => {}))({
                 prefix: '__prospect_row__',     // sentinel: write to DB not DOM
                 prospectId,
                 scanned: res.fields || {},
                 confidence: res.confidence || {},
                 current,
                 rawText: res.raw_text || '',
-            };
+            });
             (window.app.renderCpsScanReview || (() => {}))();
         } catch (err) {
             (window.app._hideCpsScanOverlay || (() => {}))();
@@ -4800,6 +4799,7 @@
         // be missing from the Supabase schema and silently stripped on save). Only mirror when
         // the venue is non-empty so we don't clobber existing FSA/SITE site addresses.
         if (venue) updates.location_address = venue;
+        let _localOnly = false;
         try {
             await AppDataStore.update('activities', activityId, updates);
         } catch (e) {
@@ -4807,11 +4807,18 @@
             const key = 'fs_crm_activities';
             const all = JSON.parse(localStorage.getItem(key) || '[]');
             const idx = all.findIndex(r => r.id == activityId);
-            if (idx >= 0) { all[idx] = { ...all[idx], ...updates }; localStorage.setItem(key, JSON.stringify(all)); }
+            if (idx >= 0) { all[idx] = { ...all[idx], ...updates }; localStorage.setItem(key, JSON.stringify(all)); _localOnly = true; }
             else { UI.toast.error('Could not save: ' + e.message); return; }
         }
         UI.hideModal();
-        UI.toast.success('Appointment timing updated');
+        // Don't claim a successful save when the server never received the change.
+        // The localStorage fallback is device-local: other users won't see the new
+        // timing and a later server refresh can silently revert it — surface that.
+        if (_localOnly) {
+            (UI.toast.warning || UI.toast.error)('Saved on this device only — could not sync to the server. Other users won\'t see this change until it syncs.');
+        } else {
+            UI.toast.success('Appointment timing updated');
+        }
 
         // Push-notify any newly-added co-agents (delta only, so existing ones aren't spammed).
         if (Array.isArray(updates.co_agents) && updates.co_agents.length > 0) {
@@ -5346,7 +5353,12 @@
                     }
                     document.getElementById(`acc-potential-${prospectId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 }, 400);
-            } else if (typeof showCustomerDetail === 'function') {
+            } else {
+                // The previous `typeof showCustomerDetail === 'function'` guard
+                // referenced a bare (undeclared) identifier that is ALWAYS
+                // undefined, so the customer-navigation branch never ran. Call
+                // window.app.showCustomerDetail directly; the || fallback keeps it
+                // safe if the handler isn't loaded.
                 await (window.app.showCustomerDetail || (() => {}))(prospectId);
             }
         }
@@ -5564,9 +5576,21 @@
         const activity = await _lookupActivityRobust(activityId);
         if (!activity) { UI.toast.error('Activity not found'); return; }
 
-        activity.status = 'completed';
-        activity.completed_at = new Date().toISOString();
-        await AppDataStore.update('activities', activityId, activity);
+        try {
+            // Send a NARROW payload, not the whole `activity` object: the row can
+            // come from the calendar hot RPC and carry joined/synthetic columns
+            // (e.g. entity_name) that don't exist on the activities table, which
+            // would make the write fail with 42703. Wrap in try/catch so an RLS
+            // deny / offline error surfaces to the user instead of silently
+            // rejecting the promise (and skipping the toast + re-render).
+            await AppDataStore.update('activities', activityId, {
+                status: 'completed',
+                completed_at: new Date().toISOString()
+            });
+        } catch (err) {
+            UI.toast.error('Could not mark complete: ' + (err?.message || 'Unknown error'));
+            return;
+        }
 
         UI.toast.success('Activity marked as complete');
         if (document.querySelector('.calendar-view-container')) {
@@ -5694,10 +5718,14 @@
             ? await AppDataStore.getById('users', attendeeId)
             : (attendeeType === 'prospect' ? await AppDataStore.getById('prospects', attendeeId) : await AppDataStore.getById('customers', attendeeId));
 
-        const existingNote =(await AppDataStore.getAll('notes')).find(n => n.activity_id === activityId && n.note_type === 'outcome' &&
-            ((attendeeType === 'agent' && n.agent_id === attendeeId) ||
-                (attendeeType === 'prospect' && n.prospect_id === attendeeId) ||
-                (attendeeType === 'customer' && n.customer_id === attendeeId)));
+        // Normalize ids with String(): activityId/attendeeId arrive from the
+        // modal action string as bare numeric literals, but the notes table can
+        // store string/UUID ids — strict === would never match and we'd create a
+        // duplicate note. Mirrors the String()-normalized style used elsewhere.
+        const existingNote =(await AppDataStore.getAll('notes')).find(n => String(n.activity_id) === String(activityId) && n.note_type === 'outcome' &&
+            ((attendeeType === 'agent' && String(n.agent_id) === String(attendeeId)) ||
+                (attendeeType === 'prospect' && String(n.prospect_id) === String(attendeeId)) ||
+                (attendeeType === 'customer' && String(n.customer_id) === String(attendeeId))));
 
         const content = `
             <div class="form-group">
@@ -5717,10 +5745,12 @@
             ? await AppDataStore.getById('users', attendeeId)
             : (attendeeType === 'prospect' ? await AppDataStore.getById('prospects', attendeeId) : await AppDataStore.getById('customers', attendeeId));
 
-        const existingNote = (await AppDataStore.getAll('notes')).find(n => n.activity_id === activityId && n.note_type === 'post_meetup' &&
-            ((attendeeType === 'agent' && n.agent_id === attendeeId) ||
-                (attendeeType === 'prospect' && n.prospect_id === attendeeId) ||
-                (attendeeType === 'customer' && n.customer_id === attendeeId)));
+        // String()-normalize ids (see openAttendeeOutcomeModal) so number-vs-string
+        // id types still match the existing note instead of duplicating it.
+        const existingNote = (await AppDataStore.getAll('notes')).find(n => String(n.activity_id) === String(activityId) && n.note_type === 'post_meetup' &&
+            ((attendeeType === 'agent' && String(n.agent_id) === String(attendeeId)) ||
+                (attendeeType === 'prospect' && String(n.prospect_id) === String(attendeeId)) ||
+                (attendeeType === 'customer' && String(n.customer_id) === String(attendeeId))));
 
         const content = `
             <div class="form-group">
@@ -5757,11 +5787,14 @@
         else if (attendeeType === 'prospect') noteData.prospect_id = attendeeId;
         else if (attendeeType === 'customer') noteData.customer_id = attendeeId;
 
-        // Check if note already exists to update
-        const existingNote = (await AppDataStore.getAll('notes')).find(n => n.activity_id === activityId && n.note_type === noteType &&
-            ((attendeeType === 'agent' && n.agent_id === attendeeId) ||
-                (attendeeType === 'prospect' && n.prospect_id === attendeeId) ||
-                (attendeeType === 'customer' && n.customer_id === attendeeId)));
+        // Check if note already exists to update. String()-normalize the id
+        // comparisons: attendeeId/activityId come in as bare numeric literals
+        // from the modal action string, but notes ids may be string/UUID — strict
+        // === would miss the match and create a duplicate note every save.
+        const existingNote = (await AppDataStore.getAll('notes')).find(n => String(n.activity_id) === String(activityId) && n.note_type === noteType &&
+            ((attendeeType === 'agent' && String(n.agent_id) === String(attendeeId)) ||
+                (attendeeType === 'prospect' && String(n.prospect_id) === String(attendeeId)) ||
+                (attendeeType === 'customer' && String(n.customer_id) === String(attendeeId))));
 
         if (existingNote) {
             await AppDataStore.update('notes', existingNote.id, noteData);
@@ -5777,7 +5810,11 @@
 
     const addCoAgentToActivity = async (activityId) => {
         await app.editActivity(activityId);
-        (() => {
+        // Was a parenthesized comma expression `(() => {...}, 350)` — the arrow
+        // function was created then discarded and the body never ran, so the
+        // co-agent section never auto-expanded/focused. Wrap in setTimeout so it
+        // fires after the edit modal mounts (matches rescheduleActivity/postMeetupNotes).
+        setTimeout(() => {
             const coSectionStr = document.getElementById('co-agent-section')?.style.display;
             if (coSectionStr === 'none' || !coSectionStr) {
                 app.toggleCoAgentSection();
@@ -5844,10 +5881,6 @@
         renderMonthView,
         renderWeekView,
         renderDayView,
-        generateDayHours,
-        openFilterModal,
-        applyFilters,
-        clearFilters,
         todo,
         viewActivityDetails,
         openActivityRepairModal,

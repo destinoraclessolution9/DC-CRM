@@ -374,19 +374,31 @@
         const _venueData = await _getVenuesCached();
         const _venueOptions = (_venueData || [])
             .sort((a, b) => (a.sequence || 0) - (b.sequence || 0))
-            .map(v => `<option value="${v.name} | ${v.location}">${v.name} | ${v.location}</option>`)
+            // Escape DB-sourced venue name/location (stored XSS — values land in both
+            // the option value attribute and its text content).
+            .map(v => `<option value="${escapeHtml((v.name || '') + ' | ' + (v.location || ''))}">${escapeHtml((v.name || '') + ' | ' + (v.location || ''))}</option>`)
             .join('');
         const _productOptions = (await _getProductsCached())
             .filter(p => p.is_active !== false)
-            .map(p => `<option value="${p.name}">${p.name}</option>`)
+            // Escape DB-sourced product name (stored XSS) — matches buildMeetingOutcomeBlock.
+            .map(p => `<option value="${escapeHtml(p.name || '')}">${escapeHtml(p.name || '')}</option>`)
             .join('') || '<option value="">No products available</option>';
 
         const modalContent = buildActivityModalContent(prefillDate, today, _venueOptions, _productOptions);
 
+        // When editing an existing activity, bind the primary button to updateActivity(id)
+        // SYNCHRONOUSLY here — never rely on the stacked setTimeouts in fillActivityForm to
+        // flip the button later, which left a ~800ms window where 'Save Activity' would
+        // call saveActivity() (create-new) and duplicate the record.
+        const isEdit = !!(activity && activity.id != null);
+        const primaryBtn = isEdit
+            ? { label: 'Update Activity', type: 'primary', action: `(async () => { await app.updateActivity(${JSON.stringify(activity.id)}); })()` }
+            : { label: 'Save Activity', type: 'primary', action: '(async () => { await app.saveActivity(); })()' };
+
         UI.showModal('Quick Add Activity', modalContent, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Save & Add Another', type: 'secondary', action: '(async () => { await app.saveAndAddAnother(); })()' },
-            { label: 'Save Activity', type: 'primary', action: '(async () => { await app.saveActivity(); })()' }
+            primaryBtn
         ]);
 
         await updateActivityForm();
@@ -1271,7 +1283,7 @@
             <div class="form-group">
                 <label>Upload Purchased Invoice <span style="font-size:11px;color:var(--gray-400);font-weight:normal;">(AI auto-fill on upload)</span></label>
                 <input id="${prefix}-invoice-file" type="file" class="form-control" accept="image/png,image/jpeg,application/pdf" ${disabled} onchange="if(!this.disabled)(async()=>{ try{ await app.scanInvoiceWithAI(this,'${prefix}','mo'); }catch(e){ console.error(e); } })()">
-                ${v.invoice_file ? `<div style="margin-top:6px;font-size:11px;color:var(--gray-500);"><i class="fas fa-paperclip"></i> Current: <a href="${v.invoice_file}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">${escapeHtml(v.invoice_file_name || 'View invoice')}</a> <span style="color:var(--gray-400);">(choosing a new file will replace it)</span></div>` : ''}
+                ${v.invoice_file ? `<div style="margin-top:6px;font-size:11px;color:var(--gray-500);"><i class="fas fa-paperclip"></i> Current: <a href="${escapeHtml(/^https?:\/\//i.test(v.invoice_file) ? v.invoice_file : '#')}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">${escapeHtml(v.invoice_file_name || 'View invoice')}</a> <span style="color:var(--gray-400);">(choosing a new file will replace it)</span></div>` : ''}
             </div>
         ` : '';
 
@@ -2405,7 +2417,7 @@
                                 <label>Choose ${type.includes('AGENT') ? 'Meeting/Training' : 'Event'}</label>
                                 <select id="existing-event" class="form-control" onchange="(async()=>{ try{ await app.showSelectedEventDetails(this.value); }catch(e){ console.error(e); } })()">
                                     <option value="">-- Select --</option>
-                                    ${(await AppDataStore.getAll('events')).filter(e => e.is_active !== false && e.status !== 'inactive').map(e => `<option value="${e.id}">${e.event_title || e.title || 'Untitled Event'}</option>`).join('')}
+                                    ${(await AppDataStore.getAll('events')).filter(e => e.is_active !== false && e.status !== 'inactive').map(e => `<option value="${escapeHtml(e.id)}">${escapeHtml(e.event_title || e.title || 'Untitled Event')}</option>`).join('')}
                                 </select>
                                 <div id="event-details-preview"></div>
                             </div>
@@ -2677,9 +2689,9 @@
         // Write back to event_registrations so it appears in prospect/customer profile
         if (entityId && eventId) {
             try {
-                const existing = (await AppDataStore.getAll('event_registrations')).find(
-                    r => r.event_id == eventId && r.attendee_id == entityId
-                );
+                // Scale-safe: scoped query by event_id+attendee_id instead of a whole-table
+                // getAll().find() that grows O(table) with every event attendance org-wide.
+                const existing = (await AppDataStore.query('event_registrations', { event_id: eventId, attendee_id: entityId }))[0];
                 if (existing) {
                     await AppDataStore.update('event_registrations', existing.id, { attendance_status: status });
                 } else {
@@ -2703,6 +2715,18 @@
                 console.error('toggleAttendeeAttended write-back error:', err);
             }
         }
+        // Refresh the modal so the opposite 'Unattended' checkbox unticks (mutual exclusion).
+        // Mirror toggleAttendeeUnattended's scale-safe scoped refresh.
+        let acts;
+        try {
+            if (eventId == null) throw new Error('no eventId — using full scan');
+            const rows = await AppDataStore.query('activities', { event_id: eventId, activity_date: activityDate });
+            acts = (rows || []).filter(a => a.event_id == eventId && a.activity_date == activityDate);
+        } catch (e) {
+            console.warn('toggleAttendeeAttended: scoped refresh query failed — full-table fallback', e);
+            acts = (await AppDataStore.getAll('activities')).filter(a => a.event_id == eventId && a.activity_date == activityDate);
+        }
+        if (acts.length > 0) await app.viewActivityDetails(acts[0].id);
     };
 
     const toggleAttendeeUnattended = async (attendeeId, checked, entityId, entityType, eventId, activityDate) => {
@@ -2713,9 +2737,8 @@
 
         if (entityId && eventId) {
             try {
-                const existing = (await AppDataStore.getAll('event_registrations')).find(
-                    r => r.event_id == eventId && r.attendee_id == entityId
-                );
+                // Scale-safe: scoped query instead of a whole-table getAll().find().
+                const existing = (await AppDataStore.query('event_registrations', { event_id: eventId, attendee_id: entityId }))[0];
                 if (existing) {
                     await AppDataStore.update('event_registrations', existing.id, { attendance_status: status });
                 } else {
@@ -2811,8 +2834,8 @@
         const agent = person.responsible_agent_id ? await AppDataStore.getById('users', person.responsible_agent_id) : null;
         const row = (label, value) => `
             <div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--border,#e5e0d8);">
-                <span style="width:140px;font-size:12px;color:var(--gray-400);flex-shrink:0;">${label}</span>
-                <span style="font-size:13px;font-weight:500;">${value || '—'}</span>
+                <span style="width:140px;font-size:12px;color:var(--gray-400);flex-shrink:0;">${escapeHtml(label)}</span>
+                <span style="font-size:13px;font-weight:500;">${escapeHtml(value || '—')}</span>
             </div>`;
         const content = `
             <div style="padding:4px 0;">
@@ -2834,9 +2857,8 @@
         if (!entityId) return;
         // Ensure event_registrations record exists so it shows in prospect's Activities & Events tab
         try {
-            const existing = (await AppDataStore.getAll('event_registrations')).find(
-                r => r.event_id == eventId && r.attendee_id == entityId
-            );
+            // Scale-safe: scoped query instead of a whole-table getAll().find().
+            const existing = (await AppDataStore.query('event_registrations', { event_id: eventId, attendee_id: entityId }))[0];
             if (!existing) {
                 await AppDataStore.create('event_registrations', {
                     event_id: eventId,
@@ -3177,13 +3199,19 @@
                 let matches = [];
                 if (type === 'CPS' || type === 'EVENT') {
                     const [_prospects, _customers] = await Promise.all([AppDataStore.getAll('prospects'), AppDataStore.getAll('customers')]);
-                    const all = [..._prospects, ..._customers];
+                    // Tag type at the SOURCE table — customers rows never carry an is_customer
+                    // flag (nothing sets it), so inferring from it mislabelled every customer as
+                    // 'prospect' and persisted the wrong attendee_type.
+                    const all = [
+                        ...(_prospects || []).map(p => ({ ...p, type: 'prospect' })),
+                        ...(_customers || []).map(c => ({ ...c, type: 'customer' }))
+                    ];
                     const available = all.filter(p => !_state.sat.find(a => a.id === p.id && a.type !== 'agent'));
                     matches = available.filter(p =>
                         (p.full_name && p.full_name.toLowerCase().includes(searchTerm)) ||
                         (p.phone && p.phone.includes(searchTerm)) ||
                         (p.email && p.email?.toLowerCase().includes(searchTerm))
-                    ).map(p => ({ ...p, type: p.is_customer ? 'customer' : 'prospect' }));
+                    );
                 }
 
                 if (isAgentRelevant) {
@@ -3420,12 +3448,27 @@
         }).join('');
     };
 
-    // Called by consultant to accept/reject — from notification or activity detail
+    // Called by consultant to accept/reject — from notification or activity detail.
+    // SECURITY: mirror respondCoAgentInvite — require a logged-in user, validate the
+    // response against an allowlist, and only permit responding on your OWN invite
+    // (String(consultantId) === String(_state.cu.id)) unless the caller is management.
     const respondConsultantInvite = async (activityId, consultantId, response) => {
+        if (!_state.cu || _state.cu.id == null) {
+            UI.toast.error('You must be logged in to respond.');
+            return;
+        }
+        if (response !== 'accepted' && response !== 'rejected') {
+            UI.toast.error('Invalid response');
+            return;
+        }
+        if (String(consultantId) !== String(_state.cu.id) && !isManagement(_state.cu)) {
+            UI.toast.error('You can only respond to your own appointment invite.');
+            return;
+        }
         const activity = await (window.app._lookupActivityRobust || AppDataStore.getById.bind(AppDataStore, 'activities'))(activityId);
         if (!activity) return UI.toast.error('Activity not found');
         const consultants = (activity.consultants || []).map(c =>
-            c.id === consultantId ? { ...c, status: response } : c
+            String(c.id) === String(consultantId) ? { ...c, status: response } : c
         );
         await AppDataStore.update('activities', activityId, { consultants });
         UI.toast.success(response === 'accepted' ? 'Appointment accepted!' : 'Appointment rejected.');
@@ -3605,6 +3648,13 @@
             : type === 'Customer'
             ? await AppDataStore.getById('customers', id)
             : await AppDataStore.getById('users', id);
+
+        // getById can return null (RLS deny / deleted / offline) — guard before deref.
+        if (!entity) {
+            UI.toast.error('Could not load the selected record.');
+            _state.se = null;
+            return;
+        }
 
         const infoDiv = document.getElementById('selected-entity-info');
         if (infoDiv) {
@@ -3817,9 +3867,9 @@
                         '✅ Appointment Confirmed',
                         `<div style="text-align:center; padding:8px 0;">
                             <p style="margin-bottom:12px; font-size:14px; color:#374151;">
-                                Notify <strong>${name}</strong> (${intakeRow.prospect_phone}) via WhatsApp?
+                                Notify <strong>${escapeHtml(name)}</strong> (${escapeHtml(intakeRow.prospect_phone || '')}) via WhatsApp?
                             </p>
-                            <pre style="background:#f3f4f6; border-radius:8px; padding:12px; font-size:12px; text-align:left; white-space:pre-wrap; max-height:220px; overflow-y:auto;">${msg}</pre>
+                            <pre style="background:#f3f4f6; border-radius:8px; padding:12px; font-size:12px; text-align:left; white-space:pre-wrap; max-height:220px; overflow-y:auto;">${escapeHtml(msg)}</pre>
                         </div>`,
                         [
                             { label: '📲 Send WhatsApp', type: 'primary',   action: `window.open('${waUrl}', '_blank'); UI.hideModal();` },
@@ -3932,16 +3982,22 @@
     // solution_sold. Fire-and-forget (uses .then chains internally).
     const _autoMarkProposedSolutionPurchased = (activity) => {
         if (activity.is_closing && activity.solution_sold) {
-            const soldLower = (activity.solution_sold || '').toLowerCase();
+            const soldLower = (activity.solution_sold || '').trim().toLowerCase();
             const entityId = activity.prospect_id || activity.customer_id;
-            if (entityId) {
+            if (entityId && soldLower) {
                 AppDataStore.getAll('proposed_solutions').then(sols => {
                     const matches = (sols || []).filter(s => {
                         const samePerson = String(s.prospect_id) === String(activity.prospect_id) ||
                                            String(s.customer_id) === String(activity.customer_id);
+                        // Require an EXACT (trimmed/case-insensitive) solution match instead of an
+                        // 8-char substring, which flipped unrelated solutions to 'Purchased' when
+                        // solution_sold was short/generic (e.g. 'ring', 'sofa').
                         return samePerson && s.status !== 'Purchased' &&
-                               (s.solution || '').toLowerCase().includes(soldLower.slice(0, 8));
+                               (s.solution || '').trim().toLowerCase() === soldLower;
                     });
+                    if (matches.length > 1) {
+                        console.warn(`[activities] _autoMarkProposedSolutionPurchased: ${matches.length} proposed solutions matched "${activity.solution_sold}" exactly — marking all Purchased`);
+                    }
                     for (const s of matches) {
                         AppDataStore.update('proposed_solutions', s.id, {
                             status: 'Purchased',
@@ -4367,8 +4423,13 @@
                 unable_reason: activity.unable_reason || '',
                 updated_at: new Date().toISOString()
             }).catch(() => {});
-            // Score penalty for marking unable to serve / not interested
-            addScoreToProspect(activity.prospect_id, SCORING_RULES.MARK_NOT_INTERESTED, 'Marked unable to serve / not interested').catch(() => {});
+            // Score penalty for marking unable to serve / not interested.
+            // AWAIT this read-modify-write BEFORE applyActivityScoring fires below —
+            // otherwise the later-resolving applyActivityScoring score write races and
+            // overwrites the -500 penalty (lost update).
+            try {
+                await addScoreToProspect(activity.prospect_id, SCORING_RULES.MARK_NOT_INTERESTED, 'Marked unable to serve / not interested');
+            } catch (e) { console.warn('unable-to-serve score penalty failed:', e?.message); }
         }
 
         // Upload CPS attachment to Supabase storage and save URL into activities.photo_urls.
@@ -4401,18 +4462,26 @@
         // Save event attendees now that we have the activity ID — stored per-activity so
         // different dates of the same event don't share attendees
         if ((type === 'EVENT' || type === 'AGENT_MEETING' || type === 'AGENT_TRAINING') && _state.sat.length > 0) {
-            for (const att of _state.sat) {
-                await AppDataStore.create('event_attendees', {
-                    event_id: activity.event_id,
-                    activity_id: savedActivity.id,
-                    entity_id: att.id,
-                    entity_name: att.name || att.full_name || '',
-                    attendee_id: att.id,
-                    attendee_type: att.type,
-                    attendance_status: att.status,
-                    added_by_agent_id: _state.cu?.id || null,
-                    added_by_name: _state.cu?.full_name || ''
-                });
+            // The activity row is already committed above — an attendee insert failure
+            // must NOT propagate to the outer catch and falsely report "activity not saved".
+            // Warn + non-fatal toast instead so the save isn't implied to have failed.
+            try {
+                for (const att of _state.sat) {
+                    await AppDataStore.create('event_attendees', {
+                        event_id: activity.event_id,
+                        activity_id: savedActivity.id,
+                        entity_id: att.id,
+                        entity_name: att.name || att.full_name || '',
+                        attendee_id: att.id,
+                        attendee_type: att.type,
+                        attendance_status: att.status,
+                        added_by_agent_id: _state.cu?.id || null,
+                        added_by_name: _state.cu?.full_name || ''
+                    });
+                }
+            } catch (err) {
+                console.warn('Event attendee save failed (activity already saved):', err?.message);
+                UI.toast.error('Activity saved, but some attendees could not be added.');
             }
         }
 
@@ -4614,16 +4683,11 @@
             try {
                 const allUsers = await AppDataStore.getAll('users');
                 (allUsers || []).forEach(u => {
-                    const role = (u.role || '').toString().toLowerCase();
-                    const lvlMatch = role.match(/level\s*(\d+)/);
-                    const lvl = lvlMatch ? parseInt(lvlMatch[1]) : 99;
-                    const isLead =
-                        lvl <= 4 ||
-                        role === 'team_leader' ||
-                        role === 'admin' ||
-                        role === 'super_admin' ||
-                        role === 'marketing_manager' ||
-                        role === 'manager';
+                    // Use the canonical role system (getUserLevel + _crmUtils predicates) so
+                    // named/Chinese-only roles (which _getUserLevel maps to L12-L14) resolve
+                    // correctly instead of the inline /level (\d+)/ regex defaulting them to 99.
+                    const lvl = getUserLevel(u);
+                    const isLead = lvl <= 4 || isManagement(u) || isTeamLeaderOrAbove(u);
                     if (isLead && u.id != null) targets.add(String(u.id));
                 });
             } catch (e) { /* admin broadcast is best-effort */ }

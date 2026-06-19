@@ -55,26 +55,24 @@
             if (window.UI) window.UI.toast.error("Access Denied. Super Admins only.");
             return;
         }
+        // audit_logs schema (written by data.js _writeAudit): created_at, action,
+        // entity_type, entity_id, user_id, old_data, new_data, user_agent.
+        // There is no timestamp/level/category column — read the real columns.
         const logs = (await AppDataStore.getAll('audit_logs') || [])
-            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
             .slice(0, 50);
     
         let content = `
             <div class="audit-log-viewer" style="margin:24px;">
                 <h2>Audit Logs</h2>
                 <div class="audit-filters">
-                    <select class="form-control" style="width:200px"><option>All Categories</option></select>
-                    <select class="form-control" style="width:200px">
-                        <option>All Levels</option>
-                        ${(_utils.USER_ROLES || []).map(r => `<option>${r}</option>`).join('')}
-                    </select>
+                    <select class="form-control" style="width:200px"><option>All Entities</option></select>
                 </div>
                 <table class="audit-table">
                     <thead>
                         <tr>
                             <th scope="col">Timestamp</th>
-                            <th scope="col">Level</th>
-                            <th scope="col">Category</th>
+                            <th scope="col">Entity</th>
                             <th scope="col">Action</th>
                             <th scope="col">User</th>
                         </tr>
@@ -82,14 +80,13 @@
                     <tbody>
                         ${logs.map(log => `
                             <tr>
-                                <td>${new Date(log.timestamp).toLocaleString()}</td>
-                                <td><span class="log-level ${log.level}">${log.level}</span></td>
-                                <td>${esc(log.category)}</td>
+                                <td>${log.created_at ? new Date(log.created_at).toLocaleString() : '—'}</td>
+                                <td>${esc(log.entity_type)}</td>
                                 <td>${esc(log.action)}</td>
                                 <td>${esc(log.user_id || 'System')}</td>
                             </tr>
                         `).join('')}
-                        ${!logs.length ? '<tr><td colspan="5">No logs found.</td></tr>' : ''}
+                        ${!logs.length ? '<tr><td colspan="4">No logs found.</td></tr>' : ''}
                     </tbody>
                 </table>
             </div>
@@ -278,7 +275,7 @@
                                     <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">${esc(t.tenant_id)}</td>
                                     <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);"><strong>${esc(t.name)}</strong></td>
                                     <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">${esc(t.plan)}</td>
-                                    <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);"><span class="status-badge status-${t.status.toLowerCase()}">${t.status}</span></td>
+                                    <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);"><span class="status-badge status-${esc(String(t.status || '').toLowerCase())}">${esc(t.status)}</span></td>
                                     <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">${new Date(t.created_at).toLocaleDateString()}</td>
                                     <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
                                         <button class="btn-icon" onclick="app.viewTenantDetails('${t.tenant_id}')" title="View"><i class="fas fa-eye"></i></button>
@@ -321,6 +318,12 @@
     };
     
     const submitNewTenant = async () => {
+        // Authz: provisioning a tenant is a privileged mutation — gate at entry
+        // rather than relying solely on the (admin-only) rendering view.
+        if (!isSystemAdmin()) {
+            if (window.UI) window.UI.toast.error("Access Denied. Super Admins only.");
+            return;
+        }
         const idEl    = document.getElementById('new-tenant-id');
         const nameEl  = document.getElementById('new-tenant-name');
         const emailEl = document.getElementById('new-tenant-email');
@@ -328,14 +331,30 @@
             if (window.UI) UI.toast.error("Tenant form elements missing — please reopen the dialog");
             return;
         }
-        const id    = idEl.value;
-        const name  = nameEl.value;
-        const email = emailEl.value;
+        // Trim whitespace so malformed (padded) tenants are not persisted.
+        const id    = idEl.value.trim();
+        const name  = nameEl.value.trim();
+        const email = emailEl.value.trim();
         if (!id || !name || !email) {
             if (window.UI) UI.toast.error("Please fill all fields");
             return;
         }
+        // Validate tenant-id charset (alphanumeric, dash, underscore) and email shape.
+        if (!/^[A-Za-z0-9_-]+$/.test(id)) {
+            if (window.UI) UI.toast.error("Tenant ID may only contain letters, numbers, hyphens and underscores");
+            return;
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            if (window.UI) UI.toast.error("Please enter a valid admin email address");
+            return;
+        }
         if (typeof TenantManager !== 'undefined') {
+            // Reject duplicates before creating.
+            const existing = (typeof TenantManager.listTenants === 'function' ? TenantManager.listTenants() : []) || [];
+            if (existing.some(t => String(t.tenant_id) === id)) {
+                if (window.UI) UI.toast.error("A tenant with that ID already exists");
+                return;
+            }
             await TenantManager.createTenant(id, name, email);
         }
         if (window.UI) {
@@ -350,7 +369,7 @@
             if (window.UI) window.UI.toast.error("Access Denied. Super Admins only.");
             return;
         }
-        const health = typeof SystemHealth !== 'undefined' ? SystemHealth.checkAll() : { status: 'UNKNOWN', components: {} };
+        const health = typeof SystemHealth !== 'undefined' ? SystemHealth.checkAll() : { status: 'UNKNOWN', components: {}, timestamp: Date.now() };
         let content = `
             <div class="system-health" style="padding: 24px;">
                 <div class="header-actions" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
@@ -359,7 +378,7 @@
                 </div>
                 <div class="kpi-card" style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 24px; border: 1px solid var(--gray-200);">
                     <h3>Overall Status: <span class="${health.status === 'HEALTHY' ? 'status-active' : 'status-danger'}">${health.status}</span></h3>
-                    <p style="color: var(--gray-500); font-size: 14px;">Last checked: ${new Date(health.timestamp).toLocaleString()}</p>
+                    <p style="color: var(--gray-500); font-size: 14px;">Last checked: ${health.timestamp ? new Date(health.timestamp).toLocaleString() : '—'}</p>
                 </div>
                 <div class="components-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px;">
                     ${Object.entries(health.components).map(([name, status]) => `
@@ -411,8 +430,8 @@
                                     <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">${b.id}</td>
                                     <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">${new Date(b.created_at).toLocaleString()}</td>
                                     <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">${b.type}</td>
-                                    <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);"><span class="status-badge status-${b.status.toLowerCase()}">${b.status}</span></td>
-                                    <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">${Math.round(b.size / 1024)}</td>
+                                    <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);"><span class="status-badge status-${esc(String(b.status || '').toLowerCase())}">${esc(b.status)}</span></td>
+                                    <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">${Number.isFinite(b.size) ? Math.round(b.size / 1024) : 0}</td>
                                     <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
                                         <button class="btn btn-sm secondary" onclick="app.restoreBackup('${b.id}')">Restore</button>
                                     </td>
@@ -428,6 +447,11 @@
     };
     
     const createBackup = async (type) => {
+        // Authz: destructive/privileged op exported on window.app — gate at entry.
+        if (!isSystemAdmin()) {
+            if (window.UI) window.UI.toast.error("Access Denied. Super Admins only.");
+            return;
+        }
         if (typeof BackupManager !== 'undefined') {
             const id = await BackupManager.createBackup(type);
             if (window.UI) UI.toast.success(`Backup ${id} initiated successfully`);
@@ -436,6 +460,11 @@
     };
     
     const restoreBackup = (id) => {
+        // Authz: destructive data-replacing restore exported on window.app — gate at entry.
+        if (!isSystemAdmin()) {
+            if (window.UI) window.UI.toast.error("Access Denied. Super Admins only.");
+            return;
+        }
         if (confirm("Are you sure you want to restore this backup? This will replace current data.")) {
             if (typeof BackupManager !== 'undefined') {
                 BackupManager.restoreBackup(id);
@@ -509,7 +538,7 @@
                                 <tr>
                                     <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);"><strong>${d.version}</strong></td>
                                     <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">${d.environment}</td>
-                                    <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);"><span class="status-badge status-${d.status.toLowerCase()}">${d.status}</span></td>
+                                    <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);"><span class="status-badge status-${esc(String(d.status || '').toLowerCase())}">${esc(d.status)}</span></td>
                                     <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">${new Date(d.deployed_at).toLocaleString()}</td>
                                     <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
                                         ${d.status === 'COMPLETED' ? `<button class="btn btn-sm warning" onclick="app.rollbackDeployment('${d.version}')">Rollback</button>` : '-'}
@@ -526,6 +555,11 @@
     };
     
     const executeDeployment = async () => {
+        // Authz: privileged deployment op exported on window.app — gate at entry.
+        if (!isSystemAdmin()) {
+            if (window.UI) window.UI.toast.error("Access Denied. Super Admins only.");
+            return;
+        }
         if (typeof DeploymentManager !== 'undefined') {
             const version = 'v' + (8.7 + Math.random() * 0.1).toFixed(2);
             DeploymentManager.createDeployment(version, 'PRODUCTION', { 'feature_x': true });
@@ -535,6 +569,11 @@
     };
     
     const rollbackDeployment = async (version) => {
+        // Authz: destructive rollback exported on window.app — gate at entry.
+        if (!isSystemAdmin()) {
+            if (window.UI) window.UI.toast.error("Access Denied. Super Admins only.");
+            return;
+        }
         if (confirm(`Are you sure you want to rollback from ${version}?`)) {
             if (typeof DeploymentManager !== 'undefined') {
                 await DeploymentManager.rollbackDeployment(version);

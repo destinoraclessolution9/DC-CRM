@@ -330,7 +330,7 @@ viewport.innerHTML = `
         <div>
             <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
                 <h1 style="font-size:32px; font-weight:700;">${escapeHtml(agent.full_name)}</h1>
-                <span class="status-badge status-${agent.status}">${agent.status?.toUpperCase() || 'ACTIVE'}</span>
+                <span class="status-badge status-${esc(agent.status || '')}">${esc(agent.status?.toUpperCase() || 'ACTIVE')}</span>
             </div>
             <div style="display:flex; gap:12px; color:var(--gray-500); font-size:14px;">
                 <span>Agent ID: ${escapeHtml(agent.agent_code || '—')}</span>
@@ -358,7 +358,7 @@ viewport.innerHTML = `
         <div class="license-stats">
             <div class="license-stat">
                 <span class="license-stat-label">License Expiry</span>
-                <span class="license-stat-value">${agent.license_expiry || '2026-12-31'}</span>
+                <span class="license-stat-value">${esc(agent.license_expiry || '2026-12-31')}</span>
             </div>
             <div class="license-stat">
                 <span class="license-stat-label">Days Remaining</span>
@@ -366,7 +366,7 @@ viewport.innerHTML = `
             </div>
             <div class="license-stat">
                 <span class="license-stat-label">Renewal Status</span>
-                <span class="license-stat-value">${agent.renewal_status || 'ELIGIBLE'}</span>
+                <span class="license-stat-value">${esc(agent.renewal_status || 'ELIGIBLE')}</span>
             </div>
         </div>
         <div class="license-actions">
@@ -390,7 +390,7 @@ viewport.innerHTML = `
                 </div>
                 <div class="stat-row">
                     <span class="stat-label">Join Date:</span>
-                    <span class="stat-value">${agent.join_date || '2026-01-01'}</span>
+                    <span class="stat-value">${esc(agent.join_date || '2026-01-01')}</span>
                 </div>
                 <div class="stat-row">
                     <span class="stat-label">Comm. Rate:</span>
@@ -673,7 +673,10 @@ if (notesContainer) notesContainer.innerHTML = notesHtml;
 
             
 const renderCustomerHistory = async (agentId) => {
-    const customers = (await getVisibleCustomers()).filter(c => c.responsible_agent_id === agentId);
+    // responsible_agent_id may be number or string depending on column type /
+    // serialization — coerce both sides (matches prospects path & count loops)
+    // so Customer History is not silently empty on a type mismatch.
+    const customers = (await getVisibleCustomers()).filter(c => String(c.responsible_agent_id) === String(agentId));
     if (customers.length === 0) return '<p>No converted customers yet.</p>';
 
     return `
@@ -684,7 +687,7 @@ const renderCustomerHistory = async (agentId) => {
                         <div class="assignment-prospect">${escapeHtml(c.full_name || '')}</div>
                         <div class="next-action">Customer Since: ${escapeHtml(c.customer_since || '')}</div>
                     </div>
-                    <span class="assignment-status status-active">RM ${c.lifetime_value.toLocaleString()}</span>
+                    <span class="assignment-status status-active">RM ${(c.lifetime_value || 0).toLocaleString()}</span>
                 </div>
             `).join('')
         }
@@ -829,30 +832,40 @@ const renderPerformanceTargets = async (agentId) => {
     const target = (await AppDataStore.query('agent_targets', { agent_id: agentId }))[0];
     if (!target) return '<p>No targets set for this month.</p>';
 
+    // Null-default the values (a null column would throw on .toLocaleString and
+    // abort the whole card render) and guard the denominator so a zero/null
+    // target can't produce NaN%/Infinity% widths (bar disappears / overflows).
+    const amtCur = target.current_amount || 0, amtTgt = target.target_amount || 0;
+    const cpsCur = target.current_cps || 0, cpsTgt = target.target_cps || 0;
+    const mtgCur = target.current_meetings || 0, mtgTgt = target.target_meetings || 0;
+    const pctAmt = amtTgt ? Math.min(100, (amtCur / amtTgt) * 100) : 0;
+    const pctCps = cpsTgt ? Math.min(100, (cpsCur / cpsTgt) * 100) : 0;
+    const pctMtg = mtgTgt ? Math.min(100, (mtgCur / mtgTgt) * 100) : 0;
+
     return `
 <div class="performance-stats">
             <div class="stat-row">
                 <span class="stat-label">Sales Amount:</span>
-                <span>RM ${target.current_amount.toLocaleString()} / ${target.target_amount.toLocaleString()}</span>
+                <span>RM ${amtCur.toLocaleString()} / ${amtTgt.toLocaleString()}</span>
             </div>
             <div class="target-progress">
-                <div class="fill" style="width: ${(target.current_amount / target.target_amount) * 100}%"></div>
+                <div class="fill" style="width: ${pctAmt}%"></div>
             </div>
-            
+
             <div class="stat-row">
                 <span class="stat-label">CPS Conducted:</span>
-                <span>${target.current_cps} / ${target.target_cps}</span>
+                <span>${cpsCur} / ${cpsTgt}</span>
             </div>
             <div class="target-progress">
-                <div class="fill" style="width: ${(target.current_cps / target.target_cps) * 100}%"></div>
+                <div class="fill" style="width: ${pctCps}%"></div>
             </div>
 
             <div class="stat-row">
                 <span class="stat-label">Meetings:</span>
-                <span>${target.current_meetings} / ${target.target_meetings}</span>
+                <span>${mtgCur} / ${mtgTgt}</span>
             </div>
             <div class="target-progress">
-                <div class="fill" style="width: ${(target.current_meetings / target.target_meetings) * 100}%"></div>
+                <div class="fill" style="width: ${pctMtg}%"></div>
             </div>
             
             <button class="btn primary btn-sm" style="margin-top:12px;" onclick="app.updateAgentTargets(${agentId})">Update Targets</button>
@@ -1163,6 +1176,16 @@ const submitForcePasswordChange = async () => {
         return UI.toast.error('Failed to set password: ' + (e?.message || e));
     }
     // Clear the force-change flag only (real users column) — no password write.
+    // Guard _state.cu: an RLS empty-read / session expiry between modal open and
+    // submit can null it AFTER GoTrue already changed the password. Don't throw —
+    // bail to re-login so the flag is cleared on next authenticated load.
+    if (!_state.cu || !_state.cu.id) {
+        UI.hideModal();
+        UI.toast.success('Password set. Please sign in again.');
+        // Session was lost mid-flow; log out cleanly to return to the login screen
+        // (canonical re-login path — there is no 'login' navigateTo view).
+        return (window.app.logout || (() => {}))();
+    }
     await AppDataStore.update('users', _state.cu.id, {
         force_password_change: false
     });

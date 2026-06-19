@@ -9,7 +9,20 @@
     const _utils = window._crmUtils;
     const esc    = (...a) => _utils.escapeHtml(...a);
     const isSystemAdmin      = (u) => _utils.isSystemAdmin(u || _state.cu);
+    const isMarketingManager = (u) => _utils.isMarketingManager(u || _state.cu);
     const navigateTo         = (v) => window.app.navigateTo(v);
+
+    // Org Chart is a Super Admin / L1-2 (Marketing Manager) feature — the header
+    // doc says so but the code never enforced it. Gate every entrypoint and every
+    // mutating/detail handler so the restriction is real, not just a comment.
+    // (Server-side RLS on org_consultations must back this up; this is the
+    // client-side half — see audit cross_file_needs.)
+    const _orgIsAuthorized = () => isSystemAdmin() || isMarketingManager();
+    const _orgRequireAdmin = () => {
+        if (_orgIsAuthorized()) return true;
+        UI.toast.error('Not authorized.');
+        return false;
+    };
 
     const ORG_TIERS = [
         { code: 't1_5',   min: 1,  max: 5,  price: 99 },
@@ -62,6 +75,43 @@
         }
         return out;
     };
+
+    // Combined cleaner for embedding a user/DB text value into report HTML:
+    // run the BaZi-secrecy term map on the PLAIN TEXT first, THEN html-escape.
+    // Running the term map on the assembled markup (the old approach) risked a
+    // future map entry with regex/HTML metacharacters corrupting tags/attrs.
+    const _orgCleanText = (s) => _orgEscapeHtml(_orgSanitiseClientText(s == null ? '' : String(s)));
+
+    // Render-time defence for the STORED report_html blob. We persist
+    // self-built HTML, but treat it as untrusted at render (a future import /
+    // migration / direct DB edit could plant markup). Parse into a detached
+    // document and strip script/style/iframe/object elements, all on* event
+    // handlers, and javascript:/data: URLs before returning safe innerHTML.
+    const _orgScrubHtml = (html) => {
+        if (!html) return '';
+        let doc;
+        try {
+            doc = new DOMParser().parseFromString(String(html), 'text/html');
+        } catch (_) {
+            // Parse failed → never inject raw; fall back to escaped text.
+            return _orgEscapeHtml(String(html));
+        }
+        // Remove executable / dangerous elements outright.
+        doc.querySelectorAll('script,style,iframe,object,embed,link,meta,base,form').forEach(el => el.remove());
+        // Strip event-handler attrs and unsafe URL schemes on everything else.
+        doc.querySelectorAll('*').forEach(el => {
+            [...el.attributes].forEach(attr => {
+                const name = attr.name.toLowerCase();
+                const val = (attr.value || '').trim();
+                if (name.startsWith('on')) { el.removeAttribute(attr.name); return; }
+                if ((name === 'href' || name === 'src' || name === 'xlink:href')
+                    && /^\s*(javascript|data|vbscript):/i.test(val)) {
+                    el.removeAttribute(attr.name);
+                }
+            });
+        });
+        return doc.body ? doc.body.innerHTML : '';
+    };
     
     const ORG_ARCHETYPES = [
         { code: 'leader',     label: 'Strategic Leader',     hint: 'sets direction, takes accountability' },
@@ -86,9 +136,12 @@
     // internal terminology surfaces from this function.
     const _orgComputeArchetype = (member) => {
         const dob = member.dob;
-        if (!dob) return { code: 'analyst', score: 60, note: 'incomplete data' };
+        // Return null code (not a fabricated 'analyst') on missing/invalid DOB so
+        // the analysisDone guard (members.every(m => m.archetype_code)) and
+        // runOrgAnalysis can detect incomplete data instead of silently passing.
+        if (!_orgIsValidDob(dob)) return { code: null, score: null, note: dob ? 'unparseable date' : 'incomplete data' };
         const d = new Date(dob);
-        if (isNaN(d.getTime())) return { code: 'analyst', score: 60, note: 'unparseable date' };
+        if (isNaN(d.getTime())) return { code: null, score: null, note: 'unparseable date' };
         const dayOfYear = Math.floor((d - new Date(d.getFullYear(), 0, 0)) / 86400000);
         const idx = (dayOfYear + (member.name?.length || 0)) % ORG_ARCHETYPES.length;
         const score = 60 + ((dayOfYear * 7) % 41); // 60..100
@@ -117,12 +170,61 @@
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#39;');
     }
+
+    // Quote-aware CSV line splitter. A naive line.split(',') corrupts every
+    // field after a name/role that legitimately contains a comma
+    // (e.g. "Lim, Wei Ann" or "Manager, Sales"). This honours double-quoted
+    // fields and the "" escape so commas inside a quoted field stay in place.
+    function _orgParseCsvLine(line) {
+        const out = [];
+        let cur = '';
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+            const ch = line[i];
+            if (inQuotes) {
+                if (ch === '"') {
+                    if (line[i + 1] === '"') { cur += '"'; i++; } // escaped quote
+                    else inQuotes = false;
+                } else {
+                    cur += ch;
+                }
+            } else if (ch === '"') {
+                inQuotes = true;
+            } else if (ch === ',') {
+                out.push(cur.trim());
+                cur = '';
+            } else {
+                cur += ch;
+            }
+        }
+        out.push(cur.trim());
+        return out;
+    }
+
+    // Strict YYYY-MM-DD validation, mirroring the <input type="date"> contract
+    // enforced in saveOrgMember. Rejects blanks, free text ("next week"), and
+    // ambiguous formats like "12/03/1985" so analysis can't run on bad DOBs.
+    function _orgIsValidDob(dob) {
+        if (!dob) return false;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dob)) return false;
+        const d = new Date(dob + 'T00:00:00');
+        if (isNaN(d.getTime())) return false;
+        // Guard against roll-over (e.g. 2020-02-31 → Mar 02).
+        const [y, m, day] = dob.split('-').map(Number);
+        return d.getFullYear() === y && (d.getMonth() + 1) === m && d.getDate() === day;
+    }
     
     // ---------------- LIST VIEW ----------------
     const showOrgChartView = async (viewport) => {
         viewport = viewport || document.getElementById('content-viewport');
         if (!viewport) return;
-    
+
+        // Authz: Super Admin / L1-2 only (see header).
+        if (!_orgIsAuthorized()) {
+            viewport.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-lock" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">You do not have access to this section.</p></div>';
+            return;
+        }
+
         let rows = [];
         try {
             const all = await AppDataStore.getAll('org_consultations');
@@ -148,6 +250,7 @@
     
     // ---------------- NEW CONSULTATION ----------------
     const openNewOrgConsultation = async () => {
+        if (!_orgRequireAdmin()) return;
         const tierRows = ORG_TIERS.map(t => `
             <tr><td style="padding:6px 10px;">${t.min}–${t.max} pax</td><td style="padding:6px 10px;text-align:right;">RM ${t.price.toLocaleString()}</td></tr>
         `).join('');
@@ -200,6 +303,7 @@
     };
     
     const saveNewOrgConsultation = async () => {
+        if (!_orgRequireAdmin()) return;
         const company = document.getElementById('org-new-company')?.value?.trim();
         const size = parseInt(document.getElementById('org-new-size')?.value, 10);
         if (!company) { UI.toast.error('Client company is required.'); return; }
@@ -341,6 +445,7 @@
         `;
 
     const openOrgConsultationDetail = async (id) => {
+        if (!_orgRequireAdmin()) return;
         const row = await AppDataStore.getById('org_consultations', id);
         if (!row) { UI.toast.error('Consultation not found.'); return; }
         const viewport = document.getElementById('content-viewport');
@@ -355,6 +460,7 @@
 
     // ---------------- MEMBER ADD / EDIT ----------------
     const openOrgMemberAddModal = async (consultationId, memberIdx) => {
+        if (!_orgRequireAdmin()) return;
         const row = await AppDataStore.getById('org_consultations', consultationId);
         if (!row) { UI.toast.error('Consultation not found.'); return; }
         const members = Array.isArray(row.members) ? row.members : [];
@@ -391,6 +497,7 @@
     };
     
     const saveOrgMember = async () => {
+        if (!_orgRequireAdmin()) return;
         const cid = parseInt(document.getElementById('org-mem-cid')?.value, 10);
         const idx = parseInt(document.getElementById('org-mem-idx')?.value, 10);
         const name = document.getElementById('org-mem-name')?.value?.trim();
@@ -437,6 +544,7 @@
     };
     
     const removeOrgMember = async (cid, idx) => {
+        if (!_orgRequireAdmin()) return;
         if (!confirm('Remove this member?')) return;
         const row = await AppDataStore.getById('org_consultations', cid);
         if (!row) return;
@@ -453,6 +561,7 @@
     };
     
     const openOrgMemberBulkPaste = async (cid) => {
+        if (!_orgRequireAdmin()) return;
         UI.showModal('Bulk Paste Members', `
             <input type="hidden" id="org-bulk-cid" value="${cid}">
             <p style="color:var(--gray-600);font-size:13px;">Paste CSV: <code>Name, Role, DOB (YYYY-MM-DD), Gender</code> — one per line.</p>
@@ -464,24 +573,30 @@
     };
     
     const importOrgMembersCsv = async () => {
+        if (!_orgRequireAdmin()) return;
         const cid = parseInt(document.getElementById('org-bulk-cid')?.value, 10);
         const csv = document.getElementById('org-bulk-csv')?.value || '';
         const lines = csv.split('\n').map(l => l.trim()).filter(Boolean);
         if (!lines.length) { UI.toast.error('Paste at least one row.'); return; }
-    
+
         const row = await AppDataStore.getById('org_consultations', cid);
-        if (!row) return;
+        if (!row) { UI.toast.error('Consultation not found.'); return; }
         const members = Array.isArray(row.members) ? [...row.members] : [];
-    
+
         let added = 0, skipped = 0;
         for (const line of lines) {
-            const parts = line.split(',').map(p => p.trim());
+            // Quote-aware split so commas inside a name/role don't shift columns.
+            const parts = _orgParseCsvLine(line);
             const name = parts[0]; if (!name) { skipped++; continue; }
+            const dob = parts[2] || '';
+            // DOB is required and must be a real YYYY-MM-DD — mirror saveOrgMember
+            // so analysis can't silently complete on incomplete/garbage data.
+            if (!_orgIsValidDob(dob)) { skipped++; continue; }
             if (members.length >= row.team_size) { skipped++; continue; }
             members.push({
                 name,
                 current_role: parts[1] || '',
-                dob:          parts[2] || '',
+                dob,
                 dob_time:     '',
                 dob_city:     '',
                 gender:       (parts[3] || '').toLowerCase(),
@@ -490,9 +605,14 @@
             added++;
         }
 
+        if (!added) {
+            UI.toast.error('No valid rows imported. Each row needs a Name and a valid DOB (YYYY-MM-DD).');
+            return;
+        }
+
         // Reset analysis/pairs (member-index based) since the roster changed.
         await AppDataStore.update('org_consultations', cid, { members, status: 'collecting', analysis: {}, pairs: [], report_html: null });
-        if (skipped > 0) UI.toast.warning(`Imported ${added} member(s); skipped ${skipped} (team-size cap ${row.team_size} reached or blank/malformed row).`);
+        if (skipped > 0) UI.toast.warning(`Imported ${added} member(s); skipped ${skipped} (team-size cap ${row.team_size} reached, or blank/invalid name/DOB).`);
         else UI.toast.success(`Imported ${added} member(s).`);
         UI.hideModal();
         await window.app.openOrgConsultationDetail(cid);
@@ -500,17 +620,34 @@
     
     // ---------------- ANALYSIS ----------------
     const runOrgAnalysis = async (cid) => {
+        if (!_orgRequireAdmin()) return;
         const row = await AppDataStore.getById('org_consultations', cid);
-        if (!row) return;
+        if (!row) { UI.toast.error('Consultation not found.'); return; }
         const membersIn = Array.isArray(row.members) ? row.members : [];
         if (!membersIn.length) { UI.toast.error('No members to analyse.'); return; }
-    
+
+        // Refuse to complete if any member has a missing/invalid DOB — otherwise
+        // _orgComputeArchetype would emit a null code and analysisDone/report
+        // would still flip true on incomplete data.
+        const incomplete = membersIn.filter(m => !_orgIsValidDob(m.dob));
+        if (incomplete.length) {
+            const names = incomplete.map(m => m.name || '(unnamed)').slice(0, 5).join(', ');
+            UI.toast.error(`Cannot run analysis: ${incomplete.length} member(s) missing a valid DOB (${names}${incomplete.length > 5 ? '…' : ''}). Fix their dates first.`);
+            return;
+        }
+
+        // Snapshot the roster we computed against so we can detect a concurrent
+        // edit (member add/remove from another tab) before writing index-based
+        // analysis/pairs back. AppDataStore.update has no version guard, so a
+        // stale write would otherwise silently clobber the other session.
+        const rosterFingerprint = JSON.stringify(membersIn.map(m => [m.name, m.dob, m.current_role]));
+
         UI.toast.info('Running analysis…');
         const members = membersIn.map(m => {
             const r = _orgComputeArchetype(m);
             return { ...m, archetype_code: r.code, fit_score: r.score, suggested_role: _orgArchetypeLabel(r.code) };
         });
-    
+
         const pairs = [];
         for (let i = 0; i < members.length; i++) {
             for (let j = i + 1; j < members.length; j++) {
@@ -541,6 +678,19 @@
             generated_at: new Date().toISOString(),
         };
     
+        // Re-fetch immediately before write: if the roster changed while we were
+        // computing (concurrent add/remove from another tab), the array indices
+        // baked into analysis/pairs are now stale — abort rather than clobber.
+        const fresh = await AppDataStore.getById('org_consultations', cid);
+        if (!fresh) { UI.toast.error('Consultation not found.'); return; }
+        const freshMembers = Array.isArray(fresh.members) ? fresh.members : [];
+        const freshFingerprint = JSON.stringify(freshMembers.map(m => [m.name, m.dob, m.current_role]));
+        if (freshFingerprint !== rosterFingerprint) {
+            UI.toast.error('The team roster changed in another session. Reloading — please re-run the analysis.');
+            await window.app.openOrgConsultationDetail(cid);
+            return;
+        }
+
         await AppDataStore.update('org_consultations', cid, { members, pairs, analysis, status: 'analyzing' });
         UI.toast.success('Analysis complete.');
         await window.app.openOrgConsultationDetail(cid);
@@ -548,42 +698,56 @@
     
     // ---------------- REPORT ----------------
     const generateOrgReport = async (cid) => {
+        if (!_orgRequireAdmin()) return;
         const row = await AppDataStore.getById('org_consultations', cid);
-        if (!row) return;
+        if (!row) { UI.toast.error('Consultation not found.'); return; }
         const members = Array.isArray(row.members) ? row.members : [];
         const analysis = row.analysis || {};
-    
+
+        // Don't generate a report on incomplete analysis — every member must have
+        // a computed archetype (now null for missing/invalid DOB). Mirrors the
+        // analysisDone guard so the deliverable can't be built on bad data.
+        if (!members.length || !members.every(m => m.archetype_code)) {
+            UI.toast.error('Run a complete analysis first — every member needs a valid DOB and computed role.');
+            return;
+        }
+
+        // _orgCleanText = term-map sanitise (on plain text) THEN html-escape.
+        // Run on the values, never on the assembled markup.
         const memberRows = members.map(m => `
             <tr style="border-top:1px solid #e5e7eb;">
-                <td style="padding:10px;"><strong>${_orgEscapeHtml(m.name)}</strong><div style="font-size:11px;color:#6b7280;">${_orgEscapeHtml(m.current_role || '')}</div></td>
-                <td style="padding:10px;">${_orgEscapeHtml(_orgArchetypeLabel(m.archetype_code))}</td>
-                <td style="padding:10px;font-weight:600;color:#16a34a;">${m.fit_score || ''}</td>
+                <td style="padding:10px;"><strong>${_orgCleanText(m.name)}</strong><div style="font-size:11px;color:#6b7280;">${_orgCleanText(m.current_role || '')}</div></td>
+                <td style="padding:10px;">${_orgCleanText(_orgArchetypeLabel(m.archetype_code))}</td>
+                <td style="padding:10px;font-weight:600;color:#16a34a;">${_orgEscapeHtml(m.fit_score || '')}</td>
             </tr>
         `).join('');
-    
+
         const leadershipNames = (analysis.leadership_cluster || []).map(idx => members[idx]?.name).filter(Boolean);
-    
+
         const conflictRows = (analysis.conflict_pairs || []).map(c =>
-            `<li>${_orgEscapeHtml(members[c.a]?.name || '')} ↔ ${_orgEscapeHtml(members[c.b]?.name || '')} — coach communication style</li>`
+            `<li>${_orgCleanText(members[c.a]?.name || '')} ↔ ${_orgCleanText(members[c.b]?.name || '')} — coach communication style</li>`
         ).join('') || '<li>No high-friction pairs detected.</li>';
-    
+
         const missingList = (analysis.missing_archetypes || [])
             .map(code => _orgArchetypeLabel(code))
-            .map(label => `<li>${_orgEscapeHtml(label)}</li>`)
+            .map(label => `<li>${_orgCleanText(label)}</li>`)
             .join('') || '<li>All key archetypes are represented.</li>';
-    
-        // Build raw HTML then RUN IT THROUGH THE SANITISER before persist.
-        const rawHtml = `
+
+        const companyClean = _orgCleanText(row.client_company);
+        // Build the report HTML directly from already-cleaned text values.
+        // No whole-markup sanitise pass — that risked a term-map entry with
+        // regex/HTML metacharacters corrupting tags.
+        const report = `
             <div style="font-family:Inter,sans-serif;max-width:800px;color:#1f2937;">
                 <div style="background:linear-gradient(135deg,#8B1A1A,#b91c1c);color:#fff;padding:24px;border-radius:8px;">
                     <h1 style="margin:0;">Organisational Restructure Report</h1>
-                    <div style="opacity:0.9;margin-top:6px;">Prepared for ${_orgEscapeHtml(row.client_company)} · ${new Date().toLocaleDateString()}</div>
+                    <div style="opacity:0.9;margin-top:6px;">Prepared for ${companyClean} · ${new Date().toLocaleDateString()}</div>
                 </div>
                 <div style="padding:24px 8px;">
                     <h2>Executive Summary</h2>
-                    <p>${_orgEscapeHtml(analysis.overall_summary || '')}</p>
+                    <p>${_orgCleanText(analysis.overall_summary || '')}</p>
                     <h2>Recommended Leadership Cluster</h2>
-                    <p>${leadershipNames.length ? leadershipNames.map(_orgEscapeHtml).join(', ') : 'No clear leadership cluster — recommend external hire or development plan.'}</p>
+                    <p>${leadershipNames.length ? leadershipNames.map(_orgCleanText).join(', ') : 'No clear leadership cluster — recommend external hire or development plan.'}</p>
                     <h2>Role-Fit Assessment</h2>
                     <table style="width:100%;border-collapse:collapse;background:#fff;border:1px solid #e5e7eb;border-radius:6px;">
                         <thead style="background:#f9fafb;text-align:left;"><tr><th style="padding:10px;">Member</th><th style="padding:10px;">Suggested Role</th><th style="padding:10px;">Fit</th></tr></thead>
@@ -594,12 +758,11 @@
                     <h2>Capability Gaps</h2>
                     <ul>${missingList}</ul>
                     <hr style="margin:32px 0;border:none;border-top:1px solid #e5e7eb;">
-                    <p style="font-size:11px;color:#6b7280;">Report generated by DestinOraclesSolution · Confidential · For internal use of ${_orgEscapeHtml(row.client_company)} only.</p>
+                    <p style="font-size:11px;color:#6b7280;">Report generated by DestinOraclesSolution · Confidential · For internal use of ${companyClean} only.</p>
                 </div>
             </div>
         `;
-        const report = _orgSanitiseClientText(rawHtml);
-    
+
         await AppDataStore.update('org_consultations', cid, {
             report_html: report,
             report_generated_at: new Date().toISOString(),
@@ -610,10 +773,15 @@
     };
     
     const previewOrgReport = async (cid) => {
+        if (!_orgRequireAdmin()) return;
         const row = await AppDataStore.getById('org_consultations', cid);
         if (!row?.report_html) { UI.toast.error('No report yet.'); return; }
+        // Treat the stored report_html as untrusted: scrub before injecting.
+        // The Print action reads this already-scrubbed DOM, so it inherits the
+        // sanitised markup (no separate raw-HTML path to document.write).
+        const safeHtml = _orgScrubHtml(row.report_html);
         UI.showModal('Client-facing Report Preview', `
-            <div style="max-height:70vh;overflow:auto;" id="org-report-body">${row.report_html}</div>
+            <div style="max-height:70vh;overflow:auto;" id="org-report-body">${safeHtml}</div>
         `, [
             { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Print', type: 'primary', action: '(() => { const body=document.getElementById("org-report-body")?.innerHTML||""; const w=window.open("","_blank"); if(!w){alert("Popup blocked. Please allow popups to print.");return;} w.document.write("<html><head><title>Report</title></head><body>"+body+"</body></html>"); w.document.close(); w.print(); })()' }
@@ -622,10 +790,21 @@
     
     // ---------------- MISC ----------------
     const markOrgConsultationPaid = async (cid) => {
+        // Money-state mutation — gate to L1-2 and capture the actor so the flip
+        // isn't an anonymous, unauthenticated client UPDATE. (A server RPC that
+        // records an immutable payment event would be stronger — see
+        // cross_file_needs; this is the client-side guard.)
+        if (!_orgRequireAdmin()) return;
+        const row = await AppDataStore.getById('org_consultations', cid);
+        if (!row) { UI.toast.error('Consultation not found.'); return; }
+        if (row.payment_status === 'paid') { UI.toast.info('Already marked as paid.'); return; }
+        if (!confirm(`Mark this consultation (RM ${Number(row.price_myr || 0).toLocaleString()}) as PAID? This records payment was received.`)) return;
+        const actorId = _state.cu?.id || null;
         try {
             await AppDataStore.update('org_consultations', cid, {
                 payment_status: 'paid',
-                payment_received_at: new Date().toISOString()
+                payment_received_at: new Date().toISOString(),
+                paid_by: actorId
             });
             UI.toast.success('Marked as paid.');
             await window.app.openOrgConsultationDetail(cid);
@@ -635,6 +814,7 @@
     };
 
     const saveOrgConsultationNotes = async (cid) => {
+        if (!_orgRequireAdmin()) return;
         const notes = document.getElementById(`org-detail-notes-${cid}`)?.value || '';
         try {
             await AppDataStore.update('org_consultations', cid, { consultant_notes: notes });

@@ -22,6 +22,30 @@
     const navigateTo           = (v) => window.app.navigateTo(v);
 
 // ========== NOTIFICATION BELL ==========
+// Scope notification refill-reminders to the current user's visible agents, mirroring
+// renderRefillReminders in script-calendar.js. Reminders carry no agent column, so the
+// owning agent is resolved through the linked prospect/customer's responsible/lead agent.
+// Previously the badge + panel showed every agent's pending refills regardless of role.
+const _scopeRefillReminders = (reminders, visibleIds, prospectMap, customerMap) => {
+    if (visibleIds === 'all') return reminders || [];
+    const vStrs = visibleIds.map(String);
+    return (reminders || []).filter(r => {
+        const entity = r.prospect_id
+            ? prospectMap.get(String(r.prospect_id))
+            : customerMap.get(String(r.customer_id));
+        if (!entity) return false; // can't attribute → hide from scoped users
+        const agentId = entity.responsible_agent_id || entity.lead_agent_id;
+        return agentId && vStrs.includes(String(agentId));
+    });
+};
+// Scope birthday people (prospects + customers) to the current user's visible agents.
+// Agents stay unscoped (org-wide agent birthdays are not PII-sensitive customer data).
+const _isVisibleBirthdayPerson = (p, visibleIds, vStrs) => {
+    if (visibleIds === 'all') return true;
+    const agentId = p.responsible_agent_id || p.lead_agent_id;
+    return !!agentId && vStrs.includes(String(agentId));
+};
+
 const _refreshNotifBadge = async () => {
     const badge = document.querySelector('.notif-bell .badget');
     if (!badge) return;
@@ -51,18 +75,25 @@ const _refreshNotifBadge = async () => {
         const [allProspects, allCustomers, allUsers] = await Promise.all([
             AppDataStore.getAll('prospects'), AppDataStore.getAll('customers'), AppDataStore.getAll('users')
         ]);
-        const birthdayPeople = [...allProspects, ...allCustomers, ...allUsers].filter(p => {
+        const vStrs = visibleIds === 'all' ? null : visibleIds.map(String);
+        const prospectMap = new Map((allProspects || []).map(p => [String(p.id), p]));
+        const customerMap = new Map((allCustomers || []).map(c => [String(c.id), c]));
+        const hasBday = p => {
             const dob = p.date_of_birth || '';
             if (!dob || dob.length < 5) return false;
             const md = dob.slice(5, 10); // MM-DD
             return md === todayMD || md === tomMD;
-        });
-        count += birthdayPeople.length;
+        };
+        // Client birthdays are owner-scoped; agent birthdays remain org-wide.
+        const bdayClients = [...allProspects, ...allCustomers]
+            .filter(p => hasBday(p) && _isVisibleBirthdayPerson(p, visibleIds, vStrs));
+        const bdayAgents = allUsers.filter(hasBday);
+        count += bdayClients.length + bdayAgents.length;
 
-        // Pending refill reminders
+        // Pending refill reminders — scoped to the current user's visible agents
         try {
             const reminders = await AppDataStore.query('refill_reminders', { status: 'pending' });
-            count += (reminders || []).length;
+            count += _scopeRefillReminders(reminders, visibleIds, prospectMap, customerMap).length;
         } catch (_) {}
 
         // Pending co-agent invitations for current user
@@ -111,6 +142,9 @@ const _buildNotifPanel = async () => {
     const [allProspects, allCustomers, allUsers] = await Promise.all([
         AppDataStore.getAll('prospects'), AppDataStore.getAll('customers'), AppDataStore.getAll('users')
     ]);
+    const vStrs = visibleIds === 'all' ? null : visibleIds.map(String);
+    const prospectMap = new Map((allProspects || []).map(p => [String(p.id), p]));
+    const customerMap = new Map((allCustomers || []).map(c => [String(c.id), c]));
     const bdayClientSet = new Set();
     [...allProspects, ...allCustomers].forEach(p => {
         const dob = p.date_of_birth || '';
@@ -119,6 +153,8 @@ const _buildNotifPanel = async () => {
         const isToday = md === todayMD;
         const isTom   = md === tomMD;
         if (!isToday && !isTom) return;
+        // Owner-scope client birthdays so agents don't see other teams' contacts.
+        if (!_isVisibleBirthdayPerson(p, visibleIds, vStrs)) return;
         items.push({ icon: '🎂', title: `${esc(p.full_name || 'Someone')}'s Birthday`, sub: isToday ? 'Today!' : 'Tomorrow' });
         bdayClientSet.add(p.id);
     });
@@ -132,10 +168,11 @@ const _buildNotifPanel = async () => {
         items.push({ icon: '🎂', title: `${esc(u.full_name || 'Agent')}'s Birthday`, sub: (isToday ? 'Today!' : 'Tomorrow') + ' · Agent' });
     });
 
-    // Refill reminders
+    // Refill reminders — scoped to the current user's visible agents
     try {
         const reminders = await AppDataStore.query('refill_reminders', { status: 'pending' });
-        for (const r of (reminders || []).slice(0, 5)) {
+        const scopedReminders = _scopeRefillReminders(reminders, visibleIds, prospectMap, customerMap);
+        for (const r of scopedReminders.slice(0, 5)) {
             items.push({ icon: '💊', title: `Refill due: ${esc(r.product_name || 'Product')}`, sub: `Customer needs reorder · Due ${esc(r.due_date || '')}` });
         }
     } catch (_) {}
@@ -282,10 +319,16 @@ const calculateCustomerHealthScore = async (customer) => {
         else if (days <= 90) score += 10;
     }
     if (purchases.length > 0) {
-        const last = purchases.sort((a, b) => (b.purchase_date || '').localeCompare(a.purchase_date || ''))[0];
-        const days = Math.floor((Date.now() - new Date(last.purchase_date)) / 86400000);
-        if (days <= 90) score += 30;
-        else if (days <= 180) score += 15;
+        // Canonical purchases column is `date` (not purchase_date) — mirror the
+        // defensive `date || purchase_date` reads in performance/pipeline/reporting
+        // chunks. Previously the sort + day-calc keyed on undefined → Invalid Date
+        // → days=NaN → the recency bonus was always 0.
+        const last = purchases.sort((a, b) => (b.date || b.purchase_date || '').localeCompare(a.date || a.purchase_date || ''))[0];
+        const days = Math.floor((Date.now() - new Date(last.date || last.purchase_date)) / 86400000);
+        if (!isNaN(days)) { // guard invalid/missing date before scoring
+            if (days <= 90) score += 30;
+            else if (days <= 180) score += 15;
+        }
     }
     score += Math.min(30, Math.floor((customer.score || 0) / 10));
     const grade = score >= 70 ? 'green' : score >= 40 ? 'yellow' : 'red';
@@ -855,6 +898,12 @@ const _writeCpsField = (prefix, suffix, value) => {
 
 // Stash scan result so the review modal callbacks can read it.
 let _cpsScanCache = null;
+// Setter exposed on window.app so the calendar chunk's Upload-CPS OCR flow writes
+// into THIS chunk's lexical `let _cpsScanCache` — the same binding that
+// renderCpsScanReview()/applyCpsScanSelection() read. A bare cross-chunk
+// `_cpsScanCache = …` assignment (non-strict IIFE) creates a separate global
+// window._cpsScanCache that this chunk never sees, breaking the prospect-row apply.
+const _setCpsScanCache = (obj) => { _cpsScanCache = obj; };
 // Photo file (File blob) pending silent upload. Persists across the
 // review modal lifecycle — consumed when the host record (prospect or
 // activity) is saved, then cleared. Per-prefix so prospect-modal and
@@ -1352,5 +1401,6 @@ const applyCpsScanSelection = async () => {
         renderCpsScanReview,
         toggleCpsScanAll,
         applyCpsScanSelection,
+        _setCpsScanCache,
     });
 })();

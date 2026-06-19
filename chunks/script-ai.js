@@ -29,6 +29,9 @@
     const getVisibleUserIds = (u) => window._crmUtils.getVisibleUserIds(u);
     let _aiService = null;
     let _currentModelVersion = '1.0.0';
+    // Re-entrancy guard for startModelTraining — prevents stacked setInterval timers
+    // (and overlapping ai_models writes) if Start Training is clicked twice.
+    let _training = false;
 
     // ── Real-data insight engine ──────────────────────────────────────────
     // DETERMINISTIC heuristics over genuine CRM data — NO Math.random, NO
@@ -262,6 +265,11 @@
 
         const snapshot = {
             generatedAt: Date.now(),
+            // Record the viewer id this snapshot was scoped to, so _getSnapshot can
+            // invalidate when the current user changes mid-page (no full reload on
+            // login/logout) — otherwise one viewer's scoped data could bleed into
+            // the next within the 60s TTL window.
+            cuId: (data.cu && data.cu.id != null) ? String(data.cu.id) : null,
             counts: {
                 prospects: data.prospects.length,
                 customers: data.customers.length,
@@ -274,7 +282,11 @@
     };
 
     const _getSnapshot = async (force = false) => {
-        if (!force && _snapshot && (Date.now() - _snapshotTs) < _SNAPSHOT_TTL) return _snapshot;
+        // Freshness = within TTL AND scoped to the SAME viewer. A bare TTL check
+        // would serve one user's scoped data to whoever is logged in next within
+        // the 60s window (same-page user switch / logout without reload).
+        const curCuId = (_state && _state.cu && _state.cu.id != null) ? String(_state.cu.id) : null;
+        if (!force && _snapshot && _snapshot.cuId === curCuId && (Date.now() - _snapshotTs) < _SNAPSHOT_TTL) return _snapshot;
         _snapshot = await _buildSnapshot();
         _snapshotTs = Date.now();
         return _snapshot;
@@ -413,8 +425,18 @@
         }
         if (!rows.length) return { rows: [], topPerformer: null, mostImproved: null, needsAttention: null };
         const topPerformer = [...rows].sort((a, b) => b.pipelineValue - a.pipelineValue || b.conversionRate - a.conversionRate)[0];
-        const mostImproved = [...rows].sort((a, b) => b.activityDelta - a.activityDelta)[0];
-        const needsAttention = [...rows].sort((a, b) => a.activityDelta - b.activityDelta || a.conversionRate - b.conversionRate)[0];
+        // Make the three callouts MUTUALLY EXCLUSIVE so a single-/few-agent team
+        // doesn't see the same person flagged as top performer AND most improved AND
+        // needs attention. Most improved skips the top performer; needs attention
+        // skips both. With only one agent the secondary callouts resolve to null.
+        const topId = topPerformer ? String(topPerformer.id) : null;
+        const mostImproved = [...rows]
+            .filter(r => String(r.id) !== topId)
+            .sort((a, b) => b.activityDelta - a.activityDelta)[0] || null;
+        const impId = mostImproved ? String(mostImproved.id) : null;
+        const needsAttention = [...rows]
+            .filter(r => String(r.id) !== topId && String(r.id) !== impId)
+            .sort((a, b) => a.activityDelta - b.activityDelta || a.conversionRate - b.conversionRate)[0] || null;
         return { rows, topPerformer, mostImproved, needsAttention };
     };
 
@@ -1140,10 +1162,14 @@
         return leadScore;
     };
 
-    // Batch update all lead scores
+    // Batch update lead scores — SCOPED + role-gated. Routes through the same
+    // viewer-scoped data path as the dashboard (_loadScopedData → getVisibleUserIds)
+    // so a caller only scores prospects in their visibility band, and additionally
+    // gates the bulk write behind a management/admin role.
     const batchUpdateLeadScores = async () => {
-        const allProspects = await AppDataStore.getAll('prospects');
-        const prospects = (allProspects || []).filter(p => p.status === 'active');
+        if (!window._crmUtils.isManagement(_state.cu)) { UI.toast.error('Management access required.'); return; }
+        const data = await _loadScopedData();
+        const prospects = (data.prospects || []).filter(p => p.status === 'active');
 
         for (const prospect of prospects) {
             await predictLeadScore(prospect.id);
@@ -1260,7 +1286,9 @@
         `;
 
         UI.showModal('AI Sales Forecast', content, [
-            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
+            // Clear the session-only what-if override on close so every other AI view
+            // (export/share/schedule/dashboard) reads the real, data-derived forecast.
+            { label: 'Close', type: 'secondary', action: 'app.clearForecastAdjustment(); UI.hideModal()' }
         ], 'fullscreen');
     };
 
@@ -1268,16 +1296,25 @@
     // by month, fits a least-squares linear trend blended 50/50 with a 3-month
     // moving average, and projects forward. `period` scales the projection
     // horizon (weekly≈¼mo, monthly=1mo, quarterly=3mo, yearly=12mo).
-    const generateSalesForecast = async (period = 'quarterly') => {
+    // `persist` (default false) controls whether a forecast_history row is written.
+    // Render paths (showSalesForecast / changeForecastPeriod / applyForecastAdjustment)
+    // pass false so merely toggling the period dropdown or applying a what-if does NOT
+    // spam the history table; only an explicit save/export action persists.
+    const generateSalesForecast = async (period = 'quarterly', persist = false) => {
         const snap = await _getSnapshot();
         const fc = snap.forecast; // { hasData, series, slope, recentAvg, nextMonth, total3mo, projections, ... }
+
+        // Session-only what-if override (applyForecastAdjustment) — read read-only,
+        // never mutate the cached snapshot. Falls back to the real projections.
+        const adj = window.__aiForecastAdjusted;
+        const projections = (adj && Array.isArray(adj.projections)) ? adj.projections : fc.projections;
 
         // months of horizon implied by the requested period
         const horizonMonths = period === 'weekly' ? 0.25 : period === 'monthly' ? 1 : period === 'yearly' ? 12 : 3;
         // Per-month projection = mean of the 3 projected months (stable),
         // scaled by horizon. Falls back to the recent average when sparse.
         const perMonth = fc.hasData
-            ? (fc.projections.reduce((a, p) => a + p.amount, 0) / Math.max(1, fc.projections.length))
+            ? (projections.reduce((a, p) => a + p.amount, 0) / Math.max(1, projections.length))
             : 0;
         const predictedAmount = Math.max(0, Math.round(perMonth * horizonMonths));
         // Confidence band: ±16% best / -12% worst (asymmetric, conservative).
@@ -1292,7 +1329,7 @@
         const upsells = predictedAmount * 0.12;
         const referrals = predictedAmount * 0.03;
 
-        // Save forecast to history (best-effort — never block the UI on a write)
+        // Forecast record (shape kept for the breakdown return below)
         const forecast = {
             id: generateId(),
             forecast_date: new Date().toISOString(),
@@ -1306,7 +1343,12 @@
             model_version: _currentModelVersion,
             created_at: new Date().toISOString()
         };
-        try { await AppDataStore.create('forecast_history', forecast); } catch (_) { /* non-fatal */ }
+        // Persist to forecast_history ONLY on an explicit save action (persist=true)
+        // and NEVER when a what-if growth override is active — a session-only adjusted
+        // number must not be stored as a genuine, data-derived forecast.
+        if (persist && !window.__aiForecastAdjusted) {
+            try { await AppDataStore.create('forecast_history', forecast); } catch (_) { /* non-fatal */ }
+        }
 
         return {
             predicted_amount: predictedAmount,
@@ -1318,7 +1360,7 @@
             trendDir: fc.trendDir,
             series: fc.series,
             keys: fc.keys,
-            projections: fc.projections,
+            projections: projections, // overlaid with what-if override if active
         };
     };
 
@@ -1358,7 +1400,12 @@
             return '<div class="forecast-empty empty-state" style="padding:24px;text-align:center;color:#6B7280;">Not enough sales history to forecast yet.</div>';
         }
         const actuals = fc.keys.map((k, i) => ({ key: k, amount: fc.series[i], projected: false }));
-        const projected = fc.projections.map(p => ({ key: p.key, amount: p.amount, projected: true }));
+        // Read the session-only what-if override (if the user applied a growth
+        // assumption) WITHOUT mutating the cached snapshot. Falls back to the real,
+        // data-derived projections.
+        const adj = window.__aiForecastAdjusted;
+        const projSource = (adj && Array.isArray(adj.projections)) ? adj.projections : fc.projections;
+        const projected = projSource.map(p => ({ key: p.key, amount: p.amount, projected: true }));
         const bars = [...actuals, ...projected];
         const max = Math.max(1, ...bars.map(b => b.amount));
 
@@ -1561,10 +1608,12 @@
         return churnRisk;
     };
 
-    // Batch update all churn risks
+    // Batch update churn risks — SCOPED + role-gated (mirrors batchUpdateLeadScores).
+    // Only iterates customers the caller may see, and requires a management/admin role.
     const batchUpdateChurnRisks = async () => {
-        const allCustomers = await AppDataStore.getAll('customers');
-        const customers = (allCustomers || []).filter(c => c.status === 'active');
+        if (!window._crmUtils.isManagement(_state.cu)) { UI.toast.error('Management access required.'); return; }
+        const data = await _loadScopedData();
+        const customers = (data.customers || []).filter(c => c.status === 'active');
 
         for (const customer of customers) {
             await calculateChurnRisk(customer.id);
@@ -1779,10 +1828,17 @@
     };
 
     const startModelTraining = async () => {
+        // Re-entrancy guard: a single training run at a time. Re-clicking Start while
+        // a run is in flight previously stacked independent intervals that each wrote
+        // a full round of ai_models updates.
+        if (_training) { UI.toast.info('Training already in progress…'); return; }
+        _training = true;
         UI.hideModal();
         UI.toast.info('AI model training started...');
 
-        // Simulate training progress
+        // Progress ticks (the scoring engine in this chunk is deterministic and runs
+        // on demand — there is no offline batch model to "train", so this is a UI
+        // progress affordance, not a compute job).
         let progress = 0;
         const interval = setInterval(async () => {
             progress += 10;
@@ -1791,21 +1847,25 @@
             if (progress >= 100) {
                 clearInterval(interval);
 
-                // Update model versions and accuracy
+                // Refresh the model bookkeeping ONLY — record that a (re)training pass
+                // ran. We do NOT fabricate accuracy/record counts here: the rest of this
+                // chunk is deterministic with no Math.random, and persisting randomized
+                // quality metrics would surface fake numbers to users as real metrics.
                 try {
                     const models = Object.values(await AppDataStore.getAll('ai_models') || []);
+                    const now = new Date().toISOString();
                     for (const model of models) {
-                        model.model_version = '1.1.0';
-                        model.accuracy += Math.random() * 3 - 1; // Random change
-                        model.trained_at = new Date().toISOString();
-                        model.trained_on_records += Math.floor(Math.random() * 100);
-                        model.updated_at = new Date().toISOString();
-
+                        model.model_version = _currentModelVersion;
+                        model.trained_at = now;
+                        model.updated_at = now;
+                        // accuracy / trained_on_records left untouched — not fabricated.
                         await AppDataStore.update('ai_models', model.id, model);
                     }
-                    UI.toast.success('AI models trained successfully! Accuracy improved.');
+                    UI.toast.success('AI models refreshed — scoring uses the latest data.');
                 } catch (err) {
                     UI.toast.error('Training failed: ' + (err.message || 'Unknown error'));
+                } finally {
+                    _training = false; // clear in both success and error paths
                 }
             }
         }, 1000);
@@ -1956,6 +2016,10 @@
             const snap = await _getSnapshot();
             const fc = snap.forecast;
             if (!fc || !fc.hasData) { UI.toast.error('Not enough sales history to export a forecast.'); return; }
+            // Export is the explicit user action that persists a forecast_history row
+            // (skips automatically when a what-if override is active — see
+            // generateSalesForecast's persist guard).
+            try { await generateSalesForecast('quarterly', true); } catch (_) { /* non-fatal */ }
             const rows = [
                 ['AI Sales Forecast Export'],
                 ['Generated', new Date().toLocaleString()],
@@ -2251,21 +2315,33 @@
         const snap = await _getSnapshot();
         const fc = snap.forecast;
         if (!fc || !fc.projections) { UI.toast.error('No forecast to adjust.'); return; }
-        // Re-derive projections from the ORIGINAL baseline each time so repeated
-        // tweaks don't compound. Stash baseline once.
-        if (!window.__aiForecastBaseline) {
-            window.__aiForecastBaseline = fc.projections.map(p => ({ key: p.key, amount: p.amount }));
-        }
-        const base = window.__aiForecastBaseline;
+        // DATA-INTEGRITY: never mutate the shared cached snapshot (fc === _snapshot.forecast,
+        // reused for ~60s across exportForecast/shareInsights/scheduleForecastReview/etc.).
+        // A what-if growth assumption must stay session-local. We always derive from the
+        // PRISTINE snapshot baseline (so repeated tweaks don't compound) and stash the
+        // adjusted view in a separate override object that the render path reads read-only.
+        const base = fc.projections.map(p => ({ key: p.key, amount: p.amount }));
         const factor = 1 + (g / 100);
-        fc.projections = base.map((p, i) => ({ key: p.key, amount: Math.max(0, Math.round(p.amount * Math.pow(factor, i + 1))) }));
-        fc.nextMonth = fc.projections[0] ? fc.projections[0].amount : fc.nextMonth;
-        fc.total3mo = fc.projections.reduce((a, p) => a + p.amount, 0);
+        const adjustedProjections = base.map((p, i) => ({ key: p.key, amount: Math.max(0, Math.round(p.amount * Math.pow(factor, i + 1))) }));
+        window.__aiForecastAdjusted = {
+            growth: g,
+            projections: adjustedProjections,
+            nextMonth: adjustedProjections[0] ? adjustedProjections[0].amount : fc.nextMonth,
+            total3mo: adjustedProjections.reduce((a, p) => a + p.amount, 0),
+        };
         window.__aiForecastGrowth = g;
         try { UI.hideModal(); } catch (_) {}
-        // Re-render the forecast view with the adjusted snapshot.
+        // Re-render the forecast view; the render path overlays the override without
+        // touching the cached snapshot.
         await showSalesForecast();
         UI.toast.success(`Applied ${g >= 0 ? '+' : ''}${g}% monthly growth to the forecast.`);
+    };
+
+    // Clear the session-only what-if forecast override (called on forecast-modal
+    // close so other AI views recompute against the real, data-derived forecast).
+    const _clearForecastAdjustment = () => {
+        window.__aiForecastAdjusted = null;
+        window.__aiForecastGrowth = null;
     };
 
     // ── Performance: Share a text summary of the dashboard to clipboard ───
@@ -2415,6 +2491,7 @@
         exportForecast,                       // CSV of forecast actuals + projections
         adjustForecast,                       // what-if growth modal
         applyForecastAdjustment,              // re-renders forecast with growth %
+        clearForecastAdjustment: _clearForecastAdjustment, // drops session-only what-if override
         scheduleForecastReview,               // creates an agent-meeting activity
         executeRiskActions,                   // modal → confirmRiskActions
         confirmRiskActions,                   // creates retention activities (customers)

@@ -9,6 +9,14 @@
     const _utils = window._crmUtils;
     const esc    = (...a) => _utils.escapeHtml(...a);
 
+    // PostgREST .or() filter sanitizer — OCR/user text is embedded into the .or()
+    // string syntax where commas are the OR separator and ()/operators are syntax.
+    // A raw comma (e.g. "Smith, John") splits the clause into malformed sub-filters
+    // and ()/* / a column.op token can break the request (400) or inject an
+    // unintended filter. Strip the PostgREST-significant characters before
+    // interpolating into ilike/eq values so the search stays a single literal clause.
+    const _orSafe = (v) => String(v == null ? '' : v).replace(/[,()*]/g, ' ').trim();
+
     // ── Shared field definitions ───────────────────────────────────────────
     const FIELD_GROUPS = [
         { title: 'Order Info', icon: 'fa-file-invoice', fields: [
@@ -112,10 +120,14 @@
                 const name  = (fields.customer_name  || '').trim();
                 if (!phone && !name) return;
 
+                // Sanitize OCR values before embedding in .or() syntax (see _orSafe).
+                const phoneQ = _orSafe(phone);
+                const nameQ  = _orSafe(name);
                 let orClause = '';
-                if (phone && name) orClause = `phone.ilike.%${phone}%,full_name.ilike.%${name}%`;
-                else if (phone)    orClause = `phone.ilike.%${phone}%`;
-                else               orClause = `full_name.ilike.%${name}%`;
+                if (phoneQ && nameQ) orClause = `phone.ilike.%${phoneQ}%,full_name.ilike.%${nameQ}%`;
+                else if (phoneQ)     orClause = `phone.ilike.%${phoneQ}%`;
+                else if (nameQ)      orClause = `full_name.ilike.%${nameQ}%`;
+                else return; // nothing searchable after sanitizing
 
                 const { data } = await sb
                     .from('prospects')
@@ -133,10 +145,13 @@
                 const consultantName = (fields.consultant || '').trim();
                 if (!code && !consultantName) return;
 
+                // Sanitize OCR values before embedding in .or() syntax (see _orSafe).
+                const codeQ       = _orSafe(code);
+                const consultantQ = _orSafe(consultantName);
                 let orClause = '';
-                if (code && consultantName) orClause = `agent_code.eq.${code},name.ilike.%${consultantName}%`;
-                else if (consultantName)    orClause = `name.ilike.%${consultantName}%`;
-                else if (code)              orClause = `agent_code.eq.${code}`;
+                if (codeQ && consultantQ) orClause = `agent_code.eq.${codeQ},name.ilike.%${consultantQ}%`;
+                else if (consultantQ)     orClause = `name.ilike.%${consultantQ}%`;
+                else if (codeQ)           orClause = `agent_code.eq.${codeQ}`;
 
                 if (orClause) {
                     const { data } = await sb
@@ -454,7 +469,7 @@
                 <td style="padding:10px 12px;font-size:12px;font-weight:600;">${amountDisp}</td>
                 <td style="padding:10px 12px;font-size:12px;font-weight:700;color:${r.scan_confidence != null ? confColor : 'var(--gray-400)'};">${confPct}</td>
                 <td style="padding:10px 12px;" onclick="event.stopPropagation()">
-                    <button onclick="app.ofeHistToggleStatus('${rid}', '${status}')"
+                    <button onclick="event.stopPropagation();app.ofeHistToggleStatus('${rid}', '${status}')"
                         style="padding:3px 10px;font-size:11px;border:none;border-radius:10px;cursor:pointer;font-weight:600;
                                background:${status === 'collected' ? '#dcfce7' : '#fef9c3'};
                                color:${status === 'collected' ? '#15803d' : '#92400e'};">
@@ -817,10 +832,14 @@
         try {
             const sb = window.supabase || window.supabaseClient;
             if (!sb) throw new Error('offline');
+            // Sanitize the user search term before embedding in .or() syntax (see _orSafe):
+            // a comma/paren/operator in the query would otherwise break or inject the filter.
+            const qSafe = _orSafe(q);
+            if (!qSafe) { resEl.innerHTML = ''; return; }
             const { data, error } = await sb
                 .from('prospects')
                 .select('id, full_name, phone, ic_number, status')
-                .or(`full_name.ilike.%${q}%,phone.ilike.%${q}%,ic_number.ilike.%${q}%`)
+                .or(`full_name.ilike.%${qSafe}%,phone.ilike.%${qSafe}%,ic_number.ilike.%${qSafe}%`)
                 .limit(8);
             if (error) throw error;
             const rows = data || [];
@@ -882,6 +901,52 @@
         if (res)   res.innerHTML = '';
     };
 
+    // ── Closing-activity post-create side effects ──────────────────────────
+    // A closing entered through this Order Form tool inserts the activity via a bare
+    // AppDataStore.create, which (unlike the script-activities.js saveActivity path)
+    // runs none of the closing post-processing. Fire the same effects the canonical
+    // save path runs so the prospect's journey advances, role upgrades, and the
+    // proposed solution is marked Purchased. Fire-and-forget; never blocks/throws into
+    // the save flow (mirrors _evaluateActivityJourneyRules / _autoMarkProposedSolutionPurchased).
+    const _ofeFireClosingSideEffects = async (activity) => {
+        if (!activity.is_closing || !activity.solution_sold) return;
+        const entityType = activity.customer_id ? 'customer' : 'prospect';
+        const entityId   = activity.customer_id || activity.prospect_id;
+        if (!entityId) return;
+
+        // 1) Journey ROS: purchase_signed → Step 5 + purchase_signed_role → role upgrade.
+        try {
+            const evaluateJourneyRules = window.app && window.app.evaluateJourneyRules;
+            if (evaluateJourneyRules) {
+                const ctx = { fromStage: null };
+                await evaluateJourneyRules(entityType, entityId, 'purchase_signed',      ctx);
+                await evaluateJourneyRules(entityType, entityId, 'purchase_signed_role', ctx);
+            }
+        } catch (e) { console.warn('[ofe] journey post-close evaluation failed:', e?.message || e); }
+
+        // 2) Auto-mark the matching proposed solution as Purchased (exact, case-insensitive
+        //    match on the same person — mirrors _autoMarkProposedSolutionPurchased).
+        try {
+            const soldLower = (activity.solution_sold || '').trim().toLowerCase();
+            if (soldLower) {
+                const sols = await window.AppDataStore.getAll('proposed_solutions').catch(() => []);
+                const matches = (sols || []).filter(s => {
+                    const samePerson = (activity.prospect_id && String(s.prospect_id) === String(activity.prospect_id)) ||
+                                       (activity.customer_id && String(s.customer_id) === String(activity.customer_id));
+                    return samePerson && s.status !== 'Purchased' &&
+                           (s.solution || '').trim().toLowerCase() === soldLower;
+                });
+                for (const s of matches) {
+                    await window.AppDataStore.update('proposed_solutions', s.id, {
+                        status: 'Purchased',
+                        next_follow_up_date: null,
+                        updated_at: new Date().toISOString(),
+                    }).catch(() => {});
+                }
+            }
+        } catch (e) { console.warn('[ofe] proposed-solution auto-mark failed:', e?.message || e); }
+    };
+
     const ofeSaveClosing = async () => {
         if (_ofeSaving) return;
         if (!_ofeLinkedProspect) { UI.toast.error('Please select a prospect first.'); return; }
@@ -932,6 +997,12 @@
         try {
             await window.AppDataStore.create('activities', activity);
 
+            // Run the same closing side effects the canonical saveActivity path runs
+            // (journey advancement + role upgrade + proposed-solution marking) so a
+            // closing entered here is reconciled like every other purchase path.
+            // Fire-and-forget — must not block or break the rest of the save.
+            _ofeFireClosingSideEffects(activity).catch(() => {});
+
             // Also save the attachment with collection_status = 'pending' so it appears in History
             const sb = window.supabase || window.supabaseClient;
             if (sb && !_ofeAttachId) {
@@ -946,7 +1017,7 @@
 
                     // prospect_attachments only has prospect_id — customers are stored in the
                     // same prospects table (status='customer'), so always use prospect_id.
-                    const { data: att } = await sb.from('prospect_attachments').insert({
+                    const _attRow = {
                         prospect_id:       _ofeLinkedProspect.id,
                         attachment_type:   'order_form',
                         filename:          `order_form_${prn || today}.jpg`,
@@ -965,10 +1036,28 @@
                         scanned_at:        new Date().toISOString(),
                         scan_confidence:   meanConf,
                         collection_status: 'pending',
-                    }).select('id').single().catch(() => ({ data: null }));
-
-                    if (att) { _ofeAttachId = att.id; _ofeAllRows = []; } // invalidate history cache so new entry appears on next tab switch
-                } catch (_) { /* graceful — attachment save failure shouldn't block activity */ }
+                    };
+                    // Capture the insert error instead of swallowing it: a failed insert means
+                    // the scan never lands in History, so the user must be told (non-blocking).
+                    let { data: att, error: attErr } = await sb.from('prospect_attachments')
+                        .insert(_attRow).select('id').single();
+                    // collection_status column not yet migrated → retry without it (mirrors _ofeLoadHistory).
+                    if (attErr && attErr.code === '42703') {
+                        const { collection_status, ...attNoStatus } = _attRow;
+                        ({ data: att, error: attErr } = await sb.from('prospect_attachments')
+                            .insert(attNoStatus).select('id').single());
+                    }
+                    if (att) {
+                        _ofeAttachId = att.id; _ofeAllRows = []; // invalidate history cache so new entry appears on next tab switch
+                    } else if (attErr) {
+                        console.warn('[ofe] order-form scan attachment insert failed:', attErr.message || attErr);
+                        UI.toast.error('Saved activity, but could not record this scan in History.');
+                    }
+                } catch (e) {
+                    // Attachment save failure must not block the activity, but surface it.
+                    console.warn('[ofe] order-form scan attachment insert threw:', e?.message || e);
+                    UI.toast.error('Saved activity, but could not record this scan in History.');
+                }
             }
 
             // Update collection status panel if visible
@@ -1000,22 +1089,37 @@
         const badge   = document.getElementById('ofe-status-badge');
         const btnP    = document.getElementById('ofe-btn-pending');
         const btnC    = document.getElementById('ofe-btn-collected');
-        // Snapshot for rollback if DB fails
-        const oldBadge = badge ? badge.innerHTML : undefined;
-        const oldOpP   = btnP  ? btnP.style.opacity  : undefined;
-        const oldOpC   = btnC  ? btnC.style.opacity  : undefined;
-        // Optimistic update
-        if (badge) badge.innerHTML = _statusBadge(newStatus);
-        if (btnP)  btnP.style.opacity  = newStatus === 'pending'   ? '0.4' : '1';
-        if (btnC)  btnC.style.opacity  = newStatus === 'collected' ? '0.4' : '1';
 
+        // No persisted attachment yet → don't paint an optimistic badge that nothing
+        // backs (it would falsely read 'Collected' with no record). Guard BEFORE the
+        // optimistic UI update so the badge only changes once a record exists.
         if (!_ofeAttachId) {
             UI.toast.info('Status will apply when closing activity is saved.');
             return;
         }
 
+        // Snapshot for rollback if DB fails
+        const oldBadge = badge ? badge.innerHTML : undefined;
+        const oldOpP   = btnP  ? btnP.style.opacity  : undefined;
+        const oldOpC   = btnC  ? btnC.style.opacity  : undefined;
+        // Roll the optimistic UI back to the snapshot (shared by the offline + error paths).
+        const _rollback = () => {
+            if (badge && oldBadge !== undefined) badge.innerHTML = oldBadge;
+            if (btnP  && oldOpP   !== undefined) btnP.style.opacity  = oldOpP;
+            if (btnC  && oldOpC   !== undefined) btnC.style.opacity  = oldOpC;
+        };
+        // Optimistic update
+        if (badge) badge.innerHTML = _statusBadge(newStatus);
+        if (btnP)  btnP.style.opacity  = newStatus === 'pending'   ? '0.4' : '1';
+        if (btnC)  btnC.style.opacity  = newStatus === 'collected' ? '0.4' : '1';
+
         const sb = window.supabase || window.supabaseClient;
-        if (!sb) return;
+        if (!sb) {
+            // Offline: nothing was persisted — roll back so the badge doesn't lie, and tell the user.
+            _rollback();
+            UI.toast.error('Offline — status not saved.');
+            return;
+        }
         try {
             const { error } = await sb
                 .from('prospect_attachments')
@@ -1028,9 +1132,7 @@
             UI.toast.success(`Marked as ${newStatus}`);
         } catch (err) {
             // Roll back optimistic UI to previous state
-            if (badge && oldBadge !== undefined) badge.innerHTML = oldBadge;
-            if (btnP  && oldOpP   !== undefined) btnP.style.opacity  = oldOpP;
-            if (btnC  && oldOpC   !== undefined) btnC.style.opacity  = oldOpC;
+            _rollback();
             UI.toast.error('Could not update status: ' + (err.message || String(err)));
         }
     };

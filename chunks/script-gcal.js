@@ -139,11 +139,13 @@
 
             try {
                 // Delta read: only activities changed since the last persisted cursor
-                // (last_sync_at). Falls back to full getAll() when the cursor is absent
-                // (first sync) or the delta errors/aborts — a missing cursor never drops data.
+                // (last_sync — the SAME column the UI/manual-sync write & display, so the
+                // cursor and 'Last Sync' never drift apart). Falls back to full getAll()
+                // when the cursor is absent (first sync) or the delta errors/aborts — a
+                // missing cursor never drops data.
                 let activities = null;
                 try {
-                    const _cursor = (await getGoogleConnection())?.last_sync_at;
+                    const _cursor = (await getGoogleConnection())?.last_sync;
                     if (_cursor) {
                         const _delta = await AppDataStore.getAllSince('activities', _cursor);
                         if (Array.isArray(_delta)) activities = _delta; // null = abort → full sync
@@ -160,7 +162,9 @@
                     if (this.needsSync(activity, syncRecord)) {
                         if (activity.status === 'cancelled' && syncRecord?.google_event_id) {
                             await this.googleCalendar.deleteEvent(syncRecord.google_event_id);
-                            this.removeSyncRecord(activity.id);
+                            // Await the sync-record delete so it lands before 'deleted++' is
+                            // reported, matching the awaited add/update paths below.
+                            await this.removeSyncRecord(activity.id);
                             deleted++;
                         } else if (syncRecord?.google_event_id) {
                             await this.googleCalendar.updateEvent(activity, syncRecord.google_event_id);
@@ -178,20 +182,29 @@
                 }
 
                 this.lastSyncTime = new Date().toISOString();
-                // Persist last sync time to Supabase via integration_connections.last_sync_at
+                // Persist the delta cursor to the SAME integration_connections.last_sync
+                // column the UI reads (line ~511) and manual sync writes (syncGoogleCalendar),
+                // so the cursor never silently fails against a non-existent column and the
+                // delta optimization actually persists. Log failures instead of swallowing.
                 try {
                     const _syncConn = await getGoogleConnection();
                     if (_syncConn) {
-                        AppDataStore.update('integration_connections', _syncConn.id, { last_sync_at: this.lastSyncTime }).catch(() => {});
+                        await AppDataStore.update('integration_connections', _syncConn.id, { last_sync: this.lastSyncTime })
+                            .catch((e) => console.error('Failed to persist Google sync cursor:', e));
                     }
-                } catch (_) {}
+                } catch (e) { console.error('Failed to persist Google sync cursor:', e); }
 
                 if (created || updated || deleted) {
-                    // Only show toast if something actually synced to avoid spam
-                    UI.toast.success(`Google Calendar sync complete: ${created} created`);
+                    // Only show toast if something actually synced to avoid spam.
+                    // Report all three counts so updates/deletes aren't hidden behind
+                    // a misleading '0 created' when only those happened.
+                    UI.toast.success(`Google Calendar sync complete: ${created} created, ${updated} updated, ${deleted} deleted`);
                 }
             } catch (error) {
                 console.error('Sync error:', error);
+                // Surface a failed/partial CRM→Google sync instead of silently
+                // swallowing it — the user only ever saw the success toast otherwise.
+                UI.toast.error('Google Calendar sync failed. Some activities may not have synced.');
             } finally {
                 this.syncInProgress = false;
             }
@@ -199,6 +212,13 @@
 
         async syncGoogleToCRM() {
             if (this.syncInProgress) return;
+            // Imported activities must be owned by the authenticated user. With no
+            // current user (boot race / expired session / offline restore) we'd
+            // otherwise attribute imports to an arbitrary id — skip rather than bleed.
+            if (!_state.cu?.id) {
+                UI.toast.error('Google Calendar sync requires you to be signed in.');
+                return;
+            }
             this.syncInProgress = true;
             try {
                 const timeMin = new Date(Date.now() - 30 * 86400000);
@@ -226,19 +246,26 @@
                         end_time: endTime,
                         status: 'completed',
                         discussion_summary: gEvent.description || '',
-                        lead_agent_id: _state.cu?.id || 1,
+                        // Guarded above: _state.cu.id is guaranteed present here.
+                        lead_agent_id: _state.cu.id,
                         source: 'google_calendar',
                         google_event_id: gEvent.id,
                         created_at: new Date().toISOString()
                     });
 
-                    // Record import in sync_history (was localStorage-only before)
-                    await this.addSyncRecord(activity?.id, gEvent.id, 'google_to_crm');
-                    imported++;
+                    // Only record the import + count it when the activity actually
+                    // persisted. create() can return null on RLS deny / offline / queued
+                    // write — recording an orphan sync row would permanently de-dup this
+                    // event on the next sync (line ~215) so it'd never get imported.
+                    if (activity?.id) {
+                        await this.addSyncRecord(activity.id, gEvent.id, 'google_to_crm');
+                        imported++;
+                    }
                 }
                 if (imported > 0) UI.toast.success(`Imported ${imported} events from Google Calendar`);
             } catch (error) {
                 console.error('Import error:', error);
+                UI.toast.error('Google Calendar import failed. Some events may not have been synced.');
             } finally {
                 this.syncInProgress = false;
             }
@@ -295,8 +322,11 @@
         }
 
         resolveConflict(choice, activityId, eventId) {
+            // Honest stub: real two-way conflict resolution (applying the chosen
+            // side to both CRM + Google and updating sync_history) is not yet
+            // implemented. Don't claim success while leaving the records untouched.
             UI.hideModal();
-            UI.toast.success(`Conflict resolved. Chose: ${choice}`);
+            UI.toast.info('Conflict resolution is not available yet — no changes were made.');
         }
     }
 
@@ -407,9 +437,11 @@
     const getConnectionStatus = async (integrationId) => {
         const id = await getIntegrationId(integrationId);
         if (!id) return 'disconnected';
+        if (!_state.cu?.id) return 'disconnected';
         const connections = await AppDataStore.query('integration_connections', {
             integration_id: id,
-            user_id: _state.cu?.id || 1
+            // No '|| 1' fallback: never read another user's (id 1) connection.
+            user_id: _state.cu.id
         });
 
         if (connections.length === 0) return 'disconnected';
@@ -593,10 +625,12 @@
     const getGoogleConnection = async () => {
         const integrationId = await getIntegrationId('google');
         if (!integrationId) return null;
+        if (!_state.cu?.id) return null;
 
         const connections = await AppDataStore.query('integration_connections', {
             integration_id: integrationId,
-            user_id: _state.cu?.id || 1
+            // No '|| 1' fallback: never read another user's (id 1) connection.
+            user_id: _state.cu.id
         });
 
         return connections.length > 0 ? connections[0] : null;
@@ -634,6 +668,9 @@
 
     const simulateGoogleConnection = async () => {
         UI.hideModal();
+        // Require an authenticated user before creating an ownership-bearing
+        // connection row — never attribute it to an arbitrary id 1.
+        if (!_state.cu?.id) { UI.toast.error('You must be signed in to connect Google Calendar.'); return; }
         let integration = (await AppDataStore.getAll('integrations')).find(i => i.provider === 'google');
         if (!integration) {
             integration = await AppDataStore.create('integrations', {
@@ -656,7 +693,8 @@
         } else {
             await AppDataStore.create('integration_connections', {
                 integration_id: integration.id,
-                user_id: _state.cu?.id || 1,
+                // Guarded above: _state.cu.id is present.
+                user_id: _state.cu.id,
                 access_token: 'encrypted_mock_token',
                 refresh_token: 'encrypted_mock_refresh',
                 token_expires_at: new Date(Date.now() + 3600 * 1000).toISOString(),
@@ -721,8 +759,11 @@
     };
 
     const viewSyncHistory = async () => {
-        const syncHistory = (await AppDataStore.getAll('sync_history')).filter(
-            h => h.user_id === (_state.cu?.id || 1)
+        // Scope to the current user; no '|| 1' fallback so an absent session never
+        // surfaces another user's (id 1) sync history.
+        const _uid = _state.cu?.id;
+        const syncHistory = (_uid ? await AppDataStore.getAll('sync_history') : []).filter(
+            h => h.user_id === _uid
         ).sort((a, b) => new Date(b.synced_at) - new Date(a.synced_at));
 
         let tableHtml = `
@@ -760,8 +801,15 @@
                 </tr>
             `;
         } else {
-            for (const [index, item] of syncHistory.slice(0, 10).entries()) {
-                const activity = await AppDataStore.getById('activities', item.activity_id);
+            // Batch the activity lookups instead of an N+1 serial getById per row.
+            // One getAll + a Map avoids up to 10 sequential round-trips (painful on a
+            // degraded connection) and skips wasted lookups for falsy activity_ids
+            // (e.g. google_to_crm rows whose create failed).
+            const rows = syncHistory.slice(0, 10);
+            const allActivities = await AppDataStore.getAll('activities').catch(() => []);
+            const activityById = new Map((allActivities || []).map(a => [String(a.id), a]));
+            for (const [index, item] of rows.entries()) {
+                const activity = item.activity_id ? activityById.get(String(item.activity_id)) : null;
                 const directionIcon = item.direction === 'crm_to_google' ? '→' : '←';
                 const statusIcon = item.status === 'success' ? '✓' : item.status === 'conflict' ? '⚠' : '✗';
                 const statusColor = item.status === 'success' ? '#10b981' : item.status === 'conflict' ? '#f59e0b' : '#ef4444';
@@ -796,7 +844,10 @@
 
     const exportSyncHistory = () => { UI.toast.info('Exporting sync history...'); };
     const clearSyncHistory = async () => {
-        const userId = _state.cu?.id || 1;
+        // Require an authenticated user; no '|| 1' fallback so an absent session can
+        // never delete another user's (id 1) sync history.
+        const userId = _state.cu?.id;
+        if (!userId) { UI.toast.error('You must be signed in to clear sync history.'); return; }
         const myLogs = await AppDataStore.getAll('sync_history');
         const mine = myLogs.filter(h => h.user_id === userId);
         await Promise.all(mine.map(h => AppDataStore.delete('sync_history', h.id).catch(() => {})));
@@ -871,9 +922,11 @@
     const getWebhookConnection = async () => {
         const integrationId = await getIntegrationId('webhook');
         if (!integrationId) return null;
+        if (!_state.cu?.id) return null;
         const connections = await AppDataStore.query('integration_connections', {
             integration_id: integrationId,
-            user_id: _state.cu?.id || 1
+            // No '|| 1' fallback: never read another user's (id 1) connection.
+            user_id: _state.cu.id
         });
         return connections.length > 0 ? connections[0] : null;
     };
@@ -985,6 +1038,7 @@
 
     const saveWebhookSettings = async () => {
         if (!isSystemAdmin()) { UI.toast.error('Only a System Admin can change this'); return; }
+        if (!_state.cu?.id) { UI.toast.error('You must be signed in to save webhook settings.'); return; }
         const form = readWebhookFormConfig();
 
         if (!form.url) { UI.toast.error('Please enter a webhook URL'); return; }
@@ -1009,7 +1063,8 @@
             } else {
                 await AppDataStore.create('integration_connections', {
                     integration_id: integrationId,
-                    user_id: _state.cu?.id || 1,
+                    // Guarded above: _state.cu.id is present (no '|| 1' bleed).
+                    user_id: _state.cu.id,
                     access_token: '',
                     refresh_token: '',
                     token_expires_at: null,
@@ -1172,7 +1227,10 @@
             if (d.action === 'update') {
                 activity = await AppDataStore.getById('activities', d.record?.id);
             }
-            if (activity && connection.sync_settings?.syncTypes[activity.activity_type?.toLowerCase()]) {
+            // Optional-chain the bracket access too: a connection row whose
+            // sync_settings lacks a syncTypes key (e.g. a webhook-shaped row reusing
+            // integration_connections) would otherwise throw on the index.
+            if (activity && connection.sync_settings?.syncTypes?.[activity.activity_type?.toLowerCase()]) {
                 await _syncManager.syncCRMtoGoogle().catch(console.error);
             }
         }, 1000);

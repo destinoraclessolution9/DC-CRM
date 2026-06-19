@@ -37,7 +37,10 @@
     let _kbCurrentEntryId = null;
     let _kbAllFilter = 'all';
     let _kbDailyDate = null;
-    let _kbAutosaveTimer = null;
+    // Separate debounce timers so the detail-editor and daily-notes autosaves
+    // can't clear or fire against each other's (possibly replaced) DOM.
+    let _kbDetailAutosaveTimer = null;
+    let _kbDailyAutosaveTimer = null;
 
     const _kbOwnerId = async () => {
         try {
@@ -489,8 +492,8 @@
     const scheduleKnowledgeAutosave = () => {
         const status = document.getElementById('kb-autosave-status');
         if (status) status.textContent = 'Saving…';
-        if (_kbAutosaveTimer) clearTimeout(_kbAutosaveTimer);
-        _kbAutosaveTimer = setTimeout(() => { saveKnowledgeEntry().catch(()=>{}); }, 800);
+        if (_kbDetailAutosaveTimer) clearTimeout(_kbDetailAutosaveTimer);
+        _kbDetailAutosaveTimer = setTimeout(() => { saveKnowledgeEntry().catch(()=>{}); }, 800);
     };
 
     const saveKnowledgeEntry = async () => {
@@ -565,6 +568,8 @@
 
     const addKnowledgeLink = async (fromId, toId) => {
         const owner = await _kbOwnerId();
+        // owner_id is NOT NULL — guard for a clean message instead of a raw 23502 toast
+        if (!owner) { UI.toast.error('Sign in first'); return; }
         try {
             await AppDataStore.create('knowledge_links', { from_entry_id: fromId, to_entry_id: toId, owner_id: owner });
             UI.toast.success('Linked');
@@ -584,10 +589,12 @@
             );
             if (match) {
                 // composite PK delete via direct supabase (AppDataStore.delete uses single id)
-                await window.supabase.from('knowledge_links')
+                // supabase returns {error} on RLS-deny/offline without throwing — surface it
+                const { error } = await window.supabase.from('knowledge_links')
                     .delete()
                     .eq('from_entry_id', match.from_entry_id)
                     .eq('to_entry_id', match.to_entry_id);
+                if (error) throw error;
             }
             UI.toast.success('Link removed');
             await showKnowledgeDetail(fromId);
@@ -618,8 +625,8 @@
             const ta = document.getElementById('kb-daily-content');
             if (ta) ta.addEventListener('input', () => {
                 const s = document.getElementById('kb-daily-status'); if (s) s.textContent = 'Saving…';
-                if (_kbAutosaveTimer) clearTimeout(_kbAutosaveTimer);
-                _kbAutosaveTimer = setTimeout(() => saveDailyNote().catch(()=>{}), 800);
+                if (_kbDailyAutosaveTimer) clearTimeout(_kbDailyAutosaveTimer);
+                _kbDailyAutosaveTimer = setTimeout(() => saveDailyNote().catch(()=>{}), 800);
             });
         });
     };
@@ -676,6 +683,8 @@
         const title = (lines.shift() || 'Untitled').trim().slice(0, 200);
         const content = lines.join('\n').trim();
         const owner = await _kbOwnerId();
+        // owner_id is NOT NULL — guard for a clean message instead of a raw 23502 toast
+        if (!owner) { UI.toast.error('Sign in first'); return; }
         try {
             await AppDataStore.create('knowledge_entries', {
                 owner_id: owner, title, content, type: null, status: 'draft', tags: []

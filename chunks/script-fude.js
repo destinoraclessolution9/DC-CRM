@@ -412,10 +412,10 @@ const showFudeView = async (container) => {
     if (isCustomer) {
         const rows = myPurchases.length
             ? myPurchases.map(p => `<tr>
-                <td>${esc(p.product_name || p.package_name || p.solution || '-')}</td>
+                <td>${esc(p.item || '-')}</td>
                 <td>${fmtAmt(p.amount || p.total_amount)}</td>
                 <td>${badge(p.status || 'pending', p.status === 'completed' ? '#d1fae5' : '#fef3c7', p.status === 'completed' ? '#065f46' : '#92400e')}</td>
-                <td>${fmtDate(p.purchase_date || p.created_at)}</td>
+                <td>${fmtDate(p.date || p.purchase_date || p.created_at)}</td>
               </tr>`).join('')
             : '<tr><td colspan="4" style="text-align:center;color:var(--gray-400);">No purchases found.</td></tr>';
         purchasesSection = `<div class="fude-section">
@@ -585,7 +585,7 @@ const openHighlightModal = async (highlightId = null) => {
                         if (this.value) { prev.src = this.value; prev.style.display='block'; document.getElementById('highlight-image-file').value=''; document.getElementById('highlight-image-preview').style.display='none'; }
                         else { prev.style.display='none'; }
                     ">
-                    <img loading="lazy" decoding="async" id="highlight-url-preview" src="${h?.image_url || ''}" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;${h?.image_url ? '' : 'display:none;'}" onerror="this.style.display='none'">
+                    <img loading="lazy" decoding="async" id="highlight-url-preview" src="${esc(h?.image_url || '')}" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;${h?.image_url ? '' : 'display:none;'}" onerror="this.style.display='none'">
                 </div>
             </div>
             <div class="form-group">
@@ -686,8 +686,21 @@ const confirmDeleteHighlight = async (highlightId) => {
 
 const syncFudiSummary = async (userId, totalPoints, totalReturns) => {
     try {
-        const existing = await AppDataStore.query('user_fudi_summary', { user_id: userId });
         const payload  = { total_fudi_points: totalPoints, total_sharing_return: totalReturns, updated_at: new Date().toISOString() };
+        // L691 — read-then-insert race: two concurrent calls for the same user
+        // could both see existing.length===0 and both create, producing duplicate
+        // rows. Prefer an atomic upsert keyed on user_id via the raw Supabase
+        // client (no observed UNIQUE(user_id) constraint yet — that DDL is tracked
+        // in cross_file_needs; once present this upsert is fully race-safe).
+        const sb = window.supabase || window.supabaseClient;
+        if (sb && typeof sb.from === 'function') {
+            const { error } = await sb.from('user_fudi_summary')
+                .upsert({ user_id: userId, ...payload }, { onConflict: 'user_id' });
+            if (error) throw error;
+            return;
+        }
+        // Fallback (offline / client unavailable): keep the original read-then-write.
+        const existing = await AppDataStore.query('user_fudi_summary', { user_id: userId });
         if (existing.length > 0) {
             // #3 — must pass the row's primary key (id), not user_id; update() filters by id column
             await AppDataStore.update('user_fudi_summary', existing[0].id, payload);
@@ -955,8 +968,12 @@ const uploadProspectDocument = async (prospectId) => {
 
 // Stub 6: Submit recruitment approval — was: action="app.todo('Recruitment approval workflow submitted')"
 // Captures recruitment form data and writes to approval_queue as pending.
-const submitRecruitmentApproval = async () => {
+// openRecruitModal (script-prospects.js) passes the customerId being recruited so the
+// approval row carries a real customer_id link instead of relying on label-scraping.
+const submitRecruitmentApproval = async (customerId = null) => {
     try {
+        const cid = parseInt(customerId, 10);
+        if (!Number.isFinite(cid)) { UI.toast.error('Missing customer — cannot submit recruitment.'); return; }
         const modal = document.getElementById('modal-content') || document;
         const textareas = modal.querySelectorAll('textarea');
         const inputs = modal.querySelectorAll('input.form-control, select.form-control');
@@ -972,6 +989,7 @@ const submitRecruitmentApproval = async () => {
         await AppDataStore.create('approval_queue', {
             approval_type: 'recruitment',
             status: 'pending',
+            customer_id: cid, // real linkage to the customer being recruited (was unlinked)
             submitted_by: _state.cu?.id || null,
             submitted_at: new Date().toISOString(),
             description: 'Recruitment: Convert customer to agent',
@@ -2003,7 +2021,10 @@ const saveCpsAnalysis = async () => {
         serial_number: document.getElementById('cf-cps-sn')?.value?.trim() || null,
         form_date: document.getElementById('cf-cps-date')?.value || null,
         customer_name: document.getElementById('cf-cps-name')?.value?.trim() || null,
-        customer_name_chinese: document.getElementById('cf-cps-name-zh')?.value?.trim() || null,
+        // L2006 — there is no #cf-cps-name-zh input; the form's only name field
+        // (#cf-cps-name, placeholder "(中文)") IS the Chinese name. Point the
+        // dedicated Chinese column at it so it is no longer always saved null.
+        customer_name_chinese: document.getElementById('cf-cps-name')?.value?.trim() || null,
         gender: document.querySelector('input[name="cps_gender"]:checked')?.value || null,
         birthdate_solar: document.getElementById('cf-cps-bd-solar')?.value || null,
         birthdate_lunar: document.getElementById('cf-cps-bd-lunar')?.value || null,
@@ -2302,19 +2323,21 @@ const saveApuAppraisal = async () => {
         }
 
         if (savedId) {
-            // Wipe + re-write the 3 referral rows so re-saving replaces them cleanly.
+            // L2308 — create-then-delete (was delete-then-create): if a create() threw
+            // mid-loop the old delete had already committed, losing the saved referrals.
+            // Build + insert the new rows FIRST; only after every create succeeds do we
+            // delete the old ones. If any create fails, roll back the new rows so we
+            // never leave the appraisal with duplicated (old + partial-new) referrals.
             const existingRefs = (await AppDataStore.getAll('apu_referrals').catch(() => []))
                 .filter(r => r.appraisal_id == savedId);
-            for (const r of existingRefs) {
-                try { await AppDataStore.delete('apu_referrals', r.id); } catch (e) { console.error('Failed to delete apu_referral', r.id, e); }
-            }
+            const newRows = [];
             for (let i = 0; i < 3; i++) {
                 const name = document.getElementById(`cf-apu-ref-name-${i}`)?.value?.trim();
                 const nric = document.getElementById(`cf-apu-ref-nric-${i}`)?.value?.trim();
                 const contact = document.getElementById(`cf-apu-ref-contact-${i}`)?.value?.trim();
                 const occ = document.getElementById(`cf-apu-ref-occ-${i}`)?.value?.trim();
                 if (name || nric || contact || occ) {
-                    await AppDataStore.create('apu_referrals', {
+                    newRows.push({
                         appraisal_id: savedId,
                         position: i + 1,
                         name: name || null,
@@ -2324,6 +2347,23 @@ const saveApuAppraisal = async () => {
                         created_at: new Date().toISOString()
                     });
                 }
+            }
+            const createdIds = [];
+            try {
+                for (const row of newRows) {
+                    const created = await AppDataStore.create('apu_referrals', row);
+                    if (created?.id) createdIds.push(created.id);
+                }
+            } catch (e) {
+                // Roll back the partial new inserts; leave the old rows untouched.
+                for (const id of createdIds) {
+                    try { await AppDataStore.delete('apu_referrals', id); } catch (_) {}
+                }
+                throw e;
+            }
+            // All new rows committed — now it's safe to remove the old ones.
+            for (const r of existingRefs) {
+                try { await AppDataStore.delete('apu_referrals', r.id); } catch (e) { console.error('Failed to delete apu_referral', r.id, e); }
             }
         }
 
@@ -2808,10 +2848,33 @@ const _fudeRedeemPickPreset = (cost, item) => {
 // table exists, so we do NOT debit points here — the awarding ledger
 // (recommendation_rewards) is admin-managed; the admin reconciles on approval.
 const confirmRedeemPoints = async () => {
-    const user = _state.cu || _state.cu;
+    // L2811 — was `_state.cu || _state.cu` (copy-paste tautology); _state.cu IS the
+    // canonical current user, so collapse it to a single reference.
+    const user = _state.cu;
     if (!user || !user.id) { UI.toast.error('无法识别当前用户，请重新登录后再试。'); return; }
 
-    const bal  = Math.max(0, parseInt(_fudeRedeemBalance, 10) || 0);
+    // L486/L2823 — the banner-passed balance (_fudeRedeemBalance) is client-trusted
+    // and attacker-controllable (e.g. app.openFudeRedeemModal(999999) from the
+    // console). Re-derive the user's REAL balance server-side from their own
+    // recommendation_rewards rows before accepting the spend, and refuse a new
+    // request while one is already pending so concurrent pending claims can't
+    // aggregate past the real balance. Full enforcement (debit/escrow + RLS check)
+    // is tracked in cross_file_needs; this removes the trivial client-side bypass.
+    let bal = Math.max(0, parseInt(_fudeRedeemBalance, 10) || 0);
+    const _sbBal = window.supabase || window.supabaseClient;
+    if (_sbBal && typeof _sbBal.from === 'function') {
+        try {
+            const { data: _rwRows, error: _rwErr } = await _sbBal
+                .from('recommendation_rewards')
+                .select('fudi_points')
+                .eq('user_id', user.id);
+            if (!_rwErr && Array.isArray(_rwRows)) {
+                // Authoritative balance = SUM of the member's own awarded points.
+                bal = _rwRows.reduce((s, r) => s + (parseInt(r.fudi_points, 10) || 0), 0);
+                _fudeRedeemBalance = bal;
+            }
+        } catch (_balErr) { /* offline — fall back to the banner value below */ }
+    }
     if (bal <= 0) { UI.toast.error('您当前没有可兑换的福气积分。'); return; }
 
     const item = (document.getElementById('fude-redeem-item')?.value || '').trim();
@@ -2821,6 +2884,23 @@ const confirmRedeemPoints = async () => {
     if (!item)                       { UI.toast.error('请填写要兑换的内容。'); return; }
     if (!Number.isFinite(pts) || pts <= 0) { UI.toast.error('请输入有效的积分数量。'); return; }
     if (pts > bal)                   { UI.toast.error(`积分不足：当前仅有 ${bal.toLocaleString()} 福气积分。`); return; }
+
+    // Reject a new request while one is still pending — prevents stacking multiple
+    // pending claims that each spend up to the full balance.
+    if (_sbBal && typeof _sbBal.from === 'function') {
+        try {
+            const { data: _pendRows, error: _pendErr } = await _sbBal
+                .from('redemption_requests')
+                .select('id')
+                .eq('user_id', user.id)
+                .eq('status', 'pending')
+                .limit(1);
+            if (!_pendErr && Array.isArray(_pendRows) && _pendRows.length > 0) {
+                UI.toast.error('您已有一个待审核的兑换申请，请等待处理后再提交新的申请。');
+                return;
+            }
+        } catch (_pendCatch) { /* offline — fall through, copy-to-leader flow handles it */ }
+    }
 
     // FIRST: attempt a GENUINE server insert into redemption_requests. We deliberately
     // bypass AppDataStore.create — its insert path silently falls back to localStorage
@@ -2913,10 +2993,15 @@ const showRedemptionQueue = async () => {
     let rows = null;
     if (sb && typeof sb.from === 'function') {
         try {
+            // L2919 — fetch ONLY the columns this queue renders; do NOT select('*').
+            // The free-text `note` (delivery address / phone) and balance_at_request
+            // are PII the queue never displays, so they must not be pulled to the
+            // client. Server-side scope hardening (own-row-or-admin RLS SELECT) is
+            // tracked in cross_file_needs — the JS gate above is not a trust boundary.
             // Pending first, then newest first within each status group.
             const { data, error } = await sb
                 .from('redemption_requests')
-                .select('*')
+                .select('id, item, points, requester_name, user_id, status, created_at')
                 .order('status', { ascending: true })
                 .order('created_at', { ascending: false });
             if (!error && Array.isArray(data)) rows = data;
@@ -2941,7 +3026,12 @@ const showRedemptionQueue = async () => {
 
     // Sort: pending first, then newest first (defensive — DB order may vary).
     const _rank = (s) => (String(s || 'pending').toLowerCase() === 'pending' ? 0 : 1);
-    rows.sort((a, b) => (_rank(a.status) - _rank(b.status)) || (new Date(b.created_at) - new Date(a.created_at)));
+    // L2944 — coerce created_at safely: a null/invalid date yields NaN from Date
+    // subtraction, which makes the comparator return NaN (inconsistent/undefined
+    // ordering, can throw under strict comparator validation). Map unparseable
+    // dates to 0 so the tiebreaker is always a finite number.
+    const _ts = (d) => { const n = Date.parse(d); return Number.isFinite(n) ? n : 0; };
+    rows.sort((a, b) => (_rank(a.status) - _rank(b.status)) || (_ts(b.created_at) - _ts(a.created_at)));
 
     let body;
     if (!rows.length) {
