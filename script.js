@@ -1707,6 +1707,67 @@ const Auth = {
         emailField?.focus();
     }
 
+// Native MFA (Supabase auth.mfa / AAL2) login gate. Returns true if login may
+// proceed, false if it must abort. ENROLLMENT-GATED + FAIL-OPEN by design:
+// a user with no verified factor (everyone until they opt in) is never
+// challenged, and any error in the detection path proceeds with login so a
+// transient Supabase hiccup can never lock anyone out. Only a user who HAS a
+// verified factor is required to enter a correct TOTP code.
+async function _enforceMfaOnLogin() {
+    let aal;
+    try {
+        const r = await window.supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+        aal = r && r.data;
+    } catch (_) { return true; }                       // detection unavailable -> proceed
+    if (!aal || aal.nextLevel !== 'aal2' || aal.currentLevel === 'aal2') return true; // no factor / already satisfied
+    let factorId;
+    try {
+        const f = await window.supabase.auth.mfa.listFactors();
+        const totp = (f && f.data && f.data.totp) || [];
+        const v = totp.find(x => x.status === 'verified') || totp[0];
+        factorId = v && v.id;
+    } catch (_) { return true; }                        // can't list -> fail open
+    if (!factorId) return true;                         // nextLevel claimed aal2 but no factor -> fail open
+    for (let attempt = 0; attempt < 5; attempt++) {
+        const code = await _promptMfaCode(attempt > 0);
+        if (code === null) {                            // user cancelled
+            try { await window.supabase.auth.signOut(); } catch (_) {}
+            return false;
+        }
+        try {
+            const res = await window.supabase.auth.mfa.challengeAndVerify({ factorId, code: String(code).trim() });
+            if (res && !res.error) return true;         // verified -> AAL2
+        } catch (_) { /* wrong code -> retry */ }
+    }
+    try { await window.supabase.auth.signOut(); } catch (_) {}
+    if (window.UI && UI.toast) UI.toast.error('Too many incorrect codes. Please log in again.');
+    return false;
+}
+
+// Self-contained TOTP prompt overlay (works on the login screen, no app-shell
+// dependency). Resolves with the entered code, or null if cancelled.
+function _promptMfaCode(isRetry) {
+    return new Promise((resolve) => {
+        const ov = document.createElement('div');
+        ov.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:16px;';
+        ov.innerHTML = '<div style="background:#fff;border-radius:12px;max-width:360px;width:100%;padding:24px;box-shadow:0 8px 32px rgba(0,0,0,.2);">'
+            + '<h3 style="margin:0 0 8px;font-size:18px;">Two-Factor Verification</h3>'
+            + '<p style="margin:0 0 14px;color:#6b7280;font-size:14px;">' + (isRetry ? 'Incorrect code — try again.' : 'Enter the 6-digit code from your authenticator app.') + '</p>'
+            + '<input id="_mfa_code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" style="width:100%;padding:12px;font-size:20px;letter-spacing:6px;text-align:center;border:1px solid #d1d5db;border-radius:8px;margin-bottom:14px;" />'
+            + '<div style="display:flex;gap:8px;">'
+            + '<button id="_mfa_cancel" style="flex:1;padding:10px;border:1px solid #d1d5db;background:#fff;border-radius:8px;cursor:pointer;">Cancel</button>'
+            + '<button id="_mfa_verify" style="flex:1;padding:10px;border:none;background:#7c3aed;color:#fff;border-radius:8px;cursor:pointer;">Verify</button>'
+            + '</div></div>';
+        document.body.appendChild(ov);
+        const done = (val) => { try { ov.remove(); } catch (_) {} resolve(val); };
+        const inp = ov.querySelector('#_mfa_code');
+        ov.querySelector('#_mfa_cancel').onclick = () => done(null);
+        ov.querySelector('#_mfa_verify').onclick = () => done((inp.value || '').trim());
+        inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') done((inp.value || '').trim()); });
+        setTimeout(() => { try { inp.focus(); } catch (_) {} }, 50);
+    });
+}
+
 function _wireLoginBtn() {
     const btn = document.getElementById('loginBtn');
     if (!btn || btn._supabaseSetup) return;
@@ -1914,6 +1975,14 @@ function _wireLoginBtn() {
             // "undefined is not an object (evaluating 'user.email')" on iPad.
             if (!user || !user.email) {
                 throw new Error('Login completed but no account information was returned. Please reload the page and try again.');
+            }
+
+            // Native MFA (AAL2) gate. Only users with a verified TOTP factor are
+            // challenged; everyone else proceeds unchanged. Aborts login (and
+            // signs out) on cancel / repeated wrong codes. finally{} re-enables
+            // the button.
+            if (!(await _enforceMfaOnLogin())) {
+                return;
             }
 
             // Try to get profile from 'users' table using service-role client to bypass RLS

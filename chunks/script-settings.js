@@ -160,6 +160,24 @@ const showSettingsView = (container) => {
             </div>
         </div>
 
+        <!-- ========== Two-Factor Authentication (native TOTP) ========== -->
+        <div class="performance-card" style="margin-top:24px;">
+            <h4><i class="fas fa-shield-alt"></i> Two-Factor Authentication</h4>
+            <p style="color:var(--gray-500); font-size:13px; margin:8px 0 12px;">
+                Add a second step at login using an authenticator app (Google Authenticator, Authy, 1Password).
+                Strongly recommended for an account with customer data.
+            </p>
+            <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                <span id="mfa-status" style="font-size:14px;">Checking…</span>
+                <button class="btn primary" id="mfa-enable-btn" style="display:none;" onclick="(async()=>{ await app.startMfaEnroll(); })()">
+                    <i class="fas fa-plus"></i> Enable
+                </button>
+                <button class="btn secondary" id="mfa-disable-btn" style="display:none;" onclick="(async()=>{ await app.unenrollMfa(); })()">
+                    <i class="fas fa-times"></i> Disable
+                </button>
+            </div>
+        </div>
+
         <!-- ========== Push Notifications ========== -->
         <div class="performance-card" style="margin-top:24px;">
             <h4><i class="fas fa-bell"></i> Phone Push Notifications</h4>
@@ -244,6 +262,96 @@ const showSettingsView = (container) => {
 
     // Populate status asynchronously
     setTimeout(() => refreshPushNotificationStatus(), 50);
+    setTimeout(() => refreshMfaStatus(), 50);
+};
+
+// ========== Native Two-Factor Authentication (Supabase auth.mfa, TOTP) ==========
+let _mfaEnrollFactorId = null;
+
+const refreshMfaStatus = async () => {
+    const el = document.getElementById('mfa-status');
+    const enableBtn = document.getElementById('mfa-enable-btn');
+    const disableBtn = document.getElementById('mfa-disable-btn');
+    if (!el) return;
+    try {
+        const { data, error } = await window.supabase.auth.mfa.listFactors();
+        if (error) throw error;
+        const verified = ((data && data.totp) || []).filter(f => f.status === 'verified');
+        if (verified.length) {
+            el.innerHTML = '<span style="color:var(--success,#10b981); font-weight:600;"><i class="fas fa-check-circle"></i> Enabled</span>';
+            if (enableBtn) enableBtn.style.display = 'none';
+            if (disableBtn) disableBtn.style.display = '';
+        } else {
+            el.innerHTML = '<span style="color:var(--gray-500);">Not enabled</span>';
+            if (enableBtn) enableBtn.style.display = '';
+            if (disableBtn) disableBtn.style.display = 'none';
+        }
+    } catch (e) {
+        el.textContent = 'Status unavailable';
+    }
+};
+
+const startMfaEnroll = async () => {
+    try {
+        // Clean up any stale unverified factor from a previous abandoned attempt.
+        try {
+            const { data: existing } = await window.supabase.auth.mfa.listFactors();
+            for (const f of ((existing && existing.totp) || [])) {
+                if (f.status !== 'verified') { try { await window.supabase.auth.mfa.unenroll({ factorId: f.id }); } catch (_) {} }
+            }
+        } catch (_) {}
+        const { data, error } = await window.supabase.auth.mfa.enroll({ factorType: 'totp', friendlyName: 'CRM TOTP' });
+        if (error) throw error;
+        _mfaEnrollFactorId = data.id;
+        const secret = (data.totp && data.totp.secret) || '';
+        const content =
+            '<p style="margin-bottom:10px; font-size:14px; color:var(--gray-600);">Scan this QR code with your authenticator app, then enter the 6-digit code to confirm.</p>'
+            + '<div style="text-align:center; margin-bottom:10px;"><img id="mfa-qr-img" alt="Authenticator QR code" style="width:184px; height:184px;" /></div>'
+            + '<p style="font-size:12px; color:var(--gray-500); text-align:center; margin-bottom:12px;">Can’t scan? Manual key: <code style="user-select:all;">' + escapeHtml(secret) + '</code></p>'
+            + '<input id="mfa-enroll-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" style="width:100%; padding:10px; font-size:18px; letter-spacing:4px; text-align:center; border:1px solid var(--gray-300,#d1d5db); border-radius:8px;" />';
+        UI.showModal('Set Up Two-Factor Authentication', content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Verify & Enable', type: 'primary', action: '(async()=>{ await app.verifyMfaEnrollment(); })()' },
+        ]);
+        // Set the QR src directly (avoid HTML-escaping the data: URI) + focus input.
+        setTimeout(() => {
+            const im = document.getElementById('mfa-qr-img');
+            if (im && data.totp && data.totp.qr_code) im.src = data.totp.qr_code;
+            const ip = document.getElementById('mfa-enroll-code');
+            if (ip) ip.focus();
+        }, 60);
+    } catch (e) {
+        UI.toast.error('Could not start 2FA setup: ' + (e?.message || e));
+    }
+};
+
+const verifyMfaEnrollment = async () => {
+    const code = ((document.getElementById('mfa-enroll-code') || {}).value || '').trim();
+    if (!_mfaEnrollFactorId || code.length < 6) return UI.toast.error('Enter the 6-digit code from your app');
+    try {
+        const { error } = await window.supabase.auth.mfa.challengeAndVerify({ factorId: _mfaEnrollFactorId, code });
+        if (error) throw error;
+        _mfaEnrollFactorId = null;
+        UI.hideModal();
+        UI.toast.success('Two-factor authentication enabled');
+        refreshMfaStatus();
+    } catch (e) {
+        UI.toast.error('Incorrect code — please try again.');
+    }
+};
+
+const unenrollMfa = async () => {
+    if (!window.confirm('Disable two-factor authentication for your account?')) return;
+    try {
+        const { data } = await window.supabase.auth.mfa.listFactors();
+        for (const f of ((data && data.totp) || [])) {
+            try { await window.supabase.auth.mfa.unenroll({ factorId: f.id }); } catch (_) {}
+        }
+        UI.toast.success('Two-factor authentication disabled');
+        refreshMfaStatus();
+    } catch (e) {
+        UI.toast.error('Could not disable 2FA: ' + (e?.message || e));
+    }
 };
 
 // ========== Phone-duplicate review (Super Admin only) ==========
@@ -653,11 +761,15 @@ const onReminderCheckboxChange = () => {
         enablePushNotifications,
         loadNotificationPreferences,
         onReminderCheckboxChange,
+        refreshMfaStatus,
         refreshPhoneDupes,
         refreshPushNotificationStatus,
         saveNotificationPreferences,
         saveSelfPreferredName,
         selfChangePassword,
+        startMfaEnroll,
+        unenrollMfa,
+        verifyMfaEnrollment,
         sendTestPushNotification,
         showPhoneDupesModal,
         showSettingsView,
