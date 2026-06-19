@@ -17,9 +17,16 @@ _*.js
 _*.tsv
 _*.csv
 _*.py
+_*.sql
 _chunks/
 _chunks2/
 _make_*.py
+
+# Local env files — never commit (the CRM's anon key is public, but treat env
+# files as secret by default so a future real secret can't leak).
+process.env.local
+.env
+.env.*
 
 # Lighthouse / perf reports
 _lighthouse_*.json

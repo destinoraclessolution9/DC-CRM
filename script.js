@@ -2391,7 +2391,7 @@ function _wireLoginBtn() {
                     try { localStorage.setItem('remember_me', '1'); } catch (_) { /* intentional: best-effort guard flag on minimal-profile fallback */ }
                 } else {
                     // Auth session exists but no matching user profile in DB — force sign out
-                    console.warn('No user profile found for:', authUser.email, '— signing out.');
+                    console.warn('No user profile found for the current session — signing out.');
                     await window.supabase.auth.signOut();
                     _currentUser = null;
                 }

@@ -67,3 +67,21 @@ _audit_findings_compact.json
 _audit_targetarch.txt
 _audit_roadmap.txt
 _reval_merged.json
+
+# Internal spec / requirements docs — schema + role/permission disclosure (M10).
+# (robots.txt / sitemap.xml are NOT matched — listed explicitly, no blanket *.txt.)
+"Level 1 super admin.txt"
+"Referal Trees.txt"
+"Marketing manage listing.txt"
+*_PLAN.md
+*_PLAN_V2.md
+*_RUNBOOK.md
+UI_SYSTEM_PROPOSAL.md
+AUDIT.md
+
+# Local env file (only holds the public anon key, but never serve it) + SQL scratch.
+process.env.local
+_*.sql
+_q_*.sql
+_t_*.sql
+_cron.sql
