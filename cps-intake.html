@@ -195,38 +195,53 @@ function formatTime(t) {
     return t.slice(0, 5); // HH:MM
 }
 
-// Fetch the intake row via PostgREST directly — avoids the supabase-js
-// client entirely so we don't depend on the jsdelivr CDN loading, and we
-// get clean fetch error messages if anything goes wrong.
+// Fetch the intake row via a token-scoped SECURITY DEFINER RPC. The table no
+// longer grants anon SELECT (that allowed dumping ALL intakes' PII); the RPC
+// returns ONLY the appointment fields for the row matching this exact token.
 async function fetchIntake(tok) {
-    const url = `${SUPABASE_URL}/rest/v1/cps_intake_requests?token=eq.${encodeURIComponent(tok)}&select=*`;
+    const url = `${SUPABASE_URL}/rest/v1/rpc/get_cps_intake_by_token`;
     const resp = await fetch(url, {
+        method: 'POST',
         headers: {
             'apikey': SUPABASE_ANON,
             'Authorization': `Bearer ${SUPABASE_ANON}`,
+            'Content-Type': 'application/json',
             'Accept': 'application/json'
-        }
+        },
+        body: JSON.stringify({ p_token: tok })
     });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const rows = await resp.json();
     return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
 }
 
-async function updateIntake(tok, payload) {
-    const url = `${SUPABASE_URL}/rest/v1/cps_intake_requests?token=eq.${encodeURIComponent(tok)}&status=eq.awaiting_submission`;
+// Submit via a token-scoped SECURITY DEFINER RPC that writes ONLY the prospect_*
+// fields and flips status to 'submitted' (only while awaiting & not expired).
+// Anon can no longer PATCH the table directly, so the agent-set appointment
+// fields (date/venue/waze) cannot be tampered with.
+async function submitIntakeRpc(tok, fields) {
+    const url = `${SUPABASE_URL}/rest/v1/rpc/submit_cps_intake`;
     const resp = await fetch(url, {
-        method: 'PATCH',
+        method: 'POST',
         headers: {
             'apikey': SUPABASE_ANON,
             'Authorization': `Bearer ${SUPABASE_ANON}`,
             'Content-Type': 'application/json',
-            'Prefer': 'return=representation'
+            'Accept': 'application/json'
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({
+            p_token: tok,
+            p_name: fields.name,
+            p_ic: fields.ic,
+            p_occupation: fields.occupation,
+            p_phone: fields.phone,
+            p_email: fields.email
+        })
     });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const rows = await resp.json();
-    return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+    // RPC returns the new status text ('submitted') on success, or null if no
+    // eligible row matched (expired / already used / bad token).
+    return await resp.json();
 }
 
 async function init() {
@@ -259,7 +274,8 @@ async function init() {
             `${formatDate(data.activity_date)} · ${formatTime(data.start_time)} – ${formatTime(data.end_time)}`;
         document.getElementById('info-venue').textContent = data.venue_name || '—';
         document.getElementById('info-address').textContent = data.venue_address || '';
-        if (data.waze_link) {
+        // Only honor http(s) Waze links — never javascript:/data: URIs (XSS / token theft).
+        if (data.waze_link && /^https?:\/\//i.test(data.waze_link)) {
             const wazeEl = document.getElementById('info-waze');
             wazeEl.href = data.waze_link;
             wazeEl.style.display = 'inline-flex';
@@ -303,14 +319,12 @@ async function submitIntake() {
     btn.textContent = 'Submitting...';
 
     try {
-        const result = await updateIntake(token, {
-            prospect_name: name,
-            prospect_ic: ic,
-            prospect_occupation: occupation || null,
-            prospect_phone: phone,
-            prospect_email: email || null,
-            status: 'submitted',
-            submitted_at: new Date().toISOString()
+        const result = await submitIntakeRpc(token, {
+            name: name,
+            ic: ic,
+            occupation: occupation || null,
+            phone: phone,
+            email: email || null
         });
 
         if (!result) {
