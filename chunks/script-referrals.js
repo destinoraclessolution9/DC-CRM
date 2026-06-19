@@ -594,9 +594,11 @@
             }
         }
 
-        const leaderboardItems = sorted.map((item, idx) => {
-            if (hiddenIds.includes(String(item.id))) return '';
-            if (!item.name) return '';
+        // Drop hidden + unnamed rows FIRST, then number sequentially — otherwise
+        // a hidden/unnamed entry consumes its index and leaves a rank gap (the
+        // visible list could start at #2 if the top referrer is hidden).
+        const visibleSorted = sorted.filter(item => !hiddenIds.includes(String(item.id)) && item.name);
+        const leaderboardItems = visibleSorted.map((item, idx) => {
             return `
                 <tr class="rank-${idx + 1}">
                     <td data-label="Rank" class="rank-cell">${idx + 1}</td>
@@ -642,7 +644,7 @@
                 </thead>
                 <tbody>
                     ${leaderboardItems.join('')}
-                    ${sorted.length === 0 ? '<tr><td colspan="6" class="text-center p-4 text-muted">No referrer data found.</td></tr>' : ''}
+                    ${visibleSorted.length === 0 ? '<tr><td colspan="6" class="text-center p-4 text-muted">No referrer data found.</td></tr>' : ''}
                 </tbody>
             </table>
         `;
@@ -1049,7 +1051,10 @@
             .attr("fill", d => isLightBg(d) ? '#1f2937' : '#ffffff')
             .style("font-weight", "600")
             .style("font-size", "11px")
-            .text(d => d.data.name.length > 18 ? d.data.name.substring(0, 15) + '...' : d.data.name);
+            // Coalesce null/empty names (prospect/customer rows can lack full_name);
+            // an unguarded .length here threw inside the D3 callback and aborted
+            // the entire tree render.
+            .text(d => { const nm = d.data.name || '(no name)'; return nm.length > 18 ? nm.substring(0, 15) + '...' : nm; });
 
         // Role/Status
         nodes.append("text")
@@ -1172,10 +1177,13 @@
                 const nameById = new Map();
                 for (const p of pRows) nameById.set(`prospect:${p.id}`, p.full_name);
                 for (const c of cRows) nameById.set(`customer:${c.id}`, c.full_name);
+                // Keep RLS-denied / soft-deleted / missing ancestors in the chain
+                // as a 'Restricted' placeholder rather than dropping them — the old
+                // .filter(n => n.name) silently truncated the chain with no signal.
                 const path = ids.map((rid, i) => {
                     const t = types[i] || 'prospect';
-                    return { id: rid, type: t, name: nameById.get(`${t}:${rid}`) || '' };
-                }).filter(n => n.name);
+                    return { id: rid, type: t, name: nameById.get(`${t}:${rid}`) || 'Restricted' };
+                });
                 if (path.length) return path;
             }
         } catch (_) {
@@ -1198,9 +1206,10 @@
             const referrerId = ref.referrer_id;
             const referrerType = ref.referrer_type || 'prospect';
             const person = await AppDataStore.getById(referrerType === 'customer' ? 'customers' : 'prospects', referrerId);
-            if (!person) break;
-
-            path.unshift({ id: referrerId, type: referrerType, name: person.full_name });
+            // A missing/RLS-denied ancestor used to `break`, truncating the chain.
+            // Push a 'Restricted' placeholder and keep walking up so the chain
+            // length stays truthful.
+            path.unshift({ id: referrerId, type: referrerType, name: person ? person.full_name : 'Restricted' });
             currentId = String(referrerId);
         }
 
@@ -1235,16 +1244,24 @@
             } catch (_) {}
         }
 
-        // Referral stats
+        // Referral stats — match on BOTH id and type. buildTreeData keys by the
+        // composite referrer_type:referrer_id to avoid cross-type id collisions
+        // (e.g. user id 5 vs prospect id 5); filtering on id alone here credited a
+        // prospect node with a same-id customer/user's referrals (and vice-versa).
         const allReferrals = await AppDataStore.getAll('referrals');
-        const made = allReferrals.filter(r => String(r.referrer_id) === String(id));
+        const made = allReferrals.filter(r => String(r.referrer_id) === String(id) && (r.referrer_type || 'prospect') === type);
         const converted = made.filter(r => r.is_converted || r.status === 'Active').length;
 
         // Stage badge color — matches tree node colour scheme
         const pid = String(id);
+        // Activities link to a customer via customer_id, to a prospect via
+        // prospect_id. Matching customers against prospect_id (always null for a
+        // customer's activities) meant hasCPS / unableToServe were always false
+        // for customer nodes. Pick the right column per node type.
+        const actCol = type === 'customer' ? 'customer_id' : 'prospect_id';
         const allActivities = await AppDataStore.getAll('activities');
-        const hasCPS = allActivities.some(a => a.activity_type === 'CPS' && String(a.prospect_id) === pid);
-        const unableToServe = allActivities.some(a => a.unable_to_serve && String(a.prospect_id) === pid);
+        const hasCPS = allActivities.some(a => a.activity_type === 'CPS' && String(a[actCol]) === pid);
+        const unableToServe = allActivities.some(a => a.unable_to_serve && String(a[actCol]) === pid);
         const hasActivityDate = !!person.last_activity_date;
         const daysSinceActivity = hasActivityDate
             ? (Date.now() - new Date(person.last_activity_date).getTime()) / 86400000 : 0;
@@ -1488,9 +1505,15 @@
         // Indexed server-side search — trigram GIN on prospects.full_name /
         // nickname means this is fast even at 100K+ rows. Previously pulled
         // BOTH full tables on every keystroke (debounce 250ms).
+        // The "referred" slot is stored in referred_prospect_id and resolved as
+        // a PROSPECT everywhere downstream (buildTreeData / getAncestorPath), so
+        // restrict its search to prospects only — a customer picked here would be
+        // saved as a prospect id and silently vanish from the tree (data-integrity).
         const [prospects, customers] = await Promise.all([
             AppDataStore.searchProspects(query, { includeDormant: true, limit: 10 }),
-            AppDataStore.searchCustomers(query, { limit: 10 }),
+            modalType === 'referred'
+                ? Promise.resolve([])
+                : AppDataStore.searchCustomers(query, { limit: 10 }),
         ]);
         const filtered = [
             ...prospects.map(p => ({ ...p, type: 'prospect' })),
@@ -1543,13 +1566,31 @@
  
     const openCreateProspectForReferral = async () => {
         await app.openProspectModal();
-        // Listener for the custom event we added to saveProspect
+        // Listener for the custom event we added to saveProspect.
+        let cleanup = () => {};
         const handler = async (e) => {
             const newProspect = e.detail;
+            cleanup();
             await selectReferrerForModal(newProspect.id, 'prospect', 'referred');
-            document.removeEventListener('prospectCreated', handler);
         };
-        document.addEventListener('prospectCreated', handler);
+        // { once: true } auto-detaches after a real prospectCreated event so the
+        // listener can't accumulate across repeated New clicks.
+        document.addEventListener('prospectCreated', handler, { once: true });
+        // ...but if the user cancels the prospect modal (no event ever fires), the
+        // listener would linger and hijack the NEXT prospect created anywhere.
+        // Watch the modal overlay; when it closes (loses .active), detach.
+        const overlay = document.getElementById('global-modal-overlay');
+        let observer = null;
+        cleanup = () => {
+            document.removeEventListener('prospectCreated', handler);
+            if (observer) { observer.disconnect(); observer = null; }
+        };
+        if (overlay && typeof MutationObserver !== 'undefined') {
+            observer = new MutationObserver(() => {
+                if (!overlay.classList.contains('active')) cleanup();
+            });
+            observer.observe(overlay, { attributes: true, attributeFilter: ['class'] });
+        }
     };
  
     const submitReferral = async () => {
@@ -1575,7 +1616,15 @@
         
         // Refresh views
         await renderReferralSummaryAndLeaderboard();
-        if (_currentSelectedPerson && String(_currentSelectedPerson.id) === String(_state.sr.id)) {
+        // Re-render the open tree only if the just-created referral touches the
+        // currently-rooted person. The old code compared against _state.sr
+        // (the CPS/activities referrer-picker value, null on this view) and
+        // dereferenced .id with no guard → TypeError on every submit. Compare
+        // against the modal's own selections with optional chaining instead.
+        if (_currentSelectedPerson && (
+            String(_currentSelectedPerson.id) === String(_modalSelectedReferrer?.id) ||
+            String(_currentSelectedPerson.id) === String(_modalSelectedReferred?.id)
+        )) {
             await showReferralTree(_currentSelectedPerson.id, _currentSelectedPerson.type);
         }
     };
@@ -1589,17 +1638,24 @@
         const r = await AppDataStore.getById('referrals', referralId);
         if (!r) return;
         const prospect = await AppDataStore.getById('prospects', r.referred_prospect_id);
-        const referrer = await AppDataStore.getById('customers', r.referrer_customer_id);
+        // Resolve the referrer via the REAL columns (referrer_id + referrer_type).
+        // The old code read r.referrer_customer_id — a column that doesn't exist —
+        // so the referrer always showed 'N/A'. referrer_type can be prospect /
+        // customer / user; map it to the right table.
+        const referrerTable = r.referrer_type === 'customer' ? 'customers'
+            : r.referrer_type === 'user' ? 'users'
+            : 'prospects';
+        const referrer = r.referrer_id ? await AppDataStore.getById(referrerTable, r.referrer_id) : null;
         const content = `
             <div class="form-section">
                 <div style="display:grid; gap:8px;">
                     <div class="info-row"><div class="info-label">Referrer</div><div class="info-value">${escapeHtml(referrer?.full_name || 'N/A')}</div></div>
                     <div class="info-row"><div class="info-label">Referred Person</div><div class="info-value">${escapeHtml(prospect?.full_name || 'N/A')}</div></div>
-                    <div class="info-row"><div class="info-label">Relationship</div><div class="info-value">${escapeHtml(r.relationship || '-')}</div></div>
-                    <div class="info-row"><div class="info-label">Date</div><div class="info-value">${r.date || '-'}</div></div>
-                    <div class="info-row"><div class="info-label">Source</div><div class="info-value">${escapeHtml(r.source || '-')}</div></div>
-                    <div class="info-row"><div class="info-label">Status</div><div class="info-value"><span class="score-badge ${r.status === 'Active' ? 'score-A+' : 'score-A'}">${r.status}</span></div></div>
-                    <div class="info-row"><div class="info-label">Reward Status</div><div class="info-value">${r.reward_status || '-'}</div></div>
+                    <div class="info-row"><div class="info-label">Date</div><div class="info-value">${r.created_at ? UI.formatDate(r.created_at) : '-'}</div></div>
+                    <div class="info-row"><div class="info-label">Source</div><div class="info-value">${escapeHtml(r.referral_source || '-')}</div></div>
+                    <div class="info-row"><div class="info-label">Status</div><div class="info-value"><span class="score-badge ${r.status === 'Active' ? 'score-A+' : 'score-A'}">${escapeHtml(r.status || '-')}</span></div></div>
+                    <div class="info-row"><div class="info-label">Reward Status</div><div class="info-value">${escapeHtml(r.reward_status || '-')}</div></div>
+                    ${r.memo ? `<div class="info-row"><div class="info-label">Incentive</div><div class="info-value">${escapeHtml(r.memo)}</div></div>` : ''}
                     ${r.notes ? `<div class="info-row"><div class="info-label">Notes</div><div class="info-value">${escapeHtml(r.notes)}</div></div>` : ''}
                 </div>
             </div>
@@ -1688,6 +1744,63 @@
         `;
         UI.showModal("Memo Details", content);
     };
+
+    // ── Tree toolbar handlers (own them in the referrals chunk) ──────────
+    // These two were defined only in the fude chunk, but their buttons live in
+    // THIS view and renderLeaderboard / _state.ctd are local to this IIFE.
+    // The fude copy of changeLeaderboardPeriod threw 'renderLeaderboard is not
+    // defined' (out of scope there); defining + registering them here makes the
+    // referrals view self-sufficient without ever loading the fude chunk.
+
+    // Export the currently-loaded relationship tree (_state.ctd) to CSV.
+    const exportRelationshipTree = () => {
+        if (!_state.ctd) {
+            UI.toast.error('No tree loaded — search for a person first.');
+            return;
+        }
+        const rows = [];
+        const walk = (node, parentName = '', depth = 0) => {
+            rows.push({
+                depth,
+                parent: parentName,
+                name: node.name || '',
+                type: node.type || '',
+                role: node.role || '',
+                pipeline: node.pipeline_stage || '',
+                last_activity: node.last_activity_date || '',
+                join_date: node.join_date || ''
+            });
+            (node.children || []).forEach(c => walk(c, node.name, depth + 1));
+        };
+        walk(_state.ctd);
+        const esc = v => {
+            const s = String(v ?? '');
+            return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+        };
+        const header = 'Depth,Parent,Name,Type,Role,Pipeline Stage,Last Activity,Join Date\n';
+        const body = rows.map(r => [r.depth, r.parent, r.name, r.type, r.role, r.pipeline, r.last_activity, r.join_date].map(esc).join(',')).join('\n');
+        const csv = '﻿' + header + body; // BOM so Excel reads UTF-8 (Chinese names) correctly
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const safeName = String(_state.ctd.name || 'export').replace(/[^\w一-鿿-]+/g, '_');
+        a.download = `relationship-tree-${safeName}-${new Date().toISOString().split('T')[0]}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        UI.toast.success(`Exported ${rows.length} nodes to CSV`);
+    };
+
+    // Change the leaderboard period filter, then re-render the leaderboard
+    // (renderLeaderboard is in scope here, so this actually re-renders).
+    const changeLeaderboardPeriod = async (label) => {
+        const map = { 'All Time': 'all', 'This Year': 'year', 'This Month': 'month' };
+        _state.lbp = map[label] || 'all';
+        await renderLeaderboard();
+    };
+
     // ── Register public surface on window.app ────────────────────────────
     // Complete list of top-level definitions in this chunk (scanned by
     // _patch_v2.mjs — includes column-0 definitions the extractor missed).
@@ -1718,5 +1831,12 @@
         getReferralLeaderboardData,
         toggleHideReferrerData,
         resetHiddenReferrersData,
+        // Tree toolbar handlers — owned here so they reach renderLeaderboard /
+        // _state.ctd (out of scope in the fude chunk that previously held them).
+        exportRelationshipTree,
+        changeLeaderboardPeriod,
+        // Previously defined but never registered → unreachable; now exported.
+        viewReferralDetails,
+        openReferralFromProfile,
     });
 })();

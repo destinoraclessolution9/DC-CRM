@@ -60,6 +60,14 @@
     // Current view (read-only reference)
     const _getCurrentView = () => _state.cv;
 
+    // URL-scheme guard for user-supplied file/link values interpolated into href.
+    // Returns the escaped URL only when it is an http(s) absolute URL; otherwise ''
+    // (callers render '-' / no link). Blocks javascript:/data: and attribute breakout.
+    const _safeHref = (u) => {
+        const s = (u == null ? '' : String(u)).trim();
+        return /^https?:\/\//i.test(s) ? escapeHtml(s) : '';
+    };
+
     // ── Duplicated from prospects-core: shared server-pagination helper.    // Reads only header globals (getVisibleUserIds/_state.cu/AppDataStore),    // so a verbatim copy is safe and keeps _bffGetCustomers an intra-chunk call.
 const _serverPage = async (table, opts = {}) => {
     try {
@@ -239,6 +247,10 @@ const showCustomersView = async (container) => {
 // ── Pagination state for customers table ──
 let _customerPage = 0;
 const _customerPageSize = 50;
+// Last total-row count computed by renderCustomersTable — customerPageNav reads
+// this directly instead of scraping the rendered pagination DOM text (which has
+// two "of N" tokens and is order-fragile). Set on every table render.
+let _customerTotalCount = 0;
 
 // ── Phase 4.2 (#13): React-island customers path ─────────────────────────────
 // The real Customers table can render via a React island (window.CRMReact,
@@ -518,6 +530,7 @@ const renderCustomersTable = async () => {
     tbody.innerHTML = html || '<tr><td colspan="8" style="text-align:center; padding:20px;">No customers found</td></tr>';
 
     // ── Render pagination controls ──
+    _customerTotalCount = totalCount; // remember for customerPageNav (no DOM scraping)
     const totalPages = Math.ceil(totalCount / _customerPageSize);
     let paginationEl = document.getElementById('customers-pagination');
     if (!paginationEl) {
@@ -543,9 +556,9 @@ const renderCustomersTable = async () => {
 };
 
 const customerPageNav = async (dir) => {
-    const paginationText = document.getElementById('customers-pagination')?.textContent || '';
-    const totalMatch = paginationText.match(/of (\d+)/);
-    const total = totalMatch ? parseInt(totalMatch[1]) : 9999;
+    // Use the in-memory row total from the last render rather than scraping the
+    // pagination DOM text (which contains two "of N" tokens and is order-fragile).
+    const total = _customerTotalCount || 0;
     const lastPage = Math.max(0, Math.ceil(total / _customerPageSize) - 1);
     if (dir === 'first') _customerPage = 0;
     else if (dir === 'prev') _customerPage = Math.max(0, _customerPage - 1);
@@ -801,7 +814,9 @@ const switchProfileTab = async (btn, tabName, cId) => {
             html += '<table class="events-table"><thead><tr><th scope="col">Event</th><th scope="col">Date</th><th scope="col">Status</th><th scope="col">Points</th></tr></thead><tbody>';
             for (const r of registrations) {
                 const event = eventsById.get(String(r.event_id));
-                html += `<tr><td>${escapeHtml(event?.title || 'Unknown')}</td><td>${escapeHtml(r.event_date || '-')}</td><td>${r.attendance_status}</td><td>${r.points_awarded || 0}</td></tr>`;
+                // escape attendance_status like every sibling field (defense in depth;
+                // normally a controlled enum but rendered raw was an inconsistency).
+                html += `<tr><td>${escapeHtml(event?.title || 'Unknown')}</td><td>${escapeHtml(r.event_date || '-')}</td><td>${escapeHtml(r.attendance_status || '')}</td><td>${r.points_awarded || 0}</td></tr>`;
             }
             html += '</tbody></table>';
         }
@@ -838,6 +853,14 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
         if (cfDisplay) container.insertAdjacentHTML('beforeend', cfDisplay);
     }
     else if (tab === 'bank') {
+        // Derive last-purchase date from the purchases table (max(date)) — customers
+        // carry no maintained last_purchase_date column, so reading it always yields '-'.
+        let _lastPur = '-';
+        try {
+            const _purs = await AppDataStore.query('purchases', { customer_id: customer.id });
+            const _dates = (_purs || []).map(p => p.date).filter(Boolean).sort();
+            if (_dates.length) _lastPur = _dates[_dates.length - 1];
+        } catch (_e) { /* offline / RLS — leave as '-' */ }
         container.innerHTML = `
             <div class="pv-sub">Bank &amp; Payment</div>
             <div class="pv-row"><span class="pv-lbl">Bank Name</span><span class="pv-val">${escapeHtml(customer.bank_name || '-')}</span></div>
@@ -860,7 +883,7 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
                 </div>
                 <div style="background:var(--gray-50);padding:12px;border-radius:8px;text-align:center;">
                     <div style="font-size:12px;color:var(--gray-500);">Last Purchase</div>
-                    <div style="font-size:14px;font-weight:600;">${escapeHtml(customer.last_purchase_date || '-')}</div>
+                    <div style="font-size:14px;font-weight:600;">${escapeHtml(_lastPur)}</div>
                 </div>
             </div>
         `;
@@ -977,6 +1000,31 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
 
 const renderBasicBankTab = async (customer, containerId = 'profile-tab-content') => {
     const container = document.getElementById(containerId);
+    if (!container) return; // target tab body may be absent in some detail layouts
+
+    // ── Compute the previously-hardcoded metrics from real customer/purchase data ──
+    // Age from date_of_birth (matches the React-shell 'info' tab formula).
+    const _age = customer.date_of_birth
+        ? Math.floor((Date.now() - new Date(customer.date_of_birth).getTime()) / 31557600000)
+        : null;
+    const _ageStr = (Number.isFinite(_age) && _age >= 0) ? ` (Age ${_age})` : '';
+    // Mask a real account number (first 4 / last 4) instead of emitting a fake one.
+    const _acctMasked = customer.account_number
+        ? escapeHtml(String(customer.account_number).replace(/^(\d{4}).*(\d{4})$/, '$1-****-$2'))
+        : '-';
+    // Real purchase metrics. Last-purchase date is derived from the purchases table
+    // (max(date)) since customers carry no maintained last_purchase_date column.
+    const _totalPurchases = customer.total_purchases || 0;
+    const _avgOrder = _totalPurchases
+        ? Math.round((customer.lifetime_value || 0) / _totalPurchases)
+        : 0;
+    let _lastPurchase = '-';
+    try {
+        const _purs = await AppDataStore.query('purchases', { customer_id: customer.id });
+        const _dates = (_purs || []).map(p => p.date).filter(Boolean).sort();
+        if (_dates.length) _lastPurchase = _dates[_dates.length - 1];
+    } catch (_e) { /* offline / RLS — leave as '-' */ }
+
     container.innerHTML = `
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:32px;">
             <div>
@@ -992,7 +1040,7 @@ const renderBasicBankTab = async (customer, containerId = 'profile-tab-content')
                         <span>${escapeHtml(customer.email || '')} <button class="btn-icon"><i class="fas fa-envelope"></i></button></span>
                     </div>
                     <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">IC Number:</span> <span>${escapeHtml(customer.ic_number || '')}</span></div>
-                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Date of Birth:</span> <span>${escapeHtml(customer.date_of_birth || '')} (Age 44)</span></div>
+                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Date of Birth:</span> <span>${escapeHtml(customer.date_of_birth || '-')}${_ageStr}</span></div>
                     <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Ming Gua:</span> <span style="color:#6b21a8; font-weight:600;">${escapeHtml(customer.ming_gua || '')} (${escapeHtml(customer.element || '')})</span></div>
                     <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Gender:</span> <span>${escapeHtml(customer.gender || '')}</span></div>
                     <hr style="border:none; border-top:1px solid var(--gray-100); margin:8px 0;">
@@ -1004,9 +1052,8 @@ const renderBasicBankTab = async (customer, containerId = 'profile-tab-content')
 
                 <h4 style="font-size:16px; font-weight:600; margin-top:24px; margin-bottom:16px; color:var(--primary);">Referral Information</h4>
                 <div style="display:flex; flex-direction:column; gap:12px;">
-                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Referred By:</span> <a href="#" style="color:var(--primary); text-decoration:none;">Tan Ah Kow</a></div>
-                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Relationship:</span> <span>Friend</span></div>
-                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Referral Date:</span> <span>15 Feb 2026</span></div>
+                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Referred By:</span> <span>${escapeHtml(customer.referred_by || '-')}</span></div>
+                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Relationship:</span> <span>${escapeHtml(customer.referral_relationship || '-')}</span></div>
                 </div>
             </div>
 
@@ -1014,7 +1061,7 @@ const renderBasicBankTab = async (customer, containerId = 'profile-tab-content')
                 <h4 style="font-size:16px; font-weight:600; margin-bottom:16px; color:var(--primary);">Bank and Payment Information</h4>
                 <div style="display:flex; flex-direction:column; gap:12px; background:var(--gray-50); padding:16px; border-radius:8px;">
                     <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Bank Name:</span> <strong>${escapeHtml(customer.bank_name || '')}</strong></div>
-                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Account Number:</span> <span>5123-****-8901</span></div>
+                    <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Account Number:</span> <span>${_acctMasked}</span></div>
                     <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Account Holder:</span> <span>${escapeHtml(customer.account_holder || '')}</span></div>
                     <div style="display:flex; justify-content:space-between;"><span style="color:var(--gray-500);">Payment Method:</span> <span>${escapeHtml(customer.payment_methods || '')}</span></div>
                 </div>
@@ -1027,15 +1074,15 @@ const renderBasicBankTab = async (customer, containerId = 'profile-tab-content')
                     </div>
                     <div style="background:var(--gray-50); padding:12px; border-radius:8px; text-align:center;">
                         <div style="font-size:12px; color:var(--gray-500);">Total Purchases</div>
-                        <div style="font-size:18px; font-weight:700; color:var(--primary);">4</div>
+                        <div style="font-size:18px; font-weight:700; color:var(--primary);">${_totalPurchases.toLocaleString()}</div>
                     </div>
                     <div style="background:var(--gray-50); padding:12px; border-radius:8px; text-align:center;">
                         <div style="font-size:12px; color:var(--gray-500);">Avg Order Value</div>
-                        <div style="font-size:18px; font-weight:700; color:var(--primary);">RM 788</div>
+                        <div style="font-size:18px; font-weight:700; color:var(--primary);">RM ${_avgOrder.toLocaleString()}</div>
                     </div>
                     <div style="background:var(--gray-50); padding:12px; border-radius:8px; text-align:center;">
                         <div style="font-size:12px; color:var(--gray-500);">Last Purchase</div>
-                        <div style="font-size:14px; font-weight:600;">04 Mar 2026</div>
+                        <div style="font-size:14px; font-weight:600;">${escapeHtml(_lastPurchase)}</div>
                     </div>
                 </div>
             </div>
@@ -1197,6 +1244,7 @@ const copyToClipboard = (text) => {
 const renderPurchaseHistoryTab = async (customer, containerId = 'profile-tab-content') => {
     const purchases = await AppDataStore.query('purchases', { customer_id: customer.id });
     const container = document.getElementById(containerId);
+    if (!container) return; // target tab body may be absent (detail view has no such id)
 
     // Fetch original closing record from the prospect this customer was converted from
     let cr = null;
@@ -1219,7 +1267,7 @@ const renderPurchaseHistoryTab = async (customer, containerId = 'profile-tab-con
                 <td><strong>${escapeHtml(cr.product || '-')}</strong> <span style="font-size:11px;color:var(--gray-400);">(Conversion Sale)</span></td>
                 <td>RM ${amt.toLocaleString()}</td>
                 <td><span class="score-badge" style="font-size:11px;background:#dcfce7;color:#166534;">PAID</span></td>
-                <td>${cr.invoice_file ? `<a href="${cr.invoice_file}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">View</a>` : '-'}</td>
+                <td>${(() => { const _h = _safeHref(cr.invoice_file); return _h ? `<a href="${_h}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">View</a>` : '-'; })()}</td>
                 <td><span style="font-size:11px;color:var(--gray-400);">Locked</span></td>
             </tr>`;
     })() : '';
@@ -1245,6 +1293,9 @@ const renderPurchaseHistoryTab = async (customer, containerId = 'profile-tab-con
         else totalPending += (p.amount || 0);
 
         const badgeClass = `badge-${_pstatus.toLowerCase().replace('/', '')}`;
+        // Scheme-validated proof URL (savePaymentProof now stores a public URL, not a
+        // bare object key). View + download both point at it; absent → no link/button.
+        const _proofHref = _safeHref(p.proof);
         return `
                         <tr>
                             <td>${escapeHtml(p.date || '')}</td>
@@ -1252,10 +1303,10 @@ const renderPurchaseHistoryTab = async (customer, containerId = 'profile-tab-con
                             <td>${escapeHtml(p.item || '')}</td>
                             <td>RM ${(p.amount || 0).toLocaleString()}</td>
                             <td><span class="score-badge ${badgeClass}" style="font-size:11px;">${escapeHtml(_pstatus)}</span></td>
-                            <td>${p.proof ? `<a href="#" style="color:var(--primary);">${p.proof.endsWith('.pdf') ? 'View Report' : 'View Image'}</a>` : `<button class="btn-sm secondary" onclick="app.uploadPaymentProof(${p.id}, ${customer.id})">Upload Image</button>`}</td>
+                            <td>${_proofHref ? `<a href="${_proofHref}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">${String(p.proof).endsWith('.pdf') ? 'View Report' : 'View Image'}</a>` : `<button class="btn-sm secondary" onclick="app.uploadPaymentProof(${p.id}, ${customer.id})">Upload Image</button>`}</td>
                             <td>
-                                <button class="btn-icon"><i class="fas fa-download"></i></button>
-                                ${p.status === 'PENDING' ? '<button class="btn-icon"><i class="fas fa-edit"></i></button><button class="btn-icon"><i class="fas fa-trash"></i></button>' : ''}
+                                ${_proofHref ? `<a class="btn-icon" href="${_proofHref}" target="_blank" rel="noopener noreferrer" download title="Download proof"><i class="fas fa-download"></i></a>` : ''}
+                                ${p.status === 'PENDING' ? `<button class="btn-icon" title="Delete purchase" onclick="event.stopPropagation(); app.deletePurchase(${p.id}, ${customer.id})"><i class="fas fa-trash"></i></button>` : ''}
                             </td>
                         </tr>
                     `;
@@ -1277,6 +1328,7 @@ const renderPurchaseHistoryTab = async (customer, containerId = 'profile-tab-con
 const renderReferralsTab = async (customer, containerId = 'profile-tab-content') => {
     const refs = await AppDataStore.query('referrals', { referrer_customer_id: customer.id });
     const container = document.getElementById(containerId);
+    if (!container) return; // target tab body may be absent in some detail layouts
 
     const rowsPromises = refs.map(async (r) => {
         const prospect = await AppDataStore.getById('prospects', r.referred_prospect_id);
@@ -1285,7 +1337,7 @@ const renderReferralsTab = async (customer, containerId = 'profile-tab-content')
                 <td><strong>${escapeHtml(prospect?.full_name || 'N/A')}</strong></td>
                 <td>${escapeHtml(r.relationship || '')}</td>
                 <td>${escapeHtml(r.date || '')}</td>
-                <td><span class="score-badge ${r.status === 'Active' ? 'score-A+' : 'score-A'}">${r.status}</span></td>
+                <td><span class="score-badge ${r.status === 'Active' ? 'score-A+' : 'score-A'}">${escapeHtml(r.status || '')}</span></td>
                 <td>${escapeHtml(r.reward_status || '')}</td>
                 <td>
                     <button class="btn-sm secondary" onclick="app.viewReferralDetail(${r.id})">View</button>
@@ -1418,7 +1470,7 @@ const viewReferralDetail = async (referralId) => {
             <div><strong>Phone:</strong> ${escapeHtml(prospect?.phone || '—')}</div>
             <div><strong>Relationship:</strong> ${escapeHtml(ref.relationship || '')}</div>
             <div><strong>Referral Date:</strong> ${escapeHtml(ref.date || '')}</div>
-            <div><strong>Status:</strong> <span class="score-badge ${ref.status === 'Active' ? 'score-A+' : 'score-A'}">${ref.status}</span></div>
+            <div><strong>Status:</strong> <span class="score-badge ${ref.status === 'Active' ? 'score-A+' : 'score-A'}">${escapeHtml(ref.status || '')}</span></div>
             <div><strong>Reward Status:</strong> ${escapeHtml(ref.reward_status || '')}</div>
         </div>
     `, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
@@ -1525,6 +1577,19 @@ const uploadPaymentProof = async (purchaseId, customerId) => {
     ]);
 };
 
+// Refresh the purchases UI after a proof/delete change. The detail view exposes
+// purchases via the 'closing' accordion (cust-acc-body-closing-…) + renderCustomerClosingTab,
+// NOT a 'purchases' body — the old code targeted a non-existent id and fell back to
+// 'profile-tab-content' (also absent) → getElementById null → innerHTML threw.
+const _refreshPurchasesUI = async (customerId) => {
+    const customer = await AppDataStore.getById('customers', customerId);
+    if (!customer) return;
+    const closingBody = document.getElementById(`cust-acc-body-closing-${customerId}`);
+    if (closingBody) { await window.app.renderCustomerClosingTab(customer, closingBody); return; }
+    // Legacy profile-tab layout (if present) still renders via renderPurchaseHistoryTab.
+    if (document.getElementById('profile-tab-content')) await renderPurchaseHistoryTab(customer, 'profile-tab-content');
+};
+
 const savePaymentProof = async (purchaseId, customerId) => {
     const file = document.getElementById('proof-upload')?.files[0];
     if (!file) { UI.toast.error('Please select a file'); return; }
@@ -1532,19 +1597,23 @@ const savePaymentProof = async (purchaseId, customerId) => {
     const fileName = `proof_${purchaseId}_${Date.now()}_${file.name}`;
     try {
         if (window.supabase) {
-            await window.supabase.storage.from('attachments').upload(fileName, file);
+            // Supabase storage returns errors in the RESOLVED value, not by throwing —
+            // must inspect { error } or a failed upload is silently treated as success.
+            const { error: upErr } = await window.supabase.storage.from('attachments').upload(fileName, file);
+            if (upErr) { UI.toast.error('Upload failed: ' + (upErr.message || upErr)); return; }
+            // Store the public URL (a resolvable link), not the bare object key.
+            const pub = window.supabase.storage.from('attachments').getPublicUrl(fileName);
+            const proofUrl = pub?.data?.publicUrl || fileName;
+            await AppDataStore.update('purchases', purchaseId, { proof: proofUrl, status: 'COLLECTED' });
+        } else {
+            // Offline / no Supabase client: record the filename only, don't claim COLLECTED.
+            await AppDataStore.update('purchases', purchaseId, { proof: fileName });
         }
-        await AppDataStore.update('purchases', purchaseId, { proof: fileName, status: 'COLLECTED' });
         UI.hideModal();
         UI.toast.success('Payment proof uploaded');
-        const customer = await AppDataStore.getById('customers', customerId);
-        if (customer) { const cid = `cust-acc-body-purchases-${customerId}`; await renderPurchaseHistoryTab(customer, document.getElementById(cid) ? cid : 'profile-tab-content'); }
+        await _refreshPurchasesUI(customerId);
     } catch (err) {
-        await AppDataStore.update('purchases', purchaseId, { proof: fileName });
-        UI.hideModal();
-        UI.toast.success('Proof filename saved (offline mode)');
-        const customer = await AppDataStore.getById('customers', customerId);
-        if (customer) { const cid = `cust-acc-body-purchases-${customerId}`; await renderPurchaseHistoryTab(customer, document.getElementById(cid) ? cid : 'profile-tab-content'); }
+        UI.toast.error('Failed to save proof: ' + (err?.message || err));
     }
 };
 
@@ -1713,17 +1782,24 @@ const openAddCustomerModal = async () => {
 const saveCustomer = async () => {
     const name = document.getElementById('cust-name')?.value;
     if (!name) return UI.toast.error('Name is required');
-    await AppDataStore.create('customers', {
-        full_name: name,
-        phone: document.getElementById('cust-phone')?.value,
-        email: document.getElementById('cust-email')?.value,
-        ic_number: document.getElementById('cust-ic')?.value,
-        date_of_birth: document.getElementById('cust-dob')?.value,
-        lifetime_value: parseFloat(document.getElementById('cust-init-amt')?.value) || 0,
-        status: 'active',
-        customer_since: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
-        responsible_agent_id: _state.cu?.id || null,
-    });
+    // Guard the create: an RLS deny / offline / validation reject must surface an error
+    // and keep the modal open, not throw an unhandled rejection + close silently.
+    try {
+        await AppDataStore.create('customers', {
+            full_name: name,
+            phone: document.getElementById('cust-phone')?.value,
+            email: document.getElementById('cust-email')?.value,
+            ic_number: document.getElementById('cust-ic')?.value,
+            date_of_birth: document.getElementById('cust-dob')?.value,
+            lifetime_value: parseFloat(document.getElementById('cust-init-amt')?.value) || 0,
+            status: 'active',
+            customer_since: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
+            responsible_agent_id: _state.cu?.id || null,
+        });
+    } catch (e) {
+        UI.toast.error('Failed to create customer: ' + (e?.message || e));
+        return; // keep modal open so the user can retry
+    }
     UI.hideModal();
     UI.toast.success('Customer created (Legacy)');
     if (document.getElementById('customers-table-body')) await renderCustomersTable();
@@ -1731,6 +1807,8 @@ const saveCustomer = async () => {
 
 const openAddPurchaseModal = async (customerId) => {
     const customer = await AppDataStore.getById('customers', customerId);
+    // getById can return null (RLS deny / offline / deleted id) — guard before deref.
+    if (!customer) { UI.toast.error('Customer not found'); return; }
     const content = `
 <div class="form-section">
                 <div class="form-group">
@@ -1788,12 +1866,12 @@ const openAddPurchaseModal = async (customerId) => {
                     </label>
                 </div>
                 <div id="pkg-fields" style="display:none;">
-                    <div class="form-group"><label>Package Name</label><input type="text" class="form-control"></div>
-                    <div class="form-group"><label>Description</label><textarea class="form-control" rows="2"></textarea></div>
+                    <div class="form-group"><label>Package Name</label><input type="text" id="pur-pkg-name" class="form-control"></div>
+                    <div class="form-group"><label>Description</label><textarea id="pur-pkg-desc" class="form-control" rows="2"></textarea></div>
                 </div>
             </div>
 `;
-    UI.showModal(`Add Purchase for ${customer.full_name}`, content, [
+    UI.showModal(`Add Purchase for ${escapeHtml(customer.full_name || '')}`, content, [
         { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
         { label: 'Add Purchase', type: 'primary', action: `(async () => { await app.savePurchase(${customerId}); })()` }
     ]);
@@ -1805,82 +1883,118 @@ const openAddPurchaseModal = async (customerId) => {
 const _adjustCustomerLtv = (customerId, amountDelta, countDelta) =>
     _utils.adjustCustomerLtv(customerId, amountDelta, countDelta);
 
+// Synchronous double-submit guard for savePurchase — mirrors _convInFlight in
+// approveProspectConversion. Set BEFORE the first await, released in finally, so a
+// rapid second click on "Add Purchase" can't double-insert + double-bump LTV.
+const _savePurchaseInFlight = new Set();
+
 const savePurchase = async (customerId) => {
     const amt = parseFloat(document.getElementById('pur-amt')?.value);
     if (!(amt > 0)) return UI.toast.error('Amount must be a positive number');
     const invoiceNo = document.getElementById('pur-inv')?.value?.trim();
     if (!invoiceNo) return UI.toast.error('Invoice No. is required');
 
-    const item = document.getElementById('pur-product')?.value === 'Other' ? document.getElementById('pur-other')?.value : document.getElementById('pur-product')?.value;
+    // ── Double-submit guard (synchronous, set before any await) ──
+    const _key = String(customerId);
+    if (_savePurchaseInFlight.has(_key)) return; // a save for this customer is already running
+    _savePurchaseInFlight.add(_key);
 
-    // Match with promotion package if exists
-    let packageId = null;
-    const allPackages = await AppDataStore.getAll('promotion_packages');
-    
-const allProductsForPkg = await AppDataStore.getAll('products');
-const productNameMap = new Map(allProductsForPkg.map(pr => [pr.id, pr.name]));
-let matchingPkg = null;
-for (const p of allPackages) {
-if (!p.is_active) continue;
-const found = (p.product_ids || []).some(pid => productNameMap.get(pid) === item);
-if (found) {
-    matchingPkg = p;
-    break;
-}
-}
+    try {
+        const item = document.getElementById('pur-product')?.value === 'Other' ? document.getElementById('pur-other')?.value : document.getElementById('pur-product')?.value;
 
-    if (matchingPkg) packageId = matchingPkg.id;
+        // Match with promotion package if exists
+        let packageId = null;
+        const allPackages = await AppDataStore.getAll('promotion_packages');
+        const allProductsForPkg = await AppDataStore.getAll('products');
+        const productNameMap = new Map(allProductsForPkg.map(pr => [pr.id, pr.name]));
+        let matchingPkg = null;
+        for (const p of allPackages) {
+            if (!p.is_active) continue;
+            const found = (p.product_ids || []).some(pid => productNameMap.get(pid) === item);
+            if (found) { matchingPkg = p; break; }
+        }
+        if (matchingPkg) packageId = matchingPkg.id;
 
-    const purMethod = document.getElementById('pur-method')?.value || 'Cash';
-    // epp_months is an integer column — send null (not '') when not EPP, otherwise
-    // the Supabase insert fails with "invalid input syntax for type integer" (22P02),
-    // the purchase gets written to localStorage only, and subsequent query() calls
-    // read from Supabase and show RM 0.
-    const eppMonthsRaw = purMethod === 'EPP' ? document.getElementById('epp-months')?.value : '';
-    const eppMonthsInt = parseInt(eppMonthsRaw, 10);
-    const eppBankRaw = purMethod === 'EPP' ? document.getElementById('epp-bank')?.value?.trim() : '';
-    // Fetch customer first so we can attribute the purchase to the responsible agent
-    const customer = await AppDataStore.getById('customers', customerId);
-    const pur = {
-        customer_id: customerId,
-        date: new Date().toISOString().split('T')[0],
-        invoice: invoiceNo,
-        item: item,
-        amount: amt,
-        status: document.getElementById('pur-status')?.value,
-        delivery_status: document.getElementById('pur-delivery')?.value || 'Pending Delivery',
-        proof: document.getElementById('pur-file')?.value ? 'image_uploaded.png' : '',
-        package_id: packageId,
-        payment_method: purMethod,
-        epp_months: Number.isFinite(eppMonthsInt) ? eppMonthsInt : null,
-        epp_bank: eppBankRaw || null,
-    };
-    await AppDataStore.create('purchases', pur);
+        const purMethod = document.getElementById('pur-method')?.value || 'Cash';
+        // epp_months is an integer column — send null (not '') when not EPP, otherwise
+        // the Supabase insert fails with "invalid input syntax for type integer" (22P02),
+        // the purchase gets written to localStorage only, and subsequent query() calls
+        // read from Supabase and show RM 0.
+        const eppMonthsRaw = purMethod === 'EPP' ? document.getElementById('epp-months')?.value : '';
+        const eppMonthsInt = parseInt(eppMonthsRaw, 10);
+        const eppBankRaw = purMethod === 'EPP' ? document.getElementById('epp-bank')?.value?.trim() : '';
+        // Persist the explicit "Is Agent Package?" selection (is_agent_package is a real
+        // boolean column on purchases — reporting RPCs exclude these from sales totals).
+        const isAgentPkg = !!document.getElementById('is-agent-pkg')?.checked;
+        // Fetch customer for the post-save re-render fallback. NOTE: purchases are
+        // agent-attributed via the customers.responsible_agent_id join in the reporting
+        // RPCs (no agent column on the purchase row) — do NOT add one (prior bug).
+        const customer = await AppDataStore.getById('customers', customerId);
+        const pur = {
+            customer_id: customerId,
+            date: new Date().toISOString().split('T')[0],
+            invoice: invoiceNo,
+            item: item,
+            amount: amt,
+            status: document.getElementById('pur-status')?.value,
+            delivery_status: document.getElementById('pur-delivery')?.value || 'Pending Delivery',
+            proof: document.getElementById('pur-file')?.value ? 'image_uploaded.png' : '',
+            package_id: packageId,
+            payment_method: purMethod,
+            epp_months: Number.isFinite(eppMonthsInt) ? eppMonthsInt : null,
+            epp_bank: eppBankRaw || null,
+            is_agent_package: isAgentPkg,
+        };
 
-    // Update lifetime value + purchase count atomically (race-free; symmetric with deletePurchase).
-    await _adjustCustomerLtv(customerId, amt, 1);
+        // ── Atomic-ish create + LTV adjust: guard both so a failure surfaces an error,
+        // keeps the modal open, and reverses the LTV bump if the purchase row was
+        // created but the adjust failed (otherwise LTV is permanently wrong, audit #9). ──
+        let created = false;
+        try {
+            await AppDataStore.create('purchases', pur);
+            created = true;
+            // Update lifetime value + purchase count atomically (race-free; symmetric with deletePurchase).
+            await _adjustCustomerLtv(customerId, amt, 1);
+        } catch (e) {
+            if (created) {
+                // create succeeded but LTV adjust failed — try to reverse so LTV stays consistent.
+                try { await _adjustCustomerLtv(customerId, -amt, -1); } catch (_re) { /* best-effort */ }
+            }
+            UI.toast.error('Failed to save purchase: ' + (e?.message || e));
+            return; // leave the modal open so the user can retry (no double-insert thanks to the guard)
+        }
 
-    UI.hideModal();
-    UI.toast.success('Purchase added');
-    const closingBody = document.getElementById(`cust-acc-body-closing-${customerId}`);
-    if (closingBody) {
-        // Re-fetch: the RPC updated the server row, so the cached `customer` (read
-        // before the adjust) now has a stale lifetime_value/total_purchases.
-        const _freshCustomer = await AppDataStore.getById('customers', customerId);
-        await window.app.renderCustomerClosingTab(_freshCustomer || customer, closingBody);
-    } else if (document.getElementById('customers-table-body')) await renderCustomersTable();
+        UI.hideModal();
+        UI.toast.success('Purchase added');
+        const closingBody = document.getElementById(`cust-acc-body-closing-${customerId}`);
+        if (closingBody) {
+            // Re-fetch: the RPC updated the server row, so the cached `customer` (read
+            // before the adjust) now has a stale lifetime_value/total_purchases.
+            const _freshCustomer = await AppDataStore.getById('customers', customerId);
+            await window.app.renderCustomerClosingTab(_freshCustomer || customer, closingBody);
+        } else if (document.getElementById('customers-table-body')) await renderCustomersTable();
+    } finally {
+        _savePurchaseInFlight.delete(_key);
+    }
 };
 
 const _deliveryStatusColors = { 'Pending Delivery': 'background:#fef3c7;color:#92400e', 'Dispatched': 'background:#dbeafe;color:#1e40af', 'Delivered': 'background:#dcfce7;color:#166534' };
 const _deliveryStatusIcons = { 'Pending Delivery': 'fa-clock', 'Dispatched': 'fa-truck', 'Delivered': 'fa-check-circle' };
 
 const _setDelivery = async (mode, id, customerId, newStatus) => {
-    if (mode === 'purchase') {
-        await AppDataStore.update('purchases', id, { delivery_status: newStatus });
-    } else {
-        const prospect = await AppDataStore.getById('prospects', id);
-        const cr = { ...(prospect?.closing_record || {}), delivery_status: newStatus };
-        await AppDataStore.update('prospects', id, { closing_record: cr });
+    // Guard the underlying update: only toast success after the write resolves, else a
+    // failed update would falsely report a change that never persisted.
+    try {
+        if (mode === 'purchase') {
+            await AppDataStore.update('purchases', id, { delivery_status: newStatus });
+        } else {
+            const prospect = await AppDataStore.getById('prospects', id);
+            const cr = { ...(prospect?.closing_record || {}), delivery_status: newStatus };
+            await AppDataStore.update('prospects', id, { closing_record: cr });
+        }
+    } catch (e) {
+        UI.toast.error('Failed to update delivery: ' + (e?.message || e));
+        return;
     }
     UI.toast.success('Delivery updated: ' + newStatus);
     const customer = await AppDataStore.getById('customers', customerId);

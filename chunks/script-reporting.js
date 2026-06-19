@@ -82,6 +82,7 @@
         activeAgents: "Active agents (60-day window) - Agents with any activity log or event attendance in the past 60 days, grouped by team",
         newAgents: "Agent recruits - Count of new agents created",
         newCustomers: "Customer conversions - Count of prospects converted to customers",
+        conversionRate: "Prospect-to-customer conversion rate - New customers as a percentage of prospects in the period",
         totalMeetings: "Agent meetings & training - Events and internal agent meetings only",
         clientMeetings: "Client meetings - CPS, FTF, and FSA meetings with prospects/customers",
         activityHeadcount: "Event attendance - Sum of attendees by activity title"
@@ -424,7 +425,16 @@
                 }
             } catch (_) { /* fall through to legacy */ }
         }
-        const purchases = await AppDataStore.getAll('purchases');
+        // Purchases have no agent_id column — the per-agent filter must resolve the
+        // agent via the linked customer (same contract as _getPurchaseAgentId / the
+        // KPI getters), or this branch silently returns all-zeros for any non-'all'
+        // filter. Build customerMap once and compare String-vs-String.
+        const [purchases, custList] = await Promise.all([
+            AppDataStore.getAll('purchases'),
+            _currentAgentFilter === 'all' ? Promise.resolve([]) : AppDataStore.getAll('customers')
+        ]);
+        const customerMap = {};
+        custList.forEach(c => { customerMap[c.id] = c; });
         const keywordMap = {
             'FengShui': ['feng shui', 'fengshui'],
             'Flexi FengShui': ['flexi', 'flexible feng shui'],
@@ -438,7 +448,7 @@
         };
         for (const p of purchases) {
             if (p.date < from || p.date > to) continue;
-            if (_currentAgentFilter !== 'all' && p.agent_id != _currentAgentFilter) continue;
+            if (_currentAgentFilter !== 'all' && String(_getPurchaseAgentId(p, customerMap)) !== String(_currentAgentFilter)) continue;
             const itemLower = (p.item || '').toLowerCase();
             for (const [cat, keywords] of Object.entries(keywordMap)) {
                 if (keywords.some(kw => itemLower.includes(kw))) { categories[cat]++; break; }
@@ -636,7 +646,11 @@
             currentTo = new Date(now);
             currentFrom = new Date(now);
             currentFrom.setDate(now.getDate() - 7);
+            // Previous window ends the day BEFORE the current window starts, else the
+            // boundary day at currentFrom (both ends inclusive in KPI filters) is
+            // double-counted in current and previous, skewing vs-last-period trends.
             prevTo = new Date(currentFrom);
+            prevTo.setDate(prevTo.getDate() - 1);
             prevFrom = new Date(currentFrom);
             prevFrom.setDate(prevFrom.getDate() - 7);
         } else if (filter === 'monthly') {
@@ -659,8 +673,12 @@
             currentFrom = new Date(from);
             currentTo = new Date(to);
             const diff = currentTo - currentFrom;
+            // Previous window ends the day BEFORE currentFrom (not ON it) to avoid the
+            // inclusive-both-ends boundary-day double-count; keep the same span by
+            // deriving prevFrom from the shifted prevTo.
             prevTo = new Date(currentFrom);
-            prevFrom = new Date(currentFrom - diff);
+            prevTo.setDate(prevTo.getDate() - 1);
+            prevFrom = new Date(prevTo - diff);
         }
 
         return {
@@ -1002,7 +1020,9 @@ const getNewCustomers = async (from, to) => {
     for (const c of customers) {
         if (c.customer_since < from || c.customer_since > to) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(c.responsible_agent_id))) continue;
-        const hasPurchaseInRange = purchases.some(p => p.customer_id == c.id && (p.date || p.purchase_date) >= from && (p.date || p.purchase_date) <= to);
+        // purchases column is `date` (no purchase_date) — use it consistently with
+        // every other purchase reader in this file; the old fallback was dead drift.
+        const hasPurchaseInRange = purchases.some(p => p.customer_id == c.id && p.date >= from && p.date <= to);
         if (!hasPurchaseInRange) continue;
         count++;
     }
@@ -1820,7 +1840,10 @@ const _buildActivityHeadcountDetailsLegacy = async (from, to) => {
             } else {
                 agentId = prospMap[entityId]?.responsible_agent_id;
             }
-            if (!_visibleUserIds.includes(agentId)) continue;
+            // Normalize both sides to String (matches the other visibility filters in
+            // this file) — _visibleUserIds and the resolved agentId can differ in type
+            // (number vs string), which would wrongly drop rows on a raw .includes.
+            if (!_visibleUserIds.map(String).includes(String(agentId))) continue;
         }
 
         const ev = eventMap[att.event_id];
@@ -1853,7 +1876,7 @@ const _renderActivityHeadcount = (prospectRows, agentRows, byEvent, prospectCoun
     const summaryByEvent = Object.keys(byEvent).length
         ? `<div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;padding:12px 16px;margin-bottom:14px;">
              <div style="font-size:12px;color:var(--gray-500);margin-bottom:8px;font-weight:600;">By Event:</div>
-             ${Object.entries(byEvent).sort((a,b) => b[1]-a[1]).map(([name, c]) => `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;"><span>${name}</span><strong>${c} attendee${c===1?'':'s'}</strong></div>`).join('')}
+             ${Object.entries(byEvent).sort((a,b) => b[1]-a[1]).map(([name, c]) => `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;"><span>${escapeHtml(name)}</span><strong>${c} attendee${c===1?'':'s'}</strong></div>`).join('')}
            </div>`
         : '';
 
@@ -1955,7 +1978,7 @@ const showKPIDetails = async (key) => {
             { label: 'EPP Cases', value: kpis.eppCaseCount, prev: prevKpis.eppCaseCount, icon: '💳', color: 'purple', key: 'eppCaseCount',
               subType: 'epp', eppDetails,
               subHtml: (kpis.eppDetails || []).length > 0
-                ? (kpis.eppDetails || []).map(d => `<div style="font-size:11px;color:var(--gray-500);line-height:1.6;">${d.bank} &middot; ${d.months} months &times;${d.count}</div>`).join('')
+                ? (kpis.eppDetails || []).map(d => `<div style="font-size:11px;color:var(--gray-500);line-height:1.6;">${escapeHtml(d.bank)} &middot; ${escapeHtml(d.months)} months &times;${escapeHtml(d.count)}</div>`).join('')
                 : '' },
             { label: 'Active Agents', value: kpis.activeAgents || 0, prev: prevKpis.activeAgents || 0, icon: '⚡', color: 'green', key: 'activeAgents',
               subType: 'active',
@@ -1987,7 +2010,7 @@ const showKPIDetails = async (key) => {
             const t = _kpiCardTrend(c, kpis, prevKpis);
             return {
                 key: c.key, label: c.label, value: c.value, icon: c.icon, color: c.color,
-                definition: KPI_DEFINITIONS[c.key],
+                definition: KPI_DEFINITIONS[c.key] || '',
                 trendClass: t.trendClass, trendIcon: t.trendIcon, trendAbs: t.trendAbs,
                 subType: c.subType || null,
                 popTotal: c.popTotal,
@@ -2017,7 +2040,7 @@ const showKPIDetails = async (key) => {
                             ${c.label}
                             <div class="kpi-tooltip" onclick="event.stopPropagation();">
                                 <i class="fas fa-info-circle"></i>
-                                <span class="tooltip-text">${KPI_DEFINITIONS[c.key]}</span>
+                                <span class="tooltip-text">${KPI_DEFINITIONS[c.key] || ''}</span>
                             </div>
                         </h3>
                         <div class="stat-value">${c.value}</div>
@@ -2294,6 +2317,15 @@ const renderAgentLeaderboard = async () => {
         let actualData = [];
         let targetData = [];
 
+        // TZ-stable parse of a Supabase 'YYYY-MM-DD' date string. `new Date(str)`
+        // parses as UTC midnight, so .getMonth()/.getDay() read the LOCAL date and
+        // roll back a day in negative-UTC offsets, mis-bucketing boundary sales.
+        // Parse the parts manually (local date) so month/quarter/day are stable.
+        const _ymd = (s) => {
+            const [y, m, d] = String(s).split('-').map(Number);
+            return { month: (m || 1) - 1, jsDay: new Date(y, (m || 1) - 1, d || 1).getDay() };
+        };
+
         const year = new Date().getFullYear();
         const yTarget = (await AppDataStore.getAll('yearly_targets')).find(t => t.target_year === year) || {};
         const qTargets = (await AppDataStore.getAll('quarterly_targets')).filter(t => t.year === year);
@@ -2306,7 +2338,7 @@ const renderAgentLeaderboard = async () => {
             const _byDay = await _trySalesByDay(range.from, range.to);
             if (_byDay) {
                 _byDay.forEach(r => {
-                    const day = new Date(r.sale_date).getDay();
+                    const day = _ymd(r.sale_date).jsDay;
                     actualData[dayMap[day]] += (Number(r.total) || 0);
                 });
             } else {
@@ -2314,7 +2346,7 @@ const renderAgentLeaderboard = async () => {
                     p.date >= range.from && p.date <= range.to && !p.is_agent_package
                 );
                 currentWeekPurchases.forEach(p => {
-                    const day = new Date(p.date).getDay();
+                    const day = _ymd(p.date).jsDay;
                     actualData[dayMap[day]] += (p.amount || 0);
                 });
             }
@@ -2329,15 +2361,17 @@ const renderAgentLeaderboard = async () => {
             const _byDay = await _trySalesByDay(`${year}-01-01`, `${year}-12-31`);
             if (_byDay) {
                 _byDay.forEach(r => {
-                    const month = new Date(r.sale_date).getMonth();
+                    const month = _ymd(r.sale_date).month;
                     actualData[month] += (Number(r.total) || 0);
                 });
             } else {
                 const yearPurchases = (await AppDataStore.getAll('purchases')).filter(p =>
-                    p.date.startsWith(year.toString()) && !p.is_agent_package
+                    // Null-safe: some purchase rows carry a null `date` (RPC NULL-date
+                    // parity note), and p.date.startsWith would throw on those.
+                    p.date && p.date.startsWith(year.toString()) && !p.is_agent_package
                 );
                 yearPurchases.forEach(p => {
-                    const month = new Date(p.date).getMonth();
+                    const month = _ymd(p.date).month;
                     actualData[month] += (p.amount || 0);
                 });
             }
@@ -2358,15 +2392,17 @@ const renderAgentLeaderboard = async () => {
             const _byDay = await _trySalesByDay(`${year}-01-01`, `${year}-12-31`);
             if (_byDay) {
                 _byDay.forEach(r => {
-                    const quarter = Math.floor(new Date(r.sale_date).getMonth() / 3);
+                    const quarter = Math.floor(_ymd(r.sale_date).month / 3);
                     actualData[quarter] += (Number(r.total) || 0);
                 });
             } else {
                 const yearPurchases = (await AppDataStore.getAll('purchases')).filter(p =>
-                    p.date.startsWith(year.toString()) && !p.is_agent_package
+                    // Null-safe: some purchase rows carry a null `date` (RPC NULL-date
+                    // parity note), and p.date.startsWith would throw on those.
+                    p.date && p.date.startsWith(year.toString()) && !p.is_agent_package
                 );
                 yearPurchases.forEach(p => {
-                    const quarter = Math.floor(new Date(p.date).getMonth() / 3);
+                    const quarter = Math.floor(_ymd(p.date).month / 3);
                     actualData[quarter] += (p.amount || 0);
                 });
             }

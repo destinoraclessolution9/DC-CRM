@@ -27,7 +27,11 @@
     // Chunk-local search state (mirrors IIFE vars)
     let _searchPanelVisible = false;
     let _currentSearchEntity = 'prospects';
-    let _conditionGroups = [{ logic: 'AND', conditions: [{ field: 'name', op: 'contains', value: '' }] }];
+    // Seed shape MUST match addCondition's {field, operator, value} — the engine
+    // (renderConditionGroups / evaluateCondition) reads `cond.operator`, not `op`.
+    // Using `op` left the seeded row's operator undefined → evaluateCondition hit
+    // default:return true (silent no-op) and the operator dropdown rendered unselected.
+    let _conditionGroups = [{ logic: 'AND', conditions: [{ field: 'name', operator: 'contains', value: '' }] }];
     let _savedSearches = [];
     let _searchHistory = [];
     let _currentSearchResults = [];
@@ -163,6 +167,9 @@ const toggleSearchPanel = async () => {
 };
 
 const buildSearchPanelHTML = () => {
+    // Events have no per-agent scope (company-wide resource), so the entity is gated to
+    // management — hide the option for everyone else to match performEventSearch's guard.
+    const _canSeeEvents = isManagement() || isSystemAdmin() || isMarketingManager();
     return `
         <div class="search-panel-overlay" id="search-panel-overlay" onclick="app.hideSearchPanel()"></div>
         <div class="search-panel" id="search-panel">
@@ -198,7 +205,7 @@ const buildSearchPanelHTML = () => {
                         <option value="customers">Customers</option>
                         <option value="activities">Activities</option>
                         <option value="transactions">Transactions</option>
-                        <option value="events">Events</option>
+                        ${_canSeeEvents ? '<option value="events">Events</option>' : ''}
                         <option value="products">Products</option>
                         <option value="bujishu">Bujishu</option>
                         <option value="formula">Formula</option>
@@ -397,8 +404,15 @@ const updateFilterSections = async () => {
     if (extraContainer) extraContainer.innerHTML = extraHtml;
 
     // Populate dynamic agent dropdowns — only show agents visible to the current user
-    // (admins see all; managers/agents see only their own downline team)
-    const agentSelects = [...container.querySelectorAll('select[id$="-agent"]'), ...container.querySelectorAll('select[id$="-responsible-agent"]')];
+    // (admins see all; managers/agents see only their own downline team).
+    // The prospect/customer 'Responsible Agent' <select> is rendered into the EXTRA
+    // container (#extra-filter-sections), NOT #filter-sections, so scan BOTH (plus the
+    // React host) — otherwise that dropdown was left with only its placeholder option.
+    const _agentSelectHosts = [container, extraContainer].filter(Boolean);
+    const agentSelects = _agentSelectHosts.flatMap(host => [
+        ...host.querySelectorAll('select[id$="-agent"]'),
+        ...host.querySelectorAll('select[id$="-responsible-agent"]'),
+    ]);
     if (agentSelects.length > 0) {
         try {
             const allUsers = await AppDataStore.getAll('users');
@@ -1076,8 +1090,18 @@ const collectFilters = () => {
         complex: _conditionGroups
     };
 
-    // Collect basic filters based on entity
-    const prefix = 'filter-' + entity.slice(0, -1) + '-';
+    // Collect basic filters based on entity.
+    // Use an EXPLICIT entity→prefix map — the old `entity.slice(0,-1)` singularizer
+    // produced 'filter-bujish-' / 'filter-formul-', neither of which is a prefix of
+    // the actual input ids ('filter-bujishu-name' / 'filter-formula-name'), so the
+    // .replace() left the id untouched and every bujishu/formula filter was read as
+    // undefined by perform*Search. The map matches the ids each renderer emits.
+    const _ENTITY_PREFIX = {
+        agents: 'filter-agent-', prospects: 'filter-prospect-', customers: 'filter-customer-',
+        activities: 'filter-activity-', transactions: 'filter-transaction-', events: 'filter-event-',
+        products: 'filter-product-', bujishu: 'filter-bujishu-', formula: 'filter-formula-',
+    };
+    const prefix = _ENTITY_PREFIX[entity] || ('filter-' + entity.slice(0, -1) + '-');
     const collectInputs = (section) => {
         if (!section) return;
         section.querySelectorAll('input, select').forEach(input => {
@@ -1336,20 +1360,22 @@ const hasProspectPurchasedProduct = async (prospectId, productName) => {
     return activities.some(a => (a.prospect_id === prospectId || a.customer_id === prospectId) && a.is_closing && a.solution_sold === productName);
 };
 
+// Build the set of PROSPECT ids (from `candidateIds`) that have purchased a product
+// matching `productName`. The candidate ids here are PROSPECT ids — purchases.customer_id
+// keys CUSTOMER rows (a separate table with independently-generated numeric ids), so
+// matching purchases.customer_id against prospect ids caused cross-table id collisions
+// (a prospect falsely flagged for a same-numbered customer's purchase). Prospects have
+// no reliable purchases linkage, so we rely solely on the activities `is_closing` signal,
+// using the SAME case-insensitive substring match as the purchases branch used to (so
+// has/not-purchased matching is internally consistent — substring, not exact).
 const _buildPurchasedProductIdSet = async (productName, candidateIds) => {
     const want = candidateIds instanceof Set ? candidateIds : new Set(candidateIds);
     const set = new Set();
-    const [purchases, activities] = await Promise.all([
-        AppDataStore.getAll('purchases'),
-        AppDataStore.getAll('activities'),
-    ]);
-    for (const p of purchases) {
-        if (p.item && p.item.includes(productName) && want.has(p.customer_id)) {
-            set.add(p.customer_id);
-        }
-    }
+    const needle = String(productName || '').toLowerCase();
+    const activities = await AppDataStore.getAll('activities');
     for (const a of activities) {
-        if (!a.is_closing || a.solution_sold !== productName) continue;
+        if (!a.is_closing || !a.solution_sold) continue;
+        if (!String(a.solution_sold).toLowerCase().includes(needle)) continue;
         if (want.has(a.prospect_id)) set.add(a.prospect_id);
         if (want.has(a.customer_id)) set.add(a.customer_id);
     }
@@ -1596,6 +1622,14 @@ const performTransactionSearch = async (filters) => {
     // EVERY original client filter below still runs on the result, so the returned
     // set is identical. If the matched set exceeds the fetch cap (or anything errors)
     // we fall back to the exact legacy whole-table scan for completeness.
+    //
+    // VISIBILITY SCOPE (security, audit HIGH L1624): purchases are NOT assumed to be
+    // RLS-scoped per-agent, and the search panel is reachable by every role. A non-admin
+    // must only see invoices for customers they can see. We resolve the viewer's visible
+    // customer-id set ONCE (mirroring performCustomerSearch's OR-over-resp/agent scope),
+    // push it as a server `customer_id IN (...)` scope, AND re-apply it client-side after
+    // EVERY source (including the whole-table fallback) so no path can leak company-wide
+    // transactions. Admins ('all') are unscoped.
     const FETCH_CAP = 10000;
     const _ymdShift = (ymd, days) => {
         try {
@@ -1604,6 +1638,35 @@ const performTransactionSearch = async (filters) => {
             return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
         } catch (_) { return null; }
     };
+
+    // Resolve the visible customer-id scope. `null` ⇒ admin/unscoped; a Set ⇒ restrict to
+    // those customer_ids; empty Set ⇒ nothing visible → return [].
+    let _visibleCustomerIds = null;
+    try {
+        const visIds = await getVisibleUserIds(_state.cu);
+        if (visIds !== 'all') {
+            // Reuse the canonical visible-customer resolver (same OR-scope as getVisibleCustomers).
+            const visibleCustomers = await getVisibleCustomers();
+            _visibleCustomerIds = new Set((visibleCustomers || []).map(c => String(c.id)));
+            if (_visibleCustomerIds.size === 0) {
+                return applyComplexConditions([], filters.complex);
+            }
+        }
+    } catch (e) {
+        // Scope could not be resolved — fail CLOSED for non-admins: if we couldn't confirm
+        // admin, do not show anything rather than risk leaking the whole table.
+        console.warn('performTransactionSearch: visibility scope unavailable — failing closed', e);
+        try {
+            if (await getVisibleUserIds(_state.cu) !== 'all') {
+                UI.toast.error('Could not verify your access scope — transaction search unavailable.');
+                return applyComplexConditions([], filters.complex);
+            }
+        } catch (_) {
+            UI.toast.error('Could not verify your access scope — transaction search unavailable.');
+            return applyComplexConditions([], filters.complex);
+        }
+    }
+
     let items;
     try {
         const opts = { sort: 'id', sortDir: 'asc', countMode: null, limit: FETCH_CAP + 1, offset: 0, filters: {}, gte: {}, lte: {} };
@@ -1612,6 +1675,8 @@ const performTransactionSearch = async (filters) => {
         if (filters.basic.product) { opts.search = filters.basic.product; opts.searchFields = ['item']; }
         if (filters.dateRange.from) { const w = _ymdShift(filters.dateRange.from, -1); if (w) opts.gte.date = w; }
         if (filters.dateRange.to)   { const w = _ymdShift(filters.dateRange.to, 1);    if (w) opts.lte.date = w; }
+        // Push the visibility scope server-side (compiles to `.in('customer_id', …)`).
+        if (_visibleCustomerIds) { opts.scopeField = 'customer_id'; opts.scopeValues = [..._visibleCustomerIds]; }
         const res = await AppDataStore.queryAdvanced('purchases', opts);
         const data = (res && Array.isArray(res.data)) ? res.data : null;
         if (data && data.length <= FETCH_CAP) {
@@ -1622,6 +1687,12 @@ const performTransactionSearch = async (filters) => {
     } catch (e) {
         console.warn('performTransactionSearch: server filter unavailable — full-table fallback', e);
         items = await AppDataStore.getAll('purchases');
+    }
+
+    // Client-side visibility re-clamp — guarantees scope even on the whole-table fallback
+    // path (and re-asserts it if the server scope was dropped for any reason).
+    if (_visibleCustomerIds) {
+        items = items.filter(i => i.customer_id != null && _visibleCustomerIds.has(String(i.customer_id)));
     }
 
     if (filters.basic.product) {
@@ -1655,6 +1726,14 @@ const performTransactionSearch = async (filters) => {
 };
 
 const performEventSearch = async (filters) => {
+    // SECURITY (audit HIGH L1624): events are a company-wide resource with no per-agent
+    // ownership column, so there is no row-level visible set to scope to. Gate the whole
+    // entity behind management — non-management roles must not enumerate company events
+    // (and their attendance/financial metadata) via the all-roles search panel.
+    if (!isManagement() && !isSystemAdmin() && !isMarketingManager()) {
+        UI.toast.error('Event search is restricted to management.');
+        return [];
+    }
     let items = await AppDataStore.getAll('events');
 
     if (filters.basic.title) {
@@ -1764,13 +1843,21 @@ const performFormulaSearch = async (filters) => {
 };
 
 const applyComplexConditions = (items, groups) => {
-    if (!groups || groups.length === 0 || groups[0].conditions.length === 0) return items;
+    // Harden the guard — loadSavedSearch overwrites _conditionGroups directly from
+    // parsed JSON, so groups may be non-array, empty, or contain elements with no
+    // `conditions` array. Reading groups[0].conditions.length blindly threw and aborted
+    // the entire executeSearch.
+    if (!Array.isArray(groups) || groups.length === 0) return items;
+    const _anyActive = groups.some(g => Array.isArray(g?.conditions) && g.conditions.length > 0);
+    if (!_anyActive) return items;
 
     return items.filter(item => {
         // Group logic (AND/OR for multiple groups)
         // Simplified: we only support one group logic at the top level for now or specific per-group
         return groups.every(group => {
-            const results = group.conditions.map(cond => evaluateCondition(item, cond));
+            const conds = Array.isArray(group?.conditions) ? group.conditions : [];
+            if (conds.length === 0) return true; // empty group = no constraint
+            const results = conds.map(cond => evaluateCondition(item, cond));
             return group.logic === 'AND' ? results.every(r => r) : results.some(r => r);
         });
     });
@@ -1781,14 +1868,26 @@ const evaluateCondition = (item, cond) => {
 
     const itemValue = item[cond.field];
     const val = cond.value;
+    // Fall back to the legacy `op` key in case a saved/older condition used it.
+    const op = cond.operator || cond.op;
 
-    switch (cond.operator) {
+    switch (op) {
         case '=': return itemValue == val;
         case '!=': return itemValue != val;
-        case '>': return parseFloat(itemValue) > parseFloat(val);
-        case '<': return parseFloat(itemValue) < parseFloat(val);
-        case 'contains': return String(itemValue).toLowerCase().includes(String(val).toLowerCase());
-        case 'not_contains': return !String(itemValue).toLowerCase().includes(String(val).toLowerCase());
+        case '>': {
+            // Numeric compare: if either side isn't a number, there's no meaningful
+            // ordering — return false rather than letting NaN silently drop all rows.
+            const a = parseFloat(itemValue), b = parseFloat(val);
+            return (!isNaN(a) && !isNaN(b)) && a > b;
+        }
+        case '<': {
+            const a = parseFloat(itemValue), b = parseFloat(val);
+            return (!isNaN(a) && !isNaN(b)) && a < b;
+        }
+        // Treat null/undefined as '' (not the literal string 'undefined', which could
+        // spuriously match substrings like 'und').
+        case 'contains': return String(itemValue ?? '').toLowerCase().includes(String(val ?? '').toLowerCase());
+        case 'not_contains': return !String(itemValue ?? '').toLowerCase().includes(String(val ?? '').toLowerCase());
         default: return true;
     }
 };
@@ -1944,11 +2043,21 @@ const loadSavedSearch = async (id) => {
     if (!search) return;
 
     UI.toast.info(`Loading search: ${search.search_name}`);
-    const filters = JSON.parse(search.filter_data);
+    // filter_data may be corrupt, empty (RLS-truncated read), or written under an older
+    // schema (no dateRange/complex keys). Guard JSON.parse and use defensive defaults so
+    // a single bad saved search can't crash the whole load with an unhandled rejection.
+    let filters;
+    try {
+        filters = JSON.parse(search.filter_data) || {};
+    } catch (e) {
+        UI.toast.error('Could not load this saved search — its data is corrupted.');
+        return;
+    }
+    filters.dateRange = filters.dateRange || { from: '', to: '' };
 
     // Restore UI
     const seEl = document.getElementById('search-entity');
-    if (seEl) seEl.value = filters.entity;
+    if (seEl && filters.entity) seEl.value = filters.entity;
     await updateFilterSections();
 
     const sdfEl = document.getElementById('search-date-from');
@@ -1956,7 +2065,11 @@ const loadSavedSearch = async (id) => {
     const sdtEl = document.getElementById('search-date-to');
     if (sdtEl) sdtEl.value = filters.dateRange.to || '';
 
-    _conditionGroups = filters.complex;
+    // Only adopt a well-formed complex array — otherwise reset to the empty default so
+    // renderConditionGroups (_conditionGroups.map) and applyComplexConditions don't throw.
+    _conditionGroups = (Array.isArray(filters.complex) && filters.complex.length)
+        ? filters.complex
+        : [{ logic: 'AND', conditions: [] }];
     renderConditionGroups();
 
     // Execute
@@ -2001,12 +2114,21 @@ const renderSearchHistory = () => {
 };
 
 const clearAllFilters = () => {
-    // Reset basic filters
-    const section = document.getElementById('filter-sections');
-    if (section) {
-        const inputs = section.querySelectorAll('input, select');
-        inputs.forEach(input => input.value = '');
-    }
+    // Reset basic filters in BOTH containers — most prospect/customer filters live in
+    // #extra-filter-sections, and collectFilters reads both, so clearing only
+    // #filter-sections left stale extra criteria silently applied to the next search.
+    ['filter-sections', 'extra-filter-sections'].forEach(containerId => {
+        const section = document.getElementById(containerId);
+        if (!section) return;
+        section.querySelectorAll('input, select').forEach(input => {
+            if (input.multiple) {
+                // Deselect every option of a multi-select (value='' wouldn't clear it).
+                Array.from(input.options).forEach(opt => { opt.selected = false; });
+            } else {
+                input.value = '';
+            }
+        });
+    });
 
     // Reset date
     const sdfEl = document.getElementById('search-date-from');
@@ -2068,8 +2190,19 @@ const exportResults = (format) => {
     // and lazy-load the prospects chunk which owns the detail views.
     const viewEntityDetail = async (entity, id) => {
         if (window.app.hideSearchPanel) window.app.hideSearchPanel();
-        if (typeof window._loadChunk === 'function' && ['prospects','customers','agents'].includes(entity)) {
-            try { await window._loadChunk('chunks/script-prospects.min.js'); } catch (_) {}
+        if (typeof window._loadChunk === 'function') {
+            // The search chunk loads for ALL roles the moment the panel opens, but the
+            // detail handlers live in OTHER lazy chunks. Without loading the owning
+            // chunk first, a user who searches Activities/Customers/etc. without ever
+            // opening that tab gets a dead row (undefined handler, no feedback).
+            const _chunkFor = {
+                prospects: 'chunks/script-prospects.min.js',
+                customers: 'chunks/script-prospects.min.js',
+                agents:    'chunks/script-prospects.min.js',
+                activities:'chunks/script-calendar.min.js', // viewActivityDetails owned by calendar chunk
+            };
+            const chunk = _chunkFor[entity];
+            if (chunk) { try { await window._loadChunk(chunk); } catch (_) {} }
         }
         switch (entity) {
             case 'prospects': if (window.app.showProspectDetail) await window.app.showProspectDetail(id); break;
@@ -2081,7 +2214,10 @@ const exportResults = (format) => {
                 if (window.app.navigateTo) await window.app.navigateTo('marketing');
                 UI.toast.info('Navigate to Marketing → Lists to manage ' + entity);
                 break;
-            case 'activities': if (window.app.viewActivityDetails) await window.app.viewActivityDetails(id); break;
+            case 'activities':
+                if (window.app.viewActivityDetails) await window.app.viewActivityDetails(id);
+                else UI.toast.error('Could not open activity — please open the Calendar tab and try again.');
+                break;
             case 'events':     if (window.app.showEventDetail) await window.app.showEventDetail(id); else UI.toast.info('Event #' + id); break;
             default: UI.toast.info(`${entity} #${id}`);
         }

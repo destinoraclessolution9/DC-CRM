@@ -154,9 +154,15 @@
         _fpState.loaded = true;
     };
 
+    // Persist helpers. CRITICAL: when running against Supabase (useSupabase true)
+    // a write error MUST propagate so callers stop fabricating success toasts —
+    // previously these swallowed the error and returned a synthetic success value,
+    // so stock receive / PO save / cost edits reported success while the DB was
+    // unchanged. We only fall back to the local synthetic value in pure offline
+    // mode (useSupabase false). In Supabase mode the throw is re-raised.
     const fpSave = async (table, row) => {
         if (_fpState.useSupabase && window.AppDataStore?.create) {
-            try { return await AppDataStore.create(table, row); } catch (e) { /* fall through */ }
+            return await AppDataStore.create(table, row); // throws on real DB failure → caller handles
         }
         if (!row.id) row.id = 'local-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
         return row;
@@ -164,14 +170,14 @@
 
     const fpUpdate = async (table, id, patch) => {
         if (_fpState.useSupabase && window.AppDataStore?.update) {
-            try { return await AppDataStore.update(table, id, patch); } catch (e) {}
+            return await AppDataStore.update(table, id, patch); // throws on real DB failure → caller handles
         }
         return { id, ...patch };
     };
 
     const fpDelete = async (table, id) => {
         if (_fpState.useSupabase && window.AppDataStore?.delete) {
-            try { return await AppDataStore.delete(table, id); } catch (e) {}
+            return await AppDataStore.delete(table, id); // throws on real DB failure → caller handles
         }
         return true;
     };
@@ -969,25 +975,41 @@
 
         if (!items.length) { UI.toast.error('No items to order'); return; }
 
-        const po = await fpSave('fp_purchase_orders', {
-            po_number: refNum,
-            vendor_id: vendorId,
-            branch_location_id: branchId,
-            order_date: date,
-            status: 'draft',
-            created_by: _state.cu?.email || 'system',
-            created_at: new Date().toISOString(),
+        // Map sku_id → free_quantity from the replenishment recs that built this PO,
+        // so Buy-X-Get-Y free goods are PERSISTED on the po_item and credited on receipt.
+        const freeBySku = {};
+        (_fpState.lastReplenishment || []).forEach(r => {
+            if (r && r.sku && r.sku.id) freeBySku[r.sku.id] = r.freeQty || 0;
         });
-        _fpState.purchaseOrders.push(po);
 
-        for (const it of items) {
-            const sku = fpGetSkuById(it.sku_id);
-            const row = await fpSave('fp_po_items', {
-                po_id: po.id, sku_id: it.sku_id,
-                quantity_ordered: it.quantity_ordered,
-                unit_cost: sku?.unit_cost || null,
+        let po;
+        try {
+            po = await fpSave('fp_purchase_orders', {
+                po_number: refNum,
+                vendor_id: vendorId,
+                branch_location_id: branchId,
+                order_date: date,
+                status: 'draft',
+                created_by: _state.cu?.email || 'system',
+                created_at: new Date().toISOString(),
             });
-            _fpState.poItems.push(row);
+            _fpState.purchaseOrders.push(po);
+
+            for (const it of items) {
+                const sku = fpGetSkuById(it.sku_id);
+                const row = await fpSave('fp_po_items', {
+                    po_id: po.id, sku_id: it.sku_id,
+                    quantity_ordered: it.quantity_ordered,
+                    free_quantity: freeBySku[it.sku_id] || 0,
+                    unit_cost: sku?.unit_cost || null,
+                });
+                _fpState.poItems.push(row);
+            }
+        } catch (e) {
+            // A real Supabase write failed — do not fabricate a success toast.
+            console.error('fpSavePoAndExport failed:', e);
+            UI.toast.error('Could not save the purchase order. Please retry.');
+            return;
         }
 
         UI.hideModal();
@@ -995,29 +1017,45 @@
         await fpExportPoExcel(po.id);
     };
 
+    const _fpReceivingPos = new Set(); // in-flight guard: PO ids currently being received
     const fpReceivePo = async (poId) => {
         if (!confirm('Mark PO as received and add stock to central hub?')) return;
+        // Re-entrancy guard: a double-click would otherwise add stock twice.
+        if (_fpReceivingPos.has(poId)) { UI.toast.error('This PO is already being received.'); return; }
         const hub = _fpState.locations.find(l => l.type === 'central_hub' && l.is_active);
         if (!hub) { UI.toast.error('No central hub configured'); return; }
         const items = _fpState.poItems.filter(i => i.po_id === poId);
-        for (const it of items) {
-            const existing = _fpState.stockBalance.find(s => s.sku_id === it.sku_id && s.location_id === hub.id);
-            const totalQty = (it.quantity_ordered || 0) + (it.free_quantity || 0);
-            if (existing) {
-                existing.physical_stock = (parseInt(existing.physical_stock) || 0) + totalQty;
-                await fpUpdate('fp_stock_balance', existing.id, { physical_stock: existing.physical_stock });
-            } else {
-                const newRow = await fpSave('fp_stock_balance', {
-                    location_id: hub.id, sku_id: it.sku_id, physical_stock: totalQty,
-                });
-                _fpState.stockBalance.push(newRow);
+        _fpReceivingPos.add(poId);
+        try {
+            for (const it of items) {
+                const existing = _fpState.stockBalance.find(s => s.sku_id === it.sku_id && s.location_id === hub.id);
+                // free_quantity is now persisted at save time (Buy-X-Get-Y deals) so it credits real stock.
+                const totalQty = (it.quantity_ordered || 0) + (it.free_quantity || 0);
+                if (existing) {
+                    const prev = existing.physical_stock;
+                    existing.physical_stock = (parseInt(existing.physical_stock) || 0) + totalQty;
+                    try {
+                        await fpUpdate('fp_stock_balance', existing.id, { physical_stock: existing.physical_stock });
+                    } catch (e) { existing.physical_stock = prev; throw e; } // roll back in-memory on DB failure
+                } else {
+                    const newRow = await fpSave('fp_stock_balance', {
+                        location_id: hub.id, sku_id: it.sku_id, physical_stock: totalQty,
+                    });
+                    _fpState.stockBalance.push(newRow);
+                }
+                it.quantity_received = it.quantity_ordered;
+                await fpUpdate('fp_po_items', it.id, { quantity_received: it.quantity_received });
             }
-            it.quantity_received = it.quantity_ordered;
-            await fpUpdate('fp_po_items', it.id, { quantity_received: it.quantity_received });
+            const po = _fpState.purchaseOrders.find(p => p.id === poId);
+            if (po) { po.status = 'received'; await fpUpdate('fp_purchase_orders', poId, { status: 'received' }); }
+            UI.toast.success('PO received and stock updated');
+        } catch (e) {
+            // A real Supabase write failed — surface it instead of a fabricated success.
+            console.error('fpReceivePo failed:', e);
+            UI.toast.error('Could not receive PO — the stock update did not save. Please retry.');
+        } finally {
+            _fpReceivingPos.delete(poId);
         }
-        const po = _fpState.purchaseOrders.find(p => p.id === poId);
-        if (po) { po.status = 'received'; await fpUpdate('fp_purchase_orders', poId, { status: 'received' }); }
-        UI.toast.success('PO received and stock updated');
         fpRenderPurchaseOrders(document.getElementById('fp-tab-content'));
     };
 
@@ -1188,50 +1226,83 @@
     const fpExecuteTransfer = async (idx) => {
         const rec = _fpState.lastTransferRecs[idx];
         if (!rec) return;
+        // Re-entrancy guard (identity-based, robust against splice re-indexing): a
+        // double-click would otherwise apply the stock delta twice / write two orders.
+        if (rec._executing) { UI.toast.error('This transfer is already running.'); return; }
         if (!confirm(`Transfer ${rec.transferQty} × ${rec.sku.product_code} from ${rec.hub.name} to ${rec.outlet.name}?`)) return;
+        rec._executing = true;
 
+        // Remove the rec from lastTransferRecs by IDENTITY (not index — splice would
+        // re-index neighbours) so a re-entrant call cannot re-find/re-run the same rec.
+        const _ri = _fpState.lastTransferRecs.indexOf(rec);
+        if (_ri !== -1) _fpState.lastTransferRecs.splice(_ri, 1);
+
+        // Re-read LIVE hub stock at execution time (transferQty was computed against a
+        // stale snapshot in fpCalcTransferNeeds). Only move what the hub actually has.
         const hubBal    = _fpState.stockBalance.find(s => s.sku_id === rec.sku.id && s.location_id === rec.hub.id);
         const outletBal = _fpState.stockBalance.find(s => s.sku_id === rec.sku.id && s.location_id === rec.outlet.id);
 
-        if (hubBal) {
-            hubBal.physical_stock = (parseInt(hubBal.physical_stock) || 0) - rec.transferQty;
-            await fpUpdate('fp_stock_balance', hubBal.id, { physical_stock: hubBal.physical_stock });
+        const liveHub = hubBal ? (parseInt(hubBal.physical_stock) || 0) : 0;
+        if (liveHub <= 0) {
+            UI.toast.error(`No live stock at ${rec.hub.name} for ${rec.sku.product_code}.`);
+            fpRenderTransfers(document.getElementById('fp-tab-content'));
+            return;
         }
-        if (outletBal) {
-            outletBal.physical_stock = (parseInt(outletBal.physical_stock) || 0) + rec.transferQty;
-            await fpUpdate('fp_stock_balance', outletBal.id, { physical_stock: outletBal.physical_stock });
-        } else {
-            const nb = await fpSave('fp_stock_balance', {
-                location_id: rec.outlet.id, sku_id: rec.sku.id, physical_stock: rec.transferQty
+        // Clamp the moved quantity to what the hub can actually supply (no negative hub,
+        // no out-of-thin-air outlet credit). Outlet is only credited by the real debit.
+        const moveQty = Math.min(rec.transferQty, liveHub);
+        if (moveQty < rec.transferQty) {
+            UI.toast.info(`Only ${moveQty} available at hub — transferring ${moveQty} (requested ${rec.transferQty}).`);
+        }
+
+        try {
+            const prevHub = hubBal.physical_stock;
+            hubBal.physical_stock = liveHub - moveQty;
+            try {
+                await fpUpdate('fp_stock_balance', hubBal.id, { physical_stock: hubBal.physical_stock });
+            } catch (e) { hubBal.physical_stock = prevHub; throw e; } // roll back in-memory hub debit
+
+            if (outletBal) {
+                const prevOutlet = outletBal.physical_stock;
+                outletBal.physical_stock = (parseInt(outletBal.physical_stock) || 0) + moveQty;
+                try {
+                    await fpUpdate('fp_stock_balance', outletBal.id, { physical_stock: outletBal.physical_stock });
+                } catch (e) { outletBal.physical_stock = prevOutlet; throw e; }
+            } else {
+                const nb = await fpSave('fp_stock_balance', {
+                    location_id: rec.outlet.id, sku_id: rec.sku.id, physical_stock: moveQty
+                });
+                _fpState.stockBalance.push(nb);
+            }
+
+            const today = new Date().toISOString().slice(0, 10);
+            const order = await fpSave('fp_transfer_orders', {
+                from_location_id: rec.hub.id, to_location_id: rec.outlet.id,
+                transfer_date: today, status: 'completed',
+                created_at: new Date().toISOString(),
             });
-            _fpState.stockBalance.push(nb);
-        }
-
-        const today = new Date().toISOString().slice(0, 10);
-        const order = await fpSave('fp_transfer_orders', {
-            from_location_id: rec.hub.id, to_location_id: rec.outlet.id,
-            transfer_date: today, status: 'completed',
-            created_at: new Date().toISOString(),
-        });
-        _fpState.transferOrders.push(order);
-        const item = await fpSave('fp_transfer_items', {
-            transfer_id: order.id, sku_id: rec.sku.id, quantity: rec.transferQty
-        });
-        _fpState.transferItems.push(item);
-
-        const setting = _fpState.outletSettings.find(s => s.outlet_id === rec.outlet.id && s.sku_id === rec.sku.id);
-        if (setting) {
-            setting.last_transfer_date = today;
-            await fpUpdate('fp_outlet_sku_settings', setting.id, { last_transfer_date: today });
-        } else {
-            const ns = await fpSave('fp_outlet_sku_settings', {
-                outlet_id: rec.outlet.id, sku_id: rec.sku.id, last_transfer_date: today
+            _fpState.transferOrders.push(order);
+            const item = await fpSave('fp_transfer_items', {
+                transfer_id: order.id, sku_id: rec.sku.id, quantity: moveQty
             });
-            _fpState.outletSettings.push(ns);
-        }
+            _fpState.transferItems.push(item);
 
-        _fpState.lastTransferRecs.splice(idx, 1);
-        UI.toast.success('Transfer completed');
+            const setting = _fpState.outletSettings.find(s => s.outlet_id === rec.outlet.id && s.sku_id === rec.sku.id);
+            if (setting) {
+                setting.last_transfer_date = today;
+                await fpUpdate('fp_outlet_sku_settings', setting.id, { last_transfer_date: today });
+            } else {
+                const ns = await fpSave('fp_outlet_sku_settings', {
+                    outlet_id: rec.outlet.id, sku_id: rec.sku.id, last_transfer_date: today
+                });
+                _fpState.outletSettings.push(ns);
+            }
+            UI.toast.success('Transfer completed');
+        } catch (e) {
+            // A real Supabase write failed — surface it instead of a fabricated success.
+            console.error('fpExecuteTransfer failed:', e);
+            UI.toast.error('Transfer did not save — please retry.');
+        }
         fpRenderTransfers(document.getElementById('fp-tab-content'));
     };
 
@@ -1306,6 +1377,7 @@
         _fpStockSearch = v;
         // re-render but preserve focus
         const c = document.getElementById('fp-tab-content');
+        if (!c) return; // tab content swapped out (navigation / island re-render) — bail (mirror fpSwitchTab guard)
         const scroll = c.querySelector('div[style*="overflow-y:auto"]')?.scrollTop || 0;
         fpRenderStockInquiry(c);
         const inp = document.getElementById('fp-stock-search');
@@ -1317,19 +1389,50 @@
     const fpSaveActualMin = async (skuId, value) => {
         const sku = fpGetSkuById(skuId);
         if (!sku) return;
-        const v = value === '' ? null : parseInt(value);
+        // Validate: never persist NaN (pasted text / locale separators / programmatic onchange).
+        // Empty string clears the override (null → falls back to auto_min_stock).
+        let v;
+        if (value === '' || value == null) {
+            v = null;
+        } else {
+            const n = parseInt(value);
+            if (!Number.isFinite(n) || n < 0) { UI.toast.error('Enter a valid non-negative number.'); return; }
+            v = n;
+        }
+        const prev = sku.actual_min_stock;
         sku.actual_min_stock = v;
-        await fpUpdate('fp_sku_master', skuId, { actual_min_stock: v });
-        UI.toast.success('Min stock saved');
+        try {
+            await fpUpdate('fp_sku_master', skuId, { actual_min_stock: v });
+            UI.toast.success('Min stock saved');
+        } catch (e) {
+            sku.actual_min_stock = prev; // roll back in-memory on DB failure
+            console.error('fpSaveActualMin failed:', e);
+            UI.toast.error('Could not save min stock — please retry.');
+        }
     };
 
     const fpSaveUnitCost = async (skuId, value) => {
         const sku = fpGetSkuById(skuId);
         if (!sku) return;
-        const v = value === '' ? null : parseFloat(value);
+        // Validate: never persist NaN. Empty string clears the cost (null).
+        let v;
+        if (value === '' || value == null) {
+            v = null;
+        } else {
+            const n = parseFloat(value);
+            if (!Number.isFinite(n) || n < 0) { UI.toast.error('Enter a valid non-negative cost.'); return; }
+            v = n;
+        }
+        const prev = sku.unit_cost;
         sku.unit_cost = v;
-        await fpUpdate('fp_sku_master', skuId, { unit_cost: v });
-        UI.toast.success('Cost saved');
+        try {
+            await fpUpdate('fp_sku_master', skuId, { unit_cost: v });
+            UI.toast.success('Cost saved');
+        } catch (e) {
+            sku.unit_cost = prev; // roll back in-memory on DB failure
+            console.error('fpSaveUnitCost failed:', e);
+            UI.toast.error('Could not save cost — please retry.');
+        }
     };
 
     // ---------- Sub-tab: Vendors ----------
@@ -1407,13 +1510,20 @@
             name, address_line1: get('addr1'), address_line2: get('addr2'), address_line3: get('addr3'),
             phone: get('phone'), fax: get('fax'), email: get('email'), is_active: true,
         };
-        if (vendorId) {
-            const v = _fpState.vendors.find(x => x.id === vendorId);
-            Object.assign(v, data);
-            await fpUpdate('fp_vendors', vendorId, data);
-        } else {
-            const v = await fpSave('fp_vendors', { ...data, created_at: new Date().toISOString() });
-            _fpState.vendors.push(v);
+        try {
+            if (vendorId) {
+                const v = _fpState.vendors.find(x => x.id === vendorId);
+                Object.assign(v, data);
+                await fpUpdate('fp_vendors', vendorId, data);
+            } else {
+                const v = await fpSave('fp_vendors', { ...data, created_at: new Date().toISOString() });
+                _fpState.vendors.push(v);
+            }
+        } catch (e) {
+            // Real Supabase write failed — surface instead of fabricating a success toast.
+            console.error('fpSaveVendor failed:', e);
+            UI.toast.error('Could not save vendor — please retry.');
+            return;
         }
         UI.hideModal();
         UI.toast.success('Vendor saved');
@@ -1425,7 +1535,14 @@
         const v = _fpState.vendors.find(x => x.id === vendorId);
         if (v) {
             v.is_active = false;
-            await fpUpdate('fp_vendors', vendorId, { is_active: false });
+            try {
+                await fpUpdate('fp_vendors', vendorId, { is_active: false });
+            } catch (e) {
+                v.is_active = true; // roll back in-memory on DB failure
+                console.error('fpDeleteVendor failed:', e);
+                UI.toast.error('Could not deactivate vendor — please retry.');
+                return;
+            }
             fpRenderVendors(document.getElementById('fp-tab-content'));
             UI.toast.success('Vendor deactivated');
         }
@@ -1536,10 +1653,17 @@
         const match  = document.getElementById('fp-ex-match').value;
         const reason = document.getElementById('fp-ex-reason').value.trim();
         if (!code) { UI.toast.error('Code required'); return; }
-        const e = await fpSave('fp_product_exclusions', {
-            product_code: code, match_type: match, reason, is_active: true,
-            created_by: _state.cu?.email || 'system', created_at: new Date().toISOString(),
-        });
+        let e;
+        try {
+            e = await fpSave('fp_product_exclusions', {
+                product_code: code, match_type: match, reason, is_active: true,
+                created_by: _state.cu?.email || 'system', created_at: new Date().toISOString(),
+            });
+        } catch (err) {
+            console.error('fpSaveExclusion failed:', err);
+            UI.toast.error('Could not add exclusion — please retry.');
+            return;
+        }
         _fpState.exclusions.push(e);
         UI.hideModal();
         UI.toast.success('Exclusion added');
@@ -1548,12 +1672,28 @@
 
     const fpToggleExclusion = async (id, active) => {
         const e = _fpState.exclusions.find(x => x.id === id);
-        if (e) { e.is_active = active; await fpUpdate('fp_product_exclusions', id, { is_active: active }); }
+        if (e) {
+            e.is_active = active;
+            try {
+                await fpUpdate('fp_product_exclusions', id, { is_active: active });
+            } catch (err) {
+                e.is_active = !active; // roll back in-memory on DB failure
+                console.error('fpToggleExclusion failed:', err);
+                UI.toast.error('Could not update exclusion — please retry.');
+                fpRenderExclusionsDeals(document.getElementById('fp-tab-content'));
+            }
+        }
     };
 
     const fpDeleteExclusion = async (id) => {
         if (!confirm('Delete this exclusion?')) return;
-        await fpDelete('fp_product_exclusions', id);
+        try {
+            await fpDelete('fp_product_exclusions', id);
+        } catch (err) {
+            console.error('fpDeleteExclusion failed:', err);
+            UI.toast.error('Could not delete exclusion — please retry.');
+            return;
+        }
         _fpState.exclusions = _fpState.exclusions.filter(x => x.id !== id);
         fpRenderExclusionsDeals(document.getElementById('fp-tab-content'));
     };
@@ -1566,22 +1706,28 @@
             const text = await file.text();
             if (typeof Papa === 'undefined') { UI.toast.error('CSV parser missing'); return; }
             const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
-            let added = 0;
+            let added = 0, failed = 0;
             for (const row of parsed.data) {
                 const code = (row.product_code || row.Code || row.code || '').trim();
                 if (!code) continue;
-                const ex = await fpSave('fp_product_exclusions', {
-                    product_code: code,
-                    match_type: (row.match_type || 'exact').trim(),
-                    reason: (row.reason || '').trim(),
-                    is_active: true,
-                    created_by: _state.cu?.email || 'system',
-                    created_at: new Date().toISOString(),
-                });
-                _fpState.exclusions.push(ex);
-                added++;
+                try {
+                    const ex = await fpSave('fp_product_exclusions', {
+                        product_code: code,
+                        match_type: (row.match_type || 'exact').trim(),
+                        reason: (row.reason || '').trim(),
+                        is_active: true,
+                        created_by: _state.cu?.email || 'system',
+                        created_at: new Date().toISOString(),
+                    });
+                    _fpState.exclusions.push(ex);
+                    added++;
+                } catch (err) {
+                    console.error('fpExclusionBulkUpload row failed:', code, err);
+                    failed++;
+                }
             }
-            UI.toast.success(`Imported ${added} exclusion(s)`);
+            if (failed) UI.toast.error(`Imported ${added} exclusion(s); ${failed} failed.`);
+            else UI.toast.success(`Imported ${added} exclusion(s)`);
             fpRenderExclusionsDeals(document.getElementById('fp-tab-content'));
         };
         inp.click();
@@ -1632,7 +1778,14 @@
             effective_to: document.getElementById('fp-dl-to').value || null,
             is_active: true, created_at: new Date().toISOString(),
         };
-        const d = await fpSave('fp_order_requirements', data);
+        let d;
+        try {
+            d = await fpSave('fp_order_requirements', data);
+        } catch (err) {
+            console.error('fpSaveDeal failed:', err);
+            UI.toast.error('Could not save deal — please retry.');
+            return;
+        }
         _fpState.orderReqs.push(d);
         UI.hideModal();
         UI.toast.success('Deal saved');
@@ -1641,7 +1794,13 @@
 
     const fpDeleteDeal = async (id) => {
         if (!confirm('Delete this deal?')) return;
-        await fpDelete('fp_order_requirements', id);
+        try {
+            await fpDelete('fp_order_requirements', id);
+        } catch (err) {
+            console.error('fpDeleteDeal failed:', err);
+            UI.toast.error('Could not delete deal — please retry.');
+            return;
+        }
         _fpState.orderReqs = _fpState.orderReqs.filter(x => x.id !== id);
         fpRenderExclusionsDeals(document.getElementById('fp-tab-content'));
     };
@@ -1671,7 +1830,11 @@
                 const name  = (row['Product Name'] || '').toString();
                 const attr  = (row['Product Attribute'] || '').toString();
                 const phys  = parseInt(row['Physical Stock']) || 0;
-                let pos     = row['POS Completed']; pos = parseInt(pos) || 0; pos = Math.abs(pos);
+                // POS Completed is a SIGNED sales figure used here only as a liveness signal.
+                // Do NOT abs() it for the keep/drop test — a SKU with refund/correction-only
+                // activity (e.g. -3) is still "live" and must survive the zero/zero drop. We
+                // keep the raw signed value and test `!== 0` ("any activity") for that filter.
+                const pos   = parseInt(row['POS Completed']) || 0;
 
                 const pushDrop = (reason) => droppedRows.push({
                     Location: loc, 'Product Code': code, 'Product Name': name,
@@ -1752,14 +1915,15 @@
         UI.toast.info('Committing import...');
         const ACTIVE = new Set(['Puchong warehouse','001 Retail Puchong','002 Retail Bay Avenue','003 Retail Pavilion 2','Factory OEM']);
         const NAME_RE = new RegExp('\\b(' + FP_NAME_EXCLUDES.join('|') + ')\\b', 'i');
-        let upserted = 0;
+        let upserted = 0, failed = 0;
         for (const row of rows) {
             const loc   = (row.Location || '').trim();
             const code  = (row['Product Code'] || '').toString().trim();
             const name  = (row['Product Name'] || '').toString();
             const attr  = (row['Product Attribute'] || '').toString();
             const phys  = parseInt(row['Physical Stock']) || 0;
-            let pos = row['POS Completed']; pos = Math.abs(parseInt(pos) || 0);
+            // Keep parity with the preview: signed liveness signal, test `!== 0` (no abs()).
+            const pos = parseInt(row['POS Completed']) || 0;
             if (!ACTIVE.has(loc) || (phys === 0 && pos === 0)) continue;
             const codeUp = code.toUpperCase();
             const inKeep = FP_KEEP_TOKENS.some(t => codeUp.includes(t));
@@ -1769,32 +1933,42 @@
             }
             if (fpIsExcluded(code)) continue;
 
-            let sku = fpGetSkuByCode(code);
-            if (!sku) {
-                sku = await fpSave('fp_sku_master', {
-                    product_code: code, product_name: name, product_attribute: attr,
-                    is_active: true, is_oem: loc === 'Factory OEM',
-                    last_updated: new Date().toISOString(),
-                });
-                _fpState.skus.push(sku);
+            // Per-row try/catch: a real Supabase failure must NOT fabricate an upsert count.
+            try {
+                let sku = fpGetSkuByCode(code);
+                if (!sku) {
+                    sku = await fpSave('fp_sku_master', {
+                        product_code: code, product_name: name, product_attribute: attr,
+                        is_active: true, is_oem: loc === 'Factory OEM',
+                        last_updated: new Date().toISOString(),
+                    });
+                    _fpState.skus.push(sku);
+                }
+                const location = fpGetLocationByName(loc);
+                if (!location) continue;
+                let bal = _fpState.stockBalance.find(s => s.sku_id === sku.id && s.location_id === location.id);
+                if (bal) {
+                    const prev = bal.physical_stock, prevTs = bal.last_updated;
+                    bal.physical_stock = phys;
+                    bal.last_updated = new Date().toISOString();
+                    try {
+                        await fpUpdate('fp_stock_balance', bal.id, { physical_stock: phys, last_updated: bal.last_updated });
+                    } catch (e) { bal.physical_stock = prev; bal.last_updated = prevTs; throw e; }
+                } else {
+                    bal = await fpSave('fp_stock_balance', {
+                        location_id: location.id, sku_id: sku.id, physical_stock: phys,
+                        last_updated: new Date().toISOString(),
+                    });
+                    _fpState.stockBalance.push(bal);
+                }
+                upserted++;
+            } catch (e) {
+                console.error('fpCommitStockImport row write failed:', code, e);
+                failed++;
             }
-            const location = fpGetLocationByName(loc);
-            if (!location) continue;
-            let bal = _fpState.stockBalance.find(s => s.sku_id === sku.id && s.location_id === location.id);
-            if (bal) {
-                bal.physical_stock = phys;
-                bal.last_updated = new Date().toISOString();
-                await fpUpdate('fp_stock_balance', bal.id, { physical_stock: phys, last_updated: bal.last_updated });
-            } else {
-                bal = await fpSave('fp_stock_balance', {
-                    location_id: location.id, sku_id: sku.id, physical_stock: phys,
-                    last_updated: new Date().toISOString(),
-                });
-                _fpState.stockBalance.push(bal);
-            }
-            upserted++;
         }
-        UI.toast.success(`Imported ${upserted} stock row(s)`);
+        if (failed) UI.toast.error(`Imported ${upserted} stock row(s); ${failed} failed to save.`);
+        else UI.toast.success(`Imported ${upserted} stock row(s)`);
         await fpSwitchTab(_fpState.currentTab);
     };
 
@@ -1817,9 +1991,20 @@
             _fpState.locations.forEach(l => { if (l.pos_prefix) prefixMap[l.pos_prefix] = l; });
 
             const parseDate = (s) => {
-                if (!s) return null;
+                if (s === '' || s == null) return null;
                 if (s instanceof Date) return s.toISOString().slice(0, 10);
+                // Excel serial number (sheet_to_json without cellDates returns dates as
+                // numeric serials, e.g. 46000). Convert from the Excel epoch (1899-12-30).
+                if (typeof s === 'number' && isFinite(s) && s > 0) {
+                    const d = new Date(Date.UTC(1899, 11, 30) + Math.round(s) * 86400000);
+                    return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+                }
                 const str = s.toString().trim();
+                // Numeric serial that arrived as a string (e.g. '46000')
+                if (/^\d{4,6}$/.test(str)) {
+                    const d = new Date(Date.UTC(1899, 11, 30) + parseInt(str, 10) * 86400000);
+                    return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+                }
                 // DD/MM/YYYY
                 const m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
                 if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
@@ -1828,9 +2013,27 @@
                 return null;
             };
 
-            let salesAdded = 0, refundsAdded = 0, skipped = 0;
+            let salesAdded = 0, refundsAdded = 0, skipped = 0, duplicates = 0;
             const droppedRows = [];
             const newSkus = new Set();
+            const importedSkuIds = new Set(); // only recompute auto_min for SKUs touched by THIS import
+
+            // Dedup guard: re-importing the same POS export (or overlapping date ranges)
+            // would otherwise double-count every sale/refund. Build a Set of natural keys
+            // from already-loaded transactions/refunds, and add each newly-inserted key so
+            // duplicate rows WITHIN the same file are also skipped.
+            const _natKey = (purchase_number, code, qty, date) =>
+                `${purchase_number}|${code}|${qty}|${date}`;
+            const seenKeys = new Set();
+            _fpState.posTransactions.forEach(t => {
+                const c = (fpGetSkuById(t.sku_id) || {}).product_code || t.sku_id;
+                seenKeys.add('S|' + _natKey(t.purchase_number, c, t.quantity_sold, t.transaction_date));
+            });
+            _fpState.refunds.forEach(r => {
+                const c = (fpGetSkuById(r.sku_id) || {}).product_code || r.sku_id;
+                seenKeys.add('R|' + _natKey(r.purchase_number, c, r.quantity_refunded, r.refund_date));
+            });
+
             for (const row of rows) {
                 const purchase = (row['Purchase Number'] || '').toString().trim();
                 const rawDate  = row['Purchase Date'];
@@ -1872,49 +2075,75 @@
                     newSkus.add(code);
                 }
 
-                if (isRefund) {
-                    const r = await fpSave('fp_refunds', {
-                        location_id: location.id, sku_id: sku.id,
-                        purchase_number: purchase, quantity_refunded: qty,
-                        unit_price: price, refund_date: date,
-                        created_at: new Date().toISOString(),
-                    });
-                    _fpState.refunds.push(r);
-                    refundsAdded++;
-                } else {
-                    const t = await fpSave('fp_pos_transactions', {
-                        location_id: location.id, sku_id: sku.id,
-                        purchase_number: purchase, quantity_sold: qty,
-                        unit_price: price, subtotal: subtotal, transaction_date: date,
-                        created_at: new Date().toISOString(),
-                    });
-                    _fpState.posTransactions.push(t);
-                    salesAdded++;
+                // Dedup: skip rows already present (prior import or duplicate within file).
+                const key = (isRefund ? 'R|' : 'S|') + _natKey(purchase, code, qty, date);
+                if (seenKeys.has(key)) { duplicates++; pushDrop('Duplicate (already imported)'); continue; }
+                seenKeys.add(key);
+
+                try {
+                    if (isRefund) {
+                        const r = await fpSave('fp_refunds', {
+                            location_id: location.id, sku_id: sku.id,
+                            purchase_number: purchase, quantity_refunded: qty,
+                            unit_price: price, refund_date: date,
+                            created_at: new Date().toISOString(),
+                        });
+                        _fpState.refunds.push(r);
+                        refundsAdded++;
+                    } else {
+                        const t = await fpSave('fp_pos_transactions', {
+                            location_id: location.id, sku_id: sku.id,
+                            purchase_number: purchase, quantity_sold: qty,
+                            unit_price: price, subtotal: subtotal, transaction_date: date,
+                            created_at: new Date().toISOString(),
+                        });
+                        _fpState.posTransactions.push(t);
+                        salesAdded++;
+                    }
+                    importedSkuIds.add(sku.id);
+                } catch (e) {
+                    // A real Supabase write failed — count as skipped, drop the seen-key so a
+                    // retry can re-attempt, and don't fabricate success.
+                    console.error('fpImportPos row write failed:', e);
+                    seenKeys.delete(key);
+                    skipped++;
+                    pushDrop('Write failed (DB error)');
                 }
             }
 
-            // Recompute auto_min_stock locally from imported sales
-            for (const sku of _fpState.skus) {
-                const cutoff = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
-                const sold = _fpState.posTransactions
-                    .filter(p => p.sku_id === sku.id && p.transaction_date >= cutoff)
+            // Recompute auto_min_stock ONLY for SKUs touched by this import (not the whole
+            // catalog), with the 90-day cutoff hoisted out of the loop and the POS rows
+            // bucketed by sku_id ONCE. Writes are batched/parallelized instead of N+1 serial.
+            const cutoff = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
+            const soldBySku = _fpBucketBy(_fpState.posTransactions, p => p.sku_id);
+            const autoMinUpdates = [];
+            for (const skuId of importedSkuIds) {
+                const sku = fpGetSkuById(skuId);
+                if (!sku) continue;
+                const sold = _fpFromBucket(soldBySku, skuId)
+                    .filter(p => p.transaction_date >= cutoff)
                     .reduce((s, p) => s + (parseInt(p.quantity_sold) || 0), 0);
                 const lead   = sku.lead_time_days || 7;
                 const safety = sku.safety_factor   || 1.5;
                 const auto = Math.ceil((sold / 90) * lead * safety);
                 if (auto !== sku.auto_min_stock) {
                     sku.auto_min_stock = auto;
-                    await fpUpdate('fp_sku_master', sku.id, { auto_min_stock: auto });
+                    autoMinUpdates.push(fpUpdate('fp_sku_master', sku.id, { auto_min_stock: auto }));
                 }
+            }
+            // Parallelize the derived-min writes; failures here are non-fatal (auto_min is
+            // recomputed every import) so swallow them rather than aborting the import summary.
+            if (autoMinUpdates.length) {
+                try { await Promise.allSettled(autoMinUpdates); } catch (_) {}
             }
 
             _fpState._lastDroppedPosRows = droppedRows;
-            UI.toast.success(`Imported ${salesAdded} sales, ${refundsAdded} refund(s). ${skipped} skipped. ${newSkus.size} new SKU(s) auto-created.`);
+            UI.toast.success(`Imported ${salesAdded} sales, ${refundsAdded} refund(s). ${skipped} skipped, ${duplicates} duplicate(s). ${newSkus.size} new SKU(s) auto-created.`);
             if (droppedRows.length) {
                 UI.showModal('POS Import Complete', `
                     <div style="font-size:14px;">
                         <p style="margin:0 0 10px;"><strong>${salesAdded}</strong> sales, <strong>${refundsAdded}</strong> refund(s) imported. <strong>${newSkus.size}</strong> new SKU(s) auto-created.</p>
-                        <p style="margin:0 0 10px;color:#991b1b;"><strong>${skipped}</strong> row(s) were skipped. Download them for review:</p>
+                        <p style="margin:0 0 10px;color:#991b1b;"><strong>${skipped}</strong> skipped + <strong>${duplicates}</strong> duplicate(s) not imported. Download them for review:</p>
                         <button class="btn primary" onclick="app.fpDownloadDroppedPosRows()" style="width:100%;">
                             <i class="fas fa-file-excel"></i> Download ${skipped} Dropped Row(s) as Excel
                         </button>
@@ -2031,25 +2260,31 @@
         if (!candidates || !candidates.length) { UI.hideModal(); return; }
         UI.hideModal();
         UI.toast.info(`Adding ${candidates.length} delisted SKU(s)...`);
-        let added = 0;
+        let added = 0, failed = 0;
         for (const c of candidates) {
-            const ex = await fpSave('fp_product_exclusions', {
-                product_code: c.code,
-                match_type: 'exact',
-                reason: c.name ? `delisted — ${c.name}` : 'delisted',
-                is_active: true,
-                created_by: _state.cu?.email || 'system',
-                created_at: new Date().toISOString(),
-            });
-            _fpState.exclusions.push(ex);
-            const sku = fpGetSkuByCode(c.code);
-            if (sku && sku.is_active !== false) {
-                sku.is_active = false;
-                await fpUpdate('fp_sku_master', sku.id, { is_active: false });
+            try {
+                const ex = await fpSave('fp_product_exclusions', {
+                    product_code: c.code,
+                    match_type: 'exact',
+                    reason: c.name ? `delisted — ${c.name}` : 'delisted',
+                    is_active: true,
+                    created_by: _state.cu?.email || 'system',
+                    created_at: new Date().toISOString(),
+                });
+                _fpState.exclusions.push(ex);
+                const sku = fpGetSkuByCode(c.code);
+                if (sku && sku.is_active !== false) {
+                    sku.is_active = false;
+                    await fpUpdate('fp_sku_master', sku.id, { is_active: false });
+                }
+                added++;
+            } catch (err) {
+                console.error('fpCommitDelistedImport row failed:', c.code, err);
+                failed++;
             }
-            added++;
         }
-        UI.toast.success(`${added} SKU(s) marked as delisted and saved.`);
+        if (failed) UI.toast.error(`${added} SKU(s) delisted; ${failed} failed to save.`);
+        else UI.toast.success(`${added} SKU(s) marked as delisted and saved.`);
         await fpSwitchTab(_fpState.currentTab);
     };
 

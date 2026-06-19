@@ -47,8 +47,8 @@
 
     let _brState = {
         selectedRun: null,
-        salesFile: null, salesFileName: null,
-        trackingFile: null, trackingFileName: null,
+        salesFile: null, salesFileName: null, salesLoading: false,
+        trackingFile: null, trackingFileName: null, trackingLoading: false,
         skusMap: null,
         reportText: null,
     };
@@ -62,7 +62,11 @@
     const _brMonthBounds = () => {
         const n = new Date();
         const y = n.getFullYear(), m = String(n.getMonth()+1).padStart(2,'0');
-        return { start: `${y}-${m}-01`, end: `${y}-${m}-31` };
+        // Compute the real last day of the month — day 0 of next month rolls back
+        // to the final day of the current one. Avoids impossible '-31' bounds for
+        // short months (e.g. 2026-02-31) that would error/mis-filter a date query.
+        const last = new Date(y, n.getMonth()+1, 0).getDate();
+        return { start: `${y}-${m}-01`, end: `${y}-${m}-${String(last).padStart(2,'0')}` };
     };
 
     const _brParseSkusXlsx = async (buf) => {
@@ -92,6 +96,11 @@
             const code = String(row['Product Code']||'').trim();
             const qty  = Number(row['Quantity'])||0;
             if (_brIsEgg(code)) continue;
+            // Scope: the Product Balance section is KL/PG-only by design (the report
+            // template and balance inputs have no JB column — JB exists only in the
+            // egg run totals, not in these wholesale-product balance files). Purchase
+            // Numbers prefixed 'F'→KL, 'P'→PG; any other prefix is intentionally
+            // excluded from these sold totals.
             const region = pNum.startsWith('F') ? 'KL' : pNum.startsWith('P') ? 'PG' : null;
             if (!region) continue;
             const sku = skusMap[code];
@@ -103,9 +112,13 @@
     };
 
     const _brParseTrackingCsv = (csvText, skusMap) => {
-        const rows = (typeof Papa!=='undefined')
-            ? Papa.parse(csvText, { header:true, skipEmptyLines:true }).data
-            : [];
+        // Throw (rather than silently returning empty) when PapaParse is missing,
+        // so brGenerate's catch surfaces the failure instead of treating the
+        // tracking file as 'sold nothing' and under-deducting the balance.
+        if (typeof Papa === 'undefined') {
+            throw new Error('PapaParse (Papa) is not loaded — cannot parse Order Tracking CSV');
+        }
+        const rows = Papa.parse(csvText, { header:true, skipEmptyLines:true }).data;
         const sold = { KL: {}, PG: {} };
         for (const row of rows) {
             const code    = String(row['Product Code']||'').trim();
@@ -285,8 +298,12 @@
         const file = input.files[0]; if (!file) return;
         const lbl = document.getElementById('br-lbl-sales');
         if (lbl) lbl.textContent = 'Loading…';
+        // Race guard: clear the stale file and flag loading until onload completes,
+        // so brGenerate can refuse to run with a half-read (or previous) file.
+        _brState.salesFile = null; _brState.salesLoading = true;
         const fr = new FileReader();
-        fr.onload = e => { _brState.salesFile = e.target.result; _brState.salesFileName = file.name; if (lbl) lbl.textContent = '✓ '+file.name; };
+        fr.onload = e => { _brState.salesFile = e.target.result; _brState.salesFileName = file.name; _brState.salesLoading = false; if (lbl) lbl.textContent = '✓ '+file.name; };
+        fr.onerror = () => { _brState.salesLoading = false; if (lbl) lbl.textContent = 'Error reading file'; UI.toast.error('Failed to read FORMULA Sales file'); };
         fr.readAsArrayBuffer(file);
     };
 
@@ -294,8 +311,11 @@
         const file = input.files[0]; if (!file) return;
         const lbl = document.getElementById('br-lbl-track');
         if (lbl) lbl.textContent = 'Loading…';
+        // Race guard: clear the stale file and flag loading until onload completes.
+        _brState.trackingFile = null; _brState.trackingLoading = true;
         const fr = new FileReader();
-        fr.onload = e => { _brState.trackingFile = e.target.result; _brState.trackingFileName = file.name; if (lbl) lbl.textContent = '✓ '+file.name; };
+        fr.onload = e => { _brState.trackingFile = e.target.result; _brState.trackingFileName = file.name; _brState.trackingLoading = false; if (lbl) lbl.textContent = '✓ '+file.name; };
+        fr.onerror = () => { _brState.trackingLoading = false; if (lbl) lbl.textContent = 'Error reading file'; UI.toast.error('Failed to read Order Tracking file'); };
         fr.readAsText(file, 'utf-8');
     };
 
@@ -319,6 +339,10 @@
     };
 
     const brSaveTargets = () => {
+        // Defense in depth: re-check role at the handler (the view gate alone is
+        // insufficient — these are exported on window.app and could be invoked
+        // directly). Boss Report is Super Admin only.
+        if (!isSystemAdmin(_state.cu)) { UI.toast.error('Access denied'); return; }
         const mk = _brMonthKey();
         const groups = ['klCheras','klKepong','pgCenter','pgMainland','pgSouth'];
         const tgts = {};
@@ -327,16 +351,25 @@
         UI.toast.success('Targets saved for '+mk.replace('_','/'));
     };
 
+    // Escape regex metacharacters so a label like 'Eye+' is matched literally
+    // (the '+' must not act as a quantifier).
+    const _brEscapeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
     const _brParseFinalBalances = (text) => {
         const groups = [
             { key:'oceanSold', label:'Ocean sold' },
             { key:'yangPower', label:'Yang power sold' },
             { key:'d3k2',      label:'D3k2 Sold' },
-            { key:'eyePlus',   label:'Eye\\+' },
+            { key:'eyePlus',   label:'Eye+' },
         ];
         const bals = {};
         for (const g of groups) {
-            const re = new RegExp(g.label + '[\\s\\S]*?Balance\\s*-\\s*(\\d+)');
+            // Anchor the label to the START of a line (m flag) so it only matches
+            // a real product-block header — not an earlier free-text mention of the
+            // same words elsewhere in the (admin-edited) report. The non-greedy
+            // gap then captures the FIRST 'Balance -' inside that block. Escape the
+            // label for ALL groups (e.g. 'Eye+') so metachars are matched literally.
+            const re = new RegExp('^' + _brEscapeRegExp(g.label) + '[\\s\\S]*?Balance\\s*-\\s*(\\d+)', 'm');
             const m = text.match(re);
             if (m) bals[g.key] = Number(m[1]);
         }
@@ -344,6 +377,8 @@
     };
 
     const brSaveFinal = () => {
+        // Defense in depth: Super Admin only (mirrors the view gate).
+        if (!isSystemAdmin(_state.cu)) { UI.toast.error('Access denied'); return; }
         const ta = document.getElementById('br-text');
         const text = ta ? ta.value : (_brState.reportText || '');
         if (!text.trim()) { UI.toast.error('Nothing to save'); return; }
@@ -358,6 +393,15 @@
     };
 
     const brGenerate = async () => {
+        // Defense in depth: Super Admin only (mirrors the view gate).
+        if (!isSystemAdmin(_state.cu)) { UI.toast.error('Access denied'); return; }
+        // Race guard: refuse to run while a selected file is still being read by
+        // FileReader, otherwise we would read a null/half-loaded file and silently
+        // generate with the wrong (or zero) sold quantities.
+        if (_brState.salesLoading || _brState.trackingLoading) {
+            UI.toast.error('A file is still loading — please wait a moment and try again');
+            return;
+        }
         const runId = Number(document.getElementById('br-run-select')?.value);
         if (!runId) { UI.toast.error('Select an egg run first'); return; }
 
@@ -464,17 +508,27 @@ Gold-${totGold}`;
         } else {
             const sold = { KL:{}, PG:{} };
 
+            // MEDIUM: track whether every uploaded (non-null) file parsed cleanly.
+            // A swallowed parse error would otherwise silently treat the failed
+            // file as 'sold nothing', understating deductions and (previously)
+            // persisting a wrong carry-forward baseline. Abort on failure.
             if (_brState.salesFile) {
                 try {
                     const s = await _brParseSalesXlsx(_brState.salesFile, skusMap);
                     for (const rg of ['KL','PG']) for (const [g,q] of Object.entries(s[rg]||{})) sold[rg][g]=(sold[rg][g]||0)+q;
-                } catch(e) { UI.toast.error('FORMULA Sales: '+e.message); }
+                } catch(e) {
+                    UI.toast.error('FORMULA Sales parse failed — report not generated: '+(e?.message||e));
+                    return; // do not generate with zero sold for an uploaded file
+                }
             }
             if (_brState.trackingFile) {
                 try {
                     const s = _brParseTrackingCsv(_brState.trackingFile, skusMap);
                     for (const rg of ['KL','PG']) for (const [g,q] of Object.entries(s[rg]||{})) sold[rg][g]=(sold[rg][g]||0)+q;
-                } catch(e) { UI.toast.error('Order Tracking: '+e.message); }
+                } catch(e) {
+                    UI.toast.error('Order Tracking parse failed — report not generated: '+(e?.message||e));
+                    return; // do not generate with zero sold for an uploaded file
+                }
             }
 
             const prevBals = {};
@@ -482,7 +536,6 @@ Gold-${totGold}`;
                 const el = document.getElementById(`br-bal-${g.key}`);
                 prevBals[g.key] = Number(el?.value)||0;
             }
-            const newBals = {};
             let balLines = `Product Balance\n${balDate}`;
             for (const g of balGroups) {
                 const sg = g.skuGroup;
@@ -490,10 +543,13 @@ Gold-${totGold}`;
                 const pgSold = Math.round(sold.PG[sg]||0);
                 const prev   = prevBals[g.key]||0;
                 const bal    = Math.max(0, prev - klSold - pgSold);
-                newBals[g.key] = bal;
                 balLines += `\n${g.label}\nKL-${klSold}\nPG-${pgSold}\nBalance - ${bal}\n`;
             }
-            localStorage.setItem('br_balances', JSON.stringify(newBals));
+            // HIGH: do NOT persist br_balances here. Generate must be non-destructive
+            // to the carry-forward baseline (br_balances is read back as the OPENING
+            // balance on view load via _brGetBals). Re-generating would otherwise
+            // double-deduct 'sold' from an already-deducted prev. The baseline is
+            // persisted only by brSaveFinal, after the admin reviews/edits the text.
             balSection = balLines;
         }
 

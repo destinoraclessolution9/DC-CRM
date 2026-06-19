@@ -178,7 +178,11 @@ const showApprovalDetail = async (entryId) => {
         const before = entry.snapshot_before || {};
         const after = entry.snapshot_after || {};
         const fields = ['full_name','nickname','phone','email','ic_number','date_of_birth','lunar_birth','ming_gua','occupation','company_name','income_range','address','city','state','postal_code','title','gender','nationality','referred_by','referral_relationship'];
-        const changedFields = fields.filter(f => before[f] !== undefined && after[f] !== undefined && String(before[f] || '') !== String(after[f] || ''));
+        // Audit logic fix: treat an absent (undefined) before/after value as empty so a
+        // field newly populated by the agent (undefined before, set after) still shows
+        // in the Before/After diff. The old `before[f] !== undefined && after[f] !== undefined`
+        // gate silently dropped genuinely-added fields from the manager's review.
+        const changedFields = fields.filter(f => String(before[f] ?? '') !== String(after[f] ?? ''));
 
         detailHtml = `
             <div style="background:#fef3c7; border:1px solid #fcd34d; border-radius:8px; padding:12px; font-size:13px; color:#92400e; margin-bottom:14px;">
@@ -232,6 +236,12 @@ const showApprovalDetail = async (entryId) => {
 };
 
 const approveQueueEntry = async (entryId) => {
+    // Authz (audit security-authz): manager-only. The Approve/Reject UI is gated at
+    // L<=4, but these handlers live on window.app and the writes target rows the
+    // submitting agent already owns (so RLS does not stop a self-approval). Re-check
+    // the caller's level here so an agent can't book their own commission-bearing
+    // sale by calling app.approveQueueEntry(id) from the console / a crafted onclick.
+    if (!isManagement(_state.cu)) return UI.toast.error('Not permitted');
     const entry = await AppDataStore.getById('approval_queue', entryId);
     if (!entry || entry.status !== 'pending') return UI.toast.error('Entry not found or already processed.');
 
@@ -253,7 +263,10 @@ const approveQueueEntry = async (entryId) => {
                 console.warn('approveQueueEntry: linked-customer query failed — full-table fallback', e);
                 customer = (await AppDataStore.getAll('customers')).find(c => c.converted_from_prospect_id == entry.prospect_id);
             }
-            if (customer) {
+            // Audit null-deref fix: guard snapshot_after — an info_update row can come
+            // back with a null/RLS-trimmed snapshot_after, and indexing it in the loop
+            // below would throw and silently abort the approval.
+            if (customer && entry.snapshot_after) {
                 const syncable = ['title','full_name','nickname','gender','nationality','phone','email','ic_number','date_of_birth','lunar_birth','ming_gua','occupation','company_name','income_range','address','city','state','postal_code','referred_by','referred_by_id','referred_by_type','referral_relationship'];
                 const syncFields = {};
                 for (const field of syncable) {
@@ -320,6 +333,8 @@ const approveQueueEntry = async (entryId) => {
 };
 
 const rejectQueueEntry = async (entryId) => {
+    // Authz (audit security-authz): manager-only — same rationale as approveQueueEntry.
+    if (!isManagement(_state.cu)) return UI.toast.error('Not permitted');
     const entry = await AppDataStore.getById('approval_queue', entryId);
     if (!entry || entry.status !== 'pending') return UI.toast.error('Entry not found or already processed.');
 
@@ -341,11 +356,18 @@ const rejectQueueEntry = async (entryId) => {
 };
 
 const confirmRejectQueueEntry = async (entryId) => {
+    // Authz (audit security-authz): this is the function that actually persists the
+    // rejection (reverts prospect fields + marks the queue row rejected), so re-gate
+    // it too — rejectQueueEntry only opens the modal.
+    if (!isManagement(_state.cu)) return UI.toast.error('Not permitted');
     const reason = document.getElementById('reject-reason')?.value?.trim() || '';
     const entry = await AppDataStore.getById('approval_queue', entryId);
     if (!entry) return;
 
-    if (entry.approval_type === 'info_update' && entry.snapshot_before) {
+    // Audit null-deref fix: also require snapshot_after — a row with snapshot_before
+    // set but snapshot_after null (partial insert / aborted edit / RLS-trimmed JSONB)
+    // would otherwise throw `Object.keys(null)`, aborting the whole rejection silently.
+    if (entry.approval_type === 'info_update' && entry.snapshot_before && entry.snapshot_after) {
         const revertFields = {};
         for (const key of Object.keys(entry.snapshot_after)) {
             if (entry.snapshot_before[key] !== undefined) {
@@ -387,6 +409,11 @@ const confirmRejectQueueEntry = async (entryId) => {
 };
 
 const approveClosingRecord = async (prospectId) => {
+    // Authz (audit security-authz): manager-only. This creates purchases rows,
+    // converts prospects to customers and adjusts lifetime_value — an agent must
+    // not be able to self-approve their own sale by calling app.approveClosingRecord
+    // directly. The UI only renders the approve control at L<=4.
+    if (!isManagement(_state.cu)) return UI.toast.error('Not permitted');
     const prospect = await AppDataStore.getById('prospects', prospectId);
     if (!prospect?.closing_record) return UI.toast.error('No closing record found');
     const isAlreadyConverted = prospect.status === 'converted' || prospect.conversion_status === 'approved';
@@ -553,7 +580,32 @@ const approveProspectConversion = async (prospectId) => {
     const saleAmount = parseFloat(cr?.sale_amount) || 0;
     const now = new Date().toISOString();
 
-    // Full data copy — every field from prospect goes to customer
+    // Audit data-integrity fix: persist the prospect's converted/idempotency flag
+    // FIRST, before creating the customer. If a later step throws, a manual retry
+    // hits the layer-2 guard above (already 'converted'/'approved') and is dropped,
+    // so we never create a SECOND customer + duplicate lifetime_value. Previously the
+    // order was create-customer → update-prospect, and a failed update left the guard
+    // unset, letting a retry duplicate the customer.
+    const updatedFields = {
+        status: 'converted',
+        conversion_status: 'approved',
+        conversion_approved_at: now,
+        conversion_approved_by: _state.cu?.id
+    };
+    // Archive closing record to history and reset so a new closing can be started
+    if (cr) {
+        const existingHistory = Array.isArray(prospect.closing_records_history) ? prospect.closing_records_history : [];
+        updatedFields.closing_records_history = [...existingHistory, { ...cr, status: 'approved', approved_at: now }];
+        updatedFields.closing_record = null;
+    }
+    await AppDataStore.update('prospects', prospectId, updatedFields);
+    _state.phc = null;
+
+    // Full data copy — every field from prospect goes to customer.
+    // Audit #9 fix: create with lifetime_value:0 here, then route the sale through a
+    // purchases row + adjustCustomerLtv below. Setting lifetime_value directly with no
+    // purchases row + total_purchases:0 re-creates the leaderboard<->LTV divergence the
+    // ltv_purchase_backfill migration was written to cure.
     const customer = {
         title: prospect.title || '',
         full_name: prospect.full_name,
@@ -578,7 +630,7 @@ const approveProspectConversion = async (prospectId) => {
         referred_by_type: prospect.referred_by_type || '',
         referral_relationship: prospect.referral_relationship || '',
         responsible_agent_id: prospect.responsible_agent_id || null,
-        lifetime_value: saleAmount,
+        lifetime_value: 0,
         status: 'active',
         customer_since: cr?.closing_date || now.split('T')[0],
         converted_from_prospect_id: prospectId,
@@ -587,22 +639,33 @@ const approveProspectConversion = async (prospectId) => {
         created_at: now
     };
 
-    await AppDataStore.create('customers', customer);
+    const createdCustomer = await AppDataStore.create('customers', customer);
+    const newCustomerId = createdCustomer?.id;
 
-    const updatedFields = {
-        status: 'converted',
-        conversion_status: 'approved',
-        conversion_approved_at: now,
-        conversion_approved_by: _state.cu?.id
-    };
-    // Archive closing record to history and reset so a new closing can be started
-    if (cr) {
-        const existingHistory = Array.isArray(prospect.closing_records_history) ? prospect.closing_records_history : [];
-        updatedFields.closing_records_history = [...existingHistory, { ...cr, status: 'approved', approved_at: now }];
-        updatedFields.closing_record = null;
+    // Audit #9 fix: book the first sale as a real purchases row + atomic LTV bump,
+    // mirroring the additional-sale path in approveClosingRecord so all purchase paths
+    // agree (lifetime_value AND total_purchases move together, never diverge).
+    if (newCustomerId && saleAmount > 0) {
+        // Book the sale in its OWN try/catch: the customer + converted-flag are
+        // already persisted (idempotent), so if only this step fails a plain retry
+        // is blocked by the already-converted guard and would leave LTV=0 silently.
+        // Surface a specific, actionable message so the manager records it manually.
+        try {
+            await AppDataStore.create('purchases', {
+                customer_id: newCustomerId,
+                date: cr?.closing_date || now.split('T')[0],
+                invoice: cr?.invoice_number || '',
+                item: cr?.product || '',
+                amount: saleAmount,
+                status: 'COMPLETED',
+                payment_method: cr?.payment_method || 'Cash'
+            });
+            await _utils.adjustCustomerLtv(newCustomerId, saleAmount, 1);
+        } catch (saleErr) {
+            console.error('[approveProspectConversion] sale booking failed', saleErr);
+            try { UI.toast.error(`Customer created, but recording the RM ${saleAmount.toLocaleString()} sale failed — please add the purchase manually from the customer profile.`); } catch (_) {}
+        }
     }
-    await AppDataStore.update('prospects', prospectId, updatedFields);
-    _state.phc = null;
 
     // Sync approval queue — mark matching new_customer entry as approved
     try {
@@ -624,6 +687,13 @@ const approveProspectConversion = async (prospectId) => {
     UI.toast.success(`${prospect.full_name} is now a Customer!`);
     const viewport = document.getElementById('content-viewport');
     if (viewport && _state.cv === 'prospects') await (window.app.showProspectsViewSmart || (() => {}))(viewport);
+    } catch (e) {
+        // Audit data-integrity fix: surface the failure instead of letting it become a
+        // silent unhandled rejection. Leave the modal OPEN so the manager sees the error
+        // and can retry — the persisted converted-flag (written first, above) makes any
+        // retry idempotent via the layer-2 guard.
+        console.error('[approveProspectConversion] failed', e);
+        try { UI.toast.error('Conversion failed — please retry. ' + (e?.message || '')); } catch (_) {}
     } finally {
         // Always release the in-flight lock, even on early-return / throw.
         _convInFlight.delete(_convKey);

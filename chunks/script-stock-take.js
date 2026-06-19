@@ -500,6 +500,9 @@
         ]);
     };
     const stSaveNewSession = async () => {
+        // Setup-only flow — Super Admin only (L15 Stock Take Staff get the Count tab
+        // alone). Guard here too: every export is reachable from the console.
+        if (!_stRequireSetupAdmin()) return;
         const id = (document.getElementById('st-new-id')?.value || '').trim();
         const locs = (document.getElementById('st-new-locs')?.value || '').split('\n').map(s => s.trim()).filter(Boolean);
         if (!id) return UI.toast.error('Session ID required');
@@ -510,6 +513,7 @@
         // session via Supabase. sbSessionId is stored on the local v1 record so
         // QR scans + realtime stay correlated.
         let sbSessionId = null;
+        let cloudFailed = false; // true when a Supabase client exists but the insert didn't yield an id
         const sb = _stSb();
         if (sb) {
             try {
@@ -518,7 +522,8 @@
                     created_by: _state.cu?.email || _state.cu?.name || 'admin',
                 }).select('id').single();
                 sbSessionId = created?.data?.id || null;
-            } catch (e) { console.warn('[stock-take v2] session insert failed:', e?.message); }
+                if (created?.error || !sbSessionId) cloudFailed = true;
+            } catch (e) { console.warn('[stock-take v2] session insert failed:', e?.message); cloudFailed = true; }
         }
         sessions.push({ id, locations: locs, createdAt: new Date().toISOString(), createdBy: _state.cu?.name || _state.cu?.email || 'admin', status: 'open', sbSessionId });
         _stSave('sessions', sessions);
@@ -526,7 +531,11 @@
         _stState.sbSessionId = sbSessionId;
         if (sbSessionId) await stStartRealtime();
         UI.hideModal();
-        UI.toast.success('Session created');
+        // Bug fix: when the cloud insert fails, the session exists only in localStorage with
+        // no sbSessionId — realtime/multi-device sync is OFF. Tell the user instead of the
+        // generic success toast that implies cloud sync is live.
+        if (cloudFailed) UI.toast.error('Session created locally only — cloud sync unavailable (single-device).');
+        else UI.toast.success('Session created');
         stSwitchTab('import');
     };
     const stActivateSession = async (id) => {
@@ -538,6 +547,7 @@
         stSwitchTab('count');
     };
     const stCloseSession = (id) => {
+        if (!_stRequireSetupAdmin()) return; // setup-only: closing a session is admin-gated
         const sessions = _stSessions();
         const s = sessions.find(x => x.id === id);
         if (!s) return;
@@ -547,6 +557,7 @@
         stSwitchTab('sessions');
     };
     const stDeleteSession = (id) => {
+        if (!_stRequireSetupAdmin()) return; // setup-only: destroys a whole session + its data
         if (!confirm(`Delete session ${id} and all its data?`)) return;
         _stSave('sessions', _stSessions().filter(s => s.id !== id));
         localStorage.removeItem(_stKey(`systemStock.${id}`));
@@ -631,6 +642,7 @@
     };
 
     const stImportFile = async () => {
+        if (!_stRequireSetupAdmin()) return; // setup-only: overwrites system stock baseline
         const sid = _stRequireOpenSession();
         if (!sid) return;
         const input = document.getElementById('st-file');
@@ -651,6 +663,7 @@
         stSwitchTab('import');
     };
     const stImportPaste = () => {
+        if (!_stRequireSetupAdmin()) return; // setup-only: overwrites system stock baseline
         const sid = _stRequireOpenSession();
         if (!sid) return;
         const raw = (document.getElementById('st-paste')?.value || '').trim();
@@ -673,6 +686,7 @@
         stSwitchTab('import');
     };
     const stClearSystemStock = () => {
+        if (!_stRequireSetupAdmin()) return; // setup-only: wipes the imported system stock
         const sid = _stRequireOpenSession();
         if (!sid) return;
         if (!confirm('Clear all imported system stock for this session?')) return;
@@ -1133,29 +1147,60 @@
             { label: 'Save Recount', type: 'primary', action: `(async () => { await app.stSaveRecount('${_stAttr(location)}','${_stAttr(sku)}'); })()` },
         ]);
     };
-    const stSaveRecount = (location, sku) => {
+    const stSaveRecount = async (location, sku) => {
         const sid = _stRequireOpenSession();
         if (!sid) return;
         const qtyRaw = (document.getElementById('st-rc-qty')?.value || '').trim();
         const qty = Number(qtyRaw);
         if (!qtyRaw || !isFinite(qty) || qty < 0) return UI.toast.error('Valid qty required');
+        // Bug fix: st_counts.qty is integer in the DB; reject decimals so the recount
+        // total isn't silently dropped on multi-device sync (parity with stAddCount).
+        if (!Number.isInteger(qty)) return UI.toast.error('Whole number qty required (no decimals)');
         const key = _stNormKey(location, sku);
+        const skuUp = String(sku).toUpperCase();
         const nowIso = new Date().toISOString();
         // Phase 1: soft-delete — mark prior counts for this (location, sku) as superseded
         // rather than deleting them. The audit trail keeps original per-shelf scans;
         // _stReconcile / _stReconcileBySku skip rows with superseded:true.
+        const supersededIds = [];
         const counts = _stCounts(sid).map(c => {
             if (_stNormKey(c.location, c.sku) !== key) return c;
             if (c.superseded) return c;
+            if (c.id) supersededIds.push(c.id);
             return { ...c, superseded: true, supersededAt: nowIso };
         });
+        const recountId = _stNewCountId();
         counts.push({
-            id: `c_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+            id: recountId,
             timestamp: nowIso,
             counter: _state.cu?.name || _state.cu?.email || 'admin',
-            location, shelf: 'recount-total', sku: String(sku).toUpperCase(), qty, recount: true,
+            location, shelf: 'recount-total', sku: skuUp, qty, recount: true,
         });
         _stSave(`counts.${sid}`, counts);
+        // Bug fix: on a multi-device (Supabase-backed) session, mirror the supersede +
+        // recount into st_counts. Without this, other devices and the realtime feed keep
+        // replaying the original per-shelf rows and DOUBLE-COUNT the recounted SKU. Delete
+        // the prior DB rows for this (session, location, sku) and insert the recount total
+        // with the SAME id so the realtime echo dedupes locally.
+        const sb = _stSb();
+        if (sb && _stState.sbSessionId) {
+            try {
+                if (supersededIds.length) {
+                    await sb.from('st_counts').delete()
+                        .eq('session_id', _stState.sbSessionId).in('id', supersededIds);
+                }
+                await sb.from('st_counts').insert({
+                    id: recountId,
+                    session_id: _stState.sbSessionId,
+                    sku: skuUp, qty,
+                    counter: _state.cu?.name || _state.cu?.email || 'admin',
+                    location_label: location, shelf_text: 'recount-total',
+                });
+            } catch (e) {
+                console.warn('[stock-take v2] recount sync failed:', e?.message);
+                UI.toast.error('Recount saved locally — cloud sync failed; other devices may be out of date');
+            }
+        }
         UI.hideModal();
         UI.toast.success('Recount saved');
         stSwitchTab('recount');
@@ -1215,12 +1260,41 @@
     // wants the next session to start from physical reality. Only acts on rows
     // outside tolerance — matched rows keep their original System_Qty.
     const stAcceptVariances = () => {
+        if (!_stRequireSetupAdmin()) return; // setup-only: rewrites the system stock inventory
         const sid = _stRequireOpenSession();
         if (!sid) return;
         const rec = _stReconcile(sid, _stGetThreshold());
-        const adjust = rec.filter(r => r.Status === 'Recount Required');
-        if (adjust.length === 0) return UI.toast.info('Nothing to accept — every row is within tolerance.');
-        if (!confirm(`Rewrite System Stock for ${adjust.length} (Location, SKU) row(s) using counted physical quantities?\n\nThis only mutates this session's localStorage record. The Adjustment File export still lets you sync back to your ERP.`)) return;
+        // Bug fix (data-integrity): _stReconcile flags EVERY uncounted system SKU as
+        // 'Recount Required' (phys=0 → |variance|=System_Qty > tol). Accepting those would
+        // rewrite the system qty of merely-uncounted SKUs to 0 in a PARTIAL stock take —
+        // the opposite of the Final Summary promise. Restrict acceptance to rows that had
+        // actual physical coverage: a QR scan at that exact (location, sku) OR a bulk entry
+        // for that SKU. This mirrors _stReconcileBySku's 'Not Counted' distinction.
+        const counts = _stCounts(sid);
+        const exSet = _stExclusionSet();
+        const coveredLocSku = new Set();   // (location|sku) keys with a real QR scan
+        for (const c of counts) {
+            if (c.superseded) continue;
+            if (exSet.has(String(c.sku||'').trim().toUpperCase())) continue;
+            coveredLocSku.add(_stNormKey(c.location, c.sku));
+        }
+        const bulkSkus = new Set((_stBulkData(sid).rows || [])
+            .map(r => String(r.SKU||'').trim().toUpperCase())
+            .filter(s => s && !exSet.has(s)));
+        const wasCounted = (loc, sku) =>
+            coveredLocSku.has(_stNormKey(loc, sku)) || bulkSkus.has(String(sku||'').trim().toUpperCase());
+        const allRecount = rec.filter(r => r.Status === 'Recount Required');
+        const adjust = allRecount.filter(r => wasCounted(r.Location, r.SKU));
+        const skipped = allRecount.length - adjust.length; // uncounted SKUs we refuse to zero
+        if (adjust.length === 0) {
+            return UI.toast.info(skipped > 0
+                ? `Nothing to accept — the ${skipped} flagged row(s) were never physically counted and will not be zeroed.`
+                : 'Nothing to accept — every row is within tolerance.');
+        }
+        const skipNote = skipped > 0
+            ? `\n\nNOTE: ${skipped} flagged SKU(s) were NOT physically counted (partial take) and will KEEP their previous expected quantities — they will NOT be set to zero.`
+            : '';
+        if (!confirm(`Rewrite System Stock for ${adjust.length} (Location, SKU) row(s) using counted physical quantities?${skipNote}\n\nThis only mutates this session's localStorage record. The Adjustment File export still lets you sync back to your ERP.`)) return;
         const adjMap = new Map();
         for (const r of adjust) adjMap.set(_stNormKey(r.Location, r.SKU), r.Physical_Total);
         const sys = _stSystemStock(sid).map(r => {
@@ -1319,6 +1393,7 @@
     };
 
     const stAddExclusion = () => {
+        if (!_stRequireSetupAdmin()) return; // setup-only: exclusions are global across all sessions
         const sku = (document.getElementById('st-ex-sku')?.value || '').trim().toUpperCase();
         const reason = (document.getElementById('st-ex-reason')?.value || '').trim();
         if (!sku) return UI.toast.error('SKU required');
@@ -1330,17 +1405,20 @@
         stSwitchTab('exclusions');
     };
     const stRemoveExclusion = (sku) => {
+        if (!_stRequireSetupAdmin()) return; // setup-only: exclusions are global across all sessions
         _stSaveExclusions(_stExclusions().filter(e => String(e.sku).toUpperCase() !== String(sku).toUpperCase()));
         UI.toast.success('Removed');
         stSwitchTab('exclusions');
     };
     const stClearExclusions = () => {
+        if (!_stRequireSetupAdmin()) return; // setup-only: exclusions are global across all sessions
         if (!confirm('Clear all exclusions? This affects every session.')) return;
         _stSaveExclusions([]);
         UI.toast.success('All exclusions cleared');
         stSwitchTab('exclusions');
     };
     const stImportExclusions = async () => {
+        if (!_stRequireSetupAdmin()) return; // setup-only: exclusions are global across all sessions
         const input = document.getElementById('st-ex-file');
         const f = input?.files?.[0];
         if (!f) return UI.toast.error('Choose a file first');
@@ -1457,6 +1535,7 @@
     };
 
     const stBulkUploadFile = async () => {
+        if (!_stRequireSetupAdmin()) return; // setup-only: bulk physical upload is an admin flow
         const sid = _stRequireOpenSession();
         if (!sid) return;
         const input = document.getElementById('st-bulk-file');
@@ -1481,6 +1560,7 @@
         stSwitchTab('bulk');
     };
     const stBulkUploadPaste = () => {
+        if (!_stRequireSetupAdmin()) return; // setup-only: bulk physical upload is an admin flow
         const sid = _stRequireOpenSession();
         if (!sid) return;
         const raw = (document.getElementById('st-bulk-paste')?.value || '').trim();
@@ -1506,6 +1586,7 @@
         stSwitchTab('bulk');
     };
     const stClearBulk = () => {
+        if (!_stRequireSetupAdmin()) return; // setup-only: clears the bulk physical upload
         const sid = _stRequireOpenSession();
         if (!sid) return;
         if (!confirm('Clear bulk physical counts for this session?')) return;
@@ -1713,18 +1794,31 @@
         if (_stV2.loaded) return _stV2;
         if (_stV2.loading) return _stV2.loading;
         _stV2.loading = (async () => {
-            const [stores, shelves, master] = await Promise.all([
-                sb.from('st_stores').select('*').order('store_code'),
-                sb.from('st_shelves').select('*').order('shelf_code'),
-                sb.from('st_product_master').select('*').order('sku').limit(5000),
-            ]);
-            _stV2.stores = stores.data || [];
-            _stV2.shelves = shelves.data || [];
-            _stV2.productMaster = master.data || [];
-            _stV2.shelfByQr = new Map(_stV2.shelves.map(s => [String(s.qr_payload||'').trim().toUpperCase(), s]));
-            _stV2.loaded = true;
-            _stV2.loading = null;
-            return _stV2;
+            // Bug fix: wrap in try/catch. On a transport failure (offline / 'Failed to
+            // fetch' / 521) the fetch promise rejects; without this the IIFE threw before
+            // the resets below, leaving _stV2.loading a REJECTED promise that every later
+            // _stV2Load() short-circuited back to — wedging the Shelves tab permanently.
+            // Reset loading=null on failure so the next call retries, and re-throw so the
+            // caller's .catch can render an error/retry state.
+            try {
+                const [stores, shelves, master] = await Promise.all([
+                    sb.from('st_stores').select('*').order('store_code'),
+                    sb.from('st_shelves').select('*').order('shelf_code'),
+                    sb.from('st_product_master').select('*').order('sku').limit(5000),
+                ]);
+                _stV2.stores = stores.data || [];
+                _stV2.shelves = shelves.data || [];
+                _stV2.productMaster = master.data || [];
+                _stV2.shelfByQr = new Map(_stV2.shelves.map(s => [String(s.qr_payload||'').trim().toUpperCase(), s]));
+                _stV2.loaded = true;
+                _stV2.loading = null;
+                _stV2._lastError = undefined; // clear any prior failure marker
+                return _stV2;
+            } catch (e) {
+                _stV2.loading = null;          // allow a future _stV2Load() to retry from scratch
+                _stV2._lastError = e || true;  // flag so _stRenderShelves can show a Retry state
+                throw e;
+            }
         })();
         return _stV2.loading;
     };
@@ -1879,12 +1973,58 @@
             <div style="margin-top:10px;display:flex;gap:6px;align-items:center;">
                 <input type="text" id="st-extra-sku" placeholder="Unexpected SKU…" style="flex:2;padding:6px;border:1px solid var(--gray-300);border-radius:4px;font-family:monospace;">
                 <input type="number" id="st-extra-qty" placeholder="qty" min="0" step="1" style="width:90px;padding:6px;border:1px solid var(--gray-300);border-radius:4px;">
-                <button type="button" class="btn small secondary" onclick="(async () => { const sku=document.getElementById('st-extra-sku')?.value?.trim().toUpperCase(); const q=Number(document.getElementById('st-extra-qty')?.value); if(!sku||!isFinite(q)||q<0) return UI.toast.error('SKU and qty required'); const tbody=document.querySelector('.st-shelf-count-input')?.closest('tbody'); if(!tbody) return UI.toast.error('Cannot find table structure'); const tr=document.createElement('tr'); tr.style.borderTop='1px solid var(--gray-100)'; tr.style.background='#fff7ed'; tr.innerHTML='<td style=\\'padding:6px 8px;font-family:monospace;font-size:12px;\\'>'+sku+' <span style=\\'background:#fed7aa;color:#9a3412;font-size:10px;padding:1px 4px;border-radius:3px;\\'>UNEXPECTED</span></td><td style=\\'padding:6px 8px;text-align:right;color:var(--gray-600);\\'>0</td><td style=\\'padding:6px 8px;text-align:right;\\'><input type=\\'number\\' min=\\'0\\' step=\\'1\\' data-sku=\\''+sku+'\\' data-expected=\\'0\\' class=\\'st-shelf-count-input\\' value=\\''+q+'\\' style=\\'width:80px;padding:4px;border:1px solid var(--gray-300);border-radius:4px;text-align:right;\\'></td>'; tbody.appendChild(tr); document.getElementById('st-extra-sku').value=''; document.getElementById('st-extra-qty').value=''; })()">+ Add</button>
+                <button type="button" class="btn small secondary" onclick="app.stAddExtraShelfRow()">+ Add</button>
             </div>
         `, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Save shelf counts', type: 'primary', action: `(async () => { await app.stSaveShelfCounts('${_stAttr(shelf.id)}','${_stAttr(shelf.qr_payload)}','${_stAttr(locLabel)}'); })()` },
         ]);
+    };
+
+    // Append an "unexpected SKU" row to the shelf-count sheet. Extracted from the inline
+    // onclick that built the row via string concatenation into tr.innerHTML — that path
+    // injected the raw (user-typed) SKU unescaped (stored-XSS surface: a SKU like
+    // A'><img src=x onerror=...> broke out of the data-sku attr). Building the row with
+    // DOM APIs + textContent + dataset is injection-proof (no HTML parsing of the SKU).
+    const stAddExtraShelfRow = () => {
+        const sku = (document.getElementById('st-extra-sku')?.value || '').trim().toUpperCase();
+        const q = Number(document.getElementById('st-extra-qty')?.value);
+        // Bug fix: also reject decimals at add-time — stSaveShelfCounts drops non-integer
+        // rows silently (Number.isInteger guard), so allowing 2.5 here loses the row on Save.
+        if (!sku || !isFinite(q) || q < 0) return UI.toast.error('SKU and qty required');
+        if (!Number.isInteger(q)) return UI.toast.error('Whole number qty required (no decimals)');
+        const tbody = document.querySelector('.st-shelf-count-input')?.closest('tbody');
+        if (!tbody) return UI.toast.error('Cannot find table structure');
+        const tr = document.createElement('tr');
+        tr.style.borderTop = '1px solid var(--gray-100)';
+        tr.style.background = '#fff7ed';
+        // SKU cell — textContent for the SKU (no HTML parse), a static badge appended after.
+        const tdSku = document.createElement('td');
+        tdSku.style.cssText = 'padding:6px 8px;font-family:monospace;font-size:12px;';
+        tdSku.textContent = sku + ' ';
+        const badge = document.createElement('span');
+        badge.style.cssText = 'background:#fed7aa;color:#9a3412;font-size:10px;padding:1px 4px;border-radius:3px;';
+        badge.textContent = 'UNEXPECTED';
+        tdSku.appendChild(badge);
+        // Expected cell.
+        const tdExp = document.createElement('td');
+        tdExp.style.cssText = 'padding:6px 8px;text-align:right;color:var(--gray-600);';
+        tdExp.textContent = '0';
+        // Counted-input cell — dataset.sku set as a property, never serialized into HTML.
+        const tdInput = document.createElement('td');
+        tdInput.style.cssText = 'padding:6px 8px;text-align:right;';
+        const input = document.createElement('input');
+        input.type = 'number'; input.min = '0'; input.step = '1';
+        input.className = 'st-shelf-count-input';
+        input.dataset.sku = sku;
+        input.dataset.expected = '0';
+        input.value = String(q);
+        input.style.cssText = 'width:80px;padding:4px;border:1px solid var(--gray-300);border-radius:4px;text-align:right;';
+        tdInput.appendChild(input);
+        tr.appendChild(tdSku); tr.appendChild(tdExp); tr.appendChild(tdInput);
+        tbody.appendChild(tr);
+        document.getElementById('st-extra-sku').value = '';
+        document.getElementById('st-extra-qty').value = '';
     };
 
     const stSaveShelfCounts = async (shelfId, qrPayload, locLabel) => {
@@ -1971,7 +2111,19 @@
         // schedule another stSwitchTab — that would infinite-loop, re-rendering
         // every microtask and yanking focus out of the store/shelf inputs.
         if (!_stV2.loaded) {
-            if (!_stV2.loading) _stV2Load().then(() => { if (_stState.tab === 'shelves') stSwitchTab('shelves'); });
+            // Bug fix: add a .catch so a load failure doesn't surface as an unhandled
+            // rejection and the user gets a retry path instead of a forever-spinner.
+            if (!_stV2.loading) _stV2Load()
+                .then(() => { if (_stState.tab === 'shelves') stSwitchTab('shelves'); })
+                .catch(() => { if (_stState.tab === 'shelves') stSwitchTab('shelves'); });
+            // If a prior attempt rejected (loading reset to null, still not loaded), show
+            // an explicit error + Retry button rather than an indefinite spinner.
+            if (!_stV2.loading && !_stV2.loaded && _stV2._lastError !== undefined) {
+                return `<div style="padding:40px;text-align:center;color:var(--gray-500);">
+                    <p style="color:#991b1b;"><i class="fas fa-exclamation-triangle"></i> Could not load the shelves master.</p>
+                    <button class="btn small primary" onclick="app.stSwitchTab('shelves')"><i class="fas fa-redo"></i> Retry</button>
+                </div>`;
+            }
             return `<div style="padding:40px;text-align:center;color:var(--gray-500);"><i class="fas fa-spinner fa-spin"></i> Loading shelves master…</div>`;
         }
         const storesHtml = _stV2.stores.length === 0
@@ -2039,6 +2191,7 @@
     };
 
     const stV2AddStore = async () => {
+        if (!_stRequireSetupAdmin()) return; // setup-only: edits the shared shelves master
         const sb = _stSb(); if (!sb) return UI.toast.error('Supabase unavailable');
         const code = (document.getElementById('st-v2-store-code')?.value || '').trim().toUpperCase();
         const name = (document.getElementById('st-v2-store-name')?.value || '').trim();
@@ -2049,6 +2202,7 @@
         await _stV2Reload(); stSwitchTab('shelves');
     };
     const stV2DeleteStore = async (id) => {
+        if (!_stRequireSetupAdmin()) return; // setup-only: edits the shared shelves master
         if (!confirm('Delete this store and all its shelves?')) return;
         const sb = _stSb(); if (!sb) return;
         const { error } = await sb.from('st_stores').delete().eq('id', id);
@@ -2057,6 +2211,7 @@
         await _stV2Reload(); stSwitchTab('shelves');
     };
     const stV2AddShelf = async () => {
+        if (!_stRequireSetupAdmin()) return; // setup-only: edits the shared shelves master
         const sb = _stSb(); if (!sb) return UI.toast.error('Supabase unavailable');
         const storeId = (document.getElementById('st-v2-shelf-store')?.value || '').trim();
         const code = (document.getElementById('st-v2-shelf-code')?.value || '').trim().toUpperCase();
@@ -2073,6 +2228,7 @@
         await _stV2Reload(); stSwitchTab('shelves');
     };
     const stV2DeleteShelf = async (id) => {
+        if (!_stRequireSetupAdmin()) return; // setup-only: edits the shared shelves master
         if (!confirm('Delete this shelf and its expected SKU map?')) return;
         const sb = _stSb(); if (!sb) return;
         const { error } = await sb.from('st_shelves').delete().eq('id', id);
@@ -2081,6 +2237,7 @@
         await _stV2Reload(); stSwitchTab('shelves');
     };
     const stV2EditExpected = async (shelfId) => {
+        if (!_stRequireSetupAdmin()) return; // setup-only: edits the shared expected-SKU map
         const sb = _stSb(); if (!sb) return;
         const shelf = _stV2.shelves.find(s => s.id === shelfId);
         const expected = await _stShelfExpected(shelfId);
@@ -2147,6 +2304,7 @@
         stOpenScanner,
         _stCancelScanner,
         stScanShelfAndCount,
+        stAddExtraShelfRow,
         stSaveShelfCounts,
         stStartRealtime,
         stStopRealtime,

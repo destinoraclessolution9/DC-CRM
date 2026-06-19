@@ -59,8 +59,38 @@
     const SCORING_RULES = window.app.SCORING_RULES || { CREATE_PROSPECT: 5, MARK_NOT_INTERESTED: -500 };
     // addWhatsAppButtonToProfile — defined in script.js IIFE, exported to window.app.
     const addWhatsAppButtonToProfile = (...a) => (window.app.addWhatsAppButtonToProfile || (() => Promise.resolve()))(...a);
+    // buildActivityVisibilityChecker — private const in the script.js IIFE, exported to
+    // _crmUtils in Wave A. Bare identifier here would ReferenceError on the non-admin
+    // Prospects+Activities export path. Fallback denies-all visibility if not yet exported.
+    const buildActivityVisibilityChecker = (...a) => (window._crmUtils.buildActivityVisibilityChecker || (async () => () => false))(...a);
+    // canEditProspect — edit-policy predicate. Mirrors script.js canEditProspect
+    // (script.js:1095): L1-2 edit anything, L3-10 edit team/subordinate records,
+    // L11+ own records only. Implemented locally because the core predicate is not
+    // exported to _crmUtils; falls back to the exported one if it ever appears.
+    const canEditProspect = async (prospect) => {
+        if (window._crmUtils.canEditProspect) return await window._crmUtils.canEditProspect(prospect);
+        const user = _state.cu;
+        if (!user || !prospect) return false;
+        const level = _getUserLevel(user);
+        if (level <= 2) return true;
+        if (level <= 10) {
+            const visibleIds = await getVisibleUserIds(user);
+            if (visibleIds === 'all') return true;
+            return visibleIds.some(id => String(id) === String(prospect.responsible_agent_id));
+        }
+        return String(prospect.responsible_agent_id) === String(user.id);
+    };
     // Current view (read-only reference)
     const _getCurrentView = () => _state.cv;
+    // safeUrl — for stored/agent-controllable values interpolated into href/src.
+    // Drops dangerous schemes (javascript:/vbscript:/file:) to prevent click-XSS,
+    // then HTML-escapes so a value with a double-quote can't break out of the
+    // attribute. Allows http(s), data:, blob:, and relative/anchor URLs.
+    const safeUrl = (u) => {
+        const s = String(u == null ? '' : u).trim();
+        if (/^\s*(javascript|vbscript|data:text\/html|file):/i.test(s)) return '#';
+        return escapeHtml(s);
+    };
 
 let _sortField = 'score';
 let _sortDirection = 'desc';
@@ -403,6 +433,13 @@ const exportData = async (type, format) => {
         UI.toast.success(`Exported ${data.length} customers`);
 
     } else if (type === 'agents') {
+        // Authz: the agents export leaks IC numbers, emails, and commission rates for
+        // every user. Gate it to Super Admin / Management — siblings (prospects/customers)
+        // scope by getVisibleUserIds, but staff PII must not be exported by the agent band.
+        if (!(isSystemAdmin(_state.cu) || isManagement(_state.cu))) {
+            UI.toast.error('You do not have permission to export staff records');
+            return;
+        }
         const allUsers = await AppDataStore.getAll('users');
         const data = allUsers.filter(u => u.full_name);
         if (!data.length) { UI.toast.error('No agents to export'); return; }
@@ -819,6 +856,10 @@ const renderProspectsTable = async () => {
     }) : [];
 
     // ── Apply sorting (skipped on the server path — already sorted server-side) ──
+    // Sort a COPY: on the admin / 'all'-scope legacy path `prospects` aliases the
+    // getActiveProspects/searchProspects SWR cache array, so sorting in place would
+    // reorder the shared cache for every other reader. slice() decouples it.
+    if (!_usedServerP) prospects = prospects.slice();
     if (!_usedServerP) prospects.sort((a, b) => {
         let valA, valB;
         if (_sortField === 'name') {
@@ -1093,7 +1134,10 @@ const openProspectGradePicker = async (prospectId) => {
     const prospect = await AppDataStore.getById('prospects', prospectId);
     if (!prospect) { UI.toast.error('Prospect not found'); return; }
     const currentUser = _state.cu || await Auth.getCurrentUser();
-    const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || currentUser.role?.includes('Level 3') || currentUser.role?.includes('Level 7') || currentUser.role === 'team_leader';
+    // Use the canonical level helper, not fragile role-substring matching:
+    // 'Level 3'.includes also caught 'Level 30/31', and named/Chinese roles that
+    // map to L3-5 were missed. lvl<=5 = team-leader-or-above per the role band.
+    const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || _getUserLevel(currentUser) <= 5;
     const isOwner = prospect.responsible_agent_id == currentUser.id;
     if (!isAdmin && !isOwner) {
         UI.toast.error('You cannot set the grade for this prospect.');
@@ -1457,7 +1501,10 @@ const openProspectModal = async (prospectId = null) => {
             return;
         }
         const currentUser = _state.cu || await Auth.getCurrentUser();
-        const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || currentUser.role?.includes('Level 3') || currentUser.role?.includes('Level 7') || currentUser.role === 'team_leader';
+        // Use the canonical level helper, not fragile role-substring matching:
+        // 'Level 3'.includes also caught 'Level 30/31', and named/Chinese roles that
+        // map to L3-5 were missed. lvl<=5 = team-leader-or-above per the role band.
+        const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || _getUserLevel(currentUser) <= 5;
         const isOwner = String(prospect.responsible_agent_id) === String(currentUser.id);
         if (!isAdmin && !isOwner) {
             UI.toast.error('You cannot edit this prospect.');
@@ -1656,6 +1703,14 @@ const saveProspect = async () => {
     let snapshotBefore = null;
     if (editId) {
         snapshotBefore = await AppDataStore.getById('prospects', parseInt(editId));
+        if (!snapshotBefore) { UI.toast.error('Prospect not found'); return; }
+        // Enforce the documented edit policy (canEditProspect): view-scope (L3-11
+        // upline) is broader than edit-scope (L11+ = own records only), so re-check
+        // here — canViewProspect upstream is NOT a sufficient edit gate.
+        if (!(await canEditProspect(snapshotBefore))) {
+            UI.toast.error('You do not have permission to edit this prospect.');
+            return;
+        }
     }
 
     try {
@@ -1829,7 +1884,7 @@ const buildProspectDetailHeaderHtml = (prospect, cpsPhoto) => {
                         <button title="Edit" aria-label="Edit prospect" onclick="app.editProspect(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--gray-500);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i></button><button title="Convert to Customer" aria-label="Convert to customer" onclick="app.convertToCustomer(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:none;background:var(--primary);color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'"><i class="fa-solid fa-user-check" aria-hidden="true"></i></button><button title="Meet-Up History" aria-label="Meet-up history" onclick="app.openMeetupHistoryModal(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--primary);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i></button><button title="Save to Phone Contacts" aria-label="Save to phone contacts" onclick="app.downloadProspectVCard(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--success);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-solid fa-address-book" aria-hidden="true"></i></button>
                     </div>
                 </div>
-                ${cpsPhoto ? `<img loading="lazy" decoding="async" data-attach-src="${cpsPhoto.url}" onclick="event.stopPropagation();app.zoomCpsPhoto('${UI.escJsAttr(String(cpsPhoto.url))}')" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:2px solid var(--gray-200);cursor:zoom-in;flex-shrink:0;margin-top:4px;" title="CPS Photo — click to enlarge">` : ''}
+                ${cpsPhoto ? `<img loading="lazy" decoding="async" data-attach-src="${escapeHtml(String(cpsPhoto.url))}" onclick="event.stopPropagation();app.zoomCpsPhoto('${UI.escJsAttr(String(cpsPhoto.url))}')" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:2px solid var(--gray-200);cursor:zoom-in;flex-shrink:0;margin-top:4px;" title="CPS Photo — click to enlarge">` : ''}
             </div>
 `;
 };
@@ -2099,12 +2154,12 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             <div class="pv-row"><span class="pv-lbl">File</span><span class="pv-val">${escapeHtml(prospect.cps_form_name || 'CPS Form')}</span></div>
             ${isImage ? `
                 <div style="margin-top:10px;text-align:center;">
-                    <img loading="lazy" decoding="async" src="${cpsUrl}" alt="CPS Form" style="max-width:100%;max-height:280px;border-radius:8px;border:1px solid var(--border);cursor:pointer;" onclick="window.open(this.src,'_blank')">
+                    <img loading="lazy" decoding="async" src="${safeUrl(cpsUrl)}" alt="CPS Form" style="max-width:100%;max-height:280px;border-radius:8px;border:1px solid var(--border);cursor:pointer;" onclick="window.open(this.src,'_blank')">
                     <div style="font-size:11px;color:var(--gray-400);margin-top:4px;">Tap to view full size</div>
                 </div>
             ` : `
                 <div style="margin-top:8px;">
-                    <a href="${cpsUrl}" target="_blank" rel="noopener" download="${escapeHtml(prospect.cps_form_name || 'cps_form.pdf')}" class="btn secondary btn-sm"><i class="fas fa-download"></i> Download</a>
+                    <a href="${safeUrl(cpsUrl)}" target="_blank" rel="noopener" download="${escapeHtml(prospect.cps_form_name || 'cps_form.pdf')}" class="btn secondary btn-sm"><i class="fas fa-download"></i> Download</a>
                 </div>
             `}
         ` : '';
@@ -2119,7 +2174,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             <div class="pv-sub">Registration</div>
             <div class="pv-row"><span class="pv-lbl">Referrer</span><span class="pv-val">${escapeHtml(prospect.referred_by || '-')}</span></div>
             <div class="pv-row"><span class="pv-lbl">Relation</span><span class="pv-val">${escapeHtml(prospect.referral_relationship || '-')}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Created</span><span class="pv-val">${new Date(prospect.created_at).toLocaleDateString()}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Created</span><span class="pv-val">${prospect.created_at ? new Date(prospect.created_at).toLocaleDateString() : '-'}</span></div>
             ${cpsHtml}
         `;
     }
@@ -2441,7 +2496,9 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         const agentRec = prospect.responsible_agent_id
             ? await AppDataStore.getById('users', prospect.responsible_agent_id)
             : null;
-        const agentName = agentRec?.full_name || 'Unassigned';
+        // Escape: full_name is a user-controlled profile value rendered into innerHTML
+        // below (every other pv-val in this file is escaped — this was the lone omission).
+        const agentName = escapeHtml(agentRec?.full_name || 'Unassigned');
 
         // Format dates consistently (handles ISO + falsy values)
         const assignedStr = prospect.cps_assignment_date
@@ -2657,7 +2714,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                     <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;color:var(--gray-500);">${escapeHtml(r.notes || '-')}</td>
                     <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;text-align:center;">
                         ${r.attachment_data
-                            ? `<a href="${r.attachment_data}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(r.attachment_name||'View attachment')}" style="color:var(--primary);margin-right:4px;"><i class="fas fa-paperclip"></i></a>`
+                            ? `<a href="${safeUrl(r.attachment_data)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(r.attachment_name||'View attachment')}" style="color:var(--primary);margin-right:4px;"><i class="fas fa-paperclip"></i></a>`
                             : `<label for="pre2025-att-${pid}-${i}" title="Attach file" style="cursor:pointer;color:var(--gray-400);margin-right:4px;"><i class="fas fa-paperclip"></i></label>`
                         }
                         <input type="file" id="pre2025-att-${pid}-${i}" style="display:none" accept="image/*,application/pdf" onchange="event.stopPropagation();app.addPrePurchaseAttachment(${pid},${i},this)">
@@ -2720,7 +2777,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                                 <div><span style="color:var(--gray-400);">Invoice:</span> ${escapeHtml(h.invoice_number||'-')}</div>
                                 <div style="grid-column:1/-1;">
                                     ${h.invoice_file
-                                        ? `<a href="${h.invoice_file}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(h.invoice_file_name||'View invoice')}</a>`
+                                        ? `<a href="${safeUrl(h.invoice_file)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(h.invoice_file_name||'View invoice')}</a>`
                                         : `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px;background:#fffbeb;border:1px dashed #f59e0b;border-radius:6px;padding:6px 8px;">
                                             <span style="color:#92400e;"><i class="fas fa-exclamation-triangle"></i> No invoice attached.</span>
                                             <input type="file" id="crh-inv-${pid}-${hi}" accept="image/*,application/pdf" style="font-size:11px;flex:1;min-width:140px;">
@@ -2744,7 +2801,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                                 </div>
                                 <div style="margin-bottom:8px;">
                                     <label style="font-size:11px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Delivery Proof Attachment</label>
-                                    ${h.delivery_proof ? `<div style="margin-bottom:4px;"><a href="${h.delivery_proof}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> ${escapeHtml(h.delivery_proof_name||'View proof')}</a> <span style="color:var(--gray-400);font-size:11px;">(upload new to replace)</span></div>` : ''}
+                                    ${h.delivery_proof ? `<div style="margin-bottom:4px;"><a href="${safeUrl(h.delivery_proof)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> ${escapeHtml(h.delivery_proof_name||'View proof')}</a> <span style="color:var(--gray-400);font-size:11px;">(upload new to replace)</span></div>` : ''}
                                     <input type="file" id="crh-proof-${pid}-${hi}" accept="image/*,application/pdf" style="font-size:11px;width:100%;" onchange="(function(el){var f=el.files[0];if(!f)return;var r=new FileReader();r.onload=function(e){el.dataset.b64=e.target.result;el.dataset.fname=f.name;};r.readAsDataURL(f);})(this)">
                                 </div>
                                 <div style="margin-bottom:8px;">
@@ -2816,7 +2873,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 <div class="form-group" style="margin-bottom:14px;">
                     <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Upload Purchased Invoice <span style="font-size:11px;color:var(--gray-400);font-weight:normal;">(AI auto-fill on upload)</span></label>
                     <input id="cr-invoice-file" type="file" class="form-control" accept="image/png,image/jpeg,application/pdf" onchange="app.scanInvoiceWithAI(this,'cr','cr')">
-                    ${d.invoice_file ? `<div style="margin-top:6px;font-size:11px;color:var(--gray-500);"><i class="fas fa-paperclip"></i> Current: <a href="${d.invoice_file}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">${escapeHtml(d.invoice_file_name || 'view')}</a> <span style="color:var(--gray-400);">(choosing a new file will replace it)</span></div>` : ''}
+                    ${d.invoice_file ? `<div style="margin-top:6px;font-size:11px;color:var(--gray-500);"><i class="fas fa-paperclip"></i> Current: <a href="${safeUrl(d.invoice_file)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">${escapeHtml(d.invoice_file_name || 'view')}</a> <span style="color:var(--gray-400);">(choosing a new file will replace it)</span></div>` : ''}
                 </div>
 
                 <div class="pv-sub">📁 Case Study (Optional)</div>
@@ -2861,7 +2918,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 ` : ''}
                 <div class="pv-row"><span class="pv-lbl">Invoice No.</span><span class="pv-val">${escapeHtml(d.invoice_number || '-')}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Collection Date</span><span class="pv-val">${escapeHtml(d.closing_date || '-')}</span></div>
-                <div class="pv-row"><span class="pv-lbl">Invoice File</span><span class="pv-val">${d.invoice_file ? `<a href="${d.invoice_file}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(d.invoice_file_name || 'View')}</a>` : '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Invoice File</span><span class="pv-val">${d.invoice_file ? `<a href="${safeUrl(d.invoice_file)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(d.invoice_file_name || 'View')}</a>` : '-'}</span></div>
                 ${(d.sales_idea || d.plan_details || d.success_story) ? `
                 <div class="pv-sub">Case Study</div>
                 ${d.sales_idea ? `<div class="pv-row"><span class="pv-lbl">Sales Idea</span><span class="pv-val">${escapeHtml(d.sales_idea)}</span></div>` : ''}
@@ -2891,7 +2948,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 ` : ''}
                 <div class="pv-row"><span class="pv-lbl">Invoice No.</span><span class="pv-val">${escapeHtml(d.invoice_number || '-')}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Collection Date</span><span class="pv-val">${escapeHtml(d.closing_date || '-')}</span></div>
-                <div class="pv-row"><span class="pv-lbl">Invoice File</span><span class="pv-val">${d.invoice_file ? `<a href="${d.invoice_file}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(d.invoice_file_name || 'View')}</a>` : '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Invoice File</span><span class="pv-val">${d.invoice_file ? `<a href="${safeUrl(d.invoice_file)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(d.invoice_file_name || 'View')}</a>` : '-'}</span></div>
                 ${(d.sales_idea || d.plan_details || d.success_story) ? `
                 <div class="pv-sub">Case Study</div>
                 ${d.sales_idea ? `<div class="pv-row"><span class="pv-lbl">Sales Idea</span><span class="pv-val">${escapeHtml(d.sales_idea)}</span></div>` : ''}
@@ -2913,7 +2970,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                     </div>
                     <div style="margin-bottom:10px;">
                         <label style="font-size:11px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Delivery Proof / Photo Attachment</label>
-                        ${d.delivery_proof ? `<div style="margin-bottom:5px;"><a href="${d.delivery_proof}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> ${escapeHtml(d.delivery_proof_name||'View proof')}</a> <span style="color:var(--gray-400);font-size:11px;">(upload new to replace)</span></div>` : ''}
+                        ${d.delivery_proof ? `<div style="margin-bottom:5px;"><a href="${safeUrl(d.delivery_proof)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> ${escapeHtml(d.delivery_proof_name||'View proof')}</a> <span style="color:var(--gray-400);font-size:11px;">(upload new to replace)</span></div>` : ''}
                         <input type="file" id="cr-active-proof-${prospect.id}" accept="image/*,application/pdf" style="font-size:11px;width:100%;" onchange="(function(el){var f=el.files[0];if(!f)return;var r=new FileReader();r.onload=function(e){el.dataset.b64=e.target.result;el.dataset.fname=f.name;};r.readAsDataURL(f);})(this)">
                     </div>
                     <div style="margin-bottom:10px;">
@@ -2976,7 +3033,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                     <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;color:var(--gray-500);">${escapeHtml(r.notes || '-')}</td>
                     <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;text-align:center;">
                         ${r.attachment_data
-                            ? `<a href="${r.attachment_data}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(r.attachment_name||'View attachment')}" style="color:var(--primary);margin-right:4px;"><i class="fas fa-paperclip"></i></a>`
+                            ? `<a href="${safeUrl(r.attachment_data)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(r.attachment_name||'View attachment')}" style="color:var(--primary);margin-right:4px;"><i class="fas fa-paperclip"></i></a>`
                             : `<label for="${tab}-att-${pid}-${i}" title="Attach file" style="cursor:pointer;color:var(--gray-400);margin-right:4px;"><i class="fas fa-paperclip"></i></label>`
                         }
                         <input type="file" id="${tab}-att-${pid}-${i}" style="display:none" accept="image/*,application/pdf" onchange="event.stopPropagation();app.addProductPurchaseAttachment(${pid},'${tab}',${i},this)">
@@ -3042,9 +3099,23 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
     else if (tab === 'orders') {
         let orders = [];
         try {
-            orders = await AppDataStore.query('purchases', { prospect_id: prospect.id });
+            // purchases rows are keyed by customer_id (no code path ever writes
+            // purchases.prospect_id), so resolve the linked customer first via
+            // converted_from_prospect_id, then query by that customer_id. Without
+            // this the Sales Orders tab was always empty.
+            const linkedCustomers = await AppDataStore.query('customers', { converted_from_prospect_id: prospect.id }).catch(() => []);
+            if (linkedCustomers && linkedCustomers.length) {
+                const orderLists = await Promise.all(
+                    linkedCustomers.map(c => AppDataStore.query('purchases', { customer_id: c.id }).catch(() => []))
+                );
+                orders = orderLists.flat();
+            }
             orders.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-        } catch(_) { /* intentional: best-effort orders fetch — empty list renders the "no orders" state */ }
+        } catch (err) {
+            // Surface the failure rather than silently degrading to the empty state.
+            console.warn('[orders tab] purchases fetch failed:', err);
+            UI.toast.error('Could not load sales orders');
+        }
         if (!orders.length) {
             container.innerHTML = `<div style="padding:16px;color:var(--gray-400);font-size:13px;text-align:center;">No sales orders on record.</div>`;
             return;
@@ -3152,7 +3223,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             };
 
             const fileLink = (url, name) => url
-                ? `<a href="${url}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(name || 'View file')}</a>`
+                ? `<a href="${safeUrl(url)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(name || 'View file')}</a>`
                 : '<span style="color:var(--gray-400);font-style:italic;">Not uploaded</span>';
 
             return `
@@ -3260,11 +3331,16 @@ const renderCustomerClosingTab = async (customer, container) => {
     const purchases = await AppDataStore.query('purchases', { customer_id: customer.id }).catch(() => []);
     let totalPaid = 0, totalPending = 0;
 
-    // Pull the original conversion sale from the linked prospect closing_record
+    // Pull the original conversion sale from the linked prospect closing_record.
+    // IMPORTANT: every approval path NULLs closing_record on conversion and pushes
+    // the approved CR into closing_records_history. So a non-null closing_record here
+    // is a NEW, subsequent draft/submission (status 'draft'|'submitted') — NOT the
+    // approved conversion sale. Only count/render it as PAID when it is approved,
+    // otherwise it inflates totalPaid with an unapproved draft.
     let conversionRow = '';
     if (customer.converted_from_prospect_id) {
         const origP = await AppDataStore.getById('prospects', customer.converted_from_prospect_id);
-        if (origP?.closing_record) {
+        if (origP?.closing_record && origP.closing_record.status === 'approved') {
             const cr0 = origP.closing_record;
             const amt0 = parseFloat(cr0.sale_amount) || 0;
             totalPaid += amt0;
@@ -3276,7 +3352,7 @@ const renderCustomerClosingTab = async (customer, container) => {
                     <td style="padding:6px 10px;">RM ${amt0.toLocaleString('en-MY',{minimumFractionDigits:2})}</td>
                     <td style="padding:6px 10px;"><span style="background:#dcfce7;color:#166534;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;">PAID</span></td>
                     <td style="padding:6px 10px;">${(()=>{ const ds=cr0.delivery_status||'Pending Delivery'; const dc={'Pending Delivery':'background:#fef3c7;color:#92400e','Dispatched':'background:#dbeafe;color:#1e40af','Delivered':'background:#dcfce7;color:#166534'}; return `<span style="${dc[ds]||dc['Pending Delivery']};border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;cursor:pointer;" onclick="app.updateConversionDelivery(${origP.id},${customer.id})" title="Click to update">${ds} ✎</span>`; })()}</td>
-                    <td style="padding:6px 10px;">${cr0.invoice_file ? `<a href="${cr0.invoice_file}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> View</a>` : '-'}</td>
+                    <td style="padding:6px 10px;">${cr0.invoice_file ? `<a href="${safeUrl(cr0.invoice_file)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> View</a>` : '-'}</td>
                     <td style="padding:6px 10px;font-size:11px;color:var(--gray-400);">Locked</td>
                 </tr>`;
         }
@@ -3364,7 +3440,7 @@ const renderCustomerClosingTab = async (customer, container) => {
                 <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;color:var(--gray-500);">${escapeHtml(r.notes || '-')}</td>
                 <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;text-align:center;">
                     ${r.attachment_data
-                        ? `<a href="${r.attachment_data}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(r.attachment_name||'View attachment')}" style="color:var(--primary);margin-right:4px;"><i class="fas fa-paperclip"></i></a>`
+                        ? `<a href="${safeUrl(r.attachment_data)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(r.attachment_name||'View attachment')}" style="color:var(--primary);margin-right:4px;"><i class="fas fa-paperclip"></i></a>`
                         : `<label for="pre2025-att-${pid}-${i}" title="Attach file" style="cursor:pointer;color:var(--gray-400);margin-right:4px;"><i class="fas fa-paperclip"></i></label>`
                     }
                     <input type="file" id="pre2025-att-${pid}-${i}" style="display:none" accept="image/*,application/pdf" onchange="event.stopPropagation();app.addPrePurchaseAttachment(${pid},${i},this)">
@@ -3425,7 +3501,7 @@ const renderCustomerClosingTab = async (customer, container) => {
                             <div><span style="color:var(--gray-400);">Invoice:</span> ${escapeHtml(h.invoice_number||'-')}</div>
                             <div style="grid-column:1/-1;">
                                 ${h.invoice_file
-                                    ? `<a href="${h.invoice_file}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(h.invoice_file_name||'View invoice')}</a>`
+                                    ? `<a href="${safeUrl(h.invoice_file)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(h.invoice_file_name||'View invoice')}</a>`
                                     : `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px;background:#fffbeb;border:1px dashed #f59e0b;border-radius:6px;padding:6px 8px;">
                                         <span style="color:#92400e;"><i class="fas fa-exclamation-triangle"></i> No invoice attached.</span>
                                         <input type="file" id="crh-inv-${pid}-${hi}" accept="image/*,application/pdf" style="font-size:11px;flex:1;min-width:140px;">
@@ -3449,7 +3525,7 @@ const renderCustomerClosingTab = async (customer, container) => {
                             </div>
                             <div style="margin-bottom:8px;">
                                 <label style="font-size:11px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Delivery Proof Attachment</label>
-                                ${h.delivery_proof ? `<div style="margin-bottom:4px;"><a href="${h.delivery_proof}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> ${escapeHtml(h.delivery_proof_name||'View proof')}</a> <span style="color:var(--gray-400);font-size:11px;">(upload new to replace)</span></div>` : ''}
+                                ${h.delivery_proof ? `<div style="margin-bottom:4px;"><a href="${safeUrl(h.delivery_proof)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> ${escapeHtml(h.delivery_proof_name||'View proof')}</a> <span style="color:var(--gray-400);font-size:11px;">(upload new to replace)</span></div>` : ''}
                                 <input type="file" id="crh-proof-${pid}-${hi}" accept="image/*,application/pdf" style="font-size:11px;width:100%;" onchange="(function(el){var f=el.files[0];if(!f)return;var r=new FileReader();r.onload=function(e){el.dataset.b64=e.target.result;el.dataset.fname=f.name;};r.readAsDataURL(f);})(this)">
                             </div>
                             <div style="margin-bottom:8px;">
@@ -3604,7 +3680,7 @@ const downloadProspectVCard = async (prospectId) => {
 const addNote = async (prospectId) => {
     const text = document.getElementById('new-note-text')?.value?.trim();
     if (!text) return;
-    const currentUser = await Auth.getCurrentUser();
+    const currentUser = await Auth.getCurrentUser() || _state.cu;
 
     // Auto-link to the most recent meet-up so the note surfaces under
     // Meet Up History too — otherwise notes-tab entries get orphaned
@@ -3618,7 +3694,7 @@ const addNote = async (prospectId) => {
         prospect_id: prospectId,
         activity_id: latestActivity?.id || null,
         text: text,
-        author: currentUser?.full_name || 'Michelle Tan',
+        author: currentUser?.full_name || 'Unknown', // never a hardcoded real name — avoids identity-bleed
         date: new Date().toISOString().split('T')[0]
     });
 
@@ -3702,7 +3778,7 @@ const attachActivityPhoto = async (activityId) => {
             <div style="display:flex;flex-wrap:wrap;gap:8px;max-height:180px;overflow:auto;padding:6px;border:1px solid var(--gray-200);border-radius:6px;">
                 ${existing.map((url, i) => `
                     <div style="position:relative;">
-                        <img loading="lazy" decoding="async" data-attach-src="${url}" style="height:70px;border-radius:4px;object-fit:cover;cursor:pointer;" onclick="window._openAttachment('${UI.escJsAttr(String(url))}')">
+                        <img loading="lazy" decoding="async" data-attach-src="${escapeHtml(String(url))}" style="height:70px;border-radius:4px;object-fit:cover;cursor:pointer;" onclick="window._openAttachment('${UI.escJsAttr(String(url))}')">
                         <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:20px;height:20px;font-size:10px;padding:0;" title="Remove" onclick="app.removeActivityPhoto(${activityId}, '${UI.escJsAttr(String(url))}', 'upload')"><i class="fas fa-times"></i></button>
                     </div>
                 `).join('')}
@@ -3927,7 +4003,7 @@ const attachAppraisalForm = async (prospectId) => {
             <div style="display:flex;flex-wrap:wrap;gap:8px;max-height:180px;overflow:auto;padding:6px;border:1px solid var(--gray-200);border-radius:6px;">
                 ${existing.map(row => `
                     <div style="position:relative;">
-                        <img loading="lazy" decoding="async" data-attach-src="${row.file_url}" style="height:70px;border-radius:4px;object-fit:cover;cursor:pointer;" onclick="window._openAttachment('${UI.escJsAttr(String(row.file_url))}')">
+                        <img loading="lazy" decoding="async" data-attach-src="${escapeHtml(String(row.file_url))}" style="height:70px;border-radius:4px;object-fit:cover;cursor:pointer;" onclick="window._openAttachment('${UI.escJsAttr(String(row.file_url))}')">
                         <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:20px;height:20px;font-size:10px;padding:0;" title="Remove" onclick="app.removeAppraisalForm(${prospectId}, ${row.id})"><i class="fas fa-times"></i></button>
                     </div>
                 `).join('')}
@@ -4004,7 +4080,7 @@ const uploadAPUForm = async (activityId, prospectId) => {
             <div style="display:flex;flex-wrap:wrap;gap:8px;max-height:180px;overflow:auto;padding:6px;border:1px solid var(--gray-200);border-radius:6px;">
                 ${existing.map(row => `
                     <div style="position:relative;">
-                        <img loading="lazy" decoding="async" data-attach-src="${row.file_url}" style="height:70px;border-radius:4px;object-fit:cover;cursor:pointer;" onclick="window._openAttachment('${UI.escJsAttr(String(row.file_url))}')">
+                        <img loading="lazy" decoding="async" data-attach-src="${escapeHtml(String(row.file_url))}" style="height:70px;border-radius:4px;object-fit:cover;cursor:pointer;" onclick="window._openAttachment('${UI.escJsAttr(String(row.file_url))}')">
                         <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:20px;height:20px;font-size:10px;padding:0;" title="Remove" onclick="app.removeAPUForm(${prospectId}, ${row.id})"><i class="fas fa-times"></i></button>
                     </div>
                 `).join('')}
@@ -4092,9 +4168,14 @@ const toggleNextActionItem = async (prospectId, itemId, isDone) => {
     // Persist to Supabase so completion state syncs across users/devices.
     // itemId is like "${activityId}_na" or "${activityId}_ns"
     const isNa = itemId.endsWith('_na');
-    const activityId = parseInt(itemId.slice(0, -3));
+    // Recover the activity id by stripping the 3-char suffix as a STRING — do NOT
+    // parseInt: some synced activities use fp_* UUID string PKs, and parseInt(uuid)
+    // = NaN would silently skip the DB write (localStorage-only). Coerce to a number
+    // only when the id is purely numeric so legacy int-keyed rows still match.
+    const rawId = itemId.slice(0, -3);
+    const activityId = /^\d+$/.test(rawId) ? parseInt(rawId, 10) : rawId;
     const field = isNa ? 'next_action_done' : 'note_next_steps_done';
-    if (!isNaN(activityId)) {
+    if (activityId !== '' && activityId != null) {
         try {
             await AppDataStore.update('activities', activityId, { [field]: isDone });
         } catch (err) {
@@ -4218,7 +4299,13 @@ const addPrePurchaseRow = async (prospectId) => {
             }
         } else {
             const reader = new FileReader();
-            reader.onload = async (e) => await saveRow(e.target.result, file.name);
+            // Surface async-save failures in the base64 fallback (was an unhandled
+            // rejection — user got no error toast and the row silently failed to save).
+            reader.onload = async (e) => {
+                try { await saveRow(e.target.result, file.name); }
+                catch (err) { UI.toast.error('Failed to save record: ' + (err.message || 'Unknown error')); }
+            };
+            reader.onerror = () => UI.toast.error('Could not read the selected file');
             reader.readAsDataURL(file);
         }
     } else {
@@ -4264,7 +4351,12 @@ const addPrePurchaseAttachment = async (prospectId, index, fileInput) => {
         }
     } else {
         const reader = new FileReader();
-        reader.onload = async (e) => await saveAttachment(e.target.result, file.name);
+        // Surface async-save failures in the base64 fallback (was an unhandled rejection).
+        reader.onload = async (e) => {
+            try { await saveAttachment(e.target.result, file.name); }
+            catch (err) { UI.toast.error('Failed to save attachment: ' + (err.message || 'Unknown error')); }
+        };
+        reader.onerror = () => UI.toast.error('Could not read the selected file');
         reader.readAsDataURL(file);
     }
 };
@@ -4430,7 +4522,12 @@ const addProductPurchaseRow = async (prospectId, type) => {
 
     if (file) {
         const reader = new FileReader();
-        reader.onload = async (e) => await saveRow(e.target.result, file.name);
+        // Surface async-save failures in the base64 fallback (was an unhandled rejection).
+        reader.onload = async (e) => {
+            try { await saveRow(e.target.result, file.name); }
+            catch (err) { UI.toast.error('Failed to save record: ' + (err.message || 'Unknown error')); }
+        };
+        reader.onerror = () => UI.toast.error('Could not read the selected file');
         reader.readAsDataURL(file);
     } else {
         await saveRow(null, null);
@@ -4441,18 +4538,24 @@ const addProductPurchaseAttachment = async (prospectId, type, index, fileInput) 
     const file = fileInput?.files[0];
     if (!file) return;
     const reader = new FileReader();
+    // Surface async-save failures (was an unhandled rejection with no user feedback).
     reader.onload = async (e) => {
-        const prospect = await AppDataStore.getById('prospects', prospectId);
-        if (!prospect) return;
-        const records = _readProductPurchases(prospect, type);
-        if (records[index]) {
-            records[index].attachment_name = file.name;
-            records[index].attachment_data = e.target.result;
+        try {
+            const prospect = await AppDataStore.getById('prospects', prospectId);
+            if (!prospect) return UI.toast.error('Prospect not found');
+            const records = _readProductPurchases(prospect, type);
+            if (records[index]) {
+                records[index].attachment_name = file.name;
+                records[index].attachment_data = e.target.result;
+            }
+            await _writeProductPurchases(prospectId, prospect, type, records);
+            UI.toast.success('Attachment saved');
+            await _refreshProductPurchaseTab(prospectId, type);
+        } catch (err) {
+            UI.toast.error('Failed to save attachment: ' + (err.message || 'Unknown error'));
         }
-        await _writeProductPurchases(prospectId, prospect, type, records);
-        UI.toast.success('Attachment saved');
-        await _refreshProductPurchaseTab(prospectId, type);
     };
+    reader.onerror = () => UI.toast.error('Could not read the selected file');
     reader.readAsDataURL(file);
 };
 
@@ -4762,7 +4865,7 @@ const openFengShuiPhotosModal = async (prospectId, auditId, phase) => {
             ${photos.map((p, i) => `
                 <div style="width:120px;border:1px solid var(--gray-200);border-radius:6px;overflow:hidden;background:#fff;">
                     <div style="position:relative;">
-                        <img loading="lazy" decoding="async" data-attach-src="${p.url}" style="width:100%;height:90px;object-fit:cover;cursor:pointer;" onclick="window._openAttachment('${UI.escJsAttr(String(p.url))}')">
+                        <img loading="lazy" decoding="async" data-attach-src="${escapeHtml(String(p.url))}" style="width:100%;height:90px;object-fit:cover;cursor:pointer;" onclick="window._openAttachment('${UI.escJsAttr(String(p.url))}')">
                         <button type="button" title="Remove" onclick="event.stopPropagation();app.removeFengShuiPhoto(${prospectId},${auditId},'${phase}',${i});UI.hideModal();" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;"><i class="fas fa-times"></i></button>
                     </div>
                     <input type="text" class="form-control" value="${escapeHtml(p.remarks || '')}" placeholder="Remark..." style="font-size:11px;height:26px;border:none;border-top:1px solid var(--gray-200);border-radius:0;" onchange="event.stopPropagation();app.updateFengShuiPhotoRemark(${prospectId},${auditId},'${phase}',${i},this.value)">
@@ -4788,7 +4891,7 @@ const openFengShuiSitePhotosModal = async (prospectId, auditId, srId) => {
         : `<div style="display:flex;flex-wrap:wrap;gap:8px;">
             ${photos.map((url, i) => `
                 <div style="position:relative;">
-                    <img loading="lazy" decoding="async" data-attach-src="${url}" style="width:90px;height:90px;object-fit:cover;border-radius:4px;cursor:pointer;border:1px solid var(--gray-200);" onclick="window._openAttachment('${UI.escJsAttr(String(url))}')">
+                    <img loading="lazy" decoding="async" data-attach-src="${escapeHtml(String(url))}" style="width:90px;height:90px;object-fit:cover;border-radius:4px;cursor:pointer;border:1px solid var(--gray-200);" onclick="window._openAttachment('${UI.escJsAttr(String(url))}')">
                     <button type="button" title="Remove" onclick="event.stopPropagation();app.removeFengShuiSitePhoto(${prospectId},${auditId},${srId},${i});UI.hideModal();" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:9px;cursor:pointer;"><i class="fas fa-times"></i></button>
                 </div>
             `).join('')}
@@ -4937,7 +5040,9 @@ const _mirrorCrToActivity = async (prospectId, cr) => {
     if (cr.payment_method === 'POP') {
         if (cr.pop_monthly) updates.pop_monthly_amount = cr.pop_monthly;
         if (cr.pop_tenure)  updates.pop_tenure = cr.pop_tenure;
-        if (cr.pop_down)    updates.pop_down_payment = cr.pop_down;
+        // Field-name fix: gatherClosingFormData writes pop_down_payment (line ~4248),
+        // not pop_down — reading cr.pop_down silently dropped the POP down-payment.
+        if (cr.pop_down_payment) updates.pop_down_payment = cr.pop_down_payment;
     }
 
     try { await AppDataStore.update('activities', target.id, updates); }
@@ -4999,8 +5104,17 @@ const submitClosingRecord = async (prospectId) => {
         updates.conversion_requested_by = _state.cu?.id;
     }
 
-    await AppDataStore.update('prospects', prospectId, updates);
-    await _mirrorCrToActivity(prospectId, submittedCr);
+    // Guard the PRIMARY closing-record write + activity mirror: if this throws
+    // (RLS/offline), the sale is NOT recorded — surface the error and abort before
+    // the success toast, instead of rejecting silently while claiming success.
+    try {
+        await AppDataStore.update('prospects', prospectId, updates);
+        await _mirrorCrToActivity(prospectId, submittedCr);
+    } catch (err) {
+        console.warn('submitClosingRecord primary update failed:', err);
+        UI.toast.error('Failed to submit closing record. Please retry.');
+        return;
+    }
 
     // Create approval queue entries for non-managers
     if (!isManager) {
@@ -5073,7 +5187,9 @@ const uploadHistoryInvoice = async (prospectId, historyIndex) => {
     const file = fileInput?.files?.[0];
     if (!file) return UI.toast.error('Please choose a file first');
 
-    const prospect = await AppDataStore.getByIdFull
+    // Feature-detect getByIdFull explicitly: `await` binds tighter than `?:`, so the
+    // previous form awaited the function reference itself, not the call. Parenthesize.
+    const prospect = AppDataStore.getByIdFull
         ? await AppDataStore.getByIdFull('prospects', prospectId)
         : await AppDataStore.getById('prospects', prospectId);
     const history = [...(Array.isArray(prospect?.closing_records_history) ? prospect.closing_records_history : [])];
@@ -5126,6 +5242,9 @@ const uploadHistoryInvoice = async (prospectId, historyIndex) => {
 
 const saveClosingHistoryEntry = async (prospectId, index) => {
     const prospect = await AppDataStore.getByIdFull('prospects', prospectId);
+    // getByIdFull does a live fetch and can return null (RLS deny / offline / deleted).
+    // Guard before dereferencing, matching savePurchasesHistoryRow.
+    if (!prospect) return UI.toast.error('Prospect not found');
     const history = [...(Array.isArray(prospect.closing_records_history) ? prospect.closing_records_history : [])];
     if (index < 0 || index >= history.length) return UI.toast.error('Record not found');
     const pid = prospectId;
@@ -5294,7 +5413,60 @@ const _loadPurchasesHistory = async () => {
 // React-island Purchases History (default-on). The island owns filter+page state
 // (keeps search focus) and renders the editable table with the SAME cell ids so
 // app.savePurchasesHistoryRow still works. Kill-switch → legacy: __REACT_PURCHASES
-// ===false, ?react=0, crm_react_off='1'. Legacy table is the fallback on error.
+// ===false, ?react=0, crm_react_off='1'. A minimal server-data legacy table (below)
+// is the real fallback when React is off or the island mount throws.
+
+// Minimal legacy Purchases History table — rendered from _state.phc.rows with the
+// ph-ds-/ph-rem-/ph-cc- cell ids that savePurchasesHistoryRow reads, so Save works
+// without the React island. Honors _phFilter (text) + _phPage pagination.
+const _renderPurchasesHistoryLegacy = (viewport) => {
+    const { rows = [] } = _state.phc || {};
+    const q = (_phFilter.q || '').trim().toLowerCase();
+    const filtered = q
+        ? rows.filter(r => `${r.customerName} ${r.agentName} ${r.invoiceNo} ${r.product}`.toLowerCase().includes(q))
+        : rows;
+    const total = filtered.length;
+    const start = _phPage * _PH_PAGE_SIZE;
+    const page = filtered.slice(start, start + _PH_PAGE_SIZE);
+    const dsOptions = ['pending','Pending Delivery','Dispatched','Delivered','Partial Delivery','Cancelled','Doubtful'];
+    const body = page.map(r => {
+        const rk = `${r.prospectId}-${r.historyIndex}`;
+        const opts = dsOptions.map(o => `<option value="${escapeHtml(o)}"${o === r.deliveryStatus ? ' selected' : ''}>${escapeHtml(o)}</option>`).join('');
+        return `<tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:6px 10px;font-size:12px;">${escapeHtml(r.date || '-')}</td>
+            <td style="padding:6px 10px;font-size:12px;">${escapeHtml(r.customerName || '-')}</td>
+            <td style="padding:6px 10px;font-size:12px;color:var(--gray-500);">${escapeHtml(r.agentName || '-')}</td>
+            <td style="padding:6px 10px;font-size:12px;">${escapeHtml(r.invoiceNo || '-')}</td>
+            <td style="padding:6px 10px;font-size:12px;">${escapeHtml(r.product || '-')}</td>
+            <td style="padding:6px 10px;font-size:12px;font-weight:600;">RM ${(r.amount || 0).toLocaleString()}</td>
+            <td style="padding:6px 10px;"><select id="ph-ds-${escapeHtml(rk)}" class="form-control" style="font-size:11px;padding:2px 6px;">${opts}</select></td>
+            <td style="padding:6px 10px;"><input id="ph-rem-${escapeHtml(rk)}" class="form-control" style="font-size:11px;padding:2px 6px;" value="${escapeHtml(r.remarks || '')}"></td>
+            <td style="padding:6px 10px;text-align:center;"><input type="checkbox" id="ph-cc-${escapeHtml(rk)}"${r.caseCompleted ? ' checked' : ''}></td>
+            <td style="padding:6px 10px;"><button class="btn secondary btn-sm" style="font-size:11px;padding:2px 8px;" onclick="app.savePurchasesHistoryRow('${UI.escJsAttr(String(r.prospectId))}',${r.historyIndex},${r.isHistory})">Save</button></td>
+        </tr>`;
+    }).join('');
+    const pages = Math.max(1, Math.ceil(total / _PH_PAGE_SIZE));
+    const pager = pages > 1
+        ? `<div style="display:flex;gap:6px;align-items:center;justify-content:flex-end;padding:8px 10px;font-size:12px;">
+            <button class="btn secondary btn-sm" ${_phPage <= 0 ? 'disabled' : ''} onclick="app.phSetPage(${_phPage - 1})">Prev</button>
+            <span>Page ${_phPage + 1} / ${pages}</span>
+            <button class="btn secondary btn-sm" ${_phPage >= pages - 1 ? 'disabled' : ''} onclick="app.phSetPage(${_phPage + 1})">Next</button>
+        </div>` : '';
+    viewport.innerHTML = `
+        <div style="padding:12px;">
+            <div style="margin-bottom:10px;"><input class="form-control" placeholder="Search customer / agent / invoice / product…" value="${escapeHtml(_phFilter.q || '')}" oninput="app.phSetFilter('q', this.value)" style="max-width:360px;"></div>
+            <div style="border:1px solid var(--border);border-radius:8px;overflow:auto;">
+                <table style="width:100%;border-collapse:collapse;min-width:900px;">
+                    <thead><tr style="background:var(--gray-50);text-align:left;">
+                        <th style="padding:8px 10px;font-size:11px;">Date</th><th style="padding:8px 10px;font-size:11px;">Customer</th><th style="padding:8px 10px;font-size:11px;">Agent</th><th style="padding:8px 10px;font-size:11px;">Invoice</th><th style="padding:8px 10px;font-size:11px;">Product</th><th style="padding:8px 10px;font-size:11px;">Amount</th><th style="padding:8px 10px;font-size:11px;">Delivery</th><th style="padding:8px 10px;font-size:11px;">Remarks</th><th style="padding:8px 10px;font-size:11px;">Done</th><th style="padding:8px 10px;font-size:11px;"></th>
+                    </tr></thead>
+                    <tbody>${body || `<tr><td colspan="10" style="padding:24px;text-align:center;color:var(--gray-400);font-size:12px;">No purchase history records.</td></tr>`}</tbody>
+                </table>
+            </div>
+            ${pager}
+        </div>`;
+};
+
 const _reactPurchasesOn = () => {
     try {
         if (window.__REACT_PURCHASES === false) return false;
@@ -5312,12 +5484,13 @@ const _renderPurchasesHistory = (viewport) => {
             window.CRMReact.mountPurchasesHistory(document.getElementById('purchases-react-root'), { rows, agentMap });
             return;
         } catch (e) {
-            console.warn('[purchases_history] react mount failed:', e && e.message);
-            viewport.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
+            console.warn('[purchases_history] react mount failed — using legacy table:', e && e.message);
+            _renderPurchasesHistoryLegacy(viewport);
             return;
         }
     }
-    viewport.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;"><i class="fas fa-rotate-right" style="font-size:30px;opacity:.45;"></i><p style="margin:14px 0;">This section couldn\'t load. Please reload the page.</p><button class="btn primary" onclick="location.reload()">Reload</button></div>';
+    // React off (kill-switch) → real legacy table, not a dead error message.
+    _renderPurchasesHistoryLegacy(viewport);
 };
 
 const phSetFilter = (key, val) => {
@@ -5341,6 +5514,10 @@ const refreshPurchasesHistory = async () => {
 };
 
 const savePurchasesHistoryRow = async (prospectId, historyIndex, isHistory) => {
+    // Authz: this is the write path of the Super-Admin-only Purchases History screen.
+    // Without this gate any authenticated user could deep-link the view and call
+    // app.savePurchasesHistoryRow(...) to mutate other teams' closing/fulfilment records.
+    if (!isSystemAdmin(_state.cu)) return UI.toast.error('Not permitted');
     const rk = `${prospectId}-${historyIndex}`;
     const statusEl = document.getElementById(`ph-ds-${rk}`);
     const remarksEl = document.getElementById(`ph-rem-${rk}`);
@@ -5370,8 +5547,10 @@ const savePurchasesHistoryRow = async (prospectId, historyIndex, isHistory) => {
 
 const openRecruitModal = async (customerId) => {
     const customer = await AppDataStore.getById('customers', customerId);
+    if (!customer) return UI.toast.error('Customer not found');
     const content = `
 <div class="form-section">
+                <div style="background:#f1f5f9;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:13px;color:var(--gray-700);"><i class="fas fa-user" style="margin-right:6px;color:var(--primary);"></i> Recruiting: <strong>${escapeHtml(customer.full_name || 'Customer')}</strong></div>
                 <h4 style="margin-bottom:12px;">Package Selection</h4>
                 <div class="form-row">
                     <div class="form-group half"><label>Package Type</label><select id="rec-pkg" class="form-control"><option>Premium</option><option>Standard</option><option>Basic</option></select></div>
@@ -5401,12 +5580,17 @@ const openRecruitModal = async (customerId) => {
 `;
     UI.showModal('Convert Customer to Agent', content, [
         { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-        { label: 'Submit for Approval', type: 'primary', action: '(async () => { await app.submitRecruitmentApproval(); })()' }
+        // Pass customerId so the recruitment approval entry carries a customer_id link
+        // (submitRecruitmentApproval in script-fude.js must read it — see cross_file_needs).
+        { label: 'Submit for Approval', type: 'primary', action: `(async () => { await app.submitRecruitmentApproval(${customerId}); })()` }
     ]);
 };
 
 
 const confirmDelete = async (id) => {
+    // Defence-in-depth: legacy delete path must enforce the same Level>5 gate as the
+    // live confirmDeleteProspect path, not rely solely on RLS.
+    if (_getUserLevel(_state.cu) > 5) { UI.toast.error('You do not have permission to delete prospects.'); return; }
     UI.showModal('Delete Confirmation',
         '<p>Are you sure you want to delete this prospect? This action cannot be undone.</p>', [
         { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
@@ -5416,6 +5600,9 @@ const confirmDelete = async (id) => {
 };
 
 const executeDelete = async (id) => {
+    // Defence-in-depth: executeDelete is reachable as app.executeDelete(id). Gate it on
+    // the same Level>5 rule the live delete path enforces, not solely on RLS.
+    if (_getUserLevel(_state.cu) > 5) { UI.toast.error('You do not have permission to delete prospects.'); return; }
     UI.hideModal();
     try {
         const [acts, allNotes, names, referrals] = await Promise.all([
@@ -5791,8 +5978,22 @@ const convertToCustomer = async (prospectId) => {
     }
 };
 
+// openPastRecordModal is owned by chunks/script-activities.js and has NO core
+// lazy-stub, so the prospect-detail "Past Record" button (inline app.openPastRecordModal)
+// throws TypeError before the activities chunk is warmed. Register a self-loading
+// stub here that loads activities on demand and re-dispatches via the module
+// namespace (robust against flat-key clobber regardless of chunk load order).
+const openPastRecordModal = async (...args) => {
+    await window._loadChunk('chunks/script-activities.min.js');
+    const real = (window.app._modules && window.app._modules.activities && window.app._modules.activities.openPastRecordModal)
+        || (window.app.openPastRecordModal !== openPastRecordModal ? window.app.openPastRecordModal : null);
+    if (typeof real === 'function') return real(...args);
+    UI.toast.error('Could not open Past Record. Please reload and try again.');
+};
+
 
     app.register('prospects', {
+        openPastRecordModal,
         EXPORT_HARD_LIMIT,
         EXPORT_WARN_THRESHOLD,
         _computeFinishDate,

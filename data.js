@@ -245,9 +245,19 @@ class DataStore {
         const candidates = entries
             .filter(e => e.k.startsWith('fs_crm_') && !PROTECTED.has(e.k))
             .sort((a, b) => b.bytes - a.bytes);
+        // `total` includes protected/non-prunable keys (auth token, sync queue,
+        // tombstones). Only the candidate bytes are reclaimable — so the floor we
+        // can ever reach is `total - reclaimable`. If that floor already exceeds
+        // TARGET (protected keys dominate), no prune brings usage under target;
+        // we still drop every candidate to free what we can, and warn that the
+        // remainder is unprunable rather than silently believing we hit target.
+        const reclaimable = candidates.reduce((s, c) => s + c.bytes, 0);
+        const unprunableFloor = total - reclaimable;
         let freed = 0;
         const dropped = [];
         for (const c of candidates) {
+            // Remaining usage after this point is (total - freed); stop once it's
+            // under target (real usage, not an approximation).
             if (total - freed <= TARGET_BYTES) break;
             try {
                 localStorage.removeItem(c.k);
@@ -261,6 +271,13 @@ class DataStore {
                 `pruned ${dropped.length} cache entries (${(freed / 1024 / 1024).toFixed(2)} MB freed)`
             );
         }
+        if (unprunableFloor > TARGET_BYTES && (total - freed) > TARGET_BYTES) {
+            console.warn(
+                `[DataStore] localStorage still at ${((total - freed) / 1024 / 1024).toFixed(2)} MB after prune — ` +
+                `${(unprunableFloor / 1024 / 1024).toFixed(2)} MB is non-prunable (auth/sync/tombstones); ` +
+                `auth-token writes may still hit quota.`
+            );
+        }
     }
 
     // PostgREST `select` clause to use for a given table. Lets us omit heavy
@@ -269,6 +286,25 @@ class DataStore {
     // back to '*' if the column list becomes stale.
     _selectClauseForGetAll(tableName) {
         return this._lightSelects[tableName] || '*';
+    }
+
+    // Project a full row down to just the columns the getAll light-select keeps,
+    // so realtime splices (which receive the FULL row from the realtime
+    // publication) don't re-introduce the heavy BLOB-adjacent columns that
+    // _lightSelects was designed to exclude from list snapshots. Tables with no
+    // light select ('*') are returned unchanged.
+    _projectToLightSelect(tableName, row) {
+        if (!row || typeof row !== 'object') return row;
+        const clause = this._lightSelects[tableName];
+        if (!clause || clause === '*') return row;
+        const cols = clause.split(',').map(c => c.trim()).filter(Boolean);
+        const out = {};
+        for (const c of cols) {
+            if (c in row) out[c] = row[c];
+        }
+        // Always preserve the id even if it somehow wasn't listed.
+        if (!('id' in out) && 'id' in row) out.id = row.id;
+        return out;
     }
 
     on(event, callback) {
@@ -524,14 +560,22 @@ class DataStore {
                     if (evt === 'DELETE') {
                         if (idx >= 0) cached.data.splice(idx, 1);
                     } else {
-                        if (idx >= 0) cached.data[idx] = { ...cached.data[idx], ...row };
-                        else cached.data.unshift(row);
+                        // Project the full realtime row down to the light-select
+                        // shape before splicing, so heavy columns (e.g.
+                        // closing_records_history) never leak into the lean list
+                        // cache / persisted snapshot the way the full row would.
+                        const lean = this._projectToLightSelect(table, row);
+                        if (idx >= 0) cached.data[idx] = { ...cached.data[idx], ...lean };
+                        else cached.data.unshift(lean);
                     }
                     // Cap the in-memory list for high-volume tables so a flood
                     // of org-wide inserts on a long-lived tab can't grow the
-                    // cached array without bound. Newest rows are unshifted to
-                    // the front, so the tail is oldest — drop from the tail.
-                    if (this.HIGH_VOLUME_TABLES.has(table) && cached.data.length > this._realtimeListCap) {
+                    // cached array without bound. Only cap on INSERT: an unshift
+                    // guarantees the tail is the oldest row, so truncating the
+                    // tail evicts oldest-first. UPDATE/DELETE mutate in place and
+                    // don't reorder, so capping there could drop a recently-active
+                    // row that happens to sit at the tail.
+                    if (evt === 'INSERT' && this.HIGH_VOLUME_TABLES.has(table) && cached.data.length > this._realtimeListCap) {
                         cached.data.length = this._realtimeListCap;
                     }
                     cached.ts = Date.now();
@@ -1044,8 +1088,15 @@ class DataStore {
             // fires immediately in parallel so there's no extra RTT added.
             this._cacheApiGet(tableName).then(cacheApiRows => {
                 if (!cacheApiRows || cacheApiRows.length === 0) return;
-                // Only prime if Tier 3 hasn't already returned fresh data.
-                if (!this._cacheGet(tableName)) {
+                // Only prime if Tier 3 hasn't already returned fresh data AND no
+                // Tier-3 fetch is still in flight. Without the in-flight check
+                // there's a window where the Cache-API promise resolves while the
+                // fresh Supabase fetch is still running: _cacheGet returns null
+                // (nothing cached yet), so we'd prime + emit stale rows that the
+                // about-to-land fresh result immediately overwrites — a flash of
+                // stale data and a redundant re-render.
+                const inFlight = this._inFlightGetAll && this._inFlightGetAll.has(tableName);
+                if (!this._cacheGet(tableName) && !inFlight) {
                     this._cacheSet(tableName, cacheApiRows);
                     if (window.__FS_DEBUG_SWR) console.log(`[SWR] ${tableName}: served ${cacheApiRows.length} rows from Cache API overflow tier`);
                     this.emit('dataChanged', { action: 'cache_api_hit', table: tableName });
@@ -1150,12 +1201,17 @@ class DataStore {
 
         const out = [];
         for (let offset = 0; offset < max; offset += pageSize) {
-            const end = Math.min(offset + pageSize - 1, max - 1);
+            // Request a FULL pageSize window (don't clamp `end` to max-1). Clamping
+            // made the final window short, so a genuinely-truncated dataset returned
+            // a short page and the `< pageSize` break fired — silently capping at
+            // `max` rows with NO error. We page full windows and instead throw below
+            // when the budget is exhausted while the server still has more, so the
+            // caller narrows filters rather than receiving a partial set silently.
             let q = this._readClient()
                 .from(tableName)
                 .select(selectClause)
                 .order(orderBy, { ascending })
-                .range(offset, end);
+                .range(offset, offset + pageSize - 1);
             for (const [col, val] of Object.entries(filters)) {
                 if (Array.isArray(val)) q = q.in(col, val);
                 else q = q.eq(col, val);
@@ -1164,7 +1220,25 @@ class DataStore {
             if (error) throw error;
             if (!data || data.length === 0) break;
             out.push(...data);
-            if (data.length < pageSize) break; // last page
+            if (data.length < pageSize) break; // last page (genuinely short)
+            // Budget filled with a FULL final page. Off-by-one guard (mirrors
+            // _getInRange): a dataset of EXACTLY `max` rows must NOT throw. Probe
+            // one row past the budget — only throw when the server genuinely has
+            // more than `max`; otherwise return the complete set.
+            if (offset + pageSize >= max) {
+                let probeQ = this._readClient().from(tableName).select('id')
+                    .order(orderBy, { ascending }).range(max, max);
+                for (const [col, val] of Object.entries(filters)) {
+                    if (Array.isArray(val)) probeQ = probeQ.in(col, val);
+                    else probeQ = probeQ.eq(col, val);
+                }
+                const { data: probeData, error: probeErr } = await probeQ;
+                if (probeErr) throw probeErr;
+                if (probeData && probeData.length > 0) {
+                    throw new Error(`queryPaged(${tableName}): result exceeds ${max} rows — narrow filters or raise opts.max`);
+                }
+                break; // exactly `max` rows, no more — return the complete set
+            }
         }
         this._clearOfflineNotice();
         return this._stripTombstones(tableName, out);
@@ -1221,8 +1295,26 @@ class DataStore {
             if (!data || data.length === 0) break;
             out.push(...data);
             if (data.length < pageSize) break;   // last page
-            // Budget filled but server has more — refuse to silently truncate.
-            if (offset + pageSize >= max) throw new Error(`_getInRange(${table}): window exceeds ${max} rows — narrow the date range or scope`);
+            // Budget filled with a FULL final page. Off-by-one guard: a dataset of
+            // EXACTLY `max` rows (no more on the server) must NOT throw. Probe for a
+            // single row past the budget — only throw when the probe actually finds
+            // one (i.e. the server genuinely has more than `max`).
+            if (offset + pageSize >= max) {
+                let probeQ = this._readClient().from(table).select('id')
+                    .gte(dateCol, fromISO).lte(dateCol, toISO)
+                    .order(dateCol, { ascending: false }).range(max, max);
+                if (scopeIds) probeQ = probeQ.in(scopeCol, scopeIds);
+                if (signal && typeof probeQ.abortSignal === 'function') probeQ = probeQ.abortSignal(signal);
+                let probeData, probeErr;
+                try { ({ data: probeData, error: probeErr } = await probeQ); }
+                catch (e) { if (this._isAbortError(e)) return this._stripTombstones(table, out); throw e; }
+                if (this._isAbortError(probeErr)) return this._stripTombstones(table, out);
+                if (probeErr) throw probeErr;
+                if (probeData && probeData.length > 0) {
+                    throw new Error(`_getInRange(${table}): window exceeds ${max} rows — narrow the date range or scope`);
+                }
+                break;   // exactly `max` rows, no more — return them
+            }
         }
         this._clearOfflineNotice();
         return this._stripTombstones(table, out);
@@ -1541,6 +1633,7 @@ class DataStore {
             const otherTable = queue.filter(q => q.tableName !== tableName);
             const stillPending = [];
             for (const item of forTable) {
+                if (!item || !item.record) continue; // skip legacy/corrupt queue entry (no .record) instead of TypeError-aborting the whole drain
                 if (deletedIds.has(String(item.record.id))) continue; // dropped from queue, never resurrect
                 if (item.pushed) continue; // already synced once — never re-push (prevents resurrection of externally-deleted records)
                 try {
@@ -1626,6 +1719,7 @@ class DataStore {
             const queue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
             for (const item of queue) {
                 if (item.tableName !== tableName) continue;
+                if (!item || !item.record) continue;   // legacy/corrupt entry — skip, don't crash the whole reconcile pass
                 const idStr = String(item.record.id);
                 if (serverIds.has(idStr)) continue;   // already confirmed on the server
                 if (deletedIds.has(idStr)) continue;   // intentionally deleted
@@ -1682,6 +1776,7 @@ class DataStore {
                 const newTombstones = [];
 
                 for (const item of forTable) {
+                    if (!item || !item.record) continue;   // legacy/corrupt entry — skip, don't crash the whole sync pass
                     const idStr = String(item.record.id);
                     // Already in Supabase — confirmed synced, drop from queue
                     if (serverIds.has(idStr)) continue;
@@ -1932,7 +2027,10 @@ class DataStore {
 
     _isSchemaError(e) { return window._dataHelpers.isSchemaError(e); }
 
-    async add(tableName, record) {
+    // opts.suppressEmit — skip the per-row dataChanged emit (used by createMany's
+    // per-row fallback so it can fire ONE batch event instead of N, honoring the
+    // createMany contract even when the bulk path falls back to sequential add()).
+    async add(tableName, record, opts = {}) {
         const dataToInsert = { ...record };
         if (!dataToInsert.id) dataToInsert.id = this._generateId(tableName);
 
@@ -1976,16 +2074,21 @@ class DataStore {
                 if (_strippedFKCols.length && window.UI?.toast?.warning) {
                     try { window.UI.toast.warning(`Saved, but couldn't link to ${_strippedFKCols.join(', ')} — that record no longer exists.`); } catch (_) { /* intentional: toast is best-effort UI feedback */ }
                 }
-                // Save full record (including stripped fields) to localStorage
+                // Save the ACTUALLY-saved record to localStorage. Do NOT spread the
+                // original `dataToInsert` — on a 23503 retry it still carries the
+                // dropped (broken) FK value, which the server response `data` omits.
+                // Spreading it back would re-inject the stale FK as a "local-only
+                // field" that _autoSync/_reconcile re-merge onto the row, silently
+                // re-attaching the link the user was just warned was lost.
                 try {
                     const key = `fs_crm_${tableName}`;
                     const all = JSON.parse(localStorage.getItem(key) || '[]');
-                    all.push({ ...insertData, ...dataToInsert, ...data });
+                    all.push({ ...insertData, ...data });
                     localStorage.setItem(key, JSON.stringify(this._sanitizeForStorage(tableName, all)));
                 } catch (_) { /* intentional: local mirror is best-effort; server insert already succeeded */ }
                 this._writeAudit('insert', tableName, data.id || insertData.id, null, data);
                 this.invalidateCache(tableName);
-                this.emit('dataChanged', { action: 'add', table: tableName, record: data });
+                if (!opts.suppressEmit) this.emit('dataChanged', { action: 'add', table: tableName, record: data });
                 // Phase J: confirm optimistic row — clears the ⏳ overlay.
                 if (_isActivityInsert && typeof window._confirmOptimisticActivity === 'function') {
                     try { window._confirmOptimisticActivity(dataToInsert.client_request_id); } catch (_) { /* intentional: optimistic-chip clear is best-effort UI */ }
@@ -2059,7 +2162,7 @@ class DataStore {
             localStorage.setItem('fs_crm_sync_queue', JSON.stringify(syncQueue));
         } catch (_) { /* intentional: sync-queue persist is best-effort; offline write may not auto-sync */ }
         this.invalidateCache(tableName);
-        this.emit('dataChanged', { action: 'add', table: tableName, record: dataToInsert });
+        if (!opts.suppressEmit) this.emit('dataChanged', { action: 'add', table: tableName, record: dataToInsert });
         // Phase J: mark optimistic row as failed so the calendar shows ⚠.
         // The row stays in the overlay until the sync queue drains successfully.
         // Pass through the real Postgres / network error so the tooltip surfaces
@@ -2120,7 +2223,11 @@ class DataStore {
         } catch (e) {
             console.warn(`createMany bulk insert failed for ${tableName}, falling back to per-row add: ${e?.message || e}`);
             const out = [];
-            for (const r of records) out.push(await this.add(tableName, r));
+            // Suppress each add()'s per-row emit and fire ONE batch event after the
+            // loop — honors the documented "single dataChanged add event (records[])"
+            // contract even on the bulk-failure fallback path.
+            for (const r of records) out.push(await this.add(tableName, r, { suppressEmit: true }));
+            this.emit('dataChanged', { action: 'add', table: tableName, records: out });
             return out;
         }
     }
@@ -2318,7 +2425,13 @@ class DataStore {
                             const key = `fs_crm_${tableName}`;
                             const all = JSON.parse(localStorage.getItem(key) || '[]');
                             const idx = all.findIndex(r => String(r.id) === String(id));
-                            const full = { ...inserted, ...updates };
+                            // Server response wins (parity with the happy path at the
+                            // top of update(): { ...updates, ...data }). Spread the
+                            // caller's `updates` FIRST so the server-returned `inserted`
+                            // row (with trigger-computed / normalized columns) takes
+                            // precedence — the previous { ...inserted, ...updates } let
+                            // stale client values clobber server-canonical fields.
+                            const full = { ...updates, ...inserted };
                             if (idx >= 0) all[idx] = full; else all.push(full);
                             localStorage.setItem(key, JSON.stringify(this._sanitizeForStorage(tableName, all)));
                         } catch (_) { /* intentional: local mirror is best-effort; server insert already succeeded */ }
@@ -2468,7 +2581,15 @@ class DataStore {
             console.warn(`Offline: falling back for ${tableName} query`, e);
             const local = localStorage.getItem(`fs_crm_${tableName}`);
             const all = local ? JSON.parse(local) : [];
-            return all.filter(row => Object.entries(filters).every(([k, v]) => row[k] == v));
+            // Strip tombstones so a locally-deleted row never resurfaces from a
+            // stale localStorage snapshot (parity with the success path above and
+            // getAll/_stripTombstones). Use String() equality (the codebase's
+            // id-compare convention) so offline matching mirrors server .eq()
+            // strictness instead of loose == coercion (0==false, '1'==1, etc.).
+            return this._stripTombstones(
+                tableName,
+                all.filter(row => Object.entries(filters).every(([k, v]) => String(row[k]) === String(v)))
+            );
         }
     }
 
@@ -2512,8 +2633,11 @@ class DataStore {
         // Multi-field scope: scopeFields [{ field, values }] — OR across fields
         if (options.scopeFields && options.scopeFields.length > 0) {
             // Build PostgREST OR filter: (field1.in.(v1,v2),field2.in.(v1,v2))
+            // Strip the OR-syntax delimiters ( ) , from each scope value so an id
+            // that somehow contains one can't break out of its .in(...) clause and
+            // corrupt the OR expression (mirrors the search sanitizer below).
             const orParts = options.scopeFields.map(
-                s => `${s.field}.in.(${s.values.join(',')})`
+                s => `${s.field}.in.(${s.values.map(v => String(v).replace(/[,()]/g, '')).join(',')})`
             );
             q = q.or(orParts.join(','));
         } else if (options.scopeField && options.scopeValues) {
@@ -2542,7 +2666,13 @@ class DataStore {
 
         // Full-text-style search across multiple columns (ilike OR)
         if (options.search && options.searchFields && options.searchFields.length > 0) {
-            const term = options.search.replace(/%/g, '');
+            // The term is interpolated raw into a PostgREST .or() string whose
+            // delimiters are comma and parentheses — a name/company containing
+            // ',' or '(' ')' (e.g. 'Tan, Sdn Bhd', 'ABC (M)') would split the OR
+            // expression and return HTTP 400 (broken add-attendee/referrer/calendar
+            // search). Replace those delimiters (and the % wildcard) with spaces
+            // so the ilike still fuzzy-matches the rest of the term.
+            const term = options.search.replace(/[%,()*]/g, ' ').trim();
             const orClauses = options.searchFields
                 .map(f => `${f}.ilike.%${term}%`)
                 .join(',');
@@ -2602,7 +2732,12 @@ class DataStore {
                     })
                 );
             } else if (options.scopeField && options.scopeValues) {
-                filtered = filtered.filter(r => options.scopeValues.includes(r[options.scopeField]));
+                // String()-coerce both sides like the multi-field path above —
+                // scopeValues are stringified ids but a numeric column (e.g.
+                // purchases.customer_id) would otherwise never match (fail-closed
+                // = silently empty results for non-admins on the offline path).
+                const _sv = new Set(options.scopeValues.map(String));
+                filtered = filtered.filter(r => _sv.has(String(r[options.scopeField])));
             }
             if (options.filters) {
                 for (const [k, v] of Object.entries(options.filters)) {
@@ -2610,14 +2745,33 @@ class DataStore {
                     filtered = filtered.filter(r => String(r[k]) === String(v));
                 }
             }
+            // Type-normalized range comparison so the offline fallback matches
+            // PostgREST .gte()/.lte() semantics for mixed-type columns: when BOTH
+            // operands parse as finite numbers compare numerically; otherwise
+            // compare as strings (ISO dates/timestamps sort lexically == chrono).
+            // A null/undefined cell never satisfies a range bound (server excludes
+            // nulls from gte/lte too). Raw JS >= / <= would coerce inconsistently
+            // (lexical on number-vs-string) and diverge from the online path.
+            const _cmpGte = (cell, bound) => {
+                if (cell == null) return false;
+                const nc = Number(cell), nb = Number(bound);
+                if (Number.isFinite(nc) && Number.isFinite(nb)) return nc >= nb;
+                return String(cell) >= String(bound);
+            };
+            const _cmpLte = (cell, bound) => {
+                if (cell == null) return false;
+                const nc = Number(cell), nb = Number(bound);
+                if (Number.isFinite(nc) && Number.isFinite(nb)) return nc <= nb;
+                return String(cell) <= String(bound);
+            };
             if (options.gte) {
                 for (const [k, v] of Object.entries(options.gte)) {
-                    if (v != null) filtered = filtered.filter(r => r[k] >= v);
+                    if (v != null) filtered = filtered.filter(r => _cmpGte(r[k], v));
                 }
             }
             if (options.lte) {
                 for (const [k, v] of Object.entries(options.lte)) {
-                    if (v != null) filtered = filtered.filter(r => r[k] <= v);
+                    if (v != null) filtered = filtered.filter(r => _cmpLte(r[k], v));
                 }
             }
             if (options.search && options.searchFields) {
@@ -3043,7 +3197,10 @@ class DataStore {
                 .order('activity_date', { ascending: orderDir === 'asc' })
                 .limit(limit);
             if (error) throw error;
-            return data || [];
+            // Strip locally-tombstoned activities so a client-deleted row never
+            // resurfaces from a stale server snapshot (parity with getAll /
+            // query* — class docstring requires every read path to agree).
+            return this._stripTombstones('activities', data || []);
         } catch (e) {
             console.warn('getActivitiesForProspect fallback (cache):', e?.message);
             const all = await this._activitiesFallbackRows();
@@ -3115,9 +3272,46 @@ class DataStore {
                 .order('activity_date', { ascending: false })
                 .limit(1000);
             if (error) throw error;
-            for (const row of (data || [])) {
+            // Strip locally-tombstoned activities before picking the "latest" per
+            // prospect, so a deleted activity can't drive the last-contact column
+            // (parity with getAll / query*).
+            const _firstRows = this._stripTombstones('activities', data || []);
+            for (const row of _firstRows) {
                 const key = String(row.prospect_id);
                 if (!result.has(key)) result.set(key, row);
+            }
+            // Completeness guard: a single global activity_date-DESC window is
+            // capped at PostgREST's 1000 rows. If busy prospects own the newest
+            // 1000 activities, prospects whose latest activity is older never
+            // appear — rendering a false "no activity" / blank last-contact. Only
+            // when the window saturated (>=1000 rows) AND some ids remain
+            // uncovered, run a bounded completion pass: chunk the uncovered ids
+            // (small batches so a per-chunk 1000-cap can't truncate) and take the
+            // newest row per id from each chunk.
+            if (_firstRows.length >= 1000) {
+                const uncovered = ids.filter(id => !result.has(String(id)));
+                const CHUNK = 50;
+                for (let i = 0; i < uncovered.length; i += CHUNK) {
+                    const chunk = uncovered.slice(i, i + CHUNK);
+                    try {
+                        const { data: cData, error: cErr } = await this._readClient()
+                            .from('activities')
+                            .select('prospect_id,activity_date,activity_type')
+                            .in('prospect_id', chunk)
+                            .order('activity_date', { ascending: false })
+                            .limit(1000);
+                        if (cErr) throw cErr;
+                        for (const row of this._stripTombstones('activities', cData || [])) {
+                            const key = String(row.prospect_id);
+                            if (!result.has(key)) result.set(key, row);
+                        }
+                    } catch (ce) {
+                        // Best-effort: a failed completion chunk just leaves those
+                        // ids absent (same as before this guard) — don't abort the
+                        // whole lookup.
+                        console.warn('[DataStore] latest-activity completion chunk failed:', ce?.message);
+                    }
+                }
             }
             // Route through _cacheSet so __latact_ entries obey the LRU cap
             // (MEMO-2) — _cacheSet wraps as { data, ts }, identical shape.
@@ -3181,7 +3375,8 @@ class DataStore {
                 .order('activity_date', { ascending: orderDir === 'asc' })
                 .limit(limit);
             if (error) throw error;
-            return data || [];
+            // Strip locally-tombstoned activities (parity with getAll / query*).
+            return this._stripTombstones('activities', data || []);
         } catch (e) {
             console.warn('getActivitiesForCustomer fallback (cache):', e?.message);
             const all = await this._activitiesFallbackRows();
@@ -3382,13 +3577,22 @@ class DataStore {
     }
 
     // Mark a touchpoint done / skipped / snoozed.
-    // opts: { notes?, snooze_days? (for snoozed status) }
+    // opts: { notes?, snooze_days? (for snoozed status), due_date? }
     async updateTouchpointStatus(touchpointId, status, opts = {}) {
         if (!touchpointId) return false;
         const payload = { status, updated_at: new Date().toISOString() };
         if (status === 'done') {
             payload.completed_at = new Date().toISOString();
-            if (window._currentUser?.id) payload.completed_by = window._currentUser.id;
+            // completed_by is typed UUID (auth.users) per 20260606_journey_system.sql,
+            // but this CRM generates NUMERIC ids (see getJourneyTouchpointsDueToday's
+            // assigned_to drift note). Writing a numeric id into the uuid column throws
+            // 22P02 invalid-input-syntax and aborts the whole "mark done". The column is
+            // nullable — only stamp it when the id is actually a UUID; otherwise leave it
+            // null so the status still saves rather than silently failing.
+            const _uid = window._currentUser?.id;
+            if (_uid && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(_uid))) {
+                payload.completed_by = _uid;
+            }
         }
         if (status === 'snoozed' && opts.snooze_days) {
             const d = new Date();
@@ -3397,6 +3601,9 @@ class DataStore {
             payload.status = 'pending';  // re-activate; cron will re-mark overdue if missed
         }
         if (opts.notes) payload.notes = opts.notes;
+        // Optional reschedule (Wave-C journey fix): write the new due_date when the
+        // caller supplies one. Backward compatible — no opts.due_date → unchanged.
+        if (opts.due_date) payload.due_date = opts.due_date;
         try {
             const { error } = await window.supabase
                 .from('journey_touchpoints')
@@ -3406,7 +3613,10 @@ class DataStore {
             this.invalidateCache('journey_touchpoints');
             return true;
         } catch (e) {
+            // Surface the failure instead of only console.warn — a swallowed error
+            // made the "mark done" silently no-op with no user feedback.
             console.warn('[journey] updateTouchpointStatus', e?.message);
+            try { window.UI?.toast?.error?.('Could not update touchpoint — ' + (e?.message || 'try again')); } catch (_) { /* intentional: toast is best-effort UI feedback */ }
             return false;
         }
     }
@@ -3520,6 +3730,12 @@ class DataStore {
 
     // Log a stage transition (immutable).
     async logStageTransition(entityType, entityId, fromStage, toStage, notes = '') {
+        // transitioned_by is typed UUID (auth.users) per 20260606_journey_system.sql;
+        // a numeric CRM id would throw 22P02 and lose the (immutable) log entry. Only
+        // stamp it when the id is a real UUID; otherwise null (column is nullable).
+        const _uid = window._currentUser?.id;
+        const _transitionedBy = (_uid && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(_uid)))
+            ? _uid : null;
         try {
             const { error } = await window.supabase
                 .from('journey_stage_log')
@@ -3528,7 +3744,7 @@ class DataStore {
                     entity_id:       entityId,
                     from_stage:      fromStage || null,
                     to_stage:        toStage,
-                    transitioned_by: window._currentUser?.id || null,
+                    transitioned_by: _transitionedBy,
                     notes:           notes || null,
                 });
             if (error) throw error;

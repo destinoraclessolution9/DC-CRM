@@ -16,6 +16,12 @@
     const isAgent              = (u) => _utils.isAgent(u || _state.cu);
     const _getUserLevel        = (u) => _utils.getUserLevel(u);
     const navigateTo           = (v) => window.app.navigateTo(v);
+    // Atomic, race-free LTV + total_purchases adjuster (defined in script.js core,
+    // exported on window._crmUtils). Used by the import auto-convert path so an
+    // imported sale lands in the purchases table + total_purchases exactly like
+    // the approvals/savePurchase paths — never a bare lifetime_value write
+    // (audit #9 leaderboard/LTV divergence). Defensive alias with a no-op fallback.
+    const adjustCustomerLtv = (...a) => (_utils.adjustCustomerLtv || (async () => {}))(...a);
 
     // React-island flag (default-on) for the Protection Monitoring view.
     // Kill-switch → legacy: window.__REACT_PROTECTION===false, ?react=0, crm_react_off='1'.
@@ -121,7 +127,10 @@ const renderRecentImports = async () => {
     if (imports.length === 0) return `<tr><td colspan="7" style="text-align:center;padding:40px;"><i class="fas fa-cloud-upload-alt" style="font-size:48px;color:var(--gray-300);display:block;margin-bottom:16px;"></i><h3>No imports yet</h3><p>Click "IMPORT NEW DATA" to start your first import</p></td></tr>`;
     return imports.map(imp => {
         const pct = imp.total_rows > 0 ? Math.round((imp.valid_rows / imp.total_rows) * 100) : 0;
-        return `<tr><td><strong>${esc(imp.file_name)}</strong></td><td>${imp.import_type}</td><td>${imp.total_rows} (${imp.created_records} new)</td><td>${pct}%</td><td><span class="import-status status-${imp.status}">${imp.status.toUpperCase()}</span></td><td>${UI.formatDate(imp.created_at)}</td><td><button class="btn-icon" onclick="app.viewImportDetails(${imp.id})" title="View"><i class="fas fa-eye"></i></button><button class="btn-icon" onclick="app.downloadImportLog(${imp.id})" title="Download Log"><i class="fas fa-download"></i></button></td></tr>`;
+        // Null-safe + escaped, mirroring showImportHistory: a null/undefined status
+        // would otherwise throw on .toUpperCase() and abort the whole dashboard
+        // innerHTML render; import_type/status are now escaped like file_name.
+        return `<tr><td><strong>${esc(imp.file_name)}</strong></td><td>${esc(String(imp.import_type||''))}</td><td>${imp.total_rows} (${imp.created_records} new)</td><td>${pct}%</td><td><span class="import-status status-${esc(String(imp.status||''))}">${esc(String(imp.status||'').toUpperCase())}</span></td><td>${UI.formatDate(imp.created_at)}</td><td><button class="btn-icon" onclick="app.viewImportDetails(${imp.id})" title="View"><i class="fas fa-eye"></i></button><button class="btn-icon" onclick="app.downloadImportLog(${imp.id})" title="Download Log"><i class="fas fa-download"></i></button></td></tr>`;
     }).join('');
 };
 
@@ -198,7 +207,11 @@ const getStep2Html = async () => `
                     <select id="import-type" class="form-control" style="width:200px" onchange="app.updateImportType(this.value)">
                         <option value="prospects" ${_importData.importType === 'prospects' ? 'selected' : ''}>Prospects</option>
                         <option value="customers" ${_importData.importType === 'customers' ? 'selected' : ''}>Customers</option>
-                        <option value="agents" ${_importData.importType === 'agents' ? 'selected' : ''}>Agents</option>
+                        <!-- BUG (data-integrity): 'agents' import had NO table-map entry, so it fell
+                             through to the prospects table — agent rows were silently written as
+                             prospects with agent_code discarded. Agents are auth-provisioned users
+                             (role/auth/code), not a plain table insert, so the option is removed
+                             rather than wired into a half-implemented users-insert path. -->
                         <option value="products" ${_importData.importType === 'products' ? 'selected' : ''}>Products (Marketing List)</option>
                         <option value="events" ${_importData.importType === 'events' ? 'selected' : ''}>Events (Marketing List)</option>
                         <option value="promotions" ${_importData.importType === 'promotions' ? 'selected' : ''}>Promotions (Marketing List)</option>
@@ -335,13 +348,14 @@ const getStep5Html = async () => {
                 </div>
                 <div class="assignment-options" style="margin:16px 0">
                     <h4>Assignment Options</h4>
-                    <label class="radio-label"><input type="radio" name="assign-to" value="myself" checked onchange="document.getElementById('team-opts').style.display='none'"> Assign to myself (${esc(assignLabel)})</label>
-                    <label class="radio-label"><input type="radio" name="assign-to" value="team" onchange="document.getElementById('team-opts').style.display='block'"> Assign to team</label>
-                    <label class="radio-label"><input type="radio" name="assign-to" value="unassigned" onchange="document.getElementById('team-opts').style.display='none'"> Leave unassigned</label>
-                    <div id="team-opts" style="display:none;margin-top:12px">
-                        <select class="form-control" style="width:200px">${Array.from({length: 26}, (_, i) => String.fromCharCode(65 + i)).map(L => `<option>Team ${L}</option>`).join('')}</select>
-                        <label class="checkbox-label" style="margin-top:8px"><input type="checkbox"> Distribute evenly</label>
-                    </div>
+                    <label class="radio-label"><input type="radio" name="assign-to" value="myself" checked> Assign to myself (${esc(assignLabel)})</label>
+                    <!-- BUG (broken-feature): the "Assign to team" radio + Team A-Z <select> +
+                         "Distribute evenly" checkbox were dead — startImport only honoured
+                         'myself', so 'team' was byte-identical to 'unassigned' (records imported
+                         unassigned, the team select/distribute had no id and were never read).
+                         Removed the option + its sub-controls so the UI cannot promise behaviour
+                         the code does not perform. -->
+                    <label class="radio-label"><input type="radio" name="assign-to" value="unassigned"> Leave unassigned</label>
                 </div>
                 <div class="import-options" style="margin:16px 0">
                     <h4>Import Options</h4>
@@ -542,7 +556,11 @@ const mapRowToRecord = (row, reverseMap, agentId, importType = 'prospects') => {
             postal_code: get('postal_code'),
             ming_gua: get('ming_gua'),
             responsible_agent_id: agentId,
-            lifetime_value: _parseAmount(get('lifetime_value')),
+            // Clamp to >= 0: lifetime_value is a cumulative balance, not a signed
+            // adjustment, and _parseAmount now preserves a leading minus. A negative
+            // imported LTV (e.g. "-RM 1,200") would otherwise bypass the Math.max(0,…)
+            // clamp every other LTV path applies and push aggregates negative.
+            lifetime_value: Math.max(0, _parseAmount(get('lifetime_value'))),
             customer_since: get('customer_since') || new Date().toISOString().split('T')[0],
             status: 'active'
         };
@@ -922,21 +940,47 @@ const startImport = async () => {
     const autoConvertProspect = async (record, savedProspect, purchaseAmount, rowIndex) => {
         if (!(purchaseAmount > 0 && savedProspect?.id)) return;
         try {
-            await AppDataStore.create('customers', {
+            // Seed lifetime_value at 0, then route the imported sale through the
+            // canonical purchases-row + adjustCustomerLtv path (audit #9). Writing
+            // lifetime_value directly here (the old behaviour) recorded the LTV but
+            // left NO purchases row / total_purchases, so leaderboard & revenue
+            // reports (which SUM the purchases table) never saw imported conversions.
+            const savedCustomer = await AppDataStore.create('customers', {
                 full_name: record.full_name, gender: record.gender || '', nationality: record.nationality || '',
                 phone: record.phone || '', email: record.email || '', ic_number: record.ic_number || '',
                 date_of_birth: record.date_of_birth || null, lunar_birth: record.lunar_birth || '',
                 occupation: record.occupation || '', company_name: record.company_name || '',
                 income_range: record.income_range || '', address: record.address || '', city: record.city || '',
                 state: record.state || '', postal_code: record.postal_code || '', ming_gua: record.ming_gua || '',
-                responsible_agent_id: assignedAgentId, lifetime_value: purchaseAmount,
+                responsible_agent_id: assignedAgentId, lifetime_value: 0,
                 customer_since: new Date().toISOString().split('T')[0],
                 converted_from_prospect_id: savedProspect.id, status: 'active',
                 created_at: new Date().toISOString()
             });
+            if (savedCustomer?.id) {
+                // Purchases row so the imported sale appears in purchase-based reports,
+                // mirroring approveClosingRecord / savePurchase (column is `date`).
+                await AppDataStore.create('purchases', {
+                    customer_id: savedCustomer.id,
+                    date: new Date().toISOString().split('T')[0],
+                    invoice: 'IMPORT-CONVERT',
+                    item: '',
+                    amount: purchaseAmount,
+                    status: 'COMPLETED',
+                    payment_method: 'Cash'
+                });
+                // Atomic lifetime_value + total_purchases bump (same adjuster as every
+                // other purchase path) so LTV and the leaderboard stay reconciled.
+                await adjustCustomerLtv(savedCustomer.id, purchaseAmount, 1);
+            }
             await AppDataStore.update('prospects', savedProspect.id, { status: 'converted', conversion_status: 'approved' });
             convertedCount++;
-        } catch (convErr) { console.error('Auto-convert failed row', rowIndex, convErr); }
+        } catch (convErr) {
+            // Surface the failure in the import tally (finding #922): a created prospect
+            // whose auto-conversion silently failed otherwise inflated convertedCount's basis.
+            console.error('Auto-convert failed row', rowIndex, convErr);
+            errorCount++;
+        }
     };
 
     // ── Pass 2: flush create candidates in chunks of ~500 ────────────────
@@ -1032,7 +1076,7 @@ const openTemplatesModal = () => {
         <table style="width:100%;border-collapse:collapse">
             <thead><tr><th scope="col" style="padding:10px;text-align:left;background:var(--gray-50)">Template</th><th scope="col" style="padding:10px;text-align:left;background:var(--gray-50)">Description</th><th scope="col" style="padding:10px;text-align:left;background:var(--gray-50)">Download</th></tr></thead>
             <tbody>
-                ${['Prospects', 'Customers', 'Agents', 'Products', 'Events', 'Promotions', 'Activities'].map(t => `<tr><td style="padding:10px;border-bottom:1px solid var(--gray-100)">${t} Template</td><td style="padding:10px;border-bottom:1px solid var(--gray-100)">${t} data import</td><td style="padding:10px;border-bottom:1px solid var(--gray-100)"><button class="btn secondary btn-sm" onclick="app.downloadTemplate('${t.toLowerCase()}','csv')">CSV</button> <button class="btn secondary btn-sm" onclick="app.downloadTemplate('${t.toLowerCase()}','xlsx')">Excel</button></td></tr>`).join('')}
+                ${/* 'Agents' template dropped — the Agents import type was removed (agents are auth-provisioned users, not a plain import). */ ['Prospects', 'Customers', 'Products', 'Events', 'Promotions', 'Activities'].map(t => `<tr><td style="padding:10px;border-bottom:1px solid var(--gray-100)">${t} Template</td><td style="padding:10px;border-bottom:1px solid var(--gray-100)">${t} data import</td><td style="padding:10px;border-bottom:1px solid var(--gray-100)"><button class="btn secondary btn-sm" onclick="app.downloadTemplate('${t.toLowerCase()}','csv')">CSV</button> <button class="btn secondary btn-sm" onclick="app.downloadTemplate('${t.toLowerCase()}','xlsx')">Excel</button></td></tr>`).join('')}
             </tbody>
         </table>`;
     UI.showModal('Download Import Templates', content, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
@@ -2094,13 +2138,18 @@ const confirmBulkReassignment = async () => {
 
         // Scale-safe: fetch ONLY the selected prospects by id (IN) instead of the
         // whole prospects table. Falls back to the whole-table scan on error.
+        // String-coerce ids on both sides (the rest of this file does the same):
+        // checkedProspectIds are parseInt() numbers but Supabase ids can surface as
+        // strings, in which case a strict includes() would match nothing and bulk
+        // reassignment would silently do nothing.
+        const checkedIdSet = new Set(checkedProspectIds.map(id => String(id)));
         let matchedProspects;
         try {
             const res = await AppDataStore.queryAdvanced('prospects', { scopeField: 'id', scopeValues: checkedProspectIds, limit: 5000, countMode: null });
-            matchedProspects = ((res && res.data) || []).filter(p => checkedProspectIds.includes(p.id));
+            matchedProspects = ((res && res.data) || []).filter(p => checkedIdSet.has(String(p.id)));
         } catch (e) {
             console.warn('confirmBulkReassignment: prospects IN-query failed — full-table fallback', e);
-            matchedProspects = (await AppDataStore.getAll('prospects')).filter(p => checkedProspectIds.includes(p.id));
+            matchedProspects = (await AppDataStore.getAll('prospects')).filter(p => checkedIdSet.has(String(p.id)));
         }
         const fromAgentId = parseInt(document.getElementById('bulk-reassign-from-agent')?.value) || null;
 
@@ -2108,7 +2157,9 @@ const confirmBulkReassignment = async () => {
         let targetAgents;
         if (option === 'single') {
             const singleId = parseInt(document.getElementById('bulk-single-agent')?.value);
-            const singleAgent = allUsers.find(u => u.id === singleId);
+            // String-coerce like the rest of the file: u.id may arrive as a string,
+            // so a strict === would resolve no target and trip 'No active agents'.
+            const singleAgent = allUsers.find(u => String(u.id) === String(singleId));
             targetAgents = singleAgent ? [singleAgent] : [];
         } else {
             targetAgents = allUsers.filter(u => {
@@ -2182,7 +2233,13 @@ const executeConfirmedBulkReassignment = async () => {
                 totalCust += result.customersCascaded || 0;
                 totalActs += result.activitiesCascaded || 0;
                 if (!result.skipped) count++;
-            } catch { errors++; }
+            } catch (e) {
+                // Log which prospect→agent transfer failed and why — cascadeProspectReassign
+                // does multi-table writes with best-effort rollback, so a bare count gives
+                // the operator no way to diagnose a partial failure.
+                errors++;
+                console.warn('[bulkReassign] prospect', prospect.id, '->', targetAgent.id, 'failed:', e && e.message);
+            }
         }
         const bits = [];
         if (totalCust) bits.push(`${totalCust} customer record${totalCust > 1 ? 's' : ''}`);
@@ -2207,12 +2264,24 @@ const refreshFollowupStats = async () => {
 
 const exportFollowupReport = async () => {
     try {
-        const [prospects, agents, activities] = await Promise.all([
+        const [allProspects, agents, activities, visibleIds] = await Promise.all([
             AppDataStore.getAll('prospects'),
             AppDataStore.getAll('users'),
             AppDataStore.getAll('activities'),
+            getVisibleUserIds(_state.cu),
         ]);
-        const agentMap = Object.fromEntries(agents.map(a => [a.id, a.full_name]));
+        // SECURITY (PII leak): scope the export exactly like the Protection Monitoring
+        // view that hosts this button. Per-row RLS on prospects is NOT relied upon
+        // (BACK-1 deferred), so without this an L3 agent could export EVERY prospect's
+        // name+phone. Mirror showProtectionMonitoringView: keep only prospects whose
+        // responsible_agent_id is visible (and limit the agent map to the same set).
+        const prospects = visibleIds === 'all'
+            ? allProspects
+            : allProspects.filter(p => visibleIds.includes(p.responsible_agent_id));
+        const visibleAgents = visibleIds === 'all'
+            ? agents
+            : agents.filter(a => visibleIds.includes(a.id));
+        const agentMap = Object.fromEntries(visibleAgents.map(a => [a.id, a.full_name]));
         const now = new Date();
         const rows = prospects.map(p => {
             const lastActivity = activities
@@ -2311,74 +2380,12 @@ const viewAgentDetails = async (agentIdOrName) => {
 };
 const contactProspect = async (prospectId) => { await (window.app.openActivityModal || (() => {}))(null, prospectId); };
 
-// Phase 13: seed demo data
-
-// --- Helper to check if a user exists (outer scope so it can be exported) ---
-const userExists = async (userId) => {
-    const user = await AppDataStore.getById('users', userId);
-    return !!user;
-};
-
-const initImportDemoData = async () => {
-// Clear demo data if requested (optional)
-if (window.location.search.includes('resetDemo=true')) {
-    const tables = ['import_jobs', 'reassignment_history'];
-    for (const table of tables) {
-        const all = await AppDataStore.getAll(table);
-        const demoItems = all.filter(item => item.is_demo);
-        for (const item of demoItems) {
-            await AppDataStore.delete(table, item.id).catch(() => {});
-        }
-    }
-    UI.toast.info('Demo data cleared.');
-}
-
-// --- Import Jobs ---
-const importJobs = await AppDataStore.getAll('import_jobs');
-if (importJobs.length === 0) {
-    // Only create jobs if user 5 exists
-    if (await userExists(5)) {
-        const jobs = [
-            { id: 9001, file_name: 'leads_march_2026.xlsx', import_type: 'prospects', total_rows: 250, valid_rows: 235, error_rows: 15, created_records: 217, updated_records: 18, skipped_records: 15, status: 'completed', mapping_config: {}, duplicate_handling: 'skip', assignment_config: { assignTo: 'myself' }, created_by: 5, created_at: '2026-03-05T14:30:00Z', completed_at: '2026-03-05T14:32:35Z' },
-            { id: 9002, file_name: 'customers_feb.xlsx', import_type: 'customers', total_rows: 128, valid_rows: 122, error_rows: 6, created_records: 115, updated_records: 7, skipped_records: 6, status: 'completed', mapping_config: {}, duplicate_handling: 'update', assignment_config: { assignTo: 'team' }, created_by: 5, created_at: '2026-02-28T10:15:00Z', completed_at: '2026-02-28T10:17:22Z' },
-            { id: 9003, file_name: 'agents_2026.xlsx', import_type: 'agents', total_rows: 15, valid_rows: 15, error_rows: 0, created_records: 15, updated_records: 0, skipped_records: 0, status: 'completed', mapping_config: {}, duplicate_handling: 'skip', assignment_config: {}, created_by: 1, created_at: '2026-02-15T09:00:00Z', completed_at: '2026-02-15T09:01:00Z' },
-            { id: 9004, file_name: 'product_catalog.xlsx', import_type: 'products', total_rows: 45, valid_rows: 0, error_rows: 45, created_records: 0, updated_records: 0, skipped_records: 0, status: 'failed', mapping_config: {}, duplicate_handling: 'skip', assignment_config: {}, created_by: 5, created_at: '2026-02-10T09:45:00Z', completed_at: '2026-02-10T09:45:30Z' }
-        ];
-        for (const j of jobs) {
-            try {
-                await AppDataStore.create('import_jobs', j);
-            } catch (err) {
-                console.warn(`Skipping import_job ${j.id}:`, err.message);
-            }
-        }
-    } else {
-        // Skipping import_jobs seeding: user 5 does not exist
-    }
-}
-
-// --- Reassignment History ---
-const reassignmentsAll = await AppDataStore.getAll('reassignment_history');
-if (reassignmentsAll.length === 0) {
-    // Check that all referenced users exist
-    const usersExist = await Promise.all([userExists(8), userExists(6), userExists(5), userExists(7), userExists(3)]);
-    if (usersExist.every(v => v === true)) {
-        const reassignments = [
-            { id: 8001, prospect_id: 101, from_agent_id: 8, to_agent_id: 6, reassigned_by: 5, reassignment_date: '2026-03-06T10:23:00Z', reassignment_reason: 'inactive', reason_notes: 'Raj Kumar unresponsive', days_inactive: 14, protection_deadline: '2026-03-17', created_at: '2026-03-06T10:23:00Z' },
-            { id: 8002, prospect_id: 102, from_agent_id: 8, to_agent_id: 5, reassigned_by: 5, reassignment_date: '2026-03-05T15:45:00Z', reassignment_reason: 'inactive', reason_notes: 'High score prospect', days_inactive: 16, protection_deadline: '2026-03-15', created_at: '2026-03-05T15:45:00Z' },
-            { id: 8003, prospect_id: 103, from_agent_id: 6, to_agent_id: 7, reassigned_by: 3, reassignment_date: '2026-03-04T09:30:00Z', reassignment_reason: 'workload', reason_notes: 'Balancing workload', days_inactive: 12, protection_deadline: '2026-03-20', created_at: '2026-03-04T09:30:00Z' }
-        ];
-        for (const r of reassignments) {
-            try {
-                await AppDataStore.create('reassignment_history', r);
-            } catch (err) {
-                console.warn(`Skipping reassignment_history ${r.id}:`, err.message);
-            }
-        }
-    } else {
-        // Skipping reassignment_history seeding: referenced users missing
-    }
-}
-};
+// BUG (data-integrity): the former initImportDemoData (+ its only helper userExists)
+// was removed. It seeded import_jobs / reassignment_history WITHOUT is_demo (so
+// ?resetDemo=true could never clear its own seed) and wrote fake rows into the real
+// reassignment_history AUDIT table on first load, polluting genuine audit history.
+// It was never exported nor invoked (dead/unreachable), so deletion is safe and
+// avoids seeding the production audit table.
 
     app.register('import', {
         showImportDashboard,
@@ -2444,6 +2451,5 @@ if (reassignmentsAll.length === 0) {
         saveAlertConfig,
         viewAgentDetails,
         contactProspect,
-        userExists,
     });
 })();

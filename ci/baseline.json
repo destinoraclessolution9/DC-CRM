@@ -1338,8 +1338,7 @@
         "configureAlerts",
         "saveAlertConfig",
         "viewAgentDetails",
-        "contactProspect",
-        "userExists"
+        "contactProspect"
       ]
     },
     {

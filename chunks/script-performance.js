@@ -86,15 +86,29 @@ const showRankingPerformanceView = async (container) => {
     // Without this map every purchase was skipped → leaderboard sales/closing/score
     // were all zero.
     const _custAgentMap = new Map((allCustomers || []).map(c => [String(c.id), c.responsible_agent_id]));
-    const agents = users.filter(u => u.role && (u.role.includes('Level') || u.role === 'agent' || u.role === 'consultant'));
+    // Agent band = levels 3-12. The old `u.role.includes('Level')` substring test
+    // wrongly swept in L13 Customer / L14 Referrer / L15 Stock Take (all literally
+    // contain "Level"). isAgent() resolves the numeric level (and legacy
+    // 'agent'/'consultant' string roles) correctly via _getUserLevel.
+    const agents = users.filter(u => isAgent(u));
     const now = new Date();
     const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
     const monthEnd = now.toISOString().split('T')[0];
+    // "Followed up in last 7 days" cutoff as a local-date YYYY-MM-DD string.
+    // Differencing Date objects mis-handles date-only strings (parsed as UTC
+    // midnight vs local `now`), shifting boundary prospects by the UTC offset
+    // (~8h in MY). Comparing normalized date strings is timezone-stable.
+    const _fc = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+    const followupCutoff = `${_fc.getFullYear()}-${String(_fc.getMonth() + 1).padStart(2, '0')}-${String(_fc.getDate()).padStart(2, '0')}`;
 
     // Bucket activities for the current month by lead_agent_id
     const activitiesByAgent = new Map();
     for (const a of allActivities) {
         if (!a.lead_agent_id) continue;
+        // Guard undated records: `null < monthStart` coerces to NaN comparisons
+        // (always false) and would silently bucket undated activities into the
+        // current month, inflating CPS/meeting metrics.
+        if (!a.activity_date) continue;
         if (a.activity_date < monthStart || a.activity_date > monthEnd) continue;
         const k = String(a.lead_agent_id);
         let bucket = activitiesByAgent.get(k);
@@ -108,7 +122,11 @@ const showRankingPerformanceView = async (container) => {
         // fall back to the purchase's customer's responsible_agent_id.
         const agentId = p.agent_id || (p.customer_id != null ? _custAgentMap.get(String(p.customer_id)) : null);
         if (!agentId) continue;
-        if ((p.date || p.purchase_date) < monthStart || (p.date || p.purchase_date) > monthEnd) continue;
+        // Guard undated purchases — same null-coercion trap as activities above:
+        // a null date must not be bucketed into the current month's sales.
+        const _pDate = p.date || p.purchase_date;
+        if (!_pDate) continue;
+        if (_pDate < monthStart || _pDate > monthEnd) continue;
         const k = String(agentId);
         let bucket = purchasesByAgent.get(k);
         if (!bucket) { bucket = []; purchasesByAgent.set(k, bucket); }
@@ -136,8 +154,9 @@ const showRankingPerformanceView = async (container) => {
         const meetingCount = activities.filter(a => ['FTF', 'FSA', 'GR', 'SITE', 'XG'].includes(a.activity_type)).length;
         const followedUp = prospects.filter(p => {
             if (!p.last_contact_date) return false;
-            const diff = (now - new Date(p.last_contact_date)) / (1000 * 60 * 60 * 24);
-            return diff <= 7;
+            // Compare on the date prefix so date-only and datetime values both
+            // resolve consistently against the local-midnight cutoff above.
+            return String(p.last_contact_date).slice(0, 10) >= followupCutoff;
         }).length;
         const followupRate = prospects.length > 0 ? Math.round((followedUp / prospects.length) * 100) : 0;
         const closingRate = cpsCount > 0 ? Math.round((purchases.length / cpsCount) * 100) : 0;
@@ -245,9 +264,9 @@ const renderWorkflowCard = (w) => {
             </div>
             <div style="display:flex; gap:8px; align-items:center;">
                 <span class="badge ${statusColor}">${escapeHtml(w.status)}</span>
-                <button class="btn btn-sm secondary" onclick="app.toggleWorkflow(${w.id})">${w.status === 'active' ? 'Pause' : 'Activate'}</button>
-                <button class="btn btn-sm secondary" onclick="app.editWorkflow(${w.id})"><i class="fas fa-edit"></i></button>
-                <button class="btn btn-sm secondary" style="color:var(--danger);" onclick="app.deleteWorkflow(${w.id})"><i class="fas fa-trash"></i></button>
+                <button class="btn btn-sm secondary" onclick="app.toggleWorkflow('${UI.escJsAttr(String(w.id))}')">${w.status === 'active' ? 'Pause' : 'Activate'}</button>
+                <button class="btn btn-sm secondary" onclick="app.editWorkflow('${UI.escJsAttr(String(w.id))}')"><i class="fas fa-edit"></i></button>
+                <button class="btn btn-sm secondary" style="color:var(--danger);" onclick="app.deleteWorkflow('${UI.escJsAttr(String(w.id))}')"><i class="fas fa-trash"></i></button>
             </div>
         </div>
     `;
@@ -372,6 +391,24 @@ const saveWorkflow = async (workflowId) => {
         return;
     }
 
+    // Triggers that fire off a numeric threshold MUST carry a usable value,
+    // otherwise the automation can never evaluate (was silently saved as '').
+    // Require + normalise the threshold to a number for these triggers.
+    const _needsThreshold = ['score_change', 'inactivity', 'protection_expiring'];
+    const _rawCondition = document.getElementById('wf-condition-value')?.value;
+    let trigger_conditions = {};
+    if (_needsThreshold.includes(trigger)) {
+        const _num = Number(_rawCondition);
+        if (_rawCondition == null || String(_rawCondition).trim() === '' || !Number.isFinite(_num)) {
+            UI.toast.error('This trigger requires a numeric threshold value');
+            return;
+        }
+        trigger_conditions = { value: _num };
+    } else if (_rawCondition != null && String(_rawCondition).trim() !== '') {
+        // Preserve any optional condition the user typed for other triggers.
+        trigger_conditions = { value: _rawCondition };
+    }
+
     const data = {
         workflow_name: name,
         trigger_type: trigger,
@@ -379,9 +416,7 @@ const saveWorkflow = async (workflowId) => {
         action_config: document.getElementById('wf-action-config')?.value || '',
         delay_days: parseInt(document.getElementById('wf-delay')?.value) || 0,
         status: document.getElementById('wf-status')?.value || 'active',
-        trigger_conditions: {
-            value: document.getElementById('wf-condition-value')?.value || ''
-        },
+        trigger_conditions,
         updated_at: new Date().toISOString()
     };
 
@@ -389,7 +424,10 @@ const saveWorkflow = async (workflowId) => {
         if (workflowId) {
             await AppDataStore.update('automation_workflows', workflowId, data);
         } else {
-            data.created_by = _state.cu?.id || 5;
+            // Never attribute to a hardcoded user id — a null current user means
+            // the session is gone; block rather than corrupting ownership/RLS.
+            if (!_state.cu?.id) { UI.toast.error('Session expired, please re-login'); return; }
+            data.created_by = _state.cu.id;
             data.created_at = new Date().toISOString();
             data.run_count = 0;
             await AppDataStore.create('automation_workflows', data);
@@ -414,6 +452,10 @@ const createWorkflowFromTemplate = async (triggerType) => {
     const tpl = templates[triggerType];
     if (!tpl) return;
 
+    // Block template creation on a missing session rather than mis-attributing
+    // to a hardcoded user id (ownership/RLS corruption — audit #392/#425).
+    if (!_state.cu?.id) { UI.toast.error('Session expired, please re-login'); return; }
+
     const data = {
         workflow_name: tpl.name,
         trigger_type: triggerType,
@@ -422,7 +464,7 @@ const createWorkflowFromTemplate = async (triggerType) => {
         delay_days: tpl.delay,
         status: 'active',
         trigger_conditions: {},
-        created_by: _state.cu?.id || 5,
+        created_by: _state.cu.id,
         created_at: new Date().toISOString(),
         run_count: 0
     };
@@ -454,7 +496,7 @@ const editWorkflow = async (workflowId) => {
 const deleteWorkflow = async (workflowId) => {
     UI.showModal('Delete Workflow', '<p>Are you sure you want to delete this workflow?</p>', [
         { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-        { label: 'Delete', type: 'primary', action: `(async () => { try { await AppDataStore.delete('automation_workflows', ${workflowId}); UI.hideModal(); UI.toast.success('Workflow deleted'); const tc = document.getElementById('marketing-tab-content'); if (tc && app.renderAutomationTab) tc.innerHTML = await app.renderAutomationTab(); } catch(e) { UI.toast.error('Delete failed: ' + (e?.message || e)); } })()` }
+        { label: 'Delete', type: 'primary', action: `(async () => { try { await AppDataStore.delete('automation_workflows', ${JSON.stringify(workflowId)}); UI.hideModal(); UI.toast.success('Workflow deleted'); const tc = document.getElementById('marketing-tab-content'); if (tc && app.renderAutomationTab) tc.innerHTML = await app.renderAutomationTab(); } catch(e) { UI.toast.error('Delete failed: ' + (e?.message || e)); } })()` }
     ]);
 };
 

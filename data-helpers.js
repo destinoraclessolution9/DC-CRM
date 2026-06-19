@@ -58,17 +58,48 @@
         if (!err) return false;
         if (err.name === 'AbortError') return true;
         const msg = String(err.message || err.toString() || '').toLowerCase();
-        return msg.includes('abort') || msg.includes('cancel') || err.code === '20';
+        // DOMException.ABORT_ERR === 20. A native DOMException exposes `code` as
+        // the NUMBER 20, so the string compare alone never matches a real abort —
+        // accept both the numeric and string forms.
+        return msg.includes('abort') || msg.includes('cancel') || err.code === 20 || err.code === '20';
     }
 
-    // Cheap structural diff of two row snapshots (id + modified-stamp fingerprint)
-    // used by SWR to decide whether a background refresh changed anything.
+    // Stable content hash of a row's scalar fields — used as the fingerprint
+    // fallback when a row carries NO modified-stamp. Some tables (data.js
+    // _NO_DELTA_TABLES: special_program_participants, cps_intake_requests,
+    // pipeline_config, pipeline_config_history) lack updated_at/created_at/
+    // modified_at entirely, so an `id:` stamp degrades to a constant and an
+    // in-place field edit (same id, same length, no bumped timestamp) would be
+    // invisible — suppressing the SWR view refresh. Serializing the row's
+    // sorted scalar columns makes such edits detectable. Objects/arrays are
+    // skipped (cheap, deterministic, avoids deep-walk cost on hot SWR path).
+    function rowContentHash(r) {
+        if (!r || typeof r !== 'object') return String(r);
+        return Object.keys(r).sort().map(k => {
+            const v = r[k];
+            if (v === null || v === undefined) return `${k}=`;
+            const t = typeof v;
+            if (t === 'object') return `${k}=~`; // skip nested objects/arrays
+            return `${k}=${v}`;
+        }).join(',');
+    }
+
+    // Cheap structural diff of two row snapshots used by SWR to decide whether a
+    // background refresh changed anything. Fingerprints each row by id + its
+    // last-modified stamp; for rows that expose NO modified-stamp it falls back
+    // to a content hash of the row's scalar fields so a server-side field edit
+    // on a timestamp-less table (same id, same length, no bumped timestamp) is
+    // still detected instead of silently compared equal.
     function snapshotsDiffer(a, b) {
         if (!Array.isArray(a) || !Array.isArray(b)) return true;
         if (a.length !== b.length) return true;
         const fingerprint = (arr) =>
-            arr.map(r => `${r.id}:${r.updated_at || r.created_at || r.modified_at || ''}`)
-               .sort().join('|');
+            arr.map(r => {
+                const stamp = r && (r.updated_at || r.created_at || r.modified_at);
+                // No modified-stamp → fall back to a content-aware hash so
+                // in-place edits on timestamp-less tables aren't missed.
+                return stamp ? `${r.id}:${stamp}` : `${r && r.id}:#${rowContentHash(r)}`;
+            }).sort().join('|');
         return fingerprint(a) !== fingerprint(b);
     }
 

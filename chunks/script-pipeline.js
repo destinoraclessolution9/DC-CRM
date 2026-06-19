@@ -23,7 +23,26 @@
     const isAgentOrLeader      = (u) => _utils.isAgentOrLeader(u || _state.cu);
     const getVisibleProspects  = () => _utils.getVisibleProspects();
     const getVisibleActivities = () => _utils.getVisibleActivities();
+    // Cross-chunk helper: calculatePotentialValue lives as a LOCAL const inside the
+    // marketing chunk IIFE and is NOT on window/_crmUtils, so referencing it bare here
+    // threw ReferenceError (audit L2883/L3225). Prefer a shared _crmUtils copy if one is
+    // ever published; otherwise use this local copy that mirrors the marketing version.
+    const calculatePotentialValue = (prospect) => {
+        if (_utils && typeof _utils.calculatePotentialValue === 'function') return _utils.calculatePotentialValue(prospect);
+        if (!prospect) return 'RM 0';
+        let baseValue = 5000;
+        let scoreBonus = (prospect.score || 0) * 10;
+        let modifier = 0;
+        if (prospect.income_range && prospect.income_range.includes('15,000')) modifier += 2000;
+        if (prospect.occupation && (prospect.occupation.toLowerCase().includes('business') || prospect.occupation.toLowerCase().includes('owner'))) modifier += 1500;
+        const val = baseValue + scoreBonus + modifier;
+        return `RM ${val.toLocaleString()} `;
+    };
     let _draggedId = null; // shared between handleDragStart and handleDrop
+    // Synchronous in-flight guard for the legacy drag-to-Closed-Won close path
+    // (closeDealWon). Keyed on prospectId so a double-fire of the modal action / two
+    // rapid drops can't create two customer rows for the same prospect (audit L2770).
+    const _closeWonInFlight = new Set();
     // Guards for the expired-focus archive migration (see _runPipelineArchive).
     // _pipelineArchiveInFlight: prevents concurrent runs racing into double-archive.
     // _pipelineArchiveDone: per-session set of "userId|month|prospectId" keys already
@@ -573,7 +592,10 @@ const generatePipelineAction = (category, daysSinceLast, isQualified, referralIn
         if (daysSinceLast <= 60) return `Re-engagement: invite to next DC 招商会`;
         return `Win-back: 1-on-1 agent package discussion`;
     }
-    if (daysSinceLast <= 30) return `Send proposal for <strong>${name}</strong> – follow up within 7 days`;
+    // Plain text only (audit L576): entry.action is consumed both escaped (focus-row
+    // custom path / React payload, where tags render as literal '<strong>') and raw —
+    // so embedding HTML here double-encodes. Emphasis belongs to the render layer.
+    if (daysSinceLast <= 30) return `Send proposal for ${name} – follow up within 7 days`;
     if (daysSinceLast <= 60) return 'Re-engagement call – offer free sharing class';
     return 'Win-back campaign – special discount to reactivate';
 };
@@ -1428,7 +1450,10 @@ const showPipelineView = async (container) => {
     }
 
     const probBadge = (prob, prospectId) => {
-        const color = prob >= 80 ? '#DC2626' : prob >= 60 ? '#F59E0B' : '#6B7280';
+        // Align the color band cutoff with the label band (audit L1430): WARM is
+        // prob >= 50, so the amber color must use >= 50 too — otherwise 50-59% shows
+        // a '⚡ WARM' label painted with the grey COLD color.
+        const color = prob >= 80 ? '#DC2626' : prob >= 50 ? '#F59E0B' : '#6B7280';
         const label = prob >= 80 ? '🔥 HOT' : prob >= 50 ? '⚡ WARM' : '❄️ COLD';
         const clickable = prospectId != null ? `onclick="event.stopPropagation();app.showPipelineExplain(${prospectId})" style="cursor:pointer;" title="Click to see score breakdown"` : '';
         return `<span ${clickable}><span style="background:${color};color:white;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">${label}</span><strong style="margin-left:6px;">${prob}%</strong></span>`;
@@ -1476,7 +1501,9 @@ const showPipelineView = async (container) => {
             pipeline.fromPotential = true;
             pipeline.potentialLevel = p.potential_level;
             if (!pipeline.action || pipeline.action.startsWith('Complete prerequisite') || pipeline.action.startsWith('Book CPS')) {
-                pipeline.action = `Potential: <strong>${esc(p.potential_level || 'Set')}</strong> – follow up to advance to close`;
+                // Plain text (audit L576/L1479) — consumed by the plain-payload builders;
+                // matches the parallel line in _buildFocusRowData's path (no <strong>).
+                pipeline.action = `Potential: ${p.potential_level || 'Set'} – follow up to advance to close`;
             }
         }
         return { ...p, _pipeline: pipeline };
@@ -1799,6 +1826,15 @@ const saveActionPlan = async (planId) => {
     }
 
     const rows = document.querySelectorAll('.plan-item-row');
+    // Reconciliation (audit L1801): the Remove button only does a DOM-only delete, so
+    // rows the user removed in the edit modal must be diff-deleted from the DB here —
+    // otherwise the orphan action_plan_items rows survive and reappear on next open.
+    // Collect the item ids still present in the form before the upsert loop.
+    const presentIds = new Set(
+        [...rows]
+            .map(r => parseInt(r.querySelector('.item-id')?.value))
+            .filter(n => !isNaN(n))
+    );
     for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
         const eventName = row.querySelector('.item-event-name')?.value?.trim() || '';
@@ -1821,6 +1857,16 @@ const saveActionPlan = async (planId) => {
             await AppDataStore.create('action_plan_items', itemData);
         }
     }
+
+    // Delete any persisted item whose id is no longer present in the form (removed by
+    // the user). Best-effort per row so one failure doesn't abort the whole save.
+    try {
+        for (const existing of await AppDataStore.query('action_plan_items', { plan_id: plan.id })) {
+            if (!presentIds.has(existing.id)) {
+                await AppDataStore.delete('action_plan_items', existing.id);
+            }
+        }
+    } catch (e) { console.warn('saveActionPlan: orphan-item cleanup failed', e); }
 
     UI.hideModal();
     UI.toast.success('Action Plan saved');
@@ -1926,7 +1972,9 @@ const initActionPlanReminder = () => {
         const todayStr = now.toISOString().slice(0,10);
         // Skip if already ran today or not Monday
         if (now.getDay() !== 1 || _lastReminderDate === todayStr) return;
-        _lastReminderDate = todayStr;
+        // NOTE (audit L1928): do NOT mark _lastReminderDate yet — only stamp it AFTER
+        // the work succeeds, so a transient Monday-morning outage retries on the next
+        // tick instead of silently skipping the whole week's reminder.
         try {
             const allUsers = await AppDataStore.getAll('users');
             const agentRoles = ['consultant', 'agent', 'team_leader', 'Level 3', 'Level 4', 'Level 5', 'Level 6'];
@@ -1946,7 +1994,12 @@ const initActionPlanReminder = () => {
                     });
                 }
             }
-        } catch(e) { /* silent — offline or no data */ }
+            // Success — now safe to mark "ran today" so we don't re-run until next Monday.
+            _lastReminderDate = todayStr;
+        } catch(e) {
+            // Observable, but don't stamp _lastReminderDate so the next tick retries.
+            console.warn('[actionPlanReminder] run failed — will retry next tick', e);
+        }
         } finally {
             _reminderInFlight = false;
         }
@@ -1968,8 +2021,15 @@ const editFocusAmount = (recId, currentAmount) => {
     input.onclick = (e) => e.stopPropagation();
     const save = async () => {
         const val = input.value.trim();
-        if (val === '' || isNaN(val)) { await refreshPipeline(); return; }
-        await AppDataStore.update('my_potential_list', recId, { custom_amount: Number(val) });
+        // Non-negative guard (audit L1971): isNaN('-50') is false, so a negative value
+        // would otherwise be stored and flow into pipeline-value rollups. Reject < 0.
+        const n = Number(val);
+        if (val === '' || isNaN(n) || n < 0) {
+            if (val !== '' && (isNaN(n) || n < 0)) UI.toast.error('Enter a valid non-negative amount');
+            await refreshPipeline();
+            return;
+        }
+        await AppDataStore.update('my_potential_list', recId, { custom_amount: n });
         UI.toast.success('Amount updated');
         await refreshPipeline();
     };
@@ -2012,7 +2072,11 @@ const resetFocusField = async (recId, field) => {
 const addToFocusList = async (prospectId) => {
     const userId = _state.cu?.id || 5;
     const currentMonth = new Date().toISOString().slice(0, 7);
-    const currentList = await AppDataStore.query('my_potential_list', { user_id: userId });
+    // Scope the list to the CURRENT focus_month (audit L2012): querying by user_id alone
+    // returns items from all months, so priority_order = (cross-month count)+1 would
+    // collide with / skip the per-month ordering the focus list is rendered/sorted by.
+    const currentList = (await AppDataStore.query('my_potential_list', { user_id: userId }))
+        .filter(i => i.focus_month === currentMonth);
     if (currentList.some(item => item.prospect_id == prospectId)) {
         UI.toast.warning('Prospect is already in your priority list.');
         return;
@@ -2032,7 +2096,11 @@ const removeFromFocusList = async (listItemId) => {
     if (!item) return;
     const userId = item.user_id;
     await AppDataStore.delete('my_potential_list', listItemId);
+    // Re-number ONLY the deleted item's focus_month (audit L2035): re-sequencing across
+    // every month would interleave + globally renumber other months, scrambling their
+    // relative order. Scope to item.focus_month so only the affected month is touched.
     const remaining = (await AppDataStore.query('my_potential_list', { user_id: userId }))
+        .filter(rec => rec.focus_month === item.focus_month)
         .sort((a, b) => a.priority_order - b.priority_order);
     for (const [idx, rec] of remaining.entries()) {
         await AppDataStore.update('my_potential_list', rec.id, { priority_order: idx + 1 });
@@ -2333,7 +2401,10 @@ const _readPipelineDraftFromDom = () => {
         if (!cfg.event_boosters[i]) return;
         if (!cfg.event_boosters[i].multipliers) cfg.event_boosters[i].multipliers = {};
         const v = parseFloat(el.value);
-        if (isNaN(v) || v === 1 || v === 0) {
+        // Audit L2336: only collapse the genuine no-op default (1) / non-numbers. Keep
+        // an explicit 0 so an admin who deliberately zeroes a category/event combo gets
+        // a 0 multiplier — NOT the absent-key fallback of 1.0 (the opposite effect).
+        if (isNaN(v) || v === 1) {
             delete cfg.event_boosters[i].multipliers[catId];
         } else {
             cfg.event_boosters[i].multipliers[catId] = v;
@@ -2345,7 +2416,9 @@ const _readPipelineDraftFromDom = () => {
         const catId = el.dataset.cat;
         if (!cfg.activity_multipliers[row]) cfg.activity_multipliers[row] = {};
         const v = parseFloat(el.value);
-        if (isNaN(v) || v === 1 || v === 0) {
+        // Audit L2348: same as the booster branch — preserve an explicit 0 so a
+        // zero activity×category multiplier persists instead of falling back to 1.0.
+        if (isNaN(v) || v === 1) {
             delete cfg.activity_multipliers[row][catId];
         } else {
             cfg.activity_multipliers[row][catId] = v;
@@ -2768,13 +2841,36 @@ const handleStageDrop = async (e, stageId) => {
 };
 
 const closeDealWon = async (prospectId) => {
+    // Layer 1: synchronous in-flight guard (set BEFORE the first await) so a
+    // double-fire of the modal action / two rapid drops on the same prospect can't
+    // both create a customer row (audit L2770).
+    const _key = String(prospectId);
+    if (_closeWonInFlight.has(_key)) return;
+    _closeWonInFlight.add(_key);
+    try {
     const prospect = await AppDataStore.getById('prospects', prospectId);
-    const amount = parseFloat(document.getElementById('deal-amount')?.value || prospect.deal_value || 5000);
+    // Null guard (audit L2772/L2840): getById can return null on RLS deny, offline
+    // 'Failed to fetch', or if the prospect was deleted/converted by another agent
+    // between the modal opening and the button click. Guard before any deref.
+    if (!prospect) { UI.toast.error('Prospect not found'); return; }
+    // Layer 2: persisted already-converted guard — dropping the same prospect on
+    // Closed-Won twice must NOT create a second customer / double-count the deal
+    // (audit L2770(c), mirrors approveProspectConversion).
+    if (prospect.status === 'converted') {
+        UI.toast.info(`${prospect.full_name || 'This prospect'} is already a customer.`);
+        UI.hideModal();
+        return;
+    }
+    const amount = parseFloat(document.getElementById('deal-amount')?.value || prospect.deal_value || 5000) || 0;
     const closeDate = document.getElementById('close-date')?.value || new Date().toISOString().split('T')[0];
 
-    // Create customer record
+    // Create customer record. Do NOT assign id:Date.now() — let Supabase generate the
+    // PK (a client Date.now() can collide with an imported customer id or another
+    // same-millisecond close). lifetime_value is seeded 0 here and bumped atomically
+    // via the shared adjuster below (with a matching purchases row), mirroring the
+    // canonical approveQueueEntry/savePurchase path so the leaderboard / LTV-vs-
+    // purchases reconciliation stays intact (audit #9 / L2770(b)).
     const customer = {
-        id: Date.now(),
         full_name: prospect.full_name,
         phone: prospect.phone,
         email: prospect.email,
@@ -2786,7 +2882,8 @@ const closeDealWon = async (prospectId) => {
         occupation: prospect.occupation,
         company_name: prospect.company_name,
         address: prospect.address,
-        lifetime_value: amount,
+        lifetime_value: 0,
+        total_purchases: 0,
         status: 'active',
         customer_since: closeDate,
         responsible_agent_id: prospect.responsible_agent_id,
@@ -2795,7 +2892,31 @@ const closeDealWon = async (prospectId) => {
         conversion_date: closeDate
     };
 
-    await AppDataStore.create('customers', customer);
+    // Guard create + purchases + LTV in try/catch — a failed write must surface to the
+    // user, not silently leave a half-converted prospect.
+    let created;
+    try {
+        created = await AppDataStore.create('customers', customer);
+        const customerId = created?.id ?? created?.[0]?.id;
+        if (customerId != null && amount > 0) {
+            // Canonical purchase row (column is `date`, keyed by customer_id) +
+            // atomic lifetime_value/total_purchases bump via the shared adjuster.
+            await AppDataStore.create('purchases', {
+                customer_id: customerId,
+                date: closeDate,
+                item: 'Deal closed (pipeline)',
+                amount: amount,
+                status: 'COMPLETED',
+                payment_method: 'Cash'
+            });
+            await _utils.adjustCustomerLtv(customerId, amount, 1);
+        }
+        customer.id = customerId;
+    } catch (e) {
+        console.error('closeDealWon: customer/purchase write failed', e);
+        UI.toast.error('Could not save the closed deal. Please retry.');
+        return;
+    }
 
     // Update prospect
     prospect.status = 'converted';
@@ -2834,10 +2955,17 @@ const closeDealWon = async (prospectId) => {
     UI.hideModal();
     UI.toast.success(`Deal closed at RM ${amount.toLocaleString()} !Customer created.`);
     await showPipelineView(document.getElementById('content-viewport'));
+    } finally {
+        _closeWonInFlight.delete(_key);
+    }
 };
 
 const closeDealLost = async (prospectId) => {
     const prospect = await AppDataStore.getById('prospects', prospectId);
+    // Null guard (audit L2840/L2844): getById may return null on RLS deny, offline
+    // 'Failed to fetch', or a prospect deleted between modal-open and confirm — guard
+    // before mutating any field, mirroring showPipelineExplain.
+    if (!prospect) { UI.toast.error('Prospect not found'); return; }
     const reason = document.getElementById('lost-reason')?.value || 'Not specified';
     const notes = document.getElementById('lost-notes')?.value || '';
 
@@ -2887,25 +3015,12 @@ const renderSystemRanking = async () => {
 };
 
 const renderManualPriority = async () => {
-const userId = _state.cu?.id || 5;
-const [potentialRecords, allProspects] = await Promise.all([
-    AppDataStore.query('my_potential_list', { user_id: userId }),
-    // Server-scoped read (matches every other prospect fetch in this file) instead
-    // of a whole-table getAll('prospects') that times out at ~8s on large orgs.
-    // Admins still get all rows (getVisibleProspects falls back to getAll when
-    // visibleIds==='all'); scoped users get only their visible prospects — which is
-    // all that this user's my_potential_list can reference anyway.
-    getVisibleProspects(),
-]);
-const prospectsById = new Map((allProspects || []).map(p => [String(p.id), p]));
-
-const filtered = potentialRecords.filter(rec => {
-    const p = prospectsById.get(String(rec.prospect_id));
-    return p && p.status !== 'converted' && p.status !== 'lost';
-});
-
-filtered.sort((a, b) => a.priority_order - b.priority_order);
-await refreshPipeline();
+    // Audit L2889/L2902: the previous body queried my_potential_list + all visible
+    // prospects, built a Map, then filtered/sorted a `filtered` list that was NEVER
+    // written to the DOM or passed anywhere — pure dead work. The manual-priority UI
+    // is rendered by refreshPipeline()/showPipelineView (the source of truth), so the
+    // post-boost refresh that submitBoost expects happens here via refreshPipeline().
+    await refreshPipeline();
 };
 
 const handleDragStart = (e, id) => {
@@ -2939,12 +3054,22 @@ const handleDrop = async (e, targetId) => {
     const [removed] = list.splice(draggedIndex, 1);
     list.splice(targetIndex, 0, removed);
 
-    // Update priority_order and PERSIST
-    for (const [idx, item] of list.entries()) {
-        await AppDataStore.update('my_potential_list', item.id, { priority_order: idx + 1 });
+    // Update priority_order and PERSIST. Wrap the sequential writes (audit L2943): if
+    // any update rejects mid-loop (RLS deny, offline, sync 409), the remaining rows
+    // keep stale orders → duplicate/gapped ranks. Catch, warn the user, and re-render
+    // to resync the UI with whatever actually persisted; only write rows whose order
+    // actually changed to minimize round-trips.
+    try {
+        for (const [idx, item] of list.entries()) {
+            if (item.priority_order !== idx + 1) {
+                await AppDataStore.update('my_potential_list', item.id, { priority_order: idx + 1 });
+            }
+        }
+        UI.toast.info('Order rearranged.');
+    } catch (e) {
+        console.error('handleDrop: reorder persist failed', e);
+        UI.toast.error('Could not save the new order. Refreshing…');
     }
-
-    UI.toast.info('Order rearranged.');
     await refreshPipeline();
 };
 
@@ -3267,18 +3392,32 @@ const submitBoost = async () => {
     const manualList = (await AppDataStore.query('my_potential_list', { user_id: _state.cu?.id || 5 }))
         .sort((a, b) => a.priority_order - b.priority_order);
 
-    const currentItem = manualList.find(i => i.prospect_id === prospectId);
+    // Match with == / String() coercion to tolerate prospect_id type drift (some rows
+    // store it as a string while parseInt above yields a number).
+    const currentItem = manualList.find(i => String(i.prospect_id) === String(prospectId));
+    // Null guard (audit L3271): find() returns undefined if the list changed between
+    // modal-open and submit (item removed, month rolled over, RLS empty-read) — reading
+    // currentItem.priority_order would throw and abort the boost with no feedback.
+    if (!currentItem) { UI.toast.error('Prospect not in your priority list'); return; }
     const oldRank = currentItem.priority_order;
 
-    // Move to Rank 1 (priority_order = 1)
-    // Shift others down
-    for (const item of manualList) {
-        if (item.priority_order < oldRank) {
-            item.priority_order += 1;
-            await AppDataStore.update('my_potential_list', item.id, { priority_order: item.priority_order });
+    // Move to Rank 1 (priority_order = 1), shift others down. Guard the sequential
+    // per-row writes (audit L2943 — same non-atomic pattern as handleDrop): a mid-loop
+    // reject would otherwise leave duplicate/gapped ranks with no feedback.
+    try {
+        for (const item of manualList) {
+            if (item.priority_order < oldRank) {
+                item.priority_order += 1;
+                await AppDataStore.update('my_potential_list', item.id, { priority_order: item.priority_order });
+            }
         }
+        await AppDataStore.update('my_potential_list', currentItem.id, { priority_order: 1 });
+    } catch (e) {
+        console.error('submitBoost: priority reorder failed', e);
+        UI.toast.error('Could not apply the boost. Refreshing…');
+        await renderManualPriority();
+        return;
     }
-    await AppDataStore.update('my_potential_list', currentItem.id, { priority_order: 1 });
 
     // Log override
     const override = {
