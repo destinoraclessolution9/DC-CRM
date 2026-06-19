@@ -1655,10 +1655,24 @@ const Auth = {
         console.warn('app.login() called – use the loginBtn form instead');
     }
 
+    // Shared-device hardening: wipe cached PII (table snapshots in localStorage
+    // fs_crm_* and the crm-data-v1 Cache Storage tier) so a logged-out user's
+    // customer/prospect data can't be read by the next person on the device.
+    function _wipeCachedData() {
+        try {
+            for (let i = localStorage.length - 1; i >= 0; i--) {
+                const k = localStorage.key(i);
+                if (k && k.startsWith('fs_crm_')) localStorage.removeItem(k);
+            }
+        } catch (_) { /* intentional: best-effort cache wipe on logout */ }
+        try { if (window.caches) caches.delete('crm-data-v1'); } catch (_) { /* intentional: best-effort Cache Storage wipe */ }
+    }
+
     async function logout() {
         await Auth.logout();
         _currentUser = null;
         try { (window.app._clearMobileSnapshots || (() => {}))(); } catch (_) { /* intentional: best-effort cache wipe */ } // wipe per-user mobile Home/Calendar caches (shared-device leak)
+        _wipeCachedData();   // wipe cached PII (fs_crm_* + crm-data-v1) on explicit logout
         try { localStorage.removeItem('remember_me'); } catch (_) { /* intentional: best-effort storage clear on logout */ } // clear "keep me logged in" on explicit logout
         document.getElementById('app-shell').style.display = 'none';
         document.getElementById('login-container').style.display = 'flex';
@@ -1678,6 +1692,7 @@ const Auth = {
         } catch (_) { /* sign out even if the network call fails */ }
         _currentUser = null;
         try { (window.app._clearMobileSnapshots || (() => {}))(); } catch (_) { /* intentional: best-effort cache wipe */ } // wipe per-user mobile caches (shared-device leak)
+        _wipeCachedData();   // wipe cached PII (fs_crm_* + crm-data-v1) on account switch
         try { localStorage.removeItem('remember_me'); } catch (_) { /* intentional: best-effort storage cleanup on account switch */ }
         try { localStorage.removeItem('remember_me_email'); } catch (_) { /* intentional: best-effort storage cleanup on account switch */ }
         const emailField = document.getElementById('loginEmail') || document.getElementById('email');

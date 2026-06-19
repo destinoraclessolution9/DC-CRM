@@ -1042,9 +1042,12 @@ const saveAgent = async () => {
             return UI.toast.error('Email is required to create login credentials');
         }
 
+        // NOTE: the plaintext password is intentionally NOT written to the
+        // users table — that column is a dead shadow copy (credential-at-rest
+        // leak) and is being dropped. The real auth user is created in GoTrue
+        // via the admin-auth-ops Edge Function below.
         const newAgent = {
             username: usernameVal,
-            password: initialPassword,
             join_date: new Date().toISOString().split('T')[0],
             ...fields
         };
@@ -1148,17 +1151,20 @@ const submitForcePasswordChange = async () => {
     if (!newPwd || newPwd.length < 8) return UI.toast.error('Password must be at least 8 characters');
     if (newPwd !== confirmPwd) return UI.toast.error('Passwords do not match');
 
+    // The real password change goes through GoTrue (auth.users, bcrypt). The
+    // users table no longer stores a plaintext shadow copy, so if this call
+    // fails the password did NOT change — surface the error and bail.
     try {
         const r = await window.supabase.auth.updateUser({ password: newPwd });
         const error = r && r.error;
         if (error) throw error;
     } catch (e) {
-        // Offline fallback — update users table only
-        console.warn('Supabase updateUser failed (offline?):', e?.message || e);
+        console.warn('Supabase updateUser failed:', e?.message || e);
+        return UI.toast.error('Failed to set password: ' + (e?.message || e));
     }
+    // Clear the force-change flag only (real users column) — no password write.
     await AppDataStore.update('users', _state.cu.id, {
-        force_password_change: false,
-        password: newPwd
+        force_password_change: false
     });
     _state.cu.force_password_change = false;
     UI.hideModal();
@@ -1220,8 +1226,10 @@ const executePasswordReset = async (agentId) => {
         const tempPwd = document.getElementById('reset-temp-pwd')?.value?.trim();
         if (!tempPwd || tempPwd.length < 8) return UI.toast.error('Temporary password must be at least 8 characters');
 
-        // Update CRM database
-        await AppDataStore.update('users', agentId, { password: tempPwd, force_password_change: true });
+        // Flag the agent to change password on next login. The plaintext is
+        // NOT stored in the users table (dead shadow column being dropped) —
+        // the real credential lives in GoTrue, updated via admin-auth-ops below.
+        await AppDataStore.update('users', agentId, { force_password_change: true });
 
         // Update Supabase Auth (create account if missing, update password if exists)
         // via the admin-auth-ops Edge Function (holds service_role as a secret).
@@ -1385,11 +1393,10 @@ const resetAgentPassword = async (agentId) => {
         `Generate a new temporary password for <strong>${escapeHtml(agent.full_name)}</strong>? They will need to change it on next login.`,
         async () => {
             try {
-                await AppDataStore.update('users', agentId, { password: newPassword });
-                // Update the Supabase Auth password via the admin-auth-ops
-                // Edge Function. Without this, the DB's password column
-                // changes but the actual login password does not — so
-                // surface failures loudly rather than swallowing them.
+                // The plaintext is NOT written to the users table (dead shadow
+                // column being dropped). The real password change happens in
+                // GoTrue via the admin-auth-ops Edge Function below — surface
+                // failures loudly rather than swallowing them.
                 let authOk = false;
                 if (agent.email) {
                     try {

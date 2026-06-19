@@ -25,6 +25,10 @@
     };
 
     const showSecurityDashboard = async () => {
+        if (!isSystemAdmin()) {
+            if (window.UI) window.UI.toast.error("Access Denied. Super Admins only.");
+            return;
+        }
         const view = document.getElementById('content-viewport');
         if (!view) return;
         const incidents = (await AppDataStore.getAll('security_incidents').catch(() => [])) || [];
@@ -47,6 +51,10 @@
     };
 
     const showAuditLogs = async () => {
+        if (!isSystemAdmin()) {
+            if (window.UI) window.UI.toast.error("Access Denied. Super Admins only.");
+            return;
+        }
         const logs = (await AppDataStore.getAll('audit_logs') || [])
             .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
             .slice(0, 50);
@@ -91,6 +99,10 @@
     };
     
     const showComplianceCenter = () => {
+        if (!isSystemAdmin()) {
+            if (window.UI) window.UI.toast.error("Access Denied. Super Admins only.");
+            return;
+        }
         let content = `
             <div class="compliance-center" style="margin:24px;">
                 <h2>Compliance Center</h2>
@@ -227,6 +239,10 @@
     };
 
     const showTenantManagement = () => {
+        if (!isSystemAdmin()) {
+            if (window.UI) window.UI.toast.error("Access Denied. Super Admins only.");
+            return;
+        }
         let tenants = typeof TenantManager !== 'undefined' ? TenantManager.listTenants() : [];
         if (tenants.length === 0) {
             // Seed some dummy tenants for demonstration
@@ -330,6 +346,10 @@
     };
     
     const showSystemHealth = () => {
+        if (!isSystemAdmin()) {
+            if (window.UI) window.UI.toast.error("Access Denied. Super Admins only.");
+            return;
+        }
         const health = typeof SystemHealth !== 'undefined' ? SystemHealth.checkAll() : { status: 'UNKNOWN', components: {} };
         let content = `
             <div class="system-health" style="padding: 24px;">
@@ -359,6 +379,10 @@
     };
     
     const showBackupManager = async () => {
+        if (!isSystemAdmin()) {
+            if (window.UI) window.UI.toast.error("Access Denied. Super Admins only.");
+            return;
+        }
         let backups = typeof BackupManager !== 'undefined' ? BackupManager.listBackups() : [];
         let content = `
             <div class="backup-manager" style="padding: 24px;">
@@ -421,6 +445,10 @@
     };
     
     const showPerformanceMonitor = async () => {
+        if (!isSystemAdmin()) {
+            if (window.UI) window.UI.toast.error("Access Denied. Super Admins only.");
+            return;
+        }
         if (window.UI) window.UI.toast.info("Generating performance metrics report...");
         let content = `
             <div class="performance-monitor" style="padding: 24px;">
@@ -453,6 +481,10 @@
     };
     
     const showDeploymentCenter = async () => {
+        if (!isSystemAdmin()) {
+            if (window.UI) window.UI.toast.error("Access Denied. Super Admins only.");
+            return;
+        }
         const history = typeof DeploymentManager !== 'undefined' ? DeploymentManager.getDeploymentHistory() : [];
         let content = `
             <div class="deployment-center" style="padding: 24px;">
@@ -513,6 +545,10 @@
     };
     
     const showSystemLogs = () => {
+        if (!isSystemAdmin()) {
+            if (window.UI) window.UI.toast.error("Access Denied. Super Admins only.");
+            return;
+        }
         if (typeof SystemLogger !== 'undefined') {
             SystemLogger.showLogViewer();
         } else {
