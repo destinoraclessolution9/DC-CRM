@@ -1,0 +1,65 @@
+# =============================================================================
+# LOCAL PARITY ONLY — this compose file is NOT a production deploy path.
+#
+# Production for the SPA is Vercel's edge CDN (git push -> Vercel build -> CDN).
+# This file exists so a developer can build + serve the fully-built static tree
+# locally, exactly as nginx would serve it, to reproduce prod-only issues
+# (header behaviour, brotli negotiation, immutable caching, SW scope) without
+# touching Vercel. See ./README.md for the senior stance on why we do NOT
+# containerize the frontend for production.
+#
+# Usage (from the repo ROOT, because the build context is the repo root):
+#   docker compose -f deploy/docker-compose.yml up --build
+#   # then open http://localhost:8082
+#   docker compose -f deploy/docker-compose.yml down
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # web — the static SPA, multi-stage built (node -> nginx:1.27-alpine) by the
+  # sibling deploy/Dockerfile. Serves the minified, content-hashed, brotli tree
+  # on container port 80, mapped to host 8082 to mirror the local dev server
+  # (python -m http.server 8082).
+  # ---------------------------------------------------------------------------
+  web:
+    build:
+      # Context is the repo root (..) so build.mjs + all sources are visible to
+      # the build stage. The Dockerfile lives under deploy/.
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: crm-static:local
+    ports:
+      - "8082:80"
+    restart: unless-stopped
+
+# =============================================================================
+# OPTIONAL: full local Supabase stack (reference — intentionally NOT inlined)
+# -----------------------------------------------------------------------------
+# This compose file deliberately does NOT define Postgres/GoTrue/PostgREST/etc.
+# Re-implementing the Supabase stack by hand drifts from the real platform and
+# is a maintenance trap. If you need a local backend for end-to-end parity, use
+# the OFFICIAL Supabase self-host compose instead of inlining services here:
+#
+#   1. git clone --depth 1 https://github.com/supabase/supabase
+#   2. cd supabase/docker
+#   3. cp .env.example .env        # then set strong local secrets
+#   4. docker compose up -d        # brings up db + auth + rest + storage + studio
+#   5. point this app's Supabase URL/anon-key (supabase-init.js / env) at the
+#      local stack (default API gateway http://localhost:8000).
+#
+# To run BOTH together, join them on a shared external network, e.g.:
+#   docker network create crm-local
+#   # add `networks: [crm-local]` to the `web` service above AND to the Supabase
+#   # `kong`/`rest` services, declaring `crm-local` as `external: true`.
+#
+#   networks:
+#     crm-local:
+#       external: true
+#
+# !!! WARNING — SYNTHETIC DATA ONLY !!!
+# NEVER load a production database dump into a local Supabase stack. The local
+# stack has weak/default credentials, no RLS guarantees against a curious dev,
+# no PII controls, and lives on a laptop disk. Seed ONLY synthetic/fake data
+# (e.g. a sanitized fixtures script). Loading real prospect/customer PII into a
+# local container is a data-protection incident waiting to happen.
+# =============================================================================

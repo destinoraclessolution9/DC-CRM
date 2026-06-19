@@ -1,0 +1,123 @@
+# =============================================================================
+# NOT RECOMMENDED. Vercel's edge CDN is the production target for this SPA.
+#
+# This manifest exists ONLY for air-gapped / on-prem / self-host scenarios where
+# Vercel is unavailable (e.g. a customer who must run inside their own network).
+# Running Kubernetes to serve a static, content-hashed, immutable asset tree is
+# an anti-pattern: you lose Vercel's global PoPs, immutable caching, zero-ops
+# rollouts, and instant rollback, and you take on cluster ops in exchange. Do
+# NOT adopt this for the normal production path. See ../README.md.
+#
+#   kubectl apply -f deploy/k8s/static-nginx.yaml
+# =============================================================================
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crm-static
+  labels:
+    app.kubernetes.io/name: crm-static
+    app.kubernetes.io/part-of: destinoracles-crm
+    app.kubernetes.io/component: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: crm-static
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: crm-static
+        app.kubernetes.io/part-of: destinoracles-crm
+        app.kubernetes.io/component: frontend
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        # nginx:1.27-alpine ships an unprivileged 'nginx' user (uid 101).
+        runAsUser: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: nginx
+          # The same image built by deploy/Dockerfile (multi-stage node build ->
+          # nginx:1.27-alpine serving the static tree on port 80). Push it to a
+          # reachable registry and pin a digest/tag for the air-gapped cluster.
+          image: registry.example/crm-static:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 80
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "250m"
+              memory: "128Mi"
+          readinessProbe:
+            httpGet:
+              path: /index.html
+              port: 80
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /index.html
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 2
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: crm-static
+  labels:
+    app.kubernetes.io/name: crm-static
+    app.kubernetes.io/part-of: destinoracles-crm
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: crm-static
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+---
+# Ingress (commented). Uncomment and adapt for your cluster's ingress controller
+# (nginx-ingress, Traefik, etc.). TLS NOTE: terminate HTTPS here — without
+# Vercel's edge you must provision and rotate certificates yourself (cert-manager
+# + an in-cluster ACME issuer, or a corporate/private CA in an air-gapped net).
+# Also re-create the security headers (CSP/HSTS) that vercel.json supplies in
+# production — they are NOT applied by Kubernetes for you.
+#
+# apiVersion: networking.k8s.io/v1
+# kind: Ingress
+# metadata:
+#   name: crm-static
+#   annotations:
+#     # cert-manager.io/cluster-issuer: "internal-ca"   # if using cert-manager
+#     nginx.ingress.kubernetes.io/ssl-redirect: "true"
+# spec:
+#   ingressClassName: nginx
+#   tls:
+#     - hosts:
+#         - crm.internal.example
+#       secretName: crm-static-tls
+#   rules:
+#     - host: crm.internal.example
+#       http:
+#         paths:
+#           - path: /
+#             pathType: Prefix
+#             backend:
+#               service:
+#                 name: crm-static
+#                 port:
+#                   number: 80

@@ -1,0 +1,60 @@
+# Reference only — production is Vercel's edge CDN; do not use this to serve
+# the SPA in production. This .dockerignore trims the build context for the
+# LOCAL PARITY / SELF-HOST deploy/Dockerfile. It is NOT wired to any pipeline.
+
+# --- Dependencies / VCS / platform metadata ---
+node_modules/
+.git/
+.gitignore
+.vercel/
+.github/
+.claude/
+
+# --- Pre-compressed build artifacts (build.mjs regenerates .br inside the image) ---
+*.br
+
+# --- Test + screenshot output ---
+test-results/
+test_screenshots/
+playwright-report/
+.cache/
+
+# --- Downloaded / scratch data dumps (not part of the app bundle) ---
+downloaded_files/
+*.xlsx
+*.xls
+*.pptx
+*.csv
+
+# --- Scratch / temp / working files (the repo's _* and audit scratch) ---
+_*
+*_tmp.py
+*_backup*.json
+apply_log.txt
+apply_*.py
+audit*.py
+build_floorpla*
+*.tmp
+tmp/
+temp/
+
+# --- Local-only queue / retry / plan scratch ---
+*_queue.json
+*_queue_*.json
+*_Results.xlsx
+AUTOPILOT_PLAN_V2.md
+PERF_SCALE_PLAN.md
+PHASE_D_RUNBOOK.md
+UI_SYSTEM_PROPOSAL.md
+
+# --- Editor / OS noise ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+
+# --- Docker self-reference (don't ship the deploy recipe into the image) ---
+deploy/
+Dockerfile
+.dockerignore

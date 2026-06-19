@@ -1,0 +1,113 @@
+# =============================================================================
+# ILLUSTRATIVE SCAFFOLDING — for a FUTURE long-running worker that DOES NOT YET
+# EXIST. This is NOT the SPA, and NOT a service currently in this repo.
+#
+# Why it might exist later: most async work today fits in Supabase Edge
+# Functions (short, request-scoped). A worker like this becomes justified ONLY
+# when a job outgrows that model — e.g. a durable queue consumer or an OCR /
+# order-form extraction pipeline that needs minutes of CPU, large memory, or
+# steady background throughput that Edge Functions can't sustain.
+#
+# Until such a `crm-worker` image actually ships, treat this file as a reference
+# template. The image reference, env, and probes below are placeholders.
+#
+#   kubectl apply -f deploy/k8s/worker-deployment.yaml   # (NOT yet — no image)
+# =============================================================================
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crm-worker
+  labels:
+    app.kubernetes.io/name: crm-worker
+    app.kubernetes.io/part-of: destinoracles-crm
+    app.kubernetes.io/component: worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: crm-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: crm-worker
+        app.kubernetes.io/part-of: destinoracles-crm
+        app.kubernetes.io/component: worker
+    spec:
+      # Pod-level hardening. Containers below inherit / tighten this.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          # Placeholder image — ${GIT_SHA} would be substituted by CI at deploy
+          # time (e.g. envsubst / kustomize image tag). No such image is built
+          # by this repo today.
+          image: registry.example/crm-worker:${GIT_SHA}
+          imagePullPolicy: IfNotPresent
+          # All config (Supabase URL/keys, queue creds, etc.) comes from a
+          # Secret the owner creates out-of-band — NEVER baked into the image.
+          envFrom:
+            - secretRef:
+                name: crm-worker-secrets
+          ports:
+            - name: http
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          # Readiness gates traffic/work until the process is actually up.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          # Liveness restarts a wedged/deadlocked worker.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 2
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+---
+# Horizontal autoscaling on CPU. Floor of 2 keeps the queue drained during a
+# rolling update; ceiling of 8 caps cost while still absorbing bursts.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: crm-worker
+  labels:
+    app.kubernetes.io/name: crm-worker
+    app.kubernetes.io/part-of: destinoracles-crm
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: crm-worker
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 65
