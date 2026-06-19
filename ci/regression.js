@@ -172,6 +172,27 @@ try {
   fail('VIEWS derivation drifted from baseline (ci/views-derive-check.js)');
 }
 
+// ── Step 9: Business-logic unit tests ──────────────────────────────────────
+// Globs every ci/test-*.js (characterization + data-helper + reconcile suites)
+// so future test files auto-join the gate. Each must exit 0. These pin the
+// pure business logic (authz/role resolution, dormancy, money parsing, fit
+// scoring, formatters) so a refactor that changes behavior fails CI.
+console.log('\n── Step 9: Business-logic unit tests ─────────────────────');
+{
+  const unitTests = fs.readdirSync(__dirname)
+    .filter((f) => /^test-.*\.js$/.test(f))
+    .sort();
+  if (unitTests.length === 0) warn('no ci/test-*.js unit tests found');
+  for (const tf of unitTests) {
+    try {
+      execSync(`node "${path.join(__dirname, tf)}"`, { stdio: 'inherit' });
+      pass(`unit: ${tf}`);
+    } catch {
+      fail(`unit test failed: ${tf}`);
+    }
+  }
+}
+
 // ── Summary ────────────────────────────────────────────────────────────────
 console.log('\n─────────────────────────────────────────────────────────');
 if (fails === 0) {
