@@ -262,10 +262,17 @@
             // Legacy path fills the agent dropdown via innerHTML; the React island
             // owns its options via state (loadAgents), so skip the fill there.
             if (fillAgents) {
-                AppDataStore.getAll('users').then(allUsers => {
+                AppDataStore.getAll('users').then(async allUsers => {
                     const sel = document.getElementById('kpi-agent-filter');
                     if (!sel) return;
-                    const _kpiAgents = allUsers.filter(u => isAgent(u) || u.role === 'team_leader' || (u.role || '').includes('Level 7'));
+                    let _kpiAgents = allUsers.filter(u => isAgent(u) || u.role === 'team_leader' || (u.role || '').includes('Level 7'));
+                    // Scope the dropdown to the caller's visible set (defense-in-depth);
+                    // 'all' (admin/marketing) leaves the full list intact.
+                    const _vis = await _utils.getVisibleUserIds(_state.cu).catch(() => 'all');
+                    if (Array.isArray(_vis)) {
+                        const _visSet = new Set(_vis.map(id => String(id)));
+                        _kpiAgents = _kpiAgents.filter(a => _visSet.has(String(a.id)));
+                    }
                     sel.innerHTML = `<option value="all">All Agents</option>` +
                         _kpiAgents.map(a => `<option value="${a.id}" ${String(_currentAgentFilter) === String(a.id) ? 'selected' : ''}>${escapeHtml(a.full_name || '')}</option>`).join('');
                 }).catch(() => {});
@@ -293,11 +300,21 @@
                     currentAgentFilter: _currentAgentFilter,
                     // Island owns the agent dropdown via state; loadAgents resolves
                     // the list whenever users data is ready (cold-load safe).
-                    loadAgents: () => AppDataStore.getAll('users')
-                        .then(us => (us || [])
-                            .filter(u => isAgent(u) || u.role === 'team_leader' || (u.role || '').includes('Level 7'))
-                            .map(a => ({ id: a.id, name: a.full_name || '' })))
-                        .catch(() => []),
+                    loadAgents: async () => {
+                        try {
+                            const us = await AppDataStore.getAll('users');
+                            let band = (us || [])
+                                .filter(u => isAgent(u) || u.role === 'team_leader' || (u.role || '').includes('Level 7'));
+                            // Scope to the caller's visible set (defense-in-depth);
+                            // 'all' (admin/marketing) leaves the full list intact.
+                            const vis = await _utils.getVisibleUserIds(_state.cu).catch(() => 'all');
+                            if (Array.isArray(vis)) {
+                                const visSet = new Set(vis.map(id => String(id)));
+                                band = band.filter(a => visSet.has(String(a.id)));
+                            }
+                            return band.map(a => ({ id: a.id, name: a.full_name || '' }));
+                        } catch (_) { return []; }
+                    },
                 };
                 window.CRMReact.mountReports(_root, {
                     ..._reportsMountOpts,
@@ -505,7 +522,6 @@
             const agentId = parseInt(_currentAgentFilter);
             if (Array.isArray(_visibleUserIds)) {
                 _visibleUserIds = _visibleUserIds.filter(id => String(id) === String(agentId));
-                if (_visibleUserIds.length === 0) _visibleUserIds = [agentId];
             } else if (_visibleUserIds === 'all') {
                 _visibleUserIds = [agentId];
             }

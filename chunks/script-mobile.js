@@ -925,9 +925,9 @@
         const oldestPerson = draftPerson(oldestDraft);
         const suggestedName = oldestPerson?.full_name || (birthdays[0]?.full_name) || '—';
         const suggestedAction = oldestPerson
-            ? `app.mhomeWa(${oldestPerson.id ?? 'null'}, '${_mhomeEsc(oldestPerson.phone || '')}')`
+            ? `app.mhomeWa(${oldestPerson.id ?? 'null'}, '${UI.escJsAttr(oldestPerson.phone || '')}')`
             : (birthdays[0]
-                ? `app.mhomeWa(${birthdays[0].id ?? 'null'}, '${_mhomeEsc(birthdays[0].phone || '')}')`
+                ? `app.mhomeWa(${birthdays[0].id ?? 'null'}, '${UI.escJsAttr(birthdays[0].phone || '')}')`
                 : `app.navigateTo('calendar')`);
 
         const scheduleRows = activities.slice(0, 4).map(a => {
@@ -959,7 +959,7 @@
             if (oldestPerson) {
                 const d = daysAgo(oldestDraft.due_date);
                 const sub = (d != null && d >= 0) ? `Last contact ${d} day${d === 1 ? '' : 's'} ago` : 'Awaiting follow-up';
-                const phone = _mhomeEsc(oldestPerson.phone || '');
+                const phone = UI.escJsAttr(oldestPerson.phone || '');
                 rows.push(`
                 <div class="mhome-att-row followup">
                     <div class="mhome-att-avatar">${_mhomeEsc(_mhomeInitials(oldestPerson.full_name))}</div>
@@ -976,7 +976,7 @@
             const bday = birthdays[0];
             if (bday) {
                 const isToday = (bday.date_of_birth || '').slice(5,10) === todayMD;
-                const phone = _mhomeEsc(bday.phone || '');
+                const phone = UI.escJsAttr(bday.phone || '');
                 const isAgent = !!bday.role;
                 rows.push(`
                 <div class="mhome-att-row birthday">
@@ -1474,7 +1474,7 @@
         const body = rows.map(c => {
             const d = daysSince(c);
             const sub = d == null ? 'Never contacted' : `Last contact ${d} day${d === 1 ? '' : 's'} ago`;
-            const phone = _mhomeEsc(c.phone || '');
+            const phone = UI.escJsAttr(c.phone || '');
             return `
             <div style="display:flex;align-items:center;gap:12px;padding:12px;background:var(--gray-50,#f9fafb);border-radius:12px;border-left:4px solid #8b5cf6;cursor:pointer;" onclick="UI.hideModal();app.showCustomerDetail(${c.id});">
                 <div style="width:38px;height:38px;border-radius:50%;background:#ede9fe;color:#6d28d9;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0;">${_mhomeEsc(_mhomeInitials(c.full_name))}</div>
@@ -2913,7 +2913,7 @@
         const html = rows.slice(0, 60).map((p, i) => {
             const init = _mhomeInitials(p.full_name);
             const pal = palettes[i % palettes.length];
-            const phone = _mhomeEsc(p.phone || '');
+            const phone = UI.escJsAttr(p.phone || '');
             const agentEntry = p.responsible_agent_id ? (_mpAgentMap?.get(String(p.responsible_agent_id)) || null) : null;
             const agentCode = agentEntry?.code || '';
             const agentName = agentEntry?.name || '';

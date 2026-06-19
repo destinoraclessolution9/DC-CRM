@@ -463,7 +463,7 @@
                 </td>
                 <td style="padding:10px 12px;text-align:center;">
                     ${r.file_url
-                        ? `<button class="btn secondary" style="padding:3px 10px;font-size:11px;" onclick="event.stopPropagation();window._openAttachment && window._openAttachment('${esc(r.file_url)}')"><i class="fas fa-image"></i></button>`
+                        ? `<button class="btn secondary" style="padding:3px 10px;font-size:11px;" onclick="event.stopPropagation();window._openAttachment && window._openAttachment('${UI.escJsAttr(r.file_url)}')"><i class="fas fa-image"></i></button>`
                         : ''}
                 </td>
             </tr>
@@ -619,7 +619,7 @@
         const photoHtml = record.file_url
             ? `<img src="${esc(record.file_url)}" loading="lazy"
                     style="width:100%;border-radius:8px;border:1px solid var(--border,#e2e8f0);margin-bottom:10px;cursor:zoom-in;"
-                    onclick="window._openAttachment && window._openAttachment('${esc(record.file_url)}')">`
+                    onclick="window._openAttachment && window._openAttachment('${UI.escJsAttr(record.file_url)}')">`
             : `<div style="width:100%;aspect-ratio:3/4;background:var(--gray-100);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--gray-300);margin-bottom:10px;font-size:28px;">
                    <i class="fas fa-image"></i></div>`;
 
@@ -833,7 +833,7 @@
                 const badge = entityType === 'customer'
                     ? `<span style="font-size:10px;padding:1px 6px;border-radius:10px;background:#dbeafe;color:#1d4ed8;">Customer</span>`
                     : `<span style="font-size:10px;padding:1px 6px;border-radius:10px;background:#dcfce7;color:#15803d;">Prospect</span>`;
-                return `<div onclick="app.ofeClosSelect('${esc(String(r.id))}','${esc(String(r.full_name || ""))}','${entityType}')"
+                return `<div onclick="app.ofeClosSelect('${UI.escJsAttr(String(r.id))}','${UI.escJsAttr(String(r.full_name || ""))}','${entityType}')"
                     style="padding:9px 12px;cursor:pointer;border:1px solid var(--border,#e2e8f0);border-radius:8px;margin-bottom:5px;background:var(--surface,#fff);display:flex;align-items:center;gap:8px;"
                     onmouseover="this.style.background='var(--gray-50,#f8fafc)'" onmouseout="this.style.background='var(--surface,#fff)'">
                     <i class="fas fa-user-circle" style="color:var(--gray-300);font-size:18px;"></i>
@@ -1176,7 +1176,7 @@
                 <div>
                     <img src="${esc(previewUrl)}" loading="lazy"
                          style="width:100%;border-radius:10px;border:1px solid var(--border,#e2e8f0);margin-bottom:12px;cursor:zoom-in;"
-                         onclick="window._openAttachment && window._openAttachment('${esc(previewUrl)}')">
+                         onclick="window._openAttachment && window._openAttachment('${UI.escJsAttr(previewUrl)}')">
                     <div style="background:var(--surface,#fff);border:1px solid var(--border,#e2e8f0);border-radius:10px;padding:14px 16px;font-size:13px;">
                         <div style="font-size:10px;color:var(--gray-400);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;">Template Detected</div>
                         <div style="font-weight:600;color:var(--gray-900);margin-bottom:12px;">${formTypeLabel} ${_confBadge(confidence.form_type)}</div>

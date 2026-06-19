@@ -115,9 +115,10 @@ insert into public.schema_migrations (filename, sha256, applied_at) values
   ('server_cron_2026-05-03.sql', '0f7082a299bc45719c1cfbbaf1c846ab55f950c7604b4ce265002cbfa8c86eb5', '2026-06-19T00:00:00Z'),
   ('stock_take_v2_2026-05-30.sql', 'ecebda56fa28ce96d73012139d9d23e61f96a171e1a0c3c8b6df3833609b8378', '2026-06-19T00:00:00Z'),
   ('stock_take_v2_staff_role_2026-05-30.sql', '78a137dcd4afb0e6f0f81a13b313a0e14011d2717383477ccb433e728f72fb24', '2026-06-19T00:00:00Z'),
-  ('tighten_user_preferences_rls_2026-04-24.sql', 'b2b84d436813c0141da4666831afe00fa9fd516bebc6ef8c793d8a826925c2d0', '2026-06-19T00:00:00Z')
+  ('tighten_user_preferences_rls_2026-04-24.sql', 'b2b84d436813c0141da4666831afe00fa9fd516bebc6ef8c793d8a826925c2d0', '2026-06-19T00:00:00Z'),
+  ('report_rpc_scope_clamp_2026-06-19.sql', '9e54be93a3287dd2c37310b205eb756a38182da8599041dd5591a8a466e1de73', '2026-06-19T00:00:00Z')
 on conflict (filename) do nothing;
 
 -- ---------- verify ----------
--- Expected count after backfill on a fresh ledger: 62
+-- Expected count after backfill on a fresh ledger: 63
 select count(*) from public.schema_migrations;

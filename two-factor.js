@@ -384,7 +384,7 @@ const showTwoFactorSetup = () => {
                     <div class="step-content">
                         <h4>Verify Code</h4>
                         <input type="text" id="verification-code" placeholder="Enter 6-digit code" maxlength="6">
-                        <button class="btn primary" onclick="app.verifyAndEnable2FA('${esc(secret.secret)}')">Verify & Enable</button>
+                        <button class="btn primary" onclick="app.verifyAndEnable2FA('${(window.UI && window.UI.escJsAttr ? window.UI.escJsAttr(secret.secret) : esc(secret.secret))}')">Verify & Enable</button>
                     </div>
                 </div>
             </div>

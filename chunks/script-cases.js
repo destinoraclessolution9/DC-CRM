@@ -498,11 +498,11 @@
         const photoGalleryHtml = photos.length ? `
             <div class="case-detail-gallery">
                 <div class="case-detail-gallery-main">
-                    <img loading="lazy" decoding="async" data-attach-src="${escapeHtml(photos[0])}" alt="Cover" onclick="window._openAttachment('${escapeHtml(photos[0])}')">
+                    <img loading="lazy" decoding="async" data-attach-src="${escapeHtml(photos[0])}" alt="Cover" onclick="window._openAttachment('${UI.escJsAttr(String(photos[0]))}')">
                 </div>
                 ${photos.length > 1 ? `
                     <div class="case-detail-gallery-thumbs">
-                        ${photos.slice(1).map(p => `<img loading="lazy" decoding="async" data-attach-src="${escapeHtml(p)}" alt="Photo" onclick="window._openAttachment('${escapeHtml(p)}')">`).join('')}
+                        ${photos.slice(1).map(p => `<img loading="lazy" decoding="async" data-attach-src="${escapeHtml(p)}" alt="Photo" onclick="window._openAttachment('${UI.escJsAttr(String(p))}')">`).join('')}
                     </div>
                 ` : ''}
             </div>
@@ -794,7 +794,7 @@
         }
         gal.innerHTML = _casePendingPhotos.map((url, i) => `
             <div class="case-photo-thumb" draggable="false">
-                <img loading="lazy" decoding="async" data-attach-src="${escapeHtml(url)}" alt="Case photo ${i + 1}" onclick="window._openAttachment('${escapeHtml(url)}')">
+                <img loading="lazy" decoding="async" data-attach-src="${escapeHtml(url)}" alt="Case photo ${i + 1}" onclick="window._openAttachment('${UI.escJsAttr(String(url))}')">
                 ${i === 0 ? '<span class="case-photo-badge">Cover</span>' : ''}
                 <button class="case-photo-remove" title="Remove" onclick="event.stopPropagation(); app.removeCasePhoto(${i})"><i class="fas fa-times"></i></button>
             </div>

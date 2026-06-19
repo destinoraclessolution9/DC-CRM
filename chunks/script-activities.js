@@ -1117,7 +1117,7 @@
                     const existingPhotos = Array.isArray(a.photo_urls) ? a.photo_urls : [];
                     const thumbs = existingPhotos.map(url => `
                         <div style="position:relative;flex-shrink:0;">
-                            <img loading="lazy" src="${escapeHtml(url)}" style="height:64px;width:64px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-200);cursor:zoom-in;" onclick="window._openAttachment && window._openAttachment('${escapeHtml(url)}')">
+                            <img loading="lazy" src="${escapeHtml(url)}" style="height:64px;width:64px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-200);cursor:zoom-in;" onclick="window._openAttachment && window._openAttachment('${UI.escJsAttr(String(url))}')">
                         </div>`).join('');
                     return `
                 <div class="form-group" id="${prefix}-photo-section" data-existing="${escapeHtml(JSON.stringify(existingPhotos))}" style="border-top:1px solid var(--gray-200);padding-top:12px;margin-top:4px;">
@@ -1936,7 +1936,7 @@
                 <div style="overflow:auto;">
                     <div style="font-size:11px;color:var(--gray-500);margin-bottom:4px;">DETECTED TEMPLATE</div>
                     <div style="font-weight:600;color:var(--gray-900);margin-bottom:10px;">${escapeHtml(formTypeLabel)} ${confBadge(confidence.form_type)}</div>
-                    <img loading="lazy" src="${escapeHtml(photoUrl)}" style="max-width:100%;border:1px solid var(--gray-200);border-radius:8px;cursor:zoom-in;" onclick="window._openAttachment && window._openAttachment('${escapeHtml(photoUrl)}')">
+                    <img loading="lazy" src="${escapeHtml(photoUrl)}" style="max-width:100%;border:1px solid var(--gray-200);border-radius:8px;cursor:zoom-in;" onclick="window._openAttachment && window._openAttachment('${UI.escJsAttr(String(photoUrl))}')">
                     ${metaRows.length ? `
                         <div style="margin-top:12px;font-size:12px;">
                             <div style="font-weight:600;color:var(--gray-700);margin-bottom:6px;">Extra extracted info (saved with photo)</div>
@@ -2104,7 +2104,7 @@
         const item = document.createElement('div');
         item.style.cssText = 'display:inline-flex;flex-direction:column;align-items:center;gap:2px;position:relative;';
         item.innerHTML = `
-            <img src="${escapeHtml(photoUrl)}" style="width:80px;height:80px;border-radius:6px;object-fit:cover;cursor:pointer;border:1px solid var(--gray-200);" onclick="window._openAttachment && window._openAttachment('${escapeHtml(photoUrl)}')">
+            <img src="${escapeHtml(photoUrl)}" style="width:80px;height:80px;border-radius:6px;object-fit:cover;cursor:pointer;border:1px solid var(--gray-200);" onclick="window._openAttachment && window._openAttachment('${UI.escJsAttr(String(photoUrl))}')">
             <div style="font-size:10px;color:var(--gray-600);text-align:center;line-height:1.2;">${escapeHtml(typeLabel)}</div>
             ${prn ? `<div style="font-size:9px;color:var(--gray-400);">${escapeHtml(prn)}</div>` : ''}
             ${attachmentId ? `<button type="button" title="Remove" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border:none;border-radius:50%;width:20px;height:20px;font-size:10px;padding:0;cursor:pointer;" onclick="app.removeOrderFormAttachment(${attachmentId}, this.parentElement)"><i class="fas fa-times"></i></button>` : ''}

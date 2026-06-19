@@ -2125,7 +2125,7 @@ const _renderPipelineConfigModal = (isAdmin) => {
                         <tr style="border-bottom:1px solid #F3F4F6;">
                             <td style="padding:4px 8px;font-family:monospace;">${escapeHtml(k)}</td>
                             <td style="padding:4px 8px;"><input type="number" step="0.5" value="${weights[k]}" ${disabled} data-kind="weight" data-key="${escapeHtml(k)}" style="width:90px;border:1px solid #E5E7EB;padding:4px;"></td>
-                            ${isAdmin ? `<td style="padding:4px 8px;"><button type="button" class="btn-icon" style="color:#DC2626;" onclick="app.deletePipelineWeight('${escapeHtml(k)}')" title="Delete"><i class="fas fa-trash"></i></button></td>` : ''}
+                            ${isAdmin ? `<td style="padding:4px 8px;"><button type="button" class="btn-icon" style="color:#DC2626;" onclick="app.deletePipelineWeight('${UI.escJsAttr(String(k))}')" title="Delete"><i class="fas fa-trash"></i></button></td>` : ''}
                         </tr>`).join('')}
                     </tbody>
                 </table>

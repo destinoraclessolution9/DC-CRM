@@ -942,7 +942,7 @@
                     <td>${esc(p.type)}</td>
                     <td><span class="score-badge ${p.score >= 80 ? 'high' : p.score >= 60 ? 'medium' : 'low'}">${p.score}</span></td>
                     <td><span class="confidence ${confidenceClass}">${p.confidence}%</span></td>
-                    <td><button class="btn-link" onclick="app.${fn}('${esc(String(p.id))}')">${esc(p.action)}</button></td>
+                    <td><button class="btn-link" onclick="app.${fn}('${UI.escJsAttr(String(p.id))}')">${esc(p.action)}</button></td>
                 </tr>
             `;
         });
@@ -969,7 +969,7 @@
                     <td>${esc(freshLabel)} · ${lead.recentCount} acts</td>
                     <td>${predLabel}</td>
                     <td>${esc(lead.action)}</td>
-                    <td><button class="btn-icon" aria-label="View lead details" onclick="app.viewLeadDetails('${esc(String(lead.id))}')"><i class="fas fa-eye" aria-hidden="true"></i></button></td>
+                    <td><button class="btn-icon" aria-label="View lead details" onclick="app.viewLeadDetails('${UI.escJsAttr(String(lead.id))}')"><i class="fas fa-eye" aria-hidden="true"></i></button></td>
                 </tr>
             `;
         }
@@ -1410,7 +1410,7 @@
             ).join('')}
                         </div>
                     </td>
-                    <td><button class="btn-link" onclick="app.contactAtRiskCustomer('${esc(String(risk.id))}')">Contact</button></td>
+                    <td><button class="btn-link" onclick="app.contactAtRiskCustomer('${UI.escJsAttr(String(risk.id))}')">Contact</button></td>
                 </tr>
             `;
         }
@@ -1606,7 +1606,7 @@
                     <td>
                         <div class="agent-insight">${callout}</div>
                     </td>
-                    <td><button class="btn-icon" aria-label="View agent performance" onclick="app.viewAgentDetails('${esc(String(r.id))}')"><i class="fas fa-chart-bar" aria-hidden="true"></i></button></td>
+                    <td><button class="btn-icon" aria-label="View agent performance" onclick="app.viewAgentDetails('${UI.escJsAttr(String(r.id))}')"><i class="fas fa-chart-bar" aria-hidden="true"></i></button></td>
                 </tr>
             `;
         }
@@ -2017,7 +2017,7 @@
                     <td><strong>${esc(l.name)}</strong></td>
                     <td><span class="score-badge ${l.score >= 80 ? 'high' : 'medium'}">${l.score}</span></td>
                     <td>${esc(l.action)}</td>
-                    <td><button class="btn-icon" aria-label="View lead" onclick="event.stopPropagation(); app.viewLeadDetails('${esc(String(l.id))}')"><i class="fas fa-eye" aria-hidden="true"></i></button></td>
+                    <td><button class="btn-icon" aria-label="View lead" onclick="event.stopPropagation(); app.viewLeadDetails('${UI.escJsAttr(String(l.id))}')"><i class="fas fa-eye" aria-hidden="true"></i></button></td>
                 </tr>`).join('');
             const plain = seg.map(l => `${l.name} (score ${l.score})`).join('\n');
             // Stash for the copy/export buttons (avoids re-querying; escaped on use).
@@ -2337,7 +2337,7 @@
                 <tr>
                     <td><strong>${esc(c.name)}</strong></td>
                     <td><span class="risk-badge low">${c.riskScore}% risk</span></td>
-                    <td><button class="btn-icon" aria-label="Open customer" onclick="event.stopPropagation(); app.contactAtRiskCustomer('${esc(String(c.id))}')"><i class="fas fa-eye" aria-hidden="true"></i></button></td>
+                    <td><button class="btn-icon" aria-label="Open customer" onclick="event.stopPropagation(); app.contactAtRiskCustomer('${UI.escJsAttr(String(c.id))}')"><i class="fas fa-eye" aria-hidden="true"></i></button></td>
                 </tr>`).join('');
             UI.showModal(`Upsell Opportunities (${cands.length})`, `
                 <div class="ai-upsell">
@@ -2379,7 +2379,7 @@
                 <tr>
                     <td><strong>${esc(c.name)}</strong></td>
                     <td>${c.dormDays} days</td>
-                    <td><button class="btn-icon" aria-label="Open customer" onclick="event.stopPropagation(); app.contactAtRiskCustomer('${esc(String(c.id))}')"><i class="fas fa-eye" aria-hidden="true"></i></button></td>
+                    <td><button class="btn-icon" aria-label="Open customer" onclick="event.stopPropagation(); app.contactAtRiskCustomer('${UI.escJsAttr(String(c.id))}')"><i class="fas fa-eye" aria-hidden="true"></i></button></td>
                 </tr>`).join('');
             UI.showModal(`Renewals Due (${due.length})`, `
                 <div class="ai-renewals">
