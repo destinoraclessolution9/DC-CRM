@@ -933,11 +933,11 @@ const _hideCpsScanOverlay = () => {
 // photo-scan flow so the underlying form DOM stays intact.
 const openCpsPasteModal = (prefix = 'cps') => {
     const placeholder = `请填妥基本资料 Basic information
-1. 姓名 Name : CHEE CHUN CHING
-2. 身分号码 IC: 740315-04-5427
-3. 职业 Occupation: Driver
-4. 联络号码 Phone no: 0122034218
-5. 邮箱 Email: thomaschee@gmail.com`;
+1. 姓名 Name : TAN AH KAU
+2. 身分号码 IC: 900101-10-1234
+3. 职业 Occupation: Engineer
+4. 联络号码 Phone no: 012-3456789
+5. 邮箱 Email: sample@example.com`;
     const contentHtml = `
         <div style="margin-bottom:10px;color:var(--gray-600);font-size:13px;line-height:1.5;">
             Paste the customer's bilingual reply below. The system will auto-fill
