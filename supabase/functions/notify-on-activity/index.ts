@@ -14,6 +14,13 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+function callerRole(req: Request): string | null {
+  const h = req.headers.get("authorization") || "";
+  const t = h.replace(/^Bearer\s+/i, "");
+  if (!t) return null;
+  try { return (JSON.parse(atob(t.split(".")[1] || "")).role) || null; } catch { return null; }
+}
+
 async function pgSelect(table: string, params: Record<string, string>): Promise<any[]> {
   const qs = new URLSearchParams(params).toString();
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${qs}`, {
@@ -51,6 +58,9 @@ async function getReportingChain(
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: CORS_HEADERS });
+  }
+  if (callerRole(req) !== "service_role") {
+    return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
   }
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "method_not_allowed" }), {

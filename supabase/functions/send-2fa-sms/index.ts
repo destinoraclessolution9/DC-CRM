@@ -1,16 +1,19 @@
 // supabase/functions/send-2fa-sms/index.ts
-// Generates a 6-digit 2FA code server-side, sends it via Twilio SMS, and
-// returns ONLY a SHA-256 hash of the code to the client. The plaintext code
-// never touches the client browser — prevents log/screen-share leakage.
+// Generates a 6-digit 2FA code server-side and sends it via Twilio SMS.
+// Neither the plaintext code nor its hash is ever returned to the client —
+// returning the hash would let the 6-digit code be brute-forced offline and
+// bypass 2FA. Verification is handled by a server-side flow.
+// Requires an authenticated caller (Bearer JWT with role authenticated/service_role).
 //
 // Required env vars (Supabase dashboard → Functions → admin-auth-ops secrets):
 //   TWILIO_ACCOUNT_SID
 //   TWILIO_AUTH_TOKEN
 //   TWILIO_FROM           (your purchased number in E.164, e.g. +14155552671)
 //
-// Request:  { phone: "+60123456789" }
-// Response: { hash: "<64-hex>", ok: true }  on success
-//           { error, ok: false }            on failure (4xx/5xx)
+// Request:  { phone: "+60123456789" }   (Authorization: Bearer <jwt> required)
+// Response: { ok: true }                 on success
+//           { error, ok: false }         on failure (4xx/5xx)
+//           { error: "unauthorized" }    on missing/invalid caller auth (401)
 
 // @ts-ignore
 const TWILIO_ACCOUNT_SID: string = Deno.env.get("TWILIO_ACCOUNT_SID") || "";
@@ -24,6 +27,13 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
+
+function callerRole(req: Request): string | null {
+  const h = req.headers.get("authorization") || "";
+  const t = h.replace(/^Bearer\s+/i, "");
+  if (!t) return null;
+  try { return (JSON.parse(atob(t.split(".")[1] || "")).role) || null; } catch { return null; }
+}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -80,6 +90,12 @@ async function sendTwilioSms(to: string, body: string) {
 // @ts-ignore
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
+
+  const _role = callerRole(req);
+  if (_role !== "authenticated" && _role !== "service_role") {
+    return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+  }
+
   if (req.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405);
 
   let payload: any;
@@ -89,12 +105,13 @@ Deno.serve(async (req: Request) => {
   if (!phone) return json({ ok: false, error: "phone_required" }, 400);
 
   const code = generateCode();
-  const hash = await sha256Hex(code);
   const smsBody = `Your DestinOracles verification code is ${code}. It expires in 5 minutes.`;
 
   const sent = await sendTwilioSms(phone, smsBody);
   if (!sent.ok) return json({ ok: false, error: sent.error, detail: (sent as any).detail }, sent.status);
 
-  // Return only the hash — client stores it and compares on verify.
-  return json({ ok: true, hash });
+  // Confirm the SMS was sent. The code hash is intentionally NOT returned —
+  // returning it lets the 6-digit code be brute-forced offline (2FA bypass).
+  // Verification is handled by a server-side flow.
+  return json({ ok: true });
 });

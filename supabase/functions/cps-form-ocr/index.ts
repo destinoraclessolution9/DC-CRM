@@ -21,6 +21,9 @@ const GEMINI_API_KEY: string = Deno.env.get("GEMINI_API_KEY") || "";
 const GEMINI_MODEL = "gemini-2.5-flash";
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
+// Only forward image MIME types we trust to Gemini.
+const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"];
+
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -174,19 +177,22 @@ async function callGemini(imageBase64: string, mimeType: string) {
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Gemini API error ${res.status}: ${errText.slice(0, 500)}`);
+    console.error(`[cps-form-ocr] Gemini API error ${res.status}:`, errText.slice(0, 500));
+    throw new Error("upstream_error");
   }
 
   const data = await res.json();
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) {
-    throw new Error("Gemini returned no text: " + JSON.stringify(data).slice(0, 500));
+    console.error("[cps-form-ocr] Gemini returned no text:", JSON.stringify(data).slice(0, 500));
+    throw new Error("upstream_error");
   }
 
   try {
     return JSON.parse(text);
   } catch (e) {
-    throw new Error("Gemini returned non-JSON: " + text.slice(0, 500));
+    console.error("[cps-form-ocr] Gemini returned non-JSON:", text.slice(0, 500));
+    throw new Error("upstream_error");
   }
 }
 
@@ -230,8 +236,17 @@ Deno.serve(async (req: Request) => {
       if (!imageBase64) return json({ ok: false, error: "no_image_base64" }, 400);
     }
   } catch (e: any) {
-    return json({ ok: false, error: "bad_request", detail: String(e?.message || e) }, 400);
+    console.error("[cps-form-ocr] request parse error:", String(e?.message || e));
+    return json({ ok: false, error: "bad_request" }, 400);
   }
+
+  // Only allow trusted image MIME types through to Gemini.
+  const normalizedMime = mimeType.split(";")[0].trim().toLowerCase();
+  if (!ALLOWED_MIME_TYPES.includes(normalizedMime)) {
+    console.error("[cps-form-ocr] rejected mime type:", mimeType);
+    return json({ ok: false, error: "unsupported_image_type" }, 400);
+  }
+  mimeType = normalizedMime;
 
   // Validate image size — Gemini Flash limit is generous but we cap to avoid runaway costs
   const approxBytes = (imageBase64.length * 3) / 4;
@@ -243,6 +258,7 @@ Deno.serve(async (req: Request) => {
     const result = await callGemini(imageBase64, mimeType);
     return json({ ok: true, ...result });
   } catch (e: any) {
-    return json({ ok: false, error: "ocr_failed", detail: String(e?.message || e) }, 500);
+    console.error("[cps-form-ocr] ocr failed:", String(e?.message || e));
+    return json({ ok: false, error: "ocr_failed" }, 500);
   }
 });

@@ -219,6 +219,16 @@ function formatTime(activityDate: string, startTime: string): string {
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
 
+  // Shared-secret guard: only the pg_cron caller (which sends matching
+  // x-reminder-secret header) may trigger the reminder fan-out. Fail closed
+  // (401) if REMINDER_SECRET is unset or the header does not match.
+  const _secret = Deno.env.get("REMINDER_SECRET") || "";
+  if (!_secret || req.headers.get("x-reminder-secret") !== _secret) {
+    return new Response(JSON.stringify({ error: "unauthorized" }), {
+      status: 401, headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    });
+  }
+
   if (!VAPID_PUBLIC || !VAPID_PRIVATE) {
     return new Response(JSON.stringify({ error: "vapid_not_configured" }), {
       status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" },

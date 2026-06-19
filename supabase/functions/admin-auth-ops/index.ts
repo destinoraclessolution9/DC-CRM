@@ -45,9 +45,11 @@ async function requireAdmin(req: Request): Promise<{ ok: true; userId: string } 
   const authEmail = who?.email;
   if (!authUserId || !authEmail) return { ok: false, reason: "no_identity", status: 401 };
 
-  // Look up the CRM users row by email (service-role read, RLS bypassed).
+  // Look up the CRM users row by the immutable auth user id (service-role read,
+  // RLS bypassed). Email is mutable/non-unique, so keying off auth_user_id (the
+  // verified token identity) prevents the role check from matching the wrong row.
   const userRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/users?select=id,role,email&email=eq.${encodeURIComponent(authEmail)}&limit=1`,
+    `${SUPABASE_URL}/rest/v1/users?select=id,role,email&auth_user_id=eq.${encodeURIComponent(authUserId)}&limit=1`,
     { headers: { "apikey": SERVICE_ROLE, "Authorization": `Bearer ${SERVICE_ROLE}` } },
   );
   if (!userRes.ok) return { ok: false, reason: "user_lookup_failed", status: 500 };

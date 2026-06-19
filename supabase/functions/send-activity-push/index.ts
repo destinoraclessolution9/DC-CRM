@@ -43,6 +43,13 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+function callerRole(req: Request): string | null {
+  const h = req.headers.get("authorization") || "";
+  const t = h.replace(/^Bearer\s+/i, "");
+  if (!t) return null;
+  try { return (JSON.parse(atob(t.split(".")[1] || "")).role) || null; } catch { return null; }
+}
+
 // @ts-ignore
 const VAPID_PUBLIC = Deno.env.get("VAPID_PUBLIC_KEY") || "";
 // @ts-ignore
@@ -281,6 +288,15 @@ serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: CORS_HEADERS });
   }
+
+  const _role = callerRole(req);
+  if (_role !== "service_role" && _role !== "authenticated") {
+    return new Response(JSON.stringify({ error: "unauthorized" }), {
+      status: 401,
+      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    });
+  }
+
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "method_not_allowed" }), {
       status: 405,
