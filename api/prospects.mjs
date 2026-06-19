@@ -24,6 +24,15 @@ const SECRET       = process.env.SUPABASE_SECRET_KEY || '';
 // prospects_page accepts only these sort keys (real columns); anything else → score.
 const SORT_KEYS = new Set(['score', 'full_name', 'last_activity_date']);
 
+// Best-effort per-IP rate limit (defense-in-depth; the real control is the
+// Vercel WAF). INERT unless RATE_LIMIT_PER_MIN is set to a positive integer.
+// In-memory + per-instance: with Fluid Compute each warm instance keeps its
+// own window, so the effective global limit is (limit × live instances) — a
+// backstop against a single-instance hammer, not a distributed-flood control.
+const RL_MAX = Math.max(0, parseInt(process.env.RATE_LIMIT_PER_MIN || '0', 10) || 0);
+const RL_WINDOW_MS = 60000;
+const _rlHits = new Map(); // ip -> number[] (recent hit timestamps)
+
 export default async function handler(req, res) {
   res.setHeader('content-type', 'application/json');
   res.setHeader('cache-control', 'no-store');
@@ -47,6 +56,7 @@ export default async function handler(req, res) {
   };
 
   if (req.method !== 'GET') return send(405, { error: 'method_not_allowed' });
+  if (rateLimited(req)) return send(429, { error: 'rate_limited' });
   if (!SECRET) return send(503, { error: 'not_configured', detail: 'SUPABASE_SECRET_KEY env var is not set on this deployment' });
 
   const Q = req.query || {};
@@ -160,6 +170,21 @@ function clampInt(v, dflt, min, max) {
   const n = Number.parseInt(String(v ?? ''), 10);
   if (!Number.isFinite(n)) return dflt;
   return Math.min(max, Math.max(min, n));
+}
+// Returns true if this request should be rejected (429). Fail-open: any error → false (allow).
+function rateLimited(req) {
+  try {
+    if (RL_MAX <= 0) return false; // disabled
+    const xff = String((req.headers && (req.headers['x-forwarded-for'] || req.headers['x-real-ip'])) || '');
+    const ip = (xff.split(',')[0] || '').trim() || 'unknown';
+    const now = Date.now();
+    const arr = (_rlHits.get(ip) || []).filter((t) => now - t < RL_WINDOW_MS);
+    arr.push(now);
+    _rlHits.set(ip, arr);
+    // Opportunistic cleanup so the Map can't grow unbounded on a long-lived instance.
+    if (_rlHits.size > 5000) { for (const [k, v] of _rlHits) { if (!v.length || now - v[v.length-1] > RL_WINDOW_MS) _rlHits.delete(k); } }
+    return arr.length > RL_MAX;
+  } catch { return false; }
 }
 // Structured single-line JSON log for a Vercel Log Drain to ingest + alert on.
 // Pure observability — never throws into the request path (best-effort, swallowed).

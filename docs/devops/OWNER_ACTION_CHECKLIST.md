@@ -27,6 +27,9 @@ so nothing breaks before you do these. Tick them off when ready; the code activa
 ## P4 — Edge security
 - [ ] **Vercel WAF / BotID** — enable managed ruleset + a rate-limit rule on `/api/*`
       (dashboard → Firewall). The in-function limiter ships as defense-in-depth regardless.
+  - [ ] **Enable the shipped in-function limiter** — set Vercel env `RATE_LIMIT_PER_MIN`
+        to a positive integer (start ~240 — office users share one NAT'd IP — and tune down
+        only if abuse appears). See `SECURITY_EDGE.md` for the full perimeter playbook.
 
 ## P5 — Scaling (the biggest reliability lever)
 - [ ] **Supabase compute** — upgrade NANO → Small/Medium and confirm **Pro + Cost-Control**
