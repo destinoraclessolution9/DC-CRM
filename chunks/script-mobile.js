@@ -2212,11 +2212,30 @@
     // Birthday WhatsApp greeting — id-only so nothing dynamic (names like
     // O'Brien) ever lands in an onclick attribute. Phone is looked up from the
     // in-scope person map; no phone → no-op (the button is also phone-gated).
-    const mcalBirthdayWa = (id) => {
+    const mcalBirthdayWa = async (id) => {
         const person = _mcalPersonMap.get(String(id));
         if (!person || !_mhomeWaPhone(person.phone)) return;
         const greeting = `Happy Birthday, ${person.full_name || ''}! 🎂 Wishing you a wonderful year ahead. — DestinOraclesSolution`;
-        mhomeWa(id, person.phone, greeting);
+        mhomeWa(id, person.phone, greeting); // open WhatsApp first (sync, before any await) so the popup isn't blocked
+        // Log the wish as an activity — parity with desktop executeSendBirthdayWish.
+        // The mobile people map merges prospects + customers with NO type tag, so
+        // resolve the entity by id at send-time. Wrapped in try/catch so a logging
+        // failure can never break the WhatsApp open (the primary action).
+        try {
+            const _d = new Date();
+            const _localDate = `${_d.getFullYear()}-${String(_d.getMonth()+1).padStart(2,'0')}-${String(_d.getDate()).padStart(2,'0')}`;
+            const _payload = {
+                activity_type: 'CALL',
+                activity_date: _localDate,
+                summary: `Birthday Wish via WhatsApp: ${greeting}`,
+                lead_agent_id: _state.cu?.id,
+                created_by: _state.cu?.id,
+            };
+            const isProspect = !!(await AppDataStore.getById('prospects', id).catch(() => null));
+            if (isProspect) _payload.prospect_id = id; else _payload.customer_id = id;
+            await AppDataStore.create('activities', _payload);
+            UI.toast.success('Birthday wish logged.');
+        } catch (e) { console.warn('[mcalBirthdayWa] activity log failed (WhatsApp still opened)', e); }
     };
     // Open a birthday person's profile — mirrors mcalOpenEvent: try prospect,
     // then customer, routing to the matching detail view. id-only.

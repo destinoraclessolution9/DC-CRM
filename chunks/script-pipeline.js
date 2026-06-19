@@ -2890,7 +2890,12 @@ const renderManualPriority = async () => {
 const userId = _state.cu?.id || 5;
 const [potentialRecords, allProspects] = await Promise.all([
     AppDataStore.query('my_potential_list', { user_id: userId }),
-    AppDataStore.getAll('prospects'),
+    // Server-scoped read (matches every other prospect fetch in this file) instead
+    // of a whole-table getAll('prospects') that times out at ~8s on large orgs.
+    // Admins still get all rows (getVisibleProspects falls back to getAll when
+    // visibleIds==='all'); scoped users get only their visible prospects — which is
+    // all that this user's my_potential_list can reference anyway.
+    getVisibleProspects(),
 ]);
 const prospectsById = new Map((allProspects || []).map(p => [String(p.id), p]));
 
