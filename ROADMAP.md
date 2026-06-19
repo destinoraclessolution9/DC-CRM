@@ -1,5 +1,11 @@
 # CRM — Living Roadmap
 
+## Status as of 2026-06-20
+Repo tip `9c9dbf3`. Improvement program R1–R6: **all 6 shipped** (commits `7db7b54`→`349221f`,
+incl. R3 arch-freeze decision). Owner/external section: **2 cleared** (RLS BACK-1 applied
+`fbc6e6b`; edge functions deployed `9c9dbf3`) — **4 still owner-gated** (compute upgrade,
+full OAuth, fude redeem DB wiring + admin role promotion, monthly_focus UNIQUE apply).
+
 _Canonical program tracker. Supersedes the per-initiative plan docs now in `docs/archive/`
 (AUTOPILOT_PLAN, OUTSTANDING, REACT_MIGRATION_PLAN, REFACTOR_PLAN, UPGRADE)._
 
@@ -42,10 +48,10 @@ Effort goes to correctness (tests) and stability (deploy choreography) instead.
 
 | Phase | Item | Deploys? | Status |
 |-------|------|----------|--------|
-| 0 | **R4** repo hygiene · **R6** docs refresh · **R3** arch-freeze decision | No | 🟡 in progress |
-| 1 | **R1** business-logic test oracle (money/authz/dormancy/reconcile/matcher) | No (CI) | ⬜ queued |
-| 2 | **R2** deploy-storm fix — stagger SW reload + preserve session | **Yes** (1 bump) | ⬜ queued |
-| 3 | **R5** migration discipline — applied-ledger + dup-number CI check | No | ⬜ queued |
+| 0 | **R4** repo hygiene · **R6** docs refresh · **R3** arch-freeze decision | No | ✅ DONE (`7db7b54`) |
+| 1 | **R1** business-logic test oracle (money/authz/dormancy/reconcile/matcher) | No (CI) | ✅ DONE (`7bebc4f`) |
+| 2 | **R2** deploy-storm fix — stagger SW reload + preserve session | **Yes** (1 bump) | ✅ DONE (`e1d198f` — repaired dead reload edit-guard modal selector; R2 runtime already live) |
+| 3 | **R5** migration discipline — applied-ledger + dup-number CI check | No | ✅ DONE (`349221f`) |
 
 **Why this order:** only R2 force-deploys; the rest land as quiet source commits (no
 `CACHE_VERSION` bump → no fleet-reload storm). The test net (R1) is built before the one risky
@@ -55,6 +61,10 @@ Verification ceiling: structural (build/CI/marker), **not** authenticated click-
 ---
 
 ## External / owner-gated (cannot be done from code — folded from OUTSTANDING.md)
+
+> Status note (2026-06-20): two items previously here are now CLOSED — RLS per-row SELECT
+> scoping (BACK-1) was applied to prod (`fbc6e6b`) and all 7 edge functions were deployed
+> (`9c9dbf3`). The items below remain genuinely owner-gated.
 
 - **Supabase compute Nano → Micro/Small** (billing) — the durable fix for repeat 521 outages;
   R2 only mitigates the client-side stampede. Confirm project id before changing.
