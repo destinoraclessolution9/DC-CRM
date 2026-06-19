@@ -80,7 +80,11 @@
     function _swIsEditing() {
         try {
             // An open modal means the user is mid-task — defer.
-            if (document.querySelector('.modal.open, [data-modal-open]')) return true;
+            // The app's modal system is UI.showModal → #global-modal-overlay.active
+            // (ui.js). The old '.modal.open, [data-modal-open]' selector matched
+            // NOTHING, so this guard was silently dead for every app modal; the
+            // real selector is kept first, legacy ones retained as harmless fallbacks.
+            if (document.querySelector('#global-modal-overlay.active, .modal-overlay.active, .modal.open, [data-modal-open]')) return true;
             var el = document.activeElement;
             if (!el) return false;
             if (el.isContentEditable) return true;
