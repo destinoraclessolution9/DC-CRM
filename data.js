@@ -217,6 +217,11 @@ class DataStore {
             'fs_crm_tombstones',
             'remember_me',
             'remember_me_email',
+            // The live Supabase auth session — MUST be protected or a prune can
+            // evict it and silently log the user out. supabase-init.js configures
+            // storageKey='fs-crm-auth-v1'; the old 'sb-crm-auth-token' entry never
+            // matched the real key (kept as a legacy no-op).
+            (typeof window !== 'undefined' && window.SUPABASE_AUTH_STORAGE_KEY) || 'fs-crm-auth-v1',
             'sb-crm-auth-token',
         ]);
         const THRESHOLD_BYTES = 3.5 * 1024 * 1024;

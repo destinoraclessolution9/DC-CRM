@@ -494,7 +494,14 @@ const appLogic = (() => {
     // no listeners to re-bind after innerHTML restore.
     const _viewHtmlCache = new Map(); // cacheKey -> { html, className, scrollTop, ts }
     const _VIEW_HTML_CACHE_TTL_MS = 60_000;
-    const _CACHEABLE_VIEWS = new Set(['prospects', 'calendar', 'month', 'pipeline']);
+    // Disabled: every standalone "cacheable" view (prospects / calendar / month /
+    // pipeline) is now a React island rendered with synthetic onClick handlers
+    // (ProspectsTable/CalendarView/PipelineView .jsx). Snapshotting their innerHTML
+    // and restoring it produces DEAD DOM — React's event delegation lives on the
+    // root fiber, not in the serialized markup, so the restored table is fully
+    // non-interactive. React re-mount over warm React-Query data is fast enough.
+    // The machinery is kept for any future *vanilla* (inline-onclick) view.
+    const _CACHEABLE_VIEWS = new Set();
     // Mobile + desktop render entirely different DOM for the same viewId
     // (mobile uses _mpRenderList card layout, desktop uses renderProspectsTable).
     // Without a viewport-tier suffix on the cache key, a desktop snapshot
@@ -2384,7 +2391,16 @@ function _wireLoginBtn() {
             ]);
             const session = (sessionResponse && sessionResponse.data && sessionResponse.data.session) || null;
             const authUser = session?.user ?? null;
-            if (authUser) {
+            // MFA (AAL2) gate on session RESTORE — the fresh-login gate
+            // (_enforceMfaOnLogin, called only on the Auth.login path) could be
+            // bypassed by reloading the page after a session reached AAL1. Enforce
+            // it here too. Fail-open (no verified factor / detection error -> proceed);
+            // on cancel or too-many-wrong it has already signed out, so drop the user
+            // to the login screen. Computed only when a session actually exists.
+            const _restoreMfaFail = authUser ? !(await _enforceMfaOnLogin()) : false;
+            if (_restoreMfaFail) {
+                _currentUser = null;
+            } else if (authUser) {
                 // Fetch the full profile from the users table (has integer id + role),
                 // same as the login flow – avoids using the raw Auth UUID as _currentUser.id.
                 // Detect network errors so we don't sign out on a flaky connection.
@@ -2474,10 +2490,19 @@ function _wireLoginBtn() {
                 _currentUser = null;
                 try {
                     if (localStorage.getItem('remember_me') === '1') {
-                        // supabase-js stores the auth session as 'sb-<ref>-auth-token'
-                        const _sbKey = Object.keys(localStorage).find(k => /^sb-.+-auth-token$/.test(k));
-                        const _sbData = _sbKey ? JSON.parse(localStorage.getItem(_sbKey) || 'null') : null;
-                        const _offlineEmail = _sbData?.user?.email;
+                        // supabase-js persists the whole session under the configured
+                        // storageKey (window.SUPABASE_AUTH_STORAGE_KEY = 'fs-crm-auth-v1').
+                        // The old code scanned for an 'sb-<ref>-auth-token' key that a
+                        // custom storageKey NEVER writes, so this offline-resume was dead
+                        // and users were locked out during a 521/offline blip. Read the
+                        // real key; keep the legacy scan only as a last-resort fallback.
+                        const _sbKey = window.SUPABASE_AUTH_STORAGE_KEY || 'fs-crm-auth-v1';
+                        let _sbData = JSON.parse(localStorage.getItem(_sbKey) || 'null');
+                        if (!_sbData) {
+                            const _legacy = Object.keys(localStorage).find(k => /^sb-.+-auth-token$/.test(k));
+                            _sbData = _legacy ? JSON.parse(localStorage.getItem(_legacy) || 'null') : null;
+                        }
+                        const _offlineEmail = _sbData?.user?.email || _sbData?.currentSession?.user?.email;
                         if (_offlineEmail) {
                             const _rawUsers = localStorage.getItem('fs_crm_users');
                             const _allUsers = _rawUsers ? JSON.parse(_rawUsers) : [];
@@ -3257,6 +3282,21 @@ function _wireLoginBtn() {
                 // chunk a silent no-op for the whole session.
                 _chunkInFlight.delete(src);
                 console.warn('[chunk] failed to load', src, e);
+                // Version skew: a long-open tab still holds an OLD __ASSET_MANIFEST,
+                // so the hashed chunk URL 404s after a new deploy — the feature would
+                // be a silent no-op for the rest of the session. Reload ONCE (guarded
+                // by a session flag so a genuine network failure can't loop) to pull a
+                // fresh index + manifest. Only triggers for manifest-resolved (hashed)
+                // chunks, i.e. real deploys, not ad-hoc/relative srcs.
+                try {
+                    const _resolved = (window.__ASSET_MANIFEST || {})[src];
+                    if (_resolved && !sessionStorage.getItem('fs_chunk_skew_reloaded')) {
+                        sessionStorage.setItem('fs_chunk_skew_reloaded', '1');
+                        console.warn('[chunk] likely version skew after a deploy — reloading once to refresh the asset manifest');
+                        location.reload();
+                        return;
+                    }
+                } catch (_) { /* sessionStorage blocked (private mode) — fall through to the toast */ }
                 try { if (window.UI?.toast?.error) window.UI.toast.error('A module failed to load — check your connection and try again.'); } catch (_) { /* intentional: toast is cosmetic; load already failed and resolves */ }
                 resolve();
             };
