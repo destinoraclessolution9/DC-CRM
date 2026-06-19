@@ -34,9 +34,10 @@ so nothing breaks before you do these. Tick them off when ready; the code activa
 ## P5 — Scaling (the biggest reliability lever)
 - [ ] **Supabase compute** — upgrade NANO → Small/Medium and confirm **Pro + Cost-Control**
       (NANO is the documented 521-outage root cause; it auto-reverts unless billed properly).
-- [ ] **Supavisor pooler** — enable the transaction pooler (port `6543`). Set Vercel env
-      `SUPABASE_POOLER_URL` to the pooled connection string. BFF prefers it when present,
-      else falls back to the direct URL — no code change needed to switch.
+- [ ] **Supavisor pooler** — enable the transaction pooler (port `6543`) for any EXTERNAL
+      direct-Postgres clients (psql, migrations, BI tools, scripts). The in-app BFF
+      (`api/*.mjs`) talks to **PostgREST over HTTP**, which Supabase already pools
+      server-side — so there is no app connection string to swap. See `SCALING.md`.
 - [ ] **DB metric alerts** — in Supabase, alert on CPU > 80 %, connections > 80 % of pool,
       disk > 80 % → route to `OPS_SLACK_WEBHOOK`.
 
