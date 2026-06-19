@@ -1,0 +1,153 @@
+# Deploy gate + post-deploy smoke
+#
+# This workflow is the POST-DEPLOY verification layer plus an OPTIONAL gated-
+# promotion scaffold. It closes the gap left by ci.yml: those gates are
+# reporting-only and do NOT block Vercel, which auto-builds `main` on every push
+# regardless of CI status. See docs/devops/CICD.md for the full pipeline + the
+# two hardening options (branch protection vs gated promotion).
+#
+# It CANNOT break the live site:
+#   • `post_deploy_smoke` is READ-ONLY — it curls public endpoints (homepage +
+#     Supabase auth health) after a push has already shipped, and reports.
+#   • `promote` is a complete NO-OP unless the owner BOTH switches to
+#     workflow_dispatch AND sets the `VERCEL_PROD_DEPLOY_HOOK` secret. On a
+#     normal push it never runs.
+#
+# This does NOT replace branch protection — protection is configured in the
+# GitHub UI (Settings → Branches), documented in docs/devops/CICD.md and
+# docs/devops/OWNER_ACTION_CHECKLIST.md.
+#
+# Status-code semantics for the auth health probe match uptime.yml:
+#   400          → UP / healthy  (GoTrue rejects dummy creds before checking)  → PASS
+#   521 or 5xx   → DOWN          (Cloudflare 521 = dead origin / 5xx = broken) → FAIL
+#   401/403/429  → WARN-but-PASS (throttle / rate-limit / transient gating)    → PASS
+
+name: Deploy gate + post-deploy smoke
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'marketing/**'
+      - '_*'
+  workflow_dispatch:
+
+jobs:
+  # ── Post-deploy smoke: verify production immediately after a push lands ──────
+  # Vercel builds + propagates the new deploy independently; we wait out that
+  # window, then confirm the homepage + backend are actually serving traffic.
+  # Faster signal than uptime.yml's 10-minute cadence — catches a bad deploy now.
+  post_deploy_smoke:
+    name: Post-deploy smoke (homepage + auth health)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # Vercel build + CDN propagate window. A plain sleep is sufficient here —
+      # the smoke checks below are idempotent and the later uptime cron backstops.
+      - name: Wait for production to update
+        run: sleep 120
+
+      # ── Check A: homepage must answer 200 ──────────────────────────────────
+      - name: Homepage 200
+        run: |
+          set -euo pipefail
+          URL="https://destinoraclessolution.com"
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+                   --max-time 30 \
+                   -A "crm-deploy-smoke/1.0 (+github-actions)" \
+                   "$URL" || echo "000")
+          echo "Homepage GET $URL → HTTP $CODE"
+          if [ "$CODE" != "200" ]; then
+            echo "::error::Homepage check FAILED — expected 200, got $CODE"
+            exit 1
+          fi
+          echo "Homepage OK (200)"
+
+      # ── Check B: Supabase auth health — 400 means UP ───────────────────────
+      - name: Auth health (400=up, 521/5xx=down)
+        run: |
+          set -euo pipefail
+          SUPABASE_URL="https://remuwhxvzkzjtgbzqjaa.supabase.co"
+          # Public publishable key — already shipped in the browser bundle, safe in plaintext.
+          APIKEY="sb_publishable_XVWyiw5j1lnEErQUTV4XWg_lQcCIAjX"
+          ENDPOINT="$SUPABASE_URL/auth/v1/token?grant_type=password"
+
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+                   --max-time 30 \
+                   -X POST "$ENDPOINT" \
+                   -H "apikey: $APIKEY" \
+                   -H "Content-Type: application/json" \
+                   -d '{"email":"probe@deploy.invalid","password":"x"}' || echo "000")
+
+          echo "Auth POST $ENDPOINT → HTTP $CODE"
+
+          case "$CODE" in
+            400)
+              echo "Auth backend UP — dummy creds rejected with 400 as expected."
+              ;;
+            401|403|429)
+              echo "::warning::Auth health returned $CODE (throttle/rate-limit/auth-gate) — NOT treating as an outage. Passing."
+              ;;
+            521|5[0-9][0-9])
+              echo "::error::Auth health FAILED — HTTP $CODE indicates Supabase backend is DOWN (521 = dead origin / 5xx = broken)."
+              exit 1
+              ;;
+            *)
+              echo "::error::Auth health returned UNEXPECTED HTTP $CODE — treating as failure so we never silently miss an outage."
+              exit 1
+              ;;
+          esac
+
+      # ── Alerting on failure ────────────────────────────────────────────────
+      # If a Slack/ops webhook secret is configured, POST a one-line alert.
+      # The `secrets.OPS_SLACK_WEBHOOK != ''` guard means this step is simply
+      # skipped (not errored) when the secret is absent — see the echo step below.
+      - name: Notify Slack on failure
+        if: ${{ failure() && secrets.OPS_SLACK_WEBHOOK != '' }}
+        env:
+          OPS_SLACK_WEBHOOK: ${{ secrets.OPS_SLACK_WEBHOOK }}
+        run: |
+          set -euo pipefail
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          curl -s -X POST "$OPS_SLACK_WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d "{\"text\":\"🔴 Post-deploy smoke FAILED — production may be down — ${RUN_URL}\"}" \
+            || echo "::warning::Slack notify call itself failed (webhook unreachable?) — failure is still visible in the Actions UI."
+
+      # Always-runs-on-failure plain echo so an unconfigured webhook is a no-op,
+      # never an error. The job's red status + the GitHub Actions failure
+      # notification remain the baseline alarm even with no Slack secret set.
+      - name: Echo failure (no external alerting required)
+        if: failure()
+        run: |
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          echo "::error::Post-deploy smoke FAILED. See run: ${RUN_URL}"
+          echo "If you want Slack alerts, set the OPS_SLACK_WEBHOOK repo secret to an incoming-webhook URL."
+
+  # ── Gated promotion (OPTIONAL) ──────────────────────────────────────────────
+  # Only for owners who DISABLE Vercel production auto-deploy (option B in
+  # docs/devops/CICD.md). Until both conditions below hold this job never runs,
+  # so it is a complete no-op for the current auto-deploy setup:
+  #   1. invoked manually via workflow_dispatch (never on a normal push), AND
+  #   2. the VERCEL_PROD_DEPLOY_HOOK secret is set.
+  # When enabled, dispatch this workflow only AFTER ci.yml is green to promote.
+  promote:
+    name: Gated production promotion (dispatch + secret only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: ${{ github.event_name == 'workflow_dispatch' && secrets.VERCEL_PROD_DEPLOY_HOOK != '' }}
+
+    steps:
+      - name: Trigger Vercel production deploy hook
+        env:
+          VERCEL_PROD_DEPLOY_HOOK: ${{ secrets.VERCEL_PROD_DEPLOY_HOOK }}
+        run: |
+          set -euo pipefail
+          echo "Triggering a GATED production build via the Vercel Deploy Hook."
+          echo "(This path is only active when Vercel auto-deploy is OFF — see docs/devops/CICD.md option B.)"
+          curl -fsS -X POST "$VERCEL_PROD_DEPLOY_HOOK"
+          echo
+          echo "Deploy hook accepted — Vercel is now building production. Watch the post_deploy_smoke run next."

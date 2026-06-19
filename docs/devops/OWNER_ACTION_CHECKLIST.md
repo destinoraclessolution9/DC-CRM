@@ -16,12 +16,13 @@ so nothing breaks before you do these. Tick them off when ready; the code activa
 
 ## P3 — CI/CD gating
 - [ ] **Branch protection** on `main`: require checks `gates`, `regression`, `lighthouse`,
-      `migration-ledger` before merge (GitHub → Settings → Branches). See `DEPLOY_DISCIPLINE.md`.
+      `migration-ledger` before merge (GitHub → Settings → Branches). See `CICD.md` + `DEPLOY_DISCIPLINE.md`.
 - [ ] **Gated promotion (optional, stronger):** turn off Vercel auto-deploy-to-production,
       create a **Deploy Hook**, store its URL as repo secret `VERCEL_PROD_DEPLOY_HOOK`.
       `.github/workflows/deploy.yml` then promotes only on green.
-- [ ] **Migration ledger** — apply `migrations/_ledger_schema_migrations.sql` once via the
-      Supabase SQL Editor. Thereafter `ci/check-migration-ledger.js` reports drift.
+- [ ] **Migration ledger** — apply `migrations/ledger_schema_migrations_2026-06-19.sql` once via the
+      Supabase SQL Editor (creates `public.schema_migrations` + backfills 62 applied rows).
+      Thereafter `ci/test-migration-ledger.js` (auto-runs in the regression gate) reports drift.
 
 ## P4 — Edge security
 - [ ] **Vercel WAF / BotID** — enable managed ruleset + a rate-limit rule on `/api/*`
