@@ -90,7 +90,13 @@ async function init() {
     (data.fields || []).forEach(field => {
         const wrapper = document.createElement('div');
         const labelEl = document.createElement('label');
-        labelEl.innerHTML = field.label + (field.required ? ' <span class="required">*</span>' : '');
+        labelEl.textContent = field.label || '';
+        if (field.required) {
+            const reqMark = document.createElement('span');
+            reqMark.className = 'required';
+            reqMark.textContent = ' *';
+            labelEl.appendChild(reqMark);
+        }
         wrapper.appendChild(labelEl);
 
         let input;

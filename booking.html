@@ -177,7 +177,9 @@ const supabase = window.supabase.createClient(
 
 const params = new URLSearchParams(window.location.search);
 const agentId = params.get('agent');
-// Pre-filled by agent before sharing the link
+// Pre-filled by agent before sharing the link. Kept raw for the DB write
+// (data is preserved); these params are never rendered into the DOM as HTML —
+// any future display must use textContent (never innerHTML/attributes).
 const prefilledReferrer = params.get('ref') || '';
 const prefilledRelation = params.get('rel') || '';
 
@@ -241,9 +243,18 @@ function loadSlots(dateStr) {
         }
     });
 
-    grid.innerHTML = timeSlots.map(ts =>
-        `<button class="slot-btn" onclick="selectSlot(this, '${ts.start}', '${ts.end}', ${ts.slotId})">${ts.start}</button>`
-    ).join('');
+    // Build slot buttons via DOM APIs rather than an HTML/onclick template:
+    // DB-derived values (start/end from booking_slots time strings, slotId from
+    // the row id) go through textContent + a JS closure, so they can never break
+    // out of the HTML, attribute, or nested onclick JS-string contexts.
+    grid.innerHTML = '';
+    timeSlots.forEach(ts => {
+        const btn = document.createElement('button');
+        btn.className = 'slot-btn';
+        btn.textContent = ts.start;
+        btn.addEventListener('click', () => selectSlot(btn, ts.start, ts.end, ts.slotId));
+        grid.appendChild(btn);
+    });
     section.style.display = 'block';
     selectedSlot = null;
     document.getElementById('submit-btn').disabled = true;
