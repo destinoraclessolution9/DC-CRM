@@ -70,10 +70,12 @@ eq('pure-junk',         _parseAmount('abc'), 0);
 eq('rm-only',           _parseAmount('RM'), 0);
 eq('symbols-only',      _parseAmount('$-,'), 0);
 
-// ── Negatives: the minus sign is stripped → value becomes POSITIVE ─────────
-// (characterizing current behavior — refunds/negatives are NOT preserved.)
-eq('negative-plain',    _parseAmount('-50'), 50);
-eq('negative-rm',       _parseAmount('-RM 1,200'), 1200);
+// ── Negatives: a LEADING minus is preserved → value is NEGATIVE ────────────
+// (2026-06-19 fix: the minus was previously stripped, silently flipping refunds/
+// credits to positive; a leading '-' (after optional currency/space) now negates.)
+eq('negative-plain',    _parseAmount('-50'), -50);
+eq('negative-rm',       _parseAmount('-RM 1,200'), -1200);
+eq('mid-string-minus',  _parseAmount('1-2'), 12);   // minus NOT leading → ignored (positive)
 
 // ── Junk-wrapped numbers: leading text stripped, digits/dots retained ──────
 eq('text-then-number',  _parseAmount('Paid: 1,500.00'), 1500); // strips to "1500.00" → 1500
@@ -87,7 +89,7 @@ eq('three-segments',    _parseAmount('1,2.3.4'), 12.3); // commas gone → "12.3
 eq('numeric-int',       _parseAmount(1234), 1234);
 eq('numeric-float',     _parseAmount(1234.5), 1234.5);
 eq('numeric-zero',      _parseAmount(0), 0);          // 0 is falsy → (0||'') → '' → 0
-eq('numeric-negative',  _parseAmount(-99), 99);       // '-99' → minus stripped → 99
+eq('numeric-negative',  _parseAmount(-99), -99);      // '-99' → leading minus preserved → -99
 eq('numeric-NaN',       _parseAmount(NaN), 0);        // NaN falsy → '' → 0
 
 // ── Boolean / falsy passthrough (defensive, current behavior) ─────────────

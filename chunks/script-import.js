@@ -510,7 +510,11 @@ const buildReverseMapping = () => {
 
 const normalisePhone = (raw) => (raw || '').toString().replace(/[-\s()]/g, '').replace(/^\+60/, '0');
 
-const _parseAmount = (raw) => { const n = parseFloat((raw || '').toString().replace(/[^0-9.]/g, '')); return Number.isFinite(n) ? n : 0; };
+// A LEADING minus (after optional currency/space, e.g. "-50" / "-RM 1,200") is
+// preserved so refunds/credit adjustments import as negative; previously the
+// minus was stripped by the [^0-9.] filter, silently flipping them to positive.
+// A non-leading '-' (e.g. "1-2") is still ignored. Magnitude logic unchanged.
+const _parseAmount = (raw) => { const s = (raw || '').toString(); const n = parseFloat(s.replace(/[^0-9.]/g, '')); if (!Number.isFinite(n)) return 0; return /^[^\d]*-/.test(s) ? -n : n; };
 
 const mapRowToRecord = (row, reverseMap, agentId, importType = 'prospects') => {
     const get = (field) => {
