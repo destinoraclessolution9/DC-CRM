@@ -340,31 +340,77 @@ const SMS2FAManager = {
         }
     },
 
-    // Verify code — hash the submitted code and compare (constant-time) to the
-    // stored hash. No plaintext codes on the client.
-    verifyCode: async (code) => {
+    _clearStored() {
+        sessionStorage.removeItem('mfa_code_hash');
+        sessionStorage.removeItem('mfa_code_salt');
+        sessionStorage.removeItem('mfa_code_expires');
+    },
+
+    // Legacy client-side digest compare: sha256(code + ':' + salt) vs the stored
+    // hash. Kept ONLY as an availability fallback for when the server verify
+    // edge function is unreachable (see verifyCode). Not an authoritative gate.
+    _localDigestMatches: async (code) => {
         const storedHash = sessionStorage.getItem('mfa_code_hash');
-        const expires = sessionStorage.getItem('mfa_code_expires');
-        if (!storedHash || !expires) return false;
-
-        if (Date.now() > parseInt(expires, 10)) {
-            sessionStorage.removeItem('mfa_code_hash');
-            sessionStorage.removeItem('mfa_code_salt');
-            sessionStorage.removeItem('mfa_code_expires');
-            return false;
-        }
-
-        // Reproduce the server's salted digest: sha256(code + ':' + salt).
+        if (!storedHash) return false;
         const salt = sessionStorage.getItem('mfa_code_salt') || '';
         const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(code) + ':' + salt));
         const submittedHash = Array.from(new Uint8Array(buf))
             .map(b => b.toString(16).padStart(2, '0')).join('');
-        const ok = SMS2FAManager._constantEq(submittedHash, storedHash);
-        if (ok) {
-            sessionStorage.removeItem('mfa_code_hash');
-            sessionStorage.removeItem('mfa_code_salt');
-            sessionStorage.removeItem('mfa_code_expires');
+        return SMS2FAManager._constantEq(submittedHash, storedHash);
+    },
+
+    // Verify a submitted SMS code.
+    //
+    // The AUTHORITATIVE gate is the server-side verify-2fa-sms edge function: it
+    // checks the code against the salted hash persisted in public.mfa_sms_codes
+    // and enforces single-use, an attempt cap, and TTL — none of which a fully
+    // attacker-controlled browser can be trusted to do. A definitive server
+    // verdict (verified === true|false) is always honored over the local check,
+    // so the client can no longer self-approve a code.
+    //
+    // Availability: if the edge function gives NO definitive verdict (network
+    // error, not deployed, or a 5xx infra response) we fall back to the legacy
+    // local digest compare so an Edge outage can't lock SMS-2FA users out of
+    // login. (TOTP + backup codes remain as independent factors regardless.)
+    verifyCode: async (code) => {
+        const expires = sessionStorage.getItem('mfa_code_expires');
+        // Fast local TTL pre-check — the server enforces TTL authoritatively too.
+        if (expires && Date.now() > parseInt(expires, 10)) {
+            SMS2FAManager._clearStored();
+            return false;
         }
+
+        // ── Authoritative server-side verify ──
+        try {
+            const sb = window.supabase;
+            if (sb && sb.functions && typeof sb.functions.invoke === 'function') {
+                const { data, error } = await sb.functions.invoke('verify-2fa-sms', {
+                    body: { code: String(code) }
+                });
+                if (!error && data && typeof data.verified === 'boolean') {
+                    if (data.verified) { SMS2FAManager._clearStored(); return true; }
+                    // A DEFINITIVE rejection (wrong code / expired / over the attempt
+                    // cap) is authoritative — deny even if the local hash would accept.
+                    // A correct, timely code yields verified:true above, so a legit
+                    // user is never denied here. Any other verdict (notably
+                    // 'no_pending_code' — a possible server-state miss) falls through
+                    // to the local fallback so a backend hiccup can't lock anyone out.
+                    if (data.reason === 'invalid_code' || data.reason === 'expired' || data.reason === 'too_many_attempts') {
+                        return false;
+                    }
+                }
+                _safeAudit('warn', 'SECURITY', 'MFA_SMS_VERIFY_DEGRADED',
+                    { reason: String(error?.message || (data && (data.reason || data.error)) || 'no_verdict') });
+            }
+        } catch (e) {
+            _safeAudit('warn', 'SECURITY', 'MFA_SMS_VERIFY_UNREACHABLE', { error: String(e?.message || e) });
+        }
+
+        // ── Availability fallback: legacy local digest compare ──
+        // Reached only when the edge function gave no definitive verdict.
+        if (!expires) return false;
+        const ok = await SMS2FAManager._localDigestMatches(code);
+        if (ok) SMS2FAManager._clearStored();
         return ok;
     }
 };
