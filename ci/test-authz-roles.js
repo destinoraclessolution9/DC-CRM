@@ -109,7 +109,8 @@ eq('agent-not-L13',     R.isAgent(u('Level 13 X')), false);
 
 eq('mgmt-L1',           R.isManagement(u('Level 1 X')), true);
 eq('mgmt-L3',           R.isManagement(u('Level 3 X')), true);
-eq('mgmt-not-L4',       R.isManagement(u('Level 4 X')), false);
+eq('mgmt-L4',           R.isManagement(u('Level 4 X')), true);   // owner-confirmed 2026-06-19: L4 Manager is management
+eq('mgmt-not-L5',       R.isManagement(u('Level 5 X')), false);  // Team Leader (L5) is NOT management (isTeamLeaderOrAbove only)
 
 eq('tl-L5',             R.isTeamLeaderOrAbove(u('Level 5 X')), true);
 eq('tl-not-L6',         R.isTeamLeaderOrAbove(u('Level 6 X')), false);

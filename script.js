@@ -590,7 +590,10 @@ const appLogic = (() => {
         return lvl >= 3 && lvl <= 12;
     };
     Object.assign(window._crmUtils, { isAgent });
-    const isManagement = (user) => _getUserLevel(user) <= 3;
+    // Management = Level 1-4 (Super Admin, Marketing Manager, Senior Manager, Manager).
+    // L4 "Manager" included per the role-system spec (owner-confirmed 2026-06-19);
+    // Team Leaders are L5 and covered by isTeamLeaderOrAbove, not isManagement.
+    const isManagement = (user) => _getUserLevel(user) <= 4;
     Object.assign(window._crmUtils, { isManagement });
     // Team Leader and above = Level 1-5 (Super Admin, Marketing Manager, Senior Manager, Manager, Team Leader)
     const isTeamLeaderOrAbove = (user) => _getUserLevel(user) <= 5;
