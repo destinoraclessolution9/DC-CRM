@@ -247,10 +247,19 @@ async function rewriteHtml(manifest) {
   // Inject / replace asset manifest inline script immediately before </head>.
   // The script-features dynamic loader uses window.__ASSET_MANIFEST['script-features.min.js']
   // to get the hashed name — eliminates the last remaining ?v= fallback.
-  const manifestScript = `<script>window.__ASSET_MANIFEST=${JSON.stringify(manifest)};</script>`;
+  //
+  // The same inline script also seeds the env-gated observability globals read
+  // by obs-init.js: window.__SENTRY_DSN (empty string ⇒ Sentry stays a no-op)
+  // and window.__APP_RELEASE (the deploy commit SHA, for release tagging).
+  // Both are JSON.stringify'd so an empty value renders as a valid `""` literal.
+  const sentryDsn = process.env.SENTRY_DSN || '';
+  const appRelease = process.env.VERCEL_GIT_COMMIT_SHA || '';
+  const manifestScript = `<script>window.__ASSET_MANIFEST=${JSON.stringify(manifest)};window.__SENTRY_DSN=${JSON.stringify(sentryDsn)};window.__APP_RELEASE=${JSON.stringify(appRelease)};</script>`;
   // Replace existing manifest injection if present, or insert before </head>.
+  // The regex spans the whole injected block (manifest + observability globals)
+  // so re-runs stay idempotent regardless of which globals were present before.
   if (html.includes('window.__ASSET_MANIFEST=')) {
-    html = html.replace(/<script>window\.__ASSET_MANIFEST=[^<]+<\/script>/, manifestScript);
+    html = html.replace(/<script>window\.__ASSET_MANIFEST=[^<]*?<\/script>/, manifestScript);
   } else {
     html = html.replace('</head>', `${manifestScript}\n</head>`);
   }

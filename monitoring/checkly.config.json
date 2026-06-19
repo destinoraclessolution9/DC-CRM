@@ -1,0 +1,132 @@
+{
+  "_note": "REFERENCE SPEC, NOT a runnable config. Checkly's real config is JS/TS (checkly.config.ts) and Better Stack uses its own dashboard/Terraform. This is a plain-JSON description of the two synthetic checks the owner should create, written so it can be hand-translated into either tool (or imported by a small script). Nothing here is auto-loaded by the CRM or CI. The dependency-free GitHub Actions workflow at .github/workflows/uptime.yml already gives baseline 10-min uptime alerting for free; adopt this spec when you want multi-region probing + a public status page.",
+
+  "_provider_hint": "Recommended: Checkly (API checks + status pages) or Better Stack (Uptime + status page). Both support: scheduled API checks, multi-region, response-status assertions, and a hosted status page.",
+
+  "project": {
+    "name": "DestinOraclesSolution CRM",
+    "logicalId": "destinoracles-crm-monitoring",
+    "_comment": "logicalId is Checkly's stable identifier for the project; keep it constant across edits so checks update in place instead of duplicating."
+  },
+
+  "defaults": {
+    "frequencyMinutes": 5,
+    "_comment_frequency": "Probe every 5 minutes. GitHub Actions cron can drift / coalesce under load; a dedicated monitoring vendor gives tighter, more reliable scheduling.",
+    "locations": ["us-east-1", "eu-west-1", "ap-southeast-1"],
+    "_comment_locations": "Multi-region so a single-region network blip does not page you. ap-southeast-1 (Singapore) is closest to the Malaysia user base and is the most representative of real latency; us-east-1 + eu-west-1 catch global edge issues. A real outage shows red from ALL regions.",
+    "alertChannelIds": ["primary-ops-channel"]
+  },
+
+  "checks": [
+    {
+      "_comment": "Check 1 — homepage availability. Plain GET, expect 200.",
+      "name": "CRM homepage 200",
+      "logicalId": "crm-homepage-200",
+      "checkType": "API",
+      "frequencyMinutes": 5,
+      "locations": ["us-east-1", "eu-west-1", "ap-southeast-1"],
+      "request": {
+        "method": "GET",
+        "url": "https://destinoraclessolution.com",
+        "followRedirects": true,
+        "headers": [
+          { "key": "User-Agent", "value": "crm-uptime-probe/1.0 (+checkly)" }
+        ]
+      },
+      "assertions": [
+        {
+          "source": "STATUS_CODE",
+          "comparison": "EQUALS",
+          "target": "200",
+          "_comment": "Fail the check if the homepage is anything other than 200."
+        }
+      ],
+      "degradedResponseTimeMs": 3000,
+      "maxResponseTimeMs": 10000
+    },
+
+    {
+      "_comment": "Check 2 — Supabase auth health probe. POST a dummy login; the GoTrue endpoint rejects bad creds with HTTP 400 BEFORE checking the password, so 400 = backend UP. A 521 (dead Cloudflare origin) or any 5xx = backend DOWN. This is the same semantics as .github/workflows/uptime.yml.",
+      "name": "Supabase auth up (expects 400)",
+      "logicalId": "crm-supabase-auth-400",
+      "checkType": "API",
+      "frequencyMinutes": 5,
+      "locations": ["us-east-1", "eu-west-1", "ap-southeast-1"],
+      "request": {
+        "method": "POST",
+        "url": "https://remuwhxvzkzjtgbzqjaa.supabase.co/auth/v1/token?grant_type=password",
+        "followRedirects": false,
+        "headers": [
+          {
+            "key": "apikey",
+            "value": "sb_publishable_XVWyiw5j1lnEErQUTV4XWg_lQcCIAjX",
+            "_comment": "Public publishable key — already shipped in the browser bundle, safe to commit. Do NOT put a service/secret key here."
+          },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": "{\"email\":\"probe@uptime.invalid\",\"password\":\"x\"}",
+        "bodyType": "JSON"
+      },
+      "assertions": [
+        {
+          "source": "STATUS_CODE",
+          "comparison": "EQUALS",
+          "target": "400",
+          "_comment": "400 = healthy (dummy creds correctly rejected by a live backend). 521/5xx = DOWN → this assertion fails and pages you. Note: 401/403/429 also fail this strict EQUALS — in a vendor, add a 'tolerate' rule or a second soft assertion to treat those as warn-not-page (throttling), matching the workflow's warn-but-pass branch."
+        }
+      ],
+      "degradedResponseTimeMs": 3000,
+      "maxResponseTimeMs": 10000
+    }
+  ],
+
+  "alertChannels": [
+    {
+      "_comment": "PLACEHOLDER — replace with your real channel before importing. Checkly/Better Stack support Slack, email, PagerDuty, Opsgenie, SMS, and generic webhooks. Reuse the same OPS_SLACK_WEBHOOK URL as the GitHub Actions workflow so all monitoring fans into one ops channel.",
+      "id": "primary-ops-channel",
+      "type": "WEBHOOK",
+      "config": {
+        "name": "Ops alerts",
+        "url": "https://REPLACE_WITH_YOUR_SLACK_OR_OPS_WEBHOOK",
+        "method": "POST",
+        "template": "{\"text\":\"🔴 CRM monitor {{ALERT_TYPE}} — {{CHECK_NAME}} in {{RUN_LOCATION}} — {{RESPONSE_TIME}}ms / status {{RESPONSE_STATUS}} — {{RESULT_LINK}}\"}"
+      },
+      "sendOn": {
+        "failure": true,
+        "recovery": true,
+        "degraded": true,
+        "_comment": "Page on failure AND recovery so the on-call knows when it clears; degraded = slow-but-up early warning."
+      },
+      "escalation": {
+        "runBasedEscalation": { "failedRunThreshold": 1 },
+        "_comment": "Page after a single failed run across regions. Raise to 2 if you see flapping from a noisy region."
+      }
+    }
+  ],
+
+  "statusPage": {
+    "_comment": "PLACEHOLDER — a public status page so customers/staff can self-check during an incident instead of emailing support. Checkly Status Pages + Better Stack both host this for free on a *.checkly-status.com / *.betteruptime.com subdomain, or map your own (e.g. status.destinoraclessolution.com via CNAME).",
+    "name": "DestinOraclesSolution CRM Status",
+    "url": "https://status.destinoraclessolution.com",
+    "_url_comment": "Map this CNAME to the vendor's status-page host once created.",
+    "cards": [
+      {
+        "name": "Web app",
+        "checkLogicalIds": ["crm-homepage-200"]
+      },
+      {
+        "name": "Login / Database (Supabase)",
+        "checkLogicalIds": ["crm-supabase-auth-400"]
+      }
+    ],
+    "theme": "AUTO"
+  },
+
+  "_adoption_steps": [
+    "1. Pick a vendor (Checkly free tier covers this comfortably; Better Stack also fine).",
+    "2. Recreate the two checks above (homepage 200; auth probe expecting 400) at 5-min frequency in us-east-1 + eu-west-1 + ap-southeast-1.",
+    "3. Wire the alert channel to your real Slack/PagerDuty webhook (reuse OPS_SLACK_WEBHOOK).",
+    "4. Publish the status page and CNAME status.destinoraclessolution.com to it.",
+    "5. Optional: once the vendor probe is trusted, you can drop the schedule in .github/workflows/uptime.yml to manual/dispatch-only to avoid duplicate alerts — or keep both as belt-and-suspenders."
+  ]
+}

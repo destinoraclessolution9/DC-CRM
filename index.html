@@ -123,6 +123,9 @@
     <!-- SW cleanup v2 + registration extracted to sw-init.js (#15).
          Full history comment preserved in sw-init.js. -->
     <script defer src="sw-init.js"></script>
+    <!-- Env-gated front-end error tracking (Sentry) — complete no-op unless
+         the owner sets the Vercel env var SENTRY_DSN. See obs-init.js. -->
+    <script defer src="/obs-init.js"></script>
 
     <!-- Skeleton CSS inlined so the shimmer paints on first frame, even
          before styles-fixed.css arrives. FB/IG philosophy: the user must

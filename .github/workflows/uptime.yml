@@ -1,0 +1,118 @@
+# Uptime probe — black-box availability check for the live CRM.
+#
+# Runs every 10 minutes against PRODUCTION (no preview, no deploy gating).
+# Pure curl/bash, zero npm install, no third-party monitoring account needed —
+# GitHub Actions IS the scheduler and the alarm. If you later wire a Slack
+# webhook into the OPS_SLACK_WEBHOOK repo secret, failures page you there too;
+# without it, a failed run is still visible as a red check + workflow-run alert.
+#
+# Two independent checks:
+#   A) Homepage   — GET https://destinoraclessolution.com must return HTTP 200.
+#   B) Auth probe — POST {SUPABASE_URL}/auth/v1/token?grant_type=password with a
+#      throwaway credential. The GoTrue auth endpoint answers BEFORE it ever
+#      checks the password, so a reachable/healthy backend rejects the dummy
+#      login with HTTP 400 ("invalid_grant" / bad creds). That 400 is the
+#      SUCCESS signal here — it proves the API, DB, and auth service are all up.
+#
+#   Auth-probe status-code semantics:
+#     400          → UP / healthy   (expected rejection of dummy creds) → PASS
+#     521 or 5xx   → DOWN           (Cloudflare 521 = Supabase origin dead,
+#                                    or any 500-class = backend broken)   → FAIL
+#     401/403/429  → WARN-but-PASS  (throttling / rate-limit / transient
+#                                    auth gating — not an outage)         → PASS
+#     anything else→ treat as unexpected → FAIL (so we never silently miss)
+#
+# IMPORTANT: this workflow is OBSERVE-ONLY. It never touches the deployment and
+# cannot break the live site — it only reads public endpoints and reports.
+
+name: Uptime probe
+
+on:
+  schedule:
+    # Every 10 minutes. UTC cron (GitHub schedules are always UTC).
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  probe:
+    name: Probe homepage + Supabase auth
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      # ── Check A: homepage must answer 200 ──────────────────────────────────
+      - name: Homepage returns 200
+        run: |
+          set -euo pipefail
+          URL="https://destinoraclessolution.com"
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+                   --max-time 30 \
+                   -A "crm-uptime-probe/1.0 (+github-actions)" \
+                   "$URL" || echo "000")
+          echo "Homepage GET $URL → HTTP $CODE"
+          if [ "$CODE" != "200" ]; then
+            echo "::error::Homepage check FAILED — expected 200, got $CODE"
+            exit 1
+          fi
+          echo "Homepage OK (200)"
+
+      # ── Check B: Supabase auth probe — 400 means UP ────────────────────────
+      - name: Supabase auth probe (400 = up, 521/5xx = down)
+        run: |
+          set -euo pipefail
+          SUPABASE_URL="https://remuwhxvzkzjtgbzqjaa.supabase.co"
+          # Public publishable key — already shipped in the browser bundle, safe in plaintext.
+          APIKEY="sb_publishable_XVWyiw5j1lnEErQUTV4XWg_lQcCIAjX"
+          ENDPOINT="$SUPABASE_URL/auth/v1/token?grant_type=password"
+
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+                   --max-time 30 \
+                   -X POST "$ENDPOINT" \
+                   -H "apikey: $APIKEY" \
+                   -H "Content-Type: application/json" \
+                   -d '{"email":"probe@uptime.invalid","password":"x"}' || echo "000")
+
+          echo "Auth POST $ENDPOINT → HTTP $CODE"
+
+          case "$CODE" in
+            400)
+              echo "Auth backend UP — dummy creds rejected with 400 as expected."
+              ;;
+            401|403|429)
+              echo "::warning::Auth probe returned $CODE (throttle/rate-limit/auth-gate) — NOT treating as an outage. Passing."
+              ;;
+            521|5[0-9][0-9])
+              echo "::error::Auth probe FAILED — HTTP $CODE indicates Supabase backend is DOWN (521 = dead origin / 5xx = broken)."
+              exit 1
+              ;;
+            *)
+              echo "::error::Auth probe returned UNEXPECTED HTTP $CODE — treating as failure so we never silently miss an outage."
+              exit 1
+              ;;
+          esac
+
+      # ── Alerting on failure ────────────────────────────────────────────────
+      # If a Slack/ops webhook secret is configured, POST a one-line alert.
+      # The `secrets.OPS_SLACK_WEBHOOK != ''` guard means this step is simply
+      # skipped (not errored) when the secret is absent — see the echo step below.
+      - name: Notify Slack on failure
+        if: ${{ failure() && secrets.OPS_SLACK_WEBHOOK != '' }}
+        env:
+          OPS_SLACK_WEBHOOK: ${{ secrets.OPS_SLACK_WEBHOOK }}
+        run: |
+          set -euo pipefail
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          curl -s -X POST "$OPS_SLACK_WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d "{\"text\":\"🔴 CRM uptime probe FAILED — homepage or Supabase auth check — run ${RUN_URL}\"}" \
+            || echo "::warning::Slack notify call itself failed (webhook unreachable?) — failure is still visible in the Actions UI."
+
+      # Always-runs-on-failure plain echo so an unconfigured webhook is a no-op,
+      # never an error. The job's red status + the GitHub Actions failure
+      # notification remain the baseline alarm even with no Slack secret set.
+      - name: Echo failure (no external alerting required)
+        if: failure()
+        run: |
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          echo "::error::CRM uptime probe FAILED. See run: ${RUN_URL}"
+          echo "If you want Slack alerts, set the OPS_SLACK_WEBHOOK repo secret to an incoming-webhook URL."

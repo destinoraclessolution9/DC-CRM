@@ -28,7 +28,24 @@ const LIST_COLUMNS = 'id,full_name,nickname,phone,email,ming_gua,responsible_age
 export default async function handler(req, res) {
   res.setHeader('content-type', 'application/json');
   res.setHeader('cache-control', 'no-store');
-  const send = (status, body) => { res.statusCode = status; res.end(JSON.stringify(body)); };
+  // Observability only — single-line JSON log per terminal return (Vercel Log
+  // Drain ingest/alerting). Wraps send() so it logs once, centrally, classifying
+  // level by status; the returned value is byte-identical to before.
+  const _t0 = Date.now();
+  const _reqId = String((req.headers && req.headers['x-vercel-id']) || '') || undefined;
+  const send = (status, body) => {
+    const level = status >= 500 ? 'error' : (status >= 400 ? 'warn' : 'info');
+    const event = (body && body.error) || 'ok';
+    logEvent(level, event, {
+      status,
+      ms: Date.now() - _t0,
+      ...(_reqId ? { reqId: _reqId } : {}),
+      ...(body && typeof body.status === 'number' ? { upstream: body.status } : {}),
+      ...(body && Array.isArray(body.rows) ? { rows: body.rows.length } : {}),
+      ...(body && typeof body.count === 'number' ? { count: body.count } : {}),
+    });
+    res.statusCode = status; res.end(JSON.stringify(body));
+  };
 
   if (req.method !== 'GET') return send(405, { error: 'method_not_allowed' });
   if (!SECRET) return send(503, { error: 'not_configured', detail: 'SUPABASE_SECRET_KEY env var is not set on this deployment' });
@@ -142,4 +159,12 @@ function clampInt(v, dflt, min, max) {
   const n = Number.parseInt(String(v ?? ''), 10);
   if (!Number.isFinite(n)) return dflt;
   return Math.min(max, Math.max(min, n));
+}
+// Structured single-line JSON log for a Vercel Log Drain to ingest + alert on.
+// Pure observability — never throws into the request path (best-effort, swallowed).
+function logEvent(level, event, fields) {
+  try {
+    const rec = { t: new Date().toISOString(), lvl: level, ev: event, fn: 'customers', ...fields };
+    (level === 'error' ? console.error : console.log)(JSON.stringify(rec));
+  } catch {}
 }
