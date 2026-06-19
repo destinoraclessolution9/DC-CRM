@@ -53,15 +53,17 @@ window.app.register = function (domain, methods) {
                 try { window._markOptimisticRetrying(); } catch (_) { /* intentional: optional UI overlay hook; drain proceeds without it */ }
             }
             // getAll triggers _autoSync which upserts queued records.
+            const _failedTables = [];
             for (const t of tables) {
-                try { await window.AppDataStore.getAll(t); } catch (_) { /* intentional: per-table drain is best-effort; failed rows stay queued with ⚠ */ }
+                try { await window.AppDataStore.getAll(t); } catch (_) { _failedTables.push(t); /* failed rows stay queued with ⚠ */ }
             }
-            // After drain, refresh the calendar — pending rows have either synced
-            // (and will appear in the real fetch) or remain failed (overlay shows ⚠).
-            if (window.app && typeof window.app.renderCalendar === 'function') {
-                // Not actually exposed by name — rely on Phase B's coalesced renderCalendar via UI hook if any.
+            // Surface partial-drain failures distinctly instead of always logging
+            // success (the old dead renderCalendar branch was removed — it was a no-op).
+            if (_failedTables.length) {
+                console.warn('[Perf] online drain: ' + _failedTables.length + ' table(s) failed to sync, still queued:', _failedTables);
+            } else {
+                console.info('[Perf] online drain finished for', tables.length, 'tables');
             }
-            console.info('[Perf] online drain finished for', tables.length, 'tables');
         } catch (e) { console.warn('[Perf] online drain failed:', e); }
     };
     window.addEventListener('online', drain);
@@ -239,12 +241,15 @@ window._ensureQrScanner = () => typeof Html5Qrcode !== 'undefined'
 // Patch to prevent the "undefined .call" error and map missing .create to .add
 if (window.AppDataStore && !window.AppDataStore._patched) {
     const originalCreate = window.AppDataStore.create || window.AppDataStore.add;
-    window.AppDataStore.create = function(...args) {
+    window.AppDataStore.create = async function(...args) {
         try {
             if (!originalCreate) throw new Error("Method doesn't exist!");
-            return originalCreate.apply(this, args);
+            // await so a REJECTED promise (the common async Supabase-write failure)
+            // is caught here — `return originalCreate(...)` returned the promise
+            // immediately, so the catch only ever saw synchronous throws.
+            return await originalCreate.apply(this, args);
         } catch (e) {
-            if (e.message && e.message.includes("reading 'call'")) {
+            if (e && e.message && e.message.includes("reading 'call'")) {
                 console.error("Missing function in create. Available keys:", Object.keys(this));
             }
             throw e;
@@ -307,7 +312,9 @@ if (window.SENTRY_DSN) {
     (function loadSentry() {
         const s = document.createElement('script');
         s.src = 'https://browser.sentry-cdn.com/7.112.2/bundle.tracing.min.js';
-        s.integrity = 'sha384-unset'; // set a real SRI hash if you pin a version
+        // No integrity attribute: a non-empty but invalid SRI hash ('sha384-unset')
+        // makes the browser REJECT the script, so setting a DSN to enable error
+        // reporting silently disabled it. Pin a real sha384 here if locking the version.
         s.crossOrigin = 'anonymous';
         s.onload = () => {
             try {
@@ -1041,6 +1048,10 @@ const appLogic = (() => {
             return visibleSet.has(String(activity.lead_agent_id));
         };
     };
+    // Exposed for the prospects chunk's activities-export visibility scoping —
+    // chunks run in a separate IIFE and can only see window.* globals. Without
+    // this, _getAllActivitiesForExport() threw ReferenceError for non-admins.
+    Object.assign(window._crmUtils, { buildActivityVisibilityChecker });
 
     const getVisibleActivities = async () => {
         const user = _currentUser;
@@ -1700,6 +1711,41 @@ const Auth = {
             }
         } catch (_) { /* intentional: best-effort cache wipe on logout */ }
         try { if (window.caches) caches.delete('crm-data-v1'); } catch (_) { /* intentional: best-effort Cache Storage wipe */ }
+        // The data.js overflow tier (crm-data-v1) above is NOT the only PII cache:
+        // (1) the in-memory AppDataStore._cache/_primedRows survive on a shared
+        // device because logout does not reload the page, and (2) the service
+        // worker caches /api/customers & /api/prospects (BFF PII) into its
+        // "<CACHE_VERSION>-runtime" Cache Storage bucket. Purge both so user A's
+        // customer/prospect data can't bleed into user B's session.
+        try { if (window.AppDataStore && typeof AppDataStore.clearCache === 'function') AppDataStore.clearCache(); } catch (_) { /* intentional: best-effort in-memory cache wipe */ }
+        try {
+            if (window.caches && caches.keys) {
+                caches.keys().then(keys => keys.forEach(n => { if (/-runtime$/.test(n)) caches.delete(n); })).catch(() => {});
+            }
+        } catch (_) { /* intentional: best-effort SW runtime-cache wipe */ }
+        try { localStorage.removeItem('crm_last_uid'); } catch (_) { /* intentional: clear identity marker so next login re-baselines */ }
+    }
+
+    // Shared-device defense-in-depth: if the just-authenticated identity DIFFERS
+    // from the one whose cached snapshots are on disk/in memory, fully purge ALL
+    // caches (not just the historic 4-table login allowlist) so the previous
+    // user's activities/purchases/cases/etc. can't be served to the new user.
+    // Same uid → keep the warm offline snapshots. Pairs with reload-on-logout.
+    function _resetCachesIfIdentityChanged(uid) {
+        const cur = uid == null ? '' : String(uid);
+        let prior = null;
+        try { prior = localStorage.getItem('crm_last_uid'); } catch (_) { /* noop */ }
+        if (prior !== null && prior !== cur) {
+            try {
+                for (let i = localStorage.length - 1; i >= 0; i--) {
+                    const k = localStorage.key(i);
+                    if (k && k.startsWith('fs_crm_')) localStorage.removeItem(k);
+                }
+            } catch (_) { /* best-effort cross-user snapshot purge */ }
+            try { if (window.AppDataStore && typeof AppDataStore.clearCache === 'function') AppDataStore.clearCache(); } catch (_) { /* best-effort */ }
+            try { _visibleUserIdsCache.clear(); } catch (_) { /* best-effort */ }
+        }
+        try { localStorage.setItem('crm_last_uid', cur); } catch (_) { /* best-effort identity marker */ }
     }
 
     async function logout() {
@@ -1714,6 +1760,13 @@ const Auth = {
         UI.toast.info('Logged out successfully');
         // Re-wire loginBtn after logout in case DOM re-rendered
         _wireLoginBtn();
+        // Full reload after the toast paints: the 33 lazy chunks hold per-user
+        // module-level state (tree nav stacks, selection maps, campaign drafts,
+        // search history) that _wipeCachedData() can't reach. Reloading guarantees
+        // none of the previous user's in-memory data survives into the next login
+        // on a shared device. (Single-client reload — NOT a CACHE_VERSION storm.)
+        try { window._sessionTimeoutArmed = false; } catch (_) { /* noop */ }
+        setTimeout(() => { try { location.reload(); } catch (_) { /* reload best-effort */ } }, 600);
     }
 
     // Switch account: same as logout but also clears the remembered email and
@@ -1739,6 +1792,10 @@ const Auth = {
         UI.toast.info('Signed out — please log in with your own account.');
         _wireLoginBtn();
         emailField?.focus();
+        // Reload so no chunk module-level state from the prior account survives
+        // into the next login on a shared device (see logout() for rationale).
+        try { window._sessionTimeoutArmed = false; } catch (_) { /* noop */ }
+        setTimeout(() => { try { location.reload(); } catch (_) { /* reload best-effort */ } }, 600);
     }
 
 // Native MFA (Supabase auth.mfa / AAL2) login gate. Returns true if login may
@@ -2104,6 +2161,10 @@ function _wireLoginBtn() {
             }
 
             _currentUser = profile;
+            // Cross-user purge: if a DIFFERENT account than the one whose cached
+            // snapshots are present just logged in (shared device), wipe every
+            // table cache — not just the 4-table allowlist below — before any read.
+            _resetCachesIfIdentityChanged(profile.id);
             // Flush stale SWR snapshots on every login so the user always
             // sees fresh prospect/customer data rather than a cached view
             // from a previous session that may pre-date admin reassignments.
@@ -2136,6 +2197,9 @@ function _wireLoginBtn() {
             updateUserDisplay();
             updateNavVisibility();
             UI.toast.success(`Welcome ${profile.full_name}!`);
+            // Arm the web inactivity auto-logout now that _currentUser is set
+            // (initSecurity ran pre-auth during boot and bailed on the cu guard).
+            try { (window.app.initSessionTimeout || (() => {}))(); } catch (_) { /* best-effort timer arm */ }
 
             // Auto-subscribe to push notifications for PWA / homescreen users
             // _autoSubscribePush lives in the activities lazy chunk — call via window.app
@@ -2275,7 +2339,10 @@ function _wireLoginBtn() {
             } else if (_isQuotaErr(err)) {
                 // Last-ditch: cache wipe didn't fix it. Drop EVERYTHING in
                 // localStorage and reload — the user is locked out otherwise.
-                btn.textContent = 'Clearing storage…';
+                // Set the label via the <span> — assigning btn.textContent would
+                // destroy the <span>/<i> children, then the finally{} below would
+                // null-deref btn.querySelector('span').
+                { const _qsp = btn.querySelector('span'); if (_qsp) { _qsp.textContent = 'Clearing storage…'; } else { btn.textContent = 'Clearing storage…'; } }
                 try { localStorage.clear(); } catch (_) { /* intentional: best-effort wipe; reload follows regardless */ }
                 setTimeout(() => window.location.reload(true), 600);
             } else {
@@ -2297,7 +2364,7 @@ function _wireLoginBtn() {
         } finally {
             clearTimeout(_slowHint);
             btn.disabled = false;
-            btn.querySelector('span').textContent = 'LOGIN';
+            const _fsp = btn.querySelector('span'); if (_fsp) _fsp.textContent = 'LOGIN';
         }
     };
 
@@ -2465,6 +2532,9 @@ function _wireLoginBtn() {
                 }
                 if (profile) {
                     _currentUser = profile;
+                    // Cross-user purge on restore: if the restored identity differs
+                    // from the snapshots on disk (shared device), wipe all caches.
+                    _resetCachesIfIdentityChanged(profile.id);
                     // Ensure the inactivity-timer guard is always set for restored sessions,
                     // even if localStorage was partially cleared between visits.
                     try { localStorage.setItem('remember_me', '1'); } catch (_) { /* intentional: best-effort guard flag; session restore proceeds */ }
@@ -2606,9 +2676,13 @@ function _wireLoginBtn() {
             'workflows','marketing_lists',
         ]);
         const _rawHash = (location.hash || '').replace(/^#/, '').trim().toLowerCase();
-        const _hashView = (_rawHash && _KNOWN_VIEWS.has(_rawHash)) ? _rawHash : null;
-        // Mobile users land on the AI Home dashboard; desktop on calendar.
-        const _defaultView = _initLevel >= 13 ? 'fude' : (isMobile() ? 'home' : 'calendar');
+        // Validate the bookmarked hash against the user's ACTUAL view permissions
+        // (not just membership in _KNOWN_VIEWS) so a deep-link to an admin/PII view
+        // can't bypass authorization. Disallowed/absent hash → the role's default.
+        const _hashView = (_rawHash && _KNOWN_VIEWS.has(_rawHash) && _isViewAllowed(_rawHash, _initLevel)) ? _rawHash : null;
+        // Mobile users land on the AI Home dashboard; desktop on calendar. L12-14
+        // → fude, L15 → stock_take (each guaranteed allowed → never a bounce loop).
+        const _defaultView = _defaultViewFor(_currentUser);
         const _initialView = (_initLevel < 13 && _hashView) ? _hashView : _defaultView;
         await navigateTo(_initialView);
 
@@ -2757,6 +2831,11 @@ function _wireLoginBtn() {
         // Wire notification bell
         (window.app._initNotifBell || (() => {}))();
 
+        // Arm the web inactivity auto-logout for restored sessions (initSecurity
+        // ran pre-auth during boot and bailed on the no-user guard; _currentUser
+        // exists now). Idempotent — safe alongside the login-path arm.
+        try { (window.app.initSessionTimeout || (() => {}))(); } catch (_) { /* best-effort timer arm */ }
+
         // Session inactivity timeout is owned by initSessionTimeout() (the canonical,
         // configurable [UserPreferences session_timeout, default 30 min], throttled,
         // audit-logged implementation, web-only). The cruder 60-min duplicate that
@@ -2825,8 +2904,11 @@ function _wireLoginBtn() {
             prospect_id: prospectId,
             relation: document.getElementById('name-relation')?.value || 'Other',
             full_name: name,
-            date_of_birth: document.getElementById('name-dob')?.value,
-            notes: document.getElementById('name-notes')?.value
+            // Empty <input type="date"> yields '' which Postgres rejects for a date
+            // column ("invalid input syntax for type date"); coalesce to null like
+            // every other optional-date save path in this codebase.
+            date_of_birth: document.getElementById('name-dob')?.value || null,
+            notes: document.getElementById('name-notes')?.value || null
         };
 
         try {
@@ -2975,7 +3057,10 @@ function _wireLoginBtn() {
     // [CHUNK: cps] ~1310 lines extracted to chunks/script-cps.js
     const _initNotifBell          = () => (window.app._initNotifBell          || (() => {}))();
     const getViewPhase            = (v) => (window.app.getViewPhase            || ((v)=>'?'))(v);
-    const openApproveCpsIntakeModal = async (id) => (window.app.openApproveCpsIntakeModal || (() => {}))(id);
+    // Self-reference guard (matches the auto-generated stubs below): the old
+    // `(window.app.X || (() => {}))(id)` form recursed because window.app.X IS
+    // this stub until the cps chunk's Object.assign overwrites it.
+    const openApproveCpsIntakeModal = async (...a) => { const _r = window.app.openApproveCpsIntakeModal; if (_r && _r !== openApproveCpsIntakeModal) return _r(...a); };
     const showBookingSettingsView  = async (vp) => (window.app.showBookingSettingsView   || (() => {}))(vp);
     // ===== LEAD FORMS + SURVEYS + CONTRACTS + CUSTOM FIELDS + PORTAL =====
     // [CHUNK: forms] ~1164 lines extracted to chunks/script-forms.js
@@ -3129,6 +3214,41 @@ function _wireLoginBtn() {
     };
 
     const _CHUNK_VIEWS = _deriveChunkViews();
+
+    // ── Authoritative per-view access control ────────────────────────────────
+    // Resolves a view's authorization contract from the VIEWS registry so that
+    // navigateTo can ENFORCE it (not merely hide the sidebar item). Role levels
+    // are lower-is-more-privileged (L1 = Super Admin). A view is allowed when:
+    //   • its exactLevels (chunk-load gate) include the level, AND
+    //   • its minLevel (if set) is satisfied (level <= minLevel), AND
+    //   • its navLevels include the level — UNLESS navLevels is _VIEW_NO_NAV
+    //     (null), which marks a programmatic/default-visible sub-view open to all
+    //     authenticated users (e.g. customers, search, journey, home).
+    // Unknown view ids pass through (their _VIEW_RENDER inline gate, if any,
+    // still applies). This closes the deep-link / URL-hash bypass where a view
+    // restricted in the registry was reachable just by typing its hash.
+    const _isViewAllowed = (viewId, lvl) => {
+        const v = VIEWS[viewId];
+        if (!v) return true;
+        if (v.exactLevels && !v.exactLevels.includes(lvl)) return false;
+        if (v.minLevel != null && !(lvl <= v.minLevel)) return false;
+        let nav = v.navLevels;
+        if (nav === _VIEW_NO_NAV) return true;
+        if (typeof nav === 'string' && nav.charAt(0) === '@') nav = VIEWS[nav.slice(1)]?.navLevels;
+        if (Array.isArray(nav) && !nav.includes(lvl)) return false;
+        return true;
+    };
+
+    // The view a given user should land on / be bounced to. Always returns a view
+    // that _isViewAllowed permits for that level, so a bounce can never loop:
+    //   L15 (stock-take staff) → stock_take; L12-L14 (ambassador/customer/referrer)
+    //   → fude; everyone else → home (mobile) / calendar (desktop).
+    const _defaultViewFor = (user) => {
+        const lvl = _getUserLevel(user);
+        if (lvl === 15) return 'stock_take';
+        if (lvl >= 12) return 'fude';
+        return isMobile() ? 'home' : 'calendar';
+    };
 
     // Declarative refresh map — the single source for refreshCurrentView (replaces
     // the parallel switch(_currentView)). Each entry re-renders its view in place
@@ -3391,6 +3511,18 @@ function _wireLoginBtn() {
         // If this view has a dedicated chunk registered in _CHUNK_VIEWS, fetch
         // it before attempting to render. _loadChunkOnce deduplicates — the
         // network request fires only the first time this view is visited.
+        // ── Authoritative per-view authorization (deep-link / hash bypass guard) ─
+        // The chunk-load gate below only honors exactLevels and merely skips the
+        // chunk fetch. Enforce the FULL VIEWS authz contract FIRST so a registry-
+        // restricted view (admin config, financial, PII) cannot be reached by
+        // typing its URL hash — not just hidden from the sidebar. Only enforced
+        // once authenticated; boot-time / pre-auth navigates pass through.
+        if (_currentUser && !_isViewAllowed(viewId, _getUserLevel(_currentUser))) {
+            try { UI.toast.error('You do not have access to that page.'); } catch (_) { /* toast best-effort */ }
+            const _fallbackView = _defaultViewFor(_currentUser);
+            if (viewId !== _fallbackView) { await navigateTo(_fallbackView); }
+            return;
+        }
         const _chunkDef = _CHUNK_VIEWS[viewId];
         if (_chunkDef) {
             const _userLevel = _currentUser ? _getUserLevel(_currentUser) : 99;
@@ -3707,8 +3839,13 @@ function _wireLoginBtn() {
     // throw ReferenceError on load. The fude / referrals / prospects chunks override
     // window.app with their real implementations via Object.assign after loading.
     const showRoadmap             = (...a) => (window.app.showRoadmap             || todo.bind(null, 'Roadmap'))(...a);
-    const exportRelationshipTree  = (...a) => (window.app.exportRelationshipTree  || todo.bind(null, 'Export Tree'))(...a);
-    const changeLeaderboardPeriod = (...a) => (window.app.changeLeaderboardPeriod || todo.bind(null, 'Leaderboard'))(...a);
+    // exportRelationshipTree / changeLeaderboardPeriod are implemented in the fude
+    // chunk, but their buttons live in the referrals view, which never loads fude.
+    // The old `(window.app.X || todo)(...)` stub IS window.app.X before fude loads,
+    // so it recursed into a stack overflow. _lazyStub loads fude then dispatches to
+    // the real fn (r !== stub guard prevents recursion).
+    const exportRelationshipTree  = _lazyStub('chunks/script-fude.min.js', 'exportRelationshipTree');
+    const changeLeaderboardPeriod = _lazyStub('chunks/script-fude.min.js', 'changeLeaderboardPeriod');
     const uploadProspectDocument  = (...a) => (window.app.uploadProspectDocument  || todo.bind(null, 'Upload Doc'))(...a);
 
 
@@ -4153,6 +4290,12 @@ function _wireLoginBtn() {
         // before it finishes (e.g. user clicks calendar cell immediately), the
         // stub loads the chunk then re-invokes the now-real function.
         openActivityModal: _lazyStub('chunks/script-activities.min.js', 'openActivityModal'),
+        // These activities-chunk handlers are wired to the always-rendered
+        // prospect-detail identity panel / invoice file-inputs, which can fire
+        // before the activities chunk is warmed. Self-loading stubs auto-load it
+        // then dispatch (previously threw "app.X is not a function").
+        toggleLifeChartType: _lazyStub('chunks/script-activities.min.js', 'toggleLifeChartType'),
+        scanInvoiceWithAI:   _lazyStub('chunks/script-activities.min.js', 'scanInvoiceWithAI'),
 
         // Phase 3 Prospect Management Functions
         showProspectsView,
@@ -4765,6 +4908,7 @@ function _wireLoginBtn() {
         login,
         populateLoginDropdown,
         updateNavVisibility,
+        updateUserDisplay,   // exported so settings/marketing/prospects chunks can refresh the header name after a save (was a ReferenceError in those IIFEs)
         openQuarterlyTargetsModal,
         saveQuarterlyTargets,
         openSpecialProgramModal,
@@ -4922,6 +5066,11 @@ const initSessionTimeout = async () => {
         || window.navigator.standalone === true;
     if (_isStandaloneApp) return;
     if (!window._appState?.cu) return;
+    // Idempotent: initSecurity() arms this pre-auth (bails on the cu guard above),
+    // then init()/login re-arm it once _currentUser exists. Attach listeners only
+    // once per session so repeat calls don't stack duplicate listeners/timers.
+    if (window._sessionTimeoutArmed) return;
+    window._sessionTimeoutArmed = true;
     const timeoutMinutes = parseInt(UserPreferences.getSync('session_timeout', 30));
     const resetTimeout = () => {
         clearTimeout(sessionTimeoutTimer);
