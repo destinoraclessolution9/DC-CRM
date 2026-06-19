@@ -1295,10 +1295,11 @@
 
     // Quick handler — open WhatsApp for the given phone, or fall back to
     // navigating to the customer/prospect detail when no phone is on file.
-    const mhomeWa = (id, phone) => {
+    const mhomeWa = (id, phone, text) => {
         const num = _mhomeWaPhone(phone);
         if (num) {
-            window.open(`https://wa.me/${num}`, '_blank', 'noopener');
+            const _q = (typeof text === 'string' && text.length) ? `?text=${encodeURIComponent(text)}` : '';
+            window.open(`https://wa.me/${num}${_q}`, '_blank', 'noopener');
         } else if (id) {
             navigateTo('prospects').catch(() => {});
         }
@@ -1698,7 +1699,7 @@
 
         // B: Serve prospects + customers from localStorage cache (cold reference
         // data — birthdays/names rarely change; invalidated on edit).
-        const _PEOPLE_KEY  = 'mcal-people-v2'; // v2: now includes responsible_agent_id for RBAC birthday scoping
+        const _PEOPLE_KEY  = 'mcal-people-v3'; // v3: now includes phone for birthday WhatsApp greeting (v2: responsible_agent_id for RBAC birthday scoping)
         const _DRAFTS_KEY  = 'mcal-drafts-v1';
         const _REFILLS_KEY = 'mcal-refills-v1';
         let allPeople     = _forceFresh ? null : _lsGet(_PEOPLE_KEY,  8 * 60 * 60 * 1000);
@@ -1766,8 +1767,8 @@
         const _capturedYearMcal = _mcalYear, _capturedMonthMcal = _mcalMonth;
         if (_needPeople || _needDrafts || _needRefills) {
             Promise.all([
-                _needPeople  ? AppDataStore.queryAdvanced('prospects', { select: 'id,full_name,date_of_birth,responsible_agent_id', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []) : Promise.resolve(null),
-                _needPeople  ? AppDataStore.queryAdvanced('customers', { select: 'id,full_name,date_of_birth,responsible_agent_id', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []) : Promise.resolve(null),
+                _needPeople  ? AppDataStore.queryAdvanced('prospects', { select: 'id,full_name,date_of_birth,responsible_agent_id,phone', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []) : Promise.resolve(null),
+                _needPeople  ? AppDataStore.queryAdvanced('customers', { select: 'id,full_name,date_of_birth,responsible_agent_id,phone', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []) : Promise.resolve(null),
                 _needDrafts  ? AppDataStore.getAll('follow_up_drafts').catch(() => []) : Promise.resolve(null),
                 _needRefills ? AppDataStore.query('refill_reminders', { status: 'pending' }).catch(() => []) : Promise.resolve(null),
             ]).then(([p, c, d, r]) => {
@@ -2208,6 +2209,26 @@
         // No linked contact (or it was removed) — show the activity details.
         try { if (window.app.viewActivityDetails) await window.app.viewActivityDetails(activityId); } catch (e) { console.error(e); }
     };
+    // Birthday WhatsApp greeting — id-only so nothing dynamic (names like
+    // O'Brien) ever lands in an onclick attribute. Phone is looked up from the
+    // in-scope person map; no phone → no-op (the button is also phone-gated).
+    const mcalBirthdayWa = (id) => {
+        const person = _mcalPersonMap.get(String(id));
+        if (!person || !_mhomeWaPhone(person.phone)) return;
+        const greeting = `Happy Birthday, ${person.full_name || ''}! 🎂 Wishing you a wonderful year ahead. — DestinOraclesSolution`;
+        mhomeWa(id, person.phone, greeting);
+    };
+    // Open a birthday person's profile — mirrors mcalOpenEvent: try prospect,
+    // then customer, routing to the matching detail view. id-only.
+    const mcalOpenPerson = async (id) => {
+        try { UI.hideModal(); } catch (_) { /* intentional: best-effort modal cleanup before navigating */ }
+        try {
+            const p = await AppDataStore.getById('prospects', id);
+            if (p) { await window.app.showProspectDetail(id); return; }
+            const c = await AppDataStore.getById('customers', id);
+            if (c) { await window.app.showCustomerDetail(id); return; }
+        } catch (e) { console.error(e); }
+    };
     const mcalDayClick = (dateStr) => {
         const allDay    = _mcalByDate.get(dateStr) || [];
         const dayBdays  = allDay.filter(a => a._isBirthday);
@@ -2228,13 +2249,18 @@
                 const age = d.getFullYear() - parseInt(dob.slice(0, 4));
                 if (age > 0 && age < 120) ageStr = ` · Turning ${age}`;
             }
+            const hasPhone = !!_mhomeWaPhone(p.phone);
+            const waBtn = hasPhone
+                ? `<button onclick="event.stopPropagation();app.mcalBirthdayWa('${p.id}')" aria-label="Send birthday WhatsApp" style="flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border:none;border-radius:50%;background:#25D366;color:#fff;font-size:17px;cursor:pointer;"><i class="fab fa-whatsapp"></i></button>`
+                : '';
             return `
                 <div style="display:flex;align-items:center;gap:12px;padding:12px 10px;margin-bottom:6px;background:linear-gradient(90deg,#FDF2F8,#fff);border-radius:10px;border:1px solid #FBCFE8;">
                     <div style="font-size:26px;flex-shrink:0;">🎂</div>
-                    <div style="flex:1;min-width:0;">
+                    <div style="flex:1;min-width:0;cursor:pointer;" onclick="app.mcalOpenPerson('${p.id}')">
                         <div style="font-size:15px;font-weight:700;color:#9D174D;">${_mhomeEsc(p.full_name || '—')}</div>
                         <div style="font-size:12px;color:#BE185D;margin-top:2px;">Birthday${ageStr}</div>
                     </div>
+                    ${waBtn}
                 </div>`;
         }).join('');
 
@@ -2617,8 +2643,78 @@
         window._mcalAfterSaveDate = dateStr;
         window.app.openActivityModal && window.app.openActivityModal(dateStr);
     };
+    // Per-render context for the appointment-WhatsApp sheet, keyed by the
+    // person id (prospect/customer). Holds the human date label + the
+    // appointment time so the id-only handler can compose the reminder without
+    // any names/phones in the onclick attribute. Rebuilt each time the sheet
+    // opens; the person + phone are still looked up live from _mcalPersonMap.
+    let _mcalApptWaCtx = new Map();
+    // WhatsApp FAB → bottom-sheet of the day's appointments. web.whatsapp.com
+    // is a desktop QR page (dead end on the phone this lives on), so instead we
+    // list the people the agent has appointments with on the selected day (or
+    // today) and let them fire a bilingual reminder. Owner-gated via _mcalOwned
+    // (the same gate the day-detail / week / day views use) so non-owners never
+    // see another agent's client name or phone here.
     const mcalWa = () => {
-        window.open('https://web.whatsapp.com', '_blank', 'noopener');
+        const d = (_mcalSelDate instanceof Date && !isNaN(_mcalSelDate.getTime()))
+            ? new Date(_mcalSelDate.getFullYear(), _mcalSelDate.getMonth(), _mcalSelDate.getDate())
+            : new Date();
+        const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        const days   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+        const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        const dateLabel = `${days[d.getDay()]}, ${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+
+        const allDay  = _mcalByDate.get(dateStr) || [];
+        const sorted  = allDay
+            .filter(a => !a._isBirthday)
+            .sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
+
+        _mcalApptWaCtx = new Map();
+        const rows = [];
+        for (const a of sorted) {
+            // Owner gate: only appointments whose client this agent may see.
+            if (!_mcalOwned(a)) continue;
+            const pid = a.prospect_id || a.customer_id;
+            if (!pid) continue;
+            const person = _mcalPersonMap.get(String(pid));
+            if (!person || !person.full_name) continue;
+            if (!_mhomeWaPhone(person.phone)) continue; // no contactable phone → skip
+
+            const time  = (a.start_time || '').slice(0, 5);
+            const type  = a.activity_type || a.activity_title || 'Appointment';
+            const venue = a.venue_name || a.venue || a.location_address || '';
+            _mcalApptWaCtx.set(String(pid), { dateLabel, time });
+            rows.push(`
+                <div style="display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--gray-100);">
+                    <div style="min-width:46px;font-size:13px;font-weight:600;color:var(--gray-700);">${time ? _mhomeEsc(time) : 'All day'}</div>
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-size:14px;font-weight:600;color:var(--gray-800);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_mhomeEsc(person.full_name)}</div>
+                        <div style="font-size:12px;color:var(--gray-500);margin-top:2px;">${_mhomeEsc(type)}${venue ? ' · ' + _mhomeEsc(venue) : ''}</div>
+                    </div>
+                    <button onclick="event.stopPropagation();app.mcalApptWa('${pid}')" aria-label="WhatsApp appointment reminder" style="flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border:none;border-radius:50%;background:#25D366;color:#fff;font-size:17px;cursor:pointer;"><i class="fab fa-whatsapp"></i></button>
+                </div>`);
+        }
+
+        const body = rows.length
+            ? `<div style="margin:-8px -4px;">${rows.join('')}</div>`
+            : `<div style="text-align:center;padding:28px;color:var(--gray-400);font-size:13px;">No appointments with a phone on file for this day.<br>Tap an appointment in the calendar to add a contact.</div>`;
+
+        UI.showModal(`WhatsApp · ${_mhomeEsc(dateLabel)}`, body, [
+            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
+        ]);
+    };
+    // Appointment WhatsApp reminder — id-only (no names/phones in the onclick
+    // attribute so names like O'Brien can't break the markup). Person + phone
+    // are looked up live from _mcalPersonMap; date/time come from the sheet
+    // context built in mcalWa. Reuses mhomeWa(id, phone, text) + _mhomeWaPhone.
+    const mcalApptWa = (id) => {
+        const person = _mcalPersonMap.get(String(id));
+        if (!person || !_mhomeWaPhone(person.phone)) return;
+        const ctx = _mcalApptWaCtx.get(String(id)) || {};
+        const name = person.full_name || '';
+        const when = ctx.time ? `${ctx.dateLabel || ''} at ${ctx.time}` : (ctx.dateLabel || '');
+        const text = `Hi ${name}, this is a reminder of our appointment on ${when}. See you then! / 您好${name}，提醒您我们于 ${when} 的预约，到时见！`;
+        mhomeWa(id, person.phone, text);
     };
 
     // ── Mobile Prospects / Clients view ──────────────────────
@@ -3191,12 +3287,15 @@
         mcalRefreshActiveView,
         mcalDayClick,
         mcalOpenEvent,
+        mcalBirthdayWa,
+        mcalOpenPerson,
         mcalOpenDay,
         mcalAddMeetUp,
         mcalTab,
         mcalFilter,
         mcalAdd,
         mcalWa,
+        mcalApptWa,
         showMobileProspectsView,
         showProspectsViewSmart,
         mpSwitchTab,
