@@ -1843,7 +1843,6 @@ if (found) {
     const customer = await AppDataStore.getById('customers', customerId);
     const pur = {
         customer_id: customerId,
-        agent_id: customer?.responsible_agent_id || null,
         date: new Date().toISOString().split('T')[0],
         invoice: invoiceNo,
         item: item,

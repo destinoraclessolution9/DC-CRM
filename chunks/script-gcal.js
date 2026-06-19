@@ -138,7 +138,18 @@
             this.syncInProgress = true;
 
             try {
-                const activities = await AppDataStore.getAll('activities');
+                // Delta read: only activities changed since the last persisted cursor
+                // (last_sync_at). Falls back to full getAll() when the cursor is absent
+                // (first sync) or the delta errors/aborts — a missing cursor never drops data.
+                let activities = null;
+                try {
+                    const _cursor = (await getGoogleConnection())?.last_sync_at;
+                    if (_cursor) {
+                        const _delta = await AppDataStore.getAllSince('activities', _cursor);
+                        if (Array.isArray(_delta)) activities = _delta; // null = abort → full sync
+                    }
+                } catch (_) { activities = null; }
+                if (!Array.isArray(activities)) activities = await AppDataStore.getAll('activities');
                 const syncLog = await this.getSyncLog();
 
                 let synced = 0, created = 0, updated = 0, deleted = 0;

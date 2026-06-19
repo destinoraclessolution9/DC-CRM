@@ -4121,10 +4121,10 @@
                         </div>
                         <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
                             <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
-                                <input type="checkbox" ${attendedChecked} onchange="app.toggleAttendeeAttended(${att.id}, this.checked, ${entityId}, 'agent', ${activity.event_id}, '${activity.activity_date}')"> Attended
+                                <input type="checkbox" ${attendedChecked} onchange="app.toggleAttendeeAttended(${att.id}, this.checked, ${entityId}, 'agent', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}')"> Attended
                             </label>
                             <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
-                                <input type="checkbox" ${unattendedChecked} onchange="app.toggleAttendeeUnattended(${att.id}, this.checked, ${entityId}, 'agent', ${activity.event_id}, '${activity.activity_date}')"> Unattended
+                                <input type="checkbox" ${unattendedChecked} onchange="app.toggleAttendeeUnattended(${att.id}, this.checked, ${entityId}, 'agent', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}')"> Unattended
                             </label>
                             <button class="btn btn-sm" style="background:#FEE2E2;color:#991B1B;border:none;padding:3px 8px;border-radius:4px;" onclick="event.stopPropagation();app.removeAgentAttendee(${att.id}, ${activityId})" title="Remove"><i class="fas fa-times"></i></button>
                         </div>
