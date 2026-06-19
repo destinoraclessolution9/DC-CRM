@@ -20,6 +20,7 @@
 // The scaffold branch below is UNCHANGED and still runs whenever `data` is
 // absent (flag off, or payload build threw → chunk does the by-id fill).
 import React, { useEffect, useState } from 'react';
+import { EmptyState } from '../ui/EmptyState.jsx';
 
 const app = () => window.app || {};
 const call = (name, ...args) => { const f = app()[name]; if (typeof f === 'function') return f(...args); };
@@ -206,7 +207,7 @@ function LeaderboardSection({ leaderboard }) {
                     </thead>
                     <tbody>
                         {visible.length === 0 ? (
-                            <tr><td colSpan="6" className="text-center p-4 text-muted">No referrer data found.</td></tr>
+                            <tr><td colSpan="6"><EmptyState icon="fa-trophy" title="No referrer data found" description="Referrers will appear here once referrals are recorded." /></td></tr>
                         ) : visible.map((item, idx) => (
                             <tr className={`rank-${idx + 1}`} key={`${item.type}:${item.id}`}>
                                 <td data-label="Rank" className="rank-cell">{idx + 1}</td>

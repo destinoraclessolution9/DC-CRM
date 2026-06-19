@@ -7,7 +7,7 @@
 import { useState } from 'react';
 import {
     Button, IconButton, Badge, ScoreBadge, Spinner, Skeleton, TextField, Textarea,
-    Select, Checkbox, Switch, Card, Avatar, Tooltip, Tabs, Menu, Pagination,
+    Select, Combobox, Checkbox, Switch, Card, Avatar, Tooltip, Tabs, Menu, Pagination,
     Breadcrumb, EmptyState, ErrorState, Modal, Drawer, ConfirmDialog, SelectAgent,
     ProtectionBar, HealthBadge, RoleGate, StatCard, VirtualizedDataTable, InfiniteList,
 } from './index.js';
@@ -40,6 +40,15 @@ const COLUMNS = [
     { key: 'city', header: 'City' },
 ];
 
+// Mock async option loader for the Combobox (no network).
+const CITY_LIST = ['Kuala Lumpur', 'Petaling Jaya', 'Johor Bahru', 'Penang', 'Ipoh', 'Melaka', 'Kota Kinabalu', 'Kuching', 'Shah Alam', 'Seremban'];
+function mockLoadOptions(q, { signal } = {}) {
+    const items = CITY_LIST
+        .filter((c) => c.toLowerCase().includes(String(q || '').toLowerCase()))
+        .map((c) => ({ value: c, label: c }));
+    return new Promise((resolve) => setTimeout(() => resolve({ items }), 150));
+}
+
 function Section({ title, children }) {
     return (
         <section style={{ marginBottom: 36 }}>
@@ -57,6 +66,7 @@ export function Gallery() {
     const [checked, setChecked] = useState(true);
     const [on, setOn] = useState(false);
     const [agent, setAgent] = useState('2');
+    const [city, setCity] = useState('');
 
     const agents = [{ id: 1, full_name: 'Agent Lim' }, { id: 2, full_name: 'Agent Tan' }, { id: 3, full_name: 'Agent Wong' }];
     const agentNames = { 1: 'Agent Lim', 2: 'Agent Tan', 3: 'Agent Wong' };
@@ -113,6 +123,7 @@ export function Gallery() {
                 <Checkbox label="Subscribed" checked={checked} onChange={(e) => setChecked(e.target.checked)} />
                 <Switch label="Auto follow-up" checked={on} onChange={(v) => setOn(typeof v === 'boolean' ? v : v?.target?.checked)} />
                 <div style={{ minWidth: 220 }}><SelectAgent value={agent} onChange={setAgent} agents={agents} agentNames={agentNames} canReassign /></div>
+                <div style={{ minWidth: 260 }}><Combobox label="City (async search)" value={city} onChange={setCity} loadOptions={mockLoadOptions} placeholder="Type to search…" /></div>
             </Section>
 
             <Section title="Overlays & navigation">

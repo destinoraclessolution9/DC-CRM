@@ -11,7 +11,10 @@
     "audit": "node ci/audit.js",
     "snapshot": "node ci/snapshot.js",
     "lint": "node ci/lint-patterns.js",
-    "size": "node ci/size-budget.js"
+    "size": "node ci/size-budget.js",
+    "a11y": "node ci/a11y-grep.js",
+    "escape-check": "node ci/escape-grep.js",
+    "contrast": "node ci/contrast-check.js"
   },
   "dependencies": {
     "puppeteer": "^24.40.0"

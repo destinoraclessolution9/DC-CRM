@@ -8,6 +8,8 @@
 // keeps focus while typing), client-filters by chip + sorts, and reproduces the
 // legacy .kb-all-bar / .kb-table markup. Rows call window.app.showKnowledgeDetail.
 import { useState, useEffect, Fragment } from 'react';
+import { EmptyState } from '../ui/EmptyState.jsx';
+import { ErrorState } from '../ui/ErrorState.jsx';
 
 const TYPE_ICON = { idea: 'fa-lightbulb', task: 'fa-check-square', case_study: 'fa-flask', note: 'fa-note-sticky', reference: 'fa-bookmark' };
 const TYPE_LABEL = { idea: 'Idea', task: 'Task', case_study: 'Case Study', note: 'Note', reference: 'Reference' };
@@ -71,11 +73,11 @@ export function KnowledgeAllEntries({ loadEntries, initialFilter = 'all', onFilt
     if (base === null) {
         listInner = <div className="kb-empty">Loading…</div>;
     } else if (err && err.kind === 'signin') {
-        listInner = <div className="kb-empty">Sign in first.</div>;
+        listInner = <ErrorState title="Sign in required" description="Sign in first." retryable={false} />;
     } else if (err && err.kind === 'load') {
-        listInner = <div className="kb-empty">Cannot load entries ({err.msg}). Did you run the migration?</div>;
+        listInner = <ErrorState title="Couldn't load entries" description={err.msg || 'Did you run the migration?'} retryable={true} />;
     } else if (!rows.length) {
-        listInner = <div className="kb-empty">No entries match.</div>;
+        listInner = <EmptyState icon="fa-inbox" title="No entries" description="No entries match." />;
     } else {
         listInner = (
             <table className="kb-table">

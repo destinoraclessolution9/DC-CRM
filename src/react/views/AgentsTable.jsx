@@ -17,6 +17,8 @@
 // as "offline" (never ran) leaving counts at 0. Reading warm data via props is
 // simpler and guarantees parity with the legacy table.
 
+import { EmptyState } from '../ui/EmptyState.jsx';
+
 const app = () => window.app || {};
 const stop = (e) => e.stopPropagation();
 
@@ -85,7 +87,7 @@ export function AgentsTable({ agents = [], counts = {}, filters = {}, meta = {} 
 
     let body;
     if (visible.length === 0) {
-        body = <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px' }}>No agents found</td></tr>;
+        body = <tr><td colSpan={8}><EmptyState icon="fa-user-tie" title="No agents found" description="No agents match the current filters." /></td></tr>;
     } else {
         body = visible.map((agent) => (
             <Row

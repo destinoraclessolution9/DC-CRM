@@ -15,6 +15,7 @@ export { Skeleton } from './Skeleton.jsx';
 export { TextField } from './TextField.jsx';
 export { Textarea } from './Textarea.jsx';
 export { Select } from './Select.jsx';
+export { Combobox } from './Combobox.jsx';
 export { Checkbox } from './Checkbox.jsx';
 export { Switch } from './Switch.jsx';
 export { Card } from './Card.jsx';
@@ -24,6 +25,9 @@ export { Tabs } from './Tabs.jsx';
 export { Menu } from './Menu.jsx';
 export { Pagination } from './Pagination.jsx';
 export { Breadcrumb } from './Breadcrumb.jsx';
+
+// ── Feedback ──────────────────────────────────────────────────────────────────
+export { toast, useToast } from './Toast.js';
 
 // ── States ──────────────────────────────────────────────────────────────────
 export { EmptyState } from './EmptyState.jsx';

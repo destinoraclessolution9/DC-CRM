@@ -3238,6 +3238,9 @@ function _wireLoginBtn() {
 
     const navigateTo = async (viewId) => {
         UI.hideModal();
+        // A11y: announce the view change to assistive tech via the shared polite
+        // live region (UI.live). Defensive — it must NEVER block navigation.
+        try { if (window.UI && UI.live) UI.live('Loading ' + String(viewId || '').replace(/_/g, ' ') + '…'); } catch (_) { /* intentional: route announcer is best-effort */ }
         // Cancel any in-flight Supabase reads tied to the OUTGOING view so
         // their late-arriving responses can't overwrite the new view's cache
         // ~800ms after navigation. AppDataStore catches AbortError internally

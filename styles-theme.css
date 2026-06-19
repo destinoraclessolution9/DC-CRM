@@ -1582,3 +1582,126 @@ table.auto-card tbody tr:not(.no-cv) {
         animation: none;
     }
 }
+
+/* ===== UI component library styles (Phase 5) ===== */
+
+/* ---------- Button variants ---------- */
+.btn.ghost {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid transparent;
+}
+.btn.ghost:hover {
+    background: color-mix(in srgb, var(--accent) 10%, var(--bg-sunken));
+    color: var(--accent-hover);
+}
+
+.btn.link {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--accent);
+    text-decoration: none;
+    box-shadow: none;
+}
+.btn.link:hover {
+    color: var(--accent-hover);
+    text-decoration: underline;
+}
+
+.btn-lg {
+    padding: 12px 22px;
+    font-size: 16px;
+    min-height: var(--touch-target);
+}
+
+.btn-block {
+    width: 100%;
+    justify-content: center;
+}
+
+/* ---------- Form helpers ---------- */
+.form-label {
+    display: block;
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 4px;
+    color: var(--text-secondary);
+}
+
+.form-hint {
+    display: block;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+.form-error {
+    display: block;
+    font-size: 12px;
+    color: var(--danger-text);
+    margin-top: 4px;
+}
+
+/* ---------- Component bases ---------- */
+.ui-empty-state,
+.ui-error-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 8px;
+    padding: 32px 20px;
+    color: var(--text-muted);
+}
+.ui-error-state {
+    color: var(--danger-text);
+}
+
+.ui-spinner {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-secondary);
+}
+
+.ui-skeleton {
+    display: grid;
+    gap: 8px;
+}
+
+/* ---------- Touch targets (additive — does not modify the base .btn rule) ---------- */
+.btn,
+.btn-icon,
+[role="menuitem"] {
+    min-height: var(--touch-target);
+}
+
+/* ---------- Responsive table -> stacked-card collapse (opt-in) ---------- */
+@media (max-width: 768px) {
+    .ui-table--stack thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+    }
+    .ui-table--stack tr {
+        display: block;
+        margin-bottom: 12px;
+        border: 1px solid var(--border-soft);
+        border-radius: var(--radius-md);
+    }
+    .ui-table--stack td {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 8px 12px;
+    }
+    .ui-table--stack td::before {
+        content: attr(data-label);
+        font-weight: 600;
+        color: var(--text-secondary);
+    }
+}

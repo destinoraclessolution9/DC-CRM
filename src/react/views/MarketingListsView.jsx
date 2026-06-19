@@ -19,6 +19,7 @@
 // React auto-escapes every field these tables interpolated raw — XSS hardening
 // across every JSX table.
 import React from 'react';
+import { EmptyState } from '../ui/EmptyState.jsx';
 
 const app = () => window.app || {};
 const call = (name, ...args) => { const f = app()[name]; if (typeof f === 'function') f(...args); };
@@ -352,7 +353,7 @@ function PromotionsTab({ data }) {
                     </thead>
                     <tbody id="packages-table-body">
                         {data.empty
-                            ? <tr><td colSpan="9" style={{ padding: '40px', textAlign: 'center', color: 'var(--gray-500)' }}>No promotion packages found. Click &quot;+ New Package&quot; to create one.</td></tr>
+                            ? <tr><td colSpan={9}><EmptyState icon="fa-tags" title="No promotion packages" description='Click "+ New Package" to create one.' /></td></tr>
                             : <>
                                 {data.active.map((r) => <PackageRow key={r.id} row={r} />)}
                                 {showExpiredDivider && (
@@ -426,10 +427,11 @@ function SpecialProgramRow({ r, canManage }) {
 function SpecialProgramsTab({ data }) {
     if (data.empty) {
         return (
-            <div className="card" style={{ padding: '32px', border: '2px dashed var(--gray-200)', textAlign: 'center' }}>
-                <h3 style={{ margin: '0 0 8px' }}>🏆 No Active Special Programs</h3>
-                <p style={{ color: 'var(--gray-400)', margin: 0 }}>{data.canManage ? 'Click "New Program" to launch a new challenge for selected agents.' : 'No special programs have been launched yet.'}</p>
-            </div>
+            <EmptyState
+                icon="fa-trophy"
+                title="No Active Special Programs"
+                description={data.canManage ? 'Click "New Program" to launch a new challenge for selected agents.' : 'No special programs have been launched yet.'}
+            />
         );
     }
     return (

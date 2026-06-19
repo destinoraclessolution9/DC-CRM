@@ -10,6 +10,7 @@
 // the existing window.app.savePurchasesHistoryRow reads via getElementById, so
 // the save path is unchanged. Row link / Save / Refresh call window.app.*.
 import { useState } from 'react';
+import { EmptyState } from '../ui/EmptyState.jsx';
 
 const PAGE_SIZE = 50;
 const app = () => window.app || {};
@@ -96,7 +97,7 @@ export function PurchasesHistoryView({ rows = [], agentMap = {} }) {
                     </thead>
                     <tbody>
                         {pageRows.length === 0 ? (
-                            <tr><td colSpan="11" style={{ padding: '48px', textAlign: 'center', color: 'var(--gray-400)', fontSize: '13px' }}><i className="fas fa-receipt" style={{ fontSize: '36px', display: 'block', marginBottom: '10px', opacity: 0.4 }}></i>No purchase records found</td></tr>
+                            <tr><td colSpan="11"><EmptyState icon="fa-receipt" title="No purchase records found" description="No purchases match the current filters." /></td></tr>
                         ) : pageRows.map((r, i) => {
                             const sn = start + i + 1;
                             const rk = `${r.prospectId}-${r.historyIndex}`;
