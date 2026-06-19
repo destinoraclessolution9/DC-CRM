@@ -82,12 +82,12 @@ const selfChangePassword = async () => {
         const updateErr = updateRes && updateRes.error;
         if (updateErr) throw updateErr;
     } catch (e) {
-        console.warn('Supabase password change (offline?):', e?.message || e);
+        console.error('Password change failed:', e?.message || e);
+        return UI.toast.error('Could not change password. Please try again.');
     }
-    await AppDataStore.update('users', _state.cu.id, {
-        password: newPwd,
-        force_password_change: false
-    });
+    // GoTrue (auth.users) is the source of truth for the password — do NOT store a
+    // plaintext copy in public.users. Only clear the force-change flag here.
+    try { await AppDataStore.update('users', _state.cu.id, { force_password_change: false }); } catch (_) { /* best-effort flag clear */ }
     _state.cu.force_password_change = false;
     document.getElementById('settings-current-pwd').value = '';
     document.getElementById('settings-new-pwd').value = '';
