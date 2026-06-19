@@ -1799,9 +1799,15 @@ const openAddPurchaseModal = async (customerId) => {
     ]);
 };
 
+// Delegates to the shared, race-free LTV + total_purchases adjuster on _crmUtils so
+// the customers chunk and the approvals chunk apply lifetime_value identically.
+// (audit #8/#16/#22 — see window._crmUtils.adjustCustomerLtv in script.js.)
+const _adjustCustomerLtv = (customerId, amountDelta, countDelta) =>
+    _utils.adjustCustomerLtv(customerId, amountDelta, countDelta);
+
 const savePurchase = async (customerId) => {
     const amt = parseFloat(document.getElementById('pur-amt')?.value);
-    if (!amt) return UI.toast.error('Amount is required');
+    if (!(amt > 0)) return UI.toast.error('Amount must be a positive number');
     const invoiceNo = document.getElementById('pur-inv')?.value?.trim();
     if (!invoiceNo) return UI.toast.error('Invoice No. is required');
 
@@ -1852,14 +1858,18 @@ if (found) {
     };
     await AppDataStore.create('purchases', pur);
 
-    // Update lifetime value
-    await AppDataStore.update('customers', customerId, { lifetime_value: (customer.lifetime_value || 0) + amt });
+    // Update lifetime value + purchase count atomically (race-free; symmetric with deletePurchase).
+    await _adjustCustomerLtv(customerId, amt, 1);
 
     UI.hideModal();
     UI.toast.success('Purchase added');
     const closingBody = document.getElementById(`cust-acc-body-closing-${customerId}`);
-    if (closingBody) await window.app.renderCustomerClosingTab(customer, closingBody);
-    else if (document.getElementById('customers-table-body')) await renderCustomersTable();
+    if (closingBody) {
+        // Re-fetch: the RPC updated the server row, so the cached `customer` (read
+        // before the adjust) now has a stale lifetime_value/total_purchases.
+        const _freshCustomer = await AppDataStore.getById('customers', customerId);
+        await window.app.renderCustomerClosingTab(_freshCustomer || customer, closingBody);
+    } else if (document.getElementById('customers-table-body')) await renderCustomersTable();
 };
 
 const _deliveryStatusColors = { 'Pending Delivery': 'background:#fef3c7;color:#92400e', 'Dispatched': 'background:#dbeafe;color:#1e40af', 'Delivered': 'background:#dcfce7;color:#166534' };
@@ -1896,13 +1906,13 @@ const deletePurchase = async (purchaseId, customerId) => {
     try {
         const p = await AppDataStore.getById('purchases', purchaseId);
         await AppDataStore.delete('purchases', purchaseId);
-        // Keep the customer's lifetime value in sync if this purchase counted toward it.
-        if (p && p.status && p.status !== 'PENDING') {
-            const cust = await AppDataStore.getById('customers', customerId);
-            if (cust) {
-                const amt = parseFloat(p.amount) || 0;
-                await AppDataStore.update('customers', customerId, { lifetime_value: Math.max(0, (cust.lifetime_value || 0) - amt) });
-            }
+        // Reverse this purchase's contribution to lifetime_value + total_purchases.
+        // Symmetric with savePurchase, which adds EVERY purchase incl. PENDING: the old
+        // `status !== 'PENDING'` skip meant a pending purchase was added to LTV on save
+        // but never subtracted on delete, permanently inflating it (audit #8).
+        if (p) {
+            const amt = parseFloat(p.amount) || 0;
+            if (amt) await _adjustCustomerLtv(customerId, -amt, -1);
         }
         UI.toast.success('Purchase deleted');
         const customer = await AppDataStore.getById('customers', customerId);

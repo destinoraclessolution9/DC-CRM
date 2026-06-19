@@ -1018,7 +1018,7 @@ const saveAgent = async () => {
         phone: document.getElementById('agent-phone').value,
         email: document.getElementById('agent-email').value,
         ic_number: document.getElementById('agent-ic').value,
-        commission_rate: parseInt(document.getElementById('agent-comm').value),
+        commission_rate: parseFloat(document.getElementById('agent-comm').value) || 0,
         license_start: document.getElementById('agent-license-start').value || null,
         license_expiry: document.getElementById('agent-license-expiry').value || null,
         reporting_to: reportingToVal ? parseInt(reportingToVal) : null,

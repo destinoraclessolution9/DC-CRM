@@ -292,9 +292,9 @@ const approveQueueEntry = async (entryId) => {
                     status: 'COMPLETED',
                     payment_method: cr.payment_method || 'Cash'
                 });
-                await AppDataStore.update('customers', customer.id, {
-                    lifetime_value: (customer.lifetime_value || 0) + amt
-                });
+                // Atomic, race-free LTV + total_purchases bump (audit #8/#16/#22) —
+                // matches savePurchase/deletePurchase so all purchase paths agree.
+                await _utils.adjustCustomerLtv(customer.id, amt, 1);
             }
         }
         if (prospect?.closing_record?.status === 'submitted') {
@@ -424,9 +424,8 @@ const approveClosingRecord = async (prospectId) => {
                 status: 'COMPLETED',
                 payment_method: cr.payment_method || 'Cash'
             });
-            await AppDataStore.update('customers', customer.id, {
-                lifetime_value: (customer.lifetime_value || 0) + saleAmount
-            });
+            // Atomic, race-free LTV + total_purchases bump (audit #8/#16/#22).
+            await _utils.adjustCustomerLtv(customer.id, saleAmount, 1);
         }
         const existingHistory = Array.isArray(prospect.closing_records_history) ? prospect.closing_records_history : [];
         await AppDataStore.update('prospects', prospectId, {

@@ -637,6 +637,30 @@ const appLogic = (() => {
         if (e?.detail?.table === 'users') { _agentsLeadersCache = null; _agentsLeadersCacheTs = 0; }
     });
     Object.assign(window._crmUtils, { getAgentsAndLeaders: () => getAgentsAndLeaders() });
+    // Atomic, race-free customer lifetime_value + total_purchases adjuster, shared by
+    // the customers chunk (savePurchase/deletePurchase) and the approvals chunk
+    // (approveQueueEntry/approveClosingRecord sales) so every purchase path mutates
+    // LTV identically. One server-side UPDATE via the adjust_customer_ltv RPC (no
+    // read-modify-write lost-update race — audit #16; symmetric add/delete — audit #8;
+    // maintains total_purchases — audit #22). Falls back to an optimistic local update
+    // that queues offline if the RPC is unreachable.
+    Object.assign(window._crmUtils, {
+        adjustCustomerLtv: async (customerId, amountDelta, countDelta) => {
+            try {
+                const { error } = await window.supabase.rpc('adjust_customer_ltv', {
+                    p_customer_id: customerId, p_amount_delta: amountDelta, p_count_delta: countDelta,
+                });
+                if (!error) { try { AppDataStore.invalidateCache('customers'); } catch (_) { /* cache drop best-effort */ } return; }
+            } catch (_) { /* offline / RPC unreachable -> optimistic local fallback below */ }
+            try {
+                const c = await AppDataStore.getById('customers', customerId);
+                if (c) await AppDataStore.update('customers', customerId, {
+                    lifetime_value: Math.max(0, (c.lifetime_value || 0) + amountDelta),
+                    total_purchases: Math.max(0, (c.total_purchases || 0) + countDelta),
+                });
+            } catch (_) { /* best-effort: a failed LTV adjust must not abort the purchase write */ }
+        },
+    });
 
     // Phase 10: Search Panel State
     let _searchPanelVisible = false;
