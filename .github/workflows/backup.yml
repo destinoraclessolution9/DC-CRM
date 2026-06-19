@@ -115,9 +115,9 @@ jobs:
           echo "Backup uploaded: ${{ steps.filename.outputs.name }}.sql.gpg"
           rclone ls gdrive: --include "crm-backup-*.sql.gpg" | tail -5
 
-  # Monthly automated restore test — fails loudly if a backup can't be
-  # decrypted and loaded into a throwaway Postgres. Runs on the 1st of
-  # each month at 03:00 UTC, using the most recent backup file.
+  # Weekly automated restore test — fails loudly if a backup can't be
+  # decrypted and loaded into a throwaway Postgres. Runs after each weekly
+  # Sunday backup (needs: backup), using the most recent backup file.
   restore_test:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -178,4 +178,4 @@ jobs:
 
       - name: Notify on failure
         if: failure()
-        run: echo "::error::Monthly restore test FAILED — investigate the latest backup immediately"
+        run: echo "::error::Weekly restore test FAILED — investigate the latest backup immediately"

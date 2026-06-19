@@ -19,7 +19,7 @@ on-call this system, everything you need is in this folder.
 | [SECURITY_EDGE.md](./SECURITY_EDGE.md) | BFF auth/scope model, the 8 Supabase Edge Functions, RLS + native MFA, CSP/headers, rate-limit backstop. |
 | [SCALING.md](./SCALING.md) | Connection pooling, keyset vs offset pagination, compute tier, and the documented load limits. |
 | [INCIDENT_RUNBOOK.md](./INCIDENT_RUNBOOK.md) | On-call playbook: diagnose up/down, the 521 compute-exhaustion class, rollback, restore. **On-call starts here.** |
-| [../deploy/](../deploy/) | Container / self-host reference (Dockerfile, compose, env) for running off-Vercel. |
+| [../../deploy/](../../deploy/) | Container / self-host reference (Dockerfile, compose, env) for running off-Vercel. |
 
 ## Phase map
 
@@ -31,7 +31,7 @@ on-call this system, everything you need is in this folder.
 | **P3** | CI/CD + ledger | `CICD.md`, deploy-gating workflows, migration ledger |
 | **P4** | Edge security | `SECURITY_EDGE.md`, `/api` rate-limit backstop, CSP Sentry origin, edge-fn auth |
 | **P5** | Scaling | `SCALING.md`, pooling config, keyset pagination path |
-| **P6** | Containers + runbooks | `../deploy/`, `INCIDENT_RUNBOOK.md` |
+| **P6** | Containers + runbooks | `deploy/`, `INCIDENT_RUNBOOK.md` |
 
 ## Start here
 

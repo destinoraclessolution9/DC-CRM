@@ -24,7 +24,7 @@ env var or imports a config.
 | API / function errors | BFF structured JSON logs → Vercel Log Drain → Axiom / Better Stack | `api/customers.mjs`, `api/prospects.mjs` outcomes + latency | `lvl:"error"` rate, `5xx`, sustained high `ms` |
 | Function / access logs | Vercel Log Drain (platform) | All function invocations, cold starts, platform `5xx` | Invocation-error rate; runtime exceptions |
 | Database | Supabase metric alerts (dashboard) | CPU, **connections**, disk, slow queries | CPU > 80 %, **connections > 80 % of pool** (NANO-tier killer), disk > 80 % |
-| Backups | `.github/workflows/backup.yml` (on-failure) | Weekly GPG dump + **monthly restore test** | Job failure → page (dump too small, GPG/restore fails) |
+| Backups | `.github/workflows/backup.yml` (on-failure) | Weekly GPG dump + **weekly restore test** | Job failure → page (dump too small, GPG/restore fails) |
 | Status page | Checkly / Better Stack public page (optional) | Aggregated probe history, public incident comms | Manual / auto on sustained probe failure |
 
 ## How to turn each layer on

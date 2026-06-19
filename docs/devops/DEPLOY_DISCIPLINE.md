@@ -41,5 +41,5 @@ Rolling Release (canary %).
    (or `vercel rollback <url>`). Every deploy is retained.
 2. **Verify:** `POST /auth/v1/token` → 400, login works.
 3. **Database:** restore path is the GPG dump from `.github/workflows/backup.yml`
-   (already restore-tested monthly). DDL is forward-only — never auto-revert a migration.
+   (already restore-tested weekly). DDL is forward-only — never auto-revert a migration.
 4. Log the incident in `INCIDENT_RUNBOOK.md`.

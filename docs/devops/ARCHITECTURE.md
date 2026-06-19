@@ -110,7 +110,7 @@ client to reload at once — only do it for a runtime SW change, per
 - **BFF logs** — each `/api/*` return emits one structured JSON line
   (`{t,lvl,ev,fn,status,ms,…}`) for a Vercel Log Drain to ingest and alert on.
 - **Supabase metric alerts + backups** — weekly `pg_dump` → GPG → Drive with a
-  monthly automated restore test (`.github/workflows/backup.yml`).
+  weekly automated restore test (`.github/workflows/backup.yml`).
 
 See [MONITORING.md](./MONITORING.md) and [INCIDENT_RUNBOOK.md](./INCIDENT_RUNBOOK.md).
 

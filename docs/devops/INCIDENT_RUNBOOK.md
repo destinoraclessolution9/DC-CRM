@@ -108,7 +108,7 @@ White screen or broken UI, homepage still `200`, probe `400` — it's the client
 Last resort, highest blast radius. **Do not improvise UPDATEs on prod.**
 
 1. **Restore path is the GPG dump** from [`backup.yml`](../../.github/workflows/backup.yml)
-   (weekly dump, monthly restore-tested). Restore to a staging DB, validate, then cut over.
+   (weekly dump, weekly restore-tested). Restore to a staging DB, validate, then cut over.
 2. **DDL is forward-only** — fix data with a new forward migration; never hand-revert schema.
 3. Snapshot the bad state first (for the post-mortem) before you overwrite anything.
 

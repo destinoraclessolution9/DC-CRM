@@ -10,7 +10,7 @@ red check actually block a bad deploy.
 | [`ci.yml`](../../.github/workflows/ci.yml) | PR + push to `main` | Correctness gates: `gates` (audit + tsc + contract) and `regression` (build + snapshot + lint + size) | **No** — reporting-only |
 | [`lighthouse.yml`](../../.github/workflows/lighthouse.yml) | PR + push to `main` | Core Web Vitals budgets (preview on PR, prod on `main`) | **No** — reporting-only |
 | [`uptime.yml`](../../.github/workflows/uptime.yml) | every 10 min (cron) | Black-box availability probe: homepage 200 + Supabase auth health | n/a — observe-only |
-| [`backup.yml`](../../.github/workflows/backup.yml) | weekly cron + monthly restore test | GPG-encrypted `pg_dump` → Google Drive | n/a |
+| [`backup.yml`](../../.github/workflows/backup.yml) | weekly cron + restore test | GPG-encrypted `pg_dump` → Google Drive | n/a |
 | [`deploy.yml`](../../.github/workflows/deploy.yml) | push to `main` + dispatch | **New.** Post-deploy smoke + optional gated promotion | optional (dispatch path) |
 
 ## The gap

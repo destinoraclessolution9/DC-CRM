@@ -18,7 +18,7 @@ Authored by the DevOps autopilot run (2026-06-19). Each phase ships independentl
 - **Security:** RLS lockdown, edge-function auth, PII-table hardening, password-at-rest
   removed, **native Supabase MFA (TOTP / AAL2)** — shipped in the `db3ab85..60cbc84` pass.
 - **Backups:** weekly `pg_dump` (public + auth) → GPG AES-256 → Google Drive, **with a
-  monthly automated restore test** (`.github/workflows/backup.yml`). Best-in-class.
+  weekly automated restore test** (`.github/workflows/backup.yml`). Best-in-class.
 - **Edge delivery:** content-hashed immutable assets, brotli-11, hardened CSP/HSTS
   (`vercel.json`), real SW offline strategy (`sw.js`).
 - **SW reload de-herd:** `sw-init.js` already jitters reloads 0–60 s + guards active edits
