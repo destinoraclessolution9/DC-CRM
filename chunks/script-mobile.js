@@ -482,8 +482,8 @@
             11: ['calendar','prospects','referrals','promotions','cases','knowledge','settings','fude','milestones'],
             // #6 fix: added 'noticeboard' to L12/L13/L14 (customers must reach Noticeboard on mobile)
             12: ['noticeboard','prospects','referrals','fude','milestones'],
-            13: ['noticeboard','prospects','fude','milestones'],
-            14: ['noticeboard','prospects','fude','milestones'],
+            13: ['noticeboard','fude','milestones'],
+            14: ['noticeboard','fude','milestones'],
             // Level 15 Stock Take Staff — per-store counter accounts that only
             // see the Stock Take tab. Inside the module they only get the
             // count / recount / summary sub-tabs (gated in showStockTakeView).

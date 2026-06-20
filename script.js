@@ -3104,7 +3104,7 @@ function _wireLoginBtn() {
         'home':                 { chunk: 'chunks/script-mobile.min.js',      minLevel: null, exactLevels: null, navId: 'home',                navLevels: _VIEW_NO_NAV, title: 'Home' },
         'calendar':             { chunk: 'chunks/script-calendar.min.js',    minLevel: null, exactLevels: null, navId: 'calendar',            navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], title: 'Calendar' },
         'month':                { chunk: 'chunks/script-calendar.min.js',    minLevel: null, exactLevels: null, navId: 'calendar',            navLevels: '@calendar', title: 'Calendar' },
-        'prospects':            { chunk: 'chunks/script-prospects.min.js',   minLevel: null, exactLevels: null, navId: 'prospects',           navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], title: 'Prospects & Customers' },
+        'prospects':            { chunk: 'chunks/script-prospects.min.js',   minLevel: null, exactLevels: null, navId: 'prospects',           navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], title: 'Prospects & Customers' },
         'customers':            { chunk: 'chunks/script-customers.min.js',   minLevel: null, exactLevels: null, navId: 'customers',           navLevels: _VIEW_NO_NAV, title: undefined },
         'agents':               { chunk: 'chunks/script-agents.min.js',      minLevel: null, exactLevels: null, navId: 'agents',              navLevels: [1, 2], title: 'Consultants' },
         'purchases_history':    { chunk: 'chunks/script-prospects.min.js',   minLevel: null, exactLevels: null, navId: 'purchases_history',   navLevels: [1], title: 'Purchases History' },
@@ -3161,8 +3161,8 @@ function _wireLoginBtn() {
     const _VIEW_NAV_ORDER = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'purchases_history', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'knowledge', 'import', 'integrations', 'settings', 'fude', 'milestones', 'noticeboard', 'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser', 'stock-take', 'boss-report', 'org-chart', 'ai-insights', 'security', 'workflows', 'lead_forms', 'surveys', 'contracts', 'booking_settings', 'order-form-extract'];
     const _VIEW_NAV_ORDER_OVERRIDE = {
         12: ['noticeboard', 'fude', 'milestones', 'prospects', 'referrals'],
-        13: ['noticeboard', 'fude', 'milestones', 'prospects'],
-        14: ['noticeboard', 'fude', 'milestones', 'prospects'],
+        13: ['noticeboard', 'fude', 'milestones'],
+        14: ['noticeboard', 'fude', 'milestones'],
     };
 
     // Title-only ids that have no VIEWS entry (aliases / legacy view ids that
