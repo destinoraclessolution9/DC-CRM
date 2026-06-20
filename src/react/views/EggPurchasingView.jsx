@@ -136,7 +136,40 @@ function PushUpCounter({ pushUp }) {
 }
 
 function RunPhase2({ run }) {
-    const { topUp, candidateRows, newRowCount, prev } = run;
+    const { candidateRows, newRowCount, prev } = run;
+
+    // Local state so ticking a row (or typing a top-up) re-renders ONLY this
+    // subtree IN PLACE — React reconciles the existing DOM nodes, preserving the
+    // user's scroll position. The previous code called eggRerenderJsx() on every
+    // tick, which remounted the WHOLE island (container.innerHTML reset + DB
+    // re-query) and snapped the page back to the top. We still call the chunk
+    // handlers so _eggState stays the source of truth for Phase 3 + commit — we
+    // just skip the remount.
+    const [excluded, setExcluded] = useState(() => {
+        const s = new Set();
+        candidateRows.forEach((r) => { if (r.pushed) s.add(r.unique_key); });
+        return s;
+    });
+    const [topUp, setTopUp] = useState({ GOLD: run.topUp.GOLD, KING: run.topUp.KING });
+
+    const toggleRow = (uniqueKey) => {
+        call('eggToggleExclude', uniqueKey); // keep _eggState.excludedKeys in sync
+        setExcluded((prevSet) => {
+            const next = new Set(prevSet);
+            if (next.has(uniqueKey)) next.delete(uniqueKey); else next.add(uniqueKey);
+            return next;
+        });
+    };
+    const setTopUpVal = (product, val) => {
+        call('eggSetLastWeekTopUp', product, val); // keep _eggState in sync
+        setTopUp((p) => ({ ...p, [product]: Number(val) || 0 }));
+    };
+
+    // Live push-up counter computed from local state (mirrors eggPushUpCounterHtml).
+    const goldSum = candidateRows.filter((r) => r.product === 'GOLD' && excluded.has(r.unique_key)).reduce((s, r) => s + Number(r.quantity || 0), 0);
+    const kingSum = candidateRows.filter((r) => r.product === 'KING' && excluded.has(r.unique_key)).reduce((s, r) => s + Number(r.quantity || 0), 0);
+    const pushUp = { goldSum, kingSum, goldTarget: Number(topUp.GOLD) || 0, kingTarget: Number(topUp.KING) || 0 };
+
     return (
         <>
             <PhaseBanner phase={2} />
@@ -149,18 +182,18 @@ function RunPhase2({ run }) {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', maxWidth: '480px' }}>
                     <div>
                         <label style={{ fontWeight: 600, display: 'block', marginBottom: '4px', fontSize: '13px' }}>GOLD (cartons)</label>
-                        <input type="number" min="0" step="1" defaultValue={topUp.GOLD}
-                            onInput={(e) => call('eggSetLastWeekTopUp', 'GOLD', e.target.value)}
+                        <input type="number" min="0" step="1" defaultValue={run.topUp.GOLD}
+                            onInput={(e) => setTopUpVal('GOLD', e.target.value)}
                             style={{ width: '100%', padding: '8px 12px', border: '1px solid var(--gray-300)', borderRadius: '6px', fontSize: '14px' }} />
                     </div>
                     <div>
                         <label style={{ fontWeight: 600, display: 'block', marginBottom: '4px', fontSize: '13px' }}>KIN / KING (cartons)</label>
-                        <input type="number" min="0" step="1" defaultValue={topUp.KING}
-                            onInput={(e) => call('eggSetLastWeekTopUp', 'KING', e.target.value)}
+                        <input type="number" min="0" step="1" defaultValue={run.topUp.KING}
+                            onInput={(e) => setTopUpVal('KING', e.target.value)}
                             style={{ width: '100%', padding: '8px 12px', border: '1px solid var(--gray-300)', borderRadius: '6px', fontSize: '14px' }} />
                     </div>
                 </div>
-                <PushUpCounter pushUp={run.pushUp} />
+                <PushUpCounter pushUp={pushUp} />
             </div>
 
             <PrevRunPanel prev={prev} />
@@ -193,10 +226,12 @@ function RunPhase2({ run }) {
                             </tr>
                         </thead>
                         <tbody>
-                            {candidateRows.map((r) => (
-                                <tr key={r.unique_key} style={{ borderTop: '1px solid var(--gray-200)', background: r.pushed ? '#fef2f2' : undefined }}>
+                            {candidateRows.map((r) => {
+                                const pushed = excluded.has(r.unique_key);
+                                return (
+                                <tr key={r.unique_key} style={{ borderTop: '1px solid var(--gray-200)', background: pushed ? '#fef2f2' : undefined }}>
                                     <td style={{ padding: '8px' }}>
-                                        <input type="checkbox" checked={r.pushed} onChange={() => callThenRerender('eggToggleExclude', r.unique_key)} />
+                                        <input type="checkbox" checked={pushed} onChange={() => toggleRow(r.unique_key)} />
                                     </td>
                                     <td style={{ padding: '8px' }}>{r.agent_name}</td>
                                     <td style={{ padding: '8px', fontSize: '12px' }}>{r.dateStr}</td>
@@ -206,12 +241,13 @@ function RunPhase2({ run }) {
                                     <td style={{ padding: '8px', textAlign: 'right' }}>{r.quantity}</td>
                                     <td style={{ padding: '8px' }}>{r.channel}</td>
                                     <td style={{ padding: '8px' }}>
-                                        {r.pushed
+                                        {pushed
                                             ? <span style={{ background: '#dc2626', color: 'white', padding: '2px 8px', borderRadius: '10px', fontSize: '11px' }}>PUSHED UP</span>
                                             : '-'}
                                     </td>
                                 </tr>
-                            ))}
+                                );
+                            })}
                         </tbody>
                     </table>
                 )}
