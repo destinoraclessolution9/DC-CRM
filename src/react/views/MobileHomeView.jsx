@@ -137,7 +137,7 @@ function AttentionCard({ rows }) {
         <div className="mhome-card">
             <div className="mhome-card-head">
                 <div className="mhome-card-title"><span className="ico purple"><i className="fas fa-circle-exclamation"></i></span> Needs Your Attention</div>
-                <button className="mhome-card-link" onClick={() => call('openMobileDrawer')}>View All ›</button>
+                <button className="mhome-card-link" onClick={() => call('mhomeOpenFollowups')}>View All ›</button>
             </div>
             {rows.map((r, i) => r.type === 'followup' ? (
                 <div className="mhome-att-row followup" key={i}>

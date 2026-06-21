@@ -1021,7 +1021,7 @@
             <div class="mhome-card">
                 <div class="mhome-card-head">
                     <div class="mhome-card-title"><span class="ico purple"><i class="fas fa-circle-exclamation"></i></span> Needs Your Attention</div>
-                    <button class="mhome-card-link" onclick="app.openMobileDrawer()">View All ›</button>
+                    <button class="mhome-card-link" onclick="app.mhomeOpenFollowups()">View All ›</button>
                 </div>
                 ${rows.join('')}
             </div>`;
