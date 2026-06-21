@@ -3630,6 +3630,58 @@ function _wireLoginBtn() {
     })();
     try { window._ux = _ux; } catch (_) { /* expose for debugging + manual flush */ }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // Predictive prefetch (Phase 3). Reads the aggregate nav-transition model
+    // (crm_nav_predictions RPC — PII-free counts, SECURITY DEFINER) and, on each
+    // navigation, idle-loads the chunk(s) the user is most likely to visit NEXT
+    // from the current view. Degrades gracefully: empty/sparse model → no-op (the
+    // existing hover + post-login tier-1 prefetch still apply). Honors role gating
+    // and chunk-load dedupe. Sharpens automatically as user_events data accrues.
+    // Kill switch: window.__PUX_OFF=true.
+    // ─────────────────────────────────────────────────────────────────────
+    const _pux = (() => {
+        let _map = null;        // from_view -> [predicted next view ids, ranked]
+        let _loading = false;
+        let _loaded = false;
+        const _idle = (cb) => {
+            try { return window.requestIdleCallback ? requestIdleCallback(cb, { timeout: 2500 }) : setTimeout(cb, 300); }
+            catch (_) { return setTimeout(cb, 300); }
+        };
+        const load = async () => {
+            if (_loaded || _loading || window.__PUX_OFF || !_currentUser) return;
+            _loading = true;
+            try {
+                const { data, error } = await window.supabase.rpc('crm_nav_predictions', { p_days: 30, p_top: 3, p_min: 2 });
+                if (!error && Array.isArray(data)) {
+                    const m = {};
+                    data.forEach(r => { if (r && r.from_view && r.to_view) (m[r.from_view] = m[r.from_view] || []).push(r.to_view); });
+                    _map = m;
+                    _loaded = true;
+                }
+            } catch (_) { /* predictions best-effort */ }
+            _loading = false;
+        };
+        const onNavigate = (viewId) => {
+            if (window.__PUX_OFF || !_currentUser) return;
+            if (!_loaded) { load(); return; }   // warm the model now; predictions apply from the next nav
+            const nexts = _map && _map[viewId];
+            if (!nexts || !nexts.length) return;
+            const lvl = _getUserLevel(_currentUser);
+            _idle(() => {
+                nexts.forEach(v => {
+                    try {
+                        const def = _CHUNK_VIEWS[v];
+                        if (!def || !def.src) return;
+                        if (def.exactLevels && !def.exactLevels.includes(lvl)) return; // don't prefetch role-gated chunks the user can't load
+                        _loadChunkOnce(def.src); // internally deduped + in-flight-guarded
+                    } catch (_) { /* per-view best-effort */ }
+                });
+            });
+        };
+        return { load, onNavigate };
+    })();
+    try { window._pux = _pux; } catch (_) { /* expose for debugging */ }
+
     const navigateTo = async (viewId) => {
         UI.hideModal();
         // A11y: announce the view change to assistive tech via the shared polite
@@ -3705,6 +3757,8 @@ function _wireLoginBtn() {
         // User-activity stream: record the transition (PII-free) BEFORE we
         // overwrite _currentView/_lastNavigatedAt, so from_view + dwell are correct.
         try { if (_currentUser && _currentView !== viewId) _ux.nav(_currentView, viewId, _lastNavigatedAt); } catch (_) { /* telemetry best-effort */ }
+        // Predictive prefetch: idle-warm the chunk(s) most likely to be visited next.
+        try { _pux.onNavigate(viewId); } catch (_) { /* prefetch best-effort */ }
         _lastNavigatedAt = Date.now();
         document.querySelectorAll('.nav-links li').forEach(li => {
             li.classList.toggle('active', li.getAttribute('data-view') === viewId);
