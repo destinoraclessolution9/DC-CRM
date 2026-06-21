@@ -287,6 +287,18 @@ function _bufferError(entry) {
         while (buf.length > ERROR_BUFFER_MAX) buf.shift();
         localStorage.setItem(ERROR_BUFFER_KEY, JSON.stringify(buf));
     } catch (_) { /* quota exceeded or SecurityError — best-effort only */ }
+    // Forward to the first-party user-activity stream (PII-safe: truncated
+    // message + source file + line/col; NO full stack). No-op until logged in.
+    try {
+        if (window._ux && window._ux.event) window._ux.event('error', {
+            target: entry.kind || 'error',
+            meta: {
+                msg: String(entry.msg || '').slice(0, 300),
+                src: entry.url ? String(entry.url).slice(0, 200) : undefined,
+                line: entry.line, col: entry.col,
+            },
+        });
+    } catch (_) { /* telemetry best-effort */ }
 }
 
 window.onerror = (msg, url, line, col, err) => {
@@ -3624,7 +3636,7 @@ function _wireLoginBtn() {
                 _push('nav', { from_view: fromView || null, view: toView || null, dwell_ms: dwell });
             },
             search: (resultCount, queryLen) => { _push('search', { view: _currentView || null, meta: { results: (resultCount | 0), len: (queryLen | 0) } }); },
-            event: (type, fields) => { _push(String(type || 'event'), fields || {}); },
+            event: (type, fields) => { ensure(); _push(String(type || 'event'), Object.assign({ view: _currentView || null }, fields || {})); },
             flush: () => _flush(false),
         };
     })();

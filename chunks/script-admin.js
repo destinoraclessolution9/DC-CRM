@@ -114,7 +114,7 @@
         try {
             const { data, error } = await window.supabase
                 .from('user_events')
-                .select('user_id,session_id,event_type,view,from_view,target,dwell_ms,role_level,client_ts,created_at')
+                .select('user_id,session_id,event_type,view,from_view,target,dwell_ms,role_level,client_ts,created_at,meta')
                 .gte('created_at', sinceISO)
                 .order('created_at', { ascending: false })
                 .limit(3000);
@@ -135,6 +135,7 @@
 
         const navs = rows.filter(r => r.event_type === 'nav');
         const clicks = rows.filter(r => r.event_type === 'click');
+        const errors = rows.filter(r => r.event_type === 'error');
         const activeUsers = new Set(rows.map(r => r.user_id).filter(v => v != null));
         const sessions = new Set(rows.map(r => r.session_id).filter(Boolean));
 
@@ -161,6 +162,9 @@
             + '<div style="display:flex;gap:12px;flex-wrap:wrap;margin:16px 0;">'
             + card('Events', rows.length) + card('Navigations', navs.length) + card('Action clicks', clicks.length)
             + card('Active users', activeUsers.size) + card('Sessions', sessions.size)
+            + '<div style="flex:1;min-width:110px;background:var(--surface,#fff);border:1px solid ' + (errors.length ? '#e11d48' : 'var(--border,#e5e7eb)') + ';border-radius:12px;padding:16px;">'
+            + '<div style="font-size:24px;font-weight:700;line-height:1;color:' + (errors.length ? '#e11d48' : 'inherit') + ';">' + errors.length + '</div>'
+            + '<div style="font-size:11px;color:var(--muted-text,#6b7280);text-transform:uppercase;letter-spacing:.05em;margin-top:6px;">JS errors</div></div>'
             + '</div>';
 
         html += '<h3 style="margin:20px 0 8px;">Navigation flow <span style="font-size:12px;color:var(--muted-text,#6b7280);font-weight:400;">— where users go next (drives predictive preloading)</span></h3>'
@@ -173,6 +177,18 @@
             + (topActs.length ? topActs.map(t => '<tr><td>' + esc(t[0]) + '</td><td style="text-align:right;font-variant-numeric:tabular-nums;">' + t[1] + '</td></tr>').join('') : '<tr><td colspan="2">No action clicks recorded yet.</td></tr>')
             + '</tbody></table>';
 
+        if (errors.length) {
+            html += '<h3 style="margin:20px 0 8px;color:#e11d48;">Recent errors <span style="font-size:12px;color:var(--muted-text,#6b7280);font-weight:400;">— uncaught JS exceptions &amp; rejected promises (PII-free)</span></h3>'
+                + '<table class="audit-table" style="width:100%;"><thead><tr><th scope="col">Time</th><th scope="col">User</th><th scope="col">Type</th><th scope="col">Message</th><th scope="col">Where</th></tr></thead><tbody>'
+                + errors.slice(0, 40).map(r => {
+                    const t = r.created_at ? new Date(r.created_at).toLocaleString() : '—';
+                    const m = (r.meta && r.meta.msg) ? r.meta.msg : '';
+                    const where = (r.meta && r.meta.src) ? (String(r.meta.src).split('/').pop() + (r.meta.line ? ':' + r.meta.line : '')) : (r.view || '');
+                    return '<tr><td style="white-space:nowrap;">' + esc(t) + '</td><td>' + esc(nameOf(r.user_id)) + '</td><td>' + esc(r.target || 'error') + '</td><td>' + esc(m) + '</td><td>' + esc(where) + '</td></tr>';
+                }).join('')
+                + '</tbody></table>';
+        }
+
         html += '<h3 style="margin:20px 0 8px;">Recent events</h3>'
             + '<table class="audit-table" style="width:100%;"><thead><tr><th scope="col">Time</th><th scope="col">User</th><th scope="col">Type</th><th scope="col">Detail</th></tr></thead><tbody>'
             + rows.slice(0, 120).map(r => {
@@ -181,6 +197,7 @@
                 if (r.event_type === 'nav') detail = (r.from_view || '∅') + ' → ' + (r.view || '∅') + (r.dwell_ms != null ? ' · ' + fmtDur(r.dwell_ms) : '');
                 else if (r.event_type === 'click') detail = r.target || '';
                 else if (r.event_type === 'search') detail = 'search · ' + (r.view || '');
+                else if (r.event_type === 'error') detail = '⚠ ' + (r.target || 'error') + ': ' + ((r.meta && r.meta.msg) ? r.meta.msg : '');
                 else detail = r.view || '';
                 return '<tr><td style="white-space:nowrap;">' + esc(t) + '</td><td>' + esc(nameOf(r.user_id)) + '</td><td>' + esc(r.event_type) + '</td><td>' + esc(detail) + '</td></tr>';
             }).join('')
