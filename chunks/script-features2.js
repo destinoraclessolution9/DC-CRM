@@ -288,9 +288,31 @@ const _runWeeklyInactivityCheck = async () => {
     try {
         const prospects = await AppDataStore.getAll('prospects');
         const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+        // Cross-client idempotency guard. The localStorage flag above only stops
+        // THIS browser from re-sweeping; a different device/browser opened in the
+        // same ISO week would still double-deduct each prospect. Pull the prospects
+        // already given a weekly-inactivity penalty since Monday 00:00 (any client)
+        // and skip them, making the -5 idempotent per prospect per week across all
+        // clients. Best-effort: if the read fails we fall back to the per-browser
+        // guard alone (prior behaviour).
+        const _weekStart = new Date(); _weekStart.setHours(0, 0, 0, 0);
+        _weekStart.setDate(_weekStart.getDate() - (_weekStart.getDay() + 6) % 7); // back up to Monday
+        const penalizedThisWeek = new Set();
+        try {
+            const { data: _recent } = await window.supabase
+                .from('score_history')
+                .select('entity_id')
+                .eq('entity_type', 'prospect')
+                .ilike('reason', 'Weekly inactivity%')
+                .gte('created_at', _weekStart.toISOString());
+            (_recent || []).forEach(r => penalizedThisWeek.add(String(r.entity_id)));
+        } catch (_) { /* fall back to per-browser localStorage guard */ }
+
         let count = 0;
         for (const p of prospects) {
             if (p.unable_to_serve || p.status === 'converted' || p.status === 'lost') continue;
+            if (penalizedThisWeek.has(String(p.id))) continue; // already deducted this week on another client
             const lastAct = p.last_activity_date;
             if (!lastAct || lastAct < cutoff) {
                 await addScoreToProspect(p.id, SCORING_RULES.WEEKLY_INACTIVITY, 'Weekly inactivity — no activity for 7+ days');

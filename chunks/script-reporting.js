@@ -228,8 +228,284 @@
                     <h3 class="kpi-card-title">Activity Attendance Breakdown</h3>
                     <div id="activity-attendance-details"><!-- Loaded by refreshKPIDashboard --></div>
                 </div>
+
+                <!-- Weekly Monday Report — built/filled by _renderNonGrid into #weekly-monday-report -->
+                <div id="weekly-monday-report" style="margin-top:16px;"></div>
             </div>
 `;
+
+    // ==================== WEEKLY MONDAY REPORT ====================
+    // A copy-ready message block the team sends out every Monday, rendered at the
+    // very bottom of the Reporting KPI tab. Figures are entered manually (the
+    // abbreviations are business-internal — see the response notes for the data
+    // mapping still to be confirmed before any are auto-filled from the CRM). The
+    // week label auto-advances each Monday, the two section "Total" lines auto-sum
+    // live, a monospace preview shows exactly what will be sent, and a draft is
+    // persisted to localStorage per user (reset automatically when the week rolls
+    // over). Rendered by id so it works in BOTH the legacy and React shell paths.
+
+    // Most recent Monday (today if today is Monday, else the Monday just passed).
+    const _wrMostRecentMonday = () => {
+        const d = new Date();
+        const day = d.getDay();                 // 0 Sun … 6 Sat
+        const back = (day === 0) ? 6 : (day - 1);
+        d.setDate(d.getDate() - back);
+        d.setHours(0, 0, 0, 0);
+        return d;
+    };
+    // "W{n} {Month} {Year}" — n is the ordinal week of the month (ceil(date/7)).
+    const _weeklyReportLabel = () => {
+        const m = _wrMostRecentMonday();
+        const wk = Math.ceil(m.getDate() / 7);
+        const month = m.toLocaleString('en-US', { month: 'long' });
+        return `W${wk} ${month} ${m.getFullYear()}`;
+    };
+
+    // Field spec — single source of truth for the form, totals and copy-text so
+    // they never drift. type: 'in' editable figure, 'sub' indented sub-figure,
+    // 'gap' blank spacer. Section 1 & 2 carry a computed `total`; section 3 a
+    // grand `tto` (entered manually — its arithmetic is unconfirmed).
+    const _WR_SECTIONS = [
+        {
+            sumKey: 'wr-s1-total',
+            rows: [
+                { k: 'cps',  label: 'CPS' },
+                { k: 'pja',  label: 'PJA/EA/RM' },
+                { k: 'cs_n', label: 'CS (N)' },
+                { k: 'cs_g', label: '(G)', sub: true },
+                { k: 'mt',   label: 'MT' },
+                { k: 'tr',   label: 'TR' },
+                { k: 'cr',   label: 'CR' },
+            ],
+        },
+        {
+            sumKey: 'wr-s2-total',
+            rows: [
+                { k: 'cf',    label: 'CF' },
+                { k: 'ft_n',  label: 'FT (N)' },
+                { k: 'ft_kk', label: '(KK)', sub: true },
+                { k: 'it',    label: 'IT' },
+                { k: 'hj',    label: 'HJ' },
+                { k: 'rs',    label: 'RS' },
+                { k: 'mz',    label: 'MZ' },
+                { k: 'tx',    label: 'TX' },
+            ],
+        },
+        {
+            grand: { k: 'tto', label: 'TTO' },
+            rows: [
+                { k: 'pd_do',      label: 'PD (DO)' },
+                { k: 'pd_po',      label: '(PO)', sub: true },
+                { k: 'sr_do',      label: 'SR (DO)' },
+                { k: 'sr_po',      label: '(PO)', sub: true },
+                { k: '_gap1',      gap: true },
+                { k: 'por',        label: 'POR' },
+                { k: 'nc',         label: 'NC' },
+                { k: 'rmt',        label: 'RMT' },
+                { k: 'port_dp',    label: 'PORT (DP)' },
+                { k: 'port_total', label: '(TOTAL)', sub: true },
+            ],
+        },
+    ];
+
+    const _wrGet = (k) => {
+        const el = document.getElementById('wr-' + k);
+        if (!el) return 0;
+        const n = parseFloat(el.value);
+        return Number.isFinite(n) ? n : 0;
+    };
+    const _wrFmt = (n) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100));
+
+    // Build the plain-text message exactly in the supplied format (aligned columns
+    // + em-dash dividers) so it pastes cleanly into a chat group.
+    const _buildWeeklyReportText = () => {
+        const W = 12;
+        const lbl = (s) => s.padEnd(W);
+        const sub = (s) => ('   ' + s).padEnd(W);
+        const div = '—'.repeat(12);
+        const g = _wrGet;
+        const out = [];
+        const week = (document.getElementById('wr-week-label') || {}).value || _weeklyReportLabel();
+        out.push(week, '');
+        _WR_SECTIONS.forEach((sec) => {
+            sec.rows.forEach((r) => {
+                if (r.gap) { out.push(''); return; }
+                out.push((r.sub ? sub(r.label) : lbl(r.label)) + _wrFmt(g(r.k)));
+            });
+            if (sec.grand || sec.sumKey) {
+                out.push(div);
+                if (sec.sumKey) {
+                    const sum = sec.rows.reduce((a, r) => a + (r.gap ? 0 : g(r.k)), 0);
+                    out.push(lbl('Total') + _wrFmt(sum));
+                } else if (sec.grand) {
+                    out.push(lbl(sec.grand.label) + _wrFmt(g(sec.grand.k)));
+                }
+                out.push('');
+            }
+        });
+        // Trim the trailing blank line.
+        while (out.length && out[out.length - 1] === '') out.pop();
+        return out.join('\n');
+    };
+
+    const _wrDraftKey = () => `weekly-rpt-draft-${(_state.cu && _state.cu.id) || 'anon'}`;
+    const _saveWeeklyReportDraft = () => {
+        try {
+            const vals = {};
+            document.querySelectorAll('#weekly-monday-report input.wr-input').forEach((i) => { vals[i.id] = i.value; });
+            const labelEl = document.getElementById('wr-week-label');
+            localStorage.setItem(_wrDraftKey(), JSON.stringify({ label: labelEl ? labelEl.value : '', vals }));
+        } catch (_) { /* localStorage may be unavailable */ }
+    };
+    const _restoreWeeklyReportDraft = () => {
+        try {
+            const raw = localStorage.getItem(_wrDraftKey());
+            if (!raw) return;
+            const saved = JSON.parse(raw);
+            // A new week → start with a blank report (don't carry last week's figures).
+            if (saved.label && saved.label !== _weeklyReportLabel()) return;
+            if (saved.vals) Object.keys(saved.vals).forEach((id) => {
+                const e = document.getElementById(id);
+                if (e && e.classList.contains('wr-input')) e.value = saved.vals[id];
+            });
+        } catch (_) { /* ignore corrupt draft */ }
+    };
+
+    // Recompute the two section totals + refresh the live preview + persist draft.
+    const recalcWeeklyReport = () => {
+        _WR_SECTIONS.forEach((sec) => {
+            if (!sec.sumKey) return;
+            const sum = sec.rows.reduce((a, r) => a + (r.gap ? 0 : _wrGet(r.k)), 0);
+            const el = document.getElementById(sec.sumKey);
+            if (el) el.textContent = _wrFmt(sum);
+        });
+        const pre = document.getElementById('wr-preview');
+        if (pre) pre.textContent = _buildWeeklyReportText();
+        _saveWeeklyReportDraft();
+    };
+
+    const copyWeeklyReport = async () => {
+        const txt = _buildWeeklyReportText();
+        try {
+            await navigator.clipboard.writeText(txt);
+            UI.toast.success('Weekly report copied — paste it into your reporting group');
+            return;
+        } catch (_) { /* fall back to execCommand below */ }
+        try {
+            const ta = document.createElement('textarea');
+            ta.value = txt;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            const ok = document.execCommand('copy');
+            ta.remove();
+            if (ok) UI.toast.success('Weekly report copied');
+            else UI.toast.error('Copy failed — select the preview text and copy manually');
+        } catch (e) {
+            UI.toast.error('Copy failed — select the preview text and copy manually');
+        }
+    };
+
+    const resetWeeklyReport = () => {
+        document.querySelectorAll('#weekly-monday-report input.wr-input').forEach((i) => { i.value = ''; });
+        recalcWeeklyReport();
+    };
+
+    // Builds one figure row (editable). Sub rows are indented + dimmed.
+    const _wrRow = (r) => {
+        if (r.gap) return `<div class="wr-gap"></div>`;
+        return `
+            <div class="wr-row${r.sub ? ' wr-sub' : ''}">
+                <label class="wr-lbl" for="wr-${r.k}">${escapeHtml(r.label)}</label>
+                <input type="number" step="any" inputmode="decimal" id="wr-${r.k}" class="wr-input"
+                       value="" placeholder="0" oninput="app.recalcWeeklyReport()">
+            </div>`;
+    };
+
+    const _buildWeeklyReportSection = () => {
+        const week = escapeHtml(_weeklyReportLabel());
+        const sectionsHtml = _WR_SECTIONS.map((sec) => {
+            const rows = sec.rows.map(_wrRow).join('');
+            let footer = '';
+            if (sec.sumKey) {
+                footer = `
+                    <div class="wr-divider"></div>
+                    <div class="wr-row wr-total-row">
+                        <span class="wr-lbl">Total</span>
+                        <span class="wr-input wr-total-val" id="${sec.sumKey}">0</span>
+                    </div>`;
+            } else if (sec.grand) {
+                footer = `
+                    <div class="wr-divider"></div>
+                    <div class="wr-row wr-grand-row">
+                        <label class="wr-lbl" for="wr-${sec.grand.k}">${escapeHtml(sec.grand.label)}</label>
+                        <input type="number" step="any" inputmode="decimal" id="wr-${sec.grand.k}" class="wr-input wr-grand-val"
+                               value="" placeholder="0" oninput="app.recalcWeeklyReport()">
+                    </div>`;
+            }
+            return `<div class="wr-section">${rows}${footer}</div>`;
+        }).join('');
+
+        return `
+        <style>
+        .weekly-report-card{background:var(--white,#fff);border:1px solid var(--gray-200,#e5e7eb);border-radius:14px;padding:20px 22px;box-shadow:var(--shadow-sm,0 1px 2px rgba(0,0,0,.05));}
+        .weekly-report-card .wr-head{display:flex;flex-wrap:wrap;align-items:center;gap:12px;justify-content:space-between;margin-bottom:6px;}
+        .weekly-report-card .wr-title{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:700;color:var(--gray-900,#111827);margin:0;}
+        .weekly-report-card .wr-title i{color:var(--primary,#0D9488);}
+        .weekly-report-card .wr-week{font:600 14px/1.2 inherit;border:1px solid var(--gray-300,#d1d5db);border-radius:8px;padding:7px 10px;color:var(--gray-900,#111827);background:var(--gray-50,#f9fafb);min-width:160px;}
+        .weekly-report-card .wr-note{font-size:12.5px;color:var(--gray-500,#6b7280);margin:0 0 16px;}
+        .weekly-report-card .wr-body{display:grid;grid-template-columns:minmax(280px,1fr) minmax(260px,0.9fr);gap:22px;align-items:start;}
+        .weekly-report-card .wr-form{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;}
+        .weekly-report-card .wr-section{border:1px solid var(--gray-200,#e5e7eb);border-radius:10px;padding:10px 12px;background:var(--gray-50,#f9fafb);}
+        .weekly-report-card .wr-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:3px 0;}
+        .weekly-report-card .wr-sub{padding-left:14px;}
+        .weekly-report-card .wr-sub .wr-lbl{color:var(--gray-500,#6b7280);}
+        .weekly-report-card .wr-lbl{font-size:13px;font-weight:600;color:var(--gray-700,#374151);white-space:nowrap;}
+        .weekly-report-card .wr-input{width:78px;text-align:right;font:600 13px/1 inherit;border:1px solid var(--gray-300,#d1d5db);border-radius:7px;padding:6px 8px;color:var(--gray-900,#111827);background:var(--white,#fff);}
+        .weekly-report-card .wr-input:focus{outline:none;border-color:var(--primary,#0D9488);box-shadow:0 0 0 3px rgba(13,148,136,.15);}
+        .weekly-report-card .wr-gap{height:10px;}
+        .weekly-report-card .wr-divider{border-top:1px dashed var(--gray-300,#d1d5db);margin:7px 0;}
+        .weekly-report-card .wr-total-row .wr-lbl,.weekly-report-card .wr-grand-row .wr-lbl{font-weight:700;color:var(--gray-900,#111827);}
+        .weekly-report-card .wr-total-val{display:inline-flex;justify-content:flex-end;align-items:center;min-width:78px;background:var(--gray-100,#f3f4f6);border-color:transparent;font-weight:700;}
+        .weekly-report-card .wr-grand-val{border-color:var(--primary,#0D9488);font-weight:700;}
+        .weekly-report-card .wr-preview-wrap{display:flex;flex-direction:column;gap:10px;}
+        .weekly-report-card .wr-preview{margin:0;background:#0f172a;color:#e2e8f0;border-radius:10px;padding:14px 16px;font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;overflow:auto;max-height:520px;}
+        .weekly-report-card .wr-actions{display:flex;gap:10px;flex-wrap:wrap;}
+        @media (max-width:880px){.weekly-report-card .wr-body{grid-template-columns:1fr;}.weekly-report-card .wr-form{grid-template-columns:1fr;}}
+        </style>
+        <div class="weekly-report-card kpi-card">
+            <div class="wr-head">
+                <h3 class="wr-title"><i class="fas fa-calendar-day"></i> Weekly Report — Monday</h3>
+                <input type="text" id="wr-week-label" class="wr-week" value="${week}"
+                       aria-label="Report week" oninput="app.recalcWeeklyReport()">
+            </div>
+            <p class="wr-note">Auto-generated every Monday. Fill in the week's figures, then <strong>Copy report</strong> to send it out. The week label and the two section <em>Totals</em> update automatically; your draft is saved until the next Monday.</p>
+            <div class="wr-body">
+                <div class="wr-form">${sectionsHtml}</div>
+                <div class="wr-preview-wrap">
+                    <div class="wr-actions">
+                        <button class="btn primary" onclick="app.copyWeeklyReport()"><i class="fas fa-copy"></i> Copy report</button>
+                        <button class="btn secondary" onclick="app.resetWeeklyReport()"><i class="fas fa-eraser"></i> Reset</button>
+                    </div>
+                    <pre class="wr-preview" id="wr-preview"></pre>
+                </div>
+            </div>
+        </div>`;
+    };
+
+    // Build + restore + compute the weekly report into #weekly-monday-report.
+    // Built once per mounted shell (guarded by data-built) so an unrelated filter
+    // refresh never wipes figures the user is mid-entry on; the React-grid path
+    // re-mounts a fresh node, so it rebuilds there correctly.
+    const renderWeeklyReport = () => {
+        const el = document.getElementById('weekly-monday-report');
+        if (!el || el.dataset.built === '1') return;
+        el.innerHTML = _buildWeeklyReportSection();
+        el.dataset.built = '1';
+        _restoreWeeklyReportDraft();
+        recalcWeeklyReport();
+    };
 
     const showKPIDashboard = async (container) => {
         // The "Set Yearly/Quarterly Targets" buttons call app.openKPITargetsModal /
@@ -635,6 +911,8 @@
                     targetSection.innerHTML = '';
                 }
             })(),
+            // Weekly Monday report (manual-entry message block at the very bottom).
+            (async () => { try { renderWeeklyReport(); } catch (e) { console.warn('renderWeeklyReport failed:', e); } })(),
         ]);
     };
 
@@ -2880,5 +3158,10 @@ const exportKPIReport = async (format) => {
         refreshKPIDashboard,
         renderKPITargetComparison,
         renderYearlyTargetRows,
+        // Weekly Monday report
+        renderWeeklyReport,
+        recalcWeeklyReport,
+        copyWeeklyReport,
+        resetWeeklyReport,
     });
 })();

@@ -4266,6 +4266,12 @@
                 ...basic,
                 score: SCORING_RULES.CREATE_PROSPECT,
                 responsible_agent_id: _state.cu?.id || null,
+                // Parity with the normal Add-Prospect path: seed CPS protection +
+                // pipeline so intake-born prospects aren't born "Expired" and stay
+                // tier-eligible for the event-invite automation (keys off cps_assignment_date).
+                cps_assignment_date: new Date().toISOString().split('T')[0],
+                protection_deadline: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+                pipeline_stage: 'new',
                 referred_by_id: _state.sr?.id || null,
                 referred_by_type: _state.sr?.type || null,
                 referred_by: _state.sr?.name || document.getElementById('cps-referrer')?.value || '',

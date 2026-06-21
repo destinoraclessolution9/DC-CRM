@@ -179,6 +179,9 @@ export function ReportsView({ isTeamLeader = false, currentTimeFilter = 'monthly
                 <h3 className="kpi-card-title">Activity Attendance Breakdown</h3>
                 <div id="activity-attendance-details"></div>
             </div>
+
+            {/* Weekly Monday report — built/filled by the chunk's renderWeeklyReport() */}
+            <div id="weekly-monday-report" style={{ marginTop: '16px' }}></div>
         </div>
     );
 }
