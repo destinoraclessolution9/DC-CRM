@@ -1719,7 +1719,10 @@ const Auth = {
         try {
             for (let i = localStorage.length - 1; i >= 0; i--) {
                 const k = localStorage.key(i);
-                if (k && k.startsWith('fs_crm_')) localStorage.removeItem(k);
+                // cal-snap-* holds the desktop calendar month grid pre-rendered
+                // with the prior user's scope baked in — purge it alongside the
+                // fs_crm_* table snapshots so it can't bleed into the next login.
+                if (k && (k.startsWith('fs_crm_') || k.startsWith('cal-snap-'))) localStorage.removeItem(k);
             }
         } catch (_) { /* intentional: best-effort cache wipe on logout */ }
         try { if (window.caches) caches.delete('crm-data-v1'); } catch (_) { /* intentional: best-effort Cache Storage wipe */ }
@@ -1751,7 +1754,7 @@ const Auth = {
             try {
                 for (let i = localStorage.length - 1; i >= 0; i--) {
                     const k = localStorage.key(i);
-                    if (k && k.startsWith('fs_crm_')) localStorage.removeItem(k);
+                    if (k && (k.startsWith('fs_crm_') || k.startsWith('cal-snap-'))) localStorage.removeItem(k);
                 }
             } catch (_) { /* best-effort cross-user snapshot purge */ }
             try { if (window.AppDataStore && typeof AppDataStore.clearCache === 'function') AppDataStore.clearCache(); } catch (_) { /* best-effort */ }

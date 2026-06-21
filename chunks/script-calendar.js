@@ -2120,7 +2120,13 @@
         // Tier 1.4: TTL extended 30m → 8h to match mobile (mcal-snap), and SWR
         // pattern — stale snapshot still paints instantly, fresh data swaps in
         // silently when it arrives. Stale beats blank.
-        const _calSnapKey = `cal-snap-${_state.cd.getFullYear()}-${_state.cd.getMonth()}`;
+        // Namespaced by user id: the snapshot is rendered with the viewer's
+        // role/group scope already baked in (ownership gate + RPC scope), so it
+        // MUST NOT be read back by a different user on a shared device. Without
+        // the uid prefix, a higher-scope user's cached month (e.g. an admin who
+        // sees every agent's activities) would paint for the next, lower-scope
+        // login — most visibly in offline mode, where no scoped RPC swaps it out.
+        const _calSnapKey = `cal-snap-${_state.cu?.id || 'anon'}-${_state.cd.getFullYear()}-${_state.cd.getMonth()}`;
         const _CAL_SNAP_TTL_MS = 8 * 60 * 60 * 1000; // 8h
         const _calSnap = (() => {
             try {
