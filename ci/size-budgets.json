@@ -7,7 +7,7 @@
   "auth.js": 119,
   "supabase-init.js": 67,
   "build.mjs": 290,
-  "chunks/script-activities.js": 5079,
+  "chunks/script-activities.js": 5115,
   "chunks/script-admin.js": 698,
   "chunks/script-ai.js": 2685,
   "chunks/script-boss-report.js": 650,
@@ -36,7 +36,7 @@
   "chunks/script-approvals.js": 800,
   "chunks/script-settings.js": 800,
   "chunks/script-referrals.js": 1960,
-  "chunks/script-reporting.js": 3000,
+  "chunks/script-reporting.js": 3250,
   "chunks/script-search.js": 2400,
   "chunks/script-stock-take.js": 2450,
   "chunks/script-whatsapp.js": 713

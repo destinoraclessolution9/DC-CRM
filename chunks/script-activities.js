@@ -96,38 +96,11 @@
         _state.pcts = Date.now();
         return _state.pc;
     };
-    // Entity-search lookup cache (prospects + customers + agents) for the
-    // "Select Existing Prospect/Customer" box. Re-fetching + re-mapping all three
-    // tables on EVERY keystroke is what made the search freeze for seconds on
-    // mobile — and for scoped users each call fired 3 server round-trips. Fetch
-    // once per modal session, dedupe concurrent callers, and reuse for typing.
-    // Invalidated on openActivityModal so a just-added prospect still shows up.
-    const _getSearchEntitiesCached = async () => {
-        const now = Date.now();
-        if (_state.sec && (now - _state.sects) < _LOOKUP_CACHE_TTL_MS) return _state.sec;
-        if (_state.secp) return _state.secp; // in-flight dedup — avoid parallel fetches
-        _state.secp = (async () => {
-            const [visibleProspects, visibleCustomers, allUsers] = await Promise.all([
-                getVisibleProspects(),
-                getVisibleCustomers(),
-                AppDataStore.getAll('users'),
-            ]);
-            const visibleAgents = (allUsers || []).filter(u => isAgent(u));
-            const combined = [
-                ...(visibleProspects || []).map(p => ({ ...p, type: 'Prospect' })),
-                ...(visibleCustomers || []).map(c => ({ ...c, type: 'Customer' })),
-                ...visibleAgents.map(a => ({ ...a, type: 'Agent' })),
-            ];
-            _state.sec = combined;
-            _state.sects = Date.now();
-            return combined;
-        })();
-        try {
-            return await _state.secp;
-        } finally {
-            _state.secp = null;
-        }
-    };
+    // NOTE: the "Select Existing Prospect/Customer" box no longer pre-downloads
+    // the whole visible prospect+customer set on modal-open and filters it in
+    // memory. That froze for seconds on mobile, silently missed dormant prospects
+    // and anyone past the 1000-row getAll cap. It now runs a per-keystroke,
+    // scope-injected, server-side trigram search — see _runEntitySearch below.
 
     // ========== PHASE 2: ACTIVITY MODAL FUNCTIONS ==========
 
@@ -388,13 +361,6 @@
         _state.se = null;
         _state.sr = null;
         window._cpsDuplicateConfirmed = false;
-
-        // Warm the prospect/customer search cache in the background so the
-        // "Select Existing Prospect/Customer" box answers instantly on the first
-        // keystroke instead of freezing on a multi-table fetch mid-typing.
-        // Reset the timestamp first so a freshly-added prospect is re-fetched.
-        _state.sects = 0;
-        _getSearchEntitiesCached().catch(() => {});
 
         // Pre-fetch lookup data BEFORE building the template (safer than await inside template literals).
         // Cached helpers turn this from two network round-trips per modal open into
@@ -3622,34 +3588,102 @@
 
     const _runEntitySearch = async () => {
         const raw = document.getElementById('entity-search')?.value || '';
-        const searchTerm = raw.toLowerCase().trim();
+        const searchTerm = raw.trim();
         const resultsDiv = document.getElementById('search-results');
         if (!searchTerm || searchTerm.length < 2) {
             if (resultsDiv) resultsDiv.style.display = 'none';
             return;
         }
 
-        // Search prospects, customers, and agents — served from the per-session
-        // cache (warmed on modal open) so this is an instant in-memory filter.
         const seq = ++_entitySearchSeq;
-        const all = await _getSearchEntitiesCached();
+
+        // Immediate affordance — a slow NANO round-trip shouldn't look frozen.
+        if (resultsDiv) {
+            resultsDiv.innerHTML = '<div class="search-result-item" style="color:#888;cursor:default;">Searching…</div>';
+            resultsDiv.style.display = 'block';
+        }
+
+        // Per-keystroke server-side trigram search (idx_prospects_*_trgm) instead of
+        // downloading the whole visible table on modal-open + filtering in memory —
+        // faster on mobile, and finds dormant / >1000-cap rows the old filter missed.
+        // SCOPE TRAP: queryAdvanced does NOT self-scope — the live Prospects list
+        // filters by responsible_agent_id ∈ visibleIds *client-side* (script-prospects.js).
+        // Push that scope INTO the query (before the limit) so no cross-agent
+        // prospect leaks into a scoped picker. Both tables scope on
+        // responsible_agent_id (customers' "legacy agent_id" that
+        // getVisibleCustomers references does NOT exist on the live schema —
+        // verified 2026-06-21 — and referencing it 400s the query).
+        //   'all'  (admin / L≤2)        ⇒ no scope clause, see everything
+        //   [ids]  (non-admin)          ⇒ .in(responsible_agent_id, ids)
+        //   []     (no user / error)    ⇒ FAIL CLOSED — show nothing, never
+        //                                 fall through to an unscoped query.
+        let visibleIds = [];
+        try { visibleIds = await getVisibleUserIds(_state.cu); } catch (_) { visibleIds = []; }
+        const adminScope = visibleIds === 'all';
+        const scopeIds = Array.isArray(visibleIds) ? visibleIds : [];
+        if (!adminScope && scopeIds.length === 0) {
+            if (seq === _entitySearchSeq && resultsDiv) {
+                resultsDiv.innerHTML = `
+                    <div class="search-result-item" style="color:#888;cursor:default;">
+                        No results found for "<strong>${escapeHtml(raw)}</strong>".
+                    </div>`;
+                resultsDiv.style.display = 'block';
+            }
+            return;
+        }
+
+        const prospOpts = {
+            search: searchTerm,
+            searchFields: ['full_name', 'nickname', 'phone', 'email'],
+            sort: 'last_activity_date', sortDir: 'desc',
+            limit: 20, countMode: null,
+            select: 'id,full_name,nickname,phone,email,responsible_agent_id',
+        };
+        const custOpts = {
+            search: searchTerm,
+            searchFields: ['full_name', 'nickname', 'phone', 'email'],
+            limit: 20, countMode: null,
+            select: 'id,full_name,nickname,phone,email,responsible_agent_id',
+        };
+        if (!adminScope) {
+            prospOpts.scopeField = 'responsible_agent_id';
+            prospOpts.scopeValues = scopeIds;
+            custOpts.scopeField = 'responsible_agent_id';
+            custOpts.scopeValues = scopeIds;
+        }
+
+        const [prospects, customers, allUsers] = await Promise.all([
+            AppDataStore.queryAdvanced('prospects', prospOpts).then(r => r.data || []).catch(() => []),
+            AppDataStore.queryAdvanced('customers', custOpts).then(r => r.data || []).catch(() => []),
+            AppDataStore.getAll('users').catch(() => []),
+        ]);
+
         // A newer keystroke superseded this search while data loaded — drop it
         // so a slow response can never clobber fresher results.
         if (seq !== _entitySearchSeq) return;
 
-        // Normalise phone digits for phone-number queries
-        const termDigits = searchTerm.replace(/\D/g, '');
-
-        const matches = all.filter(e => {
-            const name  = (e.full_name  || '').toLowerCase();
-            const nick  = (e.nickname   || '').toLowerCase();
-            const email = (e.email      || '').toLowerCase();
-            const phone = (e.phone      || '').replace(/\D/g, '');
-            return name.includes(searchTerm)
-                || nick.includes(searchTerm)
-                || email.includes(searchTerm)
+        // Agents are a small, app-cached set — filter in memory. They stay globally
+        // visible in the picker (the old combined list included every isAgent user,
+        // un-scoped), so match the prior name/nick/email/phone predicate exactly.
+        const termLc = searchTerm.toLowerCase();
+        const termDigits = termLc.replace(/\D/g, '');
+        const agentMatches = (allUsers || []).filter(u => {
+            if (!isAgent(u)) return false;
+            const name  = (u.full_name || '').toLowerCase();
+            const nick  = (u.nickname  || '').toLowerCase();
+            const email = (u.email     || '').toLowerCase();
+            const phone = (u.phone     || '').replace(/\D/g, '');
+            return name.includes(termLc)
+                || nick.includes(termLc)
+                || email.includes(termLc)
                 || (termDigits.length >= 4 && phone.includes(termDigits));
-        }).slice(0, 10);
+        });
+
+        const matches = [
+            ...prospects.map(p => ({ ...p, type: 'Prospect' })),
+            ...customers.map(c => ({ ...c, type: 'Customer' })),
+            ...agentMatches.map(a => ({ ...a, type: 'Agent' })),
+        ].slice(0, 10);
 
         if (resultsDiv) {
             if (matches.length) {
