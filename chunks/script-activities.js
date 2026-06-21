@@ -47,8 +47,37 @@
     const executeWorkflows          = (...a) => (window.app.executeWorkflows          || (() => Promise.resolve()))(...a);
     // SCORING_RULES constant — exported by script-features2.js. Fallback guards against load order.
     const SCORING_RULES = window.app.SCORING_RULES || { CREATE_PROSPECT: 5, MARK_NOT_INTERESTED: -500 };
-    // buildEventCategoriesField — exported by script-marketing.js (marketing managers only).
-    const buildEventCategoriesField = (...a) => (window.app.buildEventCategoriesField || (() => ''))(...a);
+    // buildEventCategoriesField — marketing (manager-only) chunk exports a copy, but the
+    // CPS/activities event modal is reachable by agents/admins who never load that chunk.
+    // Without a local builder the category field rendered EMPTY while saveCpsNewEvent still
+    // required a category → users were stuck on "At least one category is required". So build
+    // it locally from this chunk's own EVENT_CATEGORIES, deferring to marketing's copy when
+    // that chunk IS loaded so the two never drift.
+    const buildEventCategoriesField = (selected = []) => {
+        if (window.app.buildEventCategoriesField) return window.app.buildEventCategoriesField(selected);
+        const known = new Set(EVENT_CATEGORIES);
+        const sel = new Set(selected);
+        const others = selected.filter(s => !known.has(s));
+        const hasOthers = others.length > 0;
+        const othersText = others.join(', ').replace(/"/g, '&quot;');
+        const items = EVENT_CATEGORIES.map((cat) => `
+            <label style="display:flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid var(--gray-200);border-radius:6px;background:#fff;cursor:pointer;font-size:13px;">
+                <input type="checkbox" class="mkt-event-category-cb" value="${cat.replace(/"/g, '&quot;')}" ${sel.has(cat) ? 'checked' : ''}>
+                <span>${cat}</span>
+            </label>`).join('');
+        return `
+            <div class="form-group">
+                <label>Categories <small class="text-muted">(select one or more)</small></label>
+                <div id="mkt-event-categories" style="display:flex;flex-wrap:wrap;gap:6px;max-height:200px;overflow-y:auto;padding:8px;border:1px solid var(--gray-200);border-radius:6px;background:var(--gray-50,#f9fafb);">
+                    ${items}
+                    <label style="display:flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid var(--gray-200);border-radius:6px;background:#fff;cursor:pointer;font-size:13px;">
+                        <input type="checkbox" id="mkt-event-cat-others-cb" ${hasOthers ? 'checked' : ''} onchange="document.getElementById('mkt-event-cat-others-input').style.display = this.checked ? 'block' : 'none'; if (this.checked) document.getElementById('mkt-event-cat-others-input').focus();">
+                        <span>Others</span>
+                    </label>
+                </div>
+                <input type="text" id="mkt-event-cat-others-input" class="form-control" placeholder="Type custom category, separate multiple with commas" value="${othersText}" style="margin-top:8px;display:${hasOthers ? 'block' : 'none'};">
+            </div>`;
+    };
 
     // Venue/product lookup cache — mirrors the same helpers in script-calendar.js.
     // Both chunks share _state, so whichever chunk loaded first warms the cache for the other.
