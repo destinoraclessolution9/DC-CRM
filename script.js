@@ -3494,6 +3494,142 @@ function _wireLoginBtn() {
     // re-sync. This also fixes the prior latent bug where 5 chunks shared the
     // window._syncProspectsUser key (only the last-loaded was ever re-synced).
 
+    // ─────────────────────────────────────────────────────────────────────
+    // User-activity stream (predictive-UX foundation).
+    // PII-FREE behavioral telemetry: navigation transitions (+dwell), action-
+    // button intents (the app.fn name only) and search counts — batched and
+    // flushed to public.user_events via the user's own RLS-scoped Supabase
+    // session. Stores NO names / phones / notes / search text; only view ids,
+    // fn names, numeric entity ids and counts. Powers app.showUserActivity and
+    // (next phase) predictive chunk + data prefetch. Kill switch: window.__UX_OFF=true.
+    // ─────────────────────────────────────────────────────────────────────
+    const _ux = (() => {
+        let _buf = [];
+        let _sid = null;
+        let _timer = null;
+        let _started = false;
+        let _flushing = false;
+        let _lastClick = { fn: null, t: 0 };
+        const _MAX_BUF = 25;
+        const _FLUSH_MS = 12000;
+        const _NAV_FNS = new Set(['navigateTo', 'goBackFromDetail']);
+
+        const _uuid = () => {
+            try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch (_) { /* fall through */ }
+            return 's_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+        };
+        const _enabled = () => !window.__UX_OFF && !!_currentUser;
+        // users.id is a bigint; coerce non-numeric ids (rare UUID placeholder
+        // profile) to null so an insert never type-errors and drops the batch.
+        const _uid = () => { try { const n = Number(_currentUser && _currentUser.id); return Number.isFinite(n) ? n : null; } catch (_) { return null; } };
+        const _level = () => { try { return _getUserLevel(_currentUser); } catch (_) { return null; } };
+        const _token = () => {
+            try {
+                const raw = localStorage.getItem(window.SUPABASE_AUTH_STORAGE_KEY);
+                if (!raw) return null;
+                const o = JSON.parse(raw);
+                return (o && (o.access_token || (o.currentSession && o.currentSession.access_token))) || null;
+            } catch (_) { return null; }
+        };
+
+        const _push = (type, fields) => {
+            if (!_enabled()) return;
+            try {
+                _buf.push(Object.assign({
+                    user_id: _uid(),
+                    session_id: _sid,
+                    event_type: type,
+                    role_level: _level(),
+                    client_ts: new Date().toISOString(),
+                }, fields || {}));
+            } catch (_) { return; }
+            if (_buf.length >= _MAX_BUF) _flush(false);
+        };
+
+        const _flush = (viaBeacon) => {
+            if (!_buf.length) return;
+            if (viaBeacon) {
+                // pagehide path: async supabase-js can't finish before unload, so
+                // POST directly to PostgREST with keepalive. Needs a live JWT
+                // (anon can't insert under the authenticated-only RLS policy).
+                const batch = _buf; _buf = [];
+                try {
+                    const tok = _token();
+                    if (!tok) return;
+                    fetch((window.SUPABASE_URL || '') + '/rest/v1/user_events', {
+                        method: 'POST', keepalive: true,
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'apikey': window.__SUPABASE_ANON || '',
+                            'Authorization': 'Bearer ' + tok,
+                            'Prefer': 'return=minimal',
+                        },
+                        body: JSON.stringify(batch),
+                    }).catch(() => { });
+                } catch (_) { /* best-effort */ }
+                return;
+            }
+            if (_flushing) return;
+            _flushing = true;
+            const batch = _buf; _buf = [];
+            Promise.resolve()
+                .then(() => window.supabase.from('user_events').insert(batch))
+                .catch(() => { /* best-effort telemetry; drop batch on failure */ })
+                .then(() => { _flushing = false; });
+        };
+
+        const ensure = () => {
+            if (_started || !_enabled()) return;
+            _started = true;
+            _sid = _uuid();
+            _push('session_start', {
+                view: _currentView || null,
+                meta: { mobile: !!(window.matchMedia && window.matchMedia('(max-width: 768px)').matches), tz_off: new Date().getTimezoneOffset() },
+            });
+            try { _timer = setInterval(() => _flush(false), _FLUSH_MS); } catch (_) { /* timer best-effort */ }
+            try {
+                document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') _flush(false); });
+                window.addEventListener('pagehide', () => _flush(true), { capture: true });
+            } catch (_) { /* lifecycle best-effort */ }
+        };
+
+        // Passive, capture-phase intent capture. Reads the already-fired inline
+        // onclick="app.fn(...)" of the nearest actionable ancestor — never
+        // intercepts, never preventDefault (passive) — so existing handlers and
+        // the idle-logout reset are untouched. Captures the fn NAME only (no args).
+        try {
+            document.addEventListener('click', (e) => {
+                if (!_enabled()) return;
+                ensure();
+                let el = null;
+                try { el = (e.target && e.target.closest) ? e.target.closest('[onclick]') : null; } catch (_) { return; }
+                if (!el) return;
+                const m = (el.getAttribute('onclick') || '').match(/app\.([A-Za-z0-9_]+)/);
+                if (!m) return;
+                const fn = m[1];
+                if (_NAV_FNS.has(fn)) return; // navigation is captured by nav()
+                const now = Date.now();
+                if (_lastClick.fn === fn && (now - _lastClick.t) < 400) return; // de-dupe double-fire
+                _lastClick = { fn: fn, t: now };
+                _push('click', { target: fn, view: _currentView || null });
+            }, { capture: true, passive: true });
+        } catch (_) { /* capture best-effort */ }
+
+        return {
+            ensure,
+            nav: (fromView, toView, prevTs) => {
+                if (!_enabled()) return;
+                ensure();
+                const dwell = (prevTs && prevTs > 0) ? Math.min(Date.now() - prevTs, 3600000) : null;
+                _push('nav', { from_view: fromView || null, view: toView || null, dwell_ms: dwell });
+            },
+            search: (resultCount, queryLen) => { _push('search', { view: _currentView || null, meta: { results: (resultCount | 0), len: (queryLen | 0) } }); },
+            event: (type, fields) => { _push(String(type || 'event'), fields || {}); },
+            flush: () => _flush(false),
+        };
+    })();
+    try { window._ux = _ux; } catch (_) { /* expose for debugging + manual flush */ }
+
     const navigateTo = async (viewId) => {
         UI.hideModal();
         // A11y: announce the view change to assistive tech via the shared polite
@@ -3566,6 +3702,9 @@ function _wireLoginBtn() {
         // Stamp the navigation time so initSync can suppress the SWR
         // revalidation refresh that would otherwise blow away the DOM 1–3s
         // after the page paints (visible flash / lost scroll position).
+        // User-activity stream: record the transition (PII-free) BEFORE we
+        // overwrite _currentView/_lastNavigatedAt, so from_view + dwell are correct.
+        try { if (_currentUser && _currentView !== viewId) _ux.nav(_currentView, viewId, _lastNavigatedAt); } catch (_) { /* telemetry best-effort */ }
         _lastNavigatedAt = Date.now();
         document.querySelectorAll('.nav-links li').forEach(li => {
             li.classList.toggle('active', li.getAttribute('data-view') === viewId);
@@ -5255,6 +5394,7 @@ Object.assign(window.app, {
     // Security dashboards + Admin functions loaded lazily by script-admin.js chunk
     showSecurityDashboard:  _lazyAppStub('chunks/script-admin.min.js', 'showSecurityDashboard'),
     showAuditLogs:          _lazyAppStub('chunks/script-admin.min.js', 'showAuditLogs'),
+    showUserActivity:       _lazyAppStub('chunks/script-admin.min.js', 'showUserActivity'),
     showComplianceCenter:   _lazyAppStub('chunks/script-admin.min.js', 'showComplianceCenter'),
     showAdminDashboard:     _lazyAppStub('chunks/script-admin.min.js', 'showAdminDashboard'),
     // Admin sub-menu items — must load chunk before calling (direct nav skips showAdminDashboard)

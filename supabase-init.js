@@ -15,6 +15,10 @@ window.SUPABASE_URL = 'https://remuwhxvzkzjtgbzqjaa.supabase.co';
 // drift — a past drift left offline-resume reading a non-existent 'sb-*-auth-token'
 // key, locking users out during a 521/offline blip.
 window.SUPABASE_AUTH_STORAGE_KEY = 'fs-crm-auth-v1';
+// Publishable (anon) key exposed as a global so the user-activity stream can do a
+// keepalive POST to PostgREST on pagehide (when the async supabase-js client can't
+// finish its insert before the page unloads). Same key passed to createClient below.
+window.__SUPABASE_ANON = 'sb_publishable_XVWyiw5j1lnEErQUTV4XWg_lQcCIAjX';
 
 // Guard against the supabase-js library failing to load (CDN block, weak signal,
 // service-worker cache miss). Without this guard the next line crashed with
@@ -31,7 +35,7 @@ if (typeof window.supabase === 'undefined' || typeof window.supabase.createClien
     window._supabaseFactory = window.supabase;
     window.supabase = window.supabase.createClient(
         window.SUPABASE_URL,
-        'sb_publishable_XVWyiw5j1lnEErQUTV4XWg_lQcCIAjX',
+        window.__SUPABASE_ANON,
         {
             auth: {
                 persistSession: true,

@@ -95,6 +95,102 @@
         if (view) view.innerHTML = content;
     };
     
+    // User Activity (predictive-UX telemetry viewer). Reads public.user_events
+    // directly via the admin's RLS-scoped session (SELECT policy: role_level<=2),
+    // windowed to the last 7 days. Renders: summary, the navigation transition map
+    // (the signal that will drive predictive prefetch), top actions and a recent
+    // feed. The events themselves are PII-free (view ids / fn names / counts only).
+    const showUserActivity = async () => {
+        if (!isSystemAdmin()) {
+            if (window.UI) window.UI.toast.error('Access Denied. Super Admins only.');
+            return;
+        }
+        const view = document.getElementById('content-viewport');
+        if (!view) return;
+        view.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;">Loading activity…</div>';
+
+        const sinceISO = new Date(Date.now() - 7 * 864e5).toISOString();
+        let rows = [];
+        try {
+            const { data, error } = await window.supabase
+                .from('user_events')
+                .select('user_id,session_id,event_type,view,from_view,target,dwell_ms,role_level,client_ts,created_at')
+                .gte('created_at', sinceISO)
+                .order('created_at', { ascending: false })
+                .limit(3000);
+            if (error) throw error;
+            rows = data || [];
+        } catch (e) {
+            view.innerHTML = '<div style="padding:48px 24px;text-align:center;color:#888;">Could not load user activity (' + esc((e && e.message) || 'error') + ').</div>';
+            return;
+        }
+
+        // Resolve user_id -> display name (admins already see names elsewhere).
+        const nameById = {};
+        try {
+            const users = (await AppDataStore.getAll('users').catch(() => [])) || [];
+            users.forEach(u => { if (u && u.id != null) nameById[String(u.id)] = u.full_name || u.username || ('#' + u.id); });
+        } catch (_) { /* name map best-effort */ }
+        const nameOf = (id) => (id == null) ? '—' : (nameById[String(id)] || ('#' + id));
+
+        const navs = rows.filter(r => r.event_type === 'nav');
+        const clicks = rows.filter(r => r.event_type === 'click');
+        const activeUsers = new Set(rows.map(r => r.user_id).filter(v => v != null));
+        const sessions = new Set(rows.map(r => r.session_id).filter(Boolean));
+
+        // Transition map: from_view -> view counts (the prediction signal).
+        const trans = {};
+        navs.forEach(n => { const k = (n.from_view || '∅') + ' → ' + (n.view || '∅'); trans[k] = (trans[k] || 0) + 1; });
+        const topTrans = Object.entries(trans).sort((a, b) => b[1] - a[1]).slice(0, 15);
+
+        // Top action clicks.
+        const acts = {};
+        clicks.forEach(c => { if (c.target) acts[c.target] = (acts[c.target] || 0) + 1; });
+        const topActs = Object.entries(acts).sort((a, b) => b[1] - a[1]).slice(0, 15);
+
+        const fmtDur = (ms) => ms == null ? '—' : (ms < 1000 ? ms + 'ms' : (ms < 60000 ? (ms / 1000).toFixed(1) + 's' : Math.round(ms / 60000) + 'm'));
+        const card = (label, val) => '<div style="flex:1;min-width:110px;background:var(--surface,#fff);border:1px solid var(--border,#e5e7eb);border-radius:12px;padding:16px;">'
+            + '<div style="font-size:24px;font-weight:700;line-height:1;">' + val + '</div>'
+            + '<div style="font-size:11px;color:var(--muted-text,#6b7280);text-transform:uppercase;letter-spacing:.05em;margin-top:6px;">' + label + '</div></div>';
+
+        let html = '<div style="margin:24px;max-width:1100px;">'
+            + '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">'
+            + '<h2 style="margin:0;">User Activity <span style="font-size:13px;color:var(--muted-text,#6b7280);font-weight:400;">· last 7 days · ' + rows.length + ' events</span></h2>'
+            + '<button class="btn ghost" onclick="app.showUserActivity()">↻ Refresh</button>'
+            + '</div>'
+            + '<div style="display:flex;gap:12px;flex-wrap:wrap;margin:16px 0;">'
+            + card('Events', rows.length) + card('Navigations', navs.length) + card('Action clicks', clicks.length)
+            + card('Active users', activeUsers.size) + card('Sessions', sessions.size)
+            + '</div>';
+
+        html += '<h3 style="margin:20px 0 8px;">Navigation flow <span style="font-size:12px;color:var(--muted-text,#6b7280);font-weight:400;">— where users go next (drives predictive preloading)</span></h3>'
+            + '<table class="audit-table" style="width:100%;"><thead><tr><th scope="col">From → To</th><th scope="col" style="text-align:right;">Count</th></tr></thead><tbody>'
+            + (topTrans.length ? topTrans.map(t => '<tr><td>' + esc(t[0]) + '</td><td style="text-align:right;font-variant-numeric:tabular-nums;">' + t[1] + '</td></tr>').join('') : '<tr><td colspan="2">No navigation recorded yet.</td></tr>')
+            + '</tbody></table>';
+
+        html += '<h3 style="margin:20px 0 8px;">Top actions</h3>'
+            + '<table class="audit-table" style="width:100%;"><thead><tr><th scope="col">Action (app.fn)</th><th scope="col" style="text-align:right;">Count</th></tr></thead><tbody>'
+            + (topActs.length ? topActs.map(t => '<tr><td>' + esc(t[0]) + '</td><td style="text-align:right;font-variant-numeric:tabular-nums;">' + t[1] + '</td></tr>').join('') : '<tr><td colspan="2">No action clicks recorded yet.</td></tr>')
+            + '</tbody></table>';
+
+        html += '<h3 style="margin:20px 0 8px;">Recent events</h3>'
+            + '<table class="audit-table" style="width:100%;"><thead><tr><th scope="col">Time</th><th scope="col">User</th><th scope="col">Type</th><th scope="col">Detail</th></tr></thead><tbody>'
+            + rows.slice(0, 120).map(r => {
+                const t = r.created_at ? new Date(r.created_at).toLocaleString() : '—';
+                let detail = '';
+                if (r.event_type === 'nav') detail = (r.from_view || '∅') + ' → ' + (r.view || '∅') + (r.dwell_ms != null ? ' · ' + fmtDur(r.dwell_ms) : '');
+                else if (r.event_type === 'click') detail = r.target || '';
+                else if (r.event_type === 'search') detail = 'search · ' + (r.view || '');
+                else detail = r.view || '';
+                return '<tr><td style="white-space:nowrap;">' + esc(t) + '</td><td>' + esc(nameOf(r.user_id)) + '</td><td>' + esc(r.event_type) + '</td><td>' + esc(detail) + '</td></tr>';
+            }).join('')
+            + '</tbody></table>'
+            + '<p style="color:var(--muted-text,#6b7280);font-size:12px;margin-top:14px;">PII-free behavioral telemetry — view ids, action names, dwell and counts only. No names, phone numbers, notes or search text are stored. This data powers the upcoming predictive preloading.</p>'
+            + '</div>';
+
+        view.innerHTML = html;
+    };
+
     const showComplianceCenter = () => {
         if (!isSystemAdmin()) {
             if (window.UI) window.UI.toast.error("Access Denied. Super Admins only.");
@@ -135,6 +231,7 @@
     app.register('admin', {
         showSecurityDashboard,
         showAuditLogs,
+        showUserActivity,
         showComplianceCenter,
         showTwoFactorSetup: typeof showTwoFactorSetup !== 'undefined' ? showTwoFactorSetup : () => UI.toast.warning('Two-factor authentication is not enabled on this build.'),
         verifyAndEnable2FA: typeof verifyAndEnable2FA !== 'undefined' ? verifyAndEnable2FA : () => UI.toast.warning('Two-factor authentication is not enabled on this build.'),
