@@ -1514,6 +1514,18 @@ const sortProspectsBySelect = async (val) => {
 };
 
 const openProspectModal = async (prospectId = null) => {
+    // The form body (buildBasicInfoBlock) + its handlers (searchBasicInfoReferrers,
+    // collectBasicInfoData, prefillProspectChildren) are owned by the activities chunk
+    // and referenced synchronously below. If that chunk hasn't loaded yet the template's
+    // `(window.app.buildBasicInfoBlock || (() => ''))` fallback fires → an empty modal
+    // (only the "Basic Information" header, no fields). Warm the chunk first.
+    if (typeof window._loadChunk === 'function') {
+        try { await window._loadChunk('chunks/script-activities.min.js'); } catch (_) { /* intentional: fall through to the guard below */ }
+    }
+    if (typeof window.app.buildBasicInfoBlock !== 'function') {
+        UI.toast.error('Could not load the prospect form. Please reload and try again.');
+        return;
+    }
     const prospect = prospectId ? await AppDataStore.getById('prospects', prospectId) : null;
     if (prospectId) {
         if (!prospect) {
