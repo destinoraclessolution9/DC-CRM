@@ -4350,13 +4350,20 @@ const _evGenerateForName = async (prospectId, name, nameId = null, opts = {}) =>
     if (upErr) throw upErr;
     const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
     if (!urlData?.publicUrl) throw new Error('Upload succeeded but could not get URL');
-    const savedRow = await AppDataStore.create('prospect_attachments', {
+    // Insert via the RAW client with NO id. prospect_attachments.id is a
+    // GENERATED-ALWAYS identity, so AppDataStore.create (which stamps a client-side
+    // id) is rejected by Postgres with 428C9 ("cannot insert a non-DEFAULT value
+    // into column id") and the row only ever saves locally. This mirrors the proven
+    // order-form attachment insert (chunks/script-order-form-extract.js).
+    const { data: savedRow, error: insErr } = await sb.from('prospect_attachments').insert({
         prospect_id: prospectId,
         attachment_type: 'evoucher',
         file_url: urlData.publicUrl,
         filename: `evoucher_${code}.png`,
         metadata: { voucher_code: code, recipient_name: name, seq, name_id: (nameId != null ? nameId : null), generated_by: (_state?.cu?.id || null), generated_at: now.toISOString() }
-    });
+    }).select().single();
+    if (insErr) throw insErr;
+    try { if (AppDataStore.invalidateCache) AppDataStore.invalidateCache('prospect_attachments'); } catch (_) {}
     if (savedRow?.id) _evBlobCache[savedRow.id] = blob; // reuse for the immediate share gesture
     return savedRow;
 };
