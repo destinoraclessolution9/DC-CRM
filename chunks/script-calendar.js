@@ -349,7 +349,8 @@
                 dispatchPendingSolutionReminders(),
                 dispatchReEngagementReminders(),
                 dispatchCustomerCheckins(),
-                dispatchApuAckTouches()
+                dispatchApuAckTouches(),
+                dispatchAppointmentReminders()
             ]).then(() => Promise.all([
                 renderFollowUpReminders(),
                 renderPendingSolutionsWidget()
@@ -413,6 +414,7 @@
         re_engagement:   { trigger_category: 'no_contact', event_keywords: '', cps_interest_match: '', solution_match: '', solution_category_match: '', eligibility_tiers: 'active', icon: '💌', description: 'No contact for N+ days — gentle re-connect message ({days} auto-filled). Tune cadence via RE_ENGAGE_DAYS.', sort_order: 7, template_name: 'Re-Engagement Nudge', message_template: 'Hi {name}，好久没联系了！距离上次见面已经 {days} 天 😊 我很挂念您，最近一切都好吗？方便的话想约您坐坐叙叙～ — {agent_name}', delay_days: 0, event_window_days: 0 },
         cust_checkin:    { trigger_category: 'customer_checkin', event_keywords: '', cps_interest_match: '', solution_match: '', solution_category_match: '', eligibility_tiers: 'customer', icon: '🤝', description: '90-day customer check-in — no contact for {days}+ days. Caps at 2/day, highest-LTV first.', sort_order: 8, template_name: 'Customer 90-Day Check-In', message_template: 'Hi {name}，好久不见！距离上次见面已经 {days} 天，很想念您 😊 最近一切都好吗？方便的话想约您喝杯茶叙叙～ — {agent_name}', delay_days: 0, event_window_days: 0 },
         apu_ack:         { trigger_category: 'apu_namelist', event_keywords: '', cps_interest_match: '', solution_match: '', solution_category_match: '', eligibility_tiers: 'active', icon: '📒', description: 'Next day after a referral namelist is provided — thank them + confirm slots reserved. Respects grade-F/converted; re-arms each new namelist round.', sort_order: 9, template_name: 'APU Namelist Acknowledgment', message_template: 'Hi {name}，非常感谢您提供的推荐名单！🙏 我们已经收到，会尽快为每位贵宾安排专属解析并预留名额。您的信任与推荐对我们意义重大～ — {agent_name}', delay_days: 1, event_window_days: 0 },
+        appointment_reminder: { trigger_category: 'on_appointment', event_keywords: '', cps_interest_match: '', solution_match: '', solution_category_match: '', eligibility_tiers: 'active', icon: '🔔', description: 'Day(s) before a booked CPS/FTF/GR/XG meeting — surfaces a come-on-time confirmation with date / time / venue to send the client.', sort_order: 3, template_name: 'Appointment Reminder', message_template: '您好 {name} 🙏 温馨提醒您的预约：{date} {time}，地点：{venue}。请准时出席，期待与您相见！如有不便请提前告知 😊 — {agent_name}', delay_days: 0, event_window_days: 0 },
         // ── Power Ring ───────────────────────────────────────────────────────────────
         pr_9star:    { trigger_category: 'after_cps', event_keywords: '个人风水基础课', solution_category_match: 'Power Ring', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active', icon: '⭐', template_name: 'Power Ring → 个人风水基础课', description: 'Power Ring proposed → 个人风水基础课 invite (Active)', sort_order: 10, message_template: 'Hi {name}，诚邀您出席《个人风水基础课》！日期：{date}，地点：{venue}。期待与您相见！— {agent_name}', delay_days: 0, event_window_days: 60 },
         pr_destiny:  { trigger_category: 'after_cps', event_keywords: '个人改命分享会', solution_category_match: 'Power Ring', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active', icon: '⭐', template_name: 'Power Ring → 个人改命分享会', description: 'Power Ring proposed → 个人改命分享会 invite (Active)', sort_order: 11, message_template: 'Hi {name}，诚邀您出席《个人改命分享会》！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
@@ -1575,6 +1577,61 @@
         }
     };
 
+    // ── Dispatcher: appointment reminders — runs on calendar load ────────────────────
+    // For each UPCOMING client meeting (CPS/FTF/GR/XG activity, today..+LOOKAHEAD days, with a
+    // date) surface a draft so the agent sends the prospect/customer a "please come on time"
+    // confirmation carrying the date / time / venue. Deduped per booking via eventId=activity.id
+    // (one reminder per appointment). Grade-blind on purpose — a confirmed meeting is honored
+    // regardless of grade; only unable_to_serve + cross-agent are skipped.
+    const APPT_TYPES = ['CPS', 'FTF', 'GR', 'XG'];
+    const APPT_REMINDER_LOOKAHEAD = 2; // days of notice (today + next 2 days)
+    const dispatchAppointmentReminders = async () => {
+        const myId = _state.cu?.id;
+        if (!myId) return;
+        const tpl = await getFollowUpTemplate('appointment_reminder');
+        if (!tpl) return;
+        const _t = new Date();
+        const today0 = new Date(_t.getFullYear(), _t.getMonth(), _t.getDate());
+        const todayStr = _localDateStr(today0);
+        const horizon = new Date(today0); horizon.setDate(horizon.getDate() + APPT_REMINDER_LOOKAHEAD);
+        const horizonStr = _localDateStr(horizon);
+        let activities = [];
+        try { activities = await AppDataStore.getAll('activities'); } catch (_) { return; }
+        const appts = (activities || []).filter(a => APPT_TYPES.includes(a.activity_type)
+            && a.activity_date && a.activity_date >= todayStr && a.activity_date <= horizonStr
+            && (a.prospect_id || a.customer_id));
+        if (!appts.length) return;
+        let prospects = [], customers = [];
+        try { prospects = await AppDataStore.getAll('prospects'); } catch (_) {}
+        try { customers = await AppDataStore.getAll('customers'); } catch (_) {}
+        const pById = Object.fromEntries((prospects || []).map(p => [String(p.id), p]));
+        const cById = Object.fromEntries((customers || []).map(c => [String(c.id), c]));
+        for (const a of appts) {
+            const person = a.prospect_id ? pById[String(a.prospect_id)] : cById[String(a.customer_id)];
+            if (!person) continue;
+            if (person.responsible_agent_id != myId) continue;     // only my own
+            if (person.unable_to_serve) continue;
+            const time  = (a.start_time || '').slice(0, 5);
+            const venue = a.venue || a.location_address || '';
+            const msg = interpolateTemplate(tpl.message_template, {
+                name: person.full_name || '', date: a.activity_date, time, venue,
+                agent_name: _state.cu?.full_name || ''
+            });
+            await createFollowUpDraft({
+                prospectId:   a.prospect_id || null,
+                customerId:   a.customer_id || null,
+                triggerType:  'appointment_reminder',
+                messageText:  msg,
+                phone:        person.phone || '',
+                prospectName: person.full_name || '',
+                eventId:      a.id,                 // dedup: one reminder per appointment booking
+                eventDate:    a.activity_date,
+                eventName:    a.activity_title || a.activity_type,
+                dueDate:      todayStr              // surface now (1-2 days before the meeting)
+            });
+        }
+    };
+
     // ── Dispatcher: pending solution follow-ups — runs on calendar load ──────────────
     // For each proposed_solutions row where status='Proposed' and next_follow_up_date <= today,
     // creates a follow_up_draft for the responsible agent.
@@ -1870,6 +1927,7 @@
                                 </div>
                             </div>
                             <div style="display:flex; gap:6px; flex-shrink:0;">
+                                ${d.trigger_type === 'apu_ack' && d.prospect_id ? `<button class="btn secondary btn-sm" onclick="event.stopPropagation(); app.openGenerateEvoucherModal(${d.prospect_id});" style="font-size:12px; padding:6px 10px; white-space:nowrap;" title="Generate / send the referral e-CPS voucher(s)"><i class="fas fa-ticket-alt"></i> E-Voucher</button>` : ''}
                                 <button class="btn primary btn-sm" onclick="event.stopPropagation(); (async () => { await app.sendFollowUpInvite(${d.id}); })();" style="font-size:12px; padding:6px 12px; white-space:nowrap;">
                                     <i class="fab fa-whatsapp"></i> Send
                                 </button>
@@ -6274,6 +6332,7 @@
         dispatchReEngagementReminders,
         dispatchCustomerCheckins,
         dispatchApuAckTouches,
+        dispatchAppointmentReminders,
         renderFollowUpReminders,
         markFollowUpSent,
         dismissFollowUp,
