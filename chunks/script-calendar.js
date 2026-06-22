@@ -1323,6 +1323,7 @@
         for (const p of prospects) {
             if (p.responsible_agent_id != myId) continue;            // only my own leads
             if (p.unable_to_serve || p.status === 'converted' || p.status === 'lost') continue;
+            if (p.manual_grade === 'F') continue;                   // grade F = dropped, fully dark
             if (alreadyDrafted.has(String(p.id))) continue;         // already on the list
             const last = p.last_activity_date;
             if (!last) continue;          // never-contacted is a CPS/protection concern, not re-engagement
@@ -1383,6 +1384,7 @@
             // lost / unable-to-serve contact must not keep getting the proposal drip or
             // the 21-day overdue escalation — they already closed (or were dropped).
             if (person.unable_to_serve || person.status === 'converted' || person.status === 'lost') continue;
+            if (person.manual_grade === 'F') continue; // grade F = dropped, fully dark
 
             const solutionLower = (sol.solution || '').toLowerCase();
             const proposedDate  = sol.proposed_date || '';

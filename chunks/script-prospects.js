@@ -1144,17 +1144,33 @@ const openProspectGradePicker = async (prospectId) => {
         return;
     }
     const current = prospect.manual_grade || '';
-    const grades = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
+    // A–F potential grade — sets the follow-up RHYTHM (drives the cadence engine).
+    // F = drop: greyed out, off all reminders. (Legacy E/G map nowhere; collapsed to A–F.)
+    const GRADE_META = {
+        A: { label: 'Close now',  sub: 'very high · ~3d',  color: '#16a34a' },
+        B: { label: 'Warming up', sub: 'needs time · ~10d', color: '#2563eb' },
+        C: { label: 'Half-half',  sub: 'either way · ~21d', color: '#d97706' },
+        D: { label: 'Very far',   sub: 'long-shot · ~30d',  color: '#6b7280' },
+        F: { label: 'Drop it',    sub: 'off monitoring',    color: '#dc2626' },
+    };
+    const grades = ['A', 'B', 'C', 'D', 'F'];
     const btn = (g) => {
+        const m = GRADE_META[g];
         const active = g === current;
-        return `<button type="button" onclick="(async () => { await app.setProspectGrade(${prospectId}, '${g}'); })()" style="padding:14px;font-weight:700;font-size:18px;border-radius:10px;border:2px solid ${active ? 'var(--primary)' : 'var(--gray-300)'};background:${active ? 'var(--primary)' : '#fff'};color:${active ? '#fff' : 'var(--gray-800)'};cursor:pointer;transition:all .15s;" onmouseover="if(!${active}){this.style.background='var(--gray-100)';this.style.borderColor='var(--gray-400)';}" onmouseout="if(!${active}){this.style.background='#fff';this.style.borderColor='var(--gray-300)';}">${g}</button>`;
+        return `<button type="button" onclick="(async () => { await app.setProspectGrade(${prospectId}, '${g}'); })()" style="display:flex;flex-direction:column;align-items:center;gap:2px;padding:12px 6px;border-radius:10px;border:2px solid ${active ? m.color : 'var(--gray-300)'};background:${active ? m.color : '#fff'};color:${active ? '#fff' : 'var(--gray-800)'};cursor:pointer;transition:all .15s;">
+            <span style="font-size:20px;font-weight:700;line-height:1;">${g}</span>
+            <span style="font-size:12px;font-weight:600;">${m.label}</span>
+            <span style="font-size:10px;opacity:.85;">${m.sub}</span>
+        </button>`;
     };
     const content = `
         <div style="padding:4px 0;">
-            <p style="margin:0 0 14px;color:var(--gray-600);font-size:14px;">Select a grade for <strong>${escapeHtml(prospect.full_name || 'this prospect')}</strong>.</p>
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">
+            <p style="margin:0 0 14px;color:var(--gray-600);font-size:14px;">Grade <strong>${escapeHtml(prospect.full_name || 'this prospect')}</strong> — sets the follow-up rhythm. <span style="color:var(--gray-400);">F greys them out (off all reminders).</span></p>
+            <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;">
                 ${grades.map(btn).join('')}
-                <button type="button" onclick="(async () => { await app.setProspectGrade(${prospectId}, null); })()" style="padding:14px;font-weight:600;font-size:14px;border-radius:10px;border:2px solid var(--gray-300);background:#fff;color:var(--gray-500);cursor:pointer;" title="Clear grade">None</button>
+            </div>
+            <div style="text-align:center;margin-top:14px;">
+                <button type="button" onclick="(async () => { await app.setProspectGrade(${prospectId}, null); })()" style="padding:8px 18px;font-size:13px;border-radius:8px;border:1px solid var(--gray-300);background:#fff;color:var(--gray-500);cursor:pointer;" title="Clear grade">Clear grade</button>
             </div>
         </div>
     `;

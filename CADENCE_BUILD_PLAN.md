@@ -25,18 +25,20 @@ old code rather than delete, for reversibility).
 
 ## Phases (status: TODO / WIP / SHIPPED)
 
-### Phase 1 — Foundation + stop-the-bleeding  [WIP]
-- [ ] F1.1 Cap the re-engagement flood (bug #1): sort oldest-quiet first, cap N=5/load.
-- [ ] F1.2 Lifecycle guards: solution dispatcher (#6) + refill scope (#10) skip
-      converted/lost/unable.
-- [ ] F1.3 UTC→MYT "today" fix (#20) in re-engagement dispatcher (local date).
-- [ ] F1.4 Additive DB: `customers.last_contact_date` + trigger + backfill (90-day keystone).
-- [ ] F1.5 Verify (CI + SQL replay) → ship → bug-test.
+### Phase 1 — Foundation + stop-the-bleeding  [SHIPPED 1856341]
+- [x] F1.1 Cap the re-engagement flood (bug #1): RE_ENGAGE_MAX_OPEN=5, oldest-quiet first.
+- [x] F1.2 Lifecycle guards: solution dispatcher (#6) + refill scope (#10, calendar+bell) skip converted/lost/unable.
+- [x] F1.3 UTC→MYT "today" fix (#20) in re-engagement dispatcher (local date).
+- [x] F1.4 Additive DB: `customers.last_contact_date` + trg_sync_customer_last_contact + backfill (30/30).
+- [x] F1.5 Verified (CI green, render-baseline 60) → shipped → re_engagement template not yet seeded so no flood occurred (prevented).
 
-### Phase 2 — Grade A–F capture + cadence config  [TODO]
-- manual_grade A–F required at CPS + editable header picker (narrow A–G→A–F).
-- Additive cols: prospects.follow_mode, cooldown_until, silence_count.
-- Grade→decaying-interval config + touch-type ladder (code constants).
+### Phase 2 — Grade A–F capture + cadence config  [WIP — core shipped]
+- [x] Editable header picker narrowed A–G→A–F with labels + cadence hints (Close now/Warming/Half-half/Very far/Drop).
+- [x] Additive cols: prospects.follow_mode, cooldown_until, silence_count, last_grade_change_at.
+- [x] F-exclusion (partial): manual_grade==='F' skip in re-engagement + solution dispatchers.
+- [ ] manual_grade REQUIRED at CPS (saveActivity CPS branch) + ungraded→default C.
+- [ ] Complete F-exclusion: birthday dispatcher + notification bell + grey-out in prospect list.
+- [ ] Grade→decaying-interval config + touch-type ladder constants (consumed by Phase 3 engine).
 
 ### Phase 3 — Unified cadence engine  [TODO]
 - dispatchCadence supersedes naive re-engagement + reconciles proposed_solutions drip.
