@@ -981,7 +981,7 @@
         const solCatsByProspect  = {}, solCatsByCustomer  = {};
         for (const s of allSolutions) {
             const name = (s.solution || '').toLowerCase();
-            const cat  = productCatMap[name] || '';
+            const cat  = productCatMap[name] || name; // #4: a proposal may store the bare category (e.g. 'Power Ring'), not a product name — fall back to the solution string itself
             if (s.prospect_id) {
                 (solNamesByProspect[s.prospect_id] = solNamesByProspect[s.prospect_id] || []).push(name);
                 if (cat) (solCatsByProspect[s.prospect_id] = solCatsByProspect[s.prospect_id] || []).push(cat);
@@ -1070,7 +1070,15 @@
                 const solNameOk      = !solutionList.length || solutionList.some(m => personSolNames.some(s => s.includes(m)));
                 const solCatOk       = !solCatList.length   || solCatList.some(m => personSolCats.some(c => c.includes(m)));
                 // General templates (no match criteria) fire for all tier-qualified people
-                const matchOk = !hasMatchCrit || interestOk || solNameOk || solCatOk;
+                // #3: only the criteria the template ACTUALLY specifies gate the match — an
+                // empty sub-list must be NEUTRAL, not vacuously true. (pr_9star sets only
+                // solution_category_match; empty interest/solution made matchOk always true,
+                // inviting EVERY tier-eligible prospect instead of Power-Ring ones.)
+                const _matchChecks = [];
+                if (interestList.length) _matchChecks.push(interestOk);
+                if (solutionList.length) _matchChecks.push(solNameOk);
+                if (solCatList.length)   _matchChecks.push(solCatOk);
+                const matchOk = !_matchChecks.length || _matchChecks.some(Boolean);
                 if (!matchOk) continue;
 
                 for (const act of matchingInstances) {
@@ -1146,7 +1154,7 @@
         const solCatsByProspect  = {}, solCatsByCustomer  = {};
         for (const s of allSolutions) {
             const name = (s.solution || '').toLowerCase();
-            const cat  = productCatMap[name] || '';
+            const cat  = productCatMap[name] || name; // #4: a proposal may store the bare category (e.g. 'Power Ring'), not a product name — fall back to the solution string itself
             if (s.prospect_id) {
                 (solNamesByProspect[s.prospect_id] = solNamesByProspect[s.prospect_id] || []).push(name);
                 if (cat) (solCatsByProspect[s.prospect_id] = solCatsByProspect[s.prospect_id] || []).push(cat);
@@ -1232,7 +1240,15 @@
                 const personSolCats  = person._type === 'prospect' ? (solCatsByProspect[pid]  || []) : (solCatsByCustomer[pid]  || []);
                 const solNameOk      = !solutionList.length || solutionList.some(m => personSolNames.some(s => s.includes(m)));
                 const solCatOk       = !solCatList.length   || solCatList.some(m => personSolCats.some(c => c.includes(m)));
-                const matchOk = !hasMatchCrit || interestOk || solNameOk || solCatOk;
+                // #3: only the criteria the template ACTUALLY specifies gate the match — an
+                // empty sub-list must be NEUTRAL, not vacuously true. (pr_9star sets only
+                // solution_category_match; empty interest/solution made matchOk always true,
+                // inviting EVERY tier-eligible prospect instead of Power-Ring ones.)
+                const _matchChecks = [];
+                if (interestList.length) _matchChecks.push(interestOk);
+                if (solutionList.length) _matchChecks.push(solNameOk);
+                if (solCatList.length)   _matchChecks.push(solCatOk);
+                const matchOk = !_matchChecks.length || _matchChecks.some(Boolean);
                 if (!matchOk) continue;
 
                 const msg = interpolateTemplate(tpl.message_template, {

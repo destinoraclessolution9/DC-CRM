@@ -55,9 +55,11 @@ old code rather than delete, for reversibility).
 - [x] dispatchCustomerCheckins: customers idle CUSTOMER_CHECKIN_DAYS(90)+ → warm "let's catch up" draft, capped 2/day (CUSTOMER_MAX_OPEN), highest-LTV first, one-open-reminder, episode-keyed on last_contact_date. Fixes bug #11 (CRM went silent post-conversion). cust_checkin template + wired into _runSecondary + dedup + export.
 - [ ] cadence-health badge on customer card; "due this week" heads-up.
 
-### Phase 6 — Event cool-downs + silence back-off + event-invite bug fixes  [TODO]
-- event_attended cool-down (A=4/B=6/C=8/D=10); silence tally → auto-slow → seasonal-only.
-- Fix event-invite #3 (inert match), #4 (category lookup), #5 (catalog-only events).
+### Phase 6 — Event cool-downs + silence back-off + event-invite bug fixes  [WIP]
+- [x] #3 inert match filter — empty template criteria now NEUTRAL not vacuously-true (was inviting EVERY tier-eligible prospect instead of the matching ones). Both twin sites.
+- [x] #4 category lookup falls back to the solution string (`productCatMap[name] || name`) so 'Power Ring'-style category proposals match. Both twin sites.
+- [ ] #5 catalog-only events invite nobody — drive the proactive scan from the events catalog (events.date in window) not just logged EVENT activities.
+- [ ] event_attended cool-down (A=4/B=6/C=8/D=10) + silence tally → auto-slow → seasonal-only.
 
 ### Phase 7 — APU express lane + e-voucher monitoring  [TODO]
 - APU tickbox + next-day ack + reserve slots + referred leads; voucher lifecycle monitor + reminders.
