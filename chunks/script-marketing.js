@@ -458,6 +458,35 @@
         }
 
         if (_state.cmlt === 'products') {
+            // Sort so the same categories sit together, then the same product group/series
+            // (e.g. "一星指环/二星指环/三星指环", "Bao Wang Xiang 1/2/3") clusters within each
+            // category, ordered strictly by variant number. There is no stored group column, so
+            // the series + variant are inferred from the name: Chinese numerals (一二三…), English
+            // number words (One/Two/…) and Arabic digits are all normalised to a number, then a
+            // numeric-aware collator keeps variants in true order (一→二→三, 2 before 10).
+            const _cnDigit = { '〇': 0, '零': 0, '一': 1, '壹': 1, '二': 2, '贰': 2, '两': 2, '三': 3, '叁': 3, '四': 4, '肆': 4, '五': 5, '伍': 5, '六': 6, '陆': 6, '七': 7, '柒': 7, '八': 8, '捌': 8, '九': 9, '玖': 9, '十': 10 };
+            const _cnRun = /[〇零一壹二贰两三叁四肆五伍六陆七柒八捌九玖十]+/g;
+            const _cnToInt = (s) => {
+                if (s.length === 1 && _cnDigit[s] != null) return _cnDigit[s];
+                // simple 十-forms up to 99: 十=10, 十X=10+X, X十=X*10, X十Y=X*10+Y
+                const m = s.match(/^([一壹二贰两三叁四肆五伍六陆七柒八捌九玖])?十([一壹二贰两三叁四肆五伍六陆七柒八捌九玖])?$/);
+                if (m) { const t = m[1] ? _cnDigit[m[1]] : 1; const o = m[2] ? _cnDigit[m[2]] : 0; return t * 10 + o; }
+                return null; // contains 百/千 etc. — leave as-is rather than mis-parse
+            };
+            const _enWords = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
+            const _normName = (raw) => String(raw || '')
+                .replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/gi, (w) => String(_enWords[w.toLowerCase()]))
+                .replace(_cnRun, (run) => { const n = _cnToInt(run); return n == null ? run : String(n); });
+            const _prodCollator = new Intl.Collator(['zh', 'en'], { numeric: true, sensitivity: 'base' });
+            data = data.slice().sort((a, b) => {
+                const ca = (a.category || '').trim();
+                const cb = (b.category || '').trim();
+                if (!ca && cb) return 1;          // products without a category go last
+                if (ca && !cb) return -1;
+                const catCmp = _prodCollator.compare(ca, cb);
+                if (catCmp !== 0) return catCmp;
+                return _prodCollator.compare(_normName(a.name), _normName(b.name));
+            });
             return `
                 <table class="data-table">
                     <thead>
