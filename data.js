@@ -2664,19 +2664,23 @@ class DataStore {
             }
         }
 
-        // Full-text-style search across multiple columns (ilike OR)
+        // Full-text-style search across multiple columns.
+        // Token-AND of field-OR: split the term on whitespace and require EACH
+        // token to match at least one field. Tokens may land in different fields
+        // and in any order, so "oo kean cherng" now finds "Kean Cherng Oo", a
+        // name carrying a middle token, or surname-first "Oo, Kean Cherng". The
+        // old single `%term%` ilike only matched when the WHOLE typed string
+        // appeared unbroken in one column. Multiple .or() calls on the same
+        // builder are ANDed by PostgREST → (tok1 in any field) AND (tok2 …) …
         if (options.search && options.searchFields && options.searchFields.length > 0) {
-            // The term is interpolated raw into a PostgREST .or() string whose
-            // delimiters are comma and parentheses — a name/company containing
-            // ',' or '(' ')' (e.g. 'Tan, Sdn Bhd', 'ABC (M)') would split the OR
-            // expression and return HTTP 400 (broken add-attendee/referrer/calendar
-            // search). Replace those delimiters (and the % wildcard) with spaces
-            // so the ilike still fuzzy-matches the rest of the term.
-            const term = options.search.replace(/[%,()*]/g, ' ').trim();
-            const orClauses = options.searchFields
-                .map(f => `${f}.ilike.%${term}%`)
-                .join(',');
-            q = q.or(orClauses);
+            // Strip the PostgREST OR-syntax delimiters (comma / parens) and the
+            // % wildcard so a name/company like 'Tan, Sdn Bhd' or 'ABC (M)' can't
+            // break out of the .or() expression and return HTTP 400. Splitting on
+            // whitespace then drops the now-blank fragments.
+            const tokens = options.search.replace(/[%,()*]/g, ' ').trim().split(/\s+/).filter(Boolean);
+            for (const tok of tokens) {
+                q = q.or(options.searchFields.map(f => `${f}.ilike.%${tok}%`).join(','));
+            }
         }
 
         // Sorting
@@ -2775,9 +2779,13 @@ class DataStore {
                 }
             }
             if (options.search && options.searchFields) {
-                const term = options.search.toLowerCase();
+                // Mirror the online token-AND of field-OR (see the server path in
+                // queryAdvanced) so the offline fallback returns the same rows.
+                const tokens = options.search.toLowerCase().split(/\s+/).filter(Boolean);
                 filtered = filtered.filter(r =>
-                    options.searchFields.some(f => (r[f] || '').toLowerCase().includes(term))
+                    tokens.every(t =>
+                        options.searchFields.some(f => String(r[f] ?? '').toLowerCase().includes(t))
+                    )
                 );
             }
             if (options.sort) {

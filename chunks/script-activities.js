@@ -3061,9 +3061,15 @@
                     catch { /* intentional: customers fetch failed — search prospects only */ window._addAttCustomers = []; }
                 }
                 const qLower = q.toLowerCase();
-                const customerMatches = (window._addAttCustomers || []).filter(c =>
-                    (c.full_name || '').toLowerCase().includes(qLower) || (c.phone || '').includes(q)
-                ).slice(0, 5).map(c => ({ ...c, _type: 'customer' }));
+                // Token-AND: each typed word must appear in the name or phone, so
+                // word order / a middle token doesn't defeat the match (mirrors
+                // the server-side searchProspects token search).
+                const qTokens = qLower.split(/\s+/).filter(Boolean);
+                const customerMatches = (window._addAttCustomers || []).filter(c => {
+                    const name = (c.full_name || '').toLowerCase();
+                    const phone = String(c.phone || '');
+                    return qTokens.every(t => name.includes(t) || phone.includes(t));
+                }).slice(0, 5).map(c => ({ ...c, _type: 'customer' }));
 
                 let prospectMatches = [];
                 try {
