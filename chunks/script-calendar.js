@@ -589,6 +589,9 @@
         const person = opts.prospectId ? `p:${opts.prospectId}`
                      : opts.customerId ? `c:${opts.customerId}` : 'n:?';
         if (opts.triggerType === 'birthday' || opts.triggerType === 're_engagement' || opts.triggerType === 'cust_checkin' || opts.triggerType === 'apu_ack') return `${person}|${opts.triggerType}|${opts.dueDate || ''}`;
+        // appointment_reminder's eventId is an ACTIVITY id (its own id-space, not events.id)
+        // — namespace it so it can't collide with an event invite sharing the same number.
+        if (opts.triggerType === 'appointment_reminder') return `${person}|appt:${opts.eventId || ''}`;
         if (opts.eventId) return `${person}|eid:${opts.eventId}`;
         if (opts.eventName && opts.eventDate) return `${person}|en:${_n(opts.eventName)}|ed:${opts.eventDate}`;
         return `${person}|t:${opts.triggerType}`;
@@ -642,6 +645,12 @@
                     // contact) re-arms the nudge, while repeated calendar loads within
                     // the same gap stay deduped — and a dismissal sticks for that gap.
                     return d.trigger_type === triggerType && d.due_date === dueDate;
+                }
+                if (triggerType === 'appointment_reminder') {
+                    // event_id here is an ACTIVITY id (separate id-space from the events.id
+                    // that event invites store). Scope dedup to this trigger so a colliding
+                    // events.id can't suppress — or be suppressed by — an appointment reminder.
+                    return d.trigger_type === triggerType && d.event_id == eventId;
                 }
                 if (!eventId) {
                     return d.trigger_type === triggerType;
@@ -1790,6 +1799,78 @@
     };
 
     // Render follow-up reminders below calendar
+    // ── Gesture-safe poster share (P2) ──────────────────────────────────────────────
+    // iOS Safari voids transient activation the moment any network/data await runs, so
+    // fetching the poster (or the event row) inside the Send click breaks
+    // navigator.share({files}). Instead we PREFETCH the poster image + precompute the
+    // invite body when the reminders panel renders, cache them by draft id, and let the
+    // Send click fire navigator.share synchronously. Cache miss/null → async
+    // fetch-then-share / wa.me-link fallback (unchanged). value: null = fetch in flight,
+    // { file, body, draft } = ready.
+    const _posterShareCache = new Map();
+
+    // Build the WhatsApp message body for a draft: event invites get the rich poster
+    // caption (needs the events row + matching activity for date/time/venue); everything
+    // else uses the stored message text. Extracted so the render-time prefetch and the
+    // click-time send share ONE source of truth.
+    const _buildFollowUpBody = async (draft) => {
+        if (!draft.event_id) return draft.message_text || '';
+        const event = await AppDataStore.getById('events', draft.event_id);
+        let activity = null;
+        try {
+            const allActs = await AppDataStore.getAll('activities');
+            activity = (allActs || []).find(a =>
+                a.activity_type === 'EVENT'
+                && String(a.event_id) === String(draft.event_id)
+                && (!draft.event_date || a.activity_date === draft.event_date)
+            ) || null;
+        } catch (_) { /* best-effort time lookup, falls back to event fields */ }
+        const title = event?.event_title || event?.title || draft.event_name || '';
+        const date = (event?.event_date || event?.date || draft.event_date || '').toString();
+        const startTRaw = (activity?.start_time || event?.start_time || '').toString();
+        const endTRaw = (activity?.end_time || event?.end_time || '').toString();
+        const time = startTRaw && endTRaw ? `${startTRaw} - ${endTRaw}` : (startTRaw || '');
+        const venue = activity?.venue || activity?.location_address || event?.location || '';
+        const description = event?.description || '';
+        const ticketPrice = event?.ticket_price ? `RM ${event.ticket_price}` : '';
+        // Unicode escapes — literal emoji bytes get mangled by Windows clipboard round-trips.
+        const E = { sparkle: '✨', calendar: '\u{1F4C5}', clock: '\u{1F550}', pin: '\u{1F4CD}', ticket: '\u{1F39F}️' };
+        const lines = [`${E.sparkle} *${title || 'You are invited!'}* ${E.sparkle}`, ''];
+        if (date) lines.push(`${E.calendar} Date: ${date}`);
+        if (time) lines.push(`${E.clock} Time: ${time}`);
+        if (venue) lines.push(`${E.pin} Venue: ${venue}`);
+        if (ticketPrice) lines.push(`${E.ticket} Ticket Price: ${ticketPrice}`);
+        if (description) lines.push('', description);
+        return lines.join('\n');
+    };
+
+    // Prefetch poster image + body for the event-invite drafts currently shown, and evict
+    // entries for rows no longer on screen. No-op when the Web Share file API is absent
+    // (desktops keep the wa.me-link path). Fire-and-forget; never blocks render.
+    const _prefetchPosterShares = (drafts) => {
+        if (!(navigator.share && navigator.canShare)) return;
+        const wanted = new Set();
+        for (const d of drafts) {
+            if (!(d.event_id && d.attachment_url)) continue;
+            wanted.add(d.id);
+            if (_posterShareCache.has(d.id)) continue; // ready or already in flight
+            _posterShareCache.set(d.id, null);          // mark in flight
+            (async () => {
+                try {
+                    const body = await _buildFollowUpBody(d);
+                    const resp = await fetch(d.attachment_url);
+                    if (!resp.ok) { _posterShareCache.delete(d.id); return; }
+                    const blob = await resp.blob();
+                    const ext = ((blob.type || '').split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+                    const file = new File([blob], `poster.${ext}`, { type: blob.type || 'image/jpeg' });
+                    if (!navigator.canShare({ files: [file] })) { _posterShareCache.delete(d.id); return; }
+                    _posterShareCache.set(d.id, { file, body, draft: d });
+                } catch (_) { _posterShareCache.delete(d.id); }
+            })();
+        }
+        for (const k of [..._posterShareCache.keys()]) { if (!wanted.has(k)) _posterShareCache.delete(k); }
+    };
+
     const renderFollowUpReminders = async () => {
         const container = document.getElementById('follow-up-reminders');
         if (!container) return;
@@ -1871,6 +1952,11 @@
                 if (_episodic.has(d.trigger_type)) {
                     // Collapse all episodes of this person+type to one row (newest, above).
                     key = `${personKey}|t:${d.trigger_type}`;
+                } else if (d.trigger_type === 'appointment_reminder') {
+                    // event_id is an activity id (own id-space) — scope to the trigger so an
+                    // appointment reminder isn't collapsed against an event invite that
+                    // happens to share the same numeric id.
+                    key = `${personKey}|t:appointment_reminder|eid:${d.event_id || ''}`;
                 } else if (isEventBased) {
                     const eventKey = d.event_id
                         ? `eid:${d.event_id}`
@@ -1953,6 +2039,9 @@
                 </div>
             </div>
         `;
+
+        // Prefetch posters so the Send click can share the image gesture-safely (P2).
+        _prefetchPosterShares(drafts);
     };
 
     // Contacted-feedback loop: a tick OR a WhatsApp-click both count as "contacted" →
@@ -2026,6 +2115,26 @@
     // are picked up. The draft's stored message_text is used only as a fallback
     // when no event_id is set (e.g. birthday triggers, manual drafts).
     const sendFollowUpInvite = async (draftId) => {
+        // Gesture-safe fast path (P2): if renderFollowUpReminders prefetched this event
+        // invite's poster + body, fire the native file-share synchronously — BEFORE any
+        // await — so iOS Safari keeps transient activation (a data/network await first
+        // voids it). Map.get + canShare are synchronous, so navigator.share is the very
+        // first await this click sees. Cache miss/null → async path below (unchanged).
+        const _pre = _posterShareCache.get(draftId);
+        if (_pre && _pre.file && navigator.share && navigator.canShare && navigator.canShare({ files: [_pre.file] })) {
+            try {
+                await navigator.share({ files: [_pre.file], text: _pre.body });
+                _posterShareCache.delete(draftId);
+                AppDataStore.update('follow_up_drafts', draftId, { status: 'sent', updated_at: new Date().toISOString() }).catch(() => {});
+                _logFollowUpContact(_pre.draft);
+                renderFollowUpReminders();
+                return;
+            } catch (e) {
+                if (e && e.name === 'AbortError') return; // user cancelled — leave pending
+                // any other error → fall through to the async fetch / wa.me-link path
+            }
+        }
+
         const draft = await AppDataStore.getById('follow_up_drafts', draftId);
         if (!draft) { UI.toast.error('Reminder not found'); return; }
 
@@ -2033,49 +2142,10 @@
         if (!phone) { UI.toast.error('No phone number on this contact'); return; }
         const waPhone = phone.startsWith('0') ? '60' + phone.slice(1) : phone;
 
-        let body;
-        if (draft.event_id) {
-            const event = await AppDataStore.getById('events', draft.event_id);
-            // Time lives on the calendar ACTIVITY (the slot), not the events
-            // catalog row. Look up the matching activity so we can show the
-            // start/end time the user expects in the invite.
-            let activity = null;
-            try {
-                const allActs = await AppDataStore.getAll('activities');
-                activity = (allActs || []).find(a =>
-                    a.activity_type === 'EVENT'
-                    && String(a.event_id) === String(draft.event_id)
-                    && (!draft.event_date || a.activity_date === draft.event_date)
-                ) || null;
-            } catch (_) { /* intentional: best-effort time lookup, falls back to event fields */ }
-
-            const title = event?.event_title || event?.title || draft.event_name || '';
-            const date = (event?.event_date || event?.date || draft.event_date || '').toString();
-            const startTRaw = (activity?.start_time || event?.start_time || '').toString();
-            const endTRaw = (activity?.end_time || event?.end_time || '').toString();
-            const time = startTRaw && endTRaw
-                ? `${startTRaw} - ${endTRaw}`
-                : (startTRaw || '');
-            const venue = activity?.venue || activity?.location_address || event?.location || '';
-            const description = event?.description || '';
-            const ticketPrice = event?.ticket_price ? `RM ${event.ticket_price}` : '';
-            // Use Unicode escapes — the source file's literal emoji bytes can
-            // get mangled by Windows clipboards and copy-paste round-trips,
-            // which is why the previous build sent "�" instead of 📅/📍/🎟️.
-            const E = { sparkle: '✨', calendar: '\u{1F4C5}', clock: '\u{1F550}', pin: '\u{1F4CD}', ticket: '\u{1F39F}️' };
-            // Match the calendar event-details invite exactly: no "Hi {name},"
-            // prefix, no "— {agent}" sign-off. The agent's name is already on
-            // their own WhatsApp profile; the prospect knows who's sending.
-            const lines = [`${E.sparkle} *${title || 'You are invited!'}* ${E.sparkle}`, ''];
-            if (date) lines.push(`${E.calendar} Date: ${date}`);
-            if (time) lines.push(`${E.clock} Time: ${time}`);
-            if (venue) lines.push(`${E.pin} Venue: ${venue}`);
-            if (ticketPrice) lines.push(`${E.ticket} Ticket Price: ${ticketPrice}`);
-            if (description) lines.push('', description);
-            body = lines.join('\n');
-        } else {
-            body = draft.message_text || '';
-        }
+        // Body for the wa.me / link fallback (event invite → rich poster caption built
+        // from the LIVE event row at click time, else the stored text). Same builder the
+        // render-time prefetch uses, so both share paths emit identical copy.
+        const body = await _buildFollowUpBody(draft);
 
         // Clicking Send counts as "contacted": mark the draft sent + advance the cadence clock,
         // then refresh the panel so the handled row clears. Shared by both send paths below.
