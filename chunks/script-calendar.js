@@ -346,7 +346,8 @@
             Promise.allSettled([
                 dispatchBirthdayTriggers(),
                 dispatchProactiveEventInvites(),
-                dispatchPendingSolutionReminders()
+                dispatchPendingSolutionReminders(),
+                dispatchReEngagementReminders()
             ]).then(() => Promise.all([
                 renderFollowUpReminders(),
                 renderPendingSolutionsWidget()
@@ -407,6 +408,7 @@
         apu_appointment: { trigger_category: 'on_apu_photo', event_keywords: '', cps_interest_match: '', solution_match: '', solution_category_match: '', eligibility_tiers: 'active', icon: '📋', description: 'When APU photo is attached. Reminds prospect to schedule appointment.', sort_order: 4, template_name: 'APU Appointment Reminder', message_template: 'Hi {name}, your APU form has been received. Please schedule your appointment with {agent_name} at your earliest convenience.', delay_days: 0, event_window_days: 0 },
         diy_review:      { trigger_category: 'on_event_attendance', event_keywords: '环境风水基础课', cps_interest_match: '', solution_match: '', solution_category_match: '', eligibility_tiers: 'active', icon: '🔄', description: 'After attending 环境风水基础课. 3-day follow-up.', sort_order: 5, template_name: 'DIY 3-Day Review Follow-up', message_template: 'Hi {name}, hope you enjoyed {event_name}! How has your progress been? — {agent_name}', delay_days: 3, event_window_days: 0 },
         birthday:        { trigger_category: 'on_birthday', event_keywords: '', cps_interest_match: '', solution_match: '', solution_category_match: '', eligibility_tiers: 'active', icon: '🎂', description: 'Daily on calendar load. Sends birthday greeting.', sort_order: 6, template_name: 'Birthday Greeting', message_template: 'Hi {name}, wishing you a very happy birthday! — {agent_name}', delay_days: 0, event_window_days: 0 },
+        re_engagement:   { trigger_category: 'no_contact', event_keywords: '', cps_interest_match: '', solution_match: '', solution_category_match: '', eligibility_tiers: 'active', icon: '💌', description: 'No contact for N+ days — gentle re-connect message ({days} auto-filled). Tune cadence via RE_ENGAGE_DAYS.', sort_order: 7, template_name: 'Re-Engagement Nudge', message_template: 'Hi {name}，好久没联系了！距离上次见面已经 {days} 天 😊 我很挂念您，最近一切都好吗？方便的话想约您坐坐叙叙～ — {agent_name}', delay_days: 0, event_window_days: 0 },
         // ── Power Ring ───────────────────────────────────────────────────────────────
         pr_9star:    { trigger_category: 'after_cps', event_keywords: '个人风水基础课', solution_category_match: 'Power Ring', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active', icon: '⭐', template_name: 'Power Ring → 个人风水基础课', description: 'Power Ring proposed → 个人风水基础课 invite (Active)', sort_order: 10, message_template: 'Hi {name}，诚邀您出席《个人风水基础课》！日期：{date}，地点：{venue}。期待与您相见！— {agent_name}', delay_days: 0, event_window_days: 60 },
         pr_destiny:  { trigger_category: 'after_cps', event_keywords: '个人改命分享会', solution_category_match: 'Power Ring', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active', icon: '⭐', template_name: 'Power Ring → 个人改命分享会', description: 'Power Ring proposed → 个人改命分享会 invite (Active)', sort_order: 11, message_template: 'Hi {name}，诚邀您出席《个人改命分享会》！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
@@ -562,7 +564,7 @@
         const _n = (s) => String(s || '').trim().toLowerCase();
         const person = opts.prospectId ? `p:${opts.prospectId}`
                      : opts.customerId ? `c:${opts.customerId}` : 'n:?';
-        if (opts.triggerType === 'birthday') return `${person}|birthday|${opts.dueDate || ''}`;
+        if (opts.triggerType === 'birthday' || opts.triggerType === 're_engagement') return `${person}|${opts.triggerType}|${opts.dueDate || ''}`;
         if (opts.eventId) return `${person}|eid:${opts.eventId}`;
         if (opts.eventName && opts.eventDate) return `${person}|en:${_n(opts.eventName)}|ed:${opts.eventDate}`;
         return `${person}|t:${opts.triggerType}`;
@@ -610,8 +612,12 @@
                 const personMatch = (prospectId && d.prospect_id == prospectId) ||
                                     (customerId && d.customer_id == customerId);
                 if (!personMatch) return false;
-                if (triggerType === 'birthday') {
-                    return d.trigger_type === 'birthday' && d.due_date === dueDate;
+                if (triggerType === 'birthday' || triggerType === 're_engagement') {
+                    // Episode-keyed dedup: re_engagement passes last_activity_date as
+                    // due_date, so a NEW no-contact gap (after the agent logs a fresh
+                    // contact) re-arms the nudge, while repeated calendar loads within
+                    // the same gap stay deduped — and a dismissal sticks for that gap.
+                    return d.trigger_type === triggerType && d.due_date === dueDate;
                 }
                 if (!eventId) {
                     return d.trigger_type === triggerType;
@@ -1277,6 +1283,44 @@
             for (const tpl of triggers) {
                 executeSimpleTrigger(tpl, person).catch(e => console.warn(`Birthday trigger ${tpl.trigger_type} failed:`, e));
             }
+        }
+    };
+
+    // ── Dispatcher: re-engagement nudges — runs on calendar load ─────────────────────
+    // "You haven't contacted {name} in {days} days — they're missing you."
+    // For every prospect the current agent owns whose last_activity_date is older than
+    // RE_ENGAGE_DAYS, queue a warm, ready-to-send re-connect message in Follow-Up
+    // Reminders. Ownership is never changed (this is a nudge, not a release). The draft
+    // is episode-keyed on last_activity_date (passed as due_date) so logging a fresh
+    // contact re-arms the nudge after the next gap. Change the number below to retune.
+    const RE_ENGAGE_DAYS = 14;
+    const dispatchReEngagementReminders = async () => {
+        const myId = _state.cu?.id;
+        if (!myId) return;
+        const tpl = await getFollowUpTemplate('re_engagement');
+        if (!tpl) return;
+        const todayStr = new Date().toISOString().split('T')[0];
+        let prospects = [];
+        try { prospects = await AppDataStore.getActiveProspects(); }
+        catch (_) { return; }
+        for (const p of prospects) {
+            if (p.responsible_agent_id != myId) continue;            // only my own leads
+            if (p.unable_to_serve || p.status === 'converted' || p.status === 'lost') continue;
+            const last = p.last_activity_date;
+            if (!last) continue;          // never-contacted is a CPS/protection concern, not re-engagement
+            const days = Math.floor((new Date(todayStr) - new Date(last)) / 86400000);
+            if (days < RE_ENGAGE_DAYS) continue;
+            const msg = interpolateTemplate(tpl.message_template, {
+                name: p.full_name || '', days: String(days), agent_name: _state.cu?.full_name || ''
+            });
+            await createFollowUpDraft({
+                prospectId:   p.id,
+                triggerType:  're_engagement',
+                messageText:  msg,
+                phone:        p.phone || '',
+                prospectName: p.full_name || '',
+                dueDate:      last        // episode key — see dedup note in createFollowUpDraft
+            });
         }
     };
 
@@ -5852,6 +5896,7 @@
         dispatchOnNewCalendarEvent,
         dispatchBirthdayTriggers,
         dispatchPendingSolutionReminders,
+        dispatchReEngagementReminders,
         renderFollowUpReminders,
         markFollowUpSent,
         dismissFollowUp,
