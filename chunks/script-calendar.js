@@ -1364,7 +1364,18 @@
     // Grade sets the rhythm (A tightest -> D loosest); ungraded defaults to C; F is dark.
     const GRADE_CADENCE = { A: 3, B: 10, C: 21, D: 30 };
     const GRADE_RANK    = { A: 0, B: 1, C: 2, D: 3 };
-    const _cadenceDays  = (g) => GRADE_CADENCE[g] || GRADE_CADENCE.C; // ungraded -> C (21d)
+    // Decaying back-off: each un-answered re-engagement touch (prospects.silence_count)
+    // WIDENS the next gap, so a quiet lead is chased less and less. At SILENCE_SEASONAL_AT
+    // un-answered touches the lead drops to seasonal-only (follow_mode='seasonal' →
+    // re-engagement skips them; events + birthday still run). Any logged contact
+    // (_logFollowUpContact) snaps follow_mode back to 'active' and resets the count.
+    const RE_ENGAGE_DECAY          = [1, 1.6, 2.5, 4]; // step 0,1,2,3+ interval multipliers
+    const RE_ENGAGE_DECAY_CAP_DAYS = 120;              // hard floor on max widening
+    const SILENCE_SEASONAL_AT      = 4;                // un-answered touches → seasonal-only
+    const _silenceStep  = (p) => { const n = parseInt(p && p.silence_count, 10); return (Number.isFinite(n) && n > 0) ? n : 0; };
+    const _decayFactor  = (step) => RE_ENGAGE_DECAY[Math.min(step, RE_ENGAGE_DECAY.length - 1)];
+    const _baseDays     = (g) => GRADE_CADENCE[g] || GRADE_CADENCE.C; // ungraded -> C (21d)
+    const _cadenceDays  = (g, step) => Math.min(RE_ENGAGE_DECAY_CAP_DAYS, Math.round(_baseDays(g) * _decayFactor(step || 0)));
     const RE_ENGAGE_MAX_OPEN = 5; // hard cap on how many re-engagement rows an agent sees at once
     const dispatchReEngagementReminders = async () => {
         const myId = _state.cu?.id;
@@ -1407,7 +1418,9 @@
             const last = p.last_activity_date;
             if (!last) continue;          // never-contacted is a CPS/protection concern, not re-engagement
             const days = Math.floor((todayMs - new Date(last).getTime()) / 86400000);
-            if (days < _cadenceDays(p.manual_grade)) continue;      // grade sets the rhythm
+            if (p.follow_mode === 'seasonal') continue;             // backed off to seasonal-only
+            const step = _silenceStep(p);                           // touch counter → widening interval
+            if (days < _cadenceDays(p.manual_grade, step)) continue; // grade × decay sets the rhythm
             due.push({ p, last, days });
         }
         // Highest-value first: grade rank, then most-overdue (oldest contact).
@@ -1420,7 +1433,7 @@
             const msg = interpolateTemplate(tpl.message_template, {
                 name: p.full_name || '', days: String(days), agent_name: _state.cu?.full_name || ''
             });
-            await createFollowUpDraft({
+            const _created = await createFollowUpDraft({
                 prospectId:   p.id,
                 triggerType:  're_engagement',
                 messageText:  msg,
@@ -1428,6 +1441,16 @@
                 prospectName: p.full_name || '',
                 dueDate:      last        // episode key — see dedup note in createFollowUpDraft
             });
+            // A brand-new draft = the previous touch went un-answered (answering routes via
+            // _logFollowUpContact, which resets). Advance the touch counter so the NEXT gap
+            // widens; at SILENCE_SEASONAL_AT drop to seasonal-only. Guarded on the non-null
+            // return so dedup / in-flight no-ops never miscount.
+            if (_created) {
+                const _sc = (Number(p.silence_count) || 0) + 1;
+                const _patch = { silence_count: _sc };
+                if (_sc >= SILENCE_SEASONAL_AT && p.follow_mode !== 'seasonal') _patch.follow_mode = 'seasonal';
+                AppDataStore.update('prospects', p.id, _patch).catch(e => console.warn('re_engagement back-off update failed:', e));
+            }
         }
     };
 
@@ -1806,7 +1829,7 @@
         try {
             const d = new Date();
             const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-            if (draft.prospect_id) await AppDataStore.update('prospects', draft.prospect_id, { last_activity_date: today });
+            if (draft.prospect_id) await AppDataStore.update('prospects', draft.prospect_id, { last_activity_date: today, follow_mode: 'active', silence_count: 0 });
             else if (draft.customer_id) await AppDataStore.update('customers', draft.customer_id, { last_contact_date: today });
         } catch (e) { console.warn('_logFollowUpContact failed:', e); }
     };
