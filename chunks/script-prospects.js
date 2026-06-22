@@ -2254,6 +2254,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 <button class="btn ${row ? 'secondary' : 'primary'} btn-sm" onclick="event.stopPropagation(); ${handler}">
                     <i class="fas fa-${icon}"></i> ${row ? 'Edit' : 'Fill'}
                 </button>
+                ${kind === 'ApuAppraisal' ? `<button class="btn secondary btn-sm" onclick="event.stopPropagation(); app.openGenerateEvoucherModal(${prospect.id})"><i class="fas fa-ticket-alt"></i> E-Voucher</button>` : ''}
             </div>
         `;
         };
@@ -2282,12 +2283,37 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         ]);
         const appraisalCount = allAttachments.filter(a => a.attachment_type === 'appraisal_form').length;
         const apuUrls = allAttachments.filter(a => a.attachment_type === 'apu_form').map(a => a.file_url);
+        const vouchers = allAttachments.filter(a => a.attachment_type === 'evoucher');
+        const vouchersHtml = vouchers.length > 0 ? `
+            <div style="background:var(--gray-50);border-radius:8px;padding:12px;margin-bottom:12px;">
+                <div style="font-weight:600;font-size:13px;margin-bottom:8px;"><i class="fas fa-ticket-alt" style="color:#7C3AED;margin-right:6px;"></i>E-Vouchers (${vouchers.length})</div>
+                <div style="display:flex;flex-wrap:wrap;gap:14px;">
+                    ${vouchers.map(v => {
+                        const code = (v.metadata && v.metadata.voucher_code) || '';
+                        const rname = (v.metadata && v.metadata.recipient_name) || (prospect.full_name || '');
+                        const fname = `evoucher_${code || v.id}.png`;
+                        return `
+                        <div style="width:104px;text-align:center;">
+                            <img loading="lazy" decoding="async" data-attach-src="${escapeHtml(String(v.file_url))}" style="width:104px;height:auto;border-radius:6px;border:1px solid var(--gray-200);cursor:pointer;" onclick="window._openAttachment && window._openAttachment('${UI.escJsAttr(String(v.file_url))}')">
+                            <div style="font-size:10px;color:var(--gray-500);margin-top:3px;font-family:monospace;">${escapeHtml(code)}</div>
+                            <div style="display:flex;gap:5px;justify-content:center;margin-top:5px;">
+                                <button class="btn-icon" title="Share via WhatsApp" style="background:#25D366;color:#fff;width:28px;height:28px;border-radius:50%;font-size:13px;padding:0;" onclick="event.stopPropagation(); app.sendVoucherWhatsApp(${prospect.id}, ${v.id}, '${UI.escJsAttr(code)}', '${UI.escJsAttr(rname)}', '${UI.escJsAttr(String(prospect.phone || ''))}', '${UI.escJsAttr(String(v.file_url))}')"><i class="fab fa-whatsapp"></i></button>
+                                <button class="btn-icon" title="Download" style="width:28px;height:28px;border-radius:50%;font-size:12px;padding:0;" onclick="event.stopPropagation(); app.downloadVoucher('${UI.escJsAttr(String(v.file_url))}','${UI.escJsAttr(fname)}')"><i class="fas fa-download"></i></button>
+                                <button class="btn-icon" title="Remove" style="background:var(--error);color:#fff;width:28px;height:28px;border-radius:50%;font-size:12px;padding:0;" onclick="event.stopPropagation(); app.removeEvoucher(${prospect.id}, ${v.id})"><i class="fas fa-times"></i></button>
+                            </div>
+                        </div>`;
+                    }).join('')}
+                </div>
+            </div>
+        ` : '';
         container.innerHTML = `
             <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
                 <button class="btn secondary btn-sm" onclick="app.attachAppraisalForm(${prospect.id})"><i class="fas fa-file-image"></i> Appraisal Form${appraisalCount ? ` (${appraisalCount})` : ''}</button>
                 <button class="btn secondary btn-sm" onclick="app.uploadAPUForm(null, ${prospect.id})"><i class="fas fa-paperclip"></i> APU Form${apuUrls.length ? ` (${apuUrls.length})` : ''}</button>
+                <button class="btn secondary btn-sm" onclick="app.openGenerateEvoucherModal(${prospect.id})"><i class="fas fa-ticket-alt"></i> E-Voucher${vouchers.length ? ` (${vouchers.length})` : ''}</button>
                 <button class="btn primary btn-sm" onclick="app.openAddNameModal(${prospect.id})"><i class="fas fa-plus"></i> Add Name</button>
             </div>
+            ${vouchersHtml}
             ${names.length > 0 ? names.map(n => `
                 <div style="background:var(--gray-50);border-radius:8px;padding:12px;margin-bottom:8px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
@@ -4136,6 +4162,409 @@ const removeAPUForm = async (prospectId, attachmentId) => {
     UI.toast.success('APU photo removed');
     const bodyEl = document.getElementById(`acc-body-names-${prospectId}`);
     if (bodyEl) await switchProspectTab('names', prospectId, null, bodyEl);
+};
+
+// =========================================================================
+// E-VOUCHER GENERATOR (APU referral voucher)
+// One admin-uploaded template (evoucher_config singleton) with two field
+// placements (姓名 + 序号). Agents enter a name; the CRM stamps an atomic
+// running number (next_evoucher_number RPC — 169 + MM + YY + NNN, never
+// resets), composes name + number onto the template via canvas, saves the PNG
+// to the prospect's APU/Names tab as a prospect_attachments row
+// (attachment_type='evoucher'), then shares the actual image file to the
+// prospect over WhatsApp (Web Share API, wa.me + download fallback).
+// =========================================================================
+let _evGenBusy = false;
+const _evBlobCache = {}; // attachmentId -> freshly-generated PNG Blob (skips refetch for the share gesture)
+
+const _evIsVoucherAdmin = () =>
+    (typeof isSystemAdmin === 'function' && isSystemAdmin(_state?.cu)) ||
+    (typeof isMarketingManager === 'function' && isMarketingManager(_state?.cu));
+
+// Malaysia MSISDN normalizer for wa.me (mirror of _mhomeWaPhone in script-mobile.js,
+// duplicated because that helper is chunk-private).
+const _evWaPhone = (raw) => {
+    const digits = String(raw || '').replace(/[^0-9+]/g, '').replace(/^\+/, '');
+    if (!digits) return '';
+    if (digits.startsWith('60')) return digits;
+    if (digits.startsWith('0')) return '6' + digits;
+    return digits;
+};
+
+const _evGetConfig = async () => {
+    const sb = window.supabase || window.supabaseClient;
+    if (!sb) return null;
+    try {
+        const { data, error } = await sb.from('evoucher_config').select('*').eq('id', 1).maybeSingle();
+        if (error) { console.warn('evoucher_config read failed:', error.message); return null; }
+        return data || null;
+    } catch (e) { console.warn('evoucher_config read exception:', e?.message); return null; }
+};
+
+// Draw name + running number onto the template image and return a PNG Blob.
+// The template is fetched to a same-origin object URL first, so the canvas is
+// never tainted (no crossOrigin/CORS dependency) and toBlob always works.
+const _evComposeVoucherBlob = async (config, name, code) => {
+    let tplUrl = config.template_url;
+    try { tplUrl = (await AppDataStore.resolveAttachmentSrc(config.template_url)) || config.template_url; } catch (_) {}
+    const resp = await fetch(tplUrl);
+    if (!resp.ok) throw new Error('Template image fetch failed (' + resp.status + ')');
+    const objUrl = URL.createObjectURL(await resp.blob());
+    try {
+        const img = await new Promise((res, rej) => {
+            const im = new Image();
+            im.onload = () => res(im);
+            im.onerror = () => rej(new Error('Template image failed to load'));
+            im.src = objUrl;
+        });
+        const W = img.naturalWidth || img.width;
+        const H = img.naturalHeight || img.height;
+        const canvas = document.createElement('canvas');
+        canvas.width = W; canvas.height = H;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, W, H);
+        const drawField = (field, text) => {
+            if (!field || text == null || text === '') return;
+            const xPct = typeof field.xPct === 'number' ? field.xPct : 0.5;
+            const yPct = typeof field.yPct === 'number' ? field.yPct : 0.5;
+            const fontPct = typeof field.fontPct === 'number' ? field.fontPct : 5;
+            const maxW = (typeof field.maxWidthPct === 'number' ? field.maxWidthPct : 0.6) * W;
+            const fam = '"KaiTi","STKaiti","Microsoft YaHei","PingFang SC",sans-serif';
+            let size = Math.max(8, Math.round(fontPct / 100 * W));
+            ctx.fillStyle = field.color || '#15233f';
+            ctx.textAlign = field.align || 'center';
+            ctx.textBaseline = 'middle';
+            const str = String(text);
+            ctx.font = '700 ' + size + 'px ' + fam;
+            while (ctx.measureText(str).width > maxW && size > 8) {
+                size -= 2;
+                ctx.font = '700 ' + size + 'px ' + fam;
+            }
+            ctx.fillText(str, xPct * W, yPct * H);
+        };
+        drawField(config.name_field, name);
+        drawField(config.number_field, code);
+        const blob = await new Promise(res => canvas.toBlob(res, 'image/png', 0.95));
+        if (!blob) throw new Error('Canvas export failed');
+        return blob;
+    } finally {
+        URL.revokeObjectURL(objUrl);
+    }
+};
+
+const openGenerateEvoucherModal = async (prospectId) => {
+    const prospect = await AppDataStore.getById('prospects', prospectId);
+    if (!prospect) { UI.toast.error('Prospect not found'); return; }
+    const config = await _evGetConfig();
+    const isAdmin = _evIsVoucherAdmin();
+    if (!config || !config.template_url) {
+        const content = `
+            <div style="text-align:center;padding:14px;">
+                <i class="fas fa-ticket-alt" style="font-size:28px;color:#7C3AED;"></i>
+                <p style="color:var(--gray-700);margin-top:10px;">No voucher template has been set up yet.</p>
+                <p style="color:var(--gray-500);font-size:13px;">${isAdmin ? 'Upload the standard voucher and mark where the name and 序号 go.' : 'Please ask your admin to set up the voucher template first.'}</p>
+            </div>`;
+        UI.showModal('Generate E-Voucher', content, isAdmin
+            ? [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }, { label: 'Set Up Template', type: 'primary', action: '(async () => { await app.openEvoucherTemplateSetup(); })()' }]
+            : [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }]);
+        return;
+    }
+    const content = `
+        <div class="form-group">
+            <label>持券人姓名 / Holder Name</label>
+            <input type="text" id="ev-name" class="form-control" value="${escapeHtml(prospect.full_name || '')}" placeholder="Name to print on the voucher">
+            <p style="color:var(--gray-500);font-size:12px;margin-top:4px;">A unique running number (序号) is assigned automatically.</p>
+        </div>
+        ${isAdmin ? `<p style="font-size:12px;margin-top:4px;"><a href="javascript:void(0)" style="color:#7C3AED;" onclick="(async () => { await app.openEvoucherTemplateSetup(); })()"><i class="fas fa-cog"></i> Edit template / field positions</a></p>` : ''}
+    `;
+    UI.showModal('Generate E-Voucher', content, [
+        { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+        { label: 'Generate', type: 'primary', action: `(async () => { await app.generateEvoucher(${prospectId}); })()` }
+    ]);
+    setTimeout(() => document.getElementById('ev-name')?.focus(), 60);
+};
+
+const generateEvoucher = async (prospectId) => {
+    if (_evGenBusy) return;
+    const name = (document.getElementById('ev-name')?.value || '').trim();
+    if (!name) { UI.toast.error('Please enter the holder name'); return; }
+    const sb = window.supabase || window.supabaseClient;
+    if (!sb || !sb.storage) { UI.toast.error('Supabase not connected — cannot generate'); return; }
+    const config = await _evGetConfig();
+    if (!config || !config.template_url) { UI.toast.error('No voucher template set up yet'); return; }
+    _evGenBusy = true;
+    try {
+        const { data: seq, error: rpcErr } = await sb.rpc('next_evoucher_number');
+        if (rpcErr) throw rpcErr;
+        const now = new Date();
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const yy = String(now.getFullYear() % 100).padStart(2, '0');
+        const prefix = config.prefix || '169';
+        const code = `${prefix}${mm}${yy}${String(seq).padStart(3, '0')}`;
+        const blob = await _evComposeVoucherBlob(config, name, code);
+        const path = `evouchers/${prospectId}_${code}_${Date.now()}.png`;
+        const { error: upErr } = await sb.storage.from('attachments').upload(path, blob, { upsert: false, contentType: 'image/png' });
+        if (upErr) throw upErr;
+        const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
+        if (!urlData?.publicUrl) throw new Error('Upload succeeded but could not get URL');
+        const savedRow = await AppDataStore.create('prospect_attachments', {
+            prospect_id: prospectId,
+            attachment_type: 'evoucher',
+            file_url: urlData.publicUrl,
+            filename: `evoucher_${code}.png`,
+            metadata: { voucher_code: code, recipient_name: name, seq, generated_by: (_state?.cu?.id || null), generated_at: now.toISOString() }
+        });
+        if (savedRow?.id) _evBlobCache[savedRow.id] = blob; // reuse for the immediate share gesture
+        UI.hideModal();
+        UI.toast.success(`E-Voucher ${code} generated`);
+        const bodyEl = document.getElementById(`acc-body-names-${prospectId}`);
+        if (bodyEl) await switchProspectTab('names', prospectId, null, bodyEl);
+    } catch (err) {
+        console.error('E-Voucher generate failed:', err);
+        UI.toast.error('Generate failed: ' + (err.message || 'Unknown error'));
+    } finally {
+        _evGenBusy = false;
+    }
+};
+
+// Share the generated voucher IMAGE to the prospect. Primary: Web Share API
+// (sends the actual PNG file). Fallback: open the prospect's WhatsApp chat with
+// a caption + download the PNG so the agent can attach it (wa.me can't carry a file).
+//
+// NOT async, and synchronous up to navigator.share()/window.open(): the Web Share
+// API and popups require transient user activation, which any await before them
+// would consume (the gesture would be lost and share/open would silently fail —
+// the same lesson as mhomeWa in script-mobile.js). All inputs are passed in from
+// the render so we never await a DB read before the gesture. Freshly-generated
+// vouchers carry their PNG in _evBlobCache, enabling a true file share on mobile;
+// older vouchers (no cached blob) fall back to wa.me + download.
+const sendVoucherWhatsApp = (prospectId, attId, code, rname, phone, fileUrl) => {
+    code = code || '';
+    rname = rname || '';
+    const fname = `evoucher_${code || attId}.png`;
+    const caption = `🎁 传福增运 · 九星引路\n这是一份专属您的个人风水解析券\n持券人：${rname}${code ? `\n序号：${code}` : ''}\n请凭此券预约 1对1 个人风水解析。`;
+
+    // PRIMARY (gesture-safe): a just-generated voucher has its PNG cached — share the
+    // actual file synchronously inside the click so transient activation is preserved.
+    const cached = _evBlobCache[attId];
+    if (cached && navigator.share && navigator.canShare) {
+        try {
+            const file = new File([cached], fname, { type: 'image/png' });
+            if (navigator.canShare({ files: [file] })) {
+                navigator.share({ files: [file], title: 'Feng Shui E-Voucher', text: caption }).catch(() => {});
+                return;
+            }
+        } catch (_) { /* fall through to wa.me */ }
+    }
+
+    // FALLBACK (gesture-safe): open the prospect's WhatsApp chat NOW (before any await),
+    // then download the PNG so the agent can attach it. wa.me cannot carry a file.
+    const num = _evWaPhone(phone);
+    if (num) {
+        window.open(`https://wa.me/${num}?text=${encodeURIComponent(caption)}`, '_blank', 'noopener');
+    } else {
+        UI.toast.error('No phone number on file — downloading the voucher to share manually.');
+    }
+    downloadVoucher(fileUrl, fname);
+};
+
+const downloadVoucher = async (fileUrl, filename) => {
+    try {
+        const signed = (await AppDataStore.resolveAttachmentSrc(fileUrl)) || fileUrl;
+        const resp = await fetch(signed);
+        if (!resp.ok) throw new Error('fetch ' + resp.status);
+        const url = URL.createObjectURL(await resp.blob());
+        const a = document.createElement('a');
+        a.href = url; a.download = filename || 'evoucher.png';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch (err) {
+        console.warn('Download failed, opening in a tab instead:', err?.message);
+        try { window._openAttachment(fileUrl); } catch (_) {}
+    }
+};
+
+const removeEvoucher = async (prospectId, attId) => {
+    if (!window.confirm('Remove this e-voucher?')) return;
+    try {
+        try {
+            const atts = await AppDataStore.query('prospect_attachments', { prospect_id: prospectId });
+            const row = (atts || []).find(a => String(a.id) === String(attId));
+            if (row && row.file_url) {
+                const path = AppDataStore.extractAttachmentPath(row.file_url);
+                if (path) await AppDataStore.deleteAttachmentByPath(path);
+            }
+        } catch (_) { /* best-effort storage cleanup */ }
+        delete _evBlobCache[attId];
+        await AppDataStore.delete('prospect_attachments', attId);
+        UI.toast.success('E-Voucher removed');
+        const bodyEl = document.getElementById(`acc-body-names-${prospectId}`);
+        if (bodyEl) await switchProspectTab('names', prospectId, null, bodyEl);
+    } catch (err) {
+        UI.toast.error('Remove failed: ' + (err.message || 'Unknown error'));
+    }
+};
+
+// Admin-only: upload the standard voucher template and drag the two field
+// markers (姓名 + 序号) onto the blanks. Stored in the evoucher_config singleton.
+const openEvoucherTemplateSetup = async () => {
+    if (!_evIsVoucherAdmin()) { UI.toast.error('Only admin / marketing manager can set up the voucher template.'); return; }
+    const config = (await _evGetConfig()) || {};
+    const nf = config.name_field || {};
+    const numf = config.number_field || {};
+    let tplPreview = '';
+    if (config.template_url) {
+        try { tplPreview = (await AppDataStore.resolveAttachmentSrc(config.template_url)) || config.template_url; } catch (_) { tplPreview = config.template_url; }
+    }
+    const nx = (nf.xPct != null ? nf.xPct : 0.5) * 100;
+    const ny = (nf.yPct != null ? nf.yPct : 0.78) * 100;
+    const ox = (numf.xPct != null ? numf.xPct : 0.78) * 100;
+    const oy = (numf.yPct != null ? numf.yPct : 0.07) * 100;
+    const content = `
+        <style>.evt-marker{transform:translate(-50%,-50%);position:absolute;background:rgba(124,58,237,.92);color:#fff;font-size:12px;font-weight:700;padding:3px 9px;border-radius:12px;cursor:grab;user-select:none;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.35);touch-action:none;}</style>
+        <div class="form-group">
+            <label>Voucher template image ${config.template_url ? '<span style="color:#10B981;">(uploaded ✓ — choose a file to replace)</span>' : '(required)'}</label>
+            <input type="file" id="evt-file" class="form-control" accept="image/*">
+        </div>
+        <p style="font-size:12px;color:var(--gray-600);margin:0 0 8px;">Drag <b style="color:#7C3AED;">姓名</b> onto the holder-name box and <b style="color:#7C3AED;">序号</b> onto the serial-number line.</p>
+        <div style="font-size:12px;display:flex;gap:18px;flex-wrap:wrap;margin-bottom:10px;">
+            <label>姓名 size <input type="range" id="evt-name-size" min="2" max="12" step="0.5" value="${nf.fontPct || 5}" style="vertical-align:middle;width:90px;"></label>
+            <label>color <input type="color" id="evt-name-color" value="${nf.color || '#15233f'}" style="vertical-align:middle;"></label>
+            <label>序号 size <input type="range" id="evt-num-size" min="1.5" max="10" step="0.5" value="${numf.fontPct || 3.5}" style="vertical-align:middle;width:90px;"></label>
+            <label>color <input type="color" id="evt-num-color" value="${numf.color || '#b8341c'}" style="vertical-align:middle;"></label>
+        </div>
+        <div id="evt-stage" style="position:relative;display:inline-block;max-width:100%;border:1px solid var(--gray-200);border-radius:6px;overflow:hidden;${tplPreview ? '' : 'min-height:140px;width:100%;background:#f8f8f8;'}">
+            ${tplPreview ? `<img id="evt-img" src="${safeUrl(tplPreview)}" style="display:block;max-width:100%;height:auto;">` : '<div id="evt-img" style="padding:40px 10px;text-align:center;color:#9CA3AF;">Choose a template image…</div>'}
+            <div id="evt-mk-name" class="evt-marker" style="left:${nx}%;top:${ny}%;">姓名</div>
+            <div id="evt-mk-num" class="evt-marker" style="left:${ox}%;top:${oy}%;">序号</div>
+        </div>
+    `;
+    UI.showModal('E-Voucher Template Setup', content, [
+        { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+        { label: 'Save Template', type: 'primary', action: '(async () => { await app.saveEvoucherTemplate(); })()' }
+    ]);
+    setTimeout(() => _evBindTemplateSetup(), 80);
+};
+
+const _evBindTemplateSetup = () => {
+    const stage = document.getElementById('evt-stage');
+    if (!stage) return;
+    const fileInput = document.getElementById('evt-file');
+    if (fileInput) {
+        fileInput.onchange = () => {
+            const f = fileInput.files && fileInput.files[0];
+            if (!f) return;
+            const r = new FileReader();
+            r.onload = (e) => {
+                let img = document.getElementById('evt-img');
+                if (img && img.tagName === 'IMG') {
+                    img.src = e.target.result;
+                } else {
+                    const newImg = document.createElement('img');
+                    newImg.id = 'evt-img';
+                    newImg.src = e.target.result;
+                    newImg.style.cssText = 'display:block;max-width:100%;height:auto;';
+                    if (img) img.replaceWith(newImg);
+                    stage.style.minHeight = ''; stage.style.background = ''; stage.style.width = '';
+                    // Markers may have been dragged over the empty placeholder box; reset
+                    // them to sensible defaults so they're positioned against the real image.
+                    const mkN = document.getElementById('evt-mk-name'); if (mkN) { mkN.style.left = '50%'; mkN.style.top = '78%'; }
+                    const mkO = document.getElementById('evt-mk-num'); if (mkO) { mkO.style.left = '78%'; mkO.style.top = '7%'; }
+                }
+            };
+            r.readAsDataURL(f);
+        };
+    }
+    ['evt-mk-name', 'evt-mk-num'].forEach((id) => {
+        const mk = document.getElementById(id);
+        if (!mk) return;
+        mk.addEventListener('pointerdown', (ev) => {
+            ev.preventDefault();
+            mk.style.cursor = 'grabbing';
+            try { mk.setPointerCapture(ev.pointerId); } catch (_) {}
+            const move = (e) => {
+                const rect = stage.getBoundingClientRect();
+                if (!rect.width || !rect.height) return;
+                let x = (e.clientX - rect.left) / rect.width;
+                let y = (e.clientY - rect.top) / rect.height;
+                x = Math.max(0, Math.min(1, x));
+                y = Math.max(0, Math.min(1, y));
+                mk.style.left = (x * 100) + '%';
+                mk.style.top = (y * 100) + '%';
+            };
+            const up = () => {
+                mk.style.cursor = 'grab';
+                mk.removeEventListener('pointermove', move);
+                mk.removeEventListener('pointerup', up);
+            };
+            mk.addEventListener('pointermove', move);
+            mk.addEventListener('pointerup', up);
+        });
+    });
+};
+
+const saveEvoucherTemplate = async () => {
+    if (!_evIsVoucherAdmin()) { UI.toast.error('Not authorized'); return; }
+    const sb = window.supabase || window.supabaseClient;
+    if (!sb || !sb.storage) { UI.toast.error('Supabase not connected'); return; }
+    const existing = (await _evGetConfig()) || {};
+    const file = document.getElementById('evt-file')?.files?.[0];
+    if (!existing.template_url && !file) { UI.toast.error('Please choose a template image'); return; }
+    const frac = (id, axis, dflt) => {
+        const raw = (document.getElementById(id)?.style?.[axis] || '').replace('%', '');
+        const v = parseFloat(raw);
+        return isNaN(v) ? dflt : v / 100;
+    };
+    const nameField = {
+        xPct: frac('evt-mk-name', 'left', 0.5),
+        yPct: frac('evt-mk-name', 'top', 0.78),
+        fontPct: parseFloat(document.getElementById('evt-name-size')?.value) || 5,
+        color: document.getElementById('evt-name-color')?.value || '#15233f',
+        align: 'center', maxWidthPct: 0.6
+    };
+    const numField = {
+        xPct: frac('evt-mk-num', 'left', 0.78),
+        yPct: frac('evt-mk-num', 'top', 0.07),
+        fontPct: parseFloat(document.getElementById('evt-num-size')?.value) || 3.5,
+        color: document.getElementById('evt-num-color')?.value || '#b8341c',
+        align: 'center', maxWidthPct: 0.4
+    };
+    try {
+        let templateUrl = existing.template_url;
+        if (file) {
+            if (file.size > 8 * 1024 * 1024) { UI.toast.error('Template too large (max 8MB)'); return; }
+            const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+            const path = `evoucher_templates/template_${Date.now()}_${safeName}`;
+            const { error: upErr } = await sb.storage.from('attachments').upload(path, file, { upsert: false, contentType: file.type });
+            if (upErr) throw upErr;
+            const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
+            if (!urlData?.publicUrl) throw new Error('Upload succeeded but could not get URL');
+            templateUrl = urlData.publicUrl;
+        }
+        const { data: updRows, error } = await sb.from('evoucher_config').update({
+            template_url: templateUrl,
+            name_field: nameField,
+            number_field: numField,
+            updated_at: new Date().toISOString(),
+            updated_by: (_state?.cu?.id || null)
+        }).eq('id', 1).select('id');
+        if (error) throw error;
+        // A zero-row update means RLS silently rejected the write (not an admin at
+        // the DB layer). Surface it instead of a false success, and clean up the
+        // template we just uploaded so storage doesn't accrete orphans.
+        if (!updRows || !updRows.length) {
+            if (file && templateUrl) {
+                try { const p = AppDataStore.extractAttachmentPath(templateUrl); if (p) await AppDataStore.deleteAttachmentByPath(p); } catch (_) {}
+            }
+            UI.toast.error('Not authorized to save the voucher template (admin level required).');
+            return;
+        }
+        UI.hideModal();
+        UI.toast.success('Voucher template saved');
+    } catch (err) {
+        console.error('Save template failed:', err);
+        UI.toast.error('Save failed: ' + (err.message || 'Unknown error'));
+    }
 };
 
 const recordSalesClosure = (prospectId, activityId) => {
@@ -6119,6 +6548,13 @@ const openPastRecordModal = async (...args) => {
         updateProspectBulkBar,
         updateProspectFilterBadge,
         uploadAPUForm,
+        openGenerateEvoucherModal,
+        generateEvoucher,
+        sendVoucherWhatsApp,
+        downloadVoucher,
+        removeEvoucher,
+        openEvoucherTemplateSetup,
+        saveEvoucherTemplate,
         uploadFengShuiFile,
         uploadFengShuiPhotos,
         uploadFengShuiSitePhotos,
