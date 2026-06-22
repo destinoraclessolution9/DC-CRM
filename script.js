@@ -4517,6 +4517,12 @@ function _wireLoginBtn() {
         // then dispatch (previously threw "app.X is not a function").
         toggleLifeChartType: _lazyStub('chunks/script-activities.min.js', 'toggleLifeChartType'),
         scanInvoiceWithAI:   _lazyStub('chunks/script-activities.min.js', 'scanInvoiceWithAI'),
+        // The apu_ack follow-up "E-Voucher" button renders on the Calendar
+        // reminders panel, which can show before the prospects chunk loads
+        // (prospects is NOT in the eager post-login burst). Self-loading stub
+        // pulls the chunk in then dispatches — previously threw "app.openGenerate
+        // EvoucherModal is not a function" on a fresh login landing on the calendar.
+        openGenerateEvoucherModal: _lazyStub('chunks/script-prospects.min.js', 'openGenerateEvoucherModal'),
 
         // Phase 3 Prospect Management Functions
         showProspectsView,
