@@ -26,6 +26,29 @@
 // renderRefillReminders in script-calendar.js. Reminders carry no agent column, so the
 // owning agent is resolved through the linked prospect/customer's responsible/lead agent.
 // Previously the badge + panel showed every agent's pending refills regardless of role.
+// #22: shared due-window for refill notifications — mirrors renderRefillReminders'
+// estimated_finish_date bucketing in script-calendar.js. Keep only refills overdue or
+// due within 7 days, soonest-first; far-future refills aren't actionable notifications.
+// #19: NOTIF_REFILL_MAX caps how many surface so the badge count and the panel render stay in lockstep.
+const NOTIF_REFILL_MAX = 5;
+const _refillNotifDaysLeft = (r) => {
+    const efd = r && r.estimated_finish_date;
+    if (efd) {
+        const parts = String(efd).slice(0, 10).split('-').map(Number);
+        if (parts.length === 3 && parts.every(n => !isNaN(n))) {
+            const t = new Date();
+            const todayMs = new Date(t.getFullYear(), t.getMonth(), t.getDate()).getTime();
+            const finishMs = new Date(parts[0], parts[1] - 1, parts[2]).getTime();
+            return Math.floor((finishMs - todayMs) / 86400000);
+        }
+    }
+    return (r && typeof r.days_until_finish === 'number') ? r.days_until_finish : null;
+};
+const _dueRefillReminders = (reminders) =>
+    (reminders || [])
+        .filter(r => { const d = _refillNotifDaysLeft(r); return d != null && d <= 7; })
+        .sort((a, b) => _refillNotifDaysLeft(a) - _refillNotifDaysLeft(b));
+
 const _scopeRefillReminders = (reminders, visibleIds, prospectMap, customerMap) => {
     if (visibleIds === 'all') return reminders || [];
     const vStrs = visibleIds.map(String);
@@ -96,7 +119,13 @@ const _refreshNotifBadge = async () => {
         // Pending refill reminders — scoped to the current user's visible agents
         try {
             const reminders = await AppDataStore.query('refill_reminders', { status: 'pending' });
-            count += _scopeRefillReminders(reminders, visibleIds, prospectMap, customerMap).length;
+            // #22: only count refills actually due (overdue or within 7 days), mirroring the
+            // calendar widget — a refill 90 days out isn't an actionable notification. #19:
+            // cap to NOTIF_REFILL_MAX so the badge matches the panel's render limit.
+            const dueRefills = _dueRefillReminders(
+                _scopeRefillReminders(reminders, visibleIds, prospectMap, customerMap)
+            );
+            count += Math.min(dueRefills.length, NOTIF_REFILL_MAX);
         } catch (_) {}
 
         // Pending co-agent invitations for current user
@@ -175,8 +204,11 @@ const _buildNotifPanel = async () => {
     // Refill reminders — scoped to the current user's visible agents
     try {
         const reminders = await AppDataStore.query('refill_reminders', { status: 'pending' });
-        const scopedReminders = _scopeRefillReminders(reminders, visibleIds, prospectMap, customerMap);
-        for (const r of scopedReminders.slice(0, 5)) {
+        // #22: same overdue/<=7d window as the badge + calendar widget, soonest-first.
+        const scopedReminders = _dueRefillReminders(
+            _scopeRefillReminders(reminders, visibleIds, prospectMap, customerMap)
+        );
+        for (const r of scopedReminders.slice(0, NOTIF_REFILL_MAX)) {
             // #9: refill_reminders has no `due_date` column — the date lives in
             // estimated_finish_date (the calendar widget already uses it). Was rendering a blank "Due ".
             const _refDue = (r.estimated_finish_date || '').toString().slice(0, 10);
