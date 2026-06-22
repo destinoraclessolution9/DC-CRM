@@ -640,6 +640,24 @@
             });
             if (dup) return null; // already exists
 
+            // Hard comfort ceiling (Phase 6): never produce more than COMFORT_MAX_PER_30D
+            // proactive drafts for ONE person in any rolling 30 days, across ALL trigger
+            // types combined. Placed AFTER dedup so a re-fire of an existing draft never
+            // counts against the budget. Reuses the `existing` snapshot already fetched above.
+            const COMFORT_MAX_PER_30D = 6;
+            const _ceilFloorMs = Date.now() - 30 * 86400000;
+            const _recentForPerson = existing.filter(d => {
+                const personMatch = (prospectId && d.prospect_id == prospectId) ||
+                                    (customerId && d.customer_id == customerId);
+                if (!personMatch) return false;
+                const t = d.created_at ? new Date(d.created_at).getTime() : 0;
+                return t >= _ceilFloorMs;
+            }).length;
+            if (_recentForPerson >= COMFORT_MAX_PER_30D) {
+                console.warn('createFollowUpDraft: 30-day comfort ceiling reached for person — skipping', { prospectId, customerId, triggerType });
+                return null;
+            }
+
             return await AppDataStore.create('follow_up_drafts', {
                 prospect_id: prospectId || null,
                 customer_id: customerId || null,
@@ -1056,7 +1074,10 @@
             if (!matchingInstances.length) continue;
 
             for (const person of allPeople) {
-                if (person.responsible_agent_id && person.responsible_agent_id != _state.cu?.id) continue;
+                // #21: a null/empty responsible_agent_id used to fall THROUGH this guard (the
+                // leading `responsible_agent_id &&` short-circuits), and the draft was then
+                // attributed to the dispatching admin — leaking unowned contacts. Skip them.
+                if (person.responsible_agent_id != _state.cu?.id) continue;
                 if (person.unable_to_serve) continue;
 
                 // ── Tier eligibility ──────────────────────────────────────────────────────
@@ -1222,7 +1243,9 @@
             const hasMatchCrit = interestList.length || solutionList.length || solCatList.length;
 
             for (const person of allPeople) {
-                if (person.responsible_agent_id && person.responsible_agent_id != _state.cu?.id) continue;
+                // #21: skip null-owner contacts (the `&&` short-circuit previously let them
+                // through, mis-attributing the draft to the dispatching admin).
+                if (person.responsible_agent_id != _state.cu?.id) continue;
                 if (person.unable_to_serve) continue;
 
                 const pid = person.id;
@@ -1319,7 +1342,9 @@
             if (!person.date_of_birth) continue;
             const dobMD = person.date_of_birth.slice(5);
             if (dobMD !== todayMD) continue;
-            if (person.responsible_agent_id && person.responsible_agent_id != _state.cu?.id) continue;
+            // #21: skip null-owner contacts (the `&&` short-circuit previously let them
+            // through, mis-attributing the birthday draft to the dispatching admin).
+            if (person.responsible_agent_id != _state.cu?.id) continue;
             if (person._type === 'prospect' && person.manual_grade === 'F') continue; // grade F = dropped, no birthday wish
 
             for (const tpl of triggers) {
@@ -1352,7 +1377,11 @@
         const _t = new Date();
         const todayMs = new Date(_t.getFullYear(), _t.getMonth(), _t.getDate()).getTime();
         let prospects = [];
-        try { prospects = await AppDataStore.getActiveProspects(); }
+        // #14: re-engagement is the ONE feature meant to wake the longest-quiet leads, but
+        // getActiveProspects() hides anything past the 500-day dormancy cutoff — exactly the
+        // leads most in need of a nudge. Pull the full set; the RE_ENGAGE_MAX_OPEN cap +
+        // grade-rank sort + F/converted/lost skips already bound how many surface per agent.
+        try { prospects = await AppDataStore.getActiveProspects({ includeDormant: true }); }
         catch (_) { return; }
         // Cap the VISIBLE backlog to RE_ENGAGE_MAX_OPEN. Count what this agent already
         // has pending, then top up only to the cap, oldest-quiet first. Without this a
@@ -1490,8 +1519,10 @@
                          : sol.customer_id ? customerMap[String(sol.customer_id)] : null;
             if (!person) continue;
 
-            // Only create drafts for the current agent's own prospects
-            if (person.responsible_agent_id && person.responsible_agent_id != _state.cu?.id) continue;
+            // Only create drafts for the current agent's own prospects. #21: a null owner
+            // used to slip past the `&&` short-circuit and get a draft attributed to the
+            // dispatching admin — skip unowned contacts outright.
+            if (person.responsible_agent_id != _state.cu?.id) continue;
             // Lifecycle guard (parity with the re-engagement dispatcher): a converted /
             // lost / unable-to-serve contact must not keep getting the proposal drip or
             // the 21-day overdue escalation — they already closed (or were dropped).
@@ -1555,15 +1586,21 @@
                     });
                 }
 
-                // Advance next_follow_up_date by 7 days so we don't re-fire tomorrow
-                const next = new Date(sol.next_follow_up_date);
-                next.setDate(next.getDate() + 7);
-                AppDataStore.update('proposed_solutions', sol.id, {
-                    last_follow_up_date: sol.next_follow_up_date,
-                    next_follow_up_date: next.toISOString().split('T')[0],
-                    follow_up_count: (sol.follow_up_count || 0) + 1,
-                    updated_at: new Date().toISOString()
-                }).catch(() => {});
+                // #15: only advance the cadence cursor when a drip step actually fired.
+                // Previously this ran even when dueTpls was empty (no matching/reached step),
+                // bumping follow_up_count and pushing next_follow_up_date +7d with zero
+                // outreach sent — silently skipping the contact a step at a time.
+                if (dueTpls.length) {
+                    // Advance next_follow_up_date by 7 days so we don't re-fire tomorrow
+                    const next = new Date(sol.next_follow_up_date);
+                    next.setDate(next.getDate() + 7);
+                    AppDataStore.update('proposed_solutions', sol.id, {
+                        last_follow_up_date: sol.next_follow_up_date,
+                        next_follow_up_date: next.toISOString().split('T')[0],
+                        follow_up_count: (sol.follow_up_count || 0) + 1,
+                        updated_at: new Date().toISOString()
+                    }).catch(() => {});
+                }
             }
 
             // ── Overdue escalation (21+ days since proposed_date, not yet escalated) ──
