@@ -502,9 +502,10 @@ const buildProspectRowHtml = (p, ctx) => {
     const grade = getScoreGrade(p.score);
     const daysLeft = calculateProtectionDays(p);
     const protectionStatus = getProtectionStatus(daysLeft);
-    const protFillClass = daysLeft <= 0 ? 'expired' : protectionStatus;
-    const daysClass = daysLeft <= 0 ? 'days-expired' : (daysLeft <= 7 ? 'days-critical' : (daysLeft <= 14 ? 'days-warning' : 'days-normal'));
-    const daysLabel = daysLeft <= 0 ? 'Expired' : `${daysLeft}d left`;
+    const _protTerminal = p.status === 'converted' || p.status === 'lost'; // #8: closed deals aren't "Expired"
+    const protFillClass = _protTerminal ? 'normal' : (daysLeft <= 0 ? 'expired' : protectionStatus);
+    const daysClass = _protTerminal ? 'days-normal' : (daysLeft <= 0 ? 'days-expired' : (daysLeft <= 7 ? 'days-critical' : (daysLeft <= 14 ? 'days-warning' : 'days-normal')));
+    const daysLabel = _protTerminal ? (p.status === 'converted' ? '✓ Customer' : 'Closed') : (daysLeft <= 0 ? 'Expired' : `${daysLeft}d left`);
     const relTime = timeAgo(p.last_activity_date);
     const lastActivityHtml = p.last_activity_date
         ? `<span style="font-weight:600;color:var(--text-primary);">${relTime}</span><br><span class="la-date" style="font-size:11px;color:var(--text-secondary);">${escapeHtml(p.last_activity_date)}</span>`
@@ -1266,9 +1267,10 @@ const renderProspectCards = (pageProspects, userById, canReassign, activeAgents)
     container.innerHTML = pageProspects.map(p => {
         const grade = getScoreGrade(p.score);
         const daysLeft = calculateProtectionDays(p);
-        const protFillClass = daysLeft <= 0 ? 'expired' : getProtectionStatus(daysLeft);
-        const daysClass = daysLeft <= 0 ? 'days-expired' : (daysLeft <= 7 ? 'days-critical' : (daysLeft <= 14 ? 'days-warning' : 'days-normal'));
-        const daysLabel = daysLeft <= 0 ? 'Expired' : `${daysLeft}d left`;
+        const _protTerminal = p.status === 'converted' || p.status === 'lost'; // #8: closed deals aren't "Expired"
+        const protFillClass = _protTerminal ? 'normal' : (daysLeft <= 0 ? 'expired' : getProtectionStatus(daysLeft));
+        const daysClass = _protTerminal ? 'days-normal' : (daysLeft <= 0 ? 'days-expired' : (daysLeft <= 7 ? 'days-critical' : (daysLeft <= 14 ? 'days-warning' : 'days-normal')));
+        const daysLabel = _protTerminal ? (p.status === 'converted' ? '✓ Customer' : 'Closed') : (daysLeft <= 0 ? 'Expired' : `${daysLeft}d left`);
         const agent = userById.get(String(p.responsible_agent_id));
         const agentName = agent ? agent.full_name : '—';
         const relTime = timeAgo(p.last_activity_date);
