@@ -2042,6 +2042,8 @@
         } else if (_filters.caseStatus === 'open') {
             activities = activities.filter(a => !a.closing_amount || parseFloat(a.closing_amount) <= 0);
         }
+        // Make every rendered row resolvable on click (see _calGridIndex).
+        _indexGridActivities(activities);
         const neededProspectIds = [...new Set(activities.filter(a => a.prospect_id).map(a => a.prospect_id))];
         const neededCustomerIds = [...new Set(activities.filter(a => a.customer_id).map(a => a.customer_id))];
         const [prospectResult, customerResult] = await Promise.all([
@@ -2444,6 +2446,11 @@
             if (da !== 0) return da;
             return (a.start_time || '').localeCompare(b.start_time || '');
         });
+
+        // Make every row this grid renders resolvable on click, even outside the
+        // hot window / under scoped RLS (see _calGridIndex). Indexed from the full
+        // list so rows hidden behind the mobile "+N more" cap still open.
+        _indexGridActivities(activities);
 
         // Lookup maps reconstructed from joined RPC fields (no extra queries).
         // userMap/eventMap/prospectMap/customerMap shaped to match the legacy
@@ -3623,6 +3630,8 @@
                 }
             }
         }
+        // Make every rendered row resolvable on click (see _calGridIndex).
+        _indexGridActivities(activities);
         // Fetch ONLY the prospect/customer names these scoped activities reference.
         const _wvPIds = [...new Set(activities.filter(a => a.prospect_id).map(a => a.prospect_id))];
         const _wvCIds = [...new Set(activities.filter(a => a.customer_id).map(a => a.customer_id))];
@@ -3764,6 +3773,8 @@
             dayActivities.push(a);
         }
         dayActivities.sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
+        // Make every rendered row resolvable on click (see _calGridIndex).
+        _indexGridActivities(dayActivities);
         // Fetch ONLY the prospect/customer names the scoped day activities
         // reference (id,full_name) — not the whole tables. Mirrors the week-view
         // + renderTodayActivities fix; closes the same getAll() privacy over-fetch.
@@ -3894,6 +3905,40 @@
             if (oldest !== undefined) _recentActivities.delete(oldest);
         }
     };
+
+    // _calGridIndex — every activity row that was DRAWN on a calendar grid this
+    // session (month / week / day). It exists to close a gap that surfaced as
+    // "Activity not found" when clicking a tile the user is plainly looking at:
+    //   • The grids fetch via get_calendar_window / queryAdvanced, both of which
+    //     include the `visibility IN ('open','public')` arm — so a tile can be
+    //     visible that the caller CANNOT re-read with a direct getById, because
+    //     the activities table RLS is owner/subtree-scoped (no public arm).
+    //   • _state.hac (the full-row click cache) only covers yesterday→today+7,
+    //     so any tile outside that window misses the hot tier too.
+    // When both happen at once (e.g. a public activity 4 days in the past) every
+    // tier of _lookupActivityRobust below missed and the modal refused to open.
+    // Stashing the light row that rendered the tile lets the detail lookup
+    // always resolve what was drawn. Heavy columns (notes/summary/consultants)
+    // may be absent — the detail modal renders those conditionally, so they are
+    // simply omitted, never broken. Bounded so a long session can't grow it
+    // without limit.
+    const _calGridIndex = new Map();
+    const _indexGridActivities = (rows) => {
+        if (!Array.isArray(rows)) return;
+        for (const a of rows) {
+            // Skip optimistic in-flight rows: they carry a temp id and clicking
+            // them is already gated, and we must not let a temp row mask the real
+            // one once it syncs.
+            if (!a || a.id == null || a._optimistic) continue;
+            _calGridIndex.set(String(a.id), a);
+        }
+        while (_calGridIndex.size > 1000) {
+            const oldest = _calGridIndex.keys().next().value;
+            if (oldest === undefined) break;
+            _calGridIndex.delete(oldest);
+        }
+    };
+
     const _lookupActivityRobust = async (activityId) => {
         if (activityId == null || activityId === 'null' || activityId === 'undefined') return null;
         const idStr = String(activityId);
@@ -3901,7 +3946,9 @@
         // Survives invalidateCache(), SWR refresh, and any RLS flap.
         const pinned = _recentActivities.get(idStr);
         if (pinned) return pinned;
-        // Tier 1 — calendar hot RPC (SECURITY DEFINER, RLS-bypassing).
+        // Tier 1 — calendar hot RPC cache (get_calendar_hot_details, full rows
+        // for yesterday→today+7). The RPC is SECURITY INVOKER, so this only
+        // holds rows the caller's RLS already permits within the hot window.
         let activity = _state.hac.get(idStr) || null;
         // Tier 2 — AppDataStore (which now checks primedRows, then SWR, then network).
         if (!activity) {
@@ -3924,8 +3971,18 @@
                 }
             } catch (_) { /* intentional: localStorage snapshot fallback is best-effort */ }
         }
-        if (activity) _pinRecentActivity(activity);
-        return activity;
+        if (activity) {
+            _pinRecentActivity(activity);
+            return activity;
+        }
+        // Tier 5 — calendar grid snapshot (final fallback). The row was drawn on
+        // a grid this session but is outside the hot window AND not directly
+        // re-readable (scoped-RLS public/open activity owned by another agent).
+        // Return the light row that rendered the tile so the modal opens instead
+        // of erroring. Deliberately NOT pinned: if a later getById can fetch the
+        // full row (e.g. a transient denial clears), that authoritative path
+        // should win on the next click rather than being masked by this stash.
+        return _calGridIndex.get(idStr) || null;
     };
 
     // Pure HTML builder for viewActivityDetails — extracted verbatim so the
