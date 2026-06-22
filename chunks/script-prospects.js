@@ -514,14 +514,14 @@ const buildProspectRowHtml = (p, ctx) => {
     const isSelected = _selectedProspects.has(p.id);
 
     return `
-            <tr onclick="app.showProspectDetail(${p.id})" class="${p.unable_to_serve ? 'row-unable' : ''}">
+            <tr onclick="app.showProspectDetail(${p.id})" class="${(p.unable_to_serve || p.manual_grade === 'F') ? 'row-unable' : ''}">
                 <td class="prospect-select-cell" onclick="event.stopPropagation()">
                     <input type="checkbox" data-pid="${p.id}" ${isSelected ? 'checked' : ''} onchange="app.toggleProspectSelect(${p.id})">
                 </td>
                 <td data-label="Name">
-                    <strong class="${p.unable_to_serve ? 'name-unable' : ''}">${escapeHtml(p.full_name || '(No Name)')}</strong>
+                    <strong class="${(p.unable_to_serve || p.manual_grade === 'F') ? 'name-unable' : ''}">${escapeHtml(p.full_name || '(No Name)')}</strong>
                     ${p.phone ? `<br><span style="font-size:12px;color:var(--text-secondary);">${escapeHtml(p.phone)}</span>` : ''}
-                    ${p.unable_to_serve ? `<br><span class="badge-unable">Unable to Serve</span>` : ''}
+                    ${p.unable_to_serve ? `<br><span class="badge-unable">Unable to Serve</span>` : ''}${p.manual_grade === 'F' ? `<br><span class="badge-unable">Dropped (F)</span>` : ''}
                 </td>
                 <td data-label="Agent" onclick="event.stopPropagation()">${canReassign
                     ? `<select class="form-control" style="padding:2px 6px;font-size:12px;min-width:120px;border:1px solid var(--border);border-radius:4px;background:var(--surface);cursor:pointer;" onchange="app.quickReassign(${p.id}, this.value, 'prospect')" title="Reassign agent">${(() => {
@@ -1276,13 +1276,13 @@ const renderProspectCards = (pageProspects, userById, canReassign, activeAgents)
         const initials = getInitials(p.full_name);
         const pct = Math.min(100, daysLeft <= 0 ? 100 : (daysLeft / 30) * 100);
         return `
-            <div class="prospect-card${p.unable_to_serve ? ' row-unable' : ''}" onclick="app.showProspectDetail(${p.id})">
+            <div class="prospect-card${(p.unable_to_serve || p.manual_grade === 'F') ? ' row-unable' : ''}" onclick="app.showProspectDetail(${p.id})">
                 <div class="prospect-card-header">
                     <div class="prospect-card-avatar" style="background:${color};">${initials}</div>
                     <div style="flex:1;min-width:0;">
-                        <div class="prospect-card-name${p.unable_to_serve ? ' name-unable' : ''}">${escapeHtml(p.full_name || '(No Name)')}</div>
+                        <div class="prospect-card-name${(p.unable_to_serve || p.manual_grade === 'F') ? ' name-unable' : ''}">${escapeHtml(p.full_name || '(No Name)')}</div>
                         ${p.phone ? `<div class="prospect-card-phone">${escapeHtml(p.phone)}</div>` : ''}
-                        ${p.unable_to_serve ? `<span class="badge-unable">Unable to Serve</span>` : ''}
+                        ${p.unable_to_serve ? `<span class="badge-unable">Unable to Serve</span>` : ''}${p.manual_grade === 'F' ? `<span class="badge-unable">Dropped (F)</span>` : ''}
                     </div>
                     <div class="prospect-card-score"><span class="score-badge score-${grade.replace('+','-plus')}">${p.score || 0} (${grade})</span></div>
                 </div>

@@ -38,7 +38,8 @@ old code rather than delete, for reversibility).
 - [x] F-exclusion (partial): manual_grade==='F' skip in re-engagement + solution dispatchers.
 - [x] F-exclusion: birthday dispatcher now skips grade-F prospects (no birthday wish).
 - [ ] ungraded handled by cadence default C (no DB write needed); REQUIRED-at-CPS picker deferred.
-- [ ] Complete F-exclusion remainder: notification bell + grey-out in prospect list.
+- [x] F grey-out in prospect list (table row + card): grade-F prospects render greyed with a "Dropped (F)" badge, mirroring unable-to-serve.
+- [ ] Complete F-exclusion remainder: notification bell birthday/refill (cps.js).
 
 ### Phase 3 — Unified cadence engine  [WIP — grade-driven core shipped]
 - [x] Re-engagement nudge is now GRADE-DRIVEN: per-grade interval (A=3/B=10/C=21/D=30, ungraded→C, F dark) via GRADE_CADENCE; replaces the flat 14-day threshold. Grade sets the rhythm.
