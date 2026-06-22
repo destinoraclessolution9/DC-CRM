@@ -1294,22 +1294,44 @@
     // is episode-keyed on last_activity_date (passed as due_date) so logging a fresh
     // contact re-arms the nudge after the next gap. Change the number below to retune.
     const RE_ENGAGE_DAYS = 14;
+    const RE_ENGAGE_MAX_OPEN = 5; // hard cap on how many re-engagement rows an agent sees at once
     const dispatchReEngagementReminders = async () => {
         const myId = _state.cu?.id;
         if (!myId) return;
         const tpl = await getFollowUpTemplate('re_engagement');
         if (!tpl) return;
-        const todayStr = new Date().toISOString().split('T')[0];
+        // Local (MYT) "today" — toISOString() gives the UTC date, which flips the
+        // 14-day boundary (and the displayed {days}) before 08:00 local. Match the
+        // renderer, which uses local date parts.
+        const _t = new Date();
+        const todayMs = new Date(_t.getFullYear(), _t.getMonth(), _t.getDate()).getTime();
         let prospects = [];
         try { prospects = await AppDataStore.getActiveProspects(); }
         catch (_) { return; }
+        // Cap the VISIBLE backlog to RE_ENGAGE_MAX_OPEN. Count what this agent already
+        // has pending, then top up only to the cap, oldest-quiet first. Without this a
+        // seasoned agent's book (80+ quiet leads) dumped a draft for every one on a
+        // single calendar load. As rows are cleared, slots reopen and the next-oldest
+        // surface — the backlog drains a few at a time instead of flooding.
+        let existing = [];
+        try { existing = await AppDataStore.getAll('follow_up_drafts'); } catch (_) {}
+        const minePending = (existing || []).filter(d => d.trigger_type === 're_engagement' && d.status === 'pending' && d.agent_id == myId);
+        const alreadyDrafted = new Set(minePending.map(d => String(d.prospect_id)));
+        const slots = Math.max(0, RE_ENGAGE_MAX_OPEN - minePending.length);
+        if (slots === 0) return;
+        const due = [];
         for (const p of prospects) {
             if (p.responsible_agent_id != myId) continue;            // only my own leads
             if (p.unable_to_serve || p.status === 'converted' || p.status === 'lost') continue;
+            if (alreadyDrafted.has(String(p.id))) continue;         // already on the list
             const last = p.last_activity_date;
             if (!last) continue;          // never-contacted is a CPS/protection concern, not re-engagement
-            const days = Math.floor((new Date(todayStr) - new Date(last)) / 86400000);
+            const days = Math.floor((todayMs - new Date(last).getTime()) / 86400000);
             if (days < RE_ENGAGE_DAYS) continue;
+            due.push({ p, last, days });
+        }
+        due.sort((a, b) => (a.last < b.last ? -1 : a.last > b.last ? 1 : 0)); // oldest contact first
+        for (const { p, last, days } of due.slice(0, slots)) {
             const msg = interpolateTemplate(tpl.message_template, {
                 name: p.full_name || '', days: String(days), agent_name: _state.cu?.full_name || ''
             });
@@ -1357,6 +1379,10 @@
 
             // Only create drafts for the current agent's own prospects
             if (person.responsible_agent_id && person.responsible_agent_id != _state.cu?.id) continue;
+            // Lifecycle guard (parity with the re-engagement dispatcher): a converted /
+            // lost / unable-to-serve contact must not keep getting the proposal drip or
+            // the 21-day overdue escalation — they already closed (or were dropped).
+            if (person.unable_to_serve || person.status === 'converted' || person.status === 'lost') continue;
 
             const solutionLower = (sol.solution || '').toLowerCase();
             const proposedDate  = sol.proposed_date || '';
@@ -2993,6 +3019,9 @@
                 ? prospectMap.get(String(r.prospect_id))
                 : customerMap.get(String(r.customer_id));
             if (!entity) return false;
+            // Terminal-status guard: a refill tied to a converted/lost/unable PROSPECT
+            // is no longer a live reorder nudge (customers carry their own refills).
+            if (entity.status === 'converted' || entity.status === 'lost' || entity.unable_to_serve) return false;
             if (isAdminOrLead) return true;
             const agentId = entity.responsible_agent_id || entity.lead_agent_id;
             return agentId && String(agentId) === String(_state.cu?.id);

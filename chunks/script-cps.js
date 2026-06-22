@@ -34,6 +34,9 @@ const _scopeRefillReminders = (reminders, visibleIds, prospectMap, customerMap) 
             ? prospectMap.get(String(r.prospect_id))
             : customerMap.get(String(r.customer_id));
         if (!entity) return false; // can't attribute → hide from scoped users
+        // Terminal-status guard (parity with the calendar refill widget): converted/
+        // lost/unable prospects no longer get a reorder nudge in the bell.
+        if (entity.status === 'converted' || entity.status === 'lost' || entity.unable_to_serve) return false;
         const agentId = entity.responsible_agent_id || entity.lead_agent_id;
         return agentId && vStrs.includes(String(agentId));
     });

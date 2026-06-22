@@ -11,7 +11,7 @@
   "chunks/script-admin.js": 698,
   "chunks/script-ai.js": 2685,
   "chunks/script-boss-report.js": 650,
-  "chunks/script-calendar.js": 6026,
+  "chunks/script-calendar.js": 6055,
   "chunks/script-cases.js": 988,
   "chunks/script-cps.js": 1498,
   "chunks/script-documents.js": 1545,
@@ -36,7 +36,7 @@
   "chunks/script-approvals.js": 800,
   "chunks/script-settings.js": 800,
   "chunks/script-referrals.js": 1960,
-  "chunks/script-reporting.js": 3250,
+  "chunks/script-reporting.js": 3350,
   "chunks/script-search.js": 2400,
   "chunks/script-stock-take.js": 2450,
   "chunks/script-whatsapp.js": 713

@@ -1,0 +1,68 @@
+# Humane Follow-Up Cadence System — Autonomous Build Plan
+
+Goal: build the full grade-driven follow-up cadence system designed across the
+2026-06 design sessions, **replacing** the existing "lousy" reminder dispatchers
+where features overlap and **merging** where they differ, while fixing the 22
+verified live bugs. Each phase ships to live (source-only, no CACHE_VERSION bump
+unless a runtime change must reach all clients) and is bug-tested before the next.
+
+Owner mandate (2026-06-22): fully automatic — build → done → push to live → test →
+next phase, until 100% done. Parallelize with subagents where there is no file
+interlock. Additive DDL pre-authorized; avoid destructive DDL (disable/supersede
+old code rather than delete, for reversibility).
+
+## Architecture
+- One unified follow-up engine in `chunks/script-calendar.js` generating
+  `follow_up_drafts`, surfaced in a daily "Today's list" (5 prospects + 2 customers
+  + birthdays). Grade (`prospects.manual_grade` A–F) sets urgency; the event
+  calendar sets rhythm. Customers get a 90-day check-in via a new
+  `customers.last_contact_date` (trigger-maintained, like prospects).
+- New per-entity state (`follow_mode`, `cooldown_until`, `silence_count`) drives
+  cool-downs and silence back-off. Comfort caps (≤1 proactive/7d, ≤6/30d, min-gap,
+  one-open-reminder, quiet hours, festival suppression) are hard floors.
+- Old dispatchers (naive re-engagement, painting-only solution drip) are absorbed
+  into the engine; event-invite path is kept + fixed; birthday/refill kept + merged.
+
+## Phases (status: TODO / WIP / SHIPPED)
+
+### Phase 1 — Foundation + stop-the-bleeding  [WIP]
+- [ ] F1.1 Cap the re-engagement flood (bug #1): sort oldest-quiet first, cap N=5/load.
+- [ ] F1.2 Lifecycle guards: solution dispatcher (#6) + refill scope (#10) skip
+      converted/lost/unable.
+- [ ] F1.3 UTC→MYT "today" fix (#20) in re-engagement dispatcher (local date).
+- [ ] F1.4 Additive DB: `customers.last_contact_date` + trigger + backfill (90-day keystone).
+- [ ] F1.5 Verify (CI + SQL replay) → ship → bug-test.
+
+### Phase 2 — Grade A–F capture + cadence config  [TODO]
+- manual_grade A–F required at CPS + editable header picker (narrow A–G→A–F).
+- Additive cols: prospects.follow_mode, cooldown_until, silence_count.
+- Grade→decaying-interval config + touch-type ladder (code constants).
+
+### Phase 3 — Unified cadence engine  [TODO]
+- dispatchCadence supersedes naive re-engagement + reconciles proposed_solutions drip.
+- Decaying intervals, one-open-reminder, no-naked-followup, never-2-asks, comfort caps + merge.
+
+### Phase 4 — Daily "Today's 5+2" list + contacted-feedback loop  [TODO]
+- "Today" surface; WhatsApp-click + manual tick = contacted (log touch + advance clock);
+  roll-over "overdue Nd"; 3-day escalation.
+
+### Phase 5 — 90-day customer monitor  [TODO]
+- dispatchCustomerCheckins (uses last_contact_date), value-weighted 2/day, cadence-health badge.
+
+### Phase 6 — Event cool-downs + silence back-off + event-invite bug fixes  [TODO]
+- event_attended cool-down (A=4/B=6/C=8/D=10); silence tally → auto-slow → seasonal-only.
+- Fix event-invite #3 (inert match), #4 (category lookup), #5 (catalog-only events).
+
+### Phase 7 — APU express lane + e-voucher monitoring  [TODO]
+- APU tickbox + next-day ack + reserve slots + referred leads; voucher lifecycle monitor + reminders.
+
+### Phase 8 — 5-year journey auto-advance + retire lousy bits + remaining bug fixes  [TODO]
+- Journey step progression + 2nd-product cross-sell; disable superseded dispatchers.
+- Remaining bugs: #2 (list filter converted) #8 (protection badge) #9 (bell refill column)
+  #11 (customer-side) #12–22.
+
+## Verify-per-phase recipe
+1. `node --check` edited files + `node ci/regression.js` (green except pre-existing admin red).
+2. SQL replay of the changed dispatcher's trigger logic against live data (read-only).
+3. Commit SOURCE ONLY → push main → Vercel auto-builds. No CACHE_VERSION bump unless required.
+4. Re-run the relevant bug-replay query post-deploy to confirm fixed.
