@@ -1366,11 +1366,15 @@
     // Grade sets the rhythm (A tightest -> D loosest); ungraded defaults to C; F is dark.
     const GRADE_CADENCE = { A: 3, B: 10, C: 21, D: 30 };
     const GRADE_RANK    = { A: 0, B: 1, C: 2, D: 3 };
-    // Decaying back-off: each un-answered re-engagement touch (prospects.silence_count)
-    // WIDENS the next gap, so a quiet lead is chased less and less. At SILENCE_SEASONAL_AT
-    // un-answered touches the lead drops to seasonal-only (follow_mode='seasonal' →
-    // re-engagement skips them; events + birthday still run). Any logged contact
-    // (_logFollowUpContact) snaps follow_mode back to 'active' and resets the count.
+    // Decaying back-off (NEUTRALIZED 2026-06-22 — see audit): the intent was for each
+    // un-answered re-engagement touch (prospects.silence_count) to WIDEN the next gap and,
+    // at SILENCE_SEASONAL_AT, drop the lead to seasonal-only. The 2026-06-22 adversarial
+    // audit found silence_count mis-measured churn, not true silence (one-open-reminder +
+    // episode dedup blocked it from climbing during real silence, while off-panel contacts
+    // wrongly advanced it and could strand an ACTIVE lead at 'seasonal' with a panel-only
+    // reset). So the incrementer + the seasonal cutoff are REMOVED below; step stays 0 →
+    // clean grade-driven base cadence. The consts/ladder remain for a future correct
+    // redesign (increment-on-unanswered-nudge + reset-on-any-contact). DO NOT re-enable as-is.
     const RE_ENGAGE_DECAY          = [1, 1.6, 2.5, 4]; // step 0,1,2,3+ interval multipliers
     const RE_ENGAGE_DECAY_CAP_DAYS = 120;              // hard floor on max widening
     const SILENCE_SEASONAL_AT      = 4;                // un-answered touches → seasonal-only
@@ -1430,9 +1434,8 @@
             const last = p.last_activity_date;
             if (!last) continue;          // never-contacted is a CPS/protection concern, not re-engagement
             const days = Math.floor((todayMs - new Date(last).getTime()) / 86400000);
-            if (p.follow_mode === 'seasonal') continue;             // backed off to seasonal-only
-            const step = _silenceStep(p);                           // touch counter → widening interval
-            if (days < _cadenceDays(p.manual_grade, step)) continue; // grade × decay sets the rhythm
+            const step = _silenceStep(p);                           // 0 in practice (incrementer removed; DB cleared)
+            if (days < _cadenceDays(p.manual_grade, step)) continue; // grade sets the base rhythm
             due.push({ p, last, days, step });
         }
         // Highest-value first: grade rank, then most-overdue (oldest contact).
@@ -1447,7 +1450,7 @@
             const msg = step > 0
                 ? `Hi ${p.full_name || ''}，距离上次联系已经 ${days} 天 😊 ${_ladderCopy(step)} — ${_agent}`
                 : interpolateTemplate(tpl.message_template, { name: p.full_name || '', days: String(days), agent_name: _agent });
-            const _created = await createFollowUpDraft({
+            await createFollowUpDraft({
                 prospectId:   p.id,
                 triggerType:  're_engagement',
                 messageText:  msg,
@@ -1455,16 +1458,6 @@
                 prospectName: p.full_name || '',
                 dueDate:      last        // episode key — see dedup note in createFollowUpDraft
             });
-            // A brand-new draft = the previous touch went un-answered (answering routes via
-            // _logFollowUpContact, which resets). Advance the touch counter so the NEXT gap
-            // widens; at SILENCE_SEASONAL_AT drop to seasonal-only. Guarded on the non-null
-            // return so dedup / in-flight no-ops never miscount.
-            if (_created) {
-                const _sc = (Number(p.silence_count) || 0) + 1;
-                const _patch = { silence_count: _sc };
-                if (_sc >= SILENCE_SEASONAL_AT && p.follow_mode !== 'seasonal') _patch.follow_mode = 'seasonal';
-                AppDataStore.update('prospects', p.id, _patch).catch(e => console.warn('re_engagement back-off update failed:', e));
-            }
         }
     };
 
