@@ -1692,13 +1692,29 @@
             // Keep the oldest draft (lowest id) so dismissals stay attached
             // to a stable row.
             const _norm = (s) => String(s || '').trim().toLowerCase();
+            // #16: re_engagement / cust_checkin drafts are episode-keyed on due_date
+            // (= last_activity / last_contact date). When a NEW quiet-gap arms a fresh draft,
+            // createFollowUpDraft's dedup keys on the new due_date and does NOT match the
+            // prior episode's pending draft — so the old one lingers forever. Collapse to the
+            // NEWEST pending draft per (person, episodic trigger): resolve episodic rows first,
+            // newest-id wins; non-episodic rows keep oldest-id-wins so dismissals stay stable.
+            const _episodic = new Set(['re_engagement', 'cust_checkin']);
             const seen = new Map();
             const deduped = [];
-            for (const d of visible.sort((a, b) => (a.id || 0) - (b.id || 0))) {
+            const _orderedForDedup = visible.slice().sort((a, b) => {
+                const ea = _episodic.has(a.trigger_type), eb = _episodic.has(b.trigger_type);
+                if (ea !== eb) return ea ? -1 : 1;             // episodic rows resolved first
+                if (ea && eb) return (b.id || 0) - (a.id || 0); // newest episode wins
+                return (a.id || 0) - (b.id || 0);              // others: oldest wins (stable)
+            });
+            for (const d of _orderedForDedup) {
                 const personKey = d.prospect_id ? `p:${d.prospect_id}` : (d.customer_id ? `c:${d.customer_id}` : `n:${d.id}`);
                 const isEventBased = !!d.event_id || (!!d.event_name && !!d.event_date);
                 let key;
-                if (isEventBased) {
+                if (_episodic.has(d.trigger_type)) {
+                    // Collapse all episodes of this person+type to one row (newest, above).
+                    key = `${personKey}|t:${d.trigger_type}`;
+                } else if (isEventBased) {
                     const eventKey = d.event_id
                         ? `eid:${d.event_id}`
                         : `en:${_norm(d.event_name)}|ed:${d.event_date || ''}`;
