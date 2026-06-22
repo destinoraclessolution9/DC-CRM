@@ -36,7 +36,7 @@ const _scopeRefillReminders = (reminders, visibleIds, prospectMap, customerMap) 
         if (!entity) return false; // can't attribute → hide from scoped users
         // Terminal-status guard (parity with the calendar refill widget): converted/
         // lost/unable prospects no longer get a reorder nudge in the bell.
-        if (entity.status === 'converted' || entity.status === 'lost' || entity.unable_to_serve) return false;
+        if (entity.status === 'converted' || entity.status === 'lost' || entity.unable_to_serve || entity.manual_grade === 'F') return false;
         const agentId = entity.responsible_agent_id || entity.lead_agent_id;
         return agentId && vStrs.includes(String(agentId));
     });
@@ -89,7 +89,7 @@ const _refreshNotifBadge = async () => {
         };
         // Client birthdays are owner-scoped; agent birthdays remain org-wide.
         const bdayClients = [...allProspects, ...allCustomers]
-            .filter(p => hasBday(p) && _isVisibleBirthdayPerson(p, visibleIds, vStrs));
+            .filter(p => hasBday(p) && p.manual_grade !== 'F' && _isVisibleBirthdayPerson(p, visibleIds, vStrs));
         const bdayAgents = allUsers.filter(hasBday);
         count += bdayClients.length + bdayAgents.length;
 
@@ -156,6 +156,7 @@ const _buildNotifPanel = async () => {
         const isToday = md === todayMD;
         const isTom   = md === tomMD;
         if (!isToday && !isTom) return;
+        if (p.manual_grade === 'F') return; // grade F = dropped, no birthday wish
         // Owner-scope client birthdays so agents don't see other teams' contacts.
         if (!_isVisibleBirthdayPerson(p, visibleIds, vStrs)) return;
         items.push({ icon: '🎂', title: `${esc(p.full_name || 'Someone')}'s Birthday`, sub: isToday ? 'Today!' : 'Tomorrow' });
