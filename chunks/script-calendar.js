@@ -1279,6 +1279,7 @@
             const dobMD = person.date_of_birth.slice(5);
             if (dobMD !== todayMD) continue;
             if (person.responsible_agent_id && person.responsible_agent_id != _state.cu?.id) continue;
+            if (person._type === 'prospect' && person.manual_grade === 'F') continue; // grade F = dropped, no birthday wish
 
             for (const tpl of triggers) {
                 executeSimpleTrigger(tpl, person).catch(e => console.warn(`Birthday trigger ${tpl.trigger_type} failed:`, e));
@@ -1289,11 +1290,15 @@
     // ── Dispatcher: re-engagement nudges — runs on calendar load ─────────────────────
     // "You haven't contacted {name} in {days} days — they're missing you."
     // For every prospect the current agent owns whose last_activity_date is older than
-    // RE_ENGAGE_DAYS, queue a warm, ready-to-send re-connect message in Follow-Up
-    // Reminders. Ownership is never changed (this is a nudge, not a release). The draft
-    // is episode-keyed on last_activity_date (passed as due_date) so logging a fresh
-    // contact re-arms the nudge after the next gap. Change the number below to retune.
-    const RE_ENGAGE_DAYS = 14;
+    // its GRADE cadence (A=3/B=10/C=21/D=30, ungraded->C, F=dark), queue a warm
+    // re-connect message in Follow-Up Reminders. Ownership is never changed. The draft
+    // is episode-keyed on last_activity_date so logging a fresh contact re-arms the
+    // nudge; one-open-reminder + a grade-ranked cap keep the panel from flooding.
+    // Grade-driven re-connect cadence: days of no contact before a nudge surfaces.
+    // Grade sets the rhythm (A tightest -> D loosest); ungraded defaults to C; F is dark.
+    const GRADE_CADENCE = { A: 3, B: 10, C: 21, D: 30 };
+    const GRADE_RANK    = { A: 0, B: 1, C: 2, D: 3 };
+    const _cadenceDays  = (g) => GRADE_CADENCE[g] || GRADE_CADENCE.C; // ungraded -> C (21d)
     const RE_ENGAGE_MAX_OPEN = 5; // hard cap on how many re-engagement rows an agent sees at once
     const dispatchReEngagementReminders = async () => {
         const myId = _state.cu?.id;
@@ -1315,23 +1320,32 @@
         // surface — the backlog drains a few at a time instead of flooding.
         let existing = [];
         try { existing = await AppDataStore.getAll('follow_up_drafts'); } catch (_) {}
-        const minePending = (existing || []).filter(d => d.trigger_type === 're_engagement' && d.status === 'pending' && d.agent_id == myId);
-        const alreadyDrafted = new Set(minePending.map(d => String(d.prospect_id)));
-        const slots = Math.max(0, RE_ENGAGE_MAX_OPEN - minePending.length);
+        // One-open-reminder: a prospect already holding ANY pending outreach (birthday /
+        // event invite / proposal / re-engage) is not re-nudged, so the panel never
+        // double-contacts the same person. The cap bounds new re-engagement rows.
+        const minePending = (existing || []).filter(d => d.status === 'pending' && d.agent_id == myId);
+        const reEngOpen   = minePending.filter(d => d.trigger_type === 're_engagement').length;
+        const hasOpenDraft = new Set(minePending.map(d => String(d.prospect_id)));
+        const slots = Math.max(0, RE_ENGAGE_MAX_OPEN - reEngOpen);
         if (slots === 0) return;
         const due = [];
         for (const p of prospects) {
             if (p.responsible_agent_id != myId) continue;            // only my own leads
             if (p.unable_to_serve || p.status === 'converted' || p.status === 'lost') continue;
             if (p.manual_grade === 'F') continue;                   // grade F = dropped, fully dark
-            if (alreadyDrafted.has(String(p.id))) continue;         // already on the list
+            if (hasOpenDraft.has(String(p.id))) continue;           // already has an open outreach
             const last = p.last_activity_date;
             if (!last) continue;          // never-contacted is a CPS/protection concern, not re-engagement
             const days = Math.floor((todayMs - new Date(last).getTime()) / 86400000);
-            if (days < RE_ENGAGE_DAYS) continue;
+            if (days < _cadenceDays(p.manual_grade)) continue;      // grade sets the rhythm
             due.push({ p, last, days });
         }
-        due.sort((a, b) => (a.last < b.last ? -1 : a.last > b.last ? 1 : 0)); // oldest contact first
+        // Highest-value first: grade rank, then most-overdue (oldest contact).
+        due.sort((a, b) => {
+            const ra = GRADE_RANK[a.p.manual_grade] ?? 2, rb = GRADE_RANK[b.p.manual_grade] ?? 2;
+            if (ra !== rb) return ra - rb;
+            return a.last < b.last ? -1 : a.last > b.last ? 1 : 0;
+        });
         for (const { p, last, days } of due.slice(0, slots)) {
             const msg = interpolateTemplate(tpl.message_template, {
                 name: p.full_name || '', days: String(days), agent_name: _state.cu?.full_name || ''

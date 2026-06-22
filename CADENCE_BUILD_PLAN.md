@@ -36,13 +36,16 @@ old code rather than delete, for reversibility).
 - [x] Editable header picker narrowed A–G→A–F with labels + cadence hints (Close now/Warming/Half-half/Very far/Drop).
 - [x] Additive cols: prospects.follow_mode, cooldown_until, silence_count, last_grade_change_at.
 - [x] F-exclusion (partial): manual_grade==='F' skip in re-engagement + solution dispatchers.
-- [ ] manual_grade REQUIRED at CPS (saveActivity CPS branch) + ungraded→default C.
-- [ ] Complete F-exclusion: birthday dispatcher + notification bell + grey-out in prospect list.
-- [ ] Grade→decaying-interval config + touch-type ladder constants (consumed by Phase 3 engine).
+- [x] F-exclusion: birthday dispatcher now skips grade-F prospects (no birthday wish).
+- [ ] ungraded handled by cadence default C (no DB write needed); REQUIRED-at-CPS picker deferred.
+- [ ] Complete F-exclusion remainder: notification bell + grey-out in prospect list.
 
-### Phase 3 — Unified cadence engine  [TODO]
-- dispatchCadence supersedes naive re-engagement + reconciles proposed_solutions drip.
-- Decaying intervals, one-open-reminder, no-naked-followup, never-2-asks, comfort caps + merge.
+### Phase 3 — Unified cadence engine  [WIP — grade-driven core shipped]
+- [x] Re-engagement nudge is now GRADE-DRIVEN: per-grade interval (A=3/B=10/C=21/D=30, ungraded→C, F dark) via GRADE_CADENCE; replaces the flat 14-day threshold. Grade sets the rhythm.
+- [x] one-open-reminder: skip any prospect already holding ANY pending outreach (fixes double-fire #12); grade-ranked cap surfaces high-value quiet leads first.
+- [ ] Decaying intervals (gap widens per un-converted touch) + touch-type ladder.
+- [ ] Reconcile/absorb the proposed_solutions day-1/3/7/14 drip + generic (non-画作) drip.
+- [ ] Cross-source comfort caps (≤1/7d, ≤6/30d, min-gap) + purpose merge.
 
 ### Phase 4 — Daily "Today's 5+2" list + contacted-feedback loop  [TODO]
 - "Today" surface; WhatsApp-click + manual tick = contacted (log touch + advance clock);
