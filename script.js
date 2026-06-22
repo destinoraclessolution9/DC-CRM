@@ -2931,8 +2931,17 @@ function _wireLoginBtn() {
                 await AppDataStore.update('names', parseInt(nameId), data);
                 UI.toast.success('Name updated successfully');
             } else {
-                await AppDataStore.create('names', data);
+                const created = await AppDataStore.create('names', data);
                 UI.toast.success('Name added successfully');
+                // Referral workflow: each proposed family/friend gets an e-voucher to
+                // invite them for their own CPS. Auto-generate it now, tied to this
+                // name. Best-effort + silent: a no-op if no voucher template is set up
+                // yet, and never blocks the name save.
+                try {
+                    if (created?.id && window.app && typeof app.generateEvoucherForName === 'function') {
+                        await app.generateEvoucherForName(prospectId, name, created.id, { silent: true });
+                    }
+                } catch (ev) { console.warn('Auto e-voucher generation failed:', ev); }
             }
         } catch (e) {
             UI.toast.error('Could not save name: ' + (e?.message || e));
@@ -4108,7 +4117,11 @@ function _wireLoginBtn() {
     const attachAppraisalForm = async (...a) => { const _r = window.app.attachAppraisalForm; if (_r && _r !== attachAppraisalForm) return _r(...a); };
     const saveAppraisalForm = async (...a) => { const _r = window.app.saveAppraisalForm; if (_r && _r !== saveAppraisalForm) return _r(...a); };
     const removeAppraisalForm = async (...a) => { const _r = window.app.removeAppraisalForm; if (_r && _r !== removeAppraisalForm) return _r(...a); };
-    const uploadAPUForm = async (...a) => { const _r = window.app.uploadAPUForm; if (_r && _r !== uploadAPUForm) return _r(...a); };
+    // Active lazy-loader (not a passive forwarding stub): the APU button lives in
+    // the Calendar activity-details modal, which renders while the prospects chunk
+    // is usually NOT loaded — so it must pull the chunk in before delegating, or the
+    // button silently no-ops. Mirrors the showProspectDetail pattern above.
+    const uploadAPUForm = async (...a) => { await _loadChunkOnce('chunks/script-prospects.min.js'); const _r = window.app.uploadAPUForm; if (_r && _r !== uploadAPUForm) return _r(...a); };
     const saveAPUForm = async (...a) => { const _r = window.app.saveAPUForm; if (_r && _r !== saveAPUForm) return _r(...a); };
     const removeAPUForm = async (...a) => { const _r = window.app.removeAPUForm; if (_r && _r !== removeAPUForm) return _r(...a); };
     const recordSalesClosure = async (...a) => { const _r = window.app.recordSalesClosure; if (_r && _r !== recordSalesClosure) return _r(...a); };

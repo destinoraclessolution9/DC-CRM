@@ -2316,11 +2316,16 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         const appraisalCount = allAttachments.filter(a => a.attachment_type === 'appraisal_form').length;
         const apuUrls = allAttachments.filter(a => a.attachment_type === 'apu_form').map(a => a.file_url);
         const vouchers = allAttachments.filter(a => a.attachment_type === 'evoucher');
-        const vouchersHtml = vouchers.length > 0 ? `
+        const nameIdSet = new Set(names.map(n => String(n.id)));
+        // Per-name vouchers render on each name's row below. The strip here lists only
+        // "loose" vouchers — ad-hoc ones (typed via the top button) or vouchers whose
+        // Name List entry was deleted — so nothing is duplicated or orphaned off-screen.
+        const looseVouchers = vouchers.filter(v => !(v.metadata && v.metadata.name_id != null && nameIdSet.has(String(v.metadata.name_id))));
+        const vouchersHtml = looseVouchers.length > 0 ? `
             <div style="background:var(--gray-50);border-radius:8px;padding:12px;margin-bottom:12px;">
-                <div style="font-weight:600;font-size:13px;margin-bottom:8px;"><i class="fas fa-ticket-alt" style="color:#7C3AED;margin-right:6px;"></i>E-Vouchers (${vouchers.length})</div>
+                <div style="font-weight:600;font-size:13px;margin-bottom:8px;"><i class="fas fa-ticket-alt" style="color:#7C3AED;margin-right:6px;"></i>Other E-Vouchers (${looseVouchers.length})</div>
                 <div style="display:flex;flex-wrap:wrap;gap:14px;">
-                    ${vouchers.map(v => {
+                    ${looseVouchers.map(v => {
                         const code = (v.metadata && v.metadata.voucher_code) || '';
                         const rname = (v.metadata && v.metadata.recipient_name) || (prospect.full_name || '');
                         const fname = `evoucher_${code || v.id}.png`;
@@ -2346,11 +2351,17 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 <button class="btn primary btn-sm" onclick="app.openAddNameModal(${prospect.id})"><i class="fas fa-plus"></i> Add Name</button>
             </div>
             ${vouchersHtml}
-            ${names.length > 0 ? names.map(n => `
+            ${names.length > 0 ? names.map(n => { const nv = vouchers.find(v => v.metadata && String(v.metadata.name_id) === String(n.id)); const nvCode = nv ? ((nv.metadata && nv.metadata.voucher_code) || '') : ''; return `
                 <div style="background:var(--gray-50);border-radius:8px;padding:12px;margin-bottom:8px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
                         <span style="font-weight:600;font-size:15px;">${escapeHtml(n.full_name || '')}</span>
-                        <div style="display:flex;gap:6px;">
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            ${nv ? `
+                                <img loading="lazy" decoding="async" data-attach-src="${escapeHtml(String(nv.file_url))}" title="View voucher ${escapeHtml(nvCode)}" style="height:34px;border-radius:4px;border:1px solid var(--gray-200);cursor:pointer;" onclick="event.stopPropagation(); window._openAttachment && window._openAttachment('${UI.escJsAttr(String(nv.file_url))}')">
+                                <button class="btn-icon" title="Share voucher via WhatsApp" style="background:#25D366;color:#fff;border-radius:50%;width:28px;height:28px;font-size:13px;padding:0;" onclick="event.stopPropagation(); app.sendVoucherWhatsApp(${prospect.id}, ${nv.id}, '${UI.escJsAttr(nvCode)}', '${UI.escJsAttr(n.full_name || '')}', '${UI.escJsAttr(String(prospect.phone || ''))}', '${UI.escJsAttr(String(nv.file_url))}')"><i class="fab fa-whatsapp"></i></button>
+                            ` : `
+                                <button class="btn secondary btn-sm" title="Generate this name's referral e-voucher" onclick="event.stopPropagation(); app.generateEvoucherForName(${prospect.id}, '${UI.escJsAttr(n.full_name || '')}', ${n.id})"><i class="fas fa-ticket-alt"></i> E-Voucher</button>
+                            `}
                             <button class="btn-icon" onclick="app.openAddNameModal(${prospect.id},${n.id})"><i class="fas fa-edit"></i></button>
                             <button class="btn-icon" onclick="app.deleteName(${prospect.id},${n.id})"><i class="fas fa-trash"></i></button>
                         </div>
@@ -2361,7 +2372,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                     </div>
                     ${n.notes ? `<div style="font-size:13px;color:var(--gray-500);margin-top:6px;font-style:italic;">${escapeHtml(n.notes)}</div>` : ''}
                 </div>
-            `).join('') : '<p style="text-align:center;padding:20px;color:var(--gray-400);">No names added yet.</p>'}
+            `; }).join('') : '<p style="text-align:center;padding:20px;color:var(--gray-400);">No names added yet.</p>'}
         `;
     }
     else if (tab === 'activity') {
@@ -4316,44 +4327,94 @@ const openGenerateEvoucherModal = async (prospectId) => {
     setTimeout(() => document.getElementById('ev-name')?.focus(), 60);
 };
 
+// Core mint: claim an atomic number, compose the PNG, upload, persist as an
+// evoucher attachment. Returns the saved row (with id) or null. nameId ties the
+// voucher to a Name List entry (the referred friend/family); null for ad-hoc
+// vouchers typed via the top button. Throws on hard errors; with opts.silent it
+// returns null quietly when no template is configured (used by auto-on-Add-Name).
+const _evGenerateForName = async (prospectId, name, nameId = null, opts = {}) => {
+    const sb = window.supabase || window.supabaseClient;
+    if (!sb || !sb.storage) { if (!opts.silent) UI.toast.error('Supabase not connected — cannot generate'); return null; }
+    const config = await _evGetConfig();
+    if (!config || !config.template_url) { if (!opts.silent) UI.toast.error('No voucher template set up yet'); return null; }
+    const { data: seq, error: rpcErr } = await sb.rpc('next_evoucher_number');
+    if (rpcErr) throw rpcErr;
+    const now = new Date();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const yy = String(now.getFullYear() % 100).padStart(2, '0');
+    const prefix = config.prefix || '169';
+    const code = `${prefix}${mm}${yy}${String(seq).padStart(3, '0')}`;
+    const blob = await _evComposeVoucherBlob(config, name, code);
+    const path = `evouchers/${prospectId}_${code}_${Date.now()}.png`;
+    const { error: upErr } = await sb.storage.from('attachments').upload(path, blob, { upsert: false, contentType: 'image/png' });
+    if (upErr) throw upErr;
+    const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
+    if (!urlData?.publicUrl) throw new Error('Upload succeeded but could not get URL');
+    const savedRow = await AppDataStore.create('prospect_attachments', {
+        prospect_id: prospectId,
+        attachment_type: 'evoucher',
+        file_url: urlData.publicUrl,
+        filename: `evoucher_${code}.png`,
+        metadata: { voucher_code: code, recipient_name: name, seq, name_id: (nameId != null ? nameId : null), generated_by: (_state?.cu?.id || null), generated_at: now.toISOString() }
+    });
+    if (savedRow?.id) _evBlobCache[savedRow.id] = blob; // reuse for the immediate share gesture
+    return savedRow;
+};
+
+// Top-button flow: read the typed name and generate an ad-hoc voucher (name_id=null).
 const generateEvoucher = async (prospectId) => {
     if (_evGenBusy) return;
     const name = (document.getElementById('ev-name')?.value || '').trim();
     if (!name) { UI.toast.error('Please enter the holder name'); return; }
-    const sb = window.supabase || window.supabaseClient;
-    if (!sb || !sb.storage) { UI.toast.error('Supabase not connected — cannot generate'); return; }
-    const config = await _evGetConfig();
-    if (!config || !config.template_url) { UI.toast.error('No voucher template set up yet'); return; }
     _evGenBusy = true;
     try {
-        const { data: seq, error: rpcErr } = await sb.rpc('next_evoucher_number');
-        if (rpcErr) throw rpcErr;
-        const now = new Date();
-        const mm = String(now.getMonth() + 1).padStart(2, '0');
-        const yy = String(now.getFullYear() % 100).padStart(2, '0');
-        const prefix = config.prefix || '169';
-        const code = `${prefix}${mm}${yy}${String(seq).padStart(3, '0')}`;
-        const blob = await _evComposeVoucherBlob(config, name, code);
-        const path = `evouchers/${prospectId}_${code}_${Date.now()}.png`;
-        const { error: upErr } = await sb.storage.from('attachments').upload(path, blob, { upsert: false, contentType: 'image/png' });
-        if (upErr) throw upErr;
-        const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
-        if (!urlData?.publicUrl) throw new Error('Upload succeeded but could not get URL');
-        const savedRow = await AppDataStore.create('prospect_attachments', {
-            prospect_id: prospectId,
-            attachment_type: 'evoucher',
-            file_url: urlData.publicUrl,
-            filename: `evoucher_${code}.png`,
-            metadata: { voucher_code: code, recipient_name: name, seq, generated_by: (_state?.cu?.id || null), generated_at: now.toISOString() }
-        });
-        if (savedRow?.id) _evBlobCache[savedRow.id] = blob; // reuse for the immediate share gesture
+        const row = await _evGenerateForName(prospectId, name, null);
+        if (!row) return;
         UI.hideModal();
-        UI.toast.success(`E-Voucher ${code} generated`);
+        UI.toast.success(`E-Voucher ${row.metadata?.voucher_code || ''} generated`);
         const bodyEl = document.getElementById(`acc-body-names-${prospectId}`);
         if (bodyEl) await switchProspectTab('names', prospectId, null, bodyEl);
     } catch (err) {
         console.error('E-Voucher generate failed:', err);
         UI.toast.error('Generate failed: ' + (err.message || 'Unknown error'));
+    } finally {
+        _evGenBusy = false;
+    }
+};
+
+// Per-name flow: one voucher per Name List entry (the referred friend/family).
+// Called auto on Add Name (opts.silent) and by the per-row "E-Voucher" button.
+// Skips if that name already has a voucher (no duplicate serials).
+const generateEvoucherForName = async (prospectId, name, nameId, opts = {}) => {
+    if (_evGenBusy) return null;
+    name = (name || '').trim();
+    if (!name) { if (!opts.silent) UI.toast.error('Name is required'); return null; }
+    _evGenBusy = true;
+    try {
+        if (nameId != null) {
+            const existing = await AppDataStore.query('prospect_attachments', { prospect_id: prospectId });
+            const dup = (existing || []).find(a => a.attachment_type === 'evoucher' && a.metadata && String(a.metadata.name_id) === String(nameId));
+            if (dup) {
+                if (!opts.silent) {
+                    UI.toast.success('This name already has a voucher.');
+                    const b = document.getElementById(`acc-body-names-${prospectId}`);
+                    if (b) await switchProspectTab('names', prospectId, null, b);
+                }
+                return dup;
+            }
+        }
+        const row = await _evGenerateForName(prospectId, name, nameId, opts);
+        if (!row) return null;
+        if (!opts.silent) {
+            UI.toast.success(`E-Voucher ${row.metadata?.voucher_code || ''} generated`);
+            const bodyEl = document.getElementById(`acc-body-names-${prospectId}`);
+            if (bodyEl) await switchProspectTab('names', prospectId, null, bodyEl);
+        }
+        return row;
+    } catch (err) {
+        console.error('Per-name e-voucher generate failed:', err);
+        if (!opts.silent) UI.toast.error('Generate failed: ' + (err.message || 'Unknown error'));
+        return null;
     } finally {
         _evGenBusy = false;
     }
@@ -6582,6 +6643,7 @@ const openPastRecordModal = async (...args) => {
         uploadAPUForm,
         openGenerateEvoucherModal,
         generateEvoucher,
+        generateEvoucherForName,
         sendVoucherWhatsApp,
         downloadVoucher,
         removeEvoucher,
