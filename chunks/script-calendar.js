@@ -698,6 +698,21 @@
         }
     };
 
+    // Interest/known-proposal → event CATEGORY. Owner-confirmed 2026-06-22: a prospect's stated
+    // CPS INTEREST (not just a formal proposal) should flag them for the matching class, and
+    // proposal names whose product isn't in the products table still map. These feed an
+    // "implied category" OR'd into the event-invite solCatOk — so cps_interest='个人改命' (a ring)
+    // is invited to Power-Ring classes, and a proposed 'Office Audit' to 风水方案 classes.
+    const _INTEREST_SOLCAT = { '个人改命': 'power ring', '风水': '风水方案', '画作': '画作', '满堂系列': 'bujishu', 'formula': 'formula' };
+    const _SOLUTION_SOLCAT = { 'office audit': '风水方案', 'home audit': '风水方案', '风水审计': '风水方案', 'pr3 ring': 'power ring', 'pr5 ring': 'power ring' };
+    const _impliedSolCats = (cpsInterest, solNames) => {
+        const out = [];
+        const it = (cpsInterest || '').trim().toLowerCase();
+        if (_INTEREST_SOLCAT[it]) out.push(_INTEREST_SOLCAT[it]);
+        for (const n of (solNames || [])) { const c = _SOLUTION_SOLCAT[(n || '').toLowerCase()]; if (c) out.push(c); }
+        return out;
+    };
+
     // Check if an event matches template target categories (used by all event-based triggers)
     const _eventMatchesTemplate = (event, tpl) => {
         const targetCats = (tpl.event_keywords || '').split(',').map(k => k.trim()).filter(Boolean);
@@ -1105,8 +1120,11 @@
                 const interestOk     = !interestList.length || interestList.some(m => interest.includes(m));
                 const personSolNames = person._type === 'prospect' ? (solNamesByProspect[pid] || []) : (solNamesByCustomer[pid] || []);
                 const personSolCats  = person._type === 'prospect' ? (solCatsByProspect[pid]  || []) : (solCatsByCustomer[pid]  || []);
+                // Fold in implied categories so stated INTEREST (or an off-catalog proposal name)
+                // flags the class, OR'd with the real proposed categories (owner: interest OR proposal).
+                const effSolCats     = [...personSolCats, ..._impliedSolCats(person.cps_interest, personSolNames)];
                 const solNameOk      = !solutionList.length || solutionList.some(m => personSolNames.some(s => s.includes(m)));
-                const solCatOk       = !solCatList.length   || solCatList.some(m => personSolCats.some(c => c.includes(m)));
+                const solCatOk       = !solCatList.length   || solCatList.some(m => effSolCats.some(c => c.includes(m)));
                 // General templates (no match criteria) fire for all tier-qualified people
                 // #3: only the criteria the template ACTUALLY specifies gate the match — an
                 // empty sub-list must be NEUTRAL, not vacuously true. (pr_9star sets only
@@ -1278,8 +1296,11 @@
                 const interestOk     = !interestList.length || interestList.some(m => interest.includes(m));
                 const personSolNames = person._type === 'prospect' ? (solNamesByProspect[pid] || []) : (solNamesByCustomer[pid] || []);
                 const personSolCats  = person._type === 'prospect' ? (solCatsByProspect[pid]  || []) : (solCatsByCustomer[pid]  || []);
+                // Fold in implied categories so stated INTEREST (or an off-catalog proposal name)
+                // flags the class, OR'd with the real proposed categories (owner: interest OR proposal).
+                const effSolCats     = [...personSolCats, ..._impliedSolCats(person.cps_interest, personSolNames)];
                 const solNameOk      = !solutionList.length || solutionList.some(m => personSolNames.some(s => s.includes(m)));
-                const solCatOk       = !solCatList.length   || solCatList.some(m => personSolCats.some(c => c.includes(m)));
+                const solCatOk       = !solCatList.length   || solCatList.some(m => effSolCats.some(c => c.includes(m)));
                 // #3: only the criteria the template ACTUALLY specifies gate the match — an
                 // empty sub-list must be NEUTRAL, not vacuously true. (pr_9star sets only
                 // solution_category_match; empty interest/solution made matchOk always true,
