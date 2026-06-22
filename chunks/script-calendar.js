@@ -451,6 +451,14 @@
         painting_day3:    { trigger_category: 'after_solution_proposed', event_keywords: '', cps_interest_match: '', solution_match: 'harmony painting,画作,painting', solution_category_match: '画作', eligibility_tiers: 'active', icon: '🖼️', description: 'Day 3 after 画作 proposed — check-in.', sort_order: 101, template_name: '画作 Day-3 Check-In', message_template: 'Hi {name}，想了解您对画作目录的看法，有什么想法吗？— {agent_name}', delay_days: 3, event_window_days: 0 },
         painting_day7:    { trigger_category: 'after_solution_proposed', event_keywords: '', cps_interest_match: '', solution_match: 'harmony painting,画作,painting', solution_category_match: '画作', eligibility_tiers: 'active', icon: '🖼️', description: 'Day 7 after 画作 proposed — send mockup.', sort_order: 102, template_name: '画作 Day-7 Mockup', message_template: 'Hi {name}，我已为您准备好画作的3D效果图，方便的话可以约个时间给您展示！— {agent_name}', delay_days: 7, event_window_days: 0 },
         painting_day14:   { trigger_category: 'after_solution_proposed', event_keywords: '', cps_interest_match: '', solution_match: 'harmony painting,画作,painting', solution_category_match: '画作', eligibility_tiers: 'active', icon: '🖼️', description: 'Day 14 after 画作 proposed — closing push.', sort_order: 103, template_name: '画作 Day-14 Closing', message_template: 'Hi {name}，本月画作名额有限，请问您准备好锁定了吗？— {agent_name}', delay_days: 14, event_window_days: 0 },
+        // Generic drip (bug #7): every NON-painting proposal (Power Ring / FSA / Bujishu /
+        // Formula / …) had NO day-1/3/7/14 sequence. These empty-solution_match templates
+        // are the FALLBACK — the dispatcher prefers a specific match (e.g. 画作) when one
+        // exists, else uses these. {solution} is interpolated with the proposal name.
+        sol_day1:  { trigger_category: 'after_solution_proposed', event_keywords: '', cps_interest_match: '', solution_match: '', solution_category_match: '', eligibility_tiers: 'active', icon: '💬', description: 'Day 1 after any proposal — thank you (generic).', sort_order: 105, template_name: 'Proposal Day-1 Thank You', message_template: 'Hi {name}，感谢您今天的时间！关于「{solution}」如有任何疑问，欢迎随时联系我。— {agent_name}', delay_days: 1, event_window_days: 0 },
+        sol_day3:  { trigger_category: 'after_solution_proposed', event_keywords: '', cps_interest_match: '', solution_match: '', solution_category_match: '', eligibility_tiers: 'active', icon: '💬', description: 'Day 3 after any proposal — check-in (generic).', sort_order: 106, template_name: 'Proposal Day-3 Check-In', message_template: 'Hi {name}，想了解您对「{solution}」的想法，有什么我可以帮忙的吗？— {agent_name}', delay_days: 3, event_window_days: 0 },
+        sol_day7:  { trigger_category: 'after_solution_proposed', event_keywords: '', cps_interest_match: '', solution_match: '', solution_category_match: '', eligibility_tiers: 'active', icon: '💬', description: 'Day 7 after any proposal — detail/offer (generic).', sort_order: 107, template_name: 'Proposal Day-7 Follow-Up', message_template: 'Hi {name}，关于「{solution}」我可以为您安排更详细的介绍，方便约个时间吗？— {agent_name}', delay_days: 7, event_window_days: 0 },
+        sol_day14: { trigger_category: 'after_solution_proposed', event_keywords: '', cps_interest_match: '', solution_match: '', solution_category_match: '', eligibility_tiers: 'active', icon: '💬', description: 'Day 14 after any proposal — closing push (generic).', sort_order: 108, template_name: 'Proposal Day-14 Closing', message_template: 'Hi {name}，本月「{solution}」名额有限，请问您准备好了吗？— {agent_name}', delay_days: 14, event_window_days: 0 },
         solution_overdue: { trigger_category: 'solution_overdue', event_keywords: '', cps_interest_match: '', solution_match: '', solution_category_match: '', eligibility_tiers: 'active', icon: '⚠️', description: 'Day 21+ — proposed solution still Proposed. Escalation alert.', sort_order: 104, template_name: 'Solution Overdue Alert', message_template: 'Hi {name}，距离我们上次提案已超过21天，希望能再约个时间为您跟进。— {agent_name}', delay_days: 21, event_window_days: 0 }
     };
 
@@ -1418,10 +1426,15 @@
                 // step due now. Fire only the template whose delay_days has been
                 // reached but whose NEXT step (if any) has not — so each drip
                 // step lands on its own date as the sequence progresses.
-                const matchingTpls = solutionTpls.filter(tpl => {
+                const _allMatch = solutionTpls.filter(tpl => {
                     const matchList = (tpl.solution_match || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
                     return !matchList.length || matchList.some(m => solutionLower.includes(m));
                 });
+                // Specific solution_match beats the generic (empty-match) fallback: a 画作
+                // proposal gets its tailored drip, every other proposal gets the generic
+                // sol_day* drip — never both (bug #7: non-painting proposals had no drip).
+                const _specific = _allMatch.filter(tpl => (tpl.solution_match || '').trim());
+                const matchingTpls = _specific.length ? _specific : _allMatch;
                 // The single step whose delay_days is the largest value already
                 // reached (delay_days <= daysSinceProposed). When proposed_date
                 // is unknown, fall back to the smallest-delay (first) step.

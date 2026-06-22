@@ -43,9 +43,9 @@ old code rather than delete, for reversibility).
 ### Phase 3 — Unified cadence engine  [WIP — grade-driven core shipped]
 - [x] Re-engagement nudge is now GRADE-DRIVEN: per-grade interval (A=3/B=10/C=21/D=30, ungraded→C, F dark) via GRADE_CADENCE; replaces the flat 14-day threshold. Grade sets the rhythm.
 - [x] one-open-reminder: skip any prospect already holding ANY pending outreach (fixes double-fire #12); grade-ranked cap surfaces high-value quiet leads first.
+- [x] Generic (non-画作) proposal drip (#7): every proposal type now gets day-1/3/7/14 via sol_day* fallback templates; dispatcher prefers a specific solution_match over the generic catch-all.
 - [ ] Decaying intervals (gap widens per un-converted touch) + touch-type ladder.
-- [ ] Reconcile/absorb the proposed_solutions day-1/3/7/14 drip + generic (non-画作) drip.
-- [ ] Cross-source comfort caps (≤1/7d, ≤6/30d, min-gap) + purpose merge.
+- [ ] Reconcile/absorb the proposed_solutions drip into the unified engine (avoid double-book) + cross-source comfort caps (≤1/7d, ≤6/30d) + purpose merge.
 
 ### Phase 4 — Daily "Today's 5+2" list + contacted-feedback loop  [TODO]
 - "Today" surface; WhatsApp-click + manual tick = contacted (log touch + advance clock);
