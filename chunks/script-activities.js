@@ -859,6 +859,17 @@
                         ${BASIC_INFO_INTERESTS.map(([v,l]) => `<option value="${v}" ${sel(d.cps_interest, v)}>${l}</option>`).join('')}
                     </select>
                 </div>
+                ${prefix === 'cps' ? `
+                <div class="form-group">
+                    <label>Grade / 等级 <span class="required">*</span> <span style="font-weight:normal;color:var(--text-secondary);">— 决定跟进节奏</span></label>
+                    <select id="${prefix}-grade" class="form-control" ${disabled}>
+                        <option value="A" ${sel(d.manual_grade || 'C', 'A')}>A · 即将成交，立即跟进 (~3天)</option>
+                        <option value="B" ${sel(d.manual_grade || 'C', 'B')}>B · 有潜力，需要时间 (~10天)</option>
+                        <option value="C" ${sel(d.manual_grade || 'C', 'C')}>C · 一半一半 (~21天)</option>
+                        <option value="D" ${sel(d.manual_grade || 'C', 'D')}>D · 很远 (~30天)</option>
+                        <option value="F" ${sel(d.manual_grade || 'C', 'F')}>F · 放弃，不再跟进</option>
+                    </select>
+                </div>` : ''}
                 <div class="form-group">
                     <label>Marital Status</label>
                     ${readOnly
@@ -950,6 +961,7 @@
             postal_code: d(`${prefix}-postal`) || null,
             ming_gua: d(`${prefix}-minggua`) || null,
             cps_interest: d(`${prefix}-interest`) || null,
+            manual_grade: d(`${prefix}-grade`) || 'C', // grade-at-CPS: sets the follow-up rhythm; defaults to C
             marital_status: document.querySelector(`.${prefix}-marital-cb:checked`)?.value || null,
             children: JSON.stringify(collectProspectChildren()),
             referral_relationship: rel === 'Other' ? (relOther || 'Other') : rel,
