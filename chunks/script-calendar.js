@@ -1676,6 +1676,14 @@
                         const thumbHtml = d.attachment_url
                             ? `<img loading="lazy" decoding="async" data-attach-src="${escapeHtml(d.attachment_url)}" alt="Attachment" style="width:48px; height:48px; border-radius:6px; object-fit:cover; cursor:pointer; border:1px solid var(--gray-200); flex-shrink:0;" onclick="event.stopPropagation(); window._openAttachment('${UI.escJsAttr(String(d.attachment_url))}');" title="Click to view full image">`
                             : '';
+                        // Agent-action loop: how long this reminder has sat un-acted
+                        // (from created_at) → an "overdue Nd" nag so it's chased, not ignored.
+                        const _nowD = new Date();
+                        const _todayMs2 = new Date(_nowD.getFullYear(), _nowD.getMonth(), _nowD.getDate()).getTime();
+                        const _daysOpen = d.created_at ? Math.floor((_todayMs2 - new Date(d.created_at).getTime()) / 86400000) : 0;
+                        const _overdueBadge = _daysOpen >= 1
+                            ? `<span style="font-size:11px; background:#fee2e2; color:#b91c1c; padding:2px 8px; border-radius:10px; font-weight:600;" title="Un-acted for ${_daysOpen} day(s)">overdue ${_daysOpen}d</span>`
+                            : '';
                         return `
                         <div id="followup-row-${d.id}" style="display:flex; align-items:flex-start; gap:12px; padding:12px; background:var(--gray-50,#f9fafb); border-radius:8px; border-left:4px solid #3b82f6; transition: opacity 0.4s ease, max-height 0.4s ease;">
                             <input type="checkbox" id="followup-check-${d.id}" style="margin-top:4px; width:18px; height:18px; cursor:pointer; accent-color:#3b82f6;" onchange="app.markFollowUpSent(${d.id})" title="Mark as sent">
@@ -1685,6 +1693,7 @@
                                     <span style="font-size:16px;">${triggerIcons[d.trigger_type] || '📩'}</span>
                                     <strong style="font-size:13px; color:var(--gray-800,#1f2937);">${esc(d.prospect_name || 'Unknown')}</strong>
                                     <span style="font-size:11px; background:#dbeafe; color:#1d4ed8; padding:2px 8px; border-radius:10px;">${esc(triggerLabels[d.trigger_type] || d.trigger_type)}</span>
+                                    ${_overdueBadge}
                                     ${d.event_name ? `<span style="font-size:11px; color:var(--gray-500,#6b7280);">${esc(d.event_name)}${d.event_date ? ' — ' + esc(d.event_date) : ''}</span>` : ''}
                                     ${d.attachment_url ? '<span style="font-size:11px; background:#dcfce7; color:#059669; padding:2px 8px; border-radius:10px;"><i class="fas fa-paperclip"></i> Photo</span>' : ''}
                                 </div>
@@ -1704,9 +1713,25 @@
         `;
     };
 
+    // Contacted-feedback loop: a tick OR a WhatsApp-click both count as "contacted" →
+    // stamp today onto the linked entity's last-contact date so the cadence clock advances
+    // (the next nudge is measured from now) and the episode-keyed dedup only re-arms after
+    // the NEXT gap. Best-effort, non-blocking.
+    const _logFollowUpContact = async (draft) => {
+        if (!draft) return;
+        try {
+            const d = new Date();
+            const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            if (draft.prospect_id) await AppDataStore.update('prospects', draft.prospect_id, { last_activity_date: today });
+            else if (draft.customer_id) await AppDataStore.update('customers', draft.customer_id, { last_contact_date: today });
+        } catch (e) { console.warn('_logFollowUpContact failed:', e); }
+    };
+
     const markFollowUpSent = async (draftId) => {
         try {
+            const _draft = await AppDataStore.getById('follow_up_drafts', draftId).catch(() => null);
             await AppDataStore.update('follow_up_drafts', draftId, { status: 'sent', updated_at: new Date().toISOString() });
+            _logFollowUpContact(_draft); // contacted → advance the cadence clock
             // Animate row out
             const row = document.getElementById(`followup-row-${draftId}`);
             if (row) {
@@ -1815,6 +1840,11 @@
 
         const url = `https://wa.me/${waPhone}?text=${encodeURIComponent(body)}`;
         window.open(url, '_blank');
+        // Clicking WhatsApp counts as contacted: mark the draft sent + advance the cadence
+        // clock, then refresh the panel so the now-handled row clears.
+        AppDataStore.update('follow_up_drafts', draftId, { status: 'sent', updated_at: new Date().toISOString() }).catch(() => {});
+        _logFollowUpContact(draft);
+        renderFollowUpReminders();
     };
 
     // ── Pending Proposals widget — shown on calendar page below follow-up reminders ──
