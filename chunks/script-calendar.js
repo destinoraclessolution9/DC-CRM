@@ -772,7 +772,8 @@
             eventId: nextEvent.id,
             eventDate: nextEvent.event_date || nextEvent.date,
             eventName: nextEvent.event_title || nextEvent.title,
-            dueDate: new Date().toISOString().split('T')[0]
+            dueDate: new Date().toISOString().split('T')[0],
+            attachmentUrl: nextEvent.poster_url || null   // event poster → sent as a real image on WhatsApp
         });
     };
 
@@ -1159,7 +1160,8 @@
                         eventId:      linkedEv.id || act.event_id,
                         eventDate:    act.activity_date,
                         eventName:    linkedEv.title || linkedEv.event_title || '',
-                        dueDate:      todayStr
+                        dueDate:      todayStr,
+                        attachmentUrl: linkedEv.poster_url || null   // event poster → sent as a real image on WhatsApp
                     });
                 }
             }
@@ -1333,7 +1335,8 @@
                     eventId:      linkedEv.id,
                     eventDate:    calActivity.activity_date,
                     eventName:    linkedEv.title || linkedEv.event_title || '',
-                    dueDate:      todayStr
+                    dueDate:      todayStr,
+                    attachmentUrl: linkedEv.poster_url || null   // event poster → sent as a real image on WhatsApp
                 });
                 draftsCreated++;
             }
@@ -2063,17 +2066,47 @@
         } else {
             body = draft.message_text || '';
         }
-        if (draft.attachment_url && !body.includes(draft.attachment_url)) {
-            body += '\n\n' + draft.attachment_url;
+
+        // Clicking Send counts as "contacted": mark the draft sent + advance the cadence clock,
+        // then refresh the panel so the handled row clears. Shared by both send paths below.
+        const _markSentAndRefresh = () => {
+            AppDataStore.update('follow_up_drafts', draftId, { status: 'sent', updated_at: new Date().toISOString() }).catch(() => {});
+            _logFollowUpContact(draft);
+            renderFollowUpReminders();
+        };
+
+        // Event-class invites carry the event POSTER (attachment_url = events.poster_url). Send it
+        // as a REAL image via the device share sheet — the same path the e-voucher uses — so the
+        // poster lands inline in WhatsApp. Mobile-only; falls back to a wa.me text + poster LINK
+        // when the Web Share file API is unavailable (most desktops) or the fetch fails. Scoped to
+        // event invites (draft.event_id) per owner choice — other reminders keep the link behaviour.
+        if (draft.event_id && draft.attachment_url && navigator.share && navigator.canShare) {
+            let _file = null;
+            try {
+                const _resp = await fetch(draft.attachment_url);
+                if (_resp.ok) {
+                    const _blob = await _resp.blob();
+                    const _ext  = ((_blob.type || '').split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+                    _file = new File([_blob], `poster.${_ext}`, { type: _blob.type || 'image/jpeg' });
+                }
+            } catch (_) { _file = null; } // fetch failed — fall through to the wa.me link path
+            if (_file && navigator.canShare({ files: [_file] })) {
+                try {
+                    await navigator.share({ files: [_file], text: body });
+                    _markSentAndRefresh();
+                    return;
+                } catch (e) {
+                    if (e && e.name === 'AbortError') return; // user cancelled the share — leave it pending
+                    // any other share error — fall through to the wa.me link path
+                }
+            }
         }
 
-        const url = `https://wa.me/${waPhone}?text=${encodeURIComponent(body)}`;
-        window.open(url, '_blank');
-        // Clicking WhatsApp counts as contacted: mark the draft sent + advance the cadence
-        // clock, then refresh the panel so the now-handled row clears.
-        AppDataStore.update('follow_up_drafts', draftId, { status: 'sent', updated_at: new Date().toISOString() }).catch(() => {});
-        _logFollowUpContact(draft);
-        renderFollowUpReminders();
+        // Default path (and fallback): wa.me with the text; poster appended as a tappable link.
+        let _waBody = body;
+        if (draft.attachment_url && !_waBody.includes(draft.attachment_url)) _waBody += '\n\n' + draft.attachment_url;
+        window.open(`https://wa.me/${waPhone}?text=${encodeURIComponent(_waBody)}`, '_blank');
+        _markSentAndRefresh();
     };
 
     // ── Pending Proposals widget — shown on calendar page below follow-up reminders ──
