@@ -51,8 +51,9 @@ old code rather than delete, for reversibility).
 - "Today" surface; WhatsApp-click + manual tick = contacted (log touch + advance clock);
   roll-over "overdue Nd"; 3-day escalation.
 
-### Phase 5 — 90-day customer monitor  [TODO]
-- dispatchCustomerCheckins (uses last_contact_date), value-weighted 2/day, cadence-health badge.
+### Phase 5 — 90-day customer monitor  [WIP — core shipped]
+- [x] dispatchCustomerCheckins: customers idle CUSTOMER_CHECKIN_DAYS(90)+ → warm "let's catch up" draft, capped 2/day (CUSTOMER_MAX_OPEN), highest-LTV first, one-open-reminder, episode-keyed on last_contact_date. Fixes bug #11 (CRM went silent post-conversion). cust_checkin template + wired into _runSecondary + dedup + export.
+- [ ] cadence-health badge on customer card; "due this week" heads-up.
 
 ### Phase 6 — Event cool-downs + silence back-off + event-invite bug fixes  [TODO]
 - event_attended cool-down (A=4/B=6/C=8/D=10); silence tally → auto-slow → seasonal-only.

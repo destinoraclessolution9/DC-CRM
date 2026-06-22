@@ -347,7 +347,8 @@
                 dispatchBirthdayTriggers(),
                 dispatchProactiveEventInvites(),
                 dispatchPendingSolutionReminders(),
-                dispatchReEngagementReminders()
+                dispatchReEngagementReminders(),
+                dispatchCustomerCheckins()
             ]).then(() => Promise.all([
                 renderFollowUpReminders(),
                 renderPendingSolutionsWidget()
@@ -409,6 +410,7 @@
         diy_review:      { trigger_category: 'on_event_attendance', event_keywords: '环境风水基础课', cps_interest_match: '', solution_match: '', solution_category_match: '', eligibility_tiers: 'active', icon: '🔄', description: 'After attending 环境风水基础课. 3-day follow-up.', sort_order: 5, template_name: 'DIY 3-Day Review Follow-up', message_template: 'Hi {name}, hope you enjoyed {event_name}! How has your progress been? — {agent_name}', delay_days: 3, event_window_days: 0 },
         birthday:        { trigger_category: 'on_birthday', event_keywords: '', cps_interest_match: '', solution_match: '', solution_category_match: '', eligibility_tiers: 'active', icon: '🎂', description: 'Daily on calendar load. Sends birthday greeting.', sort_order: 6, template_name: 'Birthday Greeting', message_template: 'Hi {name}, wishing you a very happy birthday! — {agent_name}', delay_days: 0, event_window_days: 0 },
         re_engagement:   { trigger_category: 'no_contact', event_keywords: '', cps_interest_match: '', solution_match: '', solution_category_match: '', eligibility_tiers: 'active', icon: '💌', description: 'No contact for N+ days — gentle re-connect message ({days} auto-filled). Tune cadence via RE_ENGAGE_DAYS.', sort_order: 7, template_name: 'Re-Engagement Nudge', message_template: 'Hi {name}，好久没联系了！距离上次见面已经 {days} 天 😊 我很挂念您，最近一切都好吗？方便的话想约您坐坐叙叙～ — {agent_name}', delay_days: 0, event_window_days: 0 },
+        cust_checkin:    { trigger_category: 'customer_checkin', event_keywords: '', cps_interest_match: '', solution_match: '', solution_category_match: '', eligibility_tiers: 'customer', icon: '🤝', description: '90-day customer check-in — no contact for {days}+ days. Caps at 2/day, highest-LTV first.', sort_order: 8, template_name: 'Customer 90-Day Check-In', message_template: 'Hi {name}，好久不见！距离上次见面已经 {days} 天，很想念您 😊 最近一切都好吗？方便的话想约您喝杯茶叙叙～ — {agent_name}', delay_days: 0, event_window_days: 0 },
         // ── Power Ring ───────────────────────────────────────────────────────────────
         pr_9star:    { trigger_category: 'after_cps', event_keywords: '个人风水基础课', solution_category_match: 'Power Ring', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active', icon: '⭐', template_name: 'Power Ring → 个人风水基础课', description: 'Power Ring proposed → 个人风水基础课 invite (Active)', sort_order: 10, message_template: 'Hi {name}，诚邀您出席《个人风水基础课》！日期：{date}，地点：{venue}。期待与您相见！— {agent_name}', delay_days: 0, event_window_days: 60 },
         pr_destiny:  { trigger_category: 'after_cps', event_keywords: '个人改命分享会', solution_category_match: 'Power Ring', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active', icon: '⭐', template_name: 'Power Ring → 个人改命分享会', description: 'Power Ring proposed → 个人改命分享会 invite (Active)', sort_order: 11, message_template: 'Hi {name}，诚邀您出席《个人改命分享会》！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
@@ -572,7 +574,7 @@
         const _n = (s) => String(s || '').trim().toLowerCase();
         const person = opts.prospectId ? `p:${opts.prospectId}`
                      : opts.customerId ? `c:${opts.customerId}` : 'n:?';
-        if (opts.triggerType === 'birthday' || opts.triggerType === 're_engagement') return `${person}|${opts.triggerType}|${opts.dueDate || ''}`;
+        if (opts.triggerType === 'birthday' || opts.triggerType === 're_engagement' || opts.triggerType === 'cust_checkin') return `${person}|${opts.triggerType}|${opts.dueDate || ''}`;
         if (opts.eventId) return `${person}|eid:${opts.eventId}`;
         if (opts.eventName && opts.eventDate) return `${person}|en:${_n(opts.eventName)}|ed:${opts.eventDate}`;
         return `${person}|t:${opts.triggerType}`;
@@ -620,7 +622,7 @@
                 const personMatch = (prospectId && d.prospect_id == prospectId) ||
                                     (customerId && d.customer_id == customerId);
                 if (!personMatch) return false;
-                if (triggerType === 'birthday' || triggerType === 're_engagement') {
+                if (triggerType === 'birthday' || triggerType === 're_engagement' || triggerType === 'cust_checkin') {
                     // Episode-keyed dedup: re_engagement passes last_activity_date as
                     // due_date, so a NEW no-contact gap (after the agent logs a fresh
                     // contact) re-arms the nudge, while repeated calendar loads within
@@ -1365,6 +1367,63 @@
                 phone:        p.phone || '',
                 prospectName: p.full_name || '',
                 dueDate:      last        // episode key — see dedup note in createFollowUpDraft
+            });
+        }
+    };
+
+    // ── Dispatcher: 90-day customer check-ins — runs on calendar load ────────────────
+    // The post-conversion counterpart to re-engagement (bug #11: the CRM went silent
+    // once a prospect converted — no customer-side reminder existed at all). For every
+    // customer the current agent owns whose last_contact_date is CUSTOMER_CHECKIN_DAYS+
+    // old, queue a warm "let's catch up" draft — capped at CUSTOMER_MAX_OPEN ("2 a day"),
+    // highest-LTV first. last_contact_date is trigger-maintained (customers migration,
+    // Phase 1); the draft is episode-keyed on it so a fresh contact re-arms the cycle.
+    const CUSTOMER_CHECKIN_DAYS = 90;
+    const CUSTOMER_MAX_OPEN = 2;
+    const dispatchCustomerCheckins = async () => {
+        const myId = _state.cu?.id;
+        if (!myId) return;
+        const tpl = await getFollowUpTemplate('cust_checkin');
+        if (!tpl) return;
+        const _t = new Date();
+        const todayMs = new Date(_t.getFullYear(), _t.getMonth(), _t.getDate()).getTime();
+        let customers = [];
+        try { customers = await AppDataStore.getAll('customers'); } catch (_) { return; }
+        let existing = [];
+        try { existing = await AppDataStore.getAll('follow_up_drafts'); } catch (_) {}
+        const minePending = (existing || []).filter(d => d.status === 'pending' && d.agent_id == myId);
+        const checkinOpen = minePending.filter(d => d.trigger_type === 'cust_checkin').length;
+        const hasOpenDraft = new Set(minePending.filter(d => d.customer_id).map(d => String(d.customer_id)));
+        const slots = Math.max(0, CUSTOMER_MAX_OPEN - checkinOpen);
+        if (slots === 0) return;
+        const due = [];
+        for (const c of customers) {
+            if (c.responsible_agent_id != myId) continue;          // only my own customers
+            if (c.status === 'lost' || c.unable_to_serve) continue;
+            if (hasOpenDraft.has(String(c.id))) continue;          // one open reminder per customer
+            const last = c.last_contact_date;
+            if (!last) continue;
+            const days = Math.floor((todayMs - new Date(last).getTime()) / 86400000);
+            if (days < CUSTOMER_CHECKIN_DAYS) continue;
+            due.push({ c, last, days });
+        }
+        // Highest-value first: lifetime value desc, then most-overdue.
+        due.sort((a, b) => {
+            const la = Number(a.c.lifetime_value) || 0, lb = Number(b.c.lifetime_value) || 0;
+            if (la !== lb) return lb - la;
+            return a.last < b.last ? -1 : a.last > b.last ? 1 : 0;
+        });
+        for (const { c, last, days } of due.slice(0, slots)) {
+            const msg = interpolateTemplate(tpl.message_template, {
+                name: c.full_name || '', days: String(days), agent_name: _state.cu?.full_name || ''
+            });
+            await createFollowUpDraft({
+                customerId:   c.id,
+                triggerType:  'cust_checkin',
+                messageText:  msg,
+                phone:        c.phone || '',
+                prospectName: c.full_name || '',
+                dueDate:      last        // episode key — fresh contact re-arms the 90-day cycle
             });
         }
     };
@@ -6012,6 +6071,7 @@
         dispatchBirthdayTriggers,
         dispatchPendingSolutionReminders,
         dispatchReEngagementReminders,
+        dispatchCustomerCheckins,
         renderFollowUpReminders,
         markFollowUpSent,
         dismissFollowUp,
