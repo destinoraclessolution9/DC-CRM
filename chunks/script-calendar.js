@@ -1376,6 +1376,16 @@
     const _decayFactor  = (step) => RE_ENGAGE_DECAY[Math.min(step, RE_ENGAGE_DECAY.length - 1)];
     const _baseDays     = (g) => GRADE_CADENCE[g] || GRADE_CADENCE.C; // ungraded -> C (21d)
     const _cadenceDays  = (g, step) => Math.min(RE_ENGAGE_DECAY_CAP_DAYS, Math.round(_baseDays(g) * _decayFactor(step || 0)));
+    // Touch-type LADDER: the message PURPOSE climbs with each un-answered touch so repeated
+    // nudges don't all read as the same "miss you" line. Step 0 uses the warm template;
+    // step 1 = event-invite framing, 2 = social proof, 3+ = decision-bridge. Built in code so
+    // it works on the live DB with no template change.
+    const RE_ENGAGE_LADDER = [
+        '我们近期有一场很适合您的活动，名额有限，想第一时间留给您 😊',
+        '最近有几位和您情况相似的朋友做了调整，反馈都很好，想分享给您参考',
+        '想帮您把方案最后梳理一下，约个15分钟，让您安心做决定，方便吗？'
+    ];
+    const _ladderCopy = (step) => RE_ENGAGE_LADDER[Math.min((step || 1) - 1, RE_ENGAGE_LADDER.length - 1)];
     const RE_ENGAGE_MAX_OPEN = 5; // hard cap on how many re-engagement rows an agent sees at once
     const dispatchReEngagementReminders = async () => {
         const myId = _state.cu?.id;
@@ -1421,7 +1431,7 @@
             if (p.follow_mode === 'seasonal') continue;             // backed off to seasonal-only
             const step = _silenceStep(p);                           // touch counter → widening interval
             if (days < _cadenceDays(p.manual_grade, step)) continue; // grade × decay sets the rhythm
-            due.push({ p, last, days });
+            due.push({ p, last, days, step });
         }
         // Highest-value first: grade rank, then most-overdue (oldest contact).
         due.sort((a, b) => {
@@ -1429,10 +1439,12 @@
             if (ra !== rb) return ra - rb;
             return a.last < b.last ? -1 : a.last > b.last ? 1 : 0;
         });
-        for (const { p, last, days } of due.slice(0, slots)) {
-            const msg = interpolateTemplate(tpl.message_template, {
-                name: p.full_name || '', days: String(days), agent_name: _state.cu?.full_name || ''
-            });
+        for (const { p, last, days, step } of due.slice(0, slots)) {
+            // Step 0 = the warm template; later steps rotate the purpose up the ladder.
+            const _agent = _state.cu?.full_name || '';
+            const msg = step > 0
+                ? `Hi ${p.full_name || ''}，距离上次联系已经 ${days} 天 😊 ${_ladderCopy(step)} — ${_agent}`
+                : interpolateTemplate(tpl.message_template, { name: p.full_name || '', days: String(days), agent_name: _agent });
             const _created = await createFollowUpDraft({
                 prospectId:   p.id,
                 triggerType:  're_engagement',
