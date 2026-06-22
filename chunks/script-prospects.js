@@ -1913,7 +1913,7 @@ const buildProspectDetailHeaderHtml = (prospect, cpsPhoto) => {
                     </div>
                     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0 8px;">
                         <span style="font-size:22px;font-weight:700;line-height:1.3;flex-shrink:0;">${escapeHtml(prospect.full_name)}</span>${prospect.nickname ? `<span style="font-size:15px;font-weight:400;color:var(--gray-500);">"${escapeHtml(prospect.nickname)}"</span>` : ''}
-                        <button title="Edit" aria-label="Edit prospect" onclick="app.editProspect(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--gray-500);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i></button><button title="Convert to Customer" aria-label="Convert to customer" onclick="app.convertToCustomer(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:none;background:var(--primary);color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'"><i class="fa-solid fa-user-check" aria-hidden="true"></i></button><button title="Meet-Up History" aria-label="Meet-up history" onclick="app.openMeetupHistoryModal(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--primary);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i></button><button title="Save to Phone Contacts" aria-label="Save to phone contacts" onclick="app.downloadProspectVCard(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--success);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-solid fa-address-book" aria-hidden="true"></i></button>
+                        <button title="Edit" aria-label="Edit prospect" onclick="app.editProspect(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--gray-500);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i></button><button title="Convert to Customer" aria-label="Convert to customer" onclick="app.convertToCustomer(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:none;background:var(--primary);color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'"><i class="fa-solid fa-user-check" aria-hidden="true"></i></button><button title="Meet-Up History" aria-label="Meet-up history" onclick="app.openMeetupHistoryModal(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--primary);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i></button><button title="Save to Phone Contacts" aria-label="Save to phone contacts" onclick="app.downloadProspectVCard(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--success);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-solid fa-address-book" aria-hidden="true"></i></button><button title="WhatsApp Prospect" aria-label="Open WhatsApp chat with prospect" onclick="app.openProspectWhatsApp(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:#25D366;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-brands fa-whatsapp" aria-hidden="true"></i></button>
                     </div>
                 </div>
                 ${cpsPhoto ? `<img loading="lazy" decoding="async" data-attach-src="${escapeHtml(String(cpsPhoto.url))}" onclick="event.stopPropagation();app.zoomCpsPhoto('${UI.escJsAttr(String(cpsPhoto.url))}')" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:2px solid var(--gray-200);cursor:zoom-in;flex-shrink:0;margin-top:4px;" title="CPS Photo — click to enlarge">` : ''}
@@ -3746,6 +3746,16 @@ const downloadProspectVCard = async (prospectId) => {
     UI.toast.success('Contact downloaded — tap the file to save to your phone');
 };
 
+// Open a WhatsApp chat with the prospect directly (no message draft).
+// Reuses the Malaysia MSISDN normalizer so 0xx / +60 / 60xx all resolve.
+const openProspectWhatsApp = async (prospectId) => {
+    const p = await AppDataStore.getById('prospects', prospectId);
+    if (!p) { UI.toast.error('Prospect not found'); return; }
+    const num = _evWaPhone(p.phone);
+    if (!num) { UI.toast.error('Prospect has no phone number'); return; }
+    window.open(`https://wa.me/${num}`, '_blank', 'noopener');
+};
+
 const addNote = async (prospectId) => {
     const text = document.getElementById('new-note-text')?.value?.trim();
     if (!text) return;
@@ -4442,7 +4452,7 @@ const sendVoucherWhatsApp = (prospectId, attId, code, rname, phone, fileUrl) => 
     code = code || '';
     rname = rname || '';
     const fname = `evoucher_${code || attId}.png`;
-    const caption = `🎁 传福增运 · 九星引路\n这是一份专属您的个人风水解析券\n持券人：${rname}${code ? `\n序号：${code}` : ''}\n请凭此券预约 1对1 个人风水解析。`;
+    const caption = `🎁 传福增运 · 九星引路\n这是一份专属的特殊个人风水解析券\n持券人：${rname}${code ? `\n序号：${code}` : ''}\n请凭此券免费预约 1对1 个人风水解析，为期30天。`;
 
     // PRIMARY (gesture-safe): a just-generated voucher has its PNG cached — share the
     // actual file synchronously inside the click so transient activation is preserved.
@@ -6591,6 +6601,7 @@ const openPastRecordModal = async (...args) => {
         openFengShuiSitePhotosModal,
         openProspectGradePicker,
         openProspectModal,
+        openProspectWhatsApp,
         openRecruitModal,
         openReviveProspectModal,
         phSetFilter,
