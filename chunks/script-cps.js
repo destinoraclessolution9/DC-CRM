@@ -177,7 +177,10 @@ const _buildNotifPanel = async () => {
         const reminders = await AppDataStore.query('refill_reminders', { status: 'pending' });
         const scopedReminders = _scopeRefillReminders(reminders, visibleIds, prospectMap, customerMap);
         for (const r of scopedReminders.slice(0, 5)) {
-            items.push({ icon: '💊', title: `Refill due: ${esc(r.product_name || 'Product')}`, sub: `Customer needs reorder · Due ${esc(r.due_date || '')}` });
+            // #9: refill_reminders has no `due_date` column — the date lives in
+            // estimated_finish_date (the calendar widget already uses it). Was rendering a blank "Due ".
+            const _refDue = (r.estimated_finish_date || '').toString().slice(0, 10);
+            items.push({ icon: '💊', title: `Refill due: ${esc(r.product_name || 'Product')}`, sub: `Customer needs reorder${_refDue ? ' · Due ' + esc(_refDue) : ''}` });
         }
     } catch (_) {}
 
