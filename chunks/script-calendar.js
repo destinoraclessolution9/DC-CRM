@@ -1434,7 +1434,7 @@
             const last = p.last_activity_date;
             if (!last) continue;          // never-contacted is a CPS/protection concern, not re-engagement
             const days = Math.floor((todayMs - new Date(last).getTime()) / 86400000);
-            const step = _silenceStep(p);                           // 0 in practice (incrementer removed; DB cleared)
+            const step = 0;                                         // back-off neutralized (audit): ignore any stale silence_count so cadence is purely grade-driven
             if (days < _cadenceDays(p.manual_grade, step)) continue; // grade sets the base rhythm
             due.push({ p, last, days, step });
         }
