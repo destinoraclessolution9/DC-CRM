@@ -1029,15 +1029,30 @@
             windowEnd.setDate(windowEnd.getDate() + (tpl.event_window_days || 60));
             const windowEndStr = windowEnd.toISOString().split('T')[0];
 
-            // The events catalog has no dates — scan upcoming calendar EVENT activities instead
-            const matchingInstances = eventActs.filter(a => {
+            // Instances to invite to = upcoming logged EVENT activities (which carry the
+            // per-slot date/time/venue) PLUS catalog events whose `date` falls in the window
+            // but were never separately logged as a calendar activity. #5: a published class
+            // with no activity previously invited NOBODY (the old comment "catalog has no
+            // dates" is stale — events.date exists now). Dedupe by event_id, preferring the
+            // logged activity (richer slot info) over the bare catalog row.
+            const _actInstances = eventActs.filter(a => {
                 const aDate = a.activity_date || '';
                 if (aDate < todayStr || aDate > windowEndStr) return false;
                 const linkedEv = eventsMap[String(a.event_id)];
                 if (!linkedEv) return false;
                 if ((linkedEv.status || '').toLowerCase() === 'cancelled') return false;
                 return targetCats.some(tc => _parseEventCats(linkedEv.categories).includes(tc));
-            }).sort((a, b) => (a.activity_date || '').localeCompare(b.activity_date || ''));
+            });
+            const _seenEv = new Set(_actInstances.map(a => String(a.event_id)));
+            const _catInstances = (events || []).filter(ev => {
+                const d = ev.date || ev.event_date || '';
+                if (!d || d < todayStr || d > windowEndStr) return false;
+                if ((ev.status || '').toLowerCase() === 'cancelled' || ev.is_active === false) return false;
+                if (_seenEv.has(String(ev.id))) return false; // already covered by a logged activity
+                return targetCats.some(tc => _parseEventCats(ev.categories).includes(tc));
+            }).map(ev => ({ activity_date: ev.date || ev.event_date, start_time: ev.start_time || ev.time || '', location_address: ev.location || '', event_id: ev.id }));
+            const matchingInstances = [..._actInstances, ..._catInstances]
+                .sort((a, b) => (a.activity_date || '').localeCompare(b.activity_date || ''));
             if (!matchingInstances.length) continue;
 
             for (const person of allPeople) {

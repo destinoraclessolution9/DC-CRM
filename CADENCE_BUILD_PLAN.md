@@ -58,8 +58,9 @@ old code rather than delete, for reversibility).
 ### Phase 6 — Event cool-downs + silence back-off + event-invite bug fixes  [WIP]
 - [x] #3 inert match filter — empty template criteria now NEUTRAL not vacuously-true (was inviting EVERY tier-eligible prospect instead of the matching ones). Both twin sites.
 - [x] #4 category lookup falls back to the solution string (`productCatMap[name] || name`) so 'Power Ring'-style category proposals match. Both twin sites.
-- [ ] #5 catalog-only events invite nobody — drive the proactive scan from the events catalog (events.date in window) not just logged EVENT activities.
-- [ ] event_attended cool-down (A=4/B=6/C=8/D=10) + silence tally → auto-slow → seasonal-only.
+- [x] #5 catalog-only events: proactive scan now ALSO includes catalog events with a future events.date in window (deduped vs logged activities by event_id), so a published class invites people even without a separately-logged EVENT activity.
+- [ ] event_attended cool-down: largely handled already — attendance logs an EVENT activity → trigger bumps last_activity_date → grade cadence measures from the event date (natural cool-down). Explicit cooldown_until + forced-debrief touch deferred as refinement.
+- [ ] silence tally → auto-slow → seasonal-only (needs the contacted-loop's silence_count wiring).
 
 ### Phase 7 — APU express lane + e-voucher monitoring  [TODO]
 - APU tickbox + next-day ack + reserve slots + referred leads; voucher lifecycle monitor + reminders.
