@@ -494,6 +494,59 @@
         </div>`;
     };
 
+    // ── Auto-fill (boss-facing report — only DEFINITE, code-grounded mappings) ──
+    // The report's abbreviations are business-internal. A field is auto-filled
+    // ONLY when an existing getter's meaning is an UNAMBIGUOUS, non-fuzzy match
+    // for the label — otherwise it stays manual so the owner enters it by hand.
+    //
+    // AUTO-FILLED:
+    //   CPS  → getCPSCount(from,to)   (counts activities where activity_type==='CPS';
+    //          the form label "CPS" IS the same token the getter filters on — exact match)
+    //
+    // LEFT MANUAL (no definite/unambiguous getter — DO NOT auto-fill, would risk a
+    // wrong number to the boss):
+    //   PJA/EA/RM  — "new agents" is plausible (getNewAgents) but the field bundles
+    //                three sub-categories into one cell; the intended subset is not
+    //                code-confirmable. MANUAL.
+    //   CS (N)     — labelled FTF, but getClientMeetings counts FTF *and* FSA together;
+    //                no FTF-only getter exists. MANUAL.
+    //   CS (G)     — "GR"/golden-road has no standalone getter (only mixed inside
+    //                getMeetUpExistingCustomerCount via a title-substring). MANUAL.
+    //   TR         — no training-only getter (training is lumped into totalMeetings). MANUAL.
+    //   CF         — getCFHeadcount has a very specific definition (unique customers who
+    //                referred to a CPS); equivalence to the report's "CF" not code-confirmable. MANUAL.
+    //   HJ / MZ    — two distinct event types; no per-event-type getter maps to HJ or MZ alone. MANUAL.
+    //   NC         — "NC" not code-defined; getNewCustomers is new *paying* customers,
+    //                a possible semantic mismatch. MANUAL.
+    //   POR        — POP-sales mapping (getPOPSales) is a business-jargon guess (POR≠POP
+    //                textually, unconfirmed). MANUAL.
+    //   RMT        — "total sales" mapping (getTotalSales) not code-grounded. MANUAL.
+    //   MT/CR/FT(N)/FT(KK)/IT/RS/TX, PD/SR, PORT(DP)/(TOTAL), TTO — owner-pending. MANUAL.
+    //
+    // Window = the report's OWN week (the most-recent Monday → that Sunday), matching
+    // the auto label — NOT the dashboard's active time filter. Only fills cells the
+    // owner has left blank (a restored draft or manual edit is never overwritten).
+    const _wrAutoFill = async () => {
+        try {
+            const cpsEl = document.getElementById('wr-cps');
+            if (!cpsEl || (cpsEl.value !== '' && cpsEl.value != null)) return; // owner already set it
+            const mon = _wrMostRecentMonday();
+            const sun = new Date(mon);
+            sun.setDate(mon.getDate() + 6);
+            const from = toLocalDateStr(mon);
+            const to = toLocalDateStr(sun);
+            const cps = await getCPSCount(from, to);
+            // Re-check: bail if the user typed into it while the getter was awaiting,
+            // or if the node was torn down by a re-mount.
+            const live = document.getElementById('wr-cps');
+            if (!live || (live.value !== '' && live.value != null)) return;
+            if (Number.isFinite(cps)) {
+                live.value = String(cps);
+                recalcWeeklyReport(); // re-sum Totals + refresh preview + persist draft
+            }
+        } catch (e) { console.warn('weekly-report auto-fill failed:', e); }
+    };
+
     // Build + restore + compute the weekly report into #weekly-monday-report.
     // Built once per mounted shell (guarded by data-built) so an unrelated filter
     // refresh never wipes figures the user is mid-entry on; the React-grid path
@@ -505,6 +558,10 @@
         el.dataset.built = '1';
         _restoreWeeklyReportDraft();
         recalcWeeklyReport();
+        // Auto-fill the confirmed cells (async; only fills blanks). Scope globals
+        // (_visibleUserIds / _currentRoleFilter) are already set by refreshKPIDashboard
+        // before _renderNonGrid → renderWeeklyReport runs, so the count is correctly scoped.
+        _wrAutoFill();
     };
 
     const showKPIDashboard = async (container) => {
