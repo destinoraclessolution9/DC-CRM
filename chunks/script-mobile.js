@@ -953,6 +953,30 @@
         cachedRefills = cachedRefills || [];
         cachedUsers   = cachedUsers   || [];
 
+        // ── Cadence generator on mobile (parity with the desktop calendar) ───────────────
+        // The grade-driven follow-up dispatchers live in the calendar chunk and historically
+        // ran ONLY on the desktop calendar load — so a phone-only agent never generated their
+        // daily follow-ups. Run the same idempotent batch here (each dispatcher's per-agent caps
+        // count existing pending drafts before creating, so re-running is self-bounding),
+        // throttled to ~15 min/device, then re-fetch drafts + repaint so the curated list is
+        // current. _state is the shared window._appState, so the dispatchers see the logged-in
+        // agent. Best-effort — a failure leaves the home on its cached drafts.
+        const _mhomeGenKey = 'mhome-cadence-gen-' + _mhomeUid;
+        if (_mhomeForce || Date.now() - Number(localStorage.getItem(_mhomeGenKey) || 0) > 15 * 60 * 1000) {
+            try { localStorage.setItem(_mhomeGenKey, String(Date.now())); } catch (_) {}
+            (async () => {
+                try {
+                    await window._loadChunk('chunks/script-calendar.min.js');
+                    const A = window.app || {};
+                    const _disp = ['dispatchBirthdayTriggers', 'dispatchProactiveEventInvites', 'dispatchPendingSolutionReminders', 'dispatchReEngagementReminders', 'dispatchCustomerCheckins', 'dispatchApuAckTouches', 'dispatchAppointmentReminders'];
+                    await Promise.allSettled(_disp.map(n => (typeof A[n] === 'function' ? A[n]() : Promise.resolve())));
+                    const rows = await AppDataStore.query('follow_up_drafts', { status: 'pending' }).catch(() => null);
+                    if (rows) { cachedDrafts = rows; _mhomeLsSet(_mhomeDraftsKey, cachedDrafts); }
+                    _mhomeRepaint();
+                } catch (_) { /* generator best-effort — home still shows cached drafts */ }
+            })();
+        }
+
         // Single source of truth for the dashboard HTML. Called once when the
         // people base is warm, or twice on a cold load (fast partial pass with
         // peoplePending=true, then a full pass from the background fetch).
@@ -966,9 +990,15 @@
         // with a null agent_id is treated as belonging to the current user, so
         // null-owned/imported drafts are not hidden from non-admins.
         const _isMine = (d) => isSystemAdmin(_state.cu) || !d.agent_id || String(d.agent_id) === String(_state.cu?.id);
-        const visibleDrafts = cachedDrafts.filter(d =>
-            d.status === 'pending' && (d.due_date || '') <= todayStr && _isMine(d)
-        );
+        // Curated via the shared desktop helper (composeFollowUpList) once the calendar chunk is
+        // loaded — identical filter (pending + due<=today + non-expired-event + owned + not
+        // unable_to_serve) + dedup to the desktop panel, so the count + list match (no more
+        // uncapped, un-deduped "93"). Falls back to the lean filter on the first paint before the
+        // chunk lands; the generator block above loads it and repaints.
+        const _curate = (window.app && typeof window.app.composeFollowUpList === 'function') ? window.app.composeFollowUpList : null;
+        const visibleDrafts = _curate
+            ? _curate(cachedDrafts, allPeople, cachedCustomers, _state.cu?.id, isSystemAdmin(_state.cu))
+            : cachedDrafts.filter(d => d.status === 'pending' && (d.due_date || '') <= todayStr && _isMine(d));
         // RBAC: client (prospect/customer) birthdays are scoped to the viewer's
         // visible agent set so agents don't see other agents' clients; colleague
         // (cachedUsers) birthdays stay visible to all as a team feature.
@@ -1201,9 +1231,10 @@
         // with a null agent_id is treated as belonging to the current user, so
         // null-owned/imported drafts are not hidden from non-admins.
         const _isMine = (d) => isSystemAdmin(_state.cu) || !d.agent_id || String(d.agent_id) === String(_state.cu?.id);
-            const visibleDrafts = cachedDrafts.filter(d =>
-                d.status === 'pending' && (d.due_date || '') <= todayStr && _isMine(d)
-            );
+            const _curate = (window.app && typeof window.app.composeFollowUpList === 'function') ? window.app.composeFollowUpList : null;
+            const visibleDrafts = _curate
+                ? _curate(cachedDrafts, allPeople, cachedCustomers, _state.cu?.id, isSystemAdmin(_state.cu))
+                : cachedDrafts.filter(d => d.status === 'pending' && (d.due_date || '') <= todayStr && _isMine(d));
             const _bdayOwnerVisible = (ownerId) => {
                 if (visibleIds === 'all') return true;
                 if (!ownerId) return false;
@@ -1441,9 +1472,14 @@
         const today = _mhomeToday();
         // null agent_id → treat as current user's (desktop parity, script-calendar.js:1381)
         const mine = (d) => isSystemAdmin(_state.cu) || !d.agent_id || String(d.agent_id) === String(_state.cu?.id);
-        const rows = drafts
-            .filter(d => d.status === 'pending' && (d.due_date || '') < today && mine(d))
-            .sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''));
+        // Curated list via the shared desktop helper (loaded above): same filter + dedup as the
+        // desktop panel, due<=today (today's full list incl. overdue — each row's label shows
+        // "Due today" vs "N overdue"). Lean fallback if the helper isn't present.
+        const _curate = (window.app && typeof window.app.composeFollowUpList === 'function') ? window.app.composeFollowUpList : null;
+        const rows = _curate
+            ? _curate(drafts, people, people, _state.cu?.id, isSystemAdmin(_state.cu))
+            : drafts.filter(d => d.status === 'pending' && (d.due_date || '') < today && mine(d))
+                    .sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''));
         if (!rows.length) {
             UI.showModal('Overdue Follow-ups', _mhomeSheetEmpty('fas fa-circle-check', 'All caught up — no overdue follow-ups.'), _mhomeSheetBtns);
             return;

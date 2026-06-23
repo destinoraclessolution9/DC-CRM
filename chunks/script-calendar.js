@@ -1871,6 +1871,57 @@
         for (const k of [..._posterShareCache.keys()]) { if (!wanted.has(k)) _posterShareCache.delete(k); }
     };
 
+    // Shared curated-follow-up builder — the SINGLE source of truth for "today's follow-ups",
+    // used by BOTH the desktop panel (renderFollowUpReminders) and the mobile home so the two
+    // surfaces show the IDENTICAL list/count. Pure: no DOM, no state writes. Filters to
+    // pending + due<=today + non-expired-event + owned-(or admin sees null-agent) + not
+    // unable_to_serve, then collapses duplicates (episodic newest-wins / appointment / event /
+    // other) and sorts by due_date asc. The ~5-prospect/2-customer/birthday curation is already
+    // guaranteed upstream by the dispatcher caps — do NOT add a slice here.
+    const composeFollowUpList = (allDrafts, allProspects, allCustomers, viewerId, isAdminViewer) => {
+        const _now = new Date();
+        const todayStr = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}-${String(_now.getDate()).padStart(2, '0')}`;
+        const _unableP = new Set((allProspects || []).filter(p => p.unable_to_serve).map(p => String(p.id)));
+        const _unableC = new Set((allCustomers || []).filter(c => c.unable_to_serve).map(c => String(c.id)));
+        const visible = (allDrafts || []).filter(d =>
+            d.status === 'pending' &&
+            d.due_date <= todayStr &&
+            (!d.event_date || d.event_date >= todayStr) &&
+            (d.agent_id ? d.agent_id == viewerId : isAdminViewer) &&
+            !(d.prospect_id && _unableP.has(String(d.prospect_id))) &&
+            !(d.customer_id && _unableC.has(String(d.customer_id)))
+        );
+        const _norm = (s) => String(s || '').trim().toLowerCase();
+        const _episodic = new Set(['re_engagement', 'cust_checkin']);
+        const seen = new Map();
+        const deduped = [];
+        const _orderedForDedup = visible.slice().sort((a, b) => {
+            const ea = _episodic.has(a.trigger_type), eb = _episodic.has(b.trigger_type);
+            if (ea !== eb) return ea ? -1 : 1;             // episodic rows resolved first
+            if (ea && eb) return (b.id || 0) - (a.id || 0); // newest episode wins
+            return (a.id || 0) - (b.id || 0);              // others: oldest wins (stable)
+        });
+        for (const d of _orderedForDedup) {
+            const personKey = d.prospect_id ? `p:${d.prospect_id}` : (d.customer_id ? `c:${d.customer_id}` : `n:${d.id}`);
+            const isEventBased = !!d.event_id || (!!d.event_name && !!d.event_date);
+            let key;
+            if (_episodic.has(d.trigger_type)) {
+                key = `${personKey}|t:${d.trigger_type}`;
+            } else if (d.trigger_type === 'appointment_reminder') {
+                key = `${personKey}|t:appointment_reminder|eid:${d.event_id || ''}`;
+            } else if (isEventBased) {
+                const eventKey = d.event_id ? `eid:${d.event_id}` : `en:${_norm(d.event_name)}|ed:${d.event_date || ''}`;
+                key = `${personKey}|${eventKey}`;
+            } else {
+                key = `${personKey}|t:${d.trigger_type}|due:${d.due_date || ''}`;
+            }
+            if (seen.has(key)) continue;
+            seen.set(key, true);
+            deduped.push(d);
+        }
+        return deduped.sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''));
+    };
+
     const renderFollowUpReminders = async () => {
         const container = document.getElementById('follow-up-reminders');
         if (!container) return;
@@ -1882,94 +1933,7 @@
                 AppDataStore.getAll('prospects').catch(() => []),
                 AppDataStore.getAll('customers').catch(() => []),
             ]);
-            const _now = new Date();
-            const _yR = _now.getFullYear();
-            const _mR = String(_now.getMonth() + 1).padStart(2, '0');
-            const _dR = String(_now.getDate()).padStart(2, '0');
-            const todayStr = `${_yR}-${_mR}-${_dR}`;
-            // Build the set of prospect/customer IDs flagged unable_to_serve
-            // so we can hide their existing drafts. The dispatcher already
-            // refuses to CREATE drafts for them (script.js:11680, 11951,
-            // 12109), but a draft made before the flag was set sticks around
-            // forever otherwise.
-            const _unableP = new Set(
-                (allProspectsR || []).filter(p => p.unable_to_serve).map(p => String(p.id))
-            );
-            const _unableC = new Set(
-                (allCustomersR || []).filter(c => c.unable_to_serve).map(c => String(c.id))
-            );
-            // Null/empty agent_id drafts (legacy/imported, or created during an
-            // identity flap) must NOT be broadcast to every agent — that leaks a
-            // prospect's name/phone/event/message cross-agent. Only show them to
-            // admins, who already see the whole org. Owned drafts stay scoped to
-            // their agent as before.
-            const _isAdminViewer = isSystemAdmin(_state.cu);
-            const visible = (all || []).filter(d =>
-                d.status === 'pending' &&
-                d.due_date <= todayStr &&
-                // Hide event invites whose event has already happened — the
-                // invite is moot once the date passes. Non-event reminders
-                // (no event_date) are unaffected.
-                (!d.event_date || d.event_date >= todayStr) &&
-                (d.agent_id ? d.agent_id == _state.cu?.id : _isAdminViewer) &&
-                // Hide drafts for prospects/customers marked unable to serve.
-                !(d.prospect_id && _unableP.has(String(d.prospect_id))) &&
-                !(d.customer_id && _unableC.has(String(d.customer_id)))
-            );
-            // Collapse duplicates already in the DB. For event-based reminders
-            // we dedupe at (person, event) — IGNORING trigger_type — because
-            // a prospect with multiple cps_interest categories can match
-            // several templates pointing at the same event, producing 3-4
-            // identical-feeling rows (same name, same event, different
-            // trigger badge). The customer only needs one invite. Event is
-            // matched by event_id OR (event_name + event_date) so legacy
-            // duplicate catalog rows also collapse.
-            //
-            // For non-event reminders (birthday, APU), keep trigger_type and
-            // due_date in the key so distinct types still show separately.
-            // Keep the oldest draft (lowest id) so dismissals stay attached
-            // to a stable row.
-            const _norm = (s) => String(s || '').trim().toLowerCase();
-            // #16: re_engagement / cust_checkin drafts are episode-keyed on due_date
-            // (= last_activity / last_contact date). When a NEW quiet-gap arms a fresh draft,
-            // createFollowUpDraft's dedup keys on the new due_date and does NOT match the
-            // prior episode's pending draft — so the old one lingers forever. Collapse to the
-            // NEWEST pending draft per (person, episodic trigger): resolve episodic rows first,
-            // newest-id wins; non-episodic rows keep oldest-id-wins so dismissals stay stable.
-            const _episodic = new Set(['re_engagement', 'cust_checkin']);
-            const seen = new Map();
-            const deduped = [];
-            const _orderedForDedup = visible.slice().sort((a, b) => {
-                const ea = _episodic.has(a.trigger_type), eb = _episodic.has(b.trigger_type);
-                if (ea !== eb) return ea ? -1 : 1;             // episodic rows resolved first
-                if (ea && eb) return (b.id || 0) - (a.id || 0); // newest episode wins
-                return (a.id || 0) - (b.id || 0);              // others: oldest wins (stable)
-            });
-            for (const d of _orderedForDedup) {
-                const personKey = d.prospect_id ? `p:${d.prospect_id}` : (d.customer_id ? `c:${d.customer_id}` : `n:${d.id}`);
-                const isEventBased = !!d.event_id || (!!d.event_name && !!d.event_date);
-                let key;
-                if (_episodic.has(d.trigger_type)) {
-                    // Collapse all episodes of this person+type to one row (newest, above).
-                    key = `${personKey}|t:${d.trigger_type}`;
-                } else if (d.trigger_type === 'appointment_reminder') {
-                    // event_id is an activity id (own id-space) — scope to the trigger so an
-                    // appointment reminder isn't collapsed against an event invite that
-                    // happens to share the same numeric id.
-                    key = `${personKey}|t:appointment_reminder|eid:${d.event_id || ''}`;
-                } else if (isEventBased) {
-                    const eventKey = d.event_id
-                        ? `eid:${d.event_id}`
-                        : `en:${_norm(d.event_name)}|ed:${d.event_date || ''}`;
-                    key = `${personKey}|${eventKey}`;
-                } else {
-                    key = `${personKey}|t:${d.trigger_type}|due:${d.due_date || ''}`;
-                }
-                if (seen.has(key)) continue;
-                seen.set(key, true);
-                deduped.push(d);
-            }
-            drafts = deduped.sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''));
+            drafts = composeFollowUpList(all, allProspectsR, allCustomersR, _state.cu?.id, isSystemAdmin(_state.cu));
             // Update the count badge inside the try block so an error doesn't reset it to 0.
             const _gfc = document.getElementById('glance-followup-count');
             if (_gfc) _gfc.textContent = drafts.length;
@@ -6447,6 +6411,7 @@
         dispatchApuAckTouches,
         dispatchAppointmentReminders,
         renderFollowUpReminders,
+        composeFollowUpList,
         markFollowUpSent,
         dismissFollowUp,
         sendFollowUpInvite,
