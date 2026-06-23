@@ -136,7 +136,7 @@ function AttentionCard({ rows }) {
     return (
         <div className="mhome-card">
             <div className="mhome-card-head">
-                <div className="mhome-card-title"><span className="ico purple"><i className="fas fa-circle-exclamation"></i></span> Needs Your Attention</div>
+                <div className="mhome-card-title"><span className="ico purple"><i className="fas fa-list-check"></i></span> Today's Follow-ups</div>
                 <button className="mhome-card-link" onClick={() => call('mhomeOpenFollowups')}>View All ›</button>
             </div>
             {rows.map((r, i) => r.type === 'followup' ? (
@@ -148,7 +148,7 @@ function AttentionCard({ rows }) {
                         <div className="mhome-att-sub">{r.sub}</div>
                     </div>
                     <button className="mhome-att-btn wa" onClick={() => callArgs('mhomeWa', r.waId, r.waPhone || '')}>
-                        <i className="fab fa-whatsapp"></i> Send WhatsApp
+                        <i className="fab fa-whatsapp"></i> WhatsApp
                     </button>
                 </div>
             ) : (
@@ -181,12 +181,6 @@ function Tiles({ tiles, peoplePending }) {
                 <div className="mhome-tile-ico"><i className="fas fa-prescription-bottle-medical"></i></div>
                 <div className="mhome-tile-lbl">Refills Due</div>
                 <div className="mhome-tile-num">{tiles.refillCount}</div>
-                <div className="mhome-tile-arrow"><i className="fas fa-chevron-right"></i></div>
-            </button>
-            <button className="mhome-tile purple" onClick={() => call('mhomeOpenInactive')}>
-                <div className="mhome-tile-ico"><i className="fas fa-chart-column"></i></div>
-                <div className="mhome-tile-lbl">Inactive Clients</div>
-                <div className="mhome-tile-num">{peoplePending ? <Pend /> : tiles.inactiveCount}</div>
                 <div className="mhome-tile-arrow"><i className="fas fa-chevron-right"></i></div>
             </button>
         </div>

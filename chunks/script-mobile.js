@@ -1120,17 +1120,6 @@
             </div>`;
         };
 
-        // Inactive: customers with last_contact_date older than 60 days, OR no contact ever.
-        const inactiveCount = (() => {
-            const sixtyAgo = Date.now() - 60 * 86400000;
-            return (cachedCustomers || []).filter(c => {
-                if (c.status === 'inactive') return true;
-                const lc = c.last_contact_date || c.updated_at || c.created_at;
-                if (!lc) return false;
-                const t = new Date(lc).getTime();
-                return !isNaN(t) && t < sixtyAgo;
-            }).length;
-        })();
         const overdueFollowups = visibleDrafts.filter(d => (d.due_date || '') < todayStr).length;
 
         // ── Compose body ─────────────────────────────────────────
@@ -1289,18 +1278,26 @@
                 if (isNaN(t)) return null;
                 return Math.floor((Date.now() - t) / 86400000);
             };
+            // Curated "Today's Follow-ups" — mirror the legacy _attBuild: the first few due
+            // drafts (deduped/capped upstream) with Chinese reason labels, plus a birthday.
+            // Parity with the off-path so toggling the JSX flag never changes the layout.
+            const _reasonLabel = (t) => ({
+                re_engagement: '该跟进了', cust_checkin: '老客户问候', apu_ack: '推荐名单致谢',
+                appointment_reminder: '预约提醒', voucher_unredeemed: '电子券待使用', birthday: '生日祝福'
+            }[t] || '跟进提醒');
             const attention = [];
-            if (oldestPerson) {
-                const d = daysAgo(oldestDraft.due_date);
-                const sub = (d != null && d >= 0) ? `Last contact ${d} day${d === 1 ? '' : 's'} ago` : 'Awaiting follow-up';
+            for (const fd of visibleDrafts.slice(0, 5)) {
+                const fp = draftPerson(fd);
+                const nm = fd.prospect_name || fp?.full_name || 'Unknown';
+                const od = daysAgo(fd.due_date);
                 attention.push({
                     type: 'followup',
-                    initials: _mhomeInitials(oldestPerson.full_name),
-                    name: oldestPerson.full_name || '—',
-                    need: 'Needs follow-up',
-                    sub,
-                    waId: oldestPerson.id ?? null,
-                    waPhone: oldestPerson.phone || '',
+                    initials: _mhomeInitials(nm),
+                    name: nm,
+                    need: _reasonLabel(fd.trigger_type),
+                    sub: (od != null && od > 0) ? `逾期 ${od} 天` : '今天',
+                    waId: fp?.id ?? null,
+                    waPhone: fp?.phone || fd.phone || '',
                 });
             }
             const bday = birthdays[0];
@@ -1317,16 +1314,6 @@
                 });
             }
 
-            const inactiveCount = (() => {
-                const sixtyAgo = Date.now() - 60 * 86400000;
-                return (cachedCustomers || []).filter(c => {
-                    if (c.status === 'inactive') return true;
-                    const lc = c.last_contact_date || c.updated_at || c.created_at;
-                    if (!lc) return false;
-                    const t = new Date(lc).getTime();
-                    return !isNaN(t) && t < sixtyAgo;
-                }).length;
-            })();
             const overdueFollowups = visibleDrafts.filter(d => (d.due_date || '') < todayStr).length;
 
             return {
@@ -1336,7 +1323,7 @@
                 suggestedAction,
                 scheduleRows,
                 attention,
-                tiles: { overdueFollowups, refillCount, inactiveCount },
+                tiles: { overdueFollowups, refillCount },
             };
         };
 
