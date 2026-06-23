@@ -502,23 +502,15 @@
             // count / recount / summary sub-tabs (gated in showStockTakeView).
             15: ['stock-take'],
         };
-        let level = 12;
-        const user = _state.cu;
-        if (user?.role) {
-            const m = user.role.match(/Level\s+(\d+)/i);
-            if (m) { level = parseInt(m[1]); }
-            else {
-                const r = user.role.toLowerCase();
-                if (r === 'super_admin' || r === 'admin') level = 1;
-                else if (r === 'marketing_manager') level = 2;
-                else if (r === 'manager') level = 4;
-                else if (r === 'team_leader') level = 5;
-                else if (r === 'consultant') level = 7;
-                else if (r === 'agent') level = 10;
-                else if (r === 'customer') level = 13;
-                else if (r === 'referrer') level = 14;
-            }
-        }
+        // Use the canonical role parser (_utils.getUserLevel / _getUserLevel in
+        // script.js) instead of an inline regex/switch. The inline version had NO
+        // case for the Chinese-only role names, so a customer (改命客户 = L13) or
+        // referrer (准传福大使 = L14) fell through to the default L12 nav set and
+        // saw forbidden tabs (prospects/referrals). The canonical parser resolves
+        // Level-N strings, named roles AND the Chinese names identically to desktop.
+        // perms has no key for an unmatched level (canonical returns 99) → the
+        // `|| perms[12]` fallback preserves the previous null/unknown behavior.
+        const level = getUserLevel(_state.cu);
         return new Set(perms[level] || perms[12]);
     };
 
