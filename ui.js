@@ -131,6 +131,9 @@ window.UI = (() => {
     };
 
     // --- Toasts ---
+    // Keys (type+message) of on-screen toasts so identical ones can't stack —
+    // a burst of the same error (e.g. several module loads failing) shows once.
+    const _activeToastKeys = new Set();
     const toast = {
         show: (message, type = 'info') => {
             // Restore loading buttons whenever feedback appears
@@ -138,6 +141,12 @@ window.UI = (() => {
 
             // Mirror error toasts into any open modal so the user can't miss them.
             if (type === 'error') _showModalErrorBanner(message);
+
+            // Dedup: skip an identical toast already visible (it fades on its
+            // own timer; a later identical message shows fresh after it clears).
+            const _key = type + ' ' + String(message ?? '');
+            if (_activeToastKeys.has(_key)) return;
+            _activeToastKeys.add(_key);
 
             let container = document.getElementById('toast-container');
             if (!container) {
@@ -174,7 +183,7 @@ window.UI = (() => {
             const lifetimeMs = type === 'error' ? 6000 : 3000;
             setTimeout(() => {
                 toastEl.classList.add('fade-out');
-                setTimeout(() => toastEl.remove(), 500);
+                setTimeout(() => { toastEl.remove(); _activeToastKeys.delete(_key); }, 500);
             }, lifetimeMs);
         },
         success: (msg) => toast.show(msg, 'success'),

@@ -3388,7 +3388,7 @@ function _wireLoginBtn() {
         _predictivePrefetchRan = true;
         try {
             const seen = new Set();
-            const _load = (src) => { if (!seen.has(src)) { seen.add(src); _loadChunkOnce(src); } };
+            const _load = (src) => { if (!seen.has(src)) { seen.add(src); _loadChunkOnce(src, { silent: true }); } };
 
             // Tier 1 — immediate: essential first-nav views. The
             // customers/agents/approvals/settings siblings back the first-nav
@@ -3415,10 +3415,20 @@ function _wireLoginBtn() {
         } catch (e) { console.warn('eager chunk load failed', e); }
     };
 
-    // In-flight promises keyed by chunk src URL — ensures each chunk is fetched once.
+    // In-flight loads keyed by chunk src URL — ensures each chunk is fetched once.
+    // Value: { p, loud } — `loud` decides whether a load FAILURE surfaces a toast.
+    // Background prefetch (opts.silent) stays quiet because every view re-loads its
+    // chunk on first nav, so a failed prefetch is harmless. But if a user-initiated
+    // load (a click) attaches to an in-flight prefetch, it upgrades the entry to
+    // loud so the failure the user is waiting on isn't swallowed.
     const _chunkInFlight = new Map();
-    const _loadChunkOnce = (src) => {
-        if (_chunkInFlight.has(src)) return _chunkInFlight.get(src);
+    const _loadChunkOnce = (src, opts = {}) => {
+        const _existing = _chunkInFlight.get(src);
+        if (_existing) {
+            if (!opts.silent) _existing.loud = true;
+            return _existing.p;
+        }
+        const _entry = { p: null, loud: !opts.silent };
         const p = new Promise((resolve) => {
             const s = document.createElement('script');
             const manifest = window.__ASSET_MANIFEST || {};
@@ -3455,12 +3465,18 @@ function _wireLoginBtn() {
                         return;
                     }
                 } catch (_) { /* sessionStorage blocked (private mode) — fall through to the toast */ }
-                try { if (window.UI?.toast?.error) window.UI.toast.error('A module failed to load — check your connection and try again.'); } catch (_) { /* intentional: toast is cosmetic; load already failed and resolves */ }
+                // Only surface the failure if a caller is actually waiting on it
+                // (nav, button stub). A pure background prefetch stays silent — the
+                // chunk reloads on demand, so a prefetch miss is invisible-by-design.
+                if (_entry.loud) {
+                    try { if (window.UI?.toast?.error) window.UI.toast.error('A module failed to load — check your connection and try again.'); } catch (_) { /* intentional: toast is cosmetic; load already failed and resolves */ }
+                }
                 resolve();
             };
             document.body.appendChild(s);
         });
-        _chunkInFlight.set(src, p);
+        _entry.p = p;
+        _chunkInFlight.set(src, _entry);
         return p;
     };
     // Build a self-loading delegating stub with a recursion guard. Loads `src`,
@@ -3498,7 +3514,7 @@ function _wireLoginBtn() {
     const _prefetchChunkForView = (viewId) => {
         if (!viewId) return;
         const def = _CHUNK_VIEWS[viewId];
-        if (def) _loadChunkOnce(def.src);
+        if (def) _loadChunkOnce(def.src, { silent: true });
     };
 
     // Delegated pointerover listener: covers all current and future nav items
@@ -3697,7 +3713,7 @@ function _wireLoginBtn() {
                         const def = _CHUNK_VIEWS[v];
                         if (!def || !def.src) return;
                         if (def.exactLevels && !def.exactLevels.includes(lvl)) return; // don't prefetch role-gated chunks the user can't load
-                        _loadChunkOnce(def.src); // internally deduped + in-flight-guarded
+                        _loadChunkOnce(def.src, { silent: true }); // background predictive prefetch — quiet on failure
                     } catch (_) { /* per-view best-effort */ }
                 });
             });
