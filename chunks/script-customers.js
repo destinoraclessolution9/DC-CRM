@@ -638,8 +638,10 @@ const showCustomerDetail = async (customerId) => {
                         ${renderHealthBadge(health)}
                         <span style="font-size:11px;color:var(--gray-400);"><i class="fas fa-lock"></i> Permanent</span>
                     </div>
-                    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0 4px;">
-                        <span style="font-size:22px;font-weight:700;line-height:1.3;flex-shrink:0;">${escapeHtml(customer.full_name)}</span>
+                    <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin:6px 0 4px;min-width:0;">
+                        <span style="font-size:22px;font-weight:700;line-height:1.3;word-break:break-word;">${escapeHtml(customer.full_name)}</span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 4px;">
                         ${(isSystemAdmin(_state.cu) || isMarketingManager(_state.cu)) ? iconBtn('Edit', 'fas fa-edit', `app.openProspectModal(${customer.id})`) : ''}
                         ${iconBtn('Add Purchase', 'fas fa-plus', `app.openAddPurchaseModal(${customer.id})`)}
                         ${iconBtn('Refer a Friend', 'fas fa-user-plus', `app.openCustomerReferralModal(${customer.id})`)}

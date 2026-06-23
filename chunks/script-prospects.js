@@ -1911,9 +1911,11 @@ const buildProspectDetailHeaderHtml = (prospect, cpsPhoto) => {
                         <span class="badge info" onclick="event.stopPropagation();app.openProspectGradePicker(${prospect.id})" style="cursor:pointer;user-select:none;" title="Click to set grade">Grade ${prospect.manual_grade || '—'} <i class="fas fa-caret-down" style="font-size:10px;opacity:.7;"></i></span>
                         <span class="badge" onclick="event.stopPropagation();app.openScoreAdjustmentModal('prospect',${prospect.id})" style="background:var(--primary);color:#fff;cursor:pointer;user-select:none;" title="Click to adjust score">⭐ ${prospect.score || 0} pts (${getScoreGrade(prospect.score || 0)}) <i class="fas fa-pen" style="font-size:9px;opacity:.8;margin-left:2px;"></i></span>
                     </div>
-                    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0 8px;">
-                        <span style="font-size:22px;font-weight:700;line-height:1.3;flex-shrink:0;">${escapeHtml(prospect.full_name)}</span>${prospect.nickname ? `<span style="font-size:15px;font-weight:400;color:var(--gray-500);">"${escapeHtml(prospect.nickname)}"</span>` : ''}
-                        <button title="Edit" aria-label="Edit prospect" onclick="app.editProspect(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--gray-500);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i></button><button title="Convert to Customer" aria-label="Convert to customer" onclick="app.convertToCustomer(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:none;background:var(--primary);color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'"><i class="fa-solid fa-user-check" aria-hidden="true"></i></button><button title="Meet-Up History" aria-label="Meet-up history" onclick="app.openMeetupHistoryModal(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--primary);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i></button><button title="Save to Phone Contacts" aria-label="Save to phone contacts" onclick="app.downloadProspectVCard(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--success);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-solid fa-address-book" aria-hidden="true"></i></button><button title="WhatsApp Prospect" aria-label="Open WhatsApp chat with prospect" onclick="app.openProspectWhatsApp(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:#25D366;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-brands fa-whatsapp" aria-hidden="true"></i></button>
+                    <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin:6px 0 8px;min-width:0;">
+                        <span style="font-size:22px;font-weight:700;line-height:1.3;word-break:break-word;">${escapeHtml(prospect.full_name)}</span>${prospect.nickname ? `<span style="font-size:15px;font-weight:400;color:var(--gray-500);">"${escapeHtml(prospect.nickname)}"</span>` : ''}
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 8px;">
+                        <button title="Edit" aria-label="Edit prospect" onclick="app.editProspect(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--gray-500);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i></button><button title="Convert to Customer" aria-label="Convert to customer" onclick="app.convertToCustomer(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:none;background:var(--primary);color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'"><i class="fa-solid fa-user-check" aria-hidden="true"></i></button><button title="Meet-Up History" aria-label="Meet-up history" onclick="app.openMeetupHistoryModal(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--primary);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i></button><button title="Save to Phone Contacts" aria-label="Save to phone contacts" onclick="app.downloadProspectVCard(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--success);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-solid fa-address-book" aria-hidden="true"></i></button><button title="WhatsApp Prospect" aria-label="Open WhatsApp chat with prospect" onclick="app.openProspectWhatsApp(${prospect.id}, '${UI.escJsAttr(_evWaPhone(prospect.phone))}')" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:#25D366;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-brands fa-whatsapp" aria-hidden="true"></i></button>
                     </div>
                 </div>
                 ${cpsPhoto ? `<img loading="lazy" decoding="async" data-attach-src="${escapeHtml(String(cpsPhoto.url))}" onclick="event.stopPropagation();app.zoomCpsPhoto('${UI.escJsAttr(String(cpsPhoto.url))}')" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:2px solid var(--gray-200);cursor:zoom-in;flex-shrink:0;margin-top:4px;" title="CPS Photo — click to enlarge">` : ''}
@@ -3754,12 +3756,26 @@ const downloadProspectVCard = async (prospectId) => {
 
 // Open a WhatsApp chat with the prospect directly (no message draft).
 // Reuses the Malaysia MSISDN normalizer so 0xx / +60 / 60xx all resolve.
-const openProspectWhatsApp = async (prospectId) => {
+// GESTURE-SAFE: the header passes the prospect's phone in at render time, so the
+// common path opens wa.me SYNCHRONOUSLY inside the click (iOS Safari blocks popups
+// opened after an await). Only if no phone was passed do we open a blank window
+// first, then redirect it after the async getById resolves.
+const openProspectWhatsApp = async (prospectId, presetPhone) => {
+    if (presetPhone !== undefined && presetPhone !== null) {
+        const num = _evWaPhone(presetPhone);
+        if (!num) { UI.toast.error('Prospect has no phone number'); return; }
+        window.open(`https://wa.me/${num}`, '_blank', 'noopener');
+        return;
+    }
+    // No phone passed — open a blank window NOW (still inside the gesture) so the
+    // popup isn't blocked, then point it at wa.me once we have the number.
+    const w = window.open('', '_blank', 'noopener');
     const p = await AppDataStore.getById('prospects', prospectId);
-    if (!p) { UI.toast.error('Prospect not found'); return; }
+    if (!p) { if (w) w.close(); UI.toast.error('Prospect not found'); return; }
     const num = _evWaPhone(p.phone);
-    if (!num) { UI.toast.error('Prospect has no phone number'); return; }
-    window.open(`https://wa.me/${num}`, '_blank', 'noopener');
+    if (!num) { if (w) w.close(); UI.toast.error('Prospect has no phone number'); return; }
+    if (w) { w.location = `https://wa.me/${num}`; }
+    else { window.open(`https://wa.me/${num}`, '_blank', 'noopener'); }
 };
 
 const addNote = async (prospectId) => {
