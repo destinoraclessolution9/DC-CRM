@@ -1532,6 +1532,10 @@
     let _mcalMonth = null;
     let _mcalByDate = new Map();
     let _mcalPersonMap = new Map();
+    // id → agent full_name, used to label the responsible agent under each
+    // birthday card in the day sheet. Held in memory only (never persisted) so
+    // agent names can't leak across logins on a shared device.
+    let _mcalUserMap = new Map();
     // Active calendar view: 'month' | 'week' | 'day' | 'agenda'. Month is the
     // default; the Week/Day/Agenda renderers (below) read & write these.
     // _mcalSelDate is the anchor day for the Week + Day views (a Date object,
@@ -1832,6 +1836,22 @@
                     showMobileCalendarView(vp).catch(() => {});
                 }
             }).catch(() => {});
+        }
+
+        // Agent-name lookup for the day sheet's birthday cards. Seed instantly
+        // from the Home users cache when it's warm; otherwise fetch a trimmed
+        // (id, full_name) user list in the background. The day sheet reads
+        // _mcalUserMap live when tapped, so no re-render is needed here.
+        if (_mcalUserMap.size === 0) {
+            const _homeUsers = _lsGet('mhome-users-v1-' + String(_state.cu?.id || 'anon'), 8 * 60 * 60 * 1000);
+            if (Array.isArray(_homeUsers) && _homeUsers.length) {
+                _mcalUserMap = new Map(_homeUsers.filter(u => u && u.full_name).map(u => [String(u.id), u.full_name]));
+            } else {
+                AppDataStore.queryAdvanced('users', { select: 'id,full_name', limit: 50000, countMode: null })
+                    .then(r => r?.data || [])
+                    .then(rows => { _mcalUserMap = new Map((rows || []).filter(u => u && u.full_name).map(u => [String(u.id), u.full_name])); })
+                    .catch(() => { /* intentional: agent-name line degrades to hidden */ });
+            }
         }
 
         // First-paint fallbacks: ensure downstream code handles missing data
@@ -2324,12 +2344,19 @@
             const waBtn = hasPhone
                 ? `<button onclick="event.stopPropagation();app.mcalBirthdayWa('${p.id}')" aria-label="Send birthday WhatsApp" style="flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border:none;border-radius:50%;background:#25D366;color:#fff;font-size:17px;cursor:pointer;"><i class="fab fa-whatsapp"></i></button>`
                 : '';
+            // Responsible agent label (e.g. "- Oo Kean Cherng"), smaller/muted.
+            const _agentId = p.responsible_agent_id || p.lead_agent_id;
+            const _agentName = _agentId ? (_mcalUserMap.get(String(_agentId)) || '') : '';
+            const agentLine = _agentName
+                ? `<div style="font-size:10px;color:#9CA3AF;margin-top:1px;">- ${_mhomeEsc(_agentName)}</div>`
+                : '';
             return `
                 <div style="display:flex;align-items:center;gap:12px;padding:12px 10px;margin-bottom:6px;background:linear-gradient(90deg,#FDF2F8,#fff);border-radius:10px;border:1px solid #FBCFE8;">
                     <div style="font-size:26px;flex-shrink:0;">🎂</div>
                     <div style="flex:1;min-width:0;cursor:pointer;" onclick="app.mcalOpenPerson('${p.id}')">
                         <div style="font-size:15px;font-weight:700;color:#9D174D;">${_mhomeEsc(p.full_name || '—')}</div>
                         <div style="font-size:12px;color:#BE185D;margin-top:2px;">Birthday${ageStr}</div>
+                        ${agentLine}
                     </div>
                     ${waBtn}
                 </div>`;
