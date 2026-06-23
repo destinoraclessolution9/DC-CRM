@@ -1125,6 +1125,7 @@
                 // attributed to the dispatching admin — leaking unowned contacts. Skip them.
                 if (person.responsible_agent_id != _state.cu?.id) continue;
                 if (person.unable_to_serve) continue;
+                if (person._type === 'prospect' && person.manual_grade === 'F') continue; // grade F = dropped, fully dark
 
                 // ── Tier eligibility ──────────────────────────────────────────────────────
                 const cpsDate     = person.cps_assignment_date || person.cps_form_date;
@@ -1297,6 +1298,7 @@
                 // through, mis-attributing the draft to the dispatching admin).
                 if (person.responsible_agent_id != _state.cu?.id) continue;
                 if (person.unable_to_serve) continue;
+                if (person._type === 'prospect' && person.manual_grade === 'F') continue; // grade F = dropped, fully dark
 
                 const pid = person.id;
 
@@ -1884,7 +1886,12 @@
     // else uses the stored message text. Extracted so the render-time prefetch and the
     // click-time send share ONE source of truth.
     const _buildFollowUpBody = async (draft) => {
-        if (!draft.event_id) return draft.message_text || '';
+        // appointment_reminder + voucher_unredeemed overload event_id to carry an activity /
+        // attachment id (dedup key), NOT a real events row. Their message_text is already a
+        // fully interpolated reminder/chase — return it instead of building an event poster.
+        if (!draft.event_id
+            || draft.trigger_type === 'appointment_reminder'
+            || draft.trigger_type === 'voucher_unredeemed') return draft.message_text || '';
         const event = await AppDataStore.getById('events', draft.event_id);
         let activity = null;
         try {
