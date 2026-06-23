@@ -2336,6 +2336,9 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                             <div style="display:flex;gap:5px;justify-content:center;margin-top:5px;">
                                 <button class="btn-icon" title="Share via WhatsApp" style="background:#25D366;color:#fff;width:28px;height:28px;border-radius:50%;font-size:13px;padding:0;" onclick="event.stopPropagation(); app.sendVoucherWhatsApp(${prospect.id}, ${v.id}, '${UI.escJsAttr(code)}', '${UI.escJsAttr(rname)}', '${UI.escJsAttr(String(prospect.phone || ''))}', '${UI.escJsAttr(String(v.file_url))}')"><i class="fab fa-whatsapp"></i></button>
                                 <button class="btn-icon" title="Download" style="width:28px;height:28px;border-radius:50%;font-size:12px;padding:0;" onclick="event.stopPropagation(); app.downloadVoucher('${UI.escJsAttr(String(v.file_url))}','${UI.escJsAttr(fname)}')"><i class="fas fa-download"></i></button>
+                                ${(v.metadata && v.metadata.redeemed_at)
+                                    ? `<span title="已使用" style="font-size:10px;background:#dcfce7;color:#059669;padding:3px 7px;border-radius:10px;white-space:nowrap;"><i class="fas fa-check"></i> 已用</span>`
+                                    : `<button class="btn-icon" title="标记为已使用 (Mark redeemed)" style="background:#059669;color:#fff;width:28px;height:28px;border-radius:50%;font-size:12px;padding:0;" onclick="event.stopPropagation(); app.markVoucherRedeemed(${prospect.id}, ${v.id})"><i class="fas fa-check"></i></button>`}
                                 <button class="btn-icon" title="Remove" style="background:var(--error);color:#fff;width:28px;height:28px;border-radius:50%;font-size:12px;padding:0;" onclick="event.stopPropagation(); app.removeEvoucher(${prospect.id}, ${v.id})"><i class="fas fa-times"></i></button>
                             </div>
                         </div>`;
@@ -2359,6 +2362,9 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                             ${nv ? `
                                 <img loading="lazy" decoding="async" data-attach-src="${escapeHtml(String(nv.file_url))}" title="View voucher ${escapeHtml(nvCode)}" style="height:34px;border-radius:4px;border:1px solid var(--gray-200);cursor:pointer;" onclick="event.stopPropagation(); window._openAttachment && window._openAttachment('${UI.escJsAttr(String(nv.file_url))}')">
                                 <button class="btn-icon" title="Share voucher via WhatsApp" style="background:#25D366;color:#fff;border-radius:50%;width:28px;height:28px;font-size:13px;padding:0;" onclick="event.stopPropagation(); app.sendVoucherWhatsApp(${prospect.id}, ${nv.id}, '${UI.escJsAttr(nvCode)}', '${UI.escJsAttr(n.full_name || '')}', '${UI.escJsAttr(String(prospect.phone || ''))}', '${UI.escJsAttr(String(nv.file_url))}')"><i class="fab fa-whatsapp"></i></button>
+                                ${(nv.metadata && nv.metadata.redeemed_at)
+                                    ? `<span title="已使用" style="font-size:11px;background:#dcfce7;color:#059669;padding:3px 8px;border-radius:10px;white-space:nowrap;"><i class="fas fa-check"></i> 已用</span>`
+                                    : `<button class="btn-icon" title="标记为已使用 (Mark redeemed)" style="background:#059669;color:#fff;border-radius:50%;width:28px;height:28px;font-size:12px;padding:0;" onclick="event.stopPropagation(); app.markVoucherRedeemed(${prospect.id}, ${nv.id})"><i class="fas fa-check"></i></button>`}
                             ` : `
                                 <button class="btn secondary btn-sm" title="Generate this name's referral e-voucher" onclick="event.stopPropagation(); app.generateEvoucherForName(${prospect.id}, '${UI.escJsAttr(n.full_name || '')}', ${n.id})"><i class="fas fa-ticket-alt"></i> E-Voucher</button>
                             `}
@@ -4476,6 +4482,24 @@ const sendVoucherWhatsApp = (prospectId, attId, code, rname, phone, fileUrl) => 
         UI.toast.error('No phone number on file — downloading the voucher to share manually.');
     }
     downloadVoucher(fileUrl, fname);
+};
+
+// Mark an e-voucher as redeemed/used (stamps metadata.redeemed_at). Clears the
+// voucher_unredeemed nudge (dispatchVoucherNudges skips redeemed vouchers) and flips the
+// per-name UI to a "已用" badge. Idempotent.
+const markVoucherRedeemed = async (prospectId, attId) => {
+    try {
+        const att = await AppDataStore.getById('prospect_attachments', attId);
+        if (!att) { UI.toast.error('Voucher not found'); return; }
+        const md = Object.assign({}, att.metadata || {}, { redeemed_at: new Date().toISOString() });
+        await AppDataStore.update('prospect_attachments', attId, { metadata: md });
+        UI.toast.success('已标记为已使用');
+        const bodyEl = document.getElementById(`acc-body-names-${prospectId}`);
+        if (bodyEl) await switchProspectTab('names', prospectId, null, bodyEl);
+    } catch (err) {
+        console.warn('markVoucherRedeemed failed:', err?.message);
+        UI.toast.error('更新失败');
+    }
 };
 
 const downloadVoucher = async (fileUrl, filename) => {
@@ -6665,6 +6689,7 @@ const openPastRecordModal = async (...args) => {
         sendVoucherWhatsApp,
         downloadVoucher,
         removeEvoucher,
+        markVoucherRedeemed,
         openEvoucherTemplateSetup,
         saveEvoucherTemplate,
         uploadFengShuiFile,

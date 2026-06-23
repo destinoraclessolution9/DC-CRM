@@ -350,7 +350,8 @@
                 dispatchReEngagementReminders(),
                 dispatchCustomerCheckins(),
                 dispatchApuAckTouches(),
-                dispatchAppointmentReminders()
+                dispatchAppointmentReminders(),
+                dispatchVoucherNudges()
             ]).then(() => Promise.all([
                 renderFollowUpReminders(),
                 renderPendingSolutionsWidget()
@@ -415,6 +416,7 @@
         cust_checkin:    { trigger_category: 'customer_checkin', event_keywords: '', cps_interest_match: '', solution_match: '', solution_category_match: '', eligibility_tiers: 'customer', icon: '🤝', description: '90-day customer check-in — no contact for {days}+ days. Caps at 2/day, highest-LTV first.', sort_order: 8, template_name: 'Customer 90-Day Check-In', message_template: '{name}，别来无恙。距上次见面已{days}天，特此问候。近来若有空，邀您喝杯茶，聊聊近况。', delay_days: 0, event_window_days: 0 },
         apu_ack:         { trigger_category: 'apu_namelist', event_keywords: '', cps_interest_match: '', solution_match: '', solution_category_match: '', eligibility_tiers: 'active', icon: '📒', description: 'Next day after a referral namelist is provided — thank them + confirm slots reserved. Respects grade-F/converted; re-arms each new namelist round.', sort_order: 9, template_name: 'APU Namelist Acknowledgment', message_template: '{name}，感谢您提供的推荐名单。我们已收悉，将尽快为每位贵宾安排专属解析与预留。您的传福，无疑为华社增加多一份正力，我们珍之重之。', delay_days: 1, event_window_days: 0 },
         appointment_reminder: { trigger_category: 'on_appointment', event_keywords: '', cps_interest_match: '', solution_match: '', solution_category_match: '', eligibility_tiers: 'active', icon: '🔔', description: 'Day(s) before a booked CPS/FTF/GR/XG meeting — surfaces a come-on-time confirmation with date / time / venue to send the client.', sort_order: 3, template_name: 'Appointment Reminder', message_template: '{name}，您好。温馨提醒：您与DC有约。预约的{date} {time}，地点为{venue}。需要穿著端正，長褲包鞋。敬请准时莅临。如有不便，烦请提前告知。', delay_days: 0, event_window_days: 0 },
+        voucher_unredeemed: { trigger_category: 'voucher_followup', event_keywords: '', cps_interest_match: '', solution_match: '', solution_category_match: '', eligibility_tiers: 'active', icon: '🎫', description: 'A generated e-CPS voucher is 14+ days old and not marked redeemed — nudge the agent to follow up so it gets used.', sort_order: 2, template_name: 'Unredeemed Voucher Follow-up', message_template: '{name}，您好。之前为「{recipient}」准备的电子券（序号 {code}）尚未使用。名额有限，方便的话请协助提醒对方尽快预约领取。', delay_days: 0, event_window_days: 0 },
         // ── Power Ring ───────────────────────────────────────────────────────────────
         pr_9star:    { trigger_category: 'after_cps', event_keywords: '个人风水基础课', solution_category_match: 'Power Ring', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active', icon: '⭐', template_name: 'Power Ring → 个人风水基础课', description: 'Power Ring proposed → 个人风水基础课 invite (Active)', sort_order: 10, message_template: 'Hi {name}，诚邀您出席《个人风水基础课》！日期：{date}，地点：{venue}。期待与您相见！— {agent_name}', delay_days: 0, event_window_days: 60 },
         pr_destiny:  { trigger_category: 'after_cps', event_keywords: '个人改命分享会', solution_category_match: 'Power Ring', cps_interest_match: '', solution_match: '', eligibility_tiers: 'active', icon: '⭐', template_name: 'Power Ring → 个人改命分享会', description: 'Power Ring proposed → 个人改命分享会 invite (Active)', sort_order: 11, message_template: 'Hi {name}，诚邀您出席《个人改命分享会》！日期：{date}，地点：{venue}。— {agent_name}', delay_days: 0, event_window_days: 60 },
@@ -1411,15 +1413,15 @@
     // Grade sets the rhythm (A tightest -> D loosest); ungraded defaults to C; F is dark.
     const GRADE_CADENCE = { A: 3, B: 10, C: 21, D: 30 };
     const GRADE_RANK    = { A: 0, B: 1, C: 2, D: 3 };
-    // Decaying back-off (NEUTRALIZED 2026-06-22 — see audit): the intent was for each
-    // un-answered re-engagement touch (prospects.silence_count) to WIDEN the next gap and,
-    // at SILENCE_SEASONAL_AT, drop the lead to seasonal-only. The 2026-06-22 adversarial
-    // audit found silence_count mis-measured churn, not true silence (one-open-reminder +
-    // episode dedup blocked it from climbing during real silence, while off-panel contacts
-    // wrongly advanced it and could strand an ACTIVE lead at 'seasonal' with a panel-only
-    // reset). So the incrementer + the seasonal cutoff are REMOVED below; step stays 0 →
-    // clean grade-driven base cadence. The consts/ladder remain for a future correct
-    // redesign (increment-on-unanswered-nudge + reset-on-any-contact). DO NOT re-enable as-is.
+    // Decaying back-off (REDESIGNED 2026-06-23): each un-answered nudge WIDENS the next gap and
+    // rotates the message up a ladder, so a quiet lead is chased progressively less. The 2026-06-22
+    // audit killed the old silence_count approach (it mis-measured churn). This version derives the
+    // step from EXISTING data with no extra column/trigger: step = how many re_engagement drafts
+    // this agent has DISMISSED for the prospect SINCE their last contact. It auto-increments when
+    // the agent dismisses a nudge (gave up → back off), and auto-RESETS to 0 the moment any real
+    // contact moves last_activity_date (sending the nudge logs contact too). No hard "seasonal"
+    // cutoff — the gap just widens to the RE_ENGAGE_DECAY_CAP_DAYS floor (~quarterly), so a lead is
+    // never stranded; the one-open-reminder gate makes each step wait until the prior nudge clears.
     const RE_ENGAGE_DECAY          = [1, 1.6, 2.5, 4]; // step 0,1,2,3+ interval multipliers
     const RE_ENGAGE_DECAY_CAP_DAYS = 120;              // hard floor on max widening
     const SILENCE_SEASONAL_AT      = 4;                // un-answered touches → seasonal-only
@@ -1468,6 +1470,15 @@
         const minePending = (existing || []).filter(d => d.status === 'pending' && d.agent_id == myId);
         const reEngOpen   = minePending.filter(d => d.trigger_type === 're_engagement').length;
         const hasOpenDraft = new Set(minePending.map(d => String(d.prospect_id)));
+        // step source: re_engagement nudges this agent DISMISSED per prospect (with created_at).
+        // In the loop we count only those dismissed AFTER the prospect's last contact, so a fresh
+        // contact (which advances last_activity_date) drops them all and resets the step to 0.
+        const _dismissedReEng = {};
+        for (const d of (existing || [])) {
+            if (d.status === 'dismissed' && d.trigger_type === 're_engagement' && d.agent_id == myId && d.prospect_id) {
+                (_dismissedReEng[String(d.prospect_id)] = _dismissedReEng[String(d.prospect_id)] || []).push(d.created_at);
+            }
+        }
         const slots = Math.max(0, RE_ENGAGE_MAX_OPEN - reEngOpen);
         if (slots === 0) return;
         const due = [];
@@ -1478,10 +1489,16 @@
             if (hasOpenDraft.has(String(p.id))) continue;           // already has an open outreach
             const last = p.last_activity_date;
             if (!last) continue;          // never-contacted is a CPS/protection concern, not re-engagement
-            const days = Math.floor((todayMs - new Date(last).getTime()) / 86400000);
-            const step = 0;                                         // back-off neutralized (audit): ignore any stale silence_count so cadence is purely grade-driven
-            if (days < _cadenceDays(p.manual_grade, step)) continue; // grade sets the base rhythm
-            due.push({ p, last, days, step });
+            const _lastMs = new Date(last).getTime();
+            const days = Math.floor((todayMs - _lastMs) / 86400000);
+            // step = nudges dismissed since the last contact → widens the gap + steps the ladder.
+            const step = (_dismissedReEng[String(p.id)] || []).filter(c => c && new Date(c).getTime() > _lastMs).length;
+            const _cad = _cadenceDays(p.manual_grade, step);
+            if (days < _cad) continue;     // grade × decay sets the rhythm
+            // Episode key advances per step (last contact + this step's cadence) so the next step
+            // after a dismissal is a NEW draft, not deduped against the dismissed one.
+            const dueStr = _localDateStr(new Date(_lastMs + _cad * 86400000));
+            due.push({ p, last, days, step, dueStr });
         }
         // Highest-value first: grade rank, then most-overdue (oldest contact).
         due.sort((a, b) => {
@@ -1489,7 +1506,7 @@
             if (ra !== rb) return ra - rb;
             return a.last < b.last ? -1 : a.last > b.last ? 1 : 0;
         });
-        for (const { p, last, days, step } of due.slice(0, slots)) {
+        for (const { p, last, days, step, dueStr } of due.slice(0, slots)) {
             // Step 0 = the warm template; later steps rotate the purpose up the ladder.
             const _agent = _state.cu?.full_name || '';
             const msg = step > 0
@@ -1501,7 +1518,7 @@
                 messageText:  msg,
                 phone:        p.phone || '',
                 prospectName: p.full_name || '',
-                dueDate:      last        // episode key — see dedup note in createFollowUpDraft
+                dueDate:      dueStr      // per-step episode key (last contact + this step's cadence)
             });
         }
     };
@@ -1650,6 +1667,54 @@
                 eventDate:    a.activity_date,
                 eventName:    a.activity_title || a.activity_type,
                 dueDate:      todayStr              // surface now (1-2 days before the meeting)
+            });
+        }
+    };
+
+    // ── Dispatcher: unredeemed e-voucher follow-up — runs on calendar load ───────────
+    // A generated e-CPS voucher (prospect_attachments, attachment_type='evoucher') that is 14+
+    // days old and not marked redeemed (metadata.redeemed_at) → nudge the owning agent to chase
+    // it so it gets used. Deduped per voucher via eventId=attachment.id (one nudge per voucher).
+    // Marking the voucher redeemed (prospects.js markVoucherRedeemed) or dismissing the nudge clears it.
+    const VOUCHER_NUDGE_DAYS = 14;
+    const dispatchVoucherNudges = async () => {
+        const myId = _state.cu?.id;
+        if (!myId) return;
+        const tpl = await getFollowUpTemplate('voucher_unredeemed');
+        if (!tpl) return;
+        let atts = [];
+        try { atts = await AppDataStore.getAll('prospect_attachments'); } catch (_) { return; }
+        const evs = (atts || []).filter(a => a.attachment_type === 'evoucher' && a.prospect_id);
+        if (!evs.length) return;
+        let prospects = [];
+        try { prospects = await AppDataStore.getAll('prospects'); } catch (_) { return; }
+        const pById = Object.fromEntries((prospects || []).map(p => [String(p.id), p]));
+        const _t = new Date();
+        const cutoffMs = _t.getTime() - VOUCHER_NUDGE_DAYS * 86400000;
+        const todayStr = _localDateStr(_t);
+        for (const a of evs) {
+            const md = a.metadata || {};
+            if (md.redeemed_at) continue;                       // already redeemed
+            const _genRaw = md.generated_at || a.created_at;
+            const gen = _genRaw ? new Date(_genRaw).getTime() : 0;
+            if (!gen || gen > cutoffMs) continue;               // < 14 days old — not due yet
+            const p = pById[String(a.prospect_id)];
+            if (!p) continue;
+            if (p.responsible_agent_id != myId) continue;       // only my own
+            if (p.unable_to_serve || p.status === 'lost') continue;
+            const msg = interpolateTemplate(tpl.message_template, {
+                name: p.full_name || '', recipient: md.recipient_name || p.full_name || '',
+                code: md.voucher_code || '', agent_name: _state.cu?.full_name || ''
+            });
+            await createFollowUpDraft({
+                prospectId:   p.id,
+                triggerType:  'voucher_unredeemed',
+                messageText:  msg,
+                phone:        p.phone || '',
+                prospectName: p.full_name || '',
+                eventId:      a.id,            // dedup: one nudge per voucher attachment
+                eventName:    `voucher ${md.voucher_code || ''}`,
+                dueDate:      todayStr
             });
         }
     };
@@ -6410,6 +6475,7 @@
         dispatchCustomerCheckins,
         dispatchApuAckTouches,
         dispatchAppointmentReminders,
+        dispatchVoucherNudges,
         renderFollowUpReminders,
         composeFollowUpList,
         markFollowUpSent,

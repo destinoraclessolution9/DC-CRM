@@ -968,7 +968,7 @@
                 try {
                     await window._loadChunk('chunks/script-calendar.min.js');
                     const A = window.app || {};
-                    const _disp = ['dispatchBirthdayTriggers', 'dispatchProactiveEventInvites', 'dispatchPendingSolutionReminders', 'dispatchReEngagementReminders', 'dispatchCustomerCheckins', 'dispatchApuAckTouches', 'dispatchAppointmentReminders'];
+                    const _disp = ['dispatchBirthdayTriggers', 'dispatchProactiveEventInvites', 'dispatchPendingSolutionReminders', 'dispatchReEngagementReminders', 'dispatchCustomerCheckins', 'dispatchApuAckTouches', 'dispatchAppointmentReminders', 'dispatchVoucherNudges'];
                     await Promise.allSettled(_disp.map(n => (typeof A[n] === 'function' ? A[n]() : Promise.resolve())));
                     const rows = await AppDataStore.query('follow_up_drafts', { status: 'pending' }).catch(() => null);
                     if (rows) { cachedDrafts = rows; _mhomeLsSet(_mhomeDraftsKey, cachedDrafts); }
@@ -1065,20 +1065,29 @@
         };
         const _attBuild = () => {
             const rows = [];
-            if (oldestPerson) {
-                const d = daysAgo(oldestDraft.due_date);
-                const sub = (d != null && d >= 0) ? `Last contact ${d} day${d === 1 ? '' : 's'} ago` : 'Awaiting follow-up';
-                const phone = UI.escJsAttr(oldestPerson.phone || '');
+            // The curated daily list, inline & front-and-centre: the first few "who to follow up
+            // today" drafts (already deduped + capped upstream by the dispatchers), each with a
+            // one-tap WhatsApp. The full list stays behind View All.
+            const _reasonLabel = (t) => ({
+                re_engagement: '该跟进了', cust_checkin: '老客户问候', apu_ack: '推荐名单致谢',
+                appointment_reminder: '预约提醒', voucher_unredeemed: '电子券待使用', birthday: '生日祝福'
+            }[t] || '跟进提醒');
+            for (const fd of visibleDrafts.slice(0, 5)) {
+                const fp = draftPerson(fd);
+                const nm = fd.prospect_name || fp?.full_name || 'Unknown';
+                const od = daysAgo(fd.due_date);
+                const sub = (od != null && od > 0) ? `逾期 ${od} 天` : '今天';
+                const phone = UI.escJsAttr(fp?.phone || fd.phone || '');
                 rows.push(`
                 <div class="mhome-att-row followup">
-                    <div class="mhome-att-avatar">${_mhomeEsc(_mhomeInitials(oldestPerson.full_name))}</div>
+                    <div class="mhome-att-avatar">${_mhomeEsc(_mhomeInitials(nm))}</div>
                     <div class="mhome-att-text">
-                        <div class="mhome-att-name">${_mhomeEsc(oldestPerson.full_name || '—')}</div>
-                        <div class="mhome-att-need">Needs follow-up</div>
+                        <div class="mhome-att-name">${_mhomeEsc(nm)}</div>
+                        <div class="mhome-att-need">${_mhomeEsc(_reasonLabel(fd.trigger_type))}</div>
                         <div class="mhome-att-sub">${_mhomeEsc(sub)}</div>
                     </div>
-                    <button class="mhome-att-btn wa" onclick="app.mhomeWa(${oldestPerson.id ?? 'null'}, '${phone}')">
-                        <i class="fab fa-whatsapp"></i> Send WhatsApp
+                    <button class="mhome-att-btn wa" onclick="app.mhomeWa(${fp?.id ?? 'null'}, '${phone}')">
+                        <i class="fab fa-whatsapp"></i> WhatsApp
                     </button>
                 </div>`);
             }
@@ -1104,8 +1113,8 @@
             return `
             <div class="mhome-card">
                 <div class="mhome-card-head">
-                    <div class="mhome-card-title"><span class="ico purple"><i class="fas fa-circle-exclamation"></i></span> Needs Your Attention</div>
-                    <button class="mhome-card-link" onclick="app.mhomeOpenFollowups()">View All ›</button>
+                    <div class="mhome-card-title"><span class="ico purple"><i class="fas fa-list-check"></i></span> Today's Follow-ups</div>
+                    <button class="mhome-card-link" onclick="app.mhomeOpenFollowups()">${visibleDrafts.length > 5 ? `View All (${visibleDrafts.length})` : 'View All'} ›</button>
                 </div>
                 ${rows.join('')}
             </div>`;
@@ -1201,12 +1210,6 @@
                 <div class="mhome-tile-ico"><i class="fas fa-prescription-bottle-medical"></i></div>
                 <div class="mhome-tile-lbl">Refills Due</div>
                 <div class="mhome-tile-num">${refillCount}</div>
-                <div class="mhome-tile-arrow"><i class="fas fa-chevron-right"></i></div>
-            </button>
-            <button class="mhome-tile purple" onclick="app.mhomeOpenInactive()">
-                <div class="mhome-tile-ico"><i class="fas fa-chart-column"></i></div>
-                <div class="mhome-tile-lbl">Inactive Clients</div>
-                <div class="mhome-tile-num">${peoplePending ? _pendNum : inactiveCount}</div>
                 <div class="mhome-tile-arrow"><i class="fas fa-chevron-right"></i></div>
             </button>
         </div>`;
