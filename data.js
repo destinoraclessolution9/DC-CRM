@@ -53,6 +53,8 @@ class DataStore {
             'bujishu', 'formula',
             // Formula Healthcare refill reminder system
             'refill_reminders',
+            // Automation config singleton (admin-managed birthday posters, etc.)
+            'automation_config',
             // Egg Purchasing system (Super Admin only)
             'egg_processed_orders', 'egg_urgent_orders', 'egg_config', 'egg_run_history',
             // Knowledge HQ — personal knowledge hub

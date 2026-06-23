@@ -1456,6 +1456,15 @@
         try { if (window._loadChunk) await window._loadChunk('chunks/script-performance.min.js'); } catch (_) {}
         const workflowCardsHtml = workflowsRaw.map(w => { try { return renderWorkflowCard(w); } catch (_) { return ''; } });
 
+        // Birthday posters (admin only) — current URLs for the preview thumbnails.
+        let birthdayPosters = { maleUrl: null, femaleUrl: null };
+        if (isAdmin) {
+            try {
+                const ac = await _getAutomationConfig();
+                if (ac) birthdayPosters = { maleUrl: ac.birthday_poster_male_url || null, femaleUrl: ac.birthday_poster_female_url || null };
+            } catch (_) { /* table may not exist yet — empty slots */ }
+        }
+
         // ── Analytics tab (mirrors renderAnalyticsTab → getRealAnalyticsData) ──
         let analytics = { totalCampaigns: 0, avgOpenRate: 0, avgResponseRate: 0, avgConversionRate: 0, topCampaigns: [], openRateTrend: 0 };
         try {
@@ -1521,7 +1530,8 @@
                 followUps: followUpRows,
                 draftStats,
                 workflowCardsHtml,
-                hasWorkflows: workflowsRaw.length > 0
+                hasWorkflows: workflowsRaw.length > 0,
+                birthdayPosters
             },
             analytics,
             products: { rows: productRows },
@@ -1894,6 +1904,48 @@
         `;
     };
 
+    // ── Birthday Posters (automation_config singleton) ──
+    // Admin-managed images sent with the birthday WhatsApp wish: navy → male,
+    // pink → female. Stored once, refreshable yearly. Read here for the preview;
+    // the mobile calendar reads the same row to prefetch + share the image.
+    const _getAutomationConfig = async () => {
+        try {
+            const sb = window.supabase || window.supabaseClient;
+            if (!sb) return null;
+            const { data, error } = await sb.from('automation_config').select('*').eq('id', 1).maybeSingle();
+            if (error) { console.warn('automation_config read failed:', error.message); return null; }
+            return data || null;
+        } catch (e) { console.warn('automation_config read exception:', e?.message); return null; }
+    };
+
+    const _buildBirthdayPostersCardHtml = (cfg) => {
+        cfg = cfg || {};
+        const _slot = (url, label, sub, inputId) => `
+            <div style="flex:1; min-width:200px;">
+                <label style="font-weight:600; font-size:13px; display:block; margin-bottom:6px;">${label} <span style="color:var(--gray-400); font-weight:400;">${sub}</span></label>
+                <div id="${inputId}-box" style="margin-bottom:8px; min-height:90px; display:flex; align-items:center; justify-content:center; background:var(--gray-50); border:1px dashed var(--gray-300); border-radius:8px; overflow:hidden;">
+                    ${url
+                        ? `<img loading="lazy" decoding="async" src="${escapeHtml(url)}" crossorigin="anonymous" style="max-height:160px; max-width:100%; border-radius:6px; cursor:pointer;" onclick="window._openAttachment && window._openAttachment('${UI.escJsAttr(String(url))}')" title="Click to view full size">`
+                        : `<span style="color:var(--gray-400); font-size:12px;">No poster uploaded yet</span>`}
+                </div>
+                <input type="file" id="${inputId}" accept="image/*" class="form-control" style="font-size:12px;">
+            </div>`;
+        return `
+            <div style="margin-bottom:32px; background:var(--white,#fff); border:1px solid var(--gray-200); border-radius:10px; padding:20px;">
+                <div style="margin-bottom:8px;">
+                    <h2 style="margin:0 0 4px;"><i class="fas fa-birthday-cake" style="color:#ec4899;"></i> Birthday Posters</h2>
+                    <p style="color:var(--gray-500); font-size:14px; margin:0;">Image sent with the birthday WhatsApp wish. <strong>Male → navy</strong>, <strong>Female → pink</strong> (no gender / other → navy). Re-upload anytime to refresh for the year.</p>
+                </div>
+                <div style="display:flex; gap:20px; flex-wrap:wrap; margin-top:16px;">
+                    ${_slot(cfg.birthday_poster_male_url, 'Male / Navy Poster', '(男)', 'bday-poster-male')}
+                    ${_slot(cfg.birthday_poster_female_url, 'Female / Pink Poster', '(女)', 'bday-poster-female')}
+                </div>
+                <div style="margin-top:16px; text-align:right;">
+                    <button class="btn primary" onclick="app.saveBirthdayPosters()"><i class="fas fa-save"></i> Save Posters</button>
+                </div>
+            </div>`;
+    };
+
     const renderAutomationTab = async () => {
         // renderWorkflowCard lives in script-performance.js — ensure it's loaded
         // before we map workflows through it (avoids a blank card list if the
@@ -1907,8 +1959,16 @@
         const categoryColors = { after_cps: '#3b82f6', on_event_attendance: '#8b5cf6', on_apu_photo: '#f59e0b', on_birthday: '#ec4899' };
         const sorted = [...templates].sort((a, b) => (a.sort_order || 99) - (b.sort_order || 99));
 
+        // ── Section 0: Birthday Posters (admin only) ──
+        let html = '';
+        if (isAdmin) {
+            let _autoCfg = null;
+            try { _autoCfg = await _getAutomationConfig(); } catch (_) { /* table may not exist yet — card shows empty slots */ }
+            html += _buildBirthdayPostersCardHtml(_autoCfg);
+        }
+
         // ── Section 1: Follow-Up Triggers ──
-        let html = _buildAutomationTriggersHeaderHtml(isAdmin);
+        html += _buildAutomationTriggersHeaderHtml(isAdmin);
 
         html += _buildAutomationTriggersListHtml(isAdmin, sorted, categoryLabels, categoryColors);
 
@@ -1933,6 +1993,66 @@
         html += _buildAutomationQuickTemplatesHtml();
 
         return html;
+    };
+
+    // Upload one or both birthday posters and persist their URLs to the
+    // automation_config singleton (id=1). Mirrors saveEvoucherTemplate: a
+    // zero-row update means RLS rejected the write (not admin at the DB layer) —
+    // surface it and clean up any just-uploaded orphan so storage stays tidy.
+    let _bdayPostersBusy = false;
+    const saveBirthdayPosters = async () => {
+        if (_bdayPostersBusy) return;
+        const sb = window.supabase || window.supabaseClient;
+        if (!sb || !sb.storage) { UI.toast.error('Supabase not connected'); return; }
+        const maleF = document.getElementById('bday-poster-male')?.files?.[0];
+        const femaleF = document.getElementById('bday-poster-female')?.files?.[0];
+        if (!maleF && !femaleF) { UI.toast.error('Choose at least one poster image to upload.'); return; }
+        const _upload = async (file) => {
+            if (file.size > 8 * 1024 * 1024) throw new Error('Image too large (max 8MB)');
+            const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+            const path = `birthday_posters/poster_${Date.now()}_${safeName}`;
+            const { error: upErr } = await sb.storage.from('attachments').upload(path, file, { upsert: false, contentType: file.type });
+            if (upErr) throw upErr;
+            const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
+            if (!urlData?.publicUrl) throw new Error('Upload succeeded but could not get URL');
+            return urlData.publicUrl;
+        };
+        _bdayPostersBusy = true;
+        const _uploaded = []; // collected for cleanup if the DB write is rejected
+        try {
+            const patch = { updated_at: new Date().toISOString(), updated_by: (_state?.cu?.id || null) };
+            if (maleF)   { const u = await _upload(maleF);   patch.birthday_poster_male_url   = u; _uploaded.push(u); }
+            if (femaleF) { const u = await _upload(femaleF); patch.birthday_poster_female_url = u; _uploaded.push(u); }
+            const { data: updRows, error } = await sb.from('automation_config').update(patch).eq('id', 1).select('id');
+            if (error) throw error;
+            if (!updRows || !updRows.length) {
+                // RLS rejected (not admin) or the singleton row is missing.
+                for (const u of _uploaded) {
+                    try { const p = AppDataStore.extractAttachmentPath(u); if (p) await AppDataStore.deleteAttachmentByPath(p); } catch (_) {}
+                }
+                UI.toast.error('Not authorized to save birthday posters (admin level required).');
+                return;
+            }
+            UI.toast.success('Birthday posters saved.');
+            // Path-agnostic refresh: update the preview box(es) + clear inputs in
+            // place. Works under both the legacy HTML and the default React-JSX
+            // render paths (the boxes are real DOM either way) — avoids depending
+            // on #marketing-tab-content, which doesn't exist in the JSX path.
+            const _setPreview = (inputId, url) => {
+                if (!url) return;
+                const box = document.getElementById(`${inputId}-box`);
+                if (box) box.innerHTML = `<img loading="lazy" decoding="async" src="${escapeHtml(url)}" crossorigin="anonymous" style="max-height:160px; max-width:100%; border-radius:6px;">`;
+                const input = document.getElementById(inputId);
+                if (input) input.value = '';
+            };
+            _setPreview('bday-poster-male', patch.birthday_poster_male_url);
+            _setPreview('bday-poster-female', patch.birthday_poster_female_url);
+        } catch (err) {
+            console.error('Save birthday posters failed:', err);
+            UI.toast.error('Save failed: ' + (err.message || 'Unknown error'));
+        } finally {
+            _bdayPostersBusy = false;
+        }
     };
 
     const toggleFollowUpTemplate = async (templateId, isActive) => {
@@ -4957,6 +5077,7 @@ const simulateCampaignSending = async (campaignId) => {
         switchMarketingTab,
         openAddTriggerModal,
         toggleFollowUpTemplate,
+        saveBirthdayPosters,
         openEditTriggerModal,
         deleteTrigger,
         saveNewTrigger,

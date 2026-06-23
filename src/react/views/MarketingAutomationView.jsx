@@ -262,9 +262,40 @@ function CampaignsTab({ rows }) {
     );
 }
 
+// ── Birthday Posters card (admin only) — JSX mirror of _buildBirthdayPostersCardHtml ──
+function BirthdayPostersCard({ posters }) {
+    const { maleUrl = null, femaleUrl = null } = posters || {};
+    const slot = (url, label, sub, inputId) => (
+        <div style={{ flex: 1, minWidth: '200px' }}>
+            <label style={{ fontWeight: 600, fontSize: '13px', display: 'block', marginBottom: '6px' }}>{label} <span style={{ color: 'var(--gray-400)', fontWeight: 400 }}>{sub}</span></label>
+            <div id={`${inputId}-box`} style={{ marginBottom: '8px', minHeight: '90px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--gray-50)', border: '1px dashed var(--gray-300)', borderRadius: '8px', overflow: 'hidden' }}>
+                {url
+                    ? <img loading="lazy" decoding="async" src={url} crossOrigin="anonymous" style={{ maxHeight: '160px', maxWidth: '100%', borderRadius: '6px', cursor: 'pointer' }} onClick={() => window._openAttachment && window._openAttachment(url)} title="Click to view full size" />
+                    : <span style={{ color: 'var(--gray-400)', fontSize: '12px' }}>No poster uploaded yet</span>}
+            </div>
+            <input type="file" id={inputId} accept="image/*" className="form-control" style={{ fontSize: '12px' }} />
+        </div>
+    );
+    return (
+        <div style={{ marginBottom: '32px', background: 'var(--white, #fff)', border: '1px solid var(--gray-200)', borderRadius: '10px', padding: '20px' }}>
+            <div style={{ marginBottom: '8px' }}>
+                <h2 style={{ margin: '0 0 4px' }}><i className="fas fa-birthday-cake" style={{ color: '#ec4899' }}></i> Birthday Posters</h2>
+                <p style={{ color: 'var(--gray-500)', fontSize: '14px', margin: 0 }}>Image sent with the birthday WhatsApp wish. <strong>Male → navy</strong>, <strong>Female → pink</strong> (no gender / other → navy). Re-upload anytime to refresh for the year.</p>
+            </div>
+            <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', marginTop: '16px' }}>
+                {slot(maleUrl, 'Male / Navy Poster', '(男)', 'bday-poster-male')}
+                {slot(femaleUrl, 'Female / Pink Poster', '(女)', 'bday-poster-female')}
+            </div>
+            <div style={{ marginTop: '16px', textAlign: 'right' }}>
+                <button className="btn primary" onClick={() => call('saveBirthdayPosters')}><i className="fas fa-save"></i> Save Posters</button>
+            </div>
+        </div>
+    );
+}
+
 // ── Automation tab (JSX mirror of renderAutomationTab) ──────────────────────
 function AutomationTab({ data, isAdmin }) {
-    const { followUps = [], draftStats = {}, workflowCardsHtml = [], hasWorkflows = false } = data || {};
+    const { followUps = [], draftStats = {}, workflowCardsHtml = [], hasWorkflows = false, birthdayPosters = null } = data || {};
     const QUICK = [
         ['Birthday Greeting', 'birthday', 'Send WhatsApp greeting on customer birthday', 'fas fa-birthday-cake'],
         ['Protection Expiring', 'protection_expiring', 'Alert agent 7 days before protection expires', 'fas fa-shield-alt'],
@@ -275,6 +306,9 @@ function AutomationTab({ data, isAdmin }) {
     ];
     return (
         <div>
+            {/* Section 0: Birthday Posters (admin only) */}
+            {isAdmin ? <BirthdayPostersCard posters={birthdayPosters} /> : null}
+
             {/* Section 1: Follow-Up Triggers */}
             <div style={{ marginBottom: '32px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>

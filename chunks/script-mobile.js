@@ -17,7 +17,18 @@
     const escapeHtml = (...a) => _utils.escapeHtml(...a);
     const getVisibleUserIds = (u) => _utils.getVisibleUserIds(u);
     const isSystemAdmin = (u) => _utils.isSystemAdmin(u || _state.cu);
+    const getUserLevel = (u) => _utils.getUserLevel(u || _state.cu);
     const navigateTo = (v) => window.app.navigateTo(v);
+    // Mirror of script.js _defaultViewFor for mobile: L15 → stock_take,
+    // L12–L14 (ambassador / customer / referrer) → fude, agent band (L1–L11) →
+    // home. Used to bounce non-agents off the agent Home dashboard and to decide
+    // which bottom-nav tabs to surface.
+    const _mobileDefaultView = (u) => {
+        const lvl = getUserLevel(u || _state.cu);
+        if (lvl === 15) return 'stock_take';
+        if (lvl >= 12) return 'fude';
+        return 'home';
+    };
     // Local (MYT) date YYYY-MM-DD — toISOString() is UTC and records the previous
     // day for actions taken before 08:00 local.
     const _mLocalDate = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
@@ -573,38 +584,77 @@
     };
 
     // ── Bottom Nav ───────────────────────────────────────────
+    // Tab catalogue. '__home' is the synthetic mobile agent landing (not a real
+    // nav permission); every other key is a navId checked against
+    // _getAllowedNavIds() so a tab can never open a view the user can't access.
+    const _BOTTOM_NAV_SPEC = {
+        '__home':      { view: 'home',        icon: 'fas fa-house',           label: 'Home' },
+        'calendar':    { view: 'calendar',    icon: 'far fa-calendar',        label: 'Calendar' },
+        'prospects':   { view: 'prospects',   icon: 'fas fa-user-group',      label: 'Clients' },
+        'referrals':   { view: 'referrals',   icon: 'fas fa-project-diagram', label: 'Referrals' },
+        'fude':        { view: 'fude',        icon: 'fas fa-yin-yang',        label: '福运相随' },
+        'milestones':  { view: 'milestones',  icon: 'fas fa-star',            label: '增运九法' },
+        'noticeboard': { view: 'noticeboard', icon: 'fas fa-bullhorn',        label: '公告栏' },
+        'reports':     { view: 'reports',     icon: 'fas fa-chart-column',    label: 'Insights' },
+        'stock-take':  { view: 'stock_take',  icon: 'fas fa-boxes',           label: 'Stock Take' },
+    };
+
+    // Up-to-4 leading tabs (+ a trailing "More") for the current user. The agent
+    // band (L1–L11, default view = home) keeps its historical bar byte-for-byte;
+    // members / stock-take staff (L12–L15) get tabs drawn strictly from their
+    // allowed nav set so nothing they tap bounces.
+    const _bottomNavItemsFor = (user) => {
+        if (_mobileDefaultView(user) === 'home') {
+            return ['__home', 'calendar', 'prospects', 'reports'];
+        }
+        const allowed = _getAllowedNavIds();
+        const order = ['fude', 'prospects', 'referrals', 'milestones', 'noticeboard', 'stock-take', 'calendar', 'reports'];
+        const picked = [];
+        for (const navId of order) {
+            if (picked.length >= 4) break;
+            if (allowed.has(navId)) picked.push(navId);
+        }
+        return picked;
+    };
+
     const renderMobileBottomNav = async () => {
-        if (document.querySelector('.mobile-bottom-nav')) return;
-        const bottomNav = document.createElement('div');
-        bottomNav.className = 'mobile-bottom-nav';
-        bottomNav.id = 'mobile-bottom-nav';
-        bottomNav.innerHTML = `
-            <a class="mobile-bottom-nav-item" data-view="home" href="#" onclick="event.preventDefault(); app.navigateTo('home')">
-                <i class="fas fa-house"></i><span>Home</span>
-            </a>
-            <a class="mobile-bottom-nav-item" data-view="calendar" href="#" onclick="event.preventDefault(); app.navigateTo('calendar')">
-                <i class="far fa-calendar"></i><span>Calendar</span>
-            </a>
-            <a class="mobile-bottom-nav-item" data-view="prospects" href="#" onclick="event.preventDefault(); app.navigateTo('prospects')">
-                <i class="fas fa-user-group"></i><span>Clients</span>
-            </a>
-            <a class="mobile-bottom-nav-item" data-view="reports" href="#" onclick="event.preventDefault(); app.navigateTo('reports')">
-                <i class="fas fa-chart-column"></i><span>Insights</span>
-            </a>
+        const itemsHtml = _bottomNavItemsFor(_state.cu).map(navId => {
+            const s = _BOTTOM_NAV_SPEC[navId];
+            if (!s) return '';
+            return `
+            <a class="mobile-bottom-nav-item" data-view="${s.view}" href="#" onclick="event.preventDefault(); app.navigateTo('${s.view}')">
+                <i class="${s.icon}"></i><span>${s.label}</span>
+            </a>`;
+        }).join('');
+        const moreHtml = `
             <a class="mobile-bottom-nav-item" id="mobile-more" href="#" onclick="event.preventDefault(); app.openMobileDrawer()">
                 <i class="fas fa-ellipsis"></i><span>More</span>
-            </a>
-        `;
-        document.body.appendChild(bottomNav);
+            </a>`;
+        // Rebuild in place (no singleton early-return) so a prior session's bar
+        // never persists into the next account on a shared device.
+        let bottomNav = document.getElementById('mobile-bottom-nav');
+        if (!bottomNav) {
+            bottomNav = document.createElement('div');
+            bottomNav.className = 'mobile-bottom-nav';
+            bottomNav.id = 'mobile-bottom-nav';
+            document.body.appendChild(bottomNav);
+        }
+        bottomNav.innerHTML = itemsHtml + moreHtml;
+        updateBottomNavActive(_state.cv);
     };
 
     const updateBottomNavActive = (viewId) => {
         // Calendar/month share the same tab; prospects + customers both highlight Clients.
         const tabFor = (v) => {
             if (v === 'home') return 'home';
-            if (v === 'month' || v === 'calendar') return 'calendar';
+            if (v === 'month' || v === 'calendar' || v === 'week' || v === 'day') return 'calendar';
             if (v === 'prospects' || v === 'customers') return 'prospects';
+            if (v === 'referrals') return 'referrals';
+            if (v === 'fude') return 'fude';
+            if (v === 'milestones') return 'milestones';
+            if (v === 'noticeboard') return 'noticeboard';
             if (v === 'reports') return 'reports';
+            if (v === 'stock_take') return 'stock_take';
             return null;
         };
         const target = tabFor(viewId);
@@ -681,6 +731,10 @@
 
     const showMobileHomeView = async (viewport) => {
         if (!viewport) return;
+        // L12–L15 (ambassador / customer / referrer / stock-take staff) have no
+        // agent dashboard — if they reach the agent Home via hash/deep-link/back,
+        // bounce them to their real landing (mirrors script.js _defaultViewFor).
+        if (getUserLevel(_state.cu) >= 12) { await navigateTo(_mobileDefaultView(_state.cu)); return; }
         viewport.classList.add('mhome-active');
 
         // ── Perf instrumentation (mobile Home Tier 0) ────────────
@@ -1536,6 +1590,33 @@
     // birthday card in the day sheet. Held in memory only (never persisted) so
     // agent names can't leak across logins on a shared device.
     let _mcalUserMap = new Map();
+    // Pre-warmed birthday-poster image blobs, keyed by gender. The poster URLs
+    // are admin-managed in Marketing ▸ Automation ▸ Birthday Posters (stored in
+    // the automation_config singleton) so they can be refreshed every year with
+    // no code change. We prefetch the images into blobs once per session so the
+    // WhatsApp file-share can run synchronously inside the tap gesture — the Web
+    // Share API needs transient activation, which an await-to-fetch at tap time
+    // would consume (same lesson as mhomeWa / sendVoucherWhatsApp / the calendar
+    // reminder poster prefetch). male = navy poster, female = pink poster.
+    let _mcalBdayBlob = { male: null, female: null };
+    let _mcalBdayWarmed = false;
+    const _mcalWarmBdayPosters = async () => {
+        if (_mcalBdayWarmed) return;
+        _mcalBdayWarmed = true;
+        try {
+            const rows = await AppDataStore.getAll('automation_config').catch(() => []);
+            const cfg = (rows && rows[0]) || null;
+            if (!cfg) { _mcalBdayWarmed = false; return; } // not configured yet — retry next load
+            const _grab = (url, key) => {
+                if (!url || _mcalBdayBlob[key]) return;
+                fetch(url).then(r => r.ok ? r.blob() : null)
+                    .then(b => { if (b && b.size) _mcalBdayBlob[key] = b; })
+                    .catch(() => { /* intentional: poster fetch failed → birthday WA falls back to text-only */ });
+            };
+            _grab(cfg.birthday_poster_male_url, 'male');
+            _grab(cfg.birthday_poster_female_url, 'female');
+        } catch (_) { _mcalBdayWarmed = false; /* allow retry on a later load */ }
+    };
     // Active calendar view: 'month' | 'week' | 'day' | 'agenda'. Month is the
     // default; the Week/Day/Agenda renderers (below) read & write these.
     // _mcalSelDate is the anchor day for the Week + Day views (a Date object,
@@ -1747,7 +1828,7 @@
 
         // B: Serve prospects + customers from localStorage cache (cold reference
         // data — birthdays/names rarely change; invalidated on edit).
-        const _PEOPLE_KEY  = 'mcal-people-v3'; // v3: now includes phone for birthday WhatsApp greeting (v2: responsible_agent_id for RBAC birthday scoping)
+        const _PEOPLE_KEY  = 'mcal-people-v4'; // v4: + gender for the gendered birthday poster (v3: phone for birthday WhatsApp greeting; v2: responsible_agent_id for RBAC birthday scoping)
         const _DRAFTS_KEY  = 'mcal-drafts-v1';
         const _REFILLS_KEY = 'mcal-refills-v1';
         let allPeople     = _forceFresh ? null : _lsGet(_PEOPLE_KEY,  8 * 60 * 60 * 1000);
@@ -1815,8 +1896,8 @@
         const _capturedYearMcal = _mcalYear, _capturedMonthMcal = _mcalMonth;
         if (_needPeople || _needDrafts || _needRefills) {
             Promise.all([
-                _needPeople  ? AppDataStore.queryAdvanced('prospects', { select: 'id,full_name,date_of_birth,responsible_agent_id,phone', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []) : Promise.resolve(null),
-                _needPeople  ? AppDataStore.queryAdvanced('customers', { select: 'id,full_name,date_of_birth,responsible_agent_id,phone', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []) : Promise.resolve(null),
+                _needPeople  ? AppDataStore.queryAdvanced('prospects', { select: 'id,full_name,date_of_birth,responsible_agent_id,phone,gender', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []) : Promise.resolve(null),
+                _needPeople  ? AppDataStore.queryAdvanced('customers', { select: 'id,full_name,date_of_birth,responsible_agent_id,phone,gender', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []) : Promise.resolve(null),
                 _needDrafts  ? AppDataStore.getAll('follow_up_drafts').catch(() => []) : Promise.resolve(null),
                 _needRefills ? AppDataStore.query('refill_reminders', { status: 'pending' }).catch(() => []) : Promise.resolve(null),
             ]).then(([p, c, d, r]) => {
@@ -1853,6 +1934,10 @@
                     .catch(() => { /* intentional: agent-name line degrades to hidden */ });
             }
         }
+
+        // Pre-warm the gendered birthday posters so the day-sheet WhatsApp button
+        // can share the image file synchronously inside the tap.
+        _mcalWarmBdayPosters();
 
         // First-paint fallbacks: ensure downstream code handles missing data
         // without throwing. On cold load these are empty; the Phase 2 re-render
@@ -2287,8 +2372,27 @@
     const mcalBirthdayWa = async (id) => {
         const person = _mcalPersonMap.get(String(id));
         if (!person || !_mhomeWaPhone(person.phone)) return;
-        const greeting = `Happy Birthday, ${person.full_name || ''}! 🎂 Wishing you a wonderful year ahead. — DestinOraclesSolution`;
-        mhomeWa(id, person.phone, greeting); // open WhatsApp first (sync, before any await) so the popup isn't blocked
+        const greeting = `Happy Birthday, ${person.full_name || ''}! 🎂 Wishing you a wonderful year ahead.`;
+        // Gendered poster: female → pink, everyone else (male/other/unknown) →
+        // navy. PRIMARY path shares the actual image file + caption via the Web
+        // Share API — must run synchronously inside the tap (no await before it)
+        // or the transient activation is lost. The blob is pre-warmed on load.
+        const _g = String(person.gender || '').trim().toLowerCase();
+        const _isFemale = _g.startsWith('f') || _g.includes('女');
+        const _posterBlob = _isFemale ? _mcalBdayBlob.female : _mcalBdayBlob.male;
+        let _shared = false;
+        if (_posterBlob && navigator.share && navigator.canShare) {
+            try {
+                const _file = new File([_posterBlob], 'happy-birthday.jpg', { type: _posterBlob.type || 'image/jpeg' });
+                if (navigator.canShare({ files: [_file] })) {
+                    navigator.share({ files: [_file], text: greeting }).catch(() => {});
+                    _shared = true;
+                }
+            } catch (_) { /* fall through to text-only wa.me */ }
+        }
+        // Fallback (gesture-safe): no poster blob or no file-share support →
+        // open the WhatsApp chat with the text greeting (sync, before any await).
+        if (!_shared) mhomeWa(id, person.phone, greeting);
         // Log the wish as an activity — parity with desktop executeSendBirthdayWish.
         // The mobile people map merges prospects + customers with NO type tag, so
         // resolve the entity by id at send-time. Wrapped in try/catch so a logging
