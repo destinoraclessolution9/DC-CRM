@@ -4135,12 +4135,18 @@ const saveAppraisalForm = async (prospectId) => {
             if (upErr) { throw upErr; }
             const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
             if (urlData?.publicUrl) {
-                await AppDataStore.create('prospect_attachments', {
+                // Insert via the RAW client with NO id — prospect_attachments.id is a
+                // GENERATED-ALWAYS identity, so AppDataStore.create (which stamps a
+                // client-side id) is rejected by Postgres with 428C9 and the row only
+                // saves locally. Mirrors _evGenerateForName.
+                const { error: insErr } = await sb.from('prospect_attachments').insert({
                     prospect_id: prospectId,
                     attachment_type: 'appraisal_form',
                     file_url: urlData.publicUrl,
                     filename: safeName
-                });
+                }).select().single();
+                if (insErr) throw insErr;
+                try { if (AppDataStore.invalidateCache) AppDataStore.invalidateCache('prospect_attachments'); } catch (_) {}
                 uploaded++;
             }
         }
@@ -4211,12 +4217,18 @@ const saveAPUForm = async (prospectId) => {
         const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
         if (!urlData?.publicUrl) { UI.toast.error('Upload succeeded but could not get URL'); return; }
 
-        await AppDataStore.create('prospect_attachments', {
+        // Insert via the RAW client with NO id — prospect_attachments.id is a
+        // GENERATED-ALWAYS identity, so AppDataStore.create (which stamps a
+        // client-side id) is rejected by Postgres with 428C9 and the row only
+        // saves locally. Mirrors _evGenerateForName.
+        const { error: insErr } = await sb.from('prospect_attachments').insert({
             prospect_id: prospectId,
             attachment_type: 'apu_form',
             file_url: urlData.publicUrl,
             filename: safeName
-        });
+        }).select().single();
+        if (insErr) throw insErr;
+        try { if (AppDataStore.invalidateCache) AppDataStore.invalidateCache('prospect_attachments'); } catch (_) {}
 
         UI.hideModal();
         UI.toast.success('APU photo uploaded');
