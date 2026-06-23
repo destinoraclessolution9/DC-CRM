@@ -1024,9 +1024,17 @@ const saveAgent = async () => {
 
     const editId = document.getElementById('edit-agent-id')?.value;
     const reportingToVal = document.getElementById('agent-reporting-to').value;
+    // Keep the numeric users.role_level column in sync with the chosen role
+    // string. Server-side scoping RPCs read role_level; if it drifts stale the
+    // user's visibility breaks (leader sees everyone / account looks like L1).
+    // Use the canonical level parser (window._crmUtils.getUserLevel, aliased as
+    // getUserLevel above) so named/Chinese roles map correctly — do NOT hand-roll
+    // a /Level N/ regex.
+    const roleStr = document.getElementById('agent-role-select').value;
     const fields = {
         full_name: name,
-        role: document.getElementById('agent-role-select').value,
+        role: roleStr,
+        role_level: getUserLevel({ role: roleStr }),
         agent_code: document.getElementById('agent-code-new').value,
         phone: document.getElementById('agent-phone').value,
         email: document.getElementById('agent-email').value,
