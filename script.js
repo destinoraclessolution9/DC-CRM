@@ -3161,7 +3161,7 @@ function _wireLoginBtn() {
         'workflows':            { chunk: 'chunks/script-marketing.min.js',   minLevel: null, exactLevels: [1, 2], navId: 'workflows',         navLevels: [1], title: 'Workflow Automation' },
         'reports':              { chunk: 'chunks/script-reporting.min.js',   minLevel: null, exactLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], navId: 'reports', navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], title: 'Reporting KPI' },
         'cases':                { chunk: 'chunks/script-cases.min.js',       minLevel: null, exactLevels: null, navId: 'cases',               navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], title: 'Success Cases' },
-        'referrals':            { chunk: 'chunks/script-referrals.min.js',   minLevel: null, exactLevels: null, navId: 'referrals',           navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14], title: 'Referral Relationships' },
+        'referrals':            { chunk: 'chunks/script-referrals.min.js',   minLevel: null, exactLevels: null, navId: 'referrals',           navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], title: 'Referral Relationships' },
         'ranking':              { chunk: 'chunks/script-performance.min.js', minLevel: null, exactLevels: null, navId: 'ranking',             navLevels: _VIEW_NO_NAV, title: 'Ranking Performance' },
         'performance':          { chunk: 'chunks/script-performance.min.js', minLevel: null, exactLevels: null, navId: 'performance',         navLevels: [1, 2, 3, 4], title: 'Ranking Performance' },
         'noticeboard':          { chunk: 'chunks/script-performance.min.js',  minLevel: null, exactLevels: null, navId: 'noticeboard',        navLevels: [1, 2, 12, 13, 14], title: '公告栏 Noticeboard' },
@@ -4869,6 +4869,7 @@ function _wireLoginBtn() {
         savePostMeetupNotes:      _lazyStubMulti(['chunks/script-calendar.min.js', 'chunks/script-activities.min.js'], 'savePostMeetupNotes'),
         openMeetingOutcomeModal:  _lazyStub('chunks/script-calendar.min.js', 'openMeetingOutcomeModal'),
         saveMeetingOutcome:       _lazyStub('chunks/script-calendar.min.js', 'saveMeetingOutcome'),
+        openMeetupHistoryModal:   _lazyStub('chunks/script-calendar.min.js', 'openMeetupHistoryModal'),
 
         // Phase 11: DMS — implemented by chunks/script-documents.js
 
