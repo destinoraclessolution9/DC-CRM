@@ -30,6 +30,11 @@
     // the previous day for any action taken 00:00–08:00 local — wrong due_date and
     // breaks birthday-draft dedup. Use this for all date-only fields.
     const _localDateStr = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    // Auto-logged touches (birthday wish / gift sent) are kept for the contact's activity HISTORY
+    // and to advance the cadence clock (last_activity_date), but are a logged PAST contact — not a
+    // scheduled meeting. They are marked source='birthday_auto' and hidden from every calendar
+    // surface (month grid / today's list / day & week views / mobile) so they don't clutter it.
+    const _isAutoTouchLog = (a) => !!(a && a.source === 'birthday_auto');
     // ========== PHASE 1: FULL CALENDAR IMPLEMENTATION ==========
 
     // React-island flag (default-on, PROMOTED 2026-06-16 after thorough opt-in
@@ -2536,7 +2541,7 @@
         for (let i = 1; i <= daysInMonth; i++) {
             const isToday = isCurrentMonth && i === todayDate.getDate();
             const dateStr = `${year}-${(month + 1).toString().padStart(2, '0')}-${i.toString().padStart(2, '0')}`;
-            const dayActivities = activities.filter(a => a.activity_date === dateStr)
+            const dayActivities = activities.filter(a => a.activity_date === dateStr && !_isAutoTouchLog(a))
                 .sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
             let activityHtml = '';
             let renderedInCell = 0;
@@ -2966,7 +2971,7 @@
         for (let i = 1; i <= daysInMonth; i++) {
             const isToday = isCurrentMonth && i === todayDate.getDate();
             const dateStr = `${year}-${(month + 1).toString().padStart(2, '0')}-${i.toString().padStart(2, '0')}`;
-            const dayActivities = activities.filter(a => a.activity_date === dateStr)
+            const dayActivities = activities.filter(a => a.activity_date === dateStr && !_isAutoTouchLog(a))
                 .sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
 
             let activityHtml = '';
@@ -3234,7 +3239,7 @@
         const existingEventIds = new Set(allEventsRTA.map(e => String(e.id)));
         const userMapRTA = new Map(allUsersRTA.map(u => [String(u.id), u]));
 
-        let activities = actResult.data;
+        let activities = (actResult.data || []).filter(a => !_isAutoTouchLog(a));
 
         // Case status filter (computed — must stay client-side); EVENTs have no
         // closing_amount so always pass them through regardless of the filter.
@@ -3832,11 +3837,19 @@
         const _payload = {
             activity_type: 'CALL',
             activity_date: _localDate,
+            source: 'birthday_auto',   // logged touch — hidden from the calendar, kept in history
             summary: `Birthday Wish via ${channel}: ${msg}`,
             lead_agent_id: _state.cu?.id,
             created_by: _state.cu?.id
         };
         if (entityType === 'customer') _payload.customer_id = id; else _payload.prospect_id = id;
+        // De-dupe: one birthday-wish log per person per day (re-tapping Send won't pile up).
+        try {
+            const _existing = await AppDataStore.query('activities', entityType === 'customer' ? { customer_id: id } : { prospect_id: id });
+            if ((_existing || []).some(a => a.source === 'birthday_auto' && a.activity_date === _localDate && (a.summary || '').startsWith('Birthday Wish'))) {
+                UI.hideModal(); UI.toast.success('Birthday wish sent.'); return;
+            }
+        } catch (_) { /* de-dupe is best-effort */ }
         await AppDataStore.create('activities', _payload);
         UI.hideModal();
         UI.toast.success('Birthday wish logged.');
@@ -3879,6 +3892,7 @@
         const _payload = {
             activity_type: 'CALL',
             activity_date: _localDate,
+            source: 'birthday_auto',   // logged touch — hidden from the calendar, kept in history
             summary: `Birthday Gift: ${desc}${value ? ` (RM ${value})` : ''}${notes ? ` — ${notes}` : ''}`,
             lead_agent_id: _state.cu?.id,
             created_by: _state.cu?.id
@@ -4238,6 +4252,7 @@
         const dayActivities = [];
         const seenEventSlotsDV = new Set();
         for (const a of rawActivitiesDV) {
+            if (_isAutoTouchLog(a)) continue;
             if (a.activity_type === 'EVENT' && a.event_id) {
                 const slotKey = `${a.event_id}|${a.start_time || ''}|${a.end_time || ''}`;
                 if (seenEventSlotsDV.has(slotKey)) continue;

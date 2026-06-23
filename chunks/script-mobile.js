@@ -2042,7 +2042,7 @@
         for (let d = 1; d <= daysInMonth; d++) {
             const k = `${_mcalYear}-${String(_mcalMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
             const isToday = (_mcalYear === todayY && _mcalMonth === todayM && d === todayDay);
-            const dayActs = byDate.get(k) || [];
+            const dayActs = (byDate.get(k) || []).filter(a => a.source !== 'birthday_auto');
             const visibleActs = dayActs.slice(0, 3);
             const overflow = Math.max(0, dayActs.length - 3);
             const evtsHtml = visibleActs.map(a => {
@@ -2442,12 +2442,18 @@
             const _payload = {
                 activity_type: 'CALL',
                 activity_date: _localDate,
+                source: 'birthday_auto',   // logged touch — hidden from the calendar, kept in history
                 summary: `Birthday Wish via WhatsApp: ${greeting}`,
                 lead_agent_id: _state.cu?.id,
                 created_by: _state.cu?.id,
             };
             const isProspect = !!(await AppDataStore.getById('prospects', id).catch(() => null));
             if (isProspect) _payload.prospect_id = id; else _payload.customer_id = id;
+            // De-dupe: one birthday-wish log per person per day (re-tapping won't pile up).
+            const _existB = await AppDataStore.query('activities', isProspect ? { prospect_id: id } : { customer_id: id }).catch(() => []);
+            if ((_existB || []).some(a => a.source === 'birthday_auto' && a.activity_date === _localDate && (a.summary || '').startsWith('Birthday Wish'))) {
+                return; // already logged today
+            }
             await AppDataStore.create('activities', _payload);
             UI.toast.success('Birthday wish logged.');
         } catch (e) { console.warn('[mcalBirthdayWa] activity log failed (WhatsApp still opened)', e); }
@@ -2466,7 +2472,7 @@
     const mcalDayClick = (dateStr) => {
         const allDay    = _mcalByDate.get(dateStr) || [];
         const dayBdays  = allDay.filter(a => a._isBirthday);
-        const dayActs   = allDay.filter(a => !a._isBirthday);
+        const dayActs   = allDay.filter(a => !a._isBirthday && a.source !== 'birthday_auto');
         const sorted    = [...dayActs].sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
 
         const d = new Date(dateStr + 'T00:00:00');
