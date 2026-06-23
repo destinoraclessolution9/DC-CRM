@@ -1653,13 +1653,17 @@ const appLogic = (() => {
             }
         });
 
-        // For Level 12/13/14 (传福大使 / 改命客户 / 准传福大使), the array order
-        // in levelPermissions defines the *display* order — re-append visible nav
-        // items in that order so noticeboard sits leftmost. For admin levels we
-        // keep the existing DOM order so the dense menu doesn't shuffle.
-        if (level >= 12) {
+        // Levels with an explicit _VIEW_NAV_ORDER_OVERRIDE — the agent band (L5-11)
+        // and the ambassador/customer/referrer tier (L12-14) — get a CUSTOM display
+        // order: re-append the visible nav items in the `allowed` (override) order so
+        // e.g. 福运相随 sits second for agents and 公告栏 sits first for customers.
+        // Admin levels (L1-4) have no override → keep the dense DOM order so the menu
+        // doesn't shuffle. Sidebar items live in `.sidebar-menu` (the real container —
+        // the old `.sidebar-nav`/`#sb-nav-list` selectors matched nothing, so the
+        // sidebar never actually reordered); the legacy top nav lives in `#nav-links`.
+        if (_VIEW_NAV_ORDER_OVERRIDE[level]) {
             const navParent = document.getElementById('nav-links');
-            const sbParent  = document.querySelector('.sidebar-nav') || document.getElementById('sb-nav-list');
+            const sbParent  = document.querySelector('.sidebar-menu');
             allowed.forEach(id => {
                 const el = document.getElementById(`nav-${id}`);
                 if (el && navParent && el.parentElement === navParent) navParent.appendChild(el);
@@ -3142,7 +3146,7 @@ function _wireLoginBtn() {
         'admin':                { chunk: 'chunks/script-admin.min.js',        minLevel: null, exactLevels: [1], navId: 'admin',               navLevels: [1, 2], title: 'Admin' },
         'security':             { chunk: 'chunks/script-admin.min.js',        minLevel: null, exactLevels: [1], navId: 'security',            navLevels: [1, 2], title: 'Security' },
         'org_chart':            { chunk: 'chunks/script-org.min.js',          minLevel: null, exactLevels: [1, 2], navId: 'org-chart',        navLevels: [1, 2], title: 'Org Chart Consultant' },
-        'pipeline':             { chunk: 'chunks/script-pipeline.min.js',    minLevel: null, exactLevels: null, navId: 'pipeline',            navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], title: 'Pipeline' },
+        'pipeline':             { chunk: 'chunks/script-pipeline.min.js',    minLevel: null, exactLevels: null, navId: 'pipeline',            navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], title: 'Pipeline' },
         'import':               { chunk: 'chunks/script-import.min.js',      minLevel: null, exactLevels: null, navId: 'import',              navLevels: [1, 2], title: 'Import / Export' },
         'protection':           { chunk: 'chunks/script-import.min.js',      minLevel: null, exactLevels: null, navId: 'protection',          navLevels: [1, 2, 3, 4], title: 'Protection Monitoring' },
         'fude':                 { chunk: 'chunks/script-fude.min.js',        minLevel: null, exactLevels: null, navId: 'fude',                navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], title: '福运相随' },
@@ -3150,7 +3154,7 @@ function _wireLoginBtn() {
         'stock_take':           { chunk: 'chunks/script-stock-take.min.js',  minLevel: null, exactLevels: [1, 15], navId: 'stock-take',       navLevels: [1, 15], title: 'Stock Take' },
         'egg_purchasing':       { chunk: 'chunks/script-egg.min.js',         minLevel: null, exactLevels: [1], navId: 'egg-purchasing',       navLevels: [1], title: 'Egg Purchasing' },
         'boss_report':          { chunk: 'chunks/script-boss-report.min.js', minLevel: null, exactLevels: [1, 2], navId: 'boss-report',       navLevels: [1], title: 'Boss Report' },
-        'knowledge':            { chunk: 'chunks/script-knowledge.min.js',   minLevel: null, exactLevels: null, navId: 'knowledge',           navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], title: 'Knowledge HQ' },
+        'knowledge':            { chunk: 'chunks/script-knowledge.min.js',   minLevel: null, exactLevels: null, navId: 'knowledge',           navLevels: [1, 2, 3, 4], title: 'Knowledge HQ' },
         'formula_purchaser':    { chunk: 'chunks/script-formula.min.js',     minLevel: null, exactLevels: [1], navId: 'formula-purchaser',    navLevels: [1], title: 'Formula Purchaser' },
         'marketing_automation': { chunk: 'chunks/script-marketing.min.js',   minLevel: null, exactLevels: [1, 2], navId: 'marketing-automation', navLevels: [1, 2], title: 'Marketing Automation' },
         'marketing_lists':      { chunk: 'chunks/script-marketing.min.js',   minLevel: null, exactLevels: [1, 2], navId: 'marketing-lists',   navLevels: [1, 2], title: 'Marketing Lists' },
@@ -3163,9 +3167,9 @@ function _wireLoginBtn() {
         'noticeboard':          { chunk: 'chunks/script-performance.min.js',  minLevel: null, exactLevels: null, navId: 'noticeboard',        navLevels: [1, 2, 12, 13, 14], title: '公告栏 Noticeboard' },
         'whatsapp':             { chunk: 'chunks/script-whatsapp.min.js',    minLevel: 1,    exactLevels: [1, 2], navId: 'whatsapp',          navLevels: _VIEW_NO_NAV, title: undefined },
         'ai_insights':          { chunk: 'chunks/script-ai.min.js',          minLevel: 1,    exactLevels: [1, 2], navId: 'ai-insights',       navLevels: [1, 2], title: undefined },
-        'documents':            { chunk: 'chunks/script-documents.min.js', minLevel: null, exactLevels: null, navId: 'documents',            navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], title: 'Documents' },
+        'documents':            { chunk: 'chunks/script-documents.min.js', minLevel: null, exactLevels: null, navId: 'documents',            navLevels: [1, 2, 3, 4], title: 'Documents' },
         'integrations':         { chunk: 'chunks/script-gcal.min.js',       minLevel: 1,    exactLevels: null, navId: 'integrations',        navLevels: [1, 2], title: 'Integrations' },
-        'order_form_extract':   { chunk: 'chunks/script-order-form-extract.min.js', minLevel: null, exactLevels: null, navId: 'order-form-extract', navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], title: 'Order Form Extract' },
+        'order_form_extract':   { chunk: 'chunks/script-order-form-extract.min.js', minLevel: null, exactLevels: null, navId: 'order-form-extract', navLevels: [1, 2, 3, 4], title: 'Order Form Extract' },
         'journey':              { chunk: 'chunks/script-journey.min.js',    minLevel: null, exactLevels: null, navId: 'journey',             navLevels: _VIEW_NO_NAV, title: undefined },
         'promotions':           { chunk: 'chunks/script-marketing.min.js',  minLevel: null, exactLevels: null, navId: 'promotions',          navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], title: 'Monthly Promotion' },
         'settings':             { chunk: 'chunks/script-settings.min.js',   minLevel: null, exactLevels: null, navId: 'settings',            navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], title: 'Settings' },
@@ -3179,11 +3183,16 @@ function _wireLoginBtn() {
         'standard-functions': { navLevels: [1] },
     };
 
-    // Canonical nav display order (= the level-1 ordering). Every level-1..11/15
-    // nav array is a subsequence of this, so filtering by membership rebuilds each
-    // byte-identically. Levels 12/13/14 reorder, hence _VIEW_NAV_ORDER_OVERRIDE.
+    // Canonical nav display order for levels WITHOUT an override (L1-4). Levels 1-4
+    // nav arrays are a subsequence of this, so filtering by membership rebuilds each
+    // byte-identically. The agent band (L5-11) and the ambassador/customer/referrer
+    // tier (L12-14) have explicit _VIEW_NAV_ORDER_OVERRIDE entries that define BOTH
+    // their visible set and their display order (consumed in updateNavVisibility).
     const _VIEW_NAV_ORDER = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'purchases_history', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'knowledge', 'import', 'integrations', 'settings', 'fude', 'milestones', 'noticeboard', 'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser', 'stock-take', 'boss-report', 'org-chart', 'ai-insights', 'security', 'workflows', 'lead_forms', 'surveys', 'contracts', 'booking_settings', 'order-form-extract'];
+    const _AGENT_NAV = ['calendar', 'fude', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'milestones', 'reports'];
     const _VIEW_NAV_ORDER_OVERRIDE = {
+        5:  _AGENT_NAV, 6: _AGENT_NAV, 7: _AGENT_NAV, 8: _AGENT_NAV, 9: _AGENT_NAV, 10: _AGENT_NAV,
+        11: ['calendar', 'fude', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'milestones'],
         12: ['noticeboard', 'fude', 'milestones', 'prospects', 'referrals'],
         13: ['noticeboard', 'fude', 'milestones'],
         14: ['noticeboard', 'fude', 'milestones'],
