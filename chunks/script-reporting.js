@@ -496,55 +496,101 @@
 
     // ── Auto-fill (boss-facing report — only DEFINITE, code-grounded mappings) ──
     // The report's abbreviations are business-internal. A field is auto-filled
-    // ONLY when an existing getter's meaning is an UNAMBIGUOUS, non-fuzzy match
+    // ONLY when an existing getter's meaning is an UNAMBIGUOUS, code-grounded match
     // for the label — otherwise it stays manual so the owner enters it by hand.
     //
-    // AUTO-FILLED:
-    //   CPS  → getCPSCount(from,to)   (counts activities where activity_type==='CPS';
-    //          the form label "CPS" IS the same token the getter filters on — exact match)
+    // SAFETY (numbers go to the company boss):
+    //   • Each field's fill is wrapped in its OWN try/catch — one getter throwing
+    //     never blanks the rest, and a throwing/non-finite getter leaves its cell
+    //     MANUAL (untouched). A silent 0 is the worst outcome, so we never write a
+    //     value that isn't a finite number from a getter that returned cleanly.
+    //   • A cell is filled ONLY if currently BLANK; the element is re-read AFTER the
+    //     await and re-checked (bail if the owner typed into it meanwhile, or the
+    //     node was torn down by a re-mount). recalcWeeklyReport() runs ONCE at the
+    //     end so Totals + preview + draft re-sync.
     //
-    // LEFT MANUAL (no definite/unambiguous getter — DO NOT auto-fill, would risk a
+    // AUTO-FILLED:
+    //   CPS   → getCPSCount(from,to)                       (activity_type==='CPS')
+    //   PJA/EA/RM → getNewAgents(from,to)   single cell — owner enters one figure;
+    //              getNewAgents is the total new-agent headcount in the window.
+    //   CS(N) → getActivityTypeCount(...,'FTF')            (activity_type==='FTF')
+    //   CS(G) → getActivityTypeCount(...,'GR')             (activity_type==='GR')
+    //   MT    → getEventCategoryHeadcount(...,['代理重要会议'])
+    //   TR    → getActivityTypeCount(...,'AGENT_TRAINING') (owner: AGENT_TRAINING acts)
+    //   CR    → getEventCategoryHeadcount(...,['课程'])
+    //   CF    → getCFHeadcount(from,to)
+    //   FT(N) → getEventCategoryHeadcount(...,['个人风水基础课','环境风水基础课'])
+    //   FT(KK)→ getEventCategoryHeadcount(...,['老板每月主题课','运程讲座','新春活动'])
+    //   IT    → getEventCategoryHeadcount(...,[6 改命/分享会 cats], ['customer'])
+    //   HJ    → getEventCategoryHeadcount(...,['汇聚-专案','汇集-商业','汇集-灵活','汇集-简易'])
+    //   RS    → getEventCategoryHeadcount(...,['代理补习班'])
+    //   MZ    → getEventCategoryHeadcount(...,['博物馆'])
+    //   NC    → getConvertedCustomers(from,to)  prospect→customer conversions
+    //           (customer_since in range, NO purchase required — owner's definition).
+    //
+    // LEFT MANUAL (no definite, code-grounded source — auto-filling would risk a
     // wrong number to the boss):
-    //   PJA/EA/RM  — "new agents" is plausible (getNewAgents) but the field bundles
-    //                three sub-categories into one cell; the intended subset is not
-    //                code-confirmable. MANUAL.
-    //   CS (N)     — labelled FTF, but getClientMeetings counts FTF *and* FSA together;
-    //                no FTF-only getter exists. MANUAL.
-    //   CS (G)     — "GR"/golden-road has no standalone getter (only mixed inside
-    //                getMeetUpExistingCustomerCount via a title-substring). MANUAL.
-    //   TR         — no training-only getter (training is lumped into totalMeetings). MANUAL.
-    //   CF         — getCFHeadcount has a very specific definition (unique customers who
-    //                referred to a CPS); equivalence to the report's "CF" not code-confirmable. MANUAL.
-    //   HJ / MZ    — two distinct event types; no per-event-type getter maps to HJ or MZ alone. MANUAL.
-    //   NC         — "NC" not code-defined; getNewCustomers is new *paying* customers,
-    //                a possible semantic mismatch. MANUAL.
-    //   POR        — POP-sales mapping (getPOPSales) is a business-jargon guess (POR≠POP
-    //                textually, unconfirmed). MANUAL.
-    //   RMT        — "total sales" mapping (getTotalSales) not code-grounded. MANUAL.
-    //   MT/CR/FT(N)/FT(KK)/IT/RS/TX, PD/SR, PORT(DP)/(TOTAL), TTO — owner-pending. MANUAL.
+    //   TX  — books sold; the CRM has no book-sales source at all. MANUAL.
+    //   Section 3 sales — PD(DO/PO), SR(DO/PO), POR, RMT, PORT(DP), PORT(TOTAL),
+    //     TTO: the purchases table has NO product-group field, NO DO/PO payment-type
+    //     taxonomy (payment_method only ever carries POP/EPP, not the report's
+    //     {Pre-on, PCP, POP, NPO} set), and NO downpayment field — so none of these
+    //     can be derived without a purchases schema change (add DO/PO payment type +
+    //     product group + downpayment). That's an owner decision; MANUAL until then.
+    //
+    // Event-category headcounts (MT/CR/FT/IT/HJ/RS/MZ) reuse the SAME table+filter
+    // as the live "Headcount by Event Type" card (event_registrations,
+    // attendance_status==='Attended', r.event_date) — see getEventCategoryHeadcount.
+    // The category strings are copied verbatim from the canonical EVENT_CATEGORIES
+    // list in script-activities.js / script-marketing.js (note 汇聚-专案 uses 聚 while
+    // the 汇集-* siblings use 集 — both stored exactly as written here).
     //
     // Window = the report's OWN week (the most-recent Monday → that Sunday), matching
-    // the auto label — NOT the dashboard's active time filter. Only fills cells the
-    // owner has left blank (a restored draft or manual edit is never overwritten).
+    // the auto label — NOT the dashboard's active time filter. Scope globals
+    // (_visibleUserIds / _currentRoleFilter) are already set by refreshKPIDashboard.
     const _wrAutoFill = async () => {
-        try {
-            const cpsEl = document.getElementById('wr-cps');
-            if (!cpsEl || (cpsEl.value !== '' && cpsEl.value != null)) return; // owner already set it
-            const mon = _wrMostRecentMonday();
-            const sun = new Date(mon);
-            sun.setDate(mon.getDate() + 6);
-            const from = toLocalDateStr(mon);
-            const to = toLocalDateStr(sun);
-            const cps = await getCPSCount(from, to);
-            // Re-check: bail if the user typed into it while the getter was awaiting,
-            // or if the node was torn down by a re-mount.
-            const live = document.getElementById('wr-cps');
-            if (!live || (live.value !== '' && live.value != null)) return;
-            if (Number.isFinite(cps)) {
-                live.value = String(cps);
-                recalcWeeklyReport(); // re-sum Totals + refresh preview + persist draft
-            }
-        } catch (e) { console.warn('weekly-report auto-fill failed:', e); }
+        const mon = _wrMostRecentMonday();
+        const sun = new Date(mon);
+        sun.setDate(mon.getDate() + 6);
+        const from = toLocalDateStr(mon);
+        const to = toLocalDateStr(sun);
+        let _touched = false;
+        // Fill one BLANK cell from a getter, each isolated: a throw or a non-finite
+        // result leaves the cell MANUAL (never writes 0 on error). Re-reads the node
+        // after the await so a mid-flight manual edit / re-mount is never clobbered.
+        const fill = async (id, getter) => {
+            try {
+                const before = document.getElementById(id);
+                if (!before || (before.value !== '' && before.value != null)) return; // already set
+                const val = await getter();
+                if (!Number.isFinite(val)) return; // getter errored/returned non-finite → leave MANUAL
+                const live = document.getElementById(id);
+                if (!live || (live.value !== '' && live.value != null)) return; // typed-into / torn-down
+                live.value = String(val);
+                _touched = true;
+            } catch (e) { console.warn('weekly-report auto-fill failed for', id, ':', e); }
+        };
+        // SECTION 1
+        await fill('wr-cps',  () => getCPSCount(from, to));
+        await fill('wr-pja',  () => getNewAgents(from, to));
+        await fill('wr-cs_n', () => getActivityTypeCount(from, to, 'FTF'));
+        await fill('wr-cs_g', () => getActivityTypeCount(from, to, 'GR'));
+        await fill('wr-mt',   () => getEventCategoryHeadcount(from, to, ['代理重要会议']));
+        await fill('wr-tr',   () => getActivityTypeCount(from, to, 'AGENT_TRAINING'));
+        await fill('wr-cr',   () => getEventCategoryHeadcount(from, to, ['课程']));
+        // SECTION 2
+        await fill('wr-cf',    () => getCFHeadcount(from, to));
+        await fill('wr-ft_n',  () => getEventCategoryHeadcount(from, to, ['个人风水基础课', '环境风水基础课']));
+        await fill('wr-ft_kk', () => getEventCategoryHeadcount(from, to, ['老板每月主题课', '运程讲座', '新春活动']));
+        await fill('wr-it',    () => getEventCategoryHeadcount(from, to, ['个人改命分享会', '风水改命分享会-简易', '风水改命分享会-专案', '画作分享会', '艺品分享会', '福气分享会'], ['customer']));
+        await fill('wr-hj',    () => getEventCategoryHeadcount(from, to, ['汇聚-专案', '汇集-商业', '汇集-灵活', '汇集-简易']));
+        await fill('wr-rs',    () => getEventCategoryHeadcount(from, to, ['代理补习班']));
+        await fill('wr-mz',    () => getEventCategoryHeadcount(from, to, ['博物馆']));
+        // NC — prospect→customer conversions (regardless of payment).
+        await fill('wr-nc',    () => getConvertedCustomers(from, to));
+        // TX + all of Section 3 (PD/SR/POR/RMT/PORT/TTO) intentionally LEFT MANUAL —
+        // no code-grounded source (see header note). Re-sum once if anything changed.
+        if (_touched) recalcWeeklyReport();
     };
 
     // Build + restore + compute the weekly report into #weekly-monday-report.
@@ -1482,6 +1528,118 @@ const getActivityHeadcount = async (from, to) => {
             }
             if (!_visibleUserIds.includes(agentId)) continue;
         }
+        count++;
+    }
+    return count;
+};
+
+// ── Weekly-report auto-fill getters ────────────────────────────────────────
+// Two scope-correct, date-windowed counters cloned from the proven KPI getters
+// above, used ONLY by _wrAutoFill. Each mirrors getCPSCount's exact scope+date
+// contract (so a wrong/over-broad number can never reach the boss report).
+
+// Count activities of a single activity_type in [from,to] — direct clone of
+// getCPSCount, with the literal 'CPS' generalised to a `type` argument. Same
+// _visibleUserIds (lead_agent_id) + _currentRoleFilter scoping; same inclusive
+// date window on activity_date.
+const getActivityTypeCount = async (from, to, type) => {
+    const needUsers = _currentRoleFilter !== 'All' || _visibleUserIds !== 'all';
+    const activities = await _reportActsInRange(from, to, 'getActivityTypeCount:' + type);
+    const users = needUsers ? await AppDataStore.getAll('users') : [];
+    const userMap = {};
+    users.forEach(u => { userMap[u.id] = u; });
+    let count = 0;
+    for (const a of activities) {
+        if (a.activity_type !== type || a.activity_date < from || a.activity_date > to) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(a.lead_agent_id)) continue;
+        if (_currentRoleFilter !== 'All') {
+            const agent = userMap[a.lead_agent_id];
+            if (!agent || agent.role !== _currentRoleFilter) continue;
+        }
+        count++;
+    }
+    return count;
+};
+
+// Parse a stored event `categories` value (JSON-string array, real array, or a
+// comma-joined fallback) into a string[]. Mirror of parseEventCategories in
+// script-activities.js / script-marketing.js (that helper is local to those
+// chunks, so it's re-declared here rather than imported).
+const _wrParseEventCategories = (raw) => {
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw;
+    try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (_) {
+        return String(raw).split(',').map(s => s.trim()).filter(Boolean);
+    }
+};
+
+// Attended-headcount of events whose `categories` array intersects categoryList,
+// with the registration's event_date in [from,to]. Reuses the SAME table + filter
+// the live "Headcount by Event Type" dashboard card uses (getHeadcountByEventType):
+//   table  = event_registrations  (the mirror written on attendance toggle)
+//   filter = attendance_status === 'Attended'
+//   date   = r.event_date (inclusive)
+// joined to events by event_id to read `categories`. Optional attendeeTypes
+// (e.g. ['customer']) restricts which attendee rows count; default counts any
+// attendee. Scoping: resolves each attendee's responsible agent (agent rows by
+// entity, customer/prospect rows via responsible_agent_id) and keeps it only if
+// in _visibleUserIds — same resolution as getActivityHeadcount. When scope is
+// 'all' no per-row resolution is needed (matches the dashboard card's behaviour).
+const getEventCategoryHeadcount = async (from, to, categoryList, attendeeTypes) => {
+    const wanted = new Set(categoryList || []);
+    const typeFilter = (attendeeTypes && attendeeTypes.length) ? new Set(attendeeTypes) : null;
+    const scoped = _visibleUserIds !== 'all';
+    const [events, registrations, prospects, customers] = await Promise.all([
+        AppDataStore.getAll('events'),
+        AppDataStore.getAll('event_registrations'),
+        scoped ? AppDataStore.getAll('prospects') : Promise.resolve([]),
+        scoped ? AppDataStore.getAll('customers') : Promise.resolve([]),
+    ]);
+    // Events whose categories intersect the wanted set (RAW id key, parity with
+    // getHeadcountByEventType's regsByEvent.get(ev.id)).
+    const matchedEventIds = new Set();
+    for (const ev of events) {
+        const cats = _wrParseEventCategories(ev.categories);
+        if (cats.some(c => wanted.has(c))) matchedEventIds.add(ev.id);
+    }
+    if (matchedEventIds.size === 0) return 0;
+    const prospMap = {}; prospects.forEach(p => { prospMap[p.id] = p; });
+    const custMap = {}; customers.forEach(c => { custMap[c.id] = c; });
+    let count = 0;
+    for (const r of registrations) {
+        if (!matchedEventIds.has(r.event_id)) continue;
+        if (r.attendance_status !== 'Attended') continue;
+        if (r.event_date < from || r.event_date > to) continue;
+        if (typeFilter && !typeFilter.has(r.attendee_type)) continue;
+        if (scoped) {
+            let agentId;
+            if (r.attendee_type === 'agent') {
+                agentId = r.attendee_id;
+            } else if (r.attendee_type === 'customer') {
+                agentId = custMap[r.attendee_id] && custMap[r.attendee_id].responsible_agent_id;
+            } else {
+                agentId = prospMap[r.attendee_id] && prospMap[r.attendee_id].responsible_agent_id;
+            }
+            if (!_visibleUserIds.includes(agentId)) continue;
+        }
+        count++;
+    }
+    return count;
+};
+
+// New customer CONVERSIONS in [from,to] — customers whose customer_since falls in
+// range, regardless of any purchase. Mirrors the "convertedCount" branch of the
+// conversion-rate getter (NOT getNewCustomers, which additionally requires a
+// purchase in range). Scoped by responsible_agent_id.
+const getConvertedCustomers = async (from, to) => {
+    const customers = await AppDataStore.getAll('customers');
+    let count = 0;
+    for (const c of customers) {
+        if (c.customer_since < from || c.customer_since > to) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(c.responsible_agent_id)) continue;
         count++;
     }
     return count;
