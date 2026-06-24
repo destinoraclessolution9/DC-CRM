@@ -85,7 +85,8 @@
         conversionRate: "Prospect-to-customer conversion rate - New customers as a percentage of prospects in the period",
         totalMeetings: "Agent meetings & training - Events and internal agent meetings only",
         clientMeetings: "Client meetings - CPS, FTF, and FSA meetings with prospects/customers",
-        activityHeadcount: "Event attendance - Sum of attendees by activity title"
+        activityHeadcount: "Event attendance - Sum of attendees by activity title",
+        agentHours: "Agent operating hours this week (Mon–Sun) vs weekly target — Full-time 45h, Part-time 20h. Sums the duration of every calendar item each agent led or attended (any activity type); 1h is assumed when an event has no start/end time. Always the current week, regardless of the date filter above."
     };
 
     let _currentTimeFilter = 'monthly';
@@ -1159,17 +1160,18 @@
         // RPC fast path inside getConversionRate. getActiveAgents uses a rolling
         // 60-day window (ignores from/to) — the RPC replicates that exactly.
         const _ext = await _tryExtendedKpiRPC(from, to);
-        const [activityHeadcount, conversionRate, meetUpExistingCount, cfHeadcount, activeAgents] = await Promise.all([
+        const [activityHeadcount, conversionRate, meetUpExistingCount, cfHeadcount, activeAgents, agentHoursSummary] = await Promise.all([
             _ext ? _ext.activityHeadcount   : getActivityHeadcount(from, to),
             getConversionRate(from, to),
             _ext ? _ext.meetUpExistingCount : getMeetUpExistingCustomerCount(from, to),
             _ext ? _ext.cfHeadcount         : getCFHeadcount(from, to),
             _ext ? _ext.activeAgents        : getActiveAgents(),
+            getAgentOperatingHoursSummary(),   // always current week, ignores from/to
         ]);
 
         // Fast path: try server-side aggregates first.
         const fast = await _tryKpiRPCs(from, to);
-        if (fast) return { ...fast, activityHeadcount, conversionRate, meetUpExistingCount, cfHeadcount, activeAgents };
+        if (fast) return { ...fast, activityHeadcount, conversionRate, meetUpExistingCount, cfHeadcount, activeAgents, agentHours: agentHoursSummary.display, agentHoursPct: agentHoursSummary.pct };
 
         // Fallback: original 11-call client-side path.
         const [
@@ -1193,7 +1195,8 @@
             cpsCount, totalSales, popCaseCount, popSales,
             eppCaseCount, eppSales, newAgents, newCustomers,
             totalMeetings, clientMeetings, activityHeadcount, conversionRate, eppDetails,
-            meetUpExistingCount, cfHeadcount, activeAgents
+            meetUpExistingCount, cfHeadcount, activeAgents,
+            agentHours: agentHoursSummary.display, agentHoursPct: agentHoursSummary.pct
         };
     };
 
@@ -1424,6 +1427,153 @@ const getActiveAgents = async () => {
         if (activeSet.has(String(u.id))) count++;
     }
     return count;
+};
+
+// ── Agent weekly operating hours ───────────────────────────────────────────
+// Tracks how much each agent is actually operating per week, independent of the
+// dashboard's time filter (always the CURRENT Mon–Sun week, like getActiveAgents
+// ignores from/to). "Operating hours" = summed duration of every calendar item
+// the agent LED (lead_agent_id) or ATTENDED (event_attendees, attendee_type=
+// 'agent'), deduped per activity so leading + attending the same item counts
+// once. Owner rules: full-time target 45h/week, part-time 20h/week; when an
+// event has no/invalid start–end time, assume 1h.
+const _AGENT_WEEKLY_TARGET = { 'full-time': 45, 'part-time': 20 };
+
+// Current week as Mon..Sun YYYY-MM-DD strings (matches the weekly-report convention).
+const _currentWeekRange = () => {
+    const now = new Date();
+    const day = now.getDay();                 // 0=Sun .. 6=Sat
+    const toMon = day === 0 ? -6 : 1 - day;   // back up to this week's Monday
+    const mon = new Date(now); mon.setDate(now.getDate() + toMon);
+    const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+    return { from: toLocalDateStr(mon), to: toLocalDateStr(sun) };
+};
+
+// Hours for one activity from start_time/end_time (HH:MM). Defaults to 1h when
+// times are missing or non-positive (owner decision) so untimed events still count.
+const _activityDurationHours = (a) => {
+    const s = a && a.start_time, e = a && a.end_time;
+    if (s && e) {
+        const sp = String(s).split(':'), ep = String(e).split(':');
+        const sm = parseInt(sp[0], 10) * 60 + parseInt(sp[1] || '0', 10);
+        const em = parseInt(ep[0], 10) * 60 + parseInt(ep[1] || '0', 10);
+        const d = em - sm;
+        if (Number.isFinite(d) && d > 0) return d / 60;
+    }
+    return 1;
+};
+
+// Single source of truth for both the KPI card summary and the breakdown table.
+// Scoped to the agent band (isAgent) within _visibleUserIds; fails closed.
+const _computeAgentWeekHours = async () => {
+    const { from, to } = _currentWeekRange();
+    const [users, activities, attendees] = await Promise.all([
+        AppDataStore.getAll('users'),
+        _reportActsInRange(from, to, '_computeAgentWeekHours'),
+        AppDataStore.getAll('event_attendees'),
+    ]);
+
+    // Index this week's activities + tally CPS-per-agent in the same pass.
+    const actMap = {};
+    const cpsByAgent = {};
+    for (const a of activities) {
+        const d = a.activity_date || '';
+        if (d < from || d > to) continue;
+        actMap[a.id] = a;
+        if (a.activity_type === 'CPS' && a.lead_agent_id != null) {
+            cpsByAgent[String(a.lead_agent_id)] = (cpsByAgent[String(a.lead_agent_id)] || 0) + 1;
+        }
+    }
+
+    // agentId -> Set(activityId), so lead + attended of the same item counts once.
+    const agentActs = {};
+    const add = (agentId, actId) => {
+        if (agentId == null) return;
+        const k = String(agentId);
+        (agentActs[k] || (agentActs[k] = new Set())).add(String(actId));
+    };
+    for (const id in actMap) { const a = actMap[id]; if (a.lead_agent_id != null) add(a.lead_agent_id, a.id); }
+    for (const ea of attendees) {
+        if (ea.attendee_type !== 'agent') continue;
+        if (!ea.attended && ea.attendance_status !== 'Attended') continue;
+        if (!actMap[ea.activity_id]) continue;     // only attendance to a this-week activity
+        add(ea.entity_id || ea.attendee_id, ea.activity_id);
+    }
+
+    const rows = [];
+    let totalActual = 0, totalTarget = 0;
+    for (const u of users) {
+        if (!isAgent(u)) continue;
+        if (u.status === 'inactive' || u.status === 'expired') continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(u.id))) continue;
+        const type = u.employment_type === 'part-time' ? 'part-time' : 'full-time';
+        const target = _AGENT_WEEKLY_TARGET[type];
+        const ids = agentActs[String(u.id)];
+        let hours = 0;
+        if (ids) ids.forEach(id => { const a = actMap[id]; if (a) hours += _activityDurationHours(a); });
+        hours = Math.round(hours * 10) / 10;
+        rows.push({
+            id: u.id, name: u.full_name || u.username || ('#' + u.id),
+            type, target, hours,
+            pct: target > 0 ? Math.round((hours / target) * 100) : 0,
+            cps: cpsByAgent[String(u.id)] || 0,
+        });
+        totalActual += hours; totalTarget += target;
+    }
+    rows.sort((a, b) => a.pct - b.pct);            // most-behind agents first
+    return { from, to, rows, totalActual: Math.round(totalActual * 10) / 10, totalTarget };
+};
+
+// Card-level summary (no args — always the current week). Returns a display
+// string + pct so _kpiCardDefs can colour the card by utilisation.
+const getAgentOperatingHoursSummary = async () => {
+    try {
+        const { totalActual, totalTarget } = await _computeAgentWeekHours();
+        const pct = totalTarget > 0 ? Math.round((totalActual / totalTarget) * 100) : 0;
+        return { display: `${totalActual} / ${totalTarget}h`, pct };
+    } catch (e) {
+        console.warn('[reports] getAgentOperatingHoursSummary failed:', e && e.message);
+        return { display: '—', pct: 0 };
+    }
+};
+
+// Per-agent breakdown table for the KPI detail modal (hours + % of target + CPS).
+const buildAgentHoursDetails = async () => {
+    const { from, to, rows, totalActual, totalTarget } = await _computeAgentWeekHours();
+    if (!rows.length) return '<p style="padding:16px;color:var(--gray-500);">No agents in scope for this week.</p>';
+    const pctColor = (p) => p >= 90 ? '#059669' : p >= 60 ? '#d97706' : '#dc2626';
+    const totalPct = totalTarget > 0 ? Math.round((totalActual / totalTarget) * 100) : 0;
+    const body = rows.map(r => `
+        <tr>
+            <td>${escapeHtml(r.name)}</td>
+            <td>${r.type === 'part-time' ? 'Part-time' : 'Full-time'}</td>
+            <td style="text-align:right;">${r.target}h</td>
+            <td style="text-align:right;">${r.hours}h</td>
+            <td style="text-align:right;font-weight:600;color:${pctColor(r.pct)};">${r.pct}%</td>
+            <td style="text-align:center;">${r.cps}</td>
+        </tr>`).join('');
+    return `
+        <div style="margin-bottom:10px;color:var(--gray-500);font-size:13px;">
+            Week ${from} → ${to} · Full-time target 45h · Part-time 20h ·
+            counts calendar items led + attended · 1h assumed when an event has no start/end time.
+        </div>
+        <table class="data-table" style="width:100%;">
+            <thead><tr>
+                <th>Agent</th><th>Type</th>
+                <th style="text-align:right;">Target</th>
+                <th style="text-align:right;">Hours</th>
+                <th style="text-align:right;">% of target</th>
+                <th style="text-align:center;">CPS (wk)</th>
+            </tr></thead>
+            <tbody>${body}</tbody>
+            <tfoot><tr style="font-weight:700;border-top:2px solid var(--gray-200);">
+                <td>Total</td><td></td>
+                <td style="text-align:right;">${totalTarget}h</td>
+                <td style="text-align:right;">${totalActual}h</td>
+                <td style="text-align:right;color:${pctColor(totalPct)};">${totalPct}%</td>
+                <td></td>
+            </tr></tfoot>
+        </table>`;
 };
 
 const getNewCustomers = async (from, to) => {
@@ -2447,7 +2597,8 @@ const showKPIDetails = async (key) => {
         clientMeetings: 'Client Meetings',
         activityHeadcount: 'Activity Attendance',
         meetUpExistingCount: 'Meet Up (Existing Customers)',
-        cfHeadcount: 'CF Headcount (CPS Referrers)'
+        cfHeadcount: 'CF Headcount (CPS Referrers)',
+        agentHours: 'Agent Operating Hours (This Week)'
     };
     const title = titles[key] || 'Details';
 
@@ -2478,6 +2629,7 @@ const showKPIDetails = async (key) => {
         else if (key === 'activityHeadcount')  body = await buildActivityHeadcountDetails(from, to);
         else if (key === 'meetUpExistingCount') body = await buildMeetUpExistingDetails(from, to);
         else if (key === 'cfHeadcount')        body = await buildCFHeadcountDetails(from, to);
+        else if (key === 'agentHours')         body = await buildAgentHoursDetails();
         else body = '<p>No details available for this metric.</p>';
     } catch (e) {
         console.error('showKPIDetails error', e);
@@ -2515,7 +2667,9 @@ const showKPIDetails = async (key) => {
             { label: 'Conversion Rate', value: `${kpis.conversionRate}% `, prev: prevKpis.conversionRate, icon: '📈', color: 'purple', key: 'conversionRate' },
             { label: 'Meetings & Training', value: kpis.totalMeetings, prev: prevKpis.totalMeetings, icon: '📅', color: 'orange', key: 'totalMeetings' },
             { label: 'Client Meetings', value: kpis.clientMeetings, prev: prevKpis.clientMeetings, icon: '🤝', color: 'blue', key: 'clientMeetings' },
-            { label: 'Activity Attendance', value: kpis.activityHeadcount, prev: prevKpis.activityHeadcount, icon: '📊', color: 'purple', key: 'activityHeadcount' }
+            { label: 'Activity Attendance', value: kpis.activityHeadcount, prev: prevKpis.activityHeadcount, icon: '📊', color: 'purple', key: 'activityHeadcount' },
+            { label: 'Agent Hours (Wk)', value: kpis.agentHours, prev: prevKpis.agentHours, icon: '⏱️', key: 'agentHours',
+              color: (kpis.agentHoursPct >= 90 ? 'green' : kpis.agentHoursPct >= 60 ? 'orange' : 'red') }
         ];
     };
 

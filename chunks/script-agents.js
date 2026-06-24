@@ -951,6 +951,15 @@ const openAddAgentModal = async (agentId = null) => {
                         </select>
                     </div>
                 </div>
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Employment Type</label>
+                        <select id="agent-employment-type" class="form-control">
+                            <option value="full-time" ${(isEdit ? agent.employment_type : 'full-time') !== 'part-time' ? 'selected' : ''}>Full-time (45h / week)</option>
+                            <option value="part-time" ${isEdit && agent.employment_type === 'part-time' ? 'selected' : ''}>Part-time (20h / week)</option>
+                        </select>
+                    </div>
+                </div>
             </div>
 
             <div class="form-section">
@@ -1045,6 +1054,7 @@ const saveAgent = async () => {
         reporting_to: reportingToVal ? parseInt(reportingToVal) : null,
         team: document.getElementById('agent-team')?.value || null,
         status: document.getElementById('agent-status')?.value || 'active',
+        employment_type: document.getElementById('agent-employment-type')?.value === 'part-time' ? 'part-time' : 'full-time',
     };
 
     if (editId) {
