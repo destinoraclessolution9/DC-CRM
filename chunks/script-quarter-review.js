@@ -42,6 +42,7 @@
             posInvoices: [],  // {invoice,date,member,total,outlet,quarter}
             posLines: [],     // {purchase,date,code,qty,subtotal}
             onlineLines: [],  // {order,invoice,date,member,state,code,qty}
+            wholeLines: [],   // {purchase,date,outlet,buyer,region,product,qty} — WHOLESALE (separate)
             computed: false,
             focusQuarter: null,
         };
@@ -179,8 +180,23 @@
     // Normalize a sales line to {group, bottles, price, missing}. Falls back to
     // the line's own attribute (Order Tracking carries one) when the code isn't
     // in the catalog — only the price stays unknown for missing codes.
+    // Egg unification (owner rule 2026-06-24): all GOLD egg codes (retail/agent/
+    // wholesale) are ONE item "Gold Fresh Health Plus Egg"; all KING codes are
+    // "King Eggs". 1 qty = 1 carton. Returns the canonical product or null.
+    const _eggUnify = (name) => {
+        const s = String(name || '').toUpperCase();
+        if (!/EGG|蛋/.test(s)) return null;
+        if (/帝王|KING|KIN\s*EGG/.test(s)) return 'King Eggs';
+        if (/GOLD|高鮮|FRESH/.test(s)) return 'Gold Fresh Health Plus Egg';
+        return null;
+    };
+    // Wholesale egg price per carton (owner-set 2026-06-24).
+    const _WHOLESALE_PRICE = { 'Gold Fresh Health Plus Egg': 119, 'King Eggs': 132 };
+
     const _normLine = (code, qty, lineName, lineAttr) => {
+        const eu = _eggUnify(lineName);
         const c = _qrState.catalog[code];
+        if (eu) return { group: eu, bottles: qty * 1, price: c ? c.price : 0, missing: !c }; // egg = 1 carton/qty
         if (c) return { group: c.group, bottles: qty * c.mult, price: c.price, missing: false };
         const egg = _isEgg(lineName);
         const mult = lineAttr ? _parseCount(lineAttr, egg) : 1;
@@ -222,11 +238,14 @@
                         _qrState.files.push({ name: file.name, kind: 'POS (FORMULA Sales)', ok: true, note: inv + ' invoices, ' + li + ' lines' });
                     } else {
                         const first = XLSX.utils.sheet_to_json(wb.Sheets[names[0]]);
-                        if (first.length && _qrKey(first[0], 'Product Code') && _qrKey(first[0], 'Product Name')) {
+                        if (first.length && _qrKey(first[0], 'Product Quantity') && (_qrKey(first[0], 'Group Name') || _qrKey(first[0], 'Purchase To'))) {
+                            const n = _ingestWholesale(first);   // egg wholesale order — check BEFORE product list
+                            _qrState.files.push({ name: file.name, kind: 'Wholesale (Egg)', ok: true, note: n + ' lines' });
+                        } else if (first.length && _qrKey(first[0], 'Product Code') && _qrKey(first[0], 'Product Name')) {
                             const n = _ingestCatalog(first);
                             _qrState.files.push({ name: file.name, kind: 'Product List', ok: true, note: n + ' products' });
                         } else {
-                            _qrState.files.push({ name: file.name, kind: 'Unrecognised XLSX', ok: false, note: 'no Itemised/Online Offline/Product sheet' });
+                            _qrState.files.push({ name: file.name, kind: 'Unrecognised XLSX', ok: false, note: 'no Itemised/Online Offline/Wholesale/Product sheet' });
                         }
                     }
                 } else {
@@ -352,6 +371,43 @@
         return added;
     };
 
+    // ── Wholesale egg order (separate stream). Quantity = cartons; revenue =
+    // cartons × owner-set wholesale price per egg type.
+    const _wholeSeen = () => (_qrState._wholeSeen || (_qrState._wholeSeen = new Set()));
+    const _ingestWholesale = (rows) => {
+        if (!rows.length) return 0;
+        const cp = _qrKey(rows[0], 'Purchase Number', 'Purchase');
+        const cd = _qrKey(rows[0], 'Purchase Date Time', 'Purchase Date', 'Date');
+        const co = _qrKey(rows[0], 'Outlet Name', 'Outlet');
+        const cb = _qrKey(rows[0], 'Purchase To', 'Buyer');
+        const cg = _qrKey(rows[0], 'Group Name', 'Group');
+        const cn = _qrKey(rows[0], 'Product Name', 'Name');
+        const cc = _qrKey(rows[0], 'Product Code');
+        const cq = _qrKey(rows[0], 'Product Quantity', 'Quantity');
+        const seen = _wholeSeen(), occ = new Map(); let added = 0;
+        for (const r of rows) {
+            const purchase = cp ? String(r[cp] || '').trim() : '';
+            const code = cc ? String(r[cc] || '').trim() : '';
+            const name = cn ? String(r[cn] || '').trim() : '';
+            const qty = cq ? (_qrNum(r[cq]) || 0) : 0;
+            if (!purchase && !code) continue;
+            const base = purchase + '|' + code + '|' + qty;
+            const k = (occ.get(base) || 0); occ.set(base, k + 1);
+            const key = base + '|' + k;
+            if (seen.has(key)) continue; seen.add(key);
+            const dt = cd ? _qrParseDate(r[cd]) : null;
+            _qrState.wholeLines.push({
+                purchase, qty, date: dt, quarter: _qrQuarter(dt),
+                outlet: co ? String(r[co] || '').trim() : '',
+                buyer: cb ? String(r[cb] || '').trim() : '',
+                region: cg ? String(r[cg] || '').trim() : '',
+                product: _eggUnify(name) || name || code,
+            });
+            added++;
+        }
+        return added;
+    };
+
     // ====================================================================
     // AGGREGATION
     // ====================================================================
@@ -412,7 +468,31 @@
         const byState = {};
         _qrState.onlineLines.forEach(x => { if (!x.state) return; const s = byState[x.state] || (byState[x.state] = { state: x.state, lines: 0, bottles: 0 }); s.lines++; const nl = _normLine(x.code, x.qty, x.name, x.attr); s.bottles += nl.bottles; });
 
+        // ── WHOLESALE (separate stream — never folded into the retail totals) ──
+        const wl = _qrState.wholeLines;
+        const wRev = (p, q) => (_WHOLESALE_PRICE[p] || 0) * q;
+        const whole = wl.length ? (() => {
+            const orders = new Set(), byProduct = {}, byRegion = {}, byOutlet = {}, byBuyer = {}, byQ = {};
+            let cartons = 0, rev = 0;
+            wl.forEach(x => {
+                const r = wRev(x.product, x.qty); cartons += x.qty; rev += r; if (x.purchase) orders.add(x.purchase);
+                const P = byProduct[x.product] || (byProduct[x.product] = { name: x.product, cartons: 0, rev: 0 }); P.cartons += x.qty; P.rev += r;
+                if (x.region) { const g = byRegion[x.region] || (byRegion[x.region] = { region: x.region, cartons: 0, rev: 0 }); g.cartons += x.qty; g.rev += r; }
+                if (x.outlet) { const o = byOutlet[x.outlet] || (byOutlet[x.outlet] = { outlet: x.outlet, cartons: 0, rev: 0 }); o.cartons += x.qty; o.rev += r; }
+                if (x.buyer)  { const b = byBuyer[x.buyer] || (byBuyer[x.buyer] = { buyer: x.buyer, cartons: 0, rev: 0 }); b.cartons += x.qty; b.rev += r; }
+                if (x.quarter) { const q = byQ[x.quarter] || (byQ[x.quarter] = { cartons: 0, rev: 0 }); q.cartons += x.qty; q.rev += r; }
+            });
+            return {
+                cartons, rev, orders: orders.size, byQ,
+                products: Object.values(byProduct).sort((a, b) => b.rev - a.rev),
+                regions: Object.values(byRegion).sort((a, b) => b.cartons - a.cartons),
+                outlets: Object.values(byOutlet).sort((a, b) => b.cartons - a.cartons),
+                buyers: Object.values(byBuyer).sort((a, b) => b.cartons - a.cartons),
+            };
+        })() : null;
+
         return {
+            whole,
             totRev, nOrders, aov: nOrders ? totRev / nOrders : 0, bottles, nMembers: members.size,
             dateFrom: dated[0] || null, dateTo: dated[dated.length - 1] || null,
             byQ, quarters, byOutlet, bySystem,
@@ -429,8 +509,8 @@
     // ====================================================================
     const qrGenerate = () => {
         if (!isSystemAdmin(_state.cu)) { UI.toast.error('Access denied'); return; }
-        if (!_qrState.posLines.length && !_qrState.posInvoices.length && !_qrState.onlineLines.length) {
-            UI.toast.error('No sales data loaded. Upload a POS (FORMULA Sales .xlsx) and/or Online (Order Tracking .csv) file.');
+        if (!_qrState.posLines.length && !_qrState.posInvoices.length && !_qrState.onlineLines.length && !_qrState.wholeLines.length) {
+            UI.toast.error('No sales data loaded. Upload a POS (FORMULA Sales .xlsx), Online (Order Tracking .csv), and/or Wholesale (Egg Order .xlsx) file.');
             return;
         }
         _qrState.agg = _qrAggregate();
@@ -489,6 +569,31 @@
             ${sub ? `<div style="font-size:12px;color:var(--gray-500);margin-top:4px;">${sub}</div>` : ''}
         </div>`;
 
+    const _sect = (t) => `<h3 style="margin:26px 0 12px;font-size:17px;color:var(--gray-900);">${t}</h3>`;
+    const _wholeSection = (agg) => {
+        const w = agg.whole; if (!w) return '';
+        return `
+            <div style="margin-top:34px;border-top:3px solid #f59e0b;padding-top:6px;"></div>
+            ${_sect('🥚 Wholesale (Egg) — reported separately from retail')}
+            <div style="display:flex;flex-wrap:wrap;gap:12px;">
+                ${_card('Wholesale Revenue', _qrRM(w.rev))}
+                ${_card('Cartons', _qrInt(w.cartons))}
+                ${_card('Wholesale Orders', _qrInt(w.orders))}
+                ${w.products.map(p => _card(p.name, _qrInt(p.cartons) + ' ctn', _qrRM(p.rev))).join('')}
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:18px;">
+                <div style="flex:1;min-width:340px;">${_sect('Cartons by Region')}<div style="background:white;border:1px solid var(--gray-200);border-radius:12px;padding:16px;">${w.regions.length ? _bars(w.regions, r => r.cartons, r => r.region + '  · ' + _qrRM(r.rev), '#f59e0b', _qrInt) : '<div style="color:var(--gray-400);font-size:13px;">—</div>'}</div></div>
+                <div style="flex:1;min-width:340px;">${_sect('Cartons by Outlet')}<div style="background:white;border:1px solid var(--gray-200);border-radius:12px;padding:16px;">${w.outlets.length ? _bars(w.outlets, r => r.cartons, r => r.outlet, '#d97706', _qrInt) : '<div style="color:var(--gray-400);font-size:13px;">—</div>'}</div></div>
+            </div>
+            ${_sect('Top Wholesale Buyers (by cartons)')}
+            <div style="background:white;border:1px solid var(--gray-200);border-radius:12px;padding:16px;">
+                ${w.buyers.length ? _bars(w.buyers.slice(0, 12), r => r.cartons, r => r.buyer + '  · ' + _qrRM(r.rev), '#b45309', _qrInt) : '<div style="color:var(--gray-400);font-size:13px;">—</div>'}
+            </div>
+            <div style="background:#f8fafc;border:1px dashed var(--gray-300);border-radius:10px;padding:12px 16px;margin-top:16px;font-size:13px;color:var(--gray-600);">
+                Informational combined total: Retail <b>${_qrRM(agg.totRev)}</b> + Wholesale <b>${_qrRM(w.rev)}</b> = <b>${_qrRM(agg.totRev + w.rev)}</b>. (Retail &amp; wholesale are reported separately above.)
+            </div>`;
+    };
+
     const _renderFileStatus = () => {
         const el = document.getElementById('qr-file-status');
         if (!el) return;
@@ -500,15 +605,20 @@
                 <span style="color:var(--gray-500);">${escapeHtml(f.kind)}</span>
                 <span style="width:150px;text-align:right;color:var(--gray-400);">${escapeHtml(f.note)}</span>
             </div>`).join('');
-        const ni = _qrState.posInvoices.length, nl = _qrState.posLines.length, no = _qrState.onlineLines.length, nc = Object.keys(_qrState.catalog).length;
+        const ni = _qrState.posInvoices.length, nl = _qrState.posLines.length, no = _qrState.onlineLines.length, nw = _qrState.wholeLines.length, nc = Object.keys(_qrState.catalog).length;
         el.innerHTML = `<div style="margin-top:12px;border-top:1px solid var(--gray-200);padding-top:10px;">${rows}
-            <div style="margin-top:10px;font-size:13px;color:var(--gray-600);">Merged &amp; deduped: <b>${_qrInt(ni)}</b> POS invoices · <b>${_qrInt(nl)}</b> POS lines · <b>${_qrInt(no)}</b> online lines${nc ? ` · <b>${_qrInt(nc)}</b> uploaded-catalog overrides` : ''}<br><span style="color:var(--gray-400);">Built-in catalog (${_qrInt(Object.keys(_QR_CATALOG_EMBED).length)} products) supplies sizes, bottle counts &amp; prices.</span></div></div>`;
+            <div style="margin-top:10px;font-size:13px;color:var(--gray-600);">Merged &amp; deduped: <b>${_qrInt(ni)}</b> POS invoices · <b>${_qrInt(nl)}</b> POS lines · <b>${_qrInt(no)}</b> online lines · <b>${_qrInt(nw)}</b> wholesale lines${nc ? ` · <b>${_qrInt(nc)}</b> uploaded-catalog overrides` : ''}<br><span style="color:var(--gray-400);">Built-in catalog (${_qrInt(Object.keys(_QR_CATALOG_EMBED).length)} products) supplies sizes, bottle counts &amp; prices.</span></div></div>`;
     };
 
     const _renderResults = () => {
         const root = document.getElementById('qr-results');
         if (!root) return;
         const agg = _qrState.agg; if (!agg) { root.innerHTML = ''; return; }
+        // Wholesale-only upload (no retail quarters) — render just the wholesale section.
+        if (!agg.quarters.length) {
+            root.innerHTML = `${_sect('Overall')}<div style="color:var(--gray-500);font-size:13px;">No retail (POS/Online) sales in the uploaded files.</div>${_wholeSection(agg)}`;
+            return;
+        }
         const fq = _qrState.focusQuarter;
         const cur = agg.byQ[fq] || { rev: 0, orders: 0, members: new Set() };
         const prevQ = _qrPrevQ(fq), prev = agg.byQ[prevQ];
@@ -581,6 +691,8 @@
                 ${agg.customers.length ? _bars(agg.customers.slice(0, 10), r => r.spend, r => r.member + '  (' + _qrInt(r.orders) + ')', '#8b5cf6') : '<div style="color:var(--gray-400);font-size:13px;">No member names.</div>'}
             </div>
 
+            ${_wholeSection(agg)}
+
             ${agg.unmapped.length ? `${sect('⚠ Codes not in the Product List (counted as 1 bottle, RM 0 online) — add these &amp; re-run')}
             <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:14px;font-size:13px;color:#92400e;">
                 ${agg.unmapped.slice(0, 40).map(u => `${escapeHtml(u.code)}${u.name ? ' (' + escapeHtml(u.name) + ')' : ''} — ${_qrInt(u.qty)} qty`).join('<br>')}
@@ -648,7 +760,7 @@
                 <div style="background:white;border:1px solid var(--gray-200);border-radius:12px;padding:20px;">
                     <h3 style="margin:0 0 6px;">Upload data files</h3>
                     <p style="color:var(--gray-500);font-size:13px;margin:0 0 14px;">
-                        <b>POS</b> = FORMULA Sales exports (.xlsx) · <b>Online</b> = Order Tracking exports (.csv). A curated product catalog is built in (sizes, bottle counts, prices); a <b>Product List</b> (.xlsx) is optional — it refreshes prices or adds new codes. Upload any number — overlaps are auto-deduped.
+                        <b>POS</b> = FORMULA Sales (.xlsx) · <b>Online</b> = Order Tracking (.csv) · <b>Wholesale</b> = Egg Order (.xlsx, reported separately). A curated product catalog is built in (sizes, bottle counts, prices); a <b>Product List</b> (.xlsx) is optional — it refreshes prices or adds new codes. Upload any number — overlaps are auto-deduped.
                     </p>
                     <input type="file" id="qr-file-input" multiple accept=".xlsx,.xls,.csv" onchange="app.qrLoadFiles(this)" style="display:block;margin-bottom:6px;font-size:13px;">
                     <div id="qr-file-status"></div>
