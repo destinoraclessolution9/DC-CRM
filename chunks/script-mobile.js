@@ -1066,21 +1066,26 @@
                 re_engagement: '该跟进了', cust_checkin: '老客户问候', apu_ack: '推荐名单致谢',
                 appointment_reminder: '预约提醒', voucher_unredeemed: '电子券待使用', birthday: '生日祝福'
             }[t] || '跟进提醒');
+            const _agentMap = new Map((cachedUsers || []).map(u => [String(u.id), u.full_name]));
             for (const fd of visibleDrafts.slice(0, 5)) {
                 const fp = draftPerson(fd);
                 const nm = fd.prospect_name || fp?.full_name || 'Unknown';
                 const od = daysAgo(fd.due_date);
                 const sub = (od != null && od > 0) ? `逾期 ${od} 天` : '今天';
                 const phone = UI.escJsAttr(fp?.phone || fd.phone || '');
+                const _pid = fp?.id ?? fd.prospect_id ?? fd.customer_id ?? null;
+                const _isCust = !!fd.customer_id;
+                const _agId = fp?.responsible_agent_id || fp?.lead_agent_id;
+                const _agent = _agId ? (_agentMap.get(String(_agId)) || '') : '';
                 rows.push(`
-                <div class="mhome-att-row followup">
+                <div class="mhome-att-row followup" id="mhome-fu-${fd.id}">
                     <div class="mhome-att-avatar">${_mhomeEsc(_mhomeInitials(nm))}</div>
-                    <div class="mhome-att-text">
-                        <div class="mhome-att-name">${_mhomeEsc(nm)}</div>
+                    <div class="mhome-att-text"${_pid != null ? ` style="cursor:pointer;" onclick="app.mcalOpenPerson('${_pid}')"` : ''}>
+                        <div class="mhome-att-name">${_mhomeEsc(nm)}${_agent ? ` <span style="font-size:10px;color:#9CA3AF;font-weight:400;">· ${_mhomeEsc(_agent)}</span>` : ''}</div>
                         <div class="mhome-att-need">${_mhomeEsc(_reasonLabel(fd.trigger_type))}</div>
                         <div class="mhome-att-sub">${_mhomeEsc(sub)}</div>
                     </div>
-                    <button class="mhome-att-btn wa" onclick="app.mhomeWa(${fp?.id ?? 'null'}, '${phone}')">
+                    <button class="mhome-att-btn wa" onclick="event.stopPropagation();app.mhomeFollowupWa(${fd.id}, '${_pid}', '${phone}', ${_isCust})">
                         <i class="fab fa-whatsapp"></i> WhatsApp
                     </button>
                 </div>`);
@@ -1279,13 +1284,19 @@
                 re_engagement: '该跟进了', cust_checkin: '老客户问候', apu_ack: '推荐名单致谢',
                 appointment_reminder: '预约提醒', voucher_unredeemed: '电子券待使用', birthday: '生日祝福'
             }[t] || '跟进提醒');
+            const _agentMapJ = new Map((cachedUsers || []).map(u => [String(u.id), u.full_name]));
             const attention = [];
             for (const fd of visibleDrafts.slice(0, 5)) {
                 const fp = draftPerson(fd);
                 const nm = fd.prospect_name || fp?.full_name || 'Unknown';
                 const od = daysAgo(fd.due_date);
+                const _agId = fp?.responsible_agent_id || fp?.lead_agent_id;
                 attention.push({
                     type: 'followup',
+                    draftId: fd.id,
+                    personId: fp?.id ?? fd.prospect_id ?? fd.customer_id ?? null,
+                    isCustomer: !!fd.customer_id,
+                    agent: _agId ? (_agentMapJ.get(String(_agId)) || '') : '',
                     initials: _mhomeInitials(nm),
                     name: nm,
                     need: _reasonLabel(fd.trigger_type),
@@ -1408,6 +1419,41 @@
         }
     };
 
+    // Animate a handled follow-up row out of whichever list it's in (home card or sheet),
+    // then hide the home card if it has no rows left.
+    const _mhomeDropFollowupRow = (draftId) => {
+        const row = document.getElementById(`mhome-fu-${draftId}`) || document.getElementById(`followup-row-${draftId}`);
+        if (!row) return;
+        row.style.transition = 'opacity .3s ease, max-height .35s ease, padding .3s ease, margin .3s ease';
+        row.style.opacity = '0'; row.style.maxHeight = '0'; row.style.paddingTop = '0'; row.style.paddingBottom = '0';
+        row.style.marginTop = '0'; row.style.marginBottom = '0'; row.style.overflow = 'hidden';
+        setTimeout(() => {
+            const card = row.closest('.mhome-card');
+            row.remove();
+            if (card && !card.querySelector('.mhome-att-row')) card.style.display = 'none';
+        }, 360);
+    };
+    // Follow-up WhatsApp — "contacted = handled". Opens the chat (sync, gesture-safe) using the
+    // PERSON's phone (not the draft's, so it works offline + when the draft row is lean), marks
+    // the draft status='sent' + advances the cadence clock (last_activity/contact_date=today so
+    // re-engagement won't immediately re-fire), and drops the row from view. Replaces the
+    // calendar-chunk app.sendFollowUpInvite call, which getById's the draft + needs draft.phone
+    // (undefined/offline-fragile on mobile — the reported "icon not responding").
+    const mhomeFollowupWa = (draftId, personId, phone, isCustomer) => {
+        const num = _mhomeWaPhone(phone);
+        if (num) window.open(`https://wa.me/${num}`, '_blank', 'noopener');
+        else if (personId) { mcalOpenPerson(personId).catch(() => {}); }
+        if (draftId == null) return;
+        const today = _mhomeToday();
+        AppDataStore.update('follow_up_drafts', draftId, { status: 'sent', updated_at: new Date().toISOString() }).catch(() => {});
+        if (personId != null && personId !== 'null') {
+            const tbl = isCustomer ? 'customers' : 'prospects';
+            const fld = isCustomer ? 'last_contact_date' : 'last_activity_date';
+            AppDataStore.update(tbl, personId, { [fld]: today }).catch(() => {});
+        }
+        _mhomeDropFollowupRow(draftId);
+    };
+
     // ── Mobile dashboard tile sheets (SW-109) ────────────────────────────
     // The home quick-action tiles (Overdue Follow-ups / Refills Due /
     // Inactive Clients) previously all navigated to 'calendar'/'prospects'.
@@ -1441,18 +1487,21 @@
     const mhomeOpenFollowups = async () => {
         UI.showModal('Overdue Follow-ups', _mhomeSheetLoading, _mhomeSheetBtns);
         try { await window._loadChunk('chunks/script-calendar.min.js'); } catch (_) { /* intentional: action handlers are guarded at call sites if chunk missing */ }
-        let drafts = [], people = [];
+        let drafts = [], people = [], _sheetUsers = [];
         try {
-            const [dR, pR, cR] = await Promise.all([
+            const [dR, pR, cR, uR] = await Promise.all([
                 AppDataStore.query('follow_up_drafts', { status: 'pending' }).catch(() => []),
                 AppDataStore.getAll('prospects').catch(() => []),
                 AppDataStore.getAll('customers').catch(() => []),
+                AppDataStore.getAll('users').catch(() => []),
             ]);
             drafts = dR || [];
             people = [...(pR || []), ...(cR || [])];
+            _sheetUsers = uR || [];
         } catch (_) { /* intentional: per-query fallbacks keep empty defaults → empty sheet */ }
         if (!_mhomeOverlayOpen()) return; // user closed the sheet while it loaded
         const personMap = new Map(people.map(p => [String(p.id), p]));
+        const _agentMap = new Map((_sheetUsers || []).map(u => [String(u.id), u.full_name]));
         const today = _mhomeToday();
         // null agent_id → treat as current user's (desktop parity, script-calendar.js:1381)
         const mine = (d) => isSystemAdmin(_state.cu) || !d.agent_id || String(d.agent_id) === String(_state.cu?.id);
@@ -1473,15 +1522,20 @@
             const name = d.prospect_name || person?.full_name || 'Unknown';
             const days = Math.max(0, Math.round((new Date(today) - new Date(d.due_date)) / 86400000));
             const due = days <= 0 ? 'Due today' : `${days} day${days === 1 ? '' : 's'} overdue`;
+            const _phone = UI.escJsAttr(person?.phone || d.phone || '');
+            const _pid = person?.id ?? d.prospect_id ?? d.customer_id ?? null;
+            const _isCust = !!d.customer_id;
+            const _agId = person?.responsible_agent_id || person?.lead_agent_id;
+            const _agent = _agId ? (_agentMap.get(String(_agId)) || '') : '';
             return `
             <div id="followup-row-${d.id}" style="display:flex;align-items:center;gap:12px;padding:12px;background:var(--gray-50,#f9fafb);border-radius:12px;border-left:4px solid #ef4444;transition:opacity .4s ease,max-height .4s ease;">
                 <div style="width:38px;height:38px;border-radius:50%;background:#fee2e2;color:#b91c1c;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0;">${_mhomeEsc(_mhomeInitials(name))}</div>
-                <div style="flex:1;min-width:0;">
-                    <div style="font-weight:600;font-size:14px;color:var(--gray-800,#1f2937);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_mhomeEsc(name)}</div>
+                <div style="flex:1;min-width:0;${_pid != null ? 'cursor:pointer;' : ''}"${_pid != null ? ` onclick="app.mcalOpenPerson('${_pid}')"` : ''}>
+                    <div style="font-weight:600;font-size:14px;color:var(--gray-800,#1f2937);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_mhomeEsc(name)}${_agent ? ` <span style="font-size:10px;color:#9CA3AF;font-weight:400;">· ${_mhomeEsc(_agent)}</span>` : ''}</div>
                     <div style="font-size:12px;color:#dc2626;font-weight:500;margin-top:2px;">${due}</div>
                 </div>
                 <div style="display:flex;gap:6px;flex-shrink:0;">
-                    <button class="btn primary btn-sm" style="font-size:13px;padding:8px 12px;white-space:nowrap;" onclick="event.stopPropagation();(async()=>{ if(app.sendFollowUpInvite){await app.sendFollowUpInvite(${d.id});}else{UI.toast.error('Action unavailable — please retry.');} })();" title="Send WhatsApp"><i class="fab fa-whatsapp"></i></button>
+                    <button class="btn primary btn-sm" style="font-size:13px;padding:8px 12px;white-space:nowrap;" onclick="event.stopPropagation();app.mhomeFollowupWa(${d.id}, '${_pid}', '${_phone}', ${_isCust})" title="Send WhatsApp"><i class="fab fa-whatsapp"></i></button>
                     <button class="btn secondary btn-sm" style="font-size:13px;padding:8px 10px;" onclick="event.stopPropagation();app.markFollowUpSent ? app.markFollowUpSent(${d.id}) : UI.toast.error('Action unavailable — please retry.');" title="Mark as sent"><i class="fas fa-check"></i></button>
                     <button class="btn secondary btn-sm" style="font-size:13px;padding:8px 10px;" onclick="event.stopPropagation();app.dismissFollowUp ? app.dismissFollowUp(${d.id}) : UI.toast.error('Action unavailable — please retry.');" title="Dismiss"><i class="fas fa-times"></i></button>
                 </div>
@@ -3508,6 +3562,7 @@
         showMobileMenu,
         showMobileHomeView,
         mhomeWa,
+        mhomeFollowupWa,
         mhomeOpenFollowups,
         mhomeOpenRefills,
         mhomeOpenInactive,

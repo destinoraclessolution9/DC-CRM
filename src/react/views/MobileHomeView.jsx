@@ -142,12 +142,12 @@ function AttentionCard({ rows }) {
             {rows.map((r, i) => r.type === 'followup' ? (
                 <div className="mhome-att-row followup" key={i}>
                     <div className="mhome-att-avatar">{r.initials}</div>
-                    <div className="mhome-att-text">
-                        <div className="mhome-att-name">{r.name}</div>
+                    <div className="mhome-att-text" style={r.personId != null ? { cursor: 'pointer' } : undefined} onClick={() => { if (r.personId != null) callArgs('mcalOpenPerson', String(r.personId)); }}>
+                        <div className="mhome-att-name">{r.name}{r.agent ? <span style={{ fontSize: '10px', color: '#9CA3AF', fontWeight: 400 }}> · {r.agent}</span> : null}</div>
                         <div className="mhome-att-need">{r.need}</div>
                         <div className="mhome-att-sub">{r.sub}</div>
                     </div>
-                    <button className="mhome-att-btn wa" onClick={() => callArgs('mhomeWa', r.waId, r.waPhone || '')}>
+                    <button className="mhome-att-btn wa" onClick={(e) => { e.stopPropagation(); callArgs('mhomeFollowupWa', r.draftId, String(r.personId), r.waPhone || '', !!r.isCustomer); }}>
                         <i className="fab fa-whatsapp"></i> WhatsApp
                     </button>
                 </div>
