@@ -528,15 +528,21 @@
     //   NC    → getConvertedCustomers(from,to)  prospect→customer conversions
     //           (customer_since in range, NO purchase required — owner's definition).
     //
+    //   POR         → getPOPCaseCount  (PO=POP closed-case count)
+    //   RMT         → getDOSales       (DO=full-payment, i.e. non-POP, sales RM)
+    //   PORT(TOTAL) → getPOPSales      (PO=POP total sales RM)
+    //   TTO         → RMT + PORT(TOTAL) (owner's formula = total turnover)
+    //
     // LEFT MANUAL (no definite, code-grounded source — auto-filling would risk a
     // wrong number to the boss):
     //   TX  — books sold; the CRM has no book-sales source at all. MANUAL.
-    //   Section 3 sales — PD(DO/PO), SR(DO/PO), POR, RMT, PORT(DP), PORT(TOTAL),
-    //     TTO: the purchases table has NO product-group field, NO DO/PO payment-type
-    //     taxonomy (payment_method only ever carries POP/EPP, not the report's
-    //     {Pre-on, PCP, POP, NPO} set), and NO downpayment field — so none of these
-    //     can be derived without a purchases schema change (add DO/PO payment type +
-    //     product group + downpayment). That's an owner decision; MANUAL until then.
+    //   PORT(DP) — PO downpayment; pop_down_payment lives on the closing record, not
+    //     the purchases row, so it isn't aggregable here. MANUAL.
+    //   PD(DO/PO), SR(DO/PO) — per-item × quantity by product GROUP (画作/power ring vs
+    //     风水方案/咨询), but `item` is free-text with no reliable group field. MANUAL.
+    //   NOTE: PO is treated as POP only — the sole deposit/pre-order payment method in
+    //     the schema. If 预购/PCP/NPO deals are ever recorded under other methods,
+    //     POR/PORT would undercount; revisit if the payment taxonomy is expanded.
     //
     // Event-category headcounts (MT/CR/FT/IT/HJ/RS/MZ) reuse the SAME table+filter
     // as the live "Headcount by Event Type" card (event_registrations,
@@ -588,8 +594,21 @@
         await fill('wr-mz',    () => getEventCategoryHeadcount(from, to, ['博物馆']));
         // NC — prospect→customer conversions (regardless of payment).
         await fill('wr-nc',    () => getConvertedCustomers(from, to));
-        // TX + all of Section 3 (PD/SR/POR/RMT/PORT/TTO) intentionally LEFT MANUAL —
-        // no code-grounded source (see header note). Re-sum once if anything changed.
+        // SECTION 3 (sales). PO = POP — the ONLY pre-order/deposit payment type in the
+        // schema (it alone carries pop_down_payment / monthly / tenure); DO = full
+        // payment = every other method. So POR / PORT(TOTAL) / RMT / TTO come straight
+        // from the existing purchase getters.
+        await fill('wr-por',        () => getPOPCaseCount(from, to)); // PO closed-case count
+        await fill('wr-rmt',        () => getDOSales(from, to));      // DO (full-payment) sales RM
+        await fill('wr-port_total', () => getPOPSales(from, to));     // PO total sales RM
+        // TTO = PORT(TOTAL) + RMT (owner's formula) — sum the SAME two values we filled.
+        await fill('wr-tto', async () => {
+            const [doSales, poSales] = await Promise.all([getDOSales(from, to), getPOPSales(from, to)]);
+            return doSales + poSales;
+        });
+        // Still MANUAL (no reliable source): TX (no book sales), PORT(DP) (downpayment
+        // lives on the closing record, not the purchases row), and PD(DO/PO)+SR(DO/PO)
+        // (item→product-group split is free-text, not classifiable). Re-sum if touched.
         if (_touched) recalcWeeklyReport();
     };
 
@@ -1311,6 +1330,21 @@ const getEPPSales = async (from, to) => {
     let total = 0;
     for (const p of purchases) {
         if (p.payment_method !== 'EPP' || p.date < from || p.date > to) continue;
+        if (!_passesPurchaseFilter(p, _getPurchaseAgentId(p, customerMap), userMap)) continue;
+        total += p.amount || 0;
+    }
+    return total;
+};
+
+// DO (full-payment) sales for the weekly report = every non-agent-package sale that
+// is NOT a POP (pre-order/deposit). Mirrors getTotalSales' base+filter, minus POP, so
+// getDOSales + getPOPSales === getTotalSales (DO + PO = total turnover).
+const getDOSales = async (from, to) => {
+    const { purchases, customerMap, userMap } = await _getPurchaseBase();
+    let total = 0;
+    for (const p of purchases) {
+        if (p.date < from || p.date > to || p.is_agent_package) continue;
+        if (p.payment_method === 'POP') continue; // POP = PO (pre-order); DO = full payment
         if (!_passesPurchaseFilter(p, _getPurchaseAgentId(p, customerMap), userMap)) continue;
         total += p.amount || 0;
     }
