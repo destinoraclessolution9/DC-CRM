@@ -140,6 +140,13 @@
         2
       ]
     },
+    "quarter_review": {
+      "src": "chunks/script-quarter-review.min.js",
+      "minLevel": null,
+      "exactLevels": [
+        1
+      ]
+    },
     "knowledge": {
       "src": "chunks/script-knowledge.min.js",
       "minLevel": null,
@@ -292,6 +299,7 @@
     "stock_take": "Stock Take",
     "egg_purchasing": "Egg Purchasing",
     "boss_report": "Boss Report",
+    "quarter_review": "Quarter Review",
     "knowledge": "Knowledge HQ",
     "formula_purchaser": "Formula Purchaser",
     "marketing_automation": "Marketing Automation",
@@ -344,6 +352,7 @@
       "formula-purchaser",
       "stock-take",
       "boss-report",
+      "quarter-review",
       "org-chart",
       "ai-insights",
       "security",

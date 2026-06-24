@@ -34,6 +34,7 @@ const JS_TARGETS = [
   // loader resolves hashed filenames via window.__ASSET_MANIFEST.
   'chunks/script-egg.js',
   'chunks/script-boss-report.js',
+  'chunks/script-quarter-review.js',
   'chunks/script-stock-take.js',
   'chunks/script-knowledge.js',
   // Phase-i role-gated chunks
