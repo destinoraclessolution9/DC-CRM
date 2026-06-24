@@ -187,7 +187,11 @@ class DataStore {
             // hierarchy traversal (reporting_to, team_id), role checks,
             // agent name display, reassign dropdowns. Profile/edit views
             // call getById which gets *.
-            users: 'id,full_name,email,phone,role,status,team_id,reporting_to,date_of_birth,created_at,updated_at',
+            // NOTE: agent_code + team are the TEXT columns the Agents list
+            // actually renders (Agent ID + Team) and filters on — saveAgent
+            // writes both as text, NOT team_id. Omitting them made every row
+            // show "N/A" / "Unassigned" regardless of the saved value.
+            users: 'id,full_name,email,phone,role,agent_code,team,status,team_id,reporting_to,date_of_birth,created_at,updated_at',
             // Activities: verified against actual DB schema 2026-04-16.
             // Excludes: consultants (JSONB blob), payment detail columns,
             // long discussion_summary field — only needed in detail/edit view.
