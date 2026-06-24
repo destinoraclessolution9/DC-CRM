@@ -42,3 +42,4 @@ These are written and ready but **must be applied from the dashboard by the owne
 - `redemption_requests_2026-06-17.sql` — fude "Redeem Points" DB-backed queue (then wire `confirmRedeemPoints`).
 - `monthly_focus_archive_unique_2026-06-17.sql` — optional `UNIQUE(user_id,month,prospect_id)` race-proofing.
 - `fude_admin_roles_TEMPLATE_2026-06-17.sql` — set the 3 legacy-allowlist admins to L1/L2 (edit before running).
+- `calendar_window_hide_birthday_auto_2026-06-24.sql` — exclude `source='birthday_auto'` touch-logs from `get_calendar_window` so birthday wish/gift logs stop leaking onto the desktop calendar as "00:00 CALL" cards. Pure `CREATE OR REPLACE` (no signature/return change); applying it immediately clears the leak with no client deploy.

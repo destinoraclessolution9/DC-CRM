@@ -3896,15 +3896,28 @@
         if (!desc) { UI.toast.error('Gift description is required.'); return; }
         const _d = new Date();
         const _localDate = `${_d.getFullYear()}-${String(_d.getMonth()+1).padStart(2,'0')}-${String(_d.getDate()).padStart(2,'0')}`;
+        const _summary = `Birthday Gift: ${desc}${value ? ` (RM ${value})` : ''}${notes ? ` — ${notes}` : ''}`;
         const _payload = {
             activity_type: 'CALL',
             activity_date: _localDate,
             source: 'birthday_auto',   // logged touch — hidden from the calendar, kept in history
-            summary: `Birthday Gift: ${desc}${value ? ` (RM ${value})` : ''}${notes ? ` — ${notes}` : ''}`,
+            summary: _summary,
             lead_agent_id: _state.cu?.id,
             created_by: _state.cu?.id
         };
         if (entityType === 'customer') _payload.customer_id = id; else _payload.prospect_id = id;
+        // De-dupe: don't pile up the SAME gift for one person on one day. Gift
+        // logging previously had no guard (unlike the wish path), so re-tapping
+        // "Log Gift" — or retrying after a slow save — stacked duplicate history
+        // rows. Keyed on the exact summary so a genuinely different gift the same
+        // day is still allowed through. Best-effort: a read failure never blocks
+        // the log.
+        try {
+            const _existing = await AppDataStore.query('activities', entityType === 'customer' ? { customer_id: id } : { prospect_id: id });
+            if ((_existing || []).some(a => a.source === 'birthday_auto' && a.activity_date === _localDate && a.summary === _summary)) {
+                UI.hideModal(); UI.toast.success('Birthday gift logged.'); return;
+            }
+        } catch (_) { /* de-dupe is best-effort */ }
         await AppDataStore.create('activities', _payload);
         UI.hideModal();
         UI.toast.success('Birthday gift logged.');
