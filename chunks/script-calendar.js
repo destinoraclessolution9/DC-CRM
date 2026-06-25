@@ -5887,7 +5887,18 @@
             AppDataStore.getAll('events').then(r => r.filter(e => e.is_active !== false && e.status !== 'inactive')),
         ]);
 
-        const content = (window.app.buildPostMeetupNotesBlock || (() => ''))('pmn', activity, { products, bujishu, formula, events });
+        // Grade picker (set AFTER the meeting): grade/cadence is a prospect-only
+        // concept. Resolve prospectId to a prospect row to seed the current grade;
+        // if it's a customer (no prospect row) the picker is simply omitted.
+        let gradeContext = null;
+        if (prospectId) {
+            try {
+                const p = await AppDataStore.getById('prospects', prospectId);
+                if (p) gradeContext = { current: p.manual_grade || '' };
+            } catch (_) { /* lookup failed → omit grade picker */ }
+        }
+
+        const content = (window.app.buildPostMeetupNotesBlock || (() => ''))('pmn', activity, { products, bujishu, formula, events, gradeContext });
         UI.showModal('📝 Post-Meetup Notes', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Save', type: 'primary', action: `(async () => { await app.savePostMeetupNotes(${activityId}, ${prospectId}); })()` }
@@ -5986,6 +5997,29 @@
 
         // Invalidate the activities cache so the accordion re-reads fresh data
         AppDataStore.invalidateCache('activities');
+
+        // ── Grade (set after the meeting) → prospect ───────────────────────
+        // The grade picker writes prospects.manual_grade, NOT activities, so it's
+        // handled here rather than in collectPostMeetupNotesData (whose payload
+        // targets the activities row). The element only exists when openModal
+        // resolved a real prospect, so its presence already scopes this to
+        // prospects. Write only when the value actually changed.
+        const gradeEl = document.getElementById('pmn-grade');
+        if (gradeEl && prospectId) {
+            const newGrade = gradeEl.value || null;
+            const curGrade = gradeEl.dataset.current || '';
+            if ((newGrade || '') !== curGrade) {
+                try {
+                    if (sb) {
+                        const { error: gErr } = await sb.from('prospects').update({ manual_grade: newGrade }).eq('id', prospectId);
+                        if (gErr) console.warn('grade update failed:', gErr);
+                    } else {
+                        await AppDataStore.update('prospects', prospectId, { manual_grade: newGrade });
+                    }
+                    AppDataStore.invalidateCache('prospects');
+                } catch (e) { console.warn('grade update threw:', e); }
+            }
+        }
 
         UI.hideModal();
         UI.toast.success('Post-meetup notes saved');

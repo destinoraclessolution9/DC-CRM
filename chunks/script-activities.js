@@ -859,17 +859,6 @@
                         ${BASIC_INFO_INTERESTS.map(([v,l]) => `<option value="${v}" ${sel(d.cps_interest, v)}>${l}</option>`).join('')}
                     </select>
                 </div>
-                ${prefix === 'cps' ? `
-                <div class="form-group">
-                    <label>Grade / 等级 <span class="required">*</span> <span style="font-weight:normal;color:var(--text-secondary);">— 决定跟进节奏</span></label>
-                    <select id="${prefix}-grade" class="form-control" ${disabled}>
-                        <option value="A" ${sel(d.manual_grade || 'C', 'A')}>A · 即将成交，立即跟进 (~3天)</option>
-                        <option value="B" ${sel(d.manual_grade || 'C', 'B')}>B · 有潜力，需要时间 (~10天)</option>
-                        <option value="C" ${sel(d.manual_grade || 'C', 'C')}>C · 一半一半 (~21天)</option>
-                        <option value="D" ${sel(d.manual_grade || 'C', 'D')}>D · 很远 (~30天)</option>
-                        <option value="F" ${sel(d.manual_grade || 'C', 'F')}>F · 放弃，不再跟进</option>
-                    </select>
-                </div>` : ''}
                 <div class="form-group">
                     <label>Marital Status</label>
                     ${readOnly
@@ -961,7 +950,7 @@
             postal_code: d(`${prefix}-postal`) || null,
             ming_gua: d(`${prefix}-minggua`) || null,
             cps_interest: d(`${prefix}-interest`) || null,
-            manual_grade: d(`${prefix}-grade`) || 'C', // grade-at-CPS: sets the follow-up rhythm; defaults to C
+            manual_grade: document.getElementById(`${prefix}-grade`)?.value || null, // grade is now set AFTER the meeting (in the Minutes modal); born ungraded — null ≡ C in the cadence engine
             marital_status: document.querySelector(`.${prefix}-marital-cb:checked`)?.value || null,
             children: JSON.stringify(collectProspectChildren()),
             referral_relationship: rel === 'Other' ? (relOther || 'Other') : rel,
@@ -1132,6 +1121,19 @@
                     </div>
                     <div style="font-size:11px;color:var(--gray-400);margin-top:3px;"><i class="fas fa-link"></i> Linked to prospect profile → Next Actions / Pipeline → Action Needed to Close Deal</div>
                 </div>
+                ${opts.gradeContext ? `
+                <div class="form-group" style="border-top:1px solid var(--gray-200);padding-top:12px;margin-top:4px;">
+                    <label>Grade / 等级 <span style="font-weight:normal;color:var(--text-secondary);">— 会面后评估，决定跟进节奏</span></label>
+                    <select id="${prefix}-grade" class="form-control" data-current="${escapeHtml(opts.gradeContext.current || '')}" ${disabled}>
+                        <option value="" ${!opts.gradeContext.current ? 'selected' : ''}>— 未评估 / Not yet graded —</option>
+                        <option value="A" ${opts.gradeContext.current === 'A' ? 'selected' : ''}>A · 即将成交，立即跟进 (~3天)</option>
+                        <option value="B" ${opts.gradeContext.current === 'B' ? 'selected' : ''}>B · 有潜力，需要时间 (~10天)</option>
+                        <option value="C" ${opts.gradeContext.current === 'C' ? 'selected' : ''}>C · 一半一半 (~21天)</option>
+                        <option value="D" ${opts.gradeContext.current === 'D' ? 'selected' : ''}>D · 很远 (~30天)</option>
+                        <option value="F" ${opts.gradeContext.current === 'F' ? 'selected' : ''}>F · 放弃，不再跟进</option>
+                    </select>
+                    <p style="color:var(--gray-400);font-size:11px;margin-top:4px;"><i class="fas fa-info-circle"></i> 见面后根据客户意向评级 — 决定跟进节奏 (A最快 ~3天 → D最慢 ~30天，F停止跟进).</p>
+                </div>` : ''}
                 ${(() => {
                     const existingPhotos = Array.isArray(a.photo_urls) ? a.photo_urls : [];
                     const thumbs = existingPhotos.map(url => `
