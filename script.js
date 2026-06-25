@@ -1680,6 +1680,7 @@ const appLogic = (() => {
 // cryptic "undefined is not an object (evaluating 'data.user')" toast.
 const Auth = {
     async login(email, password) {
+        if (!window.supabase || !window.supabase.auth) throw new Error('Authentication service is still loading. Please wait a moment and try again.');
         const response = await window.supabase.auth.signInWithPassword({
             email,
             password
@@ -1698,11 +1699,13 @@ const Auth = {
         return data.user;
     },
     async logout() {
+        if (!window.supabase || !window.supabase.auth) return;
         const response = await window.supabase.auth.signOut();
         const error = response && response.error;
         if (error) throw error;
     },
     async getCurrentUser() {
+        if (!window.supabase || !window.supabase.auth) return null;
         const response = await window.supabase.auth.getUser();
         if (!response || typeof response !== 'object') return null;
         const { data, error } = response;
@@ -1838,6 +1841,9 @@ const Auth = {
     function _armSessionWatch() {
         if (_sessionWatchArmed) return;
         _sessionWatchArmed = true;
+        // Bridge the re-login prompt to a global so the data layer (data.js getAll) can route
+        // an expired-session read failure here instead of the misleading offline/network banner.
+        try { window._showSessionExpired = _showSessionExpired; } catch (_) { /* best-effort bridge */ }
         // (1) Authoritative: supabase-js emits SIGNED_OUT when it clears a session
         // (failed refresh / invalid token / cross-tab sign-out). Only react when a
         // real, online user is still active and we didn't trigger it ourselves.

@@ -418,6 +418,25 @@ class DataStore {
         }
     }
 
+    // True ONLY when there is a stored auth session whose token is missing or expired —
+    // i.e. a session that *died*, as opposed to "never logged in" (no stored blob at all).
+    // hasLiveSession() can't tell those apart (both return false). Used by getAll()'s
+    // read-failure path to recognise an expired session masquerading as a network outage.
+    _sessionLikelyDead() {
+        try {
+            const raw = localStorage.getItem('fs-crm-auth-v1');
+            if (!raw) return false;                          // never logged in / cleanly signed out
+            const s = JSON.parse(raw);
+            const token = (s && s.access_token) || (s && s.currentSession && s.currentSession.access_token);
+            if (!token) return true;                         // stored blob but no usable token
+            const exp = (s && s.expires_at) || (s && s.currentSession && s.currentSession.expires_at);
+            return exp ? (exp * 1000) <= Date.now() : false; // expired
+        } catch (_) {
+            /* intentional: corrupt auth JSON ⇒ don't claim the session is dead */
+            return false;
+        }
+    }
+
     // One-time (per epoch) repair: earlier builds let unauthenticated reads
     // overwrite table snapshots and advance the fs_crm_*_last_sync delta
     // cursors, leaving hollowed-out caches that delta sync can never backfill
@@ -1521,6 +1540,19 @@ class DataStore {
                 || (e instanceof TypeError && /failed to fetch|network request failed|load failed/i.test(e.message || ''));
             if (isNetworkError && !window._offlineNotified) {
                 window._offlineNotified = true;
+                // A read just failed at the transport layer. Two very different causes look
+                // identical here (both surface as `TypeError: Failed to fetch`):
+                //   (a) genuine offline — keep the cached-data banner so the user can work.
+                //   (b) the live session silently expired (token gone/expired) and the failed
+                //       read is really an auth problem (the token-refresh fetch threw). Telling
+                //       the user to "check your network" is misleading — route them to re-login.
+                // Only treat it as (b) when we appear to be online (navigator.onLine); when truly
+                // offline the user can't re-auth anyway, so the cached-data banner is correct.
+                // _showSessionExpired (script.js) is idempotent and self-guards via _sessionExpiredShown.
+                if (navigator.onLine && this._sessionLikelyDead()
+                    && typeof window._showSessionExpired === 'function' && !window._sessionExpiredShown) {
+                    window._showSessionExpired('read_failed');
+                } else {
                 const banner = document.createElement('div');
                 banner.id = 'offline-banner';
                 banner.setAttribute('role', 'alert');
@@ -1581,7 +1613,12 @@ class DataStore {
                     _offlineRecoverDelay = Math.min(_offlineRecoverDelay * 2, 60000);
                     setTimeout(_offlineRecoverTick, _offlineRecoverDelay * (0.7 + Math.random() * 0.6));
                 };
-                setTimeout(_offlineRecoverTick, 4000 * (0.7 + Math.random() * 0.6));
+                // First probe fires fast (≈0.7–1.7s, jittered) so a brief connectivity
+                // blip clears the banner almost immediately instead of lingering several
+                // seconds. Subsequent probes still back off (4s→8s→…→60s) so a real outage
+                // never becomes a thundering-herd retry storm.
+                setTimeout(_offlineRecoverTick, 1200 * (0.6 + Math.random() * 0.8));
+                }
             }
             // Even when read fails, still try to push queued writes — write endpoint is separate from read.
             // Only when authenticated: anon writes just bounce off RLS and spam the network.
