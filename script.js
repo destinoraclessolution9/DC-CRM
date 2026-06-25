@@ -2145,15 +2145,19 @@ function _wireLoginBtn() {
             // Show "Still connecting…" after 5 s so the user knows we're working.
             // Cleared in the finally block whether login succeeds or fails.
             _slowHint = setTimeout(() => { if (btn.disabled) btn.querySelector('span').textContent = 'Still connecting…'; }, 5000);
-            // Wrap every login attempt in a 10-second timeout so a hung mobile
+            // Wrap every login attempt in a 30-second timeout so a hung mobile
             // network never leaves the button stuck on "Logging in..." forever.
+            // 30s (not 10s): on the current Supabase compute tier the password
+            // grant (/auth/v1/token) can take 8–13s under load, so a 10s ceiling
+            // false-failed slow-but-valid logins as "Connection timed out". The
+            // 5s "Still connecting…" hint above keeps the wait visible.
             const _withTimeout = (promise, ms, label) => Promise.race([
                 promise,
                 new Promise((_, rej) => setTimeout(() => rej(new Error(label)), ms))
             ]);
             let user;
             try {
-                user = await _withTimeout(Auth.login(email, password), 10000, 'Connection timed out. Check your internet and try again.');
+                user = await _withTimeout(Auth.login(email, password), 30000, 'Connection timed out. Check your internet and try again.');
             } catch (loginErr) {
                 if (_isQuotaErr(loginErr)) {
                     // Auth-token write failed because localStorage is full of
@@ -2162,7 +2166,7 @@ function _wireLoginBtn() {
                     // bubble up to the outer catch.
                     btn.querySelector('span').textContent = 'Clearing cache…';
                     _purgeLocalCache();
-                    user = await _withTimeout(Auth.login(email, password), 10000, 'Connection timed out. Check your internet and try again.');
+                    user = await _withTimeout(Auth.login(email, password), 30000, 'Connection timed out. Check your internet and try again.');
                     UI.toast?.warning?.('Local cache cleared to make room for login.');
                 } else {
                     throw loginErr;
