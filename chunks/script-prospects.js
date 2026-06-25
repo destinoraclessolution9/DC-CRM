@@ -4261,7 +4261,22 @@ const removeAPUForm = async (prospectId, attachmentId) => {
 // (attachment_type='evoucher'), then shares the actual image file to the
 // prospect over WhatsApp (Web Share API, wa.me + download fallback).
 // =========================================================================
-let _evGenBusy = false;
+// Serialize voucher generation: a single shared busy flag used to DROP concurrent
+// calls, which silently skipped a name when several per-row "E-Voucher" buttons (or
+// quick Add-Name auto-gens) fired in close succession. A promise-chain queue runs each
+// task in turn instead, so no name is lost. The chain survives a task failure (next
+// task still runs). Template fetch / canvas / atomic running-number RPC / upload thus
+// never overlap — the original intent of the busy flag — without dropping work.
+let _evGenChain = Promise.resolve();
+const _evGenSerialize = (task) => {
+    const result = _evGenChain.then(task, task); // run after the prior task settles (ok OR fail)
+    _evGenChain = result.then(() => {}, () => {}); // keep the queue alive; swallow to avoid poisoning it
+    return result;
+};
+// The top-button (ad-hoc) flow has NO per-name dedup, so a double-click would mint a
+// second voucher. Keep a lightweight re-entrancy guard there to ignore double-submits
+// (the per-row flow is idempotent via its name_id dedup, so it doesn't need this).
+let _evTopBusy = false;
 const _evBlobCache = {}; // attachmentId -> freshly-generated PNG Blob (skips refetch for the share gesture)
 
 const _evIsVoucherAdmin = () =>
@@ -4414,12 +4429,12 @@ const _evGenerateForName = async (prospectId, name, nameId = null, opts = {}) =>
 
 // Top-button flow: read the typed name and generate an ad-hoc voucher (name_id=null).
 const generateEvoucher = async (prospectId) => {
-    if (_evGenBusy) return;
+    if (_evTopBusy) return;
     const name = (document.getElementById('ev-name')?.value || '').trim();
     if (!name) { UI.toast.error('Please enter the holder name'); return; }
-    _evGenBusy = true;
+    _evTopBusy = true;
     try {
-        const row = await _evGenerateForName(prospectId, name, null);
+        const row = await _evGenSerialize(() => _evGenerateForName(prospectId, name, null));
         if (!row) return;
         UI.hideModal();
         UI.toast.success(`E-Voucher ${row.metadata?.voucher_code || ''} generated`);
@@ -4429,7 +4444,7 @@ const generateEvoucher = async (prospectId) => {
         console.error('E-Voucher generate failed:', err);
         UI.toast.error('Generate failed: ' + (err.message || 'Unknown error'));
     } finally {
-        _evGenBusy = false;
+        _evTopBusy = false;
     }
 };
 
@@ -4437,38 +4452,40 @@ const generateEvoucher = async (prospectId) => {
 // Called auto on Add Name (opts.silent) and by the per-row "E-Voucher" button.
 // Skips if that name already has a voucher (no duplicate serials).
 const generateEvoucherForName = async (prospectId, name, nameId, opts = {}) => {
-    if (_evGenBusy) return null;
     name = (name || '').trim();
     if (!name) { if (!opts.silent) UI.toast.error('Name is required'); return null; }
-    _evGenBusy = true;
-    try {
-        if (nameId != null) {
-            const existing = await AppDataStore.query('prospect_attachments', { prospect_id: prospectId });
-            const dup = (existing || []).find(a => a.attachment_type === 'evoucher' && a.metadata && String(a.metadata.name_id) === String(nameId));
-            if (dup) {
-                if (!opts.silent) {
-                    UI.toast.success('This name already has a voucher.');
-                    const b = document.getElementById(`acc-body-names-${prospectId}`);
-                    if (b) await switchProspectTab('names', prospectId, null, b);
+    // Serialized so rapid per-row clicks / Add-Name auto-gens each generate in turn
+    // instead of being dropped by a busy flag. The name_id dedup runs INSIDE the
+    // critical section, so a double-fire for the same name returns the existing
+    // voucher rather than minting a duplicate serial.
+    return _evGenSerialize(async () => {
+        try {
+            if (nameId != null) {
+                const existing = await AppDataStore.query('prospect_attachments', { prospect_id: prospectId });
+                const dup = (existing || []).find(a => a.attachment_type === 'evoucher' && a.metadata && String(a.metadata.name_id) === String(nameId));
+                if (dup) {
+                    if (!opts.silent) {
+                        UI.toast.success('This name already has a voucher.');
+                        const b = document.getElementById(`acc-body-names-${prospectId}`);
+                        if (b) await switchProspectTab('names', prospectId, null, b);
+                    }
+                    return dup;
                 }
-                return dup;
             }
+            const row = await _evGenerateForName(prospectId, name, nameId, opts);
+            if (!row) return null;
+            if (!opts.silent) {
+                UI.toast.success(`E-Voucher ${row.metadata?.voucher_code || ''} generated`);
+                const bodyEl = document.getElementById(`acc-body-names-${prospectId}`);
+                if (bodyEl) await switchProspectTab('names', prospectId, null, bodyEl);
+            }
+            return row;
+        } catch (err) {
+            console.error('Per-name e-voucher generate failed:', err);
+            if (!opts.silent) UI.toast.error('Generate failed: ' + (err.message || 'Unknown error'));
+            return null;
         }
-        const row = await _evGenerateForName(prospectId, name, nameId, opts);
-        if (!row) return null;
-        if (!opts.silent) {
-            UI.toast.success(`E-Voucher ${row.metadata?.voucher_code || ''} generated`);
-            const bodyEl = document.getElementById(`acc-body-names-${prospectId}`);
-            if (bodyEl) await switchProspectTab('names', prospectId, null, bodyEl);
-        }
-        return row;
-    } catch (err) {
-        console.error('Per-name e-voucher generate failed:', err);
-        if (!opts.silent) UI.toast.error('Generate failed: ' + (err.message || 'Unknown error'));
-        return null;
-    } finally {
-        _evGenBusy = false;
-    }
+    });
 };
 
 // Share the generated voucher IMAGE to the prospect. Primary: Web Share API
