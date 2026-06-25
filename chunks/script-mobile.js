@@ -1080,7 +1080,7 @@
                 rows.push(`
                 <div class="mhome-att-row followup" id="mhome-fu-${fd.id}">
                     <div class="mhome-att-avatar">${_mhomeEsc(_mhomeInitials(nm))}</div>
-                    <div class="mhome-att-text"${_pid != null ? ` style="cursor:pointer;" onclick="app.mcalOpenPerson('${_pid}')"` : ''}>
+                    <div class="mhome-att-text"${_pid != null ? ` style="cursor:pointer;" onclick="app.mcalOpenPerson('${_pid}', ${_isCust})"` : ''}>
                         <div class="mhome-att-name">${_mhomeEsc(nm)}${_agent ? ` <span style="font-size:10px;color:#9CA3AF;font-weight:400;">· ${_mhomeEsc(_agent)}</span>` : ''}</div>
                         <div class="mhome-att-need">${_mhomeEsc(_reasonLabel(fd.trigger_type))}</div>
                         <div class="mhome-att-sub">${_mhomeEsc(sub)}</div>
@@ -1448,9 +1448,25 @@
         AppDataStore.update('follow_up_drafts', draftId, { status: 'sent', updated_at: new Date().toISOString() }).catch(() => {});
         if (personId != null && personId !== 'null') {
             const tbl = isCustomer ? 'customers' : 'prospects';
-            const fld = isCustomer ? 'last_contact_date' : 'last_activity_date';
-            AppDataStore.update(tbl, personId, { [fld]: today }).catch(() => {});
+            // Contacted = clock advances; for prospects also clear the re-engagement back-off
+            // (desktop _logFollowUpContact parity) so the cadence resets cleanly.
+            const patch = isCustomer ? { last_contact_date: today } : { last_activity_date: today, follow_mode: 'active', silence_count: 0 };
+            AppDataStore.update(tbl, personId, patch).catch(() => {});
         }
+        // Prune the just-sent draft from the Home drafts snapshot (mhome-drafts-v1-<uid>, 5-min
+        // TTL) so it doesn't resurface on the next Home visit before the throttled re-query fires
+        // — the DB row is already status='sent'; this keeps the cached list in step (audit fix).
+        try {
+            const _k = 'mhome-drafts-v1-' + String(_state.cu?.id || 'anon');
+            const _raw = localStorage.getItem(_k);
+            if (_raw) {
+                const _o = JSON.parse(_raw);
+                if (_o && Array.isArray(_o.val)) {
+                    _o.val = _o.val.filter(d => String(d.id) !== String(draftId));
+                    localStorage.setItem(_k, JSON.stringify(_o));
+                }
+            }
+        } catch (_) { /* best-effort snapshot prune */ }
         _mhomeDropFollowupRow(draftId);
     };
 
@@ -1530,7 +1546,7 @@
             return `
             <div id="followup-row-${d.id}" style="display:flex;align-items:center;gap:12px;padding:12px;background:var(--gray-50,#f9fafb);border-radius:12px;border-left:4px solid #ef4444;transition:opacity .4s ease,max-height .4s ease;">
                 <div style="width:38px;height:38px;border-radius:50%;background:#fee2e2;color:#b91c1c;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0;">${_mhomeEsc(_mhomeInitials(name))}</div>
-                <div style="flex:1;min-width:0;${_pid != null ? 'cursor:pointer;' : ''}"${_pid != null ? ` onclick="app.mcalOpenPerson('${_pid}')"` : ''}>
+                <div style="flex:1;min-width:0;${_pid != null ? 'cursor:pointer;' : ''}"${_pid != null ? ` onclick="app.mcalOpenPerson('${_pid}', ${_isCust})"` : ''}>
                     <div style="font-weight:600;font-size:14px;color:var(--gray-800,#1f2937);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_mhomeEsc(name)}${_agent ? ` <span style="font-size:10px;color:#9CA3AF;font-weight:400;">· ${_mhomeEsc(_agent)}</span>` : ''}</div>
                     <div style="font-size:12px;color:#dc2626;font-weight:500;margin-top:2px;">${due}</div>
                 </div>
@@ -1607,52 +1623,6 @@
         UI.showModal('Refills Due', _mhomeSheetScroll(head + body), _mhomeSheetBtns);
     };
 
-    // Inactive customers — same predicate as the home tile (status 'inactive',
-    // or last contact > 60 days ago). Tap a row to open the customer profile.
-    const mhomeOpenInactive = async () => {
-        UI.showModal('Inactive Clients', _mhomeSheetLoading, _mhomeSheetBtns);
-        let customers = [];
-        try { customers = await AppDataStore.getAll('customers').catch(() => []); } catch (_) { /* intentional: keeps empty default → empty sheet */ }
-        if (!_mhomeOverlayOpen()) return;
-        const sixtyAgo = Date.now() - 60 * 86400000;
-        const isInactive = (c) => {
-            if (c.status === 'inactive') return true;
-            const lc = c.last_contact_date || c.updated_at || c.created_at;
-            if (!lc) return false;
-            const t = new Date(lc).getTime();
-            return !isNaN(t) && t < sixtyAgo;
-        };
-        const daysSince = (c) => {
-            const lc = c.last_contact_date || c.updated_at || c.created_at;
-            const t = lc ? new Date(lc).getTime() : NaN;
-            return isNaN(t) ? null : Math.floor((Date.now() - t) / 86400000);
-        };
-        const rows = (customers || [])
-            .filter(isInactive)
-            .sort((a, b) => (daysSince(b) ?? 99999) - (daysSince(a) ?? 99999));
-        if (!rows.length) {
-            UI.showModal('Inactive Clients', _mhomeSheetEmpty('fas fa-user-check', 'No inactive clients — nicely kept up!'), _mhomeSheetBtns);
-            return;
-        }
-        const body = rows.map(c => {
-            const d = daysSince(c);
-            const sub = d == null ? 'Never contacted' : `Last contact ${d} day${d === 1 ? '' : 's'} ago`;
-            const phone = UI.escJsAttr(c.phone || '');
-            return `
-            <div style="display:flex;align-items:center;gap:12px;padding:12px;background:var(--gray-50,#f9fafb);border-radius:12px;border-left:4px solid #8b5cf6;cursor:pointer;" onclick="UI.hideModal();app.showCustomerDetail(${c.id});">
-                <div style="width:38px;height:38px;border-radius:50%;background:#ede9fe;color:#6d28d9;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0;">${_mhomeEsc(_mhomeInitials(c.full_name))}</div>
-                <div style="flex:1;min-width:0;">
-                    <div style="font-weight:600;font-size:14px;color:var(--gray-800,#1f2937);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_mhomeEsc(c.full_name || 'Unknown')}</div>
-                    <div style="font-size:12px;color:var(--gray-500,#6b7280);margin-top:2px;">${_mhomeEsc(sub)}</div>
-                </div>
-                ${phone ? `<button class="btn primary btn-sm" style="font-size:13px;padding:8px 12px;flex-shrink:0;" onclick="event.stopPropagation();app.mhomeWa(${c.id ?? 'null'},'${phone}');" title="WhatsApp"><i class="fab fa-whatsapp"></i></button>` : ''}
-                <i class="fas fa-chevron-right" style="color:var(--gray-300,#d1d5db);font-size:12px;flex-shrink:0;"></i>
-            </div>`;
-        }).join('');
-        const head = `<div style="font-size:13px;color:var(--gray-500,#6b7280);margin:0 2px 2px;">${rows.length} inactive · longest first</div>`;
-        UI.showModal('Inactive Clients', _mhomeSheetScroll(head + body), _mhomeSheetBtns);
-    };
-
     // ── Mobile Calendar (month grid) ─────────────────────────
     // Custom mobile-only month-grid layout that matches the Home dashboard's
     // brand palette. Uses the same activity dataset as the desktop calendar.
@@ -1668,12 +1638,32 @@
     // are admin-managed in Marketing ▸ Automation ▸ Birthday Posters (stored in
     // the automation_config singleton) so they can be refreshed every year with
     // no code change. We prefetch the images into blobs once per session so the
-    // WhatsApp file-share can run synchronously inside the tap gesture — the Web
-    // Share API needs transient activation, which an await-to-fetch at tap time
-    // would consume (same lesson as mhomeWa / sendVoucherWhatsApp / the calendar
-    // reminder poster prefetch). male = navy poster, female = pink poster.
+    // birthday WhatsApp button can copy the poster to the clipboard synchronously
+    // inside the tap (mcalBirthdayWa: clipboard-write-then-open-chat) without an
+    // await-to-fetch at tap time. male = navy poster, female = pink poster.
     let _mcalBdayBlob = { male: null, female: null };
     let _mcalBdayWarmed = false;
+    // Clipboard image-write requires PNG on Chrome (image/jpeg throws). Normalize
+    // any uploaded format → PNG at warm time (off the tap gesture). PNG passes
+    // through untouched; decode failure falls back to the original blob.
+    const _toPngBlob = (blob) => new Promise((resolve) => {
+        if (!blob) return resolve(null);
+        if (blob.type === 'image/png') return resolve(blob);
+        try {
+            const img = new Image();
+            const u = URL.createObjectURL(blob);
+            img.onload = () => {
+                try {
+                    const c = document.createElement('canvas');
+                    c.width = img.naturalWidth; c.height = img.naturalHeight;
+                    c.getContext('2d').drawImage(img, 0, 0);
+                    c.toBlob(b => { URL.revokeObjectURL(u); resolve(b || blob); }, 'image/png');
+                } catch (_) { URL.revokeObjectURL(u); resolve(blob); }
+            };
+            img.onerror = () => { URL.revokeObjectURL(u); resolve(blob); };
+            img.src = u;
+        } catch (_) { resolve(blob); }
+    });
     const _mcalWarmBdayPosters = async () => {
         if (_mcalBdayWarmed) return;
         _mcalBdayWarmed = true;
@@ -1684,6 +1674,7 @@
             const _grab = (url, key) => {
                 if (!url || _mcalBdayBlob[key]) return;
                 fetch(url).then(r => r.ok ? r.blob() : null)
+                    .then(b => b ? _toPngBlob(b) : null)
                     .then(b => { if (b && b.size) _mcalBdayBlob[key] = b; })
                     .catch(() => { /* intentional: poster fetch failed → birthday WA falls back to text-only */ });
             };
@@ -2447,26 +2438,28 @@
         const person = _mcalPersonMap.get(String(id));
         if (!person || !_mhomeWaPhone(person.phone)) return;
         const greeting = `Happy Birthday, ${person.full_name || ''}! 🎂 Wishing you a wonderful year ahead.`;
-        // Gendered poster: female → pink, everyone else (male/other/unknown) →
-        // navy. PRIMARY path shares the actual image file + caption via the Web
-        // Share API — must run synchronously inside the tap (no await before it)
-        // or the transient activation is lost. The blob is pre-warmed on load.
+        // Option 2 — "direct chat + paste the poster". female → pink, everyone
+        // else (male/other/unknown) → navy. We COPY the poster to the clipboard
+        // FIRST (awaited, while this page still has focus — a clipboard write
+        // after we hand off to WhatsApp is rejected for "document not focused"),
+        // THEN open the prospect's chat directly (mhomeWa → window.open, so this
+        // page stays alive and the wish still logs below). In the chat the agent
+        // taps the message box → Paste → the poster drops in as a real inline
+        // image, greeting already pre-filled. The blob is pre-warmed + PNG-
+        // normalized on load so the copy needs no fetch at tap time.
         const _g = String(person.gender || '').trim().toLowerCase();
         const _isFemale = _g.startsWith('f') || _g.includes('女');
         const _posterBlob = _isFemale ? _mcalBdayBlob.female : _mcalBdayBlob.male;
-        let _shared = false;
-        if (_posterBlob && navigator.share && navigator.canShare) {
+        let _copied = false;
+        if (_posterBlob && navigator.clipboard && window.ClipboardItem) {
             try {
-                const _file = new File([_posterBlob], 'happy-birthday.jpg', { type: _posterBlob.type || 'image/jpeg' });
-                if (navigator.canShare({ files: [_file] })) {
-                    navigator.share({ files: [_file], text: greeting }).catch(() => {});
-                    _shared = true;
-                }
-            } catch (_) { /* fall through to text-only wa.me */ }
+                await navigator.clipboard.write([new ClipboardItem({ 'image/png': _posterBlob })]);
+                _copied = true;
+            } catch (_) { /* clipboard image unsupported/denied → open chat with text only */ }
         }
-        // Fallback (gesture-safe): no poster blob or no file-share support →
-        // open the WhatsApp chat with the text greeting (sync, before any await).
-        if (!_shared) mhomeWa(id, person.phone, greeting);
+        mhomeWa(id, person.phone, greeting); // open the prospect's chat (greeting pre-filled)
+        if (_copied) UI.toast.success('📋 Poster copied! In the chat: tap the message box → Paste, then Send.');
+        else if (_posterBlob) UI.toast.info('Chat opened with the greeting — the poster could not auto-copy on this device.');
         // Log the wish as an activity — parity with desktop executeSendBirthdayWish.
         // The mobile people map merges prospects + customers with NO type tag, so
         // resolve the entity by id at send-time. Wrapped in try/catch so a logging
@@ -2495,9 +2488,19 @@
     };
     // Open a birthday person's profile — mirrors mcalOpenEvent: try prospect,
     // then customer, routing to the matching detail view. id-only.
-    const mcalOpenPerson = async (id) => {
+    const mcalOpenPerson = async (id, isCustomer) => {
         try { UI.hideModal(); } catch (_) { /* intentional: best-effort modal cleanup before navigating */ }
         try {
+            // Prospects + customers have independent id sequences, so a bare id is ambiguous
+            // (low ids overlap). When the caller knows the type (follow-up rows pass isCustomer),
+            // probe that table FIRST so a same-id record of the wrong type isn't opened.
+            if (isCustomer) {
+                const c = await AppDataStore.getById('customers', id);
+                if (c) { await window.app.showCustomerDetail(id); return; }
+                const p = await AppDataStore.getById('prospects', id);
+                if (p) { await window.app.showProspectDetail(id); return; }
+                return;
+            }
             const p = await AppDataStore.getById('prospects', id);
             if (p) { await window.app.showProspectDetail(id); return; }
             const c = await AppDataStore.getById('customers', id);
@@ -3565,7 +3568,6 @@
         mhomeFollowupWa,
         mhomeOpenFollowups,
         mhomeOpenRefills,
-        mhomeOpenInactive,
         showMobileCalendarView,
         showMobileCalendarWeek,
         showMobileCalendarDay,
