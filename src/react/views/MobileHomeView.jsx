@@ -142,7 +142,7 @@ function AttentionCard({ rows }) {
             {rows.map((r, i) => r.type === 'followup' ? (
                 <div className="mhome-att-row followup" key={i}>
                     <div className="mhome-att-avatar">{r.initials}</div>
-                    <div className="mhome-att-text" style={r.personId != null ? { cursor: 'pointer' } : undefined} onClick={() => { if (r.personId != null) callArgs('mcalOpenPerson', String(r.personId)); }}>
+                    <div className="mhome-att-text" style={r.personId != null ? { cursor: 'pointer' } : undefined} onClick={() => { if (r.personId != null) callArgs('mcalOpenPerson', String(r.personId), !!r.isCustomer); }}>
                         <div className="mhome-att-name">{r.name}{r.agent ? <span style={{ fontSize: '10px', color: '#9CA3AF', fontWeight: 400 }}> · {r.agent}</span> : null}</div>
                         <div className="mhome-att-need">{r.need}</div>
                         <div className="mhome-att-sub">{r.sub}</div>
