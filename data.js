@@ -191,7 +191,7 @@ class DataStore {
             // actually renders (Agent ID + Team) and filters on — saveAgent
             // writes both as text, NOT team_id. Omitting them made every row
             // show "N/A" / "Unassigned" regardless of the saved value.
-            users: 'id,full_name,email,phone,role,agent_code,team,status,team_id,reporting_to,date_of_birth,created_at,updated_at',
+            users: 'id,full_name,email,phone,role,agent_code,team,status,team_id,reporting_to,date_of_birth,employment_type,created_at,updated_at',
             // Activities: verified against actual DB schema 2026-04-16.
             // Excludes: consultants (JSONB blob), payment detail columns,
             // long discussion_summary field — only needed in detail/edit view.
