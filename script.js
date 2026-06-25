@@ -1768,6 +1768,7 @@ const Auth = {
     }
 
     async function logout() {
+        try { window._sessionWatchSuppressed = true; } catch (_) { /* suppress the expired-session prompt during an intentional sign-out */ }
         await Auth.logout();
         _currentUser = null;
         try { (window.app._clearMobileSnapshots || (() => {}))(); } catch (_) { /* intentional: best-effort cache wipe */ } // wipe per-user mobile Home/Calendar caches (shared-device leak)
@@ -1793,6 +1794,7 @@ const Auth = {
     // Used by the "not you? Switch account" banner that appears when a saved
     // session is auto-restored on a shared device.
     async function switchAccount() {
+        try { window._sessionWatchSuppressed = true; } catch (_) { /* suppress the expired-session prompt during an intentional account switch */ }
         try {
             await Auth.logout();
         } catch (_) { /* sign out even if the network call fails */ }
@@ -1815,6 +1817,94 @@ const Auth = {
         // into the next login on a shared device (see logout() for rationale).
         try { window._sessionTimeoutArmed = false; } catch (_) { /* noop */ }
         setTimeout(() => { try { location.reload(); } catch (_) { /* reload best-effort */ } }, 600);
+    }
+
+    // ── Silently-expired-session guard ───────────────────────────────────────
+    // A session can die AFTER the app has loaded (refresh-token expiry, an
+    // invalidated token, or a sign-out in another tab). When that happens the
+    // in-memory `_currentUser` survives, so the shell keeps rendering as if the
+    // user were logged in — but every Supabase read is now RLS-filtered to zero
+    // rows, producing empty lists that look like broken features (e.g. an empty
+    // Potential Pipeline). This guard detects that state and prompts re-login
+    // instead of leaving the user on a hollow shell.
+    //
+    // SAFETY: it must NEVER bounce a user who is merely OFFLINE with a still-valid
+    // token (a temporary 521 / network blip). It therefore (1) ignores the
+    // `_offline` resume user, (2) does a cheap sync token check first, and (3)
+    // only acts on a *definitive* no-session from supabase-js — never on an
+    // ambiguous network error. This mirrors the startup rule that only forces
+    // logout on an explicit 401/403, not on a failed fetch.
+    let _sessionWatchArmed = false;
+    function _armSessionWatch() {
+        if (_sessionWatchArmed) return;
+        _sessionWatchArmed = true;
+        // (1) Authoritative: supabase-js emits SIGNED_OUT when it clears a session
+        // (failed refresh / invalid token / cross-tab sign-out). Only react when a
+        // real, online user is still active and we didn't trigger it ourselves.
+        try {
+            window.supabase && window.supabase.auth && window.supabase.auth.onAuthStateChange((event) => {
+                if (event !== 'SIGNED_OUT') return;
+                if (window._sessionWatchSuppressed) return;      // our own logout/switchAccount
+                if (!_currentUser || _currentUser._offline) return;
+                _showSessionExpired('signed_out');
+            });
+        } catch (_) { /* listener registration best-effort */ }
+        // (2) Catch a session that expired while the tab was backgrounded (no
+        // SIGNED_OUT fired yet) — re-check on refocus, reconnect, and a slow drip.
+        // The sync pre-check inside _checkSessionAlive makes these near-free when
+        // the token is still live.
+        try { document.addEventListener('visibilitychange', () => { if (!document.hidden) _checkSessionAlive('visibility'); }); } catch (_) { /* best-effort */ }
+        try { window.addEventListener('online', () => _checkSessionAlive('online')); } catch (_) { /* best-effort */ }
+        try { setInterval(() => { if (!document.hidden) _checkSessionAlive('interval'); }, 240000); } catch (_) { /* best-effort */ }
+    }
+
+    // Conservative liveness probe. Returns without acting unless the live session
+    // is *definitively* gone (token absent/expired AND supabase-js confirms no
+    // session, with no ambiguous error). Fire-and-forget friendly.
+    async function _checkSessionAlive(reason) {
+        if (!_currentUser || _currentUser._offline) return;          // logged-out shell only; never the offline user
+        if (window._sessionExpiredShown || window._sessionWatchSuppressed) return;
+        if (window._SUPABASE_LIB_FAILED) return;                     // lib never loaded — a different failure mode
+        let live = true;
+        try { live = !window.AppDataStore || AppDataStore.hasLiveSession(); } catch (_) { live = true; }
+        if (live) return;                                            // token present + unexpired (or offline w/ valid token) → fine
+        // Local token missing/expired — confirm with supabase-js (it will attempt a
+        // refresh) before disrupting the user. Only a clean no-session acts.
+        try {
+            const { data, error } = await window.supabase.auth.getSession();
+            if (error) return;                                       // ambiguous (network) → leave the user alone
+            if (data && data.session) return;                        // refresh repopulated it → self-healed
+        } catch (_) { return; }                                      // ambiguous → leave the user alone
+        _showSessionExpired(reason);
+    }
+
+    // Non-destructive re-login prompt. Self-contained overlay so it works whether
+    // or not the app-shell is mounted, and sits above modals/toasts. Nothing is
+    // wiped until the user chooses to sign in (which reloads to the login screen).
+    function _showSessionExpired(reason) {
+        if (window._sessionExpiredShown) return;
+        window._sessionExpiredShown = true;
+        try { console.warn('[session] live Supabase session lost (' + (reason || '') + ') — prompting re-login'); } catch (_) { /* noop */ }
+        try {
+            if (document.getElementById('_session_expired_overlay')) return;
+            const ov = document.createElement('div');
+            ov.id = '_session_expired_overlay';
+            ov.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;';
+            ov.innerHTML =
+                '<div role="alertdialog" aria-modal="true" aria-labelledby="_se_title" style="background:#fff;border-radius:14px;max-width:380px;width:100%;padding:26px 24px;box-shadow:0 12px 40px rgba(0,0,0,.25);text-align:center;font-family:inherit;">'
+              + '<div style="font-size:34px;line-height:1;margin-bottom:12px;">🔒</div>'
+              + '<h3 id="_se_title" style="margin:0 0 8px;font-size:19px;color:#111827;">Your session has expired</h3>'
+              + '<p style="margin:0 0 18px;color:#6b7280;font-size:14px;line-height:1.5;">You’ve been signed out, so the app can no longer load your data — lists may appear empty. Please sign in again to continue.</p>'
+              + '<button id="_se_signin" type="button" style="width:100%;padding:12px;border:none;background:#be123c;color:#fff;font-size:15px;font-weight:600;border-radius:9px;cursor:pointer;">Sign in again</button>'
+              + '</div>';
+            document.body.appendChild(ov);
+            const go = () => { try { window._sessionWatchSuppressed = true; } catch (_) { /* noop */ } try { location.reload(); } catch (_) { /* reload best-effort */ } };
+            const btn = ov.querySelector('#_se_signin');
+            if (btn) btn.onclick = go;
+        } catch (_) {
+            // DOM build failed — last resort: hard reload straight to the login screen.
+            try { location.reload(); } catch (_) { /* noop */ }
+        }
     }
 
 // Native MFA (Supabase auth.mfa / AAL2) login gate. Returns true if login may
@@ -2661,6 +2751,7 @@ function _wireLoginBtn() {
         document.getElementById('app-shell').style.display = 'block';
         updateUserDisplay();
         updateNavVisibility();
+        _armSessionWatch();   // detect a silently-expired session → prompt re-login instead of a blank shell
         setTimeout(_initNotifBell, 800); // wire bell after shell is visible
 
         // Fire-and-forget the sync module initializers — they have no awaitable
@@ -3762,6 +3853,12 @@ function _wireLoginBtn() {
             if (viewId !== _fallbackView) { await navigateTo(_fallbackView); }
             return;
         }
+        // Runtime dead-session guard: if the app still believes a (non-offline)
+        // user is active but the live Supabase session has silently expired,
+        // surface a re-login prompt rather than render an empty, RLS-filtered
+        // view. Fire-and-forget — the cheap sync pre-check inside returns instantly
+        // when the token is still live, so navigation is never delayed.
+        try { if (_currentUser) _checkSessionAlive('nav'); } catch (_) { /* guard is best-effort */ }
         const _chunkDef = _CHUNK_VIEWS[viewId];
         if (_chunkDef) {
             const _userLevel = _currentUser ? _getUserLevel(_currentUser) : 99;
