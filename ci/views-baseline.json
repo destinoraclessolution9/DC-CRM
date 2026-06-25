@@ -147,6 +147,11 @@
         1
       ]
     },
+    "npo": {
+      "src": "chunks/script-npo.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
     "knowledge": {
       "src": "chunks/script-knowledge.min.js",
       "minLevel": null,
@@ -300,6 +305,7 @@
     "egg_purchasing": "Egg Purchasing",
     "boss_report": "Boss Report",
     "quarter_review": "Quarter Review",
+    "npo": "NPO",
     "knowledge": "Knowledge HQ",
     "formula_purchaser": "Formula Purchaser",
     "marketing_automation": "Marketing Automation",
@@ -353,6 +359,7 @@
       "stock-take",
       "boss-report",
       "quarter-review",
+      "npo",
       "org-chart",
       "ai-insights",
       "security",
@@ -387,6 +394,7 @@
       "milestones",
       "noticeboard",
       "custom_fields",
+      "npo",
       "org-chart",
       "ai-insights",
       "security",
@@ -410,6 +418,7 @@
       "knowledge",
       "settings",
       "fude",
+      "npo",
       "order-form-extract"
     ],
     "4": [
@@ -426,6 +435,7 @@
       "knowledge",
       "settings",
       "fude",
+      "npo",
       "order-form-extract"
     ],
     "5": [
@@ -437,7 +447,8 @@
       "promotions",
       "cases",
       "milestones",
-      "reports"
+      "reports",
+      "npo"
     ],
     "6": [
       "calendar",
@@ -448,7 +459,8 @@
       "promotions",
       "cases",
       "milestones",
-      "reports"
+      "reports",
+      "npo"
     ],
     "7": [
       "calendar",
@@ -459,7 +471,8 @@
       "promotions",
       "cases",
       "milestones",
-      "reports"
+      "reports",
+      "npo"
     ],
     "8": [
       "calendar",
@@ -470,7 +483,8 @@
       "promotions",
       "cases",
       "milestones",
-      "reports"
+      "reports",
+      "npo"
     ],
     "9": [
       "calendar",
@@ -481,7 +495,8 @@
       "promotions",
       "cases",
       "milestones",
-      "reports"
+      "reports",
+      "npo"
     ],
     "10": [
       "calendar",
@@ -492,7 +507,8 @@
       "promotions",
       "cases",
       "milestones",
-      "reports"
+      "reports",
+      "npo"
     ],
     "11": [
       "calendar",
@@ -502,14 +518,16 @@
       "pipeline",
       "promotions",
       "cases",
-      "milestones"
+      "milestones",
+      "npo"
     ],
     "12": [
       "noticeboard",
       "fude",
       "milestones",
       "prospects",
-      "referrals"
+      "referrals",
+      "npo"
     ],
     "13": [
       "noticeboard",

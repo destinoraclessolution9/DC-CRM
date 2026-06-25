@@ -495,6 +495,73 @@
         </div>`;
     };
 
+    // ── NPO contribution to the weekly PORT (PO bucket) figures ──────────────
+    // NPO (installment-package deals) are recorded in the `npo_sales` table — a
+    // Phase-2 table that may NOT be applied yet (see migrations/npo_feature_*.sql).
+    // Owner-confirmed: NPO counts under PORT (the PO bucket), NEVER under RMT.
+    //
+    // Returns { count, dp, total } for the report's OWN week window, scoped to the
+    // viewer EXACTLY like the purchase getters (_visibleUserIds → responsible_agent_id;
+    // for an agent that's their own rows only). The _currentRoleFilter side can't be
+    // applied here without an extra users join keyed on responsible_agent_id, but the
+    // _visibleUserIds id-set already restricts to the viewer's scope (an agent only
+    // ever sees their own id), so the agent/team contract holds.
+    //
+    // FAIL SAFE: returns null on ANY failure — no supabase client, table missing
+    //   (PGRST205 / 42P01 "relation does not exist"), query error, or a malformed
+    //   payload. A null result means the caller leaves the PORT cells exactly as the
+    //   existing PO getters set them (and PORT(DP) stays MANUAL), never writing a
+    //   wrong/zero NPO figure to a boss-facing report.
+    //
+    // Window: `from`/`to` are YYYY-MM-DD (Mon→Sun). created_at is a timestamp, so we
+    //   bound created_at >= from(00:00) AND < (Sunday + 1 day)(00:00) to include the
+    //   whole final day regardless of time-of-day.
+    const _getNPOWeekAgg = async (from, to) => {
+        const sb = window.supabase || window.supabaseClient || null;
+        if (!sb || typeof sb.from !== 'function') return null;
+        try {
+            // Inclusive upper bound: start of the day AFTER `to`.
+            const toNext = new Date(to + 'T00:00:00');
+            if (!Number.isFinite(toNext.getTime())) return null;
+            toNext.setDate(toNext.getDate() + 1);
+            const toNextStr = toLocalDateStr(toNext);
+
+            let q = sb.from('npo_sales')
+                .select('first_payment, cart_total, responsible_agent_id')
+                .gte('created_at', from)
+                .lt('created_at', toNextStr);
+
+            // Scope to the viewer's visible agents (responsible_agent_id). For an
+            // agent _visibleUserIds is already clamped to [their own id] upstream.
+            if (_visibleUserIds !== 'all' && Array.isArray(_visibleUserIds)) {
+                const ids = _visibleUserIds.map(v => Number(v)).filter(n => Number.isFinite(n));
+                if (ids.length === 0) {
+                    // Scoped but no resolvable ids → fail closed (no NPO contribution).
+                    return { count: 0, dp: 0, total: 0 };
+                }
+                q = q.in('responsible_agent_id', ids);
+            }
+
+            const { data, error } = await q;
+            // error.code 'PGRST205' = table not in schema cache; '42P01' = relation
+            // does not exist. Either way the table isn't applied → leave cells manual.
+            if (error || !Array.isArray(data)) return null;
+
+            let count = 0, dp = 0, total = 0;
+            for (const r of data) {
+                count++;
+                const fp = parseFloat(r.first_payment);
+                const ct = parseFloat(r.cart_total);
+                if (Number.isFinite(fp)) dp += fp;
+                if (Number.isFinite(ct)) total += ct;
+            }
+            return { count, dp, total };
+        } catch (_) {
+            // Network failure / missing table / unexpected shape → leave cells manual.
+            return null;
+        }
+    };
+
     // ── Auto-fill (boss-facing report — only DEFINITE, code-grounded mappings) ──
     // The report's abbreviations are business-internal. A field is auto-filled
     // ONLY when an existing getter's meaning is an UNAMBIGUOUS, code-grounded match
@@ -529,21 +596,33 @@
     //   NC    → getConvertedCustomers(from,to)  prospect→customer conversions
     //           (customer_since in range, NO purchase required — owner's definition).
     //
-    //   POR         → getPOPCaseCount  (PO=POP closed-case count)
-    //   RMT         → getDOSales       (DO=full-payment, i.e. non-POP, sales RM)
-    //   PORT(TOTAL) → getPOPSales      (PO=POP total sales RM)
-    //   TTO         → RMT + PORT(TOTAL) (owner's formula = total turnover)
+    //   POR         → getPOPCaseCount + NPO count   (PO=POP closed cases + NPO orders)
+    //   RMT         → getDOSales       (DO=full-payment, i.e. non-POP, sales RM) — NPO
+    //                 is NEVER added here (owner: NPO belongs under PORT, not RMT).
+    //   PORT(DP)    → sum(npo_sales.first_payment) this week — filled ONLY when the
+    //                 npo_sales table exists; otherwise MANUAL (see below).
+    //   PORT(TOTAL) → getPOPSales + sum(npo_sales.cart_total)  (PO total RM + NPO RM)
+    //   TTO         → RMT + PORT(TOTAL-from-purchases) (owner's PENDING formula — left
+    //                 exactly as-is; NPO is NOT folded into TTO by owner instruction).
+    //
+    // NPO (installment-package deals) are read from the `npo_sales` Phase-2 table via
+    //   _getNPOWeekAgg — scoped to the viewer (responsible_agent_id) and the report's
+    //   own week (created_at in [Mon, Sun]). If that table isn't applied yet OR the
+    //   query errors, _getNPOWeekAgg returns null and the PORT cells fall back to
+    //   PO-only (POR/PORT(TOTAL)) / MANUAL (PORT(DP)) — never a wrong/zero NPO number.
     //
     // LEFT MANUAL (no definite, code-grounded source — auto-filling would risk a
     // wrong number to the boss):
     //   TX  — books sold; the CRM has no book-sales source at all. MANUAL.
-    //   PORT(DP) — PO downpayment; pop_down_payment lives on the closing record, not
-    //     the purchases row, so it isn't aggregable here. MANUAL.
+    //   PORT(DP) — only auto-filled from NPO first_payment; the legacy PO down-payment
+    //     (pop_down_payment) lives on the closing record, not the aggregable purchases
+    //     row, so when npo_sales is absent PORT(DP) stays MANUAL.
     //   PD(DO/PO), SR(DO/PO) — per-item × quantity by product GROUP (画作/power ring vs
     //     风水方案/咨询), but `item` is free-text with no reliable group field. MANUAL.
-    //   NOTE: PO is treated as POP only — the sole deposit/pre-order payment method in
-    //     the schema. If 预购/PCP/NPO deals are ever recorded under other methods,
-    //     POR/PORT would undercount; revisit if the payment taxonomy is expanded.
+    //   NOTE: legacy PO is treated as POP only — the sole deposit/pre-order payment
+    //     method in the purchases schema. NPO (a separate table) is now added on top;
+    //     if 预购/PCP deals are ever recorded under OTHER purchase methods, POR/PORT
+    //     would still undercount those — revisit if the payment taxonomy is expanded.
     //
     // Event-category headcounts (MT/CR/FT/IT/HJ/RS/MZ) reuse the SAME table+filter
     // as the live "Headcount by Event Type" card (event_registrations,
@@ -599,17 +678,45 @@
         // schema (it alone carries pop_down_payment / monthly / tenure); DO = full
         // payment = every other method. So POR / PORT(TOTAL) / RMT / TTO come straight
         // from the existing purchase getters.
-        await fill('wr-por',        () => getPOPCaseCount(from, to)); // PO closed-case count
-        await fill('wr-rmt',        () => getDOSales(from, to));      // DO (full-payment) sales RM
-        await fill('wr-port_total', () => getPOPSales(from, to));     // PO total sales RM
-        // TTO = PORT(TOTAL) + RMT (owner's formula) — sum the SAME two values we filled.
+        //
+        // NPO (installment-package deals) also belong under PORT (the PO bucket) per the
+        // owner — NEVER under RMT. We fetch the week's NPO aggregate ONCE and ADD it to
+        // POR / PORT(DP) / PORT(TOTAL). _getNPOWeekAgg returns null if npo_sales isn't
+        // applied yet or the query errors → in that case each PORT cell falls back to
+        // exactly its prior behavior (PO-only for POR/PORT(TOTAL); MANUAL for PORT(DP)),
+        // so a missing table never writes a wrong/zero NPO number to a boss-facing field.
+        const _npo = await _getNPOWeekAgg(from, to); // null = unavailable → no NPO add
+        // POR = PO closed-case count + count of NPO orders created this week.
+        await fill('wr-por', async () => {
+            const po = await getPOPCaseCount(from, to);
+            if (!Number.isFinite(po)) return po; // propagate non-finite → leave MANUAL
+            return po + (_npo ? _npo.count : 0);
+        });
+        await fill('wr-rmt',        () => getDOSales(from, to));      // DO (full-payment) sales RM — NPO never lands here
+        // PORT(TOTAL) = PO total sales RM + sum(cart_total) of this week's NPO orders.
+        await fill('wr-port_total', async () => {
+            const po = await getPOPSales(from, to);
+            if (!Number.isFinite(po)) return po; // propagate non-finite → leave MANUAL
+            return po + (_npo ? _npo.total : 0);
+        });
+        // PORT(DP) = down-payment collected this week. The CRM purchases row has no
+        // aggregable PO down-payment (it lives on the closing record), so the ONLY
+        // confident source is NPO's first_payment. Fill it ONLY when NPO data is
+        // available; if npo_sales is missing/errored (_npo === null) leave it MANUAL.
+        if (_npo) {
+            await fill('wr-port_dp', async () => _npo.dp); // sum(first_payment) of NPO this week
+        }
+        // TTO = PORT(TOTAL) + RMT (owner's formula) — sum the SAME two PURCHASE values.
+        // TTO is a pending formula and is left exactly as-is (NPO is NOT folded into it
+        // here, by owner instruction — revisit once the TTO definition is confirmed).
         await fill('wr-tto', async () => {
             const [doSales, poSales] = await Promise.all([getDOSales(from, to), getPOPSales(from, to)]);
             return doSales + poSales;
         });
-        // Still MANUAL (no reliable source): TX (no book sales), PORT(DP) (downpayment
-        // lives on the closing record, not the purchases row), and PD(DO/PO)+SR(DO/PO)
-        // (item→product-group split is free-text, not classifiable). Re-sum if touched.
+        // Still MANUAL (no reliable source): TX (no book sales) and PD(DO/PO)+SR(DO/PO)
+        // (item→product-group split is free-text, not classifiable). PORT(DP) is now
+        // auto-filled from NPO first_payment when npo_sales exists, else MANUAL. Re-sum
+        // if touched.
         if (_touched) recalcWeeklyReport();
     };
 
