@@ -2439,26 +2439,28 @@
         if (!person || !_mhomeWaPhone(person.phone)) return;
         const greeting = `Happy Birthday, ${person.full_name || ''}! 🎂 Wishing you a wonderful year ahead.`;
         // Option 2 — "direct chat + paste the poster". female → pink, everyone
-        // else (male/other/unknown) → navy. We COPY the poster to the clipboard
-        // FIRST (awaited, while this page still has focus — a clipboard write
-        // after we hand off to WhatsApp is rejected for "document not focused"),
-        // THEN open the prospect's chat directly (mhomeWa → window.open, so this
-        // page stays alive and the wish still logs below). In the chat the agent
-        // taps the message box → Paste → the poster drops in as a real inline
-        // image, greeting already pre-filled. The blob is pre-warmed + PNG-
-        // normalized on load so the copy needs no fetch at tap time.
+        // else (male/other/unknown) → navy. We FIRE the clipboard copy but do
+        // NOT await it before opening the chat: window.open needs a fresh user
+        // gesture, and an await would consume it → the chat popup gets blocked on
+        // iOS (the exact lesson in mhomeWa's comment). So the copy settles in the
+        // background from the already-warmed in-memory PNG while we immediately
+        // open the prospect's chat (greeting pre-filled, page stays alive so the
+        // wish still logs below). Opening the chat is the primary action and is
+        // never sacrificed for the copy. In the chat the agent taps the message
+        // box → Paste → the poster drops in as a real inline image.
         const _g = String(person.gender || '').trim().toLowerCase();
         const _isFemale = _g.startsWith('f') || _g.includes('女');
         const _posterBlob = _isFemale ? _mcalBdayBlob.female : _mcalBdayBlob.male;
-        let _copied = false;
+        let _attemptedCopy = false;
         if (_posterBlob && navigator.clipboard && window.ClipboardItem) {
             try {
-                await navigator.clipboard.write([new ClipboardItem({ 'image/png': _posterBlob })]);
-                _copied = true;
-            } catch (_) { /* clipboard image unsupported/denied → open chat with text only */ }
+                // Fire-and-forget (no await) so the gesture survives for window.open below.
+                navigator.clipboard.write([new ClipboardItem({ 'image/png': _posterBlob })]).catch(() => {});
+                _attemptedCopy = true;
+            } catch (_) { /* clipboard image unsupported → open chat with text only */ }
         }
-        mhomeWa(id, person.phone, greeting); // open the prospect's chat (greeting pre-filled)
-        if (_copied) UI.toast.success('📋 Poster copied! In the chat: tap the message box → Paste, then Send.');
+        mhomeWa(id, person.phone, greeting); // open the prospect's chat (greeting pre-filled) — gesture still fresh
+        if (_attemptedCopy) UI.toast.success('📋 Poster copied! In the chat: tap the message box → Paste, then Send.');
         else if (_posterBlob) UI.toast.info('Chat opened with the greeting — the poster could not auto-copy on this device.');
         // Log the wish as an activity — parity with desktop executeSendBirthdayWish.
         // The mobile people map merges prospects + customers with NO type tag, so
