@@ -601,13 +601,26 @@
         return _date(t);
     };
 
-    const npoOpenOrderModal = async () => {
+    // `presetCustomerId` (optional): when launched from the customer's Add-Purchase
+    // modal, an existing customer is already known. We fetch it and preselect it the
+    // same way npoPickCustomer does, so the agent skips the customer-search step.
+    const npoOpenOrderModal = async (presetCustomerId) => {
         const sb = _sb();
         if (!sb) { UI.toast.error('Supabase not connected'); return; }
         const plans = (await _loadPlans()).filter(p => p.is_active !== false);
         if (!plans.length) { UI.toast.error('No active NPO plan — ask an admin to create one first'); return; }
         plans.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
         _order = { plan: null, eligibility: 'both', tiers: [], products: [], lines: new Map(), customer: { id: null, name: '' } };
+
+        // Resolve a preset existing customer (if any) before building the modal so
+        // we can seed _order.customer and prefill the search field once it renders.
+        let _presetCust = null;
+        if (presetCustomerId != null && presetCustomerId !== '') {
+            try { _presetCust = await AppDataStore.getById('customers', presetCustomerId); } catch (_) { _presetCust = null; }
+            if (_presetCust) {
+                _order.customer = { id: _presetCust.id, name: _presetCust.full_name || _presetCust.nickname || ('Customer #' + _presetCust.id) };
+            }
+        }
 
         const planOptions = plans.map(p => `<option value="${p.id}">${escapeHtml(p.name || '')}</option>`).join('');
         const content = `
@@ -680,6 +693,21 @@
             { label: 'Save Order', type: 'primary', action: `(async () => { await app.npoSaveOrder(); })()` }
         ]);
         _renderOrderSummary();
+
+        // Paint the preset existing customer into the now-rendered DOM (same
+        // visual state npoPickCustomer produces). No plan is selected yet, so
+        // _applyEligibilityUI hasn't run for a 'new'-only plan — if the agent
+        // later picks such a plan, _applyEligibilityUI hides the existing path
+        // and clears this selection, so the agent can re-enter a new name. No crash.
+        if (_presetCust) {
+            const nm = _order.customer.name;
+            const sel = document.getElementById('npo-cust-selected');
+            if (sel) sel.innerHTML = `Selected: <strong>${escapeHtml(nm)}</strong> <a href="#" onclick="app.npoClearSelectedCustomer();return false;" style="color:#dc2626;font-size:12px;margin-left:6px;">clear</a>`;
+            const search = document.getElementById('npo-cust-search');
+            if (search) search.value = nm;
+            const results = document.getElementById('npo-cust-results');
+            if (results) { results.style.display = 'none'; results.innerHTML = ''; }
+        }
     };
 
     // ── customer lookup ──────────────────────────────────────────────────

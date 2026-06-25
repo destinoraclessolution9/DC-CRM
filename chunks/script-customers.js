@@ -1807,6 +1807,25 @@ const saveCustomer = async () => {
     if (document.getElementById('customers-table-body')) await renderCustomersTable();
 };
 
+// NPO is NOT a normal purchase — it never creates a `purchases` row, never
+// touches savePurchase / lifetime_value / leaderboard. Selecting "NPO" in the
+// Add-Purchase modal is purely a launch point: close this modal, lazy-load the
+// NPO chunk, then open the NPO order wizard pre-linked to the SAME customer.
+const npoLaunchFromPurchase = async (customerId) => {
+    UI.hideModal();
+    try {
+        if (typeof window._loadChunk === 'function') {
+            await window._loadChunk('chunks/script-npo.min.js');
+        }
+    } catch (_) { /* fall through — guard below reports if the fn is still missing */ }
+    const open = window.app && window.app.npoOpenOrderModal;
+    if (typeof open !== 'function') {
+        UI.toast.error('NPO module unavailable — please try again');
+        return;
+    }
+    await open(customerId);
+};
+
 const openAddPurchaseModal = async (customerId) => {
     const customer = await AppDataStore.getById('customers', customerId);
     // getById can return null (RLS deny / offline / deleted id) — guard before deref.
@@ -1828,12 +1847,13 @@ const openAddPurchaseModal = async (customerId) => {
                     <div class="form-group half"><label>Amount (RM) <span class="required">*</span></label><input type="number" id="pur-amt" class="form-control"></div>
                     <div class="form-group half">
                         <label>Payment Method</label>
-                        <select id="pur-method" class="form-control" onchange="const epp = document.getElementById('epp-fields'); if(this.value==='EPP') epp.style.display='block'; else epp.style.display='none';">
+                        <select id="pur-method" class="form-control" onchange="const epp = document.getElementById('epp-fields'); if(this.value==='EPP') epp.style.display='block'; else epp.style.display='none'; if(this.value==='NPO') app.npoLaunchFromPurchase(${customerId});">
                             <option value="Cash">Cash</option>
                             <option value="Credit Card">Credit Card</option>
                             <option value="Bank Transfer">Bank Transfer</option>
                             <option value="EPP">EPP (Easy Payment Plan)</option>
                             <option value="POP">POP (Pre-Owned Plan)</option>
+                            <option value="NPO">NPO (Installment Package)</option>
                         </select>
                     </div>
                 </div>
@@ -2056,6 +2076,7 @@ const updateConversionDelivery = async (prospectId, customerId) => {
         deletePurchase,
         editReferral,
         filterCustomers,
+        npoLaunchFromPurchase,
         openAddCustomerModal,
         openAddPurchaseModal,
         openCustomerReferralModal,
