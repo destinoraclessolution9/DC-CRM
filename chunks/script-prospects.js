@@ -2850,7 +2850,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 ${crHistory.map((h, hi) => `
                     <details style="border-bottom:1px solid #f3f4f6;">
                         <summary style="padding:8px 12px;cursor:pointer;font-size:13px;font-weight:600;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:8px;">
-                            <span style="flex:1;">#${hi+1} — ${escapeHtml(h.product||'N/A')} · RM ${h.sale_amount ? parseFloat(h.sale_amount).toLocaleString() : '0'}</span>
+                            <span style="flex:1;">#${hi+1} — ${escapeHtml(h.product||'N/A')} · ${UI.formatCurrency(parseFloat(h.sale_amount) || 0, { currency: window._crmUtils.recordCurrency(typeof customer !== 'undefined' ? customer : (typeof prospect !== 'undefined' ? prospect : null)) })}</span>
                             ${_crStatusBadge(h)}
                             <span style="font-size:11px;color:var(--gray-400);font-weight:400;">${h.closing_date || (h.approved_at ? h.approved_at.split('T')[0] : '')}</span>
                         </summary>
@@ -2992,7 +2992,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 <div class="pv-sub">Meeting Outcome</div>
                 <div class="pv-row"><span class="pv-lbl">Product/Service</span><span class="pv-val">${escapeHtml(d.product || '-')}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Order Date</span><span class="pv-val">${escapeHtml(d.order_date || '-')}</span></div>
-                <div class="pv-row"><span class="pv-lbl">Amount Closed</span><span class="pv-val">${d.sale_amount ? 'RM ' + parseFloat(d.sale_amount).toLocaleString() : '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Amount Closed</span><span class="pv-val">${d.sale_amount ? UI.formatCurrency(parseFloat(d.sale_amount), { currency: window._crmUtils.recordCurrency(typeof customer !== 'undefined' ? customer : (typeof prospect !== 'undefined' ? prospect : null)) }) : '-'}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Payment Method</span><span class="pv-val">${escapeHtml(d.payment_method || '-')}</span></div>
                 ${d.payment_method === 'POP' ? `
                 <div class="pv-row"><span class="pv-lbl">Monthly (RM)</span><span class="pv-val">${d.pop_monthly || '-'}</span></div>
@@ -3022,7 +3022,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 <div class="pv-sub">Last Closing</div>
                 <div class="pv-row"><span class="pv-lbl">Product/Service</span><span class="pv-val">${escapeHtml(d.product || '-')}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Order Date</span><span class="pv-val">${escapeHtml(d.order_date || '-')}</span></div>
-                <div class="pv-row"><span class="pv-lbl">Amount Closed</span><span class="pv-val">${d.sale_amount ? 'RM ' + parseFloat(d.sale_amount).toLocaleString() : '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Amount Closed</span><span class="pv-val">${d.sale_amount ? UI.formatCurrency(parseFloat(d.sale_amount), { currency: window._crmUtils.recordCurrency(typeof customer !== 'undefined' ? customer : (typeof prospect !== 'undefined' ? prospect : null)) }) : '-'}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Payment Method</span><span class="pv-val">${escapeHtml(d.payment_method || '-')}</span></div>
                 ${d.payment_method === 'POP' ? `
                 <div class="pv-row"><span class="pv-lbl">Monthly (RM)</span><span class="pv-val">${d.pop_monthly || '-'}</span></div>
@@ -3146,7 +3146,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             <div style="margin-bottom:12px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
                 <div style="background:${cfg.headerBg};padding:8px 12px;font-weight:600;font-size:13px;border-bottom:1px solid #e5e7eb;color:${cfg.headerColor};display:flex;justify-content:space-between;align-items:center;">
                     <span>${cfg.title}</span>
-                    <span style="font-size:12px;">Total: RM ${totalAmount.toLocaleString()}</span>
+                    <span style="font-size:12px;">Total: ${UI.formatCurrency(totalAmount, { currency: window._crmUtils.recordCurrency(typeof customer !== 'undefined' ? customer : (typeof prospect !== 'undefined' ? prospect : null)) })}</span>
                 </div>
                 ${emptyProductsBanner}
                 <div style="overflow-x:auto;">
@@ -3576,7 +3576,7 @@ const renderCustomerClosingTab = async (customer, container) => {
             ${crHistory.map((h, hi) => `
                 <details style="border-bottom:1px solid #f3f4f6;">
                     <summary style="padding:8px 12px;cursor:pointer;font-size:13px;font-weight:600;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:8px;">
-                        <span style="flex:1;">#${hi+1} — ${escapeHtml(h.product||'N/A')} · RM ${h.sale_amount ? parseFloat(h.sale_amount).toLocaleString() : '0'}</span>
+                        <span style="flex:1;">#${hi+1} — ${escapeHtml(h.product||'N/A')} · ${UI.formatCurrency(parseFloat(h.sale_amount) || 0, { currency: window._crmUtils.recordCurrency(typeof customer !== 'undefined' ? customer : (typeof prospect !== 'undefined' ? prospect : null)) })}</span>
                         ${_crBadge(h)}
                         <span style="font-size:11px;color:var(--gray-400);font-weight:400;">${h.closing_date || (h.approved_at ? h.approved_at.split('T')[0] : '')}</span>
                     </summary>
@@ -3635,7 +3635,7 @@ const renderCustomerClosingTab = async (customer, container) => {
                 </div>
                 <div class="pv-sub">Meeting Outcome</div>
                 <div class="pv-row"><span class="pv-lbl">Product/Service</span><span class="pv-val">${escapeHtml(d.product || '-')}</span></div>
-                <div class="pv-row"><span class="pv-lbl">Amount</span><span class="pv-val">${d.sale_amount ? 'RM ' + parseFloat(d.sale_amount).toLocaleString() : '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Amount</span><span class="pv-val">${d.sale_amount ? UI.formatCurrency(parseFloat(d.sale_amount), { currency: window._crmUtils.recordCurrency(typeof customer !== 'undefined' ? customer : (typeof prospect !== 'undefined' ? prospect : null)) }) : '-'}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Payment</span><span class="pv-val">${escapeHtml(d.payment_method || '-')}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Invoice</span><span class="pv-val">${escapeHtml(d.invoice_number || '-')}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Collection Date</span><span class="pv-val">${escapeHtml(d.closing_date || '-')}</span></div>

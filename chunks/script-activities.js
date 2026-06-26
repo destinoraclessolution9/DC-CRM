@@ -2568,7 +2568,8 @@
                 <div class="form-group" style="flex:1;"><label>Start Time</label><input type="time" id="mkt-start-time" class="form-control"></div>
                 <div class="form-group" style="flex:1;"><label>End Time</label><input type="time" id="mkt-end-time" class="form-control"></div>
             </div>
-            <div class="form-group"><label>Ticket Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="0"></div>
+            <div class="form-group"><label>Market / Country</label><select id="mkt-event-country" class="form-control">${(window.UI.countries || []).map(c => `<option value="${c.code}" ${c.code === window._crmUtils.cuHomeCountry() ? 'selected' : ''}>${window._crmUtils.escapeHtml(c.name)} (${window._crmUtils.escapeHtml(c.symbol)})</option>`).join('')}</select></div>
+            <div class="form-group"><label>Ticket Price</label><input type="number" id="mkt-price" class="form-control" value="0"></div>
             <div class="form-group"><label>Early Bird Price (RM)</label><input type="text" id="mkt-early-bird-price" class="form-control" placeholder="e.g. 199"></div>
             <div class="form-group"><label>Group Purchase Price (RM)</label><input type="text" id="mkt-group-price" class="form-control" placeholder="e.g. 299 (min 5 pax)"></div>
             <div class="form-group"><label>Duration (text fallback)</label><input type="text" id="mkt-duration" class="form-control" placeholder="e.g. 2 hours"></div>
@@ -2627,6 +2628,7 @@
             event_title: title,
             date: document.getElementById('mkt-event-date')?.value || null,
             event_date: document.getElementById('mkt-event-date')?.value || null,
+            country: window.UI.countryByCode(document.getElementById('mkt-event-country')?.value).code,
             start_time: document.getElementById('mkt-start-time')?.value || null,
             end_time:   document.getElementById('mkt-end-time')?.value || null,
             ticket_price: parseFloat(document.getElementById('mkt-price')?.value) || 0,

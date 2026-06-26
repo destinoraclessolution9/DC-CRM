@@ -980,9 +980,15 @@
             if (!bucket) { bucket = []; regsByEvent.set(k, bucket); }
             bucket.push(r);
         }
+        // Market scope: when a boss/mgmt user has drilled into a specific market
+        // (header switcher), headcount counts only that market's events. ALL (and
+        // every agent, who is single-market) → unchanged combined count.
+        const _scope = window._crmUtils.listCountryScope();
+        const _scoped = _scope !== window._crmUtils.ALL_COUNTRIES;
         const result = {};
         for (const type of eventTypes) result[type] = { prospects: 0, agents: 0, total: 0 };
         for (const ev of events) {
+            if (_scoped && window._crmUtils.recordCountry(ev) !== _scope) continue;
             const matchedType = eventTypes.find(t => ev.title.toLowerCase().includes(t.toLowerCase()) || ev.category === t);
             if (!matchedType) continue;
             const regs = (regsByEvent.get(ev.id) || []).filter(r =>

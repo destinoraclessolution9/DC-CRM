@@ -578,8 +578,8 @@
                                         ? `<img loading="lazy" decoding="async" src="${item.poster_url}" crossorigin="anonymous" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer;" onclick="app.viewProductImage('${item.poster_url}','Poster')" title="View poster">`
                                         : `<span style="color:var(--gray-300);font-size:18px;" title="No poster">🖼️</span>`}
                                 </td>
-                                <td><strong>${escapeHtml(item.event_title || item.title || '')}</strong><br><small class="text-muted">${escapeHtml(item.description || '')}</small></td>
-                                <td>${item.ticket_price || '-'}</td>
+                                <td><strong>${escapeHtml(item.event_title || item.title || '')}</strong> <span style="font-size:10px;color:var(--gray-400);">${escapeHtml(UI.countryByCode(item.country).code)}</span><br><small class="text-muted">${escapeHtml(item.description || '')}</small></td>
+                                <td>${item.ticket_price ? UI.money(item.ticket_price, item.country) : '-'}</td>
                                 <td>${escapeHtml(item.early_bird_price || '-')}</td>
                                 <td>${escapeHtml(item.group_purchase_price || '-')}</td>
                                 <td>${escapeHtml(item.duration || '-')}</td>
@@ -755,7 +755,8 @@
             content = `
                 ${buildEventCategoriesField([])}
                 <div class="form-group"><label>Title*</label><input type="text" id="mkt-title" class="form-control"></div>
-                <div class="form-group"><label>Ticket Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="0"></div>
+                <div class="form-group"><label>Market / Country</label><select id="mkt-event-country" class="form-control">${(UI.countries || []).map(c => `<option value="${c.code}" ${c.code === window._crmUtils.cuHomeCountry() ? 'selected' : ''}>${escapeHtml(c.name)} (${escapeHtml(c.symbol)})</option>`).join('')}</select></div>
+                <div class="form-group"><label>Ticket Price</label><input type="number" id="mkt-price" class="form-control" value="0"></div>
                 <div class="form-group"><label>Early Bird Price (RM)</label><input type="text" id="mkt-early-bird-price" class="form-control" placeholder="e.g. 199"></div>
                 <div class="form-group"><label>Group Purchase Price (RM)</label><input type="text" id="mkt-group-price" class="form-control" placeholder="e.g. 299 (min 5 pax)"></div>
                 <div class="form-group"><label>Duration</label><input type="text" id="mkt-duration" class="form-control" placeholder="e.g. 2 hours"></div>
@@ -868,7 +869,8 @@
             content = `
                 ${buildEventCategoriesField(parseEventCategories(item.categories))}
                 <div class="form-group"><label>Title*</label><input type="text" id="mkt-title" class="form-control" value="${escapeHtml(item.event_title || item.title || '')}"></div>
-                <div class="form-group"><label>Ticket Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="${item.ticket_price || 0}"></div>
+                <div class="form-group"><label>Market / Country</label><select id="mkt-event-country" class="form-control">${(UI.countries || []).map(c => `<option value="${c.code}" ${c.code === (item.country || window._crmUtils.cuHomeCountry()) ? 'selected' : ''}>${escapeHtml(c.name)} (${escapeHtml(c.symbol)})</option>`).join('')}</select></div>
+                <div class="form-group"><label>Ticket Price</label><input type="number" id="mkt-price" class="form-control" value="${item.ticket_price || 0}"></div>
                 <div class="form-group"><label>Early Bird Price (RM)</label><input type="text" id="mkt-early-bird-price" class="form-control" value="${escapeHtml(item.early_bird_price || '')}" placeholder="e.g. 199"></div>
                 <div class="form-group"><label>Group Purchase Price (RM)</label><input type="text" id="mkt-group-price" class="form-control" value="${escapeHtml(item.group_purchase_price || '')}" placeholder="e.g. 299 (min 5 pax)"></div>
                 <div class="form-group"><label>Duration</label><input type="text" id="mkt-duration" class="form-control" value="${escapeHtml(item.duration || '')}"></div>
@@ -1062,6 +1064,7 @@
             // `title` is sufficient — the unknown-column retry would silently
             // strip `event_title` anyway, dropping the user's edit.
             data.title = document.getElementById('mkt-title').value.trim();
+            data.country = UI.countryByCode(document.getElementById('mkt-event-country')?.value).code;
             data.ticket_price = parseFloat(document.getElementById('mkt-price').value) || 0;
             data.early_bird_price = document.getElementById('mkt-early-bird-price').value;
             data.group_purchase_price = document.getElementById('mkt-group-price').value;
