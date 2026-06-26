@@ -898,7 +898,7 @@
 
         const _mhomeDraftsKey     = 'mhome-drafts-v1-' + _mhomeUid;
         const _mhomeRefillsKey    = 'mhome-refills-v1-' + _mhomeUid;
-        const _mhomeUsersKey      = 'mhome-users-v1-' + _mhomeUid;
+        const _mhomeUsersKey      = 'mhome-users-v2-' + _mhomeUid; // v2: + ic_number,status for Team Birthdays (IC-derived DOB)
         const _mhomeCustomersKey  = 'mhome-customers-v1-' + _mhomeUid;
         let cachedDrafts     = _mhomeForce ? null : _mhomeLsGet(_mhomeDraftsKey,     5 * 60 * 1000);
         let cachedRefills    = _mhomeForce ? null : _mhomeLsGet(_mhomeRefillsKey,    5 * 60 * 1000);
@@ -2027,7 +2027,7 @@
         // (id, full_name) user list in the background. The day sheet reads
         // _mcalUserMap live when tapped, so no re-render is needed here.
         if (_mcalUserMap.size === 0) {
-            const _homeUsers = _lsGet('mhome-users-v1-' + String(_state.cu?.id || 'anon'), 8 * 60 * 60 * 1000);
+            const _homeUsers = _lsGet('mhome-users-v2-' + String(_state.cu?.id || 'anon'), 8 * 60 * 60 * 1000);
             if (Array.isArray(_homeUsers) && _homeUsers.length) {
                 _mcalUserMap = new Map(_homeUsers.filter(u => u && u.full_name).map(u => [String(u.id), u.full_name]));
             } else {

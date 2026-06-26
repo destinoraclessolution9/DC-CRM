@@ -922,6 +922,13 @@ const openAddAgentModal = async (agentId = null) => {
                         <input type="email" id="agent-email" class="form-control" required value="${isEdit ? (agent.email || '') : ''}">
                     </div>
                 </div>
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Date of Birth</label>
+                        <input type="date" id="agent-dob" class="form-control" value="${isEdit ? String(agent.date_of_birth || '').slice(0,10) : ''}">
+                        <small style="color:var(--gray-500); margin-top:4px; display:block;">Powers the calendar's Team Birthdays reminder.</small>
+                    </div>
+                </div>
             </div>
 
             <div class="form-section">
@@ -1057,6 +1064,7 @@ const saveAgent = async () => {
         phone: document.getElementById('agent-phone').value,
         email: document.getElementById('agent-email').value,
         ic_number: document.getElementById('agent-ic').value,
+        date_of_birth: document.getElementById('agent-dob')?.value || null,
         commission_rate: parseFloat(document.getElementById('agent-comm').value) || 0,
         license_start: document.getElementById('agent-license-start').value || null,
         license_expiry: document.getElementById('agent-license-expiry').value || null,

@@ -3347,7 +3347,9 @@
             AppDataStore.getAll('prospects').catch(() => []),
             AppDataStore.getAll('customers').catch(() => []),
             AppDataStore.getAll('names').catch(() => []),
-            AppDataStore.getAll('users').catch(() => []),
+            // Explicit select — getAll('users') is PII-trimmed and omits ic_number,
+            // which the Team Birthdays IC-derived DOB needs. Mirror the mobile fetch.
+            AppDataStore.queryAdvanced('users', { select: 'id,full_name,date_of_birth,ic_number,role,team,status', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []),
         ]);
         const all = [...prospects, ...customers];
         const userMap = new Map(allUsers.map(u => [String(u.id), u]));
