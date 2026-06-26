@@ -1208,6 +1208,9 @@
     // we can ship the JS independently of the DB migration.
     const _tryKpiRPCs = async (from, to) => {
         if (!window.supabase || !window.supabase.rpc) return null;
+        // Market drill-down: the kpi_* RPCs aren't country-aware, so fall back to
+        // the (now market-scoped) per-function client getters when a market is active.
+        if (window._crmUtils.listCountryScope() !== window._crmUtils.ALL_COUNTRIES) return null;
         try {
             const agentIds = (_visibleUserIds === 'all' || !Array.isArray(_visibleUserIds))
                 ? null
@@ -1246,6 +1249,8 @@
     // active-agents window). Returns null on any error → individual getters run.
     const _tryExtendedKpiRPC = async (from, to) => {
         if (!window.supabase || !window.supabase.rpc) return null;
+        // Market drill-down → use the market-scoped client getters (RPC isn't country-aware).
+        if (window._crmUtils.listCountryScope() !== window._crmUtils.ALL_COUNTRIES) return null;
         try {
             const agentIds = (_visibleUserIds === 'all' || !Array.isArray(_visibleUserIds))
                 ? null
@@ -1351,6 +1356,16 @@
     };
 
 
+// ── Multi-country reporting scope ────────────────────────────────────────────
+// When a boss/mgmt user drills into a specific market (header switcher), every
+// report metric counts only that market's records. ALL scope (the default, and
+// every agent — who is single-market) → always true, so nothing changes for them.
+// Records read their `country`; legacy/untagged rows resolve to MY.
+const _recInMarket = (rec) => {
+    const s = window._crmUtils.listCountryScope();
+    return s === window._crmUtils.ALL_COUNTRIES || window._crmUtils.recordCountry(rec) === s;
+};
+
 const getCPSCount = async (from, to) => {
     const needUsers = _currentRoleFilter !== 'All' || _visibleUserIds !== 'all';
     const activities = await _reportActsInRange(from, to, 'getCPSCount');
@@ -1360,6 +1375,7 @@ const getCPSCount = async (from, to) => {
     let count = 0;
     for (const a of activities) {
         if (a.activity_type !== 'CPS' || a.activity_date < from || a.activity_date > to) continue;
+        if (!_recInMarket(a)) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(a.lead_agent_id)) continue;
         if (_currentRoleFilter !== 'All') {
             const agent = userMap[a.lead_agent_id];
@@ -1389,6 +1405,10 @@ const _getPurchaseBase = async () => {
 };
 
 const _passesPurchaseFilter = (p, agentId, userMap) => {
+    // Market scope: when a specific market is active, count only sales booked in
+    // that market's currency (purchases.currency, default MYR for legacy rows).
+    const _ms = window._crmUtils.listCountryScope();
+    if (_ms !== window._crmUtils.ALL_COUNTRIES && (p.currency || 'MYR') !== UI.currencyForCountry(_ms)) return false;
     if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(agentId))) return false;
     if (_currentRoleFilter !== 'All') {
         const agent = userMap[agentId];
@@ -1487,6 +1507,7 @@ const getNewAgents = async (from, to) => {
     let count = 0;
     for (const u of users) {
         if (u.join_date < from || u.join_date > to) continue;
+        if (!_recInMarket(u)) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(u.id)) continue;
         if (_currentRoleFilter !== 'All') {
             if (u.role !== _currentRoleFilter) continue;
@@ -1536,6 +1557,7 @@ const getActiveAgents = async () => {
     let count = 0;
     for (const u of users) {
         if (!isAgent(u)) continue;
+        if (!_recInMarket(u)) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(u.id))) continue;
         if (activeSet.has(String(u.id))) count++;
     }
@@ -1697,6 +1719,7 @@ const getNewCustomers = async (from, to) => {
     let count = 0;
     for (const c of customers) {
         if (c.customer_since < from || c.customer_since > to) continue;
+        if (!_recInMarket(c)) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(c.responsible_agent_id))) continue;
         // purchases column is `date` (no purchase_date) — use it consistently with
         // every other purchase reader in this file; the old fallback was dead drift.
@@ -1720,6 +1743,7 @@ const getTotalMeetings = async (from, to) => {
     for (const a of activities) {
         if (a.activity_date < from || a.activity_date > to) continue;
         if (!AGENT_MEETING_TYPES.includes(a.activity_type)) continue;
+        if (!_recInMarket(a)) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(a.lead_agent_id)) continue;
         if (_currentRoleFilter !== 'All') {
             const agent = userMap[a.lead_agent_id];
@@ -1740,6 +1764,7 @@ const getClientMeetings = async (from, to) => {
     for (const a of activities) {
         if (a.activity_date < from || a.activity_date > to) continue;
         if (!CLIENT_MEETING_TYPES.includes(a.activity_type)) continue;
+        if (!_recInMarket(a)) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(a.lead_agent_id)) continue;
         if (_currentRoleFilter !== 'All') {
             const agent = userMap[a.lead_agent_id];
@@ -1762,6 +1787,7 @@ const getMeetUpExistingCustomerCount = async (from, to) => {
         const isClientMeet = CLIENT_MEETING_TYPES.includes(a.activity_type) ||
             (a.activity_title || '').toLowerCase().includes('golden road');
         if (!isClientMeet) continue;
+        if (!_recInMarket(a)) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(a.lead_agent_id))) continue;
         if (_currentRoleFilter !== 'All') {
             const agent = userMap[String(a.lead_agent_id)];
@@ -1784,6 +1810,7 @@ const getCFHeadcount = async (from, to) => {
     for (const a of activities) {
         if (a.activity_type !== 'CPS') continue;
         if (a.activity_date < from || a.activity_date > to) continue;
+        if (!_recInMarket(a)) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(a.lead_agent_id))) continue;
         if (_currentRoleFilter !== 'All') {
             const agent = userMap[String(a.lead_agent_id)];
@@ -1813,6 +1840,7 @@ const getActivityHeadcount = async (from, to) => {
         const act = actMap[att.activity_id];
         const date = act?.activity_date || '';
         if (date < from || date > to) continue;
+        if (!_recInMarket(act || {})) continue;
         if (_visibleUserIds !== 'all') {
             const entityId = att.entity_id || att.attendee_id;
             let agentId;
@@ -1848,6 +1876,7 @@ const getActivityTypeCount = async (from, to, type) => {
     let count = 0;
     for (const a of activities) {
         if (a.activity_type !== type || a.activity_date < from || a.activity_date > to) continue;
+        if (!_recInMarket(a)) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(a.lead_agent_id)) continue;
         if (_currentRoleFilter !== 'All') {
             const agent = userMap[a.lead_agent_id];
@@ -1899,6 +1928,7 @@ const getEventCategoryHeadcount = async (from, to, categoryList, attendeeTypes) 
     // getHeadcountByEventType's regsByEvent.get(ev.id)).
     const matchedEventIds = new Set();
     for (const ev of events) {
+        if (!_recInMarket(ev)) continue;
         const cats = _wrParseEventCategories(ev.categories);
         if (cats.some(c => wanted.has(c))) matchedEventIds.add(ev.id);
     }
@@ -1936,6 +1966,7 @@ const getConvertedCustomers = async (from, to) => {
     let count = 0;
     for (const c of customers) {
         if (c.customer_since < from || c.customer_since > to) continue;
+        if (!_recInMarket(c)) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(c.responsible_agent_id)) continue;
         count++;
     }
@@ -2029,6 +2060,7 @@ const _buildCPSDetailsLegacy = async (from, to) => {
     const rows = [];
     for (const a of activities) {
         if (a.activity_type !== 'CPS' || a.activity_date < from || a.activity_date > to) continue;
+        if (!_recInMarket(a)) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(a.lead_agent_id)) continue;
         if (_currentRoleFilter !== 'All') {
             const agent = userMap[a.lead_agent_id];
@@ -2201,6 +2233,7 @@ const buildNewAgentsDetails = async (from, to) => {
     const rows = [];
     for (const u of users) {
         if (u.join_date < from || u.join_date > to) continue;
+        if (!_recInMarket(u)) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(u.id)) continue;
         if (_currentRoleFilter !== 'All') {
             if (u.role !== _currentRoleFilter) continue;
@@ -2357,6 +2390,7 @@ const _buildNewCustomersDetailsLegacy = async (from, to) => {
     const rows = [];
     for (const c of customers) {
         if (c.customer_since < from || c.customer_since > to) continue;
+        if (!_recInMarket(c)) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(c.responsible_agent_id))) continue;
         const agent = c.responsible_agent_id
             ? (userMap[c.responsible_agent_id]?.full_name || userMap[String(c.responsible_agent_id)]?.full_name || '—')
@@ -2445,6 +2479,7 @@ const _buildMeetingsDetailsLegacy = async (from, to) => {
     for (const a of activities) {
         if (a.activity_date < from || a.activity_date > to) continue;
         if (!AGENT_MEETING_TYPES.includes(a.activity_type)) continue;
+        if (!_recInMarket(a)) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(a.lead_agent_id)) continue;
         if (_currentRoleFilter !== 'All') {
             const agent = userMap[a.lead_agent_id];
@@ -2479,6 +2514,7 @@ const _buildClientMeetingsDetailsLegacy = async (from, to) => {
     for (const a of activities) {
         if (a.activity_date < from || a.activity_date > to) continue;
         if (!CLIENT_MEETING_TYPES.includes(a.activity_type)) continue;
+        if (!_recInMarket(a)) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(a.lead_agent_id)) continue;
         if (_currentRoleFilter !== 'All') {
             const agent = userMap[String(a.lead_agent_id)];
@@ -2512,6 +2548,7 @@ const _buildMeetUpExistingDetailsLegacy = async (from, to) => {
         const isClientMeet = CLIENT_MEETING_TYPES.includes(a.activity_type) ||
             (a.activity_title || '').toLowerCase().includes('golden road');
         if (!isClientMeet) continue;
+        if (!_recInMarket(a)) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(a.lead_agent_id))) continue;
         if (_currentRoleFilter !== 'All') {
             const agent = userMap[String(a.lead_agent_id)];
@@ -2555,6 +2592,7 @@ const _buildCFHeadcountDetailsLegacy = async (from, to) => {
     for (const a of activities) {
         if (a.activity_type !== 'CPS') continue;
         if (a.activity_date < from || a.activity_date > to) continue;
+        if (!_recInMarket(a)) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(a.lead_agent_id))) continue;
         if (_currentRoleFilter !== 'All') {
             const agent = userMap[String(a.lead_agent_id)];
@@ -2620,6 +2658,7 @@ const _buildActivityHeadcountDetailsLegacy = async (from, to) => {
         const act = actMap[att.activity_id];
         const date = act?.activity_date || '';
         if (date < from || date > to) continue;
+        if (!_recInMarket(act || {})) continue;
         if (_visibleUserIds !== 'all') {
             const entityId = att.entity_id || att.attendee_id;
             let agentId;
