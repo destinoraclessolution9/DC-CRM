@@ -843,10 +843,33 @@ const appLogic = (() => {
         if (!ok) return;
         try { localStorage.setItem(_activeCountryKey(), code); } catch (_) { /* non-fatal */ }
     };
+    // Country scope for the LIST views (prospects/customers) — a boss/mgmt
+    // drill-down tool. Agents are inherently single-market (their records are all
+    // their own home country), so they NEVER scope (returns ALL = no-op), which
+    // also avoids forcing them onto the slower legacy client-filter list path.
+    const _listCountryScope = () => _seesAllMarkets(_currentUser) ? getActiveCountry() : _ALL_COUNTRIES;
+    // Switch the active market + re-render everything. A full reload is the simplest
+    // correct way to re-scope every open view and re-fetch lists; market switches
+    // are an infrequent, deliberate action so the reload cost is acceptable.
+    const switchMarket = (code) => { setActiveCountry(code); try { location.reload(); } catch (_) { /* non-fatal */ } };
+    // Populate + reveal the header market switcher. Only org-wide-visibility users
+    // (boss / marketing manager / L≤2) see it; agents are pinned to their market.
+    const renderMarketSwitcher = () => {
+        const el = document.getElementById('market-switcher');
+        if (!el) return;
+        if (!_seesAllMarkets(_currentUser)) { el.style.display = 'none'; return; }
+        const active = getActiveCountry();
+        const esc = (s) => (window.UI && UI.escapeHtml) ? UI.escapeHtml(s) : s;
+        const opts = [`<option value="${_ALL_COUNTRIES}" ${active === _ALL_COUNTRIES ? 'selected' : ''}>All Markets</option>`]
+            .concat((UI.countries || []).map(c => `<option value="${esc(c.code)}" ${active === c.code ? 'selected' : ''}>${esc(c.symbol)} ${esc(c.name)}</option>`));
+        el.innerHTML = opts.join('');
+        el.style.display = '';
+    };
     Object.assign(window._crmUtils, {
         cuHomeCountry, recordCountry, recordCurrency,
         getActiveCountry, setActiveCountry, ALL_COUNTRIES: _ALL_COUNTRIES,
         seesAllMarkets: () => _seesAllMarkets(_currentUser),
+        listCountryScope: _listCountryScope,
     });
 
     // Race a promise against a timeout. On timeout returns the fallback so
@@ -3226,6 +3249,7 @@ function _wireLoginBtn() {
             if (userAvatar) { userAvatar.src = avatarSrc; userAvatar.onerror = () => { userAvatar.src = svgNav; }; }
             const drawerAvatar = document.getElementById('drawer-user-avatar');
             if (drawerAvatar) { drawerAvatar.src = avatarSrc; drawerAvatar.onerror = () => { drawerAvatar.src = svgNav; }; }
+            try { renderMarketSwitcher(); } catch (_) { /* switcher is non-critical chrome */ }
         } else {
             if (userDisplay) userDisplay.textContent = 'Guest';
             const guestSvg = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Ccircle cx='32' cy='32' r='32' fill='%238B1A1A'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='central' text-anchor='middle' font-size='22' font-weight='700' font-family='sans-serif' fill='white'%3EG%3C/text%3E%3C/svg%3E`;
@@ -4660,6 +4684,8 @@ function _wireLoginBtn() {
     return {
         init,
         navigateTo,
+        switchMarket,          // header market switcher (boss/mgmt) → re-scope + reload
+        renderMarketSwitcher,  // populate/refresh the switcher chrome
         goBackFromDetail,
         todo,
         // [CHUNK: knowledge] 26 functions Object.assigned to window.app by chunks/script-knowledge.js

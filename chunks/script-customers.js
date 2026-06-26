@@ -367,7 +367,12 @@ const renderCustomersTable = async () => {
     // in JS — the change that lets this view scale to a 500k customer base.
     // Falls through to the legacy client path for filters not yet expressible
     // server-side (Regular null-edge, deficiency arrays, event-count aggregation).
-    const _serverUnsupported = typeFilter === 'Regular' || !!deficiencyFilter || minEventsFilter > 0 || !!purchaseFilter;
+    // Market scope (boss/mgmt drill-down). ALL → no scoping (agents always ALL).
+    // A specific market forces the legacy client-filter path (the BFF/server page
+    // query has no country param yet) so the filter below actually applies.
+    const _mktScope = window._crmUtils.listCountryScope();
+    const _mktScoped = _mktScope !== window._crmUtils.ALL_COUNTRIES;
+    const _serverUnsupported = typeFilter === 'Regular' || !!deficiencyFilter || minEventsFilter > 0 || !!purchaseFilter || _mktScoped;
 
     // ── Phase 4.2 (#13): React-island render path (opt-in bundle + flag) ───────
     // Same eligibility as the BFF branch below (the island fetches the same lean
@@ -452,6 +457,7 @@ const renderCustomersTable = async () => {
         }
         let filtered = [];
         for (const c of customers) {
+            if (_mktScoped && window._crmUtils.recordCountry(c) !== _mktScope) continue;
             if (searchQuery && !(
                 (c.full_name || '').toLowerCase().includes(searchQuery) ||
                 (c.nickname && c.nickname.toLowerCase().includes(searchQuery)) ||

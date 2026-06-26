@@ -688,7 +688,12 @@ const renderProspectsTable = async () => {
     // "include dormant" toggle) forces include-dormant so the agent's full list
     // shows, mirroring the legacy includeDormant:!!agentFilter behavior.
     const _sortColMap = { name: 'full_name', score: 'score', activity: 'last_activity_date' };
-    const _pUnsupported = !!scoreFilter || !!statusFilter || !_sortColMap[_sortField];
+    // Market scope (boss/mgmt drill-down). A specific market forces the legacy
+    // client-filter path (server/BFF page query has no country param yet); ALL =
+    // no-op (agents are always ALL).
+    const _mktScope = window._crmUtils.listCountryScope();
+    const _mktScoped = _mktScope !== window._crmUtils.ALL_COUNTRIES;
+    const _pUnsupported = !!scoreFilter || !!statusFilter || !_sortColMap[_sortField] || _mktScoped;
 
     // ── Phase 4.3 (#13): React-island render path (opt-in bundle + flag) ───────
     // Server-eligible only — same gate as the BFF/server path: table view, no
@@ -885,6 +890,7 @@ const renderProspectsTable = async () => {
     // ── Apply filters (skipped on the server path — already filtered server-side) ──
     let filtered = prospects;
     if (!_usedServerP) { filtered = []; for (const p of prospects) {
+        if (_mktScoped && window._crmUtils.recordCountry(p) !== _mktScope) continue;
         if (searchQuery && !(
             (p.full_name || '').toLowerCase().includes(searchQuery) ||
             (p.nickname && p.nickname.toLowerCase().includes(searchQuery)) ||
