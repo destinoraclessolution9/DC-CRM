@@ -4831,9 +4831,36 @@
             const prospectAttendees = attendees.filter(a => a.attendee_type !== 'agent');
             const agentAttendees = attendees.filter(a => a.attendee_type === 'agent');
 
+            // Per-attendee name visibility. An EVENT gathers attendees added by many
+            // different agents (att.added_by_agent_id), so the right unit of privacy is
+            // the ROW, not the activity's lead agent — otherwise an agent could not even
+            // see the client THEY registered (they weren't the event's lead agent).
+            // A viewer may see an attendee's name when:
+            //   • they hold an org-wide role (admin / marketing), OR
+            //   • they own this activity (lead agent / co-agent), OR
+            //   • they added this attendee themselves (own client), OR
+            //   • the adder is within their downline (team leader → their agents), OR
+            //   • the adder shares their team (same-team peers).
+            const _viewer = _state.cu;
+            const _viewerTeam = _viewer && _viewer.team_id != null ? String(_viewer.team_id) : null;
+            const _visibleAgentIds = await getVisibleUserIds(_viewer).catch(() => null);
+            const _orgWide = isSystemAdmin(_viewer) || isMarketingManager(_viewer) || _visibleAgentIds === 'all';
+            const _userById = new Map(users.map(u => [String(u.id), u]));
+            const _canSeeAttendeeName = (att) => {
+                if (_orgWide || _isOwnActivity) return true;
+                const adderId = att.added_by_agent_id != null ? String(att.added_by_agent_id) : null;
+                if (!adderId) return false; // legacy row without an adder → stay private
+                if (_viewer && adderId === String(_viewer.id)) return true; // own client
+                if (Array.isArray(_visibleAgentIds) && _visibleAgentIds.map(String).includes(adderId)) return true; // downline (team leader sees their agents)
+                const adder = _userById.get(adderId); // same-team peer
+                if (adder && _viewerTeam && adder.team_id != null && String(adder.team_id) === _viewerTeam) return true;
+                return false;
+            };
+
             const renderProspectRow = async (att) => {
-                // Non-owners must not see attendee names or links to client profiles.
-                if (!_isOwnActivity) {
+                // Names are private to the adder, their team, their upline, and the
+                // activity owner — everyone else sees an anonymized placeholder.
+                if (!_canSeeAttendeeName(att)) {
                     return `<div class="info-row" style="color:var(--gray-400);font-size:12px;font-style:italic;">— Attendee (private) —</div>`;
                 }
                 const entityId = att.entity_id || att.attendee_id;
