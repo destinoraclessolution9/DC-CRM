@@ -1602,21 +1602,38 @@ const _activityDurationHours = (a) => {
 // Scoped to the agent band (isAgent) within _visibleUserIds; fails closed.
 const _computeAgentWeekHours = async () => {
     const { from, to } = _currentWeekRange();
-    const [users, activities, attendees] = await Promise.all([
+    // event_attendees is fetched SCOPED to this week's activity ids below (see
+    // weekActIds query) rather than via getAll('event_attendees'), so the hours
+    // card doesn't scan the whole attendance table on every dashboard load.
+    const [users, activities] = await Promise.all([
         AppDataStore.getAll('users'),
         _reportActsInRange(from, to, '_computeAgentWeekHours'),
-        AppDataStore.getAll('event_attendees'),
     ]);
 
     // Index this week's activities + tally CPS-per-agent in the same pass.
     const actMap = {};
     const cpsByAgent = {};
+    const weekActIds = [];
     for (const a of activities) {
         const d = a.activity_date || '';
         if (d < from || d > to) continue;
         actMap[a.id] = a;
+        weekActIds.push(a.id);
         if (a.activity_type === 'CPS' && a.lead_agent_id != null) {
             cpsByAgent[String(a.lead_agent_id)] = (cpsByAgent[String(a.lead_agent_id)] || 0) + 1;
+        }
+    }
+
+    // Scoped attendance fetch: only event_attendees rows whose activity is in
+    // this week (instead of the full table). Skipped entirely when no activity
+    // fell in the week. Fails soft — on any error we proceed with led-only hours
+    // rather than breaking the whole KPI dashboard.
+    let attendees = [];
+    if (weekActIds.length) {
+        try {
+            attendees = await AppDataStore.queryPaged('event_attendees', { filters: { activity_id: weekActIds } });
+        } catch (e) {
+            console.warn('[reports] scoped event_attendees fetch failed — attendance omitted this load:', e && e.message);
         }
     }
 
