@@ -500,7 +500,7 @@ const renderCustomersTable = async () => {
         html += `
             <tr onclick="app.showCustomerDetail(${c.id})">
                 <td data-label="Name"><strong>${escapeHtml(c.full_name || '')}</strong></td>
-                <td data-label="Lifetime Value">RM ${(c.lifetime_value || 0).toLocaleString()} <span style="color:var(--success); font-size:12px;"><i class="fas fa-caret-up"></i></span></td>
+                <td data-label="Lifetime Value">${UI.money(c.lifetime_value || 0, c.country)} <span style="color:var(--success); font-size:12px;"><i class="fas fa-caret-up"></i></span></td>
                 <td data-label="Customer Since">${escapeHtml(c.customer_since || '—')}</td>
                 <td data-label="Ming Gua">${escapeHtml(c.ming_gua || '—')}</td>
                 <td data-label="Agent" onclick="event.stopPropagation()">${canReassignCust
@@ -650,7 +650,7 @@ const showCustomerDetail = async (customerId) => {
                         ${iconBtn('Recruit as Agent', 'fas fa-user-tie', `app.openRecruitModal(${customer.id})`, {bg:'#6b21a8',color:'#fff',border:'none'})}
                     </div>
                     <div style="font-size:12px;color:var(--gray-500);margin-top:2px;">
-                        Customer since ${customer.customer_since || '-'} · Converted at RM ${customer.conversion_amount?.toLocaleString() || '2,200'}
+                        Customer since ${customer.customer_since || '-'} · Converted at ${customer.conversion_amount != null ? UI.money(customer.conversion_amount, customer.country) : UI.money(2200, customer.country)}
                     </div>
                 </div>
             </div>
@@ -873,7 +873,7 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px;">
                 <div style="background:var(--gray-50);padding:12px;border-radius:8px;text-align:center;">
                     <div style="font-size:12px;color:var(--gray-500);">Lifetime Value</div>
-                    <div style="font-size:18px;font-weight:700;color:var(--primary);">RM ${(customer.lifetime_value || 0).toLocaleString()}</div>
+                    <div style="font-size:18px;font-weight:700;color:var(--primary);">${UI.money(customer.lifetime_value || 0, customer.country)}</div>
                 </div>
                 <div style="background:var(--gray-50);padding:12px;border-radius:8px;text-align:center;">
                     <div style="font-size:12px;color:var(--gray-500);">Total Purchases</div>
@@ -881,7 +881,7 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
                 </div>
                 <div style="background:var(--gray-50);padding:12px;border-radius:8px;text-align:center;">
                     <div style="font-size:12px;color:var(--gray-500);">Avg Order Value</div>
-                    <div style="font-size:18px;font-weight:700;color:var(--primary);">RM ${customer.total_purchases ? Math.round((customer.lifetime_value || 0) / customer.total_purchases).toLocaleString() : '0'}</div>
+                    <div style="font-size:18px;font-weight:700;color:var(--primary);">${customer.total_purchases ? UI.money(Math.round((customer.lifetime_value || 0) / customer.total_purchases), customer.country) : UI.money(0, customer.country)}</div>
                 </div>
                 <div style="background:var(--gray-50);padding:12px;border-radius:8px;text-align:center;">
                     <div style="font-size:12px;color:var(--gray-500);">Last Purchase</div>
@@ -1072,7 +1072,7 @@ const renderBasicBankTab = async (customer, containerId = 'profile-tab-content')
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
                     <div style="background:var(--gray-50); padding:12px; border-radius:8px; text-align:center;">
                         <div style="font-size:12px; color:var(--gray-500);">Lifetime Value</div>
-                        <div style="font-size:18px; font-weight:700; color:var(--primary);">RM ${(customer.lifetime_value || 0).toLocaleString()}</div>
+                        <div style="font-size:18px; font-weight:700; color:var(--primary);">${UI.money(customer.lifetime_value || 0, customer.country)}</div>
                     </div>
                     <div style="background:var(--gray-50); padding:12px; border-radius:8px; text-align:center;">
                         <div style="font-size:12px; color:var(--gray-500);">Total Purchases</div>
@@ -1080,7 +1080,7 @@ const renderBasicBankTab = async (customer, containerId = 'profile-tab-content')
                     </div>
                     <div style="background:var(--gray-50); padding:12px; border-radius:8px; text-align:center;">
                         <div style="font-size:12px; color:var(--gray-500);">Avg Order Value</div>
-                        <div style="font-size:18px; font-weight:700; color:var(--primary);">RM ${_avgOrder.toLocaleString()}</div>
+                        <div style="font-size:18px; font-weight:700; color:var(--primary);">${UI.money(_avgOrder, customer.country)}</div>
                     </div>
                     <div style="background:var(--gray-50); padding:12px; border-radius:8px; text-align:center;">
                         <div style="font-size:12px; color:var(--gray-500);">Last Purchase</div>
@@ -1247,6 +1247,9 @@ const renderPurchaseHistoryTab = async (customer, containerId = 'profile-tab-con
     const purchases = await AppDataStore.query('purchases', { customer_id: customer.id });
     const container = document.getElementById(containerId);
     if (!container) return; // target tab body may be absent (detail view has no such id)
+    // Render every amount in this customer's market currency. A purchase row may
+    // carry its own `currency` (stamped at sale time); fall back to the customer's.
+    const _custCur = UI.currencyForCountry(customer.country);
 
     // Fetch original closing record from the prospect this customer was converted from
     let cr = null;
@@ -1267,7 +1270,7 @@ const renderPurchaseHistoryTab = async (customer, containerId = 'profile-tab-con
                 <td>${escapeHtml(cr.closing_date || customer.customer_since || '-')}</td>
                 <td>${escapeHtml(cr.invoice_number || '-')}</td>
                 <td><strong>${escapeHtml(cr.product || '-')}</strong> <span style="font-size:11px;color:var(--gray-400);">(Conversion Sale)</span></td>
-                <td>RM ${amt.toLocaleString()}</td>
+                <td>${UI.formatCurrency(amt, { currency: _custCur })}</td>
                 <td><span class="score-badge" style="font-size:11px;background:#dcfce7;color:#166534;">PAID</span></td>
                 <td>${(() => { const _h = _safeHref(cr.invoice_file); return _h ? `<a href="${_h}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">View</a>` : '-'; })()}</td>
                 <td><span style="font-size:11px;color:var(--gray-400);">Locked</span></td>
@@ -1303,7 +1306,7 @@ const renderPurchaseHistoryTab = async (customer, containerId = 'profile-tab-con
                             <td>${escapeHtml(p.date || '')}</td>
                             <td>${escapeHtml(p.invoice || '')}</td>
                             <td>${escapeHtml(p.item || '')}</td>
-                            <td>RM ${(p.amount || 0).toLocaleString()}</td>
+                            <td>${UI.formatCurrency(p.amount || 0, { currency: p.currency || _custCur })}</td>
                             <td><span class="score-badge ${badgeClass}" style="font-size:11px;">${escapeHtml(_pstatus)}</span></td>
                             <td>${_proofHref ? `<a href="${_proofHref}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">${String(p.proof).endsWith('.pdf') ? 'View Report' : 'View Image'}</a>` : `<button class="btn-sm secondary" onclick="app.uploadPaymentProof(${p.id}, ${customer.id})">Upload Image</button>`}</td>
                             <td>
@@ -1317,9 +1320,9 @@ const renderPurchaseHistoryTab = async (customer, containerId = 'profile-tab-con
             </tbody>
         </table>
         <div class="purchase-summary">
-            <div>Total Paid: <span style="color:var(--success);">RM ${totalPaid.toLocaleString()}</span></div>
-            <div>Pending: <span style="color:var(--error);">RM ${totalPending.toLocaleString()}</span></div>
-            <div style="font-size:18px;">Lifetime Total: <span style="color:var(--primary);">RM ${(totalPaid + totalPending).toLocaleString()}</span></div>
+            <div>Total Paid: <span style="color:var(--success);">${UI.formatCurrency(totalPaid, { currency: _custCur })}</span></div>
+            <div>Pending: <span style="color:var(--error);">${UI.formatCurrency(totalPending, { currency: _custCur })}</span></div>
+            <div style="font-size:18px;">Lifetime Total: <span style="color:var(--primary);">${UI.formatCurrency(totalPaid + totalPending, { currency: _custCur })}</span></div>
         </div>
         <div style="margin-top:16px;">
             <button class="btn primary" onclick="app.openAddPurchaseModal(${customer.id})">Add Purchase</button>
@@ -1772,6 +1775,13 @@ const openAddCustomerModal = async () => {
         <div class="form-group half"><label>Previous Prospect ID</label><input type="text" id="cust-prev-id" class="form-control"></div>
         <div class="form-group half"><label>Initial Purchase Amt</label><input type="number" id="cust-init-amt" class="form-control"></div>
     </div>
+    <div class="form-row">
+        <div class="form-group half"><label>Market / Country</label>
+            <select id="cust-country" class="form-control">
+                ${(UI.countries || []).map(c => `<option value="${c.code}" ${c.code === window._crmUtils.cuHomeCountry() ? 'selected' : ''}>${escapeHtml(c.name)} (${escapeHtml(c.symbol)})</option>`).join('')}
+            </select>
+        </div>
+    </div>
     <div class="form-group"><label>Notes</label><textarea id="cust-notes" class="form-control" rows="2" placeholder="Legacy data notes..."></textarea></div>
 </div>
 `;
@@ -1797,6 +1807,7 @@ const saveCustomer = async () => {
             status: 'active',
             customer_since: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
             responsible_agent_id: _state.cu?.id || null,
+            country: UI.countryByCode(document.getElementById('cust-country')?.value).code,
         });
     } catch (e) {
         UI.toast.error('Failed to create customer: ' + (e?.message || e));
@@ -1826,25 +1837,43 @@ const npoLaunchFromPurchase = async (customerId) => {
     await open(customerId);
 };
 
+// Resolve a product's ABSOLUTE price for a market from its per-country price map.
+// No FX conversion: prices[country] is a number typed per market. Falls back to the
+// base `price` only for the default market; other markets with no price → null.
+const _productPriceFor = (p, country) => {
+    const m = (p && p.prices) || {};
+    if (m[country] != null) return m[country];
+    if (country === UI.defaultCountry) return p?.price ?? null;
+    return null;
+};
+
 const openAddPurchaseModal = async (customerId) => {
     const customer = await AppDataStore.getById('customers', customerId);
     // getById can return null (RLS deny / offline / deleted id) — guard before deref.
     if (!customer) { UI.toast.error('Customer not found'); return; }
+    // This customer's market drives the currency label + per-country price prefill.
+    const _cur = UI.currencyForCountry(customer.country);
+    const _sym = UI.countryByCode(customer.country).symbol;
+    const _products = await AppDataStore.getAll('products').catch(() => []);
+    const _prodOptions = (_products && _products.length)
+        ? _products.map(p => {
+            const price = _productPriceFor(p, customer.country);
+            return `<option value="${escapeHtml(p.name)}" data-price="${price != null ? price : ''}">${escapeHtml(p.name)}${price != null ? ` (${UI.formatCurrency(price, { currency: _cur })})` : ''}</option>`;
+          }).join('')
+        : ['PR4 Power Ring', 'PR3 Ring', 'Office Audit', 'Harmony Painting'].map(n => `<option value="${n}">${n}</option>`).join('');
     const content = `
 <div class="form-section">
                 <div class="form-group">
                     <label>Product</label>
-                    <select id="pur-product" class="form-control">
-                        <option value="PR4 Power Ring">PR4 Power Ring</option>
-                        <option value="PR3 Ring">PR3 Ring</option>
-                        <option value="Office Audit">Office Audit</option>
-                        <option value="Harmony Painting">Harmony Painting</option>
+                    <select id="pur-product" class="form-control" onchange="(function(s){var o=s.options[s.selectedIndex];var amt=document.getElementById('pur-amt');if(s.value==='Other'){return;}if(o&&o.dataset&&o.dataset.price!==''&&o.dataset.price!=null){amt.value=o.dataset.price;}})(this)">
+                        ${_prodOptions}
                         <option value="Other">Other (Type below)</option>
                     </select>
                 </div>
                 <div class="form-group"><label>Product Name (if Other)</label><input type="text" id="pur-other" class="form-control"></div>
+                <input type="hidden" id="pur-currency" value="${_cur}">
                 <div class="form-row">
-                    <div class="form-group half"><label>Amount (RM) <span class="required">*</span></label><input type="number" id="pur-amt" class="form-control"></div>
+                    <div class="form-group half"><label>Amount (${escapeHtml(_sym)}) <span class="required">*</span></label><input type="number" id="pur-amt" class="form-control"></div>
                     <div class="form-group half">
                         <label>Payment Method</label>
                         <select id="pur-method" class="form-control" onchange="const epp = document.getElementById('epp-fields'); if(this.value==='EPP') epp.style.display='block'; else epp.style.display='none'; if(this.value==='NPO') app.npoLaunchFromPurchase(${customerId});">
@@ -1958,6 +1987,9 @@ const savePurchase = async (customerId) => {
             invoice: invoiceNo,
             item: item,
             amount: amt,
+            // Currency the sale was booked in — from the modal's hidden field
+            // (customer's market), falling back to the customer's country.
+            currency: document.getElementById('pur-currency')?.value || UI.currencyForCountry(customer?.country),
             status: document.getElementById('pur-status')?.value,
             delivery_status: document.getElementById('pur-delivery')?.value || 'Pending Delivery',
             proof: document.getElementById('pur-file')?.value ? 'image_uploaded.png' : '',

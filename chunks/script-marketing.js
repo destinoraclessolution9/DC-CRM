@@ -737,8 +737,11 @@
                 <div class="form-group"><label>Functions Description</label><textarea id="mkt-functions-desc" class="form-control" placeholder="Describe functions..."></textarea></div>
                 <div class="form-group"><label>Product Description</label><textarea id="mkt-desc" class="form-control" placeholder="Describe the product..."></textarea></div>
                 <div class="form-row">
-                    <div class="form-group half"><label>Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="0"></div>
+                    <div class="form-group half"><label>Price (RM) — Malaysia</label><input type="number" id="mkt-price" class="form-control" value="0"></div>
                     <div class="form-group half"><label>Price Effective Date</label><input type="date" id="mkt-price-date" class="form-control" value="${_today}"></div>
+                </div>
+                <div class="form-row">
+                    ${(UI.countries || []).filter(c => c.code !== UI.defaultCountry).map(c => `<div class="form-group half"><label>Price (${escapeHtml(c.symbol)}) — ${escapeHtml(c.name)}</label><input type="number" id="mkt-price-${c.code}" class="form-control" placeholder="0"></div>`).join('')}
                 </div>
                 <div class="form-group"><label>Product Photo</label><input type="file" id="mkt-photo" class="form-control" accept="image/*"></div>
                 <div class="form-group"><label>Product Poster</label><input type="file" id="mkt-poster" class="form-control" accept="image/*"></div>
@@ -839,8 +842,11 @@
                 <div class="form-group"><label>Functions Description</label><textarea id="mkt-functions-desc" class="form-control" placeholder="Describe functions...">${escapeHtml(item.functions_description || '')}</textarea></div>
                 <div class="form-group"><label>Product Description</label><textarea id="mkt-desc" class="form-control" placeholder="Describe the product...">${escapeHtml(item.description || '')}</textarea></div>
                 <div class="form-row">
-                    <div class="form-group half"><label>Price (RM)</label><input type="number" id="mkt-price" class="form-control" value="${item.price || 0}"></div>
+                    <div class="form-group half"><label>Price (RM) — Malaysia</label><input type="number" id="mkt-price" class="form-control" value="${item.price || 0}"></div>
                     <div class="form-group half"><label>Price Effective Date</label><input type="date" id="mkt-price-date" class="form-control" value="${_today}"></div>
+                </div>
+                <div class="form-row">
+                    ${(UI.countries || []).filter(c => c.code !== UI.defaultCountry).map(c => `<div class="form-group half"><label>Price (${escapeHtml(c.symbol)}) — ${escapeHtml(c.name)}</label><input type="number" id="mkt-price-${c.code}" class="form-control" value="${(item.prices && item.prices[c.code] != null) ? item.prices[c.code] : ''}" placeholder="0"></div>`).join('')}
                 </div>
                 <div class="form-group">
                     <label>Product Photo</label>
@@ -959,6 +965,14 @@
             data.functions_description = document.getElementById('mkt-functions-desc').value;
             data.description = document.getElementById('mkt-desc')?.value || '';
             data.price = parseFloat(document.getElementById('mkt-price').value) || 0;
+            // Per-country absolute price map (NOT FX conversion). Default market (MY)
+            // mirrors the base `price`; other markets read their own input, omitted if blank.
+            data.prices = {};
+            (UI.countries || []).forEach(c => {
+                if (c.code === UI.defaultCountry) { data.prices[c.code] = data.price; return; }
+                const v = parseFloat(document.getElementById('mkt-price-' + c.code)?.value);
+                if (Number.isFinite(v) && v > 0) data.prices[c.code] = v;
+            });
             data.remarks = document.getElementById('mkt-remarks').value;
             data.delivery_lead_time = document.getElementById('mkt-lead').value;
             data.product_dimension = document.getElementById('mkt-dimension')?.value || '';

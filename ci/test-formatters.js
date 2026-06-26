@@ -49,13 +49,14 @@ const blockDateNum = slice(
   'formatDate/formatNumber'
 );
 
-// Block B: formatCurrency + formatCompact (contiguous; formatCompact calls
-// formatCurrency, so they must be eval'd together).
+// Block B: country registry + formatCurrency + formatCompact (contiguous;
+// formatCurrency now reads the _CURRENCY map derived from COUNTRIES, and
+// formatCompact calls formatCurrency, so they must be eval'd together).
 const blockCurrency = slice(
   uiSrc,
-  'const formatCurrency = (n, opts = {}) => {',
-  'return formatCurrency(num);\n    };',
-  'formatCurrency/formatCompact'
+  'const COUNTRIES = [',
+  'return formatCurrency(num, opts);\n    };',
+  'country-registry/formatCurrency/formatCompact'
 );
 
 let DN, CUR;
@@ -107,6 +108,12 @@ eq('cur-dp2',        formatCurrency(1500.5, { dp: 2 }), 'RM 1,500.50');
 eq('cur-million',    formatCurrency(1234567), 'RM 1,234,567');
 eq('cur-string',     formatCurrency('2500'), 'RM 2,500');        // Number('2500')=2500
 eq('cur-neg',        formatCurrency(-300), 'RM -300');
+// ── Multi-country: opts.currency switches symbol + locale; default stays MYR ──
+eq('cur-myr-explicit', formatCurrency(1500, { currency: 'MYR' }), 'RM 1,500');
+eq('cur-sgd',          formatCurrency(1500, { currency: 'SGD' }), 'S$ 1,500');
+eq('cur-aud',          formatCurrency(1500, { currency: 'AUD' }), 'A$ 1,500');
+eq('cur-sgd-dp2',      formatCurrency(1500.5, { currency: 'SGD', dp: 2 }), 'S$ 1,500.50');
+eq('cur-unknown-cur',  formatCurrency(1500, { currency: 'XXX' }), 'RM 1,500'); // unknown → MYR fallback
 
 // ── formatCompact: K/M suffix thresholds + sentinel ──────────────────────────
 eq('comp-nan',       formatCompact('x'), '—');
@@ -117,6 +124,10 @@ eq('comp-1m',        formatCompact(1500000), 'RM 1.5M');         // 1e6..1e7 →
 eq('comp-10m',       formatCompact(12000000), 'RM 12M');         // >= 1e7 → 0dp M
 eq('comp-neg-1m',    formatCompact(-1500000), 'RM -1.5M');       // sign preserved (abs drives threshold)
 eq('comp-boundary-1k', formatCompact(1000), 'RM 1.0K');         // exactly 1e3 → K branch, 1dp
+// ── formatCompact: currency-aware too (default MYR unchanged) ─────────────────
+eq('comp-sgd-1k',    formatCompact(1500, { currency: 'SGD' }), 'S$ 1.5K');
+eq('comp-aud-1m',    formatCompact(1500000, { currency: 'AUD' }), 'A$ 1.5M');
+eq('comp-sgd-small', formatCompact(950, { currency: 'SGD' }), 'S$ 950');
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  chunks/script-ai.js — _daysSince (relative-time; wall-clock made deterministic)

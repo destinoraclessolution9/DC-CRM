@@ -3407,6 +3407,8 @@ const renderCustomerClosingTab = async (customer, container) => {
     // ── Section 1: Purchases table (merged from former Purchase History tab) ──
     const purchases = await AppDataStore.query('purchases', { customer_id: customer.id }).catch(() => []);
     let totalPaid = 0, totalPending = 0;
+    // Render every amount in this customer's market currency (rows may carry their own).
+    const _cur = UI.currencyForCountry(customer.country);
 
     // Pull the original conversion sale from the linked prospect closing_record.
     // IMPORTANT: every approval path NULLs closing_record on conversion and pushes
@@ -3426,7 +3428,7 @@ const renderCustomerClosingTab = async (customer, container) => {
                     <td style="padding:6px 10px;">${escapeHtml(cr0.closing_date || customer.customer_since || '-')}</td>
                     <td style="padding:6px 10px;">${escapeHtml(cr0.invoice_number || '-')}</td>
                     <td style="padding:6px 10px;"><strong>${escapeHtml(cr0.product || '-')}</strong> <span style="font-size:11px;color:var(--gray-400);">(Conversion)</span></td>
-                    <td style="padding:6px 10px;">RM ${amt0.toLocaleString('en-MY',{minimumFractionDigits:2})}</td>
+                    <td style="padding:6px 10px;">${UI.formatCurrency(amt0, { currency: _cur, dp: 2 })}</td>
                     <td style="padding:6px 10px;"><span style="background:#dcfce7;color:#166534;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;">PAID</span></td>
                     <td style="padding:6px 10px;">${(()=>{ const ds=cr0.delivery_status||'Pending Delivery'; const dc={'Pending Delivery':'background:#fef3c7;color:#92400e','Dispatched':'background:#dbeafe;color:#1e40af','Delivered':'background:#dcfce7;color:#166534'}; return `<span style="${dc[ds]||dc['Pending Delivery']};border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;cursor:pointer;" onclick="app.updateConversionDelivery(${origP.id},${customer.id})" title="Click to update">${ds} ✎</span>`; })()}</td>
                     <td style="padding:6px 10px;">${cr0.invoice_file ? `<a href="${safeUrl(cr0.invoice_file)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> View</a>` : '-'}</td>
@@ -3444,7 +3446,7 @@ const renderCustomerClosingTab = async (customer, container) => {
                 <td style="padding:6px 10px;">${escapeHtml(p.date || '-')}</td>
                 <td style="padding:6px 10px;">${escapeHtml(p.invoice || '-')}</td>
                 <td style="padding:6px 10px;">${escapeHtml(p.item || '-')}</td>
-                <td style="padding:6px 10px;">RM ${amt.toLocaleString('en-MY',{minimumFractionDigits:2})}</td>
+                <td style="padding:6px 10px;">${UI.formatCurrency(amt, { currency: p.currency || _cur, dp: 2 })}</td>
                 <td style="padding:6px 10px;"><span style="background:${statusColor};border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;">${p.status}</span></td>
                 <td style="padding:6px 10px;">${(()=>{ const ds=p.delivery_status||'Pending Delivery'; const dc={'Pending Delivery':'background:#fef3c7;color:#92400e','Dispatched':'background:#dbeafe;color:#1e40af','Delivered':'background:#dcfce7;color:#166534'}; return `<span style="${dc[ds]||dc['Pending Delivery']};border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;cursor:pointer;" onclick="app.updatePurchaseDelivery(${p.id},${customer.id})" title="Click to update">${ds} ✎</span>`; })()}</td>
                 <td style="padding:6px 10px;">${p.proof
@@ -3481,9 +3483,9 @@ const renderCustomerClosingTab = async (customer, container) => {
                 </table>
             </div>
             <div style="padding:10px 12px;display:flex;gap:16px;font-size:13px;flex-wrap:wrap;background:#fafafa;">
-                <span>Paid: <strong style="color:#166534;">RM ${totalPaid.toLocaleString('en-MY',{minimumFractionDigits:2})}</strong></span>
-                <span>Pending: <strong style="color:#854d0e;">RM ${totalPending.toLocaleString('en-MY',{minimumFractionDigits:2})}</strong></span>
-                <span style="margin-left:auto;">Lifetime Total: <strong style="color:var(--primary);">RM ${(totalPaid+totalPending).toLocaleString('en-MY',{minimumFractionDigits:2})}</strong></span>
+                <span>Paid: <strong style="color:#166534;">${UI.formatCurrency(totalPaid, { currency: _cur, dp: 2 })}</strong></span>
+                <span>Pending: <strong style="color:#854d0e;">${UI.formatCurrency(totalPending, { currency: _cur, dp: 2 })}</strong></span>
+                <span style="margin-left:auto;">Lifetime Total: <strong style="color:var(--primary);">${UI.formatCurrency(totalPaid+totalPending, { currency: _cur, dp: 2 })}</strong></span>
             </div>
         </div>`;
 

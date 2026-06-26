@@ -798,6 +798,57 @@ const appLogic = (() => {
     // role-scoped visible user list).
     Object.assign(window._crmUtils, { getVisibleUserIds: (u) => getVisibleUserIds(u) });
 
+    // ── Multi-country (MY / SG / AU + future) ────────────────────────────────
+    // One org, country-tagged records. The registry lives in UI.countries; these
+    // helpers are the shared home for "which market does this record belong to"
+    // and "which market is the user currently viewing". The active-country is a
+    // VIEW scope only — it never widens data permissions; agent-visibility
+    // (getVisibleUserIds) still applies on top.
+    const _ALL_COUNTRIES = '__ALL__';
+    // Home market of the signed-in user → defaults new prospects/customers/events.
+    // Validated through the registry so a stale/blank value resolves to the default.
+    const cuHomeCountry = () => {
+        try { return UI.countryByCode((_currentUser || window._appState?.cu || {}).country).code; }
+        catch (_) { return UI.defaultCountry || 'MY'; }
+    };
+    // Country a record belongs to (legacy rows with no tag read as default = MY).
+    const recordCountry = (rec) => UI.countryByCode(rec && rec.country).code;
+    // ISO-4217 currency for a record's market — feed into UI.formatCurrency({currency}).
+    const recordCurrency = (rec) => UI.currencyForCountry(recordCountry(rec));
+    // Users with org-wide visibility default to viewing ALL markets; everyone
+    // else is pinned to their home market.
+    const _seesAllMarkets = (u) => isSystemAdmin(u) || isMarketingManager(u) || _getUserLevel(u) <= 2;
+    const _activeCountryKey = () => `crm_active_country_${(_currentUser || {}).id || 'anon'}`;
+    const _countryFromUrl = () => {
+        try {
+            const m = (location.pathname || '').match(/\/(my|sg|au)(?:\/|$)/i)
+                   || (location.search || '').match(/[?&]country=([a-z]{2})/i);
+            const code = m ? m[1].toUpperCase() : null;
+            return (code && UI.countries.some(c => c.code === code)) ? code : null;
+        } catch (_) { return null; }
+    };
+    // Active market for scoped views: URL (/sg, ?country=SG) wins, then a saved
+    // per-user choice, then the role default. Returns a country code or '__ALL__'.
+    const getActiveCountry = () => {
+        const url = _countryFromUrl();
+        if (url) return url;
+        try {
+            const saved = localStorage.getItem(_activeCountryKey());
+            if (saved === _ALL_COUNTRIES || UI.countries.some(c => c.code === saved)) return saved;
+        } catch (_) { /* storage unreadable → role default */ }
+        return _seesAllMarkets(_currentUser) ? _ALL_COUNTRIES : cuHomeCountry();
+    };
+    const setActiveCountry = (code) => {
+        const ok = code === _ALL_COUNTRIES || UI.countries.some(c => c.code === code);
+        if (!ok) return;
+        try { localStorage.setItem(_activeCountryKey(), code); } catch (_) { /* non-fatal */ }
+    };
+    Object.assign(window._crmUtils, {
+        cuHomeCountry, recordCountry, recordCurrency,
+        getActiveCountry, setActiveCountry, ALL_COUNTRIES: _ALL_COUNTRIES,
+        seesAllMarkets: () => _seesAllMarkets(_currentUser),
+    });
+
     // Race a promise against a timeout. On timeout returns the fallback so
     // a slow Supabase call never leaves a view stuck on a skeleton loader.
     const withTimeout = (promise, ms, fallback, label) => Promise.race([

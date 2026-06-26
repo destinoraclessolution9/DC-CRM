@@ -447,21 +447,58 @@ window.UI = (() => {
         }
     };
 
-    // ── Formatters: currency / compact — one home, en-MY / RM ────────────────
+    // ── Country registry: the ONE place that knows a market's currency ───────
+    // Extensible — add a market by adding a row here (and a `countries` DB row +
+    // its per-country product prices). No other code change needed. This mirrors
+    // the public.countries table; kept client-side so currency rendering stays
+    // synchronous (formatCurrency is called on every card/cell). If the registry
+    // ever needs to be admin-editable at runtime, load the DB rows into COUNTRIES
+    // at boot — every consumer already reads through the helpers below.
+    const COUNTRIES = [
+        { code: 'MY', name: 'Malaysia',  currency: 'MYR', symbol: 'RM', locale: 'en-MY' },
+        { code: 'SG', name: 'Singapore', currency: 'SGD', symbol: 'S$', locale: 'en-SG' },
+        { code: 'AU', name: 'Australia', currency: 'AUD', symbol: 'A$', locale: 'en-AU' },
+    ];
+    const DEFAULT_COUNTRY = 'MY';
+    // currency code → { symbol, locale } (derived from COUNTRIES; the lookup key
+    // is the currency, so two markets sharing a currency would still resolve).
+    const _CURRENCY = COUNTRIES.reduce((m, c) => {
+        if (!m[c.currency]) m[c.currency] = { symbol: c.symbol, locale: c.locale };
+        return m;
+    }, {});
+    const countryByCode = (code) =>
+        COUNTRIES.find(c => c.code === code) ||
+        COUNTRIES.find(c => c.code === DEFAULT_COUNTRY);
+    // ISO country code → ISO currency code (e.g. 'SG' → 'SGD'). Unknown → MYR.
+    const currencyForCountry = (code) => countryByCode(code).currency;
+
+    // ── Formatters: currency / compact — currency-aware, default MYR / RM ─────
+    // opts.currency is an ISO-4217 code ('MYR' default | 'SGD' | 'AUD'). Omitting
+    // it keeps the historical 'RM …' / en-MY output byte-identical, so every
+    // existing call site is unchanged.
     const formatCurrency = (n, opts = {}) => {
         const num = Number(n);
         if (!Number.isFinite(num)) return '—';
         const dp = opts.dp == null ? 0 : opts.dp;
-        return 'RM ' + num.toLocaleString('en-MY', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+        const cur = _CURRENCY[opts.currency] || _CURRENCY.MYR;
+        return cur.symbol + ' ' + num.toLocaleString(cur.locale, { minimumFractionDigits: dp, maximumFractionDigits: dp });
     };
-    const formatCompact = (n) => {
+    const formatCompact = (n, opts = {}) => {
         const num = Number(n);
         if (!Number.isFinite(num)) return '—';
+        const cur = _CURRENCY[opts.currency] || _CURRENCY.MYR;
         const abs = Math.abs(num);
-        if (abs >= 1e6) return 'RM ' + (num / 1e6).toFixed(abs >= 1e7 ? 0 : 1) + 'M';
-        if (abs >= 1e3) return 'RM ' + (num / 1e3).toFixed(abs >= 1e4 ? 0 : 1) + 'K';
-        return formatCurrency(num);
+        if (abs >= 1e6) return cur.symbol + ' ' + (num / 1e6).toFixed(abs >= 1e7 ? 0 : 1) + 'M';
+        if (abs >= 1e3) return cur.symbol + ' ' + (num / 1e3).toFixed(abs >= 1e4 ? 0 : 1) + 'K';
+        return formatCurrency(num, opts);
     };
+    // Render an amount in a COUNTRY's currency (resolves country → currency for you).
+    //   UI.money(45, 'SG')            → 'S$ 45'
+    //   UI.money(1500.5, 'MY', {dp:2})→ 'RM 1,500.50'
+    const money = (n, country, opts = {}) =>
+        formatCurrency(n, { ...opts, currency: currencyForCountry(country) });
+    const moneyCompact = (n, country) =>
+        formatCompact(n, { currency: currencyForCountry(country) });
 
     // ── Vanilla UI kit: escaped string-builders that REUSE existing classes ──
     // Every interpolation routes through escapeHtml; onClick strings are the
@@ -586,6 +623,13 @@ window.UI = (() => {
         formatNumber,
         formatCurrency,
         formatCompact,
+        // ── Multi-country: registry + currency resolver ──
+        countries: COUNTRIES,
+        defaultCountry: DEFAULT_COUNTRY,
+        countryByCode,
+        currencyForCountry,
+        money,
+        moneyCompact,
         escapeHtml,
         escJsAttr,
         requireNumericId,

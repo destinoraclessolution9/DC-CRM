@@ -960,6 +960,15 @@ const openAddAgentModal = async (agentId = null) => {
                         </select>
                     </div>
                 </div>
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Home Market</label>
+                        <select id="agent-country" class="form-control">
+                            ${(UI.countries || []).map(c => `<option value="${c.code}" ${((isEdit ? (agent.country || UI.defaultCountry) : UI.defaultCountry) === c.code) ? 'selected' : ''}>${escapeHtml(c.name)} (${escapeHtml(c.symbol)})</option>`).join('')}
+                        </select>
+                        <small style="color:var(--gray-500); margin-top:4px; display:block;">New prospects, customers &amp; events this agent creates default to this market's currency &amp; pricing. Can be changed per record.</small>
+                    </div>
+                </div>
             </div>
 
             <div class="form-section">
@@ -1055,6 +1064,9 @@ const saveAgent = async () => {
         team: document.getElementById('agent-team')?.value || null,
         status: document.getElementById('agent-status')?.value || 'active',
         employment_type: document.getElementById('agent-employment-type')?.value === 'part-time' ? 'part-time' : 'full-time',
+        // Home market — defaults this agent's new prospects/customers/events to a
+        // country's currency & pricing. Validated against the registry; bad/empty → MY.
+        country: (UI.countryByCode(document.getElementById('agent-country')?.value).code) || UI.defaultCountry,
     };
 
     if (editId) {

@@ -2887,6 +2887,7 @@ const closeDealWon = async (prospectId) => {
         status: 'active',
         customer_since: closeDate,
         responsible_agent_id: prospect.responsible_agent_id,
+        country: UI.countryByCode(prospect.country).code,
         converted_from_prospect_id: prospect.id,
         conversion_amount: amount,
         conversion_date: closeDate
@@ -2906,6 +2907,7 @@ const closeDealWon = async (prospectId) => {
                 date: closeDate,
                 item: 'Deal closed (pipeline)',
                 amount: amount,
+                currency: UI.currencyForCountry(prospect.country),
                 status: 'COMPLETED',
                 payment_method: 'Cash'
             });

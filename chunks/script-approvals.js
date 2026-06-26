@@ -434,6 +434,7 @@ const approveClosingRecord = async (prospectId) => {
                 ic_number: prospect.ic_number,
                 date_of_birth: prospect.date_of_birth,
                 responsible_agent_id: prospect.responsible_agent_id,
+                country: UI.countryByCode(prospect.country).code,
                 status: 'active',
                 lifetime_value: 0,
                 customer_since: cr.closing_date || cr.order_date || now.split('T')[0],
@@ -448,6 +449,7 @@ const approveClosingRecord = async (prospectId) => {
                 invoice: cr.invoice_number || '',
                 item: cr.product || '',
                 amount: saleAmount,
+                currency: UI.currencyForCountry(prospect.country),
                 status: 'COMPLETED',
                 payment_method: cr.payment_method || 'Cash'
             });
@@ -630,6 +632,7 @@ const approveProspectConversion = async (prospectId) => {
         referred_by_type: prospect.referred_by_type || '',
         referral_relationship: prospect.referral_relationship || '',
         responsible_agent_id: prospect.responsible_agent_id || null,
+        country: UI.countryByCode(prospect.country).code,
         lifetime_value: 0,
         status: 'active',
         customer_since: cr?.closing_date || now.split('T')[0],
@@ -657,6 +660,7 @@ const approveProspectConversion = async (prospectId) => {
                 invoice: cr?.invoice_number || '',
                 item: cr?.product || '',
                 amount: saleAmount,
+                currency: UI.currencyForCountry(prospect.country),
                 status: 'COMPLETED',
                 payment_method: cr?.payment_method || 'Cash'
             });

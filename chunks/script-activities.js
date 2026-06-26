@@ -802,6 +802,14 @@
                 </div>
                 <div class="form-row">
                     <div class="form-group half">
+                        <label>Market / Country</label>
+                        <select id="${prefix}-country" class="form-control" ${disabled}>
+                            ${(window.UI.countries || []).map(c => `<option value="${c.code}" ${sel(d.country || window._crmUtils.cuHomeCountry(), c.code)}>${esc(c.name)} (${esc(c.symbol)})</option>`).join('')}
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group half">
                         <div style="display:flex;align-items:center;gap:8px;">
                             <label style="margin-bottom:0;">Date of Birth</label>
                             ${readOnly ? '' : `<input type="checkbox" id="${prefix}-use-dob" ${chk(useDob)} title="Use for life chart"><small style="color:var(--gray-400);font-size:11px;">Use for life chart</small>`}
@@ -936,6 +944,7 @@
             nickname: d(`${prefix}-nickname`) || null,
             gender: d(`${prefix}-gender`) || null,
             nationality: d(`${prefix}-nationality`) || null,
+            country: window.UI.countryByCode(d(`${prefix}-country`)).code,
             phone: d(`${prefix}-phone`),
             email: d(`${prefix}-email`) || null,
             ic_number: d(`${prefix}-ic`) || null,
@@ -2647,16 +2656,24 @@
             // If an image was attached, upload it to storage and patch the
             // event's poster_url — mirrors the marketing chunk's event poster
             // upload (events/poster/<id>_<ts> in the `attachments` bucket).
+            // Wrapped in its own try/catch so a thrown upload error doesn't
+            // roll into the outer catch and mislabel an already-created event
+            // as a failed save (or skip hideModal + the dropdown refresh).
             if (newEvent?.id && _posterFile) {
-                const _sb = window.supabase || window.supabaseClient;
-                const _path = `events/poster/${newEvent.id}_${Date.now()}`;
-                const { error: _pe } = await _sb.storage.from('attachments').upload(_path, _posterFile, { upsert: true, contentType: _posterFile.type });
-                if (!_pe) {
-                    const { data: _ud } = _sb.storage.from('attachments').getPublicUrl(_path);
-                    await AppDataStore.update('events', newEvent.id, { poster_url: _ud.publicUrl });
-                    newEvent.poster_url = _ud.publicUrl;
-                } else {
-                    console.error('Event poster upload error:', _pe);
+                try {
+                    const _sb = window.supabase || window.supabaseClient;
+                    const _path = `events/poster/${newEvent.id}_${Date.now()}`;
+                    const { error: _pe } = await _sb.storage.from('attachments').upload(_path, _posterFile, { upsert: true, contentType: _posterFile.type });
+                    if (!_pe) {
+                        const { data: _ud } = _sb.storage.from('attachments').getPublicUrl(_path);
+                        await AppDataStore.update('events', newEvent.id, { poster_url: _ud.publicUrl });
+                        newEvent.poster_url = _ud.publicUrl;
+                    } else {
+                        console.error('Event poster upload error:', _pe);
+                        UI.toast.error('Event saved, but poster upload failed.');
+                    }
+                } catch (_upErr) {
+                    console.error('Event poster upload threw:', _upErr);
                     UI.toast.error('Event saved, but poster upload failed.');
                 }
             }
