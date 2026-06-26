@@ -4730,6 +4730,16 @@ function _wireLoginBtn() {
         // then dispatch (previously threw "app.X is not a function").
         toggleLifeChartType: _lazyStub('chunks/script-activities.min.js', 'toggleLifeChartType'),
         scanInvoiceWithAI:   _lazyStub('chunks/script-activities.min.js', 'scanInvoiceWithAI'),
+        // The Activity Details modal (Add Attendee / Add Agent-Consultant buttons)
+        // is rendered by viewActivityDetails in the CALENDAR chunk, but these two
+        // handlers live in the activities chunk — which is NOT in the eager
+        // post-login burst. On the calendar landing the buttons would call an
+        // undefined app.showAddAttendeeSearch / showAddConsultantSearch and no-op.
+        // Self-loading stubs pull the activities chunk in, then dispatch (the rest
+        // of the add-attendee flow — searchAddAttendee / confirmAddAttendee /
+        // searchAddConsultant / confirmAddConsultant — is registered alongside).
+        showAddAttendeeSearch:   _lazyStub('chunks/script-activities.min.js', 'showAddAttendeeSearch'),
+        showAddConsultantSearch: _lazyStub('chunks/script-activities.min.js', 'showAddConsultantSearch'),
         // The apu_ack follow-up "E-Voucher" button renders on the Calendar
         // reminders panel, which can show before the prospects chunk loads
         // (prospects is NOT in the eager post-login burst). Self-loading stub
