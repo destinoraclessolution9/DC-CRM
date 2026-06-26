@@ -2448,9 +2448,10 @@
                                 <span style="color:#6b7280; font-weight:normal; font-size:0.85rem;">(visible to L12/13/14 — untick to keep private)</span>
                             </label>
                             <div id="activity-noticeboard-fields" style="display:block; margin-top:10px;">
-                                <label style="font-size:0.9rem; color:#374151;">Poster Image URL</label>
-                                <input type="url" id="activity-poster-url" class="form-control" placeholder="https://… or Supabase storage path" style="margin-top:4px;">
-                                <small style="color:#6b7280; font-size:0.8rem;">Leave blank to keep the event's existing poster (if any).</small>
+                                <label style="font-size:0.9rem; color:#374151;">Event Poster</label>
+                                <input type="file" id="activity-poster-file" class="form-control" accept="image/*" style="margin-top:4px;">
+                                <small style="color:#6b7280; font-size:0.8rem;">Upload an image (max 5MB), or paste a URL below. Leave both blank to keep the event's existing poster.</small>
+                                <input type="url" id="activity-poster-url" class="form-control" placeholder="https://… or Supabase storage path" style="margin-top:6px;">
                             </div>
                         </div>
                         ` : ''}
@@ -2528,6 +2529,19 @@
         if (next) next.style.display = val === 'new' ? 'block' : 'none';
     };
 
+    // Reject oversized poster uploads before they hit storage — a phone photo
+    // can be 5–10MB, which is slow on mobile and bloats the `attachments`
+    // bucket. Shared by both event-poster upload paths (create-event modal +
+    // inline EVENT activity modal).
+    const POSTER_MAX_BYTES = 5 * 1024 * 1024;
+    const _posterTooLarge = (file) => {
+        if (file && file.size > POSTER_MAX_BYTES) {
+            UI.toast.error('Poster image is too large (max 5MB). Please choose a smaller file.');
+            return true;
+        }
+        return false;
+    };
+
     // Show/hide the poster URL input when the noticeboard checkbox is toggled
     // inside the Quick Add Activity → EVENT modal.
     const toggleActivityNoticeboardFields = () => {
@@ -2553,7 +2567,12 @@
             <div class="form-group"><label>Location / Venue</label><input type="text" id="mkt-location" class="form-control" placeholder="e.g. KL, Online"></div>
             <div class="form-group"><label>Speaker</label><input type="text" id="mkt-speaker" class="form-control" placeholder="e.g. Master Tan"></div>
             <div class="form-group"><label>Description</label><textarea id="mkt-desc" class="form-control"></textarea></div>
-            <div class="form-group"><label>Poster Image URL <span style="color:var(--gray-400);font-weight:normal;">(shown on Noticeboard)</span></label><input type="url" id="mkt-poster-url" class="form-control" placeholder="https://… or Supabase storage path"></div>
+            <div class="form-group">
+                <label>Event Poster <span style="color:var(--gray-400);font-weight:normal;">(shown on Noticeboard)</span></label>
+                <input type="file" id="mkt-poster-file" class="form-control" accept="image/*">
+                <small style="color:#6b7280;font-size:0.8rem;">Upload an image from your device, or paste a URL below.</small>
+                <input type="url" id="mkt-poster-url" class="form-control" placeholder="https://… or Supabase storage path" style="margin-top:6px;">
+            </div>
             <div class="form-group"><label>Remarks</label><input type="text" id="mkt-remarks" class="form-control"></div>
             <div class="form-group"><label><input type="checkbox" id="mkt-active" checked> Is Active</label></div>
             <div class="form-group" style="padding:10px 12px;background:#fdf2f8;border:1px solid #fce7f3;border-radius:8px;">
@@ -2619,8 +2638,29 @@
             updated_at: new Date().toISOString()
         };
 
+        const _posterFile = document.getElementById('mkt-poster-file')?.files?.[0];
+        if (_posterTooLarge(_posterFile)) return;
+
         try {
             const newEvent = await AppDataStore.create('events', data);
+
+            // If an image was attached, upload it to storage and patch the
+            // event's poster_url — mirrors the marketing chunk's event poster
+            // upload (events/poster/<id>_<ts> in the `attachments` bucket).
+            if (newEvent?.id && _posterFile) {
+                const _sb = window.supabase || window.supabaseClient;
+                const _path = `events/poster/${newEvent.id}_${Date.now()}`;
+                const { error: _pe } = await _sb.storage.from('attachments').upload(_path, _posterFile, { upsert: true, contentType: _posterFile.type });
+                if (!_pe) {
+                    const { data: _ud } = _sb.storage.from('attachments').getPublicUrl(_path);
+                    await AppDataStore.update('events', newEvent.id, { poster_url: _ud.publicUrl });
+                    newEvent.poster_url = _ud.publicUrl;
+                } else {
+                    console.error('Event poster upload error:', _pe);
+                    UI.toast.error('Event saved, but poster upload failed.');
+                }
+            }
+
             UI.hideModal();
             UI.toast.success('Event created successfully');
 
@@ -4367,7 +4407,30 @@
                 const publishCb = document.getElementById('activity-publish-noticeboard');
                 if (publishCb) {
                     const wantsPublished = publishCb.checked === true;
-                    const newPoster = document.getElementById('activity-poster-url')?.value?.trim() || null;
+                    let newPoster = document.getElementById('activity-poster-url')?.value?.trim() || null;
+
+                    // An uploaded image takes precedence over a pasted URL.
+                    // Upload to the `attachments` bucket and use its public URL
+                    // (mirrors the create-event modal + marketing chunk).
+                    const _posterFile = document.getElementById('activity-poster-file')?.files?.[0];
+                    if (_posterFile && !_posterTooLarge(_posterFile)) {
+                        try {
+                            const _sb = window.supabase || window.supabaseClient;
+                            const _path = `events/poster/${eventId}_${Date.now()}`;
+                            const { error: _pe } = await _sb.storage.from('attachments').upload(_path, _posterFile, { upsert: true, contentType: _posterFile.type });
+                            if (!_pe) {
+                                const { data: _ud } = _sb.storage.from('attachments').getPublicUrl(_path);
+                                newPoster = _ud.publicUrl;
+                            } else {
+                                console.error('Event poster upload error:', _pe);
+                                UI.toast.error('Poster upload failed — event poster unchanged.');
+                            }
+                        } catch (_upErr) {
+                            console.error('Event poster upload threw:', _upErr);
+                            UI.toast.error('Poster upload failed — event poster unchanged.');
+                        }
+                    }
+
                     const patch = { published_to_noticeboard: wantsPublished };
                     if (newPoster) patch.poster_url = newPoster;
                     // Only write if something actually changed (avoids extra
