@@ -22,6 +22,7 @@
     const isAgent              = (u) => _utils.isAgent(u || _state.cu);
     const isManagement         = (u) => _utils.isManagement(u || _state.cu);
     const isTeamLeaderOrAbove  = (u) => _utils.isTeamLeaderOrAbove(u || _state.cu);
+    const getUserLevel         = (u) => _utils.getUserLevel(u);
     const getAgentsAndLeaders  = () => _utils.getAgentsAndLeaders();
     // Co-agent push notification — defined in script-activities.js, exported to window.app.
     // Fire-and-forget after a co-agent is added to an activity.
@@ -209,6 +210,27 @@
                                         <h4 style="margin:0;">Upcoming (Next 2 Days)</h4>
                                     </div>
                                     <div class="bday-list" id="bday-upcoming-list"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Section 1.45: Team Birthdays (staff/colleagues) -->
+                        <div class="birthday-section">
+                            <h3>🎉 TEAM BIRTHDAYS</h3>
+                            <div class="birthday-columns">
+                                <div class="birthday-col">
+                                    <div id="team-bday-today-header" style="display:flex;align-items:center;gap:10px;margin-bottom:15px;">
+                                        <div id="team-bday-today-badge" class="bday-badge" style="width:30px;height:30px;border-radius:50%;background:#10b981;color:white;display:flex;align-items:center;justify-content:center;font-weight:bold;">0</div>
+                                        <h4 style="margin:0;">Today</h4>
+                                    </div>
+                                    <div class="bday-list" id="team-bday-today-list"></div>
+                                </div>
+                                <div class="birthday-col">
+                                    <div id="team-bday-upcoming-header" style="display:flex;align-items:center;gap:10px;margin-bottom:15px;">
+                                        <div id="team-bday-upcoming-badge" class="bday-badge" style="width:30px;height:30px;border-radius:50%;background:#f59e0b;color:white;display:flex;align-items:center;justify-content:center;font-weight:bold;">0</div>
+                                        <h4 style="margin:0;">Upcoming (Next 2 Days)</h4>
+                                    </div>
+                                    <div class="bday-list" id="team-bday-upcoming-list"></div>
                                 </div>
                             </div>
                         </div>
@@ -3435,6 +3457,80 @@
 
         todayList.innerHTML = renderBday(todayBdays);
         upcomingList.innerHTML = renderBday(upcomingBdays);
+
+        // ===== TEAM BIRTHDAYS (staff / colleagues) =====
+        // Internal team celebration widget — separate from client birthdays above.
+        // NOT RBAC-scoped: every staff member can see all colleagues' birthdays
+        // (this is intentional — it's a team-morale feature, not client PII).
+        // Excludes customer (L13) / referrer (L14) accounts that also live in the
+        // users table, and inactive/expired staff.
+        const teamTodayList = document.getElementById('team-bday-today-list');
+        const teamUpcomingList = document.getElementById('team-bday-upcoming-list');
+        if (teamTodayList && teamUpcomingList) {
+            // Staff birthday source: prefer an explicit date_of_birth (YYYY-MM-DD);
+            // otherwise derive MM-DD from the Malaysian IC number (first 6 digits =
+            // YYMMDD). The birth YEAR is irrelevant for a birthday match, so we only
+            // ever compare MM-DD — no 19xx/20xx disambiguation needed. Foreign /
+            // non-IC ids fail the MM/DD range check and are simply skipped.
+            const getStaffMMDD = (u) => {
+                const explicit = getMMDD(u.date_of_birth);
+                if (explicit) return explicit;
+                const digits = String(u.ic_number || '').replace(/[^0-9]/g, '');
+                if (digits.length < 6) return '';
+                const mm = digits.substring(2, 4), dd = digits.substring(4, 6);
+                const mi = parseInt(mm, 10), di = parseInt(dd, 10);
+                if (!(mi >= 1 && mi <= 12 && di >= 1 && di <= 31)) return '';
+                return `${mm}-${dd}`;
+            };
+
+            const isStaff = (u) => {
+                const status = String(u.status || '').toLowerCase();
+                if (status === 'inactive' || status === 'expired') return false;
+                let lvl = 12;
+                try { lvl = getUserLevel(u); } catch (_) { /* default keeps them in */ }
+                return lvl <= 12 || lvl === 15; // exclude L13 customer / L14 referrer
+            };
+
+            const getStaffBdayInfo = (u) => ({
+                id: u.id,
+                name: u.full_name || 'Staff',
+                phone: u.phone || '',
+                info: `${u.role || 'Team Member'}${u.team ? ' · ' + u.team : ''}`,
+                dob: getStaffMMDD(u)
+            });
+
+            const staff = allUsers.filter(isStaff);
+            const teamToday = staff.filter(u => getStaffMMDD(u) === todayStr).map(getStaffBdayInfo);
+            const teamUpcoming = staff.filter(u => {
+                const md = getStaffMMDD(u);
+                return md === tomorrowStr || md === day2Str;
+            }).map(u => {
+                const info = getStaffBdayInfo(u);
+                info.info += ` · ${getStaffMMDD(u) === tomorrowStr ? 'Tomorrow' : 'In 2 days'}`;
+                return info;
+            });
+
+            const renderTeamBday = (data) => {
+                if (data.length === 0) return '<div class="text-muted" style="padding:10px; font-size:12px;">No team birthdays.</div>';
+                return data.map(b => `
+                    <div class="bday-card">
+                        <div class="bday-name">${esc(b.name)} 🎉</div>
+                        <div class="bday-info">${esc(b.info)}</div>
+                        ${b.phone ? `<div class="act-actions" style="border-top:none; margin-top:4px; padding-top:0;">
+                            <button class="btn btn-sm secondary" style="font-size:11px" onclick="app.sendTeamBirthdayWish(${b.id})">Send Wish</button>
+                        </div>` : ''}
+                    </div>
+                `).join('');
+            };
+
+            const teamTodayBadge = document.getElementById('team-bday-today-badge');
+            if (teamTodayBadge) teamTodayBadge.textContent = teamToday.length;
+            const teamUpcomingBadge = document.getElementById('team-bday-upcoming-badge');
+            if (teamUpcomingBadge) teamUpcomingBadge.textContent = teamUpcoming.length;
+
+            teamTodayList.innerHTML = renderTeamBday(teamToday);
+            teamUpcomingList.innerHTML = renderTeamBday(teamUpcoming);
+        }
     };
 
     // ===== HEALTH PRODUCT REFILL REMINDERS =====
@@ -3860,6 +3956,23 @@
         await AppDataStore.create('activities', _payload);
         UI.hideModal();
         UI.toast.success('Birthday wish logged.');
+    };
+
+    // Team Birthdays "Send Wish" → open wa.me to a colleague with a prefilled
+    // greeting. Staff are NOT contacts, so nothing is logged (no birthday_auto
+    // touch, no activity record) — this is a simple internal nicety.
+    const sendTeamBirthdayWish = async (userId) => {
+        const u = await AppDataStore.getById('users', userId).catch(() => null);
+        if (!u) { UI.toast.error('Staff record not found'); return; }
+        if (!u.phone) { UI.toast.error('No phone number on file'); return; }
+        const firstName = (u.full_name || '').split(' ')[0] || u.full_name || '';
+        const body = `${firstName}，生日快乐！🎉 祝您新岁安康，诸事顺遂。— DestinOraclesSolution Team`;
+        // Normalize phone to international format (mirror sendRefillWhatsApp).
+        let phone = String(u.phone).replace(/[^0-9]/g, '');
+        if (phone.startsWith('0')) phone = '60' + phone.slice(1);
+        if (!phone.startsWith('60') && phone.length <= 10) phone = '60' + phone;
+        window.open(`https://wa.me/${phone}?text=${encodeURIComponent(body)}`, '_blank');
+        UI.toast.success('WhatsApp opened — review and send');
     };
 
     const openPrepareGiftModal = async (id, entityType) => {
@@ -6568,6 +6681,7 @@
         viewRefillProspect,
         openSendBirthdayWish,
         executeSendBirthdayWish,
+        sendTeamBirthdayWish,
         openPrepareGiftModal,
         logBirthdayGift,
         switchView,

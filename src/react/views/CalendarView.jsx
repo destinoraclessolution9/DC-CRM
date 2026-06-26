@@ -120,6 +120,26 @@ function CalendarShell({ greeting, userName, userEmail }) {
                     </div>
 
                     <div className="birthday-section">
+                        <h3>🎉 TEAM BIRTHDAYS</h3>
+                        <div className="birthday-columns">
+                            <div className="birthday-col">
+                                <div id="team-bday-today-header" style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px' }}>
+                                    <div className="bday-badge" {...badge('team-bday-today-badge', '#10b981')}>0</div>
+                                    <h4 style={{ margin: 0 }}>Today</h4>
+                                </div>
+                                <div className="bday-list" id="team-bday-today-list"></div>
+                            </div>
+                            <div className="birthday-col">
+                                <div id="team-bday-upcoming-header" style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px' }}>
+                                    <div className="bday-badge" {...badge('team-bday-upcoming-badge', '#f59e0b')}>0</div>
+                                    <h4 style={{ margin: 0 }}>Upcoming (Next 2 Days)</h4>
+                                </div>
+                                <div className="bday-list" id="team-bday-upcoming-list"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="birthday-section">
                         <h3>💊 HEALTH PRODUCT REFILLS</h3>
                         <div className="birthday-columns">
                             <div className="birthday-col">

@@ -32,6 +32,21 @@
     // Local (MYT) date YYYY-MM-DD — toISOString() is UTC and records the previous
     // day for actions taken before 08:00 local.
     const _mLocalDate = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
+    // Team-birthday MM-DD for a staff/user record: prefer an explicit
+    // date_of_birth (YYYY-MM-DD), else derive from the Malaysian IC number
+    // (first 6 digits = YYMMDD). Birth year is irrelevant for a birthday match,
+    // so we only ever return MM-DD. Foreign / non-IC ids fail the range check
+    // and return '' (skipped). Mirrors getStaffMMDD in script-calendar.js.
+    const _staffMD = (u) => {
+        const dob = u && u.date_of_birth || '';
+        if (typeof dob === 'string' && dob.length >= 7 && dob[4] === '-') return dob.slice(5, 10);
+        const digits = String((u && u.ic_number) || '').replace(/[^0-9]/g, '');
+        if (digits.length < 6) return '';
+        const mm = digits.substring(2, 4), dd = digits.substring(4, 6);
+        const mi = parseInt(mm, 10), di = parseInt(dd, 10);
+        if (!(mi >= 1 && mi <= 12 && di >= 1 && di <= 31)) return '';
+        return `${mm}-${dd}`;
+    };
     // Cross-chunk helpers — defined in script-prospects.js, exported to window.app.
     const showAgentDetail        = (...a) => (window.app.showAgentDetail        || (() => Promise.resolve()))(...a);
     const showProspectsView      = (...a) => (window.app.showProspectsView      || (() => Promise.resolve()))(...a);
@@ -935,7 +950,7 @@
             // on the next admin/lead navigation). 50× smaller payload than
             // getAll('users') on a wide users schema.
             AppDataStore.queryAdvanced('users', {
-                select: 'id,full_name,date_of_birth,role,reporting_to,team_id,phone',
+                select: 'id,full_name,date_of_birth,ic_number,role,reporting_to,team_id,phone,status',
                 limit: 50000,
                 countMode: null,
             }).then(r => r?.data || [])
@@ -1007,9 +1022,19 @@
             const md = dob.slice(5, 10);
             return md === todayMD || md === tomMD;
         };
+        // Staff matcher derives MM-DD from IC when date_of_birth is absent, and
+        // excludes inactive/expired staff + L13 customer / L14 referrer accounts
+        // that also live in the users table.
+        const _isStaffUser = (u) => {
+            const st = String(u.status || '').toLowerCase();
+            if (st === 'inactive' || st === 'expired') return false;
+            let lvl = 12; try { lvl = getUserLevel(u); } catch (_) {}
+            return lvl <= 12 || lvl === 15;
+        };
+        const _staffBdayMatch = (u) => { const md = _staffMD(u); return !!md && (md === todayMD || md === tomMD); };
         const birthdays = [
             ...allPeople.filter(p => _bdayMatch(p) && _bdayOwnerVisible(p.responsible_agent_id || p.lead_agent_id)),
-            ...cachedUsers.filter(_bdayMatch),
+            ...cachedUsers.filter(u => _isStaffUser(u) && _staffBdayMatch(u)),
         ];
         const refills = cachedRefills;
 
@@ -1092,7 +1117,7 @@
             }
             const bday = birthdays[0];
             if (bday) {
-                const isToday = (bday.date_of_birth || '').slice(5,10) === todayMD;
+                const isToday = _staffMD(bday) === todayMD;
                 const phone = UI.escJsAttr(bday.phone || '');
                 const isAgent = !!bday.role;
                 rows.push(`
@@ -1237,9 +1262,18 @@
                 const md = dob.slice(5, 10);
                 return md === todayMD || md === tomMD;
             };
+            // Staff matcher: IC-derived MM-DD fallback + exclude inactive/expired
+            // and L13 customer / L14 referrer accounts (see _composeBody).
+            const _isStaffUser = (u) => {
+                const st = String(u.status || '').toLowerCase();
+                if (st === 'inactive' || st === 'expired') return false;
+                let lvl = 12; try { lvl = getUserLevel(u); } catch (_) {}
+                return lvl <= 12 || lvl === 15;
+            };
+            const _staffBdayMatch = (u) => { const md = _staffMD(u); return !!md && (md === todayMD || md === tomMD); };
             const birthdays = [
                 ...allPeople.filter(p => _bdayMatch(p) && _bdayOwnerVisible(p.responsible_agent_id || p.lead_agent_id)),
-                ...cachedUsers.filter(_bdayMatch),
+                ...cachedUsers.filter(u => _isStaffUser(u) && _staffBdayMatch(u)),
             ];
             const refills = cachedRefills;
 
@@ -1307,7 +1341,7 @@
             }
             const bday = birthdays[0];
             if (bday) {
-                const isToday = (bday.date_of_birth || '').slice(5, 10) === todayMD;
+                const isToday = _staffMD(bday) === todayMD;
                 attention.push({
                     type: 'birthday',
                     name: bday.full_name || '—',
@@ -1634,6 +1668,10 @@
     // birthday card in the day sheet. Held in memory only (never persisted) so
     // agent names can't leak across logins on a shared device.
     let _mcalUserMap = new Map();
+    // Staff/colleague records (id, full_name, ic_number, date_of_birth, role,
+    // team, phone) for the Team Birthday markers on the month grid + day sheet.
+    // Held in memory; the WA button reads it live when a birthday card is tapped.
+    let _mcalStaffList = [];
     // Pre-warmed birthday-poster image blobs, keyed by gender. The poster URLs
     // are admin-managed in Marketing ▸ Automation ▸ Birthday Posters (stored in
     // the automation_config singleton) so they can be refreshed every year with
@@ -2000,6 +2038,39 @@
             }
         }
 
+        // Team Birthdays: staff/colleague records for the month-grid markers +
+        // day-sheet cards. Visible to ALL staff (team feature, not RBAC-scoped),
+        // excludes inactive/expired staff + L13 customer / L14 referrer accounts.
+        // Birthday MM-DD comes from date_of_birth or, failing that, the IC number
+        // (see _staffMD). Cached so swiping months doesn't refetch.
+        {
+            const _STAFF_KEY = 'mcal-staff-v1';
+            const _isStaffUser = (u) => {
+                const st = String(u.status || '').toLowerCase();
+                if (st === 'inactive' || st === 'expired') return false;
+                let lvl = 12; try { lvl = getUserLevel(u); } catch (_) {}
+                return lvl <= 12 || lvl === 15;
+            };
+            const _cachedStaff = _lsGet(_STAFF_KEY, 8 * 60 * 60 * 1000);
+            if (Array.isArray(_cachedStaff)) {
+                _mcalStaffList = _cachedStaff;
+            } else {
+                AppDataStore.queryAdvanced('users', { select: 'id,full_name,date_of_birth,ic_number,role,team,phone,status', limit: 50000, countMode: null })
+                    .then(r => r?.data || [])
+                    .then(rows => {
+                        _mcalStaffList = (rows || []).filter(_isStaffUser);
+                        _lsSet(_STAFF_KEY, _mcalStaffList);
+                        // Re-render so staff markers appear once the list lands (guarded
+                        // to the still-current month, mirrors the people refetch above).
+                        const vp = document.getElementById('content-viewport');
+                        if (vp && vp.classList.contains('mcal-active') && _mcalView === 'month') {
+                            showMobileCalendarView(vp).catch(() => {});
+                        }
+                    })
+                    .catch(() => { /* intentional: team birthdays degrade to hidden */ });
+            }
+        }
+
         // Pre-warm the gendered birthday posters so the day-sheet WhatsApp button
         // can share the image file synchronously inside the tap.
         _mcalWarmBdayPosters();
@@ -2049,6 +2120,18 @@
             const k = `${_mcalYear}-${String(_mcalMonth+1).padStart(2,'0')}-${String(_pd).padStart(2,'0')}`;
             if (!byDate.has(k)) byDate.set(k, []);
             byDate.get(k).push({ activity_type: 'All Day Birthday', _isBirthday: true, _person: p });
+        }
+        // Team Birthdays: inject staff markers (team-wide, no owner check). MM-DD
+        // from date_of_birth or IC (_staffMD).
+        for (const s of _mcalStaffList) {
+            const md = _staffMD(s);
+            if (!md) continue;
+            const [_pm, _pd] = md.split('-').map(n => parseInt(n));
+            if (_pm - 1 !== _mcalMonth) continue;
+            if (_pd < 1 || _pd > daysInMonth) continue;
+            const k = `${_mcalYear}-${String(_mcalMonth+1).padStart(2,'0')}-${String(_pd).padStart(2,'0')}`;
+            if (!byDate.has(k)) byDate.set(k, []);
+            byDate.get(k).push({ activity_type: 'All Day Birthday', _isBirthday: true, _isStaff: true, _person: s });
         }
         _mcalByDate = byDate;
 
@@ -2121,7 +2204,7 @@
             const dob = p.date_of_birth || ''; if (dob.length < 10) return false;
             if (!_mcalBdayOwnerVisible(p.responsible_agent_id || p.lead_agent_id)) return false;
             const md = dob.slice(5, 10); return md === todayMD || md === tomMD;
-        }).length;
+        }).length + _mcalStaffList.filter(s => { const md = _staffMD(s); return !!md && (md === todayMD || md === tomMD); }).length;
         const refillCount = (refillsR || []).length;
         const overdueFollowups = (draftsR || []).filter(d =>
             d.status === 'pending' && (d.due_date || '') < todayStr &&
@@ -2488,6 +2571,16 @@
             UI.toast.success('Birthday wish logged.');
         } catch (e) { console.warn('[mcalBirthdayWa] activity log failed (WhatsApp still opened)', e); }
     };
+    // Team Birthday WhatsApp — open a colleague's chat with a prefilled greeting.
+    // Staff are NOT contacts, so this does NOT log a birthday_auto activity (which
+    // would orphan an FK against prospects/customers). Text-only, no poster.
+    const mcalTeamBirthdayWa = async (id) => {
+        const s = _mcalStaffList.find(u => String(u.id) === String(id));
+        if (!s || !_mhomeWaPhone(s.phone)) return;
+        const firstName = (s.full_name || '').split(' ')[0] || s.full_name || '';
+        const greeting = `${firstName}，生日快乐！🎉 祝您新岁安康，诸事顺遂。— DestinOraclesSolution Team`;
+        mhomeWa(id, s.phone, greeting);
+    };
     // Open a birthday person's profile — mirrors mcalOpenEvent: try prospect,
     // then customer, routing to the matching detail view. id-only.
     const mcalOpenPerson = async (id, isCustomer) => {
@@ -2523,13 +2616,33 @@
         // Birthday cards — shown at the top of the modal
         const bdayRows = dayBdays.map(a => {
             const p = a._person;
+            const hasPhone = !!_mhomeWaPhone(p.phone);
+            if (a._isStaff) {
+                // Team Birthday card: green accent, role/team subline, text-only WA
+                // (staff aren't contacts → no activity logging), name → agent profile.
+                const roleLine = (p.role || p.team)
+                    ? `<div style="font-size:10px;color:#9CA3AF;margin-top:1px;">${_mhomeEsc([p.role, p.team].filter(Boolean).join(' · '))}</div>`
+                    : '';
+                const staffWa = hasPhone
+                    ? `<button onclick="event.stopPropagation();app.mcalTeamBirthdayWa('${p.id}')" aria-label="Send birthday WhatsApp" style="flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border:none;border-radius:50%;background:#25D366;color:#fff;font-size:17px;cursor:pointer;"><i class="fab fa-whatsapp"></i></button>`
+                    : '';
+                return `
+                <div style="display:flex;align-items:center;gap:12px;padding:12px 10px;margin-bottom:6px;background:linear-gradient(90deg,#ECFDF5,#fff);border-radius:10px;border:1px solid #A7F3D0;">
+                    <div style="font-size:26px;flex-shrink:0;">🎉</div>
+                    <div style="flex:1;min-width:0;cursor:pointer;" onclick="app.showAgentDetail('${p.id}')">
+                        <div style="font-size:15px;font-weight:700;color:#065F46;">${_mhomeEsc(p.full_name || '—')}</div>
+                        <div style="font-size:12px;color:#047857;margin-top:2px;">Team Birthday 🎂</div>
+                        ${roleLine}
+                    </div>
+                    ${staffWa}
+                </div>`;
+            }
             const dob = p.date_of_birth || '';
             let ageStr = '';
             if (dob.length >= 4) {
                 const age = d.getFullYear() - parseInt(dob.slice(0, 4));
                 if (age > 0 && age < 120) ageStr = ` · Turning ${age}`;
             }
-            const hasPhone = !!_mhomeWaPhone(p.phone);
             const waBtn = hasPhone
                 ? `<button onclick="event.stopPropagation();app.mcalBirthdayWa('${p.id}')" aria-label="Send birthday WhatsApp" style="flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border:none;border-radius:50%;background:#25D366;color:#fff;font-size:17px;cursor:pointer;"><i class="fab fa-whatsapp"></i></button>`
                 : '';
@@ -3583,6 +3696,7 @@
         mcalDayClick,
         mcalOpenEvent,
         mcalBirthdayWa,
+        mcalTeamBirthdayWa,
         mcalOpenPerson,
         mcalOpenDay,
         mcalAddMeetUp,
