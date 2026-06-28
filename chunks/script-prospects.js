@@ -2945,6 +2945,11 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         if (!cr || status === 'draft') {
             const d = cr || {};
             const isPOP = d.payment_method === 'POP';
+            // NPO (agent-sellable installment package) — config stays L1-only, but
+            // any closer can tag this closing to an active NPO package. Filled async.
+            const isNPO = d.payment_method === 'NPO';
+            const npoPlanId = d.npo_plan_id || '';
+            const npoPlanName = d.npo_plan_name || '';
             container.innerHTML = pre2025Html + historyHtml + `
                 <div class="cr-status draft" style="margin-bottom:14px;padding:8px 12px;border-radius:8px;background:#fff8e1;border:1px solid #ffc107;color:#856404;font-size:13px;font-weight:600;">
                     <i class="fas fa-edit"></i> Draft — Fill in details and submit for manager approval
@@ -2976,13 +2981,14 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                     <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Amount Closed (RM)</label><input id="cr-amount" type="number" class="form-control" value="${d.sale_amount || ''}" placeholder="0.00"></div>
                     <div class="form-group" style="flex:1;">
                         <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Payment Method</label>
-                        <select id="cr-payment-method" class="form-control" onchange="document.getElementById('cr-pop-fields').style.display=this.value==='POP'?'block':'none'">
+                        <select id="cr-payment-method" class="form-control" onchange="app.crPaymentMethodChanged(this.value)">
                             <option value="Cash" ${d.payment_method==='Cash'?'selected':''}>Cash</option>
                             <option value="Bank Transfer" ${d.payment_method==='Bank Transfer'?'selected':''}>Bank Transfer</option>
                             <option value="Credit Card" ${d.payment_method==='Credit Card'?'selected':''}>Credit Card</option>
                             <option value="Cheque" ${d.payment_method==='Cheque'?'selected':''}>Cheque</option>
                             <option value="EPP" ${d.payment_method==='EPP'?'selected':''}>EPP</option>
                             <option value="POP" ${d.payment_method==='POP'?'selected':''}>POP</option>
+                            <option value="NPO" ${d.payment_method==='NPO'?'selected':''}>NPO</option>
                         </select>
                     </div>
                 </div>
@@ -2992,6 +2998,14 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                         <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Tenure (months)</label><input id="cr-pop-tenure" type="number" class="form-control" value="${d.pop_tenure || ''}" placeholder="12"></div>
                     </div>
                     <div class="form-group"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Down Payment (RM)</label><input id="cr-pop-down" type="number" class="form-control" value="${d.pop_down_payment || ''}" placeholder="0.00"></div>
+                </div>
+                <div id="cr-npo-fields" style="display:${isNPO?'block':'none'};background:#ecfeff;border:1px solid #a5f3fc;padding:12px;border-radius:6px;margin-bottom:10px;">
+                    <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;"><i class="fas fa-file-invoice-dollar" style="color:#0e7490;"></i> NPO Package <span style="color:#ef4444;font-weight:700;" title="Required for NPO">*</span></label>
+                    <select id="cr-npo-plan" class="form-control" onchange="app.crNpoPlanPicked()" data-selected="${escapeHtml(String(npoPlanId))}">
+                        <option value="">${isNPO ? 'Loading packages…' : '— Select package —'}</option>
+                    </select>
+                    <div id="cr-npo-selected" style="font-size:12px;color:#0e7490;margin-top:6px;">${npoPlanName ? 'Selected package: <strong>' + escapeHtml(npoPlanName) + '</strong>' : ''}</div>
+                    ${isNPO ? `<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="" style="display:none;" onload="window.app && app.crNpoFillPlans && app.crNpoFillPlans('${escapeHtml(String(npoPlanId))}')">` : ''}
                 </div>
                 <div class="form-row" style="display:flex;gap:8px;margin-bottom:10px;">
                     <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Invoice Number</label><input id="cr-invoice" class="form-control" value="${escapeHtml(d.invoice_number || '')}" placeholder="INV-2026-001"></div>
@@ -3044,6 +3058,9 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 <div class="pv-row"><span class="pv-lbl">Tenure</span><span class="pv-val">${d.pop_tenure ? d.pop_tenure + ' months' : '-'}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Down Payment</span><span class="pv-val">${d.pop_down_payment ? 'RM ' + parseFloat(d.pop_down_payment).toLocaleString() : '-'}</span></div>
                 ` : ''}
+                ${d.payment_method === 'NPO' && d.npo_plan_name ? `
+                <div class="pv-row"><span class="pv-lbl">NPO Package</span><span class="pv-val">${escapeHtml(d.npo_plan_name)}</span></div>
+                ` : ''}
                 <div class="pv-row"><span class="pv-lbl">Invoice No.</span><span class="pv-val">${escapeHtml(d.invoice_number || '-')}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Collection Date</span><span class="pv-val">${escapeHtml(d.closing_date || '-')}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Invoice File</span><span class="pv-val">${d.invoice_file ? `<a href="${safeUrl(d.invoice_file)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(d.invoice_file_name || 'View')}</a>` : '-'}</span></div>
@@ -3073,6 +3090,9 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 <div class="pv-row"><span class="pv-lbl">Monthly (RM)</span><span class="pv-val">${d.pop_monthly || '-'}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Tenure</span><span class="pv-val">${d.pop_tenure ? d.pop_tenure + ' months' : '-'}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Down Payment</span><span class="pv-val">${d.pop_down_payment ? 'RM ' + parseFloat(d.pop_down_payment).toLocaleString() : '-'}</span></div>
+                ` : ''}
+                ${d.payment_method === 'NPO' && d.npo_plan_name ? `
+                <div class="pv-row"><span class="pv-lbl">NPO Package</span><span class="pv-val">${escapeHtml(d.npo_plan_name)}</span></div>
                 ` : ''}
                 <div class="pv-row"><span class="pv-lbl">Invoice No.</span><span class="pv-val">${escapeHtml(d.invoice_number || '-')}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Collection Date</span><span class="pv-val">${escapeHtml(d.closing_date || '-')}</span></div>
@@ -4977,6 +4997,8 @@ const gatherClosingFormData = async (existingCr = {}) => {
         pop_monthly: paymentMethod === 'POP' ? (document.getElementById('cr-pop-monthly')?.value || '') : '',
         pop_tenure: paymentMethod === 'POP' ? (document.getElementById('cr-pop-tenure')?.value || '') : '',
         pop_down_payment: paymentMethod === 'POP' ? (document.getElementById('cr-pop-down')?.value || '') : '',
+        npo_plan_id: paymentMethod === 'NPO' ? (document.getElementById('cr-npo-plan')?.value || '') : '',
+        npo_plan_name: paymentMethod === 'NPO' ? (() => { const s = document.getElementById('cr-npo-plan'); const o = s && s.options[s.selectedIndex]; return o && o.value ? (o.getAttribute('data-name') || (o.textContent || '').trim()) : ''; })() : '',
         invoice_number: document.getElementById('cr-invoice')?.value?.trim() || '',
         closing_remarks: document.getElementById('cr-remarks')?.value?.trim() || '',
         closing_date: document.getElementById('cr-close-date')?.value || '',
@@ -4987,6 +5009,50 @@ const gatherClosingFormData = async (existingCr = {}) => {
         invoice_file,
         invoice_file_name,
     };
+};
+
+// ── NPO package picker for the DC Closing Record form (prefix 'cr') ──────────
+// Mirrors the Meeting-Outcome closing flow. Defined locally (not reused from the
+// activities chunk) so the picker works even if that chunk isn't loaded. NPO
+// config stays L1-only; any closer can pick an active package here.
+const crPaymentMethodChanged = (val) => {
+    const pop = document.getElementById('cr-pop-fields');
+    if (pop) pop.style.display = val === 'POP' ? 'block' : 'none';
+    const npo = document.getElementById('cr-npo-fields');
+    if (npo) npo.style.display = val === 'NPO' ? 'block' : 'none';
+    if (val === 'NPO') {
+        const sel = document.getElementById('cr-npo-plan');
+        crNpoFillPlans((sel && sel.getAttribute('data-selected')) || '');
+    }
+};
+
+const crNpoFillPlans = async (selectedId) => {
+    const sel = document.getElementById('cr-npo-plan');
+    if (!sel) return;
+    let plans = [];
+    try { plans = (await AppDataStore.getAll('npo_plans')) || []; } catch (_) { plans = []; }
+    plans = plans.filter(p => p && p.is_active !== false).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    if (!plans.length) {
+        sel.innerHTML = '<option value="">— No NPO packages configured —</option>';
+        const cap = document.getElementById('cr-npo-selected');
+        if (cap) cap.innerHTML = '<span style="color:#b45309;">No active NPO package — ask an admin to set one up.</span>';
+        return;
+    }
+    const want = String(selectedId || sel.getAttribute('data-selected') || '');
+    sel.innerHTML = '<option value="">— Select package —</option>' + plans.map(p =>
+        `<option value="${p.id}" data-name="${escapeHtml(p.name || '')}" ${want === String(p.id) ? 'selected' : ''}>${escapeHtml(p.name || ('Package #' + p.id))}</option>`).join('');
+    crNpoPlanPicked();
+};
+
+const crNpoPlanPicked = () => {
+    const sel = document.getElementById('cr-npo-plan');
+    const cap = document.getElementById('cr-npo-selected');
+    if (!sel || !cap) return;
+    const o = sel.options[sel.selectedIndex];
+    const name = o && o.value ? (o.getAttribute('data-name') || (o.textContent || '').trim()) : '';
+    cap.innerHTML = name
+        ? `Selected package: <strong>${escapeHtml(name)}</strong>`
+        : '<span style="color:#ef4444;">Please choose an NPO package.</span>';
 };
 
 const addPrePurchaseRow = async (prospectId) => {
@@ -6781,6 +6847,9 @@ const openPastRecordModal = async (...args) => {
         extendProtection,
         filterProspects,
         gatherClosingFormData,
+        crPaymentMethodChanged,
+        crNpoFillPlans,
+        crNpoPlanPicked,
         getAvatarColor,
         getInitials,
         getProtectionStatus,
