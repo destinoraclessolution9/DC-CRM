@@ -17,32 +17,29 @@
 -- Additive + reversible. Rollback notes at the bottom.
 -- ════════════════════════════════════════════════════════════════════
 
--- ── Hierarchy helpers (SECURITY DEFINER so the recursive walk sees the
---    full users tree regardless of the caller's row-level scope) ──────
-CREATE OR REPLACE FUNCTION public.is_anc_or_self(p_node bigint, p_anc bigint)
-RETURNS boolean
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  WITH RECURSIVE up AS (
-    SELECT id, reporting_to FROM users WHERE id = p_node
-    UNION                                  -- UNION (not ALL) → cycle-safe
-    SELECT u.id, u.reporting_to FROM users u JOIN up ON u.id = up.reporting_to
-  )
-  SELECT EXISTS (SELECT 1 FROM up WHERE id = p_anc);
-$$;
-
--- True when p_a and p_b sit in the same vertical reporting chain (one is
--- an ancestor-or-self of the other), i.e. they're on the same "team".
+-- ── Team membership ─────────────────────────────────────────────────
+-- "Own Team" matches on the populated `users.team` text label (Team A /
+-- Team B / Team C). team_id is NULL org-wide, so the `team` text column is
+-- the real grouping. A null/blank/'Unassigned' team (e.g. Super Admin)
+-- belongs to no team and matches no one. SECURITY DEFINER so the lookup
+-- reads users past the caller's row-level scope.
+-- (An earlier revision keyed off the users.reporting_to tree; superseded
+--  same-day by the team-label rule per the owner. The reporting-tree helper
+--  is_anc_or_self may still exist in the DB but is unused.)
 CREATE OR REPLACE FUNCTION public.same_team_chain(p_a bigint, p_b bigint)
 RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  SELECT p_a IS NOT NULL AND p_b IS NOT NULL AND (
-           p_a = p_b
-           OR public.is_anc_or_self(p_a, p_b)
-           OR public.is_anc_or_self(p_b, p_a)
-         );
+  WITH t AS (
+    SELECT max(CASE WHEN id = p_a THEN team END) AS ta,
+           max(CASE WHEN id = p_b THEN team END) AS tb
+    FROM users WHERE id IN (p_a, p_b)
+  )
+  SELECT coalesce(
+    ta IS NOT NULL AND btrim(ta) <> '' AND lower(btrim(ta)) <> 'unassigned' AND ta = tb,
+    false
+  ) FROM t;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.is_anc_or_self(bigint, bigint)   TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.same_team_chain(bigint, bigint)  TO authenticated, service_role;
 
 -- ── 1. RLS row gate (ALTER POLICY = no drop/create gap) ──────────────

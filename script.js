@@ -1072,18 +1072,22 @@ const appLogic = (() => {
             return String(activity.lead_agent_id) === String(user.id) ||
                 (activity.co_agents && activity.co_agents.some(ca => String(ca.id) === String(user.id)));
         }
-        // 'Own Team' — owner / co-agent / admin / same reporting chain (upline or
-        // downline of the owner via reporting_to). Mirrors server same_team_chain.
+        // 'Own Team' — owner / co-agent / admin / same `users.team` label
+        // (Team A / B / C). team_id is null org-wide so the team label is the
+        // grouping; a null/blank/'Unassigned' team belongs to no team. Mirrors
+        // server same_team_chain.
         if (activity.visibility === 'team') {
             if (isSystemAdmin(user)) return true;
             if (String(activity.lead_agent_id) === String(user.id)) return true;
             if (activity.co_agents && activity.co_agents.some(ca => String(ca.id) === String(user.id))) return true;
+            const _norm = (t) => { const s = t != null ? String(t).trim() : ''; return (!s || s.toLowerCase() === 'unassigned') ? null : s; };
+            const vt = _norm(user.team);
+            if (!vt) return false;
             try {
                 const allUsers = await AppDataStore.getAll('users');
-                const parentOf = new Map((allUsers || []).map(u => [String(u.id), u.reporting_to != null ? String(u.reporting_to) : null]));
-                const ancOrSelf = (node, anc) => { let c = node, g = 0; while (c != null && g++ < 100) { if (c === anc) return true; c = parentOf.get(c) || null; } return false; };
-                const me = String(user.id), owner = String(activity.lead_agent_id);
-                return ancOrSelf(me, owner) || ancOrSelf(owner, me);
+                const owner = (allUsers || []).find(u => String(u.id) === String(activity.lead_agent_id));
+                const ot = _norm(owner && owner.team);
+                return !!ot && vt === ot;
             } catch (_) { return false; }
         }
         const isLead = String(activity.lead_agent_id) === String(user.id);
@@ -1121,26 +1125,17 @@ const appLogic = (() => {
 
         const viewerId = String(user.id);
 
-        // Reporting-line ('Own Team') lookup — mirrors the server same_team_chain
-        // (migrations/own_team_visibility_2026-06-28.sql). A 'team' activity is
-        // visible to anyone on the owner's vertical reporting chain (the owner's
-        // upline OR downline, transitively, via reporting_to). team_id is unused
-        // org-wide, so we key off reporting_to.
-        const parentOf = new Map();
-        for (const u of usersList || []) {
-            parentOf.set(String(u.id), u.reporting_to != null ? String(u.reporting_to) : null);
-        }
-        const _isAncOrSelf = (node, anc) => {
-            let cur = node, guard = 0;
-            while (cur != null && guard++ < 100) {
-                if (cur === anc) return true;
-                cur = parentOf.get(cur) || null;
-            }
-            return false;
-        };
+        // 'Own Team' lookup — match the populated `users.team` text label
+        // (Team A / B / C). team_id is null org-wide, so the team label is the
+        // grouping (mirrors the server same_team_chain). A null/blank/'Unassigned'
+        // team (e.g. Super Admin) belongs to no team and matches no one.
+        const _normTeam = (t) => { const s = t != null ? String(t).trim() : ''; return (!s || s.toLowerCase() === 'unassigned') ? null : s; };
+        const teamByUid = new Map();
+        for (const u of usersList || []) teamByUid.set(String(u.id), _normTeam(u.team));
+        const _viewerTeam = teamByUid.get(viewerId) || null;
         const _sameTeam = (ownerId) => {
-            const o = String(ownerId);
-            return _isAncOrSelf(viewerId, o) || _isAncOrSelf(o, viewerId);
+            const ot = teamByUid.get(String(ownerId)) || null;
+            return !!_viewerTeam && !!ot && _viewerTeam === ot;
         };
 
         return (activity) => {

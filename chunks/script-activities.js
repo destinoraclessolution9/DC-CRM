@@ -2505,7 +2505,7 @@
                                 <label><input type="radio" name="event-visibility" value="team"> Own Team</label>
                                 <label><input type="radio" name="event-visibility" value="open" checked> Open Event (Public)</label>
                             </div>
-                            <small class="help-text">Open = visible to all agents. Own Team = your reporting line only (your team leader, you, and everyone under you). Closed = only involved agents.</small>
+                            <small class="help-text">Open = visible to all agents. Own Team = everyone in your team only (e.g. Team A). Closed = only involved agents.</small>
                         </div>
 
                         <div class="form-group">
