@@ -566,6 +566,17 @@
         _state.sca = activity.co_agents || [];
         if (typeof renderCoAgents === 'function') renderCoAgents();
 
+        // 7b. Restore the event-visibility radio for event-type activities.
+        // Without this the form always paints the HTML default ("open" checked),
+        // so a closed/legacy (null-visibility) event LOOKED public in the edit
+        // modal while other agents could not see it. Reflect reality: only a
+        // genuinely open/public row shows "Open", everything else shows "Closed".
+        if (['EVENT', 'AGENT_MEETING', 'AGENT_TRAINING'].includes(activity.activity_type)) {
+            const _isOpen = activity.visibility === 'open' || activity.visibility === 'public';
+            const _visRadio = document.querySelector(`input[name="event-visibility"][value="${_isOpen ? 'open' : 'closed'}"]`);
+            if (_visRadio) _visRadio.checked = true;
+        }
+
         // 8. If this is a CPS activity, poll for CPS-specific fields
         if (activity.activity_type === 'CPS' && activity.prospect_id) {
             const prospect = await AppDataStore.getById('prospects', activity.prospect_id);
@@ -640,6 +651,15 @@
     // Save the venue dropdown value when it exists in the form
     if (document.getElementById('activity-venue')) {
         updatedData.venue = venueVal || '';
+    }
+    // Persist event visibility on edit. Previously updateActivity never read the
+    // radio, so { ...activity, ...updatedData } just re-saved the stored value —
+    // open/closed could never be toggled after creation (a non-open event stayed
+    // invisible to other agents forever). Only set when the radio is present so
+    // non-event edits don't clobber the column.
+    if (['EVENT', 'AGENT_MEETING', 'AGENT_TRAINING'].includes(updatedData.activity_type)) {
+        const _vis = document.querySelector('input[name="event-visibility"]:checked')?.value;
+        if (_vis) updatedData.visibility = _vis;
     }
     // Set location_address from the FSA/SITE address textarea if present, otherwise mirror
     // the venue (so it persists server-side even when the `venue` column is missing from the
