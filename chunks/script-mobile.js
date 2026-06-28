@@ -2525,6 +2525,12 @@
             }
         } catch (e) { console.error(e); }
         // No linked contact (or it was removed) — show the activity details.
+        // viewActivityDetails (incl. the attendee list) lives in the calendar
+        // chunk, which the mobile calendar never loads on its own — so without
+        // this on-demand load the tap silently no-ops and EVENT attendees never
+        // render. Mirrors the _loadChunk pattern used by the mobile follow-up
+        // sheets elsewhere in this file.
+        try { if (typeof window._loadChunk === 'function') await window._loadChunk('chunks/script-calendar.min.js'); } catch (_) { /* guarded below */ }
         try { if (window.app.viewActivityDetails) await window.app.viewActivityDetails(activityId); } catch (e) { console.error(e); }
     };
     // Birthday WhatsApp greeting — id-only so nothing dynamic (names like
