@@ -3029,6 +3029,15 @@
     return NOTES[((dayOrdinal() % NOTES.length) + NOTES.length) % NOTES.length];
   };
 
+  // 易经六十四卦 (I Ching) in King Wen order — matches Unicode block U+4DC0..U+4DFF,
+  // so the hexagram glyph for #n is String.fromCodePoint(0x4DBF + n) (n=1 => U+4DC0 ䷀).
+  var HEX = ['乾为天','坤为地','水雷屯','山水蒙','水天需','天水讼','地水师','水地比','风天小畜','天泽履','地天泰','天地否','天火同人','火天大有','地山谦','雷地豫','泽雷随','山风蛊','地泽临','风地观','火雷噬嗑','山火贲','山地剥','地雷复','天雷无妄','山天大畜','山雷颐','泽风大过','坎为水','离为火','泽山咸','雷风恒','天山遁','雷天大壮','火地晋','地火明夷','风火家人','火泽睽','水山蹇','雷水解','山泽损','风雷益','泽天夬','天风姤','泽地萃','地风升','泽水困','水风井','泽火革','火风鼎','震为雷','艮为山','风山渐','雷泽归妹','雷火丰','火山旅','巽为风','兑为泽','风水涣','水泽节','风泽中孚','雷山小过','水火既济','火水未济'];
+  // Hexagram of the day on an independent 64-day cycle; loops after #64.
+  window.app.getDailyHexagram = function () {
+    var i = ((dayOrdinal() % 64) + 64) % 64;
+    return { n: i + 1, name: HEX[i], sym: String.fromCodePoint(0x4DBF + i + 1) };
+  };
+
   // Show once per local day. Auto-closes after a delay; also has a dismiss button.
   window.app.maybeShowDailyNote = function (force) {
     try {
@@ -3045,14 +3054,20 @@
         });
       };
       var tag = esc(note.section || note.chapter || '');
+      var hx = window.app.getDailyHexagram();
+      var nn = ('0' + hx.n).slice(-2);
       var html = ''
         + '<div class="daily-note-card" style="text-align:center;padding:8px 4px 4px;">'
+        +   '<div style="font-size:52px;line-height:1;color:var(--primary,#800020);margin-bottom:4px;">' + esc(hx.sym) + '</div>'
+        +   '<div style="font-size:18px;font-weight:700;letter-spacing:.08em;color:var(--text-primary,#1c1e21);">' + esc(hx.name) + '</div>'
+        +   '<div style="font-size:11px;color:var(--text-tertiary,#9aa0a6);margin-bottom:16px;">第 ' + nn + ' 卦 · 易经六十四卦</div>'
+        +   '<div style="height:1px;background:var(--border-color,#e9ebee);margin:0 auto 18px;max-width:78%;"></div>'
         +   (tag ? '<div style="display:inline-block;font-size:12px;letter-spacing:.05em;color:var(--text-secondary,#8a8f98);border:1px solid var(--border-color,#e3e5e8);border-radius:999px;padding:3px 12px;margin-bottom:18px;">' + tag + '</div>' : '')
         +   '<div style="font-size:21px;line-height:1.6;font-weight:600;color:var(--text-primary,#1c1e21);margin-bottom:14px;">' + esc(note.zh) + '</div>'
         +   '<div style="font-size:14px;line-height:1.55;font-style:italic;color:var(--text-secondary,#6b7280);max-width:30em;margin:0 auto;">' + esc(note.en) + '</div>'
         +   '<div style="margin-top:18px;font-size:11px;color:var(--text-tertiary,#9aa0a6);">窮理查年鑑 · Poor Richard\'s Almanack · #' + note.id + '</div>'
         + '</div>';
-      UI.showModal('每日一智 · Quote of the Day', html, [
+      UI.showModal('每天一智 · Daily Wisdom', html, [
         { label: '收到 · Got it', type: 'primary', action: 'UI.hideModal()' }
       ]);
       // Auto-close after 10s unless the user already dismissed it.
