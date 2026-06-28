@@ -1781,6 +1781,7 @@
     const _mcalColorForType = (type) => {
         const t = String(type || '').toLowerCase();
         if (t.includes('birthday') || t.includes('all day') || t.includes('all-day')) return 'allday';
+        if (t === 'event') return 'red';
         if (t.includes('client meeting') || t.includes('client mtg') || t.includes('meeting')) return 'red';
         if (t.includes('cps') || t.includes('consult') || t.includes('follow')) return 'purple';
         if (t.includes('team')) return 'pink';
@@ -1799,7 +1800,19 @@
             || String(a.lead_agent_id) === String(cu?.id)
             || (Array.isArray(a.co_agents) && a.co_agents.some(c => String(c.id) === String(cu?.id)));
     };
+    // Keep all non-event activities; keep events only when they have a
+    // resolvable title (mirrors the desktop orphan-EVENT filter). Events used
+    // to be excluded from the mobile calendar entirely, so they never appeared
+    // on a phone even when marked Open — visibility scoping is already applied
+    // by the fetch's scopeFields (lead ∈ visible OR visibility IN open/public).
+    const _mcalKeepAct = (a) => a.activity_type !== 'EVENT' || !!(a.activity_title || a.event_title || a.title);
     const _mcalShortTitle = (a, personMap) => {
+        // EVENT tiles show the event's own title (e.g. "AI 與 風水"), never a
+        // client name — an event is a group activity with attendees, not a single
+        // prospect/customer, so there's no name to leak.
+        if (a.activity_type === 'EVENT') {
+            return String(a.activity_title || a.event_title || a.title || 'Event');
+        }
         const pid = a.prospect_id || a.customer_id;
         const person = pid ? personMap.get(String(pid)) : null;
         if (person?.full_name && _mcalOwned(a)) {
@@ -2087,9 +2100,9 @@
         // Resolve this month's activity set from cache or fresh fetch.
         let activities;
         if (_actMode === 'cache') {
-            activities = (_cachedActs || []).filter(a => a.activity_type !== 'EVENT');
+            activities = (_cachedActs || []).filter(_mcalKeepAct);
         } else {
-            activities = (actResult?.data || []).filter(a => a.activity_type !== 'EVENT');
+            activities = (actResult?.data || []).filter(_mcalKeepAct);
             _lsSet(_mcalActsKey, activities);
         }
         const personMap = new Map(allPeople.map(p => [String(p.id), p]));
@@ -2264,7 +2277,7 @@
                 const _staleSig = _sig(activities);
                 AppDataStore.queryAdvanced('activities', _buildActOpts(monthStartStr, monthEndStr))
                     .then(res => {
-                        const freshRaw = (res?.data || []).filter(a => a.activity_type !== 'EVENT');
+                        const freshRaw = (res?.data || []).filter(_mcalKeepAct);
                         // Preserve any optimistic rows still pending — they're not
                         // in Supabase yet but the user expects to see them.
                         // Check both localStorage (normal path) AND the in-memory
@@ -2762,7 +2775,7 @@
         let acts = [];
         try {
             const res = await AppDataStore.queryAdvanced('activities', opts);
-            acts = (res?.data || []).filter(a => a.activity_type !== 'EVENT');
+            acts = (res?.data || []).filter(_mcalKeepAct);
         } catch (_) { acts = []; /* intentional: fetch failure renders empty range */ }
 
         const byDate = new Map();
