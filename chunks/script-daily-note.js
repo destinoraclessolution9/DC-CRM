@@ -3055,12 +3055,10 @@
       };
       var tag = esc(note.section || note.chapter || '');
       var hx = window.app.getDailyHexagram();
-      var nn = ('0' + hx.n).slice(-2);
       var html = ''
         + '<div class="daily-note-card" style="text-align:center;padding:8px 4px 4px;">'
         +   '<div style="font-size:52px;line-height:1;color:var(--primary,#800020);margin-bottom:4px;">' + esc(hx.sym) + '</div>'
-        +   '<div style="font-size:18px;font-weight:700;letter-spacing:.08em;color:var(--text-primary,#1c1e21);">' + esc(hx.name) + '</div>'
-        +   '<div style="font-size:11px;color:var(--text-tertiary,#9aa0a6);margin-bottom:16px;">第 ' + nn + ' 卦 · 易经六十四卦</div>'
+        +   '<div style="font-size:18px;font-weight:700;letter-spacing:.04em;color:var(--text-primary,#1c1e21);margin-bottom:16px;">#' + hx.n + ' ' + esc(hx.name) + '</div>'
         +   '<div style="height:1px;background:var(--border-color,#e9ebee);margin:0 auto 18px;max-width:78%;"></div>'
         +   (tag ? '<div style="display:inline-block;font-size:12px;letter-spacing:.05em;color:var(--text-secondary,#8a8f98);border:1px solid var(--border-color,#e3e5e8);border-radius:999px;padding:3px 12px;margin-bottom:18px;">' + tag + '</div>' : '')
         +   '<div style="font-size:21px;line-height:1.6;font-weight:600;color:var(--text-primary,#1c1e21);margin-bottom:14px;">' + esc(note.zh) + '</div>'
