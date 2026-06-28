@@ -771,6 +771,7 @@ const renderTransactionFilters = () => {
                     <option value="Bank Transfer">Bank Transfer</option>
                     <option value="EPP">EPP</option>
                     <option value="POP">POP</option>
+                    <option value="NPO">NPO</option>
                 </select>
             </div>
             <div class="filter-group">
