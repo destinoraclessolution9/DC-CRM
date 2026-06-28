@@ -2228,13 +2228,40 @@ const buildEPPCasesDetails = async (from, to) => {
 const _trySalesTotal = async (from, to) => {
     try {
         if (window.supabase && window.supabase.rpc) {
-            const { data, error } = await window.supabase.rpc('kpi_purchase_summary', { p_from: from, p_to: to, p_agent_ids: null, p_role: null });
+            // Scope to the viewer's visible agents (own + downline) — kpi_purchase_summary
+            // honours p_agent_ids, so an agent never sees org-wide actuals here.
+            const agentIds = (_visibleUserIds === 'all' || !Array.isArray(_visibleUserIds))
+                ? null
+                : _visibleUserIds.map(v => Number(v)).filter(n => Number.isFinite(n));
+            const role = (!_currentRoleFilter || _currentRoleFilter === 'All') ? null : _currentRoleFilter;
+            const { data, error } = await window.supabase.rpc('kpi_purchase_summary', { p_from: from, p_to: to, p_agent_ids: agentIds, p_role: role });
             if (!error && data) return Number(data.total_sales) || 0;
         }
     } catch (_) {}
     return null;
 };
 const _trySalesByDay = async (from, to) => {
+    // Scoped viewers (agent / leader) must NOT use purchase_sales_by_day — that
+    // RPC has NO agent param and returns org-wide totals, which would leak other
+    // teams' sales into the Revenue Trend chart. Compute a _visibleUserIds-scoped
+    // per-day array client-side instead (agent resolved via customer, matching
+    // getTotalSales) and FAIL CLOSED so the org-wide else-fallback in the chart
+    // never runs for them. Only 'all'-scope viewers (admin / marketing) take the
+    // fast RPC path. Shape: [{ sale_date, total }] — identical to the RPC.
+    if (_visibleUserIds !== 'all' && Array.isArray(_visibleUserIds)) {
+        try {
+            const { purchases, customerMap, userMap } = await _getPurchaseBase();
+            const byDay = new Map();
+            for (const p of purchases) {
+                if (!p.date || p.date < from || p.date > to || p.is_agent_package) continue;
+                if (!_passesPurchaseFilter(p, _getPurchaseAgentId(p, customerMap), userMap)) continue;
+                byDay.set(p.date, (byDay.get(p.date) || 0) + (p.amount || 0));
+            }
+            return [...byDay.entries()].map(([sale_date, total]) => ({ sale_date, total }));
+        } catch (_) {
+            return []; // fail closed — never fall through to the org-wide else path
+        }
+    }
     try {
         if (window.supabase && window.supabase.rpc) {
             const { data, error } = await window.supabase.rpc('purchase_sales_by_day', { p_from: from, p_to: to });
@@ -2950,10 +2977,16 @@ const renderTargetOverview = async () => {
         
         let actualSales = await _trySalesTotal(qStart, qEnd);
         if (actualSales === null) {
-            const purchases = await AppDataStore.getAll('purchases');
-            actualSales = purchases
-                .filter(p => p.date >= qStart && p.date <= qEnd && !p.is_agent_package)
-                .reduce((sum, p) => sum + (p.amount || 0), 0);
+            // Scoped client fallback: resolve each purchase's agent via its customer
+            // (purchases has no agent column) and keep only the viewer's visible set,
+            // mirroring getTotalSales so an agent never sums org-wide actuals.
+            const { purchases, customerMap, userMap } = await _getPurchaseBase();
+            actualSales = 0;
+            for (const p of purchases) {
+                if (p.date < qStart || p.date > qEnd || p.is_agent_package) continue;
+                if (!_passesPurchaseFilter(p, _getPurchaseAgentId(p, customerMap), userMap)) continue;
+                actualSales += p.amount || 0;
+            }
         }
 
         const progress = target.total_sales_target ? Math.min(100, (actualSales / target.total_sales_target * 100)) : 0;
