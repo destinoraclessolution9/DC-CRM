@@ -1568,8 +1568,12 @@ const openProspectModal = async (prospectId = null) => {
         { label: isEdit ? 'Update Prospect' : 'Create Prospect', type: 'primary', action: '(async () => { await app.saveProspect(); })()' }
     ]);
 
-    // Pre-populate children rows after modal mounts
-    setTimeout(() => (window.app.prefillProspectChildren || (() => {}))(prospect?.children), 0);
+    // Pre-populate children rows after modal mounts; reveal the assign-on-behalf
+    // picker (leader keying for an agent) — both owned by the activities chunk.
+    setTimeout(() => {
+        (window.app.prefillProspectChildren || (() => {}))(prospect?.children);
+        (window.app.populateAssignAgentPicker || (() => {}))('prospect');
+    }, 0);
 };
 
 
@@ -1787,12 +1791,39 @@ const saveProspect = async () => {
             data.protection_deadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
             data.score = SCORING_RULES.CREATE_PROSPECT;
             // Create-only fields — never overwritten on edit so the original agent keeps ownership
-            data.responsible_agent_id = _state.cu?.id || null;
+            // Assign-on-behalf (Phase 1): a leader may key this for one of their
+            // agents via the picker → ownership lands on that agent. Falls back to
+            // self when the picker is absent (normal agents) or left on "(me)".
+            const _selfId = _state.cu?.id || null;
+            const _assignSel = document.getElementById('prospect-assign-agent');
+            const _assignedAgentId = (_assignSel && _assignSel.value) ? parseInt(_assignSel.value) : _selfId;
+            data.responsible_agent_id = _assignedAgentId;
             data.cps_assignment_date  = new Date().toISOString().split('T')[0];
             data.pipeline_stage       = 'new';
             data.created_at = new Date().toISOString();
             const newProspect = await AppDataStore.create('prospects', data);
-            UI.toast.success('Prospect created successfully');
+            // Phase 3 — trail: log the key-on-behalf handover so it's queryable
+            // alongside real reassignments. Best-effort; never blocks the save.
+            if (_assignedAgentId != null && String(_assignedAgentId) !== String(_selfId)) {
+                const _now = new Date().toISOString();
+                try {
+                    await AppDataStore.create('reassignment_history', {
+                        prospect_id: newProspect?.id || data.id,
+                        from_agent_id: _selfId,
+                        to_agent_id: _assignedAgentId,
+                        reassigned_by: _selfId,
+                        reassignment_date: _now,
+                        reassignment_reason: 'assigned_at_creation',
+                        reason_notes: `Keyed via Add Prospect by ${_state.cu?.full_name || 'leader'} for agent`,
+                        days_inactive: 0,
+                        protection_deadline: data.protection_deadline || '',
+                        created_at: _now
+                    });
+                } catch (_h) { /* trail best-effort */ }
+            }
+            UI.toast.success(_assignedAgentId != null && String(_assignedAgentId) !== String(_selfId)
+                ? 'Prospect created & assigned'
+                : 'Prospect created successfully');
             document.dispatchEvent(new CustomEvent('prospectCreated', { detail: data }));
             // Silent upload of CPS form photo if one was scanned this session.
             // Fire-and-forget — does not block the save flow.
@@ -2329,25 +2360,39 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         // "loose" vouchers — ad-hoc ones (typed via the top button) or vouchers whose
         // Name List entry was deleted — so nothing is duplicated or orphaned off-screen.
         const looseVouchers = vouchers.filter(v => !(v.metadata && v.metadata.name_id != null && nameIdSet.has(String(v.metadata.name_id))));
+        // Uniform circular icon-button: flex-shrink:0 stops the action row from
+        // squeezing buttons into tall "pill" ovals when several share a narrow card.
+        const vBtn = (bg, icon, fs, title, handler) =>
+            `<button class="btn-icon" title="${title}" style="flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;background:${bg};color:#fff;width:30px;height:30px;min-width:30px;min-height:30px;border-radius:50%;font-size:${fs}px;padding:0;" onclick="event.stopPropagation(); ${handler}"><i class="${icon}"></i></button>`;
         const vouchersHtml = looseVouchers.length > 0 ? `
-            <div style="background:var(--gray-50);border-radius:8px;padding:12px;margin-bottom:12px;">
-                <div style="font-weight:600;font-size:13px;margin-bottom:8px;"><i class="fas fa-ticket-alt" style="color:#7C3AED;margin-right:6px;"></i>Other E-Vouchers (${looseVouchers.length})</div>
-                <div style="display:flex;flex-wrap:wrap;gap:14px;">
+            <div style="background:var(--gray-50);border-radius:10px;padding:14px;margin-bottom:14px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+                    <div style="font-weight:600;font-size:13px;"><i class="fas fa-ticket-alt" style="color:#7C3AED;margin-right:6px;"></i>Other E-Vouchers (${looseVouchers.length})</div>
+                    ${looseVouchers.length > 1 ? `
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <label style="font-size:12px;color:var(--gray-600);display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" id="ev-selall-${prospect.id}" onclick="app.toggleAllEvouchers(${prospect.id}, this.checked)" style="cursor:pointer;"> Select all</label>
+                        <button id="ev-fwd-${prospect.id}" class="btn primary btn-sm" disabled style="opacity:0.5;" onclick="app.forwardSelectedVouchers(${prospect.id}, '${UI.escJsAttr(String(prospect.phone || ''))}')" title="Forward all selected vouchers to ${escapeHtml(prospect.full_name || 'this person')} in one WhatsApp message"><i class="fab fa-whatsapp"></i> Forward (<span id="ev-cnt-${prospect.id}">0</span>)</button>
+                    </div>` : ''}
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(164px,1fr));gap:14px;">
                     ${looseVouchers.map(v => {
                         const code = (v.metadata && v.metadata.voucher_code) || '';
                         const rname = (v.metadata && v.metadata.recipient_name) || (prospect.full_name || '');
                         const fname = `evoucher_${code || v.id}.png`;
+                        const redeemed = !!(v.metadata && v.metadata.redeemed_at);
                         return `
-                        <div style="width:104px;text-align:center;">
-                            <img loading="lazy" decoding="async" data-attach-src="${escapeHtml(String(v.file_url))}" style="width:104px;height:auto;border-radius:6px;border:1px solid var(--gray-200);cursor:pointer;" onclick="window._openAttachment && window._openAttachment('${UI.escJsAttr(String(v.file_url))}')">
-                            <div style="font-size:10px;color:var(--gray-500);margin-top:3px;font-family:monospace;">${escapeHtml(code)}</div>
-                            <div style="display:flex;gap:5px;justify-content:center;margin-top:5px;">
-                                <button class="btn-icon" title="Share via WhatsApp" style="background:#25D366;color:#fff;width:28px;height:28px;border-radius:50%;font-size:13px;padding:0;" onclick="event.stopPropagation(); app.sendVoucherWhatsApp(${prospect.id}, ${v.id}, '${UI.escJsAttr(code)}', '${UI.escJsAttr(rname)}', '${UI.escJsAttr(String(prospect.phone || ''))}', '${UI.escJsAttr(String(v.file_url))}')"><i class="fab fa-whatsapp"></i></button>
-                                <button class="btn-icon" title="Download" style="width:28px;height:28px;border-radius:50%;font-size:12px;padding:0;" onclick="event.stopPropagation(); app.downloadVoucher('${UI.escJsAttr(String(v.file_url))}','${UI.escJsAttr(fname)}')"><i class="fas fa-download"></i></button>
-                                ${(v.metadata && v.metadata.redeemed_at)
-                                    ? `<span title="已使用" style="font-size:10px;background:#dcfce7;color:#059669;padding:3px 7px;border-radius:10px;white-space:nowrap;"><i class="fas fa-check"></i> 已用</span>`
-                                    : `<button class="btn-icon" title="标记为已使用 (Mark redeemed)" style="background:#059669;color:#fff;width:28px;height:28px;border-radius:50%;font-size:12px;padding:0;" onclick="event.stopPropagation(); app.markVoucherRedeemed(${prospect.id}, ${v.id})"><i class="fas fa-check"></i></button>`}
-                                <button class="btn-icon" title="Remove" style="background:var(--error);color:#fff;width:28px;height:28px;border-radius:50%;font-size:12px;padding:0;" onclick="event.stopPropagation(); app.removeEvoucher(${prospect.id}, ${v.id})"><i class="fas fa-times"></i></button>
+                        <div style="position:relative;background:#fff;border:1px solid var(--gray-200);border-radius:10px;padding:10px;display:flex;flex-direction:column;align-items:center;box-shadow:0 1px 2px rgba(0,0,0,0.04);">
+                            ${looseVouchers.length > 1 ? `<input type="checkbox" class="ev-sel-cb" data-att="${v.id}" data-code="${UI.escJsAttr(code)}" data-rname="${UI.escJsAttr(rname)}" data-url="${UI.escJsAttr(String(v.file_url))}" data-fname="${UI.escJsAttr(fname)}" onchange="app.updateEvoucherSelection(${prospect.id})" title="Select to forward together" style="position:absolute;top:8px;left:8px;width:18px;height:18px;cursor:pointer;z-index:2;accent-color:var(--primary);">` : ''}
+                            <img loading="lazy" decoding="async" data-attach-src="${escapeHtml(String(v.file_url))}" style="width:100%;height:auto;border-radius:6px;border:1px solid var(--gray-100);cursor:pointer;" onclick="window._openAttachment && window._openAttachment('${UI.escJsAttr(String(v.file_url))}')">
+                            <div style="display:flex;align-items:center;gap:6px;margin-top:8px;">
+                                <span style="font-size:10px;color:var(--gray-500);font-family:monospace;">${escapeHtml(code)}</span>
+                                ${redeemed ? `<span title="已使用" style="font-size:9px;background:#dcfce7;color:#059669;padding:2px 6px;border-radius:10px;white-space:nowrap;"><i class="fas fa-check"></i> 已用</span>` : ''}
+                            </div>
+                            <div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;width:100%;margin-top:8px;">
+                                ${vBtn('#25D366','fab fa-whatsapp',14,'Share via WhatsApp',`app.sendVoucherWhatsApp(${prospect.id}, ${v.id}, '${UI.escJsAttr(code)}', '${UI.escJsAttr(rname)}', '${UI.escJsAttr(String(prospect.phone || ''))}', '${UI.escJsAttr(String(v.file_url))}')`)}
+                                ${vBtn('var(--gray-400)','fas fa-download',13,'Download',`app.downloadVoucher('${UI.escJsAttr(String(v.file_url))}','${UI.escJsAttr(fname)}')`)}
+                                ${redeemed ? '' : vBtn('#059669','fas fa-check',13,'标记为已使用 (Mark redeemed)',`app.markVoucherRedeemed(${prospect.id}, ${v.id})`)}
+                                ${vBtn('var(--error)','fas fa-times',13,'Remove',`app.removeEvoucher(${prospect.id}, ${v.id})`)}
                             </div>
                         </div>`;
                     }).join('')}
@@ -4535,6 +4580,76 @@ const sendVoucherWhatsApp = (prospectId, attId, code, rname, phone, fileUrl) => 
         UI.toast.error('No phone number on file — downloading the voucher to share manually.');
     }
     downloadVoucher(fileUrl, fname);
+};
+
+// --- Multi-select forward: all loose vouchers belong to the SAME prospect, so the
+// agent can tick several and push them to that one person in a single WhatsApp send. ---
+const _evSelRoot = (prospectId) => document.getElementById(`acc-body-names-${prospectId}`) || document;
+
+const updateEvoucherSelection = (prospectId) => {
+    const root = _evSelRoot(prospectId);
+    // Highlight the selected cards so the agent sees at a glance what will be forwarded.
+    root.querySelectorAll('.ev-sel-cb').forEach(cb => {
+        const card = cb.closest('div');
+        if (card) { card.style.outline = cb.checked ? '2px solid var(--primary)' : ''; card.style.outlineOffset = cb.checked ? '-1px' : ''; }
+    });
+    const n = root.querySelectorAll('.ev-sel-cb:checked').length;
+    const total = root.querySelectorAll('.ev-sel-cb').length;
+    const cnt = document.getElementById(`ev-cnt-${prospectId}`);
+    if (cnt) cnt.textContent = n;
+    const fwd = document.getElementById(`ev-fwd-${prospectId}`);
+    if (fwd) { fwd.disabled = n === 0; fwd.style.opacity = n === 0 ? '0.5' : '1'; }
+    const selAll = document.getElementById(`ev-selall-${prospectId}`);
+    if (selAll) { selAll.checked = total > 0 && n === total; selAll.indeterminate = n > 0 && n < total; }
+};
+
+const toggleAllEvouchers = (prospectId, on) => {
+    _evSelRoot(prospectId).querySelectorAll('.ev-sel-cb').forEach(cb => { cb.checked = on; });
+    updateEvoucherSelection(prospectId);
+};
+
+const forwardSelectedVouchers = async (prospectId, phone) => {
+    const boxes = [..._evSelRoot(prospectId).querySelectorAll('.ev-sel-cb:checked')];
+    if (!boxes.length) { UI.toast.error('Tick at least one e-voucher to forward'); return; }
+    const items = boxes.map(b => ({ id: b.dataset.att, code: b.dataset.code || '', url: b.dataset.url, fname: b.dataset.fname || `evoucher_${b.dataset.att}.png` }));
+    const rname = boxes[0].dataset.rname || '';
+    const serials = items.map(i => i.code).filter(Boolean);
+    const caption = `🎁 传福增运 · 九星引路\n这是 ${items.length} 份专属个人风水解析券\n持券人：${rname}` +
+        (serials.length ? `\n序号：${serials.join('、')}` : '') +
+        `\n请凭券免费预约 1对1 个人风水解析，为期30天。`;
+
+    // PRIMARY (mobile): Web Share can carry multiple files → all land on one WhatsApp
+    // contact in a single message. Just-generated vouchers are cached (no await, gesture
+    // stays live); stored ones are fetched, which may consume activation → wa.me fallback.
+    if (navigator.share && navigator.canShare) {
+        try {
+            const files = [];
+            for (const it of items) {
+                let blob = _evBlobCache[it.id];
+                if (!blob) {
+                    const signed = (await AppDataStore.resolveAttachmentSrc(it.url)) || it.url;
+                    const r = await fetch(signed);
+                    if (r.ok) blob = await r.blob();
+                }
+                if (blob) files.push(new File([blob], it.fname, { type: 'image/png' }));
+            }
+            if (files.length && navigator.canShare({ files })) {
+                await navigator.share({ files, title: 'Feng Shui E-Vouchers', text: caption });
+                return;
+            }
+        } catch (_) { /* fall through to wa.me + bulk download */ }
+    }
+
+    // FALLBACK (desktop / no file-share): open the chat once, download every PNG so the
+    // agent drags them all into WhatsApp Web (which accepts multiple images per message).
+    const num = _evWaPhone(phone);
+    if (num) {
+        window.open(`https://wa.me/${num}?text=${encodeURIComponent(caption)}`, '_blank', 'noopener');
+    } else {
+        UI.toast.error('No phone on file — downloading the vouchers to share manually.');
+    }
+    for (const it of items) { await downloadVoucher(it.url, it.fname); }
+    UI.toast.success(`${items.length} 张券已准备好转发`);
 };
 
 // Mark an e-voucher as redeemed/used (stamps metadata.redeemed_at). Clears the
@@ -6740,6 +6855,9 @@ const openPastRecordModal = async (...args) => {
         generateEvoucher,
         generateEvoucherForName,
         sendVoucherWhatsApp,
+        forwardSelectedVouchers,
+        updateEvoucherSelection,
+        toggleAllEvouchers,
         downloadVoucher,
         removeEvoucher,
         markVoucherRedeemed,
