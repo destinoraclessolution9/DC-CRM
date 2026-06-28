@@ -865,7 +865,7 @@
         if (typeof isSystemAdmin === 'function' && !isSystemAdmin(_state.cu) && visibleIds !== 'all') {
             actQueryOpts.scopeFields = [
                 { field: 'lead_agent_id', values: visibleIds },
-                { field: 'visibility', values: ['open', 'public'] }
+                { field: 'visibility', values: ['open', 'public', 'team'] }
             ];
         }
 
@@ -1966,7 +1966,7 @@
         };
 
         const _scopeFields = (typeof isSystemAdmin === 'function' && !isSystemAdmin(_state.cu) && visibleIds !== 'all')
-            ? [ { field: 'lead_agent_id', values: visibleIds }, { field: 'visibility', values: ['open', 'public'] } ]
+            ? [ { field: 'lead_agent_id', values: visibleIds }, { field: 'visibility', values: ['open', 'public', 'team'] } ]
             : null;
         // gte/lte range replaces 31-item IN list — faster Postgres plan
         const _buildActOpts = (gteStr, lteStr) => {
@@ -2742,7 +2742,7 @@
         if (typeof isSystemAdmin === 'function' && !isSystemAdmin(_state.cu) && visibleIds !== 'all') {
             return [
                 { field: 'lead_agent_id', values: visibleIds },
-                { field: 'visibility', values: ['open', 'public'] },
+                { field: 'visibility', values: ['open', 'public', 'team'] },
             ];
         }
         return null;

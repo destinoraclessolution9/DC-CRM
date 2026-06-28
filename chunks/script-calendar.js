@@ -2513,7 +2513,7 @@
         if (!isSystemAdmin(_state.cu) && visibleIds !== 'all') {
             actQueryOpts.scopeFields = [
                 { field: 'lead_agent_id', values: visibleIds },
-                { field: 'visibility', values: ['open', 'public'] }
+                { field: 'visibility', values: ['open', 'public', 'team'] }
             ];
         }
         const needsCoAgentMerge = !isSystemAdmin(_state.cu) && _state.cu?.id != null;
@@ -3239,7 +3239,7 @@
         if (!isSystemAdmin(_state.cu) && visibleIds !== 'all') {
             queryOpts.scopeFields = [
                 { field: 'lead_agent_id', values: visibleIds },
-                { field: 'visibility', values: ['open', 'public'] }
+                { field: 'visibility', values: ['open', 'public', 'team'] }
             ];
         }
 
@@ -4234,7 +4234,7 @@
         if (!isSystemAdmin(_state.cu) && visibleIdsWV !== 'all') {
             wvQueryOpts.scopeFields = [
                 { field: 'lead_agent_id', values: visibleIdsWV },
-                { field: 'visibility', values: ['open', 'public'] }
+                { field: 'visibility', values: ['open', 'public', 'team'] }
             ];
         }
         const needsCoAgentMergeWV = !isSystemAdmin(_state.cu) && _state.cu?.id != null;
@@ -4355,7 +4355,7 @@
         if (!isSystemAdmin(_state.cu) && visibleIdsDV !== 'all') {
             actQueryOptsDV.scopeFields = [
                 { field: 'lead_agent_id', values: visibleIdsDV },
-                { field: 'visibility', values: ['open', 'public'] }
+                { field: 'visibility', values: ['open', 'public', 'team'] }
             ];
         }
         const needsCoAgentMergeDV = !isSystemAdmin(_state.cu) && _state.cu?.id != null;

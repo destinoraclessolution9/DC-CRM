@@ -572,8 +572,11 @@
         // modal while other agents could not see it. Reflect reality: only a
         // genuinely open/public row shows "Open", everything else shows "Closed".
         if (['EVENT', 'AGENT_MEETING', 'AGENT_TRAINING'].includes(activity.activity_type)) {
-            const _isOpen = activity.visibility === 'open' || activity.visibility === 'public';
-            const _visRadio = document.querySelector(`input[name="event-visibility"][value="${_isOpen ? 'open' : 'closed'}"]`);
+            // Map the stored value to one of the three radios: open/public → open,
+            // team → team (own reporting line), everything else (closed/null) → closed.
+            const _vis = activity.visibility;
+            const _radioVal = (_vis === 'open' || _vis === 'public') ? 'open' : (_vis === 'team' ? 'team' : 'closed');
+            const _visRadio = document.querySelector(`input[name="event-visibility"][value="${_radioVal}"]`);
             if (_visRadio) _visRadio.checked = true;
         }
 
@@ -2434,11 +2437,12 @@
                         <h4>🎪 ${type.replace('_', ' ')} Settings</h4>
                         <div class="form-group">
                             <label>Visibility</label>
-                            <div class="radio-group" style="display:flex; gap:20px;">
+                            <div class="radio-group" style="display:flex; gap:16px; flex-wrap:wrap;">
                                 <label><input type="radio" name="event-visibility" value="closed"> Closed Event (Private)</label>
+                                <label><input type="radio" name="event-visibility" value="team"> Own Team</label>
                                 <label><input type="radio" name="event-visibility" value="open" checked> Open Event (Public)</label>
                             </div>
-                            <small class="help-text">Open events are visible to all agents. Closed events only to involved agents.</small>
+                            <small class="help-text">Open = visible to all agents. Own Team = your reporting line only (your team leader, you, and everyone under you). Closed = only involved agents.</small>
                         </div>
 
                         <div class="form-group">

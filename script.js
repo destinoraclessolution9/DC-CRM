@@ -1072,6 +1072,20 @@ const appLogic = (() => {
             return String(activity.lead_agent_id) === String(user.id) ||
                 (activity.co_agents && activity.co_agents.some(ca => String(ca.id) === String(user.id)));
         }
+        // 'Own Team' — owner / co-agent / admin / same reporting chain (upline or
+        // downline of the owner via reporting_to). Mirrors server same_team_chain.
+        if (activity.visibility === 'team') {
+            if (isSystemAdmin(user)) return true;
+            if (String(activity.lead_agent_id) === String(user.id)) return true;
+            if (activity.co_agents && activity.co_agents.some(ca => String(ca.id) === String(user.id))) return true;
+            try {
+                const allUsers = await AppDataStore.getAll('users');
+                const parentOf = new Map((allUsers || []).map(u => [String(u.id), u.reporting_to != null ? String(u.reporting_to) : null]));
+                const ancOrSelf = (node, anc) => { let c = node, g = 0; while (c != null && g++ < 100) { if (c === anc) return true; c = parentOf.get(c) || null; } return false; };
+                const me = String(user.id), owner = String(activity.lead_agent_id);
+                return ancOrSelf(me, owner) || ancOrSelf(owner, me);
+            } catch (_) { return false; }
+        }
         const isLead = String(activity.lead_agent_id) === String(user.id);
         const isCoAgent = activity.co_agents && activity.co_agents.some(ca => String(ca.id) === String(user.id));
         if (isLead || isCoAgent) return true;
@@ -1107,6 +1121,28 @@ const appLogic = (() => {
 
         const viewerId = String(user.id);
 
+        // Reporting-line ('Own Team') lookup — mirrors the server same_team_chain
+        // (migrations/own_team_visibility_2026-06-28.sql). A 'team' activity is
+        // visible to anyone on the owner's vertical reporting chain (the owner's
+        // upline OR downline, transitively, via reporting_to). team_id is unused
+        // org-wide, so we key off reporting_to.
+        const parentOf = new Map();
+        for (const u of usersList || []) {
+            parentOf.set(String(u.id), u.reporting_to != null ? String(u.reporting_to) : null);
+        }
+        const _isAncOrSelf = (node, anc) => {
+            let cur = node, guard = 0;
+            while (cur != null && guard++ < 100) {
+                if (cur === anc) return true;
+                cur = parentOf.get(cur) || null;
+            }
+            return false;
+        };
+        const _sameTeam = (ownerId) => {
+            const o = String(ownerId);
+            return _isAncOrSelf(viewerId, o) || _isAncOrSelf(o, viewerId);
+        };
+
         return (activity) => {
             if (!activity) return false;
 
@@ -1124,6 +1160,13 @@ const appLogic = (() => {
             if (activity.visibility === 'private') {
                 return String(activity.lead_agent_id) === viewerId ||
                     (Array.isArray(activity.co_agents) && activity.co_agents.some(ca => String(ca.id) === viewerId));
+            }
+
+            // 'Own Team' activities — owner / co-agent / same reporting chain
+            if (activity.visibility === 'team') {
+                if (String(activity.lead_agent_id) === viewerId) return true;
+                if (Array.isArray(activity.co_agents) && activity.co_agents.some(ca => String(ca.id) === viewerId)) return true;
+                return _sameTeam(activity.lead_agent_id);
             }
 
             // Default: lead / co-agent / subordinate within visible tree
@@ -1155,7 +1198,7 @@ const appLogic = (() => {
                 const visibleIds = await getVisibleUserIds(user);
                 const sel = AppDataStore._selectClauseForGetAll('activities');
                 const parts = [
-                    AppDataStore.queryAdvanced('activities', { scopeFields: [{ field: 'visibility', values: ['open', 'public'] }, { field: 'is_public', values: [true] }], select: sel, limit: 100000, countMode: null }),
+                    AppDataStore.queryAdvanced('activities', { scopeFields: [{ field: 'visibility', values: ['open', 'public', 'team'] }, { field: 'is_public', values: [true] }], select: sel, limit: 100000, countMode: null }),
                     (async () => { const { data, error } = await AppDataStore._readClient().from('activities').select(sel).contains('co_agents', JSON.stringify([{ id: user.id }])); if (error) throw error; return { data: data || [] }; })(),
                 ];
                 if (Array.isArray(visibleIds) && visibleIds.length) {
