@@ -2435,6 +2435,17 @@ function _wireLoginBtn() {
             } else {
                 await navigateTo('calendar');
             }
+            // Daily login quote popup (窮理查年鑑). Once per local day, lazy chunk,
+            // fire-and-forget so it never blocks login. Skipped during forced
+            // password change so it can't stack on top of that modal.
+            if (!profile.force_password_change) {
+                setTimeout(function () {
+                    try {
+                        window._loadChunk && window._loadChunk('chunks/script-daily-note.min.js')
+                            .then(function () { try { window.app.maybeShowDailyNote && window.app.maybeShowDailyNote(); } catch (_) { /* popup is best-effort */ } });
+                    } catch (_) { /* popup is best-effort */ }
+                }, 1500);
+            }
         } catch (err) {
             console.error('Login error:', err);
             const msg = err.message || '';
@@ -2837,6 +2848,17 @@ function _wireLoginBtn() {
         updateNavVisibility();
         _armSessionWatch();   // detect a silently-expired session → prompt re-login instead of a blank shell
         setTimeout(_initNotifBell, 800); // wire bell after shell is visible
+
+        // Daily login quote popup (窮理查年鑑) on returning/restored sessions too.
+        // Once-per-local-day guard lives inside maybeShowDailyNote. Lazy + best-effort.
+        if (_currentUser && !_currentUser.force_password_change) {
+            setTimeout(function () {
+                try {
+                    window._loadChunk && window._loadChunk('chunks/script-daily-note.min.js')
+                        .then(function () { try { window.app.maybeShowDailyNote && window.app.maybeShowDailyNote(); } catch (_) { /* popup is best-effort */ } });
+                } catch (_) { /* popup is best-effort */ }
+            }, 1500);
+        }
 
         // Fire-and-forget the sync module initializers — they have no awaitable
         // state the render path needs.
