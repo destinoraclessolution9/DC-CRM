@@ -6020,7 +6020,19 @@
         return result;
     };
 
+    // buildPostMeetupNotesBlock / collectPostMeetupNotesData live in the
+    // activities chunk. On mobile the activities chunk is often not loaded when
+    // these modals open (the opener lives here in the calendar chunk), so the
+    // builder falls back to () => '' and the modal renders with an EMPTY body.
+    // Ensure the activities chunk is loaded before building/collecting.
+    const _ensureActivitiesChunk = async () => {
+        if (window.app.buildPostMeetupNotesBlock) return;
+        if (typeof window._loadChunk !== 'function') return;
+        try { await window._loadChunk('chunks/script-activities.min.js'); } catch (_) { /* bail if lazy chunk fails to load */ }
+    };
+
     const openPostMeetupNotesModal = async (activityId, prospectId) => {
+        await _ensureActivitiesChunk();
         const activity = (await _lookupActivityRobust(activityId)) || {};
 
         // Fetch product/event data for the multi-select checkbox groups.
@@ -6054,6 +6066,7 @@
         const _saveBtn = document.querySelector('.modal-footer .btn.primary');
         if (_saveBtn) { _saveBtn.disabled = true; _saveBtn.textContent = 'Saving…'; }
 
+        await _ensureActivitiesChunk();
         const updates = (window.app.collectPostMeetupNotesData || (() => ({})))('pmn');
         // Single client reference used by both the photo upload and the row update.
         const sb = window.supabase || window.supabaseClient;
@@ -6213,6 +6226,7 @@
     // entity_id) so each attendee owns their own note bundle and the
     // prospect profile can surface it.
     const openAttendeePostEventModal = async (attendeeId, activityId, prospectId) => {
+        await _ensureActivitiesChunk();
         const attendee = await AppDataStore.getById('event_attendees', attendeeId);
         if (!attendee) { UI.toast.error('Attendee not found'); return; }
         const activity = (await _lookupActivityRobust(activityId)) || {};
@@ -6246,6 +6260,7 @@
     };
 
     const saveAttendeePostEventNotes = async (attendeeId, activityId, prospectId) => {
+        await _ensureActivitiesChunk();
         const fields = (window.app.collectPostMeetupNotesData || (() => ({})))('pmn');
         const updates = {
             note_key_points: fields.note_key_points,
