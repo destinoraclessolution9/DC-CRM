@@ -786,9 +786,31 @@
                 <input type="file" id="${prefix}-scan-input" accept="image/*" capture="environment" style="display:none;" onchange="app.handleCpsScanFile(this, '${prefix}')">
             </div>`;
 
+        // ── Assign-on-behalf picker (Phase 1) ────────────────────────────────
+        // A leader keying a prospect for one of their agents picks the owner here,
+        // so ownership lands on the agent at creation — no key-then-reassign step.
+        // Hidden by default; populateAssignAgentPicker() reveals + fills it async,
+        // and only for L1–L5 leaders/admins in CREATE mode. Never on 'preview'
+        // (read-only). For non-CPS forms the credit toggle stays hidden.
+        const assignAgentBlock = readOnly ? '' : `
+            <div id="${prefix}-assign-wrap" class="form-group" style="display:none;background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:12px 14px;margin-bottom:16px;">
+                <label style="font-weight:600;display:block;margin-bottom:6px;color:#0c4a6e;"><i class="fas fa-user-check"></i> Assign this prospect to</label>
+                <select id="${prefix}-assign-agent" class="form-control"></select>
+                <div id="${prefix}-credit-wrap" style="margin-top:10px;display:none;">
+                    <label style="font-size:12px;color:#475569;display:block;margin-bottom:4px;">Who gets credit for this CPS meeting?</label>
+                    <select id="${prefix}-credit" class="form-control" style="font-size:13px;">
+                        <option value="me">Me — I ran the meeting (keep my CPS credit)</option>
+                        <option value="agent">The assigned agent (give them the CPS credit)</option>
+                        <option value="both">Both — I lead, agent added as co-agent</option>
+                    </select>
+                </div>
+                <div style="font-size:11px;color:#0369a1;margin-top:6px;">You're keying this in for another agent — they own the prospect &amp; all future follow-ups. Leave it on <em>(me)</em> to keep it yourself.</div>
+            </div>`;
+
         return `
             <div class="form-section basic-info-block" data-prefix="${prefix}">
                 ${scanBtn}
+                ${assignAgentBlock}
                 <div class="form-row">
                     <div class="form-group half">
                         <label>Title</label>
@@ -988,6 +1010,63 @@
             referral_relationship: rel === 'Other' ? (relOther || 'Other') : rel,
             life_chart_type: lifeChartType,
         };
+    };
+
+    // ── Assign-on-behalf picker population (Phase 1) ─────────────────────────
+    // Fills + reveals the "Assign this prospect to" picker that buildBasicInfoBlock
+    // renders hidden. No-op for normal agents (picker stays hidden → ownership
+    // defaults to self, unchanged behaviour). Leaders (L1–L5 / admin) get their
+    // in-scope downline agents with live capacity, self pre-selected. Skips
+    // prospect EDIT mode (ownership there changes via the reassign tool).
+    const populateAssignAgentPicker = async (prefix) => {
+        try {
+            if (prefix !== 'cps' && prefix !== 'prospect') return;
+            if (prefix === 'prospect' && document.getElementById('edit-prospect-id')?.value) return;
+            const wrap = document.getElementById(`${prefix}-assign-wrap`);
+            const sel  = document.getElementById(`${prefix}-assign-agent`);
+            if (!wrap || !sel) return;
+            const cu = _state.cu;
+            if (!cu) return;
+            const isLeader = isSystemAdmin(cu) || isMarketingManager(cu) || _getUserLevel(cu) <= 5;
+            if (!isLeader) return; // normal agents: ownership stays self, picker hidden
+            const visible = await getVisibleUserIds(cu);
+            const [allUsers, allProspects] = await Promise.all([
+                AppDataStore.getAll('users'),
+                AppDataStore.getAll('prospects'),
+            ]);
+            const inScope = (u) => {
+                const lvl = _getUserLevel(u);
+                if (lvl < 3 || lvl > 11) return false;          // agent band only
+                if (u.status === 'deleted') return false;
+                if (visible === 'all') return true;
+                return (visible || []).map(String).includes(String(u.id));
+            };
+            const optFor = (u, isSelf) => {
+                const assigned = (allProspects || []).filter(p => String(p.responsible_agent_id) === String(u.id)).length;
+                const cap = Math.max(0, 60 - assigned);
+                const icon = cap > 10 ? '🟢' : cap > 0 ? '🟡' : '🔴';
+                const label = isSelf
+                    ? `${u.full_name || 'Me'} (me)`
+                    : `${u.full_name || 'Agent'} (${assigned} assigned, +${cap}) ${icon}`;
+                return `<option value="${u.id}"${isSelf ? ' selected' : ''}>${esc(label)}</option>`;
+            };
+            const others = (allUsers || [])
+                .filter(u => inScope(u) && String(u.id) !== String(cu.id))
+                .sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''));
+            sel.innerHTML = optFor(cu, true) + others.map(u => optFor(u, false)).join('');
+            wrap.style.display = 'block';
+            if (prefix === 'cps') {
+                const cw = document.getElementById('cps-credit-wrap');
+                if (cw) {
+                    // Credit toggle only matters once a non-self agent is chosen.
+                    const refreshCredit = () => {
+                        cw.style.display = (sel.value && String(sel.value) !== String(cu.id)) ? 'block' : 'none';
+                    };
+                    sel.onchange = refreshCredit;
+                    refreshCredit();
+                }
+            }
+        } catch (e) { console.warn('populateAssignAgentPicker failed', e); }
     };
 
     // Thin dispatchers so the shared block's referrer widget routes to the
@@ -2567,6 +2646,7 @@
 
         container.innerHTML = html;
         calculateDuration();
+        if (type === 'CPS') populateAssignAgentPicker('cps');
     };
 
     const calculateDuration = () => {
@@ -4428,10 +4508,32 @@
             // CPS + Prospect forms in lockstep. Activity-specific metadata
             // (responsible_agent_id, referred_by_*, score) is merged after.
             const basic = collectBasicInfoData('cps');
+            // Assign-on-behalf: a leader keying CPS for one of their agents picks
+            // the owner so ownership lands on the agent at creation (no
+            // key-then-reassign). Falls back to self when the picker is absent
+            // (normal agents) or left on "(me)".
+            const _selfId = _state.cu?.id || null;
+            const _cpsAssignSel = document.getElementById('cps-assign-agent');
+            const _assignedAgentId = (_cpsAssignSel && _cpsAssignSel.value)
+                ? parseInt(_cpsAssignSel.value) : _selfId;
+            const _isOnBehalf = _assignedAgentId != null && String(_assignedAgentId) !== String(_selfId);
+            // CPS KPI counts key off the activity's lead_agent_id, so the credit
+            // toggle decides whose CPS number moves. Default 'me' = leader keeps it.
+            if (_isOnBehalf) {
+                const _credit = document.getElementById('cps-credit')?.value || 'me';
+                if (_credit === 'agent') {
+                    activity.lead_agent_id = _assignedAgentId;
+                } else if (_credit === 'both') {
+                    activity.lead_agent_id = _selfId;
+                    const _ca = Array.isArray(activity.co_agents) ? activity.co_agents.slice() : [];
+                    if (!_ca.map(String).includes(String(_assignedAgentId))) _ca.push(_assignedAgentId);
+                    activity.co_agents = _ca;
+                } // 'me' → leave lead_agent_id = self (default)
+            }
             const prospectData = {
                 ...basic,
                 score: SCORING_RULES.CREATE_PROSPECT,
-                responsible_agent_id: _state.cu?.id || null,
+                responsible_agent_id: _assignedAgentId,
                 // Parity with the normal Add-Prospect path: seed CPS protection +
                 // pipeline so intake-born prospects aren't born "Expired" and stay
                 // tier-eligible for the event-invite automation (keys off cps_assignment_date).
@@ -4476,6 +4578,29 @@
                     created_at: new Date().toISOString()
                 });
             } catch(e) { console.warn('Auto-referral creation failed:', e); }
+
+            // Phase 3 — trail + feedback: record the key-on-behalf handover so it
+            // shows up alongside real reassignments, and confirm to the leader who
+            // now owns it. Best-effort; never blocks the save.
+            if (_isOnBehalf) {
+                const _now = new Date().toISOString();
+                try {
+                    await AppDataStore.create('reassignment_history', {
+                        prospect_id: prospect.id,
+                        from_agent_id: _selfId,
+                        to_agent_id: _assignedAgentId,
+                        reassigned_by: _selfId,
+                        reassignment_date: _now,
+                        reassignment_reason: 'assigned_at_creation',
+                        reason_notes: `Keyed via CPS by ${_state.cu?.full_name || 'leader'} for agent; CPS credit=${document.getElementById('cps-credit')?.value || 'me'}`,
+                        days_inactive: 0,
+                        protection_deadline: prospectData.protection_deadline || '',
+                        created_at: _now
+                    });
+                } catch (_h) { /* trail best-effort */ }
+                const _agentLabel = (_cpsAssignSel?.options?.[_cpsAssignSel.selectedIndex]?.text || 'the agent').replace(/\s*\(.*$/, '').trim() || 'the agent';
+                try { UI.toast.success(`Assigned to ${_agentLabel}`); } catch (_) {}
+            }
 
             const inviteMethod = document.getElementById('cps-invitation-method')?.value;
             activity.cps_invitation_method = inviteMethod === 'Other' ? document.getElementById('cps-invitation-other')?.value : inviteMethod;
@@ -5220,6 +5345,7 @@
         BASIC_INFO_MING_GUA,
         buildBasicInfoBlock,
         collectBasicInfoData,
+        populateAssignAgentPicker,
         searchBasicInfoReferrers,
         clearBasicInfoReferrer,
         EVENT_CATEGORIES,
