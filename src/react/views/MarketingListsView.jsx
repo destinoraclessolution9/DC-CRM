@@ -480,7 +480,7 @@ function _passthroughPayload(tab, rows) {
     return null;
 }
 
-export function MarketingListsView({ tab = 'products', rows = [], isTeamLeader = false, legacyHtml = '' }) {
+export function MarketingListsView({ tab = 'products', rows = [], isTeamLeader = false, isSuperAdmin = false, legacyHtml = '' }) {
     const isMaster = MASTER_TABS.includes(tab);
     const passthrough = isMaster ? null : _passthroughPayload(tab, rows);
 
@@ -517,6 +517,14 @@ export function MarketingListsView({ tab = 'products', rows = [], isTeamLeader =
                         </div>
                     );
                 })}
+                {/* NPO — Super-Admin only. Lives here (not a sidebar tab); opens the
+                    full NPO management view via the chunk's switchMarketingListTab('npo'). */}
+                {isSuperAdmin && (
+                    <div className="tab-item" onClick={() => call('switchMarketingListTab', 'npo')}
+                        style={{ padding: '10px 16px', cursor: 'pointer', borderBottom: '2px solid transparent', color: 'var(--gray-600)', fontWeight: 500 }}>
+                        <i className="fas fa-file-invoice-dollar" style={{ marginRight: '6px' }}></i>NPO
+                    </div>
+                )}
             </div>
 
             {/* Master tabs render React tables. The promotions + special_programs

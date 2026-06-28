@@ -1754,7 +1754,7 @@ const appLogic = (() => {
             'ai-insights', 'security', 'workflows',
             'integrations', 'settings', 'milestones', 'fude', 'noticeboard',
             'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser',
-            'purchases_history', 'stock-take', 'boss-report', 'quarter-review', 'npo', 'org-chart',
+            'purchases_history', 'stock-take', 'boss-report', 'quarter-review', 'org-chart',
             'lead_forms', 'surveys', 'contracts', 'booking_settings',
             'order-form-extract',
         ];
@@ -3399,7 +3399,8 @@ function _wireLoginBtn() {
         'egg_purchasing':       { chunk: 'chunks/script-egg.min.js',         minLevel: null, exactLevels: [1], navId: 'egg-purchasing',       navLevels: [1], title: 'Egg Purchasing' },
         'boss_report':          { chunk: 'chunks/script-boss-report.min.js', minLevel: null, exactLevels: [1, 2], navId: 'boss-report',       navLevels: [1], title: 'Boss Report' },
         'quarter_review':       { chunk: 'chunks/script-quarter-review.min.js', minLevel: null, exactLevels: [1], navId: 'quarter-review', navLevels: [1], title: 'Quarter Review' },
-        'npo':                  { chunk: 'chunks/script-npo.min.js',          minLevel: null, exactLevels: null, navId: 'npo',                 navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], title: 'NPO' },
+        // NPO: Super-Admin-only (exactLevels [1]); reached via the Marketing Labs NPO tab, not a sidebar item (navLevels _VIEW_NO_NAV).
+        'npo':                  { chunk: 'chunks/script-npo.min.js',          minLevel: null, exactLevels: [1], navId: 'npo',                 navLevels: _VIEW_NO_NAV, title: 'NPO' },
         'knowledge':            { chunk: 'chunks/script-knowledge.min.js',   minLevel: null, exactLevels: null, navId: 'knowledge',           navLevels: [1, 2, 3, 4], title: 'Knowledge HQ' },
         'formula_purchaser':    { chunk: 'chunks/script-formula.min.js',     minLevel: null, exactLevels: [1], navId: 'formula-purchaser',    navLevels: [1], title: 'Formula Purchaser' },
         'marketing_automation': { chunk: 'chunks/script-marketing.min.js',   minLevel: null, exactLevels: [1, 2], navId: 'marketing-automation', navLevels: [1, 2], title: 'Marketing Automation' },
@@ -3434,12 +3435,12 @@ function _wireLoginBtn() {
     // byte-identically. The agent band (L5-11) and the ambassador/customer/referrer
     // tier (L12-14) have explicit _VIEW_NAV_ORDER_OVERRIDE entries that define BOTH
     // their visible set and their display order (consumed in updateNavVisibility).
-    const _VIEW_NAV_ORDER = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'purchases_history', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'knowledge', 'import', 'integrations', 'settings', 'fude', 'milestones', 'noticeboard', 'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser', 'stock-take', 'boss-report', 'quarter-review', 'npo', 'org-chart', 'ai-insights', 'security', 'workflows', 'lead_forms', 'surveys', 'contracts', 'booking_settings', 'order-form-extract'];
-    const _AGENT_NAV = ['calendar', 'fude', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'milestones', 'reports', 'npo'];
+    const _VIEW_NAV_ORDER = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'purchases_history', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'knowledge', 'import', 'integrations', 'settings', 'fude', 'milestones', 'noticeboard', 'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser', 'stock-take', 'boss-report', 'quarter-review', 'org-chart', 'ai-insights', 'security', 'workflows', 'lead_forms', 'surveys', 'contracts', 'booking_settings', 'order-form-extract'];
+    const _AGENT_NAV = ['calendar', 'fude', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'milestones', 'reports'];
     const _VIEW_NAV_ORDER_OVERRIDE = {
         5:  _AGENT_NAV, 6: _AGENT_NAV, 7: _AGENT_NAV, 8: _AGENT_NAV, 9: _AGENT_NAV, 10: _AGENT_NAV,
-        11: ['calendar', 'fude', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'milestones', 'npo'],
-        12: ['noticeboard', 'fude', 'milestones', 'prospects', 'referrals', 'npo'],
+        11: ['calendar', 'fude', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'milestones'],
+        12: ['noticeboard', 'fude', 'milestones', 'prospects', 'referrals'],
         13: ['noticeboard', 'fude', 'milestones'],
         14: ['noticeboard', 'fude', 'milestones'],
     };

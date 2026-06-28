@@ -342,7 +342,7 @@ function mountMonthlyPromotion(container, opts) {
 // into #marketing-list-content. ──────────────────────────────────────────────
 function mountMarketingLists(container, opts) {
     const o = opts || {};
-    _mountSimple(container, <MarketingListsView tab={o.tab || 'products'} rows={o.rows || []} isTeamLeader={!!o.isTeamLeader} legacyHtml={o.legacyHtml || ''} />);
+    _mountSimple(container, <MarketingListsView tab={o.tab || 'products'} rows={o.rows || []} isTeamLeader={!!o.isTeamLeader} isSuperAdmin={!!o.isSuperAdmin} legacyHtml={o.legacyHtml || ''} />);
     window.__REACT_MKTLISTS_MOUNTED = true;
 }
 

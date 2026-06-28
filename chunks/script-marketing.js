@@ -360,7 +360,7 @@
                 }
                 container.innerHTML = '<div id="ml-react-root"></div>';
                 window.CRMReact.mountMarketingLists(document.getElementById('ml-react-root'), {
-                    tab, rows, isTeamLeader: isTeamLeaderOrAbove(_state.cu), legacyHtml,
+                    tab, rows, isTeamLeader: isTeamLeaderOrAbove(_state.cu), isSuperAdmin: isSystemAdmin(_state.cu), legacyHtml,
                 });
                 return;
             } catch (e) {
@@ -424,6 +424,11 @@
                          style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_state.cmlt === 'special_programs' ? 'var(--primary-600)' : 'transparent'}; color: ${_state.cmlt === 'special_programs' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
                         🏆 Special Programs
                     </div>
+                    ${isSystemAdmin(_state.cu) ? `
+                    <div class="tab-item" onclick="app.switchMarketingListTab('npo')"
+                         style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid transparent; color: var(--gray-600); font-weight: 500;">
+                        <i class="fas fa-file-invoice-dollar" style="margin-right:6px;"></i>NPO
+                    </div>` : ''}
                 </div>
 
                 <div id="marketing-list-content">
@@ -434,6 +439,9 @@
     };
 
     const switchMarketingListTab = async (tab) => {
+        // NPO is a Super-Admin-only deal type that lives under Marketing Labs but
+        // renders as its own full view — route to it instead of swapping the tab.
+        if (tab === 'npo') { await navigateTo('npo'); return; }
         _state.cmlt = tab;
         const viewport = document.getElementById('content-viewport');
         await showMarketingListsView(viewport);
