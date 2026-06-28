@@ -1053,6 +1053,9 @@
             const others = (allUsers || [])
                 .filter(u => inScope(u) && String(u.id) !== String(cu.id))
                 .sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''));
+            // No downline agents to hand off to → keep the picker hidden so the
+            // leader just owns it themselves (a self-only picker is pointless).
+            if (!others.length) return;
             sel.innerHTML = optFor(cu, true) + others.map(u => optFor(u, false)).join('');
             wrap.style.display = 'block';
             if (prefix === 'cps') {
@@ -4525,8 +4528,14 @@
                     activity.lead_agent_id = _assignedAgentId;
                 } else if (_credit === 'both') {
                     activity.lead_agent_id = _selfId;
+                    // co_agents is an array of {id,name,co_role,status} OBJECTS, not raw
+                    // IDs (see _notifyActivityCreated + addCoAgent). Push a proper object
+                    // and dedup by id so the agent is notified + renders correctly.
+                    const _agentName = (_cpsAssignSel?.options?.[_cpsAssignSel.selectedIndex]?.text || 'Agent').replace(/\s*\(.*$/, '').trim() || 'Agent';
                     const _ca = Array.isArray(activity.co_agents) ? activity.co_agents.slice() : [];
-                    if (!_ca.map(String).includes(String(_assignedAgentId))) _ca.push(_assignedAgentId);
+                    if (!_ca.some(c => String(c?.id ?? c) === String(_assignedAgentId))) {
+                        _ca.push({ id: _assignedAgentId, name: _agentName, co_role: 'Supporting', status: 'pending' });
+                    }
                     activity.co_agents = _ca;
                 } // 'me' → leave lead_agent_id = self (default)
             }
