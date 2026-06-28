@@ -2382,7 +2382,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                         const redeemed = !!(v.metadata && v.metadata.redeemed_at);
                         return `
                         <div style="position:relative;background:#fff;border:1px solid var(--gray-200);border-radius:10px;padding:10px;display:flex;flex-direction:column;align-items:center;box-shadow:0 1px 2px rgba(0,0,0,0.04);">
-                            ${looseVouchers.length > 1 ? `<input type="checkbox" class="ev-sel-cb" data-att="${v.id}" data-code="${UI.escJsAttr(code)}" data-rname="${UI.escJsAttr(rname)}" data-url="${UI.escJsAttr(String(v.file_url))}" data-fname="${UI.escJsAttr(fname)}" onchange="app.updateEvoucherSelection(${prospect.id})" title="Select to forward together" style="position:absolute;top:8px;left:8px;width:18px;height:18px;cursor:pointer;z-index:2;accent-color:var(--primary);">` : ''}
+                            ${looseVouchers.length > 1 ? `<input type="checkbox" class="ev-sel-cb" data-att="${v.id}" data-code="${escapeHtml(code)}" data-rname="${escapeHtml(rname)}" data-url="${escapeHtml(String(v.file_url))}" data-fname="${escapeHtml(fname)}" onchange="app.updateEvoucherSelection(${prospect.id})" title="Select to forward together" style="position:absolute;top:8px;left:8px;width:18px;height:18px;cursor:pointer;z-index:2;accent-color:var(--primary);">` : ''}
                             <img loading="lazy" decoding="async" data-attach-src="${escapeHtml(String(v.file_url))}" style="width:100%;height:auto;border-radius:6px;border:1px solid var(--gray-100);cursor:pointer;" onclick="window._openAttachment && window._openAttachment('${UI.escJsAttr(String(v.file_url))}')">
                             <div style="display:flex;align-items:center;gap:6px;margin-top:8px;">
                                 <span style="font-size:10px;color:var(--gray-500);font-family:monospace;">${escapeHtml(code)}</span>
@@ -4657,7 +4657,13 @@ const forwardSelectedVouchers = async (prospectId, phone) => {
                 await navigator.share({ files, title: 'Feng Shui E-Vouchers', text: caption });
                 return;
             }
-        } catch (_) { /* fall through to wa.me + bulk download */ }
+            // else: files not shareable on this platform → fall through to wa.me
+        } catch (err) {
+            // User dismissed the native share sheet — they chose not to send. Do NOT
+            // then fire the wa.me fallback + bulk download behind their back.
+            if (err && err.name === 'AbortError') return;
+            /* real share/fetch failure (e.g. gesture lost) → fall through to wa.me + bulk download */
+        }
     }
 
     // FALLBACK (desktop / no file-share): open the chat once, download every PNG so the
