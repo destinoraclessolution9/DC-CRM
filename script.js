@@ -2435,16 +2435,16 @@ function _wireLoginBtn() {
             } else {
                 await navigateTo('calendar');
             }
-            // Daily login quote popup (窮理查年鑑). Once per local day, lazy chunk,
-            // fire-and-forget so it never blocks login. Skipped during forced
-            // password change so it can't stack on top of that modal.
+            // Daily login quote popup (窮理查年鑑). Runs after the awaited navigateTo
+            // above so a boot navigation's UI.hideModal() can't wipe it (see the
+            // restore-path note). Once per local day, lazy chunk, best-effort.
             if (!profile.force_password_change) {
                 setTimeout(function () {
                     try {
                         window._loadChunk && window._loadChunk('chunks/script-daily-note.min.js')
                             .then(function () { try { window.app.maybeShowDailyNote && window.app.maybeShowDailyNote(); } catch (_) { /* popup is best-effort */ } });
                     } catch (_) { /* popup is best-effort */ }
-                }, 1500);
+                }, 800);
             }
         } catch (err) {
             console.error('Login error:', err);
@@ -2849,17 +2849,6 @@ function _wireLoginBtn() {
         _armSessionWatch();   // detect a silently-expired session → prompt re-login instead of a blank shell
         setTimeout(_initNotifBell, 800); // wire bell after shell is visible
 
-        // Daily login quote popup (窮理查年鑑) on returning/restored sessions too.
-        // Once-per-local-day guard lives inside maybeShowDailyNote. Lazy + best-effort.
-        if (_currentUser && !_currentUser.force_password_change) {
-            setTimeout(function () {
-                try {
-                    window._loadChunk && window._loadChunk('chunks/script-daily-note.min.js')
-                        .then(function () { try { window.app.maybeShowDailyNote && window.app.maybeShowDailyNote(); } catch (_) { /* popup is best-effort */ } });
-                } catch (_) { /* popup is best-effort */ }
-            }, 1500);
-        }
-
         // Fire-and-forget the sync module initializers — they have no awaitable
         // state the render path needs.
         // initGoogleIntegration lives in the gcal lazy chunk; it self-inits when
@@ -2901,6 +2890,20 @@ function _wireLoginBtn() {
         const _defaultView = _defaultViewFor(_currentUser);
         const _initialView = (_initLevel < 13 && _hashView) ? _hashView : _defaultView;
         await navigateTo(_initialView);
+
+        // Daily login quote popup (窮理查年鑑). MUST run AFTER the initial navigateTo
+        // resolves — navigateTo() calls UI.hideModal() on entry, and on mobile that
+        // first navigation (lazy chunk load + home render) can outlast a fixed timer,
+        // wiping the modal. Post-nav there are no further boot navigations to clobber
+        // it. Once-per-local-day guard + lazy chunk live in maybeShowDailyNote.
+        if (_currentUser && !_currentUser.force_password_change) {
+            setTimeout(function () {
+                try {
+                    window._loadChunk && window._loadChunk('chunks/script-daily-note.min.js')
+                        .then(function () { try { window.app.maybeShowDailyNote && window.app.maybeShowDailyNote(); } catch (_) { /* popup is best-effort */ } });
+                } catch (_) { /* popup is best-effort */ }
+            }, 800);
+        }
 
         // Background pre-warm: silently fetch the most-navigated tables 2 seconds
         // after first paint so every subsequent page navigation serves from
