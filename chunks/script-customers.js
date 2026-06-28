@@ -1829,8 +1829,6 @@ const saveCustomer = async () => {
 // Add-Purchase modal is purely a launch point: close this modal, lazy-load the
 // NPO chunk, then open the NPO order wizard pre-linked to the SAME customer.
 const npoLaunchFromPurchase = async (customerId) => {
-    // NPO is Super-Admin-only — fail closed even if the option is somehow reached.
-    if (!isSystemAdmin(_state.cu)) { UI.toast.error('NPO is restricted to Super Admin'); return; }
     UI.hideModal();
     try {
         if (typeof window._loadChunk === 'function') {
@@ -1890,7 +1888,7 @@ const openAddPurchaseModal = async (customerId) => {
                             <option value="Bank Transfer">Bank Transfer</option>
                             <option value="EPP">EPP (Easy Payment Plan)</option>
                             <option value="POP">POP (Pre-Owned Plan)</option>
-                            ${isSystemAdmin(_state.cu) ? `<option value="NPO">NPO (Installment Package)</option>` : ''}
+                            <option value="NPO">NPO (Installment Package)</option>
                         </select>
                     </div>
                 </div>

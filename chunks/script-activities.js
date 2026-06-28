@@ -1245,6 +1245,12 @@
 
         const paymentMethod = cr.payment_method || a.payment_method || 'Cash';
         const isPOP = paymentMethod === 'POP';
+        // NPO is an agent-sellable installment package. CONFIG (plans/tiers) stays
+        // L1-only via the Marketing Labs NPO tab, but any closer can tag a closed
+        // sale to an active NPO package here. The picker is filled async from npo_plans.
+        const isNPO = paymentMethod === 'NPO';
+        const npoPlanId = cr.npo_plan_id || a.npo_plan_id || '';
+        const npoPlanName = cr.npo_plan_name || '';
         const isClosingChecked = !!(a.is_closing || cr.product || cr.sale_amount || cr.invoice_number);
 
         const v = {
@@ -1346,7 +1352,7 @@
             </div>
         ` : '';
 
-        const paymentOptions = ['Cash','Bank Transfer','Credit Card','Cheque','EPP','POP']
+        const paymentOptions = ['Cash','Bank Transfer','Credit Card','Cheque','EPP','POP','NPO']
             .map(m => `<option value="${m}" ${paymentMethod === m ? 'selected' : ''}>${m}</option>`).join('');
 
         return `
@@ -1409,7 +1415,7 @@
                         </div>
                         <div class="form-group half">
                             <label>Payment Method</label>
-                            <select id="${prefix}-payment-method" class="form-control" onchange="document.getElementById('${prefix}-pop-fields').style.display = this.value === 'POP' ? 'block' : 'none'" ${disabled}>
+                            <select id="${prefix}-payment-method" class="form-control" onchange="app.moPaymentMethodChanged('${prefix}', this.value)" ${disabled}>
                                 ${paymentOptions}
                             </select>
                         </div>
@@ -1429,6 +1435,16 @@
                             <label>Down Payment (RM)</label>
                             <input type="number" id="${prefix}-pop-down" class="form-control" value="${escapeHtml(v.pop_down)}" placeholder="0.00" ${disabled}>
                         </div>
+                    </div>
+                    <div id="${prefix}-npo-fields" style="display:${isNPO ? 'block' : 'none'};background:#ecfeff;border:1px solid #a5f3fc;padding:12px;border-radius:6px;margin-bottom:12px;">
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label><i class="fas fa-file-invoice-dollar" style="color:#0e7490;"></i> NPO Package <span style="color:#ef4444;font-weight:700;" title="Required for NPO">*</span></label>
+                            <select id="${prefix}-npo-plan" class="form-control" onchange="app.npoClosingPlanPicked('${prefix}')" data-selected="${escapeHtml(String(npoPlanId))}" ${disabled}>
+                                <option value="">${isNPO ? 'Loading packages…' : '— Select package —'}</option>
+                            </select>
+                            <div id="${prefix}-npo-selected" style="font-size:12px;color:#0e7490;margin-top:6px;">${npoPlanName ? 'Selected package: <strong>' + escapeHtml(npoPlanName) + '</strong>' : ''}</div>
+                        </div>
+                        ${isNPO ? `<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="" style="display:none;" onload="window.app && app.npoFillClosingPlans && app.npoFillClosingPlans('${prefix}', '${escapeHtml(String(npoPlanId))}')">` : ''}
                     </div>
                     <div class="form-row">
                         <div class="form-group half">
@@ -1483,6 +1499,8 @@
             solution_sold: read(`${prefix}-solution-sold`),
             amount_closed: read(`${prefix}-amount-closed`),
             payment_method: read(`${prefix}-payment-method`),
+            npo_plan_id: read(`${prefix}-npo-plan`),
+            npo_plan_name: (() => { const s = document.getElementById(`${prefix}-npo-plan`); const o = s && s.options[s.selectedIndex]; return o && o.value ? (o.getAttribute('data-name') || (o.textContent || '').trim()) : ''; })(),
             pop_monthly: read(`${prefix}-pop-monthly`),
             pop_tenure: read(`${prefix}-pop-tenure`),
             pop_down: read(`${prefix}-pop-down`),
@@ -1494,6 +1512,51 @@
             plan_details: read(`${prefix}-plan-details`),
             success_story: read(`${prefix}-success-story`),
         };
+    };
+
+    // ── NPO package picker for the Meeting-Outcome closing flow ──────────────
+    // Toggles the POP / NPO conditional field blocks off the payment-method
+    // select, and lazy-fills the NPO package dropdown from npo_plans (no chunk
+    // load needed — it's a plain table read). NPO config stays L1-only; any
+    // closer can pick an already-configured active package here.
+    const moPaymentMethodChanged = (prefix, val) => {
+        const pop = document.getElementById(`${prefix}-pop-fields`);
+        if (pop) pop.style.display = val === 'POP' ? 'block' : 'none';
+        const npo = document.getElementById(`${prefix}-npo-fields`);
+        if (npo) npo.style.display = val === 'NPO' ? 'block' : 'none';
+        if (val === 'NPO') {
+            const sel = document.getElementById(`${prefix}-npo-plan`);
+            npoFillClosingPlans(prefix, (sel && sel.getAttribute('data-selected')) || '');
+        }
+    };
+
+    const npoFillClosingPlans = async (prefix, selectedId) => {
+        const sel = document.getElementById(`${prefix}-npo-plan`);
+        if (!sel) return;
+        let plans = [];
+        try { plans = (await AppDataStore.getAll('npo_plans')) || []; } catch (_) { plans = []; }
+        plans = plans.filter(p => p && p.is_active !== false).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        if (!plans.length) {
+            sel.innerHTML = '<option value="">— No NPO packages configured —</option>';
+            const cap = document.getElementById(`${prefix}-npo-selected`);
+            if (cap) cap.innerHTML = '<span style="color:#b45309;">No active NPO package — ask an admin to set one up.</span>';
+            return;
+        }
+        const want = String(selectedId || sel.getAttribute('data-selected') || '');
+        sel.innerHTML = '<option value="">— Select package —</option>' + plans.map(p =>
+            `<option value="${p.id}" data-name="${escapeHtml(p.name || '')}" ${want === String(p.id) ? 'selected' : ''}>${escapeHtml(p.name || ('Package #' + p.id))}</option>`).join('');
+        npoClosingPlanPicked(prefix);
+    };
+
+    const npoClosingPlanPicked = (prefix) => {
+        const sel = document.getElementById(`${prefix}-npo-plan`);
+        const cap = document.getElementById(`${prefix}-npo-selected`);
+        if (!sel || !cap) return;
+        const o = sel.options[sel.selectedIndex];
+        const name = o && o.value ? (o.getAttribute('data-name') || (o.textContent || '').trim()) : '';
+        cap.innerHTML = name
+            ? `Selected package: <strong>${escapeHtml(name)}</strong>`
+            : '<span style="color:#ef4444;">Please choose an NPO package.</span>';
     };
 
     // OCR invoice scanner using Tesseract.js — no API key required, runs entirely in-browser.
@@ -5165,6 +5228,9 @@
         collectPostMeetupNotesData,
         buildMeetingOutcomeBlock,
         collectMeetingOutcomeData,
+        moPaymentMethodChanged,
+        npoFillClosingPlans,
+        npoClosingPlanPicked,
         scanInvoiceWithAI,
         ORDER_FORM_FIELD_MAP,
         handleOrderFormFile,

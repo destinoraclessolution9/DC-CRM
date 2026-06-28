@@ -5882,6 +5882,8 @@
                         pop_monthly:      paymentMethod === 'POP' ? (mo.pop_monthly || '') : '',
                         pop_tenure:       paymentMethod === 'POP' ? (mo.pop_tenure  || '') : '',
                         pop_down_payment: paymentMethod === 'POP' ? (mo.pop_down    || '') : '',
+                        npo_plan_id:      paymentMethod === 'NPO' ? (mo.npo_plan_id   || '') : '',
+                        npo_plan_name:    paymentMethod === 'NPO' ? (mo.npo_plan_name || '') : '',
                         invoice_number:  mo.invoice_number || '',
                         invoice_file:    invoice_file || existingCR?.invoice_file || '',
                         invoice_file_name: invoice_file_name || existingCR?.invoice_file_name || '',
