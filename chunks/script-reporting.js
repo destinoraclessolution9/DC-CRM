@@ -1532,7 +1532,11 @@ const getDOSales = async (from, to) => {
     let total = 0;
     for (const p of purchases) {
         if (p.date < from || p.date > to || p.is_agent_package) continue;
-        if (p.payment_method === 'POP') continue; // POP = PO (pre-order); DO = full payment
+        // POP and NPO both belong to the PO bucket, never DO (full payment). NPO
+        // installment-package deals carry payment_method='NPO' on their purchases
+        // row; the weekly report counts them under PORT via npo_sales, so they must
+        // NOT also be summed into RMT (owner rule: NPO never lands in RMT/TTO).
+        if (p.payment_method === 'POP' || p.payment_method === 'NPO') continue;
         if (!_passesPurchaseFilter(p, _getPurchaseAgentId(p, customerMap), userMap)) continue;
         total += p.amount || 0;
     }
