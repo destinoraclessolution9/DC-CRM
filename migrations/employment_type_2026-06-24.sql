@@ -24,3 +24,12 @@ begin
             check (employment_type in ('full-time', 'part-time'));
     end if;
 end $$;
+
+-- 2026-06-29: widen to allow 'na' (Not applicable) for L12-15 roles
+-- (传福大使 / customer / referrer / stock-take) where weekly hours don't apply.
+-- Drop + re-add so the new value is accepted; idempotent.
+alter table public.users
+    drop constraint if exists users_employment_type_chk;
+alter table public.users
+    add constraint users_employment_type_chk
+    check (employment_type in ('full-time', 'part-time', 'na'));

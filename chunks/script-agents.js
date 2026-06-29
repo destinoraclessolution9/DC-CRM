@@ -936,7 +936,7 @@ const openAddAgentModal = async (agentId = null) => {
                 <div class="form-row">
                     <div class="form-group half">
                         <label>Agent Role <span class="required">*</span></label>
-                        <select id="agent-role-select" class="form-control" required>
+                        <select id="agent-role-select" class="form-control" required onchange="app.syncAgentEmploymentTypeForRole()">
                             ${USER_ROLES.map(r => `<option value="${r}" ${isEdit && agent.role === r ? 'selected' : ''}>${r}</option>`).join('')}
                         </select>
                     </div>
@@ -964,6 +964,7 @@ const openAddAgentModal = async (agentId = null) => {
                         <select id="agent-employment-type" class="form-control">
                             <option value="full-time" ${isEdit && agent.employment_type === 'full-time' ? 'selected' : ''}>Full-time (45h / week)</option>
                             <option value="part-time" ${(!isEdit || agent.employment_type === 'part-time') ? 'selected' : ''}>Part-time (20h / week)</option>
+                            <option value="na" ${isEdit && agent.employment_type === 'na' ? 'selected' : ''}>Not applicable (N/A)</option>
                         </select>
                     </div>
                 </div>
@@ -1043,6 +1044,19 @@ const openAddAgentModal = async (agentId = null) => {
 
 const openEditAgentModal = (agentId) => openAddAgentModal(agentId);
 
+// Auto-set Employment Type to "Not applicable (N/A)" when an L12-15 role is chosen
+// (传福大使 / customer / referrer / stock-take staff) — weekly full/part-time hours
+// don't apply to them. Reverts an auto-set N/A back to part-time if a role that
+// DOES track hours is reselected. Admin can still override the field manually.
+const syncAgentEmploymentTypeForRole = () => {
+    const roleSel = document.getElementById('agent-role-select');
+    const empSel  = document.getElementById('agent-employment-type');
+    if (!roleSel || !empSel) return;
+    const level = (window._crmUtils?.getUserLevel || (() => 99))({ role: roleSel.value });
+    if (level >= 12) empSel.value = 'na';
+    else if (empSel.value === 'na') empSel.value = 'part-time';
+};
+
 const saveAgent = async () => {
     const name = document.getElementById('agent-name').value;
     if (!name) return UI.toast.error('Agent name is required');
@@ -1071,7 +1085,7 @@ const saveAgent = async () => {
         reporting_to: reportingToVal ? parseInt(reportingToVal) : null,
         team: document.getElementById('agent-team')?.value || null,
         status: document.getElementById('agent-status')?.value || 'active',
-        employment_type: document.getElementById('agent-employment-type')?.value === 'part-time' ? 'part-time' : 'full-time',
+        employment_type: ['full-time', 'part-time', 'na'].includes(document.getElementById('agent-employment-type')?.value) ? document.getElementById('agent-employment-type').value : 'full-time',
         // Home market — defaults this agent's new prospects/customers/events to a
         // country's currency & pricing. Validated against the registry; bad/empty → MY.
         country: (UI.countryByCode(document.getElementById('agent-country')?.value).code) || UI.defaultCountry,
@@ -1547,6 +1561,7 @@ const viewInactiveProspects = (agentId) => {
         showAgentsView,
         showForcePasswordChangeModal,
         submitForcePasswordChange,
+        syncAgentEmploymentTypeForRole,
         updateAgentTargets,
         viewInactiveProspects,
     });

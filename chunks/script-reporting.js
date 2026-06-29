@@ -1716,6 +1716,9 @@ const _computeAgentWeekHours = async () => {
         if (!isAgent(u)) continue;
         if (u.status === 'inactive' || u.status === 'expired') continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(u.id))) continue;
+        // 'na' employment type (ambassadors / L12-15 roles) has no weekly hour
+        // target — exclude from operating-hours tracking instead of defaulting to 45h.
+        if (u.employment_type === 'na') continue;
         const type = u.employment_type === 'part-time' ? 'part-time' : 'full-time';
         const target = _AGENT_WEEKLY_TARGET[type];
         const ids = agentActs[String(u.id)];
