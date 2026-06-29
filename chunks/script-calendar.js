@@ -5761,6 +5761,12 @@
     };
 
     const openMeetingOutcomeModal = async (activityId) => {
+        // The Meeting Outcome body is built by buildMeetingOutcomeBlock(), which
+        // lives in the activities chunk. On mobile that chunk isn't loaded when a
+        // prospect activity is tapped, so the builder fell back to (() => '') and
+        // the modal opened with an empty body. Load the chunk first.
+        await _ensureActivitiesChunk();
+
         // Use the robust lookup so the Closing modal opens with the right data
         // even when the row is only reachable via the calendar hot cache / pin
         // board (consultant scope under RLS).
@@ -5793,6 +5799,10 @@
     };
 
     const saveMeetingOutcome = async (activityId) => {
+        // collectMeetingOutcomeData lives in the activities chunk — guarantee it's
+        // loaded so the save doesn't silently no-op into empty data on mobile.
+        await _ensureActivitiesChunk();
+
         // All DOM reads go through the shared collector so CPS/Prospect/
         // Standard Functions all see the same field set.
         const mo = (window.app.collectMeetingOutcomeData || (() => ({})))('mo');
