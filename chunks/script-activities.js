@@ -1333,6 +1333,34 @@
         const isNPO = paymentMethod === 'NPO';
         const npoPlanId = cr.npo_plan_id || a.npo_plan_id || '';
         const npoPlanName = cr.npo_plan_name || '';
+        // Ad-hoc NPO terms keyed directly at close (no admin pre-config required).
+        // The preset-package dropdown above is just a shortcut that fills these.
+        const npoTierAmount   = cr.npo_tier_amount   ?? a.npo_tier_amount   ?? '';
+        const npoFirstPayment = cr.npo_first_payment ?? a.npo_first_payment ?? '';
+        const npoMonthly      = cr.npo_monthly       ?? a.npo_monthly       ?? '';
+        const npoTenure       = cr.npo_tenure        ?? a.npo_tenure        ?? '';
+        const npoNote         = cr.npo_note          ?? a.npo_note          ?? '';
+        const npoProducts     = Array.isArray(cr.npo_products) ? cr.npo_products
+                              : (Array.isArray(a.npo_products) ? a.npo_products : []);
+        // key the saved selections by product_id (fall back to name) so we can
+        // re-tick the catalog checkboxes and restore each redeem-after value.
+        const npoSelMap = new Map((npoProducts || []).map(p =>
+            [String(p.product_id != null ? p.product_id : p.product_name), p]));
+        const npoProductsHtml = products.length ? products.map(p => {
+            const sel = npoSelMap.get(String(p.id)) || npoSelMap.get(String(p.name));
+            const checked = !!sel;
+            const ra = sel && sel.redeem_after_months != null ? sel.redeem_after_months : '';
+            return `
+                <div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #cffafe;">
+                    <label style="flex:1;display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;">
+                        <input type="checkbox" name="${prefix}-npo-product" value="${p.id}" data-name="${escapeHtml(p.name || '')}" ${checked ? 'checked' : ''} ${disabled}>
+                        ${escapeHtml(p.name || ('Product #' + p.id))}
+                    </label>
+                    <input type="number" min="0" placeholder="redeem after (mo)" title="Optional: redeem this item after N months"
+                        id="${prefix}-npo-ra-${p.id}" value="${escapeHtml(String(ra))}" ${disabled}
+                        style="width:140px;padding:4px 6px;border:1px solid #a5f3fc;border-radius:4px;font-size:12px;">
+                </div>`;
+        }).join('') : '<p style="color:var(--gray-500);font-size:12px;margin:0;">No products in the catalog.</p>';
         const isClosingChecked = !!(a.is_closing || cr.product || cr.sale_amount || cr.invoice_number);
 
         const v = {
@@ -1519,12 +1547,47 @@
                         </div>
                     </div>
                     <div id="${prefix}-npo-fields" style="display:${isNPO ? 'block' : 'none'};background:#ecfeff;border:1px solid #a5f3fc;padding:12px;border-radius:6px;margin-bottom:12px;">
-                        <div class="form-group" style="margin-bottom:0;">
-                            <label><i class="fas fa-file-invoice-dollar" style="color:#0e7490;"></i> NPO Package <span style="color:#ef4444;font-weight:700;" title="Required for NPO">*</span></label>
+                        <div style="font-weight:600;color:#0e7490;margin-bottom:8px;"><i class="fas fa-file-invoice-dollar"></i> NPO Installment Package</div>
+                        <div class="form-group">
+                            <label style="font-size:12px;">Use a preset package <span style="color:var(--gray-400);font-weight:normal;">(optional — fills the terms below; you can still edit)</span></label>
                             <select id="${prefix}-npo-plan" class="form-control" onchange="app.npoClosingPlanPicked('${prefix}')" data-selected="${escapeHtml(String(npoPlanId))}" ${disabled}>
-                                <option value="">${isNPO ? 'Loading packages…' : '— Select package —'}</option>
+                                <option value="">${isNPO ? 'Loading packages…' : '— None (key in manually) —'}</option>
                             </select>
+                            <div id="${prefix}-npo-tier-wrap" style="display:none;margin-top:8px;">
+                                <label style="font-size:12px;">Tier</label>
+                                <select id="${prefix}-npo-tier" class="form-control" onchange="app.npoClosingTierPicked('${prefix}')" ${disabled}>
+                                    <option value="">— Select tier —</option>
+                                </select>
+                            </div>
                             <div id="${prefix}-npo-selected" style="font-size:12px;color:#0e7490;margin-top:6px;">${npoPlanName ? 'Selected package: <strong>' + escapeHtml(npoPlanName) + '</strong>' : ''}</div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group half">
+                                <label>Tier Amount (RM) <span style="color:#ef4444;font-weight:700;" title="Required for NPO">*</span></label>
+                                <input type="number" id="${prefix}-npo-tier-amount" class="form-control" step="0.01" min="0" value="${escapeHtml(String(npoTierAmount))}" placeholder="45000" ${disabled}>
+                            </div>
+                            <div class="form-group half">
+                                <label>First Payment / Deposit (RM) <span style="color:#ef4444;font-weight:700;" title="Required for NPO">*</span></label>
+                                <input type="number" id="${prefix}-npo-first" class="form-control" step="0.01" min="0" value="${escapeHtml(String(npoFirstPayment))}" placeholder="9045" ${disabled}>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group half">
+                                <label>Monthly Amount (RM) <span style="color:#ef4444;font-weight:700;" title="Required for NPO">*</span></label>
+                                <input type="number" id="${prefix}-npo-monthly" class="form-control" step="0.01" min="0" value="${escapeHtml(String(npoMonthly))}" placeholder="799" ${disabled}>
+                            </div>
+                            <div class="form-group half">
+                                <label>Tenure (months) <span style="color:#ef4444;font-weight:700;" title="Required for NPO">*</span></label>
+                                <input type="number" id="${prefix}-npo-tenure" class="form-control" step="1" min="1" value="${escapeHtml(String(npoTenure))}" placeholder="45" ${disabled}>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Products in this package <span style="font-size:11px;color:var(--gray-400);font-weight:normal;">(tick items; optional redeem-after months each)</span></label>
+                            <div id="${prefix}-npo-products" style="max-height:200px;overflow-y:auto;background:white;border:1px solid #cffafe;border-radius:6px;padding:8px;">${npoProductsHtml}</div>
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label>NPO Note <span style="font-size:11px;color:var(--gray-400);font-weight:normal;">(optional)</span></label>
+                            <input type="text" id="${prefix}-npo-note" class="form-control" value="${escapeHtml(npoNote)}" placeholder="e.g. promo, special terms" ${disabled}>
                         </div>
                         ${isNPO ? `<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="" style="display:none;" onload="window.app && app.npoFillClosingPlans && app.npoFillClosingPlans('${prefix}', '${escapeHtml(String(npoPlanId))}')">` : ''}
                     </div>
@@ -1583,6 +1646,21 @@
             payment_method: read(`${prefix}-payment-method`),
             npo_plan_id: read(`${prefix}-npo-plan`),
             npo_plan_name: (() => { const s = document.getElementById(`${prefix}-npo-plan`); const o = s && s.options[s.selectedIndex]; return o && o.value ? (o.getAttribute('data-name') || (o.textContent || '').trim()) : ''; })(),
+            // Ad-hoc NPO terms keyed at close (independent of any preset package).
+            npo_tier_amount: read(`${prefix}-npo-tier-amount`),
+            npo_first_payment: read(`${prefix}-npo-first`),
+            npo_monthly: read(`${prefix}-npo-monthly`),
+            npo_tenure: read(`${prefix}-npo-tenure`),
+            npo_note: read(`${prefix}-npo-note`),
+            npo_products: Array.from(document.querySelectorAll(`input[name="${prefix}-npo-product"]:checked`)).map(cb => {
+                const ra = document.getElementById(`${prefix}-npo-ra-${cb.value}`);
+                const raVal = ra && ra.value !== '' ? parseInt(ra.value, 10) : null;
+                return {
+                    product_id: /^\d+$/.test(cb.value) ? parseInt(cb.value, 10) : cb.value,
+                    product_name: cb.getAttribute('data-name') || '',
+                    redeem_after_months: (raVal != null && !isNaN(raVal)) ? raVal : null,
+                };
+            }),
             pop_monthly: read(`${prefix}-pop-monthly`),
             pop_tenure: read(`${prefix}-pop-tenure`),
             pop_down: read(`${prefix}-pop-down`),
@@ -1630,15 +1708,60 @@
         npoClosingPlanPicked(prefix);
     };
 
-    const npoClosingPlanPicked = (prefix) => {
+    // Picking a preset package is OPTIONAL — it just loads that plan's tiers into
+    // a sub-dropdown and ticks its eligible products so the closer doesn't have to
+    // re-key terms. All the keyed fields stay editable. Choosing "— None —" leaves
+    // a fully ad-hoc, manually-keyed package.
+    const _npoMoney = (n) => 'RM ' + (parseFloat(n) || 0).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const npoClosingPlanPicked = async (prefix) => {
         const sel = document.getElementById(`${prefix}-npo-plan`);
         const cap = document.getElementById(`${prefix}-npo-selected`);
-        if (!sel || !cap) return;
+        const tierWrap = document.getElementById(`${prefix}-npo-tier-wrap`);
+        const tierSel = document.getElementById(`${prefix}-npo-tier`);
+        if (!sel) return;
         const o = sel.options[sel.selectedIndex];
-        const name = o && o.value ? (o.getAttribute('data-name') || (o.textContent || '').trim()) : '';
-        cap.innerHTML = name
-            ? `Selected package: <strong>${escapeHtml(name)}</strong>`
-            : '<span style="color:#ef4444;">Please choose an NPO package.</span>';
+        const planId = o && o.value ? o.value : '';
+        const name = planId ? (o.getAttribute('data-name') || (o.textContent || '').trim()) : '';
+        if (cap) cap.innerHTML = name ? `Selected package: <strong>${escapeHtml(name)}</strong>` : '';
+        if (!planId) {
+            if (tierWrap) tierWrap.style.display = 'none';
+            if (tierSel) tierSel.innerHTML = '<option value="">— Select tier —</option>';
+            return;
+        }
+        // Load the plan's tiers → tier sub-dropdown (auto-fills the number fields).
+        let tiers = [];
+        try { tiers = (await AppDataStore.query('npo_plan_tiers', { plan_id: planId })) || []; } catch (_) {}
+        tiers.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || (a.tier_amount || 0) - (b.tier_amount || 0));
+        if (tierSel) {
+            tierSel.innerHTML = '<option value="">— Select tier —</option>' + tiers.map(t =>
+                `<option value="${t.id}" data-amount="${t.tier_amount}" data-first="${t.first_payment}" data-monthly="${t.monthly_amount}" data-tenure="${t.tenure_months}">${escapeHtml(_npoMoney(t.tier_amount))} — deposit ${escapeHtml(_npoMoney(t.first_payment))} · ${escapeHtml(_npoMoney(t.monthly_amount))}/mo × ${t.tenure_months}</option>`).join('');
+        }
+        if (tierWrap) tierWrap.style.display = tiers.length ? 'block' : 'none';
+        // Tick the plan's eligible products (additive — never clears existing ticks).
+        try {
+            const pp = (await AppDataStore.query('npo_plan_products', { plan_id: planId })) || [];
+            pp.forEach(link => {
+                const cb = document.querySelector(`input[name="${prefix}-npo-product"][value="${link.product_id}"]`);
+                if (cb) {
+                    cb.checked = true;
+                    const ra = document.getElementById(`${prefix}-npo-ra-${link.product_id}`);
+                    if (ra && !ra.value && link.default_redeem_after_months != null) ra.value = link.default_redeem_after_months;
+                }
+            });
+        } catch (_) {}
+    };
+
+    // Picking a tier copies its locked terms into the editable number fields.
+    const npoClosingTierPicked = (prefix) => {
+        const tierSel = document.getElementById(`${prefix}-npo-tier`);
+        if (!tierSel) return;
+        const o = tierSel.options[tierSel.selectedIndex];
+        if (!o || !o.value) return;
+        const set = (id, v) => { const el = document.getElementById(id); if (el && v != null && v !== '') el.value = v; };
+        set(`${prefix}-npo-tier-amount`, o.getAttribute('data-amount'));
+        set(`${prefix}-npo-first`, o.getAttribute('data-first'));
+        set(`${prefix}-npo-monthly`, o.getAttribute('data-monthly'));
+        set(`${prefix}-npo-tenure`, o.getAttribute('data-tenure'));
     };
 
     // OCR invoice scanner using Tesseract.js — no API key required, runs entirely in-browser.
@@ -5358,6 +5481,7 @@
         moPaymentMethodChanged,
         npoFillClosingPlans,
         npoClosingPlanPicked,
+        npoClosingTierPicked,
         scanInvoiceWithAI,
         ORDER_FORM_FIELD_MAP,
         handleOrderFormFile,

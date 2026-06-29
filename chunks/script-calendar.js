@@ -5814,6 +5814,25 @@
             return;
         }
 
+        // NPO closings need the installment terms keyed in (tier/deposit/monthly/tenure).
+        if (isClosed && mo.payment_method === 'NPO') {
+            const _np = (v) => { const n = parseFloat(v); return isNaN(n) ? null : n; };
+            const _tier = _np(mo.npo_tier_amount), _first = _np(mo.npo_first_payment),
+                  _monthly = _np(mo.npo_monthly), _tenure = _np(mo.npo_tenure);
+            if (_tier == null || _tier <= 0 || _first == null || _first < 0 ||
+                _monthly == null || _monthly < 0 || _tenure == null || _tenure <= 0) {
+                UI.toast.error('NPO needs Tier Amount, First Payment, Monthly Amount and Tenure (months).');
+                document.getElementById('mo-npo-tier-amount')?.focus();
+                return;
+            }
+            // Guard against a fat-finger tenure (each month becomes an installment row).
+            if (_tenure > 600) {
+                UI.toast.error('Tenure looks too large — please enter the number of months (max 600).');
+                document.getElementById('mo-npo-tenure')?.focus();
+                return;
+            }
+        }
+
         // Require an Order Form photo when closing — covers the 3 PREON templates.
         // Only enforced when the photo capture UI was rendered (i.e. linked to a prospect).
         if (isClosed && document.getElementById('mo-order-form-thumbs') && !(window.app.hasOrderFormPhoto || (() => false))('mo')) {
@@ -5940,6 +5959,13 @@
                         pop_down_payment: paymentMethod === 'POP' ? (mo.pop_down    || '') : '',
                         npo_plan_id:      paymentMethod === 'NPO' ? (mo.npo_plan_id   || '') : '',
                         npo_plan_name:    paymentMethod === 'NPO' ? (mo.npo_plan_name || '') : '',
+                        npo_tier_amount:   paymentMethod === 'NPO' ? (mo.npo_tier_amount   || '') : '',
+                        npo_first_payment: paymentMethod === 'NPO' ? (mo.npo_first_payment || '') : '',
+                        npo_monthly:       paymentMethod === 'NPO' ? (mo.npo_monthly       || '') : '',
+                        npo_tenure:        paymentMethod === 'NPO' ? (mo.npo_tenure        || '') : '',
+                        npo_note:          paymentMethod === 'NPO' ? (mo.npo_note          || '') : '',
+                        npo_products:      paymentMethod === 'NPO' ? (Array.isArray(mo.npo_products) ? mo.npo_products : []) : [],
+                        npo_sale_id:       (existingCR && existingCR.npo_sale_id) || null,
                         invoice_number:  mo.invoice_number || '',
                         invoice_file:    invoice_file || existingCR?.invoice_file || '',
                         invoice_file_name: invoice_file_name || existingCR?.invoice_file_name || '',
@@ -5962,6 +5988,77 @@
                     if (hasRequiredFields) {
                         newCR.status = 'submitted';
                         newCR.submitted_at = new Date().toISOString();
+                    }
+
+                    // ── Phase 2: materialise the NPO installment order ──────────────
+                    // When the closing is NPO and the terms are present, create the real
+                    // npo_sales + npo_sale_items + npo_installments rows so the deal shows
+                    // up in the NPO Orders tab with a payment schedule. Ad-hoc terms keyed
+                    // at close → plan_id/tier_id stay NULL (schema allows it). Idempotent:
+                    // once a sale id is stamped on the closing record we never re-create.
+                    if (mo.payment_method === 'NPO' && !newCR.npo_sale_id) {
+                        try {
+                            const sb = window.supabase || window.supabaseClient;
+                            const _f = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+                            const tierAmount  = _f(mo.npo_tier_amount);
+                            const firstPay    = _f(mo.npo_first_payment);
+                            const monthly     = _f(mo.npo_monthly);
+                            const tenure      = Math.round(_f(mo.npo_tenure));
+                            if (sb && tierAmount > 0 && tenure > 0) {
+                                const _addMonths = (iso, n) => {
+                                    const base = iso ? new Date(iso) : new Date();
+                                    if (isNaN(base)) return null;
+                                    const d = new Date(base.getTime());
+                                    d.setMonth(d.getMonth() + n);
+                                    return d.toISOString().split('T')[0];
+                                };
+                                const startDate = (mo.order_date || mo.collection_date || new Date().toISOString().split('T')[0]);
+                                const uid = _state.cu?.id || null;
+                                const salePayload = {
+                                    customer_id: prospect?.customer_id || null,
+                                    customer_name: newCR.full_name || prospect?.full_name || null,
+                                    plan_id: mo.npo_plan_id ? mo.npo_plan_id : null,
+                                    tier_id: null,
+                                    cart_total: tierAmount, tier_amount: tierAmount, overage: 0,
+                                    first_payment: firstPay, monthly_amount: monthly, tenure_months: tenure,
+                                    fulfillment_mode: 'all_within_period', redemption_period_months: null,
+                                    start_date: startDate, status: 'active',
+                                    responsible_agent_id: activity.lead_agent_id || uid, created_by: uid,
+                                };
+                                const { data: saleRow, error: saleErr } = await sb.from('npo_sales').insert(salePayload).select().single();
+                                if (saleErr) throw saleErr;
+                                const saleId = saleRow && saleRow.id;
+                                if (saleId != null) {
+                                    newCR.npo_sale_id = saleId;
+                                    // one item row per ticked product
+                                    const items = (Array.isArray(mo.npo_products) ? mo.npo_products : []).map(p => ({
+                                        sale_id: saleId,
+                                        product_id: (typeof p.product_id === 'number') ? p.product_id : null,
+                                        product_name: p.product_name || '',
+                                        qty: 1, unit_price: null, line_total: null,
+                                        redeem_after_months: (p.redeem_after_months != null) ? p.redeem_after_months : null,
+                                        delivery_status: 'pending',
+                                    }));
+                                    if (items.length) {
+                                        const { error: itemErr } = await sb.from('npo_sale_items').insert(items).select();
+                                        if (itemErr) console.warn('NPO sale items insert failed:', itemErr);
+                                    }
+                                    // installment schedule: seq 1..tenure, deposit is on the sale (not a row)
+                                    const inst = [];
+                                    for (let seq = 1; seq <= tenure; seq++) {
+                                        inst.push({ sale_id: saleId, seq, due_date: _addMonths(startDate, seq), amount: monthly, status: 'due' });
+                                    }
+                                    const { error: instErr } = await sb.from('npo_installments').insert(inst).select();
+                                    if (instErr) console.warn('NPO installments insert failed:', instErr);
+                                    ['npo_sales', 'npo_sale_items', 'npo_installments'].forEach(t => {
+                                        try { AppDataStore.invalidateCache && AppDataStore.invalidateCache(t); } catch (_) {}
+                                    });
+                                }
+                            }
+                        } catch (npoErr) {
+                            // Never let an NPO-order failure abort the closing save.
+                            console.warn('NPO order creation failed (closing still saved):', npoErr);
+                        }
                     }
 
                     try {
