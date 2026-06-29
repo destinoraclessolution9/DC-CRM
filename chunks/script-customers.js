@@ -1856,6 +1856,58 @@ const _productPriceFor = (p, country) => {
     return null;
 };
 
+// ── Installment / Power-Ring helpers (shared by the Add Purchase modal and the
+// Product Delivery Listing board) ────────────────────────────────────────────
+// EPP is a BANK plan (the bank pays us up front) → treated as full payment.
+// Company-financed installments (POP/PCP/PON/NPO) must be fully paid before the
+// item can be queued for production — their tenure drives the maturity date.
+const _INSTALLMENT_METHODS = new Set(['POP', 'PCP', 'PON', 'NPO']);
+const _isInstallmentMethod = (m) => _INSTALLMENT_METHODS.has(String(m || '').toUpperCase());
+// Inline-tenure plans (keyed on the purchase modal). NPO has its own order flow
+// with a real npo_installments schedule, so it's excluded here.
+const _TENURE_METHODS = ['POP', 'PCP', 'PON'];
+// Power Ring detection: explicit "Power Ring" wording or the PR# SKU line.
+const _isPowerRingName = (name) => /power\s*ring/i.test(name || '') || /^\s*PR\d/i.test(name || '');
+// purchase date (YYYY-MM-DD) + N months → maturity date string. Parse and shift
+// in UTC so toISOString() doesn't roll the day back by the local TZ offset.
+const _addMonths = (dateStr, months) => {
+    if (!dateStr || !(months > 0)) return '';
+    const d = new Date(String(dateStr).slice(0, 10) + 'T00:00:00Z');
+    if (isNaN(d.getTime())) return '';
+    d.setUTCMonth(d.getUTCMonth() + Number(months));
+    return d.toISOString().split('T')[0];
+};
+
+// Show the Power Ring size field only when the chosen/typed product is a Power Ring.
+const _syncRingSizeField = () => {
+    const sel = document.getElementById('pur-product');
+    const other = document.getElementById('pur-other');
+    const name = sel?.value === 'Other' ? (other?.value || '') : (sel?.value || '');
+    const wrap = document.getElementById('ring-size-field');
+    if (wrap) wrap.style.display = _isPowerRingName(name) ? 'block' : 'none';
+};
+
+// Product <select> change: prefill the price (kept from the original inline fn)
+// and toggle the ring-size field.
+const _onPurchaseProductChange = (sel) => {
+    const o = sel.options[sel.selectedIndex];
+    const amt = document.getElementById('pur-amt');
+    if (sel.value !== 'Other' && o && o.dataset && o.dataset.price !== '' && o.dataset.price != null && amt) {
+        amt.value = o.dataset.price;
+    }
+    _syncRingSizeField();
+};
+
+// Payment method change: toggle EPP fields, installment (tenure+advance) fields,
+// and launch the NPO order flow when NPO is picked.
+const _onPurchaseMethodChange = (val, customerId) => {
+    const epp = document.getElementById('epp-fields');
+    if (epp) epp.style.display = val === 'EPP' ? 'block' : 'none';
+    const inst = document.getElementById('installment-fields');
+    if (inst) inst.style.display = _TENURE_METHODS.includes(val) ? 'block' : 'none';
+    if (val === 'NPO') window.app.npoLaunchFromPurchase(customerId);
+};
+
 const openAddPurchaseModal = async (customerId) => {
     const customer = await AppDataStore.getById('customers', customerId);
     // getById can return null (RLS deny / offline / deleted id) — guard before deref.
@@ -1874,23 +1926,29 @@ const openAddPurchaseModal = async (customerId) => {
 <div class="form-section">
                 <div class="form-group">
                     <label>Product</label>
-                    <select id="pur-product" class="form-control" onchange="(function(s){var o=s.options[s.selectedIndex];var amt=document.getElementById('pur-amt');if(s.value==='Other'){return;}if(o&&o.dataset&&o.dataset.price!==''&&o.dataset.price!=null){amt.value=o.dataset.price;}})(this)">
+                    <select id="pur-product" class="form-control" onchange="app._onPurchaseProductChange(this)">
                         ${_prodOptions}
                         <option value="Other">Other (Type below)</option>
                     </select>
                 </div>
-                <div class="form-group"><label>Product Name (if Other)</label><input type="text" id="pur-other" class="form-control"></div>
+                <div class="form-group"><label>Product Name (if Other)</label><input type="text" id="pur-other" class="form-control" oninput="app._syncRingSizeField()"></div>
+                <div class="form-group" id="ring-size-field" style="display:none;">
+                    <label>Power Ring Size <span class="required">*</span></label>
+                    <input type="number" id="pur-ring-size" class="form-control" step="0.5" min="1" placeholder="Ring size (numeric)">
+                </div>
                 <input type="hidden" id="pur-currency" value="${_cur}">
                 <div class="form-row">
                     <div class="form-group half"><label>Amount (${escapeHtml(_sym)}) <span class="required">*</span></label><input type="number" id="pur-amt" class="form-control"></div>
                     <div class="form-group half">
                         <label>Payment Method</label>
-                        <select id="pur-method" class="form-control" onchange="const epp = document.getElementById('epp-fields'); if(this.value==='EPP') epp.style.display='block'; else epp.style.display='none'; if(this.value==='NPO') app.npoLaunchFromPurchase(${customerId});">
+                        <select id="pur-method" class="form-control" onchange="app._onPurchaseMethodChange(this.value, ${customerId})">
                             <option value="Cash">Cash</option>
                             <option value="Credit Card">Credit Card</option>
                             <option value="Bank Transfer">Bank Transfer</option>
                             <option value="EPP">EPP (Easy Payment Plan)</option>
-                            <option value="POP">POP (Pre-Owned Plan)</option>
+                            <option value="POP">POP (Installment)</option>
+                            <option value="PCP">PCP (Installment)</option>
+                            <option value="PON">PON (Installment)</option>
                             <option value="NPO">NPO (Installment Package)</option>
                         </select>
                     </div>
@@ -1900,6 +1958,15 @@ const openAddPurchaseModal = async (customerId) => {
                         <div class="form-group half"><label>Months</label><select id="epp-months" class="form-control"><option>6</option><option>12</option><option>18</option><option>24</option><option>36</option></select></div>
                         <div class="form-group half"><label>Bank</label><input type="text" id="epp-bank" class="form-control" placeholder="Bank name"></div>
                     </div>
+                </div>
+                <div id="installment-fields" style="display:none; margin-bottom:16px;">
+                    <div class="form-row">
+                        <div class="form-group half"><label>Tenure (months) <span class="required">*</span></label><input type="number" id="pur-tenure" class="form-control" min="1" placeholder="e.g. 12"></div>
+                        <div class="form-group half" style="display:flex; align-items:flex-end;">
+                            <label class="checkbox-label" style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="pur-advance"> Deliver in advance (special package)</label>
+                        </div>
+                    </div>
+                    <div style="font-size:12px; color:var(--gray-500);">Installment items queue for production only after full payment, unless "deliver in advance" is set. Maturity = purchase date + tenure.</div>
                 </div>
                 <div class="form-row">
                     <div class="form-group half"><label>Invoice No. <span class="required">*</span></label><input type="text" id="pur-inv" class="form-control" placeholder="Enter invoice number"></div>
@@ -1986,6 +2053,16 @@ const savePurchase = async (customerId) => {
         // Persist the explicit "Is Agent Package?" selection (is_agent_package is a real
         // boolean column on purchases — reporting RPCs exclude these from sales totals).
         const isAgentPkg = !!document.getElementById('is-agent-pkg')?.checked;
+        // ── Company-financed installment (POP/PCP/PON): tenure (months) drives the
+        // maturity date the delivery board uses to gate production queueing. Required. ──
+        const isInstMethod = _TENURE_METHODS.includes(purMethod);
+        const tenureInt = parseInt(document.getElementById('pur-tenure')?.value, 10);
+        if (isInstMethod && !(tenureInt > 0)) { UI.toast.error('Tenure (months) is required for installment plans'); return; }
+        const isAdvancePkg = isInstMethod && !!document.getElementById('pur-advance')?.checked;
+        // ── Power Ring size — mandatory for every Power Ring (esp. installments, which
+        // have a long lead time before production). ──
+        const ringSize = (document.getElementById('pur-ring-size')?.value || '').trim();
+        if (_isPowerRingName(item) && !ringSize) { UI.toast.error('Power Ring size is required'); return; }
         // Fetch customer for the post-save re-render fallback. NOTE: purchases are
         // agent-attributed via the customers.responsible_agent_id join in the reporting
         // RPCs (no agent column on the purchase row) — do NOT add one (prior bug).
@@ -2007,6 +2084,10 @@ const savePurchase = async (customerId) => {
             epp_months: Number.isFinite(eppMonthsInt) ? eppMonthsInt : null,
             epp_bank: eppBankRaw || null,
             is_agent_package: isAgentPkg,
+            // Installment tenure (months) for POP/PCP/PON — null for full-payment / NPO.
+            installment_tenure: isInstMethod && tenureInt > 0 ? tenureInt : null,
+            is_advance_package: isAdvancePkg,
+            ring_size: ringSize || null,
         };
 
         // ── Atomic-ish create + LTV adjust: guard both so a failure surfaces an error,
@@ -2121,6 +2202,7 @@ const updateConversionDelivery = async (prospectId, customerId) => {
 // "Show delivered" toggle is on.
 const _DELIVERY_STATUSES = ['Pending Delivery', 'Dispatched', 'Delivered'];
 let _deliveryShowDelivered = false;
+let _deliveryPayFilter = 'all'; // 'all' | 'full' | 'installment'
 
 const openDeliveryListing = async () => {
     UI.showModal('Product Delivery Listing',
@@ -2138,6 +2220,11 @@ const openDeliveryListing = async () => {
 
 const _toggleDeliveryDelivered = async (checked) => {
     _deliveryShowDelivered = !!checked;
+    await _renderDeliveryListing();
+};
+
+const _setDeliveryPayFilter = async (f) => {
+    _deliveryPayFilter = f;
     await _renderDeliveryListing();
 };
 
@@ -2170,6 +2257,9 @@ const _renderDeliveryListing = async () => {
             product: p.item || '-', invoice: p.invoice || '',
             status: p.delivery_status || 'Pending Delivery',
             remarks: p.delivery_remarks || '', proof: p.proof || '',
+            date: p.date || '', method: p.payment_method || '',
+            tenure: p.installment_tenure || null, advance: !!p.is_advance_package,
+            ringSize: p.ring_size || '', payStatus: p.status || '',
         });
     }
 
@@ -2189,12 +2279,51 @@ const _renderDeliveryListing = async () => {
                 product: cr.product || '-', invoice: cr.invoice_number || '',
                 status: cr.delivery_status || 'Pending Delivery',
                 remarks: cr.delivery_remarks || '', proof: cr.invoice_file || '',
+                date: cr.closing_date || c.customer_since || '', method: cr.payment_method || '',
+                tenure: cr.installment_tenure || null, advance: !!cr.is_advance_package,
+                ringSize: cr.ring_size || '', payStatus: cr.payment_status || 'PAID',
             });
         }
     }
 
-    // Hide delivered unless the toggle is on; then apply the free-text search.
+    // NPO maturity = its last installment due date. Only fetch the NPO ledger when
+    // an NPO line lacks an inline tenure (NPO is keyed via its own order flow).
+    let npoMatByCust = new Map();
+    if (lines.some(l => String(l.method).toUpperCase() === 'NPO' && !l.tenure)) {
+        try {
+            const [sales, insts] = await Promise.all([
+                AppDataStore.getAll('npo_sales').catch(() => []),
+                AppDataStore.getAll('npo_installments').catch(() => []),
+            ]);
+            const saleCust = new Map((sales || []).map(s => [String(s.id), String(s.customer_id)]));
+            for (const it of (insts || [])) {
+                const cust = saleCust.get(String(it.sale_id));
+                if (!cust || !it.due_date) continue;
+                const cur = npoMatByCust.get(cust);
+                if (!cur || it.due_date > cur) npoMatByCust.set(cust, it.due_date);
+            }
+        } catch (_) { /* npo tables absent / offline — leave empty */ }
+    }
+
+    // Derive payment type, maturity + production-readiness per line.
+    for (const l of lines) {
+        l.inst = _isInstallmentMethod(l.method);
+        l.maturity = '';
+        if (l.inst) {
+            if (l.tenure && l.date) l.maturity = _addMonths(l.date, l.tenure);
+            else if (String(l.method).toUpperCase() === 'NPO') l.maturity = npoMatByCust.get(String(l.customerId)) || '';
+        }
+        const fullyPaid = ['COMPLETED', 'COLLECTED', 'PAID'].includes(String(l.payStatus || '').toUpperCase());
+        // Full payment (incl. EPP) → always ready. Installment → only when fully paid
+        // OR flagged as a special "deliver in advance" package.
+        l.ready = !l.inst || l.advance || fullyPaid;
+        l.ptype = l.inst ? (l.advance ? 'Installment · advance' : 'Installment') : 'Full payment';
+    }
+
+    // Hide delivered unless toggled; apply payment-type tab; apply free-text search.
     let rows = lines.filter(l => _deliveryShowDelivered || l.status !== 'Delivered');
+    if (_deliveryPayFilter === 'full') rows = rows.filter(l => !l.inst);
+    else if (_deliveryPayFilter === 'installment') rows = rows.filter(l => l.inst);
     if (search) {
         rows = rows.filter(l =>
             l.name.toLowerCase().includes(search) ||
@@ -2206,16 +2335,28 @@ const _renderDeliveryListing = async () => {
     const order = { 'Pending Delivery': 0, 'Dispatched': 1, 'Delivered': 2 };
     rows.sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9) || a.name.localeCompare(b.name));
 
+    // Payment-type filter tabs (counts reflect the delivered toggle but not the tab).
+    const _afterDelivered = lines.filter(l => _deliveryShowDelivered || l.status !== 'Delivered');
+    const cAll = _afterDelivered.length;
+    const cFull = _afterDelivered.filter(l => !l.inst).length;
+    const cInst = _afterDelivered.filter(l => l.inst).length;
+    const tab = (key, label, n) => `<button class="btn btn-sm ${_deliveryPayFilter === key ? 'primary' : 'secondary'}" onclick="app._setDeliveryPayFilter('${key}')">${label} (${n})</button>`;
+    const tabsHtml = `<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">${tab('all', 'All', cAll)}${tab('full', 'Full Payment', cFull)}${tab('installment', 'Installment', cInst)}</div>`;
+
     if (!rows.length) {
-        body.innerHTML = `<div style="text-align:center;color:var(--gray-400);padding:32px;">${_deliveryShowDelivered ? 'No product lines found.' : 'No pending deliveries. 🎉'}</div>`;
+        body.innerHTML = tabsHtml + `<div style="text-align:center;color:var(--gray-400);padding:32px;">${_deliveryShowDelivered ? 'No product lines found.' : 'No pending deliveries. 🎉'}</div>`;
         return;
     }
 
-    let html = `<div class="prospects-table-container"><table class="prospects-table"><thead><tr>
+    let html = tabsHtml + `<div class="prospects-table-container"><table class="prospects-table"><thead><tr>
         <th scope="col">SN</th>
         <th scope="col">Name</th>
         <th scope="col">Agent</th>
         <th scope="col">Product</th>
+        <th scope="col">Purchase Date</th>
+        <th scope="col">Payment</th>
+        <th scope="col">Maturity</th>
+        <th scope="col">Production</th>
         <th scope="col">Delivery Status</th>
         <th scope="col">Remarks</th>
         <th scope="col">Invoice / Photo</th>
@@ -2229,11 +2370,28 @@ const _renderDeliveryListing = async () => {
             : (l.kind === 'purchase'
                 ? `<button class="btn-sm secondary" onclick="app.uploadPaymentProof(${l.id}, ${l.customerId})"><i class="fas fa-upload"></i> Upload</button>`
                 : '<span style="color:var(--gray-400);">—</span>');
+        // Ring-size sub-line under the product, red when a Power Ring is missing it.
+        const isPR = _isPowerRingName(l.product);
+        const ringHtml = isPR
+            ? (l.ringSize
+                ? `<div style="font-size:11px;color:var(--gray-500);">Ring size: <strong>${escapeHtml(String(l.ringSize))}</strong></div>`
+                : `<div style="font-size:11px;color:var(--error);font-weight:600;"><i class="fas fa-exclamation-triangle"></i> Ring size missing</div>`)
+            : '';
+        const payBadge = l.inst
+            ? `<span class="score-badge" style="font-size:11px;background:#ede9fe;color:#5b21b6;">${escapeHtml(l.ptype)}</span>`
+            : `<span class="score-badge" style="font-size:11px;background:#dcfce7;color:#166534;">Full payment</span>`;
+        const prodBadge = l.ready
+            ? `<span class="score-badge" style="font-size:11px;background:#dcfce7;color:#166534;"><i class="fas fa-check-circle"></i> Ready${l.inst && l.advance ? ' (advance)' : ''}</span>`
+            : `<span class="score-badge" style="font-size:11px;background:#fef3c7;color:#92400e;"><i class="fas fa-hourglass-half"></i> Awaiting full payment</span>`;
         html += `<tr>
             <td>${i + 1}</td>
             <td><strong style="cursor:pointer;color:var(--primary);" onclick="UI.hideModal(); app.showCustomerDetail(${l.customerId})">${escapeHtml(l.name)}</strong>${l.invoice ? `<div style="font-size:11px;color:var(--gray-400);">${escapeHtml(l.invoice)}</div>` : ''}</td>
             <td>${escapeHtml(l.agent)}</td>
-            <td>${escapeHtml(l.product)}</td>
+            <td>${escapeHtml(l.product)}${ringHtml}</td>
+            <td style="white-space:nowrap;">${escapeHtml(l.date || '—')}</td>
+            <td>${payBadge}</td>
+            <td style="white-space:nowrap;">${l.inst ? escapeHtml(l.maturity || '—') : '<span style="color:var(--gray-400);">—</span>'}</td>
+            <td>${prodBadge}</td>
             <td>${statusSel}</td>
             <td><input type="text" class="form-control" style="font-size:12px;padding:4px 6px;min-width:140px;" value="${escapeHtml(l.remarks)}" placeholder="Add remark…" onchange="app.saveDeliveryRemarks('${l.kind}', ${l.id}, ${l.customerId}, this.value)"></td>
             <td>${proofCell}</td>
@@ -2271,8 +2429,12 @@ const saveDeliveryRemarks = async (kind, id, customerId, value) => {
     app.register('customers', {
         _setDelivery,
         _setDeliveryFromListing,
+        _setDeliveryPayFilter,
         _renderDeliveryListing,
         _toggleDeliveryDelivered,
+        _onPurchaseProductChange,
+        _onPurchaseMethodChange,
+        _syncRingSizeField,
         copyToClipboard,
         customerPageNav,
         deletePurchase,
