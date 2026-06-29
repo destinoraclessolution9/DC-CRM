@@ -4621,7 +4621,7 @@
                     <div class="info-row"><span class="info-label">Title:</span> <span>${escapeHtml(marketingEvent?.event_title || marketingEvent?.title || activity.activity_title || 'N/A')}</span></div>
                     <div class="info-row"><span class="info-label">Date:</span> <span>${escapeHtml(activity.activity_date || '')}</span></div>
                     <div class="info-row"><span class="info-label">Time:</span> <span>${escapeHtml(activity.start_time || '')} - ${escapeHtml(activity.end_time || '')}</span></div>
-                    ${activity.activity_type !== 'EVENT' && _isOwnActivity ? `<div class="info-row"><span class="info-label">Entity:</span> <span style="display:inline-flex; align-items:center; flex-wrap:wrap; gap:4px;">${escapeHtml(entityName || '')}${_entityIconBtn}</span></div>` : ''}
+                    ${activity.activity_type !== 'EVENT' && _isOwnActivity ? `<div class="info-row"><span class="info-label">Met With:</span> <span style="display:inline-flex; align-items:center; flex-wrap:wrap; gap:4px;">${escapeHtml(entityName || '')}${_entityIconBtn}</span></div>` : ''}
                     ${activity.location_address ? `<div class="info-row"><span class="info-label">Location:</span> <span>${escapeHtml(activity.location_address)}</span></div>` : ''}
                     ${marketingEvent?.description ? `<div class="info-row" style="flex-direction:column; align-items:flex-start; gap:4px;"><div style="display:flex; align-items:center; gap:8px; width:100%;"><span class="info-label">Description:</span><button style="width:30px;height:30px;border-radius:50%;border:none;background:#25d366;color:#fff;font-size:17px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 8px rgba(37,211,102,0.4);flex-shrink:0;" onclick="event.stopPropagation();app.sendDescriptionInvite(${activity.id})" title="Send WhatsApp Invite"><i class="fab fa-whatsapp"></i></button></div><span style="white-space:pre-wrap; color:var(--gray-700);">${escapeHtml(marketingEvent.description)}</span></div>` : ''}
                     ${activity.summary ? `<div class="info-row"><span class="info-label">Summary:</span> <span>${escapeHtml(activity.summary)}</span></div>` : ''}
@@ -4962,9 +4962,23 @@
         // cache. With SWR now backing getById, both resolve synchronously
         // when the localStorage snapshot has the users; when it doesn't,
         // Promise.all overlaps the two requests.
-        const _consultantId = prospect?.responsible_agent_id || customer?.responsible_agent_id;
+        // Consultant defaults to whoever created the appointment (the lead agent),
+        // unless one or more consultants were explicitly chosen in the consultant
+        // picker (activity.consultants). Previously this derived from the linked
+        // prospect/customer's responsible agent, so an appointment whose contact
+        // had no responsible agent — or whose contact didn't resolve (Entity shows
+        // "Unknown") — rendered "❌ Not Assigned" even though it has a creator.
+        const _assignedConsultants = Array.isArray(activity.consultants)
+            ? activity.consultants.filter(c => c && c.id != null)
+            : [];
+        const _consultantId = _assignedConsultants.length
+            ? _assignedConsultants[0].id
+            : (activity.lead_agent_id || null);
         const [_consultantName, _leadAgentName] = await Promise.all([
-            _consultantId ? getAgentName(_consultantId) : Promise.resolve(null),
+            _assignedConsultants.length
+                ? Promise.resolve(_assignedConsultants.map(c => c.name).filter(Boolean).join(', ')
+                    || (await getAgentName(_assignedConsultants[0].id)))
+                : (_consultantId ? getAgentName(_consultantId) : Promise.resolve(null)),
             activity.activity_type !== 'EVENT' && activity.lead_agent_id
                 ? getAgentName(activity.lead_agent_id)
                 : Promise.resolve(''),
