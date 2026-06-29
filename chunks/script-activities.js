@@ -501,20 +501,20 @@
         // the Supabase schema).
         setField('activity-venue', activity.venue || activity.location_address);
 
-        // 4. Restore selected entity (store in module variable)
+        // 4. Restore selected entity (store in module variable).
+        // CRITICAL: seed _state.se from the RAW activity FK first, BEFORE the
+        // name lookup. updateActivity() nulls prospect_id/customer_id whenever
+        // _state.se is empty at save time, so if the getById below fails
+        // transiently (RLS flap / offline / cache miss) we must NOT leave
+        // _state.se null — editing any field (e.g. timing) would then silently
+        // wipe the contact link. The name lookup only enriches the badge.
         let entityRestored = false;
         if (activity.prospect_id) {
-            const prospect = await AppDataStore.getById('prospects', activity.prospect_id);
-            if (prospect) {
-                _state.se = { id: prospect.id, type: 'Prospect' };
-                entityRestored = true;
-            }
+            _state.se = { id: activity.prospect_id, type: 'Prospect' };
+            entityRestored = true;
         } else if (activity.customer_id) {
-            const customer = await AppDataStore.getById('customers', activity.customer_id);
-            if (customer) {
-                _state.se = { id: customer.id, type: 'Customer' };
-                entityRestored = true;
-            }
+            _state.se = { id: activity.customer_id, type: 'Customer' };
+            entityRestored = true;
         }
 
         // 5. Poll for the entity badge container and render the badge if needed
@@ -2511,7 +2511,7 @@
             case 'WHATSAPP':
                 html = `
                     <div class="form-section">
-                        <h4>🔍 Select ${type === 'CALL' || type === 'WHATSAPP' || type === 'EMAIL' ? 'Prospect/Customer' : 'Existing Prospect/Customer'}</h4>
+                        <h4>🔍 Select ${type === 'CALL' || type === 'WHATSAPP' || type === 'EMAIL' ? 'Prospect' : 'Existing Prospect'}</h4>
                         <div class="form-group">
                             <div class="search-with-results">
                                 <input type="text" id="entity-search" class="form-control" placeholder="Type name, phone, or email..." oninput="app.searchEntities()">
@@ -2531,7 +2531,7 @@
             case 'OTHERS':
                 html = `
                     <div class="form-section">
-                        <h4>🔍 Link to Prospect/Customer (Optional)</h4>
+                        <h4>🔍 Link to Prospect (Optional)</h4>
                         <div class="form-group">
                             <div class="search-with-results">
                                 <input type="text" id="entity-search" class="form-control" placeholder="Type name, phone, or email..." oninput="app.searchEntities()">
@@ -2551,7 +2551,7 @@
             case 'SITE':
                 html = `
                     <div class="form-section">
-                        <h4>🔍 Select Existing Prospect/Customer</h4>
+                        <h4>🔍 Select Existing Prospect</h4>
                         <div class="form-group">
                             <div class="search-with-results">
                                 <input type="text" id="entity-search" class="form-control" placeholder="Type name, phone, or email..." oninput="app.searchEntities()">
@@ -3888,22 +3888,15 @@
             limit: 20, countMode: null,
             select: 'id,full_name,nickname,phone,email,responsible_agent_id',
         };
-        const custOpts = {
-            search: searchTerm,
-            searchFields: ['full_name', 'nickname', 'phone', 'email'],
-            limit: 20, countMode: null,
-            select: 'id,full_name,nickname,phone,email,responsible_agent_id',
-        };
         if (!adminScope) {
             prospOpts.scopeField = 'responsible_agent_id';
             prospOpts.scopeValues = scopeIds;
-            custOpts.scopeField = 'responsible_agent_id';
-            custOpts.scopeValues = scopeIds;
         }
 
-        const [prospects, customers, allUsers] = await Promise.all([
+        // Picker searches the Prospect listing only — Customers are intentionally
+        // excluded (per requirement). Agents stay globally visible (see below).
+        const [prospects, allUsers] = await Promise.all([
             AppDataStore.queryAdvanced('prospects', prospOpts).then(r => r.data || []).catch(() => []),
-            AppDataStore.queryAdvanced('customers', custOpts).then(r => r.data || []).catch(() => []),
             AppDataStore.getAll('users').catch(() => []),
         ]);
 
@@ -3930,7 +3923,6 @@
 
         const matches = [
             ...prospects.map(p => ({ ...p, type: 'Prospect' })),
-            ...customers.map(c => ({ ...c, type: 'Customer' })),
             ...agentMatches.map(a => ({ ...a, type: 'Agent' })),
         ].slice(0, 10);
 
