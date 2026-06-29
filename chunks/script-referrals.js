@@ -75,11 +75,21 @@
     // data logic of renderLeaderboard() exactly (RPC fast-path + JS fallback)
     // but returns objects so the JSX view owns markup + escaping. renderLeaderboard
     // itself is left UNTOUCHED so the flag-OFF path stays byte-identical.
+    // The get_referral_leaderboard RPC ranks referrers ORG-WIDE (no user scope),
+    // so only callers who legitimately see everything (Super Admin / Marketing
+    // Manager → getVisibleUserIds === 'all') may use the fast path. Everyone else
+    // falls through to the JS path, which builds the board from getVisibleReferrals()
+    // and is therefore scoped to own-data + team. Fail CLOSED on any error.
+    const _canSeeAllReferrals = async () => {
+        try { return (await _utils.getVisibleUserIds(_state.cu)) === 'all'; }
+        catch (_) { return false; }
+    };
+
     const _computeLeaderboardRows = async (period) => {
         let sorted = null;
         try {
             const sb = window.supabase;
-            if (sb && sb.rpc) {
+            if (sb && sb.rpc && await _canSeeAllReferrals()) {
                 const { data, error } = await sb.rpc('get_referral_leaderboard', { p_period: period });
                 if (!error && Array.isArray(data)) {
                     sorted = data.map(r => ({
@@ -550,7 +560,7 @@
         let sorted = null;
         try {
             const sb = window.supabase;
-            if (sb && sb.rpc) {
+            if (sb && sb.rpc && await _canSeeAllReferrals()) {
                 const { data, error } = await sb.rpc('get_referral_leaderboard', { p_period: _state.lbp });
                 if (!error && Array.isArray(data)) {
                     sorted = data.map(r => ({
