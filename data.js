@@ -2969,6 +2969,13 @@ class DataStore {
             fresh = false,
         } = opts;
 
+        // "Active" excludes won/lost deals: a converted prospect now lives as a
+        // customer record and a lost deal is closed — neither belongs in the
+        // active prospect set (list counts, re-engagement, dispatchers, birthdays).
+        // Blank/NULL status = never-classified → kept. Done client-side to avoid a
+        // NULL-status PostgREST pitfall (`status NOT IN (...)` drops NULLs).
+        const _activeStatus = (s) => { const v = String(s || '').toLowerCase(); return v !== 'converted' && v !== 'lost'; };
+
         // Opt-out: caller explicitly wants the full set (admin, reports, etc.)
         if (includeDormant) return this.getAll('prospects', { fresh });
 
@@ -2986,10 +2993,13 @@ class DataStore {
             // derived view, not its own tombstone bucket).
             const stale = this._swrGetLocalDerived(cacheKey, 'prospects');
             if (stale) {
-                this._cacheSet(cacheKey, stale);
-                if (window.__FS_DEBUG_SWR) console.log(`[SWR] ${cacheKey}: served ${stale.length} rows instantly from cache`);
+                // Filter the persisted snapshot too — a pre-fix cache may still
+                // contain converted/lost rows until the bg refresh rewrites it.
+                const staleActive = stale.filter(r => _activeStatus(r.status));
+                this._cacheSet(cacheKey, staleActive);
+                if (window.__FS_DEBUG_SWR) console.log(`[SWR] ${cacheKey}: served ${staleActive.length} rows instantly from cache`);
                 this._refreshActiveProspectsBg(cacheKey, opts).catch(() => {});
-                return stale;
+                return staleActive;
             }
         }
 
@@ -3034,7 +3044,7 @@ class DataStore {
             const tombstoneRaw = localStorage.getItem('fs_crm_tombstones');
             const tombstones = tombstoneRaw ? JSON.parse(tombstoneRaw) : {};
             const deletedIds = new Set(tombstones['prospects'] || []);
-            const result = (data || []).filter(r => !deletedIds.has(String(r.id)));
+            const result = (data || []).filter(r => !deletedIds.has(String(r.id)) && _activeStatus(r.status));
             if (result.length === limit) {
                 console.warn(`[DataStore] getActiveProspects hit limit ${limit} — raise it or paginate.`);
             }
@@ -3049,6 +3059,7 @@ class DataStore {
             console.warn('getActiveProspects failed, falling back to getAll + client filter', e);
             const all = await this.getAll('prospects');
             return all.filter(p => {
+                if (!_activeStatus(p.status)) return false;
                 // Keep prospects with no last_activity_date (brand new rows) —
                 // the trigger seeds it on insert, but a row created offline
                 // might not have it set until sync completes.

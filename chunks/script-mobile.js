@@ -47,6 +47,36 @@
         if (!(mi >= 1 && mi <= 12 && di >= 1 && di <= 31)) return '';
         return `${mm}-${dd}`;
     };
+    // Collapse duplicate staff accounts (same person across multiple user rows)
+    // so a colleague's Team Birthday shows once. Keyed by name + birthday MM-DD;
+    // prefers a row with a phone (so Send Wish works). Drops no-birthday rows.
+    const _dedupStaffByBday = (rows) => {
+        const seen = new Map();
+        for (const u of (rows || [])) {
+            const md = _staffMD(u);
+            if (!md) continue;
+            const key = `${String(u.full_name || '').trim().toLowerCase()}|${md}`;
+            const prev = seen.get(key);
+            if (!prev || (!prev.phone && u.phone)) seen.set(key, u);
+        }
+        return [...seen.values()];
+    };
+    // Collapse a CLIENT (prospect/customer) who exists in BOTH tables — e.g. a
+    // converted prospect whose old record lingers — into one birthday entry.
+    // Keyed by name + DOB (MM-DD); prefers the customer record. Drops rows with
+    // no usable birthday date.
+    const _dedupClientByBday = (rows) => {
+        const seen = new Map();
+        for (const p of (rows || [])) {
+            const dob = p && p.date_of_birth || '';
+            const md = (typeof dob === 'string' && dob.length >= 7 && dob[4] === '-') ? dob.slice(5, 10) : '';
+            if (!md) continue;
+            const key = `${String(p.full_name || '').trim().toLowerCase()}|${md}`;
+            const prev = seen.get(key);
+            if (!prev || (p.customer_since && !prev.customer_since)) seen.set(key, p);
+        }
+        return [...seen.values()];
+    };
     // Cross-chunk helpers — defined in script-prospects.js, exported to window.app.
     const showAgentDetail        = (...a) => (window.app.showAgentDetail        || (() => Promise.resolve()))(...a);
     const showProspectsView      = (...a) => (window.app.showProspectsView      || (() => Promise.resolve()))(...a);
@@ -1033,8 +1063,8 @@
         };
         const _staffBdayMatch = (u) => { const md = _staffMD(u); return !!md && (md === todayMD || md === tomMD); };
         const birthdays = [
-            ...allPeople.filter(p => _bdayMatch(p) && _bdayOwnerVisible(p.responsible_agent_id || p.lead_agent_id)),
-            ...cachedUsers.filter(u => _isStaffUser(u) && _staffBdayMatch(u)),
+            ..._dedupClientByBday(allPeople.filter(p => _bdayMatch(p) && _bdayOwnerVisible(p.responsible_agent_id || p.lead_agent_id))),
+            ..._dedupStaffByBday(cachedUsers.filter(_isStaffUser)).filter(_staffBdayMatch),
         ];
         const refills = cachedRefills;
 
@@ -1272,8 +1302,8 @@
             };
             const _staffBdayMatch = (u) => { const md = _staffMD(u); return !!md && (md === todayMD || md === tomMD); };
             const birthdays = [
-                ...allPeople.filter(p => _bdayMatch(p) && _bdayOwnerVisible(p.responsible_agent_id || p.lead_agent_id)),
-                ...cachedUsers.filter(u => _isStaffUser(u) && _staffBdayMatch(u)),
+                ..._dedupClientByBday(allPeople.filter(p => _bdayMatch(p) && _bdayOwnerVisible(p.responsible_agent_id || p.lead_agent_id))),
+                ..._dedupStaffByBday(cachedUsers.filter(_isStaffUser)).filter(_staffBdayMatch),
             ];
             const refills = cachedRefills;
 
@@ -2066,12 +2096,12 @@
             };
             const _cachedStaff = _lsGet(_STAFF_KEY, 8 * 60 * 60 * 1000);
             if (Array.isArray(_cachedStaff)) {
-                _mcalStaffList = _cachedStaff;
+                _mcalStaffList = _dedupStaffByBday(_cachedStaff);
             } else {
                 AppDataStore.queryAdvanced('users', { select: 'id,full_name,date_of_birth,ic_number,role,team,phone,status', limit: 50000, countMode: null })
                     .then(r => r?.data || [])
                     .then(rows => {
-                        _mcalStaffList = (rows || []).filter(_isStaffUser);
+                        _mcalStaffList = _dedupStaffByBday((rows || []).filter(_isStaffUser));
                         _lsSet(_STAFF_KEY, _mcalStaffList);
                         // Re-render so staff markers appear once the list lands (guarded
                         // to the still-current month, mirrors the people refetch above).
@@ -2119,9 +2149,11 @@
             if (!byDate.has(k)) byDate.set(k, []);
             byDate.get(k).push(a);
         }
-        // Inject birthdays into matching dates within this month
+        // Inject birthdays into matching dates within this month. Dedup clients
+        // who exist as both a prospect and a customer (prefer customer) so a
+        // converted-but-not-removed prospect doesn't double a birthday marker.
         const mmdd = (m, d) => `${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-        for (const p of allPeople) {
+        for (const p of _dedupClientByBday(allPeople)) {
             const dob = p.date_of_birth || '';
             if (!dob || dob.length < 10) continue;
             if (!_mcalBdayOwnerVisible(p.responsible_agent_id || p.lead_agent_id)) continue;
@@ -2213,9 +2245,8 @@
         const tom = new Date(todayD); tom.setDate(tom.getDate()+1);
         const todayMD = mmdd(todayM+1, todayDay);
         const tomMD = mmdd(tom.getMonth()+1, tom.getDate());
-        const bdayCount = allPeople.filter(p => {
+        const bdayCount = _dedupClientByBday(allPeople.filter(p => _mcalBdayOwnerVisible(p.responsible_agent_id || p.lead_agent_id))).filter(p => {
             const dob = p.date_of_birth || ''; if (dob.length < 10) return false;
-            if (!_mcalBdayOwnerVisible(p.responsible_agent_id || p.lead_agent_id)) return false;
             const md = dob.slice(5, 10); return md === todayMD || md === tomMD;
         }).length + _mcalStaffList.filter(s => { const md = _staffMD(s); return !!md && (md === todayMD || md === tomMD); }).length;
         const refillCount = (refillsR || []).length;

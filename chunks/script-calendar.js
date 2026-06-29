@@ -3408,12 +3408,25 @@
             };
         };
 
-        const todayBdays = [
+        // Collapse a person who exists as BOTH a prospect and a customer (e.g. a
+        // converted prospect whose old record was never removed) into ONE birthday
+        // card. Key = name + DOB; prefer the customer record (canonical). Family
+        // entries have distinctive names so they're unaffected.
+        const _dedupBdays = (arr) => {
+            const m = new Map();
+            for (const b of arr) {
+                const k = `${String(b.name || '').trim().toLowerCase()}|${b.dob}`;
+                const prev = m.get(k);
+                if (!prev || (b.type === 'customer' && prev.type !== 'customer')) m.set(k, b);
+            }
+            return [...m.values()];
+        };
+        const todayBdays = _dedupBdays([
             ...visibleAll.filter(p => getMMDD(p.date_of_birth) === todayStr).map(getBdayInfo),
             ...visibleNames.filter(n => getMMDD(n.date_of_birth) === todayStr).map(getNameBdayInfo)
-        ];
+        ]);
 
-        const upcomingBdays = [
+        const upcomingBdays = _dedupBdays([
             ...visibleAll.filter(p => {
                 const md = getMMDD(p.date_of_birth);
                 return md === tomorrowStr || md === day2Str;
@@ -3430,7 +3443,7 @@
                 info.info += ` · ${getMMDD(n.date_of_birth) === tomorrowStr ? 'Tomorrow' : 'In 2 days'}`;
                 return info;
             })
-        ];
+        ]);
 
         const renderBday = (data) => {
             if (data.length === 0) return '<div class="text-muted" style="padding:10px; font-size:12px;">No birthdays found.</div>';
@@ -3501,7 +3514,19 @@
                 dob: getStaffMMDD(u)
             });
 
-            const staff = allUsers.filter(isStaff);
+            // Collapse duplicate staff accounts (same person across multiple user
+            // rows) so a colleague's birthday shows once — keyed by name + birthday
+            // MM-DD; prefer a row that has a phone (so Send Wish works). Also drops
+            // staff with no birthday source (they can never match a day anyway).
+            const _staffSeen = new Map();
+            for (const u of allUsers.filter(isStaff)) {
+                const md = getStaffMMDD(u);
+                if (!md) continue;
+                const key = `${String(u.full_name || '').trim().toLowerCase()}|${md}`;
+                const prev = _staffSeen.get(key);
+                if (!prev || (!prev.phone && u.phone)) _staffSeen.set(key, u);
+            }
+            const staff = [..._staffSeen.values()];
             const teamToday = staff.filter(u => getStaffMMDD(u) === todayStr).map(getStaffBdayInfo);
             const teamUpcoming = staff.filter(u => {
                 const md = getStaffMMDD(u);
