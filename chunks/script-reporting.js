@@ -245,7 +245,8 @@
     // persisted to localStorage per user (reset automatically when the week rolls
     // over). Rendered by id so it works in BOTH the legacy and React shell paths.
 
-    // Most recent Monday (today if today is Monday, else the Monday just passed).
+    // Most recent Monday (today if today is Monday, else the Monday just passed) —
+    // i.e. the Monday this report is SENT ON.
     const _wrMostRecentMonday = () => {
         const d = new Date();
         const day = d.getDay();                 // 0 Sun … 6 Sat
@@ -254,9 +255,20 @@
         d.setHours(0, 0, 0, 0);
         return d;
     };
-    // "W{n} {Month} {Year}" — n is the ordinal week of the month (ceil(date/7)).
+    // The week the report COVERS = the just-finished week (Mon→Sun ending last
+    // Sunday). A report sent on a Monday summarises the week that just ended, so we
+    // step back from the send-Monday: start = send-Monday − 7 days, end = send-Monday
+    // − 1 day (the most recent Sunday). On Mon 2026-06-29 → 2026-06-22 .. 2026-06-28.
+    const _wrReportWeekRange = () => {
+        const sendMon = _wrMostRecentMonday();
+        const monday = new Date(sendMon); monday.setDate(sendMon.getDate() - 7); monday.setHours(0, 0, 0, 0);
+        const sunday = new Date(sendMon); sunday.setDate(sendMon.getDate() - 1); sunday.setHours(0, 0, 0, 0);
+        return { monday, sunday };
+    };
+    // "W{n} {Month} {Year}" of the COVERED (just-finished) week — n is the ordinal
+    // week of the month (ceil(date/7)).
     const _weeklyReportLabel = () => {
-        const m = _wrMostRecentMonday();
+        const { monday: m } = _wrReportWeekRange();
         const wk = Math.ceil(m.getDate() / 7);
         const month = m.toLocaleString('en-US', { month: 'long' });
         return `W${wk} ${month} ${m.getFullYear()}`;
@@ -353,9 +365,13 @@
     const _saveWeeklyReportDraft = () => {
         try {
             const vals = {};
-            document.querySelectorAll('#weekly-monday-report input.wr-input').forEach((i) => { vals[i.id] = i.value; });
+            const manual = []; // ids the user typed into by hand — never auto-overwritten
+            document.querySelectorAll('#weekly-monday-report input.wr-input').forEach((i) => {
+                vals[i.id] = i.value;
+                if (i.dataset.wrManual === '1') manual.push(i.id);
+            });
             const labelEl = document.getElementById('wr-week-label');
-            localStorage.setItem(_wrDraftKey(), JSON.stringify({ label: labelEl ? labelEl.value : '', vals }));
+            localStorage.setItem(_wrDraftKey(), JSON.stringify({ label: labelEl ? labelEl.value : '', vals, manual }));
         } catch (_) { /* localStorage may be unavailable */ }
     };
     const _restoreWeeklyReportDraft = () => {
@@ -365,9 +381,15 @@
             const saved = JSON.parse(raw);
             // A new week → start with a blank report (don't carry last week's figures).
             if (saved.label && saved.label !== _weeklyReportLabel()) return;
+            const manualSet = new Set(Array.isArray(saved.manual) ? saved.manual : []);
             if (saved.vals) Object.keys(saved.vals).forEach((id) => {
                 const e = document.getElementById(id);
-                if (e && e.classList.contains('wr-input')) e.value = saved.vals[id];
+                if (!e || !e.classList.contains('wr-input')) return;
+                e.value = saved.vals[id];
+                // Restore the auto/manual tag so auto-fill refreshes auto cells but
+                // leaves hand-typed cells alone. Empty cells get no tag (stay blank).
+                if (manualSet.has(id)) e.dataset.wrManual = '1';
+                else if (saved.vals[id] !== '' && saved.vals[id] != null) e.dataset.wrAuto = '1';
             });
         } catch (_) { /* ignore corrupt draft */ }
     };
@@ -408,9 +430,25 @@
         }
     };
 
-    const resetWeeklyReport = () => {
-        document.querySelectorAll('#weekly-monday-report input.wr-input').forEach((i) => { i.value = ''; });
+    // User typed into a figure cell → tag it MANUAL so auto-fill never overwrites it,
+    // then re-sum. (Programmatic .value sets don't fire oninput, so this only ever
+    // marks genuine hand edits.) An emptied cell drops back to auto-refreshable.
+    const wrFigureInput = (el) => {
+        if (el) {
+            if (el.value === '' || el.value == null) { delete el.dataset.wrManual; }
+            else { el.dataset.wrManual = '1'; delete el.dataset.wrAuto; }
+        }
         recalcWeeklyReport();
+    };
+
+    const resetWeeklyReport = () => {
+        document.querySelectorAll('#weekly-monday-report input.wr-input').forEach((i) => {
+            i.value = '';
+            delete i.dataset.wrManual; // wipe BOTH tags so every cell re-auto-fills cleanly
+            delete i.dataset.wrAuto;
+        });
+        recalcWeeklyReport();
+        _wrAutoFill(); // immediately repopulate from the live getters
     };
 
     // Builds one figure row (editable). Sub rows are indented + dimmed.
@@ -420,7 +458,7 @@
             <div class="wr-row${r.sub ? ' wr-sub' : ''}">
                 <label class="wr-lbl" for="wr-${r.k}">${escapeHtml(r.label)}</label>
                 <input type="number" step="any" inputmode="decimal" id="wr-${r.k}" class="wr-input"
-                       value="" placeholder="0" oninput="app.recalcWeeklyReport()">
+                       value="" placeholder="0" oninput="app.wrFigureInput(this)">
             </div>`;
     };
 
@@ -442,7 +480,7 @@
                     <div class="wr-row wr-grand-row">
                         <label class="wr-lbl" for="wr-${sec.grand.k}">${escapeHtml(sec.grand.label)}</label>
                         <input type="number" step="any" inputmode="decimal" id="wr-${sec.grand.k}" class="wr-input wr-grand-val"
-                               value="" placeholder="0" oninput="app.recalcWeeklyReport()">
+                               value="" placeholder="0" oninput="app.wrFigureInput(this)">
                     </div>`;
             }
             return `<div class="wr-section">${rows}${footer}</div>`;
@@ -631,15 +669,13 @@
     // list in script-activities.js / script-marketing.js (note 汇聚-专案 uses 聚 while
     // the 汇集-* siblings use 集 — both stored exactly as written here).
     //
-    // Window = the report's OWN week (the most-recent Monday → that Sunday), matching
+    // Window = the COVERED (just-finished) week (Mon→Sun ending last Sunday), matching
     // the auto label — NOT the dashboard's active time filter. Scope globals
     // (_visibleUserIds / _currentRoleFilter) are already set by refreshKPIDashboard.
     const _wrAutoFill = async () => {
-        const mon = _wrMostRecentMonday();
-        const sun = new Date(mon);
-        sun.setDate(mon.getDate() + 6);
-        const from = toLocalDateStr(mon);
-        const to = toLocalDateStr(sun);
+        const { monday, sunday } = _wrReportWeekRange();
+        const from = toLocalDateStr(monday);
+        const to = toLocalDateStr(sunday);
         let _touched = false;
         // Race a getter against a timeout. A hung/never-resolving query (stalled fetch
         // or a missing RPC the client keeps retrying) would otherwise stall the whole
@@ -649,21 +685,24 @@
             Promise.resolve().then(getter),
             new Promise((res) => setTimeout(() => res(undefined), GETTER_TIMEOUT_MS)),
         ]);
-        // Fill one BLANK cell from a getter, each isolated: a throw, a timeout, or a
-        // non-finite result leaves the cell MANUAL (never writes 0 on error). Re-reads
-        // the node after the await so a mid-flight manual edit / re-mount is never
-        // clobbered. CRITICAL: each successful fill recalcs immediately so the preview
-        // + section Totals reflect every value as it lands — a slow/hung SIBLING getter
-        // can never leave the report frozen at 0 with inputs already populated.
+        // Fill a cell from a getter, each isolated: a throw, a timeout, or a non-finite
+        // result leaves the cell untouched (never writes 0 on error). REFRESH MODEL:
+        // we overwrite cells that are BLANK or previously AUTO-filled (data-wr-auto), so
+        // a stale auto value self-corrects on every load — but we NEVER touch a cell the
+        // user typed into by hand (data-wr-manual). Re-reads the node after the await so
+        // a mid-flight manual edit / re-mount is never clobbered. CRITICAL: each fill
+        // recalcs immediately so the preview + Totals reflect every value as it lands —
+        // a slow/hung SIBLING getter can never leave the report frozen at 0.
         const fill = async (id, getter) => {
             try {
                 const before = document.getElementById(id);
-                if (!before || (before.value !== '' && before.value != null)) return; // already set
+                if (!before || before.dataset.wrManual === '1') return; // user owns this cell
                 const val = await withTimeout(getter);
-                if (!Number.isFinite(val)) return; // getter errored/timed-out/non-finite → leave MANUAL
+                if (!Number.isFinite(val)) return; // getter errored/timed-out/non-finite → leave as-is
                 const live = document.getElementById(id);
-                if (!live || (live.value !== '' && live.value != null)) return; // typed-into / torn-down
+                if (!live || live.dataset.wrManual === '1') return; // typed-into mid-flight / torn-down
                 live.value = String(val);
+                live.dataset.wrAuto = '1'; // mark as auto so it stays refreshable next load
                 _touched = true;
                 recalcWeeklyReport(); // reflect THIS fill now — never wait on siblings
             } catch (e) { console.warn('weekly-report auto-fill failed for', id, ':', e); }
@@ -1519,7 +1558,13 @@ const getNewAgents = async (from, to) => {
     const users = await AppDataStore.getAll('users');
     let count = 0;
     for (const u of users) {
-        if (u.join_date < from || u.join_date > to) continue;
+        // Normalise join_date to a YYYY-MM-DD string. A null/blank/undated user can't
+        // be "new in this window" — without this guard those rows slip past the date
+        // filter (null < from and null > to are BOTH false) and inflate the count.
+        const jd = (u.join_date instanceof Date)
+            ? toLocalDateStr(u.join_date)
+            : (u.join_date == null ? '' : String(u.join_date).slice(0, 10));
+        if (!jd || jd < from || jd > to) continue;
         if (!_recInMarket(u)) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(u.id)) continue;
         if (_currentRoleFilter !== 'All') {
@@ -3781,5 +3826,6 @@ const exportKPIReport = async (format) => {
         recalcWeeklyReport,
         copyWeeklyReport,
         resetWeeklyReport,
+        wrFigureInput,
     });
 })();
