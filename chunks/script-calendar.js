@@ -2074,6 +2074,13 @@
                         const _overdueBadge = _daysOpen >= 1
                             ? `<span style="font-size:11px; background:#fee2e2; color:#b91c1c; padding:2px 8px; border-radius:10px; font-weight:600;" title="Un-acted for ${_daysOpen} day(s)">overdue ${_daysOpen}d</span>`
                             : '';
+                        // Make the name a click-through to the linked profile (prospect preferred, else customer).
+                        const _navName = d.prospect_id
+                            ? `app.showProspectDetail(${d.prospect_id})`
+                            : (d.customer_id ? `app.showCustomerDetail(${d.customer_id})` : '');
+                        const _nameHtml = _navName
+                            ? `<strong style="font-size:13px; color:#2563eb; cursor:pointer; text-decoration:underline; text-decoration-style:dotted;" onclick="event.stopPropagation(); ${_navName};" title="Open profile">${esc(d.prospect_name || 'Unknown')}</strong>`
+                            : `<strong style="font-size:13px; color:var(--gray-800,#1f2937);">${esc(d.prospect_name || 'Unknown')}</strong>`;
                         return `
                         <div id="followup-row-${d.id}" style="display:flex; align-items:flex-start; gap:12px; padding:12px; background:var(--gray-50,#f9fafb); border-radius:8px; border-left:4px solid #3b82f6; transition: opacity 0.4s ease, max-height 0.4s ease;">
                             <input type="checkbox" id="followup-check-${d.id}" style="margin-top:4px; width:18px; height:18px; cursor:pointer; accent-color:#3b82f6;" onchange="app.markFollowUpSent(${d.id})" title="Mark as sent">
@@ -2081,7 +2088,7 @@
                             <div style="flex:1; min-width:0;">
                                 <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
                                     <span style="font-size:16px;">${triggerIcons[d.trigger_type] || '📩'}</span>
-                                    <strong style="font-size:13px; color:var(--gray-800,#1f2937);">${esc(d.prospect_name || 'Unknown')}</strong>
+                                    ${_nameHtml}
                                     <span style="font-size:11px; background:#dbeafe; color:#1d4ed8; padding:2px 8px; border-radius:10px;">${esc(triggerLabels[d.trigger_type] || d.trigger_type)}</span>
                                     ${_overdueBadge}
                                     ${d.event_name ? `<span style="font-size:11px; color:var(--gray-500,#6b7280);">${esc(d.event_name)}${d.event_date ? ' — ' + esc(d.event_date) : ''}</span>` : ''}
