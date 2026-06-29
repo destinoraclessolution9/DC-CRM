@@ -118,6 +118,9 @@ const showCustomersView = async (container) => {
                     <p>Manage converted customers and their lifecycle events. Customer records are permanent.</p>
                 </div>
                 <div class="header-actions">
+                    <button class="btn secondary" onclick="app.openDeliveryListing()">
+                        <i class="fas fa-truck"></i> Product Delivery Listing
+                    </button>
                     <button class="btn primary" onclick="app.openAddCustomerModal()">
                         <i class="fas fa-plus"></i> Add Customer
                     </button>
@@ -2106,9 +2109,170 @@ const updateConversionDelivery = async (prospectId, customerId) => {
     UI.showModal('Update Delivery Status', content, [{ label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }]);
 };
 
+// ── Product Delivery Listing (cross-customer delivery monitoring board) ───────
+// One row per undelivered PRODUCT line, gathered from BOTH sources of truth:
+//   • purchases rows — each row is already one product line, so a multi-product
+//     invoice is naturally several rows sharing the same invoice number (each
+//     tracked independently because items may arrive on different days);
+//   • prospects.closing_record conversion sales — the very first sale isn't in
+//     `purchases`, it lives on the originating prospect.
+// Scope follows getVisibleCustomers() (own + team), so an agent sees only their
+// own customers' deliveries. A line drops off once it's Delivered, unless the
+// "Show delivered" toggle is on.
+const _DELIVERY_STATUSES = ['Pending Delivery', 'Dispatched', 'Delivered'];
+let _deliveryShowDelivered = false;
+
+const openDeliveryListing = async () => {
+    UI.showModal('Product Delivery Listing',
+        `<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:12px;">
+            <label class="checkbox-label" style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
+                <input type="checkbox" id="delivery-show-delivered" ${_deliveryShowDelivered ? 'checked' : ''} onchange="app._toggleDeliveryDelivered(this.checked)"> Show delivered
+            </label>
+            <input type="text" id="delivery-search" class="form-control" placeholder="Search name / agent / product / invoice" style="flex:1;min-width:220px;" oninput="app.debounceCall('delivery-search', app._renderDeliveryListing, 220)">
+        </div>
+        <div id="delivery-listing-body"><div class="acc-loading" style="text-align:center;padding:24px;color:var(--gray-400);"><i class="fas fa-spinner fa-spin"></i> Loading deliveries…</div></div>`,
+        [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }],
+        'fullscreen');
+    await _renderDeliveryListing();
+};
+
+const _toggleDeliveryDelivered = async (checked) => {
+    _deliveryShowDelivered = !!checked;
+    await _renderDeliveryListing();
+};
+
+const _renderDeliveryListing = async () => {
+    const body = document.getElementById('delivery-listing-body');
+    if (!body) return; // modal closed mid-flight
+    const search = (document.getElementById('delivery-search')?.value || '').trim().toLowerCase();
+
+    // Visible customers — own + team scope already applied by getVisibleCustomers().
+    const customers = await getVisibleCustomers();
+    const custById = new Map(customers.map(c => [String(c.id), c]));
+    const allUsers = await AppDataStore.getAll('users');
+    const userById = new Map(allUsers.map(u => [String(u.id), u]));
+    const agentNameFor = (c) => {
+        const a = userById.get(String(c.responsible_agent_id || c.agent_id));
+        return a ? (a.full_name || 'Agent') : '—';
+    };
+
+    const lines = [];
+
+    // Source 1: purchases for visible customers (one row = one product line).
+    let purchases = [];
+    try { purchases = await AppDataStore.getAll('purchases'); } catch (_) { purchases = []; }
+    for (const p of purchases) {
+        const c = custById.get(String(p.customer_id));
+        if (!c) continue; // out of scope / not a customer
+        lines.push({
+            kind: 'purchase', id: p.id, customerId: c.id,
+            name: c.full_name || '', agent: agentNameFor(c),
+            product: p.item || '-', invoice: p.invoice || '',
+            status: p.delivery_status || 'Pending Delivery',
+            remarks: p.delivery_remarks || '', proof: p.proof || '',
+        });
+    }
+
+    // Source 2: conversion sales (prospects.closing_record) for converted customers.
+    const convCustomers = customers.filter(c => c.converted_from_prospect_id);
+    if (convCustomers.length) {
+        let prospects = [];
+        try { prospects = await AppDataStore.getAll('prospects'); } catch (_) { prospects = []; }
+        const prospById = new Map(prospects.map(pr => [String(pr.id), pr]));
+        for (const c of convCustomers) {
+            const pr = prospById.get(String(c.converted_from_prospect_id));
+            const cr = pr?.closing_record;
+            if (!cr || !cr.product) continue;
+            lines.push({
+                kind: 'conversion', id: pr.id, customerId: c.id,
+                name: c.full_name || '', agent: agentNameFor(c),
+                product: cr.product || '-', invoice: cr.invoice_number || '',
+                status: cr.delivery_status || 'Pending Delivery',
+                remarks: cr.delivery_remarks || '', proof: cr.invoice_file || '',
+            });
+        }
+    }
+
+    // Hide delivered unless the toggle is on; then apply the free-text search.
+    let rows = lines.filter(l => _deliveryShowDelivered || l.status !== 'Delivered');
+    if (search) {
+        rows = rows.filter(l =>
+            l.name.toLowerCase().includes(search) ||
+            l.agent.toLowerCase().includes(search) ||
+            (l.product || '').toLowerCase().includes(search) ||
+            (l.invoice || '').toLowerCase().includes(search));
+    }
+    // Sort: pending first, dispatched next, delivered last; then by name.
+    const order = { 'Pending Delivery': 0, 'Dispatched': 1, 'Delivered': 2 };
+    rows.sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9) || a.name.localeCompare(b.name));
+
+    if (!rows.length) {
+        body.innerHTML = `<div style="text-align:center;color:var(--gray-400);padding:32px;">${_deliveryShowDelivered ? 'No product lines found.' : 'No pending deliveries. 🎉'}</div>`;
+        return;
+    }
+
+    let html = `<div class="prospects-table-container"><table class="prospects-table"><thead><tr>
+        <th scope="col">SN</th>
+        <th scope="col">Name</th>
+        <th scope="col">Agent</th>
+        <th scope="col">Product</th>
+        <th scope="col">Delivery Status</th>
+        <th scope="col">Remarks</th>
+        <th scope="col">Invoice / Photo</th>
+    </tr></thead><tbody>`;
+    rows.forEach((l, i) => {
+        const _h = _safeHref(l.proof);
+        const statusStyle = _deliveryStatusColors[l.status] || '';
+        const statusSel = `<select class="form-control" style="font-size:12px;padding:4px 6px;border-radius:6px;${statusStyle};" title="Update delivery status" onchange="app._setDeliveryFromListing('${l.kind}', ${l.id}, ${l.customerId}, this.value)">${_DELIVERY_STATUSES.map(s => `<option value="${s}" ${s === l.status ? 'selected' : ''}>${s}</option>`).join('')}</select>`;
+        const proofCell = _h
+            ? `<a href="${_h}" target="_blank" rel="noopener noreferrer" class="btn-sm secondary"><i class="fas fa-image"></i> View</a>`
+            : (l.kind === 'purchase'
+                ? `<button class="btn-sm secondary" onclick="app.uploadPaymentProof(${l.id}, ${l.customerId})"><i class="fas fa-upload"></i> Upload</button>`
+                : '<span style="color:var(--gray-400);">—</span>');
+        html += `<tr>
+            <td>${i + 1}</td>
+            <td><strong style="cursor:pointer;color:var(--primary);" onclick="UI.hideModal(); app.showCustomerDetail(${l.customerId})">${escapeHtml(l.name)}</strong>${l.invoice ? `<div style="font-size:11px;color:var(--gray-400);">${escapeHtml(l.invoice)}</div>` : ''}</td>
+            <td>${escapeHtml(l.agent)}</td>
+            <td>${escapeHtml(l.product)}</td>
+            <td>${statusSel}</td>
+            <td><input type="text" class="form-control" style="font-size:12px;padding:4px 6px;min-width:140px;" value="${escapeHtml(l.remarks)}" placeholder="Add remark…" onchange="app.saveDeliveryRemarks('${l.kind}', ${l.id}, ${l.customerId}, this.value)"></td>
+            <td>${proofCell}</td>
+        </tr>`;
+    });
+    html += `</tbody></table></div><div style="margin-top:10px;font-size:12px;color:var(--gray-500);">${rows.length} line${rows.length !== 1 ? 's' : ''} shown</div>`;
+    body.innerHTML = html;
+};
+
+// Inline status change from the listing — reuses the shared _setDelivery writer
+// (mode 'purchase' keys the purchases row; anything else keys the prospect's
+// closing_record), then re-renders so a Delivered line drops off the board.
+const _setDeliveryFromListing = async (kind, id, customerId, newStatus) => {
+    await _setDelivery(kind === 'purchase' ? 'purchase' : 'conversion', id, customerId, newStatus);
+    await _renderDeliveryListing();
+};
+
+const saveDeliveryRemarks = async (kind, id, customerId, value) => {
+    const v = (value || '').trim();
+    try {
+        if (kind === 'purchase') {
+            await AppDataStore.update('purchases', id, { delivery_remarks: v });
+        } else {
+            const prospect = await AppDataStore.getById('prospects', id);
+            const cr = { ...(prospect?.closing_record || {}), delivery_remarks: v };
+            await AppDataStore.update('prospects', id, { closing_record: cr });
+        }
+        UI.toast.success('Remark saved');
+    } catch (e) {
+        UI.toast.error('Failed to save remark: ' + (e?.message || e));
+    }
+};
+
 
     app.register('customers', {
         _setDelivery,
+        _setDeliveryFromListing,
+        _renderDeliveryListing,
+        _toggleDeliveryDelivered,
         copyToClipboard,
         customerPageNav,
         deletePurchase,
@@ -2117,6 +2281,8 @@ const updateConversionDelivery = async (prospectId, customerId) => {
         npoLaunchFromPurchase,
         openAddCustomerModal,
         openAddPurchaseModal,
+        openDeliveryListing,
+        saveDeliveryRemarks,
         openCustomerReferralModal,
         openEditPlatformIdsModal,
         openUploadDocumentModal,
