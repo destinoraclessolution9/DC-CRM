@@ -4664,14 +4664,14 @@ function _wireLoginBtn() {
     const shareCpsIntakeWhatsApp = async (...a) => { const _r = window.app.shareCpsIntakeWhatsApp; if (_r && _r !== shareCpsIntakeWhatsApp) return _r(...a); };
     const renderPendingCpsIntakes = async (...a) => { const _r = window.app.renderPendingCpsIntakes; if (_r && _r !== renderPendingCpsIntakes) return _r(...a); };
     const rejectCpsIntake = async (...a) => { const _r = window.app.rejectCpsIntake; if (_r && _r !== rejectCpsIntake) return _r(...a); };
-    const scanCpsForm = async (...a) => { const _r = window.app.scanCpsForm; if (_r && _r !== scanCpsForm) return _r(...a); };
-    const handleCpsScanFile = async (...a) => { const _r = window.app.handleCpsScanFile; if (_r && _r !== handleCpsScanFile) return _r(...a); };
+    const scanCpsForm = async (...a) => { await _loadChunkOnce('chunks/script-cps.min.js'); const _r = window.app.scanCpsForm; if (_r && _r !== scanCpsForm) return _r(...a); };
+    const handleCpsScanFile = async (...a) => { await _loadChunkOnce('chunks/script-cps.min.js'); const _r = window.app.handleCpsScanFile; if (_r && _r !== handleCpsScanFile) return _r(...a); };
     const renderCpsScanReview = async (...a) => { const _r = window.app.renderCpsScanReview; if (_r && _r !== renderCpsScanReview) return _r(...a); };
     const toggleCpsScanAll = async (...a) => { const _r = window.app.toggleCpsScanAll; if (_r && _r !== toggleCpsScanAll) return _r(...a); };
     const applyCpsScanSelection = async (...a) => { const _r = window.app.applyCpsScanSelection; if (_r && _r !== applyCpsScanSelection) return _r(...a); };
     const _hideCpsScanOverlay = async (...a) => { const _r = window.app._hideCpsScanOverlay; if (_r && _r !== _hideCpsScanOverlay) return _r(...a); };
     const _uploadCpsFormFile = async (...a) => { const _r = window.app._uploadCpsFormFile; if (_r && _r !== _uploadCpsFormFile) return _r(...a); };
-    const openCpsPasteModal = async (...a) => { const _r = window.app.openCpsPasteModal; if (_r && _r !== openCpsPasteModal) return _r(...a); };
+    const openCpsPasteModal = async (...a) => { await _loadChunkOnce('chunks/script-cps.min.js'); const _r = window.app.openCpsPasteModal; if (_r && _r !== openCpsPasteModal) return _r(...a); };
     const parseCpsPastedText = async (...a) => { const _r = window.app.parseCpsPastedText; if (_r && _r !== parseCpsPastedText) return _r(...a); };
     const toggleActivityNoticeboardFields = async (...a) => { const _r = window.app.toggleActivityNoticeboardFields; if (_r && _r !== toggleActivityNoticeboardFields) return _r(...a); };
     const markMilestoneCompleted = async (...a) => { const _r = window.app.markMilestoneCompleted; if (_r && _r !== markMilestoneCompleted) return _r(...a); };
