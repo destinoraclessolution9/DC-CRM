@@ -5814,19 +5814,15 @@
             return;
         }
 
-        // NPO closings need the installment terms keyed in (tier/deposit/monthly/tenure).
+        // NPO terms are OPTIONAL at close. Selecting NPO records the payment method
+        // (the old, pre-2026-06-29 behaviour — never block the save). Additionally
+        // filling Tier/Deposit/Monthly/Tenure also materialises the installment order
+        // + schedule (done in the closing-record sync below; it self-gates on
+        // tier_amount>0 && tenure>0). The ONLY hard guard is an absurd tenure that
+        // would explode the schedule into thousands of installment rows.
         if (isClosed && mo.payment_method === 'NPO') {
-            const _np = (v) => { const n = parseFloat(v); return isNaN(n) ? null : n; };
-            const _tier = _np(mo.npo_tier_amount), _first = _np(mo.npo_first_payment),
-                  _monthly = _np(mo.npo_monthly), _tenure = _np(mo.npo_tenure);
-            if (_tier == null || _tier <= 0 || _first == null || _first < 0 ||
-                _monthly == null || _monthly < 0 || _tenure == null || _tenure <= 0) {
-                UI.toast.error('NPO needs Tier Amount, First Payment, Monthly Amount and Tenure (months).');
-                document.getElementById('mo-npo-tier-amount')?.focus();
-                return;
-            }
-            // Guard against a fat-finger tenure (each month becomes an installment row).
-            if (_tenure > 600) {
+            const _t = parseFloat(mo.npo_tenure);
+            if (!isNaN(_t) && _t > 600) {
                 UI.toast.error('Tenure looks too large — please enter the number of months (max 600).');
                 document.getElementById('mo-npo-tenure')?.focus();
                 return;
