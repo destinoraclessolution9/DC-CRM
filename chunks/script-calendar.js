@@ -5814,17 +5814,39 @@
             return;
         }
 
-        // NPO terms are OPTIONAL at close. Selecting NPO records the payment method
-        // (the old, pre-2026-06-29 behaviour — never block the save). Additionally
-        // filling Tier/Deposit/Monthly/Tenure also materialises the installment order
-        // + schedule (done in the closing-record sync below; it self-gates on
-        // tier_amount>0 && tenure>0). The ONLY hard guard is an absurd tenure that
-        // would explode the schedule into thousands of installment rows.
+        // NPO closings REQUIRE the installment terms (owner: this is what creates the
+        // npo_sales order that feeds the PORT KPI). Unlike the old silent guard, we
+        // scroll the NPO block into view and red-highlight the exact missing field(s)
+        // so it's obvious on mobile why Save didn't go through (the toast alone was
+        // easy to miss). The highlight clears as soon as the agent edits the field.
         if (isClosed && mo.payment_method === 'NPO') {
-            const _t = parseFloat(mo.npo_tenure);
-            if (!isNaN(_t) && _t > 600) {
+            const _np = (v) => { const n = parseFloat(v); return isNaN(n) ? null : n; };
+            const checks = [
+                ['mo-npo-tier-amount', (v) => v != null && v > 0,  mo.npo_tier_amount],
+                ['mo-npo-first',       (v) => v != null && v >= 0, mo.npo_first_payment],
+                ['mo-npo-monthly',     (v) => v != null && v >= 0, mo.npo_monthly],
+                ['mo-npo-tenure',      (v) => v != null && v > 0,  mo.npo_tenure],
+            ];
+            const missing = checks.filter(([, ok, raw]) => !ok(_np(raw)));
+            if (missing.length) {
+                document.getElementById('mo-npo-fields')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                missing.forEach(([id]) => {
+                    const el = document.getElementById(id);
+                    if (!el) return;
+                    el.style.border = '2px solid #ef4444';
+                    el.style.background = '#fff5f5';
+                    const _clr = () => { el.style.border = ''; el.style.background = ''; el.removeEventListener('input', _clr); };
+                    el.addEventListener('input', _clr);
+                });
+                document.getElementById(missing[0][0])?.focus();
+                UI.toast.error('NPO needs Tier Amount, First Payment, Monthly Amount and Tenure (months) — highlighted in red.');
+                return;
+            }
+            // Guard against a fat-finger tenure that would explode the schedule.
+            if (_np(mo.npo_tenure) > 600) {
+                const el = document.getElementById('mo-npo-tenure');
+                if (el) { el.style.border = '2px solid #ef4444'; el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus(); }
                 UI.toast.error('Tenure looks too large — please enter the number of months (max 600).');
-                document.getElementById('mo-npo-tenure')?.focus();
                 return;
             }
         }
