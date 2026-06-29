@@ -2576,6 +2576,15 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 const notesBtn = a._isAttendeeNote
                     ? `<button class="btn btn-sm secondary" onclick="event.stopPropagation();app.openAttendeePostEventModal(${a._attendeeRowId}, ${a._parentActivityId}, ${prospect.id})"><i class="fas fa-sticky-note"></i> Post Event Notes</button>`
                     : `<button class="btn btn-sm secondary" onclick="event.stopPropagation();app.openPostMeetupNotesModal(${a.id}, ${prospect.id})"><i class="fas fa-sticky-note"></i> Post Event Notes</button>`;
+                // Discussion-paper photos: attendee notes live on event_attendees
+                // (own-event notes live on activities.photo_urls) — route each to
+                // its matching viewer so uploaded papers are findable here too.
+                const photoCount = Array.isArray(a.photo_urls) ? a.photo_urls.length : 0;
+                const photosBtn = photoCount > 0
+                    ? (a._isAttendeeNote
+                        ? `<button class="btn btn-sm secondary" style="color:var(--primary);border-color:var(--primary);" onclick="event.stopPropagation();app.viewAttendeePhotos(${a._attendeeRowId})"><i class="fas fa-images"></i> Photos (${photoCount})</button>`
+                        : `<button class="btn btn-sm secondary" style="color:var(--primary);border-color:var(--primary);" onclick="event.stopPropagation();app.viewActivityPhotos(${a.id})"><i class="fas fa-images"></i> Photos (${photoCount})</button>`)
+                    : '';
                 const sourceTag = a._isAttendeeNote
                     ? `<span style="font-size:10px;background:var(--gray-100);color:var(--gray-600);padding:1px 6px;border-radius:10px;margin-left:6px;">attended</span>`
                     : '';
@@ -2597,6 +2606,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                         ${a.score_value ? `<div style="margin-bottom:6px;"><span class="badge success" style="font-size:11px;">+${a.score_value} pts</span></div>` : ''}
                         <div class="meet-actions">
                             ${notesBtn}
+                            ${photosBtn}
                         </div>
                     </div>
                 `;

@@ -86,7 +86,10 @@ alter table event_attendees
     add column if not exists entity_name text,
     add column if not exists paid boolean default false,
     add column if not exists ticket_created boolean default false,
-    add column if not exists attended boolean default false;
+    add column if not exists attended boolean default false,
+    -- Per-attendee discussion-paper photos captured in the Post-Event Notes
+    -- modal. JSONB array of short public URLs (mirrors activities.photo_urls).
+    add column if not exists photo_urls jsonb default '[]'::jsonb;
 
 -- Back-fill: entity_id is an alias for attendee_id
 update event_attendees set entity_id = attendee_id where entity_id is null and attendee_id is not null;

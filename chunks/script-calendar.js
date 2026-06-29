@@ -6305,6 +6305,11 @@
             opportunity_potential: attendee.opportunity_potential || '',
             next_action: attendee.next_action || '',
             summary: attendee.summary || '',
+            // Discussion-paper photos live on the ATTENDEE row (per-person), not
+            // the shared activity. Seed them so existing thumbs render and the
+            // photo-section's data-existing attribute is populated — otherwise a
+            // re-save would wipe previously uploaded papers.
+            photo_urls: Array.isArray(attendee.photo_urls) ? attendee.photo_urls : [],
         };
 
         const attendeeName = attendee.entity_name || 'Attendee';
@@ -6316,6 +6321,10 @@
     };
 
     const saveAttendeePostEventNotes = async (attendeeId, activityId, prospectId) => {
+        // Disable Save immediately to prevent double-submit while upload/write runs.
+        const _saveBtn = document.querySelector('.modal-footer .btn.primary');
+        if (_saveBtn) { _saveBtn.disabled = true; _saveBtn.textContent = 'Saving…'; }
+
         await _ensureActivitiesChunk();
         const fields = (window.app.collectPostMeetupNotesData || (() => ({})))('pmn');
         const updates = {
@@ -6330,6 +6339,60 @@
         };
 
         const sb = window.supabase || window.supabaseClient;
+
+        // ── Discussion paper photos (per-attendee) ─────────────────────────
+        // The shared notes form renders the "Discussion Papers" uploader, but
+        // these photos belong to THIS attendee — storing them on the shared
+        // activity row would leak/overwrite across every attendee. Upload here
+        // and merge into event_attendees.photo_urls. Mirrors savePostMeetupNotes.
+        const photoInput = document.getElementById('pmn-photo-files');
+        const photoFiles = photoInput?.files?.length ? Array.from(photoInput.files) : [];
+        if (photoFiles.length > 0) {
+            if (sb && sb.storage) {
+                const _compress = window.app.compressImageFile || (f => Promise.resolve(f));
+                // Read existing photo_urls from the data attribute embedded in the
+                // modal DOM when it was rendered — avoids any cache/network dependency.
+                let existingUrls = [];
+                try {
+                    const sec = document.getElementById('pmn-photo-section');
+                    existingUrls = JSON.parse(sec?.dataset?.existing || '[]');
+                } catch (_) { /* intentional: malformed dataset → start from empty list */ existingUrls = []; }
+
+                UI.toast.success('Uploading photo(s)…');
+                const newUrls = [];
+                let uploadFailed = false;
+                for (const file of photoFiles) {
+                    if (!file.type.startsWith('image/')) continue;
+                    try {
+                        const compressed = await _compress(file);
+                        const safeName = compressed.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+                        const path = `event_attendee_photos/${attendeeId}_${Date.now()}_${safeName}`;
+                        const { error: upErr } = await sb.storage.from('attachments').upload(path, compressed, { upsert: false, contentType: compressed.type || 'image/jpeg' });
+                        if (upErr) {
+                            console.warn('attendee paper upload error:', upErr);
+                            uploadFailed = true;
+                            continue;
+                        }
+                        const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
+                        if (urlData?.publicUrl) newUrls.push(urlData.publicUrl);
+                    } catch (e) {
+                        console.warn('attendee paper upload threw:', e);
+                        uploadFailed = true;
+                    }
+                }
+                if (newUrls.length > 0) {
+                    updates.photo_urls = [...existingUrls, ...newUrls];
+                } else if (uploadFailed) {
+                    if (_saveBtn) { _saveBtn.disabled = false; _saveBtn.textContent = 'Save'; }
+                    UI.toast.error('Photo upload failed — check your connection and try again. Notes were NOT saved.');
+                    return;
+                }
+            } else {
+                UI.toast.error('Supabase storage not available — photos not uploaded');
+            }
+        }
+        // ── End photo upload ───────────────────────────────────────────────
+
         let writeOk = false;
         if (sb) {
             try {
@@ -6349,6 +6412,7 @@
             }
         }
         if (!writeOk) {
+            if (_saveBtn) { _saveBtn.disabled = false; _saveBtn.textContent = 'Save'; }
             UI.toast.error('Failed to save notes — please try again');
             return;
         }
@@ -6446,8 +6510,74 @@
                 opportunity_potential: att.opportunity_potential || '',
                 next_action: att.next_action || '',
                 summary: att.summary || '',
+                // Per-attendee discussion papers — surfaced so Meet Up History
+                // and the events tab can render a photo button for this note.
+                photo_urls: Array.isArray(att.photo_urls) ? att.photo_urls : [],
             };
         });
+    };
+
+    // Gallery viewer for a single attendee's discussion-paper photos. The
+    // prospect "Post-Meetup" path stores photos on activities.photo_urls and
+    // uses viewActivityPhotos; the per-attendee path stores them on the
+    // event_attendees row, so it needs its own fresh-read + remove handlers.
+    const viewAttendeePhotos = async (attendeeRowId) => {
+        const sb = window.supabase || window.supabaseClient;
+        let photos = [];
+        try {
+            if (sb) {
+                const { data } = await sb.from('event_attendees').select('photo_urls').eq('id', attendeeRowId).maybeSingle();
+                photos = Array.isArray(data?.photo_urls) ? data.photo_urls : [];
+            } else {
+                const att = await AppDataStore.getById('event_attendees', attendeeRowId);
+                photos = Array.isArray(att?.photo_urls) ? att.photo_urls : [];
+            }
+        } catch (e) { console.warn('viewAttendeePhotos read failed:', e); }
+
+        if (photos.length === 0) { UI.toast.error('No discussion papers attached'); return; }
+
+        const content = `
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;max-height:60vh;overflow:auto;padding:4px;">
+                ${photos.map(url => `
+                    <div style="position:relative;">
+                        <img loading="lazy" decoding="async" src="${escapeHtml(url)}" style="width:100%;height:120px;border-radius:6px;object-fit:cover;cursor:zoom-in;border:1px solid var(--gray-200);" onclick="window._openAttachment && window._openAttachment('${UI.escJsAttr(String(url))}')">
+                        <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:22px;height:22px;font-size:11px;padding:0;" title="Remove" onclick="event.stopPropagation();app.removeAttendeePhoto(${attendeeRowId}, '${UI.escJsAttr(String(url))}')"><i class="fas fa-times"></i></button>
+                    </div>
+                `).join('')}
+            </div>
+            <p style="color:var(--gray-500);font-size:12px;margin-top:10px;text-align:center;">Tap a photo to view full size. Tap × to remove.</p>
+        `;
+        UI.showModal(`Discussion Papers (${photos.length})`, content, [
+            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
+        ]);
+    };
+
+    const removeAttendeePhoto = async (attendeeRowId, url) => {
+        const sb = window.supabase || window.supabaseClient;
+        try {
+            let current = [];
+            if (sb) {
+                const { data } = await sb.from('event_attendees').select('photo_urls').eq('id', attendeeRowId).maybeSingle();
+                current = Array.isArray(data?.photo_urls) ? data.photo_urls : [];
+            } else {
+                const att = await AppDataStore.getById('event_attendees', attendeeRowId);
+                current = Array.isArray(att?.photo_urls) ? att.photo_urls : [];
+            }
+            const updated = current.filter(u => u !== url);
+            if (sb) {
+                const { error } = await sb.from('event_attendees').update({ photo_urls: updated }).eq('id', attendeeRowId);
+                if (error) throw error;
+            } else {
+                await AppDataStore.update('event_attendees', attendeeRowId, { photo_urls: updated });
+            }
+            AppDataStore.invalidateCache('event_attendees');
+            UI.toast.success('Photo removed');
+            UI.hideModal();
+            if (updated.length > 0) await viewAttendeePhotos(attendeeRowId);
+        } catch (e) {
+            console.warn('removeAttendeePhoto failed:', e);
+            UI.toast.error('Failed to remove photo');
+        }
     };
 
     const editActivity = async (activityId) => {
@@ -6547,6 +6677,13 @@
                 const sourceTag = a._isAttendeeNote
                     ? `<span style="font-size:10px;background:var(--gray-100);color:var(--gray-600);padding:1px 6px;border-radius:10px;margin-left:6px;">attended</span>`
                     : '';
+                const photoCount = Array.isArray(a.photo_urls) ? a.photo_urls.length : 0;
+                const photoHandler = a._isAttendeeNote
+                    ? `app.viewAttendeePhotos(${a._attendeeRowId})`
+                    : `app.viewActivityPhotos(${a.id})`;
+                const photoBtn = photoCount > 0
+                    ? `<button class="btn btn-sm secondary" style="font-size:11px;padding:3px 8px;color:var(--primary);border-color:var(--primary);" title="${photoCount} discussion paper${photoCount > 1 ? 's' : ''}" onclick="event.stopPropagation();${photoHandler}"><i class="fas fa-camera"></i> ${photoCount}</button>`
+                    : '';
                 return `
                     <div style="border:1px solid var(--gray-200);border-radius:8px;padding:12px 14px;margin-bottom:10px;background:#fff;">
                         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
@@ -6554,7 +6691,10 @@
                                 <div style="font-weight:600;font-size:14px;"><i class="fas fa-user-friends" style="color:var(--primary);"></i> ${escapeHtml(a.activity_type || 'Meeting')}${a.activity_title ? ' — ' + escapeHtml(a.activity_title) : ''}${sourceTag}</div>
                                 <div style="font-size:12px;color:var(--gray-500);margin-top:2px;">${escapeHtml(a.activity_date || '')}</div>
                             </div>
-                            <button class="btn btn-sm secondary" style="font-size:11px;padding:3px 8px;" onclick="${editHandler}"><i class="fas fa-edit"></i> Edit</button>
+                            <div style="display:flex;gap:6px;flex-shrink:0;">
+                                ${photoBtn}
+                                <button class="btn btn-sm secondary" style="font-size:11px;padding:3px 8px;" onclick="${editHandler}"><i class="fas fa-edit"></i> Edit</button>
+                            </div>
                         </div>
                         ${hasAnyNote ? `
                             ${section('Key Points', a.note_key_points || a.summary)}
@@ -6827,6 +6967,8 @@
         openAttendeePostEventModal,
         saveAttendeePostEventNotes,
         getProspectAttendeeNotes,
+        viewAttendeePhotos,
+        removeAttendeePhoto,
         editActivity,
         deleteActivity,
         confirmDeleteActivity,
