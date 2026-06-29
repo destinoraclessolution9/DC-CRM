@@ -641,82 +641,95 @@
         const from = toLocalDateStr(mon);
         const to = toLocalDateStr(sun);
         let _touched = false;
-        // Fill one BLANK cell from a getter, each isolated: a throw or a non-finite
-        // result leaves the cell MANUAL (never writes 0 on error). Re-reads the node
-        // after the await so a mid-flight manual edit / re-mount is never clobbered.
+        // Race a getter against a timeout. A hung/never-resolving query (stalled fetch
+        // or a missing RPC the client keeps retrying) would otherwise stall the whole
+        // pipeline; on timeout we resolve `undefined` so the cell just stays MANUAL.
+        const GETTER_TIMEOUT_MS = 12000;
+        const withTimeout = (getter) => Promise.race([
+            Promise.resolve().then(getter),
+            new Promise((res) => setTimeout(() => res(undefined), GETTER_TIMEOUT_MS)),
+        ]);
+        // Fill one BLANK cell from a getter, each isolated: a throw, a timeout, or a
+        // non-finite result leaves the cell MANUAL (never writes 0 on error). Re-reads
+        // the node after the await so a mid-flight manual edit / re-mount is never
+        // clobbered. CRITICAL: each successful fill recalcs immediately so the preview
+        // + section Totals reflect every value as it lands — a slow/hung SIBLING getter
+        // can never leave the report frozen at 0 with inputs already populated.
         const fill = async (id, getter) => {
             try {
                 const before = document.getElementById(id);
                 if (!before || (before.value !== '' && before.value != null)) return; // already set
-                const val = await getter();
-                if (!Number.isFinite(val)) return; // getter errored/returned non-finite → leave MANUAL
+                const val = await withTimeout(getter);
+                if (!Number.isFinite(val)) return; // getter errored/timed-out/non-finite → leave MANUAL
                 const live = document.getElementById(id);
                 if (!live || (live.value !== '' && live.value != null)) return; // typed-into / torn-down
                 live.value = String(val);
                 _touched = true;
+                recalcWeeklyReport(); // reflect THIS fill now — never wait on siblings
             } catch (e) { console.warn('weekly-report auto-fill failed for', id, ':', e); }
         };
-        // SECTION 1
-        await fill('wr-cps',  () => getCPSCount(from, to));
-        await fill('wr-pja',  () => getNewAgents(from, to));
-        await fill('wr-cs_n', () => getActivityTypeCount(from, to, 'FTF'));
-        await fill('wr-cs_g', () => getActivityTypeCount(from, to, 'GR'));
-        await fill('wr-mt',   () => getEventCategoryHeadcount(from, to, ['代理重要会议']));
-        await fill('wr-tr',   () => getActivityTypeCount(from, to, 'AGENT_TRAINING'));
-        await fill('wr-cr',   () => getEventCategoryHeadcount(from, to, ['课程']));
-        // SECTION 2
-        await fill('wr-cf',    () => getCFHeadcount(from, to));
-        await fill('wr-ft_n',  () => getEventCategoryHeadcount(from, to, ['个人风水基础课', '环境风水基础课']));
-        await fill('wr-ft_kk', () => getEventCategoryHeadcount(from, to, ['老板每月主题课', '运程讲座', '新春活动']));
-        await fill('wr-it',    () => getEventCategoryHeadcount(from, to, ['个人改命分享会', '风水改命分享会-简易', '风水改命分享会-专案', '画作分享会', '艺品分享会', '福气分享会'], ['customer']));
-        await fill('wr-hj',    () => getEventCategoryHeadcount(from, to, ['汇聚-专案', '汇集-商业', '汇集-灵活', '汇集-简易']));
-        await fill('wr-rs',    () => getEventCategoryHeadcount(from, to, ['代理补习班']));
-        await fill('wr-mz',    () => getEventCategoryHeadcount(from, to, ['博物馆']));
-        // NC — prospect→customer conversions (regardless of payment).
-        await fill('wr-nc',    () => getConvertedCustomers(from, to));
-        // SECTION 3 (sales). PO = POP — the ONLY pre-order/deposit payment type in the
-        // schema (it alone carries pop_down_payment / monthly / tenure); DO = full
-        // payment = every other method. So POR / PORT(TOTAL) / RMT / TTO come straight
-        // from the existing purchase getters.
-        //
-        // NPO (installment-package deals) also belong under PORT (the PO bucket) per the
-        // owner — NEVER under RMT. We fetch the week's NPO aggregate ONCE and ADD it to
-        // POR / PORT(DP) / PORT(TOTAL). _getNPOWeekAgg returns null if npo_sales isn't
-        // applied yet or the query errors → in that case each PORT cell falls back to
-        // exactly its prior behavior (PO-only for POR/PORT(TOTAL); MANUAL for PORT(DP)),
-        // so a missing table never writes a wrong/zero NPO number to a boss-facing field.
-        const _npo = await _getNPOWeekAgg(from, to); // null = unavailable → no NPO add
-        // POR = PO closed-case count + count of NPO orders created this week.
-        await fill('wr-por', async () => {
-            const po = await getPOPCaseCount(from, to);
-            if (!Number.isFinite(po)) return po; // propagate non-finite → leave MANUAL
-            return po + (_npo ? _npo.count : 0);
-        });
-        await fill('wr-rmt',        () => getDOSales(from, to));      // DO (full-payment) sales RM — NPO never lands here
-        // PORT(TOTAL) = PO total sales RM + sum(cart_total) of this week's NPO orders.
-        await fill('wr-port_total', async () => {
-            const po = await getPOPSales(from, to);
-            if (!Number.isFinite(po)) return po; // propagate non-finite → leave MANUAL
-            return po + (_npo ? _npo.total : 0);
-        });
-        // PORT(DP) = down-payment collected this week. The CRM purchases row has no
-        // aggregable PO down-payment (it lives on the closing record), so the ONLY
-        // confident source is NPO's first_payment. Fill it ONLY when NPO data is
-        // available; if npo_sales is missing/errored (_npo === null) leave it MANUAL.
-        if (_npo) {
-            await fill('wr-port_dp', async () => _npo.dp); // sum(first_payment) of NPO this week
-        }
-        // TTO = PORT(TOTAL) + RMT (owner's formula) — sum the SAME two PURCHASE values.
-        // TTO is a pending formula and is left exactly as-is (NPO is NOT folded into it
-        // here, by owner instruction — revisit once the TTO definition is confirmed).
-        await fill('wr-tto', async () => {
-            const [doSales, poSales] = await Promise.all([getDOSales(from, to), getPOPSales(from, to)]);
-            return doSales + poSales;
-        });
+        // SECTION 3's PORT cells fold in NPO (installment-package) deals, which live in
+        // a separate Phase-2 table. Fetch that aggregate ONCE up front. _getNPOWeekAgg
+        // returns null if npo_sales isn't applied yet or the query errors → each PORT
+        // cell then falls back to PO-only (POR/PORT(TOTAL)) / MANUAL (PORT(DP)), so a
+        // missing table never writes a wrong/zero NPO number to a boss-facing field.
+        // Owner: NPO counts under PORT (the PO bucket), NEVER under RMT.
+        const _npo = await withTimeout(() => _getNPOWeekAgg(from, to)); // null/undefined = no NPO add
+        const npo = _npo || null;
+        // All fills run CONCURRENTLY (each independent, different cell): one slow or hung
+        // getter can no longer block the others, and per-fill recalc keeps the preview
+        // live as results stream in. fill() never rejects, so Promise.all always settles.
+        await Promise.all([
+            // SECTION 1
+            fill('wr-cps',  () => getCPSCount(from, to)),
+            fill('wr-pja',  () => getNewAgents(from, to)),
+            fill('wr-cs_n', () => getActivityTypeCount(from, to, 'FTF')),
+            fill('wr-cs_g', () => getActivityTypeCount(from, to, 'GR')),
+            fill('wr-mt',   () => getEventCategoryHeadcount(from, to, ['代理重要会议'])),
+            fill('wr-tr',   () => getActivityTypeCount(from, to, 'AGENT_TRAINING')),
+            fill('wr-cr',   () => getEventCategoryHeadcount(from, to, ['课程'])),
+            // SECTION 2
+            fill('wr-cf',    () => getCFHeadcount(from, to)),
+            fill('wr-ft_n',  () => getEventCategoryHeadcount(from, to, ['个人风水基础课', '环境风水基础课'])),
+            fill('wr-ft_kk', () => getEventCategoryHeadcount(from, to, ['老板每月主题课', '运程讲座', '新春活动'])),
+            fill('wr-it',    () => getEventCategoryHeadcount(from, to, ['个人改命分享会', '风水改命分享会-简易', '风水改命分享会-专案', '画作分享会', '艺品分享会', '福气分享会'], ['customer'])),
+            fill('wr-hj',    () => getEventCategoryHeadcount(from, to, ['汇聚-专案', '汇集-商业', '汇集-灵活', '汇集-简易'])),
+            fill('wr-rs',    () => getEventCategoryHeadcount(from, to, ['代理补习班'])),
+            fill('wr-mz',    () => getEventCategoryHeadcount(from, to, ['博物馆'])),
+            // NC — prospect→customer conversions (regardless of payment).
+            fill('wr-nc',    () => getConvertedCustomers(from, to)),
+            // SECTION 3 (sales). PO = POP — the ONLY pre-order/deposit payment type in
+            // the schema (it alone carries pop_down_payment / monthly / tenure); DO =
+            // full payment = every other method. POR / PORT(TOTAL) / RMT / TTO come
+            // straight from the existing purchase getters, with NPO ADDED to the PORT
+            // cells (POR / PORT(DP) / PORT(TOTAL)) only — never RMT/TTO.
+            // POR = PO closed-case count + count of NPO orders created this week.
+            fill('wr-por', async () => {
+                const po = await getPOPCaseCount(from, to);
+                if (!Number.isFinite(po)) return po; // propagate non-finite → leave MANUAL
+                return po + (npo ? npo.count : 0);
+            }),
+            fill('wr-rmt', () => getDOSales(from, to)), // DO (full-payment) sales RM — NPO never lands here
+            // PORT(TOTAL) = PO total sales RM + sum(cart_total) of this week's NPO orders.
+            fill('wr-port_total', async () => {
+                const po = await getPOPSales(from, to);
+                if (!Number.isFinite(po)) return po; // propagate non-finite → leave MANUAL
+                return po + (npo ? npo.total : 0);
+            }),
+            // PORT(DP) = down-payment collected this week. The purchases row has no
+            // aggregable PO down-payment (it lives on the closing record), so the ONLY
+            // confident source is NPO's first_payment — fill ONLY when NPO data exists.
+            ...(npo ? [fill('wr-port_dp', async () => npo.dp)] : []),
+            // TTO = PORT(TOTAL) + RMT (owner's formula) — sum the SAME two PURCHASE
+            // values. NPO is NOT folded into TTO here, by owner instruction.
+            fill('wr-tto', async () => {
+                const [doSales, poSales] = await Promise.all([getDOSales(from, to), getPOPSales(from, to)]);
+                return doSales + poSales;
+            }),
+        ]);
         // Still MANUAL (no reliable source): TX (no book sales) and PD(DO/PO)+SR(DO/PO)
-        // (item→product-group split is free-text, not classifiable). PORT(DP) is now
-        // auto-filled from NPO first_payment when npo_sales exists, else MANUAL. Re-sum
-        // if touched.
+        // (item→product-group split is free-text, not classifiable). Final re-sum in
+        // case the very last fill's recalc raced an earlier one.
         if (_touched) recalcWeeklyReport();
     };
 
