@@ -3068,10 +3068,10 @@
       UI.showModal('每天一智 · Daily Wisdom', html, [
         { label: '收到 · Got it', type: 'primary', action: 'UI.hideModal()' }
       ]);
-      // Auto-close after 10s unless the user already dismissed it.
+      // Auto-close after 60s unless the user already dismissed it.
       setTimeout(function () {
         try { (window.UI && UI.hideModal) && UI.hideModal(); } catch (e) {}
-      }, 10000);
+      }, 60000);
     } catch (e) { /* never block login on the popup */ }
   };
 })();
