@@ -92,6 +92,10 @@
     const _qrQuarter = (dt) => dt ? `${dt.getFullYear()}Q${Math.floor(dt.getMonth() / 3) + 1}` : null;
     const _qrPrevQ = (q) => { const m = /^(\d{4})Q(\d)$/.exec(q || ''); if (!m) return null; let y = +m[1], n = +m[2]; n--; if (n < 1) { n = 4; y--; } return `${y}Q${n}`; };
     const _qrYoYQ = (q) => { const m = /^(\d{4})Q(\d)$/.exec(q || ''); return m ? `${+m[1] - 1}Q${m[2]}` : null; };
+    const _qrNextQ = (q) => { const m = /^(\d{4})Q(\d)$/.exec(q || ''); if (!m) return null; let y = +m[1], n = +m[2]; n++; if (n > 4) { n = 1; y++; } return `${y}Q${n}`; };
+    // ── QBR Operating-System layer state (Input 5 context, targets, actions, forecasts, saved review, narrative) ──
+    // Kept separate from _qrState (which resets on every file load) so OS data survives re-uploads within a session.
+    let _qbr = { tab: 'analysis', context: '', marginPct: null, targets: [], actions: [], forecasts: [], review: null, narrative: null, narrativeSource: null, osLoaded: false, busy: false };
     const _qrKey = (row, ...cands) => {
         const low = {}; Object.keys(row).forEach(k => { low[k.trim().toLowerCase()] = k; });
         for (const c of cands) { if (low[c.toLowerCase()]) return low[c.toLowerCase()]; }
@@ -533,10 +537,12 @@
         _qrState.computed = true;
         if (!_qrState.focusQuarter && _qrState.agg.quarters.length) _qrState.focusQuarter = _qrState.agg.quarters[_qrState.agg.quarters.length - 1];
         _renderResults();
+        // Load the accountability layer (targets/actions/forecasts/review) then re-render; degrades silently if tables absent.
+        _qbrLoadOS(_qrState.focusQuarter).then(_renderResults);
         UI.toast.success('Quarter Review generated');
     };
 
-    const qrSelectQuarter = (q) => { _qrState.focusQuarter = q; _renderResults(); };
+    const qrSelectQuarter = (q) => { _qrState.focusQuarter = q; _qbr.context = ''; _qbr.narrative = null; _qbr.narrativeSource = null; _renderResults(); _qbrLoadOS(q).then(_renderResults); };
 
     // ====================================================================
     // INSIGHTS
@@ -626,14 +632,13 @@
             <div style="margin-top:10px;font-size:13px;color:var(--gray-600);">Merged &amp; deduped: <b>${_qrInt(ni)}</b> POS invoices · <b>${_qrInt(nl)}</b> POS lines · <b>${_qrInt(no)}</b> online lines · <b>${_qrInt(nw)}</b> wholesale lines${nc ? ` · <b>${_qrInt(nc)}</b> uploaded-catalog overrides` : ''}<br><span style="color:var(--gray-400);">Built-in catalog (${_qrInt(Object.keys(_QR_CATALOG_EMBED).length)} products) supplies sizes, bottle counts &amp; prices.</span></div></div>`;
     };
 
-    const _renderResults = () => {
-        const root = document.getElementById('qr-results');
-        if (!root) return;
-        const agg = _qrState.agg; if (!agg) { root.innerHTML = ''; return; }
+    // Analysis-tab HTML (returns a string). Enriched with Health Score, Revenue Decomposition,
+    // GP/NP and Opportunity Ranking layered on top of the original roll-ups.
+    const _qbrAnalysisCoreHtml = () => {
+        const agg = _qrState.agg; if (!agg) return '';
         // Wholesale-only upload (no retail quarters) — render just the wholesale section.
         if (!agg.quarters.length) {
-            root.innerHTML = `${_sect('Overall')}<div style="color:var(--gray-500);font-size:13px;">No retail (POS/Online) sales in the uploaded files.</div>${_wholeSection(agg)}`;
-            return;
+            return `${_sect('Overall')}<div style="color:var(--gray-500);font-size:13px;">No retail (POS/Online) sales in the uploaded files.</div>${_wholeSection(agg)}`;
         }
         const fq = _qrState.focusQuarter;
         const cur = agg.byQ[fq] || { rev: 0, orders: 0, members: new Set() };
@@ -654,7 +659,8 @@
         const insBox = (items, good) => items.length ? items.map(i => `<div style="background:${good ? '#f0fdf4' : '#fef2f2'};border-left:4px solid ${good ? '#0b8a4e' : '#dc2626'};border-radius:8px;padding:12px 14px;margin:8px 0;"><div style="font-weight:600;color:var(--gray-900);">${good ? '✅' : '⚠️'} ${escapeHtml(i.t)}</div><div style="font-size:13px;color:var(--gray-600);margin-top:3px;">${escapeHtml(i.d)}</div></div>`).join('') : `<div style="color:var(--gray-400);font-size:13px;">None detected.</div>`;
         const sys = agg.bySystem;
 
-        root.innerHTML = `
+        return `
+            ${_qbrHealthHtml(agg, fq)}
             ${sect('Overall — POS + Online merged')}
             <div style="display:flex;flex-wrap:wrap;gap:12px;">
                 ${_card('Total Revenue', _qrRM(agg.totRev))}
@@ -663,6 +669,7 @@
                 ${_card('Units Sold (bottles)', _qrInt(agg.bottles), 'qty × pack size')}
                 ${_card('Unique Members', _qrInt(agg.nMembers), 'name-matched')}
             </div>
+            ${_qbrGpNpHtml(agg)}
             <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:12px;">
                 ${_card('POS Revenue', _qrRM(sys.POS.rev), _qrInt(sys.POS.bottles) + ' bottles')}
                 ${_card('Online Revenue', _qrRM(sys.Online.rev), _qrInt(sys.Online.bottles) + ' bottles · Tier-B priced')}
@@ -680,6 +687,8 @@
                 ${_card('New Customers', newCust === null ? 'n/a' : _qrInt(newCust), prevQ ? 'vs ' + prevQ.replace('Q', ' Q') : '')}
                 ${_card('Repeat Customers', repeatCust === null ? 'n/a' : _qrInt(repeatCust), 'returning members')}
             </div>
+
+            ${_qbrDecompHtml(agg, fq)}
 
             <div style="display:flex;flex-wrap:wrap;gap:18px;margin-top:24px;">
                 <div style="flex:1;min-width:300px;">${sect('✅ What Went Right')}${insBox(ins.right, true)}</div>
@@ -707,6 +716,8 @@
                 ${agg.customers.length ? _bars(agg.customers.slice(0, 10), r => r.spend, r => r.member + '  (' + _qrInt(r.orders) + ')', '#8b5cf6') : '<div style="color:var(--gray-400);font-size:13px;">No member names.</div>'}
             </div>
 
+            ${_qbrOpportunityHtml(agg, fq)}
+
             ${_wholeSection(agg)}
 
             ${agg.unmapped.length ? `${sect('⚠ Codes not in the Product List (counted as 1 bottle, RM 0 online) — add these &amp; re-run')}
@@ -722,6 +733,24 @@
             <div style="font-size:11px;color:var(--gray-400);margin-top:18px;line-height:1.6;">
                 POS revenue = real invoice totals (FORMULA "Online Offline"). Online revenue = quantity × Tier-B price (Advance Member / Retail Offer / Premium) from the Product List. Units = actual bottles (quantity × pack-size). Products roll up by name + size; agent-promo &amp; package variants fold into the base product; multi-product gift bundles count as 1 package. Customer new-vs-repeat is name-matched (no member ID) and indicative.
             </div>`;
+    };
+
+    // ── Tab bar + render dispatcher (Analysis / Board Pack / Accountability) ──
+    const _qbrTabBar = () => {
+        const tab = (id, label) => `<button onclick="app.qbrSetTab('${id}')" class="qbr-noprint" style="padding:8px 16px;border:none;border-bottom:3px solid ${_qbr.tab === id ? '#6366f1' : 'transparent'};background:none;color:${_qbr.tab === id ? '#4338ca' : 'var(--gray-500)'};font-weight:${_qbr.tab === id ? 700 : 500};cursor:pointer;font-size:14px;">${label}</button>`;
+        return `<div class="qbr-noprint" style="display:flex;gap:4px;border-bottom:1px solid var(--gray-200);margin:6px 0 18px;flex-wrap:wrap;">${tab('analysis', '📊 Analysis')}${tab('board', '📑 Board Pack')}${tab('accountability', '✅ Accountability')}</div>`;
+    };
+
+    const _renderResults = () => {
+        const root = document.getElementById('qr-results');
+        if (!root) return;
+        const agg = _qrState.agg;
+        if (!agg) { root.innerHTML = ''; return; }
+        let body;
+        if (_qbr.tab === 'board') body = _qbrRenderBoardPack(agg, _qrState.focusQuarter);
+        else if (_qbr.tab === 'accountability') body = _qbrRenderAccountability(agg, _qrState.focusQuarter);
+        else body = _qbrAnalysisCoreHtml();
+        root.innerHTML = _qbrTabBar() + body;
     };
 
     // ====================================================================
@@ -759,6 +788,494 @@
     };
 
     // ====================================================================
+    // QBR OPERATING SYSTEM — heuristic analysis engine + accountability + board pack
+    // Computes every number in-app; the optional LLM layer only writes prose.
+    // ====================================================================
+    const _qbrPct1 = (x) => (x >= 0 ? '+' : '') + (x || 0).toFixed(1) + '%';
+    const _qbrQMeta = (q) => { const m = /^(\d{4})Q(\d)$/.exec(q || ''); return m ? { year: +m[1], q: +m[2] } : null; };
+    const _qbrGrowth = (cur, prev) => (prev ? (cur - prev) / prev * 100 : null);
+    const _qbrTLg = (g) => g === null || g === undefined ? 'na' : (g >= 5 ? 'green' : (g <= -5 ? 'red' : 'amber'));
+    const _qbrTLt = (val, tgt) => (!tgt ? 'na' : (val >= tgt ? 'green' : (val >= tgt * 0.9 ? 'amber' : 'red')));
+    const _qbrTLcell = (grade, txt) => grade === 'na' ? `<span style="color:var(--gray-400);">n/a</span>` : `<span class="tl-${grade}">${txt}</span>`;
+
+    // Count of members new in quarter q vs its predecessor (null if no predecessor).
+    const _qbrNewCount = (agg, q) => {
+        const cur = agg.byQ[q], prev = agg.byQ[_qrPrevQ(q)];
+        if (!cur || !prev) return null;
+        return [...cur.members].filter(m => !prev.members.has(m)).length;
+    };
+    // Quarterly target row for q (year + quarter number), or null.
+    const _qbrTargetRow = (q) => {
+        const meta = _qbrQMeta(q); if (!meta) return null;
+        return (_qbr.targets || []).find(t => (+t.year) === meta.year && (+t.quarter) === meta.q) || null;
+    };
+
+    // ── STAGE 1 — Business Health Score ──────────────────────────────────
+    const _qbrHealthRows = (agg, q) => {
+        const cur = agg.byQ[q]; if (!cur) return [];
+        const prevQ = _qrPrevQ(q), prev = agg.byQ[prevQ];
+        const yoyQ = _qrYoYQ(q), yoy = agg.byQ[yoyQ];
+        const tgt = _qbrTargetRow(q);
+        const aov = (x) => x && x.orders ? x.rev / x.orders : 0;
+        const newC = _qbrNewCount(agg, q), newP = _qbrNewCount(agg, prevQ), newY = _qbrNewCount(agg, yoyQ);
+        const rows = [
+            { kpi: 'Revenue', value: cur.rev, fmt: _qrRM, qoq: _qbrGrowth(cur.rev, prev && prev.rev), yoy: _qbrGrowth(cur.rev, yoy && yoy.rev), target: tgt ? +tgt.total_sales_target : null },
+            { kpi: 'Orders', value: cur.orders, fmt: _qrInt, qoq: _qbrGrowth(cur.orders, prev && prev.orders), yoy: _qbrGrowth(cur.orders, yoy && yoy.orders), target: null },
+            { kpi: 'AOV', value: aov(cur), fmt: _qrRM, qoq: _qbrGrowth(aov(cur), prev && aov(prev)), yoy: _qbrGrowth(aov(cur), yoy && aov(yoy)), target: null },
+            { kpi: 'New Customers', value: newC, fmt: _qrInt, qoq: (newC != null && newP != null) ? _qbrGrowth(newC, newP) : null, yoy: (newC != null && newY != null) ? _qbrGrowth(newC, newY) : null, target: tgt ? +tgt.new_customers_target : null },
+            { kpi: 'Unique Members', value: cur.members.size, fmt: _qrInt, qoq: _qbrGrowth(cur.members.size, prev && prev.members.size), yoy: _qbrGrowth(cur.members.size, yoy && yoy.members.size), target: null },
+        ];
+        const order = { red: 0, amber: 1, na: 2, green: 3 };
+        rows.forEach(r => {
+            r.tlQoQ = _qbrTLg(r.qoq); r.tlYoY = _qbrTLg(r.yoy);
+            r.tlTgt = (r.target && r.value != null) ? _qbrTLt(r.value, r.target) : 'na';
+            r.status = [r.tlQoQ, r.tlYoY, r.tlTgt].filter(x => x !== 'na').sort((a, b) => order[a] - order[b])[0] || 'na';
+        });
+        return rows;
+    };
+    const _qbrHealthRowHtml = (r) => `<tr>
+        <td style="text-align:left;font-weight:600;"><span class="tl-dot tl-${r.status}"></span> ${r.kpi}</td>
+        <td class="qbr-num">${r.value == null ? 'n/a' : r.fmt(r.value)}</td>
+        <td class="qbr-num">${_qbrTLcell(r.tlQoQ, r.qoq == null ? '' : _qbrPct1(r.qoq))}</td>
+        <td class="qbr-num">${_qbrTLcell(r.tlYoY, r.yoy == null ? '' : _qbrPct1(r.yoy))}</td>
+        <td class="qbr-num">${(r.target && r.value != null) ? _qbrTLcell(r.tlTgt, ((r.value / r.target) * 100).toFixed(0) + '%') : '<span style="color:var(--gray-400);">—</span>'}</td>
+    </tr>`;
+    const _qbrHealthHtml = (agg, q) => {
+        const rows = _qbrHealthRows(agg, q); if (!rows.length) return '';
+        return `${_sect('🚦 Business Health Score — ' + q.replace('Q', ' Q'))}
+            <table class="qbr-kpi-table">
+                <thead><tr><th style="text-align:left;">KPI</th><th class="qbr-num">Value</th><th class="qbr-num">QoQ</th><th class="qbr-num">YoY</th><th class="qbr-num">vs Target</th></tr></thead>
+                <tbody>${rows.map(_qbrHealthRowHtml).join('')}</tbody>
+            </table>
+            <div style="font-size:11px;color:var(--gray-400);margin-top:6px;">🟢 ≥ +5% or ≥ target · 🟡 within ±5% or ≥ 90% of target · 🔴 ≤ −5% or &lt; 90% of target. Targets from Quarterly Targets (Reports tab); “—” = no target set.</div>`;
+    };
+
+    // ── STAGE 2 — Revenue Decomposition (Revenue = Orders × AOV identity) ──
+    const _qbrDecomp = (agg, q) => {
+        const cur = agg.byQ[q], prev = agg.byQ[_qrPrevQ(q)];
+        if (!cur || !prev || !prev.rev) return null;
+        const aov = (x) => x.orders ? x.rev / x.orders : 0;
+        const dO = cur.orders - prev.orders, dA = aov(cur) - aov(prev);
+        const orderEffect = dO * aov(prev), aovEffect = dA * prev.orders, mixed = dO * dA;
+        const dRev = cur.rev - prev.rev;
+        const denom = Math.abs(orderEffect) + Math.abs(aovEffect) + Math.abs(mixed) || 1;
+        const repeat = [...cur.members].filter(m => prev.members.has(m)).length;
+        const repeatRate = cur.members.size ? repeat / cur.members.size * 100 : 0;
+        const ppQ = _qrPrevQ(_qrPrevQ(q)), pp = agg.byQ[ppQ];
+        const prevRepeat = (pp && prev.members.size) ? [...prev.members].filter(m => pp.members.has(m)).length / prev.members.size * 100 : null;
+        return { dRev, orderEffect, aovEffect, mixed, orderShare: Math.abs(orderEffect) / denom * 100, aovShare: Math.abs(aovEffect) / denom * 100, mixedShare: Math.abs(mixed) / denom * 100, repeatRate, repeatDelta: prevRepeat == null ? null : repeatRate - prevRepeat };
+    };
+    const _qbrDecompHtml = (agg, q) => {
+        const d = _qbrDecomp(agg, q); if (!d) return '';
+        const dir = (v) => v >= 0 ? '#0b8a4e' : '#dc2626';
+        const bar = (label, val, share, color) => `
+            <div style="margin:6px 0;">
+                <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px;"><span style="color:var(--gray-700);">${label}</span><span style="color:${dir(val)};font-weight:600;">${val >= 0 ? '+' : ''}${_qrRM(val)} · ${share.toFixed(0)}%</span></div>
+                <div style="background:var(--gray-100);border-radius:5px;overflow:hidden;height:12px;"><div style="width:${share.toFixed(1)}%;height:12px;background:${color};"></div></div>
+            </div>`;
+        return `${_sect('🔬 Revenue Decomposition — why revenue moved (QoQ)')}
+            <div style="background:white;border:1px solid var(--gray-200);border-radius:12px;padding:16px;">
+                <div style="font-size:14px;color:var(--gray-800);margin-bottom:10px;">Revenue ${d.dRev >= 0 ? 'grew' : 'declined'} <b style="color:${dir(d.dRev)};">${d.dRev >= 0 ? '+' : ''}${_qrRM(d.dRev)}</b> vs the prior quarter — split by driver:</div>
+                ${bar('Order-count effect', d.orderEffect, d.orderShare, '#0ea5e9')}
+                ${bar('Basket-size (AOV) effect', d.aovEffect, d.aovShare, '#8b5cf6')}
+                ${bar('Combined / mix', d.mixed, d.mixedShare, '#94a3b8')}
+                <div style="font-size:12px;color:var(--gray-500);margin-top:10px;border-top:1px dashed var(--gray-200);padding-top:8px;">
+                    Repeat-customer rate: <b>${d.repeatRate.toFixed(0)}%</b>${d.repeatDelta == null ? '' : ` (${d.repeatDelta >= 0 ? '+' : ''}${d.repeatDelta.toFixed(0)} pts QoQ)`}. Traffic &amp; conversion are <b>n/a</b> — not tracked in the CRM (add web analytics to complete the full Revenue = Traffic × Conversion × Orders × AOV × Repeat chain).
+                </div>
+            </div>`;
+    };
+
+    // ── STAGE 4 — Opportunity Ranking (indicative upside from your own data) ──
+    const _qbrOpportunities = (agg, q) => {
+        const cur = agg.byQ[q], prev = agg.byQ[_qrPrevQ(q)];
+        const ops = [];
+        const aov = (x) => x && x.orders ? x.rev / x.orders : 0;
+        if (cur && prev && aov(prev) > aov(cur)) ops.push({ title: 'Recover AOV to prior-quarter level', potential: (aov(prev) - aov(cur)) * cur.orders, difficulty: 'Medium', how: `Basket fell from ${_qrRM(aov(prev))} to ${_qrRM(aov(cur))}; bundle / upsell across ${_qrInt(cur.orders)} orders.` });
+        if (cur && prev) {
+            const lapsed = [...prev.members].filter(m => !cur.members.has(m));
+            const prevAvg = prev.members.size ? prev.rev / prev.members.size : 0;
+            if (lapsed.length) ops.push({ title: `Reactivate ${lapsed.length} lapsed customers`, potential: lapsed.length * prevAvg * 0.3, difficulty: 'Low', how: `${lapsed.length} members bought in ${_qrPrevQ(q).replace('Q', ' Q')} but not this quarter; win back ~30% at ${_qrRM(prevAvg)} avg.` });
+        }
+        if (agg.products && agg.products.length) { const hero = agg.products[0]; ops.push({ title: `Hero-product campaign: ${hero.group.split(' | ')[0]}`, potential: hero.rev * 0.15, difficulty: 'Low', how: `Top product did ${_qrRM(hero.rev)}; a focused +15% push.` }); }
+        const tgt = _qbrTargetRow(q), newC = _qbrNewCount(agg, q);
+        if (tgt && tgt.new_customers_target && newC != null && newC < +tgt.new_customers_target) ops.push({ title: 'Close the new-customer gap to target', potential: (+tgt.new_customers_target - newC) * agg.aov, difficulty: 'Medium', how: `${newC} new vs target ${tgt.new_customers_target}; ${(+tgt.new_customers_target - newC)} more × ${_qrRM(agg.aov)} AOV.` });
+        return ops.filter(o => o.potential > 0).sort((a, b) => b.potential - a.potential).slice(0, 5);
+    };
+    const _qbrStars = (diff) => diff === 'Low' ? '⭐⭐⭐⭐⭐' : diff === 'Medium' ? '⭐⭐⭐⭐' : '⭐⭐⭐';
+    const _qbrOpportunityHtml = (agg, q) => {
+        const ops = _qbrOpportunities(agg, q); if (!ops.length) return '';
+        return `${_sect('💡 Opportunity Ranking — estimated upside')}
+            <table class="qbr-kpi-table">
+                <thead><tr><th style="text-align:left;">Opportunity</th><th class="qbr-num">Revenue potential</th><th class="qbr-num">Difficulty</th><th class="qbr-num">Priority</th></tr></thead>
+                <tbody>${ops.map(o => `<tr><td style="text-align:left;font-weight:600;">${escapeHtml(o.title)}<div style="font-weight:400;font-size:12px;color:var(--gray-500);margin-top:2px;">${escapeHtml(o.how)}</div></td><td class="qbr-num qbr-pos">${_qrRM(o.potential)}</td><td class="qbr-num">${o.difficulty}</td><td class="qbr-num">${_qbrStars(o.difficulty)}</td></tr>`).join('')}</tbody>
+            </table>
+            <div style="font-size:11px;color:var(--gray-400);margin-top:6px;">Potentials are indicative heuristics from your own quarter data, not commitments.</div>`;
+    };
+
+    // ── STAGE 3 — structured Root-Cause (Problem→Evidence→Cause→Impact→Solution) ──
+    const _qbrRootCause = (agg, q) => {
+        const reds = _qbrHealthRows(agg, q).filter(r => r.status === 'red');
+        const d = _qbrDecomp(agg, q);
+        return reds.map(r => {
+            let cause = 'Underperformance vs prior period / target.', solution = 'Prioritise in the 90-day plan.';
+            if (r.kpi === 'Revenue' && d) {
+                if (d.aovShare >= d.orderShare) { cause = `Basket size shrank (AOV effect ~${d.aovShare.toFixed(0)}% of the move).`; solution = 'Bundle & upsell to lift AOV; review discounting.'; }
+                else { cause = `Fewer orders (order-count effect ~${d.orderShare.toFixed(0)}% of the move).`; solution = 'Reactivate lapsed buyers; strengthen acquisition.'; }
+            } else if (r.kpi === 'AOV') { cause = 'Customers bought fewer / lower-value items.'; solution = 'Bundles, threshold offers, richer premium mix.'; }
+            else if (r.kpi === 'Orders') { cause = 'Order volume fell — traffic or repeat purchase down.'; solution = 'CRM reactivation + acquisition push.'; }
+            else if (r.kpi === 'New Customers') { cause = 'Acquisition below target / prior.'; solution = 'Review lead sources & referral engine.'; }
+            else if (r.kpi === 'Unique Members') { cause = 'Active member base contracted.'; solution = 'Retention & win-back campaigns.'; }
+            return { problem: `${r.kpi} ${r.qoq != null && r.qoq < 0 ? 'down ' + _qbrPct1(r.qoq) + ' QoQ' : 'below target'}`, evidence: `${r.value == null ? 'n/a' : r.fmt(r.value)}${r.target ? ' vs target ' + r.fmt(r.target) : ''}`, cause, impact: (r.kpi === 'Revenue' && d) ? `${_qrRM(Math.abs(d.dRev))} swing` : 'Pressures the quarter outcome', solution };
+        });
+    };
+
+    // ── Optional Gross-Profit estimate (no COGS in the CRM → manual margin %) ──
+    const _qbrGpNpHtml = (agg) => {
+        if (_qbr.marginPct == null) return `<div style="font-size:12px;color:var(--gray-400);margin-top:8px;">Gross / Net Profit: <b>n/a</b> — no cost data in the CRM. <button class="btn qbr-noprint" onclick="app.qbrSetMargin()" style="background:none;border:1px solid var(--gray-300);border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;color:var(--gray-600);">Set gross margin %</button></div>`;
+        const gp = agg.totRev * _qbr.marginPct / 100;
+        return `<div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:12px;">
+            ${_card('Gross Profit (est.)', _qrRM(gp), _qbr.marginPct + '% margin')}
+            ${_card('Gross Margin', _qbr.marginPct + '%', 'manual input')}
+            <div style="display:flex;align-items:center;"><button class="btn qbr-noprint" onclick="app.qbrSetMargin()" style="background:none;border:1px solid var(--gray-300);border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;color:var(--gray-600);">Edit margin</button></div>
+        </div>`;
+    };
+    const qbrSetMargin = () => {
+        const v = prompt('Gross margin % (blank to clear):', _qbr.marginPct == null ? '' : String(_qbr.marginPct));
+        if (v === null) return;
+        const n = parseFloat(v);
+        _qbr.marginPct = (String(v).trim() === '' || isNaN(n)) ? null : Math.max(0, Math.min(100, n));
+        _renderResults();
+    };
+
+    // ── Accountability data layer (targets/actions/forecasts/review) ─────
+    async function _qbrLoadOS(q) {
+        _qbr.osLoaded = false;
+        try { _qbr.targets = (await AppDataStore.getAll('quarterly_targets')) || []; } catch (e) { _qbr.targets = []; }
+        try { _qbr.actions = (await AppDataStore.getAll('qbr_actions')) || []; } catch (e) { _qbr.actions = []; }
+        try { _qbr.forecasts = (await AppDataStore.getAll('qbr_forecasts')) || []; } catch (e) { _qbr.forecasts = []; }
+        try { const all = (await AppDataStore.getAll('qbr_reviews')) || []; _qbr.review = all.find(r => r.quarter === q) || null; if (_qbr.review && typeof _qbr.review.context === 'string') _qbr.context = _qbr.review.context; } catch (e) { _qbr.review = null; }
+        _qbr.osLoaded = true;
+    }
+
+    // ── Snapshot fed to the LLM endpoint and saved with the review ───────
+    const _qbrSnapshot = (agg, q) => {
+        const cur = agg.byQ[q] || { rev: 0, orders: 0, members: new Set() };
+        const d = _qbrDecomp(agg, q);
+        return {
+            quarter: q, coverageFrom: agg.dateFrom ? agg.dateFrom.toISOString().slice(0, 10) : null, coverageTo: agg.dateTo ? agg.dateTo.toISOString().slice(0, 10) : null,
+            totals: { revenue: Math.round(agg.totRev), orders: agg.nOrders, aov: Math.round(agg.aov), bottles: Math.round(agg.bottles), members: agg.nMembers, posRevenue: Math.round(agg.bySystem.POS.rev), onlineRevenue: Math.round(agg.bySystem.Online.rev) },
+            focusQuarter: { revenue: Math.round(cur.rev), orders: cur.orders, members: cur.members.size },
+            health: _qbrHealthRows(agg, q).map(r => ({ kpi: r.kpi, value: r.value, qoq: r.qoq == null ? null : +r.qoq.toFixed(1), yoy: r.yoy == null ? null : +r.yoy.toFixed(1), target: r.target, status: r.status })),
+            decomposition: d ? { dRev: Math.round(d.dRev), orderShare: Math.round(d.orderShare), aovShare: Math.round(d.aovShare), repeatRate: Math.round(d.repeatRate) } : null,
+            opportunities: _qbrOpportunities(agg, q).map(o => ({ title: o.title, potential: Math.round(o.potential), difficulty: o.difficulty })),
+            rootCause: _qbrRootCause(agg, q),
+            topProducts: agg.products.slice(0, 5).map(p => ({ name: p.group, revenue: Math.round(p.rev) })),
+            topCustomers: agg.customers.slice(0, 5).map(c => ({ name: c.member, spend: Math.round(c.spend) })),
+        };
+    };
+
+    // ── Heuristic narrative (used when the AI endpoint is not configured) ─
+    const _qbrHeuristicNarrative = (agg, q) => {
+        const cur = agg.byQ[q] || { rev: 0, orders: 0, members: new Set() };
+        const prev = agg.byQ[_qrPrevQ(q)];
+        const qoq = prev && prev.rev ? (cur.rev - prev.rev) / prev.rev * 100 : null;
+        const rc = _qbrRootCause(agg, q), ops = _qbrOpportunities(agg, q), qLabel = q.replace('Q', ' Q');
+        const opening = `Good morning. In ${qLabel} we recorded ${_qrRM(cur.rev)} in revenue across ${_qrInt(cur.orders)} orders${qoq == null ? '' : `, ${qoq >= 0 ? 'up' : 'down'} ${Math.abs(qoq).toFixed(1)}% versus the prior quarter`}. ${rc.length ? `Our biggest concern is ${rc[0].problem.toLowerCase()} — ${rc[0].cause.toLowerCase()} ` : 'The business is broadly on track. '}${ops.length ? `The clearest opportunity is to ${ops[0].title.toLowerCase()}, worth an estimated ${_qrRM(ops[0].potential)}.` : ''} I'll walk the board through the numbers, the root causes, and a four-initiative 90-day plan.`;
+        const exec = `${qLabel}: revenue ${_qrRM(cur.rev)}${qoq == null ? '' : ` (${qoq >= 0 ? '+' : ''}${qoq.toFixed(1)}% QoQ)`}, AOV ${_qrRM(cur.orders ? cur.rev / cur.orders : 0)}, ${_qrInt(cur.members.size)} active members. ${rc.length ? `${rc.length} KPI(s) are red; the priority is ${rc[0].problem.toLowerCase()}.` : 'No red KPIs this quarter.'}`;
+        const decision = ops.length ? `The board is asked to approve a 90-day plan targeting ${_qrRM(ops.slice(0, 3).reduce((s, o) => s + o.potential, 0))} of identified upside, led by "${ops[0].title}".` : 'The board is asked to approve continuation of the current plan and set next-quarter targets.';
+        return { openingScript: opening, executiveSummary: exec, rootCause: rc.map(r => ({ problem: r.problem, cause: r.cause, impact: r.impact, solution: r.solution })), decisionSummary: decision };
+    };
+    const qbrGenerateNarrative = async () => {
+        if (!isSystemAdmin(_state.cu)) { UI.toast.error('Access denied'); return; }
+        const agg = _qrState.agg; if (!agg) { UI.toast.error('Generate the analysis first'); return; }
+        const q = _qrState.focusQuarter;
+        _qbr.busy = true; _qbr.tab = 'board'; _renderResults();
+        const snapshot = _qbrSnapshot(agg, q);
+        let narrative = null, source = 'heuristic';
+        try {
+            const res = await fetch('/api/qbr-narrative', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ quarter: q, snapshot, context: _qbr.context || '' }) });
+            const j = await res.json();
+            if (j && j.ok && j.narrative) { narrative = j.narrative; source = 'ai'; }
+        } catch (e) { /* fall back to heuristic */ }
+        if (!narrative) narrative = _qbrHeuristicNarrative(agg, q);
+        _qbr.narrative = narrative; _qbr.narrativeSource = source; _qbr.busy = false; _renderResults();
+        UI.toast.success(source === 'ai' ? 'AI narrative generated' : 'Narrative generated (heuristic — set ANTHROPIC_API_KEY for AI prose)');
+    };
+
+    // ── Action / forecast tables (shared by Board Pack + Accountability) ──
+    const _qbrStatusPill = (s) => { const map = { open: ['#6b7280', 'Open'], in_progress: ['#2563eb', 'In progress'], done: ['#0b8a4e', 'Done'], missed: ['#dc2626', 'Missed'], dropped: ['#9ca3af', 'Dropped'] }; const m = map[s] || map.open; return `<span style="color:${m[0]};font-weight:600;">${m[1]}</span>`; };
+    const _qbrActionTable = (quarter, editable) => {
+        const list = (_qbr.actions || []).filter(a => a.quarter === quarter).sort((a, b) => String(a.priority || '').localeCompare(String(b.priority || '')));
+        const rows = list.length ? list.map(a => `<tr>
+            <td style="text-align:left;font-weight:600;">${escapeHtml(a.priority || '')}</td>
+            <td style="text-align:left;">${escapeHtml(a.initiative || '')}</td>
+            <td style="text-align:left;">${escapeHtml(a.owner || '—')}</td>
+            <td style="text-align:left;">${escapeHtml(a.kpi_target || '—')}</td>
+            <td style="text-align:left;">${a.deadline ? escapeHtml(String(a.deadline)) : '—'}</td>
+            <td style="text-align:left;">${_qbrStatusPill(a.status)}${editable ? ` <a href="#" class="qbr-noprint" onclick="event.preventDefault();app.qbrEditActionModal('${a.id}')" style="font-size:11px;">edit</a>` : (a.result ? `<div style="font-size:11px;color:var(--gray-500);">${escapeHtml(a.result)}</div>` : '')}</td>
+        </tr>`).join('') : `<tr><td colspan="6" style="text-align:left;color:var(--gray-400);padding:10px;">No initiatives recorded for ${String(quarter).replace('Q', ' Q')}.</td></tr>`;
+        return `<table class="qbr-kpi-table">
+            <thead><tr><th style="text-align:left;">Priority</th><th style="text-align:left;">Initiative</th><th style="text-align:left;">Owner</th><th style="text-align:left;">KPI target</th><th style="text-align:left;">Deadline</th><th style="text-align:left;">Status</th></tr></thead>
+            <tbody>${rows}</tbody></table>
+            ${editable ? `<button class="btn qbr-noprint" onclick="app.qbrAddActionModal('${quarter}')" style="margin-top:10px;background:#6366f1;border:none;color:white;padding:7px 16px;border-radius:8px;cursor:pointer;font-size:13px;">+ Add initiative</button>` : ''}`;
+    };
+    const _qbrForecastTable = (quarter, showActual) => {
+        const list = (_qbr.forecasts || []).filter(f => f.quarter === quarter);
+        const rows = list.length ? list.map(f => `<tr>
+            <td style="text-align:left;font-weight:600;">${escapeHtml(f.kpi)}</td>
+            <td class="qbr-num">${f.base == null ? '—' : _qrInt(f.base)}</td>
+            <td class="qbr-num">${f.best == null ? '—' : _qrInt(f.best)}</td>
+            <td class="qbr-num">${f.worst == null ? '—' : _qrInt(f.worst)}</td>
+            ${showActual ? `<td class="qbr-num">${f.actual == null ? '<span style="color:var(--gray-400);">pending</span>' : _qrInt(f.actual)}</td>` : ''}
+            <td style="text-align:left;color:var(--gray-500);font-size:12px;">${escapeHtml(f.assumptions || '')}${showActual ? ` <a href="#" class="qbr-noprint" onclick="event.preventDefault();app.qbrSetForecastActual('${f.id}')" style="font-size:11px;">set actual</a>` : ''}</td>
+        </tr>`).join('') : `<tr><td colspan="${showActual ? 6 : 5}" style="text-align:left;color:var(--gray-400);padding:10px;">No forecast recorded for ${String(quarter).replace('Q', ' Q')}.</td></tr>`;
+        return `<table class="qbr-kpi-table">
+            <thead><tr><th style="text-align:left;">KPI</th><th class="qbr-num">Base</th><th class="qbr-num">Best</th><th class="qbr-num">Worst</th>${showActual ? '<th class="qbr-num">Actual</th>' : ''}<th style="text-align:left;">Assumptions</th></tr></thead>
+            <tbody>${rows}</tbody></table>`;
+    };
+
+    // ── PART 3 — Standard 8-slide Board Pack ─────────────────────────────
+    const _qbrRenderBoardPack = (agg, q) => {
+        if (!agg.quarters.length) return `<div style="color:var(--gray-500);padding:20px;">Upload retail (POS/Online) sales to build the board pack.</div>`;
+        const nar = _qbr.narrative || _qbrHeuristicNarrative(agg, q);
+        const cur = agg.byQ[q] || { rev: 0, orders: 0, members: new Set() };
+        const prevQ = _qrPrevQ(q), prev = agg.byQ[prevQ], nextQ = _qrNextQ(q);
+        const qoq = prev && prev.rev ? (cur.rev - prev.rev) / prev.rev * 100 : null;
+        const health = _qbrHealthRows(agg, q), ops = _qbrOpportunities(agg, q), ins = _qrInsights(agg, q);
+        const qLabel = q.replace('Q', ' Q');
+        const newC = _qbrNewCount(agg, q), repeatCust = prev ? [...cur.members].filter(m => prev.members.has(m)).length : null, lapsed = prev ? [...prev.members].filter(m => !cur.members.has(m)).length : null;
+        const num = (n) => `<div class="qbr-slide-num">Slide ${n} / 8</div>`;
+        const rcList = (nar.rootCause && nar.rootCause.length) ? nar.rootCause : [{ problem: 'No red KPIs this quarter', cause: '', impact: '', solution: '' }];
+        return `<div class="qbr-boardpack">
+            <div class="qbr-noprint" style="display:flex;gap:10px;justify-content:flex-end;margin-bottom:10px;flex-wrap:wrap;align-items:center;">
+                <span style="font-size:12px;color:var(--gray-500);">Narrative: <b>${_qbr.narrativeSource === 'ai' ? 'AI (Claude)' : 'heuristic'}</b></span>
+                <button class="btn" onclick="app.qbrGenerateNarrative()" ${_qbr.busy ? 'disabled' : ''} style="background:#10b981;border:none;color:white;padding:7px 16px;border-radius:8px;cursor:pointer;font-size:13px;">${_qbr.busy ? '… generating' : '✨ Generate AI narrative'}</button>
+                <button class="btn" onclick="app.qbrPrint()" style="background:#6366f1;border:none;color:white;padding:7px 16px;border-radius:8px;cursor:pointer;font-size:13px;">🖨 Print / PDF</button>
+                <button class="btn" onclick="app.qbrSaveReview()" style="background:var(--gray-100);border:1px solid var(--gray-300);color:var(--gray-800);padding:7px 16px;border-radius:8px;cursor:pointer;font-size:13px;">💾 Save snapshot</button>
+            </div>
+
+            <div class="qbr-slide">
+                <div class="qbr-slide-kicker">Quarterly Business Review · ${qLabel}</div>
+                <div class="qbr-slide-title">Executive Dashboard</div>
+                <table class="qbr-kpi-table">
+                    <thead><tr><th style="text-align:left;">KPI</th><th class="qbr-num">Value</th><th class="qbr-num">QoQ</th><th class="qbr-num">YoY</th><th class="qbr-num">vs Target</th></tr></thead>
+                    <tbody>${health.map(_qbrHealthRowHtml).join('')}</tbody>
+                </table>
+                <p class="qbr-slide-lede" style="margin-top:16px;">${escapeHtml(nar.executiveSummary || '')}</p>
+                ${_qbr.context ? `<div class="qbr-note"><b>Business context:</b> ${escapeHtml(_qbr.context)}</div>` : ''}
+                ${num(1)}
+            </div>
+
+            <div class="qbr-slide">
+                <div class="qbr-slide-title">Business Performance</div>
+                <div class="qbr-metric-grid">
+                    <div class="qbr-metric"><div class="qbr-metric-label">Total Revenue</div><div class="qbr-metric-value">${_qrRM(agg.totRev)}</div><div class="qbr-metric-sub">${qoq == null ? '' : (qoq >= 0 ? '+' : '') + qoq.toFixed(1) + '% QoQ'}</div></div>
+                    <div class="qbr-metric"><div class="qbr-metric-label">POS</div><div class="qbr-metric-value">${_qrRM(agg.bySystem.POS.rev)}</div></div>
+                    <div class="qbr-metric"><div class="qbr-metric-label">Online</div><div class="qbr-metric-value">${_qrRM(agg.bySystem.Online.rev)}</div></div>
+                    ${agg.whole ? `<div class="qbr-metric"><div class="qbr-metric-label">Wholesale</div><div class="qbr-metric-value">${_qrRM(agg.whole.rev)}</div><div class="qbr-metric-sub">separate</div></div>` : ''}
+                </div>
+                <h4 style="margin:18px 0 8px;">Revenue by Quarter</h4>
+                ${_bars(agg.quarters.slice().reverse().map(qq => ({ q: qq, rev: agg.byQ[qq].rev })), r => r.rev, r => r.q.replace('Q', ' Q'), '#6366f1')}
+                ${num(2)}
+            </div>
+
+            <div class="qbr-slide">
+                <div class="qbr-slide-title">What Went Right / What Went Wrong</div>
+                <div style="display:flex;gap:20px;flex-wrap:wrap;">
+                    <div style="flex:1;min-width:280px;"><h4 style="color:#0b8a4e;">✅ What went right</h4>${(ins.right.length ? ins.right : [{ t: 'Stable performance', d: '' }]).slice(0, 3).map(i => `<div style="margin:8px 0;"><b>${escapeHtml(i.t)}</b><div style="font-size:12px;color:var(--gray-600);">${escapeHtml(i.d)}</div></div>`).join('')}</div>
+                    <div style="flex:1;min-width:280px;"><h4 style="color:#dc2626;">⚠️ What went wrong</h4>${(ins.wrong.length ? ins.wrong : [{ t: 'No material concerns', d: '' }]).slice(0, 3).map(i => `<div style="margin:8px 0;"><b>${escapeHtml(i.t)}</b><div style="font-size:12px;color:var(--gray-600);">${escapeHtml(i.d)}</div></div>`).join('')}</div>
+                </div>
+                ${num(3)}
+            </div>
+
+            <div class="qbr-slide">
+                <div class="qbr-slide-title">Customer Health</div>
+                <div class="qbr-metric-grid">
+                    <div class="qbr-metric"><div class="qbr-metric-label">Active Members</div><div class="qbr-metric-value">${_qrInt(cur.members.size)}</div></div>
+                    <div class="qbr-metric"><div class="qbr-metric-label">New</div><div class="qbr-metric-value">${newC == null ? 'n/a' : _qrInt(newC)}</div></div>
+                    <div class="qbr-metric"><div class="qbr-metric-label">Repeat</div><div class="qbr-metric-value">${repeatCust == null ? 'n/a' : _qrInt(repeatCust)}</div></div>
+                    <div class="qbr-metric"><div class="qbr-metric-label">Lapsed vs ${prevQ ? prevQ.replace('Q', ' Q') : '—'}</div><div class="qbr-metric-value">${lapsed == null ? 'n/a' : _qrInt(lapsed)}</div></div>
+                </div>
+                <h4 style="margin:18px 0 8px;">Top 10 customers by spend (concentration)</h4>
+                ${agg.customers.length ? _bars(agg.customers.slice(0, 10), r => r.spend, r => r.member, '#8b5cf6') : '<div style="color:var(--gray-400);">No member names.</div>'}
+                ${num(4)}
+            </div>
+
+            <div class="qbr-slide">
+                <div class="qbr-slide-title">Root Cause &amp; Opportunity Matrix</div>
+                <h4>Root causes</h4>
+                ${rcList.map(r => `<div style="margin:8px 0;padding:10px 12px;background:#fef2f2;border-left:4px solid #dc2626;border-radius:8px;"><b>${escapeHtml(r.problem)}</b><div style="font-size:12px;color:var(--gray-700);margin-top:2px;">${escapeHtml(r.cause)}${r.solution ? ' → <i>' + escapeHtml(r.solution) + '</i>' : ''}</div></div>`).join('')}
+                <h4 style="margin-top:16px;">Opportunities</h4>
+                <table class="qbr-kpi-table"><thead><tr><th style="text-align:left;">Opportunity</th><th class="qbr-num">Potential</th><th class="qbr-num">Difficulty</th></tr></thead><tbody>${ops.length ? ops.map(o => `<tr><td style="text-align:left;">${escapeHtml(o.title)}</td><td class="qbr-num qbr-pos">${_qrRM(o.potential)}</td><td class="qbr-num">${o.difficulty}</td></tr>`).join('') : '<tr><td colspan="3" style="text-align:left;color:var(--gray-400);">None identified.</td></tr>'}</tbody></table>
+                ${num(5)}
+            </div>
+
+            <div class="qbr-slide">
+                <div class="qbr-slide-title">90-Day Action Plan · ${qLabel}</div>
+                <p style="color:var(--gray-500);font-size:13px;">The board approves these initiatives — aim for four, each with an owner, a measurable KPI target, and a deadline.</p>
+                ${_qbrActionTable(q, true)}
+                ${num(6)}
+            </div>
+
+            <div class="qbr-slide">
+                <div class="qbr-slide-title">Forecast &amp; Scenario · ${nextQ ? nextQ.replace('Q', ' Q') : ''}</div>
+                ${_qbrForecastTable(nextQ, false)}
+                <button class="btn qbr-noprint" onclick="app.qbrAddForecastModal('${nextQ}')" style="margin-top:10px;background:#6366f1;border:none;color:white;padding:7px 16px;border-radius:8px;cursor:pointer;font-size:13px;">+ Add / auto-suggest forecast</button>
+                ${num(7)}
+            </div>
+
+            <div class="qbr-slide">
+                <div class="qbr-slide-title">Accountability Tracker</div>
+                <p style="color:var(--gray-500);font-size:13px;">Before new commitments — did we deliver last quarter's (${prevQ ? prevQ.replace('Q', ' Q') : '—'})?</p>
+                <h4>Last quarter's initiatives</h4>
+                ${_qbrActionTable(prevQ || '—', false)}
+                <h4 style="margin-top:16px;">Forecast vs actual · ${qLabel}</h4>
+                ${_qbrForecastTable(q, true)}
+                <p class="qbr-slide-lede" style="margin-top:14px;">${escapeHtml(nar.decisionSummary || '')}</p>
+                ${num(8)}
+            </div>
+        </div>`;
+    };
+
+    // ── Accountability tab (manage context + actions + forecasts across quarters) ──
+    const _qbrRenderAccountability = (agg, q) => {
+        const prevQ = _qrPrevQ(q), nextQ = _qrNextQ(q);
+        return `
+            ${_sect('📝 Business Context (Input 5) — what happened this quarter')}
+            <textarea id="qbr-context" class="form-control" rows="3" placeholder="e.g. Chinese New Year pulled demand forward; a price increase in May; a new competitor…" style="width:100%;box-sizing:border-box;">${escapeHtml(_qbr.context || '')}</textarea>
+            <button class="btn qbr-noprint" onclick="app.qbrSaveContext()" style="margin-top:8px;background:#6366f1;border:none;color:white;padding:7px 16px;border-radius:8px;cursor:pointer;font-size:13px;">Save context</button>
+
+            ${_sect('✅ 90-Day Action Plan · ' + q.replace('Q', ' Q'))}
+            ${_qbrActionTable(q, true)}
+
+            ${_sect('📉 Last-Quarter Scorecard · ' + (prevQ ? prevQ.replace('Q', ' Q') : '—'))}
+            ${_qbrActionTable(prevQ || '—', false)}
+
+            ${_sect('🔮 Forecast · ' + (nextQ ? nextQ.replace('Q', ' Q') : '—'))}
+            ${_qbrForecastTable(nextQ || '—', false)}
+            <button class="btn qbr-noprint" onclick="app.qbrAddForecastModal('${nextQ}')" style="margin-top:10px;background:#6366f1;border:none;color:white;padding:7px 16px;border-radius:8px;cursor:pointer;font-size:13px;">+ Add / auto-suggest forecast</button>
+
+            ${_sect('🎯 Forecast vs Actual · ' + q.replace('Q', ' Q'))}
+            ${_qbrForecastTable(q, true)}
+            ${(_qbr.osLoaded && _qbr.actions.length === 0 && _qbr.forecasts.length === 0) ? `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px;font-size:12px;color:#92400e;margin-top:14px;">If saves fail, the QBR tables may not be migrated yet — apply <code>migrations/qbr_operating_system_2026-07-03.sql</code> to the database.</div>` : ''}`;
+    };
+
+    // ── CRUD: actions ────────────────────────────────────────────────────
+    const _qbrActionModalContent = (a) => `
+        <div style="display:flex;flex-direction:column;gap:10px;">
+            <label>Priority <select id="qbr-a-priority" class="form-control">${['P0', 'P1', 'P2'].map(p => `<option ${a.priority === p ? 'selected' : ''}>${p}</option>`).join('')}</select></label>
+            <label>Initiative <input id="qbr-a-initiative" class="form-control" value="${escapeHtml(a.initiative || '')}"></label>
+            <label>Owner <input id="qbr-a-owner" class="form-control" value="${escapeHtml(a.owner || '')}"></label>
+            <label>KPI target <input id="qbr-a-kpi" class="form-control" value="${escapeHtml(a.kpi_target || '')}" placeholder="e.g. AOV RM275 → RM320"></label>
+            <label>Deadline <input id="qbr-a-deadline" type="date" class="form-control" value="${a.deadline ? escapeHtml(String(a.deadline)) : ''}"></label>
+            <label>Status <select id="qbr-a-status" class="form-control">${['open', 'in_progress', 'done', 'missed', 'dropped'].map(s => `<option value="${s}" ${a.status === s ? 'selected' : ''}>${s}</option>`).join('')}</select></label>
+            <label>Result / note <input id="qbr-a-result" class="form-control" value="${escapeHtml(a.result || '')}"></label>
+        </div>`;
+    const qbrAddActionModal = (quarter) => {
+        if (!isSystemAdmin(_state.cu)) return;
+        UI.showModal('Add initiative · ' + String(quarter).replace('Q', ' Q'), _qbrActionModalContent({ status: 'open', priority: 'P1' }), [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save', type: 'primary', action: `(async () => { await app.qbrSaveAction(null, '${quarter}'); })()` }
+        ]);
+    };
+    const qbrEditActionModal = (id) => {
+        if (!isSystemAdmin(_state.cu)) return;
+        const a = (_qbr.actions || []).find(x => String(x.id) === String(id)); if (!a) return;
+        UI.showModal('Edit initiative', _qbrActionModalContent(a), [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Delete', type: 'secondary', action: `(async () => { await app.qbrDeleteAction('${id}'); })()` },
+            { label: 'Save', type: 'primary', action: `(async () => { await app.qbrSaveAction('${id}', '${a.quarter}'); })()` }
+        ]);
+    };
+    const _qbrReadActionForm = (quarter) => ({
+        quarter,
+        priority: (document.getElementById('qbr-a-priority') || {}).value || 'P1',
+        initiative: (document.getElementById('qbr-a-initiative') || {}).value || '',
+        owner: (document.getElementById('qbr-a-owner') || {}).value || '',
+        kpi_target: (document.getElementById('qbr-a-kpi') || {}).value || '',
+        deadline: (document.getElementById('qbr-a-deadline') || {}).value || null,
+        status: (document.getElementById('qbr-a-status') || {}).value || 'open',
+        result: (document.getElementById('qbr-a-result') || {}).value || '',
+    });
+    const qbrSaveAction = async (id, quarter) => {
+        const data = _qbrReadActionForm(quarter);
+        if (!String(data.initiative).trim()) { UI.toast.error('Initiative is required'); return; }
+        try {
+            if (id) await AppDataStore.update('qbr_actions', id, data); else await AppDataStore.create('qbr_actions', data);
+            UI.hideModal(); await _qbrLoadOS(_qrState.focusQuarter); _renderResults(); UI.toast.success('Initiative saved');
+        } catch (e) { UI.toast.error('Save failed (is the migration applied?): ' + (e && e.message || e)); }
+    };
+    const qbrDeleteAction = async (id) => {
+        try { await AppDataStore.delete('qbr_actions', id); UI.hideModal(); await _qbrLoadOS(_qrState.focusQuarter); _renderResults(); UI.toast.success('Deleted'); }
+        catch (e) { UI.toast.error('Delete failed: ' + (e && e.message || e)); }
+    };
+
+    // ── CRUD: forecasts ──────────────────────────────────────────────────
+    const _qbrForecastSuggest = (agg, q) => {
+        const qs = agg.quarters;
+        const cur = agg.byQ[q] || { rev: 0 };
+        if (qs.length < 2) { const base = Math.round(cur.rev); return { base, best: Math.round(base * 1.1), worst: Math.round(base * 0.9) }; }
+        const growths = [];
+        for (let i = 1; i < qs.length; i++) { const a = agg.byQ[qs[i - 1]].rev, b = agg.byQ[qs[i]].rev; if (a) growths.push((b - a) / a); }
+        const recent = growths.slice(-3);
+        const g = recent.length ? recent.reduce((s, x) => s + x, 0) / recent.length : 0;
+        const base = Math.round(cur.rev * (1 + g));
+        return { base, best: Math.round(base * 1.1), worst: Math.round(base * 0.9) };
+    };
+    const qbrAddForecastModal = (quarter) => {
+        if (!isSystemAdmin(_state.cu)) return;
+        const agg = _qrState.agg; const sug = agg ? _qbrForecastSuggest(agg, _qrState.focusQuarter) : { base: '', best: '', worst: '' };
+        const content = `<div style="display:flex;flex-direction:column;gap:10px;">
+            <label>KPI <select id="qbr-f-kpi" class="form-control"><option value="revenue">revenue</option><option value="orders">orders</option><option value="aov">aov</option></select></label>
+            <label>Base <input id="qbr-f-base" type="number" class="form-control" value="${sug.base}"></label>
+            <label>Best <input id="qbr-f-best" type="number" class="form-control" value="${sug.best}"></label>
+            <label>Worst <input id="qbr-f-worst" type="number" class="form-control" value="${sug.worst}"></label>
+            <label>Assumptions <input id="qbr-f-assume" class="form-control" placeholder="e.g. seasonal uplift, no price change"></label>
+            <div style="font-size:12px;color:var(--gray-500);">Auto-suggestion is <b>revenue</b> from recent trend; adjust freely (and change KPI if needed).</div>
+        </div>`;
+        UI.showModal('Forecast · ' + String(quarter).replace('Q', ' Q'), content, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save', type: 'primary', action: `(async () => { await app.qbrSaveForecast('${quarter}'); })()` }
+        ]);
+    };
+    const qbrSaveForecast = async (quarter) => {
+        const data = {
+            quarter, kpi: (document.getElementById('qbr-f-kpi') || {}).value || 'revenue',
+            base: parseFloat((document.getElementById('qbr-f-base') || {}).value) || null,
+            best: parseFloat((document.getElementById('qbr-f-best') || {}).value) || null,
+            worst: parseFloat((document.getElementById('qbr-f-worst') || {}).value) || null,
+            assumptions: (document.getElementById('qbr-f-assume') || {}).value || '',
+        };
+        try { await AppDataStore.create('qbr_forecasts', data); UI.hideModal(); await _qbrLoadOS(_qrState.focusQuarter); _renderResults(); UI.toast.success('Forecast saved'); }
+        catch (e) { UI.toast.error('Save failed: ' + (e && e.message || e)); }
+    };
+    const qbrSetForecastActual = async (id) => {
+        const f = (_qbr.forecasts || []).find(x => String(x.id) === String(id)); if (!f) return;
+        const v = prompt('Actual value for ' + f.kpi + ':', f.actual == null ? '' : String(f.actual));
+        if (v === null) return;
+        const n = parseFloat(v);
+        try { await AppDataStore.update('qbr_forecasts', id, { actual: isNaN(n) ? null : n }); await _qbrLoadOS(_qrState.focusQuarter); _renderResults(); UI.toast.success('Actual saved'); }
+        catch (e) { UI.toast.error('Save failed: ' + (e && e.message || e)); }
+    };
+
+    // ── Context / review persistence ─────────────────────────────────────
+    async function _qbrUpsertReview(patch) {
+        const q = _qrState.focusQuarter;
+        try {
+            const existing = _qbr.review || ((await AppDataStore.getAll('qbr_reviews')) || []).find(r => r.quarter === q);
+            if (existing) await AppDataStore.update('qbr_reviews', existing.id, patch); else await AppDataStore.create('qbr_reviews', { quarter: q, ...patch });
+            await _qbrLoadOS(q); UI.toast.success('Saved');
+        } catch (e) { UI.toast.error('Save failed (is the migration applied?): ' + (e && e.message || e)); }
+    }
+    const qbrSaveContext = async () => { const el = document.getElementById('qbr-context'); _qbr.context = el ? el.value : _qbr.context; await _qbrUpsertReview({ context: _qbr.context }); };
+    const qbrSaveReview = async () => { const agg = _qrState.agg; if (!agg) return; await _qbrUpsertReview({ context: _qbr.context, snapshot: _qbrSnapshot(agg, _qrState.focusQuarter), narrative: _qbr.narrative || null }); };
+
+    // ── Misc UI plumbing ─────────────────────────────────────────────────
+    const qbrSetTab = (tab) => { _qbr.tab = tab; _renderResults(); };
+    const qbrPrint = () => { if (_qbr.tab !== 'board') { _qbr.tab = 'board'; _renderResults(); } setTimeout(() => window.print(), 80); };
+    const _qbrInjectCss = () => { if (document.getElementById('qbr-print-css')) return; const l = document.createElement('link'); l.id = 'qbr-print-css'; l.rel = 'stylesheet'; l.href = 'styles-qbr-print.css'; document.head.appendChild(l); };
+
+    // ====================================================================
     // VIEW
     // ====================================================================
     const showQuarterReviewView = async (container) => {
@@ -767,11 +1284,12 @@
             container.innerHTML = `<div class="placeholder-view"><h1>Access Denied</h1><p>Quarter Review is restricted to Super Admin only.</p></div>`;
             return;
         }
+        _qbrInjectCss();
         container.innerHTML = `
             <div style="padding:24px;max-width:1000px;margin:0 auto;">
                 <div style="margin-bottom:18px;">
-                    <h1 style="margin:0;display:flex;align-items:center;gap:10px;"><i class="fas fa-chart-pie" style="color:#6366f1;"></i> Quarter Review</h1>
-                    <div style="color:var(--gray-500);font-size:13px;margin-top:4px;">Independent QBR • merges POS + Online sales • Super Admin only</div>
+                    <h1 style="margin:0;display:flex;align-items:center;gap:10px;"><i class="fas fa-chart-pie" style="color:#6366f1;"></i> Quarter Review — QBR Operating System</h1>
+                    <div style="color:var(--gray-500);font-size:13px;margin-top:4px;">Health Score → Decomposition → Root Cause → Opportunity → 8-slide Board Pack → 90-day plan → forecast accountability • Super Admin only</div>
                 </div>
                 <div style="background:white;border:1px solid var(--gray-200);border-radius:12px;padding:20px;">
                     <h3 style="margin:0 0 6px;">Upload data files</h3>
@@ -795,5 +1313,19 @@
         qrSelectQuarter,
         qrExportCsv,
         qrCopySummary,
+        // QBR Operating System surface
+        qbrSetTab,
+        qbrSetMargin,
+        qbrGenerateNarrative,
+        qbrPrint,
+        qbrSaveReview,
+        qbrSaveContext,
+        qbrAddActionModal,
+        qbrEditActionModal,
+        qbrSaveAction,
+        qbrDeleteAction,
+        qbrAddForecastModal,
+        qbrSaveForecast,
+        qbrSetForecastActual,
     });
 })();

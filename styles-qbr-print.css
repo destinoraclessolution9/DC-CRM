@@ -1,0 +1,539 @@
+/* ==========================================================================
+   styles-qbr-print.css
+   --------------------------------------------------------------------------
+   Self-contained stylesheet for the 8-slide "Board Pack" (QBR) deck.
+   Renders as a clean, high-contrast board deck on screen AND prints
+   print-ready on A4 (one slide == one page).
+
+   Design notes
+   ------------
+   - Uses house-style CSS custom properties from styles-theme.min.css where
+     sensible (--text-*, --bg-*, --border-*, --accent, --success/--warning/
+     --danger, --radius-*, --shadow-*, font stacks) BUT every declaration
+     carries a hard hex/px fallback so this file works fully standalone.
+   - House accent is a magenta/pink (#E84393). Success #2E7D5B (green),
+     warning #C77700 (amber), danger #E84393 -> we use a stronger red
+     (#C0392B) for the RED traffic-light so grayscale legibility holds.
+   - NO @import, NO webfonts, NO images. System font stack only.
+   - Traffic-lights never rely on colour alone: badges carry a border +
+     bold weight + uppercase label; dots carry a ring so they read in B/W.
+
+   Contents
+   ------------
+   0.  Local design tokens (fallbacks scoped to the deck)
+   1.  Deck container            .qbr-boardpack
+   2.  Slide card                .qbr-slide
+   3.  Slide title               .qbr-slide-title
+   4.  Slide footer number       .qbr-slide-num
+   5.  Screen-only utility        .qbr-noprint
+   6.  Financial KPI table        .qbr-kpi-table
+   7.  Traffic-light system       .tl-green / .tl-amber / .tl-red / .tl-dot
+   8.  Supporting deck helpers    (subtitle, lede, grid, notes) - optional
+   9.  @media print               A4, one-slide-per-page, chrome hiding
+   ========================================================================== */
+
+
+/* ==========================================================================
+   0. LOCAL DESIGN TOKENS
+   Scoped to the deck so we never fight the host app, and so the sheet has a
+   complete fallback set even when the theme variables are absent.
+   ========================================================================== */
+.qbr-boardpack {
+  /* Ink / paper */
+  --qbr-ink:        var(--text-primary,   #1A0A10);
+  --qbr-ink-2:      var(--text-secondary, #4A2438);
+  --qbr-muted:      var(--text-muted,     #8A6076);
+  --qbr-paper:      var(--bg-surface,     #FFFFFF);
+  --qbr-panel:      var(--bg-elevated,    #FBF3F8);
+  --qbr-sunken:     var(--bg-sunken,      #F4E6EF);
+  --qbr-backdrop:   var(--bg-app,         #F3F0F2);
+
+  /* Lines */
+  --qbr-line:       var(--border-soft,    #E7DCE4);
+  --qbr-line-strong:var(--border-strong,  #D6C4CF);
+  --qbr-line-ink:   #C7B4C0;
+
+  /* Brand + status */
+  --qbr-accent:     var(--accent,         #E84393);
+  --qbr-accent-ink: var(--maroon-deep,    #C2185B);
+  --qbr-green:      var(--success,        #2E7D5B);
+  --qbr-amber:      var(--warning,        #C77700);
+  --qbr-red:        #C0392B;                       /* dedicated print-red   */
+
+  /* Shape */
+  --qbr-radius:     var(--radius-lg,      14px);
+  --qbr-radius-sm:  var(--radius-sm,       6px);
+  --qbr-shadow:     var(--shadow-md, 0 6px 20px rgba(30, 10, 16, .10));
+
+  /* Type: rely on the app's font vars, fall back to a robust system stack.  */
+  --qbr-font-body: var(--font-body,
+    "Inter", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif);
+  --qbr-font-display: var(--font-display,
+    "Space Grotesk", "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+  --qbr-font-mono: var(--font-mono,
+    "JetBrains Mono", ui-monospace, "SF Mono", "Consolas", "Liberation Mono", monospace);
+}
+
+
+/* ==========================================================================
+   1. DECK CONTAINER  ->  .qbr-boardpack
+   Screen: light neutral backdrop, deck centered, comfortable vertical rhythm.
+   ========================================================================== */
+.qbr-boardpack {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+  padding: 32px 20px 56px;
+  background: var(--qbr-backdrop, #F3F0F2);
+  color: var(--qbr-ink, #1A0A10);
+  font-family: var(--qbr-font-body);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+.qbr-boardpack *,
+.qbr-boardpack *::before,
+.qbr-boardpack *::after { box-sizing: border-box; }
+
+
+/* ==========================================================================
+   2. SLIDE CARD  ->  .qbr-slide
+   Screen: white card, ~1000px, centered, generous padding, border + soft
+   shadow, rounded, clearly separated from the next slide.
+   ========================================================================== */
+.qbr-slide {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 1000px;
+  margin: 0 auto 32px;
+  padding: 38px 40px 34px;
+  background: var(--qbr-paper, #FFFFFF);
+  color: var(--qbr-ink, #1A0A10);
+  border: 1px solid var(--qbr-line-strong, #D6C4CF);
+  border-radius: var(--qbr-radius, 14px);
+  box-shadow: var(--qbr-shadow, 0 6px 20px rgba(30, 10, 16, .10));
+  /* Keep a print-friendly aspect close to A4 portrait on screen too.        */
+  min-height: 620px;
+}
+.qbr-slide:last-child { margin-bottom: 0; }
+
+/* Thin accent bar down the left edge = "board deck" cue (screen only). */
+.qbr-slide::before {
+  content: "";
+  position: absolute;
+  top: 18px;
+  bottom: 18px;
+  left: 0;
+  width: 4px;
+  border-radius: 0 4px 4px 0;
+  background: var(--qbr-accent, #E84393);
+}
+
+
+/* ==========================================================================
+   3. SLIDE TITLE  ->  .qbr-slide-title
+   Strong, large heading with a bottom rule + short accent underline.
+   ========================================================================== */
+.qbr-slide-title {
+  margin: 0 0 22px;
+  padding: 0 0 12px;
+  font-family: var(--qbr-font-display);
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.18;
+  letter-spacing: -.015em;
+  color: var(--qbr-ink, #1A0A10);
+  border-bottom: 1px solid var(--qbr-line-strong, #D6C4CF);
+}
+/* Short, thick accent stroke sitting on the rule. */
+.qbr-slide-title::after {
+  content: "";
+  display: block;
+  width: 56px;
+  height: 3px;
+  margin-top: 12px;
+  margin-bottom: -13px;                 /* overlaps the bottom rule cleanly   */
+  background: var(--qbr-accent, #E84393);
+  border-radius: 3px;
+}
+/* Optional eyebrow/kicker above a title (helper, not pinned). */
+.qbr-slide-kicker {
+  display: block;
+  margin-bottom: 6px;
+  font-family: var(--qbr-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--qbr-accent-ink, #C2185B);
+}
+
+
+/* ==========================================================================
+   4. SLIDE FOOTER NUMBER  ->  .qbr-slide-num
+   Small, muted, bottom-right "Slide 3 / 8".
+   ========================================================================== */
+.qbr-slide-num {
+  margin-top: auto;                     /* pin to the bottom of the flex card */
+  padding-top: 18px;
+  align-self: flex-end;
+  font-family: var(--qbr-font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--qbr-muted, #8A6076);
+}
+
+
+/* ==========================================================================
+   5. SCREEN-ONLY UTILITY  ->  .qbr-noprint
+   Visible on screen; removed entirely from print (see @media print).
+   ========================================================================== */
+.qbr-noprint { /* visible by default on screen */ }
+
+
+/* ==========================================================================
+   6. FINANCIAL KPI TABLE  ->  .qbr-kpi-table
+   Clean, dense, right-aligned numerics, strong header rule, subtle zebra.
+   ========================================================================== */
+.qbr-kpi-table {
+  width: 100%;
+  margin: 4px 0 18px;
+  border-collapse: collapse;
+  font-family: var(--qbr-font-body);
+  font-size: 13px;
+  color: var(--qbr-ink, #1A0A10);
+  background: var(--qbr-paper, #FFFFFF);
+}
+
+/* Header: strong bottom rule, quiet uppercase labels. */
+.qbr-kpi-table thead th {
+  padding: 9px 14px;
+  font-family: var(--qbr-font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--qbr-ink-2, #4A2438);
+  text-align: left;
+  background: var(--qbr-panel, #FBF3F8);
+  border-bottom: 2px solid var(--qbr-line-ink, #C7B4C0);
+  white-space: nowrap;
+}
+
+/* Body cells: compact rows, hairline separators. */
+.qbr-kpi-table tbody td,
+.qbr-kpi-table tbody th {
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--qbr-line, #E7DCE4);
+  vertical-align: middle;
+}
+/* Row-label cells (first column as <th scope="row">). */
+.qbr-kpi-table tbody th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--qbr-ink, #1A0A10);
+}
+
+/* Subtle zebra for legibility across wide rows. */
+.qbr-kpi-table tbody tr:nth-child(even) td,
+.qbr-kpi-table tbody tr:nth-child(even) th {
+  background: var(--qbr-sunken, #F4E6EF);
+}
+
+/* Numeric alignment + tabular figures.
+   Apply .num on cells, or right-align via the last-child fallback. */
+.qbr-kpi-table td.num,
+.qbr-kpi-table th.num,
+.qbr-kpi-table .qbr-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  white-space: nowrap;
+}
+/* Default: last column is typically the headline number -> right align. */
+.qbr-kpi-table tbody td:last-child { text-align: right; }
+.qbr-kpi-table thead th:last-child { text-align: right; }
+
+/* Emphasis + delta helpers (optional, not pinned). */
+.qbr-kpi-table .qbr-strong { font-weight: 700; }
+.qbr-kpi-table .qbr-pos    { color: var(--qbr-green, #2E7D5B); font-weight: 600; }
+.qbr-kpi-table .qbr-neg    { color: var(--qbr-red,   #C0392B); font-weight: 600; }
+
+/* Total / summary row: heavier top rule, no zebra, bold. */
+.qbr-kpi-table tbody tr.qbr-total td,
+.qbr-kpi-table tbody tr.qbr-total th,
+.qbr-kpi-table tfoot td,
+.qbr-kpi-table tfoot th {
+  padding: 10px 14px;
+  font-weight: 700;
+  color: var(--qbr-ink, #1A0A10);
+  background: var(--qbr-panel, #FBF3F8) !important;
+  border-top: 2px solid var(--qbr-line-ink, #C7B4C0);
+  border-bottom: none;
+}
+.qbr-kpi-table tfoot td:last-child,
+.qbr-kpi-table tfoot th.num,
+.qbr-kpi-table tfoot td.num { text-align: right; }
+
+
+/* ==========================================================================
+   7. TRAFFIC-LIGHT SYSTEM
+   .tl-green / .tl-amber / .tl-red    -> as a BADGE / pill (default use)
+   .tl-dot                            -> small inline circle
+   .tl-dot.tl-green (etc.)            -> the dot in the given state
+   Grayscale-safe: each state carries a border + bold weight; dots get a ring.
+   ========================================================================== */
+
+/* Badge / pill base (applied when .tl-* is used on a span/badge, i.e. NOT
+   in combination with .tl-dot). */
+.tl-green,
+.tl-amber,
+.tl-red {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1.5px solid currentColor;
+  border-radius: 999px;
+  font-family: var(--qbr-font-body);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+/* GREEN / ON TRACK */
+.tl-green {
+  color: var(--qbr-green, #2E7D5B);
+  background: rgba(46, 125, 91, .10);
+}
+/* AMBER / AT RISK */
+.tl-amber {
+  color: var(--qbr-amber, #C77700);
+  background: rgba(199, 119, 0, .12);
+}
+/* RED / OFF TRACK */
+.tl-red {
+  color: var(--qbr-red, #C0392B);
+  background: rgba(192, 57, 43, .10);
+}
+
+/* --- Dot modifier ---------------------------------------------------------
+   .tl-dot is a small inline circle. Combined with a state class it takes the
+   state colour. The state-class badge styles above are neutralised for dots
+   via the more specific selectors below. */
+.tl-dot {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--qbr-muted, #8A6076);
+  /* grayscale-safe ring so the disc reads even in B/W print */
+  box-shadow: 0 0 0 1.5px rgba(0, 0, 0, .28);
+  vertical-align: middle;
+  line-height: 0;
+}
+/* Reset badge treatment when .tl-dot is present (dot wins). */
+.tl-dot.tl-green,
+.tl-dot.tl-amber,
+.tl-dot.tl-red {
+  gap: 0;
+  padding: 0;
+  border: 0;
+  font-size: 0;
+  background-clip: padding-box;
+}
+.tl-dot.tl-green { background: var(--qbr-green, #2E7D5B); }
+.tl-dot.tl-amber { background: var(--qbr-amber, #C77700); }
+.tl-dot.tl-red   { background: var(--qbr-red,   #C0392B); }
+
+
+/* ==========================================================================
+   8. SUPPORTING DECK HELPERS  (optional, not pinned — safe to ignore)
+   Give chunk-generated slide bodies a clean board look out of the box.
+   ========================================================================== */
+.qbr-slide-lede {
+  margin: -6px 0 22px;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--qbr-ink-2, #4A2438);
+  max-width: 64ch;
+}
+/* Metric callout grid (e.g. 3–4 headline numbers across the top of a slide). */
+.qbr-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 16px;
+  margin: 4px 0 24px;
+}
+.qbr-metric {
+  padding: 16px 18px;
+  border: 1px solid var(--qbr-line, #E7DCE4);
+  border-left: 3px solid var(--qbr-accent, #E84393);
+  border-radius: var(--qbr-radius-sm, 6px);
+  background: var(--qbr-panel, #FBF3F8);
+}
+.qbr-metric-label {
+  display: block;
+  margin-bottom: 6px;
+  font-family: var(--qbr-font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--qbr-muted, #8A6076);
+}
+.qbr-metric-value {
+  font-family: var(--qbr-font-display);
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--qbr-ink, #1A0A10);
+}
+.qbr-metric-sub {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--qbr-muted, #8A6076);
+}
+/* Speaker / footnote block. */
+.qbr-note {
+  margin-top: 14px;
+  padding: 12px 16px;
+  border-left: 3px solid var(--qbr-line-strong, #D6C4CF);
+  background: var(--qbr-sunken, #F4E6EF);
+  border-radius: 0 var(--qbr-radius-sm, 6px) var(--qbr-radius-sm, 6px) 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--qbr-ink-2, #4A2438);
+}
+
+
+/* ==========================================================================
+   9. @media print  — THE IMPORTANT PART
+   A4 pages, one slide == one page, color forced on, app chrome hidden.
+   ========================================================================== */
+@media print {
+
+  /* A4 page with a comfortable board margin. */
+  @page {
+    size: A4;
+    margin: 14mm;
+  }
+
+  /* Force colour printing across the deck (fills, rules, badges, dots). */
+  .qbr-boardpack,
+  .qbr-boardpack * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;                 /* legacy alias */
+  }
+
+  /* The deck sits flush on the paper: no backdrop, no padding. */
+  html, body {
+    background: #FFFFFF !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  .qbr-boardpack {
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    font-size: 12pt;
+  }
+
+  /* Each slide = exactly one printed page, flush to the margins. */
+  .qbr-slide {
+    max-width: none !important;
+    width: 100% !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 0 6mm !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: #FFFFFF !important;
+
+    page-break-after: always;
+    break-after: page;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  /* No trailing blank page after the last slide. */
+  .qbr-slide:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+  /* Drop the on-screen left accent bar (rule under the title carries it). */
+  .qbr-slide::before { display: none !important; }
+
+  /* Titles: keep with their content, keep the printed rule/accent visible. */
+  .qbr-slide-title {
+    page-break-after: avoid;
+    break-after: avoid;
+    border-bottom: 1px solid #C7B4C0 !important;
+  }
+  .qbr-slide-title::after { background: var(--qbr-accent, #E84393) !important; }
+
+  /* Slide number stays quiet but present at page foot. */
+  .qbr-slide-num { color: #6B4A5C !important; }
+
+  /* Screen-only utilities: gone. */
+  .qbr-noprint { display: none !important; }
+
+  /* Defensively hide common app chrome so ONLY the deck prints. */
+  #sidebar,
+  .sidebar,
+  .app-nav,
+  nav.main-nav,
+  .top-bar,
+  .topbar,
+  .app-header,
+  #mobile-nav,
+  .mobile-bottom-nav,
+  .bottom-nav {
+    display: none !important;
+  }
+
+  /* Tables: don't break rows awkwardly across pages; repeat the header. */
+  .qbr-kpi-table { page-break-inside: auto; }
+  .qbr-kpi-table thead { display: table-header-group; }  /* repeat on each page */
+  .qbr-kpi-table tfoot { display: table-footer-group; }
+  .qbr-kpi-table tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  /* Preserve header + zebra + total fills in print. */
+  .qbr-kpi-table thead th { background: #FBF3F8 !important; }
+  .qbr-kpi-table tbody tr:nth-child(even) td,
+  .qbr-kpi-table tbody tr:nth-child(even) th { background: #F4E6EF !important; }
+  .qbr-kpi-table tbody tr.qbr-total td,
+  .qbr-kpi-table tbody tr.qbr-total th,
+  .qbr-kpi-table tfoot td,
+  .qbr-kpi-table tfoot th { background: #FBF3F8 !important; }
+
+  /* Traffic-light badges + dots must keep their fills on paper. */
+  .tl-green { color: #2E7D5B !important; background: rgba(46,125,91,.10) !important; }
+  .tl-amber { color: #C77700 !important; background: rgba(199,119,0,.12) !important; }
+  .tl-red   { color: #C0392B !important; background: rgba(192,57,43,.10) !important; }
+  .tl-dot.tl-green { background: #2E7D5B !important; }
+  .tl-dot.tl-amber { background: #C77700 !important; }
+  .tl-dot.tl-red   { background: #C0392B !important; }
+  .tl-dot { box-shadow: 0 0 0 1.5px rgba(0,0,0,.35) !important; }
+
+  /* Keep metric cards + notes from splitting across a page boundary. */
+  .qbr-metric,
+  .qbr-note { page-break-inside: avoid; break-inside: avoid; }
+}
