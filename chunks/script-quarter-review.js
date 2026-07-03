@@ -993,7 +993,10 @@
         const snapshot = _qbrSnapshot(agg, q);
         let narrative = null, source = 'heuristic';
         try {
-            const res = await fetch('/api/qbr-narrative', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ quarter: q, snapshot, context: _qbr.context || '' }) });
+            // Send the caller's Supabase session token so the server can reject
+            // anonymous callers (the endpoint bills the company Anthropic key).
+            const _qbrTok = (() => { try { const s = JSON.parse(localStorage.getItem('fs-crm-auth-v1') || 'null'); return (s && (s.access_token || (s.currentSession && s.currentSession.access_token))) || ''; } catch (_) { return ''; } })();
+            const res = await fetch('/api/qbr-narrative', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(_qbrTok ? { Authorization: `Bearer ${_qbrTok}` } : {}) }, body: JSON.stringify({ quarter: q, snapshot, context: _qbr.context || '' }) });
             const j = await res.json();
             if (j && j.ok && j.narrative) { narrative = j.narrative; source = 'ai'; }
         } catch (e) { /* fall back to heuristic */ }

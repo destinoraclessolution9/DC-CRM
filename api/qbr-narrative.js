@@ -41,11 +41,79 @@
  * so this handler must never surface a 5xx to the browser.
  */
 
+// ── Auth + abuse-control config ──────────────────────────────────────────────
+// This endpoint bills the company ANTHROPIC_API_KEY, so it must not be callable
+// anonymously. We verify the caller's Supabase session token (same mechanism as
+// api/customers.mjs) and apply a best-effort per-IP rate limit.
+const SUPABASE_URL = process.env.SUPABASE_URL || 'https://remuwhxvzkzjtgbzqjaa.supabase.co';
+const PUBLISHABLE  = process.env.SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_XVWyiw5j1lnEErQUTV4XWg_lQcCIAjX';
+
+// Per-IP rate limit (defense-in-depth; the real controls are the Vercel WAF + the
+// auth check below). In-memory + per-instance: with Fluid Compute each warm
+// instance keeps its own window, so the effective global cap is (limit × live
+// instances) — a backstop against a single-instance hammer, not distributed-flood
+// control. Default 20/min (generous for an admin generating a few quarters);
+// override with QBR_RATE_LIMIT_PER_MIN (0 disables).
+const RL_MAX = Math.max(0, parseInt(process.env.QBR_RATE_LIMIT_PER_MIN || '20', 10) || 0);
+const RL_WINDOW_MS = 60000;
+const _rlHits = new Map(); // ip -> number[] recent hit timestamps
+function _clientIp(req) {
+  const xff = String((req.headers && req.headers['x-forwarded-for']) || '').split(',')[0].trim();
+  return xff || (req.socket && req.socket.remoteAddress) || 'unknown';
+}
+function _rateLimited(req) {
+  if (!RL_MAX) return false;
+  const ip = _clientIp(req);
+  const now = Date.now();
+  const hits = (_rlHits.get(ip) || []).filter(t => now - t < RL_WINDOW_MS);
+  hits.push(now);
+  _rlHits.set(ip, hits);
+  if (_rlHits.size > 5000) { // opportunistic cleanup so the map can't grow unbounded
+    for (const [k, v] of _rlHits) { if (!v.length || now - v[v.length - 1] > RL_WINDOW_MS) _rlHits.delete(k); }
+  }
+  return hits.length > RL_MAX;
+}
+
 module.exports = async (req, res) => {
   try {
     // ── Method guard ─────────────────────────────────────────────────────────
     if (req.method !== 'POST') {
       return res.status(405).json({ ok: false, reason: 'method' });
+    }
+
+    // ── Rate limit (LLM cost control) ────────────────────────────────────────
+    if (_rateLimited(req)) {
+      return res.status(429).json({ ok: false, reason: 'rate_limited' });
+    }
+
+    // ── Authn — require a valid Supabase session ─────────────────────────────
+    // The QBR tab is admin-gated in the client; server-side we require ANY
+    // authenticated CRM user, which is proportionate to the anonymous-abuse risk
+    // (stops the open internet from billing our key). An auth failure returns
+    // ok:false so the client degrades to its heuristic narrative exactly like the
+    // not_configured path — no LLM call is made. (Optional future hardening:
+    // also assert L1 admin via a users-table role lookup.)
+    const _token = String((req.headers && req.headers.authorization) || '').replace(/^Bearer\s+/i, '');
+    if (!_token) {
+      return res.status(200).json({ ok: false, reason: 'unauthenticated' });
+    }
+    try {
+      const authRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+        headers: { apikey: PUBLISHABLE, Authorization: `Bearer ${_token}` },
+      });
+      if (!authRes.ok) {
+        // 401/403 = token genuinely rejected; anything else = a GoTrue outage
+        // (retryable) — either way we don't spend an LLM call.
+        const reason = (authRes.status === 401 || authRes.status === 403) ? 'unauthenticated' : 'auth_unavailable';
+        return res.status(200).json({ ok: false, reason });
+      }
+      const authUser = await authRes.json();
+      if (!authUser || !authUser.id) {
+        return res.status(200).json({ ok: false, reason: 'unauthenticated' });
+      }
+    } catch (_) {
+      // Auth unreachable — retryable; the client shows heuristic text meanwhile.
+      return res.status(200).json({ ok: false, reason: 'auth_unavailable' });
     }
 
     // ── Defensive body parse ─────────────────────────────────────────────────
