@@ -1051,10 +1051,36 @@ const buildPipelineIslandData = async () => {
         } else {
             _subUsers = allUsers.filter(u => _visIds.includes(u.id) && u.id !== userId);
         }
+        // PERF (N+1 → 1): batch every subordinate's my_potential_list rows into ONE
+        // IN query and group by user_id, instead of a sequential per-sub query.
+        // queryPaged turns an array filter value into a PostgREST .in(). Grouping
+        // preserves each user's returned-row order; the per-sub .filter/.sort/cap
+        // logic below is byte-identical to the old loop, so the payload is
+        // unchanged. Falls back to the original per-sub query on any batch error.
+        const _subIds = _subUsers.map(u => u.id);
+        let _focusByUser = null;
+        if (_subIds.length) {
+            try {
+                const _allSubFocus = await AppDataStore.queryPaged('my_potential_list', { filters: { user_id: _subIds } });
+                _focusByUser = new Map();
+                for (const rec of (_allSubFocus || [])) {
+                    const k = String(rec.user_id);
+                    let bucket = _focusByUser.get(k);
+                    if (!bucket) { bucket = []; _focusByUser.set(k, bucket); }
+                    bucket.push(rec);
+                }
+            } catch (e) {
+                console.warn('[pipelineJsx] batched team focus fetch failed; falling back to per-sub query', e && e.message);
+                _focusByUser = null;
+            }
+        }
         let agentCount = 0;
         for (const sub of _subUsers) {
             if (agentCount >= 30) break;
-            const subFocus = (await AppDataStore.query('my_potential_list', { user_id: sub.id }))
+            const _rawSubFocus = _focusByUser
+                ? (_focusByUser.get(String(sub.id)) || [])
+                : (await AppDataStore.query('my_potential_list', { user_id: sub.id }));
+            const subFocus = _rawSubFocus
                 .filter(rec => activeProspects.some(p => p.id == rec.prospect_id))
                 .sort((a, b) => a.priority_order - b.priority_order);
             if (subFocus.length === 0) continue;
@@ -1574,11 +1600,38 @@ const showPipelineView = async (container) => {
         } else {
             _subUsers = allUsers.filter(u => _visIds.includes(u.id) && u.id !== userId);
         }
+        // PERF (N+1 → 1): fetch every subordinate's my_potential_list rows in ONE
+        // batched IN query and group by user_id, instead of a sequential per-sub
+        // query. queryPaged turns an array filter value into a PostgREST .in().
+        // Grouping preserves each user's returned-row order, and the per-sub
+        // .filter/.sort/cap logic below is byte-identical to the old loop, so the
+        // rendered output + order are unchanged. Falls back to the original
+        // per-sub query on any batch error (keeps the offline/localStorage path).
+        const _subIds = _subUsers.map(u => u.id);
+        let _focusByUser = null;
+        if (_subIds.length) {
+            try {
+                const _allSubFocus = await AppDataStore.queryPaged('my_potential_list', { filters: { user_id: _subIds } });
+                _focusByUser = new Map();
+                for (const rec of (_allSubFocus || [])) {
+                    const k = String(rec.user_id);
+                    let bucket = _focusByUser.get(k);
+                    if (!bucket) { bucket = []; _focusByUser.set(k, bucket); }
+                    bucket.push(rec);
+                }
+            } catch (e) {
+                console.warn('[pipeline] batched team focus fetch failed; falling back to per-sub query', e && e.message);
+                _focusByUser = null;
+            }
+        }
         let _teamAgentSections = '';
         let agentCount = 0;
         for (const sub of _subUsers) {
             if (agentCount >= 30) break;
-            const subFocus = (await AppDataStore.query('my_potential_list', { user_id: sub.id }))
+            const _rawSubFocus = _focusByUser
+                ? (_focusByUser.get(String(sub.id)) || [])
+                : (await AppDataStore.query('my_potential_list', { user_id: sub.id }));
+            const subFocus = _rawSubFocus
                 .filter(rec => activeProspects.some(p => p.id == rec.prospect_id))
                 .sort((a, b) => a.priority_order - b.priority_order);
             if (subFocus.length === 0) continue;

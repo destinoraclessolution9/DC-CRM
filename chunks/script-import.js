@@ -276,8 +276,8 @@ const getStep3Html = async () => {
                     <div class="validation-badge error"><span class="badge-count">${errors}</span><span class="badge-label">Errors</span></div>
                 </div>
                 <div style="margin:16px 0">
-                    <label class="checkbox-label"><input type="checkbox" id="stop-on-error"> Stop on first error</label>
-                    <label class="checkbox-label"><input type="checkbox" id="continue-warnings" checked> Continue on warnings</label>
+                    <label class="checkbox-label" style="opacity:.55"><input type="checkbox" id="stop-on-error" disabled> Stop on first error <span style="color:var(--gray-400);font-size:12px">(not yet enforced)</span></label>
+                    <label class="checkbox-label" style="opacity:.55"><input type="checkbox" id="continue-warnings" checked disabled> Continue on warnings <span style="color:var(--gray-400);font-size:12px">(not yet enforced)</span></label>
                 </div>
                 <div class="validation-log">
                     <h4>Error Log</h4>
@@ -377,9 +377,9 @@ const getStep5Html = async () => {
                 </div>
                 <div class="import-options" style="margin:16px 0">
                     <h4>Import Options</h4>
-                    <label class="checkbox-label"><input type="checkbox" checked> Send notification when complete</label>
-                    <label class="checkbox-label"><input type="checkbox"> Create backup before import</label>
-                    <label class="checkbox-label"><input type="checkbox" checked> Log all changes for audit</label>
+                    <label class="checkbox-label" style="opacity:.55"><input type="checkbox" checked disabled> Send notification when complete <span style="color:var(--gray-400);font-size:12px">(not yet enforced)</span></label>
+                    <label class="checkbox-label" style="opacity:.55"><input type="checkbox" disabled> Create backup before import <span style="color:var(--gray-400);font-size:12px">(not yet enforced)</span></label>
+                    <label class="checkbox-label" style="opacity:.55"><input type="checkbox" checked disabled> Log all changes for audit <span style="color:var(--gray-400);font-size:12px">(not yet enforced)</span></label>
                 </div>
                 <div id="progress-area" style="display:none;margin-top:16px">
                     <h4>Import Progress</h4>
@@ -2446,24 +2446,27 @@ const configureAlerts = () => {
     const autoReassignDays = config.autoReassignDays || 21;
     const content = `
         <div class="alert-config-modal">
+            <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:6px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:var(--gray-500)">
+                <i class="fas fa-info-circle"></i> These settings are not yet enforced — the monitoring view currently uses fixed thresholds (Attention &gt;3d, Inactive &gt;7d, Critical &gt;14d).
+            </div>
             <div class="form-group">
                 <label>Warning threshold (days inactive)</label>
-                <input type="number" id="alert-warning-days" class="form-control" value="${warningDays}" min="1" max="30">
-                <small style="color:var(--gray-500)">Prospects inactive for this many days will show as "Attention"</small>
+                <input type="number" id="alert-warning-days" class="form-control" value="${warningDays}" min="1" max="30" disabled>
+                <small style="color:var(--gray-500)">Prospects inactive for this many days will show as "Attention" <span style="color:var(--gray-400)">(not yet enforced)</span></small>
             </div>
             <div class="form-group">
                 <label>Critical threshold (days inactive)</label>
-                <input type="number" id="alert-critical-days" class="form-control" value="${criticalDays}" min="1" max="60">
-                <small style="color:var(--gray-500)">Prospects inactive beyond this will show as "Critical"</small>
+                <input type="number" id="alert-critical-days" class="form-control" value="${criticalDays}" min="1" max="60" disabled>
+                <small style="color:var(--gray-500)">Prospects inactive beyond this will show as "Critical" <span style="color:var(--gray-400)">(not yet enforced)</span></small>
             </div>
             <hr style="border:none;border-top:1px solid var(--gray-200);margin:16px 0">
             <div class="form-group">
-                <label class="checkbox-label"><input type="checkbox" id="alert-auto-reassign" ${autoReassign ? 'checked' : ''}> Enable auto-reassign suggestion</label>
+                <label class="checkbox-label" style="opacity:.55"><input type="checkbox" id="alert-auto-reassign" ${autoReassign ? 'checked' : ''} disabled> Enable auto-reassign suggestion <span style="color:var(--gray-400);font-size:12px">(not yet enforced)</span></label>
                 <small style="color:var(--gray-500)">Flag prospects for reassignment after the threshold below</small>
             </div>
             <div class="form-group">
                 <label>Auto-reassign suggestion after (days)</label>
-                <input type="number" id="alert-auto-days" class="form-control" value="${autoReassignDays}" min="1" max="90">
+                <input type="number" id="alert-auto-days" class="form-control" value="${autoReassignDays}" min="1" max="90" disabled>
             </div>
         </div>`;
     UI.showModal('Configure Alerts', content, [

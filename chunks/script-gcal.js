@@ -1270,6 +1270,12 @@
         setTimeout(async () => {
             const connection = await getGoogleConnection();
             if (!connection) return;
+            // Honor the saved sync direction: this auto-sync listener only ever
+            // pushes CRM→Google (create/update events + delete-sync), so when the
+            // user chose 'Google to CRM only' it must not run at all. Default to
+            // 'two-way' when unset (preserves prior behavior on un-migrated rows).
+            const _autoDir = connection.sync_settings?.direction || 'two-way';
+            if (_autoDir === 'google-to-crm') return;
             if (d.action === 'delete') {
                 // A hard-deleted activity is no longer in the activities table, so
                 // syncCRMtoGoogle's loop never visits it — its Google event + sync
