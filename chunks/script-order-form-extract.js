@@ -507,7 +507,7 @@
                 <td style="padding:10px 12px;font-size:12px;font-weight:600;">${amountDisp}</td>
                 <td style="padding:10px 12px;font-size:12px;font-weight:700;color:${r.scan_confidence != null ? confColor : 'var(--gray-400)'};">${confPct}</td>
                 <td style="padding:10px 12px;" onclick="event.stopPropagation()">
-                    <button onclick="event.stopPropagation();app.ofeHistToggleStatus('${rid}', '${status}')"
+                    <button onclick="event.stopPropagation();app.ofeHistToggleStatus('${rid}', '${UI.escJsAttr(status)}')"
                         style="padding:3px 10px;font-size:11px;border:none;border-radius:10px;cursor:pointer;font-weight:600;
                                background:${status === 'collected' ? '#dcfce7' : '#fef9c3'};
                                color:${status === 'collected' ? '#15803d' : '#92400e'};">
@@ -691,7 +691,7 @@
                 <div style="background:var(--surface,#fff);border:1px solid var(--border,#e2e8f0);border-radius:8px;padding:10px 12px;">
                     <div style="font-size:10px;color:var(--gray-400);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">Collection Status</div>
                     <div style="margin-bottom:8px;">${_statusBadge(status)}</div>
-                    <button onclick="app.ofeHistToggleStatus('${rid}','${status}')"
+                    <button onclick="app.ofeHistToggleStatus('${rid}','${UI.escJsAttr(status)}')"
                         style="width:100%;padding:5px;font-size:11px;border:1px solid var(--border,#e2e8f0);border-radius:6px;cursor:pointer;background:var(--gray-50);font-weight:600;color:var(--gray-600);">
                         ${status === 'collected' ? '<i class="fas fa-undo"></i> Reset to Pending' : '<i class="fas fa-check"></i> Mark Collected'}
                     </button>

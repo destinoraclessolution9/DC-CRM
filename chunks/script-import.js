@@ -561,6 +561,11 @@ const normalisePhone = (raw) => (raw || '').toString().replace(/[-\s()]/g, '').r
 // A non-leading '-' (e.g. "1-2") is still ignored. Magnitude logic unchanged.
 const _parseAmount = (raw) => { const s = (raw || '').toString(); const n = parseFloat(s.replace(/[^0-9.]/g, '')); if (!Number.isFinite(n)) return 0; return /^[^\d]*-/.test(s) ? -n : n; };
 
+// Local (MYT) YYYY-MM-DD for a Date (defaults to now). toISOString() gives the UTC
+// day, which is the PREVIOUS day before 08:00 MYT — mis-bucketing persisted dates
+// (customer_since, protection_deadline, purchase date) into the prior period.
+const _impLocalDay = (dt = new Date()) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+
 const mapRowToRecord = (row, reverseMap, agentId, importType = 'prospects') => {
     const get = (field) => {
         const idx = reverseMap[field];
@@ -592,7 +597,7 @@ const mapRowToRecord = (row, reverseMap, agentId, importType = 'prospects') => {
             // imported LTV (e.g. "-RM 1,200") would otherwise bypass the Math.max(0,…)
             // clamp every other LTV path applies and push aggregates negative.
             lifetime_value: Math.max(0, _parseAmount(get('lifetime_value'))),
-            customer_since: get('customer_since') || new Date().toISOString().split('T')[0],
+            customer_since: get('customer_since') || _impLocalDay(),
             status: 'active'
         };
     }
@@ -1013,7 +1018,7 @@ const startImport = async () => {
         if (table === 'prospects') {
             // Same prospect defaults the per-row path applied just before insert.
             record.status = 'New';
-            record.protection_deadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+            record.protection_deadline = _impLocalDay(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000));
             record.score = 5;
         }
         // BUG #15: skip a second occurrence of the same person within this file.
@@ -1045,7 +1050,7 @@ const startImport = async () => {
                 income_range: record.income_range || '', address: record.address || '', city: record.city || '',
                 state: record.state || '', postal_code: record.postal_code || '', ming_gua: record.ming_gua || '',
                 responsible_agent_id: assignedAgentId, lifetime_value: 0,
-                customer_since: new Date().toISOString().split('T')[0],
+                customer_since: _impLocalDay(),
                 converted_from_prospect_id: savedProspect.id, status: 'active',
                 created_at: new Date().toISOString()
             });
@@ -1054,7 +1059,7 @@ const startImport = async () => {
                 // mirroring approveClosingRecord / savePurchase (column is `date`).
                 await AppDataStore.create('purchases', {
                     customer_id: savedCustomer.id,
-                    date: new Date().toISOString().split('T')[0],
+                    date: _impLocalDay(),
                     invoice: 'IMPORT-CONVERT',
                     item: '',
                     amount: purchaseAmount,
@@ -1254,7 +1259,7 @@ const exportMarketingList = async (format) => {
         cols = ['Package Name','Price (RM)','Details','Requirement','Remarks','Delivery Lead Time','Is Active'];
         rows = data.map(d => [d.package_name || '', d.price || 0, d.details || '', d.requirement || '', d.remarks || '', d.delivery_lead_time || '', d.is_active ? 'Yes' : 'No']);
     }
-    const filename = `${type}_export_${new Date().toISOString().split('T')[0]}`;
+    const filename = `${type}_export_${_impLocalDay()}`;
     if (format === 'xlsx') {
         await window._ensureXlsx();
         const ws = XLSX.utils.aoa_to_sheet([cols, ...rows]);
@@ -1605,7 +1610,7 @@ const cascadeProspectReassign = async (prospectId, toAgentId, opts = {}) => {
     const prospectPatch = { responsible_agent_id: newAgentId };
     let protectionResetTo = null;
     if (opts.resetProtection) {
-        protectionResetTo = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        protectionResetTo = _impLocalDay(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000));
         prospectPatch.protection_deadline = protectionResetTo;
     }
 

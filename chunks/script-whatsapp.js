@@ -444,7 +444,10 @@
         catch (_) { _visibleUserIds = _state.cu?.id != null ? [_state.cu.id] : []; }
         const _visSet = (_visibleUserIds !== 'all' && Array.isArray(_visibleUserIds))
             ? new Set(_visibleUserIds.map(v => String(v))) : null;
-        const _canSee = (r) => !_visSet || _visSet.has(String(r.responsible_agent_id));
+        // Customers are scoped by responsible_agent_id OR agent_id (prospects only have
+        // the former, whose r.agent_id is undefined → harmlessly ignored). Without the
+        // agent_id path an agent's own agent_id-scoped customers were hidden from Forward.
+        const _canSee = (r) => !_visSet || _visSet.has(String(r.responsible_agent_id)) || _visSet.has(String(r.agent_id));
         const options = [
             ...allProspects.filter(_canSee).map(p => `<option value="prospect:${p.id}">${esc(p.full_name)} (Prospect)</option>`),
             ...allCustomers.filter(_canSee).map(c => `<option value="customer:${c.id}">${esc(c.full_name)} (Customer)</option>`)

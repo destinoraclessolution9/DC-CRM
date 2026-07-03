@@ -297,8 +297,20 @@
             // Compare on the date-only portion (first 10 chars): created_at is a
             // full ISO timestamp, so any time-of-day on the To day would compare
             // greater than the date-only bound and be dropped otherwise.
-            if (_caseFilters.from) cases = cases.filter(c => String(c.closing_date || c.created_at || '').slice(0, 10) >= _caseFilters.from);
-            if (_caseFilters.to) cases = cases.filter(c => String(c.closing_date || c.created_at || '').slice(0, 10) <= _caseFilters.to);
+            // Compare on the LOCAL (MYT) day. closing_date is already a date-only
+            // string; created_at is a full ISO/UTC timestamp, so a raw slice(0,10) is
+            // the UTC day — for a case created before 08:00 MYT that is the previous
+            // day, silently dropping it from a same-day MYT filter.
+            const _caseLocalDay = (v) => {
+                if (!v) return '';
+                const s = String(v);
+                if (!s.includes('T')) return s.slice(0, 10); // already a date-only string
+                const d = new Date(s);
+                return isNaN(d.getTime()) ? s.slice(0, 10)
+                    : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            };
+            if (_caseFilters.from) cases = cases.filter(c => _caseLocalDay(c.closing_date || c.created_at) >= _caseFilters.from);
+            if (_caseFilters.to) cases = cases.filter(c => _caseLocalDay(c.closing_date || c.created_at) <= _caseFilters.to);
             return cases;
         };
 
@@ -745,7 +757,7 @@
                         </div>
                         <div class="form-group half">
                             <label>Closing Date</label>
-                            <input type="date" id="case-closing-date" class="form-control" value="${c ? c.closing_date : new Date().toISOString().split('T')[0]}">
+                            <input type="date" id="case-closing-date" class="form-control" value="${c ? c.closing_date : (function(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})()}">
                         </div>
                     </div>
 

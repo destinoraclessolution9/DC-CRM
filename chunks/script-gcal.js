@@ -303,6 +303,9 @@
                     if (syncLog.find(s => s.google_event_id === gEvent.id)) continue;
 
                     const startDate = gEvent.start?.date || gEvent.start?.dateTime?.split('T')[0];
+                    // An event with neither start.date nor start.dateTime would import as
+                    // an activity with an undefined activity_date — skip it.
+                    if (!startDate) continue;
                     const startTime = gEvent.start?.dateTime?.split('T')[1]?.substring(0, 5) || '09:00';
                     const endTime = gEvent.end?.dateTime?.split('T')[1]?.substring(0, 5) || '10:00';
 

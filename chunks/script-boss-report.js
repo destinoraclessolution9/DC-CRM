@@ -94,7 +94,9 @@
         for (const row of rows) {
             const pNum = String(row['Purchase Number']||'');
             const code = String(row['Product Code']||'').trim();
-            const qty  = Number(row['Quantity'])||0;
+            // Clamp to >= 0: a negative/garbage Quantity cell would silently over- or
+            // under-deduct the product balance. A sold quantity can never be negative.
+            const qty  = Math.max(0, Number(row['Quantity']) || 0);
             if (_brIsEgg(code)) continue;
             // Scope: the Product Balance section is KL/PG-only by design (the report
             // template and balance inputs have no JB column — JB exists only in the
