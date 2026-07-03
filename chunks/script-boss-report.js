@@ -124,8 +124,12 @@
             const code    = String(row['Product Code']||'').trim();
             const qty     = Number(row['Quantity'])||0;
             const selfCol = String(row['Self Collection']||'');
-            const state   = String(row['States']||row['State']||'');
             if (_brIsEgg(code)) continue;
+            // Region = the FULFILLING warehouse the stock leaves, NOT the customer's
+            // delivery State. PG only fulfils its own Bay-Avenue self-collection; the KL
+            // warehouse ships every other order (incl. deliveries to Penang addresses),
+            // so those stock movements are KL. The customer's State column is their
+            // address and is intentionally NOT used here — do not "fix" this to read it.
             let region;
             if (selfCol.includes('Bay Avenue, PG')) region = 'PG';
             else region = 'KL';
