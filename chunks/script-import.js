@@ -759,7 +759,10 @@ const runDuplicateCheck = async () => {
         // reference tables (products/events/promotions) — a whole-table fetch
         // is cheap, so they stay on the legacy getAll path.
         let existing = [];
-        try { existing = await AppDataStore.getAll(table); } catch (e) { existing = []; }
+        // fresh:true bypasses the SWR cache for the duplicate check — a stale snapshot
+        // (e.g. from a prior import this session) would miss just-added rows and let
+        // real duplicates through.
+        try { existing = await AppDataStore.getAll(table, { fresh: true }); } catch (e) { existing = []; }
         const nameField = importType === 'products' ? 'name' : importType === 'events' ? 'title' : 'package_name';
         const nameCol = reverseMap[nameField];
         const existingNames = new Map();
@@ -821,7 +824,10 @@ const runDuplicateCheck = async () => {
     }
     if (!_builtServerSide) {
         let existing = [];
-        try { existing = await AppDataStore.getAll(table); } catch (e) { existing = []; }
+        // fresh:true bypasses the SWR cache for the duplicate check — a stale snapshot
+        // (e.g. from a prior import this session) would miss just-added rows and let
+        // real duplicates through.
+        try { existing = await AppDataStore.getAll(table, { fresh: true }); } catch (e) { existing = []; }
         existing.forEach(rec => {
             if (rec.phone)     existingPhones.set(normalisePhone(rec.phone), rec);
             if (rec.email)     existingEmails.set((rec.email || '').toLowerCase().trim(), rec);

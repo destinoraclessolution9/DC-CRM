@@ -436,7 +436,12 @@
                 return true;
             });
         } catch (err) {
-            console.error('egg: dedup failed, returning all rows', err);
+            // Fail LOUD, not silent: if the history read fails we cannot verify against
+            // past weeks, so every row looks "new" and a blind commit would duplicate
+            // farm orders. Warn the user prominently (there is a Phase-2 review before
+            // the actual commit) instead of silently passing all rows through.
+            console.error('egg: dedup against history FAILED — cannot verify duplicates; returning all rows UNDEDUPED', err);
+            try { window.UI?.toast?.error?.('⚠️ Duplicate check failed (order history unavailable). The "new orders" list is NOT verified against past weeks — review carefully before committing to avoid duplicate farm orders.'); } catch (_) { /* toast best-effort */ }
             return rows;
         }
     };

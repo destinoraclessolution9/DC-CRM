@@ -248,7 +248,9 @@ const applyActivityScoring = async (activity) => {
 
     // Bonus scoring for closing/transaction
     if (activity.is_closing && activity.amount_closed) {
-        const txPoints = Math.round(parseFloat(activity.amount_closed) / 100);
+        // Strip commas/currency before parseFloat — parseFloat('20,000') returns 20
+        // (stops at the comma), so a large closing scored ~0 points instead of 200.
+        const txPoints = Math.round(parseFloat(String(activity.amount_closed).replace(/[^0-9.\-]/g, '')) / 100);
         if (activity.prospect_id) {
             await addScoreToProspect(activity.prospect_id, txPoints, `Transaction closed: RM ${activity.amount_closed}`);
             // Referral bonus: if this prospect was referred by another prospect, reward the referrer
@@ -943,8 +945,22 @@ const _fetchSpecialProgramSource = async (table, scope = null) => {
             opts.scopeValues = scope.agentIds;
             opts.filters = { activity_type: 'CPS' };
         }
-        const r = await AppDataStore.queryAdvanced(table, opts);
-        return (r && Array.isArray(r.data)) ? r.data : [];
+        // Manual pagination: queryAdvanced issues a single .range() and PostgREST caps
+        // each response at ~1000 rows, so a scoped set larger than that was silently
+        // truncated → wrong sales/CPS totals → wrong special-program qualification. Loop
+        // pages of 1000 until a short page (or the safety cap) so every scoped row counts.
+        const _SP_PAGE = 1000;
+        let _spAll = [], _spOff = 0;
+        for (;;) {
+            // sort by id (unique PK) so page boundaries are stable — without an ORDER BY,
+            // independent .range() requests can shift rows and drop/double-count across pages.
+            const r = await AppDataStore.queryAdvanced(table, { ...opts, sort: 'id', sortDir: 'asc', limit: _SP_PAGE, offset: _spOff });
+            const chunk = (r && Array.isArray(r.data)) ? r.data : [];
+            _spAll = _spAll.concat(chunk);
+            if (chunk.length < _SP_PAGE || _spOff > 200000) break;
+            _spOff += _SP_PAGE;
+        }
+        return _spAll;
     }
     // Unscoped path (unchanged): bounded whole-table read + unbounded fallback.
     try {

@@ -537,7 +537,13 @@
     };
 
     const sendWhatsAppMessage = async (to, templateName, variables = {}) => {
-        const phone = (to || '').replace(/^\+/, '').replace(/\s/g, '');
+        // Normalize to E.164-style digits with the Malaysia country code. The old
+        // strip (only '+' and spaces) left dashes in and, worse, sent bare local
+        // numbers ('012...', '12...') with no country code, so WhatsApp resolved them
+        // against the wrong country.
+        let phone = (to || '').replace(/[^0-9+]/g, '').replace(/^\+/, '');
+        if (phone.startsWith('0')) phone = '60' + phone.slice(1);
+        else if (/^1\d{7,9}$/.test(phone)) phone = '60' + phone;
         const conn  = await getWhatsAppConnection();
         if (!conn?.phone_number_id) { UI.toast.error('WhatsApp not connected'); return; }
 

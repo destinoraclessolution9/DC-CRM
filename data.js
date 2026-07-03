@@ -3945,11 +3945,17 @@ class DataStore {
         // caller supplies one. Backward compatible — no opts.due_date → unchanged.
         if (opts.due_date) payload.due_date = opts.due_date;
         try {
-            const { error } = await window.supabase
+            // .select('id') so a 0-row update (RLS filtered the row out, or the
+            // touchpoint no longer exists) is caught — without it PostgREST resolves
+            // error=null on 0 rows and "mark done"/snooze would report success while
+            // the touchpoint stays put and reappears on the next render.
+            const { data: _upd, error } = await window.supabase
                 .from('journey_touchpoints')
                 .update(payload)
-                .eq('id', touchpointId);
+                .eq('id', touchpointId)
+                .select('id');
             if (error) throw error;
+            if (!_upd || _upd.length === 0) throw new Error('Touchpoint not updated — it may have been removed or is not permitted.');
             this.invalidateCache('journey_touchpoints');
             return true;
         } catch (e) {

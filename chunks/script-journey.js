@@ -579,7 +579,13 @@
                                     // fabricate an empty/zero customer, so we instead flag the
                                     // record for manual completion via app.convertToCustomer.
                                     const saleAmount = parseFloat(p.closing_record?.sale_amount) || 0;
-                                    if (p.closing_record && saleAmount > 0 &&
+                                    // AUTHZ: prospect->customer conversion is manager-gated. An
+                                    // agent-triggered rule must NOT auto-create the Customer record —
+                                    // only a team-leader-or-above / admin actor auto-approves; everyone
+                                    // else parks it as pending_approval (the else branch) for a manager
+                                    // to confirm via the normal flow.
+                                    const _canAutoConvert = isTeamLeaderOrAbove(_cu()) || isSystemAdmin(_cu());
+                                    if (p.closing_record && saleAmount > 0 && _canAutoConvert &&
                                         typeof window.app?.approveProspectConversion === 'function') {
                                         await window.app.approveProspectConversion(entityId);
                                     } else if (p.conversion_status !== 'pending_approval') {

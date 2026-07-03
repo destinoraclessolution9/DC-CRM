@@ -138,6 +138,11 @@
     };
     // Reject mutating ops on a closed session so historical data stays immutable.
     const _stRequireOpenSession = () => {
+        // AUTHZ: every count-mutating handler funnels through here but the view-level
+        // _stRequireAdmin gate is not repeated in the app-exposed handlers, so also
+        // assert the Stock-Take role (L1 admin / L15 staff) here — otherwise any
+        // authenticated user could write/delete counts by calling app.stAddCount etc.
+        if (!canAccessStockTake(_state.cu)) { UI.toast.error('Not permitted'); return null; }
         const sid = _stState.sessionId;
         if (!sid) { UI.toast.error('Activate a session first'); return null; }
         const sess = _stSessions().find(s => s.id === sid);
@@ -557,6 +562,7 @@
         stJsxRefresh();
     };
     const stActivateSession = async (id) => {
+        if (!canAccessStockTake(_state.cu)) { UI.toast.error('Not permitted'); return; }
         _stState.sessionId = id;
         const sess = _stSessions().find(s => s.id === id);
         _stState.sbSessionId = sess?.sbSessionId || null;
@@ -1825,6 +1831,7 @@
     };
 
     const stSetReason = (sku, val) => {
+        if (!canAccessStockTake(_state.cu)) { UI.toast.error('Not permitted'); return; }
         const sid = _stState.sessionId;
         if (!sid) return;
         const reasons = _stReasons(sid);
@@ -1950,6 +1957,7 @@
         }
     };
     const stOpenScanner = async (targetInputId, opts = {}) => {
+        if (!canAccessStockTake(_state.cu)) { UI.toast.error('Not permitted'); return; }
         await _stStopQr();
         try {
             await window._ensureQrScanner();
@@ -2213,10 +2221,21 @@
         const sb = _stSb();
         if (!sb || !_stState.sbSessionId || !_stState.sessionId) return;
         try {
-            const { data, error } = await sb.from('st_counts')
-                .select('id, created_at, counter, location_label, shelf_text, sku, qty, shelf_id')
-                .eq('session_id', _stState.sbSessionId);
-            if (error || !Array.isArray(data)) return;
+            // Paginate past PostgREST's ~1000-row cap so a large session's backfill is
+            // not silently truncated (which would under-report physical stock at
+            // reconciliation). Order by id and page until a short page.
+            const _ST_PAGE = 1000;
+            let data = [];
+            for (let _off = 0; ; _off += _ST_PAGE) {
+                const { data: page, error } = await sb.from('st_counts')
+                    .select('id, created_at, counter, location_label, shelf_text, sku, qty, shelf_id')
+                    .eq('session_id', _stState.sbSessionId)
+                    .order('id', { ascending: true })
+                    .range(_off, _off + _ST_PAGE - 1);
+                if (error || !Array.isArray(page)) return;
+                data = data.concat(page);
+                if (page.length < _ST_PAGE || _off > 200000) break;
+            }
             const local = _stCounts(_stState.sessionId);
             const haveIds = new Set(local.map(c => c.id));
             let addedAny = false;

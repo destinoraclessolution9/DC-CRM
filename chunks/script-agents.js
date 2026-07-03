@@ -720,10 +720,11 @@ const renewLicense = async (agentId) => {
 const executeRenewal = async (agentId) => {
     const agent = await AppDataStore.getById('users', agentId);
     if (agent) {
+        const _rd = new Date(); // local (MYT) day — see join_date note in saveAgent
         await AppDataStore.update('users', agentId, {
             renewal_status: 'PENDING_REVIEW',
             license_renewal_requested: true,
-            license_renewal_date: new Date().toISOString().split('T')[0]
+            license_renewal_date: `${_rd.getFullYear()}-${String(_rd.getMonth() + 1).padStart(2, '0')}-${String(_rd.getDate()).padStart(2, '0')}`
         });
     }
     UI.hideModal();
@@ -1121,9 +1122,13 @@ const saveAgent = async () => {
         // users table — that column is a dead shadow copy (credential-at-rest
         // leak) and is being dropped. The real auth user is created in GoTrue
         // via the admin-auth-ops Edge Function below.
+        // Local (MYT) day — toISOString() rolls back to the previous day before
+        // 08:00 MYT, mis-bucketing join_date into the prior month/quarter for tenure
+        // and new-agent reporting.
+        const _jd = new Date();
         const newAgent = {
             username: usernameVal,
-            join_date: new Date().toISOString().split('T')[0],
+            join_date: `${_jd.getFullYear()}-${String(_jd.getMonth() + 1).padStart(2, '0')}-${String(_jd.getDate()).padStart(2, '0')}`,
             ...fields
         };
         await AppDataStore.create('users', newAgent);

@@ -844,6 +844,14 @@ const openApproveCpsIntakeModal = async (intakeId) => {
         UI.toast.error('Intake request not found.');
         return;
     }
+    // AUTHZ: cps_intake_requests are org-wide readable (the list filters by
+    // getVisibleUserIds client-side), so a by-id open must apply the SAME scope gate
+    // or an agent can pull another team's intake PII by guessing an id (IDOR).
+    const _cpsVis = await getVisibleUserIds(_state.cu);
+    if (_cpsVis !== 'all' && intake.agent_id && !_cpsVis.map(String).includes(String(intake.agent_id))) {
+        UI.toast.error('Access denied.');
+        return;
+    }
     if (intake.status !== 'submitted') {
         UI.toast.error('This intake is no longer pending.');
         await renderPendingCpsIntakes();
@@ -896,6 +904,15 @@ const openApproveCpsIntakeModal = async (intakeId) => {
 
 const rejectCpsIntake = async (intakeId) => {
     if (!confirm('Reject this CPS intake request? This cannot be undone.')) return;
+    // AUTHZ (mirror openApproveCpsIntakeModal): org-wide readable rows, so gate the
+    // reject by getVisibleUserIds — otherwise any agent can reject another team's intake.
+    const _rej = await AppDataStore.getById('cps_intake_requests', intakeId).catch(() => null);
+    if (!_rej) { UI.toast.error('Intake request not found.'); return; }
+    const _cpsVis = await getVisibleUserIds(_state.cu);
+    if (_cpsVis !== 'all' && _rej.agent_id && !_cpsVis.map(String).includes(String(_rej.agent_id))) {
+        UI.toast.error('Access denied.');
+        return;
+    }
     try {
         await AppDataStore.update('cps_intake_requests', intakeId, {
             status: 'rejected',

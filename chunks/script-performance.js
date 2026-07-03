@@ -398,6 +398,7 @@ const updateWorkflowConditions = () => {
 };
 
 const saveWorkflow = async (workflowId) => {
+    if (!isSystemAdmin() && !isMarketingManager()) { UI.toast.error('Not permitted'); return; } // view is level [1,2]; gate the app-exposed writes too
     const name = document.getElementById('wf-name')?.value?.trim();
     const trigger = document.getElementById('wf-trigger')?.value;
     const action = document.getElementById('wf-action')?.value;
@@ -494,6 +495,7 @@ const createWorkflowFromTemplate = async (triggerType) => {
 };
 
 const toggleWorkflow = async (workflowId) => {
+    if (!isSystemAdmin() && !isMarketingManager()) { UI.toast.error('Not permitted'); return; }
     const wf = await AppDataStore.getById('automation_workflows', workflowId);
     if (!wf) return;
     const newStatus = wf.status === 'active' ? 'paused' : 'active';
@@ -510,6 +512,7 @@ const editWorkflow = async (workflowId) => {
 };
 
 const deleteWorkflow = async (workflowId) => {
+    if (!isSystemAdmin() && !isMarketingManager()) { UI.toast.error('Not permitted'); return; }
     UI.showModal('Delete Workflow', '<p>Are you sure you want to delete this workflow?</p>', [
         { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
         { label: 'Delete', type: 'primary', action: `(async () => { try { await AppDataStore.delete('automation_workflows', ${JSON.stringify(workflowId)}); UI.hideModal(); UI.toast.success('Workflow deleted'); const tc = document.getElementById('marketing-tab-content'); if (tc && app.renderAutomationTab) tc.innerHTML = await app.renderAutomationTab(); } catch(e) { UI.toast.error('Delete failed: ' + (e?.message || e)); } })()` }

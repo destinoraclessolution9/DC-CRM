@@ -5434,10 +5434,16 @@
                     if (localStorage.getItem('push_enabled') === '1') {
                         const reg = window._swRegistration || (await navigator.serviceWorker.ready);
                         const existingSub = reg && (await reg.pushManager.getSubscription());
-                        if (existingSub) return; // still active, nothing to do
-                        // Subscription was lost — clear flag and re-subscribe below
-                        localStorage.removeItem('push_enabled');
-                        console.log('[Push] stale push_enabled flag cleared — re-subscribing');
+                        // Do NOT early-return when a browser subscription already exists:
+                        // on a shared device it may belong to a PREVIOUS user, leaving the
+                        // push_subscriptions row pointing at them (so the current user gets
+                        // no pushes and the other user's device keeps theirs). Fall through
+                        // to subscribe(), whose endpoint upsert re-claims the row for the
+                        // CURRENT session's user. Only log when the browser sub was lost.
+                        if (!existingSub) {
+                            localStorage.removeItem('push_enabled');
+                            console.log('[Push] stale push_enabled flag cleared — re-subscribing');
+                        }
                     }
                     await window.PushNotif.subscribe();
                 } catch (e) { console.warn('[Push] auto-subscribe skipped:', e.message || e); }

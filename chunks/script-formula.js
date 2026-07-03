@@ -2083,9 +2083,12 @@
                 const date     = parseDate(rawDate);
                 const code     = (row['Product Code'] || '').toString().trim();
                 const name     = (row['Name'] || '').toString();
-                const qty      = parseInt(row['Quantity']) || 0;
-                const price    = parseFloat(row['Unit Price']) || 0;
-                const subtotal = parseFloat(row['Subtotal Price']) || 0;
+                const qty      = parseInt(String(row['Quantity'] || '').replace(/[^0-9.\-]/g, ''), 10) || 0; // keep the dot so parseInt truncates ("2.0"->2), only strip commas/currency
+                // Strip thousands separators / currency symbols before parseFloat —
+                // parseFloat('1,250.00') stops at the comma and returns 1, silently
+                // importing every comma-formatted price as ~RM1.
+                const price    = parseFloat(String(row['Unit Price'] || '').replace(/[^0-9.\-]/g, '')) || 0;
+                const subtotal = parseFloat(String(row['Subtotal Price'] || '').replace(/[^0-9.\-]/g, '')) || 0;
 
                 const pushDrop = (reason) => droppedRows.push({
                     'Purchase Number': purchase, 'Purchase Date': rawDate || '',

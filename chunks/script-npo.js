@@ -1141,6 +1141,23 @@
     // ====================================================================
     // ORDER DETAIL — terms, items + delivery controls, installment ledger
     // ====================================================================
+    // Shared fail-closed scope gate for the by-id mutators (mirrors npoOpenOrder's
+    // view gate). The NPO nav is visible org-wide, so without this an agent could
+    // write to a sale outside their visible set by passing a guessed/sibling saleId.
+    const _npoSaleInScope = async (saleId) => {
+        let sale = null;
+        try { sale = await AppDataStore.getById('npo_sales', saleId); } catch (_) { sale = null; }
+        if (!sale) return false;
+        try {
+            const visible = await _utils.getVisibleUserIds(_state.cu);
+            if (visible !== 'all') {
+                const set = new Set((Array.isArray(visible) ? visible : []).map(String));
+                if (!set.has(String(sale.responsible_agent_id))) return false;
+            }
+        } catch (_) { return false; }
+        return true;
+    };
+
     const npoOpenOrder = async (saleId) => {
         const container = _viewport();
         if (!container) return;
@@ -1247,6 +1264,7 @@
     // Advance an item one step along pending→ordered→in_transit→delivered→redeemed.
     // delivered_date is stamped when it reaches 'delivered'.
     const npoAdvanceDelivery = async (saleId, itemId) => {
+        if (!(await _npoSaleInScope(saleId))) { UI.toast.error('Not permitted'); return; }
         const sb = _sb();
         if (!sb) { UI.toast.error('Supabase not connected'); return; }
         try {
@@ -1316,6 +1334,7 @@
 
     // Mark PAID — optional slip upload via a small modal.
     const npoMarkInstallmentPaid = async (saleId, instId) => {
+        if (!(await _npoSaleInScope(saleId))) { UI.toast.error('Not permitted'); return; }
         const inst = await AppDataStore.getById('npo_installments', instId).catch(() => null);
         const seq = inst ? inst.seq : '';
         const content = `
@@ -1339,6 +1358,7 @@
 
     // Resubmit / manual transfer — slip REQUIRED, marks paid with is_manual_transfer.
     const npoResubmitInstallment = async (saleId, instId) => {
+        if (!(await _npoSaleInScope(saleId))) { UI.toast.error('Not permitted'); return; }
         const inst = await AppDataStore.getById('npo_installments', instId).catch(() => null);
         const seq = inst ? inst.seq : '';
         const content = `
@@ -1364,6 +1384,7 @@
     // Shared confirm path for both "mark paid" and "resubmit/manual transfer".
     // manual=true requires a slip and sets is_manual_transfer.
     const npoConfirmInstallmentPaid = async (saleId, instId, manual) => {
+        if (!(await _npoSaleInScope(saleId))) { UI.toast.error('Not permitted'); return; }
         const sb = _sb();
         if (!sb) { UI.toast.error('Supabase not connected'); return; }
         const paid_date = _str('npo-paid-date') || _date();
@@ -1418,6 +1439,7 @@
     };
 
     const npoMarkInstallmentLapsed = async (saleId, instId) => {
+        if (!(await _npoSaleInScope(saleId))) { UI.toast.error('Not permitted'); return; }
         const sb = _sb();
         if (!sb) { UI.toast.error('Supabase not connected'); return; }
         UI.confirm('Mark Lapsed', 'Mark this installment as lapsed?', async () => {

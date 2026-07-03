@@ -324,7 +324,7 @@ const approveQueueEntry = async (entryId) => {
             // the shared _convInFlight set keyed by prospect_id (the same key that path
             // uses) so only one of the two paths books the sale. Skip silently if held.
             const _saleKey = String(entry.prospect_id);
-            if (customer && !_convInFlight.has(_saleKey)) {
+            if (!_convInFlight.has(_saleKey)) {
                 _convInFlight.add(_saleKey);
                 try {
                 // Audit null-deref fix: guard snapshot_after — a new_sale row can come
@@ -332,19 +332,42 @@ const approveQueueEntry = async (entryId) => {
                 // info_update branch guards against). Without this, cr.sale_amount throws.
                 const cr = entry.snapshot_after || {};
                 const amt = parseFloat(cr.sale_amount) || 0;
-                await AppDataStore.create('purchases', {
-                    customer_id: customer.id,
-                    date: cr.closing_date || _localToday,
-                    invoice: cr.invoice_number || '',
-                    item: cr.product || '',
-                    amount: amt,
-                    currency: UI.currencyForCountry(prospect.country),
-                    status: 'COMPLETED',
-                    payment_method: cr.payment_method || 'Cash'
-                });
-                // Atomic, race-free LTV + total_purchases bump (audit #8/#16/#22) —
-                // matches savePurchase/deletePurchase so all purchase paths agree.
-                await _utils.adjustCustomerLtv(customer.id, amt, 1);
+                // Converted prospect but no linked customer (legacy/imported, or an
+                // earlier customer-create failed): create it now from the prospect +
+                // closing record — exactly like approveClosingRecord does. Without this
+                // the sale + its LTV were SILENTLY dropped while the queue was still
+                // marked 'approved' with a success toast (revenue loss).
+                if (!customer) {
+                    customer = await AppDataStore.create('customers', {
+                        id: window.AppDataStore._generateId(),
+                        full_name: prospect.full_name,
+                        phone: prospect.phone,
+                        email: prospect.email,
+                        ic_number: prospect.ic_number,
+                        date_of_birth: prospect.date_of_birth,
+                        responsible_agent_id: prospect.responsible_agent_id,
+                        country: UI.countryByCode(prospect.country).code,
+                        status: 'active',
+                        lifetime_value: 0,
+                        customer_since: cr.closing_date || cr.order_date || _localToday,
+                        converted_from_prospect_id: entry.prospect_id,
+                    });
+                }
+                if (customer) {
+                    await AppDataStore.create('purchases', {
+                        customer_id: customer.id,
+                        date: cr.closing_date || _localToday,
+                        invoice: cr.invoice_number || '',
+                        item: cr.product || '',
+                        amount: amt,
+                        currency: UI.currencyForCountry(prospect.country),
+                        status: 'COMPLETED',
+                        payment_method: cr.payment_method || 'Cash'
+                    });
+                    // Atomic, race-free LTV + total_purchases bump (audit #8/#16/#22) —
+                    // matches savePurchase/deletePurchase so all purchase paths agree.
+                    await _utils.adjustCustomerLtv(customer.id, amt, 1);
+                }
                 } finally {
                     _convInFlight.delete(_saleKey);
                 }
