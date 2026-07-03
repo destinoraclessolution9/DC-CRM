@@ -958,11 +958,14 @@
     }
 
     // ── Snapshot fed to the LLM endpoint and saved with the review ───────
+    // Local (MYT) day string — toISOString() would roll a local midnight Date back
+    // to the previous UTC day, mis-stating the coverage window by one day.
+    const _qbrLocalDay = (dt) => dt ? `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}` : null;
     const _qbrSnapshot = (agg, q) => {
         const cur = agg.byQ[q] || { rev: 0, orders: 0, members: new Set() };
         const d = _qbrDecomp(agg, q);
         return {
-            quarter: q, coverageFrom: agg.dateFrom ? agg.dateFrom.toISOString().slice(0, 10) : null, coverageTo: agg.dateTo ? agg.dateTo.toISOString().slice(0, 10) : null,
+            quarter: q, coverageFrom: _qbrLocalDay(agg.dateFrom), coverageTo: _qbrLocalDay(agg.dateTo),
             totals: { revenue: Math.round(agg.totRev), orders: agg.nOrders, aov: Math.round(agg.aov), bottles: Math.round(agg.bottles), members: agg.nMembers, posRevenue: Math.round(agg.bySystem.POS.rev), onlineRevenue: Math.round(agg.bySystem.Online.rev) },
             focusQuarter: { revenue: Math.round(cur.rev), orders: cur.orders, members: cur.members.size },
             health: _qbrHealthRows(agg, q).map(r => ({ kpi: r.kpi, value: r.value, qoq: r.qoq == null ? null : +r.qoq.toFixed(1), yoy: r.yoy == null ? null : +r.yoy.toFixed(1), target: r.target, status: r.status })),
@@ -996,7 +999,11 @@
             // Send the caller's Supabase session token so the server can reject
             // anonymous callers (the endpoint bills the company Anthropic key).
             const _qbrTok = (() => { try { const s = JSON.parse(localStorage.getItem('fs-crm-auth-v1') || 'null'); return (s && (s.access_token || (s.currentSession && s.currentSession.access_token))) || ''; } catch (_) { return ''; } })();
-            const res = await fetch('/api/qbr-narrative', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(_qbrTok ? { Authorization: `Bearer ${_qbrTok}` } : {}) }, body: JSON.stringify({ quarter: q, snapshot, context: _qbr.context || '' }) });
+            // Strip customer PII (real names) from the payload that leaves for Anthropic —
+            // the narrative only needs the ranked spend, not who. The local snapshot keeps
+            // the real names for the admin's own on-screen review.
+            const _llmSnapshot = { ...snapshot, topCustomers: (snapshot.topCustomers || []).map((c, i) => ({ name: `Top Customer ${i + 1}`, spend: c.spend })) };
+            const res = await fetch('/api/qbr-narrative', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(_qbrTok ? { Authorization: `Bearer ${_qbrTok}` } : {}) }, body: JSON.stringify({ quarter: q, snapshot: _llmSnapshot, context: _qbr.context || '' }) });
             const j = await res.json();
             if (j && j.ok && j.narrative) { narrative = j.narrative; source = 'ai'; }
         } catch (e) { /* fall back to heuristic */ }
@@ -1201,6 +1208,7 @@
         result: (document.getElementById('qbr-a-result') || {}).value || '',
     });
     const qbrSaveAction = async (id, quarter) => {
+        if (!isSystemAdmin(_state.cu)) { UI.toast.error('Access denied'); return; } // defense-in-depth: the modal openers gate on this, but these writes are app-exposed
         const data = _qbrReadActionForm(quarter);
         if (!String(data.initiative).trim()) { UI.toast.error('Initiative is required'); return; }
         try {
@@ -1209,6 +1217,7 @@
         } catch (e) { UI.toast.error('Save failed (is the migration applied?): ' + (e && e.message || e)); }
     };
     const qbrDeleteAction = async (id) => {
+        if (!isSystemAdmin(_state.cu)) { UI.toast.error('Access denied'); return; }
         try { await AppDataStore.delete('qbr_actions', id); UI.hideModal(); await _qbrLoadOS(_qrState.focusQuarter); _renderResults(); UI.toast.success('Deleted'); }
         catch (e) { UI.toast.error('Delete failed: ' + (e && e.message || e)); }
     };
@@ -1242,17 +1251,23 @@
         ]);
     };
     const qbrSaveForecast = async (quarter) => {
+        if (!isSystemAdmin(_state.cu)) { UI.toast.error('Access denied'); return; }
+        // parseFloat(...)||null turned an intentional 0 into null (a genuine worst-case
+        // of RM0, or a zero base for a paused KPI). Preserve a finite 0; only a
+        // blank/NaN field becomes null.
+        const _num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
         const data = {
             quarter, kpi: (document.getElementById('qbr-f-kpi') || {}).value || 'revenue',
-            base: parseFloat((document.getElementById('qbr-f-base') || {}).value) || null,
-            best: parseFloat((document.getElementById('qbr-f-best') || {}).value) || null,
-            worst: parseFloat((document.getElementById('qbr-f-worst') || {}).value) || null,
+            base: _num((document.getElementById('qbr-f-base') || {}).value),
+            best: _num((document.getElementById('qbr-f-best') || {}).value),
+            worst: _num((document.getElementById('qbr-f-worst') || {}).value),
             assumptions: (document.getElementById('qbr-f-assume') || {}).value || '',
         };
         try { await AppDataStore.create('qbr_forecasts', data); UI.hideModal(); await _qbrLoadOS(_qrState.focusQuarter); _renderResults(); UI.toast.success('Forecast saved'); }
         catch (e) { UI.toast.error('Save failed: ' + (e && e.message || e)); }
     };
     const qbrSetForecastActual = async (id) => {
+        if (!isSystemAdmin(_state.cu)) { UI.toast.error('Access denied'); return; }
         const f = (_qbr.forecasts || []).find(x => String(x.id) === String(id)); if (!f) return;
         const v = prompt('Actual value for ' + f.kpi + ':', f.actual == null ? '' : String(f.actual));
         if (v === null) return;
@@ -1270,8 +1285,8 @@
             await _qbrLoadOS(q); UI.toast.success('Saved');
         } catch (e) { UI.toast.error('Save failed (is the migration applied?): ' + (e && e.message || e)); }
     }
-    const qbrSaveContext = async () => { const el = document.getElementById('qbr-context'); _qbr.context = el ? el.value : _qbr.context; await _qbrUpsertReview({ context: _qbr.context }); };
-    const qbrSaveReview = async () => { const agg = _qrState.agg; if (!agg) return; await _qbrUpsertReview({ context: _qbr.context, snapshot: _qbrSnapshot(agg, _qrState.focusQuarter), narrative: _qbr.narrative || null }); };
+    const qbrSaveContext = async () => { if (!isSystemAdmin(_state.cu)) { UI.toast.error('Access denied'); return; } const el = document.getElementById('qbr-context'); _qbr.context = el ? el.value : _qbr.context; await _qbrUpsertReview({ context: _qbr.context }); };
+    const qbrSaveReview = async () => { if (!isSystemAdmin(_state.cu)) { UI.toast.error('Access denied'); return; } const agg = _qrState.agg; if (!agg) return; await _qbrUpsertReview({ context: _qbr.context, snapshot: _qbrSnapshot(agg, _qrState.focusQuarter), narrative: _qbr.narrative || null }); };
 
     // ── Misc UI plumbing ─────────────────────────────────────────────────
     const qbrSetTab = (tab) => { _qbr.tab = tab; _renderResults(); };

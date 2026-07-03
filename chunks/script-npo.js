@@ -724,7 +724,15 @@
 
     // ── customer lookup ──────────────────────────────────────────────────
     let _custSearchSeq = 0;
-    const npoSearchCustomers = async (term) => {
+    // Debounced dispatcher (was firing searchCustomers on every keystroke). The seq
+    // guard in _npoRunCustomerSearch already drops stale results; this cuts the calls.
+    const npoSearchCustomers = (term) => {
+        clearTimeout(npoSearchCustomers._t);
+        const box = document.getElementById('npo-cust-results');
+        if (!(term || '').trim()) { if (box) { box.style.display = 'none'; box.innerHTML = ''; } return; }
+        npoSearchCustomers._t = setTimeout(() => _npoRunCustomerSearch(term), 220);
+    };
+    const _npoRunCustomerSearch = async (term) => {
         const box = document.getElementById('npo-cust-results');
         if (!box) return;
         term = (term || '').trim();
@@ -1377,8 +1385,13 @@
             const patch = { status: 'paid', paid_date, note };
             if (slip_url) patch.slip_url = slip_url;
             if (manual) patch.is_manual_transfer = true;
-            const { error } = await sb.from('npo_installments').update(patch).eq('id', instId);
+            // .select('id') so a zero-row update (RLS filtered the row out, or instId
+            // no longer exists) is caught here — without it PostgREST resolves error=null
+            // on 0 rows and we'd toast success + bump the customer LTV for a payment that
+            // was never actually recorded, leaving the ledger and LTV disagreeing.
+            const { data: _upd, error } = await sb.from('npo_installments').update(patch).eq('id', instId).select('id');
             if (error) throw error;
+            if (!_upd || _upd.length === 0) throw new Error('Installment not updated — it may have been removed or you may not have permission.');
             try { AppDataStore.invalidateCache && AppDataStore.invalidateCache('npo_installments'); } catch (_) {}
 
             // Count this installment toward the customer's LTV as collected — ONLY on a

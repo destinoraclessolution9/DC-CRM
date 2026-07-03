@@ -653,12 +653,14 @@ const buildUpdatePayload = (row, reverseMap, importType = 'prospects') => {
         if (idx === undefined) return;
         const raw = (row[idx] || '').toString().trim();
         if (raw === '') return; // never overwrite with a blank cell
-        if (field === 'deal_value') {
-            const n = parseFloat(raw);
-            if (Number.isFinite(n)) payload[field] = n;
-            return;
-        }
         if (moneyFields.has(field)) {
+            // deal_value + all money fields use the currency-aware _parseAmount (was:
+            // deal_value special-cased with raw parseFloat, which turned "5,000" into 5
+            // and "RM 5,000" into NaN — diverging from the create path in mapRowToRecord).
+            // Skip a non-blank but digit-less cell ("TBD"/"pending") so it PRESERVES the
+            // existing DB value — _parseAmount would coerce it to 0 and overwrite. Mirrors
+            // mapRowToRecord's `!/[0-9]/.test(dealVal)` guard on the create path.
+            if (!/[0-9]/.test(raw)) return;
             const amt = _parseAmount(raw);
             // BUG #12: lifetime_value is a cumulative balance, not a signed
             // adjustment. _parseAmount preserves a leading minus, so clamp it to

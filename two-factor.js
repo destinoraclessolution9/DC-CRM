@@ -425,6 +425,19 @@ const SMS2FAManager = {
 
 // 2FA UI Component
 const showTwoFactorSetup = () => {
+    // SECURITY: the custom users.mfa_* TOTP enrolment this modal performs is NOT
+    // read by the login gate — _enforceMfaOnLogin() (script.js) enforces ONLY
+    // Supabase-native AAL2 factors. Enabling 2FA here therefore left login
+    // password-only while telling the user they were protected (false sense of
+    // security). Route to the WORKING native 2FA UI in Settings › Security instead.
+    // The legacy custom-enrolment modal below is intentionally unreachable now.
+    try {
+        if (window.app && typeof window.app.navigateTo === 'function') {
+            window.app.navigateTo('settings');
+            if (window.UI && UI.toast) UI.toast.info('Set up two-factor under Settings › Security.');
+            return;
+        }
+    } catch (_) { /* fall through to the legacy modal only if navigation is unavailable */ }
     const secret = TOTPManager.generateSecret();
     const esc = (window.UI && window.UI.escapeHtml) || ((s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c])));
 

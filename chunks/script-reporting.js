@@ -1625,7 +1625,9 @@ const getNewAgents = async (from, to) => {
 const getActiveAgents = async () => {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - 60);
-    const cutoffStr = cutoff.toISOString().slice(0, 10);
+    // Local (MYT) day — toISOString() would shift the cutoff back one day before
+    // 08:00 MYT, moving records right at the 60-day boundary in/out of the window.
+    const cutoffStr = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, '0')}-${String(cutoff.getDate()).padStart(2, '0')}`;
 
     const [users, allActivities, allAttendees] = await Promise.all([
         AppDataStore.getAll('users'),
@@ -2424,7 +2426,9 @@ const buildNewAgentsDetails = async (from, to) => {
 const buildActiveAgentsDetails = async () => {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - 60);
-    const cutoffStr = cutoff.toISOString().slice(0, 10);
+    // Local (MYT) day — toISOString() would shift the cutoff back one day before
+    // 08:00 MYT, moving records right at the 60-day boundary in/out of the window.
+    const cutoffStr = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, '0')}-${String(cutoff.getDate()).padStart(2, '0')}`;
     const _ids = (_visibleUserIds === 'all' || !Array.isArray(_visibleUserIds)) ? null : _visibleUserIds.map(v => Number(v)).filter(n => Number.isFinite(n));
     try {
         if (window.supabase && window.supabase.rpc) {
@@ -2442,7 +2446,9 @@ const buildActiveAgentsDetails = async () => {
 const _buildActiveAgentsDetailsLegacy = async () => {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - 60);
-    const cutoffStr = cutoff.toISOString().slice(0, 10);
+    // Local (MYT) day — toISOString() would shift the cutoff back one day before
+    // 08:00 MYT, moving records right at the 60-day boundary in/out of the window.
+    const cutoffStr = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, '0')}-${String(cutoff.getDate()).padStart(2, '0')}`;
 
     const [users, allActivities, allAttendees] = await Promise.all([
         AppDataStore.getAll('users'),
@@ -3725,6 +3731,12 @@ const calculateQuarterlyBreakdown = async (yearlyTarget) => {
     const factors = { 1: 0.9, 2: 1.0, 3: 1.1, 4: 1.2 };
     const totalFactor = Object.values(factors).reduce((a, b) => a + b, 0);
 
+    // Fetch existing quarterly targets ONCE (was re-fetched inside the loop on every
+    // iteration). Each iteration handles a distinct quarter, so a single snapshot is
+    // correct. NOTE: the four writes below are still non-atomic — a mid-loop failure
+    // leaves some quarters updated and others stale; a transactional RPC is the proper
+    // fix (deferred, needs a migration).
+    const allQuarterly = await AppDataStore.getAll('quarterly_targets');
     // Use a for...of loop instead of forEach to support await
     for (const q of [1, 2, 3, 4]) {
         const ratio = factors[q] / totalFactor;
@@ -3742,7 +3754,6 @@ const calculateQuarterlyBreakdown = async (yearlyTarget) => {
             seasonal_factor: factors[q]
         };
 
-        const allQuarterly = await AppDataStore.getAll('quarterly_targets');
         const existing = allQuarterly.find(t => t.year === qTarget.year && t.quarter === q);
         if (existing) {
             await AppDataStore.update('quarterly_targets', existing.id, qTarget);
@@ -3778,8 +3789,12 @@ const exportKPIReport = async (format) => {
         csv += "--- Summary Metrics ---\n";
         csv += "Metric,Value,Description\n";
         for (const [key, val] of Object.entries(kpis)) {
+            // Skip structured values (e.g. eppDetails is an array of objects) that would
+            // stringify to "[object Object]"; only scalar KPI values belong in the CSV.
+            if (val && typeof val === 'object') continue;
             let displayVal = val;
-            if (key.toLowerCase().includes('sales')) displayVal = `RM ${val.toLocaleString()}`;
+            // Only RM-format actual numbers — agentHours etc. are display strings.
+            if (typeof val === 'number' && key.toLowerCase().includes('sales')) displayVal = `RM ${val.toLocaleString()}`;
             csv += `"${key}","${displayVal}","${KPI_DEFINITIONS[key] || ''}"\n`;
         }
 

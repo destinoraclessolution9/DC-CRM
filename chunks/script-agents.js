@@ -255,6 +255,19 @@ if (!agent) {
     return;
 }
 
+// AUTHZ: the agents LIST is scoped to getVisibleUserIds, so the profile (which
+// renders phone/email/commission/license + the agent's prospect book) must be too
+// — otherwise any agent could pull another team's PII by passing an arbitrary id.
+try {
+    const _visibleIds = await getVisibleUserIds(_state.cu);
+    if (_visibleIds !== 'all'
+        && String(agentId) !== String(_state.cu?.id)
+        && !_visibleIds.map(String).includes(String(agentId))) {
+        UI.toast.error('Access denied');
+        return;
+    }
+} catch (_) { /* scope resolution failed — fall through; RLS on the reads still applies */ }
+
 const isAdminOrLead = _getUserLevel(_state.cu) <= 4;
 
 // Resolve reporting_to name dynamically
@@ -1373,21 +1386,30 @@ const confirmDeleteAgent = async (agentId) => {
         // FK cleanup runs with the caller's JWT; RLS policies must allow
         // admin-level updates/deletes on these tables (see rls_replace_allow_all_*.sql).
         const wc = AppDataStore._writeClient();
+        // A PostgREST write returns a hard RLS/constraint rejection in the resolved
+        // { error } rather than throwing — so an unchecked cleanup that RLS blocks
+        // would be silently skipped and we'd still delete the user, orphaning the
+        // references (customers left pointing at a non-existent agent). Check every
+        // FK-cleanup result and ABORT before the users delete if any failed.
+        const _fkClear = async (builder, label) => {
+            const { error } = await builder;
+            if (error) throw new Error(`${label} failed: ${error.message || error.code || 'unknown'}`);
+        };
         // Clear reporting_to references pointing to this agent
-        await wc.from('users').update({ reporting_to: null }).eq('reporting_to', agentId);
+        await _fkClear(wc.from('users').update({ reporting_to: null }).eq('reporting_to', agentId), 'clear reporting_to');
         // Clear prospects assigned to this agent
-        await wc.from('prospects').update({ responsible_agent_id: null }).eq('responsible_agent_id', agentId);
+        await _fkClear(wc.from('prospects').update({ responsible_agent_id: null }).eq('responsible_agent_id', agentId), 'unassign prospects');
         // Clear customers assigned to this agent (both owner fields the app buckets
         // by) — otherwise customers keep pointing at the deleted id and render as
         // 'Agent #<id>' / unknown owner, and any FK on these columns would make the
         // final users delete throw after prospects/activities were unassigned.
-        await wc.from('customers').update({ responsible_agent_id: null }).eq('responsible_agent_id', agentId);
-        await wc.from('customers').update({ agent_id: null }).eq('agent_id', agentId);
+        await _fkClear(wc.from('customers').update({ responsible_agent_id: null }).eq('responsible_agent_id', agentId), 'unassign customers (responsible_agent_id)');
+        await _fkClear(wc.from('customers').update({ agent_id: null }).eq('agent_id', agentId), 'unassign customers (agent_id)');
         // Clear activities linked to this agent
-        await wc.from('activities').update({ lead_agent_id: null }).eq('lead_agent_id', agentId);
+        await _fkClear(wc.from('activities').update({ lead_agent_id: null }).eq('lead_agent_id', agentId), 'unassign activities');
         // Delete agent_targets and agent_stats rows for this agent
-        await wc.from('agent_targets').delete().eq('agent_id', agentId);
-        await wc.from('agent_stats').delete().eq('agent_id', agentId);
+        await _fkClear(wc.from('agent_targets').delete().eq('agent_id', agentId), 'delete agent_targets');
+        await _fkClear(wc.from('agent_stats').delete().eq('agent_id', agentId), 'delete agent_stats');
         await AppDataStore.delete('users', agentId);
         // Remove from Supabase Auth via the `admin-auth-ops` Edge Function,
         // which holds service_role as a server-side secret. If this step

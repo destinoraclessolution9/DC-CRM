@@ -490,11 +490,11 @@
                     <div><span style="color:var(--gray-500);">Signed at:</span> <span>${c.signed_at ? new Date(c.signed_at).toLocaleString() : '—'}</span></div>
                     <div><span style="color:var(--gray-500);">File:</span> ${esc(c.file_name || '—')}</div>
                 </div>
-                ${c.signature_data_url ? `
+                ${(c.signature_data_url && /^data:image\//i.test(String(c.signature_data_url))) ? `
                     <div>
                         <p style="font-weight:500; margin-bottom:8px;">Signature:</p>
                         <div style="border:1px solid var(--gray-200); border-radius:8px; padding:8px; background:#fafafa;">
-                            <img loading="lazy" decoding="async" src="${c.signature_data_url}" style="max-width:100%; height:auto; max-height:150px;">
+                            <img loading="lazy" decoding="async" src="${esc(c.signature_data_url)}" style="max-width:100%; height:auto; max-height:150px;">
                         </div>
                     </div>
                 ` : ''}

@@ -326,7 +326,16 @@ const _downloadSheet = async (cols, rows, sheetName, filename, format) => {
         XLSX.utils.book_append_sheet(wb, ws, sheetName);
         XLSX.writeFile(wb, `${filename}.xlsx`);
     } else {
-        const csvRows = [cols, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
+        // Neutralize CSV/formula injection: a cell that a spreadsheet would treat as
+        // a formula (leading = + - @, or a leading tab/CR) is prefixed with a single
+        // quote so it opens as literal text — but genuine numbers (incl. negatives
+        // like -500) are left intact so amount columns still parse.
+        const _csvCell = (v) => {
+            let s = String(v == null ? '' : v);
+            if (/^[=+\-@\t\r]/.test(s) && !/^[-+]?\d[\d,.]*$/.test(s)) s = "'" + s;
+            return `"${s.replace(/"/g, '""')}"`;
+        };
+        const csvRows = [cols, ...rows].map(r => r.map(_csvCell).join(','));
         const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a'); a.href = url; a.download = `${filename}.csv`;

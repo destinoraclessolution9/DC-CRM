@@ -543,6 +543,7 @@ const refreshPhoneDupes = async () => {
 };
 
 const dedupeClearEmail = async (prospectId) => {
+    if (!isSystemAdmin(_state.cu)) { UI.toast.error('Access denied'); return; } // defense-in-depth: UI gate is admin-only, but this is app-exposed
     const ok = confirm(`Clear the email for prospect ${prospectId}?\n\nThe record stays; only the email field is nulled.`);
     if (!ok) return;
     try {
@@ -576,6 +577,7 @@ const dedupeEditPhone = async (prospectId) => {
 };
 
 const dedupeClearPhone = async (prospectId) => {
+    if (!isSystemAdmin(_state.cu)) { UI.toast.error('Access denied'); return; } // defense-in-depth: UI gate is admin-only, but this is app-exposed
     const ok = confirm(`Clear the phone number for prospect ${prospectId}?\n\nThe record stays; only the phone field is nulled.`);
     if (!ok) return;
     try {
@@ -588,6 +590,7 @@ const dedupeClearPhone = async (prospectId) => {
 };
 
 const dedupeDeleteProspect = async (prospectId) => {
+    if (!isSystemAdmin(_state.cu)) { UI.toast.error('Access denied'); return; } // defense-in-depth: UI gate is admin-only, but this is app-exposed
     const ok = confirm(`PERMANENTLY DELETE prospect ${prospectId}?\n\nThis cannot be undone. Use this only for true duplicate records.`);
     if (!ok) return;
     try {

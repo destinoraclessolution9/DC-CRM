@@ -2356,11 +2356,23 @@ function _wireLoginBtn() {
                             u.full_name && u.full_name.trim().toLowerCase() === authName.toLowerCase() && !u.email
                         );
                         if (nameMatch) {
-                            // Link this existing admin-created record to the login email
-                            await AppDataStore.update('users', nameMatch.id, { email: user.email });
-                            profile = { ...nameMatch, email: user.email };
-                            profileError = null;
-                            // Linked existing agent record to login email
+                            // SECURITY: full_name is not a secret, and this fallback adopts
+                            // the matched row WHOLESALE (including its `role`). Left open, a
+                            // signup whose name matches a pre-provisioned MANAGER/ADMIN record
+                            // would inherit that privilege. Only auto-link by name to the
+                            // non-privileged agent band (L6+); elevated placeholders (L1–L5)
+                            // must be linked by an explicit admin-set email, so a name
+                            // collision can never escalate. _getUserLevel defaults to 99, so
+                            // ordinary agent onboarding is unaffected.
+                            const _nmLevel = _getUserLevel(nameMatch);
+                            if (_nmLevel >= 6) {
+                                await AppDataStore.update('users', nameMatch.id, { email: user.email });
+                                profile = { ...nameMatch, email: user.email };
+                                profileError = null;
+                                // Linked existing agent record to login email
+                            } else {
+                                console.warn('[auth] name-based profile link refused for elevated placeholder (L' + _nmLevel + '); an admin must link it by setting the record email.');
+                            }
                         }
                     }
                 }

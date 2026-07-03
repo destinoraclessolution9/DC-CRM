@@ -3160,24 +3160,50 @@ class DataStore {
         return data || [];
     }
 
-    // Bulk delete — runs all deletes in parallel instead of one-by-one
+    // Bulk delete — runs all deletes in one .in() call instead of one-by-one.
     async deleteMany(tableName, ids) {
         if (!ids || ids.length === 0) return;
-        const { error } = await this._writeClient()
+        // .select('id') so PostgREST returns the rows ACTUALLY deleted. Ids missing
+        // from the result were either RLS-blocked (RESTRICTIVE policy returns 0 rows
+        // with NO error) or never on the server (local-only, still in the sync queue).
+        // Only tombstone the rows we truly removed — tombstoning an RLS-blocked row
+        // hides a still-live server row on this device forever (the cascade-delete
+        // "rows vanish locally but persist on server" bug). Mirrors delete()'s guard.
+        const { data: deleted, error } = await this._writeClient()
             .from(tableName)
             .delete()
-            .in('id', ids);
+            .in('id', ids)
+            .select('id');
         if (error) throw error;
-        // Clean up local state for all deleted IDs
+        const deletedSet = new Set((deleted || []).map(r => String(r.id)));
+        // Rows not deleted server-side but sitting un-pushed in the sync queue are
+        // local-only creates — safe to purge + tombstone locally.
+        let pendingLocal = new Set();
+        try {
+            const syncQueue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
+            pendingLocal = new Set(syncQueue
+                .filter(q => q && q.record && q.tableName === tableName && !q.pushed)
+                .map(q => String(q.record.id)));
+        } catch (_) { /* intentional: queue read best-effort */ }
+        const handled = ids.map(String).filter(id => deletedSet.has(id) || pendingLocal.has(id));
+        const blocked = ids.map(String).filter(id => !deletedSet.has(id) && !pendingLocal.has(id));
+        if (handled.length === 0 && blocked.length > 0) {
+            // The ENTIRE batch was RLS-blocked (and nothing is local-only) — surface it
+            // exactly like delete() does, and tombstone nothing.
+            throw new Error('permission_denied');
+        }
+        if (blocked.length > 0) {
+            console.warn(`[DataStore] deleteMany('${tableName}') — ${blocked.length}/${ids.length} row(s) not deleted (RLS-blocked); left intact locally`);
+        }
+        const idSet = new Set(handled);
+        // Clean up local state for the CONFIRMED-deleted IDs only.
         try {
             const key = `fs_crm_${tableName}`;
             const all = JSON.parse(localStorage.getItem(key) || '[]');
-            const idSet = new Set(ids.map(String));
             localStorage.setItem(key, JSON.stringify(all.filter(r => !idSet.has(String(r.id)))));
         } catch (_) { /* intentional: local cache cleanup is best-effort; server delete confirmed */ }
         try {
             const syncQueue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
-            const idSet = new Set(ids.map(String));
             // Guard q.record — a legacy/corrupt queue entry without .record would
             // throw here and skip the whole purge, leaving deleted items to re-sync.
             localStorage.setItem('fs_crm_sync_queue', JSON.stringify(
@@ -3187,13 +3213,13 @@ class DataStore {
         try {
             const tombstones = JSON.parse(localStorage.getItem('fs_crm_tombstones') || '{}');
             if (!tombstones[tableName]) tombstones[tableName] = [];
-            for (const id of ids) {
+            for (const id of handled) {
                 if (!tombstones[tableName].includes(String(id))) tombstones[tableName].push(String(id));
             }
             localStorage.setItem('fs_crm_tombstones', JSON.stringify(tombstones));
         } catch (_) { /* intentional: tombstone persist is best-effort; a stale cache could briefly resurface rows */ }
         this.invalidateCache(tableName);
-        this.emit('dataChanged', { action: 'deleteMany', table: tableName, ids });
+        this.emit('dataChanged', { action: 'deleteMany', table: tableName, ids: handled });
     }
 
     // ── Dormancy-aware prospect fetch ─────────────────────────────────────

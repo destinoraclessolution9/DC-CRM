@@ -613,7 +613,10 @@ const openShareCpsIntakeLinkModal = async () => {
         .map(v => `<option value="${v.id}" data-name="${(v.name || '').replace(/"/g, '&quot;')}" data-address="${(v.address || v.location || '').replace(/"/g, '&quot;')}" data-waze="${(v.waze_link || '').replace(/"/g, '&quot;')}">${esc(v.name)} | ${esc(v.location || '')}</option>`)
         .join('');
 
-    const today = new Date().toISOString().split('T')[0];
+    // Local (MYT) day — toISOString() rolls back to the previous UTC day before
+    // 08:00 MYT, so the appointment date would pre-fill as yesterday in the morning.
+    const _cpsToday = new Date();
+    const today = `${_cpsToday.getFullYear()}-${String(_cpsToday.getMonth() + 1).padStart(2, '0')}-${String(_cpsToday.getDate()).padStart(2, '0')}`;
 
     UI.showModal('Share CPS Intake Link', `
         <div style="display:flex; flex-direction:column; gap:14px;">

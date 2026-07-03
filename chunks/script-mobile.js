@@ -746,6 +746,10 @@
         if (!digits) return '';
         if (digits.startsWith('60')) return digits;
         if (digits.startsWith('0')) return '6' + digits;
+        // Bare local number with the leading 0 dropped — a MY mobile is 1XXXXXXXX
+        // (9–10 digits after the 0). Prefix the 60 country code so wa.me doesn't
+        // interpret it against the wrong country.
+        if (/^1\d{7,9}$/.test(digits)) return '60' + digits;
         return digits;
     };
 
@@ -2279,9 +2283,13 @@
             const md = dob.slice(5, 10); return md === todayMD || md === tomMD;
         }).length + _mcalStaffList.filter(s => { const md = _staffMD(s); return !!md && (md === todayMD || md === tomMD); }).length;
         const refillCount = (refillsR || []).length;
+        const _mcalIsAdmin = isSystemAdmin(_state.cu);
         const overdueFollowups = (draftsR || []).filter(d =>
             d.status === 'pending' && (d.due_date || '') < todayStr &&
-            (!d.agent_id || String(d.agent_id) === String(_state.cu?.id))
+            // Was `!d.agent_id || ...` which counted unassigned (null-owner) drafts into
+            // every non-admin's tile — a scope leak. Admins see all; everyone else counts
+            // only their own owned drafts.
+            (_mcalIsAdmin || String(d.agent_id) === String(_state.cu?.id))
         ).length;
 
         const comingHost = document.getElementById('mcal-coming-host');

@@ -319,10 +319,19 @@ const showFudeView = async (container) => {
     // --- Totals & summary sync (fire-and-forget, don't block render) ---
     const totalPoints  = myRewards.reduce((s, r) => s + (parseInt(r.fudi_points)    || 0), 0);
     const totalReturns = myRewards.reduce((s, r) => s + (parseFloat(r.sharing_return) || 0), 0);
-    if (myRewards.length > 0) { syncFudiSummary(currentUser.id, totalPoints, totalReturns).catch(e => console.warn('[fude] syncFudiSummary failed:', e?.message || e)); }
+    // Only sync when the totals actually changed since the last render — this fires on
+    // every fude-view render, so an unguarded write hammered the DB with identical data
+    // (and could clobber a concurrent admin edit to the summary) on each repaint.
+    if (myRewards.length > 0) {
+        const _fudiSig = `${currentUser.id}:${totalPoints}:${totalReturns}`;
+        if (window._fudiSummarySig !== _fudiSig) {
+            window._fudiSummarySig = _fudiSig;
+            syncFudiSummary(currentUser.id, totalPoints, totalReturns).catch(e => console.warn('[fude] syncFudiSummary failed:', e?.message || e));
+        }
+    }
 
-    // --- Helper: pre-signed image src attr ---
-    const imgSrc = (h) => h._signedUrl ? `src="${h._signedUrl}"` : '';
+    // --- Helper: pre-signed image src attr (escaped for the attribute context) ---
+    const imgSrc = (h) => h._signedUrl ? `src="${esc(h._signedUrl)}"` : '';
 
     // --- Summary tiles (L13/14) ---
     const summaryBanner = isL1314 ? `

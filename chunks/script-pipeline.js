@@ -718,9 +718,16 @@ const _runPipelineArchive = async (expiredItems, userId, actsByProspect) => {
     }
 };
 
+// Notes + activities count for the badge. Runs the two scoped queries CONCURRENTLY
+// (was two sequential awaits — halves the per-row latency). Deliberately counts ALL
+// of the prospect's activities via its own query (NOT the visibility-scoped
+// _actsByProspect bucket) so the badge value is identical on the focus list and the
+// system table for the same prospect, matching the legacy behaviour.
 const getNoteCount = async (prospectId) => {
-    const notes = await AppDataStore.query('notes', { prospect_id: prospectId });
-    const activities = await AppDataStore.query('activities', { prospect_id: prospectId });
+    const [notes, activities] = await Promise.all([
+        AppDataStore.query('notes', { prospect_id: prospectId }),
+        AppDataStore.query('activities', { prospect_id: prospectId }),
+    ]);
     return notes.length + activities.length;
 };
 
@@ -745,7 +752,16 @@ const getPipelineAmount = async (prospect, category, allSolutions, solutionsByPr
     } else {
         solutions = await AppDataStore.query('proposed_solutions', { prospect_id: prospect.id });
     }
-    if (solutions.length > 0 && solutions[0].amount) return solutions[0].amount;
+    if (solutions.length > 0) {
+        // Deterministic pick: the LATEST solution by created_at (then id). [0] from an
+        // unordered query was whichever row PostgREST returned first, so the Amount
+        // column — and the focus/archive amount persisted from it — could flip between
+        // renders for a prospect with more than one proposed_solution.
+        const _latestSol = solutions.slice().sort((a, b) =>
+            String(b.created_at || '').localeCompare(String(a.created_at || '')) || (Number(b.id) || 0) - (Number(a.id) || 0)
+        )[0];
+        if (_latestSol && _latestSol.amount) return _latestSol.amount;
+    }
     if (prospect.estimated_value_max) return prospect.estimated_value_max;
     if (prospect.estimated_value_min) return prospect.estimated_value_min;
     // v6: default_amount may be null (e.g. agent_package) → caller decides how to render
@@ -1109,6 +1125,10 @@ const buildPipelineIslandData = async () => {
                 : (await AppDataStore.query('my_potential_list', { user_id: sub.id }));
             const subFocus = _rawSubFocus
                 .filter(rec => activeProspects.some(p => p.id == rec.prospect_id))
+                // Drop un-archived stale prior-month rows: _runPipelineArchive only runs
+                // for the logged-in user's own list, never subordinates', so without this
+                // the leader view leaks months-old focus items. Same rule as the own list.
+                .filter(rec => !(rec.focus_month && rec.focus_month < _focusCurrentMonth))
                 .sort((a, b) => a.priority_order - b.priority_order);
             if (subFocus.length === 0) continue;
             agentCount++;
@@ -1665,6 +1685,10 @@ const showPipelineView = async (container) => {
                 : (await AppDataStore.query('my_potential_list', { user_id: sub.id }));
             const subFocus = _rawSubFocus
                 .filter(rec => activeProspects.some(p => p.id == rec.prospect_id))
+                // Drop un-archived stale prior-month rows: _runPipelineArchive only runs
+                // for the logged-in user's own list, never subordinates', so without this
+                // the leader view leaks months-old focus items. Same rule as the own list.
+                .filter(rec => !(rec.focus_month && rec.focus_month < _focusCurrentMonth))
                 .sort((a, b) => a.priority_order - b.priority_order);
             if (subFocus.length === 0) continue;
             agentCount++;
@@ -2108,7 +2132,11 @@ const initActionPlanReminder = () => {
         _reminderInFlight = true;
         try {
         const now = new Date();
-        const todayStr = now.toISOString().slice(0,10);
+        // LOCAL (MYT) day so it agrees with getDay() below — a UTC slice rolls the key
+        // back to Sunday before 08:00 MYT, letting the Monday reminder run twice (once
+        // with a Sunday key, once after 08:00 with the Monday key) and stamp the wrong
+        // check_date (inconsistent with the mondayStr key used elsewhere in this file).
+        const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
         // Skip if already ran today or not Monday
         if (now.getDay() !== 1 || _lastReminderDate === todayStr) return;
         // NOTE (audit L1928): do NOT mark _lastReminderDate yet — only stamp it AFTER

@@ -1018,7 +1018,7 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
         if (entityTags.length > 0) {
             const tagSpans = await Promise.all(entityTags.map(async (et) => {
                 const tag = await AppDataStore.getById('tags', et.tag_id);
-                return tag ? `<span class="score-badge" style="background:${tag.color || 'var(--primary)'};color:white;display:flex;align-items:center;gap:4px;font-size:11px;">${escapeHtml(tag.name)} <span style="cursor:pointer;" onclick="app.removeTagFromCustomer(${customer.id},${tag.id})">&times;</span></span>` : '';
+                return tag ? `<span class="score-badge" style="background:${/^#[0-9a-f]{3,8}$|^[a-z]+$/i.test(String(tag.color || '')) ? tag.color : 'var(--primary)'};color:white;display:flex;align-items:center;gap:4px;font-size:11px;">${escapeHtml(tag.name)} <span style="cursor:pointer;" onclick="app.removeTagFromCustomer(${customer.id},${tag.id})">&times;</span></span>` : '';
             }));
             tagsHtml = tagSpans.join('');
         }
@@ -1411,7 +1411,12 @@ const renderReferralsTab = async (customer, containerId = 'profile-tab-content')
     `;
 };
 
-const searchReferralProspect = async () => {
+// Debounced dispatcher — was firing a server trigram search on every keystroke.
+const searchReferralProspect = () => {
+    clearTimeout(searchReferralProspect._t);
+    searchReferralProspect._t = setTimeout(() => _runReferralProspectSearch(), 220);
+};
+const _runReferralProspectSearch = async () => {
     try {
         const term = (document.getElementById('referral-prospect-search')?.value || '').trim();
         const resultsDiv = document.getElementById('referral-prospect-results');
@@ -1782,7 +1787,7 @@ const renderCustomerTags = async (customer) => {
         const tagSpans = await Promise.all(entityTags.map(async (et) => {
             const tag = await AppDataStore.getById('tags', et.tag_id);
             return tag ? `
-                <span class="score-badge" style="background:${tag.color || 'var(--primary)'}; color:white; display:flex; align-items:center; gap:4px; font-size:11px;">
+                <span class="score-badge" style="background:${/^#[0-9a-f]{3,8}$|^[a-z]+$/i.test(String(tag.color || '')) ? tag.color : 'var(--primary)'}; color:white; display:flex; align-items:center; gap:4px; font-size:11px;">
                     ${escapeHtml(tag.name)} <span style="cursor:pointer;" onclick="app.removeTagFromCustomer(${customer.id}, ${tag.id})">&times;</span>
                 </span>
             ` : '';

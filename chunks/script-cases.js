@@ -497,7 +497,7 @@
         const caseMappings = allTagMappings.filter(et => et.entity_type === 'case_study' && et.entity_id === c.id);
         const caseTags = caseMappings.map(m => allTags.find(t => t.id === m.tag_id)).filter(Boolean);
         const tagPills = caseTags.map(t => `
-            <span class="badge" style="background:${t.color || '#e5e7eb'};color:#1f2937;margin-right:4px;">
+            <span class="badge" style="background:${/^#[0-9a-f]{3,8}$|^[a-z]+$/i.test(String(t.color || '')) ? t.color : '#e5e7eb'};color:#1f2937;margin-right:4px;">
                 ${escapeHtml(t.name)}
                 <span style="cursor:pointer;margin-left:4px;" onclick="app.removeTagFromCase(${c.id}, ${t.id})">&times;</span>
             </span>`).join('');

@@ -829,7 +829,7 @@
             eventId: nextEvent.id,
             eventDate: nextEvent.event_date || nextEvent.date,
             eventName: nextEvent.event_title || nextEvent.title,
-            dueDate: new Date().toISOString().split('T')[0],
+            dueDate: _localDateStr(new Date()), // local (MYT) day — toISOString() rolls back a day before 08:00 MYT
             attachmentUrl: nextEvent.poster_url || null   // event poster → sent as a real image on WhatsApp
         });
     };

@@ -3583,10 +3583,10 @@ ALTER TABLE public.promotions
                         <button class="btn-icon" onclick="event.stopPropagation(); app.deleteTemplate(${template.id})" title="Delete"><i class="fas fa-trash"></i></button>
                     </div>
                 </div>
-                <h4 class="template-title">${escapeHtml(template.template_name)}</h4>
-                <p class="template-preview">${escapeHtml(template.content.substring(0, 80))}${template.content.length > 80 ? '...' : ''}</p>
+                <h4 class="template-title">${escapeHtml(template.template_name || '')}</h4>
+                <p class="template-preview">${escapeHtml((template.content || '').substring(0, 80))}${(template.content || '').length > 80 ? '...' : ''}</p>
                 <div class="template-variables">
-                    ${template.variables.map(v => `<span class="variable-tag">{{${escapeHtml(v)}}}</span>`).join('')}
+                    ${(template.variables || []).map(v => `<span class="variable-tag">{{${escapeHtml(v)}}}</span>`).join('')}
                 </div>
             </div>
         `;

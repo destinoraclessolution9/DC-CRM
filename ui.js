@@ -83,7 +83,12 @@ window.UI = (() => {
         const isPrimary = btn.classList.contains('primary');
         const text = btn.textContent.trim().toLowerCase();
         const isActionText = /submit|save|approve|confirm|send/.test(text);
-        if (isPrimary || isActionText) _startBtnLoad(btn);
+        // Filter/search/apply/refresh buttons re-render in place and never emit a
+        // toast or close a modal, so nothing calls _endBtnLoad — they'd sit disabled
+        // with a stuck spinner until the 10s safety net. Exclude those non-submitting
+        // primaries (the submit-verb set above still spins normally).
+        const isNonSubmitting = /\b(apply|filter|search|refresh|reload)\b/.test(text);
+        if ((isPrimary || isActionText) && !isNonSubmitting) _startBtnLoad(btn);
     }, true);
 
     // --- In-modal error banner ---
