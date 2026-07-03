@@ -1015,6 +1015,7 @@
                         await AppDataStore.create('product_price_history', { product_id: parseInt(_savedId), price: data.price, effective_date: _priceDate });
                     }
                 }
+                let _uploadFailed = false;
                 if (_savedId && (_photoFile || _posterFile)) {
                     const _sb = window.supabase || window.supabaseClient;
                     const _urlUpdates = {};
@@ -1022,15 +1023,18 @@
                         const _path = `products/photo/${_savedId}_${Date.now()}`;
                         const { error: _pe } = await _sb.storage.from('attachments').upload(_path, _photoFile, { upsert: true, contentType: _photoFile.type });
                         if (!_pe) { const { data: _ud } = _sb.storage.from('attachments').getPublicUrl(_path); _urlUpdates.photo_url = _ud.publicUrl; }
+                        else { _uploadFailed = true; console.error('product photo upload failed:', _pe.message || _pe); }
                     }
                     if (_posterFile) {
                         const _path = `products/poster/${_savedId}_${Date.now()}`;
                         const { error: _pe } = await _sb.storage.from('attachments').upload(_path, _posterFile, { upsert: true, contentType: _posterFile.type });
                         if (!_pe) { const { data: _ud } = _sb.storage.from('attachments').getPublicUrl(_path); _urlUpdates.poster_url = _ud.publicUrl; }
+                        else { _uploadFailed = true; console.error('product poster upload failed:', _pe.message || _pe); }
                     }
                     if (Object.keys(_urlUpdates).length > 0) await AppDataStore.update('products', _savedId, _urlUpdates);
                 }
-                UI.toast.success(id ? 'Product updated' : 'Product added');
+                if (_uploadFailed) UI.toast.error('Record saved, but the image upload failed — the photo/poster was not saved.');
+                else UI.toast.success(id ? 'Product updated' : 'Product added');
                 UI.hideModal();
                 await showMarketingListsView(document.getElementById('content-viewport'));
             } catch (_err) {
@@ -1112,6 +1116,7 @@
                     const _newRec = await AppDataStore.create('events', data);
                     _savedId = _newRec?.id;
                 }
+                let _posterUploadFailed = false;
                 if (_savedId && _posterFile) {
                     const _sb = window.supabase || window.supabaseClient;
                     const _path = `events/poster/${_savedId}_${Date.now()}`;
@@ -1119,9 +1124,13 @@
                     if (!_pe) {
                         const { data: _ud } = _sb.storage.from('attachments').getPublicUrl(_path);
                         await AppDataStore.update('events', _savedId, { poster_url: _ud.publicUrl });
+                    } else {
+                        _posterUploadFailed = true;
+                        console.error('event poster upload failed:', _pe.message || _pe);
                     }
                 }
-                UI.toast.success(id ? 'Event updated' : 'Event added');
+                if (_posterUploadFailed) UI.toast.error('Event saved, but the poster upload failed — the poster was not saved.');
+                else UI.toast.success(id ? 'Event updated' : 'Event added');
                 UI.hideModal();
                 await showMarketingListsView(document.getElementById('content-viewport'));
             } catch (_err) {
@@ -1257,17 +1266,19 @@
                         const linked = await AppDataStore.queryAdvanced('activities', {
                             filters: { event_id: id }, countMode: null, limit: 5000
                         });
-                        for (const act of (linked.data || [])) {
-                            try { await AppDataStore.delete('activities', act.id); } catch (_) {}
-                        }
+                        // Batch the cascade deletes instead of awaiting each one
+                        // sequentially (was up to 5000 serial round-trips).
+                        await Promise.all((linked.data || []).map(act =>
+                            AppDataStore.delete('activities', act.id).catch(() => {})
+                        ));
                     } catch (_) {}
                     try {
                         const linked = await AppDataStore.queryAdvanced('event_attendees', {
                             filters: { event_id: id }, countMode: null, limit: 5000
                         });
-                        for (const att of (linked.data || [])) {
-                            try { await AppDataStore.delete('event_attendees', att.id); } catch (_) {}
-                        }
+                        await Promise.all((linked.data || []).map(att =>
+                            AppDataStore.delete('event_attendees', att.id).catch(() => {})
+                        ));
                     } catch (_) {}
                     AppDataStore.invalidateCache('activities');
                     AppDataStore.invalidateCache('event_attendees');
@@ -1290,10 +1301,28 @@
         const today = new Date(); today.setHours(0,0,0,0);
         const allPromos = await AppDataStore.getAll('promotions');
 
+        // Audience token for the "Visible To" gate. Admins/managers see everything;
+        // agent-band users must be granted 'agent', customer/referrer-band 'customer'.
+        // A promotion with an empty/missing visible_to is visible to all (back-compat).
+        const _viewerAudience = (() => {
+            if (isSystemAdmin(_state.cu) || isManagement(_state.cu) || isMarketingManager(_state.cu)) return null; // sees all
+            // Canonical level resolver (honors Chinese-only + legacy roles); an inline
+            // /Level N/ regex misses 改命客户(13)/准传福大使(14)/'customer'/'referrer'.
+            const lvl = _utils.getUserLevel(_state.cu);
+            return lvl >= 13 ? 'customer' : 'agent';
+        })();
+        const _visibleToViewer = (p) => {
+            if (!_viewerAudience) return true;
+            const vt = Array.isArray(p.visible_to) ? p.visible_to : [];
+            if (vt.length === 0) return true; // unset → visible to all
+            return vt.includes(_viewerAudience);
+        };
+
         // Show active, non-expired promotions (Level 12+ cannot access this page via nav)
         const promotions = allPromos.filter(p => {
             if (p.is_active === false) return false;
             if (p.end_date) { const e = new Date(p.end_date); e.setHours(0,0,0,0); if (e < today) return false; }
+            if (!_visibleToViewer(p)) return false;
             return true;
         });
 
@@ -1717,9 +1746,11 @@
                 </div>`,
                 `marketing:switchTab(${tab})`
             );
-            // Re-fetch the container in case the user navigated away during the await
+            // Re-fetch the container in case the user navigated away during the await.
+            // Also guard against a slow earlier tab render resolving AFTER a newer tab
+            // click: only write if this tab is still the active one (_state.cmt === tab).
             const stillThere = document.getElementById('marketing-tab-content');
-            if (stillThere) stillThere.innerHTML = tabHtml;
+            if (stillThere && _state.cmt === tab) stillThere.innerHTML = tabHtml;
         }
 
         // Update active tab styling
@@ -3698,15 +3729,16 @@ ALTER TABLE public.promotions
             footer_text: footer || '',
             is_approved: true,
             status: 'active',
-            created_by: _state.cu ? _state.cu.id : 5,
-            created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
         };
 
         if (templateId) {
+            // Don't rewrite the creation audit fields on edit — only set them on insert.
             await AppDataStore.update('whatsapp_templates', templateId, template);
             UI.toast.success('Template updated successfully');
         } else {
+            template.created_by = _state.cu ? _state.cu.id : 5;
+            template.created_at = new Date().toISOString();
             await AppDataStore.create('whatsapp_templates', template);
             UI.toast.success('Template created successfully');
         }
@@ -4138,22 +4170,35 @@ ALTER TABLE public.promotions
                     </div>
                 </div>
             `;
-            // setTimeout, not a comma-expression: the previous (fn, 500) discarded the
-            // arrow and never ran, so #final-audience-size stayed at '...'.
-            setTimeout(() => {
-                const size = document.getElementById('audience-size-preview')?.getAttribute('data-size') || '85';
+            // #audience-size-preview lived in the step-3 markup and was destroyed by
+            // this step-4 innerHTML swap, so compute the real audience from the
+            // captured config instead of reading a gone element / hardcoded '85'.
+            (async () => {
                 const el = document.getElementById('final-audience-size');
-                if (el) el.textContent = size + ' recipients';
-            }, 500);
+                if (!el) return;
+                try {
+                    const recipients = await calculateAudienceSize(_campaignData.audience_config);
+                    el.textContent = recipients.length + ' recipients';
+                } catch (_e) {
+                    el.textContent = '0 recipients';
+                }
+            })();
         }
     };
 
-    const calculateAudienceSize = async () => {
-        const config = {
+    const calculateAudienceSize = async (presetConfig = null) => {
+        // The audience checkboxes only exist in the step-3 DOM. Callers that run
+        // after the wizard has advanced past step 3 (e.g. saveCampaign at step 4)
+        // must pass the config captured earlier into _campaignData.audience_config,
+        // otherwise the querySelectorAll below finds nothing and returns 0 recipients.
+        const config = presetConfig || {
             segments: Array.from(document.querySelectorAll('input[name="segment"]:checked')).map(i => i.value),
             tags: Array.from(document.querySelectorAll('input[name="audience-tag"]:checked')).map(i => parseInt(i.value)),
             agents: Array.from(document.querySelectorAll('input[name="agent-filter"]:checked')).map(i => parseInt(i.value))
         };
+        config.segments = config.segments || [];
+        config.tags = config.tags || [];
+        config.agents = config.agents || [];
 
         let prospects = await getVisibleProspects();
 
@@ -4260,24 +4305,26 @@ ALTER TABLE public.promotions
 
         _campaignSaveInFlight = true;
         try {
-            const recipients = await calculateAudienceSize();
+            const recipients = await calculateAudienceSize(_campaignData.audience_config);
             _campaignData.total_recipients = recipients.length;
-            _campaignData.sent_count = 0;
-            _campaignData.delivered_count = 0;
-            _campaignData.opened_count = 0;
-            _campaignData.replied_count = 0;
-            _campaignData.clicked_count = 0;
-            _campaignData.converted_count = 0;
-            _campaignData.created_by = _state.cu ? _state.cu.id : 5;
-            _campaignData.created_at = new Date().toISOString();
 
             // Edit mode keeps the existing id on _campaignData → update the row in place
-            // rather than inserting a duplicate campaign.
+            // rather than inserting a duplicate campaign. On update, DON'T zero the
+            // delivery counters or rewrite the creation audit fields — only set those
+            // when inserting a brand-new campaign.
             let campaign;
             if (_campaignData.id) {
                 await AppDataStore.update('whatsapp_campaigns', _campaignData.id, _campaignData);
                 campaign = _campaignData;
             } else {
+                _campaignData.sent_count = 0;
+                _campaignData.delivered_count = 0;
+                _campaignData.opened_count = 0;
+                _campaignData.replied_count = 0;
+                _campaignData.clicked_count = 0;
+                _campaignData.converted_count = 0;
+                _campaignData.created_by = _state.cu ? _state.cu.id : 5;
+                _campaignData.created_at = new Date().toISOString();
                 campaign = await AppDataStore.create('whatsapp_campaigns', _campaignData);
             }
 
@@ -4546,8 +4593,12 @@ const simulateCampaignSending = async (campaignId) => {
         const campaigns = (await AppDataStore.getAll('whatsapp_campaigns')).filter(c => c.status === 'completed' || c.status === 'active').slice(-5);
 
         // Message Volume Chart
-        const volumeCtx = document.getElementById('message-volume-chart')?.getContext('2d');
+        const volumeCanvas = document.getElementById('message-volume-chart');
+        const volumeCtx = volumeCanvas?.getContext('2d');
         if (volumeCtx) {
+            // Destroy any prior chart bound to this canvas so re-visiting the tab
+            // doesn't leak orphaned Chart instances in Chart.js's global registry.
+            Chart.getChart(volumeCanvas)?.destroy();
             new Chart(volumeCtx, {
                 type: 'line',
                 data: {
@@ -4566,8 +4617,10 @@ const simulateCampaignSending = async (campaignId) => {
         }
 
         // Campaign Performance Chart
-        const perfCtx = document.getElementById('campaign-performance-chart')?.getContext('2d');
+        const perfCanvas = document.getElementById('campaign-performance-chart');
+        const perfCtx = perfCanvas?.getContext('2d');
         if (perfCtx) {
+            Chart.getChart(perfCanvas)?.destroy();
             new Chart(perfCtx, {
                 type: 'bar',
                 data: {
@@ -4583,8 +4636,10 @@ const simulateCampaignSending = async (campaignId) => {
         }
 
         // Audience Segment Chart
-        const segmentCtx = document.getElementById('audience-segment-chart')?.getContext('2d');
+        const segmentCanvas = document.getElementById('audience-segment-chart');
+        const segmentCtx = segmentCanvas?.getContext('2d');
         if (segmentCtx) {
+            Chart.getChart(segmentCanvas)?.destroy();
             new Chart(segmentCtx, {
                 type: 'doughnut',
                 data: {
@@ -4605,6 +4660,8 @@ const simulateCampaignSending = async (campaignId) => {
 
     const exportAnalyticsReport = async () => {
         const data = await getRealAnalyticsData();
+        // Quote every field so commas/quotes/newlines in campaign names don't shift columns.
+        const esc = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
         let csv = "Metric,Value\n";
         csv += `Total Campaigns, ${data.totalCampaigns} \n`;
         csv += `Avg Open Rate, ${data.avgOpenRate}%\n`;
@@ -4614,7 +4671,13 @@ const simulateCampaignSending = async (campaignId) => {
 
         const campaigns = await AppDataStore.getAll('whatsapp_campaigns');
         campaigns.forEach(c => {
-            csv += `${c.campaign_name},${c.sent_count},${c.opened_count},${c.replied_count},${c.converted_count} \n`;
+            csv += [
+                esc(c.campaign_name),
+                esc(c.sent_count || 0),
+                esc(c.opened_count || 0),
+                esc(c.replied_count || 0),
+                esc(c.converted_count || 0)
+            ].join(',') + '\n';
         });
 
         const blob = new Blob([csv], { type: 'text/csv' });
@@ -4780,7 +4843,11 @@ const simulateCampaignSending = async (campaignId) => {
 
         const filteredResults = await Promise.all(messages.map(async m => {
             const prospect = await AppDataStore.getById('prospects', m.prospect_id);
-            const nameMatch = prospect?.full_name?.toLowerCase().includes(search) || prospect?.nickname?.toLowerCase().includes(search);
+            // Empty search matches everyone (including rows whose prospect was since
+            // deleted); only when a search term is present do we require a name hit.
+            const nameMatch = !search
+                || (prospect?.full_name || '').toLowerCase().includes(search)
+                || (prospect?.nickname || '').toLowerCase().includes(search);
             const statusMatch = status === 'all' || m.status === status;
             return nameMatch && statusMatch;
         }));

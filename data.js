@@ -391,7 +391,14 @@ class DataStore {
         if (tableName && /^fp_/.test(String(tableName)) && window.crypto && typeof crypto.randomUUID === 'function') {
             return crypto.randomUUID();
         }
-        return Date.now() + Math.floor(Math.random() * 1000);
+        // Numeric id = Date.now()*1000 + a per-instance monotonic counter (0..999).
+        // The old `Date.now() + rand(0..999)` drew every id in a bulk insert (all
+        // stamped in the same tick) from the SAME ~1000-value window, so a batch of
+        // 50+ rows almost always produced a duplicate PK → the bulk INSERT 23505'd
+        // and createMany degraded to N sequential add() round-trips. A monotonic
+        // counter guarantees uniqueness across same-millisecond calls in this tab.
+        this._idSeq = ((this._idSeq || 0) + 1) % 1000;
+        return Date.now() * 1000 + this._idSeq;
     }
 
     // True when a Supabase auth session with an unexpired access token is
@@ -522,9 +529,19 @@ class DataStore {
             // its own get_calendar_window RPC, not this cache, so skipping it is safe.
             const _scopedTables = new Set(['activities']);
             if (agentId) { _scopedTables.add('prospects'); _scopedTables.add('customers'); }
+            // NEVER prime 'users' from this RPC: its users CTE returns a LEAN row
+            // (id, full_name, email, phone, role, status, team_id, reporting_to,
+            // date_of_birth, timestamps) that OMITS agent_code, team and
+            // employment_type — the exact columns _lightSelects.users documents as
+            // mandatory. Priming it under the canonical 'users' cache + snapshot (and
+            // bumping fs_crm_users_last_sync) makes every Agents-list row show
+            // Agent ID "N/A" / Team "Unassigned" and misclassifies FT/PT for the
+            // operating-hours KPI, and the advanced delta cursor prevents unchanged
+            // rows from ever regaining the missing columns this session.
+            _scopedTables.add('users');
             const tablesPrimed = [];
             for (const t of ['activities', 'users', 'prospects', 'customers']) {
-                if (_scopedTables.has(t)) continue; // scoped subset — do not poison full-table cache
+                if (_scopedTables.has(t)) continue; // scoped/lean subset — do not poison full-table cache
                 const rows = data[t];
                 if (Array.isArray(rows)) {
                     this._cacheSet(t, rows);
@@ -663,12 +680,17 @@ class DataStore {
         if (!this._realtimePersistDirty || this._realtimePersistDirty.size === 0) return;
         const tables = Array.from(this._realtimePersistDirty);
         this._realtimePersistDirty.clear();
-        const nowIso = new Date().toISOString();
         for (const table of tables) {
             const cached = this._cache.get(table);
             if (!cached || !Array.isArray(cached.data)) continue;
             try { localStorage.setItem(`fs_crm_${table}`, JSON.stringify(this._sanitizeForStorage(table, cached.data))); } catch (_) { /* intentional: realtime snapshot persist is best-effort cache write */ }
-            try { localStorage.setItem(`fs_crm_${table}_last_sync`, nowIso); } catch (_) { /* intentional: cursor persist is best-effort; next read re-syncs */ }
+            // Do NOT advance fs_crm_<table>_last_sync here. Receiving realtime events
+            // proves nothing about events MISSED during a websocket drop/reconnect
+            // (supabase-js does not replay missed postgres_changes). Bumping the cursor
+            // past the gap would make those missed rows (updated_at < new cursor)
+            // permanently un-delta-fetchable until a full reconcile/reload. Leaving the
+            // cursor at the last SERVER-VERIFIED fetch lets the next delta revalidation
+            // re-pull the gap window. Only the snapshot DATA is persisted (harmless).
         }
     }
 
@@ -754,7 +776,12 @@ class DataStore {
     _cacheGet(tableName) {
         const entry = this._cache.get(tableName);
         if (!entry) return null;
-        const ttl = this._staticTables.has(tableName) ? 120_000 : this._cacheTTL;
+        // Near-static tables (users, roles, teams, products…) are cached LONGER than
+        // volatile ones, per the constructor comment. When _cacheTTL was raised from
+        // 30s to 300s the static branch was left at a hard-coded 120s, INVERTING the
+        // relationship (static refetched 2.5x more often than mutable). Static TTL
+        // must be >= the mutable TTL; use 2x so it stays longer than any future bump.
+        const ttl = this._staticTables.has(tableName) ? Math.max(600_000, this._cacheTTL * 2) : this._cacheTTL;
         if (Date.now() - entry.ts > ttl) { this._cache.delete(tableName); return null; }
         return entry.data;
     }
@@ -819,15 +846,27 @@ class DataStore {
         return safe;
     }
 
-    // Invalidate cache for a table (and any table that depends on it)
-    invalidateCache(tableName) {
+    // Invalidate cache for a table (and any table that depends on it).
+    // opts.keepSnapshot — when true, drop only the in-memory cache and derived
+    //   caches but PRESERVE the persisted localStorage snapshot + delta cursor.
+    //   Used by add()/update()/delete() after they have just written the mutated
+    //   row INTO the fs_crm_<table> mirror: blowing that mirror away one line later
+    //   made the mirror write dead code, blanked offline lists on the next read,
+    //   and forced a full-table cold re-download (cursor gone) after every single
+    //   write. Keeping the snapshot lets the next getAll() serve the up-to-date
+    //   mirror + delta-revalidate instead of re-downloading the whole table.
+    invalidateCache(tableName, opts = {}) {
+        const keepSnapshot = !!(opts && opts.keepSnapshot);
         this._cache.delete(tableName);
         // Also remove the persisted localStorage snapshot so a page refresh
-        // doesn't load stale data from the local copy.
-        try {
-            localStorage.removeItem(`fs_crm_${tableName}`);
-            localStorage.removeItem(`fs_crm_${tableName}_last_sync`);
-        } catch (_) { /* intentional: best-effort snapshot eviction; in-memory cache already cleared */ }
+        // doesn't load stale data from the local copy — UNLESS the caller just
+        // wrote the fresh row into that snapshot (keepSnapshot).
+        if (!keepSnapshot) {
+            try {
+                localStorage.removeItem(`fs_crm_${tableName}`);
+                localStorage.removeItem(`fs_crm_${tableName}_last_sync`);
+            } catch (_) { /* intentional: best-effort snapshot eviction; in-memory cache already cleared */ }
+        }
         // Drop any primed rows for this table — they're a side cache and must
         // never outlive a write or a deliberate refresh.
         this._primedRows.delete(tableName);
@@ -990,7 +1029,6 @@ class DataStore {
                     // updates forever. Leave everything untouched; a later
                     // revalidation retries from the same lastSync.
                     if (delta === null) return;
-                    const now = new Date().toISOString();
                     if (delta.length > 0) {
                         // Merge delta into the existing cached snapshot.
                         // Server rows always win; tombstoned ids are filtered out.
@@ -1009,17 +1047,32 @@ class DataStore {
                             .filter(r => !deletedIds.has(String(r.id))
                                 && !(tableName === 'users' && r.status === 'deleted'));
                         this._cacheSet(tableName, result);
+                        // Advance the cursor to the MAX server-side updated_at among the
+                        // fetched rows, NOT the client clock. A device whose clock runs
+                        // ahead of the server would otherwise stamp the cursor in the
+                        // future and permanently skip other users' writes that landed in
+                        // the skew window (their updated_at < the future cursor). Falling
+                        // back to lastSync (never past it) is safe — the next revalidation
+                        // just re-queries the same window.
+                        let _cursor = lastSync;
+                        for (const r of delta) {
+                            const u = r && r.updated_at;
+                            if (u && (!_cursor || String(u) > String(_cursor))) _cursor = u;
+                        }
+                        const nextSync = _cursor || lastSync;
                         setTimeout(() => {
                             try {
                                 localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(this._sanitizeForStorage(tableName, result)));
-                                localStorage.setItem(`fs_crm_${tableName}_last_sync`, now);
+                                if (nextSync) localStorage.setItem(`fs_crm_${tableName}_last_sync`, nextSync);
                             } catch (_) { /* intentional: delta-merge persist is best-effort cache write */ }
                         }, 0);
                         if (window.__FS_DEBUG_SWR) console.log(`[SWR] ${tableName}: delta sync — ${delta.length} changed rows merged`);
                         this.emit('dataChanged', { action: 'revalidate', table: tableName });
                     } else {
-                        // No changes since last sync — just refresh the timestamp.
-                        try { localStorage.setItem(`fs_crm_${tableName}_last_sync`, now); } catch (_) { /* intentional: cursor refresh is best-effort; stale cursor just re-fetches same window */ }
+                        // No changes since last sync — leave the cursor at lastSync.
+                        // Advancing it to the client clock could skip rows other users
+                        // modified in a clock-skew window; re-querying the same (empty)
+                        // window next time is near-zero cost.
                     }
                     return; // Delta path succeeded — skip full fetch below.
                 } catch (_) {
@@ -1367,21 +1420,46 @@ class DataStore {
     async getAllSince(tableName, sinceISO) {
         const selectClause = this._selectClauseForGetAll(tableName);
         const signal = this._inflightSignal();
+        // Paginate with explicit .range() windows (ordered by updated_at) so a
+        // change-set larger than PostgREST's implicit 1000-row cap isn't silently
+        // truncated. Without this, >1000 changed rows returned only an arbitrary
+        // 1000 and the caller advanced the delta cursor past the rest — those rows
+        // then predated the cursor and could never be delta-fetched again (they
+        // healed only at the next full reconcile / reload). Mirror getAll()'s
+        // auto-pagination. `useStar` retries with '*' once if the light-select
+        // column list is stale.
+        const PAGE = 1000;
+        const HARD_MAX = 200000; // safety bound so a huge change-set can't exhaust memory
+        const runPage = async (useStar, offset) => {
+            let q = this._readClient()
+                .from(tableName)
+                .select(useStar ? '*' : selectClause)
+                .gte('updated_at', sinceISO)
+                .order('updated_at', { ascending: true })
+                .range(offset, offset + PAGE - 1);
+            if (signal && typeof q.abortSignal === 'function') q = q.abortSignal(signal);
+            return q;
+        };
         try {
-            let q1 = this._readClient().from(tableName).select(selectClause).gte('updated_at', sinceISO);
-            if (signal && typeof q1.abortSignal === 'function') q1 = q1.abortSignal(signal);
-            let { data, error } = await q1;
-            // If the light-select column list is stale, retry with '*'
-            if (error && selectClause !== '*' && !this._isAbortError(error)) {
-                let q2 = this._readClient().from(tableName).select('*').gte('updated_at', sinceISO);
-                if (signal && typeof q2.abortSignal === 'function') q2 = q2.abortSignal(signal);
-                ({ data, error } = await q2);
+            const out = [];
+            let useStar = false;
+            for (let offset = 0; offset < HARD_MAX; offset += PAGE) {
+                let { data, error } = await runPage(useStar, offset);
+                // If the light-select column list is stale, retry this page with '*'
+                // and switch subsequent pages to '*' too.
+                if (error && !useStar && selectClause !== '*' && !this._isAbortError(error)) {
+                    useStar = true;
+                    ({ data, error } = await runPage(true, offset));
+                }
+                if (error) {
+                    if (this._isAbortError(error)) return null;  // view changed mid-fetch — signal abort (NOT empty)
+                    throw error;
+                }
+                if (!data || data.length === 0) break;
+                out.push(...data);
+                if (data.length < PAGE) break; // last page
             }
-            if (error) {
-                if (this._isAbortError(error)) return null;  // view changed mid-fetch — signal abort (NOT empty)
-                throw error;
-            }
-            return data || [];
+            return out;
         } catch (e) {
             if (this._isAbortError(e)) return null;  // signal abort distinctly from "no changes"
             throw e;
@@ -1562,6 +1640,21 @@ class DataStore {
                 // #7 — iOS Safari doesn't reliably fire 'online' on WiFi reconnection.
                 // Belt-and-suspenders: also probe on visibilitychange (tab re-focus)
                 // and pageshow (back-navigation). Both are reliable cross-platform.
+                const _onVisibilityChange = () => { if (document.visibilityState === 'visible') _dismissOfflineBanner(); };
+                const _onPageShow = () => _dismissOfflineBanner();
+                // Single detach for THIS episode's listeners. The two most common
+                // recovery paths (_clearOfflineNotice on any successful read, and the
+                // _offlineRecoverTick probe) previously cleared the banner + flag but
+                // NOT these listeners, so every offline blip stranded 2 handlers that
+                // reactivated (and re-fired a /manifest.json probe) on the next blip.
+                // Publish the detach on window so those paths can call it; each episode
+                // overwrites the previous (only one episode's listeners live at a time).
+                const _detachOfflineListeners = () => {
+                    try { document.removeEventListener('visibilitychange', _onVisibilityChange); } catch (_) { /* intentional: best-effort detach */ }
+                    try { window.removeEventListener('pageshow', _onPageShow); } catch (_) { /* intentional: best-effort detach */ }
+                    if (window._removeOfflineListeners === _detachOfflineListeners) window._removeOfflineListeners = null;
+                };
+                window._removeOfflineListeners = _detachOfflineListeners;
                 const _dismissOfflineBanner = () => {
                     if (!window._offlineNotified) return;
                     // Quick connectivity probe — if it reaches the server, we're back online.
@@ -1569,18 +1662,14 @@ class DataStore {
                         .then(() => {
                             document.getElementById('offline-banner')?.remove();
                             window._offlineNotified = false;
-                            document.removeEventListener('visibilitychange', _onVisibilityChange);
-                            window.removeEventListener('pageshow', _onPageShow);
+                            _detachOfflineListeners();
                         })
                         .catch(() => {}); // still offline — leave banner
                 };
-                const _onVisibilityChange = () => { if (document.visibilityState === 'visible') _dismissOfflineBanner(); };
-                const _onPageShow = () => _dismissOfflineBanner();
                 window.addEventListener('online', function _removeOfflineBanner() {
                     document.getElementById('offline-banner')?.remove();
                     window._offlineNotified = false;
-                    document.removeEventListener('visibilitychange', _onVisibilityChange);
-                    window.removeEventListener('pageshow', _onPageShow);
+                    _detachOfflineListeners();
                 }, { once: true });
                 document.addEventListener('visibilitychange', _onVisibilityChange);
                 window.addEventListener('pageshow', _onPageShow);
@@ -1607,6 +1696,7 @@ class DataStore {
                         await this._readClient().from('users').select('id').limit(1);
                         try { document.getElementById('offline-banner')?.remove(); } catch (_) { /* intentional: best-effort banner removal */ }
                         window._offlineNotified = false;
+                        _detachOfflineListeners();   // detach this episode's stranded listeners on recovery
                         _offlineRecoverStopped = true;
                         return;
                     } catch (_) { /* intentional: still offline — back off and retry */ }
@@ -1650,6 +1740,27 @@ class DataStore {
     //   'transient' — network/5xx/everything else: keep and retry later.
     // Thin delegator — pure logic extracted to data-helpers.js (window._dataHelpers).
     _classifyQueueError(error) { return window._dataHelpers.classifyQueueError(error); }
+
+    // True only for a GENUINE network/offline transport failure (fetch never
+    // reached the server), NOT a server-side rejection. A permanent server
+    // rejection (RLS 42501, NOT NULL 23502, FK 23503, unique 23505, type
+    // 22007/22P02, or any error carrying a Postgres .code) must NOT be silently
+    // queued-and-reported-success — add()/update() throw so the caller's own
+    // failure toast fires. This is the inverse of "should we optimistically
+    // queue this write and pretend it succeeded".
+    _isGenuineOfflineError(err) {
+        if (!err) return false;
+        // An explicit Postgres/PostgREST error code means the request reached
+        // the server and was rejected — never treat that as offline.
+        if (err.code !== undefined && err.code !== null && err.code !== ''
+            && err.code !== 'NETWORK_TIMEOUT') {
+            return false;
+        }
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+        const msg = String(err.message || err.details || err || '');
+        if (err.code === 'NETWORK_TIMEOUT') return true;
+        return /Failed to fetch|NetworkError|network request failed|load failed/i.test(msg);
+    }
 
     // Move an unsyncable queue item to fs_crm_sync_queue_dead so its data is
     // preserved for inspection without retrying (and failing) on every read.
@@ -2123,14 +2234,22 @@ class DataStore {
                 // Spreading it back would re-inject the stale FK as a "local-only
                 // field" that _autoSync/_reconcile re-merge onto the row, silently
                 // re-attaching the link the user was just warned was lost.
+                let _mirrorHadRows = false;
                 try {
                     const key = `fs_crm_${tableName}`;
                     const all = JSON.parse(localStorage.getItem(key) || '[]');
+                    _mirrorHadRows = all.length > 0; // only a real full snapshot is safe to keep
                     all.push({ ...insertData, ...data });
                     localStorage.setItem(key, JSON.stringify(this._sanitizeForStorage(tableName, all)));
                 } catch (_) { /* intentional: local mirror is best-effort; server insert already succeeded */ }
                 this._writeAudit('insert', tableName, data.id || insertData.id, null, data);
-                this.invalidateCache(tableName);
+                // Keep the fs_crm_<table> mirror we just appended the new server row to
+                // (and its delta cursor) instead of deleting it — otherwise the next
+                // read cold-re-downloads the whole table after every insert. Only keep
+                // it when the mirror was already a populated full snapshot; if it was
+                // empty (list never loaded), drop it so the next read does a proper
+                // full fetch instead of serving a 1-row snapshot as the whole list.
+                this.invalidateCache(tableName, { keepSnapshot: _mirrorHadRows });
                 if (!opts.suppressEmit) this.emit('dataChanged', { action: 'add', table: tableName, record: data });
                 // Phase J: confirm optimistic row — clears the ⏳ overlay.
                 if (_isActivityInsert && typeof window._confirmOptimisticActivity === 'function') {
@@ -2191,26 +2310,18 @@ class DataStore {
             }
         }
 
-        // Full localStorage fallback + sync queue so item gets pushed to Supabase when back online
-        const key = `fs_crm_${tableName}`;
-        try {
-            const all = JSON.parse(localStorage.getItem(key) || '[]');
-            all.push(dataToInsert);
-            localStorage.setItem(key, JSON.stringify(this._sanitizeForStorage(tableName, all)));
-        } catch (_) { /* intentional: offline local mirror is best-effort */ }
-        // Queue for auto-sync to Supabase on next successful getAll()
-        try {
-            const syncQueue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
-            syncQueue.push({ tableName, record: dataToInsert, timestamp: Date.now() });
-            localStorage.setItem('fs_crm_sync_queue', JSON.stringify(syncQueue));
-        } catch (_) { /* intentional: sync-queue persist is best-effort; offline write may not auto-sync */ }
-        this.invalidateCache(tableName);
-        if (!opts.suppressEmit) this.emit('dataChanged', { action: 'add', table: tableName, record: dataToInsert });
-        // Phase J: mark optimistic row as failed so the calendar shows ⚠.
-        // The row stays in the overlay until the sync queue drains successfully.
-        // Pass through the real Postgres / network error so the tooltip surfaces
-        // WHY it failed (RLS deny vs offline vs FK violation) instead of a generic
-        // "Save failed". Without this the user only saw the code in DevTools.
+        // The insert loop exhausted. Distinguish a GENUINE offline/network failure
+        // (queue locally + optimistically report success — the original, correct
+        // behavior) from a PERMANENT server rejection (RLS 42501, NOT NULL 23502,
+        // FK 23503, unique 23505, type 22*, or any error carrying a Postgres .code).
+        // A permanent rejection must NOT be silently queued and reported as success:
+        // it would show a success toast, close the modal, and later be parked to the
+        // dead-letter queue and vanish. Throw so the caller's own failure toast fires.
+        const _genuineOffline = this._isGenuineOfflineError(lastError);
+
+        // Update the Phase J optimistic chip (activities only) for BOTH paths so the
+        // calendar overlay reflects the real reason — offline (auto-sync) vs a hard
+        // server rejection (needs user action).
         if (_isActivityInsert && typeof window._failOptimisticActivity === 'function') {
             const _rawMsg = lastError?.message || '';
             const _code = lastError?.code || (lastError && /Failed to fetch|NetworkError/i.test(_rawMsg) ? 'OFFLINE' : null);
@@ -2229,6 +2340,35 @@ class DataStore {
                                     : (_rawMsg || 'Save failed') + (lastError.code ? ` (${lastError.code})` : '');
             try { window._failOptimisticActivity(dataToInsert.client_request_id, _humanMsg, _code, _rawMsg); } catch (_) { /* intentional: failure-chip update is best-effort UI */ }
         }
+
+        if (!_genuineOffline) {
+            // Permanent server rejection — surface it. Do NOT queue-and-succeed.
+            throw (lastError instanceof Error ? lastError : new Error(String(lastError?.message || lastError || 'insert failed')));
+        }
+
+        // Genuine offline: full localStorage fallback + sync queue so item gets
+        // pushed to Supabase when back online, and optimistically return success.
+        const key = `fs_crm_${tableName}`;
+        let _mirrorHadRows = false;
+        try {
+            const all = JSON.parse(localStorage.getItem(key) || '[]');
+            _mirrorHadRows = all.length > 0; // only a real full snapshot is safe to keep
+            all.push(dataToInsert);
+            localStorage.setItem(key, JSON.stringify(this._sanitizeForStorage(tableName, all)));
+        } catch (_) { /* intentional: offline local mirror is best-effort */ }
+        // Queue for auto-sync to Supabase on next successful getAll()
+        try {
+            const syncQueue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
+            syncQueue.push({ tableName, record: dataToInsert, timestamp: Date.now() });
+            localStorage.setItem('fs_crm_sync_queue', JSON.stringify(syncQueue));
+        } catch (_) { /* intentional: sync-queue persist is best-effort; offline write may not auto-sync */ }
+        // Offline path only: clear the in-memory cache but KEEP the localStorage
+        // mirror we just wrote (the offline row) so lists still render it — but only
+        // when the mirror was already a populated snapshot. keepSnapshot=false on an
+        // empty mirror lets the next read do a proper full fetch instead of serving a
+        // 1-row snapshot as the whole list. Either way the sync queue holds the write.
+        this.invalidateCache(tableName, { keepSnapshot: _mirrorHadRows });
+        if (!opts.suppressEmit) this.emit('dataChanged', { action: 'add', table: tableName, record: dataToInsert });
         return dataToInsert;
     }
 
@@ -2342,6 +2482,7 @@ class DataStore {
 
     async update(tableName, id, updates) {
         let updateData = { ...updates };
+        let lastError = null; // remember the final server error to decide throw-vs-queue below
         // Capture pre-update snapshot for audit diff. Best-effort: if the
         // row isn't in cache we skip the `old_data` side of the diff rather
         // than round-trip for every update.
@@ -2364,19 +2505,26 @@ class DataStore {
                     .select()
                     .single();
                 if (error) throw error;
+                let _mirrorUpdated = false;
                 try {
                     const key = `fs_crm_${tableName}`;
                     const all = JSON.parse(localStorage.getItem(key) || '[]');
                     const idx = all.findIndex(r => String(r.id) === String(id));
                     // Server response wins: spread updates first so data (server-canonical) takes precedence.
                     const full = { ...updates, ...data };
-                    if (idx >= 0) { all[idx] = full; localStorage.setItem(key, JSON.stringify(this._sanitizeForStorage(tableName, all))); }
+                    if (idx >= 0) { all[idx] = full; localStorage.setItem(key, JSON.stringify(this._sanitizeForStorage(tableName, all))); _mirrorUpdated = true; }
                 } catch (_) { /* intentional: local mirror is best-effort; server update already succeeded */ }
                 this._writeAudit('update', tableName, id, _auditOldData, data);
-                this.invalidateCache(tableName);
+                // Keep the fs_crm_<table> mirror (with the updated row spliced in) +
+                // its delta cursor when we successfully patched it in place — deleting
+                // it forced a full-table cold re-download after every edit. If the row
+                // wasn't in the mirror we couldn't patch it, so fall back to a normal
+                // invalidate (drop the snapshot) to avoid serving a stale copy.
+                this.invalidateCache(tableName, { keepSnapshot: _mirrorUpdated });
                 this.emit('dataChanged', { action: 'update', table: tableName, record: data });
                 return data;
             } catch (e) {
+                lastError = e;
                 const col = this._extractUnknownCol(e);
                 if (col && col in updateData) { delete updateData[col]; continue; }
                 if (this._isSchemaError(e)) {
@@ -2485,6 +2633,7 @@ class DataStore {
                     // Insert failed even after stripping (RLS, FK violation, etc.). Fall
                     // through to the local-save path below — preserves the user's edit
                     // in localStorage and queues it for auto-sync on the next read.
+                    lastError = lastInsertErr || lastError;
                     console.warn(`PGRST116 on update to ${tableName} id=${id}; insert fallback failed:`, lastInsertErr?.message || lastInsertErr);
                     break;
                 }
@@ -2492,10 +2641,20 @@ class DataStore {
                 break;
             }
         }
+        // Distinguish a GENUINE offline/network failure (queue locally + report
+        // success — the original behavior) from a PERMANENT server rejection (RLS
+        // 42501, NOT NULL 23502, type 22*, etc.). A permanent rejection must NOT be
+        // silently queued and reported as success — throw so the caller's own
+        // failure toast fires instead of showing "saved" and later parking the write.
+        if (!this._isGenuineOfflineError(lastError)) {
+            throw (lastError instanceof Error ? lastError : new Error(String(lastError?.message || lastError || 'update failed')));
+        }
         const key = `fs_crm_${tableName}`;
         let updatedRecord;
+        let _mirrorHadRows = false;
         try {
             const all = JSON.parse(localStorage.getItem(key) || '[]');
+            _mirrorHadRows = all.length > 0; // only a real full snapshot is safe to keep
             // String-compare ids (the codebase convention) so a numeric record id
             // still matches a string id argument and vice versa, without == coercion edge cases.
             const idx = all.findIndex(r => String(r.id) === String(id));
@@ -2506,14 +2665,21 @@ class DataStore {
         // Queue for auto-sync to Supabase on next successful getAll()
         try {
             const syncQueue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
-            // Replace existing queue entry for same id+table, or push new
-            const qIdx = syncQueue.findIndex(q => q.tableName === tableName && String(q.record.id) === String(id));
+            // Replace existing queue entry for same id+table, or push new. Guard
+            // q.record — legacy/corrupt queue entries without .record exist in the
+            // wild (the drain paths already skip them); an unguarded q.record.id
+            // would throw here and skip the enqueue, silently losing this edit.
+            const qIdx = syncQueue.findIndex(q => q && q.record && q.tableName === tableName && String(q.record.id) === String(id));
             const qEntry = { tableName, record: updatedRecord, timestamp: Date.now() };
             if (qIdx >= 0) syncQueue[qIdx] = qEntry; else syncQueue.push(qEntry);
             localStorage.setItem('fs_crm_sync_queue', JSON.stringify(syncQueue));
         } catch (_) { /* intentional: sync-queue persist is best-effort; offline edit may not auto-sync */ }
         const record = { id, ...updates };
-        this.invalidateCache(tableName);
+        // Keep the fs_crm_<table> mirror (we just wrote the edited row into it)
+        // so an offline edit doesn't blank the list on the next read — but only when
+        // the mirror was already a populated snapshot; an empty mirror must be
+        // dropped so the next read does a proper full fetch.
+        this.invalidateCache(tableName, { keepSnapshot: _mirrorHadRows });
         this.emit('dataChanged', { action: 'update', table: tableName, record });
         return record;
     }
@@ -2539,7 +2705,24 @@ class DataStore {
             .eq('id', id)
             .select('id');
         if (error) throw error;
-        if (!deleted || deleted.length === 0) throw new Error('permission_denied');
+        if (!deleted || deleted.length === 0) {
+            // 0 rows is ambiguous: (a) RLS blocked the delete, OR (b) the row was
+            // never on the server — a record created during an outage that is still
+            // sitting in fs_crm_sync_queue (never synced). For case (b), throwing
+            // BEFORE the queue purge leaves the queued INSERT in place, so the
+            // "deleted" record resurrects on the next drain. Detect a pending,
+            // never-pushed queue entry for this id; if found, treat this as a
+            // successful local delete (purge + tombstone below) instead of throwing.
+            let _pendingLocalOnly = false;
+            try {
+                const syncQueue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
+                _pendingLocalOnly = syncQueue.some(q =>
+                    q && q.record && q.tableName === tableName
+                    && String(q.record.id) === String(id) && !q.pushed);
+            } catch (_) { /* intentional: queue read best-effort; fall through to permission_denied */ }
+            if (!_pendingLocalOnly) throw new Error('permission_denied');
+            // else: local-only pending record — fall through to purge + tombstone.
+        }
 
         this._writeAudit('delete', tableName, id, _auditOldData, null);
 
@@ -2549,11 +2732,13 @@ class DataStore {
             const all = JSON.parse(localStorage.getItem(key) || '[]');
             localStorage.setItem(key, JSON.stringify(all.filter(r => String(r.id) !== String(id))));
         } catch (_) { /* intentional: local cache cleanup is best-effort; server delete confirmed */ }
-        // Remove from sync queue — no point syncing a deleted item
+        // Remove from sync queue — no point syncing a deleted item. Guard q.record:
+        // a legacy/corrupt queue entry without .record would throw here and skip the
+        // whole purge, leaving deleted items to re-sync.
         try {
             const syncQueue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
             localStorage.setItem('fs_crm_sync_queue', JSON.stringify(
-                syncQueue.filter(q => !(q.tableName === tableName && String(q.record.id) === String(id)))
+                syncQueue.filter(q => !(q && q.record && q.tableName === tableName && String(q.record.id) === String(id)))
             ));
         } catch (_) { /* intentional: sync-queue cleanup is best-effort */ }
         // Tombstone so the record never re-surfaces from a stale cache on next getAll
@@ -2578,6 +2763,11 @@ class DataStore {
         if (window._offlineNotified) {
             try { document.getElementById('offline-banner')?.remove(); } catch (_) { /* intentional: best-effort banner removal */ }
             window._offlineNotified = false;
+            // Detach the current offline episode's visibilitychange/pageshow
+            // listeners. Recovery via a successful read (this path) used to leave
+            // them attached, so they accumulated across episodes and each re-fired a
+            // /manifest.json probe on the next offline blip.
+            try { if (typeof window._removeOfflineListeners === 'function') window._removeOfflineListeners(); } catch (_) { /* intentional: best-effort listener detach */ }
         }
     }
 
@@ -2618,6 +2808,34 @@ class DataStore {
                 ({ data, error } = await q2);
             }
             if (error) throw error;
+            // PostgREST implicitly caps at 1000 rows. A bare .select().eq() that
+            // returns exactly 1000 is almost certainly truncated — callers recompute
+            // aggregates from this set (e.g. egg per-group totals) and would persist
+            // WRONG numbers. Auto-paginate the full result via queryPaged (same
+            // filters) so the caller never silently sees a capped set.
+            if (Array.isArray(data) && data.length === 1000) {
+                console.warn(`[DataStore] query('${tableName}') hit 1000-row cap — auto-paginating remainder`);
+                try {
+                    const eqFilters = {};
+                    for (const [key, value] of Object.entries(filters)) {
+                        if (value == null || value === 'null' || value === 'undefined') continue;
+                        eqFilters[key] = value;
+                    }
+                    const full = await this.queryPaged(tableName, {
+                        pageSize: 1000,
+                        max: 200000,
+                        select: selectClause,
+                        orderBy: 'id',
+                        filters: eqFilters,
+                    });
+                    if (full.length > data.length) {
+                        this._clearOfflineNotice();
+                        return this._stripTombstones(tableName, full);
+                    }
+                } catch (e2) {
+                    console.warn(`[DataStore] query auto-paginate failed for ${tableName}:`, e2?.message);
+                }
+            }
             this._clearOfflineNotice();
             return this._stripTombstones(tableName, data || []);
         } catch (e) {
@@ -2934,8 +3152,10 @@ class DataStore {
         try {
             const syncQueue = JSON.parse(localStorage.getItem('fs_crm_sync_queue') || '[]');
             const idSet = new Set(ids.map(String));
+            // Guard q.record — a legacy/corrupt queue entry without .record would
+            // throw here and skip the whole purge, leaving deleted items to re-sync.
             localStorage.setItem('fs_crm_sync_queue', JSON.stringify(
-                syncQueue.filter(q => !(q.tableName === tableName && idSet.has(String(q.record.id))))
+                syncQueue.filter(q => !(q && q.record && q.tableName === tableName && idSet.has(String(q.record.id))))
             ));
         } catch (_) { /* intentional: sync-queue cleanup is best-effort */ }
         try {
@@ -3659,8 +3879,18 @@ class DataStore {
         if (status === 'snoozed' && opts.snooze_days) {
             const d = new Date();
             d.setDate(d.getDate() + opts.snooze_days);
-            payload.snooze_until = d.toISOString().slice(0, 10);
+            // Local date parts — toISOString() is UTC, so before 08:00 MYT it yields
+            // yesterday and an N-day snooze would only push out N-1 days.
+            const snoozeDate = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+            payload.snooze_until = snoozeDate;
             payload.status = 'pending';  // re-activate; cron will re-mark overdue if missed
+            // CRITICAL: also push due_date out to the snooze date. Nothing reads
+            // snooze_until — getJourneyTouchpointsDueToday filters purely on
+            // status IN ('pending','overdue') AND due_date <= today. Without moving
+            // due_date, a snoozed touchpoint keeps its past/today due_date and
+            // reappears in Due Today on the very next render (the snooze was a no-op).
+            // Honor an explicit opts.due_date override below if the caller supplies one.
+            if (!opts.due_date) payload.due_date = snoozeDate;
         }
         if (opts.notes) payload.notes = opts.notes;
         // Optional reschedule (Wave-C journey fix): write the new due_date when the
@@ -3738,6 +3968,11 @@ class DataStore {
             const rows = stageTemplates.map(t => {
                 const dueDate = new Date(startDate);
                 dueDate.setDate(dueDate.getDate() + (t.days_offset || 0));
+                // Serialize via LOCAL date parts, not toISOString() (UTC): for MYT
+                // (UTC+8) any spawn before 08:00 local converts to the previous UTC
+                // day, so a days_offset:0 touchpoint would be born already 'overdue'
+                // and every cadence date would land one day early.
+                const dueDateLocal = `${dueDate.getFullYear()}-${String(dueDate.getMonth()+1).padStart(2,'0')}-${String(dueDate.getDate()).padStart(2,'0')}`;
                 return {
                     [entityCol]:         entityId,
                     template_id:         t.id,
@@ -3746,7 +3981,7 @@ class DataStore {
                     touchpoint_type:     t.touchpoint_type,
                     message_template:    t.message_template,
                     title:               t.name,
-                    due_date:            dueDate.toISOString().slice(0, 10),
+                    due_date:            dueDateLocal,
                     priority:            t.priority,
                     status:              'pending',
                     assigned_to:         assignedTo,
@@ -3774,7 +4009,10 @@ class DataStore {
     async getNextEventDate(eventCategory) {
         if (!eventCategory) return null;
         try {
-            const today = new Date().toISOString().slice(0, 10);
+            // Local date parts — toISOString() is UTC, so before 08:00 MYT it yields
+            // yesterday and getNextEventDate could return a past event as "next".
+            const _t = new Date();
+            const today = `${_t.getFullYear()}-${String(_t.getMonth()+1).padStart(2,'0')}-${String(_t.getDate()).padStart(2,'0')}`;
             const { data, error } = await window.supabase
                 .from('events')
                 .select('event_date')

@@ -215,7 +215,13 @@
         if (statusEl) statusEl.innerHTML = '<div style="color:var(--gray-500);">Reading ' + fileList.length + ' file(s)…</div>';
         try { await window._ensureXlsx(); } catch (_) { UI.toast.error('Spreadsheet engine failed to load'); return; }
 
-        _qrState = _freshState();
+        // Incremental: keep already-ingested data + dedup sets across selections
+        // (the UI promises "Upload any number — overlaps are auto-deduped"). Only
+        // reset the per-batch file-status list and any stale computed results.
+        _qrState.files = [];
+        _qrState.computed = false;
+        _qrState.agg = null;
+        _qrState.focusQuarter = null;
 
         for (const file of fileList) {
             try {
@@ -347,24 +353,34 @@
 
     const _onlSeen = () => (_qrState._onlSeen || (_qrState._onlSeen = new Set()));
     const _ingestOnline = (rows) => {
+        if (!rows.length) return 0;
+        const cOrd = _qrKey(rows[0], 'Order No.', 'Order');
+        const cInv = _qrKey(rows[0], 'Invoice No.', 'Invoice');
+        const cc = _qrKey(rows[0], 'Product Code');
+        const cq = _qrKey(rows[0], 'Quantity');
+        const cd = _qrKey(rows[0], 'Order Date');
+        const cn = _qrKey(rows[0], 'Product Name');
+        const ca = _qrKey(rows[0], 'Product Attribute');
+        const cm = _qrKey(rows[0], 'Full Name');
+        const cst = _qrKey(rows[0], 'States', 'State');
         const seen = _onlSeen(), occ = new Map(); let added = 0;
         for (const r of rows) {
-            const order = String(r['Order No.'] || '').trim();
-            const code = String(r['Product Code'] || '').trim();
+            const order = cOrd ? String(r[cOrd] || '').trim() : '';
+            const code = cc ? String(r[cc] || '').trim() : '';
             if (!order && !code) continue;
-            const qty = _qrNum(r['Quantity']) || 0;
+            const qty = cq ? (_qrNum(r[cq]) || 0) : 0;
             const base = order + '|' + code + '|' + qty;
             const k = (occ.get(base) || 0); occ.set(base, k + 1);
             const key = base + '|' + k;
             if (seen.has(key)) continue; seen.add(key);
-            const dt = _qrParseDate(r['Order Date']);
+            const dt = cd ? _qrParseDate(r[cd]) : null;
             _qrState.onlineLines.push({
-                order, invoice: String(r['Invoice No.'] || '').trim(), code, qty,
+                order, invoice: cInv ? String(r[cInv] || '').trim() : '', code, qty,
                 date: dt, quarter: _qrQuarter(dt),
-                name: String(r['Product Name'] || '').trim(),
-                attr: String(r['Product Attribute'] || '').trim(),
-                member: String(r['Full Name'] || '').trim(),
-                state: String(r['States'] || r['State'] || '').trim(),
+                name: cn ? String(r[cn] || '').trim() : '',
+                attr: ca ? String(r[ca] || '').trim() : '',
+                member: cm ? String(r[cm] || '').trim() : '',
+                state: cst ? String(r[cst] || '').trim() : '',
             });
             added++;
         }
@@ -579,7 +595,7 @@
                 ${_card('Wholesale Revenue', _qrRM(w.rev))}
                 ${_card('Cartons', _qrInt(w.cartons))}
                 ${_card('Wholesale Orders', _qrInt(w.orders))}
-                ${w.products.map(p => _card(p.name, _qrInt(p.cartons) + ' ctn', _qrRM(p.rev))).join('')}
+                ${w.products.map(p => _card(escapeHtml(p.name), _qrInt(p.cartons) + ' ctn', _qrRM(p.rev))).join('')}
             </div>
             <div style="display:flex;flex-wrap:wrap;gap:18px;">
                 <div style="flex:1;min-width:340px;">${_sect('Cartons by Region')}<div style="background:white;border:1px solid var(--gray-200);border-radius:12px;padding:16px;">${w.regions.length ? _bars(w.regions, r => r.cartons, r => r.region + '  · ' + _qrRM(r.rev), '#f59e0b', _qrInt) : '<div style="color:var(--gray-400);font-size:13px;">—</div>'}</div></div>

@@ -547,7 +547,7 @@ const buildProspectRowHtml = (p, ctx) => {
                 <td data-label="Score">
                     <span class="score-badge score-${grade.replace('+', '-plus')}">${p.score || 0} (${grade})</span>
                 </td>
-                <td data-label="Ming Gua">${p.ming_gua || 'MG4'}</td>
+                <td data-label="Ming Gua">${p.ming_gua || '—'}</td>
                 <td data-label="Occupation">${escapeHtml((p.occupation || '') + (p.company_name ? ' · ' + p.company_name : ''))}</td>
                 <td data-label="Last Activity" data-la-id="${p.id}">${lastActivityHtml}</td>
                 <td data-label="Protection">
@@ -1102,16 +1102,17 @@ const confirmDeleteProspect = async (id) => {
     }
     UI.hideModal();
     try {
-        const [acts, allNotes, names, referrals] = await Promise.all([
+        const [acts, notesByFk, notesByEntity, names, referrals] = await Promise.all([
             AppDataStore.query('activities', { prospect_id: id }).catch(() => []),
-            AppDataStore.getAll('notes').catch(() => []),
+            // Indexed lookups instead of downloading the whole notes table.
+            AppDataStore.query('notes', { prospect_id: id }).catch(() => []),
+            AppDataStore.query('notes', { entity_type: 'prospect', entity_id: id }).catch(() => []),
             AppDataStore.query('names', { prospect_id: id }).catch(() => []),
             AppDataStore.query('referrals', { referred_prospect_id: id }).catch(() => []),
         ]);
-        const notes = allNotes.filter(n =>
-            String(n.prospect_id) === String(id) ||
-            (n.entity_type === 'prospect' && String(n.entity_id) === String(id))
-        );
+        const notesMap = new Map();
+        for (const n of [...notesByFk, ...notesByEntity]) notesMap.set(n.id, n);
+        const notes = [...notesMap.values()];
         // Bulk-delete related records in parallel (was sequential — O(N) round trips)
         await Promise.all([
             acts.length ? AppDataStore.deleteMany('activities', acts.map(a => a.id)) : Promise.resolve(),
@@ -1141,13 +1142,10 @@ const getScoreGrade = (score) => {
 const openProspectGradePicker = async (prospectId) => {
     const prospect = await AppDataStore.getById('prospects', prospectId);
     if (!prospect) { UI.toast.error('Prospect not found'); return; }
-    const currentUser = _state.cu || await Auth.getCurrentUser();
-    // Use the canonical level helper, not fragile role-substring matching:
-    // 'Level 3'.includes also caught 'Level 30/31', and named/Chinese roles that
-    // map to L3-5 were missed. lvl<=5 = team-leader-or-above per the role band.
-    const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || _getUserLevel(currentUser) <= 5;
-    const isOwner = prospect.responsible_agent_id == currentUser.id;
-    if (!isAdmin && !isOwner) {
+    // Use the documented edit policy (canEditProspect) — same as the edit modal
+    // and saveProspect — so L6-L10 uplines can grade a subordinate's record
+    // instead of being blocked by the stricter lvl<=5-or-owner gate.
+    if (!(await canEditProspect(prospect))) {
         UI.toast.error('You cannot set the grade for this prospect.');
         return;
     }
@@ -1200,10 +1198,13 @@ const setProspectGrade = async (prospectId, grade) => {
 
 const calculateProtectionDays = (prospect) => {
     if (!prospect.protection_deadline) return 0;
-    const deadline = new Date(prospect.protection_deadline);
-    const today = new Date();
-    const diffTime = deadline - today;
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    // Parse 'YYYY-MM-DD' as LOCAL midnight (not UTC) so the deadline day isn't
+    // marked Expired from 08:00 MYT. Compare whole local calendar days.
+    const parts = String(prospect.protection_deadline).split('T')[0].split('-');
+    const deadline = new Date(+parts[0], (+parts[1] || 1) - 1, +parts[2] || 1);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const diffDays = Math.round((deadline - today) / (1000 * 60 * 60 * 24));
     return diffDays > 0 ? diffDays : 0;
 };
 
@@ -1215,8 +1216,13 @@ const getProtectionStatus = (days) => {
 
 const calculateDaysLeft = (deadline) => {
     if (!deadline) return 0;
-    const diff = new Date(deadline) - new Date();
-    const d = Math.ceil(diff / 86400000);
+    // Parse date-only 'YYYY-MM-DD' as LOCAL midnight (not UTC) and diff whole
+    // local calendar days, so a same-day deadline isn't shown Expired at 08:00 MYT.
+    const parts = String(deadline).split('T')[0].split('-');
+    const dl = new Date(+parts[0], (+parts[1] || 1) - 1, +parts[2] || 1);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const d = Math.round((dl - today) / 86400000);
     return d > 0 ? d : 0;
 };
 
@@ -1361,7 +1367,27 @@ const bulkDeleteProspects = async () => {
     if (!confirm(`Delete ${n} selected prospect${n > 1 ? 's' : ''}? This cannot be undone.`)) return;
     let errors = 0;
     for (const id of _selectedProspects) {
-        try { await AppDataStore.delete('prospects', id); }
+        try {
+            // Match the single-delete path: clean up linked children first so
+            // activities/notes/names/referrals don't dangle after the prospect goes.
+            const [acts, notesByFk, notesByEntity, names, referrals] = await Promise.all([
+                AppDataStore.query('activities', { prospect_id: id }).catch(() => []),
+                AppDataStore.query('notes', { prospect_id: id }).catch(() => []),
+                AppDataStore.query('notes', { entity_type: 'prospect', entity_id: id }).catch(() => []),
+                AppDataStore.query('names', { prospect_id: id }).catch(() => []),
+                AppDataStore.query('referrals', { referred_prospect_id: id }).catch(() => []),
+            ]);
+            const notesMap = new Map();
+            for (const nn of [...notesByFk, ...notesByEntity]) notesMap.set(nn.id, nn);
+            const notes = [...notesMap.values()];
+            await Promise.all([
+                acts.length ? AppDataStore.deleteMany('activities', acts.map(a => a.id)) : Promise.resolve(),
+                notes.length ? AppDataStore.deleteMany('notes', notes.map(nn => nn.id)) : Promise.resolve(),
+                names.length ? AppDataStore.deleteMany('names', names.map(nn => nn.id)) : Promise.resolve(),
+                referrals.length ? AppDataStore.deleteMany('referrals', referrals.map(r => r.id)) : Promise.resolve(),
+            ]);
+            await AppDataStore.delete('prospects', id);
+        }
         catch { errors++; }
     }
     _selectedProspects.clear();
@@ -1538,13 +1564,11 @@ const openProspectModal = async (prospectId = null) => {
             UI.toast.error('Prospect not found.');
             return;
         }
-        const currentUser = _state.cu || await Auth.getCurrentUser();
-        // Use the canonical level helper, not fragile role-substring matching:
-        // 'Level 3'.includes also caught 'Level 30/31', and named/Chinese roles that
-        // map to L3-5 were missed. lvl<=5 = team-leader-or-above per the role band.
-        const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || _getUserLevel(currentUser) <= 5;
-        const isOwner = String(prospect.responsible_agent_id) === String(currentUser.id);
-        if (!isAdmin && !isOwner) {
+        // Use the documented edit policy (canEditProspect) that saveProspect
+        // enforces at save time — L1-2 anything, L3-10 team/subordinate records,
+        // L11+ own only. The previous lvl<=5-or-owner gate was stricter than the
+        // save path and blocked L6-L10 uplines editing a subordinate's record.
+        if (!(await canEditProspect(prospect))) {
             UI.toast.error('You cannot edit this prospect.');
             return;
         }
@@ -2150,20 +2174,20 @@ const showProspectDetail = async (prospectId) => {
     const container = document.getElementById('content-viewport');
     if (!container) return;
 
-    // Only the CPS photo lookup needs activities on the header critical path.
-    // Previously also fetched proposed_solutions/notes/names, but those results
-    // were never used here — each was an extra serial uncached Supabase round
-    // trip that made opening a prospect feel laggy.
-    const activities = await AppDataStore.getActivitiesForProspect(prospectId, { limit: 500 });
-
     const daysLeft = calculateProtectionDays(prospect);
     const protectionStatus = getProtectionStatus(daysLeft);
     const statusColor = protectionStatus === 'normal' ? 'success' : protectionStatus === 'warning' ? 'secondary' : 'error';
     const statusLabel = protectionStatus === 'normal' ? 'Normal' : protectionStatus === 'warning' ? 'Expiring Soon' : 'Critical';
 
-    const cpsPhoto = activities
-        .filter(a => a.type === 'CPS' && a.cps_attachment?.url && a.cps_attachment?.type?.startsWith('image/'))
-        .sort((a, b) => (b.id || 0) - (a.id || 0))[0]?.cps_attachment;
+    // CPS photo lives on the prospects.cps_attachment column (NOT on activity
+    // rows, which have no such field and use activity_type not type). The old
+    // activities.filter(a => a.type === 'CPS' && a.cps_attachment...) never
+    // matched, so the thumbnail never rendered and the 500-row activities fetch
+    // it required was pure waste on the header critical path. Read the column
+    // directly and normalize to the { url } shape the header renderer expects.
+    let cpsPhoto = prospect.cps_attachment || null;
+    if (typeof cpsPhoto === 'string') cpsPhoto = cpsPhoto ? { url: cpsPhoto } : null;
+    else if (cpsPhoto && !cpsPhoto.url) cpsPhoto = null;
 
     setTimeout(async () => {
         await addWhatsAppButtonToProfile('prospect', prospectId);
@@ -2255,7 +2279,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             <div class="pv-row"><span class="pv-lbl" style="${prospect.life_chart_type === 'solar' ? 'font-weight:700;color:#dc2626;' : ''}">Date of Birth</span><span class="pv-val" style="display:flex;align-items:center;gap:8px;${prospect.life_chart_type === 'solar' ? 'font-weight:700;color:#dc2626;' : ''}"><input type="checkbox" ${prospect.life_chart_type === 'solar' ? 'checked' : ''} onchange="event.stopPropagation();app.toggleLifeChartType(${prospect.id},'solar',this.checked)" title="Use for life chart">${escapeHtml(prospect.date_of_birth || '-')}</span></div>
             <div class="pv-row"><span class="pv-lbl" style="${prospect.life_chart_type === 'lunar' ? 'font-weight:700;color:#dc2626;' : ''}">Lunar Birth</span><span class="pv-val" style="display:flex;align-items:center;gap:8px;${prospect.life_chart_type === 'lunar' ? 'font-weight:700;color:#dc2626;' : ''}"><input type="checkbox" ${prospect.life_chart_type === 'lunar' ? 'checked' : ''} onchange="event.stopPropagation();app.toggleLifeChartType(${prospect.id},'lunar',this.checked)" title="Use for life chart">${escapeHtml(prospect.lunar_birth || '-')}</span></div>
             <div class="pv-row"><span class="pv-lbl">IC Number</span><span class="pv-val">${escapeHtml(prospect.ic_number || '-')}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Ming Gua</span><span class="pv-val"><span class="badge info">${prospect.ming_gua || 'MG4'}</span></span></div>
+            <div class="pv-row"><span class="pv-lbl">Ming Gua</span><span class="pv-val"><span class="badge info">${prospect.ming_gua || '—'}</span></span></div>
             <div class="pv-sub">Family</div>
             <div class="pv-row"><span class="pv-lbl">Marital Status</span><span class="pv-val">${escapeHtml(prospect.marital_status || '-')}</span></div>
             ${(() => {
@@ -3726,8 +3750,12 @@ const renderCustomerClosingTab = async (customer, container) => {
         }
     }
 
-    container.innerHTML = pre2025Html + historyHtml + activeHtml ||
-        pre2025Html + '<p style="text-align:center;padding:16px;color:var(--gray-400);font-size:13px;">No closing records yet.</p>';
+    // pre2025Html is always a non-empty table string, so `... || fallback` never
+    // reached the fallback (+ binds tighter than ||). Decide on the actual closing
+    // content — history + active submission — and append the message when both are empty.
+    const _closingBody = historyHtml + activeHtml ||
+        '<p style="text-align:center;padding:16px;color:var(--gray-400);font-size:13px;">No closing records yet.</p>';
+    container.innerHTML = pre2025Html + _closingBody;
 };
 
 // Accordion toggle — expand/collapse a prospect profile section.
@@ -4011,10 +4039,14 @@ const viewActivityPhotos = async (activityId) => {
 
 // Compress image to max 1920px wide at 80% JPEG quality using canvas.
 // Handles large mobile camera photos (often 5-15MB) before upload.
-const compressImageFile = (file) => new Promise((resolve) => {
+const compressImageFile = (file) => new Promise((resolve, reject) => {
     const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`Could not read "${file.name}"`));
     reader.onload = (e) => {
         const img = new Image();
+        // Without onerror the Promise would hang forever on an undecodable image
+        // (corrupt file, HEIC without browser support), stalling the upload flow.
+        img.onerror = () => reject(new Error(`Could not decode "${file.name}"`));
         img.onload = () => {
             const MAX_W = 1920;
             let w = img.width, h = img.height;
@@ -4023,6 +4055,7 @@ const compressImageFile = (file) => new Promise((resolve) => {
             canvas.width = w; canvas.height = h;
             canvas.getContext('2d').drawImage(img, 0, 0, w, h);
             canvas.toBlob((blob) => {
+                if (!blob) { reject(new Error(`Could not compress "${file.name}"`)); return; }
                 resolve(new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }));
             }, 'image/jpeg', 0.8);
         };
@@ -6418,16 +6451,17 @@ const executeDelete = async (id) => {
     if (_getUserLevel(_state.cu) > 5) { UI.toast.error('You do not have permission to delete prospects.'); return; }
     UI.hideModal();
     try {
-        const [acts, allNotes, names, referrals] = await Promise.all([
+        const [acts, notesByFk, notesByEntity, names, referrals] = await Promise.all([
             AppDataStore.query('activities', { prospect_id: id }).catch(() => []),
-            AppDataStore.getAll('notes').catch(() => []),
+            // Indexed lookups instead of downloading the whole notes table.
+            AppDataStore.query('notes', { prospect_id: id }).catch(() => []),
+            AppDataStore.query('notes', { entity_type: 'prospect', entity_id: id }).catch(() => []),
             AppDataStore.query('names', { prospect_id: id }).catch(() => []),
             AppDataStore.query('referrals', { referred_prospect_id: id }).catch(() => []),
         ]);
-        const notes = allNotes.filter(n =>
-            String(n.prospect_id) === String(id) ||
-            (n.entity_type === 'prospect' && String(n.entity_id) === String(id))
-        );
+        const notesMap = new Map();
+        for (const n of [...notesByFk, ...notesByEntity]) notesMap.set(n.id, n);
+        const notes = [...notesMap.values()];
         // Bulk-delete related records in parallel (was sequential — O(N) round trips)
         await Promise.all([
             acts.length ? AppDataStore.deleteMany('activities', acts.map(a => a.id)) : Promise.resolve(),

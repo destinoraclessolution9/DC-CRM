@@ -68,6 +68,18 @@
         return /^https?:\/\//i.test(s) ? escapeHtml(s) : '';
     };
 
+    // Mask a bank account number, FAILING CLOSED. The old inline
+    // /^(\d{4}).*(\d{4})$/ regex returned the input UNCHANGED (fully exposed) for
+    // any value that didn't start AND end with exactly 4 digits (bank prefixes,
+    // trailing spaces, <8 digits). Strategy: strip to digits; if ≥8 digits, show
+    // first-4/last-4; if 4–7 digits, show only the last 4; otherwise mask entirely.
+    const _maskAccount = (raw) => {
+        const digits = String(raw == null ? '' : raw).replace(/\D/g, '');
+        if (digits.length >= 8) return `${digits.slice(0, 4)}-****-${digits.slice(-4)}`;
+        if (digits.length >= 4) return `****${digits.slice(-4)}`;
+        return '****';
+    };
+
     // ── Duplicated from prospects-core: shared server-pagination helper.    // Reads only header globals (getVisibleUserIds/_state.cu/AppDataStore),    // so a verbatim copy is safe and keeps _bffGetCustomers an intra-chunk call.
 const _serverPage = async (table, opts = {}) => {
     try {
@@ -453,8 +465,14 @@ const renderCustomersTable = async () => {
         let eventCountByAttendee = null;
         if (minEventsFilter > 0) {
             const allEventRegs = await AppDataStore.getAll('event_registrations');
+            // Match the Events tab: only count CUSTOMER-type registrations in a valid
+            // attendance status (prospects share an independent id sequence, and
+            // cancelled/invalid registrations must not inflate the count).
+            const VALID_REG_STATUSES_MIN = new Set(['Registered', 'Attended', 'No Show']);
             eventCountByAttendee = new Map();
             for (const r of allEventRegs) {
+                if (r.attendee_type !== 'customer') continue;
+                if (!VALID_REG_STATUSES_MIN.has(r.attendance_status)) continue;
                 eventCountByAttendee.set(r.attendee_id, (eventCountByAttendee.get(r.attendee_id) || 0) + 1);
             }
         }
@@ -651,7 +669,7 @@ const showCustomerDetail = async (customerId) => {
                         <span style="font-size:22px;font-weight:700;line-height:1.3;word-break:break-word;">${escapeHtml(customer.full_name)}</span>
                     </div>
                     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 4px;">
-                        ${(isSystemAdmin(_state.cu) || isMarketingManager(_state.cu)) ? iconBtn('Edit', 'fas fa-edit', `app.openProspectModal(${customer.id})`) : ''}
+                        ${(isSystemAdmin(_state.cu) || isMarketingManager(_state.cu)) && customer.converted_from_prospect_id != null ? iconBtn('Edit', 'fas fa-edit', `app.openProspectModal(${customer.converted_from_prospect_id})`) : ''}
                         ${iconBtn('Add Purchase', 'fas fa-plus', `app.openAddPurchaseModal(${customer.id})`)}
                         ${iconBtn('Refer a Friend', 'fas fa-user-plus', `app.openCustomerReferralModal(${customer.id})`)}
                         ${iconBtn('WhatsApp', 'fab fa-whatsapp', `app.openSendWhatsAppModal('customer',${customer.id})`, {color:'#25d366'})}
@@ -659,7 +677,7 @@ const showCustomerDetail = async (customerId) => {
                         ${iconBtn('Recruit as Agent', 'fas fa-user-tie', `app.openRecruitModal(${customer.id})`, {bg:'#6b21a8',color:'#fff',border:'none'})}
                     </div>
                     <div style="font-size:12px;color:var(--gray-500);margin-top:2px;">
-                        Customer since ${customer.customer_since || '-'} · Converted at ${customer.conversion_amount != null ? UI.money(customer.conversion_amount, customer.country) : UI.money(2200, customer.country)}
+                        Customer since ${customer.customer_since || '-'}${customer.conversion_amount != null ? ` · Converted at ${UI.money(customer.conversion_amount, customer.country)}` : ''}
                     </div>
                 </div>
             </div>
@@ -875,7 +893,7 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
         container.innerHTML = `
             <div class="pv-sub">Bank &amp; Payment</div>
             <div class="pv-row"><span class="pv-lbl">Bank Name</span><span class="pv-val">${escapeHtml(customer.bank_name || '-')}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Account Number</span><span class="pv-val">${customer.account_number ? escapeHtml(customer.account_number.replace(/^(\d{4}).*(\d{4})$/, '$1-****-$2')) : '-'}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Account Number</span><span class="pv-val">${customer.account_number ? escapeHtml(_maskAccount(customer.account_number)) : '-'}</span></div>
             <div class="pv-row"><span class="pv-lbl">Account Holder</span><span class="pv-val">${escapeHtml(customer.account_holder || '-')}</span></div>
             <div class="pv-row"><span class="pv-lbl">Payment Method</span><span class="pv-val">${escapeHtml(customer.payment_methods || '-')}</span></div>
             <div class="pv-sub">Customer Metrics</div>
@@ -944,18 +962,26 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
         }
     }
     else if (tab === 'eligibility') {
+        // Derive status + eligibility from REAL customer data instead of the old
+        // hardcoded "Not an Agent / 85% Good candidate" block (audit #18). The
+        // agent-package threshold is RM 3,000 (per the copy below).
+        const _isAgentCust = !!(customer.is_agent || customer.agent_eligible || customer.is_agent_eligible);
+        const _ltv = customer.lifetime_value || 0;
+        const _AGENT_THRESHOLD = 3000;
+        const _meetsThreshold = _ltv >= _AGENT_THRESHOLD;
+        const _statusLabel = _isAgentCust ? 'Agent' : 'Not an Agent';
+        const _eligLabel = _isAgentCust
+            ? 'Already an agent'
+            : (_meetsThreshold ? 'Meets purchase threshold' : 'Below purchase threshold');
         container.innerHTML = `
             <div style="text-align:center;padding:8px 0;">
-                <div style="font-size:13px;color:#6b21a8;margin-bottom:8px;">Current Status: <strong>Not an Agent</strong></div>
+                <div style="font-size:13px;color:#6b21a8;margin-bottom:8px;">Current Status: <strong>${escapeHtml(_statusLabel)}</strong></div>
                 <div style="font-size:12px;color:#7e22ce;margin-bottom:12px;">To become agent: Purchase Agent Package (min RM 3,000)</div>
                 <div style="display:inline-flex;flex-direction:column;align-items:center;gap:6px;margin-bottom:12px;">
-                    <div style="width:64px;height:64px;border-radius:50%;background:#f3e8ff;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;color:#6b21a8;">85%</div>
-                    <div style="font-size:13px;font-weight:600;color:#6b21a8;">Good candidate</div>
+                    <div style="font-size:13px;color:var(--gray-600);">Lifetime Value: <strong>${UI.money(_ltv, customer.country)}</strong></div>
+                    <div style="font-size:13px;font-weight:600;color:#6b21a8;">${escapeHtml(_eligLabel)}</div>
                 </div>
-                <div style="font-size:12px;color:#7e22ce;font-style:italic;margin-bottom:12px;">
-                    Recommendations: Active participant, makes referrals, good purchase history.
-                </div>
-                <button class="btn primary" style="width:100%;background:#6b21a8;border:none;" onclick="app.openRecruitModal(${customer.id})">Offer Agent Package</button>
+                ${_isAgentCust ? '' : `<button class="btn primary" style="width:100%;background:#6b21a8;border:none;" onclick="app.openRecruitModal(${customer.id})">Offer Agent Package</button>`}
             </div>
         `;
     }
@@ -1021,7 +1047,7 @@ const renderBasicBankTab = async (customer, containerId = 'profile-tab-content')
     const _ageStr = (Number.isFinite(_age) && _age >= 0) ? ` (Age ${_age})` : '';
     // Mask a real account number (first 4 / last 4) instead of emitting a fake one.
     const _acctMasked = customer.account_number
-        ? escapeHtml(String(customer.account_number).replace(/^(\d{4}).*(\d{4})$/, '$1-****-$2'))
+        ? escapeHtml(_maskAccount(customer.account_number))
         : '-';
     // Real purchase metrics. Last-purchase date is derived from the purchases table
     // (max(date)) since customers carry no maintained last_purchase_date column.
@@ -1445,7 +1471,7 @@ const openCustomerReferralModal = async (customerId) => {
         </div>
         <div class="form-group">
             <label>Referral Date</label>
-            <input type="date" id="referral-date" class="form-control" value="${new Date().toISOString().slice(0,10)}">
+            <input type="date" id="referral-date" class="form-control" value="${(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })()}">
         </div>
     `;
     UI.showModal('Refer a Friend', content, [
@@ -1538,7 +1564,7 @@ const openEditPlatformIdsModal = async (customerId) => {
             const row = document.createElement('div');
             row.className='form-row';
             row.style='display:flex;gap:8px;margin-bottom:8px;';
-            row.innerHTML='<input type=\\'text\\' class=\\'form-control\\' placeholder=\\'Platform name\\' style=\\'flex:1;\\'><input type=\\'text\\' class=\\'form-control\\' placeholder=\\'Platform ID\\' style=\\'flex:1;\\'><button class=\\'btn error btn-sm\\' onclick=\\'this.closest(\\'.form-row\\').remove()\\'>×</button>';
+            row.innerHTML='<input type=\\'text\\' class=\\'form-control\\' placeholder=\\'Platform name\\' style=\\'flex:1;\\'><input type=\\'text\\' class=\\'form-control\\' placeholder=\\'Platform ID\\' style=\\'flex:1;\\'><button class=\\'btn error btn-sm\\' onclick=\\'this.parentElement.remove()\\'>×</button>';
             document.getElementById('platform-rows').appendChild(row);
         ">+ Add Row</button>
     `;
@@ -1552,27 +1578,49 @@ const savePlatformIds = async (customerId) => {
     const existingRows = document.querySelectorAll('#platform-rows [data-platform-row-id]');
     const newRows = document.querySelectorAll('#platform-rows .form-row:not([data-platform-row-id])');
 
+    // Rows the user removed via the × button are gone from the DOM entirely, so
+    // the loop below never sees them and their DB row would survive. Compute the
+    // set of ids the user KEPT, then delete every original row not in that set
+    // (audit #9). All deletes are guarded because AppDataStore.delete THROWS on
+    // error / zero-deleted (audit #21) — an unguarded throw would abort mid-save
+    // with no feedback and a partial write.
+    const keptIds = new Set();
+    let hadError = false;
+
     for (const row of existingRows) {
         const id = parseInt(row.getAttribute('data-platform-row-id'));
         const inputs = row.querySelectorAll('input');
         const platform = inputs[0]?.value?.trim();
         const platform_id = inputs[1]?.value?.trim();
-        if (platform && platform_id) {
-            await AppDataStore.update('platform_ids', id, { platform, platform_id });
-        } else {
-            await AppDataStore.delete('platform_ids', id);
-        }
+        keptIds.add(id);
+        try {
+            if (platform && platform_id) {
+                await AppDataStore.update('platform_ids', id, { platform, platform_id });
+            } else {
+                await AppDataStore.delete('platform_ids', id);
+            }
+        } catch (e) { hadError = true; console.warn('[savePlatformIds] row', id, e?.message || e); }
     }
+
+    // Delete rows the user removed from the modal (present in DB, absent from DOM).
+    let originalRows = [];
+    try { originalRows = await AppDataStore.query('platform_ids', { customer_id: customerId }); } catch (_) { originalRows = []; }
+    for (const orig of originalRows) {
+        if (keptIds.has(orig.id)) continue;
+        try { await AppDataStore.delete('platform_ids', orig.id); } catch (e) { hadError = true; console.warn('[savePlatformIds] delete', orig.id, e?.message || e); }
+    }
+
     for (const row of newRows) {
         const inputs = row.querySelectorAll('input');
         const platform = inputs[0]?.value?.trim();
         const platform_id = inputs[1]?.value?.trim();
         if (platform && platform_id) {
-            await AppDataStore.create('platform_ids', { customer_id: customerId, platform, platform_id });
+            try { await AppDataStore.create('platform_ids', { customer_id: customerId, platform, platform_id }); } catch (e) { hadError = true; console.warn('[savePlatformIds] create', e?.message || e); }
         }
     }
     UI.hideModal();
-    UI.toast.success('Platform IDs saved');
+    if (hadError) UI.toast.error('Some platform IDs could not be saved. Please reopen and retry.');
+    else UI.toast.success('Platform IDs saved');
     const customer = await AppDataStore.getById('customers', customerId);
     if (customer) { const cid = `cust-acc-body-platforms-${customerId}`; await renderPlatformIdsTab(customer, document.getElementById(cid) ? cid : 'profile-tab-content'); }
 };
@@ -1652,22 +1700,26 @@ const renderEventHistory = (customer) => {
 
 const renderAgentEligibility = async (customer) => {
     const container = document.getElementById('agent-eligibility-section');
+    // Real status/eligibility from customer data instead of a hardcoded 85% (audit #18).
+    const _isAgentCust = !!(customer.is_agent || customer.agent_eligible || customer.is_agent_eligible);
+    const _ltv = customer.lifetime_value || 0;
+    const _meetsThreshold = _ltv >= 3000;
+    const _statusLabel = _isAgentCust ? 'Agent' : 'Not an Agent';
+    const _eligLabel = _isAgentCust
+        ? 'Already an agent'
+        : (_meetsThreshold ? 'Meets purchase threshold' : 'Below purchase threshold');
     container.innerHTML = `
         <div class="eligibility-card">
             <h3>Agent Package Eligibility</h3>
-            <div style="font-size:13px; color:#6b21a8; margin-bottom:8px;">Current Status: <strong>Not an Agent</strong></div>
+            <div style="font-size:13px; color:#6b21a8; margin-bottom:8px;">Current Status: <strong>${escapeHtml(_statusLabel)}</strong></div>
             <div style="font-size:12px; color:#7e22ce;">To become agent: Purchase Agent Package (min RM 3,000)</div>
-            
+
             <div class="eligibility-score">
-                <div class="score-circle">85%</div>
-                <div style="font-size:13px; font-weight:600; color:#6b21a8;">Good candidate</div>
+                <div style="font-size:13px;color:var(--gray-600);">Lifetime Value: <strong>${UI.money(_ltv, customer.country)}</strong></div>
+                <div style="font-size:13px; font-weight:600; color:#6b21a8;">${escapeHtml(_eligLabel)}</div>
             </div>
-            
-            <div style="font-size:12px; color:#7e22ce; font-style:italic; margin-bottom:12px;">
-                Recommendations: Active participant, makes referrals, good purchase history.
-            </div>
-            
-            <button class="btn primary" style="width:100%; background:#6b21a8; border:none;" onclick="app.openRecruitModal(${customer.id})">Offer Agent Package</button>
+
+            ${_isAgentCust ? '' : `<button class="btn primary" style="width:100%; background:#6b21a8; border:none;" onclick="app.openRecruitModal(${customer.id})">Offer Agent Package</button>`}
         </div>
     `;
 };
@@ -1803,21 +1855,32 @@ const openAddCustomerModal = async () => {
 const saveCustomer = async () => {
     const name = document.getElementById('cust-name')?.value;
     if (!name) return UI.toast.error('Name is required');
+    // Persist the Previous Prospect ID (converted_from_prospect_id) and Notes the
+    // modal collects — the old payload silently dropped both, breaking the
+    // pre-conversion history linkage for legacy imports (audit #10). `notes` is
+    // written best-effort: if the customers table has no such column the store's
+    // schema-error retry strips it, but we no longer claim it saved when it didn't.
+    const _prevIdRaw = document.getElementById('cust-prev-id')?.value?.trim();
+    const _prevId = _prevIdRaw ? parseInt(_prevIdRaw, 10) : null;
+    const _notes = document.getElementById('cust-notes')?.value?.trim() || null;
+    const _custPayload = {
+        full_name: name,
+        phone: document.getElementById('cust-phone')?.value,
+        email: document.getElementById('cust-email')?.value,
+        ic_number: document.getElementById('cust-ic')?.value,
+        date_of_birth: document.getElementById('cust-dob')?.value,
+        lifetime_value: parseFloat(document.getElementById('cust-init-amt')?.value) || 0,
+        status: 'active',
+        customer_since: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
+        responsible_agent_id: _state.cu?.id || null,
+        country: UI.countryByCode(document.getElementById('cust-country')?.value).code,
+    };
+    if (_prevId != null && Number.isFinite(_prevId)) _custPayload.converted_from_prospect_id = _prevId;
+    if (_notes) _custPayload.notes = _notes;
     // Guard the create: an RLS deny / offline / validation reject must surface an error
     // and keep the modal open, not throw an unhandled rejection + close silently.
     try {
-        await AppDataStore.create('customers', {
-            full_name: name,
-            phone: document.getElementById('cust-phone')?.value,
-            email: document.getElementById('cust-email')?.value,
-            ic_number: document.getElementById('cust-ic')?.value,
-            date_of_birth: document.getElementById('cust-dob')?.value,
-            lifetime_value: parseFloat(document.getElementById('cust-init-amt')?.value) || 0,
-            status: 'active',
-            customer_since: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
-            responsible_agent_id: _state.cu?.id || null,
-            country: UI.countryByCode(document.getElementById('cust-country')?.value).code,
-        });
+        await AppDataStore.create('customers', _custPayload);
     } catch (e) {
         UI.toast.error('Failed to create customer: ' + (e?.message || e));
         return; // keep modal open so the user can retry
@@ -1874,7 +1937,14 @@ const _addMonths = (dateStr, months) => {
     if (!dateStr || !(months > 0)) return '';
     const d = new Date(String(dateStr).slice(0, 10) + 'T00:00:00Z');
     if (isNaN(d.getTime())) return '';
+    // Clamp day-of-month overflow so month-end dates don't spill into the next
+    // month (Aug 31 + 6mo → Feb 31 → Mar 3). Matches the NPO chunk's _addMonths
+    // (audit #22): Jan 31 + 1mo → Feb 28/29, not Mar 3.
+    const day = d.getUTCDate();
+    d.setUTCDate(1);
     d.setUTCMonth(d.getUTCMonth() + Number(months));
+    const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+    d.setUTCDate(Math.min(day, lastDay));
     return d.toISOString().split('T')[0];
 };
 
@@ -2063,13 +2133,20 @@ const savePurchase = async (customerId) => {
         // have a long lead time before production). ──
         const ringSize = (document.getElementById('pur-ring-size')?.value || '').trim();
         if (_isPowerRingName(item) && !ringSize) { UI.toast.error('Power Ring size is required'); return; }
+        // Redemption image: capture the actual File now (the modal closes after save).
+        // The old code stored the fake string 'image_uploaded.png' and dropped the
+        // bytes (audit #12) — we upload the real file post-insert and store its URL.
+        const _proofFile = document.getElementById('pur-file')?.files?.[0] || null;
         // Fetch customer for the post-save re-render fallback. NOTE: purchases are
         // agent-attributed via the customers.responsible_agent_id join in the reporting
         // RPCs (no agent column on the purchase row) — do NOT add one (prior bug).
         const customer = await AppDataStore.getById('customers', customerId);
         const pur = {
             customer_id: customerId,
-            date: new Date().toISOString().split('T')[0],
+            // Local calendar day (MYT is UTC+8): a UTC date would stamp early-morning
+            // sales with YESTERDAY, mis-bucketing them in monthly/quarterly reports
+            // and the delivery-board maturity math (audit #5/#11).
+            date: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
             invoice: invoiceNo,
             item: item,
             amount: amt,
@@ -2078,7 +2155,7 @@ const savePurchase = async (customerId) => {
             currency: document.getElementById('pur-currency')?.value || UI.currencyForCountry(customer?.country),
             status: document.getElementById('pur-status')?.value,
             delivery_status: document.getElementById('pur-delivery')?.value || 'Pending Delivery',
-            proof: document.getElementById('pur-file')?.value ? 'image_uploaded.png' : '',
+            proof: '', // set below via a real upload if a file was chosen (audit #12)
             package_id: packageId,
             payment_method: purMethod,
             epp_months: Number.isFinite(eppMonthsInt) ? eppMonthsInt : null,
@@ -2094,8 +2171,16 @@ const savePurchase = async (customerId) => {
         // keeps the modal open, and reverses the LTV bump if the purchase row was
         // created but the adjust failed (otherwise LTV is permanently wrong, audit #9). ──
         let created = false;
+        let createdRow = null;
         try {
-            await AppDataStore.create('purchases', pur);
+            createdRow = await AppDataStore.create('purchases', pur);
+            // create() resolves with the saved row on success and throws on a
+            // permanent server rejection. A falsy return means no row was written —
+            // do NOT bump LTV or report success (audit #13), else the LTV RPC would
+            // inflate lifetime_value with no purchase row behind it.
+            if (!createdRow || createdRow.id == null) {
+                throw new Error('Purchase was not saved (no row returned)');
+            }
             created = true;
             // Update lifetime value + purchase count atomically (race-free; symmetric with deletePurchase).
             await _adjustCustomerLtv(customerId, amt, 1);
@@ -2106,6 +2191,27 @@ const savePurchase = async (customerId) => {
             }
             UI.toast.error('Failed to save purchase: ' + (e?.message || e));
             return; // leave the modal open so the user can retry (no double-insert thanks to the guard)
+        }
+
+        // Upload the redemption image (if any) now that we have the purchase id, and
+        // store its resolvable public URL — the old code stored a fake placeholder
+        // string and silently dropped the bytes (audit #12).
+        if (_proofFile && createdRow?.id != null) {
+            try {
+                if (window.supabase) {
+                    const _pn = `proof_${createdRow.id}_${Date.now()}_${_proofFile.name}`;
+                    const { error: _upErr } = await window.supabase.storage.from('attachments').upload(_pn, _proofFile);
+                    if (!_upErr) {
+                        const _pub = window.supabase.storage.from('attachments').getPublicUrl(_pn);
+                        const _proofUrl = _pub?.data?.publicUrl || _pn;
+                        await AppDataStore.update('purchases', createdRow.id, { proof: _proofUrl });
+                    } else {
+                        UI.toast.error('Purchase saved, but image upload failed: ' + (_upErr.message || _upErr));
+                    }
+                }
+            } catch (_pe) {
+                UI.toast.error('Purchase saved, but image upload failed: ' + (_pe?.message || _pe));
+            }
         }
 
         UI.hideModal();

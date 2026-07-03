@@ -7,7 +7,10 @@
 (() => {
     'use strict';
     const _utils = window._crmUtils;
+    const _state = window._appState;
     const esc    = (...a) => _utils.escapeHtml(...a);
+    // Scope helper — 'all' (admin) ⇒ no clause; [ids] ⇒ .in(...); [] ⇒ fail closed.
+    const getVisibleUserIds = (u) => _utils.getVisibleUserIds(u);
 
     // PostgREST .or() filter sanitizer — OCR/user text is embedded into the .or()
     // string syntax where commas are the OR separator and ()/operators are syntax.
@@ -376,21 +379,56 @@
             const sb = window.supabase || window.supabaseClient;
             if (!sb) throw new Error('Supabase not available');
 
+            // Scope history to the agent's visible book so the agent band can't browse
+            // every other agent's scanned order forms (NRIC / amounts / card last4).
+            // 'all' (admin) ⇒ no scope; otherwise restrict to attachments whose
+            // prospect_id belongs to a visible prospect; [] ⇒ fail closed (show nothing).
+            let visibleIds = [];
+            try { visibleIds = await getVisibleUserIds(_state && _state.cu); } catch (_) { visibleIds = []; }
+            const adminScope = visibleIds === 'all';
+            const scopeIds = Array.isArray(visibleIds) ? visibleIds : [];
+            if (!adminScope && scopeIds.length === 0) {
+                _ofeAllRows = [];
+                _ofeHistPage = 0;
+                _ofeRenderHistory();
+                return;
+            }
+            let visibleProspectIds = null;
+            if (!adminScope) {
+                const { data: pRows, error: pErr } = await sb
+                    .from('prospects')
+                    .select('id')
+                    .in('responsible_agent_id', scopeIds)
+                    .limit(5000);
+                if (pErr) throw pErr;
+                visibleProspectIds = (pRows || []).map(r => r.id);
+                if (visibleProspectIds.length === 0) {
+                    _ofeAllRows = [];
+                    _ofeHistPage = 0;
+                    _ofeRenderHistory();
+                    return;
+                }
+            }
+
             // Try with collection_status — fall back gracefully if column not yet migrated (code 42703)
             let fetchData, fetchErr;
-            ({ data: fetchData, error: fetchErr } = await sb
+            let baseQuery = sb
                 .from('prospect_attachments')
                 .select('id, prospect_id, file_url, filename, metadata, scanned_at, scan_confidence, collection_status')
-                .eq('attachment_type', 'order_form')
+                .eq('attachment_type', 'order_form');
+            if (!adminScope) baseQuery = baseQuery.in('prospect_id', visibleProspectIds);
+            ({ data: fetchData, error: fetchErr } = await baseQuery
                 .order('scanned_at', { ascending: false })
                 .limit(500));
 
             if (fetchErr && fetchErr.code === '42703') {
                 // collection_status column not yet migrated — query without it
-                ({ data: fetchData, error: fetchErr } = await sb
+                let fbQuery = sb
                     .from('prospect_attachments')
                     .select('id, prospect_id, file_url, filename, metadata, scanned_at, scan_confidence')
-                    .eq('attachment_type', 'order_form')
+                    .eq('attachment_type', 'order_form');
+                if (!adminScope) fbQuery = fbQuery.in('prospect_id', visibleProspectIds);
+                ({ data: fetchData, error: fetchErr } = await fbQuery
                     .order('scanned_at', { ascending: false })
                     .limit(500));
                 fetchData = (fetchData || []).map(r => ({ ...r, collection_status: null }));
@@ -668,7 +706,17 @@
     const ofeHistSearch = (val) => {
         _ofeHistSearch = val || '';
         _ofeHistPage = 0;
+        // _ofeRenderHistory() rewrites the container that HOLDS the search input, so the
+        // focused input is destroyed and re-created every keystroke. Capture the caret,
+        // re-render, then restore focus + caret on the freshly-built input so typing works.
+        const prev = document.getElementById('ofe-hist-search');
+        const caret = prev ? (prev.selectionStart ?? _ofeHistSearch.length) : null;
         _ofeRenderHistory();
+        const next = document.getElementById('ofe-hist-search');
+        if (next) {
+            next.focus();
+            if (caret != null) { try { next.setSelectionRange(caret, caret); } catch (_) {} }
+        }
     };
 
     const ofeHistPage = (page) => {
@@ -705,7 +753,9 @@
 
     const _ofeCleanNum = (v) => {
         if (!v) return null;
-        const s = String(v).replace(/\bRM\b/gi, '').replace(/,/g, '').trim();
+        // Strip a leading "RM" currency prefix — the \bRM\b form failed on the common
+        // no-space format "RM3,500.00" (M→3 has no word boundary), yielding null.
+        const s = String(v).replace(/RM\s*/gi, '').replace(/,/g, '').trim();
         const n = parseFloat(s);
         return isNaN(n) ? null : n;
     };
@@ -836,11 +886,23 @@
             // a comma/paren/operator in the query would otherwise break or inject the filter.
             const qSafe = _orSafe(q);
             if (!qSafe) { resEl.innerHTML = ''; return; }
-            const { data, error } = await sb
+            // Scope to the agent's visible book — 'all' (admin) ⇒ no clause; [ids] ⇒
+            // .in(responsible_agent_id, ids); [] ⇒ fail closed (show nothing) so the
+            // agent band can't read every customer's PII via an unscoped search.
+            let visibleIds = [];
+            try { visibleIds = await getVisibleUserIds(_state && _state.cu); } catch (_) { visibleIds = []; }
+            const adminScope = visibleIds === 'all';
+            const scopeIds = Array.isArray(visibleIds) ? visibleIds : [];
+            if (!adminScope && scopeIds.length === 0) {
+                resEl.innerHTML = '<div style="padding:8px 10px;font-size:12px;color:var(--gray-400);">No prospects found.</div>';
+                return;
+            }
+            let query = sb
                 .from('prospects')
                 .select('id, full_name, phone, ic_number, status')
-                .or(`full_name.ilike.%${qSafe}%,phone.ilike.%${qSafe}%,ic_number.ilike.%${qSafe}%`)
-                .limit(8);
+                .or(`full_name.ilike.%${qSafe}%,phone.ilike.%${qSafe}%,ic_number.ilike.%${qSafe}%`);
+            if (!adminScope) query = query.in('responsible_agent_id', scopeIds);
+            const { data, error } = await query.limit(8);
             if (error) throw error;
             const rows = data || [];
             if (!rows.length) {
@@ -955,7 +1017,10 @@
 
         const fields   = _ofeResult.fields || {};
         const actType  = document.querySelector('input[name="ofe-clos-type"]:checked')?.value || 'FTF';
-        const today    = new Date().toISOString().split('T')[0];
+        // Local-time YYYY-MM-DD — toISOString() is UTC, which mis-dates closings saved
+        // before 08:00 Malaysia time (UTC+8) to the previous calendar day.
+        const _td = new Date();
+        const today    = `${_td.getFullYear()}-${String(_td.getMonth() + 1).padStart(2, '0')}-${String(_td.getDate()).padStart(2, '0')}`;
 
         // Use CRM-verified product name if available
         const product  = (_ofeCrmRef && _ofeCrmRef.product ? _ofeCrmRef.product.name : null) || fields.product_name || null;
@@ -974,6 +1039,9 @@
             payment_method:   payment,
             invoice_number:   prn,
             collection_date:  colDate,
+            // Attribute the closing to the current user — every scoped KPI/report filters
+            // activities by lead_agent_id, so without it the sale is invisible everywhere.
+            lead_agent_id:    (_state && _state.cu) ? _state.cu.id : null,
         };
 
         if (payment === 'POP') {
@@ -1126,7 +1194,9 @@
                 .update({ collection_status: newStatus })
                 .eq('id', _ofeAttachId);
             if (error) {
-                if (error.code === '42703') { UI.toast.info('Status tracking requires a DB migration — ask your admin to apply it.'); return; }
+                // Migration-missing path persisted nothing — roll back the optimistic badge
+                // so it doesn't falsely read the new status for the rest of the session.
+                if (error.code === '42703') { _rollback(); UI.toast.info('Status tracking requires a DB migration — ask your admin to apply it.'); return; }
                 throw error;
             }
             UI.toast.success(`Marked as ${newStatus}`);
@@ -1203,7 +1273,10 @@
             if (statusEl) statusEl.innerHTML = '';
             _ofeRenderScanResult(res, previewUrl);
             _ofeRenderClosingPanel(res.fields || {});
-            setTimeout(() => URL.revokeObjectURL(previewUrl), 90000);
+            // NOTE: previewUrl is still the <img src> and is baked into the zoom onclick,
+            // so it must NOT be revoked on a timer — reviewing a scan routinely takes
+            // longer than any fixed delay, and revoking breaks the inline + zoomed image.
+            // The blob is released when the tab is left / the page unloads.
 
         } catch (err) {
             URL.revokeObjectURL(previewUrl);

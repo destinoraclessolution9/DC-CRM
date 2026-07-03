@@ -93,9 +93,12 @@ const selfChangePassword = async () => {
     // plaintext copy in public.users. Only clear the force-change flag here.
     try { await AppDataStore.update('users', _state.cu.id, { force_password_change: false }); } catch (_) { /* best-effort flag clear */ }
     _state.cu.force_password_change = false;
-    document.getElementById('settings-current-pwd').value = '';
-    document.getElementById('settings-new-pwd').value = '';
-    document.getElementById('settings-confirm-pwd').value = '';
+    const _curEl = document.getElementById('settings-current-pwd');
+    const _newEl = document.getElementById('settings-new-pwd');
+    const _confEl = document.getElementById('settings-confirm-pwd');
+    if (_curEl) _curEl.value = '';
+    if (_newEl) _newEl.value = '';
+    if (_confEl) _confEl.value = '';
     UI.toast.success('Password changed successfully');
 };
 
@@ -450,7 +453,7 @@ const _renderDupeGroup = (label, icon, color, keyField, items, users) => {
                     <div style="flex:1; min-width:200px;">
                         <strong>${escapeHtml(p.full_name || '(no name)')}</strong>
                         <div style="font-size:11px; color:var(--text-secondary);">
-                            Agent: ${escapeHtml(agentName(p.responsible_agent_id))} · Last activity: ${last} · ID ${p.id}
+                            Agent: ${escapeHtml(agentName(p.responsible_agent_id || p.lead_agent_id))} · Last activity: ${last} · ID ${p.id}
                         </div>
                     </div>
                     <button class="btn secondary btn-sm" onclick="app.dedupeEditPhone(${p.id})" title="Open profile">
@@ -552,9 +555,24 @@ const dedupeClearEmail = async (prospectId) => {
 };
 
 const dedupeEditPhone = async (prospectId) => {
+    // Settings is reachable without ever visiting Prospects, so the prospects
+    // chunk (which owns openProspectModal) may not be loaded yet. The script.js
+    // forwarding stub does NOT lazy-load it, so load it here first — otherwise
+    // the Edit button silently no-ops after the dupes modal closes.
+    try {
+        if (typeof window._loadChunk === 'function') {
+            await window._loadChunk('chunks/script-prospects.min.js');
+        }
+    } catch (_) { /* fall through — guarded below */ }
     UI.hideModal();
     // Tiny delay so the close animation doesn't fight the next modal open.
-    setTimeout(() => window.app.openProspectModal(prospectId), 120);
+    setTimeout(() => {
+        if (typeof window.app.openProspectModal === 'function') {
+            window.app.openProspectModal(prospectId);
+        } else {
+            UI.toast.error('Could not open the prospect editor. Please try again.');
+        }
+    }, 120);
 };
 
 const dedupeClearPhone = async (prospectId) => {

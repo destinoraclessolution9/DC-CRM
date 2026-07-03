@@ -113,21 +113,25 @@
             const referrals = cutoff
                 ? allReferrals.filter(r => r.created_at && new Date(r.created_at) >= cutoff)
                 : allReferrals;
+            // Group by composite type:id so cross-type same-id referrers stay
+            // separate (matches the server RPC's (referrer_id, referrer_type) key).
             const grouped = {};
             referrals.forEach(r => {
                 if (!r.referrer_id) return;
-                if (!grouped[r.referrer_id]) {
-                    grouped[r.referrer_id] = { id: r.referrer_id, type: r.referrer_type, count: 0, converted: 0, latest: r.created_at };
+                const rType = r.referrer_type || 'prospect';
+                const key = `${rType}:${r.referrer_id}`;
+                if (!grouped[key]) {
+                    grouped[key] = { id: r.referrer_id, type: rType, count: 0, converted: 0, latest: r.created_at };
                 }
-                grouped[r.referrer_id].count++;
-                if (r.status === 'Active' || r.is_converted) grouped[r.referrer_id].converted++;
-                if (new Date(r.created_at) > new Date(grouped[r.referrer_id].latest)) grouped[r.referrer_id].latest = r.created_at;
+                grouped[key].count++;
+                if (r.status === 'Active' || r.is_converted) grouped[key].converted++;
+                if (new Date(r.created_at) > new Date(grouped[key].latest)) grouped[key].latest = r.created_at;
             });
             sorted = Object.values(grouped).sort((a, b) => b.count - a.count);
+            // Single type-directed getById per referrer (was up to 3 sequential).
             for (const item of sorted) {
-                const person = await AppDataStore.getById('customers', item.id)
-                    || await AppDataStore.getById('prospects', item.id)
-                    || await AppDataStore.getById('users', item.id);
+                const table = item.type === 'customer' ? 'customers' : item.type === 'user' ? 'users' : 'prospects';
+                const person = await AppDataStore.getById(table, item.id);
                 item.name = person?.full_name || '';
             }
         }
@@ -185,20 +189,26 @@
         // ── Summary cards + Top Referrers strip (mirrors renderSummary) ──
         const referrals = await getVisibleReferrals();
         const totalReferrals = referrals.length;
-        const totalReferrers = new Set(referrals.map(r => r.referrer_id)).size;
+        // Distinct referrers by composite type:id (cross-type same-id ≠ one person).
+        const totalReferrers = new Set(referrals.filter(r => r.referrer_id).map(r => `${r.referrer_type || 'prospect'}:${r.referrer_id}`)).size;
         const convertedCount = referrals.filter(r => r.status === 'Active' || r.is_converted).length;
         const conversionRate = totalReferrals > 0 ? Math.round((convertedCount / totalReferrals) * 100) : 0;
 
+        // Group by composite type:id and resolve the name via the matching table.
         const grouped = {};
         referrals.forEach(r => {
             if (!r.referrer_id) return;
-            grouped[r.referrer_id] = (grouped[r.referrer_id] || 0) + 1;
+            const rType = r.referrer_type || 'prospect';
+            const key = `${rType}:${r.referrer_id}`;
+            if (!grouped[key]) grouped[key] = { id: r.referrer_id, type: rType, count: 0 };
+            grouped[key].count++;
         });
-        const top3Promises = Object.entries(grouped)
-            .sort((a, b) => b[1] - a[1])
+        const top3Promises = Object.values(grouped)
+            .sort((a, b) => b.count - a.count)
             .slice(0, 3)
-            .map(async ([id, count]) => {
-                const person = await AppDataStore.getById('customers', id) || await AppDataStore.getById('prospects', id) || await AppDataStore.getById('users', id);
+            .map(async ({ id, type, count }) => {
+                const table = type === 'customer' ? 'customers' : type === 'user' ? 'users' : 'prospects';
+                const person = await AppDataStore.getById(table, id);
                 return { name: person?.full_name || `ID: ${id}`, count };
             });
         const top3 = await Promise.all(top3Promises);
@@ -499,23 +509,31 @@
 
         const referrals = await getVisibleReferrals();
         const totalReferrals = referrals.length;
-        const totalReferrers = new Set(referrals.map(r => r.referrer_id)).size;
-        
+        // Count distinct referrers by composite type:id — a user id 5 and a
+        // customer id 5 are two different referrers, not one.
+        const totalReferrers = new Set(referrals.filter(r => r.referrer_id).map(r => `${r.referrer_type || 'prospect'}:${r.referrer_id}`)).size;
+
         // Calculate conversion rate (mock: based on 'converted' status or custom field)
         const convertedCount = referrals.filter(r => r.status === 'Active' || r.is_converted).length;
         const conversionRate = totalReferrals > 0 ? Math.round((convertedCount / totalReferrals) * 100) : 0;
 
-        // Get Top 3 Referrers for the strip
+        // Get Top 3 Referrers for the strip — group by composite type:id so
+        // cross-type same-id referrers aren't merged, and resolve the name via
+        // the table that matches referrer_type.
         const grouped = {};
         referrals.forEach(r => {
             if (!r.referrer_id) return;
-            grouped[r.referrer_id] = (grouped[r.referrer_id] || 0) + 1;
+            const rType = r.referrer_type || 'prospect';
+            const key = `${rType}:${r.referrer_id}`;
+            if (!grouped[key]) grouped[key] = { id: r.referrer_id, type: rType, count: 0 };
+            grouped[key].count++;
         });
-        const top3Promises = Object.entries(grouped)
-            .sort((a, b) => b[1] - a[1])
+        const top3Promises = Object.values(grouped)
+            .sort((a, b) => b.count - a.count)
             .slice(0, 3)
-            .map(async ([id, count]) => {
-                const person = await AppDataStore.getById('customers', id) || await AppDataStore.getById('prospects', id) || await AppDataStore.getById('users', id);
+            .map(async ({ id, type, count }) => {
+                const table = type === 'customer' ? 'customers' : type === 'user' ? 'users' : 'prospects';
+                const person = await AppDataStore.getById(table, id);
                 return { name: person?.full_name || `ID: ${id}`, count };
             });
         const top3 = await Promise.all(top3Promises);
@@ -584,22 +602,27 @@
             const referrals = cutoff
                 ? allReferrals.filter(r => r.created_at && new Date(r.created_at) >= cutoff)
                 : allReferrals;
+            // Group by composite type:id so cross-type same-id referrers stay
+            // separate (matches the server RPC's (referrer_id, referrer_type) key).
             const grouped = {};
             referrals.forEach(r => {
                 if (!r.referrer_id) return;
-                if (!grouped[r.referrer_id]) {
-                    grouped[r.referrer_id] = { id: r.referrer_id, type: r.referrer_type, count: 0, converted: 0, latest: r.created_at };
+                const rType = r.referrer_type || 'prospect';
+                const key = `${rType}:${r.referrer_id}`;
+                if (!grouped[key]) {
+                    grouped[key] = { id: r.referrer_id, type: rType, count: 0, converted: 0, latest: r.created_at };
                 }
-                grouped[r.referrer_id].count++;
-                if (r.status === 'Active' || r.is_converted) grouped[r.referrer_id].converted++;
-                if (new Date(r.created_at) > new Date(grouped[r.referrer_id].latest)) grouped[r.referrer_id].latest = r.created_at;
+                grouped[key].count++;
+                if (r.status === 'Active' || r.is_converted) grouped[key].converted++;
+                if (new Date(r.created_at) > new Date(grouped[key].latest)) grouped[key].latest = r.created_at;
             });
             sorted = Object.values(grouped).sort((a, b) => b.count - a.count);
-            // Resolve referrer names via getById on the fallback path only.
+            // Resolve referrer names via a SINGLE type-directed getById per referrer
+            // (was up to 3 sequential lookups each). The type is known from the
+            // referral row, so we never guess across tables.
             for (const item of sorted) {
-                const person = await AppDataStore.getById('customers', item.id)
-                    || await AppDataStore.getById('prospects', item.id)
-                    || await AppDataStore.getById('users', item.id);
+                const table = item.type === 'customer' ? 'customers' : item.type === 'user' ? 'users' : 'prospects';
+                const person = await AppDataStore.getById(table, item.id);
                 item.name = person?.full_name || '';
             }
         }
@@ -689,6 +712,10 @@
 
     const searchTreePerson = async (query) => {
         const results = document.getElementById('tree-search-results');
+        // The 260ms debounce may fire after the view was navigated away / re-rendered,
+        // at which point the results element is gone — bail instead of throwing an
+        // unhandled rejection on results.style / results.innerHTML.
+        if (!results) return;
         if (!query || query.length < 2) {
             results.style.display = 'none';
             return;
@@ -699,12 +726,16 @@
             AppDataStore.getAll('prospects'),
             AppDataStore.getAll('customers'),
         ]);
+        // Precompute the visible-id lookup ONCE as a Set — the old
+        // visibleIds.map(String).includes(...) allocated a fresh array and ran an
+        // O(m) scan for every row (O(rows × ids) with per-row allocations).
+        const visibleIdSet = visibleIds === 'all' ? null : new Set(visibleIds.map(String));
         const prospects = visibleIds === 'all'
             ? allProspects
-            : allProspects.filter(p => visibleIds.map(String).includes(String(p.responsible_agent_id)));
+            : allProspects.filter(p => visibleIdSet.has(String(p.responsible_agent_id)));
         const customers = visibleIds === 'all'
             ? allCustomers
-            : allCustomers.filter(c => visibleIds.map(String).includes(String(c.responsible_agent_id || c.agent_id)));
+            : allCustomers.filter(c => visibleIdSet.has(String(c.responsible_agent_id || c.agent_id)));
         const all = [
             ...prospects.map(p => ({ ...p, type: 'prospect' })),
             ...customers.map(c => ({ ...c, type: 'customer' }))
@@ -778,27 +809,40 @@
             AppDataStore.getAll('event_attendees'),
         ]);
 
-        // Build lookup maps for tree colour enrichment
-        // CPS activities by prospect_id
-        const cpsProspectIds = new Set();
-        const unableToServeProspectIds = new Set();
+        // Build lookup maps for tree colour enrichment. All keys are composite
+        // `type:id` so a customer node reads its own activities (linked via
+        // customer_id) and cross-type same-id collisions (user 5 / prospect 5)
+        // never bleed CPS / referral / attendance state between node types.
+        // Activities link to a prospect via prospect_id, to a customer via customer_id.
+        const cpsKeys = new Set();
+        const unableToServeKeys = new Set();
         for (const a of allActivities) {
-            if (a.activity_type === 'CPS' && a.prospect_id) cpsProspectIds.add(String(a.prospect_id));
-            if (a.unable_to_serve && a.prospect_id) unableToServeProspectIds.add(String(a.prospect_id));
+            if (a.activity_type === 'CPS') {
+                if (a.prospect_id) cpsKeys.add(`prospect:${a.prospect_id}`);
+                if (a.customer_id) cpsKeys.add(`customer:${a.customer_id}`);
+            }
+            if (a.unable_to_serve) {
+                if (a.prospect_id) unableToServeKeys.add(`prospect:${a.prospect_id}`);
+                if (a.customer_id) unableToServeKeys.add(`customer:${a.customer_id}`);
+            }
         }
-        // Event attendance count per prospect (only count "Attended")
+        // Event attendance count per attendee (only count "Attended"). Key by the
+        // attendee's own type so an agent/prospect/customer with a colliding id
+        // doesn't inherit another's attendance.
         const eventAttendanceCount = new Map();
         for (const ea of allEventAttendees) {
             if ((ea.attended || ea.attendance_status === 'Attended') && ea.attendee_type !== 'agent') {
-                const pid = String(ea.entity_id || ea.attendee_id);
-                eventAttendanceCount.set(pid, (eventAttendanceCount.get(pid) || 0) + 1);
+                const aType = ea.attendee_type || 'prospect';
+                const key = `${aType}:${ea.entity_id || ea.attendee_id}`;
+                eventAttendanceCount.set(key, (eventAttendanceCount.get(key) || 0) + 1);
             }
         }
-        // Referral count per referrer (how many people they referred)
+        // Referral count per referrer (how many people they referred), keyed by
+        // composite referrer_type:referrer_id.
         const referralCountByReferrer = new Map();
         for (const r of allReferrals) {
             if (r.referrer_id) {
-                const key = String(r.referrer_id);
+                const key = `${r.referrer_type || 'prospect'}:${r.referrer_id}`;
                 referralCountByReferrer.set(key, (referralCountByReferrer.get(key) || 0) + 1);
             }
         }
@@ -881,7 +925,9 @@
             }
 
             nodeCount++;
-            const pid = String(person.id);
+            // Composite type:id key — enrichment maps are keyed the same way so a
+            // customer reads its own activities and same-id nodes never collide.
+            const nodeKey = `${type}:${person.id}`;
             const node = {
                 id: person.id,
                 name: person.full_name,
@@ -890,10 +936,10 @@
                 pipeline_stage: person.pipeline_stage,
                 last_activity_date: person.last_activity_date,
                 join_date: person.join_date || person.created_at,
-                hasCPS: cpsProspectIds.has(pid),
-                unableToServe: unableToServeProspectIds.has(pid),
-                referralCount: referralCountByReferrer.get(pid) || 0,
-                eventAttendanceCount: eventAttendanceCount.get(pid) || 0,
+                hasCPS: cpsKeys.has(nodeKey),
+                unableToServe: unableToServeKeys.has(nodeKey),
+                referralCount: referralCountByReferrer.get(nodeKey) || 0,
+                eventAttendanceCount: eventAttendanceCount.get(nodeKey) || 0,
                 closeProbability: person.close_probability || 0,
                 children: []
             };
@@ -1140,8 +1186,10 @@
         if (_treeZoom && _treeSvg) {
             const container = document.getElementById('referral-tree-container');
             const width = container.clientWidth || 800;
-            const height = container.clientHeight || 500;
-            const initialTransform = d3.zoomIdentity.translate(width / 4, height / 2).scale(1);
+            // Restore the SAME top-center framing renderD3Tree sets on first render
+            // (translate(width/2, 60) scale(0.9)) — the old width/4, height/2,
+            // scale(1) jumped the root to the left-middle at a different zoom.
+            const initialTransform = d3.zoomIdentity.translate(width / 2, 60).scale(0.9);
             d3.select("#referral-tree-svg").transition().call(_treeZoom.transform, initialTransform);
         }
     };
@@ -1174,19 +1222,26 @@
                 // instead of one getById per ancestor.
                 const ids = row.path_ids;
                 const types = row.path_types || ids.map(() => 'prospect');
-                const prospectIds = ids.filter((_, i) => (types[i] || 'prospect') !== 'customer');
+                // Bucket by exact type — 'user' (agent) is a supported referrer_type
+                // and must resolve against the users table, not prospects.
+                const prospectIds = ids.filter((_, i) => (types[i] || 'prospect') === 'prospect');
                 const customerIds = ids.filter((_, i) => (types[i] || 'prospect') === 'customer');
-                const [pRows, cRows] = await Promise.all([
+                const userIds = ids.filter((_, i) => (types[i] || 'prospect') === 'user');
+                const [pRows, cRows, uRows] = await Promise.all([
                     prospectIds.length
                         ? window.supabase.from('prospects').select('id, full_name').in('id', prospectIds).then(r => r.data || [])
                         : Promise.resolve([]),
                     customerIds.length
                         ? window.supabase.from('customers').select('id, full_name').in('id', customerIds).then(r => r.data || [])
                         : Promise.resolve([]),
+                    userIds.length
+                        ? window.supabase.from('users').select('id, full_name').in('id', userIds).then(r => r.data || [])
+                        : Promise.resolve([]),
                 ]);
                 const nameById = new Map();
                 for (const p of pRows) nameById.set(`prospect:${p.id}`, p.full_name);
                 for (const c of cRows) nameById.set(`customer:${c.id}`, c.full_name);
+                for (const u of uRows) nameById.set(`user:${u.id}`, u.full_name);
                 // Keep RLS-denied / soft-deleted / missing ancestors in the chain
                 // as a 'Restricted' placeholder rather than dropping them — the old
                 // .filter(n => n.name) silently truncated the chain with no signal.
@@ -1215,7 +1270,13 @@
 
             const referrerId = ref.referrer_id;
             const referrerType = ref.referrer_type || 'prospect';
-            const person = await AppDataStore.getById(referrerType === 'customer' ? 'customers' : 'prospects', referrerId);
+            // 'user' (agent) is a supported referrer_type — resolve it against the
+            // users table, not prospects, to avoid null → 'Restricted' or a wrong
+            // same-id prospect name (which the walk would then keep climbing).
+            const referrerTable = referrerType === 'customer' ? 'customers'
+                : referrerType === 'user' ? 'users'
+                : 'prospects';
+            const person = await AppDataStore.getById(referrerTable, referrerId);
             // A missing/RLS-denied ancestor used to `break`, truncating the chain.
             // Push a 'Restricted' placeholder and keep walking up so the chain
             // length stays truthful.
@@ -1231,7 +1292,11 @@
         const sidebar = document.getElementById('tree-node-sidebar');
         if (!sidebar) return;
 
-        const person = await AppDataStore.getById(type === 'customer' ? 'customers' : 'prospects', id);
+        // Resolve against the right table per node type — user nodes (agents) are
+        // fully supported. Querying prospects with a user id returns null (silent
+        // abort) or an unrelated same-id prospect on bigint id collision.
+        const personTable = type === 'user' ? 'users' : type === 'customer' ? 'customers' : 'prospects';
+        const person = await AppDataStore.getById(personTable, id);
         if (!person) return;
 
         // Ancestor path
@@ -1608,7 +1673,25 @@
             UI.toast.error("Please select both a referrer and a referred person.");
             return;
         }
- 
+
+        // Reject self-referrals — the referred slot is always a prospect, so this
+        // fires when the same prospect is picked in both slots.
+        if (String(_modalSelectedReferrer.id) === String(_modalSelectedReferred.id) &&
+            (_modalSelectedReferrer.type || 'prospect') === (_modalSelectedReferred.type || 'prospect')) {
+            UI.toast.error("A person can't refer themselves. Pick a different referred person.");
+            return;
+        }
+
+        // Reject a duplicate referral for the same referred person — a second row
+        // makes getAncestorPath / the tree walker pick a parent nondeterministically.
+        try {
+            const existing = await AppDataStore.query('referrals', { referred_prospect_id: _modalSelectedReferred.id });
+            if (Array.isArray(existing) && existing.length > 0) {
+                UI.toast.error("This person already has a referrer on record.");
+                return;
+            }
+        } catch (_) { /* if the lookup fails, don't block the create */ }
+
         const referral = {
             referrer_id: _modalSelectedReferrer.id,
             referrer_type: _modalSelectedReferrer.type,
@@ -1784,7 +1867,11 @@
         };
         walk(_state.ctd);
         const esc = v => {
-            const s = String(v ?? '');
+            let s = String(v ?? '');
+            // Neutralize CSV formula injection: Excel/Sheets treat cells starting
+            // with = + - @ (or tab/CR) as formulas. Prefix a single quote so the
+            // value is rendered as literal text.
+            if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
             return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
         };
         const header = 'Depth,Parent,Name,Type,Role,Pipeline Stage,Last Activity,Join Date\n';

@@ -219,7 +219,7 @@
     "ranking": {
       "src": "chunks/script-performance.min.js",
       "minLevel": null,
-      "exactLevels": null
+      "exactLevels": [1, 2, 3, 4]
     },
     "performance": {
       "src": "chunks/script-performance.min.js",
@@ -240,6 +240,14 @@
       ]
     },
     "ai_insights": {
+      "src": "chunks/script-ai.min.js",
+      "minLevel": 1,
+      "exactLevels": [
+        1,
+        2
+      ]
+    },
+    "ai_prediction": {
       "src": "chunks/script-ai.min.js",
       "minLevel": 1,
       "exactLevels": [

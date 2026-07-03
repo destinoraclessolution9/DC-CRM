@@ -240,7 +240,9 @@
             if (stopBtn) stopBtn.style.display = 'inline-flex';
             if (micIcon) micIcon.className = 'fas fa-microphone recording';
 
-            // Start timer
+            // Start timer — clear any prior interval first so re-opening the
+            // recorder and recording again can never orphan an earlier timer.
+            if (_recordingTimer) { clearInterval(_recordingTimer); _recordingTimer = null; }
             _recordingTimer = setInterval(() => {
                 const elapsed = Math.floor((Date.now() - _recordingStartTime) / 1000);
                 const m = Math.floor(elapsed / 60).toString().padStart(2, '0');
@@ -339,15 +341,20 @@
             closeVoiceRecorder();
             UI.toast.success('Voice text inserted');
         } else {
-            // Create a note record
-            await createNoteFromVoice(target.entityType, target.entityId, transcribedText);
+            // Create a note record — only report success (and close the modal)
+            // when the write actually persisted.
+            const ok = await createNoteFromVoice(target.entityType, target.entityId, transcribedText);
+            if (!ok) return; // createNoteFromVoice already surfaced an error toast
             UI.hideModal();
             UI.toast.success('Voice note saved');
         }
     };
 
     const createNoteFromVoice = async (entityType, entityId, text) => {
-        const currentUser = await Auth.getCurrentUser();
+        // Attribute to the CRM users-table row (mirrors addCustomerNote/addAgentNote);
+        // Auth.getCurrentUser() returns the raw supabase auth user, which has no
+        // top-level full_name, so it always fell back to 'System'.
+        const currentUser = _state.cu;
         const noteData = {
             text,
             author: currentUser?.full_name || 'System',
@@ -371,7 +378,8 @@
             } else {
                 await AppDataStore.create('notes', noteData);
             }
-        } catch (e) { UI.toast.error('Failed to save voice note: ' + (e?.message || e)); }
+            return true;
+        } catch (e) { UI.toast.error('Failed to save voice note: ' + (e?.message || e)); return false; }
     };
 
     const editTranscription = () => {
@@ -391,6 +399,13 @@
     };
 
     const closeVoiceRecorder = () => {
+        // Stop any live recording + release the microphone/stream + clear the
+        // timer so closing (not just Cancel) can never leave the mic hot or
+        // orphan the 1s interval. Mirrors discardRecording's cleanup.
+        try { if (_mediaRecorder && _mediaRecorder.state === 'recording') _mediaRecorder.stop(); } catch (_) { /* best-effort */ }
+        if (_recordingStream) { try { _recordingStream.getTracks().forEach(t => t.stop()); } catch (_) {} _recordingStream = null; }
+        if (_recordingTimer) { clearInterval(_recordingTimer); _recordingTimer = null; }
+        if (window._waveformInterval) { clearInterval(window._waveformInterval); window._waveformInterval = null; }
         const overlay = document.getElementById('global-modal-overlay');
         if (overlay && window._prevModalState) {
             overlay.innerHTML = window._prevModalState;
@@ -644,7 +659,13 @@
     // allowed nav set so nothing they tap bounces.
     const _bottomNavItemsFor = (user) => {
         if (_mobileDefaultView(user) === 'home') {
-            return ['__home', 'calendar', 'prospects', 'reports'];
+            // '__home' is synthetic (no nav permission); the rest must be gated
+            // against the user's allowed nav set so a tab can never open a view
+            // they can't access. L11 omits 'reports' (navigateTo would bounce it),
+            // so it's dropped rather than left as a dead tab. L1–L10 keep the
+            // historical bar byte-for-byte (all four are allowed for them).
+            const allowed = _getAllowedNavIds();
+            return ['__home', 'calendar', 'prospects', 'reports'].filter(id => id === '__home' || allowed.has(id));
         }
         const allowed = _getAllowedNavIds();
         const order = ['fude', 'prospects', 'referrals', 'milestones', 'noticeboard', 'stock-take', 'calendar', 'reports'];
@@ -953,7 +974,7 @@
         _mhomePerf('foreground:activities:start');
         const actResult = await AppDataStore.queryAdvanced('activities', actQueryOpts).catch(() => ({ data: [] }));
         _mhomePerf('foreground:activities:done');
-        const activities = (actResult.data || []).filter(a => a.activity_type !== 'EVENT');
+        const activities = (actResult.data || []).filter(a => a.activity_type !== 'EVENT' && a.source !== 'birthday_auto');
 
         // Background data — repaint when each lands. The guard
         // (_state.cv === 'home') makes a stale repaint harmless if the
@@ -1974,7 +1995,7 @@
 
         // B: Serve prospects + customers from localStorage cache (cold reference
         // data — birthdays/names rarely change; invalidated on edit).
-        const _PEOPLE_KEY  = 'mcal-people-v4'; // v4: + gender for the gendered birthday poster (v3: phone for birthday WhatsApp greeting; v2: responsible_agent_id for RBAC birthday scoping)
+        const _PEOPLE_KEY  = 'mcal-people-v5'; // v5: + customer_since (customers) so _dedupClientByBday's prefer-customer tie-break works; v4: + gender for the gendered birthday poster (v3: phone for birthday WhatsApp greeting; v2: responsible_agent_id for RBAC birthday scoping)
         const _DRAFTS_KEY  = 'mcal-drafts-v1';
         const _REFILLS_KEY = 'mcal-refills-v1';
         let allPeople     = _forceFresh ? null : _lsGet(_PEOPLE_KEY,  8 * 60 * 60 * 1000);
@@ -2043,13 +2064,16 @@
         if (_needPeople || _needDrafts || _needRefills) {
             Promise.all([
                 _needPeople  ? AppDataStore.queryAdvanced('prospects', { select: 'id,full_name,date_of_birth,responsible_agent_id,phone,gender', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []) : Promise.resolve(null),
-                _needPeople  ? AppDataStore.queryAdvanced('customers', { select: 'id,full_name,date_of_birth,responsible_agent_id,phone,gender', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []) : Promise.resolve(null),
+                _needPeople  ? AppDataStore.queryAdvanced('customers', { select: 'id,full_name,date_of_birth,responsible_agent_id,phone,gender,customer_since', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []) : Promise.resolve(null),
                 _needDrafts  ? AppDataStore.getAll('follow_up_drafts').catch(() => []) : Promise.resolve(null),
                 _needRefills ? AppDataStore.query('refill_reminders', { status: 'pending' }).catch(() => []) : Promise.resolve(null),
             ]).then(([p, c, d, r]) => {
                 _mcalPerf('phase2:people-drafts-refills:done');
                 if (p !== null || c !== null) {
-                    const fresh = [...(p || []), ...(c || [])];
+                    // Tag each row with its source table so birthday actions can
+                    // resolve the correct FK target instead of probing by ambiguous
+                    // (overlapping) id — customers get _isCustomer:true.
+                    const fresh = [...(p || []), ...((c || []).map(x => ({ ...x, _isCustomer: true })))];
                     _lsSet(_PEOPLE_KEY, fresh);
                 }
                 if (d !== null) _lsSet(_DRAFTS_KEY,  d);
@@ -2398,10 +2422,18 @@
     // Mark an optimistic row as failed-to-sync. Keeps it visible (so the
     // user doesn't think their save disappeared) but flags it for retry +
     // a small warning indicator in the grid.
-    const _mcalOptimisticMarkFailed = (tmpId) => {
-        const entry = _mcalOptimisticRows.get(String(tmpId));
-        if (!entry) return;
-        const { key } = entry;
+    const _mcalOptimisticMarkFailed = (tmpId, activityData) => {
+        // Resolve the month-cache key. Prefer the in-memory bookkeeping, but fall
+        // back to deriving it from the retry entry's activity_date — the in-memory
+        // Map is empty after a page reload, so without this fallback a reloaded
+        // session's give-up path silently failed to flag the row (no ⚠ ever shown).
+        let key = _mcalOptimisticRows.get(String(tmpId))?.key;
+        if (!key && activityData && activityData.activity_date) {
+            const dateStr = String(activityData.activity_date).slice(0, 10);
+            const [y, m] = dateStr.split('-').map(n => parseInt(n, 10));
+            if (y && m) key = `mcal-acts-${y}-${m - 1}`;
+        }
+        if (!key) return;
         let cached = [];
         try { cached = JSON.parse(localStorage.getItem(key) || '{}').val || []; } catch(_) { /* intentional: corrupt cache treated as empty */ }
         if (!Array.isArray(cached)) return;
@@ -2431,6 +2463,10 @@
         try {
             const q = _mcalRetryQueueRead();
             if (!q.length) return;
+            // Remember which entries THIS drain is responsible for, so the
+            // write-back below doesn't clobber entries that _mcalEnqueueRetry
+            // appended while an awaited create was in flight.
+            const _processedIds = new Set(q.map(e => String(e.tmpId)));
             const remaining = [];
             for (const entry of q) {
                 // Backoff: skip if attempted in the last 30s × 2^attempts
@@ -2453,13 +2489,20 @@
                     if (entry.attempts >= 8) {
                         // Give up after ~8 tries (~30s + 60s + 2m + 4m + 8m + 10m + 10m).
                         // Leave the row in cache marked as failed; user can edit/delete.
-                        _mcalOptimisticMarkFailed(entry.tmpId);
+                        // Pass entry.data so a reloaded session (empty in-memory Map)
+                        // can still derive the month-cache key and flag the row.
+                        _mcalOptimisticMarkFailed(entry.tmpId, entry.data);
                         continue;
                     }
                     remaining.push(entry);
                 }
             }
-            _mcalRetryQueueWrite(remaining);
+            // Re-read the live queue and preserve any entry appended mid-drain
+            // (tmpId not in this drain's processed set) so a concurrent
+            // _mcalEnqueueRetry write isn't silently dropped by our stale snapshot.
+            const _now = _mcalRetryQueueRead();
+            const _appended = _now.filter(e => !_processedIds.has(String(e.tmpId)));
+            _mcalRetryQueueWrite([...remaining, ..._appended]);
         } finally {
             _mcalDraining = false;
         }
@@ -2567,7 +2610,7 @@
     // Birthday WhatsApp greeting — id-only so nothing dynamic (names like
     // O'Brien) ever lands in an onclick attribute. Phone is looked up from the
     // in-scope person map; no phone → no-op (the button is also phone-gated).
-    const mcalBirthdayWa = async (id) => {
+    const mcalBirthdayWa = async (id, isCustomer) => {
         const person = _mcalPersonMap.get(String(id));
         if (!person || !_mhomeWaPhone(person.phone)) return;
         const greeting = `Happy Birthday, ${person.full_name || ''}! 🎂 Wishing you a wonderful year ahead.`;
@@ -2610,7 +2653,16 @@
                 lead_agent_id: _state.cu?.id,
                 created_by: _state.cu?.id,
             };
-            const isProspect = !!(await AppDataStore.getById('prospects', id).catch(() => null));
+            // Prefer the explicit type flag the caller passed (from the person's
+            // source table) — id sequences overlap, so probing prospects-first
+            // would mis-file a customer's wish onto an unrelated prospect. Only
+            // fall back to a probe when the flag is absent.
+            let isProspect;
+            if (typeof isCustomer === 'boolean') {
+                isProspect = !isCustomer;
+            } else {
+                isProspect = !!(await AppDataStore.getById('prospects', id).catch(() => null));
+            }
             if (isProspect) _payload.prospect_id = id; else _payload.customer_id = id;
             // De-dupe: one birthday-wish log per person per day (re-tapping won't pile up).
             const _existB = await AppDataStore.query('activities', isProspect ? { prospect_id: id } : { customer_id: id }).catch(() => []);
@@ -2693,8 +2745,9 @@
                 const age = d.getFullYear() - parseInt(dob.slice(0, 4));
                 if (age > 0 && age < 120) ageStr = ` · Turning ${age}`;
             }
+            const _pIsCust = !!p._isCustomer;
             const waBtn = hasPhone
-                ? `<button onclick="event.stopPropagation();app.mcalBirthdayWa('${p.id}')" aria-label="Send birthday WhatsApp" style="flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border:none;border-radius:50%;background:#25D366;color:#fff;font-size:17px;cursor:pointer;"><i class="fab fa-whatsapp"></i></button>`
+                ? `<button onclick="event.stopPropagation();app.mcalBirthdayWa('${p.id}', ${_pIsCust})" aria-label="Send birthday WhatsApp" style="flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border:none;border-radius:50%;background:#25D366;color:#fff;font-size:17px;cursor:pointer;"><i class="fab fa-whatsapp"></i></button>`
                 : '';
             // Responsible agent label (e.g. "- Oo Kean Cherng"), smaller/muted.
             const _agentId = p.responsible_agent_id || p.lead_agent_id;
@@ -2705,7 +2758,7 @@
             return `
                 <div style="display:flex;align-items:center;gap:12px;padding:12px 10px;margin-bottom:6px;background:linear-gradient(90deg,#FDF2F8,#fff);border-radius:10px;border:1px solid #FBCFE8;">
                     <div style="font-size:26px;flex-shrink:0;">🎂</div>
-                    <div style="flex:1;min-width:0;cursor:pointer;" onclick="app.mcalOpenPerson('${p.id}')">
+                    <div style="flex:1;min-width:0;cursor:pointer;" onclick="app.mcalOpenPerson('${p.id}', ${_pIsCust})">
                         <div style="font-size:15px;font-weight:700;color:#9D174D;">${_mhomeEsc(p.full_name || '—')}</div>
                         <div style="font-size:12px;color:#BE185D;margin-top:2px;">Birthday${ageStr}</div>
                         ${agentLine}
@@ -2729,7 +2782,7 @@
             const venue = a.venue_name || a.venue || a.location_address || '';
             const color = _mcalColorForType(type);
             return `
-                <div style="display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--gray-100);cursor:pointer;" onclick="app.mcalOpenEvent(${a.id}, ${_pArg}, ${_cArg});">
+                <div style="display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--gray-100);cursor:pointer;" onclick="app.mcalOpenEvent('${a.id}', ${_pArg}, ${_cArg});">
                     <div style="min-width:42px;font-size:13px;font-weight:600;color:var(--gray-700);">${_mhomeEsc(time)}</div>
                     <span class="mcal-evt ${color}" style="white-space:nowrap;font-size:11px;padding:2px 7px;border-radius:4px;flex-shrink:0;">${_mhomeEsc(type)}</span>
                     <div style="flex:1;min-width:0;">
@@ -2812,7 +2865,10 @@
         let acts = [];
         try {
             const res = await AppDataStore.queryAdvanced('activities', opts);
-            acts = (res?.data || []).filter(_mcalKeepAct);
+            // Exclude birthday_auto logged touches — they're hidden from the
+            // calendar (parity with the month grid + day sheet), so the Week /
+            // Day / List views + the appointment WhatsApp sheet never show them.
+            acts = (res?.data || []).filter(a => _mcalKeepAct(a) && a.source !== 'birthday_auto');
         } catch (_) { acts = []; /* intentional: fetch failure renders empty range */ }
 
         const byDate = new Map();
@@ -2850,7 +2906,7 @@
         const _pArg = (owned && a.prospect_id) ? a.prospect_id : 'null';
         const _cArg = (owned && a.customer_id) ? a.customer_id : 'null';
         const click = a.id != null
-            ? `onclick="app.mcalOpenEvent(${a.id}, ${_pArg}, ${_cArg});"`
+            ? `onclick="app.mcalOpenEvent('${a.id}', ${_pArg}, ${_cArg});"`
             : '';
         return `
             <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--gray-100);${a.id != null ? 'cursor:pointer;' : ''}" ${click}>
@@ -3181,6 +3237,7 @@
     let _mpTab = 'prospects';   // 'prospects' | 'customers'
     let _mpAgentMap = null;     // id → agent_code, loaded once per session
     let _mpSearch = '';
+    let _mpRenderSeq = 0;       // last-writer-wins token for async list renders (search race guard)
     // Mobile-side filters — parity subset of the desktop filter modal.
     // Status / responsible_agent_id / Ming Gua / score range / pipeline stage.
     // Empty string / null means "no filter for that field".
@@ -3277,6 +3334,10 @@
     const _mpRenderList = async (silent = false) => {
         const listHost = document.getElementById('mp-list');
         if (!listHost) return;
+        // Last-writer-wins sequencing: a slower stale search (e.g. "jo") must not
+        // repaint the list after a newer one ("john") has already resolved. Each
+        // call claims a token; only the latest may write the final innerHTML.
+        const _seq = ++_mpRenderSeq;
         if (!silent) listHost.innerHTML = '<div class="mp-empty"><i class="fas fa-spinner fa-spin"></i> Loading…</div>';
 
         const table = _mpTab === 'customers' ? 'customers' : 'prospects';
@@ -3361,6 +3422,9 @@
             return bt - at;
         });
 
+        // Bail if a newer render has superseded this one (stale search response).
+        if (_seq !== _mpRenderSeq) return;
+
         if (!rows.length) {
             listHost.innerHTML = `<div class="mp-empty"><span class="mp-empty-flower">🌸</span> No ${_mhomeEsc(_mpTab)} yet. Tap + to add the first one.</div>`;
             return;
@@ -3368,7 +3432,12 @@
 
         const isCust = _mpTab === 'customers';
         const palettes = ['red','purple','pink','peach','wood'];
-        const html = rows.slice(0, 60).map((p, i) => {
+        // Cap the rendered cards at 60 for scroll performance, but tell the user
+        // when the list is truncated so a record beyond the cap doesn't look
+        // "missing" — they can narrow the set with the search box above.
+        const _mpCap = 60;
+        const _mpTotal = rows.length;
+        const html = rows.slice(0, _mpCap).map((p, i) => {
             const init = _mhomeInitials(p.full_name);
             const pal = palettes[i % palettes.length];
             const phone = UI.escJsAttr(p.phone || '');
@@ -3400,13 +3469,17 @@
             </div>`;
         }).join('');
 
-        listHost.innerHTML = html;
+        const truncNote = _mpTotal > _mpCap
+            ? `<div class="mp-empty" style="padding:14px 8px;font-size:12px;">Showing ${_mpCap} of ${_mpTotal}. Use search above to find older records.</div>`
+            : '';
+
+        listHost.innerHTML = html + truncNote;
         // Only cache the snapshot when there's no active search AND no active
         // filters. Caching a filtered list under the canonical key means a
         // page reload would paint that narrowed list while the in-memory
         // filter state is empty — UI says "no filters" but list is narrowed.
         if (!_mpSearch && !_mpHasActiveFilters()) {
-            try { localStorage.setItem(`mp-list-snap-v2-${_mpTab}`, JSON.stringify({ ts: Date.now(), val: html })); } catch(_) { /* intentional: snapshot persistence is best-effort */ }
+            try { localStorage.setItem(`mp-list-snap-v2-${_mpTab}`, JSON.stringify({ ts: Date.now(), val: html + truncNote })); } catch(_) { /* intentional: snapshot persistence is best-effort */ }
         }
     };
 

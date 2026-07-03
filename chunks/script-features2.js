@@ -423,10 +423,13 @@ const autoExtendProtection = async (prospectId, extensionType) => {
     const currentDeadline = new Date(prospect.protection_deadline || Date.now());
     const today = new Date();
     const baseDate = currentDeadline > today ? currentDeadline : today;
-    const newDeadline = new Date(baseDate.getTime() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    // Use LOCAL date parts (not toISOString, which is UTC and rolls back a day
+    // before 08:00 MYT) so the extension lands on the promised local calendar day.
+    const _localYMD = (dt) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+    const newDeadline = _localYMD(new Date(baseDate.getTime() + days * 24 * 60 * 60 * 1000));
     await AppDataStore.update('prospects', prospectId, {
         protection_deadline: newDeadline,
-        last_contact_date: new Date().toISOString().split('T')[0]
+        last_contact_date: _localYMD(new Date())
     });
     // Protection auto-extended
 };
@@ -553,12 +556,16 @@ const sendBirthdayWish = async (personName, phone) => {
         </div>
     `, [
         { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-        // personName is user-controlled (full_name); it lands inside an onclick
-        // attribute string, so escape it with escJsAttr (backslash-escape the
-        // quote AND HTML-escape) — plain esc() decodes back to a quote before JS
-        // parse. Apostrophe names would otherwise break the Send button or
-        // allow arbitrary JS on click.
-        { label: 'Send', type: 'primary', action: `(async () => { const ch = document.getElementById('bday-channel')?.value || 'whatsapp'; UI.hideModal(); UI.toast.success('Birthday wish sent to ${UI.escJsAttr(String(personName || ''))} via ' + ch); })()` }
+        // personName / phone are user-controlled (full_name / phone); they land
+        // inside an onclick attribute string, so escape with escJsAttr (backslash-
+        // escape the quote AND HTML-escape) — plain esc() decodes back to a quote
+        // before JS parse. Apostrophe names would otherwise break the Send button
+        // or allow arbitrary JS on click.
+        // Actually SEND: read the (possibly edited) #bday-msg textarea and open a
+        // real wa.me / sms: / tel: deep link, matching the app's other WhatsApp
+        // flows — previously the composed message was discarded and success was
+        // faked with no send performed.
+        { label: 'Send', type: 'primary', action: `(async () => { const ch = document.getElementById('bday-channel')?.value || 'whatsapp'; const msg = document.getElementById('bday-msg')?.value || ''; const num = String('${UI.escJsAttr(String(phone || ''))}').replace(/\\D/g, ''); UI.hideModal(); if (ch === 'whatsapp') { window.open('https://wa.me/' + num + '?text=' + encodeURIComponent(msg), '_blank'); } else if (ch === 'sms') { window.open('sms:' + num + '?body=' + encodeURIComponent(msg), '_blank'); } else { window.open('tel:' + num, '_blank'); } UI.toast.success('Birthday wish opened for ${UI.escJsAttr(String(personName || ''))} via ' + ch); })()` }
     ]);
 };
 
@@ -625,16 +632,22 @@ const executeBirthdayAction = async (personName, entityId, entityType) => {
         UI.toast.success(`${actionType === 'call' ? 'Call' : 'Meeting'} scheduled for ${personName} on ${actionDate}`);
 
     } else {
-        // Create as a note/task
-        await AppDataStore.create('notes', {
-            entity_type: entityType,
-            entity_id: entityId,
-            content: `[Birthday ${actionType === 'gift' ? 'Gift' : 'Task'}] ${personName} — ${notes || 'Prepare birthday follow-up'}`,
-            // Guarded above: _state.cu.id is guaranteed present here (no id-5 fallback).
+        // Create as a note in the SHAPE the prospect/customer notes panels actually
+        // read (query by prospect_id/customer_id, render n.text/n.date/n.author).
+        // The old {entity_type, entity_id, content, due_date} shape was displayed by
+        // NO surface (due_date is read nowhere; the panels render n.text, not
+        // n.content), so the reminder silently vanished.
+        const noteText = `[Birthday ${actionType === 'gift' ? 'Gift' : 'Task'}] (due ${actionDate}) ${personName} — ${notes || 'Prepare birthday follow-up'}`;
+        const noteRow = {
+            text: noteText,
+            author: _state.cu.full_name || 'Unknown',
+            date: actionDate,
             created_by: _state.cu.id,
-            created_at: new Date().toISOString(),
-            due_date: actionDate
-        });
+            created_at: new Date().toISOString()
+        };
+        if (entityType === 'prospect') noteRow.prospect_id = entityId;
+        else noteRow.customer_id = entityId;
+        await AppDataStore.create('notes', noteRow);
         UI.hideModal();
         UI.toast.success(`Birthday ${actionType} created for ${personName}`);
     }
@@ -880,7 +893,32 @@ const saveQuarterlyTargets = async (year) => {
 // ========== SPECIAL PROGRAM FIGHTING ==========
 // Incentive programs for selected agents (e.g. close RM200k in 60 days → China trip)
 
-const _today = () => new Date().toISOString().slice(0, 10);
+// Local calendar date YYYY-MM-DD. Using toISOString() (UTC) here rolled the
+// date back a day before 08:00 MYT, skewing special-program isExpired/daysLeft
+// and start-gating; local parts keep it on the user's actual calendar day.
+const _today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+
+// ---- Perf helper: bounded whole-table fetch for the Special Programs sources.
+// Special Programs previously getAll('purchases'|'customers'|'activities') with no
+// bound — activities is the app's largest table and this runs on the FIRST calendar
+// visit of every participant's session plus every KPI-dashboard render, downloading
+// several MB and blocking the view. Mirror the sibling REND-3/REND-7 pattern
+// (script-agents.js): pull via queryAdvanced with a hard cap; fall back to getAll
+// only if the bounded read fails or the table genuinely exceeds the cap, so results
+// stay identical to the old whole-table scan in the normal case.
+const _SP_FETCH_CAP = 10000;
+const _fetchSpecialProgramSource = async (table) => {
+    try {
+        const r = await AppDataStore.queryAdvanced(table, { countMode: null, limit: _SP_FETCH_CAP + 1, offset: 0 });
+        const rows = (r && Array.isArray(r.data)) ? r.data : null;
+        if (rows && rows.length <= _SP_FETCH_CAP) return rows;
+        // Cap exceeded (or unexpected shape) — fall back to the unbounded read so
+        // large-tenant totals never silently truncate.
+        return await AppDataStore.getAll(table);
+    } catch (_e) {
+        return await AppDataStore.getAll(table);
+    }
+};
 
 // ---- Perf helper: bucket purchases / customers / activities ONCE (O(n)) so the
 // per-participant calc can do Map lookups instead of a full-array scan per agent
@@ -940,9 +978,9 @@ const calculateProgramProgress = async (program, agentId, index = null) => {
     let idx = index;
     if (!idx) {
         const [purchases, customers, activities] = await Promise.all([
-            AppDataStore.getAll('purchases'),
-            AppDataStore.getAll('customers'),
-            AppDataStore.getAll('activities')
+            _fetchSpecialProgramSource('purchases'),
+            _fetchSpecialProgramSource('customers'),
+            _fetchSpecialProgramSource('activities')
         ]);
         idx = _buildSpecialProgramIndex(purchases, customers, activities);
     }
@@ -1074,9 +1112,9 @@ const renderSpecialPrograms = async () => {
         AppDataStore.getAll('special_programs'),
         AppDataStore.getAll('special_program_participants'),
         AppDataStore.getAll('users'),
-        AppDataStore.getAll('purchases'),
-        AppDataStore.getAll('customers'),
-        AppDataStore.getAll('activities')
+        _fetchSpecialProgramSource('purchases'),
+        _fetchSpecialProgramSource('customers'),
+        _fetchSpecialProgramSource('activities')
     ]);
     const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
     const active = programs.filter(p => p.status !== 'cancelled' && p.status !== 'deleted');
@@ -1218,9 +1256,9 @@ const renderSpecialProgramsTable = async () => {
         AppDataStore.getAll('special_programs'),
         AppDataStore.getAll('special_program_participants'),
         AppDataStore.getAll('users'),
-        AppDataStore.getAll('purchases'),
-        AppDataStore.getAll('customers'),
-        AppDataStore.getAll('activities')
+        _fetchSpecialProgramSource('purchases'),
+        _fetchSpecialProgramSource('customers'),
+        _fetchSpecialProgramSource('activities')
     ]);
     const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
     const active = programs.filter(p => p.status !== 'cancelled' && p.status !== 'deleted');
@@ -1337,9 +1375,9 @@ const openSpecialProgramModal = async (programId = null) => {
     const allUsers = await AppDataStore.getAll('users');
     const eligible = allUsers.filter(u => {
         if (u.status === 'deleted') return false;
-        const m = u.role?.match(/Level\s*(\d+)/);
-        if (!m) return false;
-        const lvl = parseInt(m[1]);
+        // Use the canonical level helper (not a raw /Level N/ regex) so Chinese-only
+        // role names like 传福大使 — which _getUserLevel maps to L12 — are included.
+        const lvl = _getUserLevel(u);
         return lvl >= 6 && lvl <= 12;
     });
 
@@ -1355,6 +1393,9 @@ const openSpecialProgramModal = async (programId = null) => {
 };
 
 const saveSpecialProgram = async (programId = null) => {
+    // Re-check the role INSIDE the handler (the New/Edit buttons are UI-gated by
+    // canManage=isTeamLeaderOrAbove, but the exported fn was callable directly).
+    if (!isTeamLeaderOrAbove(_state.cu)) { UI.toast.error('Not authorized'); return; }
     const name = document.getElementById('sp-name')?.value?.trim();
     const reward = document.getElementById('sp-reward')?.value?.trim();
     const description = document.getElementById('sp-desc')?.value?.trim() || '';
@@ -1434,6 +1475,9 @@ const deleteSpecialProgram = async (programId) => {
 };
 
 const confirmDeleteSpecialProgram = async (programId) => {
+    // Re-check the role INSIDE the handler (the Delete button is UI-gated by
+    // canManage=isTeamLeaderOrAbove, but the exported fn was callable directly).
+    if (!isTeamLeaderOrAbove(_state.cu)) { UI.toast.error('Not authorized'); return; }
     await AppDataStore.delete('special_programs', programId);
     const parts = (await AppDataStore.getAll('special_program_participants')).filter(p => p.program_id === programId);
     for (const p of parts) {

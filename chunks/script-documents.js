@@ -383,7 +383,10 @@
         // Omit client-generated id — let the DB assign a uuid/serial (Date.now()
         // collides under concurrency). Optional-chain the color input (modal may
         // have been torn down between click and async resolution).
-        await AppDataStore.create('folders', { name, parent_id: _currentFolder, color: document.getElementById('new-folder-color')?.value || '#f59e0b', created_by: _state.cu?.id, created_at: new Date().toISOString() });
+        // Normalize the special-view sentinels ('recent'/'all'/'starred') back to
+        // Root (null) so we never persist a junk parent_id that no folder filter matches.
+        const _parentId = (_currentFolder === 'recent' || _currentFolder === 'all' || _currentFolder === 'starred') ? null : _currentFolder;
+        await AppDataStore.create('folders', { name, parent_id: _parentId, color: document.getElementById('new-folder-color')?.value || '#f59e0b', created_by: _state.cu?.id, created_at: new Date().toISOString() });
         UI.hideModal(); UI.toast.success('Folder created'); await renderFolderTree();
     };
 
@@ -445,9 +448,11 @@
             UI.toast.error('Could not update star');
             return;
         }
-        // Only re-render list if we're inside the starred view (item would leave/enter);
-        // otherwise the icon flip is already correct and a full reload is wasted work.
-        if (_currentFolder === 'starred') await loadFolderContents();
+        // The chunk-rendered list/grid star buttons carry no [data-star-id], so the
+        // optimistic starBtn flip above is a no-op in the non-React path — always
+        // re-render so the icon (fa-star vs fa-star-o) and the starred marker reflect
+        // the new DB state instead of silently desyncing.
+        await loadFolderContents();
     };
 
     const downloadFile = async (id) => {
@@ -480,6 +485,9 @@
             AppDataStore.getAll('document_versions'),
             AppDataStore.getAll('users')
         ]);
+        // getById can return null (row deleted concurrently / RLS deny / offline) —
+        // guard before dereferencing file.filename / file.current_version below.
+        if (!file) { UI.toast.error('File not found'); return; }
         const versions = allVersions.filter(v => v.document_id === fileId).sort((a, b) => b.version_number - a.version_number);
         const verUserMap = new Map(allUsersForVer.map(u => [String(u.id), u.full_name]));
         const content = `
@@ -551,6 +559,9 @@
             AppDataStore.getAll('users'),
             AppDataStore.getAll('document_shares'),
         ]);
+        // getById can return null (row deleted concurrently / RLS deny / offline) —
+        // guard before dereferencing file.filename below.
+        if (!file) { UI.toast.error('File not found'); return; }
         const userMap = new Map((allUsers || []).map(u => [String(u.id), u]));
         // Scope share targets to the current user's visibility set (role system) —
         // a low-level agent must not be able to enumerate / share to the whole org.
@@ -711,7 +722,7 @@
                 <thead>
                     <tr>
                         <th scope="col" style="width: 30px;">
-                            <input type="checkbox" onchange="app.selectAllFiles()" 
+                            <input type="checkbox" onchange="app.selectAllFiles(this.checked)"
                                    ${_selectedFiles.length === files.length && files.length > 0 ? 'checked' : ''}>
                         </th>
                         <th scope="col" onclick="app.sortFiles('name')" style="cursor: pointer;">
@@ -893,9 +904,15 @@
         await loadFolderContents(); // Refresh to show selection
     };
 
-    const selectAllFiles = async () => {
-        const files = await getFilesInCurrentFolder();
-        _selectedFiles = files.map(f => f.id);
+    const selectAllFiles = async (checked = true) => {
+        // Honor the header checkbox state: checked selects all, unchecked clears —
+        // previously it re-selected everything in both directions (never de-selectable).
+        if (checked) {
+            const files = await getFilesInCurrentFolder();
+            _selectedFiles = files.map(f => f.id);
+        } else {
+            _selectedFiles = [];
+        }
         await loadFolderContents();
     };
 
@@ -1184,6 +1201,11 @@
         let uploaded = 0;
         const total = files.length;
 
+        // Normalize the special-view sentinels ('recent'/'all'/'starred') back to
+        // Root (null) so uploaded docs are never saved with a junk folder_id that no
+        // folder filter matches (and, on a bigint column, would 400 the insert).
+        const _targetFolder = (_currentFolder === 'recent' || _currentFolder === 'all' || _currentFolder === 'starred') ? null : _currentFolder;
+
         for (const [index, file] of files.entries()) {
             const dataUrl = await new Promise((resolve, reject) => {
                 const reader = new FileReader();
@@ -1194,7 +1216,7 @@
 
             const newDoc = {
                 filename: file.name,
-                folder_id: _currentFolder,
+                folder_id: _targetFolder,
                 size: file.size,
                 mime_type: file.type,
                 data: dataUrl,
@@ -1213,6 +1235,10 @@
             if (progressFillEl) progressFillEl.style.width = percent + '%';
             if (progressStatusEl) progressStatusEl.textContent = `Uploaded ${uploaded} of ${total} files`;
         }
+
+        // Clear the staged batch so reopening the modal (or a double Upload click)
+        // does not re-create the same documents. handleFileSelect repopulates it.
+        window._pendingUploads = [];
 
         setTimeout(async () => {
             UI.hideModal();

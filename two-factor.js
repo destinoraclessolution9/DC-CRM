@@ -119,7 +119,7 @@ const TOTPManager = {
         crypto.getRandomValues(raw);
         const secret = _base32Encode(raw).replace(/=+$/, '');
         // Prefer username; never email. Fall back to user id.
-        const u = window._currentUser || {};
+        const u = (window._appState && window._appState.cu) || {};
         const label = encodeURIComponent(u.username || u.id || 'user');
         const issuer = encodeURIComponent('FengShuiCRM');
         return {
@@ -477,7 +477,7 @@ const verifyAndEnable2FA = async (secret) => {
         return;
     }
 
-    const result = await TOTPManager.enableTOTP(window._currentUser?.id, secret);
+    const result = await TOTPManager.enableTOTP((window._appState && window._appState.cu)?.id, secret);
 
     if (result && result.success) {
         const backupCodesDiv = document.querySelector('.backup-codes');
@@ -519,7 +519,10 @@ const downloadBackupCodes = (codes) => {
 // 2FA Login Screen
 const showTwoFactorLogin = (username, password) => {
     const esc = (window.UI && window.UI.escapeHtml) || ((s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c])));
-    const escAttr = (s) => String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    // Values are placed inside DOUBLE-quoted onclick="app.fn('...')" attributes,
+    // so a bare " (or entity) breaks out of the attribute. Prefer UI.escJsAttr,
+    // which neutralizes " ' \ < > & for exactly this sink.
+    const escAttr = (window.UI && window.UI.escJsAttr) || ((s) => String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/</g, '\\x3c').replace(/>/g, '\\x3e').replace(/&/g, '&amp;'));
     const content = `
         <div class="two-factor-login">
             <h3>Two-Factor Authentication</h3>
@@ -598,7 +601,9 @@ const verifyTwoFactorLogin = async (username, password) => {
 // Backup-code login screen — shown when the user can't access their authenticator.
 // Carries username/password forward so a successful backup code completes the login.
 const showBackupCodeLogin = (username, password) => {
-    const escAttr = (s) => String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    // Double-quoted onclick="app.fn('...')" sink — prefer UI.escJsAttr so a bare
+    // " (or entity) in username/password can't break out of the attribute.
+    const escAttr = (window.UI && window.UI.escJsAttr) || ((s) => String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/</g, '\\x3c').replace(/>/g, '\\x3e').replace(/&/g, '&amp;'));
     const content = `
         <div class="two-factor-login">
             <h3>Enter a Backup Code</h3>

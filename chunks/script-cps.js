@@ -111,8 +111,17 @@ const _refreshNotifBadge = async () => {
             return md === todayMD || md === tomMD;
         };
         // Client birthdays are owner-scoped; agent birthdays remain org-wide.
+        // Dedupe across the intentional dual prospect+customer record for the same person
+        // (same full_name + date_of_birth) so converted customers aren't counted twice.
+        const _bdayCountSeen = new Set();
         const bdayClients = [...allProspects, ...allCustomers]
-            .filter(p => hasBday(p) && p.manual_grade !== 'F' && _isVisibleBirthdayPerson(p, visibleIds, vStrs));
+            .filter(p => {
+                if (!(hasBday(p) && p.manual_grade !== 'F' && _isVisibleBirthdayPerson(p, visibleIds, vStrs))) return false;
+                const key = `${(p.full_name || '').trim().toLowerCase()}|${p.date_of_birth || ''}`;
+                if (_bdayCountSeen.has(key)) return false;
+                _bdayCountSeen.add(key);
+                return true;
+            });
         const bdayAgents = allUsers.filter(hasBday);
         count += bdayClients.length + bdayAgents.length;
 
@@ -131,10 +140,13 @@ const _refreshNotifBadge = async () => {
         // Pending co-agent invitations for current user
         try {
             if (_state.cu?.id) {
+                // co_agents ids are stored as numbers by the picker (script-activities.js
+                // addCoAgent(${m.id})); JSONB containment is type-strict so a stringified id
+                // never matches. Query with the numeric id so picker-added invites surface.
                 const { data: coInvites } = await window.supabase
                     .from('activities')
                     .select('id')
-                    .filter('co_agents', 'cs', JSON.stringify([{ id: String(_state.cu.id), status: 'pending' }]));
+                    .filter('co_agents', 'cs', JSON.stringify([{ id: Number(_state.cu.id), status: 'pending' }]));
                 count += (coInvites || []).length;
             }
         } catch (_) {}
@@ -188,8 +200,12 @@ const _buildNotifPanel = async () => {
         if (p.manual_grade === 'F') return; // grade F = dropped, no birthday wish
         // Owner-scope client birthdays so agents don't see other teams' contacts.
         if (!_isVisibleBirthdayPerson(p, visibleIds, vStrs)) return;
+        // Dedupe the intentional dual prospect+customer record for the same person
+        // (same full_name + date_of_birth) so converted customers show one item, not two.
+        const key = `${(p.full_name || '').trim().toLowerCase()}|${dob}`;
+        if (bdayClientSet.has(key)) return;
+        bdayClientSet.add(key);
         items.push({ icon: '🎂', title: `${esc(p.full_name || 'Someone')}'s Birthday`, sub: isToday ? 'Today!' : 'Tomorrow' });
-        bdayClientSet.add(p.id);
     });
     allUsers.forEach(u => {
         const dob = u.date_of_birth || '';
@@ -219,10 +235,12 @@ const _buildNotifPanel = async () => {
     // Pending co-agent invitations for current user
     try {
         if (_state.cu?.id) {
+            // co_agents ids are stored as numbers by the picker; JSONB containment is
+            // type-strict so a stringified id matches zero picker-added invites. Use Number.
             const { data: coInvites } = await window.supabase
                 .from('activities')
                 .select('id, activity_type, activity_title, activity_date')
-                .filter('co_agents', 'cs', JSON.stringify([{ id: String(_state.cu.id), status: 'pending' }]));
+                .filter('co_agents', 'cs', JSON.stringify([{ id: Number(_state.cu.id), status: 'pending' }]));
             for (const act of (coInvites || []).slice(0, 5)) {
                 const typeLabel = act.activity_type || 'Activity';
                 const dateLabel = act.activity_date ? ` · ${act.activity_date}` : '';

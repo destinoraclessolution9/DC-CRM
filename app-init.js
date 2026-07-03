@@ -226,7 +226,9 @@ window.addEventListener('beforeinstallprompt', function (e) {
         applyTheme(current === 'dark' ? 'light' : 'dark');
     }
     document.addEventListener('DOMContentLoaded', function () {
-        applyTheme(localStorage.getItem('docs-theme') || 'light');
+        let saved = null;
+        try { saved = localStorage.getItem('docs-theme'); } catch (e) {}
+        applyTheme(saved || 'light');
         const btn = document.getElementById('theme-toggle');
         if (btn) btn.addEventListener('click', toggleTheme);
     });
@@ -533,7 +535,7 @@ window.addEventListener('beforeinstallprompt', function (e) {
             ...imgs.map(async function (img) {
                 const url = await window.AppDataStore.resolveAttachmentSrc(img.getAttribute('data-attach-src')).catch(function () { return null; });
                 img.removeAttribute('data-attach-inflight');
-                if (url) { img.src = url; img.setAttribute('data-attach-resolved', '1'); }
+                if (url) { img.src = url; img.style.display = ''; img.setAttribute('data-attach-resolved', '1'); }
                 else img.style.display = 'none'; // hidden but left unresolved so a later runAll() retries
             }),
             ...bgs.map(async function (el) {

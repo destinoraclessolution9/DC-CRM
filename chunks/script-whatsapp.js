@@ -280,13 +280,12 @@
             : await AppDataStore.getById('customers', entityId);
         if (!entity) return;
 
-        let templates = await AppDataStore.getAll('whatsapp_templates');
-        if (templates.length === 0) {
-            templates = [
-                await AppDataStore.create('whatsapp_templates', { template_name: 'Birthday Greeting',      status: 'APPROVED', content: 'Hi {{name}}, wishing you a very happy birthday!' }),
-                await AppDataStore.create('whatsapp_templates', { template_name: 'Appointment Reminder',   status: 'APPROVED', content: 'Hi {{name}}, your appointment is confirmed.' })
-            ];
-        }
+        // Do NOT auto-seed templates when the read returns empty. An empty result
+        // can mean a dead-session/RLS-denied read, an offline window, or that an
+        // admin deliberately deleted all templates — writing seed rows here would
+        // insert duplicates on repeated opens and silently resurrect deleted rows.
+        // The picker below simply renders no options ("Select a template").
+        const templates = await AppDataStore.getAll('whatsapp_templates');
         UI.showModal('Send WhatsApp Message', `
             <div class="send-whatsapp-modal">
                 <h3>Send WhatsApp to ${esc(entity.full_name)} (${esc(entity.phone)})</h3>
@@ -331,6 +330,11 @@
         const isTemplate = document.querySelector('input[name="msg-type"]:checked')?.value === 'template';
         const entity = window._currentWhatsAppEntity;
         if (!entity?.phone) { UI.toast.error('No recipient phone'); return; }
+        // The "Schedule for later" radio has no backend behind it — never send
+        // immediately while implying the scheduled option worked. Tell the user
+        // it is unsupported and abort so no customer message goes out unexpectedly.
+        const schedule = document.querySelector('input[name="schedule"]:checked')?.value;
+        if (schedule === 'later') { UI.toast.error('Scheduling is not available yet — choose "Send now".'); return; }
         if (isTemplate) {
             const templateId = document.getElementById('template-select')?.value;
             if (!templateId) { UI.toast.error('Please select a template'); return; }
@@ -433,9 +437,17 @@
         const original = (await AppDataStore.getAll('whatsapp_messages')).find(m => m.id === messageId);
         if (!original) { UI.toast.error('Message not found'); return; }
         const [allProspects, allCustomers] = await Promise.all([AppDataStore.getAll('prospects'), AppDataStore.getAll('customers')]);
+        // Scope the recipient picker to records the viewer is allowed to see —
+        // otherwise the dropdown leaks every other agent's client names org-wide.
+        let _visibleUserIds = 'all';
+        try { _visibleUserIds = await window._crmUtils.getVisibleUserIds(_state.cu); }
+        catch (_) { _visibleUserIds = _state.cu?.id != null ? [_state.cu.id] : []; }
+        const _visSet = (_visibleUserIds !== 'all' && Array.isArray(_visibleUserIds))
+            ? new Set(_visibleUserIds.map(v => String(v))) : null;
+        const _canSee = (r) => !_visSet || _visSet.has(String(r.responsible_agent_id));
         const options = [
-            ...allProspects.map(p => `<option value="prospect:${p.id}">${esc(p.full_name)} (Prospect)</option>`),
-            ...allCustomers.map(c => `<option value="customer:${c.id}">${esc(c.full_name)} (Customer)</option>`)
+            ...allProspects.filter(_canSee).map(p => `<option value="prospect:${p.id}">${esc(p.full_name)} (Prospect)</option>`),
+            ...allCustomers.filter(_canSee).map(c => `<option value="customer:${c.id}">${esc(c.full_name)} (Customer)</option>`)
         ].join('');
         UI.showModal('Forward Message', `
             <div class="form-group" style="margin-bottom:12px;">
@@ -471,11 +483,18 @@
 
     const syncWhatsAppTemplates = async () => {
         const connection = await getWhatsAppConnection();
-        if (!connection?.phone_number_id || !connection?.access_token) {
+        // The request URL is built from business_account_id, so guard on it (not
+        // phone_number_id) — a legacy row missing it would otherwise request
+        // '.../undefined/message_templates' and get a misleading API 400.
+        if (!connection?.business_account_id || !connection?.access_token) {
             UI.toast.error('WhatsApp not connected. Configure integration settings first.'); return;
         }
         try {
-            const res = await fetch(`https://graph.facebook.com/v20.0/${connection.business_account_id}/message_templates?access_token=${connection.access_token}`);
+            // Pass the bearer token in the Authorization header, never the query
+            // string, so it does not leak into proxy/browser history logs.
+            const res = await fetch(`https://graph.facebook.com/v20.0/${connection.business_account_id}/message_templates`, {
+                headers: { 'Authorization': `Bearer ${connection.access_token}` }
+            });
             if (!res.ok) throw new Error(`API error ${res.status}`);
             const data = await res.json();
             showTemplateSyncModal((data.data || []).filter(t => t.status === 'APPROVED'));

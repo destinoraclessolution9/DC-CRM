@@ -94,8 +94,21 @@ function AgentCell({ c, meta }) {
 }
 
 function Row({ c, meta }) {
-    const badgeHtml = (app().renderQuickHealthBadge || (() => ''))(c);
-    const canEdit = canEditCustomers(meta);
+    // renderQuickHealthBadge lives in the CPS chunk; when that chunk isn't loaded
+    // window.app.renderQuickHealthBadge is the passive async stub that returns a
+    // Promise (not an HTML string). Assigning a Promise to dangerouslySetInnerHTML
+    // coerces to the literal text "[object Promise]". Guard against any non-string
+    // result so the cell degrades to empty rather than that literal. (Mirrors the
+    // legacy `|| ''` intent, which a truthy Promise silently defeats.)
+    const rawBadge = (app().renderQuickHealthBadge || (() => ''))(c);
+    const badgeHtml = typeof rawBadge === 'string' ? rawBadge : '';
+    // Edit here reuses the prospect modal, which does a prospects-PK lookup. A
+    // customers-table id is a DIFFERENT keyspace from prospects, so passing c.id
+    // opens (and can silently overwrite) an unrelated prospect. Mirror the
+    // canonical detail-view gate (script-customers.js:672): only offer Edit when
+    // the row carries its source prospect link, and edit THAT prospect id.
+    const linkedProspectId = c.converted_from_prospect_id;
+    const canEdit = canEditCustomers(meta) && linkedProspectId != null;
     return (
         <tr onClick={() => app().showCustomerDetail && app().showCustomerDetail(c.id)} style={{ cursor: 'pointer' }}>
             <td data-label="Name"><strong>{c.full_name || ''}</strong></td>
@@ -109,7 +122,7 @@ function Row({ c, meta }) {
             <td data-label="Health" dangerouslySetInnerHTML={{ __html: badgeHtml }}></td>
             <td data-label="Status"><span className={`score-badge ${statusBadgeClass(c.status)}`}>{(c.status || 'active').toUpperCase()}</span></td>
             <td onClick={(e) => e.stopPropagation()}>
-                {canEdit ? <button className="btn-icon" title="Edit" onClick={(e) => { e.stopPropagation(); app().openProspectModal && app().openProspectModal(c.id); }}><i className="fas fa-edit"></i></button> : null}
+                {canEdit ? <button className="btn-icon" title="Edit" onClick={(e) => { e.stopPropagation(); app().openProspectModal && app().openProspectModal(linkedProspectId); }}><i className="fas fa-edit"></i></button> : null}
                 <button className="btn-icon" title="Add Purchase" onClick={() => app().openAddPurchaseModal && app().openAddPurchaseModal(c.id)}><i className="fas fa-shopping-cart"></i></button>
                 <button className="btn-icon" title="Referral" onClick={(e) => { e.stopPropagation(); app().openCustomerReferralModal && app().openCustomerReferralModal(c.id); }}><i className="fas fa-user-plus"></i></button>
                 <button className="btn-icon" title="Recruit" onClick={() => app().openRecruitModal && app().openRecruitModal(c.id)}><i className="fas fa-user-tie"></i></button>

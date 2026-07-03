@@ -207,8 +207,15 @@
         return sb ? (parseInt(sb.physical_stock) || 0) : 0;
     };
 
+    // Local (not UTC) YYYY-MM-DD — Malaysia is UTC+8 so toISOString() is a day
+    // behind between 00:00 and 08:00 local, which mis-dates deals/POs/transfers.
+    const fpTodayLocal = () => {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+
     const fpGetActiveDeal = (skuId) => {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = fpTodayLocal();
         return _fpState.orderReqs.find(r => {
             if (r.sku_id !== skuId || r.is_active === false) return false;
             const from = r.effective_from || '0000-01-01';
@@ -392,7 +399,7 @@
     const fpCalcTransferNeeds = () => {
         const hub = _fpState.locations.find(l => l.type === 'central_hub' && l.is_active);
         if (!hub) return [];
-        const today = new Date().toISOString().slice(0, 10);
+        const today = fpTodayLocal();
         const out = [];
         // ── Build lookup Maps ONCE (de-quadratify the outlet×SKU inner scans) ──
         const isExcluded = _fpBuildIsExcluded();                                              // hoisted regex compile (== fpIsExcluded)
@@ -885,7 +892,7 @@
             .map(v => `<option value="${fpEsc(v.id)}">${fpEsc(v.name)}</option>`).join('');
         const branchOpts = _fpState.locations.filter(l => l.is_active && !l.is_oem)
             .map(l => `<option value="${fpEsc(l.id)}" ${l.name === '003 Retail Pavilion 2' ? 'selected' : ''}>${fpEsc(l.name)}</option>`).join('');
-        const today = new Date().toISOString().slice(0, 10);
+        const today = fpTodayLocal();
         const refNum = 'PO-' + new Date().getFullYear() + '-' + String(_fpState.purchaseOrders.length + 1).padStart(4, '0');
 
         const itemsHtml = recs.map((r, i) => `
@@ -975,12 +982,24 @@
 
         if (!items.length) { UI.toast.error('No items to order'); return; }
 
-        // Map sku_id → free_quantity from the replenishment recs that built this PO,
-        // so Buy-X-Get-Y free goods are PERSISTED on the po_item and credited on receipt.
-        const freeBySku = {};
+        // Map sku_id → deal from the replenishment recs that built this PO, so we can
+        // RECOMPUTE free goods against the (possibly edited) ordered qty. Using the
+        // rec's pre-computed freeQty would credit free goods for the ORIGINAL
+        // recommendation even when the admin lowered the qty in the builder,
+        // over-crediting hub stock on receipt.
+        const dealBySku = {};
         (_fpState.lastReplenishment || []).forEach(r => {
-            if (r && r.sku && r.sku.id) freeBySku[r.sku.id] = r.freeQty || 0;
+            if (r && r.sku && r.sku.id && r.deal) dealBySku[r.sku.id] = r.deal;
         });
+        // freeForQty: Buy-X-Get-Y free goods for the ACTUAL ordered qty (mirrors the
+        // ratio in fpCalcReplenishmentNeeds). Non-BXGY deals grant no free goods.
+        const freeForQty = (skuId, qty) => {
+            const deal = dealBySku[skuId];
+            if (deal && deal.requirement_type === 'BUY_X_GET_Y_FREE' && deal.x_quantity > 0) {
+                return Math.floor(qty / deal.x_quantity) * (deal.y_free || 0);
+            }
+            return 0;
+        };
 
         let po;
         try {
@@ -1000,7 +1019,7 @@
                 const row = await fpSave('fp_po_items', {
                     po_id: po.id, sku_id: it.sku_id,
                     quantity_ordered: it.quantity_ordered,
-                    free_quantity: freeBySku[it.sku_id] || 0,
+                    free_quantity: freeForQty(it.sku_id, it.quantity_ordered),
                     unit_cost: sku?.unit_cost || null,
                 });
                 _fpState.poItems.push(row);
@@ -1275,7 +1294,7 @@
                 _fpState.stockBalance.push(nb);
             }
 
-            const today = new Date().toISOString().slice(0, 10);
+            const today = fpTodayLocal();
             const order = await fpSave('fp_transfer_orders', {
                 from_location_id: rec.hub.id, to_location_id: rec.outlet.id,
                 transfer_date: today, status: 'completed',
@@ -1373,8 +1392,7 @@
         `;
     };
 
-    const fpStockSearchUpdate = (v) => {
-        _fpStockSearch = v;
+    const _fpRenderStockSearch = (v) => {
         // re-render but preserve focus
         const c = document.getElementById('fp-tab-content');
         if (!c) return; // tab content swapped out (navigation / island re-render) — bail (mirror fpSwitchTab guard)
@@ -1384,6 +1402,14 @@
         if (inp) { inp.focus(); inp.setSelectionRange(v.length, v.length); }
         const sc = c.querySelector('div[style*="overflow-y:auto"]');
         if (sc) sc.scrollTop = scroll;
+    };
+
+    const fpStockSearchUpdate = (v) => {
+        _fpStockSearch = v;
+        // Debounce the expensive full-table rebuild (O(rows × stockBalance) scans +
+        // innerHTML): the live <input> keeps the user's text/caret while typing, and we
+        // only re-render ~200 ms after the last keystroke instead of on every character.
+        debounceCall('fpStockSearch', () => _fpRenderStockSearch(v), 200);
     };
 
     const fpSaveActualMin = async (skuId, value) => {
@@ -1917,8 +1943,11 @@
         const NAME_RE = new RegExp('\\b(' + FP_NAME_EXCLUDES.join('|') + ')\\b', 'i');
         let upserted = 0, failed = 0;
         for (const row of rows) {
-            const loc   = (row.Location || '').trim();
-            const code  = (row['Product Code'] || '').toString().trim();
+            // Header fallbacks MUST match the preview (fpImportStock) exactly, else a
+            // file with lowercase location/code headers passes preview but every row
+            // fails ACTIVE.has('') / empty-code here → silent 0-row import.
+            const loc   = (row.Location || row.location || '').trim();
+            const code  = (row['Product Code'] || row.code || '').toString().trim();
             const name  = (row['Product Name'] || '').toString();
             const attr  = (row['Product Attribute'] || '').toString();
             const phys  = parseInt(row['Physical Stock']) || 0;
@@ -2019,20 +2048,34 @@
             const importedSkuIds = new Set(); // only recompute auto_min for SKUs touched by THIS import
 
             // Dedup guard: re-importing the same POS export (or overlapping date ranges)
-            // would otherwise double-count every sale/refund. Build a Set of natural keys
-            // from already-loaded transactions/refunds, and add each newly-inserted key so
-            // duplicate rows WITHIN the same file are also skipped.
+            // would otherwise double-count every sale/refund. We key on the natural tuple
+            // PLUS a per-tuple occurrence ordinal (#1, #2, …) so that legitimately-repeated
+            // line items on ONE receipt (e.g. the same SKU rung up as two separate 1-qty
+            // lines) each get a DISTINCT key and are BOTH imported — while a whole-file
+            // re-import still matches ordinal-for-ordinal against the seed and is skipped.
             const _natKey = (purchase_number, code, qty, date) =>
                 `${purchase_number}|${code}|${qty}|${date}`;
-            const seenKeys = new Set();
+            // Seed occurrence counts from already-loaded rows, then expand into ordinal keys.
+            const _seedCounts = new Map();
+            const _bump = (k) => { const n = (_seedCounts.get(k) || 0) + 1; _seedCounts.set(k, n); };
             _fpState.posTransactions.forEach(t => {
                 const c = (fpGetSkuById(t.sku_id) || {}).product_code || t.sku_id;
-                seenKeys.add('S|' + _natKey(t.purchase_number, c, t.quantity_sold, t.transaction_date));
+                _bump('S|' + _natKey(t.purchase_number, c, t.quantity_sold, t.transaction_date));
             });
             _fpState.refunds.forEach(r => {
                 const c = (fpGetSkuById(r.sku_id) || {}).product_code || r.sku_id;
-                seenKeys.add('R|' + _natKey(r.purchase_number, c, r.quantity_refunded, r.refund_date));
+                _bump('R|' + _natKey(r.purchase_number, c, r.quantity_refunded, r.refund_date));
             });
+            const seenKeys = new Set();
+            _seedCounts.forEach((n, base) => { for (let i = 1; i <= n; i++) seenKeys.add(base + '#' + i); });
+            // Per-parse occurrence counter: assigns the next ordinal to each natural tuple
+            // encountered this import, so duplicate lines within the file get #1, #2, ….
+            const _occ = new Map();
+            const _nextOrdinalKey = (base) => {
+                const n = (_occ.get(base) || 0) + 1;
+                _occ.set(base, n);
+                return base + '#' + n;
+            };
 
             for (const row of rows) {
                 const purchase = (row['Purchase Number'] || '').toString().trim();
@@ -2075,8 +2118,11 @@
                     newSkus.add(code);
                 }
 
-                // Dedup: skip rows already present (prior import or duplicate within file).
-                const key = (isRefund ? 'R|' : 'S|') + _natKey(purchase, code, qty, date);
+                // Dedup: skip rows already present (prior import). The occurrence ordinal
+                // lets legitimately-repeated identical lines on ONE receipt through (each
+                // gets a fresh #n), while a full re-import matches the seeded ordinals.
+                const base = (isRefund ? 'R|' : 'S|') + _natKey(purchase, code, qty, date);
+                const key = _nextOrdinalKey(base);
                 if (seenKeys.has(key)) { duplicates++; pushDrop('Duplicate (already imported)'); continue; }
                 seenKeys.add(key);
 

@@ -319,7 +319,22 @@
         return isInGroupList ? 'Online' : 'Wholesale';
     };
 
-    const eggBuildUniqueKey = (r) => `${r.order_no || '-'}_${r.product}_${r.quantity}_${r.region}`;
+    // When order_no is present it uniquely identifies the physical order line.
+    // When it is BLANK (older exports, or a renamed order-number column), a bare
+    // '-' fallback collapses every distinct blank-order_no line with the same
+    // product/qty/region into ONE key — silently dropping real orders in the
+    // in-batch dedup and permanently suppressing them in history dedup. Fall back
+    // to agent_name + order date so two different agents' (or two dates')
+    // blank-order_no lines stay distinct. Rows WITH an order_no keep the exact
+    // same key format, so cross-week dedup for the normal case is unchanged; and
+    // the history dedup's agent+date+product+qty+region tier still catches a
+    // genuine repeat of a blank-order_no line.
+    const eggBuildUniqueKey = (r) => {
+        if (r.order_no) return `${r.order_no}_${r.product}_${r.quantity}_${r.region}`;
+        const agent = String(r.agent_name || '').trim().toUpperCase();
+        const dt = String(r.order_date_parsed || r.order_date || '').slice(0, 10);
+        return `-|${agent}|${dt}_${r.product}_${r.quantity}_${r.region}`;
+    };
 
     // --- Pipeline step: filter + map all raw rows to the standard shape, apply drop rules ---
     const eggProcessRows = (rawRows, config) => {
@@ -390,7 +405,13 @@
     // not permanently dedup a legitimately-recurring future order line.
     const eggDedupAgainstHistory = async (rows) => {
         try {
-            const history = await AppDataStore.query('egg_processed_orders', {});
+            // Full-table read MUST paginate past PostgREST's 1000-row cap.
+            // A bare query() returns at most 1000 heap-ordered rows once the
+            // table grows, so the most-recent weeks fall outside the window and
+            // recently-shipped lines pass dedup as "new" → duplicate farm orders.
+            // queryPaged() pages the entire table (ordered by id) so every
+            // shipped row populates the seen-sets.
+            const history = await AppDataStore.queryPaged('egg_processed_orders', { max: 200000 });
             // Pushed-up / reconciled rows were NOT shipped — they carry an
             // excluded_reason. They must not block a legitimately-recurring
             // identical order line in a later week, so exclude them from every
@@ -545,7 +566,7 @@ JB 星期二到
         }
         const cells = rows.map(([g, qty]) => `
             <div style="display:flex;justify-content:space-between;padding:7px 12px;border-bottom:1px solid var(--gray-100);">
-                <span style="font-size:13px;">${g}</span>
+                <span style="font-size:13px;">${escapeHtml(g)}</span>
                 <strong style="font-size:13px;">${qty} cartons</strong>
             </div>`).join('');
         return `
@@ -818,6 +839,24 @@ JB 星期二到
         }
     };
 
+    // Refresh a tab after a mutating handler, working on BOTH render paths.
+    // On the legacy/scaffold path the #egg-tab-content host exists → re-render it
+    // in place (byte-identical to the old `eggRenderXTab(getElementById(...))`
+    // call). On the full-JSX default path that host does NOT exist — calling the
+    // legacy renderer with a null host would throw (`Cannot set properties of
+    // null`) and fire a false failure toast even though the write succeeded, and
+    // the JSX list would never refresh. Guarding the host and firing
+    // eggRerenderJsx() fixes both: no throw when the host is absent, and the JSX
+    // island remounts from fresh state. `renderFn` is one of the eggRenderXTab
+    // functions; the JSX rerender ignores it and rebuilds all tabs from state.
+    const eggRerenderTab = async (renderFn) => {
+        const host = document.getElementById('egg-tab-content');
+        if (host && typeof renderFn === 'function') {
+            await renderFn(host);
+        }
+        await eggRerenderJsx();
+    };
+
     // ==================== MAIN VIEW RENDERER ====================
 
     // Pure builder for the legacy (non-React) Egg Purchasing shell: header + tab
@@ -959,8 +998,8 @@ JB 星期二到
 
     const eggRenderPhase1 = (host) => {
         const weekIso = eggFormatDateIso(_eggState.weekStartDate || eggGetCurrentMonday());
-        const csvInfo = _eggState.csvFile ? `<div style="color:#059669;"><i class="fas fa-check-circle"></i> ${_eggState.csvFile.name} — ${_eggState.csvRows.length} rows</div>` : '<div style="color:var(--gray-400);">No file selected</div>';
-        const xlsInfo = _eggState.xlsxFile ? `<div style="color:#059669;"><i class="fas fa-check-circle"></i> ${_eggState.xlsxFile.name} — ${_eggState.xlsxRows.length} rows</div>` : '<div style="color:var(--gray-400);">No file selected</div>';
+        const csvInfo = _eggState.csvFile ? `<div style="color:#059669;"><i class="fas fa-check-circle"></i> ${escapeHtml(_eggState.csvFile.name)} — ${_eggState.csvRows.length} rows</div>` : '<div style="color:var(--gray-400);">No file selected</div>';
+        const xlsInfo = _eggState.xlsxFile ? `<div style="color:#059669;"><i class="fas fa-check-circle"></i> ${escapeHtml(_eggState.xlsxFile.name)} — ${_eggState.xlsxRows.length} rows</div>` : '<div style="color:var(--gray-400);">No file selected</div>';
         const ready = _eggState.csvFile && _eggState.xlsxFile;
 
         host.innerHTML = `
@@ -1056,7 +1095,7 @@ JB 星期二到
             _eggState.csvHeaders = headers;
             _eggState.csvRows = rows;
             UI.toast.success(`CSV loaded: ${rows.length} rows`);
-            await eggRenderRunTab(document.getElementById('egg-tab-content'));
+            await eggRerenderTab(eggRenderRunTab);
         } catch (err) {
             UI.toast.error('CSV parse failed: ' + err.message);
             const inp = document.getElementById('egg-csv-input'); if (inp) inp.value = '';
@@ -1084,7 +1123,7 @@ JB 星期二到
             _eggState.xlsxHeaders = headers;
             _eggState.xlsxRows = rows;
             UI.toast.success(`XLSX loaded: ${rows.length} rows`);
-            await eggRenderRunTab(document.getElementById('egg-tab-content'));
+            await eggRerenderTab(eggRenderRunTab);
         } catch (err) {
             UI.toast.error('XLSX parse failed: ' + err.message);
             const inp = document.getElementById('egg-xlsx-input'); if (inp) inp.value = '';
@@ -1111,7 +1150,7 @@ JB 星期二到
         // Reset any live file inputs so the same file can be re-picked
         const csvInp = document.getElementById('egg-csv-input'); if (csvInp) csvInp.value = '';
         const xlsInp = document.getElementById('egg-xlsx-input'); if (xlsInp) xlsInp.value = '';
-        eggRenderRunTab(document.getElementById('egg-tab-content'));
+        eggRerenderTab(eggRenderRunTab);
     };
 
     const eggGoToPhase2 = async () => {
@@ -1172,7 +1211,7 @@ JB 星期二到
         _eggState.excludedToUrgent = {};
 
         _eggState.currentPhase = 2;
-        await eggRenderRunTab(document.getElementById('egg-tab-content'));
+        await eggRerenderTab(eggRenderRunTab);
     };
 
     const eggRenderPhase2 = (host) => {
@@ -1387,7 +1426,7 @@ JB 星期二到
 
     const eggGoToPhase1 = async () => {
         _eggState.currentPhase = 1;
-        await eggRenderRunTab(document.getElementById('egg-tab-content'));
+        await eggRerenderTab(eggRenderRunTab);
     };
 
     const eggToggleExclude = (uniqueKey) => {
@@ -1421,7 +1460,7 @@ JB 星期二到
     const eggClearExclusions = async () => {
         _eggState.excludedKeys = new Set();
         _eggState.excludedToUrgent = {};
-        await eggRenderRunTab(document.getElementById('egg-tab-content'));
+        await eggRerenderTab(eggRenderRunTab);
     };
 
     const eggGoToPhase3 = async () => {
@@ -1464,7 +1503,7 @@ JB 星期二到
             droppedFutureDated: _eggState.droppedFutureDated || 0
         };
         _eggState.currentPhase = 3;
-        await eggRenderRunTab(document.getElementById('egg-tab-content'));
+        await eggRerenderTab(eggRenderRunTab);
     };
 
     const eggRenderPhase3 = (host) => {
@@ -2008,7 +2047,7 @@ JB 星期二到
 
     const eggSetUrgentFilter = async (f) => {
         _eggState.urgentFilter = f;
-        await eggRenderUrgentTab(document.getElementById('egg-tab-content'));
+        await eggRerenderTab(eggRenderUrgentTab);
     };
 
     const eggOpenAddUrgentModal = (editId) => {
@@ -2097,7 +2136,7 @@ JB 星期二到
                 UI.toast.success('Urgent order added');
             }
             UI.hideModal();
-            await eggRenderUrgentTab(document.getElementById('egg-tab-content'));
+            await eggRerenderTab(eggRenderUrgentTab);
         } catch (err) {
             UI.toast.error('Save failed: ' + (err.message || 'unknown'));
         }
@@ -2118,7 +2157,7 @@ JB 星期二到
         try {
             await AppDataStore.update('egg_urgent_orders', id, { status: 'cancelled' });
             UI.toast.success('Urgent order cancelled');
-            await eggRenderUrgentTab(document.getElementById('egg-tab-content'));
+            await eggRerenderTab(eggRenderUrgentTab);
         } catch (err) {
             UI.toast.error('Cancel failed: ' + (err.message || 'unknown'));
         }
@@ -2129,7 +2168,7 @@ JB 星期二到
         try {
             await AppDataStore.update('egg_urgent_orders', id, { status: 'expired' });
             UI.toast.success('Marked expired');
-            await eggRenderUrgentTab(document.getElementById('egg-tab-content'));
+            await eggRerenderTab(eggRenderUrgentTab);
         } catch (err) {
             UI.toast.error('Update failed: ' + (err.message || 'unknown'));
         }
@@ -2140,8 +2179,11 @@ JB 星期二到
         try {
             const urgent = (await AppDataStore.query('egg_urgent_orders', { id }))?.[0];
             if (!urgent) { UI.toast.error('Urgent order not found'); return; }
-            const candidates = await AppDataStore.query('egg_processed_orders', {
-                product: urgent.product, region: urgent.region
+            // Paginate past the 1000-row cap so the candidate picker isn't
+            // silently limited to a heap-ordered first 1000 as history grows.
+            const candidates = await AppDataStore.queryPaged('egg_processed_orders', {
+                filters: { product: urgent.product, region: urgent.region },
+                max: 200000
             }) || [];
             const unlinkedCandidates = candidates.filter(c => !c.reconciled_with_urgent_id && !c.excluded_reason);
             if (unlinkedCandidates.length === 0) {
@@ -2168,11 +2210,11 @@ JB 星期二到
                         <tbody>
                             ${recentSlice.map(c => `
                                 <tr style="border-top:1px solid var(--gray-200);">
-                                    <td style="padding:6px;"><input type="radio" name="egg-reconcile-pick" value="${c.id}" data-key="${c.unique_key}"></td>
+                                    <td style="padding:6px;"><input type="radio" name="egg-reconcile-pick" value="${c.id}" data-key="${escapeHtml(String(c.unique_key ?? ''))}"></td>
                                     <td style="padding:6px;font-family:monospace;font-size:12px;">${escapeHtml(c.order_no || '-')}</td>
                                     <td style="padding:6px;">${escapeHtml(c.agent_name || '-')}</td>
                                     <td style="padding:6px;">${c.quantity}</td>
-                                    <td style="padding:6px;">${c.week_start || '-'}</td>
+                                    <td style="padding:6px;">${escapeHtml(c.week_start || '-')}</td>
                                 </tr>
                             `).join('')}
                         </tbody>
@@ -2208,7 +2250,7 @@ JB 星期二到
             });
             UI.hideModal();
             UI.toast.success('Manual reconciliation saved');
-            await eggRenderUrgentTab(document.getElementById('egg-tab-content'));
+            await eggRerenderTab(eggRenderUrgentTab);
         } catch (err) {
             UI.toast.error('Reconcile failed: ' + (err.message || 'unknown'));
         }
@@ -2330,7 +2372,7 @@ JB 星期二到
                 <p style="color:var(--gray-500);font-size:13px;">
                     Edit the JSON configuration for region rules, product mapping, and wholesale groups.
                 </p>
-                <textarea id="egg-config-json" class="form-control" style="width:100%;height:380px;font-family:monospace;font-size:13px;">${json}</textarea>
+                <textarea id="egg-config-json" class="form-control" style="width:100%;height:380px;font-family:monospace;font-size:13px;">${escapeHtml(json)}</textarea>
                 <div style="margin-top:14px;display:flex;gap:8px;">
                     <button class="btn primary" onclick="app.eggSaveConfigFromTextarea()"><i class="fas fa-save"></i> Save</button>
                     <button class="btn secondary" onclick="app.eggResetConfigToDefault()"><i class="fas fa-undo"></i> Reset to Defaults</button>
@@ -2355,7 +2397,7 @@ JB 星期二到
         try {
             const parsed = JSON.parse(text);
             await eggSaveConfig(parsed);
-            await eggRenderConfigTab(document.getElementById('egg-tab-content'));
+            await eggRerenderTab(eggRenderConfigTab);
         } catch (err) {
             UI.toast.error('Invalid JSON: ' + err.message);
         }
@@ -2364,7 +2406,7 @@ JB 星期二到
     const eggResetConfigToDefault = async () => {
         if (!confirm('Reset configuration to defaults? Current values will be overwritten.')) return;
         await eggSaveConfig(eggDefaultConfig());
-        await eggRenderConfigTab(document.getElementById('egg-tab-content'));
+        await eggRerenderTab(eggRenderConfigTab);
     };
 
     const eggResyncGroupData = async () => {

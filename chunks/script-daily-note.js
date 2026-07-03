@@ -3068,9 +3068,18 @@
       UI.showModal('每天一智 · Daily Wisdom', html, [
         { label: '收到 · Got it', type: 'primary', action: 'UI.hideModal()' }
       ]);
-      // Auto-close after 60s unless the user already dismissed it.
+      // Auto-close after 60s unless the user already dismissed it. Only hide if
+      // the daily-note card is STILL the modal on screen — otherwise the shared
+      // #global-modal-overlay may now hold an unrelated modal (e.g. a form the
+      // user opened after dismissing this note) and hiding it would destroy their
+      // in-progress input.
       setTimeout(function () {
-        try { (window.UI && UI.hideModal) && UI.hideModal(); } catch (e) {}
+        try {
+          var overlay = document.getElementById('global-modal-overlay');
+          if (overlay && overlay.querySelector('.daily-note-card') && window.UI && UI.hideModal) {
+            UI.hideModal();
+          }
+        } catch (e) {}
       }, 60000);
     } catch (e) { /* never block login on the popup */ }
   };

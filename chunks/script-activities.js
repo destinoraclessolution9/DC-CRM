@@ -352,7 +352,10 @@
     };
 
     const openActivityModal = async (prefillDate = null, prospectId = null, activity = null) => {
-        const today = new Date().toISOString().split('T')[0];
+        // Local date parts, not toISOString() (UTC) — the latter returns yesterday for
+        // Malaysia (UTC+8) between 00:00 and 08:00 local, mis-bucketing the KPI record.
+        const _td = new Date();
+        const today = `${_td.getFullYear()}-${String(_td.getMonth()+1).padStart(2,'0')}-${String(_td.getDate()).padStart(2,'0')}`;
 
         // Reset all temporary state to avoid interference between uses
         _state.sat = [];
@@ -670,8 +673,11 @@
     // with `undefined`.
     if (locationAddressEl) {
         updatedData.location_address = locationAddressEl.value || '';
-    } else if (venueVal) {
-        updatedData.location_address = venueVal;
+    } else if (document.getElementById('activity-venue')) {
+        // Mirror the venue dropdown even when it was CLEARED ('' → clear the stale
+        // mirror), otherwise the old venue resurrects from location_address on the
+        // next edit / calendar render.
+        updatedData.location_address = venueVal || '';
     }
 
     // Update entity IDs based on current _state.se
@@ -715,8 +721,8 @@
         }
     } catch (e) { console.warn('Milestone auto-mark (update) failed:', e); }
 
-    if (typeof renderCalendar === 'function') await (window.app.renderCalendar || (() => {}))();
-    if (typeof renderTodayActivities === 'function') await (window.app.renderTodayActivities || (() => {}))();
+    await (window.app.renderCalendar || (() => {}))();
+    await (window.app.renderTodayActivities || (() => {}))();
 };
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1036,7 +1042,7 @@
             ]);
             const inScope = (u) => {
                 const lvl = _getUserLevel(u);
-                if (lvl < 3 || lvl > 11) return false;          // agent band only
+                if (lvl < 3 || lvl > 12) return false;          // agent band only (L3–L12)
                 if (u.status === 'deleted') return false;
                 if (visible === 'all') return true;
                 return (visible || []).map(String).includes(String(u.id));
@@ -1816,7 +1822,10 @@
                 const dmy = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
                 if (dmy) return `${dmy[3]}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`;
                 if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
-                try { const d = new Date(str); if (!isNaN(d)) return d.toISOString().split('T')[0]; } catch { /* intentional: unparseable date string — return null below */ }
+                // Serialize from LOCAL date parts, not toISOString() (UTC) — the latter
+                // shifts a locally-parsed midnight one calendar day earlier for UTC+8 users
+                // (e.g. '1 March 2026' → 2026-02-28).
+                try { const d = new Date(str); if (!isNaN(d)) return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; } catch { /* intentional: unparseable date string — return null below */ }
                 return null;
             };
 
@@ -3061,7 +3070,7 @@
                         attendee_id: entityId,
                         attendee_type: entityType || 'prospect',
                         attendance_status: status,
-                        event_date: activityDate || new Date().toISOString().split('T')[0],
+                        event_date: activityDate || (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
                         points_awarded: 0,
                         created_at: new Date().toISOString()
                     });
@@ -3108,7 +3117,7 @@
                         attendee_id: entityId,
                         attendee_type: entityType || 'prospect',
                         attendance_status: status,
-                        event_date: activityDate || new Date().toISOString().split('T')[0],
+                        event_date: activityDate || (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
                         points_awarded: 0,
                         created_at: new Date().toISOString()
                     });
@@ -3226,7 +3235,7 @@
                     attendee_id: entityId,
                     attendee_type: entityType || 'prospect',
                     attendance_status: 'Registered',
-                    event_date: activityDate || new Date().toISOString().split('T')[0],
+                    event_date: activityDate || (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
                     points_awarded: 0,
                     created_at: new Date().toISOString()
                 });
@@ -3494,11 +3503,28 @@
         const eventId = window._addAttEventId;
         const activityId = window._addAttActivityId;
 
-        // One-time listener: after prospect is created, add as attendee
+        // One-time listener: after prospect is created, add as attendee.
+        // { once: true } auto-detaches after a real prospectCreated fires; a
+        // MutationObserver on the modal overlay detaches on the cancel path so
+        // the stale listener can't linger and hijack the NEXT prospect created
+        // anywhere in the SPA (mirrors chunks/script-referrals.js).
+        let cleanup = () => {};
         const handler = async (e) => {
-            document.removeEventListener('prospectCreated', handler);
+            cleanup();
             const prospect = e.detail;
             if (!prospect?.id || !eventId) return;
+            // Duplicate guard — don't insert the same prospect twice for this activity.
+            try {
+                const existing = await AppDataStore.query('event_attendees', { activity_id: activityId });
+                const dup = (existing || []).find(a =>
+                    String(a.entity_id || a.attendee_id) === String(prospect.id)
+                );
+                if (dup) {
+                    await app.viewActivityDetails(activityId);
+                    UI.toast.success((prospect.full_name || 'New prospect') + ' is already an attendee');
+                    return;
+                }
+            } catch (_) { /* intentional: dup-check best-effort — proceed with create on probe failure */ }
             await AppDataStore.create('event_attendees', {
                 event_id: eventId,
                 activity_id: activityId,
@@ -3516,7 +3542,20 @@
             await app.viewActivityDetails(activityId);
             UI.toast.success((prospect.full_name || 'New prospect') + ' added as attendee');
         };
-        document.addEventListener('prospectCreated', handler);
+        document.addEventListener('prospectCreated', handler, { once: true });
+
+        const overlay = document.getElementById('global-modal-overlay');
+        let observer = null;
+        cleanup = () => {
+            document.removeEventListener('prospectCreated', handler);
+            if (observer) { observer.disconnect(); observer = null; }
+        };
+        if (overlay && typeof MutationObserver !== 'undefined') {
+            observer = new MutationObserver(() => {
+                if (!overlay.classList.contains('active')) cleanup();
+            });
+            observer.observe(overlay, { attributes: true, attributeFilter: ['class'] });
+        }
 
         openProspectModal(); // opens the full Add New Prospect form
     };
@@ -3527,6 +3566,20 @@
 
         const s = window._addAttSelected;
         if (!s) { UI.toast.error('Please select a person first'); return; }
+
+        // Duplicate guard (mirrors confirmAddConsultant) — the same person must not be
+        // added as an attendee twice for this activity, which double-counts headcount.
+        try {
+            const existing = await AppDataStore.query('event_attendees', { activity_id: activityId });
+            const dup = (existing || []).find(a =>
+                String(a.entity_id || a.attendee_id) === String(s.id)
+            );
+            if (dup) {
+                UI.toast.error((s.name || s.full_name || 'This person') + ' is already an attendee');
+                return;
+            }
+        } catch (_) { /* intentional: dup-check best-effort — proceed with create on probe failure */ }
+
         await AppDataStore.create('event_attendees', {
             event_id: eventId,
             activity_id: activityId,
@@ -3553,19 +3606,30 @@
 
         if (input && resultsContainer) {
             clearTimeout(window.attendeeSearchTimeout);
+            // Race-token: only the most-recent query commits its result set, so a slow
+            // earlier response can never overwrite newer results.
+            const seq = (window._searchAttendeesSeq = (window._searchAttendeesSeq || 0) + 1);
             window.attendeeSearchTimeout = setTimeout(async () => {
                 const searchTerm = input.value.toLowerCase();
                 if (searchTerm.length < 2) {
                     resultsContainer.style.display = 'none';
                     return;
                 }
+                const rawTerm = input.value.trim();
 
                 const type = document.getElementById('modal-activity-type')?.value;
                 const isAgentRelevant = type === 'AGENT_MEETING' || type === 'AGENT_TRAINING' || type === 'EVENT';
 
                 let matches = [];
                 if (type === 'CPS' || type === 'EVENT') {
-                    const [_prospects, _customers] = await Promise.all([AppDataStore.getAll('prospects'), AppDataStore.getAll('customers')]);
+                    // Server-side indexed search (pg_trgm) instead of a full prospects +
+                    // customers getAll() filtered in memory — the old path stalled for
+                    // seconds on the nano tier and silently missed rows past the 1000-row
+                    // getAll cap. Mirrors the sibling searchAddAttendee path.
+                    const [_prospects, _customers] = await Promise.all([
+                        AppDataStore.searchProspects(rawTerm, { limit: 10, includeDormant: true }).then(r => Array.isArray(r) ? r : ((r && r.data) || [])).catch(() => []),
+                        AppDataStore.searchCustomers(rawTerm, { limit: 10 }).then(r => Array.isArray(r) ? r : ((r && r.data) || [])).catch(() => []),
+                    ]);
                     // Tag type at the SOURCE table — customers rows never carry an is_customer
                     // flag (nothing sets it), so inferring from it mislabelled every customer as
                     // 'prospect' and persisted the wrong attendee_type.
@@ -3573,12 +3637,7 @@
                         ...(_prospects || []).map(p => ({ ...p, type: 'prospect' })),
                         ...(_customers || []).map(c => ({ ...c, type: 'customer' }))
                     ];
-                    const available = all.filter(p => !_state.sat.find(a => a.id === p.id && a.type !== 'agent'));
-                    matches = available.filter(p =>
-                        (p.full_name && p.full_name.toLowerCase().includes(searchTerm)) ||
-                        (p.phone && p.phone.includes(searchTerm)) ||
-                        (p.email && p.email?.toLowerCase().includes(searchTerm))
-                    );
+                    matches = all.filter(p => !_state.sat.find(a => a.id === p.id && a.type !== 'agent'));
                 }
 
                 if (isAgentRelevant) {
@@ -3593,6 +3652,9 @@
                 }
 
                 matches = matches.slice(0, 10);
+
+                // A newer keystroke superseded this search while data loaded — drop it.
+                if (seq !== window._searchAttendeesSeq) return;
 
                 if (matches.length > 0) {
                     resultsContainer.innerHTML = matches.map(m => `
@@ -4110,8 +4172,11 @@
         if (!term || term.length < 1) { if (resultsDiv) resultsDiv.style.display = 'none'; return; }
 
         const consultants = (await AppDataStore.getAll('users')).filter(u => {
+            if (u.status === 'inactive' || u.status === 'deleted') return false;
             const lvl = getUserLevel(u);
-            return lvl >= 3 || isAgent(u) || u.role === 'team_leader' || u.role === 'consultant';
+            // Agent band only (L3–L12). `lvl >= 3` previously admitted customers (13),
+            // referrers (14), stock-take staff (15) and role-less users (99) as co-agent candidates.
+            return lvl >= 3 && lvl <= 12;
         });
         const matches = consultants.filter(u => u.full_name && u.full_name.toLowerCase().includes(term));
 
@@ -4325,9 +4390,17 @@
 
             // ── CPS logged: detect product interest and spawn pre-purchase track ──
             if (activity.activity_type === 'CPS' && activity.prospect_id) {
-                const notes    = (activity.notes || '').toLowerCase();
-                const solution = (activity.proposed_solution || activity.solution || '').toLowerCase();
-                const combined = notes + ' ' + solution;
+                // Read the fields saveActivity actually populates on the activity object.
+                // The previous version keyed off `notes` / `proposed_solution`, which
+                // saveActivity never sets — so `combined` was always empty and no
+                // cps_interest_* track ever fired.
+                const combined = [
+                    activity.summary,
+                    activity.note_key_points,
+                    activity.note_needs,
+                    activity.note_pain_points,
+                    activity.solution_sold,
+                ].filter(Boolean).join(' ').toLowerCase();
                 const INTEREST_MAP = [
                     ['cps_interest_ring',        ['个人改命','改命戒指','power ring','ring','九星']],
                     ['cps_interest_fengshui',    ['风水方案','fengshui','feng shui','风水审计','audit']],
@@ -4503,7 +4576,9 @@
             end_time: end,
             co_agents: _state.sca,
             consultants: _state.scon,
-            lead_agent_id: _state.cu ? _state.cu.id : 5,
+            // Attribute to the current user, or null when state is unavailable — never a
+            // hard-coded id 5 (that silently credited an arbitrary agent's KPI).
+            lead_agent_id: _state.cu ? _state.cu.id : null,
             venue: venueVal,
             // Mirror venue to location_address so it persists server-side (the `venue` column
             // may be missing from the Supabase schema and silently stripped on save). For
@@ -4661,8 +4736,11 @@
                 // Parity with the normal Add-Prospect path: seed CPS protection +
                 // pipeline so intake-born prospects aren't born "Expired" and stay
                 // tier-eligible for the event-invite automation (keys off cps_assignment_date).
-                cps_assignment_date: new Date().toISOString().split('T')[0],
-                protection_deadline: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+                // Local date parts, not toISOString() (UTC) — otherwise the assignment date
+                // and the 30-day protection window are stamped one calendar day early for
+                // UTC+8 users acting between 00:00 and 08:00 local (prospect born "Expired").
+                cps_assignment_date: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
+                protection_deadline: (() => { const d = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
                 pipeline_stage: 'new',
                 referred_by_id: _state.sr?.id || null,
                 referred_by_type: _state.sr?.type || null,
@@ -4679,11 +4757,13 @@
             activity.prospect_id = prospect.id;
             activity.activity_title = `CPS With ${name}`;
 
-            // Silent upload of CPS form photo (if scanned during this session).
-            // Fire-and-forget — does not block the rest of the save flow.
+            // Silent upload of CPS form photo to the prospect record (if scanned this session).
+            // Fire-and-forget — does not block the rest of the save flow. Do NOT delete the
+            // stash here: the later activities.photo_urls upload block reads _state.cppf.cps
+            // too, and consuming it now made that block dead code (photo never reached the
+            // activity). The final cleanup (after the photo_urls upload) clears it.
             if (_state.cppf?.cps) {
                 const _pendingScanFile = _state.cppf.cps;
-                delete _state.cppf.cps;
                 _uploadCpsFormFile(_pendingScanFile, prospect.id).catch(() => {});
             }
 
@@ -4740,7 +4820,9 @@
             activity.activity_title = type === 'FSA' ? 'Feng Shui Analysis' : 'Site Visit';
             if (_state.se) {
                 if (_state.se.type === 'Prospect') activity.prospect_id = _state.se.id;
-                else activity.customer_id = _state.se.id;
+                else if (_state.se.type === 'Customer') activity.customer_id = _state.se.id;
+                // 'Agent' selections are neither prospect nor customer — never write a
+                // users.id into the customer_id FK (mismatched-record / dangling-FK bug).
             }
         } else if (type === 'EVENT' || type === 'AGENT_MEETING' || type === 'AGENT_TRAINING') {
             const visibility = document.querySelector('input[name="event-visibility"]:checked')?.value || 'closed';
@@ -4808,7 +4890,8 @@
             // Link to selected entity if present
             if (_state.se) {
                 if (_state.se.type === 'Prospect') activity.prospect_id = _state.se.id;
-                else activity.customer_id = _state.se.id;
+                else if (_state.se.type === 'Customer') activity.customer_id = _state.se.id;
+                // 'Agent' selections must not be written into the customer_id FK.
             }
 
             // Attendees saved after activity is created (below) so activity_id is available
@@ -4822,7 +4905,8 @@
                 || (type === 'PERSONAL' ? 'Personal' : type === 'OTHERS' ? 'Others' : 'Meeting');
             if (_state.se) {
                 if (_state.se.type === 'Prospect') activity.prospect_id = _state.se.id;
-                else activity.customer_id = _state.se.id;
+                else if (_state.se.type === 'Customer') activity.customer_id = _state.se.id;
+                // 'Agent' selections must not be written into the customer_id FK.
             }
         }
 
@@ -5355,7 +5439,10 @@
             return;
         }
 
-        const today = new Date().toISOString().split('T')[0];
+        // Local date parts, not toISOString() (UTC) — the max attribute otherwise reads
+        // yesterday for UTC+8 users before 08:00, blocking a past-record entry for today.
+        const _td = new Date();
+        const today = `${_td.getFullYear()}-${String(_td.getMonth()+1).padStart(2,'0')}-${String(_td.getDate()).padStart(2,'0')}`;
         const modalContent = `
             <div class="activity-modal-form">
                 <p style="background:#fff8e1;border:1px solid #ffe082;color:#7a5c00;padding:10px 12px;border-radius:6px;font-size:13px;margin-bottom:14px;">

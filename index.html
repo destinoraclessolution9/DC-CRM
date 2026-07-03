@@ -79,14 +79,20 @@
          it before the parser reaches the <script> tag near </body>.
          script.js is ~2.5 MB so getting it in flight ASAP is the single
          biggest perceived-load win on first visit. -->
-    <link rel="preload" href="script.cfe7f1cedc.min.js" as="script">
-    <link rel="preload" href="data.6698d0072d.min.js" as="script">
+    <link rel="preload" href="script.7d0566b50b.min.js" as="script" fetchpriority="low">
+    <link rel="preload" href="data.5237772ace.min.js" as="script">
     <link rel="preload" href="styles-fixed.219b803ea0.min.css" as="style">
 
     <!-- Font Awesome 6.7.2 self-hosted (2026-06-05) — eliminates CDN dependency.
          Previously loaded from cdnjs.cloudflare.com/libs/font-awesome/6.0.0.
          Self-hosted: same-origin HTTP/2, no DNS+TLS round-trip, no CDN outage risk.
          Files in /libs/fontawesome/css/all.min.css + /libs/fontawesome/webfonts/*.woff2 -->
+    <!-- Preload the solid icon font: it renders the login logo mark + input/eye
+         icons (~50 fa- glyphs in the static login HTML) but FA ships
+         font-display:block, so without this the scanner only discovers it AFTER
+         all.min.css parses, leaving blank icon boxes for up to ~3s on first paint.
+         crossorigin is required even same-origin for font preloads to match. -->
+    <link rel="preload" href="/libs/fontawesome/webfonts/fa-solid-900.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="/libs/fontawesome/css/all.min.css">
     <!-- Self-hosted fonts — loaded synchronously (~12 KB CSS) so font-display:
          optional has its 100ms window. The browser already starts woff2 fetches
@@ -176,7 +182,7 @@
     <link rel="apple-touch-icon" sizes="167x167" href="icons/apple-touch-icon-167x167.png?v=2026-06-30">
     <link rel="apple-touch-icon" sizes="152x152" href="icons/apple-touch-icon-152x152.png?v=2026-06-30">
     <link rel="apple-touch-icon" sizes="120x120" href="icons/apple-touch-icon-120x120.png?v=2026-06-30">
-<script>window.__ASSET_MANIFEST={"script.min.js":"script.cfe7f1cedc.min.js","data-helpers.min.js":"data-helpers.c1b63292da.min.js","data.min.js":"data.6698d0072d.min.js","app-init.min.js":"app-init.002c5dce96.min.js","ui.min.js":"ui.1b114a3cb4.min.js","auth.min.js":"auth.c78d18f15d.min.js","supabase-init.min.js":"supabase-init.a3512eb7f8.min.js","two-factor.min.js":"two-factor.a2a69d8361.min.js","push-notifications.min.js":"push-notifications.22437589d6.min.js","chunks/script-egg.min.js":"chunks/script-egg.7197b29f72.min.js","chunks/script-boss-report.min.js":"chunks/script-boss-report.3d91bb4056.min.js","chunks/script-quarter-review.min.js":"chunks/script-quarter-review.18e5d40135.min.js","chunks/script-npo.min.js":"chunks/script-npo.83b7bc380f.min.js","chunks/script-stock-take.min.js":"chunks/script-stock-take.6809791d3c.min.js","chunks/script-knowledge.min.js":"chunks/script-knowledge.96ace40d3b.min.js","chunks/script-formula.min.js":"chunks/script-formula.cfccd0da79.min.js","chunks/script-marketing.min.js":"chunks/script-marketing.e9d4217392.min.js","chunks/script-reporting.min.js":"chunks/script-reporting.38efb59d2c.min.js","chunks/script-cases.min.js":"chunks/script-cases.5f553b4c10.min.js","chunks/script-referrals.min.js":"chunks/script-referrals.b808f4806e.min.js","chunks/script-performance.min.js":"chunks/script-performance.85d7eeed36.min.js","chunks/script-whatsapp.min.js":"chunks/script-whatsapp.bd5cca1283.min.js","chunks/script-ai.min.js":"chunks/script-ai.c94903208e.min.js","chunks/script-documents.min.js":"chunks/script-documents.8f5b9d9fd4.min.js","chunks/script-mobile.min.js":"chunks/script-mobile.2129dddb69.min.js","chunks/script-gcal.min.js":"chunks/script-gcal.0b1de9864f.min.js","chunks/script-forms.min.js":"chunks/script-forms.bdd98d5835.min.js","chunks/script-activities.min.js":"chunks/script-activities.c4fa7c6d86.min.js","chunks/script-calendar.min.js":"chunks/script-calendar.b5815bc3b7.min.js","chunks/script-prospects.min.js":"chunks/script-prospects.78322b1576.min.js","chunks/script-customers.min.js":"chunks/script-customers.da019313be.min.js","chunks/script-agents.min.js":"chunks/script-agents.5d4775d39c.min.js","chunks/script-approvals.min.js":"chunks/script-approvals.833bfb3ba1.min.js","chunks/script-settings.min.js":"chunks/script-settings.0a0aa55361.min.js","chunks/script-pipeline.min.js":"chunks/script-pipeline.92d708952a.min.js","chunks/script-import.min.js":"chunks/script-import.4281b66146.min.js","chunks/script-features2.min.js":"chunks/script-features2.665c8e6e0d.min.js","chunks/script-fude.min.js":"chunks/script-fude.f8cbe47f5a.min.js","chunks/script-cps.min.js":"chunks/script-cps.2676e48ec0.min.js","chunks/script-admin.min.js":"chunks/script-admin.0f462c0df9.min.js","chunks/script-org.min.js":"chunks/script-org.1c90ea963b.min.js","chunks/script-search.min.js":"chunks/script-search.f50a6f98cf.min.js","chunks/script-order-form-extract.min.js":"chunks/script-order-form-extract.9a6781ef55.min.js","chunks/script-journey.min.js":"chunks/script-journey.9daae30d97.min.js","chunks/script-daily-note.min.js":"chunks/script-daily-note.4d2c290d32.min.js","styles-fixed.min.css":"styles-fixed.219b803ea0.min.css","styles-mobile.min.css":"styles-mobile.5c2e7e65a7.min.css","styles-login-v2.min.css":"styles-login-v2.99b6c591a9.min.css","styles-theme.min.css":"styles-theme.1bd7b82c27.min.css"};window.__SENTRY_DSN="";window.__APP_RELEASE="";</script>
+<script>window.__ASSET_MANIFEST={"script.min.js":"script.7d0566b50b.min.js","data-helpers.min.js":"data-helpers.a365fd454a.min.js","data.min.js":"data.5237772ace.min.js","app-init.min.js":"app-init.3bd867f901.min.js","ui.min.js":"ui.02b4396a8f.min.js","auth.min.js":"auth.c78d18f15d.min.js","supabase-init.min.js":"supabase-init.a3512eb7f8.min.js","two-factor.min.js":"two-factor.e5c8ee97a8.min.js","push-notifications.min.js":"push-notifications.7b01745ecf.min.js","chunks/script-egg.min.js":"chunks/script-egg.55842e2a10.min.js","chunks/script-boss-report.min.js":"chunks/script-boss-report.5e1481a000.min.js","chunks/script-quarter-review.min.js":"chunks/script-quarter-review.b215ad2abb.min.js","chunks/script-npo.min.js":"chunks/script-npo.8418a098ab.min.js","chunks/script-stock-take.min.js":"chunks/script-stock-take.59ccc98ab1.min.js","chunks/script-knowledge.min.js":"chunks/script-knowledge.46423789a2.min.js","chunks/script-formula.min.js":"chunks/script-formula.261cb310d1.min.js","chunks/script-marketing.min.js":"chunks/script-marketing.1008688c98.min.js","chunks/script-reporting.min.js":"chunks/script-reporting.a024a08fee.min.js","chunks/script-cases.min.js":"chunks/script-cases.972a990119.min.js","chunks/script-referrals.min.js":"chunks/script-referrals.2fb955b77a.min.js","chunks/script-performance.min.js":"chunks/script-performance.fb83f025e3.min.js","chunks/script-whatsapp.min.js":"chunks/script-whatsapp.3a82e707a1.min.js","chunks/script-ai.min.js":"chunks/script-ai.5e86f3eb1b.min.js","chunks/script-documents.min.js":"chunks/script-documents.abb02c8148.min.js","chunks/script-mobile.min.js":"chunks/script-mobile.97305e36ae.min.js","chunks/script-gcal.min.js":"chunks/script-gcal.2d34f6e5c1.min.js","chunks/script-forms.min.js":"chunks/script-forms.f0568f6375.min.js","chunks/script-activities.min.js":"chunks/script-activities.acc1c98aa9.min.js","chunks/script-calendar.min.js":"chunks/script-calendar.f8a8545b7a.min.js","chunks/script-prospects.min.js":"chunks/script-prospects.0d290b96e9.min.js","chunks/script-customers.min.js":"chunks/script-customers.e119c9a06e.min.js","chunks/script-agents.min.js":"chunks/script-agents.0beffdd17d.min.js","chunks/script-approvals.min.js":"chunks/script-approvals.bf3df4613d.min.js","chunks/script-settings.min.js":"chunks/script-settings.fe7a97adea.min.js","chunks/script-pipeline.min.js":"chunks/script-pipeline.92ec188bc6.min.js","chunks/script-import.min.js":"chunks/script-import.eee9164a84.min.js","chunks/script-features2.min.js":"chunks/script-features2.21bcf8e5df.min.js","chunks/script-fude.min.js":"chunks/script-fude.c00522c961.min.js","chunks/script-cps.min.js":"chunks/script-cps.13fcb18ec8.min.js","chunks/script-admin.min.js":"chunks/script-admin.014058de04.min.js","chunks/script-org.min.js":"chunks/script-org.1c90ea963b.min.js","chunks/script-search.min.js":"chunks/script-search.63c934fb03.min.js","chunks/script-order-form-extract.min.js":"chunks/script-order-form-extract.d3acd5922f.min.js","chunks/script-journey.min.js":"chunks/script-journey.dde6e4d364.min.js","chunks/script-daily-note.min.js":"chunks/script-daily-note.f0338e3a72.min.js","styles-fixed.min.css":"styles-fixed.219b803ea0.min.css","styles-mobile.min.css":"styles-mobile.5c2e7e65a7.min.css","styles-login-v2.min.css":"styles-login-v2.99b6c591a9.min.css","styles-theme.min.css":"styles-theme.1bd7b82c27.min.css"};window.__SENTRY_DSN="";window.__APP_RELEASE="";</script>
 </head>
 
 <body>
@@ -641,16 +647,22 @@
     <!-- data-helpers.js: pure data-layer classifiers (queue-error/schema/abort/snapshot)
          extracted from data.js for separation + independent testability. Loads before data.js.
          (build.mjs hashes this ref; rewriteHtml resolves the content-hashed name.) -->
-    <script defer src="data-helpers.c1b63292da.min.js"></script>
-    <script defer src="data.6698d0072d.min.js"></script>
+    <script defer src="data-helpers.a365fd454a.min.js"></script>
+    <script defer src="data.5237772ace.min.js"></script>
     <script defer src="auth.c78d18f15d.min.js"></script>
-    <script defer src="ui.1b114a3cb4.min.js"></script>
+    <script defer src="ui.02b4396a8f.min.js"></script>
+    <!-- two-factor.js MUST load before script.7d0566b50b.min.js: script.js's Object.assign(app,{…})
+         eagerly evaluates `typeof showTwoFactorSetup !== 'undefined' ? … : stub` at load
+         time, so if 2FA's globals don't exist yet all six app.* 2FA bindings bake as
+         "not available" stubs. It only defines functions at load (no dependency on
+         script.js/app), so running it here is safe. -->
+    <script defer src="two-factor.e5c8ee97a8.min.js"></script>
     <script defer src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" integrity="sha512-dfX5uYVXzyU8+KHqj8bjo7UkOdg18PaOtpa48djpNbZHwExddghZ+ZmzWT06R5v6NSk3ZUfsH6FNEDepLx9hPQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <!-- fetchpriority="low" lets the browser paint the login form (already in HTML)
          before spending bandwidth on the 2.1 MB app bundle. defer already prevents
          parser-blocking; low fetchpriority additionally pushes the download below
          CSS + fonts in the network queue so FCP happens sooner. -->
-    <script defer fetchpriority="low" src="script.cfe7f1cedc.min.js"></script>
+    <script defer fetchpriority="low" src="script.7d0566b50b.min.js"></script>
 
     <!--
       The following libraries are loaded on-demand via window._loadScriptOnce()
@@ -666,12 +678,11 @@
          start in parallel with the HTML parse (see top of file). -->
 
 
-    <script defer src="push-notifications.22437589d6.min.js"></script>
-    <script defer src="two-factor.a2a69d8361.min.js"></script>
+    <script defer src="push-notifications.7b01745ecf.min.js"></script>
 
     <!-- SW registration moved to sw-init.js (#15) -->
   
-    <script defer src="app-init.002c5dce96.min.js"></script>
+    <script defer src="app-init.3bd867f901.min.js"></script>
 
     <!-- Phase 4.0 (#13): React island beachhead. An inert, hidden mount point +
          a self-contained Vite/React bundle (React 19 inlined). Renders nothing
@@ -704,7 +715,7 @@
                 // __ASSET_MANIFEST (or sw.js to treat it network-first); until then the
                 // ?v= MUST still be bumped on every src/react change.
                 var manifest = window.__ASSET_MANIFEST || {};
-                s.src = manifest['react-dist/react-island.js'] || 'react-dist/react-island.js?v=2026-06-28-1';
+                s.src = manifest['react-dist/react-island.js'] || 'react-dist/react-island.js?v=2026-07-03-1';
                 document.head.appendChild(s);
             } catch (e) {}
         })();

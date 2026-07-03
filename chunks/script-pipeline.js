@@ -161,7 +161,10 @@ const savePipelineConfigJson = async (newConfig, note = '') => {
         updated_at: new Date().toISOString(),
         updated_by: _state.cu?.id || null,
     };
-    // 1. Write current config
+    // 1. Write current config. Do NOT swallow the primary write failure (audit #2):
+    // if this rejects (RLS deny / offline / expired session), the config was never
+    // persisted — rethrow so callers can surface an error instead of toasting success
+    // and caching an unsaved config that silently loses the edit on next reload.
     try {
         const existing = await AppDataStore.query('pipeline_config', { id: 1 });
         const payload = { id: 1, config_json: newConfig, updated_by: newConfig.updated_by, updated_at: newConfig.updated_at };
@@ -172,6 +175,7 @@ const savePipelineConfigJson = async (newConfig, note = '') => {
         }
     } catch (e) {
         console.warn('savePipelineConfigJson: primary write failed', e);
+        throw e;
     }
     // 2. Append to history
     try {
@@ -605,6 +609,10 @@ const generatePipelineAction = (category, daysSinceLast, isQualified, referralIn
 const _huijiMigrationRan = { flag: false };
 const runHuiJiMigration = async () => {
     if (_huijiMigrationRan.flag) return;
+    // Only Super Admin can actually write the rename (audit #13): RLS rejects non-admin
+    // updates, so every non-admin session was downloading + regex-scanning the whole
+    // activities + events tables for nothing. Gate the scan to admins to stop the waste.
+    if (!isSystemAdmin(_state.cu)) return;
     _huijiMigrationRan.flag = true;
     const textFields = ['activity_title', 'summary', 'discussion_summary', 'note_key_points', 'note_outcome', 'note_next_steps'];
     try {
@@ -785,7 +793,9 @@ const _reactPipelineJsxOn = () => {
 // functions above are left untouched and still drive the flag-off by-id fill.
 const _plProbMeta = (prob) => ({
     prob,
-    color: prob >= 80 ? '#DC2626' : prob >= 60 ? '#F59E0B' : '#6B7280',
+    // Color band must match the label band (audit #14): WARM is prob >= 50, so amber
+    // must start at >= 50 too — otherwise 50-59% shows a WARM label in grey COLD color.
+    color: prob >= 80 ? '#DC2626' : prob >= 50 ? '#F59E0B' : '#6B7280',
     label: prob >= 80 ? '🔥 HOT' : prob >= 50 ? '⚡ WARM' : '❄️ COLD',
 });
 
@@ -880,7 +890,8 @@ const _buildArchiveRowData = async (arc, idx) => {
         name: prospect ? (prospect.name || prospect.full_name || '') : 'Unknown',
         target: arc.target_product || '',
         amount: arc.amount != null ? Number(arc.amount) : null,
-        prob: { prob, color: prob >= 80 ? '#DC2626' : prob >= 60 ? '#F59E0B' : '#6B7280', label: prob >= 80 ? 'HOT' : prob >= 50 ? 'WARM' : 'COLD' },
+        // Color band matches label band (audit #14): WARM starts at prob >= 50.
+        prob: { prob, color: prob >= 80 ? '#DC2626' : prob >= 50 ? '#F59E0B' : '#6B7280', label: prob >= 80 ? 'HOT' : prob >= 50 ? 'WARM' : 'COLD' },
         action: arc.action_needed || '',
     };
 };
@@ -910,7 +921,11 @@ const buildPipelineIslandData = async () => {
     if (_pipelineStatusFilter !== 'all') prospects = prospects.filter(p => p.status === _pipelineStatusFilter);
     const activeProspects = prospects.filter(p => p.status !== 'converted' && p.status !== 'lost' && !p.unable_to_serve);
 
-    const _focusCurrentMonth = new Date().toISOString().slice(0, 7);
+    // Local month (audit #10): use local Y-M so the expiry comparison + action-plan
+    // month key match addToFocusList's local stamp — a UTC slice rolls back to the
+    // previous month before 08:00 MYT and would flag brand-new items as expired.
+    const _fcmNow = new Date();
+    const _focusCurrentMonth = `${_fcmNow.getFullYear()}-${String(_fcmNow.getMonth() + 1).padStart(2, '0')}`;
     const _focusMonthLabel = new Date().toLocaleString('default', { month: 'long', year: 'numeric' });
     const _apCurrentMonth = _focusCurrentMonth + '-01';
 
@@ -937,7 +952,9 @@ const buildPipelineIslandData = async () => {
             const _diff = (_today.getDay() === 0 ? 6 : _today.getDay() - 1);
             const _monday = new Date(_today);
             _monday.setDate(_today.getDate() - _diff);
-            const _mondayStr = _monday.toISOString().slice(0, 10);
+            // Local date parts (audit #8/#9): toISOString() is UTC, so before 08:00 MYT
+            // it rolls the local Monday back to Sunday, splitting the week's check_date key.
+            const _mondayStr = `${_monday.getFullYear()}-${String(_monday.getMonth() + 1).padStart(2, '0')}-${String(_monday.getDate()).padStart(2, '0')}`;
             [_apItems, _apChecks] = await Promise.all([
                 AppDataStore.query('action_plan_items', { plan_id: _activePlan.id }),
                 AppDataStore.query('action_plan_checks', { plan_id: _activePlan.id, check_date: _mondayStr }),
@@ -1327,20 +1344,32 @@ const showPipelineView = async (container) => {
         // useEffect on the JSX path; the scaffold path fires it from its useEffect).
         const _plOnReady = () => { clearTimeout(_plGuard); _plReady(); };
 
+        let _mountFailed = false;
         try {
             window.CRMReact.mountPipeline(document.getElementById('pl-react-root'), { data: _plData, onReady: _plOnReady });
         } catch (e) {
             console.warn('[pipeline] island mount failed, falling back to legacy:', e && e.message);
             clearTimeout(_plGuard); _plReady();
+            _mountFailed = true;
         }
         await _plReadyP;
-        // JSX path: PipelineFullJsx already rendered EVERY section (header / action
-        // plan / focus / system table / team sections) from buildPipelineIslandData()
-        // using the same #pl-* ids. STEP-2+ below would re-query and innerHTML-clobber
-        // those React-owned nodes (torn DOM). Skip the whole by-id fill on the JSX
-        // path (also avoids the redundant second data load). The scaffold path
-        // (_plData undefined) falls through and fills the skeleton exactly as today.
-        if (_plData) return;
+        // Real legacy fallback on mount failure (audit #7): the container holds only an
+        // empty <div id="pl-react-root"> — the JSX path early-return below would leave a
+        // permanently blank page, and the scaffold-path by-id fills would find no
+        // #pl-header-controls / #pl-action-plan / #pipeline-list-body targets (they were
+        // never painted). Paint the legacy skeleton now so STEP 2+ can fill it, and do
+        // NOT early-return even when _plData was built.
+        if (_mountFailed) {
+            container.innerHTML = buildPipelineSkeletonHtml({ _skelRows, _skelCard });
+        } else if (_plData) {
+            // JSX path: PipelineFullJsx already rendered EVERY section (header / action
+            // plan / focus / system table / team sections) from buildPipelineIslandData()
+            // using the same #pl-* ids. STEP-2+ below would re-query and innerHTML-clobber
+            // those React-owned nodes (torn DOM). Skip the whole by-id fill on the JSX
+            // path (also avoids the redundant second data load). The scaffold path
+            // (_plData undefined) falls through and fills the skeleton exactly as today.
+            return;
+        }
     } else {
     container.innerHTML = buildPipelineSkeletonHtml({ _skelRows, _skelCard });
     }
@@ -1380,7 +1409,11 @@ const showPipelineView = async (container) => {
     const activeProspects = prospects.filter(p => p.status !== 'converted' && p.status !== 'lost' && !p.unable_to_serve);
 
     // ── STEP 3: Fast queries (action plan + archive + focus) in parallel ──
-    const _focusCurrentMonth = new Date().toISOString().slice(0, 7);
+    // Local month (audit #10): use local Y-M so the expiry comparison + action-plan
+    // month key match addToFocusList's local stamp — a UTC slice rolls back to the
+    // previous month before 08:00 MYT and would flag brand-new items as expired.
+    const _fcmNow = new Date();
+    const _focusCurrentMonth = `${_fcmNow.getFullYear()}-${String(_fcmNow.getMonth() + 1).padStart(2, '0')}`;
     const _focusMonthLabel = new Date().toLocaleString('default', { month: 'long', year: 'numeric' });
     const _apCurrentMonth = _focusCurrentMonth + '-01';
     const _apMonthLabel = _focusMonthLabel;
@@ -1422,7 +1455,8 @@ const showPipelineView = async (container) => {
             const _diff = (_today.getDay() === 0 ? 6 : _today.getDay() - 1);
             const _monday = new Date(_today);
             _monday.setDate(_today.getDate() - _diff);
-            const _mondayStr = _monday.toISOString().slice(0,10);
+            // Local date parts (audit #8/#9): avoid the UTC toISOString() Sunday-rollback before 08:00 MYT.
+            const _mondayStr = `${_monday.getFullYear()}-${String(_monday.getMonth() + 1).padStart(2, '0')}-${String(_monday.getDate()).padStart(2, '0')}`;
             [_apItems, _apChecks] = await Promise.all([
                 AppDataStore.query('action_plan_items', { plan_id: _activePlan.id }),
                 AppDataStore.query('action_plan_checks', { plan_id: _activePlan.id, check_date: _mondayStr }),
@@ -1805,7 +1839,12 @@ const saveActionPlan = async (planId) => {
     let plan;
     if (planId) {
         plan = await AppDataStore.getById('action_plans', planId);
-        await AppDataStore.update('action_plans', planId, { main_target: mainTarget, updated_at: new Date().toISOString() });
+        // Null guard (audit #15): the plan row may have been deleted in another session
+        // between opening the modal and saving — guard before dereferencing plan.id.
+        if (!plan) { UI.toast.error('Action plan no longer exists. Please reopen.'); return; }
+        // Persist the edited month too (audit #15): the modal exposes #plan-month, so a
+        // changed month must be written — not silently dropped.
+        await AppDataStore.update('action_plans', planId, { main_target: mainTarget, month_year: monthDate, updated_at: new Date().toISOString() });
         plan.id = planId;
     } else {
         const existing = await AppDataStore.query('action_plans', { user_id: currentUser.id, month_year: monthDate });
@@ -1879,7 +1918,9 @@ const updatePlanCheck = async (planId, itemId, isDone) => {
     const diffToMonday = (day === 0 ? 6 : day - 1);
     const lastMonday = new Date(today);
     lastMonday.setDate(today.getDate() - diffToMonday);
-    const mondayStr = lastMonday.toISOString().slice(0,10);
+    // Local date parts (audit #8/#9): toISOString() is UTC and rolls the local Monday
+    // back to Sunday before 08:00 MYT, splitting/duplicating the weekly check_date key.
+    const mondayStr = `${lastMonday.getFullYear()}-${String(lastMonday.getMonth() + 1).padStart(2, '0')}-${String(lastMonday.getDate()).padStart(2, '0')}`;
 
     const existing = await AppDataStore.query('action_plan_checks', { plan_id: planId, check_date: mondayStr, item_id: itemId });
     if (existing.length) {
@@ -1899,7 +1940,10 @@ const updatePlanCheck = async (planId, itemId, isDone) => {
 
 const sendPlanReminder = async () => {
     const currentUser = _state.cu;
-    const currentMonth = new Date().toISOString().slice(0,7) + '-01';
+    // Local month (audit #9): toISOString() UTC month rolls back to the previous month
+    // on the 1st before 08:00 MYT, loading last month's plan.
+    const _now = new Date();
+    const currentMonth = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}-01`;
     const planList = await AppDataStore.query('action_plans', { user_id: currentUser.id, month_year: currentMonth });
     const plan = planList[0];
     if (!plan) {
@@ -1912,7 +1956,8 @@ const sendPlanReminder = async () => {
     const diffToMonday = (day === 0 ? 6 : day - 1);
     const lastMonday = new Date(today);
     lastMonday.setDate(today.getDate() - diffToMonday);
-    const mondayStr = lastMonday.toISOString().slice(0,10);
+    // Local date parts (audit #8/#9): avoid the UTC Sunday-rollback before 08:00 MYT.
+    const mondayStr = `${lastMonday.getFullYear()}-${String(lastMonday.getMonth() + 1).padStart(2, '0')}-${String(lastMonday.getDate()).padStart(2, '0')}`;
     const checks = await AppDataStore.query('action_plan_checks', { plan_id: plan.id, check_date: mondayStr });
     const pendingItems = items.filter(item => !checks.some(c => c.item_id === item.id && c.is_done));
     if (pendingItems.length === 0) {
@@ -2071,7 +2116,11 @@ const resetFocusField = async (recId, field) => {
 
 const addToFocusList = async (prospectId) => {
     const userId = _state.cu?.id || 5;
-    const currentMonth = new Date().toISOString().slice(0, 7);
+    // Local month (audit #10): toISOString() UTC month rolls back to the previous month
+    // on the 1st before 08:00 MYT — a fresh item would then be stamped last month and
+    // auto-archived the same day. Use local Y-M so it matches _focusCurrentMonth.
+    const _now = new Date();
+    const currentMonth = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}`;
     // Scope the list to the CURRENT focus_month (audit L2012): querying by user_id alone
     // returns items from all months, so priority_order = (cross-month count)+1 would
     // collide with / skip the per-month ordering the focus list is rendered/sorted by.
@@ -2449,7 +2498,13 @@ const savePipelineRules = async () => {
     }
     const draft = _readPipelineDraftFromDom();
     if (!draft) return;
-    await savePipelineConfigJson(draft, 'Super Admin edit');
+    // Only report success / close the modal if the write actually persisted (audit #2).
+    try {
+        await savePipelineConfigJson(draft, 'Super Admin edit');
+    } catch (e) {
+        UI.toast.error('Could not save pipeline rules. Please retry.');
+        return;
+    }
     UI.toast.success('Pipeline rules saved');
     UI.hideModal();
     const container = document.getElementById('content-viewport');
@@ -2506,6 +2561,7 @@ const deletePipelineBooster = (i) => {
 
 // Quick-edit the 代理配套 monthly amount
 const setAgentPackageAmount = async () => {
+    if (!isSystemAdmin(_state.cu)) { UI.toast.error('Super Admin only'); return; }
     const cfg = await loadPipelineConfig();
     const cat = (cfg.categories || []).find(c => c.id === 'agent_package');
     if (!cat) {
@@ -2523,7 +2579,13 @@ const setAgentPackageAmount = async () => {
         if (isNaN(n)) { UI.toast.error('Invalid number'); return; }
         cat.default_amount = n;
     }
-    await savePipelineConfigJson(cfg, `Set agent_package amount to ${cat.default_amount}`);
+    // Only report success if the write actually persisted (audit #2).
+    try {
+        await savePipelineConfigJson(cfg, `Set agent_package amount to ${cat.default_amount}`);
+    } catch (e) {
+        UI.toast.error('Could not save. Please retry.');
+        return;
+    }
     UI.toast.success('Updated');
     const container = document.getElementById('content-viewport');
     if (container) await showPipelineView(container);
@@ -2708,13 +2770,18 @@ const showComments = async (prospectId) => {
                         <div style="font-size:11px;color:#6B7280;">${new Date(n.created_at).toLocaleString()}</div>
                         <div style="margin-top:2px;">${escapeHtml(n.content || '')}</div>
                     </div>`).join('')}
-                ${activities.map(a => `
+                ${activities.map(a => {
+                    // Activities have NO `notes` column (audit #11) — the real content lives in
+                    // summary / discussion_summary / note_* fields. Pull the first non-empty one.
+                    const _body = a.summary || a.discussion_summary || a.note_outcome || a.note_next_steps || a.note_key_points || a.activity_title || '';
+                    return `
                     <div style="border-left:2px solid #10B981;padding-left:12px;margin-bottom:14px;position:relative;">
                         <div style="position:absolute;left:-5px;top:0;width:8px;height:8px;border-radius:50%;background:#10B981;"></div>
                         <div style="font-size:11px;color:#6B7280;">${new Date(a.activity_date).toLocaleString()}</div>
                         <div style="font-weight:600;">Activity: ${escapeHtml(a.activity_type || '')}</div>
-                        <div style="margin-top:2px;font-size:12px;">${escapeHtml(a.notes || 'No notes provided.')}</div>
-                    </div>`).join('')}
+                        <div style="margin-top:2px;font-size:12px;">${escapeHtml(_body || 'No notes provided.')}</div>
+                    </div>`;
+                }).join('')}
                 ${notes.length === 0 && activities.length === 0 ? '<p style="text-align:center;color:#9CA3AF;padding:20px;">No comments or activities found.</p>' : ''}
             </div>
         </div>`;
@@ -3044,7 +3111,14 @@ const handleDrop = async (e, targetId) => {
     if (_draggedId === targetId) return;
 
     const userId = _state.cu?.id || 5;
-    const list = (await AppDataStore.query('my_potential_list', { user_id: userId }))
+    const allItems = await AppDataStore.query('my_potential_list', { user_id: userId });
+    // Scope re-ranking to the dragged item's focus_month (audit #16): mirroring
+    // removeFromFocusList, renumbering across ALL months would interleave + globally
+    // renumber other months (e.g. un-archived leftovers), scrambling their order.
+    const _dragged = allItems.find(i => i.id === _draggedId);
+    const _dragMonth = _dragged ? _dragged.focus_month : undefined;
+    const list = allItems
+        .filter(i => i.focus_month === _dragMonth)
         .sort((a, b) => a.priority_order - b.priority_order);
 
     const draggedIndex = list.findIndex(i => i.id === _draggedId);
@@ -3088,7 +3162,8 @@ const renderArchiveFocusRow = async (arc, idx) => {
     const name = prospect ? escapeHtml(prospect.name || prospect.full_name || '') : 'Unknown';
     const amountHtml = arc.amount != null ? `RM ${Number(arc.amount).toLocaleString()}` : 'N/A';
     const prob = parseInt(arc.probability || 0);
-    const color = prob >= 80 ? '#DC2626' : prob >= 60 ? '#F59E0B' : '#6B7280';
+    // Color band matches label band (audit #14): WARM starts at prob >= 50.
+    const color = prob >= 80 ? '#DC2626' : prob >= 50 ? '#F59E0B' : '#6B7280';
     const label = prob >= 80 ? 'HOT' : prob >= 50 ? 'WARM' : 'COLD';
     return `<tr style="border-bottom:1px solid #F3F4F6;background:#FAFAFA;">
         <td style="padding:14px 12px;"><span style="font-weight:700;color:#6B7280;">${idx + 1}</span></td>
@@ -3186,11 +3261,25 @@ const openExpiredSearchModal = async () => {
     }
     if (!archiveHtml) archiveHtml = '<p style="color:#9CA3AF;text-align:center;padding:24px;"><i class="fas fa-archive" style="font-size:24px;display:block;margin-bottom:8px;"></i>No archived focus items yet.</p>';
 
-    // Build available prospects (expired pipeline) rows
+    // Build available prospects (expired pipeline) rows.
+    // Prefetch relational tables ONCE (audit #12) so calcPipelineEntry's
+    // checkReferralBonus uses the in-memory buckets instead of firing 1-3 sequential
+    // referral/customer/purchase queries PER prospect (N+1). Mirrors showPipelineView.
+    const [_esAllReferrals, _esAllPurchases, _esAllSolutions] = await Promise.all([
+        AppDataStore.getAll('referrals').catch(() => []),
+        AppDataStore.getAll('purchases').catch(() => []),
+        AppDataStore.getAll('proposed_solutions').catch(() => []),
+    ]);
+    const _esPrefetched = {
+        allReferrals: _esAllReferrals, allPurchases: _esAllPurchases, allSolutions: _esAllSolutions,
+        referralsByProspect: _bucketByStringKey(_esAllReferrals, 'referred_prospect_id'),
+        purchasesByCustomer: _bucketByStringKey(_esAllPurchases, 'customer_id'),
+        solutionsByProspect: _bucketByStringKey(_esAllSolutions, 'prospect_id'),
+    };
     let availRows = '';
     for (const p of availableProspects.slice(0, 50)) {
         const pActs = _actsByProspect.get(p.id) || [];
-        const pEntry = await calcPipelineEntry(p, pActs);
+        const pEntry = await calcPipelineEntry(p, pActs, _esPrefetched);
         const lastDate = pEntry.lastActivityDate ? pEntry.lastActivityDate.toLocaleDateString('en-GB') : 'None';
         availRows += `<tr style="border-bottom:1px solid #F3F4F6;">
             <td style="padding:8px 10px;">${escapeHtml(p.name || p.full_name || '')}</td>
@@ -3247,7 +3336,10 @@ const switchExpiredTab = (tab, btn) => {
 
 const filterExpiredSearch = (query) => {
     const q = query.toLowerCase();
-    document.querySelectorAll('#expired-archive-tab tr:not(:first-child), #expired-pipeline-body tr').forEach(row => {
+    // Audit #17: the previous `:not(:first-child)` exempted the FIRST data row of every
+    // tbody from filtering; thead rows are already skipped by the closest('thead') guard,
+    // so that clause was purely harmful. Match all rows and let the guard handle headers.
+    document.querySelectorAll('#expired-archive-tab tr, #expired-pipeline-body tr').forEach(row => {
         if (row.closest('thead')) return;
         const text = row.textContent.toLowerCase();
         row.style.display = text.includes(q) ? '' : 'none';
@@ -3391,16 +3483,19 @@ const submitBoost = async () => {
         return;
     }
 
-    const manualList = (await AppDataStore.query('my_potential_list', { user_id: _state.cu?.id || 5 }))
+    const _allManual = (await AppDataStore.query('my_potential_list', { user_id: _state.cu?.id || 5 }))
         .sort((a, b) => a.priority_order - b.priority_order);
 
     // Match with == / String() coercion to tolerate prospect_id type drift (some rows
     // store it as a string while parseInt above yields a number).
-    const currentItem = manualList.find(i => String(i.prospect_id) === String(prospectId));
+    const currentItem = _allManual.find(i => String(i.prospect_id) === String(prospectId));
     // Null guard (audit L3271): find() returns undefined if the list changed between
     // modal-open and submit (item removed, month rolled over, RLS empty-read) — reading
     // currentItem.priority_order would throw and abort the boost with no feedback.
     if (!currentItem) { UI.toast.error('Prospect not in your priority list'); return; }
+    // Scope the re-rank to the boosted item's focus_month (audit #16): renumbering
+    // across ALL months would shift other months' rows, scrambling their order.
+    const manualList = _allManual.filter(i => i.focus_month === currentItem.focus_month);
     const oldRank = currentItem.priority_order;
 
     // Move to Rank 1 (priority_order = 1), shift others down. Guard the sequential

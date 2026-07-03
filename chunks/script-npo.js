@@ -544,28 +544,40 @@
             return isNaN(v) ? null : v;
         };
         try {
-            // Inserts + updates for currently-checked products.
+            // Split the currently-checked products into brand-new inserts vs.
+            // existing links whose redeem value changed, so each class collapses
+            // into as few round-trips as possible instead of one await per product.
+            const insertRows = [];
+            const updateRows = []; // { id, redeem }
             for (const pid of checked) {
                 const redeem = redeemFor(pid);
                 const row = existingByProduct.get(pid);
                 if (!row) {
                     // RAW insert WITHOUT id (GENERATED ALWAYS).
-                    const { error } = await sb.from('npo_plan_products').insert({
-                        plan_id: planId, product_id: pid, default_redeem_after_months: redeem
-                    }).select().single();
-                    if (error) throw error;
+                    insertRows.push({ plan_id: planId, product_id: pid, default_redeem_after_months: redeem });
                 } else if ((row.default_redeem_after_months ?? null) !== redeem) {
-                    const { error } = await sb.from('npo_plan_products')
-                        .update({ default_redeem_after_months: redeem }).eq('id', row.id);
-                    if (error) throw error;
+                    updateRows.push({ id: row.id, redeem });
                 }
             }
             // Deletes for previously-linked products that are now unchecked.
-            for (const row of existing) {
-                if (!checkedSet.has(row.product_id)) {
-                    const { error } = await sb.from('npo_plan_products').delete().eq('id', row.id);
-                    if (error) throw error;
-                }
+            const deleteIds = existing.filter(row => !checkedSet.has(row.product_id)).map(row => row.id);
+
+            // One array insert for all new links (PostgREST accepts arrays).
+            if (insertRows.length) {
+                const { error } = await sb.from('npo_plan_products').insert(insertRows).select();
+                if (error) throw error;
+            }
+            // Per-row updates (different id + value each) run in parallel, not serially.
+            if (updateRows.length) {
+                const results = await Promise.all(updateRows.map(u =>
+                    sb.from('npo_plan_products').update({ default_redeem_after_months: u.redeem }).eq('id', u.id)));
+                const bad = results.find(r => r && r.error);
+                if (bad) throw bad.error;
+            }
+            // One batched delete for all unchecked links.
+            if (deleteIds.length) {
+                const { error } = await sb.from('npo_plan_products').delete().in('id', deleteIds);
+                if (error) throw error;
             }
             try { AppDataStore.invalidateCache && AppDataStore.invalidateCache('npo_plan_products'); } catch (_) {}
             UI.toast.success('Eligible products saved');
@@ -726,7 +738,7 @@
         box.innerHTML = results.map(c => {
             const nm = (c.full_name || c.nickname || ('Customer #' + c.id));
             const sub = [c.phone, c.email].filter(Boolean).join(' · ');
-            return `<div style="padding:8px;cursor:pointer;border-bottom:1px solid var(--gray-100);" onclick="app.npoPickCustomer(${c.id}, '${escapeHtml(String(nm)).replace(/'/g, "\\'")}')">
+            return `<div style="padding:8px;cursor:pointer;border-bottom:1px solid var(--gray-100);" onclick="app.npoPickCustomer(${c.id}, '${UI.escJsAttr(String(nm))}')">
                 <strong>${escapeHtml(nm)}</strong>${sub ? `<span style="color:var(--gray-500);font-size:12px;"> — ${escapeHtml(sub)}</span>` : ''}
             </div>`;
         }).join('');
@@ -996,6 +1008,11 @@
         const start_date = _str('npo-start-date') || _date();
         const uid = (_state.cu && _state.cu.id) || null;
 
+        // Tracks the npo_sales row id once step 1 succeeds so the catch below can
+        // compensate (delete the orphaned sale + any items) if step 2 or 3 fails.
+        // Not a transaction, but it prevents an orphan sale surviving a mid-sequence
+        // failure and stops a retry from stacking duplicate/empty-shell orders.
+        let savedSaleId = null;
         try {
             // 1) the sale. RAW insert WITHOUT id (GENERATED ALWAYS). customer_name is
             //    a first-class column now (migrations/npo_feature_2026-06-24.sql) and
@@ -1011,6 +1028,7 @@
             if (saleErr) throw saleErr;
             const saleId = saleRow && saleRow.id;
             if (saleId == null) throw new Error('Sale insert returned no id');
+            savedSaleId = saleId;
 
             // 2) one item row per cart line.
             const itemRows = lines.map(l => ({ sale_id: saleId, ...l, delivery_status: 'pending' }));
@@ -1046,6 +1064,17 @@
             UI.toast.success('NPO order created');
             await _refresh();
         } catch (e) {
+            // Compensate: if the sale row was created but a downstream insert failed,
+            // delete the orphan (and any partial items) so it can't survive as an
+            // empty shell and a retry doesn't stack duplicates. Best-effort cleanup.
+            if (savedSaleId != null) {
+                try { await sb.from('npo_sale_items').delete().eq('sale_id', savedSaleId); } catch (_) {}
+                try { await sb.from('npo_installments').delete().eq('sale_id', savedSaleId); } catch (_) {}
+                try { await sb.from('npo_sales').delete().eq('id', savedSaleId); } catch (_) {}
+                ['npo_sales', 'npo_sale_items', 'npo_installments'].forEach(t => {
+                    try { AppDataStore.invalidateCache && AppDataStore.invalidateCache(t); } catch (_) {}
+                });
+            }
             UI.toast.error('Save failed: ' + (e && e.message ? e.message : 'unknown error'));
         }
     };

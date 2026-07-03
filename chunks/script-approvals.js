@@ -68,6 +68,12 @@
     // auto-convert) shares the same lock.
     const _convInFlight = window._convInFlight || (window._convInFlight = new Set());
 
+    // Audit data-integrity fix: in-flight guard for approveQueueEntry. Mirrors the
+    // _convInFlight lock so a rapid double-click / partial-failure retry of the green
+    // Approve icon cannot pass the entry.status==='pending' check twice and book the
+    // same sale (purchases row + adjustCustomerLtv) more than once.
+    const _queueInFlight = window._queueInFlight || (window._queueInFlight = new Set());
+
 const renderApprovalQueue = async () => {
     const tbody = document.getElementById('approval-queue-body');
     if (!tbody) return;
@@ -118,7 +124,7 @@ const renderApprovalQueue = async () => {
         const dateStr = entry.submitted_at ? new Date(entry.submitted_at).toLocaleDateString('en-MY', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
 
         html += `<tr>
-            <td><span style="background:${tc.bg}; color:${tc.color}; padding:3px 10px; border-radius:6px; font-size:12px; font-weight:600; white-space:nowrap;"><i class="fas ${tc.icon}" style="margin-right:4px;"></i>${tc.label}</span></td>
+            <td><span style="background:${tc.bg}; color:${tc.color}; padding:3px 10px; border-radius:6px; font-size:12px; font-weight:600; white-space:nowrap;"><i class="fas ${tc.icon}" style="margin-right:4px;"></i>${escapeHtml(tc.label)}</span></td>
             <td><strong>${escapeHtml(name)}</strong></td>
             <td>${escapeHtml(agentName)}</td>
             <td style="font-size:12px; white-space:nowrap;">${dateStr}</td>
@@ -245,10 +251,29 @@ const approveQueueEntry = async (entryId) => {
     const entry = await AppDataStore.getById('approval_queue', entryId);
     if (!entry || entry.status !== 'pending') return UI.toast.error('Entry not found or already processed.');
 
+    // Audit data-integrity fix (in-flight guard): after the pending check, take a
+    // per-entry lock so a concurrent second invocation (double-click) is dropped
+    // instead of re-executing the purchase/LTV writes. Released in finally.
+    const _queueKey = String(entryId);
+    if (_queueInFlight.has(_queueKey)) return;
+    _queueInFlight.add(_queueKey);
+    try {
+
     const now = new Date().toISOString();
+    // Local calendar date (Malaysia UTC+8) — toISOString() gives the UTC day, which
+    // is yesterday between 00:00-07:59 MYT and would shift the sale into the wrong
+    // day/month/quarter for KPI/PRSB reports.
+    const _localToday = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
 
     if (entry.approval_type === 'new_customer') {
+        // Audit data-integrity fix: approveProspectConversion swallows its own errors
+        // internally and updates the matching queue entry itself on success. Return here
+        // so we do NOT unconditionally mark this queue row 'approved' + toast success
+        // when the conversion actually failed (which would silently lose the request).
         await approveProspectConversion(entry.prospect_id);
+        await renderApprovalQueue();
+        await window.app.renderCustomersTable();
+        return;
     } else if (entry.approval_type === 'info_update') {
         const prospect = await AppDataStore.getById('prospects', entry.prospect_id);
         if (prospect?.status === 'converted') {
@@ -294,14 +319,18 @@ const approveQueueEntry = async (entryId) => {
                 customer = (await AppDataStore.getAll('customers')).find(c => c.converted_from_prospect_id == entry.prospect_id);
             }
             if (customer) {
-                const cr = entry.snapshot_after;
+                // Audit null-deref fix: guard snapshot_after — a new_sale row can come
+                // back with a null/RLS-trimmed snapshot_after (same failure the sibling
+                // info_update branch guards against). Without this, cr.sale_amount throws.
+                const cr = entry.snapshot_after || {};
                 const amt = parseFloat(cr.sale_amount) || 0;
                 await AppDataStore.create('purchases', {
                     customer_id: customer.id,
-                    date: cr.closing_date || now.split('T')[0],
+                    date: cr.closing_date || _localToday,
                     invoice: cr.invoice_number || '',
                     item: cr.product || '',
                     amount: amt,
+                    currency: UI.currencyForCountry(prospect.country),
                     status: 'COMPLETED',
                     payment_method: cr.payment_method || 'Cash'
                 });
@@ -330,6 +359,9 @@ const approveQueueEntry = async (entryId) => {
     UI.toast.success('Approved successfully!');
     await renderApprovalQueue();
     await window.app.renderCustomersTable();
+    } finally {
+        _queueInFlight.delete(_queueKey);
+    }
 };
 
 const rejectQueueEntry = async (entryId) => {
@@ -421,9 +453,21 @@ const approveClosingRecord = async (prospectId) => {
         // Additional sale on existing customer — add purchase, archive CR, reset
         const cr = prospect.closing_record;
         const now = new Date().toISOString();
+        // Local calendar date (Malaysia UTC+8) — toISOString() gives the UTC day, which
+        // is yesterday between 00:00-07:59 MYT and would shift the sale into the wrong
+        // day/month/quarter for KPI/PRSB reports.
+        const _localToday = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
         const saleAmount = parseFloat(cr.sale_amount) || 0;
-        const customers = await AppDataStore.getAll('customers', { fresh: true });
-        let customer = customers.find(c => c.converted_from_prospect_id == prospectId);
+        // Scale-safe: fetch only the customer linked to this prospect instead of the
+        // whole customers table. Falls back to the whole-table scan on error.
+        let customer;
+        try {
+            const linked = await AppDataStore.query('customers', { converted_from_prospect_id: prospectId });
+            customer = (linked || [])[0];
+        } catch (e) {
+            console.warn('approveClosingRecord: linked-customer query failed — full-table fallback', e);
+            customer = (await AppDataStore.getAll('customers', { fresh: true })).find(c => c.converted_from_prospect_id == prospectId);
+        }
         if (!customer) {
             // Prospect was marked converted but no customer record exists — create one now
             const newCust = await AppDataStore.create('customers', {
@@ -437,7 +481,7 @@ const approveClosingRecord = async (prospectId) => {
                 country: UI.countryByCode(prospect.country).code,
                 status: 'active',
                 lifetime_value: 0,
-                customer_since: cr.closing_date || cr.order_date || now.split('T')[0],
+                customer_since: cr.closing_date || cr.order_date || _localToday,
                 converted_from_prospect_id: prospectId,
             });
             customer = newCust;
@@ -445,7 +489,7 @@ const approveClosingRecord = async (prospectId) => {
         if (customer) {
             await AppDataStore.create('purchases', {
                 customer_id: customer.id,
-                date: cr.closing_date || cr.order_date || now.split('T')[0],
+                date: cr.closing_date || cr.order_date || _localToday,
                 invoice: cr.invoice_number || '',
                 item: cr.product || '',
                 amount: saleAmount,
@@ -472,6 +516,11 @@ const approveClosingRecord = async (prospectId) => {
 };
 
 const rejectClosingRecord = async (prospectId) => {
+    // Authz (audit security-authz): manager-only — mirrors approveClosingRecord. This
+    // mutates a teammate's prospect (closing_record back to 'draft' + rejected_at), and
+    // the handler lives on window.app where RLS does not stop a same-team write, so an
+    // L5 team leader (never shown reject controls) could bounce a sale from the console.
+    if (!isManagement(_state.cu)) return UI.toast.error('Not permitted');
     const prospect = await AppDataStore.getById('prospects', prospectId);
     if (!prospect?.closing_record) return UI.toast.error('No closing record found');
     const cr = prospect.closing_record;
@@ -581,6 +630,10 @@ const approveProspectConversion = async (prospectId) => {
     const cr = prospect.closing_record;
     const saleAmount = parseFloat(cr?.sale_amount) || 0;
     const now = new Date().toISOString();
+    // Local calendar date (Malaysia UTC+8) — toISOString() gives the UTC day, which is
+    // yesterday between 00:00-07:59 MYT and would shift customer_since / the purchase
+    // date into the wrong day/month/quarter for KPI/PRSB reports.
+    const _localToday = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
 
     // Audit data-integrity fix: persist the prospect's converted/idempotency flag
     // FIRST, before creating the customer. If a later step throws, a manual retry
@@ -635,7 +688,7 @@ const approveProspectConversion = async (prospectId) => {
         country: UI.countryByCode(prospect.country).code,
         lifetime_value: 0,
         status: 'active',
-        customer_since: cr?.closing_date || now.split('T')[0],
+        customer_since: cr?.closing_date || _localToday,
         converted_from_prospect_id: prospectId,
         approved_by: _state.cu?.id,
         approved_at: now,
@@ -656,7 +709,7 @@ const approveProspectConversion = async (prospectId) => {
         try {
             await AppDataStore.create('purchases', {
                 customer_id: newCustomerId,
-                date: cr?.closing_date || now.split('T')[0],
+                date: cr?.closing_date || _localToday,
                 invoice: cr?.invoice_number || '',
                 item: cr?.product || '',
                 amount: saleAmount,
@@ -673,8 +726,16 @@ const approveProspectConversion = async (prospectId) => {
 
     // Sync approval queue — mark matching new_customer entry as approved
     try {
-        const allQueue = await AppDataStore.getAll('approval_queue');
-        const matchingEntry = allQueue.find(e => e.prospect_id == prospectId && e.approval_type === 'new_customer' && e.status === 'pending');
+        // Scale-safe: query only this prospect's rows instead of the whole append-only
+        // approval_queue table. Falls back to the full-table scan on error.
+        let queueRows;
+        try {
+            queueRows = await AppDataStore.query('approval_queue', { prospect_id: prospectId });
+        } catch (qErr) {
+            console.warn('approveProspectConversion: scoped approval_queue query failed — full-table fallback', qErr);
+            queueRows = await AppDataStore.getAll('approval_queue');
+        }
+        const matchingEntry = (queueRows || []).find(e => e.prospect_id == prospectId && e.approval_type === 'new_customer' && e.status === 'pending');
         if (matchingEntry) {
             await AppDataStore.update('approval_queue', matchingEntry.id, {
                 status: 'approved',
@@ -705,6 +766,11 @@ const approveProspectConversion = async (prospectId) => {
 };
 
 const rejectProspectConversion = async (prospectId) => {
+    // Authz (audit security-authz): manager-only — mirrors approveProspectConversion /
+    // confirmRejectQueueEntry. Marks a teammate's pending conversion 'rejected' and stamps
+    // conversion_rejected_by; the handler is on window.app and RLS permits the same-team
+    // write, so gate it here to stop a non-management role tampering from the console.
+    if (!isManagement(_state.cu)) return UI.toast.error('Not permitted');
     const now = new Date().toISOString();
     await AppDataStore.update('prospects', prospectId, {
         conversion_status: 'rejected',
@@ -714,8 +780,16 @@ const rejectProspectConversion = async (prospectId) => {
 
     // Sync approval queue — mark matching new_customer entry as rejected
     try {
-        const allQueue = await AppDataStore.getAll('approval_queue');
-        const matchingEntry = allQueue.find(e => e.prospect_id == prospectId && e.approval_type === 'new_customer' && e.status === 'pending');
+        // Scale-safe: query only this prospect's rows instead of the whole append-only
+        // approval_queue table. Falls back to the full-table scan on error.
+        let queueRows;
+        try {
+            queueRows = await AppDataStore.query('approval_queue', { prospect_id: prospectId });
+        } catch (qErr) {
+            console.warn('rejectProspectConversion: scoped approval_queue query failed — full-table fallback', qErr);
+            queueRows = await AppDataStore.getAll('approval_queue');
+        }
+        const matchingEntry = (queueRows || []).find(e => e.prospect_id == prospectId && e.approval_type === 'new_customer' && e.status === 'pending');
         if (matchingEntry) {
             await AppDataStore.update('approval_queue', matchingEntry.id, {
                 status: 'rejected',

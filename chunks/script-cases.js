@@ -294,8 +294,11 @@
             if (_caseFilters.product !== 'all') cases = cases.filter(c => c.product === _caseFilters.product);
             // CPS invitation cases may have no closing_date — fall back to created_at
             // so the date filter doesn't silently drop them (undefined >= from is false).
-            if (_caseFilters.from) cases = cases.filter(c => (c.closing_date || c.created_at || '') >= _caseFilters.from);
-            if (_caseFilters.to) cases = cases.filter(c => (c.closing_date || c.created_at || '') <= _caseFilters.to);
+            // Compare on the date-only portion (first 10 chars): created_at is a
+            // full ISO timestamp, so any time-of-day on the To day would compare
+            // greater than the date-only bound and be dropped otherwise.
+            if (_caseFilters.from) cases = cases.filter(c => String(c.closing_date || c.created_at || '').slice(0, 10) >= _caseFilters.from);
+            if (_caseFilters.to) cases = cases.filter(c => String(c.closing_date || c.created_at || '').slice(0, 10) <= _caseFilters.to);
             return cases;
         };
 
@@ -465,6 +468,14 @@
         const isOwner = c.created_by === currentUser?.id;
         const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || /manager|team_leader/i.test(currentUser?.role || '');
 
+        // Visibility gate — mirror applySharedFilters: a private case is readable
+        // only by its owner or an admin. Without this, app.showCaseStudyDetail(id)
+        // from the console would render another agent's private case.
+        if (!(c.is_public || isOwner || isAdmin)) {
+            UI.toast.error("Not authorized");
+            return;
+        }
+
         const isCpsCase = (c.case_type || 'cps') === 'cps';
         let entityInfo = '';
         let prospectProfile = null;
@@ -605,6 +616,11 @@
     const toggleCasePublic = async (id) => {
         const c = await AppDataStore.getById('case_studies', id);
         if (!c) return;
+        // Only the owner or an admin may change a case's visibility.
+        const currentUser = _state.cu;
+        const isOwner = c.created_by === currentUser?.id;
+        const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || /manager|team_leader/i.test(currentUser?.role || '');
+        if (!(isOwner || isAdmin)) { UI.toast.error("Not authorized"); return; }
         await AppDataStore.update('case_studies', id, { is_public: !c.is_public });
         UI.toast.success(`Case study is now ${!c.is_public ? 'public' : 'private'}.`);
         await showCaseStudyDetail(id);
@@ -614,14 +630,22 @@
         const link = `${window.location.origin}${window.location.pathname}?view=cases&id=${id}`;
         navigator.clipboard.writeText(link).then(() => {
             UI.toast.info("Link copied to clipboard.");
+        }).catch(() => {
+            UI.toast.error("Couldn't copy link — copy it manually: " + link);
         });
     };
 
     const deleteCaseStudy = async (id) => {
+        // Read row first so we know which photos to clean up from Storage — and
+        // so we can gate the delete to the owner or an admin.
+        const c = await AppDataStore.getById('case_studies', id).catch(() => null);
+        if (!c) return;
+        const currentUser = _state.cu;
+        const isOwner = c.created_by === currentUser?.id;
+        const isAdmin = isSystemAdmin(currentUser) || isMarketingManager(currentUser) || /manager|team_leader/i.test(currentUser?.role || '');
+        if (!(isOwner || isAdmin)) { UI.toast.error("Not authorized"); return; }
         if (confirm("Are you sure you want to delete this case? This action cannot be undone.")) {
             try {
-                // Read row first so we know which photos to clean up from Storage.
-                const c = await AppDataStore.getById('case_studies', id).catch(() => null);
                 const photoUrls = c && Array.isArray(c.photo_urls) ? c.photo_urls : [];
 
                 const tags = await AppDataStore.getAll('entity_tags').catch(() => []);
@@ -943,7 +967,14 @@
                 data.script?.trim() ||
                 photos.length > 0
             );
-            data.created_by = _state.cu?.id || 1;
+            // Never fabricate ownership from a dead/expired session (audit #392/#425):
+            // a hardcoded created_by=1 corrupts ownership/RLS and hides the case
+            // from its real author. Block the create instead.
+            if (!_state.cu?.id) {
+                UI.toast.error("Session expired, please re-login.");
+                return;
+            }
+            data.created_by = _state.cu.id;
             data.created_at = new Date().toISOString();
             const newCase = await AppDataStore.create('case_studies', data);
             UI.toast.success("Case created.");

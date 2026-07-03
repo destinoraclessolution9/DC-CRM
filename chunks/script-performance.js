@@ -90,10 +90,26 @@ const showRankingPerformanceView = async (container) => {
     // wrongly swept in L13 Customer / L14 Referrer / L15 Stock Take (all literally
     // contain "Level"). isAgent() resolves the numeric level (and legacy
     // 'agent'/'consultant' string roles) correctly via _getUserLevel.
-    const agents = users.filter(u => isAgent(u));
+    // Scope leak fix: clamp the agent leaderboard to the viewer's visible user
+    // set. L1/L2 (and marketing) resolve to 'all'; scoped L3/L4 managers get
+    // only their reporting subtree — they must NOT see other teams' agents'
+    // sales / performance. Fail closed to the viewer's own id on error.
+    let _visibleUserIds = 'all';
+    try { _visibleUserIds = await _utils.getVisibleUserIds(_state.cu); }
+    catch (_) { _visibleUserIds = _state.cu?.id != null ? [_state.cu.id] : []; }
+    let agents = users.filter(u => isAgent(u));
+    if (_visibleUserIds !== 'all' && Array.isArray(_visibleUserIds)) {
+        const _visSet = new Set(_visibleUserIds.map(v => String(v)));
+        agents = agents.filter(u => _visSet.has(String(u.id)));
+    }
     const now = new Date();
     const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-    const monthEnd = now.toISOString().split('T')[0];
+    // Month end must be TODAY in local time (UTC+8), not the UTC day. Using
+    // now.toISOString() yields yesterday's date before 08:00 MYT, which inverts
+    // the [monthStart, monthEnd] window on the 1st and silently drops
+    // records dated today on every other early morning. (Same trap the
+    // follow-up cutoff below already avoids by using local parts.)
+    const monthEnd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     // "Followed up in last 7 days" cutoff as a local-date YYYY-MM-DD string.
     // Differencing Date objects mis-handles date-only strings (parsed as UTC
     // midnight vs local `now`), shifting boundary prospects by the UTC offset
@@ -658,15 +674,25 @@ const computeFourPillarStatuses = async (subject) => {
 
     const nameMatches = (source, def, item) => {
         const pool = source === 'bujishu' ? bujishuList : products;
-        const matches = pool.filter(p =>
-            def.categories.some(cat =>
-                String(p.category || '').trim().includes(cat) ||
-                String(cat).includes(String(p.category || '').trim())
-            )
-        );
+        const matches = pool.filter(p => {
+            // Guard empty category: an uncategorized product must NOT match every
+            // pillar. `cat.includes('')` is always true, so without this check a
+            // single null-category product is swept into all four pillars.
+            const pCat = String(p.category || '').trim();
+            if (!pCat) return false;
+            return def.categories.some(cat =>
+                pCat.includes(cat) ||
+                String(cat).includes(pCat)
+            );
+        });
         if (matches.length === 0) return false;
         const itemStr = String(item || '').toLowerCase();
-        return matches.some(p => itemStr.includes(String(p.name || '').toLowerCase()));
+        // Guard empty product name: `itemStr.includes('')` is always true, which
+        // would mark every purchase as owning this pillar.
+        return matches.some(p => {
+            const pName = String(p.name || '').toLowerCase();
+            return pName !== '' && itemStr.includes(pName);
+        });
     };
 
     for (const def of FOUR_PILLAR_DEFS) {
@@ -790,7 +816,11 @@ const showNoticeboardView = async (container) => {
     // older JS code wrote to `event_date` which the data layer stripped.
     // Read `date` first, fall back to `event_date` for legacy in-memory rows.
     const dateOf = (e) => e?.date || e?.event_date || null;
-    const todayStr = new Date().toISOString().split('T')[0];
+    // Local (UTC+8) today, NOT the UTC day. new Date().toISOString() returns
+    // yesterday's date before 08:00 MYT, so expired events would linger on the
+    // board for up to 8 extra hours. Build the cutoff from local parts.
+    const _nowNb = new Date();
+    const todayStr = `${_nowNb.getFullYear()}-${String(_nowNb.getMonth() + 1).padStart(2, '0')}-${String(_nowNb.getDate()).padStart(2, '0')}`;
     let visible = events.filter(e => {
         if (!e) return false;
         const d = dateOf(e);

@@ -111,6 +111,13 @@ function _pruneDetachedRoots() {
             _roots.delete(container);
         }
     }
+    // #9 — the singleton passthrough roots (journey timeline, fude view) have no
+    // callers for their exported unmount fns; navigateTo detaches their container
+    // and the tree would otherwise stay mounted until the next same-view render.
+    // Prune them here too (this runs before every island mount) so a detached
+    // journey/fude tree is torn down on the next navigation.
+    if (_journeyContentEl && !document.contains(_journeyContentEl)) { unmountJourneyContent(); }
+    if (_fudeContentEl && !document.contains(_fudeContentEl)) { unmountFudeContent(); }
 }
 
 // Shared get-or-create: prune detached roots first, then REUSE the live
@@ -496,12 +503,14 @@ function unmountModalContent() {
 // story-filter classList mutations working (opaque to React). flushSync makes
 // the DOM present before the chunk's post-render carousel wiring runs. ────────
 let _fudeContentRoot = null;
+let _fudeContentEl = null;
 function mountFudeContent(container, opts) {
     if (!container) return;
     if (_fudeContentRoot) { try { _fudeContentRoot.unmount(); } catch (_) {} _fudeContentRoot = null; }
     const o = opts || {};
     const root = createRoot(container);
     _fudeContentRoot = root;
+    _fudeContentEl = container;
     const el = _boundary(<ModalContentIsland html={o.html || ''} onReady={o.onReady} />);
     try { flushSync(() => { root.render(el); }); }
     catch (_) { root.render(el); }
@@ -509,6 +518,7 @@ function mountFudeContent(container, opts) {
 }
 function unmountFudeContent() {
     if (_fudeContentRoot) { try { _fudeContentRoot.unmount(); } catch (_) {} _fudeContentRoot = null; }
+    _fudeContentEl = null;
 }
 
 // ── Journey timeline passthrough (dedicated root, separate from modal/fude-view
@@ -517,12 +527,14 @@ function unmountFudeContent() {
 // touchpoint mutation — so the same re-mount-on-each-render passthrough applies.
 // Embedded in a prospect/customer detail accordion body. ──────────────────────
 let _journeyContentRoot = null;
+let _journeyContentEl = null;
 function mountJourneyContent(container, opts) {
     if (!container) return;
     if (_journeyContentRoot) { try { _journeyContentRoot.unmount(); } catch (_) {} _journeyContentRoot = null; }
     const o = opts || {};
     const root = createRoot(container);
     _journeyContentRoot = root;
+    _journeyContentEl = container;
     const el = _boundary(<ModalContentIsland html={o.html || ''} onReady={o.onReady} />);
     try { flushSync(() => { root.render(el); }); }
     catch (_) { root.render(el); }
@@ -530,6 +542,7 @@ function mountJourneyContent(container, opts) {
 }
 function unmountJourneyContent() {
     if (_journeyContentRoot) { try { _journeyContentRoot.unmount(); } catch (_) {} _journeyContentRoot = null; }
+    _journeyContentEl = null;
 }
 
 // ── Knowledge HQ slot-editor passthrough (dedicated root, separate from the

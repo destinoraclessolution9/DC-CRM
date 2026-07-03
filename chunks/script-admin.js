@@ -58,9 +58,24 @@
         // audit_logs schema (written by data.js _writeAudit): created_at, action,
         // entity_type, entity_id, user_id, old_data, new_data, user_agent.
         // There is no timestamp/level/category column — read the real columns.
-        const logs = (await AppDataStore.getAll('audit_logs') || [])
-            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-            .slice(0, 50);
+        // Server-side order+limit (mirrors showUserActivity below): audit_logs is
+        // append-only and grows without bound, so never pull the whole table just
+        // to render 50 rows. Fall back to the (bounded) client sort only if the
+        // direct query is unavailable.
+        let logs = [];
+        try {
+            const { data, error } = await window.supabase
+                .from('audit_logs')
+                .select('created_at,entity_type,action,user_id')
+                .order('created_at', { ascending: false })
+                .limit(50);
+            if (error) throw error;
+            logs = data || [];
+        } catch (_) {
+            logs = (await AppDataStore.getAll('audit_logs').catch(() => []) || [])
+                .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+                .slice(0, 50);
+        }
     
         let content = `
             <div class="audit-log-viewer" style="margin:24px;">
@@ -462,14 +477,24 @@
             if (window.UI) UI.toast.error("Please enter a valid admin email address");
             return;
         }
-        if (typeof TenantManager !== 'undefined') {
-            // Reject duplicates before creating.
-            const existing = (typeof TenantManager.listTenants === 'function' ? TenantManager.listTenants() : []) || [];
-            if (existing.some(t => String(t.tenant_id) === id)) {
-                if (window.UI) UI.toast.error("A tenant with that ID already exists");
-                return;
-            }
+        // Only claim success if a tenant is actually persisted. TenantManager is
+        // not present in the loaded runtime, so guard against a false-success toast
+        // (modal closing on a complete no-op). Keep the modal open on failure.
+        if (typeof TenantManager === 'undefined' || typeof TenantManager.createTenant !== 'function') {
+            if (window.UI) UI.toast.error("Tenant provisioning is not available in this build");
+            return;
+        }
+        // Reject duplicates before creating.
+        const existing = (typeof TenantManager.listTenants === 'function' ? TenantManager.listTenants() : []) || [];
+        if (existing.some(t => String(t.tenant_id) === id)) {
+            if (window.UI) UI.toast.error("A tenant with that ID already exists");
+            return;
+        }
+        try {
             await TenantManager.createTenant(id, name, email);
+        } catch (e) {
+            if (window.UI) UI.toast.error("Failed to provision tenant" + (e && e.message ? (": " + e.message) : ""));
+            return;
         }
         if (window.UI) {
             UI.hideModal();

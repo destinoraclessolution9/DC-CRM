@@ -23,7 +23,7 @@ const PUBLISHABLE  = process.env.SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_XVW
 const SECRET       = process.env.SUPABASE_SECRET_KEY || '';
 
 // Lean listing columns (verified against the live schema 2026-06-14).
-const LIST_COLUMNS = 'id,full_name,nickname,phone,email,ming_gua,responsible_agent_id,lifetime_value,customer_since';
+const LIST_COLUMNS = 'id,full_name,nickname,phone,email,ming_gua,responsible_agent_id,lifetime_value,customer_since,converted_from_prospect_id';
 
 // Best-effort per-IP rate limit (defense-in-depth; the real control is the
 // Vercel WAF). INERT unless RATE_LIMIT_PER_MIN is set to a positive integer.

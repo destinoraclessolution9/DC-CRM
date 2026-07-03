@@ -334,7 +334,11 @@
             const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
             projections.push({ key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, amount: proj });
         }
-        const lastActual = series[n - 1] || 0;
+        // The buckets always include the current (in-progress) month at series[n-1].
+        // "% vs last month" and trend baselines must compare against the last COMPLETE
+        // month (series[n-2]) — using the partial current month produces meaningless
+        // deltas (e.g. +4900% on the 2nd of the month).
+        const lastActual = (n >= 2 ? series[n - 2] : series[n - 1]) || 0;
         const recentAvg = Math.round(sma);
         const nextMonth = projections[0] ? projections[0].amount : 0;
         const total3mo = projections.reduce((a, p) => a + p.amount, 0);
@@ -1124,10 +1128,11 @@
         const r = _scoreLead(prospect, activities || []);
         const overallScore = r.score;
 
-        // Trend (compare with last persisted score for this prospect)
-        const allScores = await AppDataStore.getAll('lead_scores');
-        const lastScore = (allScores || [])
-            .filter(l => String(l.prospect_id) === String(prospectId))
+        // Trend (compare with last persisted score for this prospect). Query ONLY this
+        // prospect's scores — a full getAll('lead_scores') per prospect inside the batch
+        // loop pulled the entire (ever-growing) table O(N) times (O(N²) overall).
+        const priorScores = await AppDataStore.query('lead_scores', { prospect_id: prospectId }).catch(() => []);
+        const lastScore = (priorScores || [])
             .sort((a, b) => new Date(b.score_date) - new Date(a.score_date))[0];
 
         let trend = 'stable';
@@ -1169,7 +1174,12 @@
     const batchUpdateLeadScores = async () => {
         if (!window._crmUtils.isManagement(_state.cu)) { UI.toast.error('Management access required.'); return; }
         const data = await _loadScopedData();
-        const prospects = (data.prospects || []).filter(p => p.status === 'active');
+        // Match the dashboard's "active prospect" definition (see _buildSnapshot) — an
+        // exact `status === 'active'` filter silently skips imported/legacy rows with a
+        // blank status that ARE scored and shown on the dashboard.
+        const prospects = (data.prospects || []).filter(p =>
+            p.status !== 'converted' && p.conversion_status !== 'approved' && p.conversion_status !== 'rejected'
+        );
 
         for (const prospect of prospects) {
             await predictLeadScore(prospect.id);
@@ -1558,12 +1568,13 @@
         const customer = await AppDataStore.getById('customers', customerId);
         if (!customer) return null;
 
-        // Real signals: this customer's activities + purchases.
-        const [activities, allPurchases] = await Promise.all([
+        // Real signals: this customer's activities + purchases. Query ONLY this
+        // customer's purchases — a full getAll('purchases') per customer inside the
+        // batch loop re-pulled the entire purchases table for every customer.
+        const [activities, custPurchases] = await Promise.all([
             AppDataStore.query('activities', { customer_id: customerId }),
-            AppDataStore.getAll('purchases').catch(() => []),
+            AppDataStore.query('purchases', { customer_id: customerId }).catch(() => []),
         ]);
-        const custPurchases = (allPurchases || []).filter(p => String(p.customer_id) === String(customerId));
 
         const r = _scoreChurn(customer, activities || [], custPurchases);
         const riskScore = r.riskScore;
@@ -1613,7 +1624,10 @@
     const batchUpdateChurnRisks = async () => {
         if (!window._crmUtils.isManagement(_state.cu)) { UI.toast.error('Management access required.'); return; }
         const data = await _loadScopedData();
-        const customers = (data.customers || []).filter(c => c.status === 'active');
+        // Match the dashboard's "active customer" definition (see _buildSnapshot) — an
+        // exact `status === 'active'` filter silently skips imported/legacy rows with a
+        // blank status that ARE scored and shown on the dashboard.
+        const customers = (data.customers || []).filter(c => c.status !== 'inactive' && c.status !== 'lost');
 
         for (const customer of customers) {
             await calculateChurnRisk(customer.id);
@@ -1852,6 +1866,10 @@
                 // chunk is deterministic with no Math.random, and persisting randomized
                 // quality metrics would surface fake numbers to users as real metrics.
                 try {
+                    // Seed the default models first if the table is empty — otherwise the
+                    // update loop below iterates zero rows yet still toasts success (the
+                    // dead-initAIAnalytics no-op). ensureAIModelsExist is idempotent.
+                    await ensureAIModelsExist();
                     const models = Object.values(await AppDataStore.getAll('ai_models') || []);
                     const now = new Date().toISOString();
                     for (const model of models) {
@@ -1927,16 +1945,32 @@
 
     // Map a lead's prediction → a sensible follow-up activity type.
     const _followupType = (lead) => (lead && lead.prediction === 'hot' ? 'CALL' : 'WHATSAPP');
-    const _todayISO = () => new Date().toISOString().split('T')[0];
+    // LOCAL calendar date (YYYY-MM-DD). toISOString() would return the UTC date, which
+    // is the PREVIOUS day for the first 8 hours of every Malaysia (UTC+8) day — mis-dating
+    // AI-created activities to "yesterday".
+    const _todayISO = () => {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
 
     // Create one follow-up activity record for a targeted entity. Returns the
     // saved record (or throws — caller batches + reports a single toast).
     const _createFollowupActivity = async ({ prospectId = null, customerId = null, type = 'CALL', nextAction = '', summary = '' }) => {
+        // Fail closed if there is no active user (dead session / logout race): never
+        // fabricate an owner — the old fallback (lead_agent_id: 5) mis-attributed the
+        // activity to whichever production user has id 5. Callers batch + count throws.
+        if (!(_state && _state.cu && _state.cu.id != null)) throw new Error('No active user session');
         const activity = {
             activity_type: type,
             activity_title: summary || nextAction || type,
             activity_date: _todayISO(),
-            lead_agent_id: (_state && _state.cu) ? _state.cu.id : 5,
+            lead_agent_id: _state.cu.id,
+            // Explicit visibility so AGENT_MEETING / AGENT_TRAINING records (created by
+            // scheduleForecastReview / confirmCoachingSessions) satisfy the calendar's
+            // cross-user filter (visibility IN 'open'/'public'/'team') — null visibility
+            // maps to 'closed' and makes the row invisible to everyone but the creator
+            // (the previously-remediated 236-row incident).
+            visibility: 'open',
             summary: summary,
             note_next_steps: nextAction,
             next_action: nextAction,
@@ -2018,8 +2052,16 @@
             if (!fc || !fc.hasData) { UI.toast.error('Not enough sales history to export a forecast.'); return; }
             // Export is the explicit user action that persists a forecast_history row
             // (skips automatically when a what-if override is active — see
-            // generateSalesForecast's persist guard).
-            try { await generateSalesForecast('quarterly', true); } catch (_) { /* non-fatal */ }
+            // generateSalesForecast's persist guard). Persist the horizon the user is
+            // actually viewing (from the forecast-period <select>), not a hardcoded
+            // 'quarterly' — otherwise the audit trail records a period never shown.
+            let _exportPeriod = 'quarterly';
+            try {
+                const _sel = document.getElementById('forecast-period');
+                const _v = _sel && _sel.value;
+                if (['weekly', 'monthly', 'quarterly', 'yearly'].includes(_v)) _exportPeriod = _v;
+            } catch (_) { /* default to quarterly */ }
+            try { await generateSalesForecast(_exportPeriod, true); } catch (_) { /* non-fatal */ }
             const rows = [
                 ['AI Sales Forecast Export'],
                 ['Generated', new Date().toLocaleString()],

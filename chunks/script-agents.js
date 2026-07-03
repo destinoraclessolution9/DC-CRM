@@ -345,32 +345,25 @@ viewport.innerHTML = `
         </div>
     </div>
 
-    ${agent.id === 9 || agent.username === 'ong.beeling' ? `
-    <div class="conversion-banner">
-        <i class="fas fa-award"></i>
-        <span>Converted from Customer on 05 Mar 2026 via <strong>Premium Package (RM 5,500)</strong></span>
-    </div>
-    ` : ''}
-
     ${isAdminOrLead ? `
     <div class="license-dashboard">
         <h3><i class="fas fa-id-card"></i> License Renewal Dashboard</h3>
         <div class="license-stats">
             <div class="license-stat">
                 <span class="license-stat-label">License Expiry</span>
-                <span class="license-stat-value">${esc(agent.license_expiry || '2026-12-31')}</span>
+                <span class="license-stat-value">${esc(agent.license_expiry || '—')}</span>
             </div>
             <div class="license-stat">
                 <span class="license-stat-label">Days Remaining</span>
-                <span class="license-stat-value" style="color:${calculateDaysDiff(agent.license_expiry || '2026-12-31') < 30 ? '#ef4444' : '#0369a1'}">${calculateDaysDiff(agent.license_expiry || '2026-12-31')} Days</span>
+                <span class="license-stat-value" style="color:${agent.license_expiry && calculateDaysDiff(agent.license_expiry) < 30 ? '#ef4444' : '#0369a1'}">${agent.license_expiry ? calculateDaysDiff(agent.license_expiry) + ' Days' : '—'}</span>
             </div>
             <div class="license-stat">
                 <span class="license-stat-label">Renewal Status</span>
-                <span class="license-stat-value">${esc(agent.renewal_status || 'ELIGIBLE')}</span>
+                <span class="license-stat-value">${esc(agent.renewal_status || '—')}</span>
             </div>
         </div>
         <div class="license-actions">
-            <button class="btn primary" onclick="app.renewLicense(${agent.id})" ${calculateDaysDiff(agent.license_expiry || '2026-12-31') > 60 ? 'disabled' : ''}>Renew Now</button>
+            <button class="btn primary" onclick="app.renewLicense(${agent.id})" ${agent.license_expiry && calculateDaysDiff(agent.license_expiry) > 60 ? 'disabled' : ''}>Renew Now</button>
             <button class="btn secondary" onclick="app.sendRenewalReminder(${agent.id})">Send Reminder</button>
         </div>
     </div>
@@ -382,15 +375,15 @@ viewport.innerHTML = `
             <div class="performance-stats">
                 <div class="stat-row">
                     <span class="stat-label">Phone:</span>
-                    <span class="stat-value">${escapeHtml(agent.phone || '012-1234567')}</span>
+                    <span class="stat-value">${escapeHtml(agent.phone || '—')}</span>
                 </div>
                 <div class="stat-row">
                     <span class="stat-label">Email:</span>
-                    <span class="stat-value">${escapeHtml(agent.email || 'agent@fengshui.com')}</span>
+                    <span class="stat-value">${escapeHtml(agent.email || '—')}</span>
                 </div>
                 <div class="stat-row">
                     <span class="stat-label">Join Date:</span>
-                    <span class="stat-value">${esc(agent.join_date || '2026-01-01')}</span>
+                    <span class="stat-value">${esc(agent.join_date || '—')}</span>
                 </div>
                 <div class="stat-row">
                     <span class="stat-label">Comm. Rate:</span>
@@ -428,18 +421,7 @@ viewport.innerHTML = `
         <div class="performance-card">
             <h4><i class="fas fa-clock-rotate-left"></i> Agent Activity History</h4>
             <div class="performance-stats">
-                <div class="stat-row">
-                    <span class="stat-label">05 Mar 10:00:</span>
-                    <span>Login via Web Portal</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">04 Mar 16:30:</span>
-                    <span>Commission rate updated to 30%</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">04 Mar 15:45:</span>
-                    <span>Renewed license for 2026</span>
-                </div>
+                <p style="color:var(--gray-400); font-size:13px;">No activity history available.</p>
             </div>
         </div>
     </div>
@@ -888,7 +870,11 @@ const generatePassword = () => {
 };
 
 const openAddAgentModal = async (agentId = null) => {
-    const agent = agentId ? await AppDataStore.getById('users', agentId) : null;
+    // Edit pre-fill must read the FULL row: getById is cache-first and the users
+    // light-select omits ic_number, commission_rate, license_start/expiry and
+    // country — pre-filling from a cached light row and then saving would wipe
+    // those columns. getByIdFull always network-fetches select=*.
+    const agent = agentId ? await AppDataStore.getByIdFull('users', agentId) : null;
     const isEdit = !!agent;
 
     const allUsers = await AppDataStore.getAll('users');
@@ -905,21 +891,21 @@ const openAddAgentModal = async (agentId = null) => {
                 <div class="form-row">
                     <div class="form-group half">
                         <label>Full Name <span class="required">*</span></label>
-                        <input type="text" id="agent-name" class="form-control" required value="${isEdit ? (agent.full_name || '') : ''}">
+                        <input type="text" id="agent-name" class="form-control" required value="${isEdit ? escapeHtml(agent.full_name || '') : ''}">
                     </div>
                     <div class="form-group half">
                         <label>IC Number <span class="required">*</span></label>
-                        <input type="text" id="agent-ic" class="form-control" required value="${isEdit ? (agent.ic_number || '') : ''}">
+                        <input type="text" id="agent-ic" class="form-control" required value="${isEdit ? escapeHtml(agent.ic_number || '') : ''}">
                     </div>
                 </div>
                 <div class="form-row">
                     <div class="form-group half">
                         <label>Phone <span class="required">*</span></label>
-                        <input type="tel" id="agent-phone" class="form-control" required value="${isEdit ? (agent.phone || '') : ''}">
+                        <input type="tel" id="agent-phone" class="form-control" required value="${isEdit ? escapeHtml(agent.phone || '') : ''}">
                     </div>
                     <div class="form-group half">
                         <label>Email <span class="required">*</span></label>
-                        <input type="email" id="agent-email" class="form-control" required value="${isEdit ? (agent.email || '') : ''}">
+                        <input type="email" id="agent-email" class="form-control" required value="${isEdit ? escapeHtml(agent.email || '') : ''}">
                     </div>
                 </div>
                 <div class="form-row">
@@ -937,12 +923,19 @@ const openAddAgentModal = async (agentId = null) => {
                     <div class="form-group half">
                         <label>Agent Role <span class="required">*</span></label>
                         <select id="agent-role-select" class="form-control" required onchange="app.syncAgentEmploymentTypeForRole()">
-                            ${USER_ROLES.map(r => `<option value="${r}" ${isEdit && agent.role === r ? 'selected' : ''}>${r}</option>`).join('')}
+                            <!-- Neutral placeholder: selected whenever the stored role is
+                                 NOT an exact USER_ROLES member (new agent, or legacy/named
+                                 role like customer / Level 12 Ambassador). Without it the
+                                 browser silently falls back to the FIRST option (Level 1
+                                 Super Admin) and a save would escalate the user. saveAgent
+                                 rejects the empty placeholder value on submit. -->
+                            <option value="" ${isEdit && USER_ROLES.includes(agent.role) ? '' : 'selected'} disabled>— Select role —</option>
+                            ${USER_ROLES.map(r => `<option value="${escapeHtml(r)}" ${isEdit && agent.role === r ? 'selected' : ''}>${escapeHtml(r)}</option>`).join('')}
                         </select>
                     </div>
                     <div class="form-group half">
                         <label>Agent Code</label>
-                        <input type="text" id="agent-code-new" class="form-control" placeholder="AGN-2026-XXX" value="${isEdit ? (agent.agent_code || '') : ''}">
+                        <input type="text" id="agent-code-new" class="form-control" placeholder="AGN-2026-XXX" value="${isEdit ? escapeHtml(agent.agent_code || '') : ''}">
                     </div>
                 </div>
                 <div class="form-row">
@@ -1070,6 +1063,10 @@ const saveAgent = async () => {
     // getUserLevel above) so named/Chinese roles map correctly — do NOT hand-roll
     // a /Level N/ regex.
     const roleStr = document.getElementById('agent-role-select').value;
+    // Reject the empty placeholder role — the modal action button bypasses the
+    // native `required` check, and an empty role_str would otherwise let a save
+    // proceed with a mis-derived role_level. Force an explicit role choice.
+    if (!roleStr) return UI.toast.error('Please select an agent role');
     const fields = {
         full_name: name,
         role: roleStr,
@@ -1152,7 +1149,15 @@ const saveAgent = async () => {
             { label: 'Close', type: 'primary', action: 'UI.hideModal()' }
         ]);
     }
-    await renderAgentsTable();
+    // Refresh whichever view is on screen. When the edit was launched from the
+    // profile page (its 'Edit Profile' button), the agents table isn't in the
+    // DOM, so renderAgentsTable would no-op and leave the profile stale — in
+    // that case re-render the profile instead.
+    if (editId && !document.getElementById('agents-table-body')) {
+        await showAgentProfile(editId);
+    } else {
+        await renderAgentsTable();
+    }
 };
 
 const openAssignUplineModal = async (agentId) => {
@@ -1372,6 +1377,12 @@ const confirmDeleteAgent = async (agentId) => {
         await wc.from('users').update({ reporting_to: null }).eq('reporting_to', agentId);
         // Clear prospects assigned to this agent
         await wc.from('prospects').update({ responsible_agent_id: null }).eq('responsible_agent_id', agentId);
+        // Clear customers assigned to this agent (both owner fields the app buckets
+        // by) — otherwise customers keep pointing at the deleted id and render as
+        // 'Agent #<id>' / unknown owner, and any FK on these columns would make the
+        // final users delete throw after prospects/activities were unassigned.
+        await wc.from('customers').update({ responsible_agent_id: null }).eq('responsible_agent_id', agentId);
+        await wc.from('customers').update({ agent_id: null }).eq('agent_id', agentId);
         // Clear activities linked to this agent
         await wc.from('activities').update({ lead_agent_id: null }).eq('lead_agent_id', agentId);
         // Delete agent_targets and agent_stats rows for this agent
@@ -1428,9 +1439,11 @@ const updateAgentTargets = async (agentId) => {
 const saveAgentTargets = async (agentId) => {
     const target = (await AppDataStore.query('agent_targets', { agent_id: agentId }))[0];
     const data = {
-        target_amount: parseInt(document.getElementById('target-sales').value),
-        target_cps: parseInt(document.getElementById('target-cps').value),
-        target_meetings: parseInt(document.getElementById('target-meetings').value)
+        // Guard with `|| 0` (matches sibling saves) so an emptied input yields 0,
+        // not NaN — NaN serialises to null and silently wipes the target.
+        target_amount: parseInt(document.getElementById('target-sales').value) || 0,
+        target_cps: parseInt(document.getElementById('target-cps').value) || 0,
+        target_meetings: parseInt(document.getElementById('target-meetings').value) || 0
     };
     if (target) {
         await AppDataStore.update('agent_targets', target.id, data);
@@ -1474,6 +1487,11 @@ const resetAgentPassword = async (agentId) => {
                 // column being dropped). The real password change happens in
                 // GoTrue via the admin-auth-ops Edge Function below — surface
                 // failures loudly rather than swallowing them.
+                // Flag the agent to change password on next login (mirrors
+                // executePasswordReset) so the login-time forced-change modal
+                // actually triggers — otherwise the promised forced change never
+                // happens and the shared temp password becomes permanent.
+                await AppDataStore.update('users', agentId, { force_password_change: true });
                 let authOk = false;
                 if (agent.email) {
                     try {
@@ -1522,8 +1540,10 @@ const assignProspectToAgent = async (prospectId, agentId) => {
 };
 
 const sendRenewalReminder = (agentId) => {
-
-    UI.toast.success('Renewal reminder sent via Email/WhatsApp.');
+    // No email/WhatsApp/notification channel is wired up yet — do NOT report a
+    // send that never happened. Surface the honest "coming soon" placeholder
+    // (app.todo convention) instead of a fabricated success toast.
+    (window.app.todo || ((n) => UI.toast.warning((n || 'This feature') + ' is coming soon.')))('Renewal reminder');
 };
 
 const viewInactiveProspects = (agentId) => {

@@ -433,6 +433,23 @@ const updateFilterSections = async () => {
         } catch(e) { /* offline */ }
     }
 
+    // Populate the Event Category dropdown from event_categories (id + category_name).
+    // ENTITY_FIELDS declares event_category_id as 'dynamic', but the block above only
+    // fills *-agent selects, so #filter-event-category was left with just its placeholder
+    // and performEventSearch's category filter was unreachable dead code.
+    const _eventCatSel = container.querySelector('#filter-event-category');
+    if (_eventCatSel) {
+        try {
+            const cats = await AppDataStore.getAll('event_categories');
+            (cats || []).forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c.id;
+                opt.textContent = c.category_name || ('Category #' + c.id);
+                _eventCatSel.appendChild(opt);
+            });
+        } catch(e) { /* offline — leave placeholder only */ }
+    }
+
     // Update condition builder options
     renderConditionGroups();
 };
@@ -1373,7 +1390,30 @@ const _buildPurchasedProductIdSet = async (productName, candidateIds) => {
     const want = candidateIds instanceof Set ? candidateIds : new Set(candidateIds);
     const set = new Set();
     const needle = String(productName || '').toLowerCase();
-    const activities = await AppDataStore.getAll('activities');
+    // Scale-safe SOURCE: don't download the whole (largest) activities table per search.
+    // Push the two predicates this loop already applies — is_closing = true and
+    // solution_sold ilike %productName% — to Supabase so we fetch only candidate closings.
+    // The server ilike may over-match (multi-word product → token-AND, not contiguous), but
+    // the UNCHANGED substring + candidate-membership checks below narrow to the exact set,
+    // so {server rows} ⊇ {matches}. On any error queryAdvanced falls back to a client-side
+    // filter of the cached table, so this stays correct offline too.
+    const CAP = 5000;
+    let activities;
+    try {
+        const res = await AppDataStore.queryAdvanced('activities', {
+            filters: { is_closing: true },
+            search: productName,
+            searchFields: ['solution_sold'],
+            limit: CAP,
+            countMode: null,
+        });
+        activities = (res && Array.isArray(res.data)) ? res.data : null;
+        // If the matched set hit the cap the server slice may have dropped real matches —
+        // fall back to the exact whole-table scan for completeness rather than under-return.
+        if (!activities || activities.length >= CAP) throw new Error('activities closing set at/over cap — full scan for completeness');
+    } catch (e) {
+        activities = await AppDataStore.getAll('activities');
+    }
     for (const a of activities) {
         if (!a.is_closing || !a.solution_sold) continue;
         if (!String(a.solution_sold).toLowerCase().includes(needle)) continue;
@@ -1598,9 +1638,16 @@ const performActivitySearch = async (filters) => {
     const attendance = filters.basic['filter-activity-attendance'] || filters.basic.attendance;
     if (attendance) {
         const allAttendees = await AppDataStore.getAll('event_attendees');
+        // Pre-build the Set of event_ids that have a matching attendance_status ONCE, then
+        // test each activity in O(1). The old allAttendees.some(...) inside items.filter
+        // rescanned the whole attendee table per activity — O(activities × attendees).
+        const matchingEventIds = new Set();
+        for (const a of allAttendees) {
+            if (a.attendance_status === attendance && a.event_id != null) matchingEventIds.add(a.event_id);
+        }
         items = items.filter(i => {
             if (i.activity_type !== 'EVENT' || !i.event_id) return false;
-            return allAttendees.some(a => a.event_id === i.event_id && a.attendance_status === attendance);
+            return matchingEventIds.has(i.event_id);
         });
     }
     if (filters.dateRange.from) {
@@ -1852,15 +1899,31 @@ const applyComplexConditions = (items, groups) => {
     const _anyActive = groups.some(g => Array.isArray(g?.conditions) && g.conditions.length > 0);
     if (!_anyActive) return items;
 
+    // Only the groups that actually carry conditions constrain the result — an empty group
+    // imposes no constraint (matches all), and under OR it must NOT flip the union to
+    // "everything", so we combine across the NON-EMPTY groups only.
+    const activeGroups = groups.filter(g => Array.isArray(g?.conditions) && g.conditions.length > 0);
+    if (activeGroups.length === 0) return items;
+
+    // Inter-group combination operator. The single 'Group Logic' <select> is wired
+    // (both legacy + React shells) to updateGroupLogic(0, value), i.e. it sets
+    // groups[0].logic — so use that as the operator that combines MULTIPLE groups
+    // ('OR' → union, default 'AND' → intersection). Previously groups were always
+    // intersected (groups.every), making OR-across-groups impossible. Within a single
+    // group, its own logic still decides how that group's conditions combine.
+    const interGroupLogic = (groups[0] && groups[0].logic === 'OR') ? 'OR' : 'AND';
+
+    const groupMatches = (group, item) => {
+        const conds = Array.isArray(group?.conditions) ? group.conditions : [];
+        if (conds.length === 0) return true; // empty group = no constraint
+        const results = conds.map(cond => evaluateCondition(item, cond));
+        return group.logic === 'OR' ? results.some(r => r) : results.every(r => r);
+    };
+
     return items.filter(item => {
-        // Group logic (AND/OR for multiple groups)
-        // Simplified: we only support one group logic at the top level for now or specific per-group
-        return groups.every(group => {
-            const conds = Array.isArray(group?.conditions) ? group.conditions : [];
-            if (conds.length === 0) return true; // empty group = no constraint
-            const results = conds.map(cond => evaluateCondition(item, cond));
-            return group.logic === 'AND' ? results.every(r => r) : results.some(r => r);
-        });
+        return interGroupLogic === 'OR'
+            ? activeGroups.some(group => groupMatches(group, item))
+            : activeGroups.every(group => groupMatches(group, item));
     });
 };
 
@@ -1872,19 +1935,50 @@ const evaluateCondition = (item, cond) => {
     // Fall back to the legacy `op` key in case a saved/older condition used it.
     const op = cond.operator || cond.op;
 
+    // Boolean columns (e.g. products/bujishu/formula `is_active`) store a real boolean,
+    // but the condition <select> supplies the STRING 'true'/'false'. `true == 'true'` is
+    // false in JS (the string coerces to NaN), so a plain loose-equality compare matches
+    // nothing for '=' and everything for '!='. Normalize the string side to a boolean when
+    // the item value is a boolean so '='/'!=' behave as the user expects.
+    const _eqMatch = () => {
+        if (typeof itemValue === 'boolean' && (val === 'true' || val === 'false')) {
+            return itemValue === (val === 'true');
+        }
+        return itemValue == val;
+    };
+
+    // Ordered comparison for '>' / '<'. Date-typed fields (join_date, activity_date,
+    // event_date, customer_since, transactions.date …) store 'YYYY-MM-DD' strings, and
+    // parseFloat('2026-07-15') === 2026 — so a bare numeric compare only looks at the
+    // YEAR, dropping every same-year match and comparing cross-year dates by year alone.
+    // When the comparison value is a date-only string, compare both sides at day
+    // granularity (day-number since epoch, built from explicit Y,M-1,D parts to avoid
+    // UTC-parsing skew); otherwise fall back to the original numeric compare.
+    const _DATE_RE = /^\d{4}-\d{2}-\d{2}/;
+    const _toDayNum = (v) => {
+        const m = String(v ?? '').match(_DATE_RE);
+        if (!m) return null;
+        const [y, mo, d] = m[0].split('-').map(Number);
+        if (!y || !mo || !d) return null;
+        return new Date(y, mo - 1, d).getTime();
+    };
+    const _ordered = (cmp) => {
+        // If the user-supplied value is a date, compare as dates.
+        if (_DATE_RE.test(String(val ?? ''))) {
+            const a = _toDayNum(itemValue), b = _toDayNum(val);
+            return (a !== null && b !== null) && cmp(a, b);
+        }
+        // Numeric compare: if either side isn't a number, there's no meaningful
+        // ordering — return false rather than letting NaN silently drop all rows.
+        const a = parseFloat(itemValue), b = parseFloat(val);
+        return (!isNaN(a) && !isNaN(b)) && cmp(a, b);
+    };
+
     switch (op) {
-        case '=': return itemValue == val;
-        case '!=': return itemValue != val;
-        case '>': {
-            // Numeric compare: if either side isn't a number, there's no meaningful
-            // ordering — return false rather than letting NaN silently drop all rows.
-            const a = parseFloat(itemValue), b = parseFloat(val);
-            return (!isNaN(a) && !isNaN(b)) && a > b;
-        }
-        case '<': {
-            const a = parseFloat(itemValue), b = parseFloat(val);
-            return (!isNaN(a) && !isNaN(b)) && a < b;
-        }
+        case '=': return _eqMatch();
+        case '!=': return !_eqMatch();
+        case '>': return _ordered((a, b) => a > b);
+        case '<': return _ordered((a, b) => a < b);
         // Treat null/undefined as '' (not the literal string 'undefined', which could
         // spuriously match substrings like 'und').
         case 'contains': return String(itemValue ?? '').toLowerCase().includes(String(val ?? '').toLowerCase());
@@ -2065,6 +2159,30 @@ const loadSavedSearch = async (id) => {
     if (sdfEl) sdfEl.value = filters.dateRange.from || '';
     const sdtEl = document.getElementById('search-date-to');
     if (sdtEl) sdtEl.value = filters.dateRange.to || '';
+
+    // Restore the BASIC filters that collectFilters() persisted. updateFilterSections()
+    // above just re-rendered these inputs EMPTY, so without re-populating them
+    // executeSearch()'s collectFilters() re-reads the DOM as {} and every saved basic
+    // criterion (name/status/agent/score/tags/…) is silently discarded → the search runs
+    // unfiltered. Mirror collectFilters()'s id scheme exactly: key = id.replace(prefix,'').
+    const _ENTITY_PREFIX_RESTORE = {
+        agents: 'filter-agent-', prospects: 'filter-prospect-', customers: 'filter-customer-',
+        activities: 'filter-activity-', transactions: 'filter-transaction-', events: 'filter-event-',
+        products: 'filter-product-', bujishu: 'filter-bujishu-', formula: 'filter-formula-',
+    };
+    if (filters.basic && typeof filters.basic === 'object') {
+        const _rPrefix = _ENTITY_PREFIX_RESTORE[filters.entity] || ('filter-' + String(filters.entity || '').slice(0, -1) + '-');
+        Object.keys(filters.basic).forEach(key => {
+            const el = document.getElementById(_rPrefix + key);
+            if (!el) return;
+            const saved = filters.basic[key];
+            if (el.multiple && Array.isArray(saved)) {
+                Array.from(el.options).forEach(opt => { opt.selected = saved.includes(opt.value); });
+            } else if (!Array.isArray(saved)) {
+                el.value = saved;
+            }
+        });
+    }
 
     // Only adopt a well-formed complex array — otherwise reset to the empty default so
     // renderConditionGroups (_conditionGroups.map) and applyComplexConditions don't throw.

@@ -621,6 +621,9 @@
         // appointment_reminder's eventId is an ACTIVITY id (its own id-space, not events.id)
         // — namespace it so it can't collide with an event invite sharing the same number.
         if (opts.triggerType === 'appointment_reminder') return `${person}|appt:${opts.eventId || ''}`;
+        // voucher_unredeemed's eventId is a prospect_attachments id (its own id-space, not
+        // events.id) — namespace it so it can't collide with an event invite sharing the same number.
+        if (opts.triggerType === 'voucher_unredeemed') return `${person}|voucher:${opts.eventId || ''}`;
         if (opts.eventId) return `${person}|eid:${opts.eventId}`;
         if (opts.eventName && opts.eventDate) return `${person}|en:${_n(opts.eventName)}|ed:${opts.eventDate}`;
         return `${person}|t:${opts.triggerType}`;
@@ -681,6 +684,12 @@
                     // events.id can't suppress — or be suppressed by — an appointment reminder.
                     return d.trigger_type === triggerType && d.event_id == eventId;
                 }
+                if (triggerType === 'voucher_unredeemed') {
+                    // event_id here is a prospect_attachments id (separate id-space from the
+                    // events.id that event invites store). Scope dedup to this trigger so a
+                    // colliding events.id can't suppress — or be suppressed by — a voucher nudge.
+                    return d.trigger_type === triggerType && d.event_id == eventId;
+                }
                 if (!eventId) {
                     return d.trigger_type === triggerType;
                 }
@@ -721,7 +730,7 @@
                 event_id: eventId || null,
                 event_date: eventDate || null,
                 event_name: eventName || '',
-                due_date: dueDate || new Date().toISOString().split('T')[0],
+                due_date: dueDate || _localDateStr(new Date()),
                 attachment_url: attachmentUrl || null,
                 status: 'pending'
             });
@@ -777,10 +786,10 @@
         if (!targetCats.length) return [];
         const events = await AppDataStore.getAll('events');
         const today = new Date();
-        const todayStr = today.toISOString().split('T')[0];
+        const todayStr = _localDateStr(today);
         const windowEnd = new Date(today);
         windowEnd.setDate(windowEnd.getDate() + (tpl.event_window_days || 60));
-        const windowEndStr = windowEnd.toISOString().split('T')[0];
+        const windowEndStr = _localDateStr(windowEnd);
 
         return events.filter(e => {
             const eDate = e.event_date || e.date || '';
@@ -886,9 +895,17 @@
             const solutionOk = !solutionList.length || solutionList.some(m => solutionNames.some(s => s.includes(m)));
             const solCatOk   = !solCatList.length   || solCatList.some(m => solutionCategories.some(c => c.includes(m)));
 
-            // Skip if any match criteria are defined but none match
-            const hasMatchCrit = interestList.length || solutionList.length || solCatList.length;
-            if (hasMatchCrit && !interestOk && !solutionOk && !solCatOk) continue;
+            // Skip if any match criteria are defined but none match.
+            // #3: only the criteria the template ACTUALLY specifies gate the match — an
+            // empty sub-list must be NEUTRAL, not vacuously true (same fix as
+            // dispatchProactiveEventInvites / dispatchOnNewCalendarEvent). Previously
+            // every *Ok flag defaulted true for an empty list, so a template setting
+            // only one criterion always passed and fired for every prospect.
+            const _matchChecks = [];
+            if (interestList.length) _matchChecks.push(interestOk);
+            if (solutionList.length) _matchChecks.push(solutionOk);
+            if (solCatList.length)   _matchChecks.push(solCatOk);
+            if (_matchChecks.length && !_matchChecks.some(Boolean)) continue;
 
             executeEventBasedTrigger(tpl, prospectId, prospect.full_name, prospect.phone).catch(e => console.warn(`CPS trigger ${tpl.trigger_type} failed:`, e));
         }
@@ -1043,7 +1060,7 @@
         if (!eventTriggers.length) return;
 
         const today = new Date();
-        const todayStr = today.toISOString().split('T')[0];
+        const todayStr = _localDateStr(today);
         const prevYearStart = `${today.getFullYear() - 1}-01-01`;
         const prevYearEnd   = `${today.getFullYear() - 1}-12-31`;
 
@@ -1113,7 +1130,7 @@
 
             const windowEnd = new Date(today);
             windowEnd.setDate(windowEnd.getDate() + (tpl.event_window_days || 60));
-            const windowEndStr = windowEnd.toISOString().split('T')[0];
+            const windowEndStr = _localDateStr(windowEnd);
 
             // Instances to invite to = upcoming logged EVENT activities (which carry the
             // per-slot date/time/venue) PLUS catalog events whose `date` falls in the window
@@ -1226,7 +1243,7 @@
         if (!calActivity?.event_id) return;
 
         const today    = new Date();
-        const todayStr = today.toISOString().split('T')[0];
+        const todayStr = _localDateStr(today);
         const prevYearStart = `${today.getFullYear() - 1}-01-01`;
         const prevYearEnd   = `${today.getFullYear() - 1}-12-31`;
 
@@ -1754,7 +1771,7 @@
     // Also escalates solutions that have been Proposed for 21+ days.
     const dispatchPendingSolutionReminders = async () => {
         const templates = await loadFollowUpTemplates();
-        const todayStr = new Date().toISOString().split('T')[0];
+        const todayStr = _localDateStr(new Date());
 
         let solutions = [];
         try { solutions = await AppDataStore.getAll('proposed_solutions') || []; } catch (e) { /* intentional: optional table absent → nothing to dispatch */ return; }
@@ -2008,6 +2025,10 @@
                 key = `${personKey}|t:${d.trigger_type}`;
             } else if (d.trigger_type === 'appointment_reminder') {
                 key = `${personKey}|t:appointment_reminder|eid:${d.event_id || ''}`;
+            } else if (d.trigger_type === 'voucher_unredeemed') {
+                // event_id here is a prospect_attachments id (own id-space) — key it under this
+                // trigger so it can't collapse with an event invite sharing the same number.
+                key = `${personKey}|t:voucher_unredeemed|vid:${d.event_id || ''}`;
             } else if (isEventBased) {
                 const eventKey = d.event_id ? `eid:${d.event_id}` : `en:${_norm(d.event_name)}|ed:${d.event_date || ''}`;
                 key = `${personKey}|${eventKey}`;
@@ -2274,7 +2295,7 @@
         const prospectMap = Object.fromEntries(prospects.map(p => [String(p.id), p]));
         const customerMap = Object.fromEntries(customers.map(c => [String(c.id), c]));
 
-        const todayStr = new Date().toISOString().split('T')[0];
+        const todayStr = _localDateStr(new Date());
         const pending = solutions.filter(s => {
             if (s.status !== 'Proposed') return false;
             const person = s.prospect_id ? prospectMap[String(s.prospect_id)] : s.customer_id ? customerMap[String(s.customer_id)] : null;
@@ -2511,7 +2532,9 @@
             countMode: null,
             filters: {},
         };
-        if (!isSystemAdmin(_state.cu) && _filters.agent && _filters.agent !== 'all') {
+        // Agent filter is a user-chosen narrowing and applies to EVERY viewer,
+        // including admins — the admin scoping guard is a SEPARATE concern below.
+        if (_filters.agent && _filters.agent !== 'all') {
             actQueryOpts.filters.lead_agent_id = _filters.agent;
         }
         if (_filters.type && _filters.type !== 'all') {
@@ -2813,7 +2836,7 @@
             p_user_id:      userId,
             p_visible_ids:  isAdmin ? null : visibleIdsArr,
             p_is_admin:     isAdmin,
-            p_agent_filter: (!isAdmin && _filters.agent && _filters.agent !== 'all') ? _filters.agent : null,
+            p_agent_filter: (_filters.agent && _filters.agent !== 'all') ? _filters.agent : null,
             p_type_filter:  (_filters.type && _filters.type !== 'all') ? _filters.type : null,
         };
         const hotParams = {
@@ -3234,7 +3257,8 @@
             offset: 0,
             countMode: null, // no pagination needed
         };
-        if (!isSystemAdmin(_state.cu) && _filters && _filters.agent && _filters.agent !== 'all') {
+        // Agent filter is a user-chosen narrowing and applies to every viewer, admins included.
+        if (_filters && _filters.agent && _filters.agent !== 'all') {
             queryOpts.filters.lead_agent_id = _filters.agent;
         }
         if (_filters && _filters.type && _filters.type !== 'all') {
@@ -3398,7 +3422,7 @@
                 name: p.full_name,
                 phone: p.phone || '',
                 type: p.customer_since ? 'customer' : 'prospect',
-                info: `Agent: ${agent?.full_name || 'Michelle Tan'} · ${p.customer_since ? 'Customer' : 'Prospect'}`,
+                info: `Agent: ${agent?.full_name || 'Unassigned'} · ${p.customer_since ? 'Customer' : 'Prospect'}`,
                 dob: getMMDD(p.date_of_birth)
             };
         };
@@ -3406,10 +3430,16 @@
         const getNameBdayInfo = (n) => {
             const prospect = prospectById.get(String(n.prospect_id));
             return {
-                id: n.prospect_id || n.id,
+                // The wish/gift is logged against the PARENT prospect (a family member has no
+                // own contact record). Never fall back to the names-table row id here — that id
+                // lives in a different id-space and would resolve to an unrelated prospect.
+                id: n.prospect_id || null,
                 name: `${n.full_name} (${n.relation || 'Family'} of ${prospect?.full_name || 'Contact'})`,
                 phone: prospect?.phone || '',
                 type: 'prospect',
+                // The birthday belongs to the family member — carry their name so the wish is
+                // addressed to them, not to the parent contact whose record we load.
+                celebrant: n.full_name || '',
                 info: `Family of: ${prospect?.full_name || 'Contact'} · ${n.relation || 'Family Member'}`,
                 dob: getMMDD(n.date_of_birth)
             };
@@ -3454,16 +3484,24 @@
 
         const renderBday = (data) => {
             if (data.length === 0) return '<div class="text-muted" style="padding:10px; font-size:12px;">No birthdays found.</div>';
-            return data.map(b => `
+            return data.map(b => {
+                // A family-member card with no parent prospect id (b.id null) has no record to
+                // log the wish/gift against — show the card but omit the actions rather than
+                // dispatch to a wrong id-space prospect.
+                const _celebArg = b.celebrant ? `, '${UI.escJsAttr(String(b.celebrant))}'` : '';
+                const actions = (b.id == null) ? '' : `
+                    <div class="act-actions" style="border-top:none; margin-top:4px; padding-top:0;">
+                        <button class="btn btn-sm secondary" style="font-size:11px" onclick="app.openSendBirthdayWish(${b.id}, '${UI.escJsAttr(String(b.type))}'${_celebArg})">Send Wish</button>
+                        <button class="btn btn-sm secondary" style="font-size:11px" onclick="app.openPrepareGiftModal(${b.id}, '${UI.escJsAttr(String(b.type))}'${_celebArg})">Prepare Gift</button>
+                    </div>`;
+                return `
                 <div class="bday-card">
                     <div class="bday-name">${esc(b.name)} 🎂</div>
                     <div class="bday-info">${esc(b.info)}</div>
-                    <div class="act-actions" style="border-top:none; margin-top:4px; padding-top:0;">
-                        <button class="btn btn-sm secondary" style="font-size:11px" onclick="app.openSendBirthdayWish(${b.id}, '${UI.escJsAttr(String(b.type))}')">Send Wish</button>
-                        <button class="btn btn-sm secondary" style="font-size:11px" onclick="app.openPrepareGiftModal(${b.id}, '${UI.escJsAttr(String(b.type))}')">Prepare Gift</button>
-                    </div>
+                    ${actions}
                 </div>
-            `).join('');
+            `;
+            }).join('');
         };
 
         const todayBadge = document.querySelector('#bday-today-header .today');
@@ -3938,16 +3976,19 @@
     // ===== END HEALTH PRODUCT REFILL REMINDERS =====
 
 
-    const openSendBirthdayWish = async (id, entityType) => {
+    const openSendBirthdayWish = async (id, entityType, celebrantName) => {
         const table = entityType === 'customer' ? 'customers' : 'prospects';
         const person = await AppDataStore.getById(table, id);
         if (!person) return;
+        // The wish is logged against `person` (the parent contact for a family member),
+        // but is ADDRESSED to the celebrant — use their name when supplied, else the contact's.
+        const _greetName = (celebrantName && String(celebrantName).trim()) || person.full_name;
         const content = `
             <div class="form-section">
-                <p>Send a birthday wish to <strong>${escapeHtml(person.full_name)}</strong>.</p>
+                <p>Send a birthday wish to <strong>${escapeHtml(_greetName)}</strong>.</p>
                 <div class="form-group" style="margin-top:12px;">
                     <label>Message</label>
-                    <textarea id="bday-wish-msg" class="form-control" rows="4">Happy Birthday, ${escapeHtml(person.full_name)}! 🎂 Wishing you a wonderful year ahead filled with joy and prosperity. Best regards, DestinOraclesSolution Team</textarea>
+                    <textarea id="bday-wish-msg" class="form-control" rows="4">Happy Birthday, ${escapeHtml(_greetName)}! 🎂 Wishing you a wonderful year ahead filled with joy and prosperity. Best regards, DestinOraclesSolution Team</textarea>
                 </div>
                 <div class="form-group">
                     <label>Channel</label>
@@ -4009,13 +4050,16 @@
         UI.toast.success('WhatsApp opened — review and send');
     };
 
-    const openPrepareGiftModal = async (id, entityType) => {
+    const openPrepareGiftModal = async (id, entityType, celebrantName) => {
         const table = entityType === 'customer' ? 'customers' : 'prospects';
         const person = await AppDataStore.getById(table, id);
         if (!person) return;
+        // Gift is logged against `person` (the parent for a family member) but is FOR the
+        // celebrant — label it with their name when supplied, else the contact's.
+        const _giftName = (celebrantName && String(celebrantName).trim()) || person.full_name;
         const content = `
             <div class="form-section">
-                <p>Log a birthday gift for <strong>${escapeHtml(person.full_name)}</strong>.</p>
+                <p>Log a birthday gift for <strong>${escapeHtml(_giftName)}</strong>.</p>
                 <div class="form-group" style="margin-top:12px;">
                     <label>Gift Description</label>
                     <input type="text" id="bday-gift-desc" class="form-control" placeholder="e.g. Mooncake box, RM50 voucher">
@@ -4097,6 +4141,10 @@
 
     const goToPrevious = async () => {
         if (_state.cv === 'month') {
+            // Anchor to day 1 BEFORE shifting the month so month-end dates (29–31)
+            // don't overflow into the wrong month (e.g. Mar 31 → Feb 31 → Mar 3).
+            // The month grid renders purely from year+month, so day=1 is safe.
+            _state.cd.setDate(1);
             _state.cd.setMonth(_state.cd.getMonth() - 1);
         } else if (_state.cv === 'week') {
             _state.cd.setDate(_state.cd.getDate() - 7);
@@ -4110,6 +4158,10 @@
 
     const goToNext = async () => {
         if (_state.cv === 'month') {
+            // Anchor to day 1 BEFORE shifting the month so month-end dates (29–31)
+            // don't overflow into the wrong month (e.g. Jan 31 → Feb 31 → Mar 3).
+            // The month grid renders purely from year+month, so day=1 is safe.
+            _state.cd.setDate(1);
             _state.cd.setMonth(_state.cd.getMonth() + 1);
         } else if (_state.cv === 'week') {
             _state.cd.setDate(_state.cd.getDate() + 7);
@@ -4257,7 +4309,8 @@
             limit: 5000, offset: 0, countMode: null,
             filters: {},
         };
-        if (!isSystemAdmin(_state.cu) && _filters && _filters.agent && _filters.agent !== 'all') {
+        // Agent filter is a user-chosen narrowing and applies to every viewer, admins included.
+        if (_filters && _filters.agent && _filters.agent !== 'all') {
             wvQueryOpts.filters.lead_agent_id = _filters.agent;
         }
         if (_filters && _filters.type && _filters.type !== 'all') {
@@ -4378,7 +4431,8 @@
             countMode: null,
             filters: {},
         };
-        if (!isSystemAdmin(_state.cu) && _filters?.agent && _filters.agent !== 'all') {
+        // Agent filter is a user-chosen narrowing and applies to every viewer, admins included.
+        if (_filters?.agent && _filters.agent !== 'all') {
             actQueryOptsDV.filters.lead_agent_id = _filters.agent;
         }
         if (_filters?.type && _filters.type !== 'all') {
@@ -5205,6 +5259,10 @@
     };
 
     let _mcState = null;
+    // Reentrancy guard for openMeetingCapture: it awaits a network lookup BEFORE assigning
+    // _mcState / appending the overlay, so a double-tap could spawn two overlays + two 1s
+    // intervals + an orphaned wakeLock. This flag closes that window.
+    let _mcOpening = false;
 
     const _mcElapsed = () => {
         if (!_mcState) return '00:00:00';
@@ -5238,8 +5296,18 @@
     };
 
     const openMeetingCapture = async (activityId) => {
-        const activity = await _lookupActivityRobust(activityId);
+        // Refuse re-entry: a session is already open/opening, or a stray overlay exists.
+        if (_mcOpening || _mcState || document.getElementById('mc-overlay')) return;
+        _mcOpening = true;
+        let activity;
+        try {
+            activity = await _lookupActivityRobust(activityId);
+        } finally {
+            _mcOpening = false;
+        }
         if (!activity) { UI.toast.error('Activity not found'); return; }
+        // Another invocation may have won the race while we awaited the lookup.
+        if (_mcState || document.getElementById('mc-overlay')) return;
         const config = _MC_CONFIG[activity.activity_type];
         if (!config) { UI.toast.error('Live Notes not available for this activity type'); return; }
 
@@ -5523,10 +5591,20 @@
             if (error) throw new Error(error.message || 'OCR call failed');
             if (!res || res.ok === false) throw new Error(res?.detail || res?.error || 'OCR failed');
 
-            // Snapshot existing prospect values for the diff
+            // Snapshot existing prospect values for the diff.
+            // CPS_SCAN_FIELD_MAP is declared const INSIDE the cps chunk's IIFE and is
+            // NOT on window, so referencing it here threw ReferenceError and the
+            // review modal never opened. Build `current` from a local scannedKey→dbColumn
+            // map (mirrors the cps chunk's map columns [0] and [3]) so the diff snapshot
+            // keys line up with the keys renderCpsScanReview reads.
             const prospect = await AppDataStore.getById('prospects', prospectId);
+            const _cpsScanKeyToDbCol = {
+                name: 'full_name', gender: 'gender', dob_solar: 'date_of_birth',
+                dob_lunar: 'lunar_birth', phone: 'phone', occupation: 'occupation',
+                email: 'email', address: 'address', marital_status: 'marital_status',
+            };
             const current = {};
-            CPS_SCAN_FIELD_MAP.forEach(([key, , , dbCol]) => {
+            Object.entries(_cpsScanKeyToDbCol).forEach(([key, dbCol]) => {
                 current[key] = prospect?.[dbCol] != null ? String(prospect[dbCol]) : '';
             });
 
@@ -5950,6 +6028,10 @@
         // We refuse to overwrite a record that's already submitted/approved
         // so we don't sneak edits past the manager approval flow.
         let crSyncStatus = 'none';
+        // Tracks whether the NPO order (sale/items/installments) failed to materialise so the
+        // final toast can warn the agent instead of showing an unqualified success — otherwise
+        // a transient insert failure is invisible AND the now-submitted record locks out retry.
+        let npoOrderFailed = false;
         if (isClosed) {
             const activity = await AppDataStore.getById('activities', activityId);
             if (activity?.prospect_id) {
@@ -6026,11 +6108,19 @@
                                 const _addMonths = (iso, n) => {
                                     const base = iso ? new Date(iso) : new Date();
                                     if (isNaN(base)) return null;
-                                    const d = new Date(base.getTime());
-                                    d.setMonth(d.getMonth() + n);
-                                    return d.toISOString().split('T')[0];
+                                    // Anchor month math on Y/M/D parts and CLAMP the day so a start on the
+                                    // 29th–31st doesn't overflow into the next month (Jan 31 + 1 → Feb 28,
+                                    // not Mar 3). Build the result string from local parts (no UTC shift).
+                                    const y = base.getFullYear();
+                                    const m = base.getMonth();
+                                    const day = base.getDate();
+                                    const targetY = y + Math.floor((m + n) / 12);
+                                    const targetM = ((m + n) % 12 + 12) % 12;
+                                    const lastDay = new Date(targetY, targetM + 1, 0).getDate();
+                                    const d = Math.min(day, lastDay);
+                                    return `${targetY}-${String(targetM + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
                                 };
-                                const startDate = (mo.order_date || mo.collection_date || new Date().toISOString().split('T')[0]);
+                                const startDate = (mo.order_date || mo.collection_date || _localDateStr(new Date()));
                                 const uid = _state.cu?.id || null;
                                 const salePayload = {
                                     customer_id: prospect?.customer_id || null,
@@ -6059,7 +6149,7 @@
                                     }));
                                     if (items.length) {
                                         const { error: itemErr } = await sb.from('npo_sale_items').insert(items).select();
-                                        if (itemErr) console.warn('NPO sale items insert failed:', itemErr);
+                                        if (itemErr) { npoOrderFailed = true; console.warn('NPO sale items insert failed:', itemErr); }
                                     }
                                     // installment schedule: seq 1..tenure, deposit is on the sale (not a row)
                                     const inst = [];
@@ -6067,14 +6157,17 @@
                                         inst.push({ sale_id: saleId, seq, due_date: _addMonths(startDate, seq), amount: monthly, status: 'due' });
                                     }
                                     const { error: instErr } = await sb.from('npo_installments').insert(inst).select();
-                                    if (instErr) console.warn('NPO installments insert failed:', instErr);
+                                    if (instErr) { npoOrderFailed = true; console.warn('NPO installments insert failed:', instErr); }
                                     ['npo_sales', 'npo_sale_items', 'npo_installments'].forEach(t => {
                                         try { AppDataStore.invalidateCache && AppDataStore.invalidateCache(t); } catch (_) {}
                                     });
                                 }
                             }
                         } catch (npoErr) {
-                            // Never let an NPO-order failure abort the closing save.
+                            // Never let an NPO-order failure abort the closing save — but flag it so
+                            // the agent is warned (the closing auto-submits and then locks, so a
+                            // silent failure here would strand the deal with no NPO order forever).
+                            npoOrderFailed = true;
                             console.warn('NPO order creation failed (closing still saved):', npoErr);
                         }
                     }
@@ -6139,7 +6232,13 @@
         }
 
         UI.hideModal();
-        if (crSyncStatus === 'submitted_with_conversion') UI.toast.success('✓ Submitted to manager for approval — sale ≥ RM 2,000 also requested customer conversion');
+        // Surface an NPO-order failure regardless of the closing-record status: the closing
+        // still saved (by design), but the npo_sales/items/installments rows were NOT created,
+        // so the deal is missing from the NPO Orders tab / PORT KPI and needs manual follow-up.
+        if (npoOrderFailed) {
+            UI.toast.error('Closing saved, but the NPO order could not be created — please recreate it in the NPO Orders tab or contact support.');
+        }
+        else if (crSyncStatus === 'submitted_with_conversion') UI.toast.success('✓ Submitted to manager for approval — sale ≥ RM 2,000 also requested customer conversion');
         else if (crSyncStatus === 'submitted_no_queue')   UI.toast.error('Closing saved but approval queue write failed — please retry from the prospect profile');
         else if (crSyncStatus === 'submitted')            UI.toast.success('✓ Submitted to manager for approval');
         else if (crSyncStatus === 'synced')               UI.toast.success('Saved as draft (fill product, amount, invoice & full name to auto-submit for approval)');
@@ -6309,7 +6408,12 @@
                 console.warn('savePostMeetupNotes threw:', e);
             }
         }
-        if (!writeOk) {
+        // Only fall back to AppDataStore when the direct client is entirely unavailable.
+        // When `sb` exists but its RLS-aware write FAILED (e.g. 42501 on an activity owned by
+        // another agent, or an expired session), falling back to AppDataStore.update — which
+        // never rejects and silently queues — would force writeOk=true and lose the notes.
+        // Let that failure surface via the error toast below instead.
+        if (!writeOk && !sb) {
             try {
                 await AppDataStore.update('activities', activityId, updates);
                 writeOk = true;
@@ -6319,6 +6423,8 @@
         }
 
         if (!writeOk) {
+            // Re-enable Save so the agent can actually retry (the label was set to 'Saving…').
+            if (_saveBtn) { _saveBtn.disabled = false; _saveBtn.textContent = 'Save'; }
             UI.toast.error('Failed to save notes — please try again');
             return;
         }
@@ -6853,16 +6959,22 @@
             // customers) instead of downloading BOTH whole tables. getById is a
             // synchronous in-memory hit when the table is already cached, else a
             // single-row fetch. Falls back to the dual whole-table scan on error.
+            // Classify by WHICH table the record came from — there is no `is_customer`
+            // flag on either table (customers rows never carry it), so the old
+            // `p.is_customer ? 'customer' : 'prospect'` always mis-tagged customers as
+            // prospects, writing prospect_id = the customer's id into the wrong id-space.
             let p = null;
+            let pType = 'prospect';
             try {
                 p = await AppDataStore.getById('prospects', entityId);
-                if (!p) p = await AppDataStore.getById('customers', entityId);
+                if (!p) { p = await AppDataStore.getById('customers', entityId); if (p) pType = 'customer'; }
             } catch (e) {
                 console.warn('postEventFollowUp: getById lookup failed — whole-table fallback', e);
-                const all = [...await AppDataStore.getAll('prospects'), ...await AppDataStore.getAll('customers')];
-                p = all.find(x => x.id === entityId);
+                const prospectsAll = await AppDataStore.getAll('prospects');
+                p = prospectsAll.find(x => x.id === entityId);
+                if (!p) { p = (await AppDataStore.getAll('customers')).find(x => x.id === entityId); if (p) pType = 'customer'; }
             }
-            if (p) app.selectEntity(entityId, p.is_customer ? 'customer' : 'prospect');
+            if (p) app.selectEntity(entityId, pType);
 
             const typeEl = document.getElementById('modal-activity-type');
             if (typeEl) {

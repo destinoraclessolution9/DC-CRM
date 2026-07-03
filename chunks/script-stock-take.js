@@ -100,6 +100,23 @@
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
     const _stNormKey = (loc, sku) => `${String(loc||'').trim().toLowerCase()}|${String(sku||'').trim().toUpperCase()}`;
+    // Timestamps are stored as new Date().toISOString() (UTC). Slicing the ISO string
+    // renders UTC, which is 8h early for MYT users. Parse and format in LOCAL time.
+    const _st2 = (n) => String(n).padStart(2, '0');
+    // Local HH:MM for a stored ISO timestamp (empty string when absent/invalid).
+    const _stLocalTime = (iso) => {
+        if (!iso) return '';
+        const d = new Date(iso);
+        if (isNaN(d.getTime())) return String(iso).slice(11, 16);
+        return `${_st2(d.getHours())}:${_st2(d.getMinutes())}`;
+    };
+    // Local "YYYY-MM-DD HH:MM" for a stored ISO timestamp (empty string when absent/invalid).
+    const _stLocalDateTime = (iso) => {
+        if (!iso) return '';
+        const d = new Date(iso);
+        if (isNaN(d.getTime())) return String(iso).slice(0, 16).replace('T', ' ');
+        return `${d.getFullYear()}-${_st2(d.getMonth()+1)}-${_st2(d.getDate())} ${_st2(d.getHours())}:${_st2(d.getMinutes())}`;
+    };
 
     // Defense in depth: if showStockTakeView is called directly bypassing navigateTo,
     // still gate on Super Admin.
@@ -174,7 +191,7 @@
         const allCounts = sid ? _stCounts(sid) : [];
         const recentCounts = allCounts.slice().reverse().slice(0, 50).map(c => ({
             id: c.id,
-            timeShort: (c.timestamp || '').slice(11, 16),
+            timeShort: _stLocalTime(c.timestamp),
             counter: c.counter || '',
             location: c.location || '',
             shelf: c.shelf || '',
@@ -457,7 +474,7 @@
                             return `
                             <tr style="border-top:1px solid var(--gray-100);">
                                 <td style="padding:10px;font-family:monospace;font-size:13px;">${_stEsc(s.id)}</td>
-                                <td style="padding:10px;font-size:13px;">${_stEsc((s.createdAt||'').slice(0,16).replace('T',' '))}</td>
+                                <td style="padding:10px;font-size:13px;">${_stEsc(_stLocalDateTime(s.createdAt))}</td>
                                 <td style="padding:10px;font-size:13px;">${_stEsc((s.locations||[]).join(', ') || '—')}</td>
                                 <td style="padding:10px;text-align:center;font-size:13px;">${_stCounts(s.id).length}</td>
                                 <td style="padding:10px;text-align:center;font-size:13px;">${_stSystemStock(s.id).length}</td>
@@ -488,7 +505,7 @@
         UI.showModal('New Stock Take Session', `
             <div class="form-group" style="margin-bottom:12px;">
                 <label>Session ID</label>
-                <input id="st-new-id" type="text" value="ST_${new Date().toISOString().slice(0,10).replace(/-/g,'')}" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;">
+                <input id="st-new-id" type="text" value="ST_${(() => { const d = new Date(); return `${d.getFullYear()}${_st2(d.getMonth()+1)}${_st2(d.getDate())}`; })()}" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;">
             </div>
             <div class="form-group">
                 <label>Locations (one per line)</label>
@@ -537,6 +554,7 @@
         if (cloudFailed) UI.toast.error('Session created locally only — cloud sync unavailable (single-device).');
         else UI.toast.success('Session created');
         stSwitchTab('import');
+        stJsxRefresh();
     };
     const stActivateSession = async (id) => {
         _stState.sessionId = id;
@@ -546,27 +564,57 @@
         UI.toast.success(`Activated ${id}`);
         stSwitchTab('count');
     };
-    const stCloseSession = (id) => {
+    const stCloseSession = async (id) => {
         if (!_stRequireSetupAdmin()) return; // setup-only: closing a session is admin-gated
         const sessions = _stSessions();
         const s = sessions.find(x => x.id === id);
         if (!s) return;
         s.status = 'closed'; s.closedAt = new Date().toISOString();
         _stSave('sessions', sessions);
+        // Data-integrity fix: also flip the cloud st_sessions row to 'closed'. Without this
+        // the cloud row stays 'open' forever, staff devices keep inserting into the dead
+        // session, and "closed sessions are immutable" is violated cloud-side.
+        const sb = _stSb();
+        if (sb && s.sbSessionId) {
+            try {
+                const r = await sb.from('st_sessions').update({ status: 'closed' }).eq('id', s.sbSessionId);
+                if (r && r.error) UI.toast.error('Session closed locally — cloud update failed; other devices may still write to it');
+            } catch (e) {
+                console.warn('[stock-take v2] session close cloud update failed:', e?.message);
+                UI.toast.error('Session closed locally — cloud update failed; other devices may still write to it');
+            }
+        }
         UI.toast.success(`Session ${id} closed`);
         stSwitchTab('sessions');
+        stJsxRefresh();
     };
-    const stDeleteSession = (id) => {
+    const stDeleteSession = async (id) => {
         if (!_stRequireSetupAdmin()) return; // setup-only: destroys a whole session + its data
         if (!confirm(`Delete session ${id} and all its data?`)) return;
+        const sess = _stSessions().find(s => s.id === id);
         _stSave('sessions', _stSessions().filter(s => s.id !== id));
         localStorage.removeItem(_stKey(`systemStock.${id}`));
         localStorage.removeItem(_stKey(`counts.${id}`));
         localStorage.removeItem(_stKey(`bulkUpload.${id}`));
         localStorage.removeItem(_stKey(`varianceReasons.${id}`));
         if (_stState.sessionId === id) _stState.sessionId = null;
+        // Data-integrity fix: also remove the cloud st_sessions row (and its st_counts) so
+        // staff devices bootstrapping "the most recent open session" can't re-join a deleted
+        // one and keep writing counts into it.
+        const sb = _stSb();
+        if (sb && sess?.sbSessionId) {
+            try {
+                await sb.from('st_counts').delete().eq('session_id', sess.sbSessionId);
+                const r = await sb.from('st_sessions').delete().eq('id', sess.sbSessionId);
+                if (r && r.error) UI.toast.error('Session removed locally — cloud delete failed; it may still be visible to other devices');
+            } catch (e) {
+                console.warn('[stock-take v2] session delete cloud update failed:', e?.message);
+                UI.toast.error('Session removed locally — cloud delete failed; it may still be visible to other devices');
+            }
+        }
         UI.toast.success('Session deleted');
         stSwitchTab('sessions');
+        stJsxRefresh();
     };
 
     // ── Import tab ──────────────────────────────────────────
@@ -716,7 +764,7 @@
                             <th scope="col"></th>
                         </tr></thead>
                         <tbody>${counts.map(c => `<tr style="border-top:1px solid var(--gray-100);">
-                            <td style="padding:6px;">${_stEsc((c.timestamp||'').slice(11,16))}</td>
+                            <td style="padding:6px;">${_stEsc(_stLocalTime(c.timestamp))}</td>
                             <td style="padding:6px;">${_stEsc(c.counter)}</td>
                             <td style="padding:6px;">${_stEsc(c.location)}</td>
                             <td style="padding:6px;color:var(--gray-500);">${_stEsc(c.shelf||'—')}</td>
@@ -822,12 +870,25 @@
         // against the local row (the dedupe key is `id`).
         const sb = _stSb();
         if (sb && _stState.sbSessionId) {
+            // Data-integrity fix: supabase-js resolves with { error } instead of rejecting
+            // on RLS/constraint/closed-session failures. The old .then/.catch discarded the
+            // error object, so a rejected insert was silently dropped and the count lived
+            // only on this device while the UI implied multi-device sync was live. Surface
+            // the failure so the counter knows the row didn't reach the cloud.
             sb.from('st_counts').insert({
                 id: newRow.id,
                 session_id: _stState.sbSessionId,
                 sku: newRow.sku, qty,
                 counter, location_label: location, shelf_text: shelf,
-            }).then(() => {}).catch(() => {});
+            }).then(r => {
+                if (r && r.error) {
+                    console.warn('[stock-take v2] count cloud insert failed:', r.error.message);
+                    UI.toast.error('Count saved locally — cloud sync failed; other devices may not see it');
+                }
+            }).catch(e => {
+                console.warn('[stock-take v2] count cloud insert failed:', e?.message);
+                UI.toast.error('Count saved locally — cloud sync failed; other devices may not see it');
+            });
         }
         // Clear SKU + qty so the next scan starts clean; keep counter, location,
         // and shelf (counter typically stays at the same shelf across SKUs).
@@ -836,6 +897,7 @@
         if (skuEl) skuEl.value = '';
         if (qtyEl) qtyEl.value = '';
         _stRefreshCountsList();
+        stJsxRefresh();
         UI.toast.success(`+${qty} × ${skuRaw.toUpperCase()}`);
         setTimeout(() => document.getElementById('st-sku')?.focus(), 0);
     };
@@ -843,7 +905,20 @@
         const sid = _stRequireOpenSession();
         if (!sid) return;
         _stSave(`counts.${sid}`, _stCounts(sid).filter(c => c.id !== id));
+        // Data-integrity fix: mirror the delete into Supabase so the cloud row (and every
+        // other subscribed device that already mirrored it) doesn't keep the stale count.
+        // Without this, deleting locally leaves the DB + other devices diverged forever.
+        const sb = _stSb();
+        if (sb && _stState.sbSessionId) {
+            sb.from('st_counts').delete()
+                .eq('session_id', _stState.sbSessionId).eq('id', id)
+                .then(r => {
+                    if (r && r.error) console.warn('[stock-take v2] count cloud delete failed:', r.error.message);
+                })
+                .catch(e => console.warn('[stock-take v2] count cloud delete failed:', e?.message));
+        }
         _stRefreshCountsList();
+        stJsxRefresh();
     };
 
     // ── Reconciliation ──────────────────────────────────────────
@@ -1204,6 +1279,7 @@
         UI.hideModal();
         UI.toast.success('Recount saved');
         stSwitchTab('recount');
+        stJsxRefresh();
     };
 
     // ── Exports ──────────────────────────────────────────
@@ -1216,7 +1292,15 @@
         setTimeout(() => URL.revokeObjectURL(url), 1000);
     };
     const _stToCsv = (rows, headers) => {
-        const esc = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; };
+        const esc = v => {
+            let s = String(v ?? '');
+            // Security fix (CSV/formula injection): Excel interprets a cell that begins with
+            // =, +, -, @, TAB or CR as a formula/DDE. SKUs, locations and reasons are
+            // user/import-authored, so neutralize a leading formula trigger by prefixing a
+            // single quote before the value is written into the sheet.
+            if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+            return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
+        };
         return [headers.join(','), ...rows.map(r => headers.map(h => esc(r[h])).join(','))].join('\n');
     };
     const _stToXlsx = async (rows, sheetName, filename) => {
@@ -1249,8 +1333,28 @@
         if (!sid) return;
         // Only write adjustments for rows that fall outside tolerance — matched rows
         // don't need system updates.
+        // Data-integrity fix: _stReconcile flags EVERY uncounted system SKU as
+        // 'Recount Required' (phys=0). Exporting those with New_System_Qty=0 would
+        // ZERO the ERP stock of merely-uncounted SKUs on import during a partial take —
+        // the exact hazard stAcceptVariances guards against. Restrict the export to rows
+        // with actual physical coverage (a QR scan at that exact location/sku OR a bulk
+        // entry for that SKU), mirroring stAcceptVariances.
+        const counts = _stCounts(sid);
+        const exSet = _stExclusionSet();
+        const coveredLocSku = new Set();
+        for (const c of counts) {
+            if (c.superseded) continue;
+            if (exSet.has(String(c.sku||'').trim().toUpperCase())) continue;
+            coveredLocSku.add(_stNormKey(c.location, c.sku));
+        }
+        const bulkSkus = new Set((_stBulkData(sid).rows || [])
+            .map(r => String(r.SKU||'').trim().toUpperCase())
+            .filter(s => s && !exSet.has(s)));
+        const wasCounted = (loc, sku) =>
+            coveredLocSku.has(_stNormKey(loc, sku)) || bulkSkus.has(String(sku||'').trim().toUpperCase());
         const rows = _stReconcile(sid, _stGetThreshold())
             .filter(r => r.Status === 'Recount Required')
+            .filter(r => wasCounted(r.Location, r.SKU))
             .map(r => ({ Location: r.Location, SKU: r.SKU, New_System_Qty: r.Physical_Total }));
         _stDownload(`adjustment_${sid}.csv`, _stToCsv(rows, ['Location','SKU','New_System_Qty']), 'text/csv');
     };
@@ -1501,7 +1605,7 @@
                         <h3 style="margin:0;font-size:16px;">Uploaded Physical Counts (${rows.length})</h3>
                         ${rows.length ? `<button class="btn small" style="color:#dc2626;" onclick="app.stClearBulk()">Clear</button>` : ''}
                     </div>
-                    ${data.file ? `<div style="font-size:11px;color:var(--gray-500);margin-top:4px;">From: ${_stEsc(data.file)} · ${_stEsc((data.uploadedAt||'').slice(0,16).replace('T',' '))} · ${_stEsc(data.uploadedBy||'')}</div>` : ''}
+                    ${data.file ? `<div style="font-size:11px;color:var(--gray-500);margin-top:4px;">From: ${_stEsc(data.file)} · ${_stEsc(_stLocalDateTime(data.uploadedAt))} · ${_stEsc(data.uploadedBy||'')}</div>` : ''}
                     ${excludedCount > 0 ? `<div style="margin-top:8px;background:#fef3c7;color:#92400e;padding:6px 10px;border-radius:6px;font-size:12px;"><i class="fas fa-info-circle"></i> ${excludedCount} row(s) match excluded SKUs and will be ignored.</div>` : ''}
                     <div style="max-height:420px;overflow:auto;margin-top:12px;">
                         ${rows.length === 0 ? `<div style="color:var(--gray-500);padding:20px;text-align:center;">No bulk physical counts uploaded yet.</div>` : `
@@ -1630,7 +1734,7 @@
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;">
                     <div><div style="color:var(--gray-500);font-size:11px;text-transform:uppercase;">Session</div><div style="font-weight:600;font-family:monospace;">${_stEsc(sid)}</div></div>
                     <div><div style="color:var(--gray-500);font-size:11px;text-transform:uppercase;">Counter</div><div style="font-weight:600;">${_stEsc(sess?.createdBy||'—')}</div></div>
-                    <div><div style="color:var(--gray-500);font-size:11px;text-transform:uppercase;">Created</div><div style="font-weight:600;">${_stEsc((sess?.createdAt||'').slice(0,16).replace('T',' '))}</div></div>
+                    <div><div style="color:var(--gray-500);font-size:11px;text-transform:uppercase;">Created</div><div style="font-weight:600;">${_stEsc(_stLocalDateTime(sess?.createdAt))}</div></div>
                     <div><div style="color:var(--gray-500);font-size:11px;text-transform:uppercase;">Status</div><div><span style="padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:${sess?.status==='open'?'#dcfce7':'#f1f5f9'};color:${sess?.status==='open'?'#166534':'#475569'};">${_stEsc(sess?.status||'—')}</span></div></div>
                     <div><div style="color:var(--gray-500);font-size:11px;text-transform:uppercase;">Method</div><div style="font-weight:600;color:${methodColor};">${methodLabel}</div></div>
                     <div><div style="color:var(--gray-500);font-size:11px;text-transform:uppercase;">Coverage</div><div style="font-weight:600;color:${partial.partial?'#92400e':'#166534'};">${partial.partial ? `<i class="fas fa-exclamation-triangle"></i> Partial — ${partial.uncovered} SKU(s) uncovered` : `<i class="fas fa-check-circle"></i> Full — all SKUs covered`}</div></div>
@@ -1690,8 +1794,8 @@
                     <tbody>${bySku.map(r => `<tr style="border-top:1px solid var(--gray-100);${r.QR_vs_Bulk_Disagree?'background:#fff7ed;':''}">
                         <td style="padding:8px 10px;font-family:monospace;">${_stEsc(r.SKU)}${r.ShelfCount > 1 ? ` <span style="background:#dbeafe;color:#1e40af;padding:1px 5px;border-radius:3px;font-size:10px;cursor:help;" title="On ${r.ShelfCount} shelves: ${(r.Shelves||[]).map(s => _stEsc(s.Location) + '=' + s.Qty).join(', ')}">×${r.ShelfCount}</span>` : ''}</td>
                         <td style="padding:8px 10px;text-align:right;">${r.System_Qty}</td>
-                        <td style="padding:8px 10px;text-align:right;color:${r.QR_Qty?'#0ea5e9':'#94a3b8'};">${r.QR_Qty || '—'}</td>
-                        <td style="padding:8px 10px;text-align:right;color:${r.Bulk_Qty?'#0ea5e9':'#94a3b8'};">${r.Bulk_Qty || '—'}</td>
+                        <td style="padding:8px 10px;text-align:right;color:${(r.Source==='qr'||r.Source==='qr+bulk')?'#0ea5e9':'#94a3b8'};">${(r.Source==='qr'||r.Source==='qr+bulk') ? r.QR_Qty : '—'}</td>
+                        <td style="padding:8px 10px;text-align:right;color:${(r.Source==='bulk'||r.Source==='qr+bulk')?'#0ea5e9':'#94a3b8'};">${(r.Source==='bulk'||r.Source==='qr+bulk') ? r.Bulk_Qty : '—'}</td>
                         <td style="padding:8px 10px;text-align:right;font-weight:600;">${r.Physical_Used}</td>
                         <td style="padding:8px 10px;text-align:right;color:${r.Variance===0?'inherit':(r.Variance>0?'#059669':'#dc2626')};font-weight:${r.Variance===0?400:600};">${r.Variance>0?'+':''}${r.Variance}</td>
                         <td style="padding:8px 10px;text-align:right;color:${r.QR_vs_Bulk_Disagree?'#b45309':(r.QR_vs_Bulk===null?'#94a3b8':'inherit')};font-weight:${r.QR_vs_Bulk_Disagree?700:400};">${r.QR_vs_Bulk === null ? '—' : (r.QR_vs_Bulk > 0 ? '+' : '') + r.QR_vs_Bulk}${r.QR_vs_Bulk_Disagree ? ' <i class="fas fa-exclamation-triangle" title="QR and Bulk disagree beyond tolerance"></i>' : ''}</td>
@@ -1913,7 +2017,13 @@
     // st_counts when the session has a Supabase session id.
     const stScanShelfAndCount = async () => {
         if (!_stRequireOpenSession()) return;
-        await _stV2Load();
+        // Bug fix: _stV2Load() rethrows on transport failure; without this guard the
+        // rejection is unhandled and the scanner never opens with no user feedback.
+        try {
+            await _stV2Load();
+        } catch (e) {
+            return UI.toast.error('Could not load the shelves master — check your connection and try again.');
+        }
         await stOpenScanner('st-scan-shelf-target', {
             title: 'Scan shelf QR',
             sublabel: 'Point at the shelf label. The system will show expected products.',
@@ -1955,7 +2065,7 @@
                     <td style="padding:6px 8px;font-family:monospace;font-size:12px;">${_stEsc(e.sku)}
                         ${e.st_product_master?.product_name ? `<div style="color:var(--gray-500);font-size:11px;font-family:inherit;">${_stEsc(e.st_product_master.product_name)}</div>` : ''}</td>
                     <td style="padding:6px 8px;text-align:right;color:var(--gray-600);">${e.expected_qty}</td>
-                    <td style="padding:6px 8px;text-align:right;"><input type="number" min="0" step="1" data-sku="${_stAttr(e.sku)}" data-expected="${e.expected_qty}" class="st-shelf-count-input" style="width:80px;padding:4px;border:1px solid var(--gray-300);border-radius:4px;text-align:right;"></td>
+                    <td style="padding:6px 8px;text-align:right;"><input type="number" min="0" step="1" data-sku="${_stEsc(e.sku)}" data-expected="${e.expected_qty}" class="st-shelf-count-input" style="width:80px;padding:4px;border:1px solid var(--gray-300);border-radius:4px;text-align:right;"></td>
                 </tr>
             `).join('');
         UI.showModal(`Count shelf: ${_stEsc(locLabel)}`, `
@@ -1967,7 +2077,7 @@
                         <th scope="col" style="padding:6px 8px;text-align:right;">Expected</th>
                         <th scope="col" style="padding:6px 8px;text-align:right;">Counted</th>
                     </tr></thead>
-                    <tbody>${rowsHtml}</tbody>
+                    <tbody id="st-shelf-count-body">${rowsHtml}</tbody>
                 </table>
             </div>
             <div style="margin-top:10px;display:flex;gap:6px;align-items:center;">
@@ -1993,8 +2103,15 @@
         // rows silently (Number.isInteger guard), so allowing 2.5 here loses the row on Save.
         if (!sku || !isFinite(q) || q < 0) return UI.toast.error('SKU and qty required');
         if (!Number.isInteger(q)) return UI.toast.error('Whole number qty required (no decimals)');
-        const tbody = document.querySelector('.st-shelf-count-input')?.closest('tbody');
+        // Bug fix: target the tbody by id so the "+ Add" flow works even when the shelf
+        // has zero expected SKUs (the old selector keyed off an existing
+        // .st-shelf-count-input, which is absent in the empty-state row). Remove the
+        // empty-state placeholder row (colspan) before appending the first manual row.
+        const tbody = document.getElementById('st-shelf-count-body')
+            || document.querySelector('.st-shelf-count-input')?.closest('tbody');
         if (!tbody) return UI.toast.error('Cannot find table structure');
+        const placeholder = tbody.querySelector('td[colspan]');
+        if (placeholder && placeholder.parentElement) placeholder.parentElement.remove();
         const tr = document.createElement('tr');
         tr.style.borderTop = '1px solid var(--gray-100)';
         tr.style.background = '#fff7ed';
@@ -2061,18 +2178,67 @@
         if (!added) { UI.hideModal(); return UI.toast.info('No counts entered.'); }
         _stSave(`counts.${sid}`, counts);
         if (sb && _stState.sbSessionId) {
-            try { await sb.from('st_counts').insert(sbRows.filter(r => r.session_id)); }
-            catch (e) { console.warn('[stock-take v2] supabase count insert failed:', e?.message); }
+            // Data-integrity fix: check the { error } the insert resolves with (supabase-js
+            // does not reject on RLS/constraint failures) so a rejected batch isn't silently
+            // dropped while the toast claims success.
+            try {
+                const r = await sb.from('st_counts').insert(sbRows.filter(r => r.session_id));
+                if (r && r.error) {
+                    console.warn('[stock-take v2] supabase count insert failed:', r.error.message);
+                    UI.toast.error('Counts saved locally — cloud sync failed; other devices may not see them');
+                }
+            }
+            catch (e) {
+                console.warn('[stock-take v2] supabase count insert failed:', e?.message);
+                UI.toast.error('Counts saved locally — cloud sync failed; other devices may not see them');
+            }
         }
         UI.hideModal();
         UI.toast.success(`+${added} count(s) on ${locLabel}`);
         _stRefreshCountsList();
+        stJsxRefresh();
     };
 
     // ── Realtime: subscribe to st_counts for the current Supabase session ─
     // When another device inserts a row, mirror it into local counts so the
     // Recent Counts list and reconciliation pick it up without a manual refresh.
     let _stRealtimeChannel = null;
+    // Data-integrity fix: the realtime INSERT subscription only carries rows inserted
+    // WHILE this device is subscribed. Counts made before this device joined/reloaded/
+    // reconnected are never delivered, so reconciliation under-reports physical stock
+    // with no warning. Run a one-shot catch-up SELECT on activate/subscribe and merge any
+    // cloud row whose id isn't already local (superseded local rows are kept in the id set
+    // so a locally-recounted original is never re-added).
+    const _stBackfillCounts = async () => {
+        const sb = _stSb();
+        if (!sb || !_stState.sbSessionId || !_stState.sessionId) return;
+        try {
+            const { data, error } = await sb.from('st_counts')
+                .select('id, created_at, counter, location_label, shelf_text, sku, qty, shelf_id')
+                .eq('session_id', _stState.sbSessionId);
+            if (error || !Array.isArray(data)) return;
+            const local = _stCounts(_stState.sessionId);
+            const haveIds = new Set(local.map(c => c.id));
+            let addedAny = false;
+            for (const row of data) {
+                if (!row || haveIds.has(row.id)) continue;
+                local.push({
+                    id: row.id, timestamp: row.created_at, counter: row.counter || '',
+                    location: row.location_label || '', shelf: row.shelf_text || '',
+                    sku: row.sku, qty: row.qty, shelfId: row.shelf_id, fromRemote: true,
+                });
+                haveIds.add(row.id);
+                addedAny = true;
+            }
+            if (addedAny) {
+                _stSave(`counts.${_stState.sessionId}`, local);
+                _stRefreshCountsList();
+                stJsxRefresh();
+            }
+        } catch (e) {
+            console.warn('[stock-take v2] count backfill failed:', e?.message);
+        }
+    };
     const stStartRealtime = async () => {
         const sb = _stSb();
         // Always tear down the prior channel first, even if we won't be starting
@@ -2080,6 +2246,10 @@
         // continuing to fire INSERT callbacks against the active local store.
         if (sb && _stRealtimeChannel) { try { await sb.removeChannel(_stRealtimeChannel); } catch {} _stRealtimeChannel = null; }
         if (!sb || !_stState.sbSessionId) return;
+        // Catch up on counts inserted before this subscription opened, then subscribe for
+        // live INSERTs. Order matters only for the toast/refresh, not correctness (the
+        // subscription's id-dedupe covers any row that lands during the backfill window).
+        await _stBackfillCounts();
         _stRealtimeChannel = sb
             .channel(`st_counts_${_stState.sbSessionId}`)
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'st_counts', filter: `session_id=eq.${_stState.sbSessionId}` }, payload => {
@@ -2093,6 +2263,22 @@
                 });
                 _stSave(`counts.${_stState.sessionId}`, local);
                 _stRefreshCountsList();
+                stJsxRefresh();
+            })
+            // Data-integrity fix: also subscribe to DELETE so a recount's supersede
+            // (stSaveRecount deletes the prior per-shelf rows before inserting the total)
+            // propagates to other devices. Without this the INSERT-only channel left other
+            // devices summing originals + recount → double-count. DELETE CDC payloads carry
+            // only the primary key (old.id); since ids are unique UUIDs, removing the local
+            // row by id is safe even though the event isn't session-filtered.
+            .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'st_counts' }, payload => {
+                const oldRow = payload?.old; const delId = oldRow && oldRow.id;
+                if (!delId) return;
+                const local = _stCounts(_stState.sessionId);
+                if (!local.some(c => c.id === delId)) return;
+                _stSave(`counts.${_stState.sessionId}`, local.filter(c => c.id !== delId));
+                _stRefreshCountsList();
+                stJsxRefresh();
             })
             .subscribe((status, err) => {
                 if (status === 'CHANNEL_ERROR' || err) console.warn('[stock-take v2] realtime subscribe failed:', status, err);
@@ -2252,7 +2438,7 @@
             <div style="display:flex;gap:6px;margin-bottom:10px;">
                 <input id="st-v2-exp-sku" placeholder="SKU" style="flex:2;padding:6px;border:1px solid var(--gray-300);border-radius:4px;font-family:monospace;text-transform:uppercase;">
                 <input id="st-v2-exp-qty" type="number" min="0" step="1" placeholder="expected qty" style="flex:1;padding:6px;border:1px solid var(--gray-300);border-radius:4px;">
-                <button class="btn small primary" onclick="(async () => { const sku=document.getElementById('st-v2-exp-sku')?.value?.trim().toUpperCase(); const q=Number(document.getElementById('st-v2-exp-qty')?.value); if(!sku||!isFinite(q)||q<0) return UI.toast.error('SKU and qty required'); const sb=window.supabase; if(!sb) return UI.toast.error('Supabase not available'); await sb.from('st_product_master').upsert({sku,product_name:'',product_attribute:''},{onConflict:'sku'}); const r=await sb.from('st_shelf_expected').upsert({shelf_id:'${_stAttr(shelfId)}',sku,expected_qty:q},{onConflict:'shelf_id,sku'}); if(r.error) return UI.toast.error(r.error.message); UI.toast.success('Saved'); app.stV2EditExpected('${_stAttr(shelfId)}'); })()">Add / Update</button>
+                <button class="btn small primary" onclick="(async () => { const sku=document.getElementById('st-v2-exp-sku')?.value?.trim().toUpperCase(); const q=Number(document.getElementById('st-v2-exp-qty')?.value); if(!sku||!isFinite(q)||q<0) return UI.toast.error('SKU and qty required'); const sb=window.supabase; if(!sb) return UI.toast.error('Supabase not available'); await sb.from('st_product_master').upsert({sku,product_name:'',product_attribute:''},{onConflict:'sku',ignoreDuplicates:true}); const r=await sb.from('st_shelf_expected').upsert({shelf_id:'${_stAttr(shelfId)}',sku,expected_qty:q},{onConflict:'shelf_id,sku'}); if(r.error) return UI.toast.error(r.error.message); UI.toast.success('Saved'); app.stV2EditExpected('${_stAttr(shelfId)}'); })()">Add / Update</button>
             </div>
             <div style="max-height:340px;overflow:auto;border:1px solid var(--gray-200);border-radius:6px;">
                 <table style="width:100%;border-collapse:collapse;font-size:13px;">

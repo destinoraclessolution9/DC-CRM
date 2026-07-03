@@ -386,6 +386,18 @@
     };
 
     const showKnowledgeDetail = async (id) => {
+        // Flush any pending detail autosave for the entry we're leaving BEFORE we
+        // reassign _kbCurrentEntryId and tear down its fields — otherwise the
+        // queued timer fires against the wrong/empty DOM and the edit is lost.
+        if (_kbDetailAutosaveTimer && _kbCurrentEntryId && _kbCurrentEntryId !== id
+            && document.getElementById('kb-d-title')) {
+            clearTimeout(_kbDetailAutosaveTimer);
+            _kbDetailAutosaveTimer = null;
+            try { await saveKnowledgeEntry(); } catch (_) {}
+        } else if (_kbDetailAutosaveTimer) {
+            clearTimeout(_kbDetailAutosaveTimer);
+            _kbDetailAutosaveTimer = null;
+        }
         _kbCurrentEntryId = id;
         const slot = document.getElementById('kb-slot');
         if (!slot) return;
@@ -485,6 +497,13 @@
     };
 
     const kbBackToSegment = async () => {
+        // Flush any pending detail autosave BEFORE the input fields are torn down,
+        // so an edit the UI showed as "Saving…" isn't silently dropped on Back.
+        if (_kbDetailAutosaveTimer) {
+            clearTimeout(_kbDetailAutosaveTimer);
+            _kbDetailAutosaveTimer = null;
+            try { await saveKnowledgeEntry(); } catch (_) {}
+        }
         _kbCurrentEntryId = null;
         await showKnowledgeView(document.getElementById('content-viewport'));
     };
@@ -497,7 +516,7 @@
     };
 
     const saveKnowledgeEntry = async () => {
-        if (!_kbCurrentEntryId) return;
+        if (!_kbCurrentEntryId) return false;
         const id = _kbCurrentEntryId;
         const title = (document.getElementById('kb-d-title')?.value || '').trim();
         const content = document.getElementById('kb-d-content')?.value || '';
@@ -511,7 +530,7 @@
         const propDue = document.getElementById('kb-prop-due');
         if (propPri) propPri.style.display = type === 'task' ? '' : 'none';
         if (propDue) propDue.style.display = type === 'task' ? '' : 'none';
-        if (!title) { UI.toast.error('Title required'); return; }
+        if (!title) { UI.toast.error('Title required'); return false; }
         try {
             await AppDataStore.update('knowledge_entries', id, {
                 title, content, type: type || null, status, priority: priority || null,
@@ -519,23 +538,28 @@
             });
             const s = document.getElementById('kb-autosave-status');
             if (s) s.textContent = 'Saved · ' + new Date().toLocaleTimeString();
+            return true;
         } catch (e) {
             UI.toast.error('Save failed: ' + (e?.message || e));
+            return false;
         }
     };
 
     const convertKnowledgeEntry = async (toType) => {
         const sel = document.getElementById('kb-d-type');
         if (sel) sel.value = toType;
-        await saveKnowledgeEntry();
+        // Only claim "Converted" when the underlying save actually succeeded —
+        // saveKnowledgeEntry now returns false on validation/network failure.
+        const ok = await saveKnowledgeEntry();
+        if (!ok) return;
         UI.toast.success(`Converted to ${_kbTypeLabel(toType)}`);
         if (_kbCurrentEntryId) await showKnowledgeDetail(_kbCurrentEntryId);
     };
 
     const deleteKnowledgeEntry = async (id) => {
         UI.showModal('Delete entry?', '<p>This permanently removes the entry and all links to/from it.</p>', [
-            { text: 'Cancel', cls: 'btn secondary', action: 'UI.hideModal()' },
-            { text: 'Delete', cls: 'btn danger', action: `(async () => { await app._kbDoDelete('${id}'); })()` }
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Delete', type: 'primary', action: `(async () => { await app._kbDoDelete('${id}'); })()` }
         ]);
     };
 
@@ -631,9 +655,21 @@
         });
     };
 
-    const kbSetDailyDate = async (iso) => { _kbDailyDate = iso; await showKnowledgeDailyNotes(document.getElementById('kb-slot')); };
+    const kbSetDailyDate = async (iso) => {
+        // Cancel any pending autosave for the OUTGOING date before we swap
+        // _kbDailyDate — otherwise a still-queued timer fires after the switch
+        // and writes the (now-empty/loading) textarea under the NEW date.
+        if (_kbDailyAutosaveTimer) { clearTimeout(_kbDailyAutosaveTimer); _kbDailyAutosaveTimer = null; }
+        _kbDailyDate = iso;
+        await showKnowledgeDailyNotes(document.getElementById('kb-slot'));
+    };
     const kbShiftDailyDate = async (delta) => {
-        const d = new Date(_kbDailyDate || _kbTodayISO());
+        // Cancel any pending autosave for the OUTGOING date (see kbSetDailyDate).
+        if (_kbDailyAutosaveTimer) { clearTimeout(_kbDailyAutosaveTimer); _kbDailyAutosaveTimer = null; }
+        // Parse the ISO date from explicit local Y/M/D parts (not new Date(iso),
+        // which parses as UTC midnight and skips/repeats days west of UTC).
+        const base = (_kbDailyDate || _kbTodayISO()).split('-').map(Number);
+        const d = new Date(base[0], (base[1] || 1) - 1, base[2] || 1);
         d.setDate(d.getDate() + delta);
         _kbDailyDate = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
         await showKnowledgeDailyNotes(document.getElementById('kb-slot'));
@@ -733,8 +769,8 @@
                 <textarea id="kb-modal-content" class="kb-textarea" rows="6" placeholder="Optional notes (Ctrl+Enter to save)"></textarea>
             </div>
         `, [
-            { text: 'Cancel', cls: 'btn secondary', action: 'UI.hideModal()' },
-            { text: 'Capture', cls: 'btn primary', action: '(async () => { await app.saveCaptureModal(); })()' }
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Capture', type: 'primary', action: '(async () => { await app.saveCaptureModal(); })()' }
         ]);
         setTimeout(() => {
             const ta = document.getElementById('kb-modal-content');
@@ -749,6 +785,9 @@
         const content = (document.getElementById('kb-modal-content')?.value || '').trim();
         if (!title) { UI.toast.error('Title required'); return; }
         const owner = await _kbOwnerId();
+        // owner_id is NOT NULL — guard for a clean message instead of a raw 23502
+        // toast (an explicit null also defeats the column's default auth.uid()).
+        if (!owner) { UI.toast.error('Sign in first'); return; }
         try {
             await AppDataStore.create('knowledge_entries', {
                 owner_id: owner, title, content, type: null, status: 'draft', tags: []
@@ -757,7 +796,18 @@
             UI.toast.success('Captured');
             if (_state.cv === 'knowledge') {
                 if (_kbSegment === 'dashboard') await _kbReloadDashboard();
-                else if (_kbSegment === 'all')  await _kbReloadAll('');
+                else if (_kbSegment === 'all') {
+                    // On the React path #kb-all-list is owned by the KnowledgeAllEntries
+                    // island — writing innerHTML into it (as _kbReloadAll does) corrupts
+                    // React's reconciliation. Re-render the whole segment to re-mount the
+                    // island cleanly; only the legacy path uses the in-place reload.
+                    if (_reactKbOn('mountKnowledgeAllEntries')) {
+                        const slot = document.getElementById('kb-slot');
+                        if (slot) await showKnowledgeAllEntries(slot);
+                    } else {
+                        await _kbReloadAll('');
+                    }
+                }
             }
         } catch (e) {
             UI.toast.error('Save failed: ' + (e?.message || e));

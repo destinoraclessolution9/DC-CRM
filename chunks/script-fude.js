@@ -136,7 +136,7 @@ const _buildFudeCarousel = (publicNews, imgSrc, fmtDate) => {
             <div class="fude-section">
                 <div class="fude-sec-bar" style="justify-content:space-between;">
                     <div style="display:flex;align-items:center;gap:12px;"><div class="fude-sec-bar-icon news">📰</div><h2>Highlights &amp; News</h2></div>
-                    <a class="fude-sec-link">See all news →</a>
+                    <a class="fude-sec-link" style="cursor:pointer;" onclick="app.openStoryDetail(${publicNews[0].id})">See all news →</a>
                 </div>
                 <div class="fude-carousel-wrap">
                     ${arrows}
@@ -169,7 +169,7 @@ const _buildFudeStories = (successStories, imgSrc, fmtDate) => {
         const filterBar = allTags.length ? `
             <div class="fude-story-filter-bar">
                 <button class="fude-story-filter-chip active" data-tag="*" onclick="app.fudeFilterStories('*')">All</button>
-                ${allTags.map(t => `<button class="fude-story-filter-chip" data-tag="${t.replace(/"/g,'&quot;').replace(/'/g,'&#39;')}" onclick="app.fudeFilterStories(${JSON.stringify(t)})">#${esc(t)}</button>`).join('')}
+                ${allTags.map(t => `<button class="fude-story-filter-chip" data-tag="${t.replace(/"/g,'&quot;').replace(/'/g,'&#39;')}" onclick="app.fudeFilterStories('${UI.escJsAttr(t)}')">#${esc(t)}</button>`).join('')}
             </div>` : '';
         const cards = successStories.map((s, idx) => {
             const imgEl = s._signedUrl
@@ -290,7 +290,9 @@ const showFudeView = async (container) => {
         _t(isAdmin ? AppDataStore.getAll('users').catch(() => []) : Promise.resolve([])),
         _t(isAdmin ? AppDataStore.getAll('recommendation_rewards').catch(() => []) : Promise.resolve([]))
     ]);
-    const allUsersForReward = allUsersRaw.filter(u => u.role && u.role.match(/Level\s*1[34]/i));
+    // Use the canonical level helper (not an inline /Level 13|14/ regex) so members
+    // with Chinese-only role names (改命客户 → L13, 准传福大使 → L14) are included.
+    const allUsersForReward = allUsersRaw.filter(u => { const l = _getUserLevel(u); return l === 13 || l === 14; });
 
     // --- Helpers ---
     const fmtDate = d => { try { return new Date(d).toLocaleDateString(); } catch(e) { return d || '-'; } };
@@ -640,8 +642,9 @@ const saveHighlight = async () => {
         tags:      document.getElementById('highlight-tags')?.value?.trim() || '',
         image_url: imageUrl,
         type:      document.getElementById('highlight-type')?.value || 'highlight',
-        is_active: document.getElementById('highlight-active')?.checked ?? true,
-        author_id: _state.cu?.id || null
+        is_active: document.getElementById('highlight-active')?.checked ?? true
+        // author_id is set only on CREATE (below) so editing never reassigns the
+        // original author to whoever made the edit.
     };
 
     try {
@@ -650,7 +653,7 @@ const saveHighlight = async () => {
             await AppDataStore.update('news_highlights', parseInt(id), payload);
             UI.toast.success('Highlight updated.');
         } else {
-            await AppDataStore.create('news_highlights', { ...payload, created_at: new Date().toISOString() });
+            await AppDataStore.create('news_highlights', { ...payload, author_id: _state.cu?.id || null, created_at: new Date().toISOString() });
             UI.toast.success('Highlight added.');
         }
         // Push notification fan-out (non-blocking, best-effort)
@@ -715,7 +718,7 @@ const openRewardModal = async (rewardId = null) => {
     const isEdit = !!r;
 
     let eligibleUsers = [];
-    try { eligibleUsers = (await AppDataStore.getAll('users')).filter(u => u.role && u.role.match(/Level\s*1[34]/i)); } catch(e) {}
+    try { eligibleUsers = (await AppDataStore.getAll('users')).filter(u => { const l = _getUserLevel(u); return l === 13 || l === 14; }); } catch(e) {}
     const userOptions = eligibleUsers.map(u =>
         `<option value="${u.id}" ${r?.user_id === u.id ? 'selected' : ''}>${esc(u.full_name)} (${esc(u.role)})</option>`
     ).join('');
@@ -974,7 +977,11 @@ const submitRecruitmentApproval = async (customerId = null) => {
     try {
         const cid = parseInt(customerId, 10);
         if (!Number.isFinite(cid)) { UI.toast.error('Missing customer — cannot submit recruitment.'); return; }
-        const modal = document.getElementById('modal-content') || document;
+        // The modal body is the `.modal-content` element inside the global overlay
+        // (UI.showModal, ui.js:222/245) — there is NO element with id="modal-content",
+        // so the old getElementById() always fell through to `document` and scraped
+        // every .form-control field on the underlying page into the snapshot.
+        const modal = document.querySelector('#global-modal-overlay .modal-content') || document;
         const textareas = modal.querySelectorAll('textarea');
         const inputs = modal.querySelectorAll('input.form-control, select.form-control');
         const snapshot = {};
@@ -1058,7 +1065,7 @@ const exportKPIDashboard = async () => {
             AppDataStore.getAll('recommendation_rewards').catch(() => []),
             AppDataStore.getAll('users').catch(() => [])
         ]);
-        const allUsersForReward = (allUsersRaw || []).filter(u => u.role && u.role.match(/Level\s*1[34]/i));
+        const allUsersForReward = (allUsersRaw || []).filter(u => { const l = _getUserLevel(u); return l === 13 || l === 14; });
         const ranked = _computeFudeLeaderboard(allRewards, allUsersForReward);
 
         if (!ranked.length) { UI.toast.error('No 福气 leaderboard data to export yet.'); return; }
@@ -1193,16 +1200,26 @@ const _bindSignaturePad = (canvasId) => {
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, c.width, c.height);
         hasInk = false;
+        // An explicit Clear must also discard the preserved saved signature, so a
+        // subsequent save writes null (the user intentionally removed the signature).
+        c._preloadSrc = null;
     };
 
-    // If a saved signature was preloaded into c.dataset.preload, paint it.
+    // If a saved signature was preloaded into c.dataset.preload, paint it AND keep
+    // the original data URL so _getSignatureDataUrl can return it even before the
+    // async decode completes (or if it fails). Without this, a save that races the
+    // preload's onload would read hasInk===false and overwrite the stored signature
+    // with null. Any new stroke (hasInk) or an explicit Clear overrides this.
     if (c.dataset.preload) {
+        c._preloadSrc = c.dataset.preload;
         const img = new Image();
         img.onload = () => {
             ctx.drawImage(img, 0, 0, rect.width, rect.height);
             hasInk = true;
         };
         img.src = c.dataset.preload;
+    } else {
+        c._preloadSrc = null;
     }
 };
 
@@ -1215,8 +1232,14 @@ const cfClearSignature = (canvasId) => _clearSignaturePad(canvasId);
 
 const _getSignatureDataUrl = (canvasId) => {
     const c = document.getElementById(canvasId);
-    if (!c || !c._hasInk || !c._hasInk()) return null;
-    return c.toDataURL('image/png');
+    if (!c) return null;
+    // New ink drawn this session → export the live canvas.
+    if (c._hasInk && c._hasInk()) return c.toDataURL('image/png');
+    // No new ink, but a previously-saved signature was preloaded and not cleared:
+    // return the original so a save that races the async preload (or a failed
+    // decode) does NOT wipe the stored signature to null.
+    if (c._preloadSrc) return c._preloadSrc;
+    return null;
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -1229,6 +1252,13 @@ const _cfEscape = (s) => (s == null ? '' : String(s).replace(/[&<>"']/g, c => ({
 
 // ── Forms TAB main view ──────────────────────────────────────────────────
 let _cfState = { prospectId: null, prospectQuery: '' };
+// Short-lived cache of the 5 form tables so that typing in the search box
+// (cfSearchProspects re-renders the tab) filters client-side over data already
+// in memory instead of firing 5 getAll round-trips + a full rebuild on every
+// keystroke-pause. Filtering was ALWAYS client-side, so reusing fresh data is
+// behaviour-preserving; the cache auto-expires after CF_CACHE_TTL_MS.
+let _cfDataCache = null;
+const CF_CACHE_TTL_MS = 15000;
 
 const renderFormsTab = async () => {
     // Wrap each fetch with a short timeout so a missing migration (the 3 new
@@ -1237,13 +1267,19 @@ const renderFormsTab = async () => {
         AppDataStore.getAll(table).catch(() => []),
         new Promise(resolve => setTimeout(() => resolve([]), ms))
     ]);
-    const [prospects, surveys, cps, apus, blueprints] = await Promise.all([
-        _quickFetch('prospects', 6000),
-        _quickFetch('customer_surveys'),
-        _quickFetch('cps_analyses'),
-        _quickFetch('apu_appraisals'),
-        _quickFetch('destiny_blueprints')
-    ]);
+    let prospects, surveys, cps, apus, blueprints;
+    if (_cfDataCache && (Date.now() - _cfDataCache.ts) < CF_CACHE_TTL_MS) {
+        ({ prospects, surveys, cps, apus, blueprints } = _cfDataCache);
+    } else {
+        [prospects, surveys, cps, apus, blueprints] = await Promise.all([
+            _quickFetch('prospects', 6000),
+            _quickFetch('customer_surveys'),
+            _quickFetch('cps_analyses'),
+            _quickFetch('apu_appraisals'),
+            _quickFetch('destiny_blueprints')
+        ]);
+        _cfDataCache = { prospects, surveys, cps, apus, blueprints, ts: Date.now() };
+    }
 
     // Build per-prospect status map
     const byProspect = new Map();
@@ -1742,8 +1778,9 @@ const saveCustomerSurvey = async () => {
         q5_use_dc: document.querySelector('input[name="q5_use_dc"]:checked')?.value || null,
         q6_share: document.querySelector('input[name="q6_share"]:checked')?.value || null,
         signature_data_url: _getSignatureDataUrl('cf-survey-sig'),
-        signed_at: _getSignatureDataUrl('cf-survey-sig') ? new Date().toISOString() : null,
-        created_by: _state.cu?.id || null
+        signed_at: _getSignatureDataUrl('cf-survey-sig') ? new Date().toISOString() : null
+        // created_by is set only on CREATE (below) so an edit never reassigns the
+        // original capturer of the form.
     };
 
     try {
@@ -1751,10 +1788,11 @@ const saveCustomerSurvey = async () => {
             await AppDataStore.update('customer_surveys', surveyId, payload);
             UI.toast.success('Survey updated.');
         } else {
-            await AppDataStore.create('customer_surveys', { ...payload, created_at: new Date().toISOString() });
+            await AppDataStore.create('customer_surveys', { ...payload, created_by: _state.cu?.id || null, created_at: new Date().toISOString() });
             UI.toast.success('Survey saved.');
         }
         UI.hideModal();
+        _cfDataCache = null; // saved data changed — force a fresh fetch on re-render
         const target = document.getElementById('marketing-tab-content');
         if (target && _state.cmt === 'forms') target.innerHTML = await renderFormsTab();
     } catch (err) {
@@ -2016,6 +2054,20 @@ const saveCpsAnalysis = async () => {
     const dealerSig = _getSignatureDataUrl('cf-cps-sig-dealer');
     const cpsSig    = _getSignatureDataUrl('cf-cps-sig-cps');
 
+    // Honour the visible Dealer / CPS date inputs instead of re-stamping now() on
+    // every save. Signature-gated exactly as before (no signature → null), but when
+    // a signature exists we prefer the entered date: parse the date-only value with
+    // explicit Y, M-1, D (no UTC day-shift), anchored to local noon so the stored
+    // ISO day matches the picked day. Only fall back to now() when the date field
+    // is blank/malformed.
+    const _signedAtFrom = (dateInputId, hasSig) => {
+        if (!hasSig) return null;
+        const raw = document.getElementById(dateInputId)?.value?.trim();
+        const m = raw && /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+        if (m) return new Date(+m[1], +m[2] - 1, +m[3], 12, 0, 0).toISOString();
+        return new Date().toISOString();
+    };
+
     const payload = {
         prospect_id: prospectId,
         serial_number: document.getElementById('cf-cps-sn')?.value?.trim() || null,
@@ -2040,12 +2092,13 @@ const saveCpsAnalysis = async () => {
         notes: document.getElementById('cf-cps-notes')?.value?.trim() || null,
         dealer_signature_data_url: dealerSig,
         dealer_signed_name: document.getElementById('cf-cps-dealer-name')?.value?.trim() || null,
-        dealer_signed_at: dealerSig ? new Date().toISOString() : null,
+        dealer_signed_at: _signedAtFrom('cf-cps-dealer-date', !!dealerSig),
         cps_by_id: parseInt(document.getElementById('cf-cps-by')?.value, 10) || null,
         cps_signature_data_url: cpsSig,
         cps_signed_name: document.getElementById('cf-cps-by-name')?.value?.trim() || null,
-        cps_signed_at: cpsSig ? new Date().toISOString() : null,
-        created_by: _state.cu?.id || null
+        cps_signed_at: _signedAtFrom('cf-cps-by-date', !!cpsSig)
+        // created_by is set only on CREATE (below) so an edit never reassigns the
+        // original capturer of the form.
     };
 
     try {
@@ -2053,10 +2106,11 @@ const saveCpsAnalysis = async () => {
             await AppDataStore.update('cps_analyses', cpsId, payload);
             UI.toast.success('CPS form updated.');
         } else {
-            await AppDataStore.create('cps_analyses', { ...payload, created_at: new Date().toISOString() });
+            await AppDataStore.create('cps_analyses', { ...payload, created_by: _state.cu?.id || null, created_at: new Date().toISOString() });
             UI.toast.success('CPS form saved.');
         }
         UI.hideModal();
+        _cfDataCache = null; // saved data changed — force a fresh fetch on re-render
         const target = document.getElementById('marketing-tab-content');
         if (target && _state.cmt === 'forms') target.innerHTML = await renderFormsTab();
     } catch (err) {
@@ -2308,8 +2362,9 @@ const saveApuAppraisal = async () => {
         apu_signed_by: apuSig ? (_state.cu?.id || null) : null,
         head_apu_signature_data_url: headSig,
         head_apu_signed_at: headSig ? new Date().toISOString() : null,
-        head_apu_signed_by: headSig ? (_state.cu?.id || null) : null,
-        created_by: _state.cu?.id || null
+        head_apu_signed_by: headSig ? (_state.cu?.id || null) : null
+        // created_by is set only on CREATE (below) so an edit never reassigns the
+        // original capturer of the form.
     };
 
     try {
@@ -2317,7 +2372,7 @@ const saveApuAppraisal = async () => {
         if (apuId) {
             await AppDataStore.update('apu_appraisals', apuId, payload);
         } else {
-            const row = await AppDataStore.create('apu_appraisals', { ...payload, created_at: new Date().toISOString() });
+            const row = await AppDataStore.create('apu_appraisals', { ...payload, created_by: _state.cu?.id || null, created_at: new Date().toISOString() });
             if (!row?.id) { UI.toast.error('Save failed: record was not created.'); return; }
             savedId = row?.id;
         }
@@ -2369,6 +2424,7 @@ const saveApuAppraisal = async () => {
 
         UI.toast.success(apuId ? 'APU updated.' : 'APU saved.');
         UI.hideModal();
+        _cfDataCache = null; // saved data changed — force a fresh fetch on re-render
         const target = document.getElementById('marketing-tab-content');
         if (target && _state.cmt === 'forms') target.innerHTML = await renderFormsTab();
     } catch (err) {
@@ -2736,9 +2792,9 @@ const saveDestinyBlueprint = async () => {
         customer_signed_at: custSig ? new Date().toISOString() : null,
         consultant_id: parseInt(document.getElementById('cf-db-consultant')?.value, 10) || null,
         consultant_signature_data_url: consSig,
-        consultant_signed_at: consSig ? new Date().toISOString() : null,
-
-        created_by: _state.cu?.id || null
+        consultant_signed_at: consSig ? new Date().toISOString() : null
+        // created_by is set only on CREATE (below) so an edit never reassigns the
+        // original capturer of the form.
     };
 
     try {
@@ -2746,10 +2802,11 @@ const saveDestinyBlueprint = async () => {
             await AppDataStore.update('destiny_blueprints', dbId, payload);
             UI.toast.success('Blueprint updated.');
         } else {
-            await AppDataStore.create('destiny_blueprints', { ...payload, created_at: new Date().toISOString() });
+            await AppDataStore.create('destiny_blueprints', { ...payload, created_by: _state.cu?.id || null, created_at: new Date().toISOString() });
             UI.toast.success('Blueprint saved.');
         }
         UI.hideModal();
+        _cfDataCache = null; // saved data changed — force a fresh fetch on re-render
         const target = document.getElementById('marketing-tab-content');
         if (target && _state.cmt === 'forms') target.innerHTML = await renderFormsTab();
     } catch (err) {
@@ -3178,7 +3235,12 @@ const fudeShowAllStories = () => {
         confirmDeleteReward,
         showRoadmap,
         exportRelationshipTree,
-        changeLeaderboardPeriod,
+        // changeLeaderboardPeriod intentionally NOT registered here: this chunk's
+        // copy called an out-of-scope renderLeaderboard() (ReferenceError). The
+        // working implementation lives in script-referrals.js (renderLeaderboard is
+        // in scope there) and is registered from that chunk; app.register is
+        // last-loader-wins, so registering a broken copy here would clobber it
+        // whenever the fude chunk loads after referrals.
         uploadProspectDocument,
         submitRecruitmentApproval,
         deleteFile,

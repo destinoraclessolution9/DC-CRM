@@ -22,13 +22,13 @@ window.UI = (() => {
         if (unsafe === null || unsafe === undefined) return '';
         return String(unsafe)
             .replace(/\\/g, '\\\\')
+            .replace(/&/g,  '&amp;')
             .replace(/'/g,  "\\'")
             .replace(/"/g,  '&quot;')
             .replace(/\r/g, '\\r')
             .replace(/\n/g, '\\n')
             .replace(/</g,  '\\x3c')
-            .replace(/>/g,  '\\x3e')
-            .replace(/&/g,  '&amp;');
+            .replace(/>/g,  '\\x3e');
     };
 
     // Validates that a value can safely be interpolated as a numeric literal
@@ -136,8 +136,11 @@ window.UI = (() => {
     const _activeToastKeys = new Set();
     const toast = {
         show: (message, type = 'info') => {
-            // Restore loading buttons whenever feedback appears
-            if (type !== 'info') _endAllBtnLoads();
+            // Restore loading buttons whenever feedback appears (including info —
+            // many flows terminate with toast.info as their only feedback, e.g.
+            // 'nothing selected'; leaving the button spinning until the 10s safety
+            // timeout looks frozen).
+            _endAllBtnLoads();
 
             // Mirror error toasts into any open modal so the user can't miss them.
             if (type === 'error') _showModalErrorBanner(message);
@@ -273,12 +276,15 @@ window.UI = (() => {
             // it, leaking its effects/timers/listeners. These mount fns render
             // into the modal content area, so tear them down first; the
             // innerHTML clear below stays the final step.
+            // NOTE: do NOT unmount the KB editor here — it mounts into the
+            // Knowledge HQ view's #kb-slot (page content), not the modal overlay,
+            // so tearing it down on any modal close blanks the editor the user is
+            // working in (discarding un-autosaved capture / detail edits).
             try {
                 const R = window.CRMReact;
                 if (R) {
                     if (R.unmountModalContent) R.unmountModalContent();
                     if (R.unmountAIInsights) R.unmountAIInsights();
-                    if (R.unmountKbEditor) R.unmountKbEditor();
                 }
             } catch (_) {}
             overlay.innerHTML = '';

@@ -14,6 +14,24 @@
         'serviceWorker' in navigator &&
         'PushManager' in window;
 
+    // Resolve the active SW registration without hanging forever. If SW
+    // registration failed (e.g. Firefox private browsing, or a blocked/404
+    // sw.js), navigator.serviceWorker.ready is a promise that NEVER settles,
+    // so a bare `await ...ready` would hang the caller indefinitely. Race it
+    // against a timeout so callers get a definite (possibly null) result.
+    const getSwRegistration = async (timeoutMs = 3000) => {
+        if (window._swRegistration) return window._swRegistration;
+        if (!(navigator && navigator.serviceWorker)) return null;
+        try {
+            return await Promise.race([
+                navigator.serviceWorker.ready,
+                new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+            ]);
+        } catch (_) {
+            return null;
+        }
+    };
+
     // Convert VAPID key (base64url) to Uint8Array for PushManager.subscribe.
     const urlBase64ToUint8Array = (base64String) => {
         const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -74,7 +92,7 @@
             if (p !== 'granted') throw new Error('permission_denied');
         }
 
-        const reg = window._swRegistration || (await navigator.serviceWorker.ready);
+        const reg = await getSwRegistration();
         if (!reg) throw new Error('no_service_worker');
 
         // Re-check permission right before subscribe to catch the case where it
@@ -128,7 +146,7 @@
     // Unsubscribe: remove from push service and mark row disabled (or delete).
     const unsubscribe = async () => {
         if (!isPushSupported()) return;
-        const reg = window._swRegistration || (await navigator.serviceWorker.ready);
+        const reg = await getSwRegistration();
         const sub = reg && (await reg.pushManager.getSubscription());
         if (sub) {
             try {
@@ -219,7 +237,7 @@
         const permission = Notification.permission;
         let subscribed = false;
         try {
-            const reg = window._swRegistration || (await navigator.serviceWorker.ready);
+            const reg = await getSwRegistration();
             const sub = reg && (await reg.pushManager.getSubscription());
             // Cross-check the DB: a browser subscription alone is not enough — the
             // push_subscriptions row can be absent (deleted server-side, RLS
@@ -240,10 +258,19 @@
                             .eq('endpoint', sub.endpoint)
                             .eq('enabled', true)
                             .limit(1);
-                        subscribed = !error && Array.isArray(data) && data.length > 0;
+                        if (error) {
+                            // postgrest-js resolves failures (network down, 5xx,
+                            // dead RLS session) as { error } rather than throwing,
+                            // so this branch — not the catch below — is the common
+                            // failure path. Fall back to the browser-local signal
+                            // rather than incorrectly reporting unsubscribed.
+                            subscribed = true;
+                        } else {
+                            subscribed = Array.isArray(data) && data.length > 0;
+                        }
                     } catch (_) {
-                        // On query failure, fall back to the browser-local signal
-                        // rather than incorrectly reporting unsubscribed.
+                        // On thrown query failure, fall back to the browser-local
+                        // signal rather than incorrectly reporting unsubscribed.
                         subscribed = true;
                     }
                 } else {

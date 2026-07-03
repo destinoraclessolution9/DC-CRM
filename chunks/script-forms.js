@@ -117,20 +117,24 @@
     };
 
     const deleteLeadForm = async (formId) => {
-        try {
-            const submissions = await AppDataStore.getAll('lead_submissions').catch(() => []);
-            const children = submissions.filter(s => String(s.form_id) === String(formId));
-            // Delete children in parallel and tolerate partial failure instead of
-            // aborting mid-cleanup (which would leave orphaned submissions).
-            const results = await Promise.allSettled(children.map(s => AppDataStore.delete('lead_submissions', s.id)));
-            const failed = results.filter(r => r.status === 'rejected').length;
-            await AppDataStore.delete('lead_forms', formId);
-            if (failed) UI.toast.error(`Form deleted, but ${failed} submission(s) could not be removed.`);
-            else UI.toast.success('Form deleted.');
-            await showLeadFormsView(document.getElementById('content-viewport'));
-        } catch (err) {
-            UI.toast.error('Delete failed: ' + (err.message || 'Unknown error'));
-        }
+        // Irreversible cascade (form + ALL its submissions) — gate behind a confirm
+        // so a mis-clicked trash icon can't wipe collected lead data with no undo.
+        UI.confirm('Delete Lead Form?', 'This permanently deletes the form and ALL of its submissions. This cannot be undone.', async () => {
+            try {
+                const submissions = await AppDataStore.getAll('lead_submissions').catch(() => []);
+                const children = submissions.filter(s => String(s.form_id) === String(formId));
+                // Delete children in parallel and tolerate partial failure instead of
+                // aborting mid-cleanup (which would leave orphaned submissions).
+                const results = await Promise.allSettled(children.map(s => AppDataStore.delete('lead_submissions', s.id)));
+                const failed = results.filter(r => r.status === 'rejected').length;
+                await AppDataStore.delete('lead_forms', formId);
+                if (failed) UI.toast.error(`Form deleted, but ${failed} submission(s) could not be removed.`);
+                else UI.toast.success('Form deleted.');
+                await showLeadFormsView(document.getElementById('content-viewport'));
+            } catch (err) {
+                UI.toast.error('Delete failed: ' + (err.message || 'Unknown error'));
+            }
+        });
     };
 
     const copyFormLink = (formId) => {
@@ -173,11 +177,41 @@
         if (!submission) return;
         const data = submission.data || {};
         const name = data['Full Name'] || data.name || 'Lead Form Prospect';
-        const prospect = await AppDataStore.create('prospects', {
-            full_name: name, phone: data['Phone'] || data.phone || '',
-            email: data['Email'] || data.email || '',
+        const phone = data['Phone'] || data.phone || '';
+        const email = data['Email'] || data.email || '';
+        // form.html (submitForm) already auto-creates a prospect for this lead at
+        // submission time (source 'lead_form', owned by the form's assigned agent).
+        // De-dupe: if that prospect already exists, LINK the submission to it rather
+        // than creating a second record owned by the clicking user (which both
+        // duplicates the lead and steals attribution from the original agent).
+        const _norm = (s) => String(s || '').replace(/\s+/g, '').toLowerCase();
+        let prospect = null;
+        try {
+            const all = await AppDataStore.getAll('prospects').catch(() => []);
+            if (phone || email) {
+                prospect = all.find(p =>
+                    (phone && _norm(p.phone) === _norm(phone)) ||
+                    (email && _norm(p.email) === _norm(email))
+                ) || null;
+            }
+        } catch (_) { /* fall through to create */ }
+        if (prospect?.id) {
+            await AppDataStore.update('lead_submissions', submissionId, { status: 'processed', prospect_id: prospect.id });
+            UI.toast.success(`Linked to existing prospect "${prospect.full_name || name}".`);
+            UI.hideModal();
+            return;
+        }
+        // No existing match — create, but attribute to the form's assigned agent
+        // (as form.html does), not the clicking user, so lead credit stays correct.
+        let assignedAgentId = _state.cu?.id || 1;
+        try {
+            const form = submission.form_id != null ? await AppDataStore.getById('lead_forms', submission.form_id) : null;
+            if (form?.assigned_agent_id) assignedAgentId = form.assigned_agent_id;
+        } catch (_) { /* keep fallback */ }
+        prospect = await AppDataStore.create('prospects', {
+            full_name: name, phone, email,
             status: 'New', source: 'lead_form',
-            lead_agent_id: _state.cu?.id || 1, created_at: new Date().toISOString()
+            lead_agent_id: assignedAgentId, created_at: new Date().toISOString()
         });
         // Don't mark the submission processed (with a null prospect_id) if the
         // create silently failed — otherwise the row is "Done" with no prospect.
@@ -252,19 +286,23 @@
     };
 
     const deleteSurvey = async (surveyId) => {
-        try {
-            const responses = await AppDataStore.getAll('survey_responses').catch(() => []);
-            const children = responses.filter(r => String(r.survey_id) === String(surveyId));
-            // Parallel child deletes with partial-failure tolerance (no mid-cleanup abort).
-            const results = await Promise.allSettled(children.map(r => AppDataStore.delete('survey_responses', r.id)));
-            const failed = results.filter(r => r.status === 'rejected').length;
-            await AppDataStore.delete('surveys', surveyId);
-            if (failed) UI.toast.error(`Survey deleted, but ${failed} response(s) could not be removed.`);
-            else UI.toast.success('Survey deleted.');
-            await showSurveysView(document.getElementById('content-viewport'));
-        } catch (err) {
-            UI.toast.error('Delete failed: ' + (err.message || 'Unknown error'));
-        }
+        // Irreversible cascade (survey + ALL its responses) — gate behind a confirm
+        // so a mis-clicked trash icon can't wipe collected feedback with no undo.
+        UI.confirm('Delete Survey?', 'This permanently deletes the survey and ALL of its responses. This cannot be undone.', async () => {
+            try {
+                const responses = await AppDataStore.getAll('survey_responses').catch(() => []);
+                const children = responses.filter(r => String(r.survey_id) === String(surveyId));
+                // Parallel child deletes with partial-failure tolerance (no mid-cleanup abort).
+                const results = await Promise.allSettled(children.map(r => AppDataStore.delete('survey_responses', r.id)));
+                const failed = results.filter(r => r.status === 'rejected').length;
+                await AppDataStore.delete('surveys', surveyId);
+                if (failed) UI.toast.error(`Survey deleted, but ${failed} response(s) could not be removed.`);
+                else UI.toast.success('Survey deleted.');
+                await showSurveysView(document.getElementById('content-viewport'));
+            } catch (err) {
+                UI.toast.error('Delete failed: ' + (err.message || 'Unknown error'));
+            }
+        });
     };
 
     const copySurveyLink = (surveyId) => {
@@ -315,14 +353,22 @@
                             <th scope="col" style="padding:10px; text-align:left;">Feedback</th>
                             <th scope="col" style="padding:10px; text-align:left;">Date</th>
                         </tr></thead>
-                        <tbody>${responses.slice(0,20).map(r => `
+                        <tbody>${responses.slice(0,20).map(r => {
+                            // Non-numeric scores (CSAT / free-text rows) must not render
+                            // as 'undefined/10' styled red — show a neutral placeholder.
+                            const hasScore = typeof r.score === 'number';
+                            const scoreCell = hasScore
+                                ? `<span style="font-weight:700; color:${r.score>=9?'#10b981':r.score>=7?'#f59e0b':'#ef4444'};">${r.score}/10</span>`
+                                : '<span style="color:var(--gray-400);">—</span>';
+                            return `
                             <tr style="border-bottom:1px solid var(--gray-100);">
                                 <td style="padding:10px;">${esc(r.respondent_name || 'Anonymous')}</td>
-                                <td style="padding:10px;"><span style="font-weight:700; color:${r.score>=9?'#10b981':r.score>=7?'#f59e0b':'#ef4444'};">${r.score}/10</span></td>
+                                <td style="padding:10px;">${scoreCell}</td>
                                 <td style="padding:10px; color:var(--gray-600); font-size:13px;">${esc(r.feedback || '—')}</td>
                                 <td style="padding:10px; color:var(--gray-400); font-size:12px;">${r.submitted_at ? new Date(r.submitted_at).toLocaleDateString() : '—'}</td>
                             </tr>
-                        `).join('')}</tbody>
+                        `;
+                        }).join('')}</tbody>
                     </table>
                 `}
             </div>
@@ -556,23 +602,27 @@
     };
 
     const deleteCustomFieldDefinition = async (fieldId) => {
-        try {
-            let failed = 0;
-            const def = await AppDataStore.getById('custom_field_definitions', fieldId);
-            if (def) {
-                const allVals = await AppDataStore.getAll('custom_field_values').catch(() => []);
-                const children = allVals.filter(v => v.field_key === def.field_key && v.entity_type === def.entity_type);
-                // Parallel child deletes with partial-failure tolerance (no mid-cleanup abort).
-                const results = await Promise.allSettled(children.map(v => AppDataStore.delete('custom_field_values', v.id)));
-                failed = results.filter(r => r.status === 'rejected').length;
+        // Irreversible cascade (field definition + ALL its stored values) — gate
+        // behind a confirm so a mis-clicked trash icon can't wipe data with no undo.
+        UI.confirm('Delete Custom Field?', 'This permanently deletes the field and ALL values stored for it across records. This cannot be undone.', async () => {
+            try {
+                let failed = 0;
+                const def = await AppDataStore.getById('custom_field_definitions', fieldId);
+                if (def) {
+                    const allVals = await AppDataStore.getAll('custom_field_values').catch(() => []);
+                    const children = allVals.filter(v => v.field_key === def.field_key && v.entity_type === def.entity_type);
+                    // Parallel child deletes with partial-failure tolerance (no mid-cleanup abort).
+                    const results = await Promise.allSettled(children.map(v => AppDataStore.delete('custom_field_values', v.id)));
+                    failed = results.filter(r => r.status === 'rejected').length;
+                }
+                await AppDataStore.delete('custom_field_definitions', fieldId);
+                if (failed) UI.toast.error(`Field removed, but ${failed} stored value(s) could not be deleted.`);
+                else UI.toast.success('Field removed.');
+                await showCustomFieldsAdmin(document.getElementById('content-viewport'));
+            } catch (err) {
+                UI.toast.error('Delete failed: ' + (err.message || 'Unknown error'));
             }
-            await AppDataStore.delete('custom_field_definitions', fieldId);
-            if (failed) UI.toast.error(`Field removed, but ${failed} stored value(s) could not be deleted.`);
-            else UI.toast.success('Field removed.');
-            await showCustomFieldsAdmin(document.getElementById('content-viewport'));
-        } catch (err) {
-            UI.toast.error('Delete failed: ' + (err.message || 'Unknown error'));
-        }
+        });
     };
 
     const renderCustomFieldInputs = async (entityType, entityId = null) => {

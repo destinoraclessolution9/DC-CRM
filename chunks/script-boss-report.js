@@ -238,6 +238,16 @@
         _brState.skusMap = _brGetSkus();
         const skusDate = localStorage.getItem('br_skus_date');
 
+        // Reset the per-week upload buffers on every view visit so the in-memory
+        // state matches the freshly-rendered (empty) upload labels. Otherwise a
+        // week-old salesFile/trackingFile buffer survives at module scope, the
+        // labels read blank (nothing loaded), yet brGenerate's !salesFile &&
+        // !trackingFile check passes and silently deducts last week's sold
+        // quantities from this week's opening balances. skusMap is intentionally
+        // kept — it's the one-time cached mapping re-read from localStorage above.
+        _brState.salesFile = null; _brState.salesFileName = null; _brState.salesLoading = false;
+        _brState.trackingFile = null; _brState.trackingFileName = null; _brState.trackingLoading = false;
+
         // React island — render-once scaffold (same ids + app.* handlers).
         if (_reactBossReportOn()) {
             const runData = runs.map(r => {

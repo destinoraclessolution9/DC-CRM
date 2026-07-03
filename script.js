@@ -149,6 +149,9 @@ window.Perf = window.Perf || (function () {
             const btn = document.activeElement;
             const isBtn = btn && (btn.tagName === 'BUTTON' || btn.tagName === 'A');
             const prevDisabled = isBtn ? btn.disabled : null;
+            // Preserve the full markup (icon children + label) so restore doesn't
+            // strip Font Awesome <i> elements the way innerText assignment would.
+            const prevHtml = isBtn ? btn.innerHTML : null;
             const prevText = isBtn ? btn.innerText : null;
             if (isBtn) {
                 btn.disabled = true;
@@ -160,7 +163,7 @@ window.Perf = window.Perf || (function () {
                 inflight.delete(key);
                 if (isBtn) {
                     btn.disabled = !!prevDisabled;
-                    if (prevText) btn.innerText = prevText;
+                    if (prevHtml !== null) btn.innerHTML = prevHtml;
                 }
             };
             try {
@@ -2431,10 +2434,23 @@ function _wireLoginBtn() {
             // Arm the web inactivity auto-logout now that _currentUser is set
             // (initSecurity ran pre-auth during boot and bailed on the cu guard).
             try { (window.app.initSessionTimeout || (() => {}))(); } catch (_) { /* best-effort timer arm */ }
+            // Arm the silently-expired-session guard on the fresh-login path too —
+            // previously it was only armed on the session-restore path (init()), so
+            // a manual login left the shell without the dead-session → re-login
+            // bridge until the next full reload. Idempotent (guarded internally).
+            try { _armSessionWatch(); } catch (_) { /* best-effort guard arm */ }
+            // Wire the notification bell (initial badge + Realtime subscription).
+            // The restore path does this at init(); the fresh-login path never did,
+            // so the bell stayed dark all session. Self-loading stub warms the cps chunk.
+            setTimeout(_initNotifBell, 800);
 
-            // Auto-subscribe to push notifications for PWA / homescreen users
-            // _autoSubscribePush lives in the activities lazy chunk — call via window.app
-            window.app?._autoSubscribePush?.();
+            // Auto-subscribe to push notifications for PWA / homescreen users.
+            // _autoSubscribePush lives in the activities lazy chunk, which is NOT in
+            // the eager post-login burst — a bare window.app call here was a dead
+            // no-op. Load the chunk (best-effort, non-blocking) then invoke.
+            _loadChunkOnce('chunks/script-activities.min.js')
+                .then(() => { try { window.app?._autoSubscribePush?.(); } catch (_) { /* push subscribe is best-effort */ } })
+                .catch(() => {});
 
             // Force password change on first login
             if (profile.force_password_change) {
@@ -3064,8 +3080,12 @@ function _wireLoginBtn() {
         // getAll('users') then a per-user query('action_plans') every 4 hours
         // in every tab — N+1 over the user table on nano was a major IO drain.
 
-        // Auto-subscribe to push notifications for PWA / homescreen users
-        window.app?._autoSubscribePush?.();
+        // Auto-subscribe to push notifications for PWA / homescreen users.
+        // _autoSubscribePush lives in the activities lazy chunk (not in the eager
+        // burst), so a bare call here was a dead no-op. Load then invoke (best-effort).
+        _loadChunkOnce('chunks/script-activities.min.js')
+            .then(() => { try { window.app?._autoSubscribePush?.(); } catch (_) { /* push subscribe is best-effort */ } })
+            .catch(() => {});
 
         // Route notification clicks to the correct view
         if ('serviceWorker' in navigator) {
@@ -3322,7 +3342,14 @@ function _wireLoginBtn() {
 
     // ========== NOTIFICATION BELL + HEALTH + SCHEDULER + CPS ==========
     // [CHUNK: cps] ~1310 lines extracted to chunks/script-cps.js
-    const _initNotifBell          = () => (window.app._initNotifBell          || (() => {}))();
+    // Self-loading stub: the real _initNotifBell (initial badge count + Realtime
+    // channel subscription + visibilitychange/safety refresh) lives ONLY in the cps
+    // chunk, which is NOT in the eager post-login burst — so a passive stub here was
+    // a deterministic no-op and the bell never armed for the whole session. Load the
+    // cps chunk then dispatch (the `_r !== stub` guard prevents infinite recursion).
+    // _loadChunkOnce is referenced at call time only, so its later declaration in the
+    // same IIFE scope is fine (no TDZ hazard — this stub runs long after IIFE eval).
+    const _initNotifBell          = (...a) => _loadChunkOnce('chunks/script-cps.min.js').then(() => { const _r = window.app._initNotifBell; if (typeof _r === 'function' && _r !== _initNotifBell) return _r(...a); });
     const getViewPhase            = (v) => (window.app.getViewPhase            || ((v)=>'?'))(v);
     // Self-reference guard (matches the auto-generated stubs below): the old
     // `(window.app.X || (() => {}))(id)` form recursed because window.app.X IS
@@ -3404,11 +3431,20 @@ function _wireLoginBtn() {
         'reports':              { chunk: 'chunks/script-reporting.min.js',   minLevel: null, exactLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], navId: 'reports', navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], title: 'Reporting KPI' },
         'cases':                { chunk: 'chunks/script-cases.min.js',       minLevel: null, exactLevels: null, navId: 'cases',               navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], title: 'Success Cases' },
         'referrals':            { chunk: 'chunks/script-referrals.min.js',   minLevel: null, exactLevels: null, navId: 'referrals',           navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], title: 'Referral Relationships' },
-        'ranking':              { chunk: 'chunks/script-performance.min.js', minLevel: null, exactLevels: null, navId: 'ranking',             navLevels: _VIEW_NO_NAV, title: 'Ranking Performance' },
+        // exactLevels gates this org-wide leaderboard to the management band (mirrors
+        // its sibling 'performance' navLevels [1-4]); it stays out of the sidebar
+        // (navLevels _VIEW_NO_NAV) but _isViewAllowed now rejects lower levels that
+        // previously reached the full agent leaderboard via app.navigateTo('ranking').
+        'ranking':              { chunk: 'chunks/script-performance.min.js', minLevel: null, exactLevels: [1, 2, 3, 4], navId: 'ranking',             navLevels: _VIEW_NO_NAV, title: 'Ranking Performance' },
         'performance':          { chunk: 'chunks/script-performance.min.js', minLevel: null, exactLevels: null, navId: 'performance',         navLevels: [1, 2, 3, 4], title: 'Ranking Performance' },
         'noticeboard':          { chunk: 'chunks/script-performance.min.js',  minLevel: null, exactLevels: null, navId: 'noticeboard',        navLevels: [1, 2, 12, 13, 14], title: '公告栏 Noticeboard' },
         'whatsapp':             { chunk: 'chunks/script-whatsapp.min.js',    minLevel: 1,    exactLevels: [1, 2], navId: 'whatsapp',          navLevels: _VIEW_NO_NAV, title: undefined },
         'ai_insights':          { chunk: 'chunks/script-ai.min.js',          minLevel: 1,    exactLevels: [1, 2], navId: 'ai-insights',       navLevels: [1, 2], title: undefined },
+        // ai_prediction shares ai_insights' render (alias below). It needs its OWN
+        // registry entry or _isViewAllowed('ai_prediction') pass-throughs as unknown,
+        // and _CHUNK_VIEWS skips the [1,2] chunk-load gate — letting any level reach
+        // the L1/L2-only AI dashboard via navigateTo('ai_prediction'). Same authz contract as ai_insights.
+        'ai_prediction':        { chunk: 'chunks/script-ai.min.js',          minLevel: 1,    exactLevels: [1, 2], navId: 'ai-insights',       navLevels: _VIEW_NO_NAV, title: undefined },
         'documents':            { chunk: 'chunks/script-documents.min.js', minLevel: null, exactLevels: null, navId: 'documents',            navLevels: [1, 2, 3, 4], title: 'Documents' },
         'integrations':         { chunk: 'chunks/script-gcal.min.js',       minLevel: 1,    exactLevels: null, navId: 'integrations',        navLevels: [1, 2], title: 'Integrations' },
         'order_form_extract':   { chunk: 'chunks/script-order-form-extract.min.js', minLevel: null, exactLevels: null, navId: 'order-form-extract', navLevels: [1, 2, 3, 4], title: 'Order Form Extract' },
@@ -3569,6 +3605,12 @@ function _wireLoginBtn() {
         home:                 async (vp) => { _currentView = 'home'; await (window.app.showMobileHomeView || (() => {}))(vp); },
         calendar:             async (vp) => { _currentView = 'month'; if (isMobile()) { await (window.app.showMobileCalendarView || (() => {}))(vp); } else { await (window.app.showCalendarView || (() => {}))(vp); } },
         prospects:            async (vp) => { _currentView = 'prospects'; if (isMobile()) { await (window.app.showMobileProspectsView || (() => {}))(vp); } else { await (window.app.showProspectsView || (() => {}))(vp); } },
+        // The 'customers' view had a VIEWS/chunk entry but NO render dispatch, so
+        // navigateTo('customers') fell through to the placeholder page and never set
+        // _currentView — breaking the refill-reminder deep link (calendar chunk
+        // deliberately navigates here so showCustomerDetail's back-destination is the
+        // customers list). Render the customers list (chunk loaded by the gate above).
+        customers:            async (vp) => { _currentView = 'customers'; await (window.app.showCustomersView || (() => {}))(vp); },
         pipeline:             async (vp) => { _currentView = 'pipeline'; (window.app.showPipelineView || (() => Promise.resolve()))(vp).catch(e => console.warn('pipeline failed:', e)); },
         agents:               async (vp) => { _currentView = 'agents'; await (window.app.showAgentsView || (() => {}))(vp); },
         promotions:           async (vp) => { _currentView = 'promotions'; await (window.app.showMonthlyPromotionView || (() => {}))(vp); },
@@ -4300,7 +4342,12 @@ function _wireLoginBtn() {
     const showPurchasesHistoryView = async (...a) => { await _loadChunkOnce('chunks/script-prospects.min.js'); const _r = window.app.showPurchasesHistoryView; if (_r && _r !== showPurchasesHistoryView) return _r(...a); };
     const showAgentsView          = async (...a) => { await _loadChunkOnce('chunks/script-agents.min.js'); const _r = window.app.showAgentsView;          if (_r && _r !== showAgentsView)          return _r(...a); };
     const showAgentDetail         = async (...a) => { await _loadChunkOnce('chunks/script-agents.min.js'); const _r = window.app.showAgentDetail;         if (_r && _r !== showAgentDetail)         return _r(...a); };
-    const showForcePasswordChangeModal = () => (window.app.showForcePasswordChangeModal || (() => {}))();
+    // Self-loading stub: the real modal lives in the agents chunk, started only as
+    // a fire-and-forget prefetch at login — so on a slow connection the force-change
+    // call could race ahead of the chunk. The old `(window.app.X || noop)()` form IS
+    // window.app.X before agents loads, so it recursed to a stack overflow. _lazyStub
+    // awaits the chunk then dispatches (r !== stub guard prevents recursion).
+    const showForcePasswordChangeModal = _lazyStub('chunks/script-agents.min.js', 'showForcePasswordChangeModal');
     // ========== PHASE 6: PIPELINE & SALES FORCE MODULE ==========
     // [CHUNK: pipeline] ~2837 lines extracted to chunks/script-pipeline.js
     // Loaded on-demand by navigateTo() for the pipeline view.
@@ -4330,15 +4377,16 @@ function _wireLoginBtn() {
     // These must be defined in the IIFE scope so `return { showRoadmap, ... }` doesn't
     // throw ReferenceError on load. The fude / referrals / prospects chunks override
     // window.app with their real implementations via Object.assign after loading.
-    const showRoadmap             = (...a) => (window.app.showRoadmap             || todo.bind(null, 'Roadmap'))(...a);
-    // exportRelationshipTree / changeLeaderboardPeriod are implemented in the fude
-    // chunk, but their buttons live in the referrals view, which never loads fude.
-    // The old `(window.app.X || todo)(...)` stub IS window.app.X before fude loads,
-    // so it recursed into a stack overflow. _lazyStub loads fude then dispatches to
-    // the real fn (r !== stub guard prevents recursion).
+    // showRoadmap / exportRelationshipTree / changeLeaderboardPeriod / uploadProspectDocument
+    // are implemented in the fude chunk, but their buttons live in views that never
+    // load fude (placeholder page / referrals / prospect detail). The old
+    // `(window.app.X || todo)(...)` stub IS window.app.X before fude loads, so it
+    // recursed into a stack overflow. _lazyStub loads fude then dispatches to the
+    // real fn (r !== stub guard prevents recursion).
+    const showRoadmap             = _lazyStub('chunks/script-fude.min.js', 'showRoadmap');
     const exportRelationshipTree  = _lazyStub('chunks/script-fude.min.js', 'exportRelationshipTree');
     const changeLeaderboardPeriod = _lazyStub('chunks/script-fude.min.js', 'changeLeaderboardPeriod');
-    const uploadProspectDocument  = (...a) => (window.app.uploadProspectDocument  || todo.bind(null, 'Upload Doc'))(...a);
+    const uploadProspectDocument  = _lazyStub('chunks/script-fude.min.js', 'uploadProspectDocument');
 
 
 
@@ -4357,7 +4405,7 @@ function _wireLoginBtn() {
     const showProspectsView = async (...a) => { const _r = window.app.showProspectsView; if (_r && _r !== showProspectsView) return _r(...a); };
     const showProspectsViewSmart = async (...a) => { const _r = window.app.showProspectsViewSmart; if (_r && _r !== showProspectsViewSmart) return _r(...a); };
     const zoomCpsPhoto = async (...a) => { const _r = window.app.zoomCpsPhoto; if (_r && _r !== zoomCpsPhoto) return _r(...a); };
-    const openProspectModal = async (...a) => { const _r = window.app.openProspectModal; if (_r && _r !== openProspectModal) return _r(...a); };
+    const openProspectModal = _lazyStub('chunks/script-prospects.min.js', 'openProspectModal');
     const editProspect = async (...a) => { const _r = window.app.editProspect; if (_r && _r !== editProspect) return _r(...a); };
     const downloadProspectVCard = async (...a) => { const _r = window.app.downloadProspectVCard; if (_r && _r !== downloadProspectVCard) return _r(...a); };
     const saveProspect = async (...a) => { const _r = window.app.saveProspect; if (_r && _r !== saveProspect) return _r(...a); };
@@ -4366,7 +4414,7 @@ function _wireLoginBtn() {
     const filterProspects = async (...a) => { const _r = window.app.filterProspects; if (_r && _r !== filterProspects) return _r(...a); };
     const prospectPageNav = async (...a) => { const _r = window.app.prospectPageNav; if (_r && _r !== prospectPageNav) return _r(...a); };
     const customerPageNav = async (...a) => { const _r = window.app.customerPageNav; if (_r && _r !== customerPageNav) return _r(...a); };
-    const exportData = async (...a) => { const _r = window.app.exportData; if (_r && _r !== exportData) return _r(...a); };
+    const exportData = _lazyStub('chunks/script-prospects.min.js', 'exportData');
     const sortProspects = async (...a) => { const _r = window.app.sortProspects; if (_r && _r !== sortProspects) return _r(...a); };
     const sortProspectsBySelect = async (...a) => { const _r = window.app.sortProspectsBySelect; if (_r && _r !== sortProspectsBySelect) return _r(...a); };
     const toggleProspectView = async (...a) => { const _r = window.app.toggleProspectView; if (_r && _r !== toggleProspectView) return _r(...a); };
@@ -4381,7 +4429,7 @@ function _wireLoginBtn() {
     const updateProspectFilterBadge = async (...a) => { const _r = window.app.updateProspectFilterBadge; if (_r && _r !== updateProspectFilterBadge) return _r(...a); };
     const switchProspectTab = async (...a) => { const _r = window.app.switchProspectTab; if (_r && _r !== switchProspectTab) return _r(...a); };
     const toggleAccordion = async (...a) => { const _r = window.app.toggleAccordion; if (_r && _r !== toggleAccordion) return _r(...a); };
-    const toggleCustomerAccordion = async (...a) => { const _r = window.app.toggleCustomerAccordion; if (_r && _r !== toggleCustomerAccordion) return _r(...a); };
+    const toggleCustomerAccordion = _lazyStub('chunks/script-prospects.min.js', 'toggleCustomerAccordion');
     const switchCustomerProfileTab = async (...a) => { const _r = window.app.switchCustomerProfileTab; if (_r && _r !== switchCustomerProfileTab) return _r(...a); };
     const addNote = async (...a) => { const _r = window.app.addNote; if (_r && _r !== addNote) return _r(...a); };
     const deleteNote = async (...a) => { const _r = window.app.deleteNote; if (_r && _r !== deleteNote) return _r(...a); };
@@ -4486,7 +4534,7 @@ function _wireLoginBtn() {
     const openUploadDocumentModal = async (...a) => { const _r = window.app.openUploadDocumentModal; if (_r && _r !== openUploadDocumentModal) return _r(...a); };
     const saveDocument = async (...a) => { const _r = window.app.saveDocument; if (_r && _r !== saveDocument) return _r(...a); };
     const openRecruitModal = async (...a) => { const _r = window.app.openRecruitModal; if (_r && _r !== openRecruitModal) return _r(...a); };
-    const submitRecruitmentApproval = async (...a) => { const _r = window.app.submitRecruitmentApproval; if (_r && _r !== submitRecruitmentApproval) return _r(...a); };
+    const submitRecruitmentApproval = _lazyStub('chunks/script-fude.min.js', 'submitRecruitmentApproval');
     const switchProfileTab = async (...a) => { const _r = window.app.switchProfileTab; if (_r && _r !== switchProfileTab) return _r(...a); };
     const renderAgentsTable = async (...a) => { const _r = window.app.renderAgentsTable; if (_r && _r !== renderAgentsTable) return _r(...a); };
     const showAgentProfile = async (...a) => { const _r = window.app.showAgentProfile; if (_r && _r !== showAgentProfile) return _r(...a); };
@@ -4531,13 +4579,13 @@ function _wireLoginBtn() {
     const renderCustomerHistory = async (...a) => { const _r = window.app.renderCustomerHistory; if (_r && _r !== renderCustomerHistory) return _r(...a); };
     const confirmDelete = async (...a) => { const _r = window.app.confirmDelete; if (_r && _r !== confirmDelete) return _r(...a); };
     const executeDelete = async (...a) => { const _r = window.app.executeDelete; if (_r && _r !== executeDelete) return _r(...a); };
-    const openAddTagModal = async (...a) => { const _r = window.app.openAddTagModal; if (_r && _r !== openAddTagModal) return _r(...a); };
+    const openAddTagModal = _lazyStub('chunks/script-prospects.min.js', 'openAddTagModal');
     const addTagToEntity = async (...a) => { const _r = window.app.addTagToEntity; if (_r && _r !== addTagToEntity) return _r(...a); };
     const removeTagFromCustomer = async (...a) => { const _r = window.app.removeTagFromCustomer; if (_r && _r !== removeTagFromCustomer) return _r(...a); };
     const removeTagFromProspect = async (...a) => { const _r = window.app.removeTagFromProspect; if (_r && _r !== removeTagFromProspect) return _r(...a); };
     const openAddSolutionModal = async (...a) => { const _r = window.app.openAddSolutionModal; if (_r && _r !== openAddSolutionModal) return _r(...a); };
     const saveSolution = async (...a) => { const _r = window.app.saveSolution; if (_r && _r !== saveSolution) return _r(...a); };
-    const openEditSolutionModal = async (...a) => { const _r = window.app.openEditSolutionModal; if (_r && _r !== openEditSolutionModal) return _r(...a); };
+    const openEditSolutionModal = _lazyStub('chunks/script-prospects.min.js', 'openEditSolutionModal');
     const saveSolutionEdit = async (...a) => { const _r = window.app.saveSolutionEdit; if (_r && _r !== saveSolutionEdit) return _r(...a); };
     const deleteSolution = async (...a) => { const _r = window.app.deleteSolution; if (_r && _r !== deleteSolution) return _r(...a); };
     const renderPendingSolutionsWidget = async (...a) => { const _r = window.app.renderPendingSolutionsWidget; if (_r && _r !== renderPendingSolutionsWidget) return _r(...a); };
@@ -4590,7 +4638,7 @@ function _wireLoginBtn() {
     const executeSendBirthdayWish = async (...a) => { const _r = window.app.executeSendBirthdayWish; if (_r && _r !== executeSendBirthdayWish) return _r(...a); };
     const openPrepareGiftModal = async (...a) => { const _r = window.app.openPrepareGiftModal; if (_r && _r !== openPrepareGiftModal) return _r(...a); };
     const logBirthdayGift = async (...a) => { const _r = window.app.logBirthdayGift; if (_r && _r !== logBirthdayGift) return _r(...a); };
-    const openImportWizard = async (...a) => { const _r = window.app.openImportWizard; if (_r && _r !== openImportWizard) return _r(...a); };
+    const openImportWizard = _lazyStub('chunks/script-import.min.js', 'openImportWizard');
     const renderImportStep = async (...a) => { const _r = window.app.renderImportStep; if (_r && _r !== renderImportStep) return _r(...a); };
     const importNextStep = async (...a) => { const _r = window.app.importNextStep; if (_r && _r !== importNextStep) return _r(...a); };
     const importPrevStep = async (...a) => { const _r = window.app.importPrevStep; if (_r && _r !== importPrevStep) return _r(...a); };
@@ -4633,11 +4681,11 @@ function _wireLoginBtn() {
     const addScoreToProspect = async (...a) => { const _r = window.app.addScoreToProspect; if (_r && _r !== addScoreToProspect) return _r(...a); };
     const addScoreToCustomer = async (...a) => { const _r = window.app.addScoreToCustomer; if (_r && _r !== addScoreToCustomer) return _r(...a); };
     const applyActivityScoring = async (...a) => { const _r = window.app.applyActivityScoring; if (_r && _r !== applyActivityScoring) return _r(...a); };
-    const openScoreAdjustmentModal = async (...a) => { const _r = window.app.openScoreAdjustmentModal; if (_r && _r !== openScoreAdjustmentModal) return _r(...a); };
+    const openScoreAdjustmentModal = _lazyStub('chunks/script-features2.min.js', 'openScoreAdjustmentModal');
     const confirmScoreAdjustment = async (...a) => { const _r = window.app.confirmScoreAdjustment; if (_r && _r !== confirmScoreAdjustment) return _r(...a); };
     const autoExtendProtection = async (...a) => { const _r = window.app.autoExtendProtection; if (_r && _r !== autoExtendProtection) return _r(...a); };
-    const openLatestMeetupNotes = async (...a) => { const _r = window.app.openLatestMeetupNotes; if (_r && _r !== openLatestMeetupNotes) return _r(...a); };
-    const openEditPotentialModal = async (...a) => { const _r = window.app.openEditPotentialModal; if (_r && _r !== openEditPotentialModal) return _r(...a); };
+    const openLatestMeetupNotes = _lazyStub('chunks/script-features2.min.js', 'openLatestMeetupNotes');
+    const openEditPotentialModal = _lazyStub('chunks/script-features2.min.js', 'openEditPotentialModal');
     const savePotential = async (...a) => { const _r = window.app.savePotential; if (_r && _r !== savePotential) return _r(...a); };
     const sendBirthdayWish = async (...a) => { const _r = window.app.sendBirthdayWish; if (_r && _r !== sendBirthdayWish) return _r(...a); };
     const scheduleBirthdayFollowup = async (...a) => { const _r = window.app.scheduleBirthdayFollowup; if (_r && _r !== scheduleBirthdayFollowup) return _r(...a); };
@@ -4647,7 +4695,18 @@ function _wireLoginBtn() {
     const renderKPITargetComparison = async (...a) => { const _r = window.app.renderKPITargetComparison; if (_r && _r !== renderKPITargetComparison) return _r(...a); };
     const calculateCustomerHealthScore = async (...a) => { const _r = window.app.calculateCustomerHealthScore; if (_r && _r !== calculateCustomerHealthScore) return _r(...a); };
     const renderHealthBadge = async (...a) => { const _r = window.app.renderHealthBadge; if (_r && _r !== renderHealthBadge) return _r(...a); };
-    const renderQuickHealthBadge = async (...a) => { const _r = window.app.renderQuickHealthBadge; if (_r && _r !== renderQuickHealthBadge) return _r(...a); };
+    // React CustomersTable calls this SYNCHRONOUSLY and injects the return via
+    // dangerouslySetInnerHTML, so an async stub returning a Promise renders the
+    // literal "[object Promise]". Return '' synchronously (matching the real fn's
+    // string contract) and kick off a background cps-chunk load so the next render
+    // paints the real badge. Once cps loads, window.app.renderQuickHealthBadge is
+    // the real synchronous impl and this stub is bypassed entirely.
+    const renderQuickHealthBadge = (...a) => {
+        const _r = window.app.renderQuickHealthBadge;
+        if (_r && _r !== renderQuickHealthBadge) return _r(...a);
+        _loadChunkOnce('chunks/script-cps.min.js');
+        return '';
+    };
     const openAddSlotModal = async (...a) => { const _r = window.app.openAddSlotModal; if (_r && _r !== openAddSlotModal) return _r(...a); };
     const saveBookingSlot = async (...a) => { const _r = window.app.saveBookingSlot; if (_r && _r !== saveBookingSlot) return _r(...a); };
     const deleteBookingSlot = async (...a) => { const _r = window.app.deleteBookingSlot; if (_r && _r !== deleteBookingSlot) return _r(...a); };
@@ -4688,7 +4747,7 @@ function _wireLoginBtn() {
     const confirmDeleteReward = async (...a) => { const _r = window.app.confirmDeleteReward; if (_r && _r !== confirmDeleteReward) return _r(...a); };
     const openQuarterlyTargetsModal = async (...a) => { const _r = window.app.openQuarterlyTargetsModal; if (_r && _r !== openQuarterlyTargetsModal) return _r(...a); };
     const saveQuarterlyTargets = async (...a) => { const _r = window.app.saveQuarterlyTargets; if (_r && _r !== saveQuarterlyTargets) return _r(...a); };
-    const openSpecialProgramModal = async (...a) => { const _r = window.app.openSpecialProgramModal; if (_r && _r !== openSpecialProgramModal) return _r(...a); };
+    const openSpecialProgramModal = _lazyStub('chunks/script-features2.min.js', 'openSpecialProgramModal');
     const saveSpecialProgram = async (...a) => { const _r = window.app.saveSpecialProgram; if (_r && _r !== saveSpecialProgram) return _r(...a); };
     const deleteSpecialProgram = async (...a) => { const _r = window.app.deleteSpecialProgram; if (_r && _r !== deleteSpecialProgram) return _r(...a); };
     const confirmDeleteSpecialProgram = async (...a) => { const _r = window.app.confirmDeleteSpecialProgram; if (_r && _r !== confirmDeleteSpecialProgram) return _r(...a); };
@@ -4711,21 +4770,24 @@ function _wireLoginBtn() {
     const updateConditionOperator = async (...a) => { const _r = window.app.updateConditionOperator; if (_r && _r !== updateConditionOperator) return _r(...a); };
     const updateConditionValue = async (...a) => { const _r = window.app.updateConditionValue; if (_r && _r !== updateConditionValue) return _r(...a); };
     const updateGroupLogic = async (...a) => { const _r = window.app.updateGroupLogic; if (_r && _r !== updateGroupLogic) return _r(...a); };
-    const deleteFile = async (...a) => { const _r = window.app.deleteFile; if (_r && _r !== deleteFile) return _r(...a); };
-    const _confirmDeleteFile = async (...a) => { const _r = window.app._confirmDeleteFile; if (_r && _r !== _confirmDeleteFile) return _r(...a); };
-    const showProfile = async (...a) => { const _r = window.app.showProfile; if (_r && _r !== showProfile) return _r(...a); };
-    const exportKPIDashboard = async (...a) => { const _r = window.app.exportKPIDashboard; if (_r && _r !== exportKPIDashboard) return _r(...a); };
+    const deleteFile = _lazyStub('chunks/script-fude.min.js', 'deleteFile');
+    const _confirmDeleteFile = _lazyStub('chunks/script-fude.min.js', '_confirmDeleteFile');
+    const showProfile = _lazyStub('chunks/script-fude.min.js', 'showProfile');
+    const exportKPIDashboard = _lazyStub('chunks/script-fude.min.js', 'exportKPIDashboard');
     const renderFormsTab = async (...a) => { const _r = window.app.renderFormsTab; if (_r && _r !== renderFormsTab) return _r(...a); };
     const cfSearchProspects = async (...a) => { const _r = window.app.cfSearchProspects; if (_r && _r !== cfSearchProspects) return _r(...a); };
     const cfClearSignature = async (...a) => { const _r = window.app.cfClearSignature; if (_r && _r !== cfClearSignature) return _r(...a); };
-    const openCustomerSurveyModal = async (...a) => { const _r = window.app.openCustomerSurveyModal; if (_r && _r !== openCustomerSurveyModal) return _r(...a); };
-    const saveCustomerSurvey = async (...a) => { const _r = window.app.saveCustomerSurvey; if (_r && _r !== saveCustomerSurvey) return _r(...a); };
-    const openCpsAnalysisModal = async (...a) => { const _r = window.app.openCpsAnalysisModal; if (_r && _r !== openCpsAnalysisModal) return _r(...a); };
-    const saveCpsAnalysis = async (...a) => { const _r = window.app.saveCpsAnalysis; if (_r && _r !== saveCpsAnalysis) return _r(...a); };
-    const openApuAppraisalModal = async (...a) => { const _r = window.app.openApuAppraisalModal; if (_r && _r !== openApuAppraisalModal) return _r(...a); };
-    const saveApuAppraisal = async (...a) => { const _r = window.app.saveApuAppraisal; if (_r && _r !== saveApuAppraisal) return _r(...a); };
-    const openDestinyBlueprintModal = async (...a) => { const _r = window.app.openDestinyBlueprintModal; if (_r && _r !== openDestinyBlueprintModal) return _r(...a); };
-    const openDestinyBlueprintInTab = async (...a) => { const _r = window.app.openDestinyBlueprintInTab; if (_r && _r !== openDestinyBlueprintInTab) return _r(...a); };
+    // Customer Forms accordion Fill/Edit buttons (rendered by the prospects chunk's
+    // forms tab) call these fude-owned handlers. Self-loading stubs pull fude in then
+    // dispatch — a passive dispatch-only stub silently no-oped until fude was visited.
+    const openCustomerSurveyModal = _lazyStub('chunks/script-fude.min.js', 'openCustomerSurveyModal');
+    const saveCustomerSurvey = _lazyStub('chunks/script-fude.min.js', 'saveCustomerSurvey');
+    const openCpsAnalysisModal = _lazyStub('chunks/script-fude.min.js', 'openCpsAnalysisModal');
+    const saveCpsAnalysis = _lazyStub('chunks/script-fude.min.js', 'saveCpsAnalysis');
+    const openApuAppraisalModal = _lazyStub('chunks/script-fude.min.js', 'openApuAppraisalModal');
+    const saveApuAppraisal = _lazyStub('chunks/script-fude.min.js', 'saveApuAppraisal');
+    const openDestinyBlueprintModal = _lazyStub('chunks/script-fude.min.js', 'openDestinyBlueprintModal');
+    const openDestinyBlueprintInTab = _lazyStub('chunks/script-fude.min.js', 'openDestinyBlueprintInTab');
     const saveDestinyBlueprint = async (...a) => { const _r = window.app.saveDestinyBlueprint; if (_r && _r !== saveDestinyBlueprint) return _r(...a); };
 
     const goBackFromDetail = () => {
@@ -5801,6 +5863,39 @@ Object.assign(window.app, {
     showBackupCodeLogin:  typeof showBackupCodeLogin  !== 'undefined' ? showBackupCodeLogin  : () => UI?.toast?.warning('Two-factor not available.'),
     verifyBackupCodeLogin: typeof verifyBackupCodeLogin !== 'undefined' ? verifyBackupCodeLogin : () => UI?.toast?.warning('Two-factor not available.'),
 });
+
+// ── Cross-chunk self-loading stubs (no boot stub existed for these) ──────────
+// Each of these handlers is rendered by one chunk but implemented in another,
+// and had NO forwarding stub — so the button silently no-op'd (or threw) until
+// the owning chunk happened to load. Register a self-loading stub that pulls the
+// owning chunk in, then dispatches to the now-real fn. Guarded with `||` so a
+// chunk that already registered the real impl (load-order race) is never
+// clobbered; each chunk's own register()/Object.assign later overwrites the stub.
+(function _installCrossChunkStubs() {
+    const S = (name, src) => { if (typeof window.app[name] !== 'function') window.app[name] = _lazyAppStub(src, name); };
+    const A = 'chunks/script-activities.min.js';
+    // Activities-chunk handlers wired into the calendar grid, activity-details
+    // modal, notif panel, noticeboard admin bar, and fude highlight fan-out.
+    [
+        'respondCoAgentInvite', 'respondConsultantInvite',
+        'toggleAttendeePaid', 'toggleAttendeeTicket', 'toggleAttendeeAttended',
+        'toggleAttendeeUnattended', 'removeAgentAttendee', 'showAttendeeDetails',
+        'toggleCoAgentSection', 'searchAgents', 'openCpsCreateEventModal',
+        '_notifyHighlightSaved',
+    ].forEach(n => S(n, A));
+    // Knowledge HQ Quick Capture (Ctrl+Shift+N + command palette).
+    S('openCaptureModal', 'chunks/script-knowledge.min.js');
+    // Customer 'Portal Link' header button (forms chunk).
+    S('sendPortalLink', 'chunks/script-forms.min.js');
+    // Customer closing tab re-render, called unguarded from the customers chunk.
+    S('renderCustomerClosingTab', 'chunks/script-prospects.min.js');
+    // Bulk-reassign confirm popup + cascade (import chunk).
+    ['_showReassignConfirmPopup', '_renderReassignSummary', 'cascadeProspectReassign']
+        .forEach(n => S(n, 'chunks/script-import.min.js'));
+    // Customer Notes accordion buttons (mobile chunk).
+    ['addCustomerNote', 'deleteCustomerNote', 'openVoiceRecorder']
+        .forEach(n => S(n, 'chunks/script-mobile.min.js'));
+})();
 
 // ========== SECURITY DASHBOARD + SYSTEM ADMIN (Phase 5B) ==========
 // [CHUNK: admin] ~547 lines extracted to chunks/script-admin.js

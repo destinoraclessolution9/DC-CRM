@@ -13,6 +13,7 @@
     const isMarketingManager = (u) => _utils.isMarketingManager(u || _state.cu);
     const isManagement       = (u) => _utils.isManagement(u || _state.cu);
     const isTeamLeaderOrAbove= (u) => _utils.isTeamLeaderOrAbove(u || _state.cu);
+    const getVisibleUserIds  = (u) => _utils.getVisibleUserIds(u || _state.cu);
 
     const _cu = () => _state.cu;
 
@@ -284,6 +285,21 @@
         xingua_booked:            10,
     };
 
+    // Map raw activity_type (DB values are upper-case: 'CPS','FTF','FSA','CALL',
+    // 'WHATSAPP','GR','XG','EVENT' — see script-activities.js) to the matching
+    // SCORE_WEIGHTS key. Without this every non-event activity fell through to the
+    // default weight 5 (a CPS worth 15 scored 5) because the raw lower-cased type
+    // ('cps') never equals a weight key ('cps_logged').
+    const ACT_TYPE_WEIGHT_KEY = {
+        ftf:      'ftf_logged',
+        cps:      'cps_logged',
+        fsa:      'fsa_logged',
+        call:     'call_logged',
+        whatsapp: 'whatsapp_logged',
+        gr:       'gr_activity_logged',
+        xg:       'xingua_booked',
+    };
+
     // Decay rates per follow_mode:
     const DECAY_CONFIG = {
         warm_hold:      { startDay:  0, ratePerDay: 0     },  // no decay
@@ -320,8 +336,11 @@
                     || act.event?.event_category
                     || '').toLowerCase();
 
-                // Map activity_type + event_category to score weight
-                let w = SCORE_WEIGHTS[actType] || SCORE_WEIGHTS[eventCat] || 5;
+                // Map activity_type + event_category to score weight. Translate the
+                // raw type to its weight key first (see ACT_TYPE_WEIGHT_KEY) so real
+                // DB values ('cps','ftf',…) resolve to their full weights.
+                const weightKey = ACT_TYPE_WEIGHT_KEY[actType] || actType;
+                let w = SCORE_WEIGHTS[weightKey] || SCORE_WEIGHTS[eventCat] || 5;
 
                 // Event activity: use event_category key if it has its own weight
                 if (actType === 'event' && eventCat) {
@@ -330,12 +349,16 @@
 
                 const actDate = new Date(act.activity_date || act.created_at).getTime();
                 const ageD = (now - actDate) / 86400000;
-                let decay = 1;
+                // Decay is an ABSOLUTE point subtraction, not a fraction of the whole
+                // weight: active = -1pt/3d after D+14 (ratePerDay 1/3), gentle_nurture
+                // = -1pt/day after D+21. The old `w * (1 - penaltyDays*ratePerDay)`
+                // multiplier zeroed an activity's entire contribution within 3 days.
+                let contribution = w;
                 if (decayCfg.startDay > 0 && ageD > decayCfg.startDay) {
                     const penaltyDays = ageD - decayCfg.startDay;
-                    decay = Math.max(0, 1 - penaltyDays * decayCfg.ratePerDay);
+                    contribution = Math.max(0, w - penaltyDays * decayCfg.ratePerDay);
                 }
-                score += Math.round(w * decay);
+                score += Math.round(contribution);
             }
 
             // Deal value multiplier (high-value prospects score more)
@@ -627,8 +650,14 @@
             const candidates = all.filter(u => tierOk(u) && String(u.id) !== String(cu?.id));
             if (!candidates.length) return fallback;
             // Prefer a supervisor on the same team as the triggering agent.
-            const sameTeam = cu?.team_id != null
-                ? candidates.filter(u => String(u.team_id) === String(cu.team_id))
+            // team_id is null org-wide (saveAgent writes the TEXT `team` label,
+            // not team_id — see script.js), so match on the normalised `team`
+            // label instead; otherwise same-team is always empty and the pool
+            // falls back to any TL+/manager in the whole org.
+            const _normTeam = (v) => (v == null ? '' : String(v).trim().toLowerCase());
+            const cuTeam = _normTeam(cu?.team);
+            const sameTeam = cuTeam
+                ? candidates.filter(u => _normTeam(u.team) === cuTeam)
                 : [];
             const pool = sameTeam.length ? sameTeam : candidates;
             // Of those who qualify, route to the LEAST-senior supervisor that still
@@ -1293,12 +1322,28 @@
     const showAgentJourneyLoad = async (containerEl) => {
         if (!containerEl || !isTeamLeaderOrAbove(_cu())) return;
         try {
-            const { data } = await window.supabase
+            // The agent_journey_load view aggregates ALL touchpoints org-wide with
+            // no scoping (RLS USING(true)), so a team leader would otherwise see
+            // every team's agent workloads. Restrict the rows to the viewer's
+            // role-scoped visible user set (same own-team model as the KPI tab /
+            // referral leaderboard). 'all' (admin/L1-2) sees everyone.
+            let visibleIds = 'all';
+            try { visibleIds = await getVisibleUserIds(_cu()); }
+            catch (_) { visibleIds = [_cu()?.id].filter(Boolean); }
+
+            const { data: rawData } = await window.supabase
                 .from('agent_journey_load')
                 .select('agent_id, overdue_count, due_today_count, total_open')
                 .gt('total_open', 0)
                 .order('overdue_count', { ascending: false })
-                .limit(10);
+                .limit(50);
+
+            let data = rawData;
+            if (visibleIds !== 'all') {
+                const vStrs = new Set((visibleIds || []).map(String));
+                data = (rawData || []).filter(r => vStrs.has(String(r.agent_id)));
+            }
+            data = (data || []).slice(0, 10);
 
             if (!data || !data.length) {
                 _rxRenderAux(containerEl, `<div style="font-size:12px;color:var(--gray-400);text-align:center;padding:12px;">所有跟进人员均无开放任务。</div>`);

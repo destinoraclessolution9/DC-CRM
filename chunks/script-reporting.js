@@ -558,16 +558,20 @@
         const sb = window.supabase || window.supabaseClient || null;
         if (!sb || typeof sb.from !== 'function') return null;
         try {
-            // Inclusive upper bound: start of the day AFTER `to`.
+            // created_at is a UTC timestamptz, but from/to are LOCAL YYYY-MM-DD. Build
+            // local-midnight Date objects and bound with their UTC-instant ISO strings
+            // so the window is the calendar Mon..Sun in the viewer's timezone (not a
+            // UTC-midnight window shifted 8h earlier). Lower bound = local 00:00 of `from`;
+            // inclusive upper bound = local 00:00 of the day AFTER `to`.
+            const fromStart = new Date(from + 'T00:00:00');
             const toNext = new Date(to + 'T00:00:00');
-            if (!Number.isFinite(toNext.getTime())) return null;
+            if (!Number.isFinite(fromStart.getTime()) || !Number.isFinite(toNext.getTime())) return null;
             toNext.setDate(toNext.getDate() + 1);
-            const toNextStr = toLocalDateStr(toNext);
 
             let q = sb.from('npo_sales')
                 .select('first_payment, cart_total, responsible_agent_id')
-                .gte('created_at', from)
-                .lt('created_at', toNextStr);
+                .gte('created_at', fromStart.toISOString())
+                .lt('created_at', toNext.toISOString());
 
             // Scope to the viewer's visible agents (responsible_agent_id). For an
             // agent _visibleUserIds is already clamped to [their own id] upstream.
@@ -921,10 +925,28 @@
 
     const getActivityAttendanceDetails = async (from, to) => {
         const activities = await _reportActsInRange(from, to, 'getActivityAttendanceDetails');
-        const [events, registrations] = await Promise.all([
+        // Scope parity with the attended-only 'Activity Attendance' KPI card
+        // (getActivityHeadcount): only ATTENDED registrations count, market scope is
+        // honoured, and rows are filtered to _visibleUserIds so a scoped L4/L5 viewer
+        // never sees other teams' events/meetings. Resolve each attendee's agent via
+        // prospect/customer like getActivityHeadcount (only needed when scoped).
+        const [events, registrations, prospects, customers] = await Promise.all([
             AppDataStore.getAll('events'),
             AppDataStore.getAll('event_registrations'),
+            _visibleUserIds !== 'all' ? AppDataStore.getAll('prospects') : Promise.resolve([]),
+            _visibleUserIds !== 'all' ? AppDataStore.getAll('customers') : Promise.resolve([]),
         ]);
+        const prospMap = {}; prospects.forEach(p => { prospMap[p.id] = p; });
+        const custMap = {}; customers.forEach(c => { custMap[c.id] = c; });
+        const _regInScope = (r) => {
+            if (_visibleUserIds === 'all') return true;
+            const entityId = r.entity_id || r.attendee_id;
+            let agentId;
+            if (r.attendee_type === 'agent') agentId = entityId;
+            else if (r.attendee_type === 'customer') agentId = custMap[entityId]?.responsible_agent_id;
+            else agentId = prospMap[entityId]?.responsible_agent_id;
+            return _visibleUserIds.includes(agentId);
+        };
         // De-quad: bucket registrations by event_id ONCE (O(n), source insertion
         // order preserved) so the per-event lookup is O(1) instead of a full-array
         // .filter scan per event (was O(events × registrations)). RAW key + strict
@@ -938,7 +960,11 @@
         }
         const result = [];
         for (const ev of events) {
-            const regs = (regsByEvent.get(ev.id) || []).filter(r => r.event_date >= from && r.event_date <= to);
+            if (!_recInMarket(ev)) continue;
+            const regs = (regsByEvent.get(ev.id) || []).filter(r =>
+                r.event_date >= from && r.event_date <= to &&
+                r.attendance_status === 'Attended' && _regInScope(r)
+            );
             if (regs.length === 0) continue;
             let prospectCount = 0, agentCount = 0;
             for (const r of regs) {
@@ -949,7 +975,9 @@
         }
         const standaloneActivities = activities.filter(a =>
             a.activity_date >= from && a.activity_date <= to &&
-            !a.event_id && a.co_agents && a.co_agents.length > 0
+            !a.event_id && a.co_agents && a.co_agents.length > 0 &&
+            _recInMarket(a) &&
+            (_visibleUserIds === 'all' || _visibleUserIds.includes(a.lead_agent_id))
         );
         for (const a of standaloneActivities) {
             const agentCount = a.co_agents?.length || 0;
@@ -969,10 +997,11 @@
             'Power Ring': 0, 'Calligraphy': 0, 'Adornment': 0,
             'Royal Woodwork': 0, 'Courses': 0, 'Book': 0
         };
-        // Server fast path. The legacy agent filter is a dead path (purchases has
-        // no agent_id → a non-'all' filter always yields zeros), so only the
-        // 'all' case has data to fetch server-side.
-        if (_currentAgentFilter === 'all') {
+        // Server fast path. The purchase_category_counts RPC takes no agent-ids
+        // param, so it returns ORG-WIDE counts — only safe for an all-scope viewer
+        // (admin / marketing). A scoped L4/L5 viewer (_visibleUserIds is a list) or
+        // an active agent filter must take the client path so counts respect scope.
+        if (_currentAgentFilter === 'all' && _visibleUserIds === 'all') {
             try {
                 if (window.supabase && window.supabase.rpc) {
                     const { data, error } = await window.supabase.rpc('purchase_category_counts', { p_from: from, p_to: to });
@@ -983,16 +1012,12 @@
                 }
             } catch (_) { /* fall through to legacy */ }
         }
-        // Purchases have no agent_id column — the per-agent filter must resolve the
-        // agent via the linked customer (same contract as _getPurchaseAgentId / the
-        // KPI getters), or this branch silently returns all-zeros for any non-'all'
-        // filter. Build customerMap once and compare String-vs-String.
-        const [purchases, custList] = await Promise.all([
-            AppDataStore.getAll('purchases'),
-            _currentAgentFilter === 'all' ? Promise.resolve([]) : AppDataStore.getAll('customers')
-        ]);
-        const customerMap = {};
-        custList.forEach(c => { customerMap[c.id] = c; });
+        // Purchases have no agent_id column — scope (visibleUserIds / role / market)
+        // and any per-agent filter must resolve the agent via the linked customer
+        // (same contract as _passesPurchaseFilter / the KPI getters), or this branch
+        // silently returns all-zeros / org-wide. _getPurchaseBase loads customers +
+        // users so both the scope filter and the agent filter can resolve.
+        const { purchases, customerMap, userMap } = await _getPurchaseBase();
         const keywordMap = {
             'FengShui': ['feng shui', 'fengshui'],
             'Flexi FengShui': ['flexi', 'flexible feng shui'],
@@ -1006,7 +1031,12 @@
         };
         for (const p of purchases) {
             if (p.date < from || p.date > to) continue;
-            if (_currentAgentFilter !== 'all' && String(_getPurchaseAgentId(p, customerMap)) !== String(_currentAgentFilter)) continue;
+            const agentId = _getPurchaseAgentId(p, customerMap);
+            // Scope leak fix (memory: 01287cc): honour _visibleUserIds / role / market
+            // exactly like the KPI purchase getters so a scoped viewer never sees
+            // company-wide case counts.
+            if (!_passesPurchaseFilter(p, agentId, userMap)) continue;
+            if (_currentAgentFilter !== 'all' && String(agentId) !== String(_currentAgentFilter)) continue;
             const itemLower = (p.item || '').toLowerCase();
             for (const [cat, keywords] of Object.entries(keywordMap)) {
                 if (keywords.some(kw => itemLower.includes(kw))) { categories[cat]++; break; }
@@ -1211,7 +1241,10 @@
         if (filter === 'weekly') {
             currentTo = new Date(now);
             currentFrom = new Date(now);
-            currentFrom.setDate(now.getDate() - 7);
+            // KPI filters are inclusive on BOTH ends, so a 7-day window spans now-6..now
+            // (7 distinct dates). Using now-7 here spanned 8 dates and inflated every
+            // vs-last-period trend by comparing 8 current days against 7 previous days.
+            currentFrom.setDate(now.getDate() - 6);
             // Previous window ends the day BEFORE the current window starts, else the
             // boundary day at currentFrom (both ends inclusive in KPI filters) is
             // double-counted in current and previous, skewing vs-last-period trends.
@@ -1394,7 +1427,11 @@
             AppDataStore.getAll('customers')
         ]);
         const totalProspects = allProspects.filter(p => {
-            if (p.created_at < from || p.created_at > to) return false;
+            // created_at is a full ISO timestamp; from/to are date-only 'YYYY-MM-DD'.
+            // Compare on the date part only (like customer_since below) so a prospect
+            // created on the `to` day isn't excluded by the trailing 'Thh:mm...'.
+            const pd = (p.created_at || '').slice(0, 10);
+            if (!pd || pd < from || pd > to) return false;
             if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(p.responsible_agent_id)) return false;
             return true;
         }).length;
@@ -1473,7 +1510,9 @@ const getTotalSales = async (from, to) => {
     const { purchases, customerMap, userMap } = await _getPurchaseBase();
     let total = 0;
     for (const p of purchases) {
-        if (p.date < from || p.date > to || p.is_agent_package) continue;
+        // Null-date guard: `null < from` and `null > to` are BOTH false, so an
+        // undated row would otherwise pass the window filter in EVERY period.
+        if (!p.date || p.date < from || p.date > to || p.is_agent_package) continue;
         if (!_passesPurchaseFilter(p, _getPurchaseAgentId(p, customerMap), userMap)) continue;
         total += p.amount || 0;
     }
@@ -1484,7 +1523,7 @@ const getPOPCaseCount = async (from, to) => {
     const { purchases, customerMap, userMap } = await _getPurchaseBase();
     let count = 0;
     for (const p of purchases) {
-        if (p.payment_method !== 'POP' || p.date < from || p.date > to) continue;
+        if (p.payment_method !== 'POP' || !p.date || p.date < from || p.date > to) continue;
         if (!_passesPurchaseFilter(p, _getPurchaseAgentId(p, customerMap), userMap)) continue;
         count++;
     }
@@ -1495,7 +1534,7 @@ const getPOPSales = async (from, to) => {
     const { purchases, customerMap, userMap } = await _getPurchaseBase();
     let total = 0;
     for (const p of purchases) {
-        if (p.payment_method !== 'POP' || p.date < from || p.date > to) continue;
+        if (p.payment_method !== 'POP' || !p.date || p.date < from || p.date > to) continue;
         if (!_passesPurchaseFilter(p, _getPurchaseAgentId(p, customerMap), userMap)) continue;
         total += p.amount || 0;
     }
@@ -1506,7 +1545,7 @@ const getEPPCaseCount = async (from, to) => {
     const { purchases, customerMap, userMap } = await _getPurchaseBase();
     let count = 0;
     for (const p of purchases) {
-        if (p.payment_method !== 'EPP' || p.date < from || p.date > to) continue;
+        if (p.payment_method !== 'EPP' || !p.date || p.date < from || p.date > to) continue;
         if (!_passesPurchaseFilter(p, _getPurchaseAgentId(p, customerMap), userMap)) continue;
         count++;
     }
@@ -1517,7 +1556,7 @@ const getEPPSales = async (from, to) => {
     const { purchases, customerMap, userMap } = await _getPurchaseBase();
     let total = 0;
     for (const p of purchases) {
-        if (p.payment_method !== 'EPP' || p.date < from || p.date > to) continue;
+        if (p.payment_method !== 'EPP' || !p.date || p.date < from || p.date > to) continue;
         if (!_passesPurchaseFilter(p, _getPurchaseAgentId(p, customerMap), userMap)) continue;
         total += p.amount || 0;
     }
@@ -1531,7 +1570,7 @@ const getDOSales = async (from, to) => {
     const { purchases, customerMap, userMap } = await _getPurchaseBase();
     let total = 0;
     for (const p of purchases) {
-        if (p.date < from || p.date > to || p.is_agent_package) continue;
+        if (!p.date || p.date < from || p.date > to || p.is_agent_package) continue;
         // POP and NPO both belong to the PO bucket, never DO (full payment). NPO
         // installment-package deals carry payment_method='NPO' on their purchases
         // row; the weekly report counts them under PORT via npo_sales, so they must
@@ -1547,7 +1586,7 @@ const getEPPDetails = async (from, to) => {
     const { purchases, customerMap, userMap } = await _getPurchaseBase();
     const map = {};
     for (const p of purchases) {
-        if (p.payment_method !== 'EPP' || p.date < from || p.date > to) continue;
+        if (p.payment_method !== 'EPP' || !p.date || p.date < from || p.date > to) continue;
         if (!_passesPurchaseFilter(p, _getPurchaseAgentId(p, customerMap), userMap)) continue;
         const bank = p.epp_bank || 'Unknown';
         const months = p.epp_months || '-';
@@ -2082,6 +2121,10 @@ const renderDetailTable = (headers, rows, emptyMsg = 'No records in this period'
 // including null-date rows (see the RPC's NULL-date parity note).
 const _tryPurchaseDetails = async (from, to) => {
     if (!window.supabase || !window.supabase.rpc) return null;
+    // Market drill-down: report_purchase_details isn't country/currency-aware, so a
+    // scoped market would leak all-markets rows into the breakdown (contradicting the
+    // market-scoped card). Fall back to the client path, which filters by market.
+    if (window._crmUtils.listCountryScope() !== window._crmUtils.ALL_COUNTRIES) return null;
     try {
         const agentIds = (_visibleUserIds === 'all' || !Array.isArray(_visibleUserIds))
             ? null
@@ -2104,6 +2147,9 @@ const _tryPurchaseDetails = async (from, to) => {
 // the builder's original getAll path runs. Behavior-preserving.
 const _tryActivityDetails = async (from, to, types, titleLike = null) => {
     if (!window.supabase || !window.supabase.rpc) return null;
+    // Market drill-down: report_activity_details isn't country-aware, so fall back to
+    // the client path (which applies _recInMarket) when a specific market is active.
+    if (window._crmUtils.listCountryScope() !== window._crmUtils.ALL_COUNTRIES) return null;
     try {
         const agentIds = (_visibleUserIds === 'all' || !Array.isArray(_visibleUserIds))
             ? null
@@ -2180,8 +2226,13 @@ const buildTotalSalesDetails = async (from, to) => {
     const custMap = {}; customers.forEach(c => { custMap[c.id] = c; });
     const rows = [];
     let total = 0;
+    // Market scope: when a specific market is active, count only that market's
+    // currency (parity with _passesPurchaseFilter / the market-scoped card).
+    const _ms = window._crmUtils.listCountryScope();
+    const _scoped = _ms !== window._crmUtils.ALL_COUNTRIES;
     for (const p of purchases) {
         if (p.date < from || p.date > to || p.is_agent_package) continue;
+        if (_scoped && (p.currency || 'MYR') !== UI.currencyForCountry(_ms)) continue;
         const agentId = custMap[p.customer_id]?.responsible_agent_id || p.agent_id;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(agentId))) continue;
         if (_currentRoleFilter !== 'All') {
@@ -2220,8 +2271,12 @@ const buildPOPDetails = async (from, to) => {
     const custMap = {}; customers.forEach(c => { custMap[c.id] = c; });
     const rows = [];
     let total = 0;
+    // Market scope: parity with _passesPurchaseFilter / the market-scoped card.
+    const _ms = window._crmUtils.listCountryScope();
+    const _scoped = _ms !== window._crmUtils.ALL_COUNTRIES;
     for (const p of purchases) {
         if (p.payment_method !== 'POP' || p.date < from || p.date > to) continue;
+        if (_scoped && (p.currency || 'MYR') !== UI.currencyForCountry(_ms)) continue;
         const agentId = custMap[p.customer_id]?.responsible_agent_id;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(agentId))) continue;
         if (_currentRoleFilter !== 'All') {
@@ -2251,7 +2306,7 @@ const buildEPPCasesDetails = async (from, to) => {
             byBank[bank] = (byBank[bank] || 0) + 1;
             rows.push([p.date, p.agent_name || '—', p.customer_name || '—', `RM ${(p.amount || 0).toLocaleString()}`, bank, `${months} mo`]);
         }
-        const bankPills = Object.entries(byBank).map(([b, c]) => `<span style="display:inline-block;background:#ede9fe;color:#6d28d9;padding:3px 10px;border-radius:12px;font-size:11px;margin-right:6px;">${b}: ${c}</span>`).join('');
+        const bankPills = Object.entries(byBank).map(([b, c]) => `<span style="display:inline-block;background:#ede9fe;color:#6d28d9;padding:3px 10px;border-radius:12px;font-size:11px;margin-right:6px;">${escapeHtml(b)}: ${c}</span>`).join('');
         const summary = `<div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px;">Total: <strong>RM ${total.toLocaleString()}</strong> across ${rows.length} EPP case${rows.length===1?'':'s'}${bankPills ? '<br/><div style="margin-top:6px;">' + bankPills + '</div>' : ''}</div>`;
         return summary + renderDetailTable(['Date', 'Agent', 'Customer', 'Amount', 'Bank', 'Months'], rows);
     }
@@ -2266,8 +2321,12 @@ const buildEPPCasesDetails = async (from, to) => {
     const rows = [];
     const byBank = {};
     let total = 0;
+    // Market scope: parity with _passesPurchaseFilter / the market-scoped card.
+    const _ms = window._crmUtils.listCountryScope();
+    const _scoped = _ms !== window._crmUtils.ALL_COUNTRIES;
     for (const p of purchases) {
         if (p.payment_method !== 'EPP' || p.date < from || p.date > to) continue;
+        if (_scoped && (p.currency || 'MYR') !== UI.currencyForCountry(_ms)) continue;
         const agentId = custMap[p.customer_id]?.responsible_agent_id;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(agentId))) continue;
         if (_currentRoleFilter !== 'All') {
@@ -2282,7 +2341,7 @@ const buildEPPCasesDetails = async (from, to) => {
         byBank[bank] = (byBank[bank] || 0) + 1;
         rows.push([p.date, agentName, custName, `RM ${(p.amount || 0).toLocaleString()}`, bank, `${months} mo`]);
     }
-    const bankPills = Object.entries(byBank).map(([b, c]) => `<span style="display:inline-block;background:#ede9fe;color:#6d28d9;padding:3px 10px;border-radius:12px;font-size:11px;margin-right:6px;">${b}: ${c}</span>`).join('');
+    const bankPills = Object.entries(byBank).map(([b, c]) => `<span style="display:inline-block;background:#ede9fe;color:#6d28d9;padding:3px 10px;border-radius:12px;font-size:11px;margin-right:6px;">${escapeHtml(b)}: ${c}</span>`).join('');
     const summary = `<div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px;">Total: <strong>RM ${total.toLocaleString()}</strong> across ${rows.length} EPP case${rows.length===1?'':'s'}${bankPills ? '<br/><div style="margin-top:6px;">' + bankPills + '</div>' : ''}</div>`;
     return summary + renderDetailTable(['Date', 'Agent', 'Customer', 'Amount', 'Bank', 'Months'], rows);
 };
@@ -2341,7 +2400,14 @@ const buildNewAgentsDetails = async (from, to) => {
     const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
     const rows = [];
     for (const u of users) {
-        if (u.join_date < from || u.join_date > to) continue;
+        // Normalise join_date exactly like getNewAgents: null/blank users can't be
+        // "new in this window" (null < from and null > to are BOTH false), and full
+        // timestamps must be sliced to YYYY-MM-DD, else the breakdown lists rows the
+        // card excludes (with blank date cells).
+        const jd = (u.join_date instanceof Date)
+            ? toLocalDateStr(u.join_date)
+            : (u.join_date == null ? '' : String(u.join_date).slice(0, 10));
+        if (!jd || jd < from || jd > to) continue;
         if (!_recInMarket(u)) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(u.id)) continue;
         if (_currentRoleFilter !== 'All') {
@@ -2350,7 +2416,7 @@ const buildNewAgentsDetails = async (from, to) => {
             if (!isAgent(u)) continue;
         }
         const upline = u.reporting_to ? (userMap[u.reporting_to]?.full_name || '—') : '—';
-        rows.push([u.join_date, u.full_name || '—', u.role || '—', upline]);
+        rows.push([jd, u.full_name || '—', u.role || '—', upline]);
     }
     return renderDetailTable(['Join Date', 'Name', 'Role', 'Upline'], rows);
 };
@@ -2501,6 +2567,10 @@ const _buildNewCustomersDetailsLegacy = async (from, to) => {
         if (c.customer_since < from || c.customer_since > to) continue;
         if (!_recInMarket(c)) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(c.responsible_agent_id))) continue;
+        // Parity with the getNewCustomers card: a "new customer" requires a purchase
+        // dated in the same window, else the breakdown lists more rows than the card.
+        const hasPurchaseInRange = purchases.some(p => p.customer_id == c.id && p.date >= from && p.date <= to);
+        if (!hasPurchaseInRange) continue;
         const agent = c.responsible_agent_id
             ? (userMap[c.responsible_agent_id]?.full_name || userMap[String(c.responsible_agent_id)]?.full_name || '—')
             : '—';
@@ -2546,10 +2616,14 @@ const _buildConversionDetailsLegacy = async (from, to) => {
     const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
     const pRows = [];
     for (const p of prospects) {
-        if (p.created_at < from || p.created_at > to) continue;
+        // created_at is a full ISO timestamp; from/to are date-only — compare on the
+        // date part only so prospects created on the `to` day aren't dropped (parity
+        // with the customer_since date-only comparison below and getConversionRate).
+        const pd = (p.created_at || '').slice(0, 10);
+        if (!pd || pd < from || pd > to) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(p.responsible_agent_id)) continue;
         const agent = p.responsible_agent_id ? (userMap[p.responsible_agent_id]?.full_name || '—') : '—';
-        pRows.push([(p.created_at || '').slice(0, 10), p.full_name || '—', agent, p.status || '—']);
+        pRows.push([pd, p.full_name || '—', agent, p.status || '—']);
     }
     const cRows = [];
     for (const c of customers) {
@@ -3033,19 +3107,23 @@ const renderTargetOverview = async () => {
     const quarterlyTargets = await AppDataStore.getAll('quarterly_targets');
     const qTargets = quarterlyTargets.filter(t => t.year === year);
 
-    // Build rows asynchronously
-    const rows = [];
-    for (const q of [1, 2, 3, 4]) {
+    // Compute the four quarters' actual sales in ONE parallel batch (they're
+    // independent). Previously each iteration awaited _trySalesTotal serially — four
+    // RTTs, or four whole-table scans offline — on every dashboard refresh. Fetch the
+    // client fallback base ONCE and share it across quarters that need it.
+    let _purchaseBase = null;
+    const quarters = await Promise.all([1, 2, 3, 4].map(async (q) => {
         const target = qTargets.find(t => t.quarter === q) || {};
         const qStart = `${year}-${((q - 1) * 3 + 1).toString().padStart(2, '0')}-01`;
         const qEnd = `${year}-${(q * 3).toString().padStart(2, '0')}-${new Date(year, q * 3, 0).getDate()}`;
-        
+
         let actualSales = await _trySalesTotal(qStart, qEnd);
         if (actualSales === null) {
             // Scoped client fallback: resolve each purchase's agent via its customer
             // (purchases has no agent column) and keep only the viewer's visible set,
             // mirroring getTotalSales so an agent never sums org-wide actuals.
-            const { purchases, customerMap, userMap } = await _getPurchaseBase();
+            if (!_purchaseBase) _purchaseBase = await _getPurchaseBase();
+            const { purchases, customerMap, userMap } = _purchaseBase;
             actualSales = 0;
             for (const p of purchases) {
                 if (p.date < qStart || p.date > qEnd || p.is_agent_package) continue;
@@ -3053,11 +3131,15 @@ const renderTargetOverview = async () => {
                 actualSales += p.amount || 0;
             }
         }
+        return { q, target, actualSales };
+    }));
 
+    // Build rows in Q1..Q4 order.
+    const rows = quarters.map(({ q, target, actualSales }) => {
         const progress = target.total_sales_target ? Math.min(100, (actualSales / target.total_sales_target * 100)) : 0;
         const statusColor = progress > 90 ? 'green' : (progress > 70 ? 'yellow' : (progress > 0 ? 'red' : 'gray'));
 
-        rows.push(`
+        return `
             <tr>
                 <td>Q${q}</td>
                 <td>${target.cps_count_target || 0}</td>
@@ -3071,8 +3153,8 @@ const renderTargetOverview = async () => {
                     </div>
                 </td>
             </tr>
-        `);
-    }
+        `;
+    });
 
     container.innerHTML = _buildTargetOverviewHtml(year, rows);
 };
@@ -3160,7 +3242,7 @@ const renderAgentLeaderboard = async () => {
     if (_currentRoleFilter !== 'All') {
         agentsList = agentsList.filter(u => u.role === _currentRoleFilter);
     }
-    const ranges = getDateRanges(_currentTimeFilter);
+    const ranges = getDateRanges(_currentTimeFilter, _customDateFrom, _customDateTo);
 
     // ── Per-agent sales (current + previous period) ────────────────────────
     // Resolve each purchase's agent via its customer's responsible_agent_id —
@@ -3592,31 +3674,42 @@ const renderAgentLeaderboard = async () => {
     };
 
     const saveYearlyTargets = async () => {
+        // `|| 0` on every field so a CLEARED input yields 0 (not NaN → null, which
+        // would poison calculateQuarterlyBreakdown's Math.round(NaN * ratio) for all
+        // four quarters). Wrapped in try/catch like saveQuarterlyTargets so a
+        // create/update/RLS failure surfaces a toast instead of a silent open modal.
         const data = {
-            target_year: parseInt(document.getElementById('target-year').value),
-            cps_count_target: parseInt(document.getElementById('target-cps').value),
-            total_sales_target: parseFloat(document.getElementById('target-sales').value),
-            pop_case_count_target: parseInt(document.getElementById('target-pop-cases').value),
-            pop_sales_target: parseFloat(document.getElementById('target-pop-sales').value),
-            new_agents_target: parseInt(document.getElementById('target-new-agents').value),
-            new_customers_target: parseInt(document.getElementById('target-new-customers').value),
-            activity_headcount_target: parseInt(document.getElementById('target-headcount').value),
+            target_year: parseInt(document.getElementById('target-year').value) || new Date().getFullYear(),
+            cps_count_target: parseInt(document.getElementById('target-cps').value) || 0,
+            total_sales_target: parseFloat(document.getElementById('target-sales').value) || 0,
+            pop_case_count_target: parseInt(document.getElementById('target-pop-cases').value) || 0,
+            pop_sales_target: parseFloat(document.getElementById('target-pop-sales').value) || 0,
+            new_agents_target: parseInt(document.getElementById('target-new-agents').value) || 0,
+            new_customers_target: parseInt(document.getElementById('target-new-customers').value) || 0,
+            activity_headcount_target: parseInt(document.getElementById('target-headcount').value) || 0,
             seasonal_weighting: { q1: 0.9, q2: 1.0, q3: 1.1, q4: 1.2 }
         };
 
-        const existing = (await AppDataStore.getAll('yearly_targets')).find(t => t.target_year === data.target_year);
-        if (existing) {
-            await AppDataStore.update('yearly_targets', existing.id, data);
-        } else {
-            await AppDataStore.create('yearly_targets', data);
+        try {
+            const existing = (await AppDataStore.getAll('yearly_targets')).find(t => t.target_year === data.target_year);
+            let yearlyId;
+            if (existing) {
+                await AppDataStore.update('yearly_targets', existing.id, data);
+                yearlyId = existing.id;
+            } else {
+                const created = await AppDataStore.create('yearly_targets', data);
+                yearlyId = created && created.id;
+            }
+
+            // Auto-calculate quarterly (pass the resolved yearly id so the FK links).
+            await calculateQuarterlyBreakdown({ ...data, id: yearlyId });
+
+            UI.hideModal();
+            UI.toast.success('Targets saved successfully.');
+            if (_state.cv === 'reports') await refreshKPIDashboard();
+        } catch (e) {
+            UI.toast.error('Failed to save targets: ' + (e?.message || e));
         }
-
-        // Auto-calculate quarterly
-        await calculateQuarterlyBreakdown(data);
-
-        UI.hideModal();
-        UI.toast.success('Targets saved successfully.');
-        if (_state.cv === 'reports') await refreshKPIDashboard();
     };
 
 const calculateQuarterlyBreakdown = async (yearlyTarget) => {

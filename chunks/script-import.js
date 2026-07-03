@@ -23,6 +23,24 @@
     // (audit #9 leaderboard/LTV divergence). Defensive alias with a no-op fallback.
     const adjustCustomerLtv = (...a) => (_utils.adjustCustomerLtv || (async () => {}))(...a);
 
+    // BUG #4: the Protection Monitoring classifiers key on calculateProtectionDays,
+    // which is defined in chunks/script-prospects.js and undefined on a fresh
+    // session that lands here first. The old fallback `() => 0` reported every
+    // prospect as protDays<=0 → ALL critical. Replicate the real pure computation
+    // locally (identical logic: parse the deadline as LOCAL midnight, whole-day
+    // diff, floored at 0) so the classification is correct with or without the
+    // prospects chunk loaded. Prefer the canonical fn when it IS registered.
+    const _calcProtDaysFallback = (prospect) => {
+        if (!prospect || !prospect.protection_deadline) return 0;
+        const parts = String(prospect.protection_deadline).split('T')[0].split('-');
+        const deadline = new Date(+parts[0], (+parts[1] || 1) - 1, +parts[2] || 1);
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const diffDays = Math.round((deadline - today) / (1000 * 60 * 60 * 24));
+        return diffDays > 0 ? diffDays : 0;
+    };
+    const calcProtectionDays = (p) => (window.app.calculateProtectionDays || _calcProtDaysFallback)(p);
+
     // React-island flag (default-on) for the Protection Monitoring view.
     // Kill-switch → legacy: window.__REACT_PROTECTION===false, ?react=0, crm_react_off='1'.
     const _reactProtectionOn = () => {
@@ -380,8 +398,21 @@ const getStep5Html = async () => {
 const renderMappingRows = () => {
     const headers = _importData.headers || [];
     const crmFields = getCRMFieldsForType(_importData.importType);
+    const savedMapping = _importData.mapping || {};
+    const validValues = new Set(crmFields.map(f => f.value));
+    // Once the user has committed a mapping, untouched columns must stay on
+    // '-- Ignore --' rather than snapping back to an auto-matched default.
+    const captured = !!_importData._mappingCaptured;
     return headers.map((header, index) => {
-        const matched = autoMatchField(header, _importData.importType);
+        // BUG #11: prefer the user's previously-captured mapping for this column
+        // (so returning to step 2 from step 3 keeps their corrections) and only
+        // fall back to auto-match when they never committed a mapping. A saved
+        // value that isn't a field of the current import type is dropped (the
+        // import type changed) and re-auto-matched.
+        const saved = savedMapping[index];
+        const matched = (saved !== undefined && validValues.has(saved))
+            ? saved
+            : (captured ? '' : autoMatchField(header, _importData.importType));
         return `<tr><td><strong>${esc(header)}</strong></td><td>
             <select class="form-control mapping-select" data-col="${index}" style="width:200px">
                 <option value="">-- Ignore column --</option>
@@ -589,7 +620,7 @@ const mapRowToRecord = (row, reverseMap, agentId, importType = 'prospects') => {
         referral_relationship: get('referral_relationship'),
         pipeline_stage: pipelineStage,
         expected_close_date: get('expected_close_date') || null,
-        deal_value: dealVal === '' ? null : (Number.isFinite(parseFloat(dealVal)) ? parseFloat(dealVal) : null),
+        deal_value: (dealVal === '' || !/[0-9]/.test(dealVal)) ? null : _parseAmount(dealVal),
         responsible_agent_id: agentId,
         source: 'import'
     };
@@ -598,10 +629,10 @@ const mapRowToRecord = (row, reverseMap, agentId, importType = 'prospects') => {
 const mapRowToMarketingRecord = (row, reverseMap, type) => {
     const get = (field) => { const idx = reverseMap[field]; return idx !== undefined ? (row[idx] || '').toString().trim() : ''; };
     const parseActive = (val) => { if (!val) return true; return !['false','no','0','inactive','n'].includes(val.toLowerCase()); };
-    if (type === 'products') return { name: get('name'), price: parseFloat(get('price')) || 0, remarks: get('remarks') || null, delivery_lead_time: get('delivery_lead_time') || null, is_active: parseActive(get('is_active')) };
-    if (type === 'events') return { title: get('title'), ticket_price: parseFloat(get('ticket_price')) || 0, duration: get('duration') || null, target_group: get('target_group') || null, description: get('description') || null, is_active: parseActive(get('is_active')) };
+    if (type === 'products') return { name: get('name'), price: _parseAmount(get('price')), remarks: get('remarks') || null, delivery_lead_time: get('delivery_lead_time') || null, is_active: parseActive(get('is_active')) };
+    if (type === 'events') return { title: get('title'), ticket_price: _parseAmount(get('ticket_price')), duration: get('duration') || null, target_group: get('target_group') || null, description: get('description') || null, is_active: parseActive(get('is_active')) };
     // promotions
-    return { package_name: get('package_name'), price: parseFloat(get('price')) || 0, details: get('details') || null, requirement: get('requirement') || null, remarks: get('remarks') || null, delivery_lead_time: get('delivery_lead_time') || null, is_active: parseActive(get('is_active')) };
+    return { package_name: get('package_name'), price: _parseAmount(get('price')), details: get('details') || null, requirement: get('requirement') || null, remarks: get('remarks') || null, delivery_lead_time: get('delivery_lead_time') || null, is_active: parseActive(get('is_active')) };
 };
 
 // BUG #6: build a PARTIAL update payload for the "Update existing records" path.
@@ -627,7 +658,15 @@ const buildUpdatePayload = (row, reverseMap, importType = 'prospects') => {
             if (Number.isFinite(n)) payload[field] = n;
             return;
         }
-        if (moneyFields.has(field)) { payload[field] = _parseAmount(raw); return; }
+        if (moneyFields.has(field)) {
+            const amt = _parseAmount(raw);
+            // BUG #12: lifetime_value is a cumulative balance, not a signed
+            // adjustment. _parseAmount preserves a leading minus, so clamp it to
+            // >= 0 on the update path exactly like the create path (mapRowToRecord)
+            // — a negative cell must never push an existing customer's LTV negative.
+            payload[field] = field === 'lifetime_value' ? Math.max(0, amt) : amt;
+            return;
+        }
         payload[field] = raw;
     });
     return payload;
@@ -655,7 +694,12 @@ const runValidation = () => {
             const reqField = importType === 'products' ? 'name' : importType === 'events' ? 'title' : 'package_name';
             const reqLabel = importType === 'products' ? 'Name' : importType === 'events' ? 'Title' : 'Package Name';
             const reqCol = reverseMap[reqField];
-            if (reqCol !== undefined) {
+            // BUG #6: an unmapped required field previously skipped the check entirely,
+            // so every row validated as 'valid' and imported blank. Flag the missing
+            // mapping as a per-row error so the totals surface it and import is blocked.
+            if (reqCol === undefined) {
+                rowErrors.push({ field: reqLabel, msg: `${reqLabel} column is not mapped`, suggestion: `Map a column to ${reqLabel}` });
+            } else {
                 const val = (row[reqCol] || '').toString().trim();
                 if (!val) rowErrors.push({ field: reqLabel, msg: `${reqLabel} is required`, suggestion: `Enter the ${reqLabel.toLowerCase()}` });
             }
@@ -665,11 +709,18 @@ const runValidation = () => {
             const emailCol = reverseMap['email'];
             const icCol    = reverseMap['ic_number'];
 
-            if (nameCol !== undefined) {
+            // BUG #6: full_name and phone are required (*). If the column was never
+            // mapped, the old code skipped the check and let empty records through.
+            // Treat an unmapped required field as a per-row error.
+            if (nameCol === undefined) {
+                rowErrors.push({ field: 'Full Name', msg: 'Full Name column is not mapped', suggestion: 'Map a column to Full Name' });
+            } else {
                 const name = (row[nameCol] || '').toString().trim();
                 if (!name) rowErrors.push({ field: 'Full Name', msg: 'Name is required', suggestion: 'Enter the full name' });
             }
-            if (phoneCol !== undefined) {
+            if (phoneCol === undefined) {
+                rowErrors.push({ field: 'Phone', msg: 'Phone column is not mapped', suggestion: 'Map a column to Phone' });
+            } else {
                 const raw = (row[phoneCol] || '').toString().trim();
                 if (!raw) rowErrors.push({ field: 'Phone', msg: 'Phone is required', suggestion: 'Enter a phone number' });
                 else if (!/^(\+?60|0)[1-9]\d{7,9}$/.test(raw.replace(/[-\s()]/g, '')))
@@ -807,15 +858,40 @@ const importNextStep = async () => {
         document.querySelectorAll('.mapping-select').forEach(sel => {
             if (sel.value) _importData.mapping[parseInt(sel.dataset.col)] = sel.value;
         });
+        // BUG #11: remember that the user has committed a mapping so a later
+        // re-render (Back to step 2) restores THEIR choices — including columns
+        // they deliberately left on '-- Ignore --' — instead of reverting to
+        // auto-match defaults.
+        _importData._mappingCaptured = true;
         runValidation();
     }
     if (_currentImportStep === 3) {
         await runDuplicateCheck();
     }
+    if (_currentImportStep === 4) {
+        // BUG #3: the duplicate-action radios live only on step 4 and are destroyed
+        // when step 5 replaces the modal body. Capture the choice here (at the 4→5
+        // transition) so startImport can read it from _importData instead of a
+        // now-missing DOM node (which always returned null → forced 'skip').
+        _importData.duplicateAction = document.querySelector('input[name="duplicate-action"]:checked')?.value || 'skip';
+    }
     if (_currentImportStep < 5) await renderImportStep(_currentImportStep + 1);
 };
 const importPrevStep = async () => { if (_currentImportStep > 1) await renderImportStep(_currentImportStep - 1); };
-const updateImportType = (type) => { _importData.importType = type; };
+const updateImportType = async (type) => {
+    if (type === _importData.importType) return;
+    _importData.importType = type;
+    // The previous type's captured mapping no longer applies to the new type's
+    // fields, so treat the switch as a fresh mapping: clear the saved mapping +
+    // captured flag so step 2 re-auto-matches for the newly selected type.
+    _importData.mapping = {};
+    _importData._mappingCaptured = false;
+    // BUG #7: the mapping table still lists the PREVIOUS type's CRM fields until
+    // step 2 is re-rendered, so Auto-map (which computes new-type field names)
+    // assigns option values that don't exist and silently maps nothing. Re-render
+    // step 2 so the dropdowns list the newly selected type's fields + re-auto-match.
+    if (_currentImportStep === 2) await renderImportStep(2);
+};
 const autoMapFields = () => {
     const selects = document.querySelectorAll('.mapping-select');
     let matched = 0;
@@ -845,7 +921,12 @@ const downloadErrorReport = () => {
 };
 
 const startImport = async () => {
-    const duplicateAction = document.querySelector('input[name="duplicate-action"]:checked')?.value || 'skip';
+    // BUG #3: the duplicate-action radios are on step 4 (already gone by step 5),
+    // so read the choice captured at the 4→5 transition; fall back to a live DOM
+    // read (in case step 4 was skipped) then to 'skip'.
+    const duplicateAction = _importData.duplicateAction
+        || document.querySelector('input[name="duplicate-action"]:checked')?.value
+        || 'skip';
     const assignTo        = document.querySelector('input[name="assign-to"]:checked')?.value || 'myself';
 
     const progressArea = document.getElementById('progress-area');
@@ -888,8 +969,11 @@ const startImport = async () => {
         if (ic) return 'ic:' + ic;
         const phone = normalisePhone(rec.phone);
         if (phone) return 'ph:' + phone;
-        const name = (rec.full_name || '').toString().toLowerCase().trim();
-        if (name) return 'np:' + name + '|' + phone;
+        // BUG #13: the previous name-only fallback ('np:' + name, since phone is
+        // always '' by this point) silently collapsed two DIFFERENT people who
+        // share a name when neither ic nor phone was mapped — dropping a real
+        // person as an in-file "duplicate". A name alone is NOT a unique identity,
+        // so a row with no ic/phone is never deduped.
         return ''; // no usable key → do not dedup
     };
 
@@ -1069,7 +1153,36 @@ const viewImportDetails = async (id) => {
     UI.showModal(`Import Details: ${job.file_name}`, content, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
 };
 
-const downloadImportLog = (id) => UI.toast.info('Import log downloaded');
+// BUG #14: this used to fire a "downloaded" toast without producing any file.
+// Build a real log from the stored import_jobs record and download it, or show
+// an honest error if the job can't be loaded.
+const downloadImportLog = async (id) => {
+    let job = null;
+    try { job = await AppDataStore.getById('import_jobs', id); } catch (e) { job = null; }
+    if (!job) { UI.toast.error('Import log not found'); return; }
+    const lines = [
+        `Import Log — ${job.file_name || 'import'}`,
+        `Type: ${job.import_type || ''}`,
+        `Status: ${job.status || ''}`,
+        `Date: ${job.created_at || ''}`,
+        `Completed: ${job.completed_at || ''}`,
+        '',
+        `Total rows: ${job.total_rows ?? ''}`,
+        `Valid rows: ${job.valid_rows ?? ''}`,
+        `Error rows: ${job.error_rows ?? ''}`,
+        `Created records: ${job.created_records ?? ''}`,
+        `Updated records: ${job.updated_records ?? ''}`,
+        `Skipped records: ${job.skipped_records ?? ''}`,
+        `Duplicate handling: ${job.duplicate_handling || ''}`,
+    ];
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `import_log_${id}.txt`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    UI.toast.success('Import log downloaded');
+};
 
 const openTemplatesModal = () => {
     const content = `
@@ -1199,7 +1312,7 @@ const showProtectionMonitoringView = async (container) => {
     // render* helpers below), island renders; mutations stay on app.*.
     if (_reactProtectionOn()) {
         try {
-            const _calcProt = window.app.calculateProtectionDays || (() => 0);
+            const _calcProt = calcProtectionDays;
 
             // team summary cards (mirror renderTeamSummaryCards)
             const teamColors = ['team-a', 'team-b', 'team-c', 'team-d', 'team-e'];
@@ -1343,7 +1456,7 @@ const renderTeamSummaryCards = ({ visibleProspects, agentMap, lastActivityMap })
         const teamName = agent?.team || 'Unassigned';
         if (!teamStats[teamName]) teamStats[teamName] = { active: 0, attention: 0, inactive: 0, critical: 0 };
         const days = lastActivityMap[p.id]?.daysSince ?? 999;
-        const protDays = (window.app.calculateProtectionDays || (() => 0))(p);
+        const protDays = calcProtectionDays(p);
         if (days > 14 || protDays <= 0) { teamStats[teamName].critical++; totals.critical++; }
         else if (days > 7) { teamStats[teamName].inactive++; totals.inactive++; }
         else if (days > 3) { teamStats[teamName].attention++; totals.attention++; }
@@ -1386,7 +1499,7 @@ const renderInactiveProspectsRows = ({ visibleProspects, agentMap, lastActivityM
     return inactive.map(p => {
         const days = lastActivityMap[p.id]?.daysSince ?? 999;
         const agentName = agentMap[p.responsible_agent_id]?.full_name || 'Unassigned';
-        const protDays = (window.app.calculateProtectionDays || (() => 0))(p);
+        const protDays = calcProtectionDays(p);
         const status = days > 14 || protDays <= 0 ? 'critical' : 'warning';
         const deadline = p.protection_deadline ? UI.formatDate(p.protection_deadline) : 'N/A';
         return `<tr><td><strong>${esc(p.full_name || 'Unknown')}</strong></td><td>${esc(agentName)}</td><td class="${days > 14 ? 'critical' : 'warning'}">${days === 999 ? 'Never' : days + ' days'}</td><td>${p.score || 0}</td><td>${deadline}</td><td><span class="status-badge status-${status}">${status === 'critical' ? '🔴 Critical' : '🟡 Warning'}</span></td><td><button class="btn-icon" onclick="app.openReassignModal(${p.id})" title="Reassign"><i class="fas fa-exchange-alt"></i></button><button class="btn-icon" onclick="app.contactProspect(${p.id})" title="Contact"><i class="fas fa-phone"></i></button></td></tr>`;
@@ -1933,7 +2046,10 @@ const quickReassign = async (entityId, newAgentId, entityType = 'prospect') => {
     const id = parseInt(entityId);
     if (!id || !newAgentId) return;
 
-    const selectEl = document.querySelector(`select[onchange*="quickReassign(${id}"]`);
+    // BUG #15: a substring match on "quickReassign(12" also matches ids 120-129
+    // (and 123, 125, …). The rendered onchange is `app.quickReassign(<id>, ...)`
+    // so include the trailing comma delimiter to bind to the exact row's dropdown.
+    const selectEl = document.querySelector(`select[onchange*="quickReassign(${id},"]`);
     const dropdownName = selectEl?.options[selectEl.selectedIndex]?.text || '';
 
     let fromAgentId = null;

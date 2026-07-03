@@ -34,7 +34,11 @@ const PRECACHE_URLS = [
     '/index.html',
     '/offline.html',       // #27 — navigation fallback when offline
     '/manifest.json',
-    '/fonts/local-fonts.css',
+    // Must match the exact URL index.html requests (query included) — cache.match
+    // keys on the full URL, so the bare '/fonts/local-fonts.css' would never be
+    // served. Bump this ?v= token in lockstep with index.html when the font CSS
+    // is revved.
+    '/fonts/local-fonts.css?v=20260531o',
 ];
 
 self.addEventListener('install', (event) => {
@@ -52,16 +56,24 @@ self.addEventListener('activate', (event) => {
     event.waitUntil(
         caches.keys()
             .then((keys) => {
+                // Only consider caches this SW owns (named `<version>-static` /
+                // `<version>-runtime`). The data layer's own Cache API store
+                // (data.js `crm-data-v1`) and any other origin caches MUST NOT
+                // be counted as prior-version caches nor deleted here, or every
+                // upgrade would wipe overflowed table data and force a full
+                // fleet re-fetch from Supabase.
+                const isSwCache   = (k) => /^crm-v.*-(static|runtime)$/.test(k);
+                const isStale     = (k) => isSwCache(k) && !k.startsWith(CACHE_VERSION);
                 // First-install guard: if NO cache from a prior CACHE_VERSION
                 // exists, this is a brand-new visitor (no SW controlled the page
                 // before). Broadcasting SW_ACTIVATED here would make sw-init.js
                 // schedule a spurious forced reload of the just-loaded page.
-                // Only an actual upgrade (a different-version cache present)
+                // Only an actual upgrade (a different-version SW cache present)
                 // should trigger the reload signal.
-                const isUpgrade = keys.some((k) => !k.startsWith(CACHE_VERSION));
+                const isUpgrade = keys.some(isStale);
                 return Promise.all(
                     keys
-                        .filter((k) => !k.startsWith(CACHE_VERSION))
+                        .filter(isStale)
                         .map((k) => caches.delete(k))
                 ).then(() => isUpgrade);
             })
@@ -119,7 +131,7 @@ self.addEventListener('fetch', (event) => {
             fetch(req).catch(() =>
                 caches.match('/offline.html')
                     .then((r) => r || caches.match('/index.html'))
-                    .then((r) => r || Response.error())
+                    .then((r) => r ? cleanRedirect(r) : Response.error())
             )
         );
         return;
@@ -165,21 +177,64 @@ self.addEventListener('fetch', (event) => {
     }
 });
 
+// Cap RUNTIME_CACHE so unbounded hashed-bundle accumulation can't grow without
+// limit and trigger a browser-wide origin eviction (which would also wipe the
+// STATIC_CACHE offline shell). CACHE_VERSION is deliberately not bumped per
+// deploy (bumps cause fleet-wide reload/re-auth spikes → 521), so old hashed
+// URLs are never purged by the activate handler — trim here instead. The Cache
+// API returns keys() in insertion order, so deleting from the front is an
+// approximate FIFO eviction of the oldest superseded bundles. Runs after put()
+// and swallows errors so a trim failure never breaks the response.
+const RUNTIME_CACHE_MAX = 220;
+async function trimRuntimeCache() {
+    try {
+        const cache = await caches.open(RUNTIME_CACHE);
+        const keys  = await cache.keys();
+        if (keys.length <= RUNTIME_CACHE_MAX) return;
+        const excess = keys.length - RUNTIME_CACHE_MAX;
+        for (let i = 0; i < excess; i++) {
+            await cache.delete(keys[i]);
+        }
+    } catch (_) { /* best-effort — never surface trim errors */ }
+}
+
+// A cached response whose stored URL 308-redirected (Vercel cleanUrls turns
+// /offline.html → /offline, /index.html → /) carries `redirected:true`. The
+// browser refuses to use a redirected response to satisfy a navigation request
+// ("a redirected response was used for a request whose redirect mode is not
+// 'follow'"), so the offline fallback never renders. Re-wrap the body in a
+// fresh Response to clear the flag. No-op for non-redirected responses.
+async function cleanRedirect(res) {
+    if (!res || !res.redirected) return res;
+    try {
+        const body = await res.clone().blob();
+        return new Response(body, {
+            status: res.status,
+            statusText: res.statusText,
+            headers: res.headers,
+        });
+    } catch (_) {
+        return res;
+    }
+}
+
 async function staleWhileRevalidate(req) {
     const cache  = await caches.open(RUNTIME_CACHE);
     const cached = await cache.match(req);
     const fetchPromise = fetch(req)
         .then((res) => {
             if (res && res.status === 200 && res.type !== 'opaque') {
-                cache.put(req, res.clone()).catch(() => {});
+                cache.put(req, res.clone()).then(trimRuntimeCache).catch(() => {});
             }
             return res;
         })
-        // #fix: when cached is undefined AND fetch fails, return Response.error()
-        // so event.respondWith() always gets a valid Response — never undefined.
-        // Previously: .catch(() => cached)  →  resolves to undefined  →
-        //   TypeError: Failed to convert value to 'Response'
-        .catch(() => cached || Response.error());
+        // #fix: when cached is undefined AND fetch fails, fall back to any
+        // install-time precache (STATIC_CACHE) via the global caches.match —
+        // this is how precached shell assets (fonts, manifest) become reachable
+        // offline, since the runtime cache above only sees RUNTIME_CACHE. Then
+        // Response.error() so event.respondWith() always gets a valid Response
+        // — never undefined (TypeError: Failed to convert value to 'Response').
+        .catch(() => cached || caches.match(req).then((r) => r || Response.error()));
     return cached || fetchPromise;
 }
 
@@ -190,7 +245,7 @@ async function networkFirst(req) {
     try {
         const res = await fetch(req);
         if (res && res.status === 200 && res.type !== 'opaque') {
-            cache.put(req, res.clone()).catch(() => {});
+            cache.put(req, res.clone()).then(trimRuntimeCache).catch(() => {});
         }
         return res;
     } catch (err) {
@@ -208,7 +263,7 @@ async function cacheFirst(req) {
         // Never cache opaque responses (status 0) — a network error returns opaque
         // with status 0 and would be permanently cached, breaking the asset forever.
         if (res && res.status === 200 && res.type !== 'opaque') {
-            cache.put(req, res.clone()).catch(() => {});
+            cache.put(req, res.clone()).then(trimRuntimeCache).catch(() => {});
         }
         return res;
     } catch (err) {
@@ -269,13 +324,18 @@ self.addEventListener('notificationclick', (event) => {
                 // Resolve the target against the SW scope so a relative URL
                 // ("./index.html#calendar") compares correctly against client URLs.
                 const absTarget = new URL(targetUrl, self.location.origin).href;
+                // Normalize the SPA root: senders pass "./index.html#…" (pathname
+                // "/index.html") but live tabs / the installed PWA sit at "/"
+                // (manifest start_url). Treat "/index.html" and "/" as the same
+                // page so an open tab is reused instead of spawning a duplicate.
+                const normPath = (p) => (p === '/index.html' ? '/' : p);
                 for (const client of clientList) {
                     // Match on origin/path (ignore hash) so an already-open CRM
                     // tab is reused rather than spawning a duplicate window.
                     try {
                         const cu = new URL(client.url);
                         const tu = new URL(absTarget);
-                        if (cu.origin === tu.origin && cu.pathname === tu.pathname && 'focus' in client) {
+                        if (cu.origin === tu.origin && normPath(cu.pathname) === normPath(tu.pathname) && 'focus' in client) {
                             if ('navigate' in client && cu.hash !== tu.hash) {
                                 return client.navigate(absTarget).then((c) => (c || client).focus());
                             }

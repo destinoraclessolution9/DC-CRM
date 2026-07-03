@@ -57,11 +57,20 @@
     function isAbortError(err) {
         if (!err) return false;
         if (err.name === 'AbortError') return true;
-        const msg = String(err.message || err.toString() || '').toLowerCase();
         // DOMException.ABORT_ERR === 20. A native DOMException exposes `code` as
         // the NUMBER 20, so the string compare alone never matches a real abort —
         // accept both the numeric and string forms.
-        return msg.includes('abort') || msg.includes('cancel') || err.code === 20 || err.code === '20';
+        if (err.code === 20 || err.code === '20') return true;
+        // A real server-side failure carries a Postgres/PostgREST error code (e.g.
+        // statement timeout 57014 → "canceling statement due to statement timeout",
+        // failed transaction 25P02 → "current transaction is aborted"). Those
+        // messages contain 'cancel'/'abort' but must NOT be treated as harmless
+        // client aborts, or _getInRange would return a partial page as a complete
+        // result. Only fall back to substring matching when there is no such code.
+        const code = String((err && err.code) || '');
+        if (code && /^\d/.test(code)) return false;
+        const msg = String(err.message || err.toString() || '').toLowerCase();
+        return msg.includes('abort') || msg.includes('cancel');
     }
 
     // Stable content hash of a row's scalar fields — used as the fingerprint

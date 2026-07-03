@@ -152,6 +152,12 @@
                     }
                 } catch (_) { activities = null; }
                 if (!Array.isArray(activities)) activities = await AppDataStore.getAll('activities');
+                // Only push the syncing user's OWN activities into their personal
+                // Google calendar — under org-wide RLS visibility `activities` can be
+                // thousands of teammates' rows, which would both leak colleagues'
+                // meetings into this user's calendar and fire a round-trip per row.
+                const _ownerId = _state.cu?.id;
+                if (_ownerId) activities = activities.filter(a => a.lead_agent_id === _ownerId);
                 const syncLog = await this.getSyncLog();
 
                 let synced = 0, created = 0, updated = 0, deleted = 0;
@@ -237,6 +243,20 @@
                     const startDate = gEvent.start?.date || gEvent.start?.dateTime?.split('T')[0];
                     const startTime = gEvent.start?.dateTime?.split('T')[1]?.substring(0, 5) || '09:00';
                     const endTime = gEvent.end?.dateTime?.split('T')[1]?.substring(0, 5) || '10:00';
+
+                    // Skip events dated in the future: importing them as status
+                    // 'completed' Call activities would fabricate meetings that never
+                    // happened and inflate completed-activity KPIs/scoring. Compare the
+                    // event's local date to today's local date (no UTC drift).
+                    if (startDate) {
+                        const _p = String(startDate).split('-');
+                        const _evDate = _p.length === 3
+                            ? new Date(Number(_p[0]), Number(_p[1]) - 1, Number(_p[2]))
+                            : null;
+                        const _now = new Date();
+                        const _today = new Date(_now.getFullYear(), _now.getMonth(), _now.getDate());
+                        if (_evDate && _evDate > _today) continue;
+                    }
 
                     const activity = await AppDataStore.create('activities', {
                         activity_title: gEvent.summary || 'Google Calendar Event',
@@ -572,9 +592,9 @@
                         <div class="settings-section">
                             <h4>Sync Calendar</h4>
                             <select class="form-control" id="sync-calendar">
-                                <option value="primary">Primary CRM Calendar</option>
-                                <option value="work">Work Calendar</option>
-                                <option value="personal">Personal Calendar</option>
+                                <option value="primary" ${(connection.sync_settings?.calendar || 'primary') === 'primary' ? 'selected' : ''}>Primary CRM Calendar</option>
+                                <option value="work" ${connection.sync_settings?.calendar === 'work' ? 'selected' : ''}>Work Calendar</option>
+                                <option value="personal" ${connection.sync_settings?.calendar === 'personal' ? 'selected' : ''}>Personal Calendar</option>
                             </select>
                         </div>
                         
@@ -600,13 +620,11 @@
                         <div class="settings-section">
                             <h4>Default Reminder</h4>
                             <select class="form-control" id="default-reminder">
-                                <option value="0">No reminder</option>
-                                <option value="5">5 minutes before</option>
-                                <option value="10">10 minutes before</option>
-                                <option value="15" selected>15 minutes before</option>
-                                <option value="30">30 minutes before</option>
-                                <option value="60">1 hour before</option>
-                                <option value="1440">1 day before</option>
+                                ${(() => {
+                                    const _rem = String(connection.sync_settings?.reminder ?? '15');
+                                    const _opts = [['0','No reminder'],['5','5 minutes before'],['10','10 minutes before'],['15','15 minutes before'],['30','30 minutes before'],['60','1 hour before'],['1440','1 day before']];
+                                    return _opts.map(([v, lbl]) => `<option value="${v}" ${_rem === v ? 'selected' : ''}>${lbl}</option>`).join('');
+                                })()}
                             </select>
                         </div>
                         
@@ -746,8 +764,16 @@
 
         UI.toast.info('Starting Google Calendar sync...');
 
-        await _syncManager.syncCRMtoGoogle();
-        await _syncManager.syncGoogleToCRM();
+        // Honor the saved sync direction instead of always running both ways.
+        // Default to two-way when unset (matches the connect-time default).
+        const _conn = await getGoogleConnection();
+        const _direction = _conn?.sync_settings?.direction || 'two-way';
+        if (_direction !== 'google-to-crm') {
+            await _syncManager.syncCRMtoGoogle();
+        }
+        if (_direction !== 'crm-to-google') {
+            await _syncManager.syncGoogleToCRM();
+        }
 
         const connection = await getGoogleConnection();
         if (connection) {
@@ -758,21 +784,27 @@
         await showGoogleCalendarIntegration();
     };
 
-    const viewSyncHistory = async () => {
+    const viewSyncHistory = async (rangeDays) => {
+        // Apply the selected date-range filter (7 / 30 / 90 days). Default 7.
+        const _range = [7, 30, 90].includes(Number(rangeDays)) ? Number(rangeDays) : 7;
+        const _cutoff = Date.now() - _range * 86400000;
         // Scope to the current user; no '|| 1' fallback so an absent session never
         // surfaces another user's (id 1) sync history.
         const _uid = _state.cu?.id;
         const syncHistory = (_uid ? await AppDataStore.getAll('sync_history') : []).filter(
             h => h.user_id === _uid
-        ).sort((a, b) => new Date(b.synced_at) - new Date(a.synced_at));
+        ).filter(h => {
+            const t = new Date(h.synced_at).getTime();
+            return Number.isNaN(t) || t >= _cutoff;
+        }).sort((a, b) => new Date(b.synced_at) - new Date(a.synced_at));
 
         let tableHtml = `
             <div class="sync-history">
                 <div class="history-filters" style="display:flex;gap:12px;margin-bottom:16px;">
                     <select class="form-control" style="width: 150px;" id="history-date-range">
-                        <option value="7">Last 7 days</option>
-                        <option value="30">Last 30 days</option>
-                        <option value="90">Last 90 days</option>
+                        <option value="7" ${_range === 7 ? 'selected' : ''}>Last 7 days</option>
+                        <option value="30" ${_range === 30 ? 'selected' : ''}>Last 30 days</option>
+                        <option value="90" ${_range === 90 ? 'selected' : ''}>Last 90 days</option>
                     </select>
                     <button class="btn secondary" onclick="app.refreshSyncHistory()">Apply</button>
                 </div>
@@ -854,7 +886,11 @@
         UI.toast.success('Sync history cleared');
         await viewSyncHistory();
     };
-    const refreshSyncHistory = async () => { await viewSyncHistory(); };
+    const refreshSyncHistory = async () => {
+        // Read the range the user picked before the modal re-renders.
+        const _sel = document.getElementById('history-date-range')?.value;
+        await viewSyncHistory(_sel);
+    };
 
     const disconnectGoogle = async () => {
         UI.showModal('Disconnect Google Calendar', `
@@ -1217,7 +1253,21 @@
             const connection = await getGoogleConnection();
             if (!connection) return;
             if (d.action === 'delete') {
-                await _syncManager.syncCRMtoGoogle().catch(console.error);
+                // A hard-deleted activity is no longer in the activities table, so
+                // syncCRMtoGoogle's loop never visits it — its Google event + sync
+                // record would linger forever. Delete them directly via the removed
+                // record's id.
+                const _deletedId = d.record?.id ?? d.id;
+                if (_deletedId != null) {
+                    try {
+                        const _log = await _syncManager.getSyncLog();
+                        const _rec = _log.find(s => s.activity_id === _deletedId);
+                        if (_rec?.google_event_id) {
+                            await _syncManager.googleCalendar.deleteEvent(_rec.google_event_id);
+                        }
+                        await _syncManager.removeSyncRecord(_deletedId);
+                    } catch (err) { console.error('Google delete-sync error:', err); }
+                }
                 return;
             }
             // add: gate by the new record's type (matches the old create wrap).
