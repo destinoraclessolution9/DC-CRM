@@ -799,11 +799,30 @@ const _plProbMeta = (prob) => ({
     label: prob >= 80 ? '🔥 HOT' : prob >= 50 ? '⚡ WARM' : '❄️ COLD',
 });
 
+// Manual-potential boost: a prospect that isn't CPS/scoring-qualified but has a
+// manual close_probability or potential_level is treated as qualified with a derived
+// probability. Applied to BOTH the Focus list rows and the Auto-Generated table so
+// the same prospect can't show HOT 70% in one and COLD 0% in the other on one screen.
+const _applyPotentialBoost = (entry, prospect) => {
+    if (!entry.qualified && (prospect.close_probability > 0 || prospect.potential_level)) {
+        entry.probability = prospect.close_probability > 0 ? prospect.close_probability
+            : (String(prospect.potential_level) === 'High' ? 70 : String(prospect.potential_level) === 'Medium' ? 40 : 20);
+        entry.qualified = true;
+        entry.fromPotential = true;
+        entry.potentialLevel = prospect.potential_level;
+        if (!entry.action || entry.action.startsWith('Complete prerequisite') || entry.action.startsWith('Book CPS')) {
+            entry.action = `Potential: ${prospect.potential_level || 'Set'} – follow up to advance to close`;
+        }
+    }
+    return entry;
+};
+
 const _buildFocusRowData = async (rec, idx, actsByProspect, readOnly, prefetched) => {
     const prospect = await AppDataStore.getById('prospects', rec.prospect_id);
     if (!prospect) return null;
     const acts = actsByProspect.get(prospect.id) || [];
     const entry = await calcPipelineEntry(prospect, acts, prefetched);
+    _applyPotentialBoost(entry, prospect);
     const systemAmount = await getPipelineAmount(prospect, entry.category, prefetched?.allSolutions, prefetched?.solutionsByProspect);
     const noteCount = await getNoteCount(prospect.id);
 
@@ -935,9 +954,17 @@ const buildPipelineIslandData = async () => {
         AppDataStore.query('monthly_focus_archive', { user_id: userId }).catch(() => []),
     ]);
 
-    // Hide expired items from this render (read-only mirror of STEP 3 — the
-    // legacy path owns the actual archive migration / tagging side effects).
+    // Hide expired items from this render, THEN archive them off the render path.
+    // The JSX path is now the default and early-returns before STEP 3, so it must
+    // run _runPipelineArchive itself — otherwise expired items are hidden but their
+    // monthly_focus_archive rows are never written and the source my_potential_list
+    // rows never deleted (they silently pile up). The routine is guarded/idempotent.
     let _allMyFocusItems = _allMyFocusItemsRaw.filter(i => !(i.focus_month && i.focus_month < _focusCurrentMonth));
+    const _expiredJsx = _allMyFocusItemsRaw.filter(i => i.focus_month && i.focus_month < _focusCurrentMonth);
+    if (_expiredJsx.length > 0) {
+        _runPipelineArchive([..._expiredJsx], userId, _actsByProspect)
+            .catch(e => console.warn('[pipeline-archive] jsx run failed', e));
+    }
 
     const _archiveMonths = [...new Set(_archiveItems.map(a => a.month))].sort().reverse()
         .map(m => ({ value: m, label: new Date(m + '-01').toLocaleString('default', { month: 'long', year: 'numeric' }) }));
@@ -1335,6 +1362,11 @@ const buildPipelineTeamSectionRowHtml = (sub, subFocus, subRows) => {
 const showPipelineView = async (container) => {
     const userId = _state.cu?.id || 5;
     runHuiJiMigration(); // fire-and-forget
+    // Start the weekly Monday action-plan reminder interval (self-guards against
+    // double-start via window._actionPlanReminderInterval). It was registered but
+    // never invoked anywhere, so the reminder never fired — start it here now that
+    // the pipeline chunk is loaded.
+    try { initActionPlanReminder(); } catch (_) {}
 
     // ── STEP 1: Paint skeleton immediately so the page feels alive ────────
     // Same philosophy as Facebook/IG: show structure first, fill data after.
@@ -1657,6 +1689,7 @@ const renderFocusRow = async (rec, idx, actsByProspect, probBadge, readOnly = fa
 
     const acts = actsByProspect.get(prospect.id) || [];
     const entry = await calcPipelineEntry(prospect, acts, prefetched);
+    _applyPotentialBoost(entry, prospect);
     const systemAmount = await getPipelineAmount(prospect, entry.category, prefetched?.allSolutions, prefetched?.solutionsByProspect);
     const noteCount = await getNoteCount(prospect.id);
 
@@ -1835,7 +1868,12 @@ const renderPlanItemRow = (item = null, index = 0) => {
 
 const openActionPlanModal = async (planId = null) => {
     const currentUser = _state.cu;
-    const currentMonth = new Date().toISOString().slice(0, 7) + '-01';
+    // Local Y-M (not UTC toISOString) so this matches the pipeline view's local
+    // _apCurrentMonth — a UTC slice rolls back a month before 08:00 MYT and would
+    // load/create the WRONG month's plan on the 1st.
+    const _apmNow = new Date();
+    const _apMonthYm = `${_apmNow.getFullYear()}-${String(_apmNow.getMonth() + 1).padStart(2, '0')}`;
+    const currentMonth = _apMonthYm + '-01';
     let plan = null;
     let items = [];
     if (planId) {
@@ -1851,7 +1889,7 @@ const openActionPlanModal = async (planId = null) => {
         <div class="action-plan-modal">
             <div class="form-group">
                 <label>Month / Year</label>
-                <input type="month" id="plan-month" class="form-control" value="${plan?.month_year?.slice(0,7) || new Date().toISOString().slice(0,7)}" required>
+                <input type="month" id="plan-month" class="form-control" value="${plan?.month_year?.slice(0,7) || _apMonthYm}" required>
             </div>
             <div class="form-group">
                 <label>Main Target (RM)</label>
@@ -1947,6 +1985,9 @@ const saveActionPlan = async (planId) => {
             itemData.id = Date.now() + i;
             itemData.created_at = new Date().toISOString();
             await AppDataStore.create('action_plan_items', itemData);
+            // Register the just-created id so the orphan-cleanup loop below does NOT
+            // treat it as a removed row and delete the item the user just added.
+            presentIds.add(itemData.id);
         }
     }
 

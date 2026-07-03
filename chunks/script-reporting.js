@@ -1432,12 +1432,12 @@
             // created on the `to` day isn't excluded by the trailing 'Thh:mm...'.
             const pd = (p.created_at || '').slice(0, 10);
             if (!pd || pd < from || pd > to) return false;
-            if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(p.responsible_agent_id)) return false;
+            if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(p.responsible_agent_id))) return false;
             return true;
         }).length;
         const convertedCount = allCustomers.filter(c => {
             if (c.customer_since < from || c.customer_since > to) return false;
-            if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(c.responsible_agent_id)) return false;
+            if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(c.responsible_agent_id))) return false;
             return true;
         }).length;
         if (totalProspects === 0) return 0;
@@ -3010,11 +3010,20 @@ const showKPIDetails = async (key) => {
 
     // Per-card derived trend fields (identical math to the legacy inline block).
     const _kpiCardTrend = (c, kpis, prevKpis) => {
-        const diff = c.prev > 0 ? ((kpis[c.key] - prevKpis[c.key]) / prevKpis[c.key] * 100).toFixed(1) : (kpis[c.key] > 0 ? '100' : '0');
+        const cur = kpis[c.key];
+        // Some cards (e.g. Agent Hours "45 / 90h") carry a display STRING, not a
+        // number — a %-trend against it is meaningless (string math → NaN, which
+        // the old code silently rendered as a fake "0% ▲ vs last period"). Flag
+        // these so both render paths omit the trend badge entirely.
+        if (typeof cur !== 'number' || !isFinite(cur)) {
+            return { trendClass: '', trendIcon: '', trendAbs: 0, trendHide: true };
+        }
+        const diff = c.prev > 0 ? ((cur - prevKpis[c.key]) / prevKpis[c.key] * 100).toFixed(1) : (cur > 0 ? '100' : '0');
         return {
             trendClass: diff >= 0 ? 'trend-up' : 'trend-down',
             trendIcon: diff >= 0 ? 'fa-arrow-up' : 'fa-arrow-down',
             trendAbs: Math.abs(diff),
+            trendHide: false,
         };
     };
 
@@ -3027,7 +3036,7 @@ const showKPIDetails = async (key) => {
             return {
                 key: c.key, label: c.label, value: c.value, icon: c.icon, color: c.color,
                 definition: KPI_DEFINITIONS[c.key] || '',
-                trendClass: t.trendClass, trendIcon: t.trendIcon, trendAbs: t.trendAbs,
+                trendClass: t.trendClass, trendIcon: t.trendIcon, trendAbs: t.trendAbs, trendHide: t.trendHide,
                 subType: c.subType || null,
                 popTotal: c.popTotal,
                 eppDetails: c.eppDetails || [],
@@ -3061,10 +3070,10 @@ const showKPIDetails = async (key) => {
                         </h3>
                         <div class="stat-value">${c.value}</div>
                         ${c.subHtml || ''}
-                        <div class="stat-trend ${t.trendClass}">
+                        ${t.trendHide ? '' : `<div class="stat-trend ${t.trendClass}">
                             <i class="fas ${t.trendIcon}"></i>
                             <span>${t.trendAbs}% vs last period</span>
-                        </div>
+                        </div>`}
                     </div>
                     <div class="stat-icon ${c.color}">
                         ${c.icon}
@@ -3845,16 +3854,17 @@ const exportKPIReport = async (format) => {
         const qEndMonth = quarter * 3;
         const qEnd = `${year}-${String(qEndMonth).padStart(2, '0')}-${new Date(year, qEndMonth, 0).getDate()}`;
 
-        // Get actuals (getCPSCount etc. are defined above in this same IIFE)
-        const cpsActual      = await getCPSCount(qStart, qEnd);
-        const salesActual    = await getTotalSales(qStart, qEnd);
-        const popCountActual = await getPOPCaseCount(qStart, qEnd);
-        const popSalesActual = await getPOPSales(qStart, qEnd);
-        const eppCountActual = await getEPPCaseCount(qStart, qEnd);
-        const eppSalesActual = await getEPPSales(qStart, qEnd);
-        const agentsActual   = await getNewAgents(qStart, qEnd);
-        const customersActual= await getNewCustomers(qStart, qEnd);
-        const meetingsActual = await getTotalMeetings(qStart, qEnd);
+        // Get actuals in PARALLEL (getCPSCount etc. are defined above in this same
+        // IIFE). Previously 9 serial awaits, several re-scanning whole tables, ran on
+        // every dashboard filter change — Promise.all collapses that to one wait.
+        const [
+            cpsActual, salesActual, popCountActual, popSalesActual, eppCountActual,
+            eppSalesActual, agentsActual, customersActual, meetingsActual,
+        ] = await Promise.all([
+            getCPSCount(qStart, qEnd), getTotalSales(qStart, qEnd), getPOPCaseCount(qStart, qEnd),
+            getPOPSales(qStart, qEnd), getEPPCaseCount(qStart, qEnd), getEPPSales(qStart, qEnd),
+            getNewAgents(qStart, qEnd), getNewCustomers(qStart, qEnd), getTotalMeetings(qStart, qEnd),
+        ]);
 
         const row = (label, actual, target) => {
             const pct = target > 0 ? Math.round((actual / target) * 100) : 0;

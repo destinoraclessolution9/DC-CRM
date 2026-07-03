@@ -1642,7 +1642,12 @@
                 </div>
             </div>`;
         }).join('');
-        const head = `<div style="font-size:13px;color:var(--gray-500,#6b7280);margin:0 2px 2px;">${rows.length} overdue · oldest first</div>`;
+        // The curated list includes today's due items alongside overdue ones, so a flat
+        // "N overdue" over-counts (mismatching the per-row "Due today" labels + the tile's
+        // overdue badge). Split the header the same way each row is labelled.
+        const _odCount = rows.filter(d => (d.due_date || '') < today).length;
+        const _dtCount = rows.length - _odCount;
+        const head = `<div style="font-size:13px;color:var(--gray-500,#6b7280);margin:0 2px 2px;">${_odCount} overdue${_dtCount ? ` · ${_dtCount} due today` : ''} · oldest first</div>`;
         UI.showModal('Overdue Follow-ups', _mhomeSheetScroll(head + body), _mhomeSheetBtns);
     };
 
@@ -3376,7 +3381,12 @@
         // Scope by visibility for non-admins
         if (typeof isSystemAdmin === 'function' && !isSystemAdmin(_state.cu) && visibleIds !== 'all') {
             const setIds = new Set(visibleIds.map(String));
-            rows = rows.filter(r => !r.responsible_agent_id || setIds.has(String(r.responsible_agent_id)));
+            // Scope to own+team like desktop getVisibleProspects/getVisibleCustomers:
+            // match responsible_agent_id OR the legacy agent_id. Do NOT show null-owner
+            // (unassigned / imported) rows to a scoped agent — the old `!responsible_agent_id`
+            // clause leaked every unassigned prospect+customer (name, phone, WhatsApp) to
+            // all non-admin agents.
+            rows = rows.filter(r => setIds.has(String(r.responsible_agent_id)) || setIds.has(String(r.agent_id)));
         }
 
         // Client-side text filter — skip when server already filtered via searchProspects/searchCustomers

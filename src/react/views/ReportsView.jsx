@@ -121,10 +121,12 @@ export function ReportsView({ isTeamLeader = false, currentTimeFilter = 'monthly
                                 </h3>
                                 <div className="stat-value">{c.value}</div>
                                 {renderCardSub(c)}
-                                <div className={`stat-trend ${c.trendClass}`}>
-                                    <i className={`fas ${c.trendIcon}`}></i>
-                                    <span>{c.trendAbs}% vs last period</span>
-                                </div>
+                                {!c.trendHide && (
+                                    <div className={`stat-trend ${c.trendClass}`}>
+                                        <i className={`fas ${c.trendIcon}`}></i>
+                                        <span>{c.trendAbs}% vs last period</span>
+                                    </div>
+                                )}
                             </div>
                             <div className={`stat-icon ${c.color}`}>
                                 {c.icon}

@@ -4422,7 +4422,7 @@ const simulateCampaignSending = async (campaignId) => {
         } else if (sort === 'date-asc') {
             campaigns.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
         } else if (sort === 'name') {
-            campaigns.sort((a, b) => a.campaign_name.localeCompare(b.campaign_name));
+            campaigns.sort((a, b) => (a.campaign_name || '').localeCompare(b.campaign_name || ''));
         }
 
         const body = document.getElementById('campaigns-list-body');
@@ -4602,7 +4602,7 @@ const simulateCampaignSending = async (campaignId) => {
             new Chart(volumeCtx, {
                 type: 'line',
                 data: {
-                    labels: campaigns.map(c => c.campaign_name.substring(0, 10)),
+                    labels: campaigns.map(c => (c.campaign_name || '').substring(0, 10)),
                     datasets: [{
                         label: 'Messages Sent',
                         data: campaigns.map(c => c.sent_count),
@@ -4624,7 +4624,7 @@ const simulateCampaignSending = async (campaignId) => {
             new Chart(perfCtx, {
                 type: 'bar',
                 data: {
-                    labels: campaigns.map(c => c.campaign_name.substring(0, 10)),
+                    labels: campaigns.map(c => (c.campaign_name || '').substring(0, 10)),
                     datasets: [
                         { label: 'Delivered', data: campaigns.map(c => c.delivered_count), backgroundColor: '#d1fae5' },
                         { label: 'Opened', data: campaigns.map(c => c.opened_count), backgroundColor: '#3b82f6' },

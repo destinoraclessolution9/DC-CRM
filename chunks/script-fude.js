@@ -527,7 +527,7 @@ const openStoryDetail = async (highlightId) => {
             .map(t => `<span style="display:inline-block;background:var(--primary-50,#fef3c7);color:var(--primary-700,#92400e);border:1px solid var(--primary-200,#fde68a);border-radius:10px;padding:2px 8px;margin:2px 4px 2px 0;font-size:11px;">${esc(t.trim())}</span>`).join('');
         const content = `
             <div style="max-height:75vh;overflow-y:auto;padding-right:4px;">
-                ${imgSrc ? `<div style="margin:-4px -4px 16px;"><img loading="lazy" decoding="async" src="${imgSrc}" style="width:100%;max-height:320px;object-fit:cover;border-radius:8px;display:block;"></div>` : ''}
+                ${imgSrc ? `<div style="margin:-4px -4px 16px;"><img loading="lazy" decoding="async" src="${esc(imgSrc)}" style="width:100%;max-height:320px;object-fit:cover;border-radius:8px;display:block;"></div>` : ''}
                 ${tags ? `<div style="margin-bottom:8px;">${tags}</div>` : ''}
                 <h2 style="margin:0 0 8px;font-size:1.4rem;">${esc(h.title || '')}</h2>
                 <div style="font-size:12px;color:var(--gray-500,#6b7280);margin-bottom:14px;">📅 ${fmtDate(h.created_at)}</div>
@@ -1397,7 +1397,7 @@ const renderFormsTab = async () => {
                     <h2>Customer Forms 客户表格</h2>
                     <p>Survey → CPS Analysis → APU Appraisal. Pick a prospect to start.</p>
                 </div>
-                <input type="search" class="cf-search" placeholder="Search by name or phone…"
+                <input type="search" id="cf-prospect-search" class="cf-search" placeholder="Search by name or phone…"
                     value="${_cfEscape(_cfState.prospectQuery)}"
                     oninput="app.cfSearchProspects(this.value)">
             </div>
@@ -1460,7 +1460,20 @@ const cfSearchProspects = (val) => {
     _cfState._t = setTimeout(async () => {
         const target = document.getElementById('marketing-tab-content');
         if (target && _state.cmt === 'forms') {
+            // The whole tab (search box included) is re-rendered, which drops focus and
+            // caret — so the user's typing was interrupted every debounce tick. Capture
+            // focus/caret first, then restore them onto the freshly-rendered input.
+            const hadFocus = document.activeElement?.id === 'cf-prospect-search';
+            let caret = null;
+            if (hadFocus) { try { caret = document.activeElement.selectionStart; } catch (_) {} }
             target.innerHTML = await renderFormsTab();
+            if (hadFocus) {
+                const el = document.getElementById('cf-prospect-search');
+                if (el) {
+                    el.focus();
+                    try { const p = caret == null ? el.value.length : caret; el.setSelectionRange(p, p); } catch (_) {}
+                }
+            }
         }
     }, 220);
 };
@@ -1760,6 +1773,7 @@ const saveCustomerSurvey = async () => {
 
     const q2Raw = document.querySelector('input[name="q2_used_before"]:checked')?.value;
     const q2 = q2Raw == null ? null : q2Raw === 'true';
+    const _cfSurveySig = _getSignatureDataUrl('cf-survey-sig');
 
     const payload = {
         prospect_id: prospectId,
@@ -1777,17 +1791,25 @@ const saveCustomerSurvey = async () => {
         q4_willing: document.querySelector('input[name="q4_willing"]:checked')?.value || null,
         q5_use_dc: document.querySelector('input[name="q5_use_dc"]:checked')?.value || null,
         q6_share: document.querySelector('input[name="q6_share"]:checked')?.value || null,
-        signature_data_url: _getSignatureDataUrl('cf-survey-sig'),
-        signed_at: _getSignatureDataUrl('cf-survey-sig') ? new Date().toISOString() : null
+        signature_data_url: _cfSurveySig,
+        // signed_at is set per-branch below (create vs update) so an edit preserves
+        // the moment the customer ORIGINALLY signed instead of re-stamping now().
         // created_by is set only on CREATE (below) so an edit never reassigns the
         // original capturer of the form.
     };
 
     try {
         if (surveyId) {
+            // Preserve the ORIGINAL signing moment across edits: keep the prior
+            // signed_at when a signature is still present; stamp now only if this is
+            // the first time it's being signed; clear it if the signature was removed.
+            let _prior = null;
+            try { _prior = await AppDataStore.getById('customer_surveys', surveyId); } catch (_) {}
+            payload.signed_at = _cfSurveySig ? (_prior?.signed_at || new Date().toISOString()) : null;
             await AppDataStore.update('customer_surveys', surveyId, payload);
             UI.toast.success('Survey updated.');
         } else {
+            payload.signed_at = _cfSurveySig ? new Date().toISOString() : null;
             await AppDataStore.create('customer_surveys', { ...payload, created_by: _state.cu?.id || null, created_at: new Date().toISOString() });
             UI.toast.success('Survey saved.');
         }
@@ -2128,8 +2150,11 @@ const openApuAppraisalModal = async (prospectId, apuId = null) => {
     let existing = null, refs = [];
     if (apuId) {
         existing = await AppDataStore.getById('apu_appraisals', apuId).catch(() => null);
-        const allRefs = await AppDataStore.getAll('apu_referrals').catch(() => []);
-        refs = allRefs.filter(r => r.appraisal_id == apuId).sort((a, b) => (a.position || 0) - (b.position || 0));
+        // Scoped query (was getAll over the whole apu_referrals table + client filter):
+        // bounded, auto-paginates past the 1000-row cap, and still has an offline
+        // localStorage fallback that applies the same filter.
+        refs = (await AppDataStore.query('apu_referrals', { appraisal_id: apuId }).catch(() => []))
+            .sort((a, b) => (a.position || 0) - (b.position || 0));
     }
 
     const users = await AppDataStore.getAll('users').catch(() => []);
@@ -2383,8 +2408,7 @@ const saveApuAppraisal = async () => {
             // Build + insert the new rows FIRST; only after every create succeeds do we
             // delete the old ones. If any create fails, roll back the new rows so we
             // never leave the appraisal with duplicated (old + partial-new) referrals.
-            const existingRefs = (await AppDataStore.getAll('apu_referrals').catch(() => []))
-                .filter(r => r.appraisal_id == savedId);
+            const existingRefs = await AppDataStore.query('apu_referrals', { appraisal_id: savedId }).catch(() => []);
             const newRows = [];
             for (let i = 0; i < 3; i++) {
                 const name = document.getElementById(`cf-apu-ref-name-${i}`)?.value?.trim();
