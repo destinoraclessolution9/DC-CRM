@@ -3852,11 +3852,12 @@ class DataStore {
                 .lte('due_date', today)
                 .order('priority', { ascending: false })
                 .order('due_date', { ascending: true });
-            // Always scope to the requesting agent when an id is given. The CRM
-            // generates NUMERIC ids, so the old UUID-only guard silently dropped
-            // the filter for every real agent — returning the whole company's
-            // touchpoints (with prospect/customer names + phones). Security leak.
-            if (agentId) q = q.eq('assigned_to', String(agentId));
+            // Always scope to the requesting agent when an id is given. Filters on
+            // the bigint assigned_to_id column (added 2026-07-03) that matches the
+            // CRM's numeric ids — the legacy uuid assigned_to could never match a
+            // numeric id, which silently dropped the filter and leaked the whole
+            // company's touchpoints (with prospect/customer names + phones).
+            if (agentId) q = q.eq('assigned_to_id', agentId);
             const { data, error } = await q;
             if (error) throw error;
             return data || [];
@@ -3873,7 +3874,7 @@ class DataStore {
             const { data, error } = await window.supabase
                 .from('journey_touchpoints')
                 .select('*')
-                .eq('assigned_to', agentId)
+                .eq('assigned_to_id', agentId)
                 .eq('status', 'overdue')
                 .order('due_date', { ascending: true });
             if (error) throw error;
@@ -3891,16 +3892,11 @@ class DataStore {
         const payload = { status, updated_at: new Date().toISOString() };
         if (status === 'done') {
             payload.completed_at = new Date().toISOString();
-            // completed_by is typed UUID (auth.users) per 20260606_journey_system.sql,
-            // but this CRM generates NUMERIC ids (see getJourneyTouchpointsDueToday's
-            // assigned_to drift note). Writing a numeric id into the uuid column throws
-            // 22P02 invalid-input-syntax and aborts the whole "mark done". The column is
-            // nullable — only stamp it when the id is actually a UUID; otherwise leave it
-            // null so the status still saves rather than silently failing.
+            // completed_by_id is a bigint column (added 2026-07-03) matching this
+            // CRM's numeric user ids; stamp it directly. The legacy uuid completed_by
+            // (auth.users) is left null — nothing reads it.
             const _uid = window._currentUser?.id;
-            if (_uid && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(_uid))) {
-                payload.completed_by = _uid;
-            }
+            if (_uid != null) payload.completed_by_id = _uid;
         }
         if (status === 'snoozed' && opts.snooze_days) {
             const d = new Date();
@@ -4010,7 +4006,7 @@ class DataStore {
                     due_date:            dueDateLocal,
                     priority:            t.priority,
                     status:              'pending',
-                    assigned_to:         assignedTo,
+                    assigned_to_id:      assignedTo,
                     escalates_to:        null,
                     escalate_after_days: t.escalate_after_days,
                     product_track:       productTrack || t.product_track || null,

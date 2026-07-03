@@ -9,19 +9,21 @@
 ALTER TABLE customers ADD COLUMN IF NOT EXISTS score integer DEFAULT 0;
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- 2. journey_touchpoints.assigned_to / completed_by  — NOT YET APPLIED.
---    REQUIRES OWNER APPROVAL: this is a column TYPE change (destructive DDL),
---    excluded from the additive-DDL pre-authorization.
---    Rationale: users.id / prospects.id are bigint, but these columns are uuid,
---    so spawnTouchpointsForStage() (which writes numeric CRM ids) fails with
---    22P02 and journey-touchpoint assignment is broken. The table is currently
---    EMPTY (verified 0 rows on 2026-07-03), so the type change is zero-risk.
---    Run this in the Supabase SQL editor (project remuwhxvzkzjtgbzqjaa) or
---    approve running it via the Management API:
+-- 2. journey_touchpoints assignee id type — RESOLVED ADDITIVELY (APPLIED LIVE 2026-07-03).
+--    Problem: users.id / prospects.id are bigint, but assigned_to / completed_by
+--    were uuid, so spawnTouchpointsForStage() (numeric ids) failed with 22P02 and
+--    assignment / mark-done were broken.
+--    Rather than a destructive TYPE change (which needs owner approval), we added
+--    bigint sibling columns and rewired the client to use them. The legacy uuid
+--    columns are left in place, unused (nothing reads them). Additive = safe.
+ALTER TABLE journey_touchpoints ADD COLUMN IF NOT EXISTS assigned_to_id bigint;
+ALTER TABLE journey_touchpoints ADD COLUMN IF NOT EXISTS completed_by_id bigint;
 --
---    ALTER TABLE journey_touchpoints ALTER COLUMN assigned_to DROP DEFAULT;
---    ALTER TABLE journey_touchpoints ALTER COLUMN assigned_to TYPE bigint USING NULL::bigint;
---    ALTER TABLE journey_touchpoints ALTER COLUMN completed_by DROP DEFAULT;
---    ALTER TABLE journey_touchpoints ALTER COLUMN completed_by TYPE bigint USING NULL::bigint;
+--    Client rewired to assigned_to_id / completed_by_id: chunks/script-journey.js
+--    (spawn/escalate writes) and data.js (getJourneyTouchpointsDueToday /
+--    getOverdueTouchpointsForAgent filters, updateTouchpointStatus completed stamp,
+--    spawnTouchpointsForStage write).
 --
---    After it is applied, the existing spawn/assign code works unchanged.
+--    OPTIONAL future cleanup (destructive — owner only): once confirmed, the legacy
+--    uuid columns can be dropped:
+--      ALTER TABLE journey_touchpoints DROP COLUMN assigned_to, DROP COLUMN completed_by;

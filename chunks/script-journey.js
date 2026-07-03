@@ -509,7 +509,7 @@
                         due_date:       new Date().toISOString().slice(0, 10),
                         priority:       'high',
                         status:         'pending',
-                        assigned_to:    assignee,
+                        assigned_to_id: assignee,
                         follow_mode:    'active',
                         notes:          `Triggered by: ${triggerEvent}`,
                     });
