@@ -224,8 +224,13 @@
         });
     };
 
+    // Local (MYT) day for a Date. transaction_date/refund_date are stored as local
+    // YYYY-MM-DD (POS import), so a UTC toISOString().slice cutoff drifts the window by
+    // up to a day at the boundary, mis-including/excluding a day of sales/refunds.
+    const _fpLocalDay = (dt) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+
     const fpCalcRefundRate = (skuId, days = 90) => {
-        const cutoff = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+        const cutoff = _fpLocalDay(new Date(Date.now() - days * 86400000));
         const sales = _fpState.posTransactions
             .filter(p => p.sku_id === skuId && p.transaction_date >= cutoff)
             .reduce((s, p) => s + (parseInt(p.quantity_sold) || 0), 0);
@@ -236,7 +241,7 @@
     };
 
     const fpCalcWeeklyVelocity = (skuId, locationId, weeks = 4) => {
-        const cutoff = new Date(Date.now() - weeks * 7 * 86400000).toISOString().slice(0, 10);
+        const cutoff = _fpLocalDay(new Date(Date.now() - weeks * 7 * 86400000));
         const sold = _fpState.posTransactions
             .filter(p => p.sku_id === skuId && p.location_id === locationId && p.transaction_date >= cutoff)
             .reduce((s, p) => s + (parseInt(p.quantity_sold) || 0), 0);
@@ -347,7 +352,7 @@
         const posBySku     = _fpBucketBy(_fpState.posTransactions, p => p.sku_id);// == fpCalcRefundRate sales filter
         const refundsBySku = _fpBucketBy(_fpState.refunds, r => r.sku_id);        // == fpCalcRefundRate refs filter
         // fpCalcRefundRate default days=90 → cutoff hoisted once (identical string).
-        const refundCutoff = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
+        const refundCutoff = _fpLocalDay(new Date(Date.now() - 90 * 86400000));
         for (const sku of _fpState.skus) {
             if (sku.is_active === false) continue;
             if (isExcluded(sku.product_code)) continue;
@@ -410,7 +415,7 @@
         const settingByOutletSku = _fpBucketBy2(_fpState.outletSettings, s => s.outlet_id, s => s.sku_id);
         // fpCalcWeeklyVelocity default weeks=4 → cutoff hoisted once (identical string).
         const velWeeks  = 4;
-        const velCutoff = new Date(Date.now() - velWeeks * 7 * 86400000).toISOString().slice(0, 10);
+        const velCutoff = _fpLocalDay(new Date(Date.now() - velWeeks * 7 * 86400000));
         for (const outlet of fpRetailOutlets()) {
             if (outlet.id === hub.id) continue;
             for (const sku of _fpState.skus) {
@@ -2163,7 +2168,7 @@
             // Recompute auto_min_stock ONLY for SKUs touched by this import (not the whole
             // catalog), with the 90-day cutoff hoisted out of the loop and the POS rows
             // bucketed by sku_id ONCE. Writes are batched/parallelized instead of N+1 serial.
-            const cutoff = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
+            const cutoff = _fpLocalDay(new Date(Date.now() - 90 * 86400000));
             const soldBySku = _fpBucketBy(_fpState.posTransactions, p => p.sku_id);
             const autoMinUpdates = [];
             for (const skuId of importedSkuIds) {

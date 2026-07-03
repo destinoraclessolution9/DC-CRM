@@ -1912,10 +1912,24 @@
             // Reset loading=null on failure so the next call retries, and re-throw so the
             // caller's .catch can render an error/retry state.
             try {
+                // Paginate past PostgREST's ~1000-row cap — stores/shelves were unbounded
+                // and a .limit(5000) is still capped, so a deployment with >1000 shelves
+                // lost the tail and shelfByQr couldn't resolve those shelves' QR codes.
+                const _stFetchAll = async (table, orderCol) => {
+                    const PG = 1000; let out = [];
+                    for (let off = 0; ; off += PG) {
+                        const { data, error } = await sb.from(table).select('*').order(orderCol).range(off, off + PG - 1);
+                        if (error) throw error;
+                        const chunk = data || [];
+                        out = out.concat(chunk);
+                        if (chunk.length < PG || off > 200000) break;
+                    }
+                    return { data: out };
+                };
                 const [stores, shelves, master] = await Promise.all([
-                    sb.from('st_stores').select('*').order('store_code'),
-                    sb.from('st_shelves').select('*').order('shelf_code'),
-                    sb.from('st_product_master').select('*').order('sku').limit(5000),
+                    _stFetchAll('st_stores', 'store_code'),
+                    _stFetchAll('st_shelves', 'shelf_code'),
+                    _stFetchAll('st_product_master', 'sku'),
                 ]);
                 _stV2.stores = stores.data || [];
                 _stV2.shelves = shelves.data || [];

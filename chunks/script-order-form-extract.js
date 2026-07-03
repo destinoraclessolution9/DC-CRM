@@ -395,13 +395,23 @@
             }
             let visibleProspectIds = null;
             if (!adminScope) {
-                const { data: pRows, error: pErr } = await sb
-                    .from('prospects')
-                    .select('id')
-                    .in('responsible_agent_id', scopeIds)
-                    .limit(5000);
-                if (pErr) throw pErr;
-                visibleProspectIds = (pRows || []).map(r => r.id);
+                // Paginate past PostgREST's ~1000-row cap (a bare .limit(5000) is still
+                // capped) so an agent/leader with >1000 prospects doesn't lose the tail —
+                // which would hide those prospects' order-form history entirely.
+                visibleProspectIds = [];
+                const _OFE_PG = 1000;
+                for (let _off = 0; ; _off += _OFE_PG) {
+                    const { data: pRows, error: pErr } = await sb
+                        .from('prospects')
+                        .select('id')
+                        .in('responsible_agent_id', scopeIds)
+                        .order('id', { ascending: true })
+                        .range(_off, _off + _OFE_PG - 1);
+                    if (pErr) throw pErr;
+                    const chunk = pRows || [];
+                    visibleProspectIds = visibleProspectIds.concat(chunk.map(r => r.id));
+                    if (chunk.length < _OFE_PG || _off > 200000) break;
+                }
                 if (visibleProspectIds.length === 0) {
                     _ofeAllRows = [];
                     _ofeHistPage = 0;
