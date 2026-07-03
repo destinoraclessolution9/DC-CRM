@@ -174,34 +174,29 @@
 
                 let synced = 0, created = 0, updated = 0, deleted = 0;
 
-                for (const activity of activities) {
-                    const syncRecord = syncLog.find(s => s.activity_id === activity.id);
-
-                    if (this.needsSync(activity, syncRecord)) {
-                        if (activity.status === 'cancelled' && syncRecord?.google_event_id) {
-                            await this.googleCalendar.deleteEvent(syncRecord.google_event_id);
-                            // Await the sync-record delete so it lands before 'deleted++' is
-                            // reported, matching the awaited add/update paths below.
-                            await this.removeSyncRecord(activity.id);
-                            deleted++;
-                        } else if (!_typeEnabled(activity)) {
-                            // Type toggle is off: skip pushing new/updated events for this
-                            // type. Non-destructive — any previously-synced Google event is
-                            // left untouched (matches the auto-sync listener, which simply
-                            // never fires for disabled types rather than deleting).
-                            continue;
-                        } else if (syncRecord?.google_event_id) {
-                            await this.googleCalendar.updateEvent(activity, syncRecord.google_event_id);
-                            await this.updateSyncRecord(activity.id, syncRecord.google_event_id);
-                            updated++;
-                        } else {
-                            const googleEventId = await this.googleCalendar.createEvent(activity);
-                            if (googleEventId) {
-                                await this.addSyncRecord(activity.id, googleEventId);
-                                created++;
-                            }
-                        }
-                        synced++;
+                // Batch the per-activity work so Google API round-trips run in
+                // parallel WITHIN a batch (bounded concurrency, respecting the
+                // ~100 qps per-user rate limit) while each batch is awaited before
+                // the next starts — preserving backpressure and error isolation.
+                // Concurrency is across activities only; each activity's own Google
+                // API call + sync_history DB write stay serialized inside
+                // _syncActivity (see pitfall notes). We use allSettled so one
+                // failed activity never cancels the rest of its batch, matching the
+                // old serial loop's "continue on error" behavior.
+                const BATCH_SIZE = 5;
+                for (let i = 0; i < activities.length; i += BATCH_SIZE) {
+                    const batch = activities.slice(i, i + BATCH_SIZE);
+                    const results = await Promise.allSettled(
+                        batch.map(activity => this._syncActivity(activity, syncLog, _typeEnabled))
+                    );
+                    for (const r of results) {
+                        if (r.status !== 'fulfilled' || !r.value) continue;
+                        const v = r.value;
+                        if (!v.ok) continue;
+                        if (v.type === 'delete') deleted++;
+                        else if (v.type === 'update') updated++;
+                        else if (v.type === 'create') created++;
+                        if (v.counted) synced++;
                     }
                 }
 
@@ -231,6 +226,55 @@
                 UI.toast.error('Google Calendar sync failed. Some activities may not have synced.');
             } finally {
                 this.syncInProgress = false;
+            }
+        }
+
+        // Per-activity sync worker. Runs ONE activity's Google API call + its
+        // sync_history DB write sequentially (the parallelism lives in the
+        // batched caller, across activities — never within a single activity's
+        // ops, so sync_history can't drift from the actual Google event). Does
+        // NOT increment any counters; returns a status object the caller
+        // aggregates. Mirrors the old inline branch logic exactly, including the
+        // `synced` (counted) semantics: cancelled-delete / update / create count,
+        // while a not-needed or type-disabled activity does not.
+        async _syncActivity(activity, syncLog, typeEnabled) {
+            try {
+                const syncRecord = syncLog.find(s => s.activity_id === activity.id);
+                if (!this.needsSync(activity, syncRecord)) {
+                    return { ok: true, type: 'skip', counted: false };
+                }
+                if (activity.status === 'cancelled' && syncRecord?.google_event_id) {
+                    await this.googleCalendar.deleteEvent(syncRecord.google_event_id);
+                    // Await the sync-record delete so it lands before the caller
+                    // counts it, matching the awaited add/update paths below.
+                    await this.removeSyncRecord(activity.id);
+                    return { ok: true, type: 'delete', counted: true };
+                }
+                if (!typeEnabled(activity)) {
+                    // Type toggle is off: skip pushing new/updated events for this
+                    // type. Non-destructive — any previously-synced Google event is
+                    // left untouched (matches the auto-sync listener, which simply
+                    // never fires for disabled types rather than deleting).
+                    return { ok: true, type: 'skip', counted: false };
+                }
+                if (syncRecord?.google_event_id) {
+                    await this.googleCalendar.updateEvent(activity, syncRecord.google_event_id);
+                    await this.updateSyncRecord(activity.id, syncRecord.google_event_id);
+                    return { ok: true, type: 'update', counted: true };
+                }
+                const googleEventId = await this.googleCalendar.createEvent(activity);
+                if (googleEventId) {
+                    await this.addSyncRecord(activity.id, googleEventId);
+                    // create path counts as 'created' + counted.
+                    return { ok: true, type: 'create', counted: true };
+                }
+                // createEvent returned null (API failed). Original loop still ran
+                // `synced++` here but not `created++`; preserve that: counted but
+                // no create increment.
+                return { ok: true, type: 'skip', counted: true };
+            } catch (error) {
+                console.error('Per-activity Google sync error:', error);
+                return { ok: false, error };
             }
         }
 

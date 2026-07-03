@@ -956,6 +956,56 @@
             _orderSaveInFlight = false;
         }
     };
+    // Legacy multi-insert path (sale -> items -> installments) with best-effort
+    // compensating deletes on partial failure. Used only when the atomic RPC is
+    // absent. Returns the new sale id or throws (after cleaning up any orphan).
+    const _npoPersistViaInserts = async (sb, salePayload, itemPayloads, instPayloads) => {
+        let savedSaleId = null;
+        try {
+            const { data: saleRow, error: saleErr } = await sb.from('npo_sales').insert(salePayload).select().single();
+            if (saleErr) throw saleErr;
+            const saleId = saleRow && saleRow.id;
+            if (saleId == null) throw new Error('Sale insert returned no id');
+            savedSaleId = saleId;
+            if (itemPayloads.length) {
+                const { error: itemErr } = await sb.from('npo_sale_items').insert(itemPayloads.map(i => ({ sale_id: saleId, ...i }))).select();
+                if (itemErr) throw itemErr;
+            }
+            if (instPayloads.length) {
+                const { error: instErr } = await sb.from('npo_installments').insert(instPayloads.map(n => ({ sale_id: saleId, ...n }))).select();
+                if (instErr) throw instErr;
+            }
+            return saleId;
+        } catch (e) {
+            if (savedSaleId != null) {
+                try { await sb.from('npo_sale_items').delete().eq('sale_id', savedSaleId); } catch (_) {}
+                try { await sb.from('npo_installments').delete().eq('sale_id', savedSaleId); } catch (_) {}
+                try { await sb.from('npo_sales').delete().eq('id', savedSaleId); } catch (_) {}
+            }
+            throw e;
+        }
+    };
+
+    // Persist an order. Prefers the atomic server-side transaction
+    // (npo_create_order RPC — migrations/npo_atomic_create_order_2026-07-03.sql):
+    // all three inserts commit or roll back together, so no orphan can survive a
+    // mid-sequence failure. Falls back to the legacy multi-insert path ONLY when
+    // the function is absent (nothing ran → no double-insert risk); any other RPC
+    // error is a genuine save failure and is surfaced, never silently retried.
+    const _npoPersistOrder = async (sb, salePayload, itemPayloads, instPayloads) => {
+        const rpc = await sb.rpc('npo_create_order', { p_sale: salePayload, p_items: itemPayloads, p_installments: instPayloads });
+        if (!rpc.error) {
+            if (rpc.data == null) throw new Error('npo_create_order returned no id');
+            return rpc.data;
+        }
+        const code = rpc.error.code || '';
+        const msg = rpc.error.message || '';
+        const missing = code === '42883' || code === 'PGRST202'
+            || /Could not find the function|function .* does not exist/i.test(msg);
+        if (!missing) throw rpc.error;
+        return await _npoPersistViaInserts(sb, salePayload, itemPayloads, instPayloads);
+    };
+
     const _npoSaveOrderImpl = async () => {
         const sb = _sb();
         if (!sb) { UI.toast.error('Supabase not connected'); return; }
@@ -1027,75 +1077,57 @@
         const start_date = _str('npo-start-date') || _date();
         const uid = (_state.cu && _state.cu.id) || null;
 
-        // Tracks the npo_sales row id once step 1 succeeds so the catch below can
-        // compensate (delete the orphaned sale + any items) if step 2 or 3 fails.
-        // Not a transaction, but it prevents an orphan sale surviving a mid-sequence
-        // failure and stops a retry from stacking duplicate/empty-shell orders.
-        let savedSaleId = null;
-        try {
-            // 1) the sale. RAW insert WITHOUT id (GENERATED ALWAYS). customer_name is
-            //    a first-class column now (migrations/npo_feature_2026-06-24.sql) and
-            //    captures the name when there's no existing customer_id.
-            const salePayload = {
-                customer_id, customer_name: customer_name || null,
-                plan_id: plan.id, tier_id: tier.id,
-                cart_total, tier_amount, overage, first_payment, monthly_amount, tenure_months,
-                fulfillment_mode, redemption_period_months, start_date,
-                status: 'active', responsible_agent_id: uid, created_by: uid
-            };
-            const { data: saleRow, error: saleErr } = await sb.from('npo_sales').insert(salePayload).select().single();
-            if (saleErr) throw saleErr;
-            const saleId = saleRow && saleRow.id;
-            if (saleId == null) throw new Error('Sale insert returned no id');
-            savedSaleId = saleId;
-
-            // 2) one item row per cart line.
-            const itemRows = lines.map(l => ({ sale_id: saleId, ...l, delivery_status: 'pending' }));
-            const { error: itemErr } = await sb.from('npo_sale_items').insert(itemRows).select();
-            if (itemErr) throw itemErr;
-
-            // 3) installment schedule: seq 1..tenure, due_date = start + seq months,
-            //    amount = monthly. The first_payment deposit is on the sale, NOT a row.
-            const instRows = [];
-            for (let seq = 1; seq <= tenure_months; seq++) {
-                instRows.push({ sale_id: saleId, seq, due_date: _addMonths(start_date, seq), amount: monthly_amount, status: 'due' });
-            }
-            const { error: instErr } = await sb.from('npo_installments').insert(instRows).select();
-            if (instErr) throw instErr;
-
-            ['npo_sales', 'npo_sale_items', 'npo_installments'].forEach(t => {
-                try { AppDataStore.invalidateCache && AppDataStore.invalidateCache(t); } catch (_) {}
-            });
-
-            // 4) Count the deposit toward the customer's Lifetime Value as collected.
-            //    Only for an EXISTING customer (customer_id is a real id) — a new
-            //    customer (customer_id null) has no LTV target, so SKIP. countDelta=1:
-            //    the sale counts as one purchase. Each later paid installment bumps the
-            //    amount with countDelta=0 (same purchase, more collected). Best-effort:
-            //    a failed bump must NOT roll back the already-saved sale.
-            if (customer_id != null) {
-                try { await _utils.adjustCustomerLtv(customer_id, first_payment, 1); }
-                catch (e) { console.warn('NPO LTV deposit bump failed', e); }
-            }
-
-            _order = null;
-            UI.hideModal();
-            UI.toast.success('NPO order created');
-            await _refresh();
-        } catch (e) {
-            // Compensate: if the sale row was created but a downstream insert failed,
-            // delete the orphan (and any partial items) so it can't survive as an
-            // empty shell and a retry doesn't stack duplicates. Best-effort cleanup.
-            if (savedSaleId != null) {
-                try { await sb.from('npo_sale_items').delete().eq('sale_id', savedSaleId); } catch (_) {}
-                try { await sb.from('npo_installments').delete().eq('sale_id', savedSaleId); } catch (_) {}
-                try { await sb.from('npo_sales').delete().eq('id', savedSaleId); } catch (_) {}
-                ['npo_sales', 'npo_sale_items', 'npo_installments'].forEach(t => {
-                    try { AppDataStore.invalidateCache && AppDataStore.invalidateCache(t); } catch (_) {}
-                });
-            }
-            UI.toast.error('Save failed: ' + (e && e.message ? e.message : 'unknown error'));
+        // Payloads. `id` is GENERATED identity (never sent); the persist step sets
+        // sale_id on items/installments. customer_name is a first-class column
+        // (migrations/npo_feature_2026-06-24.sql) capturing the name when there's
+        // no existing customer_id.
+        const salePayload = {
+            customer_id, customer_name: customer_name || null,
+            plan_id: plan.id, tier_id: tier.id,
+            cart_total, tier_amount, overage, first_payment, monthly_amount, tenure_months,
+            fulfillment_mode, redemption_period_months, start_date,
+            status: 'active', responsible_agent_id: uid, created_by: uid
+        };
+        // one item per cart line (sale_id added by the persist step)
+        const itemPayloads = lines.map(l => ({
+            product_id: l.product_id, product_name: l.product_name, qty: l.qty,
+            unit_price: l.unit_price, line_total: l.line_total,
+            redeem_after_months: l.redeem_after_months, delivery_status: 'pending'
+        }));
+        // installment schedule: seq 1..tenure, due = start + seq months, amount = monthly.
+        // The first_payment deposit is on the sale, NOT a row.
+        const instPayloads = [];
+        for (let seq = 1; seq <= tenure_months; seq++) {
+            instPayloads.push({ seq, due_date: _addMonths(start_date, seq), amount: monthly_amount, status: 'due' });
         }
+
+        let saleId;
+        try {
+            // Atomic when the RPC is present; atomic-compensated fallback otherwise.
+            saleId = await _npoPersistOrder(sb, salePayload, itemPayloads, instPayloads);
+        } catch (e) {
+            UI.toast.error('Save failed: ' + (e && e.message ? e.message : 'unknown error'));
+            return;
+        }
+
+        ['npo_sales', 'npo_sale_items', 'npo_installments'].forEach(t => {
+            try { AppDataStore.invalidateCache && AppDataStore.invalidateCache(t); } catch (_) {}
+        });
+
+        // Count the deposit toward the customer's Lifetime Value as collected.
+        // Only for an EXISTING customer (customer_id is a real id) — a new customer
+        // has no LTV target, so SKIP. countDelta=1: the sale counts as one purchase;
+        // later paid installments bump the amount with countDelta=0. Best-effort: a
+        // failed bump must NOT undo the already-committed sale.
+        if (customer_id != null) {
+            try { await _utils.adjustCustomerLtv(customer_id, first_payment, 1); }
+            catch (e) { console.warn('NPO LTV deposit bump failed', e); }
+        }
+
+        _order = null;
+        UI.hideModal();
+        UI.toast.success('NPO order created');
+        await _refresh();
     };
 
     // ====================================================================
