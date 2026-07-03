@@ -907,7 +907,46 @@ const _today = () => { const d = new Date(); return `${d.getFullYear()}-${String
 // only if the bounded read fails or the table genuinely exceeds the cap, so results
 // stay identical to the old whole-table scan in the normal case.
 const _SP_FETCH_CAP = 10000;
-const _fetchSpecialProgramSource = async (table) => {
+// Safe upper bound for a scoped read (participant slice is tiny vs the whole
+// table); queryAdvanced pages, so this just avoids truncating a scoped result.
+const _SP_SCOPED_CAP = 50000;
+// `scope` (optional) lets the render paths, which KNOW the participant agent set,
+// push the filter server-side instead of downloading the whole table and filtering
+// on the client — activities is the app's largest table and the old whole-table
+// scan blocked the KPI dashboard on every render. Shape:
+//   { agentIds: [...] }                    → customers / activities scope by agent
+//   { agentIds: [...], customerIds: [...] } → purchases scope by owning customer
+// purchases has NO usable agent_id column (agent is resolved via
+// customer.responsible_agent_id — see data.js), so purchases is scoped by the
+// customer_ids owned by the participant agents, derived from the already-scoped
+// customers fetch. When `scope` is omitted the behavior is IDENTICAL to before
+// (bounded whole-table read + unbounded fallback) — the standalone
+// calculateProgramProgress() path (checkSpecialProgramPopup / script-marketing.js)
+// relies on that unchanged fallback, so DO NOT infer a scope when none is passed.
+const _fetchSpecialProgramSource = async (table, scope = null) => {
+    // Scoped path: the caller supplied the participant set, so restrict the read
+    // to those rows. queryAdvanced has its own server-error fallback that RE-APPLIES
+    // the same scope options client-side, so scoped correctness holds even offline —
+    // we deliberately do NOT fall back to the unbounded getAll() here (that would
+    // defeat the optimization and re-download the whole table).
+    if (scope && scope.agentIds) {
+        const opts = { countMode: null, limit: _SP_SCOPED_CAP, offset: 0 };
+        if (table === 'purchases') {
+            // purchases has no agent_id — scope by the owning customers' ids.
+            opts.scopeField = 'customer_id';
+            opts.scopeValues = scope.customerIds || [];
+        } else if (table === 'customers') {
+            opts.scopeField = 'responsible_agent_id';
+            opts.scopeValues = scope.agentIds;
+        } else if (table === 'activities') {
+            opts.scopeField = 'lead_agent_id';
+            opts.scopeValues = scope.agentIds;
+            opts.filters = { activity_type: 'CPS' };
+        }
+        const r = await AppDataStore.queryAdvanced(table, opts);
+        return (r && Array.isArray(r.data)) ? r.data : [];
+    }
+    // Unscoped path (unchanged): bounded whole-table read + unbounded fallback.
     try {
         const r = await AppDataStore.queryAdvanced(table, { countMode: null, limit: _SP_FETCH_CAP + 1, offset: 0 });
         const rows = (r && Array.isArray(r.data)) ? r.data : null;
@@ -1108,13 +1147,10 @@ const buildSpecialProgramCardHtml = (program, partProgress, qualifiedCount, part
 
 // Render the Special Programs section on the KPI dashboard
 const renderSpecialPrograms = async () => {
-    const [programs, allParts, users, purchases, customers, activities] = await Promise.all([
+    const [programs, allParts, users] = await Promise.all([
         AppDataStore.getAll('special_programs'),
         AppDataStore.getAll('special_program_participants'),
-        AppDataStore.getAll('users'),
-        _fetchSpecialProgramSource('purchases'),
-        _fetchSpecialProgramSource('customers'),
-        _fetchSpecialProgramSource('activities')
+        AppDataStore.getAll('users')
     ]);
     const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
     const active = programs.filter(p => p.status !== 'cancelled' && p.status !== 'deleted');
@@ -1135,6 +1171,18 @@ const renderSpecialPrograms = async () => {
                 <p style="text-align:center;color:var(--gray-400);padding:24px 0;margin:0;">No active special programs. Create one to launch a new challenge for selected agents.</p>
             </div>`;
     }
+
+    // Scope the source fetches to just the participant agents' rows (server-side)
+    // instead of downloading whole tables. customers+activities scope by agent id;
+    // purchases (no agent_id column) scopes by the owning customers' ids, which we
+    // derive from the already-scoped customers set.
+    const agentIds = [...new Set(allParts.map(p => p.agent_id).filter(v => v != null))];
+    const [customers, activities] = await Promise.all([
+        _fetchSpecialProgramSource('customers', { agentIds }),
+        _fetchSpecialProgramSource('activities', { agentIds })
+    ]);
+    const customerIds = [...new Set(customers.map(c => c.id).filter(v => v != null))];
+    const purchases = await _fetchSpecialProgramSource('purchases', { agentIds, customerIds });
 
     // Build the bucket index ONCE per render (de-quadratifies the per-participant calc)
     const spIndex = _buildSpecialProgramIndex(purchases, customers, activities);
@@ -1252,13 +1300,10 @@ const buildSpecialProgramsTableHtml = (rows, canManage) => {
 // ===== Special Programs Table (Marketing List tab) =====
 // Flat KPI-style table — one row per (program × agent), showing how much they made and how far to target
 const renderSpecialProgramsTable = async () => {
-    const [programs, allParts, users, purchases, customers, activities] = await Promise.all([
+    const [programs, allParts, users] = await Promise.all([
         AppDataStore.getAll('special_programs'),
         AppDataStore.getAll('special_program_participants'),
-        AppDataStore.getAll('users'),
-        _fetchSpecialProgramSource('purchases'),
-        _fetchSpecialProgramSource('customers'),
-        _fetchSpecialProgramSource('activities')
+        AppDataStore.getAll('users')
     ]);
     const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
     const active = programs.filter(p => p.status !== 'cancelled' && p.status !== 'deleted');
@@ -1274,6 +1319,18 @@ const renderSpecialProgramsTable = async () => {
                 <p style="color:var(--gray-400);margin:0;">${canManage ? 'Click "New Program" to launch a new challenge for selected agents.' : 'No special programs have been launched yet.'}</p>
             </div>`;
     }
+
+    // Scope the source fetches to just the participant agents' rows (server-side)
+    // instead of downloading whole tables. customers+activities scope by agent id;
+    // purchases (no agent_id column) scopes by the owning customers' ids, which we
+    // derive from the already-scoped customers set.
+    const agentIds = [...new Set(allParts.map(p => p.agent_id).filter(v => v != null))];
+    const [customers, activities] = await Promise.all([
+        _fetchSpecialProgramSource('customers', { agentIds }),
+        _fetchSpecialProgramSource('activities', { agentIds })
+    ]);
+    const customerIds = [...new Set(customers.map(c => c.id).filter(v => v != null))];
+    const purchases = await _fetchSpecialProgramSource('purchases', { agentIds, customerIds });
 
     // Build the bucket index ONCE per render (de-quadratifies the per-participant calc)
     const spIndex = _buildSpecialProgramIndex(purchases, customers, activities);

@@ -128,10 +128,37 @@
                 if (new Date(r.created_at) > new Date(grouped[key].latest)) grouped[key].latest = r.created_at;
             });
             sorted = Object.values(grouped).sort((a, b) => b.count - a.count);
-            // Single type-directed getById per referrer (was up to 3 sequential).
+            // Resolve referrer names WITHOUT a per-referrer serial getById fan-out
+            // (was N sequential cache/network hits). Batch by table type: one
+            // getAll(table) per type + a Map lookup, falling back to per-row
+            // getById on cache miss so the multi-layer cache/primed/localStorage/
+            // SWR + hasLiveSession behavior of getById is preserved for offline /
+            // RLS-scoped viewers whose getAll returns only a partial subset.
+            const _tableFor = (type) => type === 'customer' ? 'customers' : type === 'user' ? 'users' : 'prospects';
+            const idsByTable = { prospects: new Set(), customers: new Set(), users: new Set() };
             for (const item of sorted) {
-                const table = item.type === 'customer' ? 'customers' : item.type === 'user' ? 'users' : 'prospects';
-                const person = await AppDataStore.getById(table, item.id);
+                idsByTable[_tableFor(item.type)].add(String(item.id));
+            }
+            const lookupByTable = {};
+            for (const table of ['prospects', 'customers', 'users']) {
+                if (idsByTable[table].size === 0) continue;
+                const map = new Map();
+                try {
+                    const rows = await AppDataStore.getAll(table);
+                    if (Array.isArray(rows)) {
+                        for (const row of rows) {
+                            if (row && row.id != null) map.set(String(row.id), row);
+                        }
+                    }
+                } catch (_) { /* leave map empty → per-row getById fallback below */ }
+                lookupByTable[table] = map;
+            }
+            for (const item of sorted) {
+                const table = _tableFor(item.type);
+                let person = lookupByTable[table] && lookupByTable[table].get(String(item.id));
+                // Cache miss (offline / RLS-scoped viewer with partial getAll):
+                // fall back to per-row getById, matching the old behavior.
+                if (!person) person = await AppDataStore.getById(table, item.id);
                 item.name = person?.full_name || '';
             }
         }
