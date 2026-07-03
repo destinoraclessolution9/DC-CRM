@@ -2415,6 +2415,32 @@ class DataStore {
         }
     }
 
+    // Batched UPSERT keyed by a natural unique column: one round-trip that inserts
+    // the rows and (with ignoreDuplicates) treats a clash on `onConflict` as a
+    // no-op for that row rather than an error — so re-running a partially-committed
+    // batch cannot create duplicates. Returns ONLY the rows the server actually
+    // inserted (skipped clashes are omitted, so `.length` = new rows). Throws on a
+    // NON-clash error (e.g. NOT NULL / type), letting the caller fall back to
+    // per-row handling. Use for idempotent bulk writes (e.g. egg_processed_orders
+    // keyed by unique_key). NOTE: requires a live write client — not offline-queued.
+    async upsertMany(tableName, records, { onConflict, ignoreDuplicates = true } = {}) {
+        if (!Array.isArray(records) || records.length === 0) return [];
+        const { data, error } = await this._writeClient()
+            .from(tableName)
+            .upsert(records, { onConflict, ignoreDuplicates })
+            .select();
+        if (error) throw error;
+        const saved = data || [];
+        // Drop caches so the next read reflects the new rows. Deliberately NO
+        // local-mirror append: appending `saved` (only the newly-inserted rows,
+        // not the full table) then invalidating would either be dead work or
+        // persist a PARTIAL snapshot a later read could serve as if complete. A
+        // bulk upsert is infrequent, so a clean revalidate-from-server is safer.
+        this.invalidateCache(tableName);
+        if (saved.length) this.emit('dataChanged', { action: 'add', table: tableName, records: saved });
+        return saved;
+    }
+
     // ── Audit trail (fire-and-forget) ────────────────────────────────────
     // Writes a row to audit_logs for every update/delete on business-critical
     // tables. Non-blocking: a failure here (e.g. audit_logs unreachable, RLS

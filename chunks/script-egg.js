@@ -1855,57 +1855,46 @@ JB 星期二到
             //    report the failure than lose everything on a unique-key clash)
             let rowErrors = 0;
             const rowErrorDetails = [];
-            for (const r of keep) {
-                try {
-                    await AppDataStore.create('egg_processed_orders', {
-                        unique_key: r.unique_key,
-                        order_no: r.order_no,
-                        product: r.product,
-                        product_code: r.product_code || null,
-                        quantity: r.quantity,
-                        region: r.region,
-                        agent_name: r.agent_name,
-                        channel: r.channel,
-                        source: r.source,
-                        group_name: r.group_name,
-                        order_date: r.order_date_parsed,
-                        week_start: weekIso,
-                        processed_at: now,
-                        run_id: runId
-                    });
-                } catch (rowErr) {
-                    rowErrors++;
-                    rowErrorDetails.push({ key: r.unique_key, err: rowErr.message });
-                    console.warn('egg: row save failed', r.unique_key, rowErr);
-                }
-            }
+            // Row payload builder (keep + excluded share the base shape).
+            const _eggRow = (r, extra) => Object.assign({
+                unique_key: r.unique_key,
+                order_no: r.order_no,
+                product: r.product,
+                product_code: r.product_code || null,
+                quantity: r.quantity,
+                region: r.region,
+                agent_name: r.agent_name,
+                channel: r.channel,
+                source: r.source,
+                group_name: r.group_name,
+                order_date: r.order_date_parsed,
+                week_start: weekIso,
+                processed_at: now,
+                run_id: runId
+            }, extra || {});
+            const _allPayloads = keep.map(r => _eggRow(r))
+                .concat(excluded.map(r => _eggRow(r, { reconciled_with_urgent_id: null, excluded_reason: 'Pushed up to previous week top-up' })));
 
-            // 3. Save excluded rows with reason (audit trail)
-            // Simplified flow: all exclusions are "pushed up to previous week top-up"
-            for (const r of excluded) {
-                try {
-                    await AppDataStore.create('egg_processed_orders', {
-                        unique_key: r.unique_key,
-                        order_no: r.order_no,
-                        product: r.product,
-                        product_code: r.product_code || null,
-                        quantity: r.quantity,
-                        region: r.region,
-                        agent_name: r.agent_name,
-                        channel: r.channel,
-                        source: r.source,
-                        group_name: r.group_name,
-                        order_date: r.order_date_parsed,
-                        week_start: weekIso,
-                        processed_at: now,
-                        run_id: runId,
-                        reconciled_with_urgent_id: null,
-                        excluded_reason: 'Pushed up to previous week top-up'
-                    });
-                } catch (rowErr) {
-                    rowErrors++;
-                    rowErrorDetails.push({ key: r.unique_key, err: rowErr.message });
-                    console.warn('egg: excluded row save failed', r.unique_key, rowErr);
+            // Fast path: ONE bulk upsert. egg_processed_orders has UNIQUE(unique_key),
+            // so a clash (a row already saved by a prior run / within-batch dup) is
+            // IGNORED, not an error — re-running a partial commit can't duplicate.
+            // On a genuine (non-clash) error the whole statement fails, so fall back
+            // to per-row upsert: good rows still commit (idempotent), only bad rows
+            // count as errors — preserving the "save 99/100, report 1" behavior.
+            try {
+                if (_allPayloads.length) {
+                    await AppDataStore.upsertMany('egg_processed_orders', _allPayloads, { onConflict: 'unique_key', ignoreDuplicates: true });
+                }
+            } catch (bulkErr) {
+                console.warn('egg: bulk upsert failed, falling back to per-row', bulkErr);
+                for (const p of _allPayloads) {
+                    try {
+                        await AppDataStore.upsertMany('egg_processed_orders', [p], { onConflict: 'unique_key', ignoreDuplicates: true });
+                    } catch (rowErr) {
+                        rowErrors++;
+                        rowErrorDetails.push({ key: p.unique_key, err: rowErr.message });
+                        console.warn('egg: row save failed', p.unique_key, rowErr);
+                    }
                 }
             }
 

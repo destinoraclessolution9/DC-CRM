@@ -4594,6 +4594,13 @@
         }
 
         if (type === 'CPS') {
+            // Recovery flag (function-scoped so it is in scope at prospect-create /
+            // referral below — the block-scoped-const trap a prior fix hit). When a
+            // hard-duplicate turns out to be an ORPHAN from this owner's earlier
+            // partially-failed CPS save (same person, in scope, no activity yet), we
+            // REUSE it here instead of blocking the retry — otherwise a failed save
+            // can never be completed.
+            let _recoveredProspect = null;
             const name = document.getElementById('cps-name')?.value;
             const phone = document.getElementById('cps-phone')?.value;
             const relation = document.getElementById('cps-relationship')?.value;
@@ -4645,15 +4652,23 @@
                             pIds.length ? AppDataStore.queryAdvanced('prospects', { scopeField: 'id', scopeValues: pIds, limit: 1000, countMode: null }).then(r => r.data || []).catch(() => []) : Promise.resolve([]),
                             cIds.length ? AppDataStore.queryAdvanced('customers', { scopeField: 'id', scopeValues: cIds, limit: 1000, countMode: null }).then(r => r.data || []).catch(() => []) : Promise.resolve([]),
                         ]);
+                        // Tag each candidate with its source table so orphan-recovery
+                        // (below) can be restricted to genuine PROSPECT rows. A converted
+                        // person also has a customer row with the same name/phone/IC, and
+                        // getActivitiesForProspect can't see that customer's activities —
+                        // so a customer row must never be treated as a recoverable orphan.
                         const byKey = new Map();
-                        for (const r of [...sp, ...pFull, ...sc, ...cFull]) if (r && r.id != null) byKey.set(String(r.id), r);
+                        for (const r of sp)    if (r && r.id != null) byKey.set(String(r.id), Object.assign({}, r, { __src: 'prospects' }));
+                        for (const r of pFull) if (r && r.id != null) byKey.set(String(r.id), Object.assign({}, r, { __src: 'prospects' }));
+                        for (const r of sc)    if (r && r.id != null) byKey.set(String(r.id), Object.assign({}, r, { __src: 'customers' }));
+                        for (const r of cFull) if (r && r.id != null) byKey.set(String(r.id), Object.assign({}, r, { __src: 'customers' }));
                         allPeople = [...byKey.values()];
                     } catch (e) {
                         console.warn('CPS dup-check: scoped candidate fetch failed — full-table fallback', e);
-                        allPeople = [...(await AppDataStore.getAll('prospects')), ...(await AppDataStore.getAll('customers'))];
+                        allPeople = [...(await AppDataStore.getAll('prospects')).map(r => Object.assign({}, r, { __src: 'prospects' })), ...(await AppDataStore.getAll('customers')).map(r => Object.assign({}, r, { __src: 'customers' }))];
                     }
                 } else {
-                    allPeople = [...(await AppDataStore.getAll('prospects')), ...(await AppDataStore.getAll('customers'))];
+                    allPeople = [...(await AppDataStore.getAll('prospects')).map(r => Object.assign({}, r, { __src: 'prospects' })), ...(await AppDataStore.getAll('customers')).map(r => Object.assign({}, r, { __src: 'customers' }))];
                 }
 
                 const hardDuplicate = allPeople.find(p => {
@@ -4665,14 +4680,37 @@
                 });
 
                 if (hardDuplicate) {
-                    const agent = await AppDataStore.getById('users', hardDuplicate.responsible_agent_id || hardDuplicate.lead_agent_id) || { full_name: 'Unknown Agent' };
-                    const matchField = (phone && hardDuplicate.phone && normalize(hardDuplicate.phone) === normalize(phone)) ? 'phone number' : 'IC number';
-                    UI.toast.error(`Duplicate blocked: "${hardDuplicate.full_name}" already exists under ${agent.full_name} with the same name and ${matchField}.`);
-                    return;
+                    // Orphan recovery: a hard-duplicate that is owned WITHIN the current
+                    // user's visible scope AND has no activity yet is almost certainly an
+                    // orphan from a prior partial CPS save (prospect created, activity never
+                    // landed). Reuse it so the retry can complete. A prospect owned outside
+                    // scope (another team — poaching guard) or one that already has an
+                    // activity is a genuine duplicate and stays blocked.
+                    let _isOwnOrphan = false;
+                    try {
+                        const _vis = await _utils.getVisibleUserIds?.(_state.cu);
+                        // Recover ONLY a prospect-table row (never a converted customer row —
+                        // see the __src tagging above) that is owned within the user's scope.
+                        const _own = hardDuplicate.__src === 'prospects'
+                            && (_vis === 'all' || (Array.isArray(_vis) && _vis.map(String).includes(String(hardDuplicate.responsible_agent_id))));
+                        if (_own) {
+                            const _acts = await AppDataStore.getActivitiesForProspect(hardDuplicate.id, { limit: 1 }).catch(() => []);
+                            if (!_acts || !_acts.length) _isOwnOrphan = true;
+                        }
+                    } catch (_) { _isOwnOrphan = false; }
+                    if (_isOwnOrphan) {
+                        _recoveredProspect = hardDuplicate;
+                    } else {
+                        const agent = await AppDataStore.getById('users', hardDuplicate.responsible_agent_id || hardDuplicate.lead_agent_id) || { full_name: 'Unknown Agent' };
+                        const matchField = (phone && hardDuplicate.phone && normalize(hardDuplicate.phone) === normalize(phone)) ? 'phone number' : 'IC number';
+                        UI.toast.error(`Duplicate blocked: "${hardDuplicate.full_name}" already exists under ${agent.full_name} with the same name and ${matchField}.`);
+                        return;
+                    }
                 }
 
-                // Soft warning: same phone or same name (but not hard match)
-                if (!window._cpsDuplicateConfirmed) {
+                // Soft warning: same phone or same name (but not hard match).
+                // Skipped when recovering a known orphan — the person is already confirmed.
+                if (!_recoveredProspect && !window._cpsDuplicateConfirmed) {
                     const softDuplicate = allPeople.find(p => normalize(p.phone) === normalize(phone) || normalize(p.full_name) === normName);
                     if (softDuplicate) {
                         const agent = await AppDataStore.getById('users', softDuplicate.responsible_agent_id || softDuplicate.lead_agent_id) || { full_name: 'Unknown Agent' };
@@ -4748,11 +4786,16 @@
             };
 
             let prospect;
-            try {
-                prospect = await AppDataStore.create('prospects', prospectData);
-            } catch (err) {
-                UI.toast.error('Failed to create prospect: ' + (err.message || 'Unknown error'));
-                return;
+            if (_recoveredProspect) {
+                // Reuse the orphan from the prior partial save — no duplicate prospect row.
+                prospect = _recoveredProspect;
+            } else {
+                try {
+                    prospect = await AppDataStore.create('prospects', prospectData);
+                } catch (err) {
+                    UI.toast.error('Failed to create prospect: ' + (err.message || 'Unknown error'));
+                    return;
+                }
             }
             activity.prospect_id = prospect.id;
             activity.activity_title = `CPS With ${name}`;
@@ -4767,21 +4810,25 @@
                 _uploadCpsFormFile(_pendingScanFile, prospect.id).catch(() => {});
             }
 
-            // Auto-create referral record from CPS activity
+            // Auto-create referral record from CPS activity. Skipped on the recovery
+            // path — the orphan's referral was already created by the prior attempt, so
+            // re-creating it (with a fresh Date.now() id) would duplicate it.
             const _refType = (_state.sr?.type || '').toLowerCase() === 'consultant' ? 'user' : 'prospect';
-            try {
-                await AppDataStore.create('referrals', {
-                    id: Date.now(),
-                    referrer_id: _state.sr.id,
-                    referrer_type: _refType,
-                    referred_prospect_id: prospect.id,
-                    referral_source: 'CPS',
-                    memo: '',
-                    is_converted: false,
-                    status: 'Pending',
-                    created_at: new Date().toISOString()
-                });
-            } catch(e) { console.warn('Auto-referral creation failed:', e); }
+            if (!_recoveredProspect) {
+                try {
+                    await AppDataStore.create('referrals', {
+                        id: Date.now(),
+                        referrer_id: _state.sr.id,
+                        referrer_type: _refType,
+                        referred_prospect_id: prospect.id,
+                        referral_source: 'CPS',
+                        memo: '',
+                        is_converted: false,
+                        status: 'Pending',
+                        created_at: new Date().toISOString()
+                    });
+                } catch(e) { console.warn('Auto-referral creation failed:', e); }
+            }
 
             // Phase 3 — trail + feedback: record the key-on-behalf handover so it
             // shows up alongside real reassignments, and confirm to the leader who

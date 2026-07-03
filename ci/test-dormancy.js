@@ -91,6 +91,12 @@ const keepBody = slice(
 // predicate BODY remains verbatim source.
 const keepBlock = keepBody + '\n            });';
 
+// The keep-predicate calls the closure helper `_activeStatus(p.status)` (excludes
+// converted/lost), which lives outside the sliced body. Supply it as a named
+// parameter so the verbatim predicate evaluates instead of throwing ReferenceError.
+// Mirrors data.js getActiveProspects' `_activeStatus`.
+const _activeStatusFn = (s) => { const v = String(s || '').toLowerCase(); return v !== 'converted' && v !== 'lost'; };
+
 let keepFactory;
 try {
   // Re-host the sliced `all.filter(p => {...})` as a pure predicate factory:
@@ -98,14 +104,14 @@ try {
   // then read back whether that one row survived. The predicate BODY is
   // verbatim source.
   // eslint-disable-next-line no-new-func
-  keepFactory = new Function('all', 'cutoff', `${keepBlock}`);
+  keepFactory = new Function('all', 'cutoff', '_activeStatus', `${keepBlock}`);
 } catch (e) {
   console.error('FAIL eval of sliced keep predicate: ' + e.message);
   process.exit(1);
 }
 // isKept(row, cutoff) -> true if the row stays in the active set.
 function isKept(row, cutoff) {
-  const out = keepFactory([row], cutoff);
+  const out = keepFactory([row], cutoff, _activeStatusFn);
   return out.length === 1;
 }
 
