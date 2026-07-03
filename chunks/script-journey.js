@@ -527,17 +527,19 @@
                     const notifyAgent = rule.action_payload?.notify_agent || false;
                     if (!roleLevel) continue;
 
-                    const table = entityType === 'customer' ? 'customers' : 'prospects';
-                    const newRole = `Level ${roleLevel} ${roleName}`;
-
-                    await AppDataStore.update(table, entityId, {
-                        role: newRole,
-                        updated_at: new Date().toISOString(),
-                    });
-
-                    if (notifyAgent) {
-                        UI.toast.success(`🎉 角色升级 → ${roleName}`);
-                    }
+                    // NOTE: prospects/customers have NO `role` column (only the
+                    // `users` table carries role/role_level). The previous code wrote
+                    // {role: ...} to prospects/customers, which PostgREST silently
+                    // dropped — a no-op that still fired a success toast and misled
+                    // the agent into thinking a role change persisted. There is no
+                    // safe existing target field on prospect/customer for a "role"
+                    // label, so we deliberately do NOT write one and do NOT emit a
+                    // success toast for the (nonexistent) upgrade. The one real,
+                    // schema-backed effect of this rule — converting a prospect that
+                    // reached customer level (13) into a Customer record — is handled
+                    // below via existing columns (conversion_status / status), which
+                    // owns its own user-facing toasts. (notifyAgent no longer gates a
+                    // phantom role toast; the conversion branch reports real outcomes.)
 
                     // For purchase_signed: also create the Customer record if this
                     // prospect just hit customer level (13). Reuse the canonical
@@ -1215,12 +1217,40 @@
         );
     };
 
+    // Dedup guard: has this entity already got a live (non-terminal) touchpoint set
+    // for this stage? spawnTouchpointsForStage inserts the full template set every
+    // time it fires, so a double-click or a re-fired event duplicates all
+    // touchpoints for the same prospect+stage. Skip the spawn when open touchpoints
+    // already exist for the stage. Only 'done'/'skipped'/'auto_sent' are terminal;
+    // a stage whose touchpoints were all completed can legitimately be re-spawned.
+    async function _stageAlreadySpawned(entityType, entityId, stageName) {
+        try {
+            const existing = await AppDataStore.getJourneyTouchpoints(entityType, entityId);
+            return (existing || []).some(t =>
+                t.stage_name === stageName &&
+                !['done', 'skipped', 'auto_sent'].includes(t.status)
+            );
+        } catch (e) {
+            // Fail OPEN so a lookup error never permanently blocks a legitimate
+            // spawn; duplicate-avoidance is best-effort, not a hard invariant.
+            console.warn('[journey] _stageAlreadySpawned', e?.message);
+            return false;
+        }
+    }
+
     const executeSpawnTouchpoints = async (entityType, entityId, stageName, startDateStr, followMode = 'active') => {
         const startDate  = startDateStr ? new Date(startDateStr + 'T00:00:00') : new Date();
         const track      = stageName === 'nurture' ? 'nurture'
                          : stageName.startsWith('annual_') ? 'annual'
                          : 'active';
         const productTrack = getTrackForStage(stageName) === 'post' ? 'all' : getTrackForStage(stageName);
+
+        // Guard against duplicate spawns for the same entity + stage (double-click /
+        // re-fired event). If open touchpoints already exist for this stage, skip.
+        if (await _stageAlreadySpawned(entityType, entityId, stageName)) {
+            UI.toast.info(`该阶段已有跟进任务 — ${STAGE_LABELS[stageName] || stageName}`);
+            return;
+        }
 
         const n = await AppDataStore.spawnTouchpointsForStage(entityType, entityId, stageName, {
             startDate, track, assignedTo: _cu()?.id || null,
@@ -1245,6 +1275,9 @@
         const today = new Date().toISOString().slice(0, 10);
         let total = 0;
         for (const stage of annualStages) {
+            // Per-stage dedup: skip any annual stage that already has open
+            // touchpoints so re-running this spawner doesn't duplicate them.
+            if (await _stageAlreadySpawned(entityType, entityId, stage)) continue;
             const n = await AppDataStore.spawnTouchpointsForStage(entityType, entityId, stage, {
                 startDate:    new Date(),
                 track:        'annual',

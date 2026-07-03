@@ -40,6 +40,28 @@
     let _fileFilter = '';
     let _draggedFileId = null;
 
+    // ── Metadata-only documents fetch (excludes the heavy base64 `data` blob) ──
+    // Every folder/list render used getAll('documents'), which selects `*` for
+    // this table (documents is NOT in data.js `_lightSelects`), pulling the large
+    // base64 `data` column for EVERY row — a multi-hundred-MB download on each
+    // render. The listing UI never reads `data`; the blob is fetched lazily only
+    // when a file is actually opened/downloaded (downloadFile/previewFile/
+    // downloadSelected use getById/full docs). queryPaged accepts an explicit
+    // `select` column list and pages through the whole table with no silent cap,
+    // so this returns the SAME complete row set as getAll — just without the blob.
+    // Falls back to getAll('documents') on any throw so the offline/local-snapshot
+    // resilience of getAll is preserved.
+    const DOC_LIST_COLUMNS =
+        'id,filename,folder_id,size,mime_type,current_version,created_by,created_at,updated_at,description,is_starred';
+    const getDocumentsMeta = async () => {
+        try {
+            return await AppDataStore.queryPaged('documents', { select: DOC_LIST_COLUMNS });
+        } catch (e) {
+            try { console.warn('[documents] metadata queryPaged failed, falling back to getAll:', e && e.message); } catch (_) {}
+            return (await AppDataStore.getAll('documents')) || [];
+        }
+    };
+
     // React-island flag (default-on, PROMOTED 2026-06-16 after opt-in verification:
     // useEffect-driven populate confirmed live — folder tree + files + breadcrumb
     // populate, matching legacy). Kill-switch → legacy: window.__REACT_DMS===false,
@@ -79,7 +101,8 @@
     const buildDocumentsIslandData = async () => {
         const [allFolders, allDocs] = await Promise.all([
             AppDataStore.getAll('folders'),
-            AppDataStore.getAll('documents'),
+            // Listing render: metadata-only fetch (never pulls the heavy base64 blob).
+            getDocumentsMeta(),
         ]);
         const folders = (allFolders || []);
         const docs = (allDocs || []);
@@ -403,7 +426,7 @@
     };
 
     const deleteFolder = async (id) => {
-        const [allFoldersForDel, allDocsForDel] = await Promise.all([AppDataStore.getAll('folders'), AppDataStore.getAll('documents')]);
+        const [allFoldersForDel, allDocsForDel] = await Promise.all([AppDataStore.getAll('folders'), getDocumentsMeta()]);
         const hasSub = allFoldersForDel.some(f => f.parent_id === id);
         const hasFiles = allDocsForDel.some(d => d.folder_id === id);
         if (hasSub || hasFiles) return UI.toast.error('Cannot delete: Folder is not empty');
@@ -620,14 +643,16 @@
     };
 
     const initSampleDocuments = async () => {
-        if ((await AppDataStore.getAll('documents')).length === 0) {
+        if (((await getDocumentsMeta()) || []).length === 0) {
             await AppDataStore.create('documents', { id: 101, filename: 'Welcome Guide.pdf', folder_id: 1, size: 1024 * 500, created_at: new Date().toISOString() });
             await AppDataStore.create('documents', { id: 102, filename: 'Privacy Policy.docx', folder_id: 1, size: 1024 * 200, created_at: new Date().toISOString() });
         }
     };
 
     const getFilesInCurrentFolder = async () => {
-        let files = await AppDataStore.getAll('documents');
+        // Listing render: metadata-only fetch (never pulls the heavy base64 blob).
+        // The blob is fetched lazily by getById only when a file is opened/downloaded.
+        let files = (await getDocumentsMeta()) || [];
 
         // Special views — mirror buildDocumentsIslandData so loadFolderContents()
         // can drive Recent/All/Starred uniformly (honoring _viewMode + batch actions).

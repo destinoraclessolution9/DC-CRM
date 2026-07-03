@@ -4387,6 +4387,11 @@ function _wireLoginBtn() {
     const exportRelationshipTree  = _lazyStub('chunks/script-fude.min.js', 'exportRelationshipTree');
     const changeLeaderboardPeriod = _lazyStub('chunks/script-fude.min.js', 'changeLeaderboardPeriod');
     const uploadProspectDocument  = _lazyStub('chunks/script-fude.min.js', 'uploadProspectDocument');
+    // Self-loading stub: the real showIntegrationHub lives in the gcal chunk.
+    // The whatsapp chunk's 'Back to Integrations' button calls app.showIntegrationHub
+    // before that chunk is loaded; _lazyStub loads gcal then dispatches (forwarding
+    // the container arg via ...a) so the button works without an eager gcal load.
+    const showIntegrationHub      = _lazyStub('chunks/script-gcal.min.js', 'showIntegrationHub');
 
 
 
@@ -5261,6 +5266,7 @@ function _wireLoginBtn() {
         offlineUpdate,
 
         // Phase 15: Integrations — implemented by chunks/script-gcal.js
+        showIntegrationHub, // self-loading stub → chunks/script-gcal.min.js
 
         // [CHUNK: order_form_extract] showOrderFormExtractView + ofeHandleFile Object.assigned by chunks/script-order-form-extract.js
 

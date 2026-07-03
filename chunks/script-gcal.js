@@ -160,6 +160,18 @@
                 if (_ownerId) activities = activities.filter(a => a.lead_agent_id === _ownerId);
                 const syncLog = await this.getSyncLog();
 
+                // Honor the per-activity-type toggles the user saved (Sync CPS / FTF /
+                // FSA / Events / Calls). Same lower-cased mapping the auto-sync listener
+                // uses (CPS→cps, EVENT→event, …). Absent settings default to two-way's
+                // connect-time map so an un-migrated connection still pushes as before.
+                const _syncTypes = (await getGoogleConnection())?.sync_settings?.syncTypes
+                    || { cps: true, ftf: true, fsa: true, event: true, call: false };
+                // Only the five toggle-controlled types (cps/ftf/fsa/event/call) can be
+                // switched off. Any other activity_type (GR, AGENT_MEETING, SITE, XG, …)
+                // is not in the toggle map and must keep syncing as before — default-allow
+                // when the key is absent so we don't silently drop meeting-shaped types.
+                const _typeEnabled = (a) => { const v = _syncTypes[a.activity_type?.toLowerCase()]; return v === undefined ? true : !!v; };
+
                 let synced = 0, created = 0, updated = 0, deleted = 0;
 
                 for (const activity of activities) {
@@ -172,6 +184,12 @@
                             // reported, matching the awaited add/update paths below.
                             await this.removeSyncRecord(activity.id);
                             deleted++;
+                        } else if (!_typeEnabled(activity)) {
+                            // Type toggle is off: skip pushing new/updated events for this
+                            // type. Non-destructive — any previously-synced Google event is
+                            // left untouched (matches the auto-sync listener, which simply
+                            // never fires for disabled types rather than deleting).
+                            continue;
                         } else if (syncRecord?.google_event_id) {
                             await this.googleCalendar.updateEvent(activity, syncRecord.google_event_id);
                             await this.updateSyncRecord(activity.id, syncRecord.google_event_id);

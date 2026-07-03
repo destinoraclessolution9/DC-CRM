@@ -148,13 +148,21 @@ const TOTPManager = {
         const user = await AppDataStore.getById('users', userId);
         if (!user) return { success: false };
 
-        let encryptedSecret = secret;
+        // FAIL CLOSED: the TOTP secret must never be persisted in cleartext.
+        // If the Encryption helper is missing (module not loaded) OR encryption
+        // throws, abort enabling 2FA instead of falling through to a plaintext
+        // write — a DB read of mfa_secret must never yield a usable secret.
+        if (typeof Encryption === 'undefined' || typeof Encryption.encryptField !== 'function') {
+            console.warn('[2FA] Encryption unavailable; refusing to store TOTP secret in cleartext');
+            if (window.UI && window.UI.toast) UI.toast.error('Cannot enable 2FA: secure storage is unavailable. Contact support.');
+            return { success: false, error: 'encryption_unavailable' };
+        }
+        let encryptedSecret;
         try {
-            if (typeof Encryption !== 'undefined' && typeof Encryption.encryptField === 'function') {
-                encryptedSecret = await Encryption.encryptField(secret, await getEncryptionKey());
-            }
+            encryptedSecret = await Encryption.encryptField(secret, await getEncryptionKey());
         } catch (e) {
-            console.warn('[2FA] Encryption unavailable; storing secret in cleartext is not acceptable for production');
+            console.warn('[2FA] Encryption failed; refusing to store TOTP secret in cleartext', e);
+            if (window.UI && window.UI.toast) UI.toast.error('Cannot enable 2FA: secure storage is unavailable. Contact support.');
             return { success: false, error: 'encryption_unavailable' };
         }
 
@@ -436,12 +444,11 @@ const showTwoFactorSetup = () => {
                 <div class="step">
                     <div class="step-number">2</div>
                     <div class="step-content">
-                        <h4>Scan QR Code</h4>
-                        <div class="qr-code">
-                            <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(secret.qrCode)}"
-                                 alt="QR Code" loading="lazy" decoding="async">
-                        </div>
-                        <p>Or enter this key manually: <code>${esc(secret.secret)}</code></p>
+                        <h4>Add Your Account</h4>
+                        <p>In your authenticator app choose <strong>"Enter a setup key"</strong> and type this key:</p>
+                        <p><code style="font-size:1.1em; letter-spacing:1px; word-break:break-all;">${esc(secret.secret)}</code></p>
+                        <p style="margin-top:8px;">Or paste this full setup URI:</p>
+                        <p><code style="word-break:break-all;">${esc(secret.qrCode)}</code></p>
                     </div>
                 </div>
 
@@ -551,10 +558,35 @@ const showTwoFactorLogin = (username, password) => {
 const verifyTwoFactorLogin = async (username, password) => {
     const code = document.getElementById('2fa-code')?.value || '';
 
+    // Establish the Supabase session FIRST. The users table is RLS-gated: with no
+    // session the mfa lookup below returns 0 rows and a correct code is wrongly
+    // rejected. Auth.login (signInWithPassword) has already validated the password
+    // to reach this 2FA screen, so re-running it here just creates the session the
+    // RLS reads need. We tear the session back down if the second factor fails.
+    try {
+        if (typeof Auth !== 'undefined' && typeof Auth.login === 'function') {
+            await Auth.login(username, password);
+        }
+    } catch (e) {
+        console.error('[2FA] session establishment failed:', e);
+        if (window.UI && window.UI.toast) UI.toast.error('Could not complete sign-in. Please try again.');
+        return;
+    }
+
+    // Signs out the just-created session so a failed/aborted second factor never
+    // leaves the user half-authenticated (password accepted, 2FA not).
+    const _abort = async (msg) => {
+        try {
+            if (typeof Auth !== 'undefined' && typeof Auth.logout === 'function') await Auth.logout();
+        } catch (_) { /* best-effort teardown */ }
+        if (msg && window.UI && window.UI.toast) UI.toast.error(msg);
+    };
+
     // The users lean select (data.js:188) has no `username` column and omits the
     // MFA columns. Identify the row by a field that IS selected (email, then
     // full_name), then re-fetch the FULL row via getByIdFull so mfa_enabled /
-    // mfa_secret are actually present.
+    // mfa_secret are actually present. These reads now succeed under RLS because
+    // the session above is live.
     const ident = String(username || '').trim().toLowerCase();
     const users = await AppDataStore.getAll('users');
     const lite = (users || []).find(u =>
@@ -563,7 +595,7 @@ const verifyTwoFactorLogin = async (username, password) => {
     );
     const user = lite ? await AppDataStore.getByIdFull('users', lite.id) : null;
     if (!user || !user.mfa_enabled || !user.mfa_secret) {
-        if (window.UI && window.UI.toast) UI.toast.error('Invalid verification code');
+        await _abort('Invalid verification code');
         return;
     }
 
@@ -576,25 +608,13 @@ const verifyTwoFactorLogin = async (username, password) => {
 
     const ok = await TOTPManager.verifyTOTP(secret, code);
     if (ok) {
-        // Complete login through the REAL session path. Auth has no setToken/setUser
-        // (auth.js:93 exposes only login/logout/etc.) — calling them threw a
-        // TypeError that aborted login. A genuine Supabase session must be created
-        // via Auth.login (signInWithPassword); then publish the user via the app
-        // state setter rather than a fictional Auth setter.
-        try {
-            if (typeof Auth !== 'undefined' && typeof Auth.login === 'function') {
-                await Auth.login(username, password);
-            }
-            if (window._appState) window._appState.cu = user;
-        } catch (e) {
-            console.error('[2FA] session completion failed:', e);
-            if (window.UI && window.UI.toast) UI.toast.error('Could not complete sign-in. Please try again.');
-            return;
-        }
+        // Session already created above; publish the user via the app state setter
+        // (Auth exposes only login/logout — auth.js:113 — so there is no setUser).
+        if (window._appState) window._appState.cu = user;
         UI.hideModal();
         window.location.href = '#dashboard';
     } else {
-        if (window.UI && window.UI.toast) UI.toast.error('Invalid verification code');
+        await _abort('Invalid verification code');
     }
 };
 
@@ -636,6 +656,28 @@ const verifyBackupCodeLogin = async (username, password) => {
         return;
     }
 
+    // Establish the Supabase session FIRST so the RLS-gated users lookup and the
+    // consumeBackupCode read/write below actually see rows (with no session RLS
+    // returns 0 rows and a valid code is wrongly rejected). The password was
+    // already validated to reach this screen; we tear the session down if the
+    // backup code fails.
+    try {
+        if (typeof Auth !== 'undefined' && typeof Auth.login === 'function') {
+            await Auth.login(username, password);
+        }
+    } catch (e) {
+        console.error('[2FA] session establishment failed:', e);
+        if (window.UI && window.UI.toast) UI.toast.error('Could not complete sign-in. Please try again.');
+        return;
+    }
+
+    const _abort = async (msg) => {
+        try {
+            if (typeof Auth !== 'undefined' && typeof Auth.logout === 'function') await Auth.logout();
+        } catch (_) { /* best-effort teardown */ }
+        if (msg && window.UI && window.UI.toast) UI.toast.error(msg);
+    };
+
     let user;
     try {
         // Match by email/full_name (present in the lean select) — there is no
@@ -649,11 +691,11 @@ const verifyBackupCodeLogin = async (username, password) => {
         );
         user = lite ? await AppDataStore.getByIdFull('users', lite.id) : null;
     } catch (e) {
-        if (window.UI && window.UI.toast) UI.toast.error('Could not verify backup code. Try again.');
+        await _abort('Could not verify backup code. Try again.');
         return;
     }
     if (!user || !user.mfa_enabled) {
-        if (window.UI && window.UI.toast) UI.toast.error('Invalid backup code');
+        await _abort('Invalid backup code');
         return;
     }
 
@@ -661,27 +703,17 @@ const verifyBackupCodeLogin = async (username, password) => {
     try {
         ok = await TOTPManager.consumeBackupCode(user.id, code);
     } catch (e) {
-        if (window.UI && window.UI.toast) UI.toast.error('Could not verify backup code. Try again.');
+        await _abort('Could not verify backup code. Try again.');
         return;
     }
 
     if (ok) {
-        // Complete login through the REAL session path — Auth has no setToken/setUser
-        // (auth.js:93); the old calls threw a TypeError. Create a genuine Supabase
-        // session via Auth.login, then publish the user via the app state setter.
-        try {
-            if (typeof Auth !== 'undefined' && typeof Auth.login === 'function') {
-                await Auth.login(username, password);
-            }
-            if (window._appState) window._appState.cu = user;
-        } catch (e) {
-            console.error('[2FA] session completion failed:', e);
-            if (window.UI && window.UI.toast) UI.toast.error('Could not complete sign-in. Please try again.');
-            return;
-        }
+        // Session already created above; publish the user via the app state setter
+        // (Auth exposes only login/logout — auth.js:113 — so there is no setUser).
+        if (window._appState) window._appState.cu = user;
         UI.hideModal();
         window.location.href = '#dashboard';
     } else {
-        if (window.UI && window.UI.toast) UI.toast.error('Invalid or already-used backup code');
+        await _abort('Invalid or already-used backup code');
     }
 };

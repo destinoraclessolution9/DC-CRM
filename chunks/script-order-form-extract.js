@@ -208,7 +208,7 @@
                 <i class="fas fa-user-check" style="color:#15803d;"></i>
                 <div>
                     <span style="font-weight:600;color:#166534;">${esc(ref.customer.full_name)}</span>
-                    <span style="margin-left:6px;font-size:10px;padding:1px 6px;border-radius:10px;background:${ref.customer.status === 'customer' ? '#dbeafe' : '#dcfce7'};color:${ref.customer.status === 'customer' ? '#1d4ed8' : '#15803d'};">${esc(ref.customer.status || 'prospect')}</span>
+                    <span style="margin-left:6px;font-size:10px;padding:1px 6px;border-radius:10px;background:${ref.customer.status === 'converted' ? '#dbeafe' : '#dcfce7'};color:${ref.customer.status === 'converted' ? '#1d4ed8' : '#15803d'};">${esc(ref.customer.status === 'converted' ? 'customer' : (ref.customer.status || 'prospect'))}</span>
                     <div style="font-size:11px;color:#4ade80;margin-top:1px;">${esc(ref.customer.phone || ref.customer.ic_number || '')}</div>
                 </div>
                </div>`
@@ -798,7 +798,9 @@
             _ofeLinkedProspect = {
                 id:         crmCustomer.id,
                 name:       crmCustomer.full_name,
-                entityType: (crmCustomer.status === 'customer' || crmCustomer.status === 'Customer') ? 'customer' : 'prospect',
+                // A prospects-table row that has been converted IS the customer
+                // (status='converted'); there is no literal status='customer' value.
+                entityType: crmCustomer.status === 'converted' ? 'customer' : 'prospect',
             };
         }
 
@@ -910,7 +912,9 @@
                 return;
             }
             resEl.innerHTML = rows.map(r => {
-                const entityType = (r.status === 'customer' || r.status === 'Customer') ? 'customer' : 'prospect';
+                // A prospects-table row that has been converted IS the customer
+                // (status='converted'); there is no literal status='customer' value.
+                const entityType = r.status === 'converted' ? 'customer' : 'prospect';
                 const badge = entityType === 'customer'
                     ? `<span style="font-size:10px;padding:1px 6px;border-radius:10px;background:#dbeafe;color:#1d4ed8;">Customer</span>`
                     : `<span style="font-size:10px;padding:1px 6px;border-radius:10px;background:#dcfce7;color:#15803d;">Prospect</span>`;
@@ -1053,11 +1057,12 @@
             if (popDown) activity.pop_down_payment   = popDown;
         }
 
-        if (_ofeLinkedProspect.entityType === 'customer') {
-            activity.customer_id = _ofeLinkedProspect.id;
-        } else {
-            activity.prospect_id = _ofeLinkedProspect.id;
-        }
+        // The linked id always comes from the prospects table (every search/cross-ref
+        // path here queries `prospects`), and a converted person keeps their agent-editable
+        // prospect row. Per the dual-record design, activity FKs link to that prospect side
+        // — the prospects id is NOT a valid customers.id, so route it via prospect_id even
+        // when the person is a converted "customer" (entityType is display-only here).
+        activity.prospect_id = _ofeLinkedProspect.id;
 
         const saveBtn = document.querySelector('#ofe-closing-panel .btn.primary');
         if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…'; }

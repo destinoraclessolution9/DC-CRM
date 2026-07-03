@@ -606,7 +606,7 @@ const mapRowToRecord = (row, reverseMap, agentId, importType = 'prospects') => {
         phone: get('phone'),
         email: get('email'),
         ic_number: get('ic_number'),
-        date_of_birth: get('date_of_birth'),
+        date_of_birth: get('date_of_birth') || null,
         lunar_birth: get('lunar_birth'),
         occupation: get('occupation'),
         company_name: get('company_name'),

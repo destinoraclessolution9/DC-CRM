@@ -318,7 +318,15 @@ const approveQueueEntry = async (entryId) => {
                 console.warn('approveQueueEntry: linked-customer query failed — full-table fallback', e);
                 customer = (await AppDataStore.getAll('customers')).find(c => c.converted_from_prospect_id == entry.prospect_id);
             }
-            if (customer) {
+            // In-flight guard (audit data-integrity): _queueInFlight already blocks a
+            // double-click on THIS entry, but a concurrent approveClosingRecord additional-
+            // sale for the SAME prospect could still double-book the purchase + LTV. Reuse
+            // the shared _convInFlight set keyed by prospect_id (the same key that path
+            // uses) so only one of the two paths books the sale. Skip silently if held.
+            const _saleKey = String(entry.prospect_id);
+            if (customer && !_convInFlight.has(_saleKey)) {
+                _convInFlight.add(_saleKey);
+                try {
                 // Audit null-deref fix: guard snapshot_after — a new_sale row can come
                 // back with a null/RLS-trimmed snapshot_after (same failure the sibling
                 // info_update branch guards against). Without this, cr.sale_amount throws.
@@ -337,6 +345,9 @@ const approveQueueEntry = async (entryId) => {
                 // Atomic, race-free LTV + total_purchases bump (audit #8/#16/#22) —
                 // matches savePurchase/deletePurchase so all purchase paths agree.
                 await _utils.adjustCustomerLtv(customer.id, amt, 1);
+                } finally {
+                    _convInFlight.delete(_saleKey);
+                }
             }
         }
         if (prospect?.closing_record?.status === 'submitted') {
@@ -450,6 +461,17 @@ const approveClosingRecord = async (prospectId) => {
     if (!prospect?.closing_record) return UI.toast.error('No closing record found');
     const isAlreadyConverted = prospect.status === 'converted' || prospect.conversion_status === 'approved';
     if (isAlreadyConverted) {
+        // In-flight guard (audit data-integrity): this additional-sale branch creates a
+        // purchases row + adjustCustomerLtv with NO other lock, so a rapid double-click
+        // would book the sale twice and double the LTV. Reuse the shared _convInFlight set
+        // keyed by prospectId so this also coordinates with the new_sale queue path
+        // targeting the same prospect. Scoped to this branch only — the else branch below
+        // delegates to approveProspectConversion, which takes the SAME _convInFlight lock,
+        // so locking here would deadlock that path. Released in finally.
+        const _convKey = String(prospectId);
+        if (_convInFlight.has(_convKey)) return;
+        _convInFlight.add(_convKey);
+        try {
         // Additional sale on existing customer — add purchase, archive CR, reset
         const cr = prospect.closing_record;
         const now = new Date().toISOString();
@@ -506,6 +528,9 @@ const approveClosingRecord = async (prospectId) => {
             closing_record: null
         });
         UI.toast.success(`Sale of RM ${saleAmount.toLocaleString()} approved!`);
+        } finally {
+            _convInFlight.delete(_convKey);
+        }
     } else {
         // First conversion — reuse full-copy conversion
         await approveProspectConversion(prospectId);

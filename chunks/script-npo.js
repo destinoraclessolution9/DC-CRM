@@ -937,7 +937,26 @@
     };
 
     // ── SAVE ─────────────────────────────────────────────────────────────
+    // In-flight reentrancy guard. The order save is 3 dependent, non-atomic
+    // inserts (sale → items → installments). If a second invocation slips through
+    // while the first is still awaiting the network — a double-click, a rapid
+    // re-fire, or the framework re-enabling the Save button after an unrelated
+    // toast — it would insert a DUPLICATE sale. Without a DB client_request_id
+    // column (none exists; adding one is out of scope), this module-scoped flag is
+    // the idempotency key: the first call wins, any overlapping call is ignored.
+    // Combined with the framework's button-load disable (ui.js _startBtnLoad),
+    // this makes a retry-while-in-flight a no-op instead of a stacked order.
+    let _orderSaveInFlight = false;
     const npoSaveOrder = async () => {
+        if (_orderSaveInFlight) return; // already saving this order — ignore the duplicate
+        _orderSaveInFlight = true;
+        try {
+            return await _npoSaveOrderImpl();
+        } finally {
+            _orderSaveInFlight = false;
+        }
+    };
+    const _npoSaveOrderImpl = async () => {
         const sb = _sb();
         if (!sb) { UI.toast.error('Supabase not connected'); return; }
         if (!_order) { UI.toast.error('Order state lost — reopen the form'); return; }
