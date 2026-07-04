@@ -379,15 +379,27 @@
             { key:'eyePlus',   label:'Eye+' },
         ];
         const bals = {};
+        // 1) Locate each product-block header. The label is anchored to the START of a
+        //    line (m flag) so an earlier free-text mention of the same words isn't taken
+        //    as the header; escape it (e.g. 'Eye+') so metachars match literally.
+        const headers = [];
         for (const g of groups) {
-            // Anchor the label to the START of a line (m flag) so it only matches
-            // a real product-block header — not an earlier free-text mention of the
-            // same words elsewhere in the (admin-edited) report. The non-greedy
-            // gap then captures the FIRST 'Balance -' inside that block. Escape the
-            // label for ALL groups (e.g. 'Eye+') so metachars are matched literally.
-            const re = new RegExp('^' + _brEscapeRegExp(g.label) + '[\\s\\S]*?Balance\\s*-\\s*(\\d+)', 'm');
-            const m = text.match(re);
-            if (m) bals[g.key] = Number(m[1]);
+            const hm = new RegExp('^' + _brEscapeRegExp(g.label), 'm').exec(text);
+            if (hm) headers.push({ key: g.key, start: hm.index });
+        }
+        if (!headers.length) return bals;
+        // 2) Sort by position, then BOUND each block to end where the NEXT product header
+        //    begins (or end of text) and search for 'Balance -' only WITHIN that block. The
+        //    old '[\s\S]*?' gap crossed block boundaries: if a block was missing its own
+        //    Balance line (admin deleted it), the non-greedy match walked straight into the
+        //    NEXT block and stole its number. Bounding the search makes a missing line yield
+        //    no balance for that block instead of a wrong one. (audit boss-report:386)
+        headers.sort((a, b) => a.start - b.start);
+        for (let i = 0; i < headers.length; i++) {
+            const blockEnd = (i + 1 < headers.length) ? headers[i + 1].start : text.length;
+            const block = text.slice(headers[i].start, blockEnd);
+            const bm = block.match(/Balance\s*-\s*(\d+)/);
+            if (bm) bals[headers[i].key] = Number(bm[1]);
         }
         return bals;
     };

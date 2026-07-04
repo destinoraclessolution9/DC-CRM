@@ -74,14 +74,38 @@ const selfChangePassword = async () => {
     if (newPwd !== confirmPwd) return UI.toast.error('Passwords do not match');
     if (newPwd === currentPwd) return UI.toast.error('New password must differ from current password');
 
-    // Verify current password via re-auth
+    // Verify the current password on a THROWAWAY, non-persistent client so the MAIN
+    // client's session is never touched. signInWithPassword mints a FRESH session that,
+    // for an MFA (AAL2) user, is only AAL1 — running it on window.supabase would silently
+    // REPLACE the user's elevated session with a downgraded one, dropping AAL2-gated access
+    // mid-session (the "dead session" symptom). persistSession:false keeps the throwaway
+    // entirely in memory (it never writes the shared 'fs-crm-auth-v1' localStorage key), and
+    // a distinct storageKey guarantees isolation from the real session. (audit settings:79)
+    const _factory = window._supabaseFactory
+        || (window.supabase && typeof window.supabase.createClient === 'function' ? window.supabase : null);
+    if (!_factory) return UI.toast.error('Auth is still loading — please reload and try again');
+    let _verifyClient;
     try {
-        const verifyRes = await window.supabase.auth.signInWithPassword({
+        _verifyClient = _factory.createClient(window.SUPABASE_URL, window.__SUPABASE_ANON, {
+            auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'fs-crm-pwverify-ephemeral' }
+        });
+    } catch (e) {
+        console.error('Password verify client init failed:', e?.message || e);
+        return UI.toast.error('Could not verify password. Please try again.');
+    }
+    try {
+        const verifyRes = await _verifyClient.auth.signInWithPassword({
             email: _state.cu.email,
             password: currentPwd
         });
+        // Best-effort revoke the ephemeral verification session so it doesn't dangle.
+        // MUST be scope:'local' — the supabase-js default scope:'global' revokes EVERY
+        // refresh token for this user server-side, which would kill the MAIN session (and
+        // all the user's other devices). 'local' terminates only this throwaway session.
+        try { await _verifyClient.auth.signOut({ scope: 'local' }); } catch (_) { /* ephemeral — expires on its own */ }
         const verifyErr = verifyRes && verifyRes.error;
         if (verifyErr) return UI.toast.error('Current password is incorrect');
+        // Update the password on the MAIN client — its (possibly AAL2) session is intact.
         const updateRes = await window.supabase.auth.updateUser({ password: newPwd });
         const updateErr = updateRes && updateRes.error;
         if (updateErr) throw updateErr;
