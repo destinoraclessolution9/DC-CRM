@@ -421,7 +421,7 @@ viewport.innerHTML = `
             ${await renderCurrentAssignments(agent.id)}
         </div>
         <div class="performance-card">
-            <h4><i class="fas fa-bullseye"></i> Performance Targets (March)</h4>
+            <h4><i class="fas fa-bullseye"></i> Performance Targets</h4>
             ${await renderPerformanceTargets(agent.id)}
         </div>
     </div>
@@ -593,7 +593,7 @@ const showAgentDetail = async (agentId) => {
                     ${await renderCurrentAssignments(agent.id)}
                 </div>
                 <div class="performance-card">
-                    <h4><i class="fas fa-bullseye"></i> Performance Targets (March)</h4>
+                    <h4><i class="fas fa-bullseye"></i> Performance Targets</h4>
                     ${await renderPerformanceTargets(agent.id)}
                 </div>
             </div>
@@ -682,7 +682,7 @@ const renderCustomerHistory = async (agentId) => {
                         <div class="assignment-prospect">${escapeHtml(c.full_name || '')}</div>
                         <div class="next-action">Customer Since: ${escapeHtml(c.customer_since || '')}</div>
                     </div>
-                    <span class="assignment-status status-active">RM ${(c.lifetime_value || 0).toLocaleString()}</span>
+                    <span class="assignment-status status-active">${UI.money(c.lifetime_value || 0, c.country)}</span>
                 </div>
             `).join('')
         }

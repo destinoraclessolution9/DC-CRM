@@ -370,7 +370,7 @@ const openScoreAdjustmentModal = async (entityType, entityId) => {
                 <input type="text" id="score-adj-note" class="form-control" placeholder="e.g. Customer satisfied with feng shui analysis" maxlength="200">
             </div>
         </div>`;
-    UI.showModal(`Adjust Score — ${escapeHtml(entity.full_name)}`, content, [
+    UI.showModal(`Adjust Score — ${entity.full_name || ''}`, content, [
         { label: 'Apply', type: 'primary',   action: `app.confirmScoreAdjustment('${entityType}', ${entityId})` },
         { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' }
     ]);

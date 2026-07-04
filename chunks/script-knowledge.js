@@ -695,11 +695,22 @@
         if (!owner || !_kbDailyDate) return;
         const content = document.getElementById('kb-daily-content')?.value || '';
         try {
-            const rows = await AppDataStore.query('knowledge_daily_notes', { owner_id: owner, note_date: _kbDailyDate }) || [];
-            if (rows[0]) {
-                await AppDataStore.update('knowledge_daily_notes', rows[0].id, { content });
+            // Atomic UPSERT on the UNIQUE(owner_id, note_date) constraint — the old
+            // read-then-insert lost a day's note when the same day was open in a second
+            // tab/device (both branched to INSERT → unique violation on the loser).
+            // Online: atomic upsert. Offline: fall through to the AppDataStore path so the
+            // write still QUEUES for later sync (a direct upsert would just reject + lose it).
+            const _online = (typeof navigator === 'undefined') || navigator.onLine;
+            const sb = _online && AppDataStore._writeClient && AppDataStore._writeClient();
+            if (sb) {
+                const { error } = await sb.from('knowledge_daily_notes')
+                    .upsert({ owner_id: owner, note_date: _kbDailyDate, content }, { onConflict: 'owner_id,note_date' });
+                if (error) throw error;
+                try { AppDataStore.invalidateCache && AppDataStore.invalidateCache('knowledge_daily_notes'); } catch (_) {}
             } else {
-                await AppDataStore.create('knowledge_daily_notes', { owner_id: owner, note_date: _kbDailyDate, content });
+                const rows = await AppDataStore.query('knowledge_daily_notes', { owner_id: owner, note_date: _kbDailyDate }) || [];
+                if (rows[0]) await AppDataStore.update('knowledge_daily_notes', rows[0].id, { content });
+                else await AppDataStore.create('knowledge_daily_notes', { owner_id: owner, note_date: _kbDailyDate, content });
             }
             const s = document.getElementById('kb-daily-status');
             if (s) s.textContent = 'Saved · ' + new Date().toLocaleTimeString();

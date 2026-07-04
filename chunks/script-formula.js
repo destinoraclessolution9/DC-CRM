@@ -1279,11 +1279,16 @@
             UI.toast.info(`Only ${moveQty} available at hub — transferring ${moveQty} (requested ${rec.transferQty}).`);
         }
 
+        // Compensation state so a failure AFTER the hub debit commits can undo it — the
+        // writes below are non-atomic, and without this a failed outlet-credit / transfer-
+        // order write left the hub permanently debited (phantom stock loss).
+        let _hubDebited = false, _outletPrev = null, _outletBalId = null;
         try {
             const prevHub = hubBal.physical_stock;
             hubBal.physical_stock = liveHub - moveQty;
             try {
                 await fpUpdate('fp_stock_balance', hubBal.id, { physical_stock: hubBal.physical_stock });
+                _hubDebited = true;
             } catch (e) { hubBal.physical_stock = prevHub; throw e; } // roll back in-memory hub debit
 
             if (outletBal) {
@@ -1291,6 +1296,7 @@
                 outletBal.physical_stock = (parseInt(outletBal.physical_stock) || 0) + moveQty;
                 try {
                     await fpUpdate('fp_stock_balance', outletBal.id, { physical_stock: outletBal.physical_stock });
+                    _outletPrev = prevOutlet; _outletBalId = outletBal.id;
                 } catch (e) { outletBal.physical_stock = prevOutlet; throw e; }
             } else {
                 const nb = await fpSave('fp_stock_balance', {
@@ -1325,7 +1331,18 @@
         } catch (e) {
             // A real Supabase write failed — surface it instead of a fabricated success.
             console.error('fpExecuteTransfer failed:', e);
-            UI.toast.error('Transfer did not save — please retry.');
+            // Compensating undo so the transfer is all-or-nothing: re-credit the hub (and
+            // reverse an already-committed outlet credit) that were written before the
+            // failure — otherwise the debited stock silently vanishes.
+            if (_hubDebited) {
+                try { await fpUpdate('fp_stock_balance', hubBal.id, { physical_stock: liveHub }); hubBal.physical_stock = liveHub; }
+                catch (e2) { console.error('fpExecuteTransfer: hub re-credit compensation FAILED — manual stock correction needed', e2); }
+            }
+            if (_outletBalId != null && _outletPrev != null) {
+                try { await fpUpdate('fp_stock_balance', _outletBalId, { physical_stock: _outletPrev }); }
+                catch (e2) { console.error('fpExecuteTransfer: outlet reversal compensation FAILED', e2); }
+            }
+            UI.toast.error('Transfer did not save — reverted. Please retry.');
         }
         fpRenderTransfers(document.getElementById('fp-tab-content'));
     };

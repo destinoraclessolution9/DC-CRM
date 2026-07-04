@@ -177,9 +177,25 @@
         const submission = await AppDataStore.getById('lead_submissions', submissionId);
         if (!submission) return;
         const data = submission.data || {};
-        const name = data['Full Name'] || data.name || 'Lead Form Prospect';
-        const phone = data['Phone'] || data.phone || '';
-        const email = data['Email'] || data.email || '';
+        // Resolve by exact key first, then a case-insensitive keyword heuristic over the
+        // submission keys, then legacy lowercase — the form builder can RENAME these
+        // fields ('Full Name'→'Your Name', 'Phone'→'Contact No.'), which the old
+        // hardcoded keys missed, producing junk-named / phone-less prospects.
+        const _findByKey = (patterns, exclude = [], validate = null) => {
+            for (const k of Object.keys(data)) {
+                const kl = k.toLowerCase();
+                if (exclude.some(x => kl.includes(x))) continue;
+                if (patterns.some(p => kl.includes(p)) && data[k] && (!validate || validate(String(data[k])))) return data[k];
+            }
+            return '';
+        };
+        const name = data['Full Name'] || data.name || _findByKey(['full name', 'name'], ['company', 'business']) || 'Lead Form Prospect';
+        // phone: specific key tokens only (dropped loose 'contact'/'tel'/'hp' that matched
+        // 'Contact Name'/'Telegram') AND the value must look like a number.
+        const phone = data['Phone'] || data.phone || _findByKey(['phone', 'mobile', 'whatsapp', 'wasap', 'contact no', 'contact number'], ['name'], v => /\d{6,}/.test(v)) || '';
+        // email: exclude 'mailing/address/postal' and require an '@' so a mailing address
+        // isn't mistaken for an email.
+        const email = data['Email'] || data.email || _findByKey(['email', 'e-mail'], ['address', 'mailing', 'postal'], v => v.includes('@')) || '';
         // form.html (submitForm) already auto-creates a prospect for this lead at
         // submission time (source 'lead_form', owned by the form's assigned agent).
         // De-dupe: if that prospect already exists, LINK the submission to it rather

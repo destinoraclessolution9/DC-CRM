@@ -290,8 +290,14 @@
                 return rule.region;
             }
         }
-        // Fallback via state
-        if (state && /johor/i.test(state)) return 'JB';
+        // JB detection: a populated STATE against Johor + common JB-town names (short
+        // tokens word-anchored to avoid substring false-positives). Only fall back to the
+        // OUTLET NAME when the state is BLANK — a known non-JB state must never be
+        // overridden by an outlet-name substring. (region_mapping above still wins.)
+        const _jbRe = /johor|jhr|johor\s*bahru|pasir\s*gudang|gelang\s*patah|\b(skudai|kulai|masai|tampoi|nusajaya|iskandar|senai|permas|tebrau)\b/i;
+        const _st = String(state || '').trim();
+        if (_jbRe.test(_st)) return 'JB';
+        if (!_st && _jbRe.test(outletStr)) return 'JB';
         return cfg.default_region_fallback || 'KL';
     };
 
