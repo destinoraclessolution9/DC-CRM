@@ -2911,92 +2911,103 @@ class DataStore {
         // stalls for 10+ seconds on large tables (activities, prospects).
         const countMode = options.countMode !== undefined ? options.countMode : 'planned';
         const selectOpts = countMode ? { count: countMode } : {};
-        let q = this._readClient()
-            .from(tableName)
-            .select(selectClause, selectOpts);
-
-        // Scoping — restrict to rows the user is allowed to see.
-        // Single-field scope: scopeField + scopeValues
-        // Multi-field scope: scopeFields [{ field, values }] — OR across fields
-        if (options.scopeFields && options.scopeFields.length > 0) {
-            // Build PostgREST OR filter: (field1.in.(v1,v2),field2.in.(v1,v2))
-            // Strip the OR-syntax delimiters ( ) , from each scope value so an id
-            // that somehow contains one can't break out of its .in(...) clause and
-            // corrupt the OR expression (mirrors the search sanitizer below).
-            const orParts = options.scopeFields.map(
-                s => `${s.field}.in.(${s.values.map(v => String(v).replace(/[,()]/g, '')).join(',')})`
-            );
-            q = q.or(orParts.join(','));
-        } else if (options.scopeField && options.scopeValues) {
-            q = q.in(options.scopeField, options.scopeValues);
-        }
-
-        // Equality filters
-        if (options.filters) {
-            for (const [key, value] of Object.entries(options.filters)) {
-                if (value == null || value === '' || value === 'null' || value === 'undefined') continue;
-                q = q.eq(key, value);
-            }
-        }
-
-        // Range filters (gte / lte) — for date ranges etc.
-        if (options.gte) {
-            for (const [key, value] of Object.entries(options.gte)) {
-                if (value != null) q = q.gte(key, value);
-            }
-        }
-        if (options.lte) {
-            for (const [key, value] of Object.entries(options.lte)) {
-                if (value != null) q = q.lte(key, value);
-            }
-        }
-
-        // Full-text-style search across multiple columns.
-        // Token-AND of field-OR: split the term on whitespace and require EACH
-        // token to match at least one field. Tokens may land in different fields
-        // and in any order, so "oo kean cherng" now finds "Kean Cherng Oo", a
-        // name carrying a middle token, or surname-first "Oo, Kean Cherng". The
-        // old single `%term%` ilike only matched when the WHOLE typed string
-        // appeared unbroken in one column. Multiple .or() calls on the same
-        // builder are ANDed by PostgREST → (tok1 in any field) AND (tok2 …) …
-        if (options.search && options.searchFields && options.searchFields.length > 0) {
-            // Strip the PostgREST OR-syntax delimiters (comma / parens) and the
-            // % wildcard so a name/company like 'Tan, Sdn Bhd' or 'ABC (M)' can't
-            // break out of the .or() expression and return HTTP 400. Splitting on
-            // whitespace then drops the now-blank fragments.
-            const tokens = options.search.replace(/[%,()*]/g, ' ').trim().split(/\s+/).filter(Boolean);
-            for (const tok of tokens) {
-                q = q.or(options.searchFields.map(f => `${f}.ilike.%${tok}%`).join(','));
-            }
-        }
-
-        // Sorting
-        if (options.sort) {
-            q = q.order(options.sort, { ascending: options.sortDir !== 'desc' });
-        }
-
-        // Pagination
+        // Pagination bounds. When the caller asks for MORE than one PostgREST page
+        // (>1000), we auto-paginate below — which needs a STABLE sort across pages, so
+        // default to 'id' when the caller didn't specify a sort. Single-page reads keep
+        // the original behavior (sort only if explicitly requested).
         const limit = options.limit || 50;
         const offset = options.offset || 0;
-        q = q.range(offset, offset + limit - 1);
+        const _multiPage = limit > 1000;
+        const _sortCol = options.sort || (_multiPage ? 'id' : null);
+        const _sortAsc = options.sortDir !== 'desc';
+
+        // Build the (identical) query for a single page. Extracted into a closure so the
+        // auto-paginate loop can re-issue it with a moving range.
+        const _buildQ = (pageOffset, pageLimit) => {
+            let q = this._readClient()
+                .from(tableName)
+                .select(selectClause, selectOpts);
+
+            // Scoping — restrict to rows the user is allowed to see.
+            if (options.scopeFields && options.scopeFields.length > 0) {
+                // Strip the OR-syntax delimiters ( ) , from each scope value so an id
+                // can't break out of its .in(...) clause and corrupt the OR expression.
+                const orParts = options.scopeFields.map(
+                    s => `${s.field}.in.(${s.values.map(v => String(v).replace(/[,()]/g, '')).join(',')})`
+                );
+                q = q.or(orParts.join(','));
+            } else if (options.scopeField && options.scopeValues) {
+                q = q.in(options.scopeField, options.scopeValues);
+            }
+
+            // Equality filters
+            if (options.filters) {
+                for (const [key, value] of Object.entries(options.filters)) {
+                    if (value == null || value === '' || value === 'null' || value === 'undefined') continue;
+                    q = q.eq(key, value);
+                }
+            }
+
+            // Range filters (gte / lte)
+            if (options.gte) {
+                for (const [key, value] of Object.entries(options.gte)) {
+                    if (value != null) q = q.gte(key, value);
+                }
+            }
+            if (options.lte) {
+                for (const [key, value] of Object.entries(options.lte)) {
+                    if (value != null) q = q.lte(key, value);
+                }
+            }
+
+            // Full-text-style search: token-AND of field-OR (multiple .or() are ANDed).
+            if (options.search && options.searchFields && options.searchFields.length > 0) {
+                const tokens = options.search.replace(/[%,()*]/g, ' ').trim().split(/\s+/).filter(Boolean);
+                for (const tok of tokens) {
+                    q = q.or(options.searchFields.map(f => `${f}.ilike.%${tok}%`).join(','));
+                }
+            }
+
+            if (_sortCol) q = q.order(_sortCol, { ascending: _sortAsc });
+            q = q.range(pageOffset, pageOffset + pageLimit - 1);
+            return q;
+        };
 
         try {
             // Unauthenticated (boot race / expired token): the server would
             // RLS-filter to 0 rows with HTTP 200 — render from the cached
             // snapshot below instead of showing a falsely-empty view.
             if (!this.hasLiveSession()) throw new Error('no live auth session — using cached fallback');
-            const { data, error, count } = await q;
-            if (error) {
+            const PAGE = 1000;
+            const resp = await _buildQ(offset, Math.min(limit, PAGE));
+            if (resp.error) {
                 // If light-select column list is stale, retry with '*'
-                if (selectClause !== '*' && this._isSchemaError(error)) {
+                if (selectClause !== '*' && this._isSchemaError(resp.error)) {
                     console.warn(`queryAdvanced light-select failed for ${tableName}, retrying with *`);
                     options.select = '*';
                     return this.queryAdvanced(tableName, options);
                 }
-                throw error;
+                throw resp.error;
+            }
+            let data = resp.data || [];
+            const count = resp.count || 0;
+            // Auto-paginate the remainder: when the caller asked for >1000 rows and the
+            // first page came back FULL (== the cap), PostgREST truncated silently — page
+            // through the rest (stable sort guarantees no dropped/duplicated rows).
+            if (_multiPage && data.length === PAGE) {
+                let pageOff = offset + PAGE;
+                while (data.length < limit && pageOff < offset + limit) {
+                    const pr = await _buildQ(pageOff, PAGE);
+                    if (pr.error) break;
+                    const chunk = pr.data || [];
+                    data = data.concat(chunk);
+                    if (chunk.length < PAGE) break;
+                    pageOff += PAGE;
+                    if (pageOff > offset + 200000) break; // safety backstop
+                }
             }
             this._clearOfflineNotice();
-            return { data: this._stripTombstones(tableName, data || []), count: count || 0, limit, offset };
+            return { data: this._stripTombstones(tableName, data), count, limit, offset };
         } catch (e) {
             console.error(`queryAdvanced error on ${tableName}:`, e);
             // Fallback: filter cached/local data client-side with pagination.

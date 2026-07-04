@@ -1909,6 +1909,25 @@ JB 星期二到
                 }
             }
 
+            // Correct rows_new to the ACTUAL number of kept rows this run inserted.
+            // rows_new was written as keep.length BEFORE the upsert, but ignoreDuplicates
+            // silently drops unique_key clashes (e.g. on a re-commit), so it overstated.
+            // Rows carrying THIS run_id are exactly what this run wrote; non-excluded = new.
+            try {
+                if (runId != null) {
+                    const _savedRows = await AppDataStore.query('egg_processed_orders', { run_id: runId }).catch(() => []);
+                    const _actualNew = (_savedRows || []).filter(r => !r.excluded_reason).length;
+                    // Adjust DOWNWARD only, and only on a plausible positive count. query()
+                    // returns [] (never throws) on a read failure / stale local snapshot, so
+                    // blindly writing _actualNew could zero a CORRECT count. rows_new can only
+                    // be OVERstated (a clash drops rows), so we never need to raise it, and a
+                    // re-query of 0 right after a successful commit is treated as untrustworthy.
+                    if (_actualNew > 0 && _actualNew < keep.length) {
+                        await AppDataStore.update('egg_run_history', runId, { rows_new: _actualNew });
+                    }
+                }
+            } catch (_) { /* best-effort stat correction */ }
+
             // Simplified flow: no urgent-order table sync needed — pushed-up rows
             // already land in egg_processed_orders with excluded_reason above.
 
