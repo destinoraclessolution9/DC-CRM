@@ -562,14 +562,37 @@
         UI.showModal('Comparison', `<div class="diff-view"><pre>${escapeHtml(v1.data || '')}</pre><pre>${escapeHtml(v2.data || '')}</pre></div>`, [{ label: 'Close', type: 'primary', action: 'UI.hideModal()' }]);
     };
 
-    const downloadVersion = (versionId) => { UI.toast.info(`Downloading version ${versionId}...`); };
+    const downloadVersion = async (versionId) => {
+        // Was a stub that only toasted — actually deliver the historical bytes now,
+        // mirroring downloadFile (validate the data URL before assigning to href).
+        const ver = await AppDataStore.getById('document_versions', versionId);
+        if (!ver) { UI.toast.error('Version not found'); return; }
+        const src = ver.data;
+        if (!src || src === '#' || !isSafeFileData(src)) { UI.toast.error('Version content not available'); return; }
+        const _name = ver.file_name || ver.filename || `version-${ver.version_number || versionId}`;
+        const a = document.createElement('a');
+        a.href = src;
+        a.download = _name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        UI.toast.success(`Downloading version ${ver.version_number || ''}`.trim());
+    };
     const restoreVersion = async (versionId) => {
         const ver = await AppDataStore.getById('document_versions', versionId);
         // getById can return null (RLS deny / offline / removed) — guard before deref.
         if (!ver) { UI.toast.error('Version not found'); return; }
         // Column is snake_case `updated_at` (matches the rest of this file); camelCase
         // `updatedAt` targets a non-existent column and the modified time never bumps.
-        await AppDataStore.update('documents', ver.document_id, { current_version: ver.version_number, updated_at: new Date().toISOString() });
+        // Copy the historical bytes back into documents.data — without this the
+        // restore only relabelled current_version while downloadFile/previewFile still
+        // served the LATEST content (restore was a no-op on the actual file). GUARD:
+        // never overwrite the live doc with a null/invalid blob — a version row with no
+        // stored content would otherwise silently wipe the current file.
+        const _patch = { current_version: ver.version_number, updated_at: new Date().toISOString() };
+        if (ver.data && isSafeFileData(ver.data)) { _patch.data = ver.data; }
+        else { UI.toast.error('This version has no stored content to restore.'); return; }
+        await AppDataStore.update('documents', ver.document_id, _patch);
         UI.toast.success(`Restored to version ${ver.version_number}`); UI.hideModal(); await loadFolderContents();
     };
 
@@ -625,7 +648,16 @@
         await openShareModal(fileId);
     };
 
-    const removeShare = async (id) => { await AppDataStore.delete('document_shares', id); UI.toast.success('Share removed'); UI.hideModal(); };
+    const removeShare = async (id) => {
+        // Re-render the Share modal in place (was UI.hideModal(), which tore down the
+        // whole sharing UI after revoking ONE share — a multi-remove had to reopen it
+        // each time). Look up the parent document first so we can re-open its modal.
+        const _share = await AppDataStore.getById('document_shares', id).catch(() => null);
+        await AppDataStore.delete('document_shares', id);
+        UI.toast.success('Share removed');
+        if (_share && _share.document_id != null) await openShareModal(_share.document_id);
+        else UI.hideModal();
+    };
 
     const initDefaultFolders = async () => {
         const existing = await AppDataStore.getAll('folders');
@@ -960,22 +992,29 @@
     };
 
     const confirmDeleteSelected = async () => {
+        // Per-file try/catch so one RLS-blocked / already-gone file doesn't abort the
+        // loop mid-way (leaving the modal open, selection un-reset, and no feedback).
+        let ok = 0, failed = 0;
         for (const fileId of _selectedFiles) {
-            await AppDataStore.delete('documents', fileId);
+            try { await AppDataStore.delete('documents', fileId); ok++; }
+            catch (e) { failed++; console.warn('[documents] delete failed for', fileId, e?.message || e); }
         }
         _selectedFiles = [];
         await loadFolderContents();
         UI.hideModal();
-        UI.toast.success('Files deleted');
+        if (failed) UI.toast.error(`${ok} deleted · ${failed} could not be deleted (not permitted or already removed).`);
+        else UI.toast.success('Files deleted');
     };
 
     // Resolve the chunk-private selection (_selectedFiles = array of doc ids) into
     // the matching document records, dropping any that no longer exist. One getAll
     // beats N sequential getById round-trips.
     const _getSelectedDocs = async () => {
-        const want = new Set(_selectedFiles.map(String));
-        const all = (await AppDataStore.getAll('documents')) || [];
-        return all.filter(d => want.has(String(d.id)));
+        // Fetch ONLY the selected docs by id. getAll('documents') selects '*' (documents
+        // is not in _lightSelects) and would download every row's heavy base64 `data`
+        // blob just to resolve a handful of ids — hundreds of MB for a 2-file Copy.
+        const docs = await Promise.all(_selectedFiles.map(id => AppDataStore.getById('documents', id).catch(() => null)));
+        return docs.filter(Boolean);
     };
 
     // ── Move Selected ──────────────────────────────────────────────────
@@ -1231,6 +1270,22 @@
         // folder filter matches (and, on a bigint column, would 400 the insert).
         const _targetFolder = (_currentFolder === 'recent' || _currentFolder === 'all' || _currentFolder === 'starred') ? null : _currentFolder;
 
+        // Versioning: when "Create new version if file exists" is on, re-uploading a
+        // same-named file in this folder snapshots the current bytes into
+        // document_versions and updates the existing doc in place (bump current_version)
+        // instead of creating a duplicate document row — the checkbox was previously dead.
+        const _createVersions = document.getElementById('create-new-version')?.checked !== false;
+        const _existingByName = new Map();
+        if (_createVersions) {
+            try {
+                ((await getDocumentsMeta()) || []).forEach(d => {
+                    if (d.filename && String(d.folder_id == null ? '' : d.folder_id) === String(_targetFolder == null ? '' : _targetFolder)) {
+                        _existingByName.set(d.filename, d);
+                    }
+                });
+            } catch (_) { /* fall back to create-new for every file */ }
+        }
+
         for (const [index, file] of files.entries()) {
             const dataUrl = await new Promise((resolve, reject) => {
                 const reader = new FileReader();
@@ -1239,21 +1294,55 @@
                 reader.readAsDataURL(file);
             });
 
-            const newDoc = {
-                filename: file.name,
-                folder_id: _targetFolder,
-                size: file.size,
-                mime_type: file.type,
-                data: dataUrl,
-                current_version: 1,
-                created_by: _state.cu?.id,
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-                description: '',
-                is_starred: false
-            };
-
-            await AppDataStore.create('documents', newDoc);
+            let _versioned = false;
+            const _prior = _createVersions ? _existingByName.get(file.name) : null;
+            if (_prior) {
+                try {
+                    const _full = await AppDataStore.getById('documents', _prior.id);
+                    const _curVer = Number(_full && _full.current_version) || 1;
+                    // Update the existing doc FIRST, then record the prior content as a
+                    // version. Ordering matters: if the update throws we fall through to
+                    // create-new (no orphan snapshot); if the snapshot throws AFTER a
+                    // successful update, _versioned is already true so we never create a
+                    // duplicate doc — we just miss one history row (content is correct).
+                    await AppDataStore.update('documents', _prior.id, {
+                        data: dataUrl, size: file.size, mime_type: file.type,
+                        current_version: _curVer + 1, updated_at: new Date().toISOString(),
+                    });
+                    _versioned = true;
+                    try {
+                        await AppDataStore.create('document_versions', {
+                            document_id: _prior.id,
+                            version_number: _curVer,
+                            data: _full ? _full.data : null,
+                            size: _full ? _full.size : null,
+                            created_by: (_full && _full.created_by) || _state.cu?.id,
+                            created_at: new Date().toISOString(),
+                            change_note: 'Snapshot before re-upload',
+                        });
+                    } catch (e2) {
+                        console.warn('[documents] version snapshot failed (doc already updated)', e2 && e2.message);
+                    }
+                } catch (e) {
+                    console.warn('[documents] versioned upload failed — creating a new doc instead', e && e.message);
+                }
+            }
+            if (!_versioned) {
+                const newDoc = {
+                    filename: file.name,
+                    folder_id: _targetFolder,
+                    size: file.size,
+                    mime_type: file.type,
+                    data: dataUrl,
+                    current_version: 1,
+                    created_by: _state.cu?.id,
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                    description: '',
+                    is_starred: false
+                };
+                await AppDataStore.create('documents', newDoc);
+            }
 
             uploaded++;
             const percent = (uploaded / total) * 100;

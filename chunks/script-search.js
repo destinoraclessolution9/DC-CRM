@@ -1371,11 +1371,15 @@ const performProspectSearch = async (filters) => {
 };
 
 const hasProspectPurchasedProduct = async (prospectId, productName) => {
-    const purchases = await AppDataStore.getAll('purchases');
-    if (purchases.some(p => p.customer_id === prospectId && p.item && p.item.includes(productName))) return true;
+    // Scoped queries (were two unbounded full-table getAll scans for a single boolean).
+    const purchases = await AppDataStore.query('purchases', { customer_id: prospectId }).catch(() => []);
+    if (purchases.some(p => p.item && p.item.includes(productName))) return true;
 
-    const activities = await AppDataStore.getAll('activities');
-    return activities.some(a => (a.prospect_id === prospectId || a.customer_id === prospectId) && a.is_closing && a.solution_sold === productName);
+    const activities = [
+        ...(await AppDataStore.query('activities', { prospect_id: prospectId }).catch(() => [])),
+        ...(await AppDataStore.query('activities', { customer_id: prospectId }).catch(() => [])),
+    ];
+    return activities.some(a => a.is_closing && a.solution_sold === productName);
 };
 
 // Build the set of PROSPECT ids (from `candidateIds`) that have purchased a product

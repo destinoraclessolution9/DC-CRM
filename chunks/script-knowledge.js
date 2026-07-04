@@ -413,9 +413,9 @@
         let linkedRows = [];
         if (linkedIds.length) {
             try {
-                const all = await AppDataStore.query('knowledge_entries', { owner_id: owner }) || [];
-                const idx = new Map(all.map(r=>[r.id, r]));
-                linkedRows = linkedIds.map(lid => idx.get(lid)).filter(Boolean);
+                // Fetch only the handful of linked entries by id (was a full owner-scoped
+                // table read on every detail open just to resolve a few titles).
+                linkedRows = (await Promise.all(linkedIds.map(lid => AppDataStore.getById('knowledge_entries', lid).catch(() => null)))).filter(Boolean);
             } catch (_) {}
         }
         const html = `

@@ -1181,8 +1181,13 @@
             p.status !== 'converted' && p.conversion_status !== 'approved' && p.conversion_status !== 'rejected'
         );
 
-        for (const prospect of prospects) {
-            await predictLeadScore(prospect.id);
+        // Bounded-concurrency batches instead of a fully serial loop — each
+        // predictLeadScore does ~4 round-trips, so a serial N+1 was very slow over a
+        // large list. Cap concurrency so we don't flood the connection.
+        const _SCORE_CONC = 8;
+        for (let i = 0; i < prospects.length; i += _SCORE_CONC) {
+            await Promise.all(prospects.slice(i, i + _SCORE_CONC).map(p =>
+                predictLeadScore(p.id).catch(e => console.warn('[ai] lead score failed', p.id, e && e.message))));
         }
 
         UI.toast.success(`Updated scores for ${prospects.length} prospects`);

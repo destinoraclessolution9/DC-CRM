@@ -72,9 +72,11 @@
             if (error) throw error;
             logs = data || [];
         } catch (_) {
-            logs = (await AppDataStore.getAll('audit_logs').catch(() => []) || [])
-                .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-                .slice(0, 50);
+            // Avoid the unbounded getAll('audit_logs') fallback: audit_logs is an
+            // append-only HIGH_VOLUME table and getAll auto-paginates past 1000 rows,
+            // so a transient failure of the bounded query above would trigger a whole-
+            // table download. Leave empty on failure (the user can retry).
+            logs = [];
         }
     
         let content = `

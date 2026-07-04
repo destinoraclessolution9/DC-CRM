@@ -3907,15 +3907,19 @@ ALTER TABLE public.promotions
                 </tr>
             </thead>
             <tbody id="campaigns-list-body">
-                ${campaigns.length > 0 ? (await Promise.all(campaigns.map(c => renderCampaignRow(c)))).join('') : '<tr><td colspan="7" style="text-align:center; padding:40px;">No campaigns found. Click "New Campaign" to start.</td></tr>'}
+                ${campaigns.length > 0 ? (await (async () => { const _tplMap = new Map(((await AppDataStore.getAll('whatsapp_templates').catch(() => [])) || []).map(t => [String(t.id), t])); return (await Promise.all(campaigns.map(c => renderCampaignRow(c, _tplMap)))).join(''); })()) : '<tr><td colspan="7" style="text-align:center; padding:40px;">No campaigns found. Click "New Campaign" to start.</td></tr>'}
             </tbody>
         </table>
     </div>
 `;
     };
 
-    const renderCampaignRow = async (campaign) => {
-        const template = await AppDataStore.getById('whatsapp_templates', campaign.template_id);
+    const renderCampaignRow = async (campaign, templatesById) => {
+        // Reuse a prefetched template map when the caller supplies one (avoids a
+        // getById('whatsapp_templates') per row — N+1 across the campaigns list).
+        const template = templatesById
+            ? templatesById.get(String(campaign.template_id))
+            : await AppDataStore.getById('whatsapp_templates', campaign.template_id);
         const openRate = campaign.sent_count > 0 ? Math.round((campaign.opened_count / campaign.sent_count) * 100) : 0;
         const responseRate = campaign.sent_count > 0 ? Math.round((campaign.replied_count / campaign.sent_count) * 100) : 0;
 
@@ -4361,7 +4365,16 @@ const simulateCampaignSending = async (campaignId) => {
     if (_sendingCampaignIds.has(campaignId)) return;
     _sendingCampaignIds.add(campaignId);
     try {
-    const messages = (await AppDataStore.getAll('campaign_messages')).filter(m => m.campaign_id === campaignId);
+    // Scoped query (was getAll over the whole campaign_messages table + client filter).
+    const messages = await AppDataStore.query('campaign_messages', { campaign_id: campaignId }).catch(() => []);
+
+    // Fetch the campaign ONCE and accumulate counters in memory instead of a getById +
+    // read-modify-write every iteration (N+1). The in-flight guard above guarantees no
+    // concurrent run mutates this campaign's counters, so local accumulation is safe.
+    const campaign = await AppDataStore.getById('whatsapp_campaigns', campaignId);
+    if (!campaign) return;
+    let sent = campaign.sent_count || 0, delivered = campaign.delivered_count || 0;
+    let opened = campaign.opened_count || 0, replied = campaign.replied_count || 0;
 
     // Use sequential async loop instead of setInterval to prevent overlapping DB calls
     for (let i = 0; i < messages.length; i++) {
@@ -4377,15 +4390,13 @@ const simulateCampaignSending = async (campaignId) => {
             sent_at: new Date().toISOString()
         });
 
-        // Update campaign stats (getById can return null on RLS deny/offline)
-        const campaign = await AppDataStore.getById('whatsapp_campaigns', campaignId);
-        if (!campaign) break;
-        const updates = { sent_count: (campaign.sent_count || 0) + 1 };
-        if (['delivered', 'opened', 'replied'].includes(status)) updates.delivered_count = (campaign.delivered_count || 0) + 1;
-        if (['opened', 'replied'].includes(status)) updates.opened_count = (campaign.opened_count || 0) + 1;
-        if (status === 'replied') updates.replied_count = (campaign.replied_count || 0) + 1;
-
-        await AppDataStore.update('whatsapp_campaigns', campaignId, updates);
+        sent += 1;
+        if (['delivered', 'opened', 'replied'].includes(status)) delivered += 1;
+        if (['opened', 'replied'].includes(status)) opened += 1;
+        if (status === 'replied') replied += 1;
+        await AppDataStore.update('whatsapp_campaigns', campaignId, {
+            sent_count: sent, delivered_count: delivered, opened_count: opened, replied_count: replied
+        });
 
         // Brief pause between sends to avoid flooding
         if (i < messages.length - 1) await new Promise(r => setTimeout(r, 300));
@@ -4427,7 +4438,8 @@ const simulateCampaignSending = async (campaignId) => {
 
         const body = document.getElementById('campaigns-list-body');
         if (body) {
-            const rows = await Promise.all(campaigns.map(c => renderCampaignRow(c)));
+            const _tplMap = new Map(((await AppDataStore.getAll('whatsapp_templates').catch(() => [])) || []).map(t => [String(t.id), t]));
+            const rows = await Promise.all(campaigns.map(c => renderCampaignRow(c, _tplMap)));
             body.innerHTML = campaigns.length > 0 ? rows.join('') : '<tr><td colspan="7" style="text-align:center; padding:40px;">No campaigns found.</td></tr>';
         }
     };
@@ -4464,8 +4476,8 @@ const simulateCampaignSending = async (campaignId) => {
     const deleteCampaign = async (id) => {
         if (confirm('Delete this campaign and all its tracking data?')) {
             await AppDataStore.delete('whatsapp_campaigns', id);
-            // Delete messages
-            const messages = (await AppDataStore.getAll('campaign_messages')).filter(m => m.campaign_id === id);
+            // Delete messages (scoped query — was a full-table getAll + client filter)
+            const messages = await AppDataStore.query('campaign_messages', { campaign_id: id }).catch(() => []);
             await Promise.all(messages.map(m => AppDataStore.delete('campaign_messages', m.id)));
             await refreshCampaignsTab();
         }
@@ -4698,7 +4710,19 @@ const simulateCampaignSending = async (campaignId) => {
         if (!campaign) return;
 
         const template = await AppDataStore.getById('whatsapp_templates', campaign.template_id);
-        const messages = (await AppDataStore.getAll('campaign_messages')).filter(m => m.campaign_id === campaignId);
+        const messages = await AppDataStore.query('campaign_messages', { campaign_id: campaignId }).catch(() => []);
+        // Prefetch the recipients' prospects ONCE so the timeline + recipient table don't
+        // fire a getById per row (N+1). Batched IN query with a per-id fallback.
+        const _rcpIds = [...new Set(messages.map(m => m.prospect_id).filter(x => x != null))];
+        const _prospById = new Map();
+        if (_rcpIds.length) {
+            try {
+                const _rows = await AppDataStore.queryPaged('prospects', { filters: { id: _rcpIds }, select: 'id,full_name,phone' });
+                (_rows || []).forEach(p => _prospById.set(String(p.id), p));
+            } catch (_) {
+                await Promise.all(_rcpIds.map(async pid => { const p = await AppDataStore.getById('prospects', pid).catch(() => null); if (p) _prospById.set(String(pid), p); }));
+            }
+        }
 
         // Calculate metrics
         const sent = messages.filter(m => ['sent', 'delivered', 'opened', 'replied'].includes(m.status)).length;
@@ -4771,7 +4795,7 @@ const simulateCampaignSending = async (campaignId) => {
                                 <div class="timeline-item">
                                     <div class="timeline-time">${UI.formatDate(m.sent_at || m.created_at)}</div>
                                     <div class="timeline-event">
-                                        <strong>${escapeHtml(await getEntityName('prospects', m.prospect_id))}</strong>
+                                        <strong>${escapeHtml((_prospById.get(String(m.prospect_id)) || {}).full_name || 'Unknown')}</strong>
                                         <span class="status-badge status-${m.status}">${m.status}</span>
                                     </div>
                                 </div>
@@ -4806,7 +4830,7 @@ const simulateCampaignSending = async (campaignId) => {
                                     </tr>
                                 </thead>
                                 <tbody id="recipient-list-body">
-                                    ${(await Promise.all(messages.map(m => renderRecipientRow(m)))).join('')}
+                                    ${(await Promise.all(messages.map(m => renderRecipientRow(m, _prospById)))).join('')}
                                 </tbody>
                             </table>
                         </div>
@@ -4820,8 +4844,10 @@ const simulateCampaignSending = async (campaignId) => {
         ]);
     };
 
-    const renderRecipientRow = async (msg) => {
-        const prospect = await AppDataStore.getById('prospects', msg.prospect_id);
+    const renderRecipientRow = async (msg, prospById) => {
+        const prospect = prospById
+            ? prospById.get(String(msg.prospect_id))
+            : await AppDataStore.getById('prospects', msg.prospect_id);
         return `
             <tr>
                 <td><strong>${escapeHtml(prospect?.full_name || 'Unknown')}</strong></td>
@@ -4839,10 +4865,22 @@ const simulateCampaignSending = async (campaignId) => {
     const filterRecipients = async (campaignId) => {
         const search = (document.getElementById('recipient-search')?.value || '').toLowerCase();
         const status = document.getElementById('recipient-status-filter')?.value || 'all';
-        const messages = (await AppDataStore.getAll('campaign_messages')).filter(m => m.campaign_id === campaignId);
+        const messages = await AppDataStore.query('campaign_messages', { campaign_id: campaignId }).catch(() => []);
+        // Prefetch recipients' prospects once (was 2 getById per message — name filter +
+        // row render — an N+1 doubled).
+        const _frIds = [...new Set(messages.map(m => m.prospect_id).filter(x => x != null))];
+        const _frById = new Map();
+        if (_frIds.length) {
+            try {
+                const _rows = await AppDataStore.queryPaged('prospects', { filters: { id: _frIds }, select: 'id,full_name,nickname,phone' });
+                (_rows || []).forEach(p => _frById.set(String(p.id), p));
+            } catch (_) {
+                await Promise.all(_frIds.map(async pid => { const p = await AppDataStore.getById('prospects', pid).catch(() => null); if (p) _frById.set(String(pid), p); }));
+            }
+        }
 
         const filteredResults = await Promise.all(messages.map(async m => {
-            const prospect = await AppDataStore.getById('prospects', m.prospect_id);
+            const prospect = _frById.get(String(m.prospect_id));
             // Empty search matches everyone (including rows whose prospect was since
             // deleted); only when a search term is present do we require a name hit.
             const nameMatch = !search
@@ -4856,7 +4894,7 @@ const simulateCampaignSending = async (campaignId) => {
 
         const body = document.getElementById('recipient-list-body');
         if (body) {
-            const rows = await Promise.all(filtered.map(m => renderRecipientRow(m)));
+            const rows = await Promise.all(filtered.map(m => renderRecipientRow(m, _frById)));
             body.innerHTML = rows.join('');
         }
     };

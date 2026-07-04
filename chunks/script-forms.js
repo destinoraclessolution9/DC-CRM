@@ -143,7 +143,8 @@
     };
 
     const showFormSubmissions = async (formId) => {
-        const submissions = (await AppDataStore.getAll('lead_submissions').catch(() => [])).filter(s => s.form_id == formId);
+        // Scoped query (was getAll over the whole lead_submissions table + client filter).
+        const submissions = await AppDataStore.query('lead_submissions', { form_id: formId }).catch(() => []);
         const html = `
             <div>
                 <p style="color:var(--gray-500); margin:0 0 16px;">${submissions.length} total submissions</p>
@@ -314,7 +315,7 @@
         const survey = await AppDataStore.getById('surveys', surveyId);
         // getById can return null (deleted / RLS deny / offline) — guard before deref.
         if (!survey) { UI.toast.error('Survey not found.'); return; }
-        const responses = (await AppDataStore.getAll('survey_responses').catch(() => [])).filter(r => r.survey_id == surveyId);
+        const responses = await AppDataStore.query('survey_responses', { survey_id: surveyId }).catch(() => []); // scoped (was full-table getAll + filter)
         // Only numeric-scored rows are NPS-eligible — null/undefined scores (CSAT /
         // free-text rows) must not be coerced into the detractor bucket or denominator.
         const scored = responses.filter(r => typeof r.score === 'number');
@@ -503,7 +504,7 @@
     };
 
     const renderCustomerContractsTab = async (customer, containerId = 'profile-tab-content') => {
-        const contracts = (await AppDataStore.getAll('contracts').catch(() => [])).filter(c => c.customer_id == customer.id);
+        const contracts = await AppDataStore.query('contracts', { customer_id: customer.id }).catch(() => []); // scoped (was full-table getAll + filter)
         const container = document.getElementById(containerId);
         if (!container) return;
         container.innerHTML = `
