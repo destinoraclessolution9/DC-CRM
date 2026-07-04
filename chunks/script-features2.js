@@ -778,6 +778,11 @@ const saveKPITargets = async (year) => {
     // Save quarterly targets — use manual inputs if provided, else auto-calculate from weights
     const metrics = ['cps_count_target', 'total_sales_target', 'pop_case_count_target', 'pop_sales_target', 'epp_case_count_target', 'epp_sales_target', 'new_agents_target', 'new_customers_target', 'total_meetings_target', 'activity_headcount_target'];
     const qkeys = ['cps', 'sales', 'pop-count', 'pop-sales', 'epp-count', 'epp-sales', 'agents', 'customers', 'meetings', 'headcount'];
+    // Fetch existing target rows ONCE (were getAll inside the q/m loops — 4x + 12x
+    // full-table scans). Each iteration handles a distinct quarter/month, so a snapshot
+    // taken before the loop is correct.
+    const _allQTargets = (await AppDataStore.getAll('quarterly_targets')) || [];
+    const _allMTargets = (await AppDataStore.getAll('monthly_targets')) || [];
     for (let q = 1; q <= 4; q++) {
         const w = effectiveWeights[q - 1] / 100;
         const qData = { quarter: q, year: year };
@@ -786,7 +791,7 @@ const saveKPITargets = async (year) => {
             const manual = el ? parseFloat(el.value) : NaN;
             qData[m] = (!isNaN(manual) && el?.value !== '') ? manual : Math.round(yearlyData[m] * w);
         });
-        const existingQ = (await AppDataStore.getAll('quarterly_targets')).find(t => t.quarter === q && t.year === year);
+        const existingQ = _allQTargets.find(t => t.quarter === q && t.year === year);
         if (existingQ) {
             await AppDataStore.update('quarterly_targets', existingQ.id, qData);
         } else {
@@ -798,7 +803,7 @@ const saveKPITargets = async (year) => {
             const month = (q - 1) * 3 + m + 1;
             const mData = { month: month, year: year, quarter: q };
             metrics.forEach(met => { mData[met] = Math.round(qData[met] / 3); });
-            const existingM = (await AppDataStore.getAll('monthly_targets')).find(t => t.month === month && t.year === year);
+            const existingM = _allMTargets.find(t => t.month === month && t.year === year);
             if (existingM) {
                 await AppDataStore.update('monthly_targets', existingM.id, mData);
             } else {

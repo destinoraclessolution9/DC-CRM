@@ -1302,12 +1302,17 @@ const showProtectionMonitoringView = async (container) => {
     const agentMap = {};
     for (const u of allUsers) agentMap[u.id] = u;
     const now = new Date();
+    // Single pass to find each prospect's LATEST activity (was a full activities.filter
+    // + sort PER prospect → O(prospects × activities) on every render).
+    const _latestActByProspect = new Map();
+    for (const a of allActivities) {
+        const k = String(a.prospect_id);
+        const cur = _latestActByProspect.get(k);
+        if (!cur || new Date(a.activity_date) > new Date(cur.activity_date)) _latestActByProspect.set(k, a);
+    }
     const lastActivityMap = {};
     for (const p of allProspects) {
-        const pActivities = allActivities
-            .filter(a => String(a.prospect_id) === String(p.id))
-            .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
-        const last = pActivities[0];
+        const last = _latestActByProspect.get(String(p.id));
         const daysSince = last ? Math.floor((now - new Date(last.activity_date)) / (1000 * 60 * 60 * 24)) : 999;
         lastActivityMap[p.id] = { date: last?.activity_date, daysSince, type: last?.activity_type };
     }

@@ -794,7 +794,9 @@ const renderProspectsTable = async () => {
     }
     if (!_usedServerP) {
         const prospectsPromise = searchQueryRaw
-            ? AppDataStore.searchProspects(searchQueryRaw, { includeDormant: true, limit: 200 })
+            // limit 1000 (was 200): the legacy React-off path filters + paginates the
+            // result CLIENT-side, so a 200-row cap hid matches 201+ behind pagination.
+            ? AppDataStore.searchProspects(searchQueryRaw, { includeDormant: true, limit: 1000 })
             : AppDataStore.getActiveProspects({ includeDormant: includeDormantToggle || !!agentFilter, fresh: !!agentFilter });
         // includeDeleted users so deleted-staff owners still resolve in the Agent column.
         const [_p, _u] = await Promise.all([
@@ -2202,8 +2204,10 @@ const showProspectDetail = async (prospectId) => {
         await addWhatsAppButtonToProfile('prospect', prospectId);
         // Badge: count pending proposed solutions for this prospect
         try {
-            const sols = await AppDataStore.getAll('proposed_solutions');
-            const pendingCount = (sols || []).filter(s => String(s.prospect_id) === String(prospectId) && s.status === 'Proposed').length;
+            // Scoped query (was getAll over every prospect's proposed_solutions on each
+            // detail open) — indexed by prospect_id, filter the small result for pending.
+            const sols = await AppDataStore.query('proposed_solutions', { prospect_id: prospectId }).catch(() => []);
+            const pendingCount = (sols || []).filter(s => s.status === 'Proposed').length;
             const badge = document.getElementById(`pending-sol-badge-${prospectId}`);
             if (badge) {
                 if (pendingCount > 0) {

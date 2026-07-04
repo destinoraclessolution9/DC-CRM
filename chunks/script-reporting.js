@@ -1839,15 +1839,18 @@ const getNewCustomers = async (from, to) => {
         AppDataStore.getAll('customers'),
         AppDataStore.getAll('purchases')
     ]);
+    // Bucket in-range purchases by customer_id ONCE (was purchases.some(...) inside the
+    // customer loop → O(customers × purchases) quadratic on every dashboard refresh).
+    // purchases column is `date` (no purchase_date) — consistent with the other readers.
+    const _custWithPurchaseInRange = new Set(
+        purchases.filter(p => p.date >= from && p.date <= to).map(p => String(p.customer_id))
+    );
     let count = 0;
     for (const c of customers) {
         if (c.customer_since < from || c.customer_since > to) continue;
         if (!_recInMarket(c)) continue;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(c.responsible_agent_id))) continue;
-        // purchases column is `date` (no purchase_date) — use it consistently with
-        // every other purchase reader in this file; the old fallback was dead drift.
-        const hasPurchaseInRange = purchases.some(p => p.customer_id == c.id && p.date >= from && p.date <= to);
-        if (!hasPurchaseInRange) continue;
+        if (!_custWithPurchaseInRange.has(String(c.id))) continue;
         count++;
     }
     return count;

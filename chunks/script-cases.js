@@ -900,13 +900,15 @@
             return;
         }
 
-        const [allP, allC] = await Promise.all([
-            AppDataStore.getAll('prospects'),
-            AppDataStore.getAll('customers'),
+        // Server-side trigram search (bounded) instead of a full-table getAll on every
+        // keystroke + client filter — matches the searchProspects/searchCustomers pattern
+        // used everywhere else. Normalize the array-or-{data} return shape.
+        const [prRaw, cuRaw] = await Promise.all([
+            AppDataStore.searchProspects(query, { includeDormant: true, limit: 30 }).catch(() => []),
+            AppDataStore.searchCustomers(query, { limit: 30 }).catch(() => []),
         ]);
-        const q = query.toLowerCase();
-        const prospects = (allP || []).filter(p => p.full_name?.toLowerCase().includes(q) || p.nickname?.toLowerCase().includes(q)).slice(0, 30);
-        const customers = (allC || []).filter(c => c.full_name?.toLowerCase().includes(q) || c.nickname?.toLowerCase().includes(q)).slice(0, 30);
+        const prospects = (Array.isArray(prRaw) ? prRaw : (prRaw && prRaw.data) || []).slice(0, 30);
+        const customers = (Array.isArray(cuRaw) ? cuRaw : (cuRaw && cuRaw.data) || []).slice(0, 30);
 
         let html = '';
         if (prospects.length > 0) {

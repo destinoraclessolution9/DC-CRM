@@ -1005,13 +1005,14 @@
         try {
             const soldLower = (activity.solution_sold || '').trim().toLowerCase();
             if (soldLower) {
-                const sols = await window.AppDataStore.getAll('proposed_solutions').catch(() => []);
-                const matches = (sols || []).filter(s => {
-                    const samePerson = (activity.prospect_id && String(s.prospect_id) === String(activity.prospect_id)) ||
-                                       (activity.customer_id && String(s.customer_id) === String(activity.customer_id));
-                    return samePerson && s.status !== 'Purchased' &&
-                           (s.solution || '').trim().toLowerCase() === soldLower;
-                });
+                // Scoped query by the one person (was getAll over every prospect's
+                // proposed_solutions on each close). prospect_id XOR customer_id here.
+                let sols = [];
+                if (activity.prospect_id) sols = await window.AppDataStore.query('proposed_solutions', { prospect_id: activity.prospect_id }).catch(() => []);
+                else if (activity.customer_id) sols = await window.AppDataStore.query('proposed_solutions', { customer_id: activity.customer_id }).catch(() => []);
+                const matches = (sols || []).filter(s =>
+                    s.status !== 'Purchased' &&
+                    (s.solution || '').trim().toLowerCase() === soldLower);
                 for (const s of matches) {
                     await window.AppDataStore.update('proposed_solutions', s.id, {
                         status: 'Purchased',

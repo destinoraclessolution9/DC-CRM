@@ -6998,7 +6998,7 @@
         // modal action string as bare numeric literals, but the notes table can
         // store string/UUID ids — strict === would never match and we'd create a
         // duplicate note. Mirrors the String()-normalized style used elsewhere.
-        const existingNote =(await AppDataStore.getAll('notes')).find(n => String(n.activity_id) === String(activityId) && n.note_type === 'outcome' &&
+        const existingNote = (await AppDataStore.query('notes', { activity_id: activityId, note_type: 'outcome' }).catch(() => [])).find(n =>
             ((attendeeType === 'agent' && String(n.agent_id) === String(attendeeId)) ||
                 (attendeeType === 'prospect' && String(n.prospect_id) === String(attendeeId)) ||
                 (attendeeType === 'customer' && String(n.customer_id) === String(attendeeId))));
@@ -7023,7 +7023,7 @@
 
         // String()-normalize ids (see openAttendeeOutcomeModal) so number-vs-string
         // id types still match the existing note instead of duplicating it.
-        const existingNote = (await AppDataStore.getAll('notes')).find(n => String(n.activity_id) === String(activityId) && n.note_type === 'post_meetup' &&
+        const existingNote = (await AppDataStore.query('notes', { activity_id: activityId, note_type: 'post_meetup' }).catch(() => [])).find(n =>
             ((attendeeType === 'agent' && String(n.agent_id) === String(attendeeId)) ||
                 (attendeeType === 'prospect' && String(n.prospect_id) === String(attendeeId)) ||
                 (attendeeType === 'customer' && String(n.customer_id) === String(attendeeId))));
@@ -7067,7 +7067,10 @@
         // comparisons: attendeeId/activityId come in as bare numeric literals
         // from the modal action string, but notes ids may be string/UUID — strict
         // === would miss the match and create a duplicate note every save.
-        const existingNote = (await AppDataStore.getAll('notes')).find(n => String(n.activity_id) === String(activityId) && n.note_type === noteType &&
+        // Scoped query by activity_id + note_type (was getAll over the whole notes
+        // table + .find), then match the attendee on the small result.
+        const _scopedNotes = await AppDataStore.query('notes', { activity_id: activityId, note_type: noteType }).catch(() => []);
+        const existingNote = _scopedNotes.find(n =>
             ((attendeeType === 'agent' && String(n.agent_id) === String(attendeeId)) ||
                 (attendeeType === 'prospect' && String(n.prospect_id) === String(attendeeId)) ||
                 (attendeeType === 'customer' && String(n.customer_id) === String(attendeeId))));
