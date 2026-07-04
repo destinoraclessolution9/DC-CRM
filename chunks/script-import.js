@@ -625,7 +625,10 @@ const mapRowToRecord = (row, reverseMap, agentId, importType = 'prospects') => {
         referral_relationship: get('referral_relationship'),
         pipeline_stage: pipelineStage,
         expected_close_date: get('expected_close_date') || null,
-        deal_value: (dealVal === '' || !/[0-9]/.test(dealVal)) ? null : _parseAmount(dealVal),
+        // Accept only a clean currency number (optional non-digit prefix like 'RM',
+        // digits with thousands commas, ONE optional decimal). The old digit-only guard
+        // let _parseAmount mangle '3.5.7'→3.5 and '1,000 (approx 2000)'→10,002,000.
+        deal_value: (() => { const s = String(dealVal || '').trim(); if (!/^[^\d]*-?\d[\d,]*(\.\d+)?\s*$/.test(s)) return null; const n = _parseAmount(s); return Number.isFinite(n) ? n : null; })(),
         responsible_agent_id: agentId,
         source: 'import'
     };

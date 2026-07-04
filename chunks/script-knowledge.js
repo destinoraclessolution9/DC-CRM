@@ -580,11 +580,22 @@
         if (!q || q.trim().length < 2) { box.innerHTML = ''; return; }
         const owner = await _kbOwnerId();
         try {
-            const all = await AppDataStore.query('knowledge_entries', { owner_id: owner }) || [];
-            const needle = q.trim().toLowerCase();
-            const hits = all.filter(r => r.id !== currentId && (r.title||'').toLowerCase().includes(needle)).slice(0, 8);
-            if (!hits.length) { box.innerHTML = '<div class="kb-empty kb-empty-sm">No matches.</div>'; return; }
-            box.innerHTML = hits.map(h => `<div class="kb-link-hit" onclick="app.addKnowledgeLink('${currentId}','${h.id}')"><i class="fas ${_kbTypeIcon(h.type)}"></i> ${escapeHtml(h.title||'(untitled)')}</div>`).join('');
+            // Use the owner-scoped full-text knowledge_search RPC (bounded server-side)
+            // instead of pulling the user's ENTIRE entry set on every keystroke; fall back
+            // to the client filter only if the RPC is unavailable.
+            let hits = null;
+            try {
+                const { data, error } = await window.supabase.rpc('knowledge_search', { q: q.trim() });
+                if (!error && Array.isArray(data)) hits = data;
+            } catch (_) { /* RPC unavailable → fallback below */ }
+            if (hits === null) {
+                const all = await AppDataStore.query('knowledge_entries', { owner_id: owner }) || [];
+                const needle = q.trim().toLowerCase();
+                hits = all.filter(r => (r.title || '').toLowerCase().includes(needle));
+            }
+            const results = hits.filter(r => String(r.id) !== String(currentId)).slice(0, 8);
+            if (!results.length) { box.innerHTML = '<div class="kb-empty kb-empty-sm">No matches.</div>'; return; }
+            box.innerHTML = results.map(h => `<div class="kb-link-hit" onclick="app.addKnowledgeLink('${currentId}','${h.id}')"><i class="fas ${_kbTypeIcon(h.type)}"></i> ${escapeHtml(h.title||'(untitled)')}</div>`).join('');
         } catch (e) {
             box.innerHTML = `<div class="kb-empty kb-empty-sm">Error: ${escapeHtml(e?.message||'')}</div>`;
         }
