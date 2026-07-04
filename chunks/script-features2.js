@@ -1507,27 +1507,39 @@ const saveSpecialProgram = async (programId = null) => {
     };
 
     let savedProgramId = programId;
-    if (programId) {
-        await AppDataStore.update('special_programs', programId, programData);
-        // Remove old participants
-        const oldParts = (await AppDataStore.getAll('special_program_participants')).filter(p => p.program_id === programId);
-        for (const p of oldParts) {
-            await AppDataStore.delete('special_program_participants', p.id);
+    const _newPartIds = [];
+    try {
+        if (programId) {
+            await AppDataStore.update('special_programs', programId, programData);
+        } else {
+            programData.id = window.AppDataStore._generateId();
+            savedProgramId = programData.id;
+            await AppDataStore.create('special_programs', programData);
         }
-    } else {
-        programData.id = window.AppDataStore._generateId();
-        savedProgramId = programData.id;
-        await AppDataStore.create('special_programs', programData);
-    }
-
-    // Create new participants
-    for (const agentId of selectedAgents) {
-        await AppDataStore.create('special_program_participants', {
-            id: window.AppDataStore._generateId(),
-            program_id: savedProgramId,
-            agent_id: agentId,
-            joined_at: new Date().toISOString()
-        });
+        // Create the NEW participants FIRST, then remove the old ones — so an edit never
+        // loses its roster when a create fails mid-way (was delete-all-then-recreate,
+        // which on partial failure left the program with a corrupted/empty participant set).
+        for (const agentId of selectedAgents) {
+            const _row = await AppDataStore.create('special_program_participants', {
+                id: window.AppDataStore._generateId(),
+                program_id: savedProgramId,
+                agent_id: agentId,
+                joined_at: new Date().toISOString()
+            });
+            if (_row && _row.id != null) _newPartIds.push(_row.id);
+        }
+        if (programId) {
+            // Scoped fetch (was getAll + client filter); delete only the OLD rows.
+            const oldParts = await AppDataStore.query('special_program_participants', { program_id: programId }).catch(() => []);
+            for (const p of (oldParts || [])) {
+                if (!_newPartIds.includes(p.id)) { try { await AppDataStore.delete('special_program_participants', p.id); } catch (_) {} }
+            }
+        }
+    } catch (e) {
+        // Roll back the partial new set so we never leave old + partial-new participants.
+        for (const _id of _newPartIds) { try { await AppDataStore.delete('special_program_participants', _id); } catch (_) {} }
+        UI.toast.error('Could not save the program participants — reverted. Please retry.');
+        return;
     }
 
     UI.hideModal();

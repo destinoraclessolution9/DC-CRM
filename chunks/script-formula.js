@@ -1007,6 +1007,7 @@
         };
 
         let po;
+        const _createdItemIds = [];
         try {
             po = await fpSave('fp_purchase_orders', {
                 po_number: refNum,
@@ -1028,11 +1029,20 @@
                     unit_cost: sku?.unit_cost || null,
                 });
                 _fpState.poItems.push(row);
+                if (row && row.id != null) _createdItemIds.push(row.id);
             }
         } catch (e) {
             // A real Supabase write failed — do not fabricate a success toast.
             console.error('fpSavePoAndExport failed:', e);
-            UI.toast.error('Could not save the purchase order. Please retry.');
+            // Compensate: roll back the partial PO (header + any items already inserted)
+            // so a mid-loop failure never leaves a half-saved order.
+            try {
+                for (const _iid of _createdItemIds) { try { await fpDelete('fp_po_items', _iid); } catch (_) {} }
+                if (po && po.id != null) await fpDelete('fp_purchase_orders', po.id);
+            } catch (_) { /* best-effort cleanup */ }
+            if (po && po.id != null) _fpState.purchaseOrders = _fpState.purchaseOrders.filter(x => x.id !== po.id);
+            if (_createdItemIds.length) _fpState.poItems = _fpState.poItems.filter(x => !_createdItemIds.includes(x.id));
+            UI.toast.error('Could not save the purchase order — reverted. Please retry.');
             return;
         }
 
@@ -2133,6 +2143,7 @@
                 if (fpIsExcluded(code)) { skipped++; pushDrop('Matched custom exclusion (delisted)'); continue; }
 
                 let sku = fpGetSkuByCode(code);
+                let _skuNewThisRow = false;
                 if (!sku) {
                     sku = await fpSave('fp_sku_master', {
                         product_code: code, product_name: name,
@@ -2141,6 +2152,7 @@
                     });
                     _fpState.skus.push(sku);
                     newSkus.add(code);
+                    _skuNewThisRow = true;
                 }
 
                 // Dedup: skip rows already present (prior import). The occurrence ordinal
@@ -2177,6 +2189,14 @@
                     // retry can re-attempt, and don't fabricate success.
                     console.error('fpImportPos row write failed:', e);
                     seenKeys.delete(key);
+                    // Compensate: the SKU auto-created for THIS row is now orphaned (its
+                    // transaction failed) — remove it so it doesn't linger with no sales
+                    // behind it and inflate the new-SKU count.
+                    if (_skuNewThisRow && sku && sku.id != null) {
+                        try { await fpDelete('fp_sku_master', sku.id); } catch (_) {}
+                        _fpState.skus = _fpState.skus.filter(s => s.id !== sku.id);
+                        newSkus.delete(code);
+                    }
                     skipped++;
                     pushDrop('Write failed (DB error)');
                 }

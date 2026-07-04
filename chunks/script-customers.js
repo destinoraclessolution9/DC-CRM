@@ -2187,10 +2187,16 @@ const savePurchase = async (customerId) => {
                 throw new Error('Purchase was not saved (no row returned)');
             }
             created = true;
-            // Update lifetime value + purchase count atomically (race-free; symmetric with deletePurchase).
-            await _adjustCustomerLtv(customerId, amt, 1);
+            // Update lifetime value + purchase count atomically (race-free; symmetric with
+            // deletePurchase). Agent-package purchases are EXCLUDED from LTV so it stays
+            // consistent with the sales-reporting RPCs (which exclude them) — otherwise
+            // LTV-based VIP / agent-eligibility thresholds drift from the sales view.
+            // (Business decision: LTV = sales-eligible spend. deletePurchase mirrors this.)
+            if (!isAgentPkg) {
+                await _adjustCustomerLtv(customerId, amt, 1);
+            }
         } catch (e) {
-            if (created) {
+            if (created && !isAgentPkg) {
                 // create succeeded but LTV adjust failed — try to reverse so LTV stays consistent.
                 try { await _adjustCustomerLtv(customerId, -amt, -1); } catch (_re) { /* best-effort */ }
             }
@@ -2280,7 +2286,9 @@ const deletePurchase = async (purchaseId, customerId) => {
         // but never subtracted on delete, permanently inflating it (audit #8).
         if (p) {
             const amt = parseFloat(p.amount) || 0;
-            if (amt) await _adjustCustomerLtv(customerId, -amt, -1);
+            // Mirror savePurchase: agent-package purchases never contributed to LTV, so
+            // don't reverse them here (else deleting one would wrongly decrement LTV).
+            if (amt && !p.is_agent_package) await _adjustCustomerLtv(customerId, -amt, -1);
         }
         UI.toast.success('Purchase deleted');
         const customer = await AppDataStore.getById('customers', customerId);
@@ -2356,9 +2364,14 @@ const _renderDeliveryListing = async () => {
 
     const lines = [];
 
-    // Source 1: purchases for visible customers (one row = one product line).
+    // Source 1: purchases for visible customers (one row = one product line). Scope to
+    // the visible customer ids server-side (was getAll over the whole purchases table +
+    // client filter, re-run on every search keystroke).
+    const _dlCustIds = [...custById.keys()];
     let purchases = [];
-    try { purchases = await AppDataStore.getAll('purchases'); } catch (_) { purchases = []; }
+    if (_dlCustIds.length) {
+        try { purchases = await AppDataStore.queryPaged('purchases', { filters: { customer_id: _dlCustIds } }); } catch (_) { purchases = []; }
+    }
     for (const p of purchases) {
         const c = custById.get(String(p.customer_id));
         if (!c) continue; // out of scope / not a customer
@@ -2377,8 +2390,12 @@ const _renderDeliveryListing = async () => {
     // Source 2: conversion sales (prospects.closing_record) for converted customers.
     const convCustomers = customers.filter(c => c.converted_from_prospect_id);
     if (convCustomers.length) {
+        // Scope to just the source prospects we need (was getAll over the whole table).
+        const _dlProspIds = [...new Set(convCustomers.map(c => c.converted_from_prospect_id).filter(Boolean))];
         let prospects = [];
-        try { prospects = await AppDataStore.getAll('prospects'); } catch (_) { prospects = []; }
+        if (_dlProspIds.length) {
+            try { prospects = await AppDataStore.queryPaged('prospects', { filters: { id: _dlProspIds } }); } catch (_) { prospects = []; }
+        }
         const prospById = new Map(prospects.map(pr => [String(pr.id), pr]));
         for (const c of convCustomers) {
             const pr = prospById.get(String(c.converted_from_prospect_id));

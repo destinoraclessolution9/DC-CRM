@@ -395,7 +395,7 @@
                                     <td style="padding:8px;">${m.fit_score ? `<span style="background:#dcfce7;color:#166534;font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600;">${m.fit_score}</span>` : '—'}</td>
                                     <td style="padding:8px;text-align:right;">
                                         <button class="btn btn-sm" onclick="app.openOrgMemberAddModal(${row.id}, ${i})">Edit</button>
-                                        <button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;" onclick="app.removeOrgMember(${row.id}, ${i})">×</button>
+                                        <button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;" onclick="app.removeOrgMember(${row.id}, ${i}, '${UI.escJsAttr(m.name || '')}')">×</button>
                                     </td>
                                 </tr>
                             `).join('')}</tbody>
@@ -543,13 +543,21 @@
         }
     };
     
-    const removeOrgMember = async (cid, idx) => {
+    const removeOrgMember = async (cid, idx, name) => {
         if (!_orgRequireAdmin()) return;
         if (!confirm('Remove this member?')) return;
         const row = await AppDataStore.getById('org_consultations', cid);
         if (!row) return;
         const members = Array.isArray(row.members) ? [...row.members] : [];
-        members.splice(idx, 1);
+        // The button's positional index can be STALE if the roster changed since render
+        // (a concurrent add/remove/paste). Verify it still points at the referenced
+        // member (by name); re-find by name if not, so we never delete the wrong person.
+        let i = idx;
+        if (!members[i] || String(members[i].name || '') !== String(name || '')) {
+            i = members.findIndex(m => String(m.name || '') === String(name || ''));
+        }
+        if (i < 0 || !members[i]) { UI.toast.error('Member not found — the roster changed. Reopen and retry.'); return; }
+        members.splice(i, 1);
         try {
             // Reset analysis/pairs (member-index based) so the removed member
             // can't leave the regenerated report pointing at the wrong people.

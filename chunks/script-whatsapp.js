@@ -345,12 +345,12 @@
             const template = await AppDataStore.getById('whatsapp_templates', tid);
             if (!template) { UI.toast.error('Template not found'); return; }
             UI.hideModal(); UI.toast.info('Sending...');
-            await sendWhatsAppMessage(entity.phone, template.template_name, {});
+            await sendWhatsAppMessage(entity.phone, template.template_name, {}, { type: entityType, id: entityId });
         } else {
             const message = document.getElementById('free-message')?.value;
             if (!message) { UI.toast.error('Please enter a message'); return; }
             UI.hideModal(); UI.toast.info('Sending...');
-            await sendFreeTextWhatsApp(entity.phone, message);
+            await sendFreeTextWhatsApp(entity.phone, message, { type: entityType, id: entityId });
         }
         if (entityType === 'prospect') await app.showProspectDetail(entityId);
         else await app.showCustomerDetail(entityId);
@@ -411,16 +411,18 @@
     };
 
     const resendMessage = async (messageId) => {
-        const original = (await AppDataStore.getAll('whatsapp_messages')).find(m => m.id === messageId);
+        const original = await AppDataStore.getById('whatsapp_messages', messageId).catch(() => null);
         if (!original) { UI.toast.error('Message not found'); return; }
         if (!original.to) { UI.toast.error('Original message has no recipient'); return; }
         UI.toast.info('Resending...');
-        // Actually hit the WhatsApp API and persist the REAL status/wamid the
-        // canonical send path returns — never fabricate a delivered row.
+        // Actually hit the WhatsApp API and persist the REAL status/wamid the canonical
+        // send path returns — never fabricate a delivered row. Carry the ORIGINAL
+        // attribution through so a resend doesn't re-mis-attribute a dual prospect+customer.
+        const _resendHint = { type: original.entity_type, id: original.entity_id };
         if (original.template_name) {
-            await sendWhatsAppMessage(original.to, original.template_name, {});
+            await sendWhatsAppMessage(original.to, original.template_name, {}, _resendHint);
         } else {
-            await sendFreeTextWhatsApp(original.to, original.content);
+            await sendFreeTextWhatsApp(original.to, original.content, _resendHint);
         }
         if (original.entity_type === 'prospect') await app.showProspectDetail(original.entity_id);
         else await app.showCustomerDetail(original.entity_id);
@@ -472,7 +474,7 @@
                 const entity = type === 'prospect' ? await AppDataStore.getById('prospects', parseInt(id)) : await AppDataStore.getById('customers', parseInt(id));
                 if (!entity || !entity.phone) { UI.toast.error('Recipient has no phone number'); return; }
                 UI.hideModal(); UI.toast.info('Forwarding...');
-                await app.sendFreeTextWhatsApp(entity.phone, ${JSON.stringify(original.content)});
+                await app.sendFreeTextWhatsApp(entity.phone, ${JSON.stringify(original.content)}, { type, id: parseInt(id) });
             } catch(e) { UI.toast.error('Forward failed: ' + (e?.message || e)); } })()` }
         ]);
     };
@@ -539,7 +541,7 @@
         UI.toast.success(`${count} template${count !== 1 ? 's' : ''} imported`);
     };
 
-    const sendWhatsAppMessage = async (to, templateName, variables = {}) => {
+    const sendWhatsAppMessage = async (to, templateName, variables = {}, entityHint = null) => {
         // Normalize to E.164-style digits with the Malaysia country code. The old
         // strip (only '+' and spaces) left dashes in and, worse, sent bare local
         // numbers ('012...', '12...') with no country code, so WhatsApp resolved them
@@ -612,13 +614,18 @@
             entity = allEntities.find(e => (e.phone || '').replace(/^\+/, '').replace(/\s/g, '') === phone) || null;
         }
         await AppDataStore.create('whatsapp_messages', {
-            id: wamid, entity_type: entity?._type || 'prospect', entity_id: entity?.id || null,
+            // Prefer the caller's entity hint (the profile the user actually opened) over
+            // the phone re-resolution, which hard-prefers prospect and mis-attributes a
+            // message when the recipient is BOTH a prospect and a customer.
+            id: wamid,
+            entity_type: (entityHint && entityHint.type) || entity?._type || 'prospect',
+            entity_id: (entityHint && entityHint.id != null) ? entityHint.id : (entity?.id || null),
             direction: 'outgoing', to, template_name: templateName, content, status,
             sent_at: new Date().toISOString(), created_at: new Date().toISOString()
         });
     };
 
-    const sendFreeTextWhatsApp = async (to, text) => {
+    const sendFreeTextWhatsApp = async (to, text, entityHint = null) => {
         if (!text) return;
         const phone = (to || '').replace(/^\+/, '').replace(/\s/g, '');
         const conn  = await getWhatsAppConnection();
@@ -662,7 +669,12 @@
             entity = allEntities.find(e => (e.phone || '').replace(/^\+/, '').replace(/\s/g, '') === phone) || null;
         }
         await AppDataStore.create('whatsapp_messages', {
-            id: wamid, entity_type: entity?._type || 'prospect', entity_id: entity?.id || null,
+            // Prefer the caller's entity hint (the opened profile) over the phone
+            // re-resolution, which mis-attributes when the recipient is both a
+            // prospect and a customer (see sendWhatsAppMessage).
+            id: wamid,
+            entity_type: (entityHint && entityHint.type) || entity?._type || 'prospect',
+            entity_id: (entityHint && entityHint.id != null) ? entityHint.id : (entity?.id || null),
             direction: 'outgoing', to, content: text, status,
             sent_at: new Date().toISOString(), created_at: new Date().toISOString()
         });

@@ -232,8 +232,12 @@ const TOTPManager = {
         // Walk every slot to keep timing flat
         for (let i = 0; i < user.mfa_backup_codes.length; i++) {
             const slot = user.mfa_backup_codes[i];
-            if (!slot || slot.used || !slot.hash || !slot.salt) continue;
-            const h = await TOTPManager.hashBackupCode(normalized, slot.salt);
+            const usable = !!(slot && !slot.used && slot.hash && slot.salt);
+            // ALWAYS run the (expensive) hash — a dummy salt for used/empty slots — so the
+            // loop's duration doesn't reveal how many backup codes remain unused. Only a
+            // usable slot can actually match.
+            const h = await TOTPManager.hashBackupCode(normalized, usable ? slot.salt : '0000000000000000');
+            if (!usable) continue;
             // Constant-time string compare
             let diff = h.length ^ slot.hash.length;
             for (let k = 0; k < Math.max(h.length, slot.hash.length); k++) {

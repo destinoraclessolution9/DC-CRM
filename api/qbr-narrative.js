@@ -125,8 +125,13 @@ module.exports = async (req, res) => {
     }
     if (!body || typeof body !== 'object') body = {};
 
-    const quarter  = typeof body.quarter === 'string' ? body.quarter : '';
-    const context  = typeof body.context === 'string' ? body.context : '';
+    const quarter  = (typeof body.quarter === 'string' ? body.quarter : '').slice(0, 40);
+    // Sanitize the attacker-influenceable free-text context before it enters the LLM
+    // prompt: collapse whitespace runs (newlines/tabs — the newline-flood injection
+    // vector) and cap the length. JSON.stringify below safely escapes any remaining
+    // control chars, and the SYSTEM prompt forbids inventing figures.
+    const context  = (typeof body.context === 'string' ? body.context : '')
+      .replace(/\s+/g, ' ').trim().slice(0, 2000);
     const snapshot = (body.snapshot && typeof body.snapshot === 'object') ? body.snapshot : {};
 
     // ── Key check → 200 not_configured (client degrades to heuristic text) ───
