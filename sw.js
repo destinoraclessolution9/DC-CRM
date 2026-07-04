@@ -191,9 +191,16 @@ async function trimRuntimeCache() {
         const cache = await caches.open(RUNTIME_CACHE);
         const keys  = await cache.keys();
         if (keys.length <= RUNTIME_CACHE_MAX) return;
-        const excess = keys.length - RUNTIME_CACHE_MAX;
-        for (let i = 0; i < excess; i++) {
-            await cache.delete(keys[i]);
+        // Protect the offline app shell + core boot bundles from FIFO eviction — they
+        // may have been cached early and would otherwise be the first deleted, breaking
+        // offline mode / the app boot while CDN images and superseded chunks pile up.
+        // Evict only the oldest NON-protected entries.
+        const PROTECTED = /(^|\/)(index\.html|offline\.html|offline|manifest\.json)(\?|$)|react-island|app-init|sw-init|supabase-init/i;
+        const deletable = keys.filter(k => !PROTECTED.test(k.url));
+        let toDelete = keys.length - RUNTIME_CACHE_MAX;
+        for (let i = 0; i < deletable.length && toDelete > 0; i++) {
+            await cache.delete(deletable[i]);
+            toDelete--;
         }
     } catch (_) { /* best-effort — never surface trim errors */ }
 }

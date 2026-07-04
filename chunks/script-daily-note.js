@@ -3048,7 +3048,6 @@
       var note = window.app.getDailyNote();
       if (!note) return;
       if (!(window.UI && UI.showModal)) return;
-      try { localStorage.setItem(key, today); } catch (e) {}
       var esc = function (t) {
         return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) {
           return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
@@ -3068,6 +3067,9 @@
       UI.showModal('每天一智 · Daily Wisdom', html, [
         { label: '收到 · Got it', type: 'primary', action: 'UI.hideModal()' }
       ]);
+      // Stamp "shown today" ONLY after showModal actually succeeds — if the render
+      // above throws, the note is not suppressed for the rest of the day.
+      try { localStorage.setItem(key, today); } catch (e) {}
       // Auto-close after 60s unless the user already dismissed it. Only hide if
       // the daily-note card is STILL the modal on screen — otherwise the shared
       // #global-modal-overlay may now hold an unrelated modal (e.g. a form the

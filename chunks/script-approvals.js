@@ -302,6 +302,13 @@ const approveQueueEntry = async (entryId) => {
                 if (Object.keys(syncFields).length > 0) {
                     await AppDataStore.update('customers', customer.id, syncFields);
                 }
+            } else if (!customer && prospect?.status === 'converted') {
+                // Surface (don't silently skip): the prospect's edited fields couldn't be
+                // propagated because no customer row is linked via converted_from_prospect_id
+                // (legacy/import). The approval still proceeds; a converted_from_prospect_id
+                // backfill re-links it so future edits sync.
+                console.warn('[approvals] info_update: converted prospect', entry.prospect_id, 'has no linked customer — field sync skipped');
+                try { UI.toast.info('Approved — note: no linked customer record found to sync the edited fields.'); } catch (_) {}
             }
         }
     } else if (entry.approval_type === 'new_sale') {

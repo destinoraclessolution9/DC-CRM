@@ -147,7 +147,7 @@ const _refreshNotifBadge = async () => {
                     .from('activities')
                     .select('id')
                     .filter('co_agents', 'cs', JSON.stringify([{ id: Number(_state.cu.id), status: 'pending' }]));
-                count += (coInvites || []).length;
+                count += Math.min((coInvites || []).length, 5); // panel renders slice(0,5); keep the badge in lockstep (matches the refill-reminder cap)
             }
         } catch (_) {}
     } catch (_) {}

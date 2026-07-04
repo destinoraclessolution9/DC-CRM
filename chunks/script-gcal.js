@@ -902,9 +902,21 @@
             // One getAll + a Map avoids up to 10 sequential round-trips (painful on a
             // degraded connection) and skips wasted lookups for falsy activity_ids
             // (e.g. google_to_crm rows whose create failed).
-            const rows = syncHistory.slice(0, 10);
-            const allActivities = await AppDataStore.getAll('activities').catch(() => []);
-            const activityById = new Map((allActivities || []).map(a => [String(a.id), a]));
+            // Respect the selected 7/30/90-day range (was hard-capped at 10 rows, hiding
+            // the rest with no indicator). syncHistory is already range-filtered; cap at
+            // 200 as a sane render bound. Scope the activity lookup to just these rows'
+            // ids (was a full-table getAll('activities')).
+            const rows = syncHistory.slice(0, 200);
+            const _actIds = [...new Set(rows.map(r => r.activity_id).filter(Boolean))];
+            const activityById = new Map();
+            if (_actIds.length) {
+                try {
+                    const _acts = await AppDataStore.queryPaged('activities', { filters: { id: _actIds }, select: 'id,activity_title' });
+                    (_acts || []).forEach(a => activityById.set(String(a.id), a));
+                } catch (_) {
+                    await Promise.all(_actIds.map(async id => { const a = await AppDataStore.getById('activities', id).catch(() => null); if (a) activityById.set(String(id), a); }));
+                }
+            }
             for (const [index, item] of rows.entries()) {
                 const activity = item.activity_id ? activityById.get(String(item.activity_id)) : null;
                 const directionIcon = item.direction === 'crm_to_google' ? '→' : '←';

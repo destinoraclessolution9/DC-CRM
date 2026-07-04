@@ -61,7 +61,7 @@ export default async function handler(req, res) {
 
   const Q = req.query || {};
   const limit   = clampInt(Q.limit, 50, 1, 100);
-  const offset  = clampInt(Q.offset, 0, 0, Number.MAX_SAFE_INTEGER);
+  const offset  = clampInt(Q.offset, 0, 0, 2147483647); // int4 max — prospects_page.p_offset is int4; a larger value raised 'integer out of range' -> misread as a 503
   const q       = String(Q.q   || '').trim().slice(0, 80);
   const gua     = String(Q.gua || '').trim().slice(0, 40);
   const agentId = Number.isFinite(Number.parseInt(String(Q.agent ?? ''), 10)) ? Number.parseInt(String(Q.agent), 10) : null;
