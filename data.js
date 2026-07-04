@@ -497,6 +497,12 @@ class DataStore {
     // got — callers should null-check.
     async loadCalendarDashboard(agentId, sinceISO, untilISO) {
         try {
+            // Never issue this cache-priming RPC without a live session: it would go out as
+            // an anon read, come back with empty arrays (RLS), and then prime the
+            // prospects/customers caches + snapshots with [] — poisoning full-table reads
+            // until the next delta-sync backfills. Bail to the caller's null path instead.
+            // (bug 2026-07: a silent session drop wiped mobile data across views)
+            if (!this.hasLiveSession()) return null;
             const signal = this._inflightSignal();
             let rpc = this._readClient().rpc('calendar_dashboard_payload', {
                 p_agent_id: agentId || null,

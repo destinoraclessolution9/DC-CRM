@@ -1959,6 +1959,11 @@ const Auth = {
         // Bridge the re-login prompt to a global so the data layer (data.js getAll) can route
         // an expired-session read failure here instead of the misleading offline/network banner.
         try { window._showSessionExpired = _showSessionExpired; } catch (_) { /* best-effort bridge */ }
+        // Also bridge the CONSERVATIVE liveness probe: a feature chunk (e.g. the calendar
+        // grid) that gets a successful-but-EMPTY RLS read while the local token looks dead
+        // can route here. Unlike _showSessionExpired, this confirms with supabase-js
+        // (attempting a refresh) BEFORE prompting, so a self-healing session is left alone.
+        try { window._checkSessionAlive = _checkSessionAlive; } catch (_) { /* best-effort bridge */ }
         // (1) Authoritative: supabase-js emits SIGNED_OUT when it clears a session
         // (failed refresh / invalid token / cross-tab sign-out). Only react when a
         // real, online user is still active and we didn't trigger it ourselves.

@@ -2944,6 +2944,24 @@
             return;
         }
 
+        // Dead-session empty-read guard. A no-error RPC that returns ZERO rows while our
+        // LOCAL auth token is missing/expired is almost always an RLS empty read from a
+        // silently-dropped session (the request quietly downgraded to the anon role, which
+        // gets 200 + [] — not a 401), NOT a genuinely empty month. Rendering [] here would
+        // wipe the calendar and read as data loss ("all my info is gone"). Instead keep the
+        // last-good view (stale snapshot) and run the CONSERVATIVE liveness probe, which only
+        // prompts re-login if supabase-js confirms the session is truly gone (a refresh that
+        // self-heals is left untouched, so a genuinely empty month is never misflagged once
+        // the token is valid). Guarded on !hasLiveSession() so it can't fire on a healthy
+        // session. (bug 2026-07: mobile calendar showed empty after a silent session drop)
+        if ((!lightRes.data || lightRes.data.length === 0)
+            && window.AppDataStore && typeof AppDataStore.hasLiveSession === 'function'
+            && !AppDataStore.hasLiveSession()) {
+            if (myToken === _state.rct) _paintOfflineFallback('session may have expired — keeping last view');
+            try { if (typeof window._checkSessionAlive === 'function') window._checkSessionAlive('calendar_empty_read'); } catch (_) { /* best-effort */ }
+            return;
+        }
+
         let activities = (lightRes.data || []).slice();
 
         // Phase J: merge in optimistic in-flight rows so the user sees them
