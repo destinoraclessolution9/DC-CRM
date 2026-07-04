@@ -77,8 +77,12 @@ try {
     'return (' + followupExpr + ');'
   );
   // eslint-disable-next-line no-new-func
+  // closingRate numerator is now `ownerClosings` (a plain owner-attributed count),
+  // not `purchases.length` — see the owner-based closing-rate fix in
+  // chunks/script-performance.js (audit performance:178). The sliced expression's
+  // free vars are (cpsCount, ownerClosings), so those are the function params.
   closingRate = new Function(
-    'cpsCount', 'purchases',
+    'cpsCount', 'ownerClosings',
     'return (' + closingExpr + ');'
   );
 } catch (e) {
@@ -153,18 +157,19 @@ eq('follow-twothirds', followupRate(P(3), 2), 67);     // 66.67 -> 67
 eq('follow-over',  followupRate(P(4), 6), 150);        // no clamp: 6/4 -> 150
 eq('follow-zero-num', followupRate(P(7), 0), 0);       // none followed up
 
-// ── closingRate = cpsCount>0 ? round(purchases.length/cpsCount*100) : 0
-eq('close-zero-cps', closingRate(0, P(5)), 0);         // guard: no CPS -> 0 (even with sales)
-eq('close-full',     closingRate(5, P(5)), 100);       // 5/5
-eq('close-typical',  closingRate(8, P(2)), 25);        // 2/8
-eq('close-eighth',   closingRate(8, P(1)), 13);        // 12.5 -> round 13 (half-up)
-eq('close-over100',  closingRate(2, P(5)), 250);       // no clamp: 5/2 -> 250
-eq('close-zero-num', closingRate(10, P(0)), 0);        // CPS but no purchases
+// ── closingRate = cpsCount>0 ? round(ownerClosings/cpsCount*100) : 0
+// ownerClosings is a plain owner-attributed closing COUNT (not an array-like).
+eq('close-zero-cps', closingRate(0, 5), 0);            // guard: no CPS -> 0 (even with sales)
+eq('close-full',     closingRate(5, 5), 100);          // 5/5
+eq('close-typical',  closingRate(8, 2), 25);           // 2/8
+eq('close-eighth',   closingRate(8, 1), 13);           // 12.5 -> round 13 (half-up)
+eq('close-over100',  closingRate(2, 5), 250);          // no clamp: 5/2 -> 250
+eq('close-zero-num', closingRate(10, 0), 0);           // CPS but no closings
 
 // ── end-to-end: rates feed the score (chaining the three real expressions)
-// agent: cps=8, sales=42000, meet=6, prospects 10/5 followed, purchases 2/8 cps
+// agent: cps=8, sales=42000, meet=6, prospects 10/5 followed, 2 owner-closings / 8 cps
 const fr = followupRate(P(10), 5);   // 50
-const cr = closingRate(8, P(2));     // 25
+const cr = closingRate(8, 2);        // 25
 eq('chain-follow', fr, 50);
 eq('chain-close',  cr, 25);
 eq('chain-score',  perfScore(8, 42000, 6, fr, cr), 145);

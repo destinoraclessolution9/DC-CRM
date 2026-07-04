@@ -925,68 +925,57 @@
 
     const getActivityAttendanceDetails = async (from, to) => {
         const activities = await _reportActsInRange(from, to, 'getActivityAttendanceDetails');
-        // Scope parity with the attended-only 'Activity Attendance' KPI card
-        // (getActivityHeadcount): only ATTENDED registrations count, market scope is
-        // honoured, and rows are filtered to _visibleUserIds so a scoped L4/L5 viewer
-        // never sees other teams' events/meetings. Resolve each attendee's agent via
-        // prospect/customer like getActivityHeadcount (only needed when scoped).
-        const [events, registrations, prospects, customers] = await Promise.all([
+        // Reconcile EXACTLY with the 'Activity Attendance' KPI card (getActivityHeadcount):
+        // read the SAME source of truth — event_attendees, NOT event_registrations — and
+        // apply the card's identical per-attendee gate (attended flag, activity_date window
+        // via activity_id, market scope, and _visibleUserIds agent resolution). Bucketing by
+        // activity_id then guarantees the breakdown rows always sum to the card total. The
+        // old event_registrations path filtered on r.event_date / r.attendance_status —
+        // columns that table does not have — so it silently under-counted vs the card.
+        const [events, attendees, prospects, customers] = await Promise.all([
             AppDataStore.getAll('events'),
-            AppDataStore.getAll('event_registrations'),
+            AppDataStore.getAll('event_attendees'),
             _visibleUserIds !== 'all' ? AppDataStore.getAll('prospects') : Promise.resolve([]),
             _visibleUserIds !== 'all' ? AppDataStore.getAll('customers') : Promise.resolve([]),
         ]);
+        const actMap = {}; activities.forEach(a => { actMap[a.id] = a; });
+        const eventMap = {}; events.forEach(e => { eventMap[e.id] = e; });
         const prospMap = {}; prospects.forEach(p => { prospMap[p.id] = p; });
         const custMap = {}; customers.forEach(c => { custMap[c.id] = c; });
-        const _regInScope = (r) => {
+        const _attInScope = (att) => {
             if (_visibleUserIds === 'all') return true;
-            const entityId = r.entity_id || r.attendee_id;
+            const entityId = att.entity_id || att.attendee_id;
             let agentId;
-            if (r.attendee_type === 'agent') agentId = entityId;
-            else if (r.attendee_type === 'customer') agentId = custMap[entityId]?.responsible_agent_id;
+            if (att.attendee_type === 'agent') agentId = entityId;
+            else if (att.attendee_type === 'customer') agentId = custMap[entityId]?.responsible_agent_id;
             else agentId = prospMap[entityId]?.responsible_agent_id;
             return _visibleUserIds.includes(agentId);
         };
-        // De-quad: bucket registrations by event_id ONCE (O(n), source insertion
-        // order preserved) so the per-event lookup is O(1) instead of a full-array
-        // .filter scan per event (was O(events × registrations)). RAW key + strict
-        // === parity with the old `r.event_id === ev.id` comparison.
-        const regsByEvent = new Map();
-        for (const r of registrations) {
-            const k = r.event_id; // RAW key
-            let bucket = regsByEvent.get(k);
-            if (!bucket) { bucket = []; regsByEvent.set(k, bucket); }
-            bucket.push(r);
+        // Bucket every ATTENDED row by its activity (the "event/meeting"), applying the
+        // card's exact gate so each row that the card counts lands in exactly one bucket.
+        const buckets = new Map(); // activity_id -> { title, prospectCount, agentCount }
+        for (const att of attendees) {
+            if (!att.attended && att.attendance_status !== 'Attended') continue;
+            const act = actMap[att.activity_id];
+            const date = act?.activity_date || '';
+            if (date < from || date > to) continue;
+            if (!_recInMarket(act || {})) continue;
+            if (!_attInScope(att)) continue;
+            const k = att.activity_id;
+            let b = buckets.get(k);
+            if (!b) {
+                const title = (act?.event_id && eventMap[act.event_id]?.title)
+                    || act?.activity_title
+                    || (act ? `${act.activity_type} - Meeting` : 'Event');
+                b = { title, prospectCount: 0, agentCount: 0 };
+                buckets.set(k, b);
+            }
+            if (att.attendee_type === 'agent') b.agentCount++;
+            else b.prospectCount++; // prospect OR customer
         }
         const result = [];
-        for (const ev of events) {
-            if (!_recInMarket(ev)) continue;
-            const regs = (regsByEvent.get(ev.id) || []).filter(r =>
-                r.event_date >= from && r.event_date <= to &&
-                r.attendance_status === 'Attended' && _regInScope(r)
-            );
-            if (regs.length === 0) continue;
-            let prospectCount = 0, agentCount = 0;
-            for (const r of regs) {
-                if (r.attendee_type === 'prospect' || r.attendee_type === 'customer') prospectCount++;
-                if (r.attendee_type === 'agent') agentCount++;
-            }
-            result.push({ title: ev.title, prospectCount, agentCount, total: regs.length });
-        }
-        const standaloneActivities = activities.filter(a =>
-            a.activity_date >= from && a.activity_date <= to &&
-            !a.event_id && a.co_agents && a.co_agents.length > 0 &&
-            _recInMarket(a) &&
-            (_visibleUserIds === 'all' || _visibleUserIds.includes(a.lead_agent_id))
-        );
-        for (const a of standaloneActivities) {
-            const agentCount = a.co_agents?.length || 0;
-            result.push({
-                title: `${a.activity_type} - ${a.activity_title || 'Meeting'}`,
-                prospectCount: a.prospect_id ? 1 : 0,
-                agentCount,
-                total: agentCount + (a.prospect_id ? 1 : 0)
-            });
+        for (const b of buckets.values()) {
+            result.push({ title: b.title, prospectCount: b.prospectCount, agentCount: b.agentCount, total: b.prospectCount + b.agentCount });
         }
         return result;
     };

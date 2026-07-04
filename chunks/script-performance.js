@@ -117,36 +117,57 @@ const showRankingPerformanceView = async (container) => {
     const _fc = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
     const followupCutoff = `${_fc.getFullYear()}-${String(_fc.getMonth() + 1).padStart(2, '0')}-${String(_fc.getDate()).padStart(2, '0')}`;
 
-    // Bucket activities for the current month by lead_agent_id
+    // Bucket activities for the current month by the RESPONSIBLE AGENT of the activity's
+    // prospect/customer (business decision: performance credit goes to the record OWNER,
+    // consistent with how purchases are attributed — so the closing rate numerator and
+    // denominator share one basis). Falls back to lead_agent_id for unlinked activities.
+    const _prospAgentMap = new Map(allProspects.filter(p => p.responsible_agent_id != null).map(p => [String(p.id), String(p.responsible_agent_id)]));
     const activitiesByAgent = new Map();
     for (const a of allActivities) {
-        if (!a.lead_agent_id) continue;
         // Guard undated records: `null < monthStart` coerces to NaN comparisons
         // (always false) and would silently bucket undated activities into the
         // current month, inflating CPS/meeting metrics.
         if (!a.activity_date) continue;
         if (a.activity_date < monthStart || a.activity_date > monthEnd) continue;
-        const k = String(a.lead_agent_id);
+        let ownerAgent = null;
+        if (a.customer_id != null) ownerAgent = _custAgentMap.get(String(a.customer_id));
+        if (!ownerAgent && a.prospect_id != null) ownerAgent = _prospAgentMap.get(String(a.prospect_id));
+        if (!ownerAgent && a.lead_agent_id != null) ownerAgent = String(a.lead_agent_id);
+        if (!ownerAgent) continue;
+        const k = String(ownerAgent);
         let bucket = activitiesByAgent.get(k);
         if (!bucket) { bucket = []; activitiesByAgent.set(k, bucket); }
         bucket.push(a);
     }
-    // Bucket purchases for the current month by agent_id
+    // Bucket purchases for the current month twice, by two DIFFERENT bases:
+    //   • purchasesByAgent — drives totalSales ($): honours an explicit p.agent_id
+    //     (assign-on-behalf SALES credit) when present, else the customer's owner.
+    //   • closingsByOwner — drives the closing RATE: attributed to the record OWNER
+    //     ONLY, so its numerator shares ONE basis with the owner-attributed CPS
+    //     denominator below. A closing rate is a conversion-efficiency metric for the
+    //     agent's OWN book, independent of who received the sales credit — mixing the
+    //     two bases is exactly the inconsistency this fix removes. (audit performance:178)
     const purchasesByAgent = new Map();
+    const closingsByOwner = new Map();
     for (const p of allPurchases) {
-        // Resolve the owning agent: prefer an explicit agent_id if present, else
-        // fall back to the purchase's customer's responsible_agent_id.
-        const agentId = p.agent_id || (p.customer_id != null ? _custAgentMap.get(String(p.customer_id)) : null);
-        if (!agentId) continue;
         // Guard undated purchases — same null-coercion trap as activities above:
-        // a null date must not be bucketed into the current month's sales.
+        // a null date must not be bucketed into the current month.
         const _pDate = p.date || p.purchase_date;
         if (!_pDate) continue;
         if (_pDate < monthStart || _pDate > monthEnd) continue;
-        const k = String(agentId);
-        let bucket = purchasesByAgent.get(k);
-        if (!bucket) { bucket = []; purchasesByAgent.set(k, bucket); }
-        bucket.push(p);
+        const ownerId = p.customer_id != null ? _custAgentMap.get(String(p.customer_id)) : null;
+        // Sales credit: explicit agent_id (assign-on-behalf) wins, else the owner.
+        const agentId = p.agent_id || ownerId;
+        if (agentId) {
+            const k = String(agentId);
+            let bucket = purchasesByAgent.get(k);
+            if (!bucket) { bucket = []; purchasesByAgent.set(k, bucket); }
+            bucket.push(p);
+        }
+        if (ownerId) {
+            const ok = String(ownerId);
+            closingsByOwner.set(ok, (closingsByOwner.get(ok) || 0) + 1);
+        }
     }
     // Bucket prospects by responsible_agent_id
     const prospectsByAgent = new Map();
@@ -175,7 +196,9 @@ const showRankingPerformanceView = async (container) => {
             return String(p.last_contact_date).slice(0, 10) >= followupCutoff;
         }).length;
         const followupRate = prospects.length > 0 ? Math.round((followedUp / prospects.length) * 100) : 0;
-        const closingRate = cpsCount > 0 ? Math.round((purchases.length / cpsCount) * 100) : 0;
+        // Owner-attributed closings ÷ owner-attributed CPS — one shared basis. (performance:178)
+        const ownerClosings = closingsByOwner.get(aid) || 0;
+        const closingRate = cpsCount > 0 ? Math.round((ownerClosings / cpsCount) * 100) : 0;
 
         agentStats.push({
             id: agent.id,

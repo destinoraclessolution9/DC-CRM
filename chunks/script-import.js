@@ -565,6 +565,52 @@ const _parseAmount = (raw) => { const s = (raw || '').toString(); const n = pars
 // day, which is the PREVIOUS day before 08:00 MYT — mis-bucketing persisted dates
 // (customer_since, protection_deadline, purchase date) into the prior period.
 const _impLocalDay = (dt = new Date()) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+// Normalise a customer_since cell into a YYYY-MM-DD purchase date for the synthetic
+// "Opening balance (imported)" row. The sheet is parsed WITHOUT cellDates (see line ~515
+// XLSX.read + sheet_to_json), so a date column arrives as an Excel SERIAL NUMBER, and
+// Malaysian sheets commonly use DD/MM/YYYY — both must be handled, or the purchase lands
+// in the wrong period (a raw `new Date('45658')` parses to the year 45658, and
+// `new Date('15/3/2025')` is Invalid → today). Order: ISO passthrough → Excel serial →
+// DD/MM/YYYY (day-first) → free-text with a plausible-year guard → today as last resort.
+// The plausible window (1970–2100) also stops a stray non-date value from becoming a
+// bogus far-future/past date. (audit import:594)
+const _OB_YEAR_MIN = 1970, _OB_YEAR_MAX = 2100;
+const _openingBalanceDate = (cs) => {
+    const today = _impLocalDay();
+    if (cs == null || cs === '') return today;
+    const s = String(cs).trim();
+    if (!s) return today;
+    // Already ISO (what mapRowToRecord synthesizes for a blank cell) → take the day part.
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    // Excel serial date → convert via the 1899-12-30 epoch (accounts for the Lotus 1900
+    // leap-year bug). Bounded to plausible serials (1970-01-01=25569 .. 2100-01-01=73051)
+    // so an amount mis-mapped into this column can't masquerade as a date.
+    if (/^\d+(\.\d+)?$/.test(s)) {
+        const serial = parseFloat(s);
+        if (serial >= 25569 && serial <= 73051) {
+            const d = new Date(Date.UTC(1899, 11, 30) + Math.round(serial) * 86400000);
+            if (!isNaN(d.getTime())) return _impLocalDay(d);
+        }
+        return today;
+    }
+    // DD/MM/YYYY or DD-MM-YYYY (Malaysia locale) → interpret DAY-first, unlike JS Date's
+    // month-first parse, so '15/3/2025' and '3/4/2025' both read as day/month/year.
+    const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+    if (dmy) {
+        let dd = parseInt(dmy[1], 10), mm = parseInt(dmy[2], 10), yy = parseInt(dmy[3], 10);
+        if (yy < 100) yy += yy < 70 ? 2000 : 1900;
+        if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+            const d = new Date(yy, mm - 1, dd);
+            if (!isNaN(d.getTime()) && d.getFullYear() >= _OB_YEAR_MIN && d.getFullYear() <= _OB_YEAR_MAX) return _impLocalDay(d);
+        }
+        return today;
+    }
+    // Free-text ('March 2025', etc.): trust JS Date but REJECT an implausible year so a
+    // mis-parse (e.g. the year-45658 trap) can never push the purchase millennia away.
+    const d = new Date(s);
+    if (!isNaN(d.getTime()) && d.getFullYear() >= _OB_YEAR_MIN && d.getFullYear() <= _OB_YEAR_MAX) return _impLocalDay(d);
+    return today;
+};
 
 const mapRowToRecord = (row, reverseMap, agentId, importType = 'prospects') => {
     const get = (field) => {
@@ -1023,6 +1069,15 @@ const startImport = async () => {
             record.status = 'New';
             record.protection_deadline = _impLocalDay(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000));
             record.score = 5;
+        } else if (table === 'customers') {
+            // Keep the imported LTV ON the customer record (mapRowToRecord already set
+            // lifetime_value) so the value is persisted by the single customer insert and
+            // can NEVER be lost if the synthetic opening-balance purchase below fails. The
+            // purchase row is added purely so the historical spend is VISIBLE to
+            // purchase-based leaderboard/revenue reports (dated customer_since) — it must
+            // NOT also re-bump LTV via adjustCustomerLtv, which would double the value.
+            // Set total_purchases to match the single opening entry. (audit import:594)
+            record.total_purchases = purchaseAmount > 0 ? 1 : 0;
         }
         // BUG #15: skip a second occurrence of the same person within this file.
         const natKey = naturalKeyForCreate(record);
@@ -1083,6 +1138,35 @@ const startImport = async () => {
         }
     };
 
+    // Imported customer with a non-zero opening LTV → record it as ONE synthetic
+    // "Opening balance (imported)" purchase DATED TO customer_since so the historical spend
+    // is VISIBLE to purchase-based leaderboard/revenue reports (which SUM the purchases
+    // table) and lands in the correct historical period, not current-month revenue. The
+    // customer's lifetime_value + total_purchases were already persisted on the record
+    // itself, so this deliberately does NOT call adjustCustomerLtv (that would DOUBLE the
+    // LTV) — and a failed insert here costs only this row's report visibility, never the
+    // LTV value. Runs once per created customer, so re-imports never double-post.
+    // (audit import:594)
+    const autoOpeningBalance = async (record, savedCustomer, purchaseAmount, rowIndex) => {
+        if (!(purchaseAmount > 0 && savedCustomer?.id)) return;
+        try {
+            await AppDataStore.create('purchases', {
+                customer_id: savedCustomer.id,
+                date: _openingBalanceDate(record.customer_since),
+                invoice: 'IMPORT-OPENING',
+                item: 'Opening balance (imported)',
+                amount: purchaseAmount,
+                status: 'COMPLETED',
+                payment_method: 'Imported'
+            });
+        } catch (obErr) {
+            // LTV is safe on the customer record; only the purchase-report visibility of
+            // this one row is lost. Surface it in the tally without failing the import.
+            console.error('Opening-balance purchase failed row', rowIndex, obErr);
+            errorCount++;
+        }
+    };
+
     // ── Pass 2: flush create candidates in chunks of ~500 ────────────────
     for (let start = 0; start < pendingCreates.length; start += CHUNK_SIZE) {
         const chunk = pendingCreates.slice(start, start + CHUNK_SIZE);
@@ -1096,6 +1180,10 @@ const startImport = async () => {
                 for (let j = 0; j < chunk.length; j++) {
                     await autoConvertProspect(chunk[j].record, saved[j], chunk[j].purchaseAmount, chunk[j].rowIndex);
                 }
+            } else if (table === 'customers') {
+                for (let j = 0; j < chunk.length; j++) {
+                    await autoOpeningBalance(chunk[j].record, saved[j], chunk[j].purchaseAmount, chunk[j].rowIndex);
+                }
             }
         } catch (e) {
             // Whole-chunk reject (createMany re-threw): fall back to per-row
@@ -1106,6 +1194,7 @@ const startImport = async () => {
                     const savedOne = await AppDataStore.create(table, c.record);
                     created++;
                     if (table === 'prospects') await autoConvertProspect(c.record, savedOne, c.purchaseAmount, c.rowIndex);
+                    else if (table === 'customers') await autoOpeningBalance(c.record, savedOne, c.purchaseAmount, c.rowIndex);
                 } catch (rowErr) { console.error('Insert failed row', c.rowIndex, rowErr); errorCount++; }
             }
         }

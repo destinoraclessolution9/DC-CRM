@@ -487,6 +487,18 @@ Gold-${totGold}`;
                 const w = r.week_start_date;
                 if (!latestPerWeek[w] || new Date(r.run_at) > new Date(latestPerWeek[w].run_at)) latestPerWeek[w] = r;
             }
+            // The SELECTED run is authoritative for its own week: force the Month column to
+            // use it (not merely the latest run of that week) so Week and Month never disagree
+            // for the run being reported. Without this, picking an older run for a week that
+            // also has a newer run showed the old number in Week but the newer one in Month.
+            // GUARD: only when the selected run's run_at is in THIS month (mk) — otherwise
+            // selecting a prior-month run would inject its cartons into the current
+            // month-to-date total (month-scoped by the monthRuns filter above), over-counting
+            // the Month column. (audit boss-report:500 — "both need" the selected run reflected.)
+            const _selRunMk = run.run_at
+                ? `${new Date(run.run_at).getFullYear()}_${String(new Date(run.run_at).getMonth() + 1).padStart(2, '0')}`
+                : null;
+            if (run.week_start_date && _selRunMk === mk) latestPerWeek[run.week_start_date] = run;
             for (const r of Object.values(latestPerWeek)) {
                 for (const [g, q] of Object.entries(r.totals?.by_group||{})) monthByGroup[g]=(monthByGroup[g]||0)+q;
             }
