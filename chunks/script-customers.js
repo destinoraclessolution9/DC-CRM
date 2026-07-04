@@ -2249,9 +2249,22 @@ const _setDelivery = async (mode, id, customerId, newStatus) => {
         if (mode === 'purchase') {
             await AppDataStore.update('purchases', id, { delivery_status: newStatus });
         } else {
-            const prospect = await AppDataStore.getById('prospects', id);
-            const cr = { ...(prospect?.closing_record || {}), delivery_status: newStatus };
-            await AppDataStore.update('prospects', id, { closing_record: cr });
+            // Atomic single-key merge via set_closing_record_field so a concurrent
+            // remarks edit isn't clobbered by a whole-JSON read-modify-write. Fall back
+            // to the RMW path if the RPC is unavailable (older DB).
+            const _sb = AppDataStore._writeClient && AppDataStore._writeClient();
+            let _merged = false;
+            if (_sb) {
+                try {
+                    const { error } = await _sb.rpc('set_closing_record_field', { p_prospect_id: id, p_key: 'delivery_status', p_value: newStatus });
+                    if (!error) { _merged = true; try { AppDataStore.invalidateCache && AppDataStore.invalidateCache('prospects'); } catch (_) {} }
+                } catch (_) { /* fall back to RMW below */ }
+            }
+            if (!_merged) {
+                const prospect = await AppDataStore.getById('prospects', id);
+                const cr = { ...(prospect?.closing_record || {}), delivery_status: newStatus };
+                await AppDataStore.update('prospects', id, { closing_record: cr });
+            }
         }
     } catch (e) {
         UI.toast.error('Failed to update delivery: ' + (e?.message || e));
@@ -2543,9 +2556,21 @@ const saveDeliveryRemarks = async (kind, id, customerId, value) => {
         if (kind === 'purchase') {
             await AppDataStore.update('purchases', id, { delivery_remarks: v });
         } else {
-            const prospect = await AppDataStore.getById('prospects', id);
-            const cr = { ...(prospect?.closing_record || {}), delivery_remarks: v };
-            await AppDataStore.update('prospects', id, { closing_record: cr });
+            // Atomic single-key merge (set_closing_record_field) so a concurrent
+            // status edit isn't clobbered by a whole-JSON read-modify-write. RMW fallback.
+            const _sb = AppDataStore._writeClient && AppDataStore._writeClient();
+            let _merged = false;
+            if (_sb) {
+                try {
+                    const { error } = await _sb.rpc('set_closing_record_field', { p_prospect_id: id, p_key: 'delivery_remarks', p_value: v });
+                    if (!error) { _merged = true; try { AppDataStore.invalidateCache && AppDataStore.invalidateCache('prospects'); } catch (_) {} }
+                } catch (_) { /* fall back to RMW below */ }
+            }
+            if (!_merged) {
+                const prospect = await AppDataStore.getById('prospects', id);
+                const cr = { ...(prospect?.closing_record || {}), delivery_remarks: v };
+                await AppDataStore.update('prospects', id, { closing_record: cr });
+            }
         }
         UI.toast.success('Remark saved');
     } catch (e) {
