@@ -4356,6 +4356,9 @@ function _wireLoginBtn() {
     const calculateProtectionDays = (p) => (window.app.calculateProtectionDays || (() => 0))(p);
     const showProspectDetail      = async (...a) => { await _loadChunkOnce('chunks/script-prospects.min.js'); const _r = window.app.showProspectDetail;      if (_r && _r !== showProspectDetail)      return _r(...a); };
     const showCustomerDetail      = async (...a) => { await _loadChunkOnce('chunks/script-customers.min.js'); const _r = window.app.showCustomerDetail;      if (_r && _r !== showCustomerDetail)      return _r(...a); };
+    // Card-renewal reminder for installment closings — real impl lives in the calendar chunk
+    // (owns createFollowUpDraft). Stub loads it so the prospects closing-record save path can call it.
+    const scheduleCardExpiryReminder = async (...a) => { await _loadChunkOnce('chunks/script-calendar.min.js'); const _r = window.app.scheduleCardExpiryReminder; if (_r && _r !== scheduleCardExpiryReminder) return _r(...a); };
     const showPurchasesHistoryView = async (...a) => { await _loadChunkOnce('chunks/script-prospects.min.js'); const _r = window.app.showPurchasesHistoryView; if (_r && _r !== showPurchasesHistoryView) return _r(...a); };
     const showAgentsView          = async (...a) => { await _loadChunkOnce('chunks/script-agents.min.js'); const _r = window.app.showAgentsView;          if (_r && _r !== showAgentsView)          return _r(...a); };
     const showAgentDetail         = async (...a) => { await _loadChunkOnce('chunks/script-agents.min.js'); const _r = window.app.showAgentDetail;         if (_r && _r !== showAgentDetail)         return _r(...a); };
@@ -5010,6 +5013,7 @@ function _wireLoginBtn() {
         switchCustomerTab,
         showCustomersView,
         showCustomerDetail,
+        scheduleCardExpiryReminder,
         hideCustomerDetail: async () => await navigateTo('prospects'),
         renderCustomersTable,
         openAddCustomerModal,

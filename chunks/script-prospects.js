@@ -3054,6 +3054,18 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                     <div id="cr-npo-selected" style="font-size:12px;color:#0e7490;margin-top:6px;">${npoPlanName ? 'Selected package: <strong>' + escapeHtml(npoPlanName) + '</strong>' : ''}</div>
                     ${isNPO ? `<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="" style="display:none;" onload="window.app && app.crNpoFillPlans && app.crNpoFillPlans('${escapeHtml(String(npoPlanId))}')">` : ''}
                 </div>
+                <div id="cr-cc-fields" style="display:${(isPOP||isNPO)?'block':'none'};background:#fff7ed;border:1px solid #fed7aa;padding:12px;border-radius:6px;margin-bottom:10px;">
+                    <label class="checkbox-label" style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:#9a3412;margin:0;cursor:pointer;">
+                        <input type="checkbox" id="cr-cc-installment" ${d.cc_installment ? 'checked' : ''}
+                            onchange="var w=document.getElementById('cr-cc-expiry-wrap'); if(w) w.style.display=this.checked?'block':'none';">
+                        <span><i class="fas fa-credit-card"></i> Installment charged to a credit card</span>
+                    </label>
+                    <div id="cr-cc-expiry-wrap" style="display:${d.cc_installment ? 'block' : 'none'};margin-top:10px;max-width:220px;">
+                        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Credit Card Expiry <span style="color:#ef4444;font-weight:700;" title="Required">*</span></label>
+                        <input type="month" id="cr-cc-expiry" class="form-control" value="${escapeHtml(d.cc_expiry || '')}">
+                        <span style="font-size:11px;color:var(--gray-500);display:block;margin-top:4px;">A reminder surfaces ~1 month before expiry to collect updated card details. Store the expiry only — never the full card number.</span>
+                    </div>
+                </div>
                 <div class="form-row" style="display:flex;gap:8px;margin-bottom:10px;">
                     <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Invoice Number</label><input id="cr-invoice" class="form-control" value="${escapeHtml(d.invoice_number || '')}" placeholder="INV-2026-001"></div>
                     <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Collection Date</label><input id="cr-close-date" type="date" class="form-control" value="${d.closing_date || ''}"></div>
@@ -5061,6 +5073,9 @@ const gatherClosingFormData = async (existingCr = {}) => {
         pop_down_payment: paymentMethod === 'POP' ? (document.getElementById('cr-pop-down')?.value || '') : '',
         npo_plan_id: paymentMethod === 'NPO' ? (document.getElementById('cr-npo-plan')?.value || '') : '',
         npo_plan_name: paymentMethod === 'NPO' ? (() => { const s = document.getElementById('cr-npo-plan'); const o = s && s.options[s.selectedIndex]; return o && o.value ? (o.getAttribute('data-name') || (o.textContent || '').trim()) : ''; })() : '',
+        // Credit-card installment (POP/NPO): flag + expiry (YYYY-MM). Expiry only — no PAN/CVV.
+        cc_installment: (paymentMethod === 'POP' || paymentMethod === 'NPO') ? (document.getElementById('cr-cc-installment')?.checked || false) : false,
+        cc_expiry: ((paymentMethod === 'POP' || paymentMethod === 'NPO') && document.getElementById('cr-cc-installment')?.checked) ? (document.getElementById('cr-cc-expiry')?.value || '') : '',
         invoice_number: document.getElementById('cr-invoice')?.value?.trim() || '',
         closing_remarks: document.getElementById('cr-remarks')?.value?.trim() || '',
         closing_date: document.getElementById('cr-close-date')?.value || '',
@@ -5082,6 +5097,9 @@ const crPaymentMethodChanged = (val) => {
     if (pop) pop.style.display = val === 'POP' ? 'block' : 'none';
     const npo = document.getElementById('cr-npo-fields');
     if (npo) npo.style.display = val === 'NPO' ? 'block' : 'none';
+    // Credit-card-installment block applies to both company installment plans (POP/NPO).
+    const cc = document.getElementById('cr-cc-fields');
+    if (cc) cc.style.display = (val === 'POP' || val === 'NPO') ? 'block' : 'none';
     if (val === 'NPO') {
         const sel = document.getElementById('cr-npo-plan');
         crNpoFillPlans((sel && sel.getAttribute('data-selected')) || '');
@@ -5919,6 +5937,21 @@ const saveClosingRecord = async (prospectId) => {
         closing_record: mergedCr
     });
     await _mirrorCrToActivity(prospectId, mergedCr);
+    // Arm the credit-card-renewal reminder when a valid expiry is already keyed (POP/NPO
+    // installment charged to a card). A draft doesn't hard-require the expiry — that's
+    // enforced on submit — but if it's present we schedule the nudge now. Best-effort.
+    if ((data.payment_method === 'POP' || data.payment_method === 'NPO') && data.cc_installment && /^\d{4}-\d{2}$/.test(data.cc_expiry || '')) {
+        try {
+            await (window.app.scheduleCardExpiryReminder || (async () => {}))({
+                prospectId,
+                expiry: data.cc_expiry,
+                method: data.payment_method,
+                name: data.full_name || prospect?.full_name || '',
+                phone: data.phone || prospect?.phone || '',
+                agentId: prospect?.responsible_agent_id || _state.cu?.id || null,
+            });
+        } catch (e) { console.warn('card-expiry reminder scheduling failed:', e); }
+    }
     UI.toast.success('Draft saved');
     const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
     if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
@@ -5945,6 +5978,13 @@ const submitClosingRecord = async (prospectId) => {
             [{ label: 'OK, I\'ll Upload It', type: 'primary', action: 'UI.hideModal()' }]
         );
         return;
+    }
+    // Credit-card installment (POP/NPO): expiry is compulsory to submit when the closer
+    // flagged the installment as charged to a credit card.
+    if ((data.payment_method === 'POP' || data.payment_method === 'NPO') && data.cc_installment && !/^\d{4}-\d{2}$/.test(data.cc_expiry || '')) {
+        const el = document.getElementById('cr-cc-expiry');
+        if (el) { el.style.border = '2px solid #ef4444'; el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus(); }
+        return UI.toast.error('Please enter the Credit Card Expiry (MM/YY) — required when the installment is charged to a credit card.');
     }
 
     const saleAmount = parseFloat(data.sale_amount) || 0;
@@ -5973,6 +6013,22 @@ const submitClosingRecord = async (prospectId) => {
         console.warn('submitClosingRecord primary update failed:', err);
         UI.toast.error('Failed to submit closing record. Please retry.');
         return;
+    }
+
+    // Arm the credit-card-renewal reminder (POP/NPO installment charged to a card).
+    // The calendar chunk owns createFollowUpDraft; call through the app so it lazy-loads.
+    // Best-effort — never block the submit on the reminder.
+    if ((data.payment_method === 'POP' || data.payment_method === 'NPO') && data.cc_installment && /^\d{4}-\d{2}$/.test(data.cc_expiry || '')) {
+        try {
+            await (window.app.scheduleCardExpiryReminder || (async () => {}))({
+                prospectId,
+                expiry: data.cc_expiry,
+                method: data.payment_method,
+                name: data.full_name || prospect?.full_name || '',
+                phone: data.phone || prospect?.phone || '',
+                agentId: prospect?.responsible_agent_id || _state.cu?.id || null,
+            });
+        } catch (e) { console.warn('card-expiry reminder scheduling failed:', e); }
     }
 
     // Create approval queue entries for non-managers

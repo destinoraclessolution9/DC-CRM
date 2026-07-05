@@ -261,7 +261,12 @@ function PackageRow({ row }) {
             onMouseOver={(e) => { const t = e.currentTarget; if (!t.style.opacity || t.style.opacity == 1) t.style.background = '#fdf8f8'; }}
             onMouseOut={(e) => { const t = e.currentTarget; if (!t.style.opacity || t.style.opacity == 1) t.style.background = ''; }}>
             <td style={pkgTdStyle}>
-                <a href="javascript:void(0)" onClick={() => call('viewPackageCustomers', row.id)} style={{ fontWeight: 600, color: '#8B1A1A' }}>{row.name}</a>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {row.posterUrl
+                        ? <img src={row.posterUrl} alt="" loading="lazy" decoding="async" onClick={(e) => { e.stopPropagation(); call('viewProductImage', row.posterUrl, 'Poster'); }} title="View poster" style={{ width: '34px', height: '34px', objectFit: 'cover', borderRadius: '4px', cursor: 'pointer', flexShrink: 0, border: '1px solid var(--gray-200)' }} />
+                        : <span title="No poster" style={{ width: '34px', height: '34px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'var(--gray-300)', flexShrink: 0 }}><i className="fas fa-image"></i></span>}
+                    <a href="javascript:void(0)" onClick={() => call('viewPackageCustomers', row.id)} style={{ fontWeight: 600, color: '#8B1A1A' }}>{row.name}</a>
+                </div>
             </td>
             <td style={{ ...pkgTdStyle, color: '#555' }} title={row.productNames}>{row.shortProducts}</td>
             <td style={{ ...pkgTdStyle, fontWeight: 700 }}>RM {row.priceFmt}</td>

@@ -1348,6 +1348,12 @@
         const npoNote         = cr.npo_note          ?? a.npo_note          ?? '';
         const npoProducts     = Array.isArray(cr.npo_products) ? cr.npo_products
                               : (Array.isArray(a.npo_products) ? a.npo_products : []);
+        // Credit-card-installment flag + expiry (POP/NPO only). We persist ONLY the expiry
+        // (YYYY-MM) — never the card number/CVV (PCI). The office charges the card monthly,
+        // so a compulsory expiry lets the CRM chase updated details before the card lapses.
+        const ccInstallment   = !!(cr.cc_installment ?? a.cc_installment ?? false);
+        const ccExpiry        = cr.cc_expiry || a.cc_expiry || '';
+        const isInstallmentCC = paymentMethod === 'POP' || paymentMethod === 'NPO';
         // key the saved selections by product_id (fall back to name) so we can
         // re-tick the catalog checkboxes and restore each redeem-after value.
         const npoSelMap = new Map((npoProducts || []).map(p =>
@@ -1597,6 +1603,20 @@
                         </div>
                         ${isNPO ? `<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="" style="display:none;" onload="window.app && app.npoFillClosingPlans && app.npoFillClosingPlans('${prefix}', '${escapeHtml(String(npoPlanId))}')">` : ''}
                     </div>
+                    <div id="${prefix}-cc-fields" style="display:${isInstallmentCC ? 'block' : 'none'};background:#fff7ed;border:1px solid #fed7aa;padding:12px;border-radius:6px;margin-bottom:12px;">
+                        <label class="checkbox-label" style="display:flex;align-items:center;gap:8px;font-weight:600;color:#9a3412;margin:0;cursor:pointer;">
+                            <input type="checkbox" id="${prefix}-cc-installment" ${ccInstallment ? 'checked' : ''} ${disabled}
+                                onchange="var w=document.getElementById('${prefix}-cc-expiry-wrap'); if(w) w.style.display=this.checked?'block':'none';">
+                            <span><i class="fas fa-credit-card"></i> Installment charged to a credit card</span>
+                        </label>
+                        <div id="${prefix}-cc-expiry-wrap" style="display:${ccInstallment ? 'block' : 'none'};margin-top:10px;">
+                            <div class="form-group" style="margin-bottom:0;max-width:220px;">
+                                <label>Credit Card Expiry <span style="color:#ef4444;font-weight:700;" title="Required">*</span></label>
+                                <input type="month" id="${prefix}-cc-expiry" class="form-control" value="${escapeHtml(ccExpiry)}" ${disabled}>
+                                <span style="font-size:11px;color:var(--gray-500);">A reminder surfaces ~1 month before expiry to collect updated card details. Store the expiry only — never the full card number.</span>
+                            </div>
+                        </div>
+                    </div>
                     <div class="form-row">
                         <div class="form-group half">
                             <label>Invoice Number</label>
@@ -1670,6 +1690,9 @@
             pop_monthly: read(`${prefix}-pop-monthly`),
             pop_tenure: read(`${prefix}-pop-tenure`),
             pop_down: read(`${prefix}-pop-down`),
+            // Credit-card installment (POP/NPO): flag + expiry (YYYY-MM). Expiry only — no PAN/CVV.
+            cc_installment: readBool(`${prefix}-cc-installment`),
+            cc_expiry: read(`${prefix}-cc-expiry`),
             invoice_number: read(`${prefix}-invoice-number`),
             collection_date: read(`${prefix}-collection-date`),
             order_date: read(`${prefix}-order-date`),
@@ -1690,6 +1713,9 @@
         if (pop) pop.style.display = val === 'POP' ? 'block' : 'none';
         const npo = document.getElementById(`${prefix}-npo-fields`);
         if (npo) npo.style.display = val === 'NPO' ? 'block' : 'none';
+        // Credit-card-installment block applies to both company installment plans (POP/NPO).
+        const cc = document.getElementById(`${prefix}-cc-fields`);
+        if (cc) cc.style.display = (val === 'POP' || val === 'NPO') ? 'block' : 'none';
         if (val === 'NPO') {
             const sel = document.getElementById(`${prefix}-npo-plan`);
             npoFillClosingPlans(prefix, (sel && sel.getAttribute('data-selected')) || '');

@@ -617,7 +617,7 @@
         const _n = (s) => String(s || '').trim().toLowerCase();
         const person = opts.prospectId ? `p:${opts.prospectId}`
                      : opts.customerId ? `c:${opts.customerId}` : 'n:?';
-        if (opts.triggerType === 'birthday' || opts.triggerType === 're_engagement' || opts.triggerType === 'cust_checkin' || opts.triggerType === 'apu_ack') return `${person}|${opts.triggerType}|${opts.dueDate || ''}`;
+        if (opts.triggerType === 'birthday' || opts.triggerType === 're_engagement' || opts.triggerType === 'cust_checkin' || opts.triggerType === 'apu_ack' || opts.triggerType === 'card_expiry') return `${person}|${opts.triggerType}|${opts.dueDate || ''}`;
         // appointment_reminder's eventId is an ACTIVITY id (its own id-space, not events.id)
         // — namespace it so it can't collide with an event invite sharing the same number.
         if (opts.triggerType === 'appointment_reminder') return `${person}|appt:${opts.eventId || ''}`;
@@ -671,11 +671,14 @@
                 const personMatch = (prospectId && d.prospect_id == prospectId) ||
                                     (customerId && d.customer_id == customerId);
                 if (!personMatch) return false;
-                if (triggerType === 'birthday' || triggerType === 're_engagement' || triggerType === 'cust_checkin' || triggerType === 'apu_ack') {
+                if (triggerType === 'birthday' || triggerType === 're_engagement' || triggerType === 'cust_checkin' || triggerType === 'apu_ack' || triggerType === 'card_expiry') {
                     // Episode-keyed dedup: re_engagement passes last_activity_date as
                     // due_date, so a NEW no-contact gap (after the agent logs a fresh
                     // contact) re-arms the nudge, while repeated calendar loads within
                     // the same gap stay deduped — and a dismissal sticks for that gap.
+                    // card_expiry keys on the (expiry-derived) due_date so re-saving the
+                    // same closing dedups, but a renewed card (new expiry → new due_date)
+                    // arms a fresh reminder.
                     return d.trigger_type === triggerType && d.due_date === dueDate;
                 }
                 if (triggerType === 'appointment_reminder') {
@@ -714,7 +717,10 @@
                 const t = d.created_at ? new Date(d.created_at).getTime() : 0;
                 return t >= _ceilFloorMs;
             }).length;
-            if (_recentForPerson >= COMFORT_MAX_PER_30D) {
+            // Compliance-style reminders (card_expiry) opt out of the comfort ceiling: they are
+            // future-dated and time-critical (a lapsed card breaks installment collection), so
+            // they must never be silently dropped just because the person got other nudges.
+            if (!opts.bypassComfortCeiling && _recentForPerson >= COMFORT_MAX_PER_30D) {
                 console.warn('createFollowUpDraft: 30-day comfort ceiling reached for person — skipping', { prospectId, customerId, triggerType });
                 return null;
             }
@@ -739,6 +745,57 @@
             return null;
         } finally {
             _followUpDraftInFlight.delete(_inflightKey); // release the in-flight guard once this create resolves/fails
+        }
+    };
+
+    // ── Credit-card-expiry reminder (installment closings) ───────────────────────
+    // A POP/NPO installment charged to a credit card lapses when the card expires,
+    // so the office must chase updated card details BEFORE that happens. Given a card
+    // expiry (YYYY-MM from an <input type="month">), return the reminder due_date: the
+    // first day of the month ONE month before the expiry month. Cards die at month-end,
+    // so this surfaces the nudge ~1 month before collection would fail. Returns null on
+    // a malformed expiry so the caller skips scheduling rather than arming a bad date.
+    const _cardExpiryDueDate = (expiryYYYYMM) => {
+        const m = /^(\d{4})-(\d{2})$/.exec(String(expiryYYYYMM || '').trim());
+        if (!m) return null;
+        let y = parseInt(m[1], 10);
+        let mo = parseInt(m[2], 10); // 1–12
+        if (mo < 1 || mo > 12) return null;
+        mo -= 1;                     // one month before the expiry month
+        if (mo < 1) { mo = 12; y -= 1; }
+        return `${y}-${String(mo).padStart(2, '0')}-01`;
+    };
+
+    // Arm (or refresh) the "collect updated credit-card details" reminder for an
+    // installment closing. The draft is future-dated (composeFollowUpList hides it
+    // until due_date <= today), attributed to the closing's responsible agent, and
+    // dedup-keyed on (person, card_expiry, due_date) so re-saving the same closing
+    // never piles up while a renewed card (new expiry) arms a fresh reminder.
+    const scheduleCardExpiryReminder = async (opts = {}) => {
+        try {
+            const due = _cardExpiryDueDate(opts.expiry);
+            if (!due) return null;
+            if (!opts.prospectId && !opts.customerId) return null;
+            const mm = /^(\d{4})-(\d{2})$/.exec(String(opts.expiry).trim());
+            const expLabel = mm ? `${mm[2]}/${mm[1]}` : String(opts.expiry);
+            const agentName = _state.cu?.full_name || '';
+            const name = opts.name || '';
+            const methodTag = opts.method ? `（${opts.method}）` : '';
+            const msg = `Hi ${name}，您好 😊 我们的记录显示您用于分期付款${methodTag}的信用卡将于 ${expLabel} 到期。为确保接下来的分期扣款顺利进行，烦请您尽快向公司更新并提交最新的信用卡资料。谢谢您的配合！— ${agentName}`;
+            return await createFollowUpDraft({
+                prospectId: opts.prospectId || null,
+                customerId: opts.customerId || null,
+                agentId: opts.agentId || null,
+                triggerType: 'card_expiry',
+                messageText: msg,
+                phone: opts.phone || '',
+                prospectName: name,
+                dueDate: due,
+                bypassComfortCeiling: true,
+            });
+        } catch (e) {
+            console.warn('scheduleCardExpiryReminder failed:', e);
+            return null;
         }
     };
 
@@ -2075,6 +2132,10 @@
             triggerLabels[t.trigger_type] = t.template_name || t.trigger_type;
             triggerIcons[t.trigger_type] = t.icon || '📩';
         }
+        // card_expiry has no DB template row — give it a friendly label/icon so the
+        // installment card-renewal reminder doesn't render as the raw trigger key.
+        if (!triggerLabels['card_expiry']) triggerLabels['card_expiry'] = '信用卡到期 · Card Renewal';
+        if (!triggerIcons['card_expiry']) triggerIcons['card_expiry'] = '💳';
 
         container.innerHTML = `
             <div style="background:var(--white,#fff); border:1px solid var(--gray-200,#e5e7eb); border-radius:12px; padding:16px; margin-top:16px;">
@@ -2091,7 +2152,13 @@
                         // (from created_at) → an "overdue Nd" nag so it's chased, not ignored.
                         const _nowD = new Date();
                         const _todayMs2 = new Date(_nowD.getFullYear(), _nowD.getMonth(), _nowD.getDate()).getTime();
-                        const _daysOpen = d.created_at ? Math.floor((_todayMs2 - new Date(d.created_at).getTime()) / 86400000) : 0;
+                        // A future-dated draft (e.g. card_expiry) doesn't start "aging" until it
+                        // becomes due — otherwise it would surface already showing "overdue 300d"
+                        // from its creation date. Clock the overdue nag from max(created_at, due_date).
+                        const _createdMs = d.created_at ? new Date(d.created_at).getTime() : 0;
+                        const _dueMs = d.due_date ? new Date(d.due_date + 'T00:00:00').getTime() : 0;
+                        const _ageStartMs = Math.max(_createdMs, _dueMs || _createdMs);
+                        const _daysOpen = _ageStartMs ? Math.floor((_todayMs2 - _ageStartMs) / 86400000) : 0;
                         const _overdueBadge = _daysOpen >= 1
                             ? `<span style="font-size:11px; background:#fee2e2; color:#b91c1c; padding:2px 8px; border-radius:10px; font-weight:600;" title="Un-acted for ${_daysOpen} day(s)">overdue ${_daysOpen}d</span>`
                             : '';
@@ -3512,9 +3579,17 @@
                         <button class="btn btn-sm secondary" style="font-size:11px" onclick="app.openSendBirthdayWish(${b.id}, '${UI.escJsAttr(String(b.type))}'${_celebArg})">Send Wish</button>
                         <button class="btn btn-sm secondary" style="font-size:11px" onclick="app.openPrepareGiftModal(${b.id}, '${UI.escJsAttr(String(b.type))}'${_celebArg})">Prepare Gift</button>
                     </div>`;
+                // Clickable name → opens the contact's full profile. Customers route to
+                // showCustomerDetail, prospects (incl. family members, whose b.id is the
+                // parent prospect id) to showProspectDetail. Family cards with no parent
+                // record (b.id null) stay plain text — nothing to open.
+                const _detailFn = b.type === 'customer' ? 'showCustomerDetail' : 'showProspectDetail';
+                const nameHtml = (b.id == null)
+                    ? `${esc(b.name)} 🎂`
+                    : `<span style="cursor:pointer;color:var(--primary);text-decoration:underline;" title="View profile" onclick="event.stopPropagation();app.${_detailFn}(${b.id})">${esc(b.name)}</span> 🎂`;
                 return `
                 <div class="bday-card">
-                    <div class="bday-name">${esc(b.name)} 🎂</div>
+                    <div class="bday-name">${nameHtml}</div>
                     <div class="bday-info">${esc(b.info)}</div>
                     ${actions}
                 </div>
@@ -5947,6 +6022,26 @@
             }
         }
 
+        // Credit-card installment: when the closer flags a POP/NPO installment as charged
+        // to a credit card, the card expiry is compulsory — the office charges the card
+        // monthly and must chase updated details before it lapses. Red-highlight the field
+        // (matching the NPO guard above) so it's obvious on mobile why Save didn't go through.
+        if (isClosed && (mo.payment_method === 'POP' || mo.payment_method === 'NPO') && mo.cc_installment) {
+            if (!/^\d{4}-\d{2}$/.test(mo.cc_expiry || '')) {
+                const el = document.getElementById('mo-cc-expiry');
+                if (el) {
+                    el.style.border = '2px solid #ef4444';
+                    el.style.background = '#fff5f5';
+                    const _clr = () => { el.style.border = ''; el.style.background = ''; el.removeEventListener('input', _clr); };
+                    el.addEventListener('input', _clr);
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    el.focus();
+                }
+                UI.toast.error('Please enter the Credit Card Expiry (MM/YY) — required when the installment is charged to a credit card.');
+                return;
+            }
+        }
+
         // Require an Order Form photo when closing — covers the 3 PREON templates.
         // Only enforced when the photo capture UI was rendered (i.e. linked to a prospect).
         if (isClosed && document.getElementById('mo-order-form-thumbs') && !(window.app.hasOrderFormPhoto || (() => false))('mo')) {
@@ -6084,6 +6179,12 @@
                         npo_note:          paymentMethod === 'NPO' ? (mo.npo_note          || '') : '',
                         npo_products:      paymentMethod === 'NPO' ? (Array.isArray(mo.npo_products) ? mo.npo_products : []) : [],
                         npo_sale_id:       (existingCR && existingCR.npo_sale_id) || null,
+                        // Credit-card-installment flag + expiry (POP/NPO only). Expiry is YYYY-MM;
+                        // stored on the closing record so the DC Closing Record tab shows it and the
+                        // card-renewal reminder can re-derive its due date. We store ONLY the expiry —
+                        // never the card number/CVV (PCI).
+                        cc_installment: (paymentMethod === 'POP' || paymentMethod === 'NPO') ? !!mo.cc_installment : false,
+                        cc_expiry:      (paymentMethod === 'POP' || paymentMethod === 'NPO') && mo.cc_installment ? (mo.cc_expiry || '') : '',
                         invoice_number:  mo.invoice_number || '',
                         invoice_file:    invoice_file || existingCR?.invoice_file || '',
                         invoice_file_name: invoice_file_name || existingCR?.invoice_file_name || '',
@@ -6245,6 +6346,23 @@
                     }
                 } else {
                     crSyncStatus = 'locked';
+                }
+
+                // Arm the credit-card-renewal reminder for a POP/NPO installment charged to a
+                // card. Runs whether the record synced or was locked (the card expires either
+                // way) and dedups on (prospect, expiry) so re-saves don't pile up. Best-effort:
+                // a failure here must not block the closing save.
+                if ((mo.payment_method === 'POP' || mo.payment_method === 'NPO') && mo.cc_installment && /^\d{4}-\d{2}$/.test(mo.cc_expiry || '')) {
+                    try {
+                        await scheduleCardExpiryReminder({
+                            prospectId: activity.prospect_id,
+                            expiry: mo.cc_expiry,
+                            method: mo.payment_method,
+                            name: mo.full_name || prospect?.full_name || '',
+                            phone: mo.phone || prospect?.phone || '',
+                            agentId: prospect?.responsible_agent_id || _state.cu?.id || null,
+                        });
+                    } catch (e) { console.warn('card-expiry reminder scheduling failed:', e); }
                 }
             }
         }
@@ -7133,6 +7251,7 @@
         getFollowUpTemplate,
         interpolateTemplate,
         createFollowUpDraft,
+        scheduleCardExpiryReminder,
         executeEventBasedTrigger,
         executeSimpleTrigger,
         dispatchAfterCpsTriggers,

@@ -124,6 +124,7 @@
             return {
                 id: p.id,
                 name: p.package_name || p.name || '—',
+                posterUrl: p.poster_url || null,
                 productNames,                 // full (title attr)
                 shortProducts: shortProducts || '—',
                 priceFmt: UI.formatNumber(p.price || 0),
@@ -1344,6 +1345,7 @@
                     return {
                         id: p.id,
                         name: p.package_name || p.name || 'Promotion',
+                        posterUrl: p.poster_url || null,
                         productNames,
                         requirement: p.requirement || '',
                         hasTimeFrame: !!(p.start_date || p.end_date),
@@ -3152,6 +3154,12 @@
             </div>
 
             <div class="form-group">
+                <label>Promotion Poster <span style="font-size:11px;color:var(--gray-400);font-weight:normal;">(shown to agents &amp; customers)</span></label>
+                ${pkg.poster_url ? `<div style="margin-bottom:6px;"><img loading="lazy" decoding="async" src="${escapeHtml(pkg.poster_url)}" crossorigin="anonymous" style="height:80px;border-radius:6px;object-fit:cover;"> <small class="text-muted">Current poster — choosing a new file replaces it</small></div>` : ''}
+                <input type="file" id="pkg-poster" class="form-control" accept="image/*">
+            </div>
+
+            <div class="form-group">
                 <label>Product / Service <span class="required">*</span></label>
                 <div class="multi-select-container" style="border:1px solid var(--gray-300);border-radius:4px;padding:10px;max-height:140px;overflow-y:auto;">
                     ${allProducts.map(p => `
@@ -3252,6 +3260,7 @@ ALTER TABLE public.promotions
   ADD COLUMN IF NOT EXISTS visible_to     JSONB    DEFAULT '[]'::jsonb,
   ADD COLUMN IF NOT EXISTS name           TEXT,
   ADD COLUMN IF NOT EXISTS details        TEXT,
+  ADD COLUMN IF NOT EXISTS poster_url     TEXT,
   ADD COLUMN IF NOT EXISTS delivery_lead_time TEXT;`.trim();
 
         // No client-side RPC path exists: DDL cannot run via PostgREST with the
@@ -3321,15 +3330,16 @@ ALTER TABLE public.promotions
             updated_at:     new Date().toISOString()
         };
 
+        const _posterFile = document.getElementById('pkg-poster')?.files?.[0] || null;
+        let _savedId = id;
         try {
             if (id) {
                 await AppDataStore.update('promotions', id, data);
-                UI.toast.success("Package updated successfully");
             } else {
                 data.created_by = _state.cu ? _state.cu.id : null;
                 data.created_at = new Date().toISOString();
-                await AppDataStore.create('promotions', data);
-                UI.toast.success("Package created successfully");
+                const _newRec = await AppDataStore.create('promotions', data);
+                _savedId = _newRec?.id;
             }
         } catch (e) {
             // Only surface the migration modal when the table is actually missing a
@@ -3343,6 +3353,31 @@ ALTER TABLE public.promotions
             UI.toast.error('Failed to save package');
             return;
         }
+
+        // Poster upload — mirrors the product/event two-phase pattern: row exists →
+        // upload to the attachments bucket → stamp poster_url. Best-effort: a failed
+        // upload (or a missing poster_url column) never loses the package that just saved.
+        let _posterFailed = false;
+        if (_savedId && _posterFile) {
+            try {
+                const _sb = window.supabase || window.supabaseClient;
+                const _path = `promotions/poster/${_savedId}_${Date.now()}`;
+                const { error: _pe } = await _sb.storage.from('attachments').upload(_path, _posterFile, { upsert: true, contentType: _posterFile.type });
+                if (!_pe) {
+                    const { data: _ud } = _sb.storage.from('attachments').getPublicUrl(_path);
+                    await AppDataStore.update('promotions', _savedId, { poster_url: _ud.publicUrl });
+                } else {
+                    _posterFailed = true;
+                    console.error('promotion poster upload failed:', _pe.message || _pe);
+                }
+            } catch (_pe2) {
+                _posterFailed = true;
+                console.error('promotion poster upload error:', _pe2 && (_pe2.message || _pe2));
+            }
+        }
+
+        if (_posterFailed) UI.toast.error(`Package ${id ? 'updated' : 'created'}, but the poster upload failed — try editing the package to re-attach it.`);
+        else UI.toast.success(id ? 'Package updated successfully' : 'Package created successfully');
 
         UI.hideModal();
         if (_state.cmlt === 'promotions') {
