@@ -29,21 +29,31 @@ async function sharePromo(m) {
     if (m.hasTimeFrame) parts.push(`${m.startStr} – ${m.endStr}`);
     if (m.slots) parts.push(`限量 ${m.slots} 套 / Limited ${m.slots} sets`);
     const text = parts.filter(Boolean).join('\n');
-    try {
-        if (m.posterUrl && typeof navigator !== 'undefined' && navigator.canShare) {
-            const resp = await fetch(m.posterUrl, { mode: 'cors' });
-            const blob = await resp.blob();
-            const file = new File([blob], 'promotion.jpg', { type: blob.type || 'image/jpeg' });
-            if (navigator.canShare({ files: [file] })) {
-                await navigator.share({ files: [file], text });
-                return;
+
+    // Prefer the native share sheet (lets the agent pick WhatsApp AND attach the
+    // poster image on mobile). CRITICAL: once we actually invoke navigator.share,
+    // we NEVER also open wa.me — a user who cancels the share sheet (AbortError)
+    // must not have a second WhatsApp tab launched behind their back. wa.me is a
+    // fallback ONLY for environments with no Web Share support (typically desktop).
+    if (typeof navigator !== 'undefined' && navigator.share) {
+        try {
+            if (m.posterUrl && navigator.canShare) {
+                try {
+                    const resp = await fetch(m.posterUrl, { mode: 'cors' });
+                    const blob = await resp.blob();
+                    const file = new File([blob], 'promotion.jpg', { type: blob.type || 'image/jpeg' });
+                    if (navigator.canShare({ files: [file] })) {
+                        await navigator.share({ files: [file], text });
+                        return;
+                    }
+                } catch (_imgErr) { /* couldn't attach the image — share text-only below */ }
             }
-        }
-        if (typeof navigator !== 'undefined' && navigator.share) {
             await navigator.share({ text, url: m.posterUrl || undefined });
-            return;
-        }
-    } catch (_) { /* user cancelled or unsupported — fall through to wa.me */ }
+        } catch (_shareErr) { /* cancelled or failed — do NOT open a second channel */ }
+        return;
+    }
+
+    // No Web Share support → open WhatsApp Web with the text (and poster link).
     const wa = 'https://wa.me/?text=' + encodeURIComponent(text + (m.posterUrl ? '\n' + m.posterUrl : ''));
     try { window.open(wa, '_blank', 'noopener'); } catch (_) { /* noop */ }
 }

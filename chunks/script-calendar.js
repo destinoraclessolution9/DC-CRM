@@ -781,7 +781,21 @@
             const agentName = _state.cu?.full_name || '';
             const name = opts.name || '';
             const methodTag = opts.method ? `（${opts.method}）` : '';
-            const msg = `Hi ${name}，您好 😊 我们的记录显示您用于分期付款${methodTag}的信用卡将于 ${expLabel} 到期。为确保接下来的分期扣款顺利进行，烦请您尽快向公司更新并提交最新的信用卡资料。谢谢您的配合！— ${agentName}`;
+            // Renewed card → retire this person's OTHER pending card_expiry drafts (a
+            // different due_date = a superseded expiry) so the stale nudge with the old
+            // date doesn't also fire. Best-effort; never blocks arming the new reminder.
+            try {
+                const _existingDrafts = await AppDataStore.getAll('follow_up_drafts');
+                const _stale = (_existingDrafts || []).filter(d =>
+                    d && d.trigger_type === 'card_expiry' && d.status === 'pending' && d.due_date !== due &&
+                    ((opts.prospectId && d.prospect_id == opts.prospectId) || (opts.customerId && d.customer_id == opts.customerId)));
+                for (const d of _stale) {
+                    await AppDataStore.update('follow_up_drafts', d.id, { status: 'dismissed', updated_at: new Date().toISOString() });
+                }
+            } catch (_supersede) { /* best-effort supersede */ }
+            // Greeting drops the "Hi {name}" prefix when no name is on file (avoids "Hi ，…").
+            const greeting = name ? `Hi ${name}，您好 😊` : '您好 😊';
+            const msg = `${greeting} 我们的记录显示您用于分期付款${methodTag}的信用卡将于 ${expLabel} 到期。为确保接下来的分期扣款顺利进行，烦请您尽快向公司更新并提交最新的信用卡资料。谢谢您的配合！— ${agentName}`;
             return await createFollowUpDraft({
                 prospectId: opts.prospectId || null,
                 customerId: opts.customerId || null,
