@@ -143,7 +143,7 @@
                     <span class="cases-section-desc">Prospects invited via CPS method</span>
                     <span class="cases-count-pill" id="cases-count-cps">0</span>
                 </div>
-                <div class="case-card-grid" id="cases-list-cps"></div>
+                <div class="cases-table-host" id="cases-list-cps"></div>
                 <div id="cases-empty-state-cps" class="cases-empty-state" style="display:none;">
                     <div class="cases-empty-illus"><i class="fas fa-handshake"></i></div>
                     <h3>No CPS invitation cases yet</h3>
@@ -157,7 +157,7 @@
                     <span class="cases-section-desc">Successfully closed deals &amp; stories</span>
                     <span class="cases-count-pill" id="cases-count-closed">0</span>
                 </div>
-                <div class="case-card-grid" id="cases-list-closed"></div>
+                <div class="cases-table-host" id="cases-list-closed"></div>
                 <div id="cases-empty-state-closed" class="cases-empty-state" style="display:none;">
                     <div class="cases-empty-illus"><i class="fas fa-trophy"></i></div>
                     <h3>No closed cases yet</h3>
@@ -380,8 +380,8 @@
                 coverGradient: productGradient(type === 'cps' ? (entityName || 'cps') : c.product),
                 coverIcon: type === 'cps' ? 'fa-handshake' : 'fa-trophy',
                 isPublic: !!c.is_public,
-                entityName,
-                entityIcon,
+                // entityName/entityIcon deliberately NOT emitted — the library must
+                // not carry the prospect/customer identity to the client.
                 canEdit,
                 creatorName,
                 creatorInitial,
@@ -389,14 +389,34 @@
                 extraTagCount,
             };
 
+            // The Success Case Library is a cross-agent STUDY surface: other agents
+            // come to learn the method, not to see who the prospect/customer is.
+            // So NO identifying field (full_name, or a raw title that may embed a
+            // name) is ever put on the card model. We surface only anonymized,
+            // pedagogical attributes: gender · age · occupation · referral · method.
+            const genderText = prospectData?.gender ? `${prospectData.gender} ${genderEmoji(prospectData.gender)}`.trim() : '';
+            const profileBits = [genderText, ageText, prospectData?.occupation || ''].filter(Boolean);
+
             if (type === 'cps') {
-                m.title = entityName ? entityName : (c.title ? c.title : 'CPS Case');
+                // Anonymized profile stands in for the (removed) prospect name.
+                m.profileLabel = profileBits.join(' · ') || 'CPS Prospect';
+                m.title = m.profileLabel; // never the prospect's name
+                m.genderText = genderText;
+                m.ageText = ageText;
+                m.occupation = prospectData?.occupation || '';
+                m.method = c.cps_invitation_method || '';
+                m.referral = prospectData?.referral_relationship || '';
+                m.product = c.product || '';
                 m.subtitle = prospectData?.occupation
                     ? prospectData.occupation
                     : (prospectData?.referral_relationship ? 'Referred via ' + prospectData.referral_relationship : '');
-                m.desc = c.cps_invitation_details
-                    ? (c.cps_invitation_details.length > 140 ? c.cps_invitation_details.substring(0, 140) + '…' : c.cps_invitation_details)
-                    : 'No invitation details recorded yet.';
+                // Empty-detail CPS cases are already filtered out before render, so
+                // the "No invitation details recorded yet." fallback is dead here —
+                // keep a neutral guard in case of a direct/edge render.
+                m.story = (c.cps_invitation_details || '').trim();
+                m.desc = m.story
+                    ? (m.story.length > 140 ? m.story.substring(0, 140) + '…' : m.story)
+                    : '—';
                 m.metaPills = [
                     prospectData?.gender ? { icon: 'fa-venus-mars', text: `${prospectData.gender} ${genderEmoji(prospectData.gender)}` } : null,
                     ageText ? { icon: 'fa-birthday-cake', text: ageText } : null,
@@ -404,15 +424,20 @@
                     prospectData?.referral_relationship ? { icon: 'fa-people-arrows', text: prospectData.referral_relationship } : null,
                 ].filter(Boolean);
             } else {
+                // Closed-case titles are agent-authored headlines (e.g. "How I closed
+                // PR4 with career focus") — kept as-is. The linked customer/prospect
+                // NAME pill is intentionally removed (identity leak).
                 m.title = c.title || 'Untitled Case';
+                m.product = c.product || '';
                 m.amountStr = c.amount ? 'RM ' + parseFloat(c.amount).toLocaleString() : '';
                 const closedDate = c.closing_date ? new Date(c.closing_date).toLocaleDateString('en-MY', { year: 'numeric', month: 'short', day: 'numeric' }) : '';
+                m.closedDate = closedDate;
                 const storyPreview = (c.success_story || c.sales_idea || c.closing_details || '').trim();
+                m.story = storyPreview;
                 m.desc = storyPreview
                     ? (storyPreview.length > 160 ? storyPreview.substring(0, 160) + '…' : storyPreview)
                     : 'Tap to read the full closing strategy and sales idea.';
                 m.metaPills = [
-                    entityName ? { icon: entityIcon, text: entityName } : null,
                     c.product ? { icon: 'fa-box', text: c.product } : null,
                     closedDate ? { icon: 'fa-calendar-check', text: closedDate } : null,
                 ].filter(Boolean);
@@ -424,6 +449,11 @@
 
         // CPS cases — applySharedFilters + cardModel are now sync (preloaded maps)
         let cpsCases = allCases.filter(c => (c.case_type || 'cps') === 'cps');
+        // Auto-drop CPS shells with no recorded invitation story — an empty case
+        // has no study value and would only leak the linked prospect for nothing.
+        // (These are the auto-created rows from a CPS activity logged without
+        //  invitation details — see chunks/script-activities.js.)
+        cpsCases = cpsCases.filter(c => (c.cps_invitation_details || '').trim());
         cpsCases = applySharedFilters(cpsCases);
         cpsCases.sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0));
         if (countCps) countCps.textContent = cpsCases.length;
@@ -489,15 +519,18 @@
         }
 
         const isCpsCase = (c.case_type || 'cps') === 'cps';
+        // Identity is shown only to the case's owner or an admin — every other
+        // agent studies the method with the prospect/customer name masked.
+        const canSeeIdentity = isOwner || isAdmin;
         let entityInfo = '';
         let prospectProfile = null;
         if (c.customer_id) {
             const cust = await AppDataStore.getById('customers', c.customer_id);
-            if (!isCpsCase) entityInfo = cust ? `Customer: ${cust.full_name}` : 'Unknown Customer';
+            if (!isCpsCase) entityInfo = cust ? (canSeeIdentity ? `Customer: ${cust.full_name}` : 'Customer (identity hidden)') : 'Unknown Customer';
         } else if (c.prospect_id) {
             const pros = await AppDataStore.getById('prospects', c.prospect_id);
             prospectProfile = pros || null;
-            if (!isCpsCase) entityInfo = pros ? `Prospect: ${pros.full_name}` : 'Unknown Prospect';
+            if (!isCpsCase) entityInfo = pros ? (canSeeIdentity ? `Prospect: ${pros.full_name}` : 'Prospect (identity hidden)') : 'Unknown Prospect';
         }
 
         const creator = await AppDataStore.getById('users', c.created_by);
@@ -622,7 +655,20 @@
             ] : [])
         ];
 
-        UI.showModal(c.title, contentHtml, footerButtons);
+        // CPS case titles are auto-generated as "CPS: {activity_title}" and can
+        // embed the prospect name — never use it as the modal header. Show an
+        // anonymized profile instead. Closed-case titles are agent-authored
+        // headlines and are kept as-is.
+        const modalTitle = isCpsCase
+            ? (() => {
+                const age = prospectProfile?.date_of_birth
+                    ? Math.floor((Date.now() - new Date(prospectProfile.date_of_birth)) / (365.25 * 24 * 60 * 60 * 1000)) + 'y'
+                    : '';
+                const bits = [prospectProfile?.gender || '', age, prospectProfile?.occupation || ''].filter(Boolean);
+                return bits.length ? bits.join(' · ') : 'CPS Invitation Case';
+            })()
+            : c.title;
+        UI.showModal(modalTitle, contentHtml, footerButtons);
     };
 
     const toggleCasePublic = async (id) => {

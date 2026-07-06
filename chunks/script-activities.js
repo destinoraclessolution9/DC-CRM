@@ -5264,8 +5264,11 @@
             }
         }
 
-        // Auto-create CPS Invitation Case in Success Case Library
-        if (type === 'CPS') {
+        // Auto-create CPS Invitation Case in Success Case Library — but only when
+        // an invitation story was actually written. An empty shell has no study
+        // value, is hidden from the library anyway, and only clutters the table
+        // (see chunks/script-cases.js — empty CPS cases are filtered out).
+        if (type === 'CPS' && (activity.cps_invitation_details || '').trim()) {
             try {
                 await AppDataStore.create('case_studies', {
                     title: `CPS: ${activity.activity_title}`,
