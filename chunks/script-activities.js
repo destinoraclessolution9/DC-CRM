@@ -3476,15 +3476,12 @@
     // 出席人数目标 · Target Attendance for an EVENT (events.target_attendance INTEGER).
     // A single scalar column, so a plain patch is safe — it touches only this column
     // (never event_roles) and last-write-wins is the expected behaviour for a target.
+    // Ungated (editable by anyone who can see the event) to match the event roles.
     const saveEventTargetAttendance = async (eventId, value) => {
         if (eventId == null || eventId === '' || String(eventId) === 'null') { UI.toast.error('Event not linked'); return; }
         try {
             const ev = await AppDataStore.getById('events', eventId);
             if (!ev) { UI.toast.error('Event not found'); return; }
-            const cu = _state.cu;
-            const canEdit = isSystemAdmin(cu) || isManagement(cu) || isMarketingManager(cu)
-                || (ev.created_by != null && String(ev.created_by) === String(cu?.id));
-            if (!canEdit) { UI.toast.error('You do not have permission to edit this event'); return; }
 
             const raw = (value == null) ? '' : String(value).trim();
             let target = null;

@@ -4837,20 +4837,7 @@
                 ${marketingEvent ? `
                 <div class="detail-section">
                     <h4>Event Details</h4>
-                    ${(() => {
-                        // 出席人数目标 · Target Attendance — event-level integer on
-                        // events.target_attendance. Inline-editable for managers /
-                        // marketing / admin or the event creator; read-only otherwise
-                        // (same gate as the event roles). esc/_state + role helpers
-                        // come from the enclosing chunk closure.
-                        const _ta = marketingEvent.target_attendance;
-                        const _canEditMeta = isSystemAdmin(_state.cu) || isManagement(_state.cu) || isMarketingManager(_state.cu)
-                            || (marketingEvent.created_by != null && String(marketingEvent.created_by) === String(_state.cu?.id));
-                        if (_canEditMeta && activity.event_id) {
-                            return `<div class="info-row"><span class="info-label">出席人数目标:</span> <span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;"><input type="number" min="0" step="1" value="${_ta != null ? escapeHtml(String(_ta)) : ''}" placeholder="—" class="form-control" style="max-width:110px;" onchange="app.saveEventTargetAttendance(${activity.event_id}, this.value)"><span style="font-size:11px;color:#9CA3AF;">人 · Target</span></span></div>`;
-                        }
-                        return `<div class="info-row"><span class="info-label">出席人数目标:</span> <span>${_ta != null ? escapeHtml(String(_ta)) + ' 人' : '—'}</span></div>`;
-                    })()}
+                    ${activity.event_id ? `<div class="info-row"><span class="info-label">出席人数目标:</span> <span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;"><input type="number" min="0" step="1" value="${marketingEvent.target_attendance != null ? escapeHtml(String(marketingEvent.target_attendance)) : ''}" placeholder="—" class="form-control" style="max-width:110px;" onchange="app.saveEventTargetAttendance(${activity.event_id}, this.value)"><span style="font-size:11px;color:#9CA3AF;">人 · Target</span></span></div>` : ''}
                     ${marketingEvent.ticket_price ? `<div class="info-row"><span class="info-label">Ticket Price:</span> <span>RM ${marketingEvent.ticket_price}</span></div>` : ''}
                     ${marketingEvent.early_bird_price ? `<div class="info-row"><span class="info-label">Early Bird Price:</span> <span>RM ${marketingEvent.early_bird_price}</span></div>` : ''}
                     ${marketingEvent.group_purchase_price ? `<div class="info-row"><span class="info-label">Group Purchase Price:</span> <span>RM ${marketingEvent.group_purchase_price}</span></div>` : ''}
