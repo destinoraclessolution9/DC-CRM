@@ -3048,6 +3048,7 @@
       var note = window.app.getDailyNote();
       if (!note) return;
       if (!(window.UI && UI.showModal)) return;
+      try { localStorage.setItem(key, today); } catch (e) {}
       var esc = function (t) {
         return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) {
           return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
@@ -3055,6 +3056,21 @@
       };
       var tag = esc(note.section || note.chapter || '');
       var hx = window.app.getDailyHexagram();
+      // 石头理论 · 每日必做三件事 — the user's own standing daily list. Read live
+      // from the logged-in profile (_appState.cu), falling back to a localStorage
+      // mirror written by the Account Settings editor. Empty → gentle hint.
+      var cu = (window._appState && window._appState.cu) || null;
+      var mustdo = (cu && Array.isArray(cu.daily_must_do)) ? cu.daily_must_do : null;
+      if (!mustdo && cu && cu.id) { try { var _raw = localStorage.getItem('daily_must_do_' + cu.id); if (_raw) mustdo = JSON.parse(_raw); } catch (e) {} }
+      mustdo = (mustdo || []).filter(function (t) { return t && String(t).trim(); }).slice(0, 3);
+      var mustdoItems = mustdo.length
+        ? mustdo.map(function (t, i) { return '<div style="display:flex;gap:8px;font-size:14px;line-height:1.5;margin:5px 0;color:var(--text-primary,#1c1e21);"><span style="flex:0 0 16px;font-weight:700;color:var(--primary,#8B1A1A);">' + (i + 1) + '.</span><span>' + esc(t) + '</span></div>'; }).join('')
+        : '<div style="font-size:12.5px;color:var(--text-tertiary,#9aa0a6);text-align:center;">在 Account Settings 设置每日必做三件事</div>';
+      var mustdoBlock = '<div style="height:1px;background:var(--border-color,#e9ebee);margin:18px auto;max-width:78%;"></div>'
+        + '<div style="text-align:left;max-width:26em;margin:0 auto;">'
+        +   '<div style="font-size:13px;font-weight:700;letter-spacing:.03em;color:var(--text-secondary,#8a8f98);margin-bottom:10px;text-align:center;">石头理论 · 每日必做三件事</div>'
+        +   mustdoItems
+        + '</div>';
       var html = ''
         + '<div class="daily-note-card" style="text-align:center;padding:8px 4px 4px;">'
         +   '<div style="font-size:18px;font-weight:700;letter-spacing:.04em;color:var(--text-primary,#1c1e21);margin-bottom:18px;">#' + hx.n + ' ' + esc(hx.name) + ' <span style="font-weight:500;font-style:italic;color:var(--text-secondary,#8a8f98);">' + esc(hx.py) + '</span></div>'
@@ -3062,26 +3078,15 @@
         +   (tag ? '<div style="display:inline-block;font-size:12px;letter-spacing:.05em;color:var(--text-secondary,#8a8f98);border:1px solid var(--border-color,#e3e5e8);border-radius:999px;padding:3px 12px;margin-bottom:18px;">' + tag + '</div>' : '')
         +   '<div style="font-size:21px;line-height:1.6;font-weight:600;color:var(--text-primary,#1c1e21);margin-bottom:14px;">' + esc(note.zh) + '</div>'
         +   '<div style="font-size:14px;line-height:1.55;font-style:italic;color:var(--text-secondary,#6b7280);max-width:30em;margin:0 auto;">' + esc(note.en) + '</div>'
+        +   mustdoBlock
         +   '<div style="margin-top:18px;font-size:11px;color:var(--text-tertiary,#9aa0a6);">窮理查年鑑 · Poor Richard\'s Almanack · #' + note.id + '</div>'
         + '</div>';
       UI.showModal('每天一智 · Daily Wisdom', html, [
         { label: '收到 · Got it', type: 'primary', action: 'UI.hideModal()' }
       ]);
-      // Stamp "shown today" ONLY after showModal actually succeeds — if the render
-      // above throws, the note is not suppressed for the rest of the day.
-      try { localStorage.setItem(key, today); } catch (e) {}
-      // Auto-close after 60s unless the user already dismissed it. Only hide if
-      // the daily-note card is STILL the modal on screen — otherwise the shared
-      // #global-modal-overlay may now hold an unrelated modal (e.g. a form the
-      // user opened after dismissing this note) and hiding it would destroy their
-      // in-progress input.
+      // Auto-close after 60s unless the user already dismissed it.
       setTimeout(function () {
-        try {
-          var overlay = document.getElementById('global-modal-overlay');
-          if (overlay && overlay.querySelector('.daily-note-card') && window.UI && UI.hideModal) {
-            UI.hideModal();
-          }
-        } catch (e) {}
+        try { (window.UI && UI.hideModal) && UI.hideModal(); } catch (e) {}
       }, 60000);
     } catch (e) { /* never block login on the popup */ }
   };

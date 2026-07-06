@@ -5125,7 +5125,26 @@ const simulateCampaignSending = async (campaignId) => {
                     <div id="avatar-upload-status" style="font-size:12px;color:var(--gray-500);margin-top:6px;margin-bottom:4px;min-height:16px;"></div>
 
                     <h2 style="margin-bottom: 4px; font-size: 20px;">${escapeHtml(currentUser.full_name)}</h2>
-                    <p style="color: var(--primary,#8B1A1A); text-transform: capitalize; margin-bottom: 32px; font-weight: 500;">${escapeHtml(currentUser.role)}</p>
+                    <p style="color: var(--primary,#8B1A1A); text-transform: capitalize; margin-bottom: 28px; font-weight: 500;">${escapeHtml(currentUser.role)}</p>
+
+                    <!-- 石头理论 · 每日必做三件事 — personal standing daily must-do list -->
+                    <div style="border-top: 1px solid var(--gray-100); padding-top: 20px; text-align: left; margin-bottom: 20px;">
+                        <div style="font-size: 14px; font-weight: 700; color: var(--text-primary,#1c1e21); margin-bottom: 2px;">石头理论 · 每日必做三件事</div>
+                        <div style="font-size: 11.5px; color: var(--gray-500); margin-bottom: 12px;">每天登入时会显示，提醒自己 · shown in your daily popup</div>
+                        ${[0, 1, 2].map(i => `
+                        <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                            <span style="flex:0 0 18px; text-align:center; font-weight:700; color:var(--primary,#8B1A1A);">${i + 1}.</span>
+                            <input type="text" id="daily-mustdo-${i}" maxlength="80"
+                                   value="${escapeHtml((Array.isArray(currentUser.daily_must_do) ? currentUser.daily_must_do[i] : '') || '')}"
+                                   placeholder="第 ${i + 1} 件事…"
+                                   style="flex:1; padding:9px 11px; border:1px solid var(--gray-200,#dfe1e5); border-radius:8px; font-size:14px; outline:none;">
+                        </div>`).join('')}
+                        <button class="btn primary" onclick="(async()=>{ await app.saveDailyMustDo(); })()"
+                                style="width:100%; margin-top:8px; padding:11px; font-weight:600; display:flex; align-items:center; justify-content:center; gap:8px;">
+                            <i class="fas fa-check"></i> 保存 · Save
+                        </button>
+                        <div id="daily-mustdo-status" style="font-size:12px;color:var(--gray-500);margin-top:8px;min-height:16px;text-align:center;"></div>
+                    </div>
 
                     <div style="border-top: 1px solid var(--gray-100); padding-top: 20px;">
                         <button class="btn danger" onclick="app.logout()" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 14px; font-weight: 600;">
@@ -5197,6 +5216,31 @@ const simulateCampaignSending = async (campaignId) => {
         } catch (e) {
             console.error('Avatar upload failed', e);
             if (statusEl) statusEl.innerHTML = '<span style="color:#dc2626;"><i class="fas fa-exclamation-circle"></i> Upload failed. Try again.</span>';
+        }
+    };
+
+    // 石头理论 · 每日必做三件事 — save the user's own standing daily must-do list
+    // (up to 3 short strings, positions compacted, empties dropped). Persists to
+    // users.daily_must_do, refreshes _state.cu in-memory, and mirrors to
+    // localStorage so today's popup reflects the change without a re-login.
+    const saveDailyMustDo = async () => {
+        const statusEl = document.getElementById('daily-mustdo-status');
+        const items = [0, 1, 2]
+            .map(i => (document.getElementById('daily-mustdo-' + i)?.value || '').trim())
+            .filter(Boolean)
+            .slice(0, 3);
+        if (statusEl) statusEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 保存中…';
+        try {
+            if (!_state.cu || !_state.cu.id) throw new Error('no current user');
+            await AppDataStore.update('users', _state.cu.id, { daily_must_do: items });
+            _state.cu.daily_must_do = items;
+            try { localStorage.setItem('daily_must_do_' + _state.cu.id, JSON.stringify(items)); } catch (_) { /* mirror is best-effort */ }
+            if (statusEl) statusEl.innerHTML = '<span style="color:var(--success,#16a34a);"><i class="fas fa-check"></i> 已保存 · Saved!</span>';
+            if (window.UI?.toast?.success) UI.toast.success('每日必做三件事已更新');
+            setTimeout(() => { if (statusEl) statusEl.innerHTML = ''; }, 3000);
+        } catch (e) {
+            console.error('saveDailyMustDo failed', e);
+            if (statusEl) statusEl.innerHTML = '<span style="color:#dc2626;"><i class="fas fa-exclamation-circle"></i> 保存失败，请重试 · Save failed</span>';
         }
     };
 
@@ -5293,6 +5337,7 @@ const simulateCampaignSending = async (campaignId) => {
         toggleUserMenu,
         loginAs,
         uploadProfilePhoto,
+        saveDailyMustDo,
         showMarketingAutomationView,
         showMarketingListsView,
         showMonthlyPromotionView,
