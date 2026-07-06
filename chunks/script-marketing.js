@@ -1334,6 +1334,12 @@
         // React island — chunk builds plain card models, island renders.
         if (_reactPromoOn()) {
             try {
+                // Agent-only bonus gate: admins/managers (_viewerAudience === null)
+                // and the agent band see the note; customer/referrer viewers
+                // (audience 'customer') never receive it in the payload. It is also
+                // never added to the WhatsApp share text (see sharePromo), so it
+                // cannot reach a customer even when an agent forwards the promo.
+                const _isAgentViewer = _viewerAudience === null || _viewerAudience === 'agent';
                 const promos = promotions.map(p => {
                     const productNames = (p.product_ids || []).map(id => _productMap.get(id) || null).filter(Boolean);
                     let hasDiscount = false, originalStr = '', savePct = 0;
@@ -1353,7 +1359,7 @@
                         endStr: p.end_date ? UI.formatDate(p.end_date) : 'Ongoing',
                         slots: p.limited_slots || null,
                         paymentTypes: p.payment_types || [],
-                        remarks: p.remarks || '',
+                        agentNote: _isAgentViewer ? (p.agent_note || '') : '',
                         price: p.price ? parseFloat(p.price).toFixed(2) : null,
                         hasDiscount, originalStr, savePct,
                     };
@@ -2529,6 +2535,7 @@
             <tr style="${rowStyle}" onmouseover="if(!this.style.opacity||this.style.opacity==1)this.style.background='#fdf8f8'" onmouseout="if(!this.style.opacity||this.style.opacity==1)this.style.background=''">
                 <td class="pkg-td">
                     <a href="javascript:void(0)" onclick="app.viewPackageCustomers(${p.id})" style="font-weight:600;color:#8B1A1A;">${escapeHtml(p.package_name || p.name || '—')}</a>
+                    ${p.agent_note ? `<span title="Agent bonus (agents only): ${escapeHtml(p.agent_note)}" style="display:inline-flex;align-items:center;gap:3px;margin-left:6px;padding:1px 6px;border-radius:999px;background:#f3e8e8;color:#8B1A1A;font-size:10px;font-weight:700;vertical-align:middle;"><i class="fas fa-gift" style="font-size:9px;"></i>Agent</span>` : ''}
                 </td>
                 <td class="pkg-td" title="${escapeHtml(productNames)}" style="color:#555;">${escapeHtml(shortProducts || '—')}</td>
                 <td class="pkg-td" style="font-weight:700;">RM ${UI.formatNumber(p.price || 0)}</td>
@@ -3140,6 +3147,7 @@
             start_date: '',
             end_date: '',
             remarks: '',
+            agent_note: '',
             is_active: true,
             visible_to: []
         };
@@ -3211,13 +3219,18 @@
             </div>
 
             <div class="form-group">
-                <label>Requirement</label>
+                <label>Requirement <span style="font-size:11px;color:var(--gray-400);font-weight:normal;">(shown to agents &amp; customers)</span></label>
                 <textarea id="pkg-requirement" class="form-control" rows="2" placeholder="e.g. Minimum 3 referrals required">${escapeHtml(pkg.requirement || '')}</textarea>
             </div>
 
             <div class="form-group">
-                <label>Remarks (Internal Notes)</label>
-                <textarea id="pkg-remarks" class="form-control" rows="2" placeholder="Internal notes…">${escapeHtml(pkg.remarks || '')}</textarea>
+                <label>Agent Bonus <span style="font-size:11px;color:var(--gray-400);font-weight:normal;">代理专属奖励 · agents only, never sent to customers</span></label>
+                <textarea id="pkg-agent-note" class="form-control" rows="2" placeholder="Extra incentive shown only on the agent's card — e.g. Close 3 sets → RM5,000 cash bonus. Never appears to customers or in the WhatsApp share.">${escapeHtml(pkg.agent_note || '')}</textarea>
+            </div>
+
+            <div class="form-group">
+                <label>Remarks (Internal Notes) <span style="font-size:11px;color:var(--gray-400);font-weight:normal;">admin / manager only · off the promo card</span></label>
+                <textarea id="pkg-remarks" class="form-control" rows="2" placeholder="Admin/manager notes — never shown on any promo card…">${escapeHtml(pkg.remarks || '')}</textarea>
             </div>
 
             <div class="form-group">
@@ -3261,7 +3274,8 @@ ALTER TABLE public.promotions
   ADD COLUMN IF NOT EXISTS name           TEXT,
   ADD COLUMN IF NOT EXISTS details        TEXT,
   ADD COLUMN IF NOT EXISTS poster_url     TEXT,
-  ADD COLUMN IF NOT EXISTS delivery_lead_time TEXT;`.trim();
+  ADD COLUMN IF NOT EXISTS delivery_lead_time TEXT,
+  ADD COLUMN IF NOT EXISTS agent_note     TEXT;`.trim();
 
         // No client-side RPC path exists: DDL cannot run via PostgREST with the
         // anon key, and the service-role key is no longer embedded. Surface the
@@ -3288,6 +3302,7 @@ ALTER TABLE public.promotions
         const payments      = Array.from(document.querySelectorAll('input[name="pkg-payments"]:checked')).map(i => i.value);
         const requirement   = document.getElementById('pkg-requirement').value.trim();
         const remarks       = document.getElementById('pkg-remarks').value.trim();
+        const agentNote     = document.getElementById('pkg-agent-note').value.trim();
         const isActive      = document.getElementById('pkg-active').checked;
         const visibleTo     = [];
         if (document.getElementById('pkg-visible-customer').checked) visibleTo.push('customer');
@@ -3325,6 +3340,7 @@ ALTER TABLE public.promotions
             start_date:     startDate,
             end_date:       endDate,
             remarks:        remarks,
+            agent_note:     agentNote,
             is_active:      isActive,
             visible_to:     visibleTo,
             updated_at:     new Date().toISOString()

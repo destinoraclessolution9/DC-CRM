@@ -4,9 +4,11 @@
 // showMonthlyPromotionView) fetches promotions + products, filters to active
 // & non-expired + visible-to-viewer, and builds one plain card model per promo
 // (name, poster url, product names, requirement, time frame, slots, payment
-// types, remarks, price, discount) — then mounts this component. React
-// auto-escapes every interpolated field (package_name, requirement, remarks,
-// payment types, product names) — an XSS-hardening win on top of the migration.
+// types, agent-only bonus note, price, discount) — then mounts this component.
+// The agent bonus (agentNote) is only present in the payload for admin/agent
+// viewers and is never added to the WhatsApp share, so customers never see it.
+// React auto-escapes every interpolated field (package_name, requirement,
+// agentNote, payment types, product names) — an XSS-hardening win.
 //
 // Poster: each card leads with the uploaded promotion poster (16:9 hero) and
 // degrades gracefully to a clean placeholder when none is set. "Share to
@@ -28,6 +30,9 @@ async function sharePromo(m) {
     if (m.requirement) parts.push(m.requirement);
     if (m.hasTimeFrame) parts.push(`${m.startStr} – ${m.endStr}`);
     if (m.slots) parts.push(`限量 ${m.slots} 套 / Limited ${m.slots} sets`);
+    // NOTE: m.agentNote is intentionally NEVER included here — the agent bonus is
+    // an internal incentive and must not be forwarded to a customer. Keep it out of
+    // every share path.
     const text = parts.filter(Boolean).join('\n');
 
     // Prefer the native share sheet (lets the agent pick WhatsApp AND attach the
@@ -119,9 +124,12 @@ function PromoCard({ m }) {
                         <i className="fas fa-check-circle" style={{ color: BRAND, marginRight: '4px' }}></i>{m.requirement}
                     </div>
                 )}
-                {m.remarks && (
-                    <div style={{ fontSize: '11px', color: 'var(--gray-400)', marginBottom: '6px' }}>
-                        <i className="fas fa-info-circle" style={{ marginRight: '4px' }}></i>{m.remarks}
+                {m.agentNote && (
+                    <div style={{ marginBottom: '8px', padding: '8px 10px', background: '#fbf3f3', border: '1px solid #edd9d9', borderLeft: '3px solid ' + BRAND, borderRadius: '6px' }}>
+                        <div style={{ fontSize: '9px', fontWeight: 800, letterSpacing: '0.6px', color: BRAND, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '2px' }}>
+                            <i className="fas fa-lock" style={{ fontSize: '9px' }}></i>Agent only · 代理专属
+                        </div>
+                        <div style={{ fontSize: '12px', color: 'var(--gray-700)', lineHeight: 1.4 }}>{m.agentNote}</div>
                     </div>
                 )}
                 <div style={{ display: 'flex', gap: '8px', marginTop: 'auto', paddingTop: '10px' }}>
