@@ -3431,58 +3431,43 @@
         }
     };
 
-    // Assign / clear one of the five named event roles (主要负责人 / 场地负责人 /
-    // 报到负责人 / 主讲老师 / 活动司仪). Persists to the shared events row
-    // (events.event_roles JSONB) so every agent's activity for the event sees the
-    // same assignment. Called from the EVENT detail modal's role dropdowns.
+    // Set / clear one of the five named event roles (主要负责人 / 场地负责人 /
+    // 报到负责人 / 主讲老师 / 活动司仪) as a free-text name. Persists to the shared
+    // events row (events.event_roles JSONB) so every agent's activity for the event
+    // sees the same names. Editable by anyone who can see the event (no gate —
+    // matches the ungated + Add Attendee / + Add Consultant in the same modal).
     const _EVENT_ROLE_KEYS = ['main_organizer', 'venue_lead', 'registration_lead', 'speaker', 'emcee'];
-    const saveEventRole = async (eventId, roleKey, userId, userName) => {
+    const saveEventRole = async (eventId, roleKey, name) => {
         if (!_EVENT_ROLE_KEYS.includes(roleKey)) { UI.toast.error('Unknown event role'); return; }
         if (eventId == null || eventId === '' || String(eventId) === 'null') { UI.toast.error('Event not linked'); return; }
         try {
-            const ev = await AppDataStore.getById('events', eventId);
-            if (!ev) { UI.toast.error('Event not found'); return; }
-            // Edit gate mirrors the modal: managers / marketing / admin, or the
-            // event creator. Others should never reach this (dropdowns render
-            // read-only) — defence-in-depth in front of the RPC.
-            const cu = _state.cu;
-            const canEdit = isSystemAdmin(cu) || isManagement(cu) || isMarketingManager(cu)
-                || (ev.created_by != null && String(ev.created_by) === String(cu?.id));
-            if (!canEdit) { UI.toast.error('You do not have permission to assign event roles'); return; }
+            const _name = (name == null) ? '' : String(name).trim();
 
-            const _uidRaw = (userId == null) ? '' : String(userId).trim();
-            const _uidNum = Number(_uidRaw);
-            const _uidParam = (_uidRaw === '' || !Number.isFinite(_uidNum)) ? null : _uidNum;
-
-            // Atomic server-side merge (set_event_role RPC). Unlike a client
-            // read-modify-write it can't clobber a concurrent editor's other roles,
-            // derives the name from the users table (a forged id is rejected), and
-            // returns the merged event_roles so we can confirm the write persisted
-            // (a schema-stripped client write would have silently "succeeded").
+            // Atomic server-side single-key merge (set_event_role_name RPC): can't
+            // clobber a concurrent editor's other roles, and returns the merged
+            // event_roles so we confirm the write actually persisted.
             const _sb = window.supabase || window.supabaseClient;
-            if (!_sb || typeof _sb.rpc !== 'function') { UI.toast.error('Offline — cannot save role right now'); return; }
-            const { data, error } = await _sb.rpc('set_event_role', {
+            if (!_sb || typeof _sb.rpc !== 'function') { UI.toast.error('Offline — cannot save right now'); return; }
+            const { data, error } = await _sb.rpc('set_event_role_name', {
                 p_event_id: Number(eventId),
                 p_role_key: roleKey,
-                p_user_id:  _uidParam,
+                p_name:     _name || null,
             });
             if (error) { UI.toast.error('Could not save role: ' + (error.message || 'unknown')); return; }
             const merged = (data && typeof data === 'object' && !Array.isArray(data)) ? data : null;
-            const applied = merged ? merged[roleKey] : undefined;
-            const ok = (_uidParam == null)
-                ? (applied == null)
-                : (applied && String(applied.id) === String(_uidParam));
-            if (!ok) { UI.toast.error('Role not saved — please retry'); return; }
 
             // Keep the local cache coherent so re-opening the modal shows the new
             // value. invalidateCache drops primed rows, so prime AFTER it.
             try {
-                AppDataStore.invalidateCache('events');
-                const _next = { ...ev, event_roles: merged };
-                if (roleKey === 'speaker') _next.speaker = (applied && applied.name) ? applied.name : null;
-                AppDataStore.primeRows('events', [_next]);
+                const ev = await AppDataStore.getById('events', eventId);
+                if (ev && merged) {
+                    AppDataStore.invalidateCache('events');
+                    const _next = { ...ev, event_roles: merged };
+                    if (roleKey === 'speaker') _next.speaker = _name || null;
+                    AppDataStore.primeRows('events', [_next]);
+                }
             } catch (_) { /* best-effort cache coherence */ }
-            UI.toast.success('已更新 · Role updated');
+            UI.toast.success(_name ? '已更新 · Saved' : '已清除 · Cleared');
         } catch (e) {
             UI.toast.error('Could not save role: ' + (e.message || e));
         }

@@ -5184,12 +5184,12 @@
                 </div>
             `;
 
-            // Section 3: Event Roles (活动负责人) — five named organiser roles, each
-            // assigned from the agent/consultant roster. EVENT-only; stored on the
-            // shared `events` row (events.event_roles JSONB) so every agent's
-            // activity row for the same event sees the same assignments. Editing is
-            // limited to managers / marketing / admin or the event creator; everyone
-            // else sees a read-only label.
+            // Section 3: Event Roles (活动负责人) — five named organiser roles, each a
+            // plain free-text field (type any name, incl. an external speaker). EVENT-
+            // only; stored on the shared `events` row (events.event_roles JSONB) so
+            // every agent's activity row for the same event sees the same names.
+            // Editable by anyone who can see the event — matching the ungated
+            // + Add Attendee / + Add Consultant actions in this same modal.
             let rolesSection = '';
             if (activity.activity_type === 'EVENT' && activity.event_id) {
                 const _EVENT_ROLE_DEFS = [
@@ -5201,28 +5201,12 @@
                 ];
                 const _eventRoles = (marketingEvent && marketingEvent.event_roles && typeof marketingEvent.event_roles === 'object')
                     ? marketingEvent.event_roles : {};
-                const _roleRoster = users
-                    .filter(u => isAgent(u) && u.status !== 'inactive')
-                    .sort((a, b) => String(a.full_name || '').localeCompare(String(b.full_name || '')));
-                const _canEditRoles = isSystemAdmin(_state.cu) || isManagement(_state.cu) || isMarketingManager(_state.cu)
-                    || (marketingEvent && marketingEvent.created_by != null && String(marketingEvent.created_by) === String(_state.cu?.id));
+                // Tolerate both shapes: legacy dropdown data {id,name} and the new
+                // free-text {name}, plus a bare string.
+                const _roleName = (v) => (typeof v === 'string') ? v : (v && v.name) ? String(v.name) : '';
                 const _roleRows = _EVENT_ROLE_DEFS.map(rd => {
-                    const cur = _eventRoles[rd.key] || null;
-                    const curId = (cur && cur.id != null) ? String(cur.id) : '';
-                    const curName = (cur && cur.name) ? String(cur.name) : '';
-                    if (!_canEditRoles) {
-                        return `<div class="info-row"><span class="info-label">${rd.label}:</span> <span>${curName ? esc(curName) : '—'}</span></div>`;
-                    }
-                    // Keep the current holder selectable even if they've since left
-                    // the roster (inactive / role change) so the pill still displays.
-                    let optionUsers = _roleRoster;
-                    if (curId && !_roleRoster.some(u => String(u.id) === curId)) {
-                        optionUsers = [{ id: cur.id, full_name: curName || ('#' + curId) }].concat(_roleRoster);
-                    }
-                    const opts = ['<option value="">— 未指派 · Unassigned —</option>']
-                        .concat(optionUsers.map(u => `<option value="${u.id}" ${String(u.id) === curId ? 'selected' : ''}>${esc(u.full_name || '')}</option>`))
-                        .join('');
-                    return `<div class="info-row"><span class="info-label">${rd.label}:</span> <select class="form-control" style="max-width:240px;flex:0 1 240px;" onchange="app.saveEventRole(${activity.event_id}, '${rd.key}', this.value, this.options[this.selectedIndex].text)">${opts}</select></div>`;
+                    const nm = _roleName(_eventRoles[rd.key]);
+                    return `<div class="info-row"><span class="info-label">${rd.label}:</span> <input type="text" class="form-control" style="max-width:240px;flex:0 1 240px;" value="${escapeHtml(nm)}" placeholder="输入姓名 · type a name" onchange="app.saveEventRole(${activity.event_id}, '${rd.key}', this.value)"></div>`;
                 }).join('');
                 rolesSection = `
                 <div class="detail-section">
