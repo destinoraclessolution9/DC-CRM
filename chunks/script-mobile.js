@@ -1724,6 +1724,12 @@
     let _mcalMonth = null;
     let _mcalByDate = new Map();
     let _mcalPersonMap = new Map();
+    // Cached getVisibleUserIds() result for the calendar surfaces, refreshed on
+    // each month/range fetch. Lets _mcalOwned grant client-name visibility to a
+    // team leader / manager whose downline includes the activity's lead agent —
+    // mirroring the desktop _canViewEntityName gate. Stays null until first
+    // resolved, in which case _mcalOwned falls back to strict owner/co-agent/admin.
+    let _mcalVisibleScope = null;
     // id → agent full_name, used to label the responsible agent under each
     // birthday card in the day sheet. Held in memory only (never persisted) so
     // agent names can't leak across logins on a shared device.
@@ -1856,9 +1862,21 @@
     // client's name; they see the activity type instead.
     const _mcalOwned = (a) => {
         const cu = _state.cu;
-        return isSystemAdmin(cu)
+        if (isSystemAdmin(cu)
             || String(a.lead_agent_id) === String(cu?.id)
-            || (Array.isArray(a.co_agents) && a.co_agents.some(c => String(c.id) === String(cu?.id)));
+            || (Array.isArray(a.co_agents) && a.co_agents.some(c => String(c.id) === String(cu?.id)))) {
+            return true;
+        }
+        // Team leader / manager: the calendar fetch already scoped this row into
+        // their view (lead_agent_id ∈ visibleIds), so the client name is theirs to
+        // see. _mcalVisibleScope is the cached getVisibleUserIds() result ('all' or
+        // an id array); null → not yet resolved, stay strict.
+        if (_mcalVisibleScope === 'all') return true;
+        if (Array.isArray(_mcalVisibleScope) && a.lead_agent_id != null) {
+            const lid = String(a.lead_agent_id);
+            return _mcalVisibleScope.some(id => String(id) === lid);
+        }
+        return false;
     };
     // Keep all non-event activities; keep events only when they have a
     // resolvable title (mirrors the desktop orphan-EVENT filter). Events used
@@ -2015,6 +2033,7 @@
         const _needRefills = !cachedRefills;
 
         const visibleIds = await _visibleIdsP;
+        _mcalVisibleScope = visibleIds;
 
         // RBAC: birthday grid markers + the coming-up count are scoped to the
         // viewer's visible agent set so agents don't see other agents' clients'
@@ -2836,6 +2855,7 @@
     const _mcalScopeFields = async () => {
         const visibleIds = (typeof getVisibleUserIds === 'function')
             ? await getVisibleUserIds(_state.cu).catch(() => 'all') : 'all';
+        _mcalVisibleScope = visibleIds;
         if (typeof isSystemAdmin === 'function' && !isSystemAdmin(_state.cu) && visibleIds !== 'all') {
             return [
                 { field: 'lead_agent_id', values: visibleIds },

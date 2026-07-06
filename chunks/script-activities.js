@@ -3431,6 +3431,46 @@
         }
     };
 
+    // Assign / clear one of the five named event roles (主要负责人 / 场地负责人 /
+    // 报到负责人 / 主讲老师 / 活动司仪). Persists to the shared events row
+    // (events.event_roles JSONB) so every agent's activity for the event sees the
+    // same assignment. Called from the EVENT detail modal's role dropdowns.
+    const _EVENT_ROLE_KEYS = ['main_organizer', 'venue_lead', 'registration_lead', 'speaker', 'emcee'];
+    const saveEventRole = async (eventId, roleKey, userId, userName) => {
+        if (!_EVENT_ROLE_KEYS.includes(roleKey)) { UI.toast.error('Unknown event role'); return; }
+        if (eventId == null || eventId === '' || String(eventId) === 'null') { UI.toast.error('Event not linked'); return; }
+        try {
+            const ev = await AppDataStore.getById('events', eventId);
+            if (!ev) { UI.toast.error('Event not found'); return; }
+            // Edit gate mirrors the modal: managers / marketing / admin, or the
+            // event creator. Others should never reach this (dropdowns render
+            // read-only) — this is the defence-in-depth server-side check.
+            const cu = _state.cu;
+            const canEdit = isSystemAdmin(cu) || isManagement(cu) || isMarketingManager(cu)
+                || (ev.created_by != null && String(ev.created_by) === String(cu?.id));
+            if (!canEdit) { UI.toast.error('You do not have permission to assign event roles'); return; }
+
+            const roles = (ev.event_roles && typeof ev.event_roles === 'object' && !Array.isArray(ev.event_roles))
+                ? { ...ev.event_roles } : {};
+            const _uidRaw = (userId == null) ? '' : String(userId).trim();
+            if (_uidRaw === '') {
+                roles[roleKey] = null;
+            } else {
+                const _uidNum = Number(_uidRaw);
+                roles[roleKey] = { id: Number.isFinite(_uidNum) ? _uidNum : _uidRaw, name: (userName || '').trim() };
+            }
+            const patch = { event_roles: roles };
+            // Keep the free-text `speaker` column in sync with 主讲老师 so the
+            // create-event form + noticeboard poster keep showing the presenter.
+            if (roleKey === 'speaker') patch.speaker = (userName || '').trim();
+            await AppDataStore.update('events', eventId, patch);
+            try { AppDataStore.invalidateCache('events'); } catch (_) { /* best-effort */ }
+            UI.toast.success('已更新 · Role updated');
+        } catch (e) {
+            UI.toast.error('Could not save role: ' + (e.message || e));
+        }
+    };
+
     // Server-side search with debounce + race-token + visible loading state.
     // Replaces the old in-memory filter on a preloaded getAll('prospects') +
     // getAll('customers') array — that pattern made the modal feel "stuck"
@@ -5682,6 +5722,7 @@
         selectAddConsultant,
         confirmAddConsultant,
         removeAgentAttendee,
+        saveEventRole,
         searchAddAttendee,
         selectAddAttendee,
         showFTFAttendeeForm,

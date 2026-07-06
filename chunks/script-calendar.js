@@ -36,6 +36,28 @@
     // scheduled meeting. They are marked source='birthday_auto' and hidden from every calendar
     // surface (month grid / today's list / day & week views / mobile) so they don't clutter it.
     const _isAutoTouchLog = (a) => !!(a && a.source === 'birthday_auto');
+    // Entity-name visibility gate (shared by month tile / today list / week / day
+    // views and the detail modal so they can never drift again). The client
+    // (prospect/customer) name on an activity the viewer does NOT personally own
+    // is shown only when the activity's lead agent sits inside the viewer's
+    // visibility scope: the viewer owns/co-owns it, is an admin/marketing (org-
+    // wide), or — the case this fixes — is a team leader / manager whose downline
+    // includes the lead agent. `scope` is a getVisibleUserIds() result: the string
+    // 'all', or an array of visible user ids. The calendar grid RPC already scopes
+    // its rows by this same visible-id set, so previously a leader could see a
+    // downline tile but not whose meeting it was — the gate here was stricter than
+    // the fetch. Peer agents viewing a public activity outside their scope still
+    // see no name, preserving the original privacy intent (commits fa31e3b/3a75855).
+    const _canViewEntityName = (a, scope) => {
+        const viewerId = _state.cu?.id;
+        if (String(a.lead_agent_id) === String(viewerId)) return true;
+        if (Array.isArray(a.co_agents) && a.co_agents.some(ca => String(ca.id) === String(viewerId))) return true;
+        if (isSystemAdmin(_state.cu)) return true;
+        if (scope === 'all') return true;
+        if (!Array.isArray(scope) || a.lead_agent_id == null) return false;
+        const lid = String(a.lead_agent_id);
+        return scope.some(id => String(id) === lid);
+    };
     // ========== PHASE 1: FULL CALENDAR IMPLEMENTATION ==========
 
     // React-island flag (default-on, PROMOTED 2026-06-16 after thorough opt-in
@@ -2506,15 +2528,14 @@
     // so for them _optBadge stays '' and the onclick falls back to
     // viewActivityDetails — identical to the legacy output before extraction.
     const buildAppointmentCardHtml = (a, ctx) => {
-        const { prospectMap, customerMap, userMap, eventMap } = ctx;
+        const { prospectMap, customerMap, userMap, eventMap, entityScope } = ctx;
         const prospect = a.prospect_id ? prospectMap.get(String(a.prospect_id)) : null;
         const customer = a.customer_id ? customerMap.get(String(a.customer_id)) : null;
-        // Ownership gate (commits fa31e3b/3a75855): non-owners viewing another
-        // agent's public/open activity must not see the client name.
-        const _tileViewerId = _state.cu?.id;
-        const _tileOwned = String(a.lead_agent_id) === String(_tileViewerId)
-            || (Array.isArray(a.co_agents) && a.co_agents.some(ca => String(ca.id) === String(_tileViewerId)))
-            || isSystemAdmin(_state.cu);
+        // Entity-name gate (commits fa31e3b/3a75855; extended 2026-07 so leaders/
+        // managers see downline names). Owners/co-agents/admins and any viewer
+        // whose scope covers the lead agent see the client name; peers viewing a
+        // public activity outside their scope do not. See _canViewEntityName.
+        const _tileOwned = _canViewEntityName(a, entityScope);
         const entityName = _tileOwned
             ? (prospect ? prospect.full_name : (customer ? customer.full_name : (a.activity_title || a.customer_name || 'Event')))
             : (a.activity_title || a.activity_type || 'Activity');
@@ -2699,7 +2720,7 @@
                 // Unified card builder (shared with the main RPC path). Returns ''
                 // when the ownership/entity gate produces no name — matches the
                 // legacy `if (!entityName) continue;` (no per-cell cap consumed).
-                const _cardHtml = buildAppointmentCardHtml(a, { prospectMap, customerMap, userMap, eventMap });
+                const _cardHtml = buildAppointmentCardHtml(a, { prospectMap, customerMap, userMap, eventMap, entityScope: visibleIds });
                 if (!_cardHtml) continue;
                 if (renderedInCell >= maxRenderPerCell) { skippedInCell++; continue; }
                 activityHtml += _cardHtml;
@@ -3155,7 +3176,7 @@
                     // Returns '' when the ownership/entity gate yields no name —
                     // matches the previous `if (entityName) { … }` guard. The cap
                     // and "+N more" accounting are unchanged.
-                    const _cardHtml = buildAppointmentCardHtml(a, { prospectMap, customerMap, userMap, eventMap });
+                    const _cardHtml = buildAppointmentCardHtml(a, { prospectMap, customerMap, userMap, eventMap, entityScope: visibleIds });
                     if (_cardHtml) {
                         if (renderedInCell >= maxRenderPerCell) {
                             skippedInCell++;
@@ -3433,10 +3454,7 @@
             const agent = userMapRTA.get(String(a.lead_agent_id)) || { full_name: 'Unknown Agent' };
             const prospect = a.prospect_id ? prospectMapRTA.get(String(a.prospect_id)) : null;
             const customer = a.customer_id ? customerMapRTA.get(String(a.customer_id)) : null;
-            const _rtaViewerId = _state.cu?.id;
-            const _rtaOwned = String(a.lead_agent_id) === String(_rtaViewerId)
-                || (Array.isArray(a.co_agents) && a.co_agents.some(ca => String(ca.id) === String(_rtaViewerId)))
-                || isSystemAdmin(_state.cu);
+            const _rtaOwned = _canViewEntityName(a, visibleIds);
             const _rtaEvent = a.activity_type === 'EVENT' && a.event_id
                 ? allEventsRTA.find(e => String(e.id) === String(a.event_id))
                 : null;
@@ -4493,10 +4511,7 @@
                     // Client names are private to the activity owner/co-agents (match the
                     // month-grid _tileOwned gate) — otherwise the week view leaked every
                     // agent's prospect/customer names. Also escape to prevent stored XSS.
-                    const _wvViewerId = _state.cu?.id;
-                    const _wvOwned = String(a.lead_agent_id) === String(_wvViewerId)
-                        || (Array.isArray(a.co_agents) && a.co_agents.some(ca => String(ca.id) === String(_wvViewerId)))
-                        || isSystemAdmin(_state.cu);
+                    const _wvOwned = _canViewEntityName(a, visibleIdsWV);
                     const name = _wvOwned
                         ? (prospect?.full_name || customer?.full_name || a.activity_title || 'Activity')
                         : (a.activity_title || a.activity_type || 'Activity');
@@ -4653,10 +4668,7 @@
             for (const a of hourActivities) {
                 const prospect = a.prospect_id ? prospectMapDV.get(String(a.prospect_id)) : null;
                 const customer = a.customer_id ? customerMapDV.get(String(a.customer_id)) : null;
-                const _dvViewerId = _state.cu?.id;
-                const _dvOwned = String(a.lead_agent_id) === String(_dvViewerId)
-                    || (Array.isArray(a.co_agents) && a.co_agents.some(ca => String(ca.id) === String(_dvViewerId)))
-                    || isSystemAdmin(_state.cu);
+                const _dvOwned = _canViewEntityName(a, visibleIdsDV);
                 const name = _dvOwned ? (prospect?.full_name || customer?.full_name || '') : '';
                 const agent = userMapDV.get(String(a.lead_agent_id));
 
@@ -4805,7 +4817,7 @@
     // orchestrator below keeps the same template string while staying a thin
     // function. `esc`, `escapeHtml`, and `_state` are read from the enclosing
     // closure (same as the inline code). Takes the locals the template reads.
-    const buildActivityDetailsContent = (activity, marketingEvent, _isOwnActivity, entityName, _entityIconBtn, _consultantId, _consultantName, _leadAgentName, attendeeHtml, isAttendeeType, entityOrphaned, activityId) => {
+    const buildActivityDetailsContent = (activity, marketingEvent, _isOwnActivity, _canSeeEntity, entityName, _entityIconBtn, _consultantId, _consultantName, _leadAgentName, attendeeHtml, isAttendeeType, entityOrphaned, activityId) => {
         return `
             <div class="activity-details">
                 <div class="detail-section">
@@ -4814,7 +4826,7 @@
                     <div class="info-row"><span class="info-label">Title:</span> <span>${escapeHtml(marketingEvent?.event_title || marketingEvent?.title || activity.activity_title || 'N/A')}</span></div>
                     <div class="info-row"><span class="info-label">Date:</span> <span>${escapeHtml(activity.activity_date || '')}</span></div>
                     <div class="info-row"><span class="info-label">Time:</span> <span>${escapeHtml(activity.start_time || '')} - ${escapeHtml(activity.end_time || '')}</span></div>
-                    ${activity.activity_type !== 'EVENT' && _isOwnActivity ? `<div class="info-row"><span class="info-label">Met With:</span> <span style="display:inline-flex; align-items:center; flex-wrap:wrap; gap:4px;">${escapeHtml(entityName || '')}${_entityIconBtn}</span></div>` : ''}
+                    ${activity.activity_type !== 'EVENT' && _canSeeEntity ? `<div class="info-row"><span class="info-label">Met With:</span> <span style="display:inline-flex; align-items:center; flex-wrap:wrap; gap:4px;">${escapeHtml(entityName || '')}${_entityIconBtn}</span></div>` : ''}
                     ${activity.location_address ? `<div class="info-row"><span class="info-label">Location:</span> <span>${escapeHtml(activity.location_address)}</span></div>` : ''}
                     ${marketingEvent?.description ? `<div class="info-row" style="flex-direction:column; align-items:flex-start; gap:4px;"><div style="display:flex; align-items:center; gap:8px; width:100%;"><span class="info-label">Description:</span><button style="width:30px;height:30px;border-radius:50%;border:none;background:#25d366;color:#fff;font-size:17px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 8px rgba(37,211,102,0.4);flex-shrink:0;" onclick="event.stopPropagation();app.sendDescriptionInvite(${activity.id})" title="Send WhatsApp Invite"><i class="fab fa-whatsapp"></i></button></div><span style="white-space:pre-wrap; color:var(--gray-700);">${escapeHtml(marketingEvent.description)}</span></div>` : ''}
                     ${activity.summary ? `<div class="info-row"><span class="info-label">Summary:</span> <span>${escapeHtml(activity.summary)}</span></div>` : ''}
@@ -4984,6 +4996,16 @@
             || String(activity.lead_agent_id) === String(_state.cu?.id)
             || (Array.isArray(activity.co_agents) && activity.co_agents.some(ca => String(ca.id) === String(_state.cu?.id)));
 
+        // A team leader / manager viewing a DOWNLINE agent's activity is entitled
+        // to the prospect/customer name — the calendar already surfaced the tile to
+        // them (grid RPC scoped by getVisibleUserIds), and the Actions strip already
+        // offers a Prospect/Customer button. _isOwnActivity (admin/lead/co-agent)
+        // hid the name from the very leaders whose job is to see it, so the "Met
+        // With" row + inline profile link now gate on the broader scope check while
+        // _isOwnActivity keeps its literal-ownership meaning for the rest of the modal.
+        const _entityScope = await getVisibleUserIds(_state.cu).catch(() => null);
+        const _canSeeEntity = _canViewEntityName(activity, _entityScope);
+
         let attendeeHtml = '';
         const isAttendeeType = ['EVENT', 'AGENT_MEETING', 'AGENT_TRAINING'].includes(activity.activity_type);
         if (isAttendeeType && activity.event_id) {
@@ -5146,7 +5168,54 @@
                 </div>
             `;
 
-            attendeeHtml = prospectSection + agentSection;
+            // Section 3: Event Roles (活动负责人) — five named organiser roles, each
+            // assigned from the agent/consultant roster. EVENT-only; stored on the
+            // shared `events` row (events.event_roles JSONB) so every agent's
+            // activity row for the same event sees the same assignments. Editing is
+            // limited to managers / marketing / admin or the event creator; everyone
+            // else sees a read-only label.
+            let rolesSection = '';
+            if (activity.activity_type === 'EVENT' && activity.event_id) {
+                const _EVENT_ROLE_DEFS = [
+                    { key: 'main_organizer',    label: '主要负责人' },
+                    { key: 'venue_lead',        label: '场地负责人' },
+                    { key: 'registration_lead', label: '报到负责人' },
+                    { key: 'speaker',           label: '主讲老师' },
+                    { key: 'emcee',             label: '活动司仪' },
+                ];
+                const _eventRoles = (marketingEvent && marketingEvent.event_roles && typeof marketingEvent.event_roles === 'object')
+                    ? marketingEvent.event_roles : {};
+                const _roleRoster = users
+                    .filter(u => isAgent(u) && u.status !== 'inactive')
+                    .sort((a, b) => String(a.full_name || '').localeCompare(String(b.full_name || '')));
+                const _canEditRoles = isSystemAdmin(_state.cu) || isManagement(_state.cu) || isMarketingManager(_state.cu)
+                    || (marketingEvent && marketingEvent.created_by != null && String(marketingEvent.created_by) === String(_state.cu?.id));
+                const _roleRows = _EVENT_ROLE_DEFS.map(rd => {
+                    const cur = _eventRoles[rd.key] || null;
+                    const curId = (cur && cur.id != null) ? String(cur.id) : '';
+                    const curName = (cur && cur.name) ? String(cur.name) : '';
+                    if (!_canEditRoles) {
+                        return `<div class="info-row"><span class="info-label">${rd.label}:</span> <span>${curName ? esc(curName) : '—'}</span></div>`;
+                    }
+                    // Keep the current holder selectable even if they've since left
+                    // the roster (inactive / role change) so the pill still displays.
+                    let optionUsers = _roleRoster;
+                    if (curId && !_roleRoster.some(u => String(u.id) === curId)) {
+                        optionUsers = [{ id: cur.id, full_name: curName || ('#' + curId) }].concat(_roleRoster);
+                    }
+                    const opts = ['<option value="">— 未指派 · Unassigned —</option>']
+                        .concat(optionUsers.map(u => `<option value="${u.id}" ${String(u.id) === curId ? 'selected' : ''}>${esc(u.full_name || '')}</option>`))
+                        .join('');
+                    return `<div class="info-row"><span class="info-label">${rd.label}:</span> <select class="form-control" style="max-width:240px;flex:0 1 240px;" onchange="app.saveEventRole(${activity.event_id}, '${rd.key}', this.value, this.options[this.selectedIndex].text)">${opts}</select></div>`;
+                }).join('');
+                rolesSection = `
+                <div class="detail-section">
+                    <h4>活动负责人 <span style="font-size:11px;color:#9CA3AF;font-weight:400;">Event Roles</span></h4>
+                    ${_roleRows}
+                </div>`;
+            }
+
+            attendeeHtml = prospectSection + agentSection + rolesSection;
         }
 
         // Resolve consultant + lead agent names in parallel before we build
@@ -5186,13 +5255,13 @@
         const _entityActionId = activity.prospect_id || activity.customer_id;
         const _entityIsProspect = !!activity.prospect_id;
         const _entityProfileFn = _entityIsProspect ? 'showProspectDetail' : 'showCustomerDetail';
-        const _entityIconBtn = (_isOwnActivity && _entityActionId)
+        const _entityIconBtn = (_canSeeEntity && _entityActionId)
             ? (entityOrphaned
                 ? `<button title="Relink this activity to a contact" style="margin-left:8px; height:26px; padding:0 10px; border-radius:13px; border:1px solid #f59e0b; background:#fef3c7; color:#92400e; cursor:pointer; display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600;" onclick="event.stopPropagation();(async()=>{ await app.openActivityRepairModal(${activity.id}); })()"><i class="fas fa-link"></i> Repair</button>`
                 : `<button title="Open ${_entityIsProspect ? 'prospect' : 'customer'} profile" style="margin-left:8px; width:26px; height:26px; border-radius:50%; border:none; background:#dbeafe; color:#1e40af; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; font-size:13px;" onclick="event.stopPropagation();(async()=>{ const p=await AppDataStore.getById('${_entityIsProspect ? 'prospects' : 'customers'}', ${_entityActionId}); if(!p){UI.toast.error('${_entityIsProspect ? 'Prospect' : 'Customer'} record not found'); return;} UI.hideModal(); app.${_entityProfileFn}(${_entityActionId}); })()"><i class="fas fa-user-circle"></i></button>`)
             : '';
 
-        const content = buildActivityDetailsContent(activity, marketingEvent, _isOwnActivity, entityName, _entityIconBtn, _consultantId, _consultantName, _leadAgentName, attendeeHtml, isAttendeeType, entityOrphaned, activityId);
+        const content = buildActivityDetailsContent(activity, marketingEvent, _isOwnActivity, _canSeeEntity, entityName, _entityIconBtn, _consultantId, _consultantName, _leadAgentName, attendeeHtml, isAttendeeType, entityOrphaned, activityId);
 
         UI.showModal('Activity Details', content, []);
     };
