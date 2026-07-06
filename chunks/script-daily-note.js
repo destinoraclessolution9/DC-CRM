@@ -3078,8 +3078,8 @@
         +   (tag ? '<div style="display:inline-block;font-size:12px;letter-spacing:.05em;color:var(--text-secondary,#8a8f98);border:1px solid var(--border-color,#e3e5e8);border-radius:999px;padding:3px 12px;margin-bottom:18px;">' + tag + '</div>' : '')
         +   '<div style="font-size:21px;line-height:1.6;font-weight:600;color:var(--text-primary,#1c1e21);margin-bottom:14px;">' + esc(note.zh) + '</div>'
         +   '<div style="font-size:14px;line-height:1.55;font-style:italic;color:var(--text-secondary,#6b7280);max-width:30em;margin:0 auto;">' + esc(note.en) + '</div>'
+        +   '<div style="margin-top:14px;font-size:11px;color:var(--text-tertiary,#9aa0a6);">窮理查年鑑 · Poor Richard\'s Almanack · #' + note.id + '</div>'
         +   mustdoBlock
-        +   '<div style="margin-top:18px;font-size:11px;color:var(--text-tertiary,#9aa0a6);">窮理查年鑑 · Poor Richard\'s Almanack · #' + note.id + '</div>'
         + '</div>';
       UI.showModal('每天一智 · Daily Wisdom', html, [
         { label: '收到 · Got it', type: 'primary', action: 'UI.hideModal()' }
