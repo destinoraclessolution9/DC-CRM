@@ -3444,27 +3444,44 @@
             if (!ev) { UI.toast.error('Event not found'); return; }
             // Edit gate mirrors the modal: managers / marketing / admin, or the
             // event creator. Others should never reach this (dropdowns render
-            // read-only) — this is the defence-in-depth server-side check.
+            // read-only) — defence-in-depth in front of the RPC.
             const cu = _state.cu;
             const canEdit = isSystemAdmin(cu) || isManagement(cu) || isMarketingManager(cu)
                 || (ev.created_by != null && String(ev.created_by) === String(cu?.id));
             if (!canEdit) { UI.toast.error('You do not have permission to assign event roles'); return; }
 
-            const roles = (ev.event_roles && typeof ev.event_roles === 'object' && !Array.isArray(ev.event_roles))
-                ? { ...ev.event_roles } : {};
             const _uidRaw = (userId == null) ? '' : String(userId).trim();
-            if (_uidRaw === '') {
-                roles[roleKey] = null;
-            } else {
-                const _uidNum = Number(_uidRaw);
-                roles[roleKey] = { id: Number.isFinite(_uidNum) ? _uidNum : _uidRaw, name: (userName || '').trim() };
-            }
-            const patch = { event_roles: roles };
-            // Keep the free-text `speaker` column in sync with 主讲老师 so the
-            // create-event form + noticeboard poster keep showing the presenter.
-            if (roleKey === 'speaker') patch.speaker = (userName || '').trim();
-            await AppDataStore.update('events', eventId, patch);
-            try { AppDataStore.invalidateCache('events'); } catch (_) { /* best-effort */ }
+            const _uidNum = Number(_uidRaw);
+            const _uidParam = (_uidRaw === '' || !Number.isFinite(_uidNum)) ? null : _uidNum;
+
+            // Atomic server-side merge (set_event_role RPC). Unlike a client
+            // read-modify-write it can't clobber a concurrent editor's other roles,
+            // derives the name from the users table (a forged id is rejected), and
+            // returns the merged event_roles so we can confirm the write persisted
+            // (a schema-stripped client write would have silently "succeeded").
+            const _sb = window.supabase || window.supabaseClient;
+            if (!_sb || typeof _sb.rpc !== 'function') { UI.toast.error('Offline — cannot save role right now'); return; }
+            const { data, error } = await _sb.rpc('set_event_role', {
+                p_event_id: Number(eventId),
+                p_role_key: roleKey,
+                p_user_id:  _uidParam,
+            });
+            if (error) { UI.toast.error('Could not save role: ' + (error.message || 'unknown')); return; }
+            const merged = (data && typeof data === 'object' && !Array.isArray(data)) ? data : null;
+            const applied = merged ? merged[roleKey] : undefined;
+            const ok = (_uidParam == null)
+                ? (applied == null)
+                : (applied && String(applied.id) === String(_uidParam));
+            if (!ok) { UI.toast.error('Role not saved — please retry'); return; }
+
+            // Keep the local cache coherent so re-opening the modal shows the new
+            // value. invalidateCache drops primed rows, so prime AFTER it.
+            try {
+                AppDataStore.invalidateCache('events');
+                const _next = { ...ev, event_roles: merged };
+                if (roleKey === 'speaker') _next.speaker = (applied && applied.name) ? applied.name : null;
+                AppDataStore.primeRows('events', [_next]);
+            } catch (_) { /* best-effort cache coherence */ }
             UI.toast.success('已更新 · Role updated');
         } catch (e) {
             UI.toast.error('Could not save role: ' + (e.message || e));

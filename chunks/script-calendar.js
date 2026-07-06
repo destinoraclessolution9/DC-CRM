@@ -50,8 +50,10 @@
     // see no name, preserving the original privacy intent (commits fa31e3b/3a75855).
     const _canViewEntityName = (a, scope) => {
         const viewerId = _state.cu?.id;
-        if (String(a.lead_agent_id) === String(viewerId)) return true;
-        if (Array.isArray(a.co_agents) && a.co_agents.some(ca => String(ca.id) === String(viewerId))) return true;
+        // viewerId != null guard: a logged-out viewer (undefined id) on an activity
+        // with no lead_agent_id must not self-match via String(undefined)===String(undefined).
+        if (viewerId != null && a.lead_agent_id != null && String(a.lead_agent_id) === String(viewerId)) return true;
+        if (viewerId != null && Array.isArray(a.co_agents) && a.co_agents.some(ca => ca.id != null && String(ca.id) === String(viewerId))) return true;
         if (isSystemAdmin(_state.cu)) return true;
         if (scope === 'all') return true;
         if (!Array.isArray(scope) || a.lead_agent_id == null) return false;

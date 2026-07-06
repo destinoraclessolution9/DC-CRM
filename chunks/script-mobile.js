@@ -1862,9 +1862,11 @@
     // client's name; they see the activity type instead.
     const _mcalOwned = (a) => {
         const cu = _state.cu;
+        // cu?.id != null guard so a logged-out viewer can't self-match an
+        // activity with no lead_agent_id via String(undefined)===String(undefined).
         if (isSystemAdmin(cu)
-            || String(a.lead_agent_id) === String(cu?.id)
-            || (Array.isArray(a.co_agents) && a.co_agents.some(c => String(c.id) === String(cu?.id)))) {
+            || (cu?.id != null && a.lead_agent_id != null && String(a.lead_agent_id) === String(cu?.id))
+            || (cu?.id != null && Array.isArray(a.co_agents) && a.co_agents.some(c => c.id != null && String(c.id) === String(cu?.id)))) {
             return true;
         }
         // Team leader / manager: the calendar fetch already scoped this row into
