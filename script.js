@@ -3150,20 +3150,31 @@ function _wireLoginBtn() {
         const nameData = nameId ? await AppDataStore.getById('names', nameId) : null;
         const isEdit = !!nameData;
 
+        // Relation options mirror the referral "Relationship" dropdown
+        // (BASIC_INFO_RELATIONS in chunks/script-activities.js) so both pickers stay
+        // in lockstep. Read the exported constant when the activities chunk is loaded;
+        // fall back to a literal copy since this modal can open before that chunk does.
+        const RELATIONS = (window.app && window.app.BASIC_INFO_RELATIONS) ||
+            ['Friend', 'Family', 'Spouse', 'Siblings', 'Cousin', 'Colleague', 'Ex Colleague', 'Ex Classmate', 'Business Partner', 'Customer'];
+        const rel = nameData?.relation || '';
+        // A saved relation that isn't a preset (and isn't the literal 'Other') is a
+        // custom "Other → specify" value — reselect Other and prefill the text field.
+        const relIsOther = !!rel && !RELATIONS.includes(rel) && rel !== 'Other';
+
         const content = `
             <div class="form-section">
                 <h4>${isEdit ? 'Edit Name' : 'Add Name to List'}</h4>
                 <input type="hidden" id="edit-name-id" value="${nameId || ''}">
                 <div class="form-group">
                     <label>Relation</label>
-                    <select id="name-relation" class="form-control">
-                        <option value="Spouse" ${nameData?.relation === 'Spouse' ? 'selected' : ''}>Spouse</option>
-                        <option value="Child" ${nameData?.relation === 'Child' ? 'selected' : ''}>Child</option>
-                        <option value="Parent" ${nameData?.relation === 'Parent' ? 'selected' : ''}>Parent</option>
-                        <option value="Sibling" ${nameData?.relation === 'Sibling' ? 'selected' : ''}>Sibling</option>
-                        <option value="Business Partner" ${nameData?.relation === 'Business Partner' ? 'selected' : ''}>Business Partner</option>
-                        <option value="Other" ${nameData?.relation === 'Other' ? 'selected' : ''}>Other</option>
+                    <select id="name-relation" class="form-control" onchange="document.getElementById('name-relation-other-div').style.display = this.value === 'Other' ? 'block' : 'none'">
+                        ${RELATIONS.map(v => `<option value="${escapeHtml(v)}" ${rel === v ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('')}
+                        <option value="Other" ${rel === 'Other' || relIsOther ? 'selected' : ''}>Other</option>
                     </select>
+                </div>
+                <div id="name-relation-other-div" class="form-group" style="display:${relIsOther ? 'block' : 'none'};">
+                    <label>Specify Relation</label>
+                    <input type="text" id="name-relation-other" class="form-control" placeholder="Specify relation..." value="${relIsOther ? escapeHtml(rel) : ''}">
                 </div>
                 <div class="form-group">
                     <label>Full Name <span class="required">*</span></label>
@@ -3194,9 +3205,13 @@ function _wireLoginBtn() {
         }
 
         const nameId = document.getElementById('edit-name-id')?.value;
+        // Mirror the referral form's Other→specify collection (collectBasicInfoData):
+        // when 'Other' is picked, store the typed relation, else the selected preset.
+        const relSel = document.getElementById('name-relation')?.value;
+        const relOther = document.getElementById('name-relation-other')?.value?.trim();
         const data = {
             prospect_id: prospectId,
-            relation: document.getElementById('name-relation')?.value || 'Other',
+            relation: relSel === 'Other' ? (relOther || 'Other') : (relSel || 'Other'),
             full_name: name,
             // Empty <input type="date"> yields '' which Postgres rejects for a date
             // column ("invalid input syntax for type date"); coalesce to null like
