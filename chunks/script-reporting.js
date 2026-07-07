@@ -938,8 +938,8 @@
         const [events, attendees, prospects, customers] = await Promise.all([
             AppDataStore.getAll('events'),
             AppDataStore.getAll('event_attendees'),
-            _visibleUserIds !== 'all' ? AppDataStore.getAll('prospects') : Promise.resolve([]),
-            _visibleUserIds !== 'all' ? AppDataStore.getAll('customers') : Promise.resolve([]),
+            AppDataStore.getAll('prospects'),
+            AppDataStore.getAll('customers'),
         ]);
         const actMap = {}; activities.forEach(a => { actMap[a.id] = a; });
         const eventMap = {}; events.forEach(e => { eventMap[e.id] = e; });
@@ -954,9 +954,27 @@
             else agentId = prospMap[entityId]?.responsible_agent_id;
             return _visibleUserIds.includes(agentId);
         };
+        // Double-report guard (same rule as the KPI drill-down): a prospect who has
+        // already become a customer is counted under Customer, never under Prospect.
+        const convertedProspectIds = new Set();
+        customers.forEach(c => { if (c.converted_from_prospect_id != null) convertedProspectIds.add(String(c.converted_from_prospect_id)); });
+        prospects.forEach(p => { if (p.status === 'converted') convertedProspectIds.add(String(p.id)); });
+        const _normName = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+        const _phoneKey = (s) => { const d = String(s || '').replace(/\D/g, ''); return d.length >= 7 ? d.slice(-8) : ''; };
+        const custNameKeys = new Set();
+        const custPhoneKeys = new Set();
+        customers.forEach(c => { const nk = _normName(c.full_name); if (nk) custNameKeys.add(nk); const pk = _phoneKey(c.phone); if (pk) custPhoneKeys.add(pk); });
+        const _isProspectReallyCustomer = (att) => {
+            const entityId = att.entity_id || att.attendee_id;
+            if (convertedProspectIds.has(String(entityId))) return true;
+            const prosp = prospMap[entityId];
+            const nk = _normName(prosp?.full_name || att.entity_name);
+            const pk = _phoneKey(prosp?.phone);
+            return (nk && custNameKeys.has(nk)) || (pk && custPhoneKeys.has(pk));
+        };
         // Bucket every ATTENDED row by its activity (the "event/meeting"), applying the
         // card's exact gate so each row that the card counts lands in exactly one bucket.
-        const buckets = new Map(); // activity_id -> { title, prospectCount, agentCount }
+        const buckets = new Map(); // activity_id -> { title, customerCount, prospectCount, agentCount }
         for (const att of attendees) {
             if (!att.attended && att.attendance_status !== 'Attended') continue;
             const act = actMap[att.activity_id];
@@ -970,15 +988,17 @@
                 const title = (act?.event_id && eventMap[act.event_id]?.title)
                     || act?.activity_title
                     || (act ? `${act.activity_type} - Meeting` : 'Event');
-                b = { title, prospectCount: 0, agentCount: 0 };
+                b = { title, customerCount: 0, prospectCount: 0, agentCount: 0 };
                 buckets.set(k, b);
             }
             if (att.attendee_type === 'agent') b.agentCount++;
-            else b.prospectCount++; // prospect OR customer
+            else if (att.attendee_type === 'customer') b.customerCount++;
+            else if (_isProspectReallyCustomer(att)) b.customerCount++; // reclassified: prospect is now a customer
+            else b.prospectCount++;
         }
         const result = [];
         for (const b of buckets.values()) {
-            result.push({ title: b.title, prospectCount: b.prospectCount, agentCount: b.agentCount, total: b.prospectCount + b.agentCount });
+            result.push({ title: b.title, customerCount: b.customerCount, prospectCount: b.prospectCount, agentCount: b.agentCount, total: b.customerCount + b.prospectCount + b.agentCount });
         }
         return result;
     };
@@ -1106,8 +1126,8 @@
         const ranges = getDateRanges(_currentTimeFilter, _customDateFrom, _customDateTo);
         const details = await getActivityAttendanceDetails(ranges.current.from, ranges.current.to);
         if (details.length === 0) { container.innerHTML = '<p style="padding:16px;color:var(--gray-500)">No attendance data for this period.</p>'; return; }
-        let html = `<table class="data-table"><thead><tr><th scope="col">Topic / Activity</th><th scope="col">Prospects</th><th scope="col">Agents</th><th scope="col">Total</th></tr></thead><tbody>`;
-        for (const d of details) html += `<tr><td>${escapeHtml(d.title)}</td><td>${d.prospectCount}</td><td>${d.agentCount}</td><td>${d.total}</td></tr>`;
+        let html = `<table class="data-table"><thead><tr><th scope="col">Topic / Activity</th><th scope="col">Customers</th><th scope="col">Prospects</th><th scope="col">Agents</th><th scope="col">Total</th></tr></thead><tbody>`;
+        for (const d of details) html += `<tr><td>${escapeHtml(d.title)}</td><td>${d.customerCount}</td><td>${d.prospectCount}</td><td>${d.agentCount}</td><td>${d.total}</td></tr>`;
         container.innerHTML = html + `</tbody></table>`;
     };
 
@@ -2937,22 +2957,12 @@ const _buildCFHeadcountDetailsLegacy = async (from, to) => {
 };
 
 const buildActivityHeadcountDetails = async (from, to) => {
-    const _ids = (_visibleUserIds === 'all' || !Array.isArray(_visibleUserIds)) ? null : _visibleUserIds.map(v => Number(v)).filter(n => Number.isFinite(n));
-    try {
-        if (window.supabase && window.supabase.rpc) {
-            const { data, error } = await window.supabase.rpc('report_activity_headcount_details', { p_from: from, p_to: to, p_agent_ids: _ids });
-            if (!error && Array.isArray(data)) {
-                const prospectRows = [], agentRows = [], byEvent = {};
-                let prospectCount = 0, agentCount = 0;
-                for (const r of data) {
-                    if (r.is_agent) { agentRows.push([r.activity_date, r.event_title, r.display_name]); agentCount++; }
-                    else { prospectRows.push([r.activity_date, r.event_title, r.display_name, r.attendee_type || 'prospect']); prospectCount++; }
-                    byEvent[r.event_title] = (byEvent[r.event_title] || 0) + 1;
-                }
-                return _renderActivityHeadcount(prospectRows, agentRows, byEvent, prospectCount, agentCount);
-            }
-        }
-    } catch (_) { /* fall through to legacy */ }
+    // Always use the client scan. It resolves each attendee's entity, which is
+    // what lets us (a) split Customer vs Prospect into separate buckets and
+    // (b) reclassify a prospect who has since become a customer OUT of the
+    // prospect bucket (no double reporting). The report_activity_headcount_details
+    // RPC returns only display_name + type, so it can't support that entity-level
+    // dedup — hence it's intentionally bypassed for this drill-down.
     return _buildActivityHeadcountDetailsLegacy(from, to);
 };
 
@@ -2971,10 +2981,26 @@ const _buildActivityHeadcountDetailsLegacy = async (from, to) => {
     const custMap = {}; customers.forEach(c => { custMap[c.id] = c; });
     const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
 
+    // Double-report guard (mirrors getPeopleMet): every prospect that has already
+    // become a customer — via the conversion FK, the prospect's status, or a
+    // name/phone match to an existing customer — is counted under Customer here,
+    // never again under Prospect.
+    const convertedProspectIds = new Set();
+    customers.forEach(c => { if (c.converted_from_prospect_id != null) convertedProspectIds.add(String(c.converted_from_prospect_id)); });
+    prospects.forEach(p => { if (p.status === 'converted') convertedProspectIds.add(String(p.id)); });
+    const _normName = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const _phoneKey = (s) => { const d = String(s || '').replace(/\D/g, ''); return d.length >= 7 ? d.slice(-8) : ''; };
+    const custNameKeys = new Set();
+    const custPhoneKeys = new Set();
+    customers.forEach(c => { const nk = _normName(c.full_name); if (nk) custNameKeys.add(nk); const pk = _phoneKey(c.phone); if (pk) custPhoneKeys.add(pk); });
+    const _matchesCustomer = (name, phone) => {
+        const nk = _normName(name); const pk = _phoneKey(phone);
+        return (nk && custNameKeys.has(nk)) || (pk && custPhoneKeys.has(pk));
+    };
+
+    const customerRows = [];
     const prospectRows = [];
     const agentRows = [];
-    let prospectCount = 0;
-    let agentCount = 0;
     const byEvent = {};
 
     for (const att of allAttendees) {
@@ -2983,8 +3009,8 @@ const _buildActivityHeadcountDetailsLegacy = async (from, to) => {
         const date = act?.activity_date || '';
         if (date < from || date > to) continue;
         if (!_recInMarket(act || {})) continue;
+        const entityId = att.entity_id || att.attendee_id;
         if (_visibleUserIds !== 'all') {
-            const entityId = att.entity_id || att.attendee_id;
             let agentId;
             if (att.attendee_type === 'agent') {
                 agentId = entityId;
@@ -3001,31 +3027,39 @@ const _buildActivityHeadcountDetailsLegacy = async (from, to) => {
 
         const ev = eventMap[att.event_id];
         const eventTitle = ev?.event_title || ev?.title || `Event #${att.event_id}`;
-        const entityId = att.entity_id || att.attendee_id;
-        const isAgent = att.attendee_type === 'agent';
 
-        let name;
-        if (isAgent) {
-            name = userMap[entityId]?.full_name || att.entity_name || '—';
+        if (att.attendee_type === 'agent') {
+            const name = userMap[entityId]?.full_name || att.entity_name || '—';
             agentRows.push([date, eventTitle, name]);
-            agentCount++;
+        } else if (att.attendee_type === 'customer') {
+            const name = custMap[entityId]?.full_name || att.entity_name || '—';
+            customerRows.push([date, eventTitle, name]);
         } else {
-            name = att.attendee_type === 'customer'
-                ? (custMap[entityId]?.full_name || att.entity_name || '—')
-                : (prospMap[entityId]?.full_name || att.entity_name || '—');
-            prospectRows.push([date, eventTitle, name, att.attendee_type || 'prospect']);
-            prospectCount++;
+            // Prospect-typed attendee. If this head is really an existing customer
+            // (converted prospect, or name/phone match), count them under Customer
+            // so the same person is never reported as a prospect too.
+            const prosp = prospMap[entityId];
+            const name = prosp?.full_name || att.entity_name || '—';
+            const isCustomer = convertedProspectIds.has(String(entityId)) ||
+                _matchesCustomer(prosp?.full_name || att.entity_name, prosp?.phone);
+            if (isCustomer) customerRows.push([date, eventTitle, name]);
+            else prospectRows.push([date, eventTitle, name]);
         }
         byEvent[eventTitle] = (byEvent[eventTitle] || 0) + 1;
     }
 
-    return _renderActivityHeadcount(prospectRows, agentRows, byEvent, prospectCount, agentCount);
+    return _renderActivityHeadcount(customerRows, prospectRows, agentRows, byEvent);
 };
 
-// Shared render for buildActivityHeadcountDetails — both the RPC fast path and
-// the legacy client scan build prospectRows/agentRows/byEvent + counts, then
-// render here identically.
-const _renderActivityHeadcount = (prospectRows, agentRows, byEvent, prospectCount, agentCount) => {
+// Shared render for buildActivityHeadcountDetails — the legacy client scan builds
+// customerRows/prospectRows/agentRows/byEvent, then renders here. Customer and
+// Prospect are separate buckets; a head counted as a customer is never also a
+// prospect (the builder reclassifies such rows into customerRows).
+const _renderActivityHeadcount = (customerRows, prospectRows, agentRows, byEvent) => {
+    const customerCount = customerRows.length;
+    const prospectCount = prospectRows.length;
+    const agentCount = agentRows.length;
+
     const summaryByEvent = Object.keys(byEvent).length
         ? `<div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;padding:12px 16px;margin-bottom:14px;">
              <div style="font-size:12px;color:var(--gray-500);margin-bottom:8px;font-weight:600;">By Event:</div>
@@ -3033,28 +3067,26 @@ const _renderActivityHeadcount = (prospectRows, agentRows, byEvent, prospectCoun
            </div>`
         : '';
 
+    const badge = (n, label, bg, border, color) => `
+        <div style="background:${bg};border:1px solid ${border};border-radius:6px;padding:10px 16px;flex:1;text-align:center;">
+            <div style="font-size:20px;font-weight:700;color:${color};">${n}</div>
+            <div style="font-size:12px;color:var(--gray-500);">${label}</div>
+        </div>`;
     const countBadge = `<div style="display:flex;gap:12px;margin-bottom:14px;">
-        <div style="background:#e0f2fe;border:1px solid #7dd3fc;border-radius:6px;padding:10px 16px;flex:1;text-align:center;">
-            <div style="font-size:20px;font-weight:700;color:#0369a1;">${prospectCount}</div>
-            <div style="font-size:12px;color:var(--gray-500);">Prospect / Customer</div>
-        </div>
-        <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:10px 16px;flex:1;text-align:center;">
-            <div style="font-size:20px;font-weight:700;color:#92400e;">${agentCount}</div>
-            <div style="font-size:12px;color:var(--gray-500);">Agent</div>
-        </div>
+        ${badge(customerCount, 'Customer', '#dcfce7', '#86efac', '#166534')}
+        ${badge(prospectCount, 'Prospect', '#e0f2fe', '#7dd3fc', '#0369a1')}
+        ${badge(agentCount, 'Agent', '#fef3c7', '#fcd34d', '#92400e')}
     </div>`;
 
-    const prospectSection = `<div style="margin-bottom:18px;">
-        <h4 style="font-size:14px;font-weight:600;margin-bottom:8px;">Prospect / Customer Attendees (${prospectCount})</h4>
-        ${renderDetailTable(['Date', 'Event', 'Attendee', 'Type'], prospectRows)}
+    const section = (title, count, rows, cols) => `<div style="margin-bottom:18px;">
+        <h4 style="font-size:14px;font-weight:600;margin-bottom:8px;">${title} (${count})</h4>
+        ${renderDetailTable(cols, rows)}
     </div>`;
 
-    const agentSection = `<div>
-        <h4 style="font-size:14px;font-weight:600;margin-bottom:8px;">Agent Attendees (${agentCount})</h4>
-        ${renderDetailTable(['Date', 'Event', 'Agent'], agentRows)}
-    </div>`;
-
-    return countBadge + summaryByEvent + prospectSection + agentSection;
+    return countBadge + summaryByEvent
+        + section('Customer Attendees', customerCount, customerRows, ['Date', 'Event', 'Attendee'])
+        + section('Prospect Attendees', prospectCount, prospectRows, ['Date', 'Event', 'Attendee'])
+        + section('Agent Attendees', agentCount, agentRows, ['Date', 'Event', 'Agent']);
 };
 
 const showKPIDetails = async (key) => {
