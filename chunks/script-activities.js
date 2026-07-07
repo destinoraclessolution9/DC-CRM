@@ -3214,10 +3214,18 @@
                 const oc = chk.getAttribute('onchange') || '';
                 const row = chk.closest('.pv-row');
                 const lbl = row ? row.querySelector('.pv-lbl') : null;
+                const val = row ? row.querySelector('.pv-val') : null;
                 let isActive = false;
                 if (oc.includes("'solar'")) { isActive = newType === 'solar'; chk.checked = isActive; }
                 else if (oc.includes("'lunar'")) { isActive = newType === 'lunar'; chk.checked = isActive; }
-                if (lbl) lbl.style.fontWeight = isActive ? '700' : '';
+                else return; // ignore checkboxes unrelated to life-chart type
+                // Mirror the initial render: bold + red on BOTH the label and the
+                // value when active, cleared when inactive.
+                [lbl, val].forEach(el => {
+                    if (!el) return;
+                    el.style.fontWeight = isActive ? '700' : '';
+                    el.style.color = isActive ? '#dc2626' : '';
+                });
             });
         }
     };
