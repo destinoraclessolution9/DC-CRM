@@ -6,62 +6,21 @@
 // (name, poster url, product names, requirement, time frame, slots, payment
 // types, agent-only bonus note, price, discount) — then mounts this component.
 // The agent bonus (agentNote) is only present in the payload for admin/agent
-// viewers and is never added to the WhatsApp share, so customers never see it.
+// viewers; there is no customer-facing share path, so it never leaves the app.
 // React auto-escapes every interpolated field (package_name, requirement,
 // agentNote, payment types, product names) — an XSS-hardening win.
 //
 // Poster: each card leads with the uploaded promotion poster (16:9 hero) and
-// degrades gracefully to a clean placeholder when none is set. "Share to
-// customer" uses the Web Share API to push the poster image + summary to
-// WhatsApp on mobile, falling back to wa.me on desktop.
+// degrades gracefully to a clean placeholder when none is set. A page-level
+// banner marks these posters INTERNAL USE ONLY; the customer-share action was
+// removed 2026-07-07 (owner: posters must not be forwarded out). The only
+// per-card action is "View full poster", which enlarges it locally.
 import React from 'react';
 
 const BRAND = '#8B1A1A';
 
 const cardOuter = { background: '#fff', border: '1px solid var(--gray-200)', borderRadius: '12px', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: 'var(--shadow-sm)' };
 const chip = { fontSize: '12px', color: 'var(--gray-600)', background: 'var(--gray-50, #f9fafb)', border: '1px solid var(--gray-200)', borderRadius: '6px', padding: '3px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' };
-
-// Build a WhatsApp-ready summary and share it. On mobile with Web Share +
-// file support, the poster image itself is attached; otherwise we fall back to
-// wa.me with the text (and poster link). Best-effort — never throws to the UI.
-async function sharePromo(m) {
-    const parts = [m.name];
-    if (m.price) parts.push(m.hasDiscount ? `RM ${m.price} (原价 RM ${m.originalStr}，省 ${m.savePct}%)` : `RM ${m.price}`);
-    if (m.requirement) parts.push(m.requirement);
-    if (m.hasTimeFrame) parts.push(`${m.startStr} – ${m.endStr}`);
-    if (m.slots) parts.push(`限量 ${m.slots} 套 / Limited ${m.slots} sets`);
-    // NOTE: m.agentNote is intentionally NEVER included here — the agent bonus is
-    // an internal incentive and must not be forwarded to a customer. Keep it out of
-    // every share path.
-    const text = parts.filter(Boolean).join('\n');
-
-    // Prefer the native share sheet (lets the agent pick WhatsApp AND attach the
-    // poster image on mobile). CRITICAL: once we actually invoke navigator.share,
-    // we NEVER also open wa.me — a user who cancels the share sheet (AbortError)
-    // must not have a second WhatsApp tab launched behind their back. wa.me is a
-    // fallback ONLY for environments with no Web Share support (typically desktop).
-    if (typeof navigator !== 'undefined' && navigator.share) {
-        try {
-            if (m.posterUrl && navigator.canShare) {
-                try {
-                    const resp = await fetch(m.posterUrl, { mode: 'cors' });
-                    const blob = await resp.blob();
-                    const file = new File([blob], 'promotion.jpg', { type: blob.type || 'image/jpeg' });
-                    if (navigator.canShare({ files: [file] })) {
-                        await navigator.share({ files: [file], text });
-                        return;
-                    }
-                } catch (_imgErr) { /* couldn't attach the image — share text-only below */ }
-            }
-            await navigator.share({ text, url: m.posterUrl || undefined });
-        } catch (_shareErr) { /* cancelled or failed — do NOT open a second channel */ }
-        return;
-    }
-
-    // No Web Share support → open WhatsApp Web with the text (and poster link).
-    const wa = 'https://wa.me/?text=' + encodeURIComponent(text + (m.posterUrl ? '\n' + m.posterUrl : ''));
-    try { window.open(wa, '_blank', 'noopener'); } catch (_) { /* noop */ }
-}
 
 function openPoster(m) {
     try {
@@ -132,16 +91,13 @@ function PromoCard({ m }) {
                         <div style={{ fontSize: '12px', color: 'var(--gray-700)', lineHeight: 1.4 }}>{m.agentNote}</div>
                     </div>
                 )}
-                <div style={{ display: 'flex', gap: '8px', marginTop: 'auto', paddingTop: '10px' }}>
-                    <button onClick={() => sharePromo(m)} style={{ flex: 1, background: '#1a9e75', color: '#fff', border: 'none', borderRadius: '6px', padding: '9px 10px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
-                        <i className="fab fa-whatsapp" style={{ fontSize: '15px' }}></i>Share to customer
-                    </button>
-                    {m.posterUrl && (
-                        <button onClick={() => openPoster(m)} title="View full poster" aria-label="View full poster" style={{ background: '#fff', color: 'var(--gray-700)', border: '1px solid var(--gray-300)', borderRadius: '6px', padding: '9px 12px', fontSize: '13px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                            <i className="fas fa-expand"></i>Poster
+                {m.posterUrl && (
+                    <div style={{ display: 'flex', gap: '8px', marginTop: 'auto', paddingTop: '10px' }}>
+                        <button onClick={() => openPoster(m)} title="View full poster" aria-label="View full poster" style={{ flex: 1, background: '#fff', color: 'var(--gray-700)', border: '1px solid var(--gray-300)', borderRadius: '6px', padding: '9px 12px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                            <i className="fas fa-expand"></i>View full poster
                         </button>
-                    )}
-                </div>
+                    </div>
+                )}
             </div>
         </div>
     );
@@ -158,9 +114,17 @@ export function MonthlyPromotionView({ promos = [], totalPromos = 0 }) {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                 <div>
                     <h2 style={{ fontSize: '22px', fontWeight: 700, margin: 0 }}>Monthly Promotion</h2>
-                    <p style={{ color: 'var(--gray-500)', fontSize: '13px', margin: '4px 0 0' }}>Current active promotions — tap a poster to enlarge, or share it straight to a customer.</p>
+                    <p style={{ color: 'var(--gray-500)', fontSize: '13px', margin: '4px 0 0' }}>Current active promotions — tap a poster to enlarge.</p>
                 </div>
             </div>
+            {promos.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '0 0 18px', padding: '11px 14px', background: '#fbf3f3', border: '1px solid #edd9d9', borderLeft: '3px solid ' + BRAND, borderRadius: '8px' }}>
+                    <i className="fas fa-lock" style={{ color: BRAND, fontSize: '15px', flexShrink: 0 }}></i>
+                    <span style={{ fontSize: '13px', color: 'var(--gray-700)', lineHeight: 1.45 }}>
+                        <strong style={{ color: BRAND }}>This promotion poster is for internal use only.</strong> Please do not share it out.
+                    </span>
+                </div>
+            )}
             {promos.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--gray-400)' }}>
                     <i className="fas fa-tags" style={{ fontSize: '40px', marginBottom: '12px', display: 'block' }}></i>
