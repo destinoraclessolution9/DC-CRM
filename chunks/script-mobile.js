@@ -3300,7 +3300,7 @@
         // Client lists rarely change between visits, so a fresh snapshot is served
         // as-is with no background refetch; it refreshes only on edit, pull-to-
         // refresh, or after the TTL expires.
-        const _mpSnapKey = `mp-list-snap-v2-${_mpTab}`;
+        const _mpSnapKey = `mp-list-snap-v3-${_mpTab}`;
         let _mpSnapHtml;
         if (!_mpForce) {
             try {
@@ -3494,11 +3494,12 @@
                 <div class="mp-card-avatar">${_mhomeEsc(init)}</div>
                 <div class="mp-card-text">
                     <div class="mp-card-name-row">
-                        <div class="mp-card-name">${_mhomeEsc(p.full_name || 'Unknown')}</div>
+                        <div class="mp-card-name${(p.unable_to_serve || p.manual_grade === 'F') ? ' name-unable' : ''}">${_mhomeEsc(p.full_name || 'Unknown')}</div>
                         ${phone ? `<button class="mp-card-wa" onclick="event.stopPropagation();app.mhomeWa(${p.id ?? 'null'},'${phone}')" aria-label="WhatsApp"><i class="fab fa-whatsapp"></i></button>` : ''}
                         ${agentCode ? `<span class="mp-card-agent">${_mhomeEsc(agentCode)}</span>` : ''}
                     </div>
                     <div class="mp-card-meta">
+                        ${p.unable_to_serve ? `<span class="badge-unable">Unable to Serve</span>` : ''}${p.manual_grade === 'F' ? `<span class="badge-unable">Dropped (F)</span>` : ''}
                         ${lastAct ? `<span class="mp-chip date">${_mhomeEsc(lastAct)}</span>` : ''}
                         ${agentName ? `<span class="mp-chip agent">${_mhomeEsc(agentName)}</span>` : ''}
                     </div>
@@ -3519,7 +3520,7 @@
         // page reload would paint that narrowed list while the in-memory
         // filter state is empty — UI says "no filters" but list is narrowed.
         if (!_mpSearch && !_mpHasActiveFilters()) {
-            try { localStorage.setItem(`mp-list-snap-v2-${_mpTab}`, JSON.stringify({ ts: Date.now(), val: html + truncNote })); } catch(_) { /* intentional: snapshot persistence is best-effort */ }
+            try { localStorage.setItem(`mp-list-snap-v3-${_mpTab}`, JSON.stringify({ ts: Date.now(), val: html + truncNote })); } catch(_) { /* intentional: snapshot persistence is best-effort */ }
         }
     };
 
@@ -3695,7 +3696,7 @@
         // Drop the snapshot so a stale unfiltered cache doesn't paint over the
         // narrowed list on the next visit. _mpRenderList skips saving while
         // filters are active, so this stays clear until filters are reset.
-        try { localStorage.removeItem(`mp-list-snap-v2-${_mpTab}`); } catch(_) { /* intentional: snapshot eviction is best-effort */ }
+        try { localStorage.removeItem(`mp-list-snap-v3-${_mpTab}`); } catch(_) { /* intentional: snapshot eviction is best-effort */ }
         _mpUpdateFilterBtn();
         await _mpRenderList();
     };
@@ -3703,7 +3704,7 @@
     const mpClearFilters = async () => {
         _mpFilters = { status: '', agentId: '', mingGua: '', scoreMin: '', scoreMax: '', pipelineStage: '' };
         UI.hideModal();
-        try { localStorage.removeItem(`mp-list-snap-v2-${_mpTab}`); } catch(_) { /* intentional: snapshot eviction is best-effort */ }
+        try { localStorage.removeItem(`mp-list-snap-v3-${_mpTab}`); } catch(_) { /* intentional: snapshot eviction is best-effort */ }
         _mpUpdateFilterBtn();
         await _mpRenderList();
     };
