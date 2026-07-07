@@ -230,6 +230,9 @@
                     <div id="activity-attendance-details"><!-- Loaded by refreshKPIDashboard --></div>
                 </div>
 
+                <!-- People Met — unique customer/prospect headcount over the rolling last 3 months -->
+                <div id="people-met-section" style="margin-top:16px;"><!-- Loaded by _renderNonGrid --></div>
+
                 <!-- Weekly Monday Report — built/filled by _renderNonGrid into #weekly-monday-report -->
                 <div id="weekly-monday-report" style="margin-top:16px;"></div>
             </div>
@@ -1206,6 +1209,7 @@
             renderCaseCountsTable().catch(e => console.warn('renderCaseCountsTable failed:', e)),
             renderHeadcountTable().catch(e => console.warn('renderHeadcountTable failed:', e)),
             renderActivityAttendanceDetails().catch(e => console.warn('renderActivityAttendanceDetails failed:', e)),
+            renderPeopleMetSection().catch(e => console.warn('renderPeopleMetSection failed:', e)),
             // Hierarchical target comparison runs in the same parallel batch.
             // Wrapped so a render failure doesn't reject the whole Promise.all.
             (async () => {
@@ -1911,6 +1915,145 @@ const getMeetUpExistingCustomerCount = async (from, to) => {
         count++;
     }
     return count;
+};
+
+// ── People Met (unique headcount, rolling last 3 months) ────────────────────
+// Owner ask: how many DISTINCT customers and prospects did we meet in the past
+// 3 months? Repeat meetings with the same person collapse to ONE headcount, and
+// anyone already a customer is kept OUT of the prospect list (no double count).
+// "Met" = FTF meetings + Golden Road (GR) sessions only (CPS/FSA excluded).
+const _isPeopleMetActivity = (a) =>
+    a.activity_type === 'FTF' ||
+    a.activity_type === 'GR' ||
+    (a.activity_title || '').toLowerCase().includes('golden road');
+
+// Rolling window: today minus 3 calendar months → today (inclusive both ends).
+const getPeopleMetRange = () => {
+    const now = new Date();
+    const from = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
+    return { from: toLocalDateStr(from), to: toLocalDateStr(now) };
+};
+
+const getPeopleMet = async (from, to) => {
+    const [activities, users, customers, prospects] = await Promise.all([
+        _reportActsInRange(from, to, 'getPeopleMet'),
+        AppDataStore.getAll('users'),
+        AppDataStore.getAll('customers'),
+        AppDataStore.getAll('prospects')
+    ]);
+    const userMap = {}; users.forEach(u => { userMap[String(u.id)] = u; });
+    const custMap = {}; customers.forEach(c => { custMap[String(c.id)] = c; });
+    const prospMap = {}; prospects.forEach(p => { prospMap[String(p.id)] = p; });
+
+    // Double-report guard: every prospect that already became a customer — via
+    // the conversion FK (customers.converted_from_prospect_id) or the prospect's
+    // own status. Such a person is counted ONLY in the customer listing.
+    const convertedProspectIds = new Set();
+    customers.forEach(c => { if (c.converted_from_prospect_id != null) convertedProspectIds.add(String(c.converted_from_prospect_id)); });
+    prospects.forEach(p => { if (p.status === 'converted') convertedProspectIds.add(String(p.id)); });
+
+    // Safety net for customers created WITHOUT a conversion link: match a met
+    // prospect to an existing customer by normalised name or last-8 phone digits.
+    const _normName = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const _phoneKey = (s) => { const d = String(s || '').replace(/\D/g, ''); return d.length >= 7 ? d.slice(-8) : ''; };
+    const custNameKeys = new Set();
+    const custPhoneKeys = new Set();
+    customers.forEach(c => {
+        const nk = _normName(c.full_name); if (nk) custNameKeys.add(nk);
+        const pk = _phoneKey(c.phone); if (pk) custPhoneKeys.add(pk);
+    });
+
+    const bump = (map, id, name, agentName, date) => {
+        let e = map.get(id);
+        if (!e) { e = { name: name || '—', agents: new Set(), meetings: 0, lastDate: '' }; map.set(id, e); }
+        e.meetings++;
+        if (agentName && agentName !== '—') e.agents.add(agentName);
+        if ((date || '') > e.lastDate) e.lastDate = date || '';
+    };
+
+    const custAgg = new Map();   // customer_id → aggregate (dedup: met N times = 1 row)
+    const prospAgg = new Map();  // prospect_id → aggregate
+    for (const a of activities) {
+        if (a.activity_date < from || a.activity_date > to) continue;
+        if (!_isPeopleMetActivity(a)) continue;
+        if (!_recInMarket(a)) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(a.lead_agent_id))) continue;
+        if (_currentRoleFilter !== 'All') {
+            const agent = userMap[String(a.lead_agent_id)];
+            if (!agent || agent.role !== _currentRoleFilter) continue;
+        }
+        const agentName = userMap[String(a.lead_agent_id)]?.full_name || '—';
+
+        // A customer_id on the activity always wins → counted as a customer,
+        // never a prospect (covers dual prospect+customer records for one person).
+        if (a.customer_id != null && custMap[String(a.customer_id)]) {
+            bump(custAgg, String(a.customer_id), custMap[String(a.customer_id)].full_name, agentName, a.activity_date);
+            continue;
+        }
+        if (a.prospect_id != null) {
+            const pid = String(a.prospect_id);
+            if (convertedProspectIds.has(pid)) continue;
+            const prosp = prospMap[pid];
+            if (prosp) {
+                const nk = _normName(prosp.full_name);
+                const pk = _phoneKey(prosp.phone);
+                if ((nk && custNameKeys.has(nk)) || (pk && custPhoneKeys.has(pk))) continue;
+            }
+            bump(prospAgg, pid, prosp?.full_name, agentName, a.activity_date);
+        }
+    }
+
+    const toRows = (map) => [...map.values()]
+        .sort((x, y) => (y.lastDate || '').localeCompare(x.lastDate || '') || y.meetings - x.meetings)
+        .map(e => [e.name, [...e.agents].join(', ') || '—', e.meetings, e.lastDate || '—']);
+
+    return {
+        range: { from, to },
+        customers: toRows(custAgg),
+        prospects: toRows(prospAgg),
+        customerCount: custAgg.size,
+        prospectCount: prospAgg.size
+    };
+};
+
+const renderPeopleMetSection = async () => {
+    let container = document.getElementById('people-met-section');
+    if (!container) {
+        // React ReportsView hardcodes its own shell without this container, so
+        // self-inject it (before the weekly report) to appear in BOTH shells.
+        const anchor = document.getElementById('weekly-monday-report');
+        const root = anchor?.parentNode || document.querySelector('.kpi-dashboard');
+        if (!root) return;
+        container = document.createElement('div');
+        container.id = 'people-met-section';
+        container.style.marginTop = '16px';
+        if (anchor) root.insertBefore(container, anchor); else root.appendChild(container);
+    }
+    const { from, to } = getPeopleMetRange();
+    let data;
+    try { data = await getPeopleMet(from, to); }
+    catch (e) { console.warn('getPeopleMet failed:', e); container.innerHTML = ''; return; }
+
+    const card = (n, label, note) => `
+        <div style="flex:1;min-width:180px;background:var(--gray-50,#f7f4ed);border:1px solid var(--border,#e5e0d8);border-radius:8px;padding:14px 16px;">
+            <div style="font-size:28px;font-weight:700;line-height:1;color:var(--text-primary,#2b2620);">${n}</div>
+            <div style="font-size:13px;color:var(--gray-500);margin-top:4px;">${label}${note ? ` <span style="font-size:11px;">${note}</span>` : ''}</div>
+        </div>`;
+
+    container.innerHTML = `
+        <div class="kpi-card">
+            <h3 class="kpi-card-title">People Met — Last 3 Months
+                <span style="font-weight:400;color:var(--gray-400);font-size:13px;">(${escapeHtml(from)} → ${escapeHtml(to)} · FTF + Golden Road · unique headcount)</span>
+            </h3>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;margin:6px 0 18px;">
+                ${card(data.customerCount, 'unique customers met')}
+                ${card(data.prospectCount, 'unique prospects met', '(existing customers excluded)')}
+            </div>
+            <h4 style="margin:8px 0 6px;font-size:14px;font-weight:600;color:var(--text-primary,#2b2620);">Customers Met (${data.customerCount})</h4>
+            ${renderDetailTable(['Customer', 'Lead Agent(s)', 'Times Met', 'Last Met'], data.customers, 'No customers met in the last 3 months')}
+            <h4 style="margin:18px 0 6px;font-size:14px;font-weight:600;color:var(--text-primary,#2b2620);">Prospects Met (${data.prospectCount})</h4>
+            ${renderDetailTable(['Prospect', 'Lead Agent(s)', 'Times Met', 'Last Met'], data.prospects, 'No prospects met in the last 3 months')}
+        </div>`;
 };
 
 const getCFHeadcount = async (from, to) => {
