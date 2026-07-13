@@ -5951,7 +5951,9 @@ const saveClosingRecord = async (prospectId) => {
     if (existingCr.status === 'submitted' || existingCr.status === 'approved') {
         return UI.toast.error('This closing record is ' + existingCr.status + ' and is locked — it can no longer be edited as a draft.');
     }
-    const data = await gatherClosingFormData(existingCr);
+    let data;
+    try { data = await gatherClosingFormData(existingCr); }
+    catch (e) { return UI.toast.error(e.message || 'Could not read the invoice file.'); }
     if (!data.full_name) return UI.toast.error('Full name is required');
     // Spread existingCr first so fields like pre2025_purchases survive a draft re-save.
     const mergedCr = { ...existingCr, ...data, status: 'draft' };
@@ -5986,7 +5988,9 @@ const submitClosingRecord = async (prospectId) => {
     if (existingCr.status === 'submitted' || existingCr.status === 'approved') {
         return UI.toast.error('This closing record is already ' + existingCr.status + ' — it is locked pending manager action.');
     }
-    const data = await gatherClosingFormData(existingCr);
+    let data;
+    try { data = await gatherClosingFormData(existingCr); }
+    catch (e) { return UI.toast.error(e.message || 'Could not read the invoice file.'); }
     if (!data.full_name) return UI.toast.error('Full name is required');
     if (!data.product) return UI.toast.error('Product/service is required');
     if (!data.sale_amount) return UI.toast.error('Amount closed is required');
@@ -6187,6 +6191,13 @@ const uploadHistoryInvoice = async (prospectId, historyIndex) => {
             UI.toast.error('Upload failed: ' + (e.message || e));
             return;
         }
+    }
+
+    // Storage was offline AND the file was too large to embed (512KB–8MB) — nothing
+    // was saved. Bail with an error instead of writing invoice_file:null over any
+    // existing attachment and (worse) toasting success.
+    if (!invoice_file) {
+        return UI.toast.error('Invoice not saved — storage is offline and the file is too large to store locally. Retry when back online.');
     }
 
     history[historyIndex] = { ...history[historyIndex], invoice_file, invoice_file_name };

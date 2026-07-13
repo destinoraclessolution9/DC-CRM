@@ -1117,7 +1117,9 @@
             const person = personId ? personMap.get(String(personId)) : null;
             const time = (a.start_time || '00:00').slice(0, 5);
             const title = a.activity_type || 'Activity';
-            const sub = person ? person.full_name : (a.notes || a.title || '—');
+            // M10 (audit): default render path — mask non-owned client names/notes
+            // (mirrors the buildHomeIslandData site so the two stay at parity).
+            const sub = _mcalOwned(a) ? (person ? person.full_name : (a.notes || a.title || '—')) : '—';
             return `
                 <div class="mhome-sched-row" onclick="app.navigateTo('calendar')">
                     <div class="mhome-sched-time">${_mhomeEsc(time)}</div>

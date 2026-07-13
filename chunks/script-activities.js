@@ -2219,7 +2219,8 @@
             if (!res) {
                 // Photo is saved; render its thumbnail now so the required-photo gate
                 // passes and the closing can be recorded despite OCR being down.
-                _renderOrderFormThumb({ prefix, photoUrl, detectedType: formTypeHint, attachmentId: attachment?.id || null, fields: {} });
+                // Tag it with the activity so M1's gate stays sale-scoped this session.
+                _renderOrderFormThumb({ prefix, photoUrl, detectedType: formTypeHint, attachmentId: attachment?.id || null, fields: {}, activityId: activityId || null });
                 setStatus('#fff8e1', '#8a6d00', `<i class="fas fa-exclamation-triangle"></i> Photo saved — auto-read unavailable (${escapeHtml(ocrErr?.message || 'OCR offline')}). Fill the fields manually.`);
                 UI.toast.info('Order form photo saved. AI auto-fill is unavailable right now — please key the fields in.');
                 return;
