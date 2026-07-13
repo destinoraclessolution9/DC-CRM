@@ -2063,7 +2063,23 @@ const Auth = {
               + '<button id="_se_signin" type="button" style="width:100%;padding:12px;border:none;background:#be123c;color:#fff;font-size:15px;font-weight:600;border-radius:9px;cursor:pointer;">Sign in again</button>'
               + '</div>';
             document.body.appendChild(ov);
-            const go = () => { try { window._sessionWatchSuppressed = true; } catch (_) { /* noop */ } try { location.reload(); } catch (_) { /* reload best-effort */ } };
+            const go = () => {
+                try { window._sessionWatchSuppressed = true; } catch (_) { /* noop */ }
+                // Break the re-login LOOP (bug 2026-07-13): a bare reload left
+                // remember_me + the DEAD auth blob in storage, so boot re-entered
+                // the offline-resume cached shell, re-detected the dead session,
+                // and re-showed this prompt forever — the login form never
+                // appeared. The dead blob is useless (its refresh token is gone);
+                // wipe it + remember_me so init() lands on the LOGIN screen.
+                // remember_me_email is kept so the email field stays pre-filled.
+                try { localStorage.removeItem('remember_me'); } catch (_) { /* best-effort */ }
+                try { localStorage.removeItem(window.SUPABASE_AUTH_STORAGE_KEY || 'fs-crm-auth-v1'); } catch (_) { /* best-effort */ }
+                try {
+                    Object.keys(localStorage).filter(k => /^sb-.+-auth-token$/.test(k))
+                        .forEach(k => { try { localStorage.removeItem(k); } catch (_) { /* per-key best-effort */ } });
+                } catch (_) { /* best-effort */ }
+                try { location.reload(); } catch (_) { /* reload best-effort */ }
+            };
             const btn = ov.querySelector('#_se_signin');
             if (btn) btn.onclick = go;
         } catch (_) {
