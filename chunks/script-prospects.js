@@ -2272,12 +2272,12 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             <div class="pv-row"><span class="pv-lbl">File</span><span class="pv-val">${escapeHtml(prospect.cps_form_name || 'CPS Form')}</span></div>
             ${isImage ? `
                 <div style="margin-top:10px;text-align:center;">
-                    <img loading="lazy" decoding="async" src="${safeUrl(cpsUrl)}" alt="CPS Form" style="max-width:100%;max-height:280px;border-radius:8px;border:1px solid var(--border);cursor:pointer;" onclick="window.open(this.src,'_blank')">
+                    <img loading="lazy" decoding="async" data-attach-src="${escapeHtml(cpsUrl)}" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" alt="CPS Form" style="max-width:100%;max-height:280px;border-radius:8px;border:1px solid var(--border);cursor:pointer;" onclick="window._openAttachment&&window._openAttachment('${UI.escJsAttr(String(cpsUrl))}')">
                     <div style="font-size:11px;color:var(--gray-400);margin-top:4px;">Tap to view full size</div>
                 </div>
             ` : `
                 <div style="margin-top:8px;">
-                    <a href="${safeUrl(cpsUrl)}" target="_blank" rel="noopener" download="${escapeHtml(prospect.cps_form_name || 'cps_form.pdf')}" class="btn secondary btn-sm"><i class="fas fa-download"></i> Download</a>
+                    <a href="#" onclick="event.preventDefault();window._openAttachment&&window._openAttachment('${UI.escJsAttr(String(cpsUrl))}')" class="btn secondary btn-sm" style="cursor:pointer;"><i class="fas fa-download"></i> Download</a>
                 </div>
             `}
         ` : '';

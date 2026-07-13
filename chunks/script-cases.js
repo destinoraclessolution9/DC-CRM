@@ -905,9 +905,9 @@
                 const path = `case_photos/${_state.cu?.id || 'anon'}_${Date.now()}_${Math.random().toString(36).slice(2,8)}_${safeName}`;
                 const { error: upErr } = await sb.storage.from('attachments').upload(path, file, { upsert: false, contentType: file.type });
                 if (upErr) throw upErr;
-                const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
-                if (!urlData?.publicUrl) throw new Error('Could not resolve public URL');
-                _casePendingPhotos.push(urlData.publicUrl);
+                // C2 (audit): store the storage PATH, not a permanent public URL.
+                // The gallery already renders via data-attach-src → signed URL.
+                _casePendingPhotos.push(path);
                 uploaded++;
             } catch (err) {
                 console.error('Case photo upload failed:', err);

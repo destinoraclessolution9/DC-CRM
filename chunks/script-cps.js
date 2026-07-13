@@ -1004,13 +1004,14 @@ const _uploadCpsFormFile = async (file, prospectId) => {
             .from('attachments')
             .upload(path, file, { upsert: true, contentType: file.type });
         if (upErr) throw upErr;
-        const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
+        // C2 (audit): store the storage PATH, not a permanent public URL. The
+        // CPS-form render resolves it to a short-lived signed URL (private bucket).
         await AppDataStore.update('prospects', prospectId, {
-            cps_form_url: urlData?.publicUrl || null,
+            cps_form_url: path,
             cps_form_date: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
             cps_form_name: file.name,
         });
-        return urlData?.publicUrl || null;
+        return path;
     } catch (err) {
         console.warn('CPS form silent upload failed:', err);
         return null;

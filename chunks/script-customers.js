@@ -1335,7 +1335,10 @@ const renderPurchaseHistoryTab = async (customer, containerId = 'profile-tab-con
         const badgeClass = `badge-${_pstatus.toLowerCase().replace('/', '')}`;
         // Scheme-validated proof URL (savePaymentProof now stores a public URL, not a
         // bare object key). View + download both point at it; absent → no link/button.
-        const _proofHref = _safeHref(p.proof);
+        // C2 (audit): proof is stored as a private storage path — open via a
+        // short-lived signed URL (window._openAttachment) instead of a raw href.
+        const _hasProof = !!p.proof;
+        const _proofOpen = `event.preventDefault();window._openAttachment&&window._openAttachment('${UI.escJsAttr(String(p.proof || ''))}')`;
         return `
                         <tr>
                             <td>${escapeHtml(p.date || '')}</td>
@@ -1343,9 +1346,9 @@ const renderPurchaseHistoryTab = async (customer, containerId = 'profile-tab-con
                             <td>${escapeHtml(p.item || '')}</td>
                             <td>${UI.formatCurrency(p.amount || 0, { currency: p.currency || _custCur })}</td>
                             <td><span class="score-badge ${badgeClass}" style="font-size:11px;">${escapeHtml(_pstatus)}</span></td>
-                            <td>${_proofHref ? `<a href="${_proofHref}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">${String(p.proof).endsWith('.pdf') ? 'View Report' : 'View Image'}</a>` : `<button class="btn-sm secondary" onclick="app.uploadPaymentProof(${p.id}, ${customer.id})">Upload Image</button>`}</td>
+                            <td>${_hasProof ? `<a href="#" onclick="${_proofOpen}" style="color:var(--primary);cursor:pointer;">${String(p.proof).endsWith('.pdf') ? 'View Report' : 'View Image'}</a>` : `<button class="btn-sm secondary" onclick="app.uploadPaymentProof(${p.id}, ${customer.id})">Upload Image</button>`}</td>
                             <td>
-                                ${_proofHref ? `<a class="btn-icon" href="${_proofHref}" target="_blank" rel="noopener noreferrer" download title="Download proof"><i class="fas fa-download"></i></a>` : ''}
+                                ${_hasProof ? `<a class="btn-icon" href="#" onclick="${_proofOpen}" title="View proof"><i class="fas fa-download"></i></a>` : ''}
                                 ${p.status === 'PENDING' ? `<button class="btn-icon" title="Delete purchase" onclick="event.stopPropagation(); app.deletePurchase(${p.id}, ${customer.id})"><i class="fas fa-trash"></i></button>` : ''}
                             </td>
                         </tr>
@@ -1668,10 +1671,9 @@ const savePaymentProof = async (purchaseId, customerId) => {
             // must inspect { error } or a failed upload is silently treated as success.
             const { error: upErr } = await window.supabase.storage.from('attachments').upload(fileName, file);
             if (upErr) { UI.toast.error('Upload failed: ' + (upErr.message || upErr)); return; }
-            // Store the public URL (a resolvable link), not the bare object key.
-            const pub = window.supabase.storage.from('attachments').getPublicUrl(fileName);
-            const proofUrl = pub?.data?.publicUrl || fileName;
-            await AppDataStore.update('purchases', purchaseId, { proof: proofUrl, status: 'COLLECTED' });
+            // C2 (audit): store the storage PATH (object key), not a public URL —
+            // rendered via a signed URL so the private bucket stays private.
+            await AppDataStore.update('purchases', purchaseId, { proof: fileName, status: 'COLLECTED' });
         } else {
             // Offline / no Supabase client: record the filename only, don't claim COLLECTED.
             await AppDataStore.update('purchases', purchaseId, { proof: fileName });
@@ -2213,9 +2215,8 @@ const savePurchase = async (customerId) => {
                     const _pn = `proof_${createdRow.id}_${Date.now()}_${_proofFile.name}`;
                     const { error: _upErr } = await window.supabase.storage.from('attachments').upload(_pn, _proofFile);
                     if (!_upErr) {
-                        const _pub = window.supabase.storage.from('attachments').getPublicUrl(_pn);
-                        const _proofUrl = _pub?.data?.publicUrl || _pn;
-                        await AppDataStore.update('purchases', createdRow.id, { proof: _proofUrl });
+                        // C2 (audit): store the storage PATH, not a public URL.
+                        await AppDataStore.update('purchases', createdRow.id, { proof: _pn });
                     } else {
                         UI.toast.error('Purchase saved, but image upload failed: ' + (_upErr.message || _upErr));
                     }
