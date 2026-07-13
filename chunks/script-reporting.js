@@ -2163,17 +2163,44 @@ const _parseOppSelected = (raw) => {
     return selected;
 };
 
-// Count DISTINCT persons (prospect_id → customer_id → activity fallback) with at
-// least one in-range activity whose Potential & Opportunities selection matches
-// `predicate`. Repeat meetings by the same person collapse to 1 (the Set). Same
-// scope contract as getActivityTypeCount: date window, _visibleUserIds
-// (lead_agent_id), _currentRoleFilter, and _recInMarket market drill-down.
+// Collapse the prospect/customer dual record to ONE person key. Activities are
+// normally FK'd to a prospect, but a pitch logged against an existing customer
+// carries only customer_id; that customer links back to its originating prospect
+// via converted_from_prospect_id, so the same human dedups to the same prospect
+// key whether met as a prospect or as a converted customer. custToProspect maps
+// String(customer_id) → prospect_id.
+const _buildCustToProspect = (customers) => {
+    const m = new Map();
+    (customers || []).forEach(c => {
+        if (c.converted_from_prospect_id != null) m.set(String(c.id), c.converted_from_prospect_id);
+    });
+    return m;
+};
+const _pitchPersonKey = (a, custToProspect) => {
+    if (a.prospect_id) return 'p' + a.prospect_id;
+    if (a.customer_id) {
+        const p = custToProspect.get(String(a.customer_id));
+        return p != null ? 'p' + p : 'c' + a.customer_id;
+    }
+    return 'a' + a.id;
+};
+
+// Count DISTINCT persons (resolved to prospect via _pitchPersonKey) with at least
+// one in-range activity whose Potential & Opportunities selection matches
+// `predicate`. Repeat meetings — and prospect vs converted-customer records of the
+// same person — collapse to 1 (the Set). Same scope contract as
+// getActivityTypeCount: date window, _visibleUserIds (lead_agent_id),
+// _currentRoleFilter, and _recInMarket market drill-down.
 const _pitchHeadcount = async (from, to, predicate, ctx) => {
     const needUsers = _currentRoleFilter !== 'All';
-    const activities = await _reportActsInRange(from, to, ctx);
+    const [activities, customers] = await Promise.all([
+        _reportActsInRange(from, to, ctx),
+        AppDataStore.getAll('customers'),
+    ]);
     const users = needUsers ? await AppDataStore.getAll('users') : [];
     const userMap = {};
     users.forEach(u => { userMap[u.id] = u; });
+    const custToProspect = _buildCustToProspect(customers);
     const seen = new Set();
     for (const a of activities) {
         if (a.activity_date < from || a.activity_date > to) continue;
@@ -2184,7 +2211,7 @@ const _pitchHeadcount = async (from, to, predicate, ctx) => {
             if (!agent || agent.role !== _currentRoleFilter) continue;
         }
         if (!_parseOppSelected(a.opportunity_potential || '').some(predicate)) continue;
-        seen.add(a.prospect_id ? 'p' + a.prospect_id : (a.customer_id ? 'c' + a.customer_id : 'a' + a.id));
+        seen.add(_pitchPersonKey(a, custToProspect));
     }
     return seen.size;
 };
@@ -2948,6 +2975,7 @@ const _buildPitchDetails = async (from, to, predicate) => {
     const userMap = {}; users.forEach(u => { userMap[String(u.id)] = u; });
     const custMap = {}; customers.forEach(c => { custMap[String(c.id)] = c; });
     const prospMap = {}; prospects.forEach(p => { prospMap[String(p.id)] = p; });
+    const custToProspect = _buildCustToProspect(customers);
     const byPerson = new Map();
     for (const a of activities) {
         if (a.activity_date < from || a.activity_date > to) continue;
@@ -2959,7 +2987,7 @@ const _buildPitchDetails = async (from, to, predicate) => {
         }
         const hits = _parseOppSelected(a.opportunity_potential || '').filter(predicate);
         if (!hits.length) continue;
-        const key = a.prospect_id ? 'p' + a.prospect_id : (a.customer_id ? 'c' + a.customer_id : 'a' + a.id);
+        const key = _pitchPersonKey(a, custToProspect);
         const cust = a.customer_id ? custMap[String(a.customer_id)] : null;
         const prosp = a.prospect_id ? prospMap[String(a.prospect_id)] : null;
         const name = cust?.full_name || prosp?.full_name || a.contact_name || '—';
