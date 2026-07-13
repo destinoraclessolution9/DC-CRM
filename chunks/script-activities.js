@@ -1452,7 +1452,7 @@
             <div class="form-group">
                 <label>Upload Purchased Invoice <span style="font-size:11px;color:var(--gray-400);font-weight:normal;">(AI auto-fill on upload)</span></label>
                 <input id="${prefix}-invoice-file" type="file" class="form-control" accept="image/png,image/jpeg,application/pdf" ${disabled} onchange="if(!this.disabled)(async()=>{ try{ await app.scanInvoiceWithAI(this,'${prefix}','mo'); }catch(e){ console.error(e); } })()">
-                ${v.invoice_file ? `<div style="margin-top:6px;font-size:11px;color:var(--gray-500);"><i class="fas fa-paperclip"></i> Current: <a href="${escapeHtml(/^https?:\/\//i.test(v.invoice_file) ? v.invoice_file : '#')}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">${escapeHtml(v.invoice_file_name || 'View invoice')}</a> <span style="color:var(--gray-400);">(choosing a new file will replace it)</span></div>` : ''}
+                ${v.invoice_file ? `<div style="margin-top:6px;font-size:11px;color:var(--gray-500);"><i class="fas fa-paperclip"></i> Current: <a href="#" onclick="event.preventDefault();window._openAttachment&&window._openAttachment('${UI.escJsAttr(String(v.invoice_file))}')" style="color:var(--primary);cursor:pointer;">${escapeHtml(v.invoice_file_name || 'View invoice')}</a> <span style="color:var(--gray-400);">(choosing a new file will replace it)</span></div>` : ''}
             </div>
         ` : '';
 
@@ -1510,8 +1510,8 @@
                                 <option value="B">B — PRN Receipt</option>
                                 <option value="C">C — Paper Form</option>
                             </select>
-                            <input type="file" id="${prefix}-order-form-camera" accept="image/*" capture="environment" style="display:none;" onchange="(async()=>{ try{ await app.handleOrderFormFile(this,'${prefix}',${a.prospect_id}); }catch(e){ console.error(e); } })()">
-                            <input type="file" id="${prefix}-order-form-file" accept="image/png,image/jpeg" style="display:none;" onchange="(async()=>{ try{ await app.handleOrderFormFile(this,'${prefix}',${a.prospect_id}); }catch(e){ console.error(e); } })()">
+                            <input type="file" id="${prefix}-order-form-camera" accept="image/jpeg,image/png,image/webp" capture="environment" style="display:none;" onchange="(async()=>{ try{ await app.handleOrderFormFile(this,'${prefix}',${a.prospect_id},${a.id}); }catch(e){ console.error(e); } })()">
+                            <input type="file" id="${prefix}-order-form-file" accept="image/jpeg,image/png,image/webp" style="display:none;" onchange="(async()=>{ try{ await app.handleOrderFormFile(this,'${prefix}',${a.prospect_id},${a.id}); }catch(e){ console.error(e); } })()">
                         </div>
                         <div id="${prefix}-order-form-thumbs" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;"></div>
                         <div id="${prefix}-order-form-status" style="margin-top:6px;"></div>
@@ -2049,7 +2049,12 @@
     const _mapPaymentToClosingValue = (payment_type, payment_method) => {
         const t = (payment_type || '').toLowerCase();
         const m = (payment_method || '').toLowerCase();
-        if (m.includes('standing') || t.includes('standing')) return 'POP';
+        const any = t + ' ' + m;
+        // H5 (audit): treat any installment phrasing as the company installment plan
+        // (POP), not just "standing instruction" — a plain installment form used to
+        // fall through to Credit Card, recording an installment sale as a lump sum
+        // and skipping the POP schedule. ("instal" covers instalment/installment.)
+        if (/standing|instal|monthly|per\s*month|\bpop\b/.test(any)) return 'POP';
         if (m.includes('online') || m.includes('mpgs')) return 'Credit Card';
         if (t === 'visa' || t === 'master' || t.includes('credit') || t.includes('debit')) return 'Credit Card';
         if (t.includes('cheque')) return 'Cheque';
@@ -2077,27 +2082,51 @@
         return s;
     };
 
+    // H6 (audit): rank candidates instead of taking the first bidirectional
+    // substring hit. The old logic let a generic option ("Power Ring", listed
+    // first) win over the specific one ("Authority Power Ring") for a scan of
+    // "Authority Power Ring 2026", and short options ("Ring") matched anything.
+    // Prefer exact, then the LONGEST option that is a substring of the scan
+    // (most specific), requiring a >=4-char common core.
+    // L1 (audit): the scan may surface card_holder / card_last4 / card_issuing_bank.
+    // Keep them for the in-session review display only — strip every card_* key
+    // before persisting the fields object into prospect_attachments.metadata so
+    // cardholder data isn't retained indefinitely (PCI posture: expiry only, no PAN).
+    const _redactCardFields = (obj) => {
+        if (!obj || typeof obj !== 'object') return obj;
+        const out = {};
+        for (const k of Object.keys(obj)) {
+            if (/^card_/i.test(k)) continue;
+            out[k] = obj[k];
+        }
+        return out;
+    };
+
     const _fuzzyMatchProduct = (selectId, scannedName) => {
         const sel = document.getElementById(selectId);
         if (!sel || !scannedName) return false;
         const target = scannedName.toLowerCase().trim();
-        let best = null;
+        let best = null, bestScore = 0;
         for (const opt of sel.options) {
-            const val = (opt.value || opt.textContent).toLowerCase();
-            if (val === target) { sel.value = opt.value; return true; }
-            if (val && (val.includes(target) || target.includes(val))) {
-                if (!best) best = opt.value;
-            }
+            const raw = (opt.textContent || opt.value || '').toLowerCase().trim();
+            if (!raw) continue;
+            if (raw === target) { sel.value = opt.value; sel.dispatchEvent(new Event('change')); return true; }
+            let score = 0;
+            if (target.includes(raw) && raw.length >= 4) score = raw.length;               // option is a specific substring of the scan
+            else if (raw.includes(target) && target.length >= 4) score = target.length * 0.5; // scan is a substring of a longer option (weaker)
+            if (score > bestScore) { bestScore = score; best = opt.value; }
         }
-        if (best) { sel.value = best; return true; }
+        if (best) { sel.value = best; sel.dispatchEvent(new Event('change')); return true; }
         return false;
     };
 
-    const handleOrderFormFile = async (input, prefix, prospectId) => {
+    const handleOrderFormFile = async (input, prefix, prospectId, activityId) => {
         const file = input.files && input.files[0];
         if (!file) return;
-        if (!file.type.startsWith('image/')) {
-            UI.toast.error('Please select an image file (JPG or PNG).');
+        // L4 (audit): accept only the formats the OCR edge function supports, so an
+        // iPhone HEIC isn't uploaded-then-rejected (leaving an orphan storage file).
+        if (!/^image\/(jpe?g|png|webp)$/i.test(file.type || '')) {
+            UI.toast.error('Please use a JPG, PNG or WEBP photo (HEIC is not supported — switch your camera to "Most Compatible").');
             input.value = '';
             return;
         }
@@ -2132,28 +2161,69 @@
             const path = `order_forms/${prospectId}_${Date.now()}_${formTypeHint}_${safeName}`;
             const { error: upErr } = await sb.storage.from('attachments').upload(path, file, { upsert: false, contentType: file.type });
             if (upErr) throw upErr;
-            const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
-            const photoUrl = urlData?.publicUrl || null;
-            if (!photoUrl) throw new Error('Photo uploaded but URL not returned');
+            // C2 (audit): keep the storage PATH (not a permanent public URL). Render
+            // + open code re-signs it via resolveAttachmentSrc, so a private bucket
+            // works and no public PII URL is ever persisted.
+            const photoUrl = path;
 
-            // 2. base64 → edge function
+            // H4 (audit): create the attachment row NOW — right after a successful
+            // upload and BEFORE the OCR call. Previously the row was written only
+            // after OCR succeeded, so an OCR outage aborted before the insert, left
+            // no thumbnail, and the required-photo gate blocked every closing. The
+            // photo record (and thus the ability to record the sale) must not depend
+            // on the OCR service being up. M1: tag the activity so a later sale for
+            // the same prospect can't satisfy its gate with this sale's photo.
+            let attachment = null;
+            const _mkAttachment = async (extraMeta, conf) => {
+                const base = {
+                    prospect_id: prospectId,
+                    attachment_type: 'order_form',
+                    file_url: photoUrl,
+                    filename: safeName,
+                    metadata: Object.assign({ form_type: formTypeHint, activity_id: activityId || null, edited_by_agent: [] }, extraMeta || {}),
+                    scanned_at: new Date().toISOString(),
+                };
+                if (conf != null) base.scan_confidence = conf;
+                try {
+                    return await AppDataStore.create('prospect_attachments', base);
+                } catch (e) {
+                    console.warn('[order-form] metadata insert failed, retrying without:', e?.message || e);
+                    return await AppDataStore.create('prospect_attachments', {
+                        prospect_id: prospectId, attachment_type: 'order_form', file_url: photoUrl, filename: safeName,
+                    }).catch(err2 => { console.error('[order-form] basic insert failed too:', err2); return null; });
+                }
+            };
+            attachment = await _mkAttachment(null, null);
+
+            // 2. base64 → edge function (best-effort auto-fill; failure no longer blocks the closing)
             setStatus('#fef3c7', '#92400e', '<i class="fas fa-spinner fa-spin"></i> Reading order form with AI… (3–6s)');
-            const dataUrl = await new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(reader.result);
-                reader.onerror = () => reject(new Error('Could not read file'));
-                reader.readAsDataURL(file);
-            });
-            const [meta, b64] = String(dataUrl).split(',');
-            const mime = (meta.match(/data:(.*?);base64/) || [])[1] || file.type || 'image/jpeg';
+            let res = null, ocrErr = null;
+            try {
+                const dataUrl = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = () => reject(new Error('Could not read file'));
+                    reader.readAsDataURL(file);
+                });
+                const [meta, b64] = String(dataUrl).split(',');
+                const mime = (meta.match(/data:(.*?);base64/) || [])[1] || file.type || 'image/jpeg';
+                if (!sb.functions) throw new Error('Supabase functions client not available');
+                const { data: _res, error } = await sb.functions.invoke('order-form-ocr', {
+                    body: { image_base64: b64, mime_type: mime, form_type: formTypeHint },
+                });
+                if (error) throw new Error(error.message || 'Edge function call failed');
+                if (!_res || _res.ok === false) throw new Error(_res?.detail || _res?.error || 'OCR failed');
+                res = _res;
+            } catch (e) { ocrErr = e; }
 
-            if (!sb.functions) throw new Error('Supabase functions client not available');
-
-            const { data: res, error } = await sb.functions.invoke('order-form-ocr', {
-                body: { image_base64: b64, mime_type: mime, form_type: formTypeHint },
-            });
-            if (error) throw new Error(error.message || 'Edge function call failed');
-            if (!res || res.ok === false) throw new Error(res?.detail || res?.error || 'OCR failed');
+            if (!res) {
+                // Photo is saved; render its thumbnail now so the required-photo gate
+                // passes and the closing can be recorded despite OCR being down.
+                _renderOrderFormThumb({ prefix, photoUrl, detectedType: formTypeHint, attachmentId: attachment?.id || null, fields: {} });
+                setStatus('#fff8e1', '#8a6d00', `<i class="fas fa-exclamation-triangle"></i> Photo saved — auto-read unavailable (${escapeHtml(ocrErr?.message || 'OCR offline')}). Fill the fields manually.`);
+                UI.toast.info('Order form photo saved. AI auto-fill is unavailable right now — please key the fields in.');
+                return;
+            }
 
             const fields = res.fields || {};
             const confidence = res.confidence || {};
@@ -2167,38 +2237,24 @@
                 ? Math.round((confValues.reduce((a, b) => a + b, 0) / confValues.length) * 100) / 100
                 : null;
 
-            // 4. Persist attachment row (graceful fallback if metadata column not yet migrated)
-            let attachment = null;
-            try {
-                attachment = await AppDataStore.create('prospect_attachments', {
-                    prospect_id: prospectId,
-                    attachment_type: 'order_form',
-                    file_url: photoUrl,
-                    filename: safeName,
-                    metadata: {
-                        form_type: detectedType,
-                        prn_number: fields.prn_number || null,
-                        fields,
-                        confidence,
-                        raw_text: rawText,
-                        edited_by_agent: [],
-                    },
-                    scanned_at: new Date().toISOString(),
-                    scan_confidence: meanConf,
-                });
-            } catch (e) {
-                console.warn('[order-form] metadata insert failed, retrying without:', e?.message || e);
-                attachment = await AppDataStore.create('prospect_attachments', {
-                    prospect_id: prospectId,
-                    attachment_type: 'order_form',
-                    file_url: photoUrl,
-                    filename: safeName,
-                }).catch(err2 => { console.error('[order-form] basic insert failed too:', err2); return null; });
+            // 4. Enrich the already-created attachment row with the OCR result.
+            // L1 (audit): store card_last4/holder/bank only in a redacted form is
+            // handled at apply-time; here we persist the raw scan for the review UI.
+            if (attachment?.id) {
+                try {
+                    await AppDataStore.update('prospect_attachments', attachment.id, {
+                        metadata: { form_type: detectedType, prn_number: fields.prn_number || null, fields: _redactCardFields(fields), confidence, raw_text: rawText, edited_by_agent: [], activity_id: activityId || null },
+                        scan_confidence: meanConf,
+                    });
+                } catch (e) { console.warn('[order-form] OCR enrich update failed:', e?.message || e); }
+            } else {
+                attachment = await _mkAttachment({ form_type: detectedType, prn_number: fields.prn_number || null, fields: _redactCardFields(fields), confidence, raw_text: rawText }, meanConf);
             }
 
             _orderFormScanCache = {
                 prefix,
                 prospectId,
+                activityId: activityId || null,
                 attachmentId: attachment?.id || null,
                 photoUrl,
                 detectedType,
@@ -2249,7 +2305,10 @@
             if (!scn) { status = 'no-scan'; defaultChecked = false; }
             else if (!cur) { status = 'fill-empty'; defaultChecked = true; }
             else if (cur.toLowerCase() === scn.toLowerCase()) { status = 'same'; defaultChecked = false; }
-            else { status = 'conflict'; defaultChecked = (strategy === 'fill'); }
+            // M5 (audit): a CONFLICT (agent already typed a different value) is never
+            // pre-ticked — the scan must not silently overwrite a hand-corrected
+            // Amount/Order Date. The agent ticks it explicitly to apply.
+            else { status = 'conflict'; defaultChecked = false; }
 
             return { idx, key, suffix, label, strategy, scn, cur, conf, status, defaultChecked };
         });
@@ -2292,7 +2351,7 @@
                 <div style="overflow:auto;">
                     <div style="font-size:11px;color:var(--gray-500);margin-bottom:4px;">DETECTED TEMPLATE</div>
                     <div style="font-weight:600;color:var(--gray-900);margin-bottom:10px;">${escapeHtml(formTypeLabel)} ${confBadge(confidence.form_type)}</div>
-                    <img loading="lazy" src="${escapeHtml(photoUrl)}" style="max-width:100%;border:1px solid var(--gray-200);border-radius:8px;cursor:zoom-in;" onclick="window._openAttachment && window._openAttachment('${UI.escJsAttr(String(photoUrl))}')">
+                    <img loading="lazy" data-attach-src="${escapeHtml(String(photoUrl))}" src="${_ORDER_FORM_PX}" style="max-width:100%;border:1px solid var(--gray-200);border-radius:8px;cursor:zoom-in;" onclick="window._openAttachment && window._openAttachment('${UI.escJsAttr(String(photoUrl))}')">
                     ${metaRows.length ? `
                         <div style="margin-top:12px;font-size:12px;">
                             <div style="font-weight:600;color:var(--gray-700);margin-bottom:6px;">Extra extracted info (saved with photo)</div>
@@ -2359,6 +2418,9 @@
             { type: 'secondary', label: 'Skip Auto-Fill (keep photo)', action: 'app.dismissOrderFormScanReview()' },
             { type: 'primary',   label: 'Apply Selected', action: '(async () => { await app.applyOrderFormScanSelection(); })()' },
         ]);
+        // C2: resolve the review photo to a short-lived signed URL (the overlay
+        // renders outside #content-viewport so the auto-resolver doesn't see it).
+        try { window._resolveAttachmentImages && setTimeout(() => window._resolveAttachmentImages(), 0); } catch (_) {}
     };
 
     const toggleOrderFormScanAll = (checked) => {
@@ -2428,10 +2490,11 @@
                     metadata: {
                         form_type: _orderFormScanCache.detectedType,
                         prn_number: fields.prn_number || null,
-                        fields,
+                        fields: _redactCardFields(fields),
                         confidence: _orderFormScanCache.confidence,
                         raw_text: _orderFormScanCache.rawText,
                         edited_by_agent: editedFields,
+                        activity_id: _orderFormScanCache.activityId || null,
                     },
                 });
             } catch (e) {
@@ -2450,22 +2513,29 @@
         }
     };
 
+    // Transparent 1x1 placeholder; the real image is resolved to a short-lived
+    // signed URL by the DOM auto-resolver (C2 — never a public PII URL).
+    const _ORDER_FORM_PX = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
     const _renderOrderFormThumb = (cache) => {
         if (!cache) return;
-        const { prefix, photoUrl, detectedType, attachmentId, fields } = cache;
+        const { prefix, photoUrl, detectedType, attachmentId, fields, activityId } = cache;
         const thumbWrap = document.getElementById(`${prefix}-order-form-thumbs`);
         if (!thumbWrap) return;
-        const typeLabel = { A: 'PRN Installment', B: 'PRN Direct', C: 'Paper Form', unknown: 'Unknown' }[detectedType] || detectedType;
+        const typeLabel = { A: 'PRN Installment', B: 'PRN Direct', C: 'Paper Form', unknown: 'Unknown', auto: 'Order Form' }[detectedType] || detectedType;
         const prn = fields?.prn_number;
         const item = document.createElement('div');
         item.style.cssText = 'display:inline-flex;flex-direction:column;align-items:center;gap:2px;position:relative;';
+        // M1: tag with the owning activity so hasOrderFormPhoto can require a photo
+        // for THIS sale, not accept a prior sale's photo for the same prospect.
+        item.setAttribute('data-activity-id', activityId != null ? String(activityId) : '');
         item.innerHTML = `
-            <img src="${escapeHtml(photoUrl)}" style="width:80px;height:80px;border-radius:6px;object-fit:cover;cursor:pointer;border:1px solid var(--gray-200);" onclick="window._openAttachment && window._openAttachment('${UI.escJsAttr(String(photoUrl))}')">
+            <img data-attach-src="${escapeHtml(String(photoUrl))}" src="${_ORDER_FORM_PX}" style="width:80px;height:80px;border-radius:6px;object-fit:cover;cursor:pointer;border:1px solid var(--gray-200);" onclick="window._openAttachment && window._openAttachment('${UI.escJsAttr(String(photoUrl))}')">
             <div style="font-size:10px;color:var(--gray-600);text-align:center;line-height:1.2;">${escapeHtml(typeLabel)}</div>
             ${prn ? `<div style="font-size:9px;color:var(--gray-400);">${escapeHtml(prn)}</div>` : ''}
             ${attachmentId ? `<button type="button" title="Remove" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border:none;border-radius:50%;width:20px;height:20px;font-size:10px;padding:0;cursor:pointer;" onclick="app.removeOrderFormAttachment(${attachmentId}, this.parentElement)"><i class="fas fa-times"></i></button>` : ''}
         `;
         thumbWrap.appendChild(item);
+        try { window._resolveAttachmentImages && window._resolveAttachmentImages(item); } catch (_) {}
     };
 
     const loadOrderFormThumbnails = async (prefix, prospectId) => {
@@ -2483,6 +2553,7 @@
                     detectedType: meta.form_type || 'unknown',
                     attachmentId: row.id,
                     fields: meta.fields || { prn_number: meta.prn_number },
+                    activityId: meta.activity_id != null ? meta.activity_id : null,
                 });
             });
         } catch (e) {
@@ -2502,9 +2573,19 @@
     };
 
     // Block save when closing is ticked but no order-form photo attached.
-    const hasOrderFormPhoto = (prefix) => {
+    // M1 (audit): when an activityId is supplied, require a photo attached to THIS
+    // sale — a prior sale's photo for the same prospect must not satisfy the gate.
+    // Legacy thumbnails (no data-activity-id) still count so closings already
+    // photographed under the old code can still be saved.
+    const hasOrderFormPhoto = (prefix, activityId) => {
         const thumbWrap = document.getElementById(`${prefix}-order-form-thumbs`);
-        return !!(thumbWrap && thumbWrap.children.length > 0);
+        if (!thumbWrap || thumbWrap.children.length === 0) return false;
+        if (activityId == null) return true;
+        const want = String(activityId);
+        return Array.from(thumbWrap.children).some(el => {
+            const a = el.getAttribute && el.getAttribute('data-activity-id');
+            return a === want || a == null || a === '';
+        });
     };
 
     // Standard Functions page — Level 1 only. Shows a read-only preview of

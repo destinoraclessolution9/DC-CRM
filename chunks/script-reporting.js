@@ -1982,9 +1982,16 @@ const getPeopleMet = async (from, to) => {
     const _phoneKey = (s) => { const d = String(s || '').replace(/\D/g, ''); return d.length >= 7 ? d.slice(-8) : ''; };
     const custNameKeys = new Set();
     const custPhoneKeys = new Set();
+    // L6 (audit): maps to RE-ATTRIBUTE (not drop) a prospect-linked meeting whose
+    // person has since converted to / matches a customer — so they're counted once
+    // in the customer list instead of vanishing from both.
+    const custByProspectId = new Map();
+    const custByName = new Map();
+    const custByPhone = new Map();
     customers.forEach(c => {
-        const nk = _normName(c.full_name); if (nk) custNameKeys.add(nk);
-        const pk = _phoneKey(c.phone); if (pk) custPhoneKeys.add(pk);
+        const nk = _normName(c.full_name); if (nk) { custNameKeys.add(nk); if (!custByName.has(nk)) custByName.set(nk, c); }
+        const pk = _phoneKey(c.phone); if (pk) { custPhoneKeys.add(pk); if (!custByPhone.has(pk)) custByPhone.set(pk, c); }
+        if (c.converted_from_prospect_id != null) custByProspectId.set(String(c.converted_from_prospect_id), c);
     });
 
     const bump = (map, id, name, agentName, date) => {
@@ -2016,12 +2023,25 @@ const getPeopleMet = async (from, to) => {
         }
         if (a.prospect_id != null) {
             const pid = String(a.prospect_id);
-            if (convertedProspectIds.has(pid)) continue;
             const prosp = prospMap[pid];
-            if (prosp) {
+            // L6 (audit): a prospect met who has since converted (or matches an existing
+            // customer by name/phone) is attributed to the CUSTOMER bucket — keyed by
+            // customer_id so it dedups with any customer_id-linked meetings — instead of
+            // being dropped from both lists (the old `continue` undercounted them).
+            let cust = custByProspectId.get(pid) || null;
+            if (!cust && prosp) {
                 const nk = _normName(prosp.full_name);
                 const pk = _phoneKey(prosp.phone);
-                if ((nk && custNameKeys.has(nk)) || (pk && custPhoneKeys.has(pk))) continue;
+                cust = (nk && custByName.get(nk)) || (pk && custByPhone.get(pk)) || null;
+            }
+            if (!cust && convertedProspectIds.has(pid)) {
+                // Converted but no resolvable customer row (link/name/phone all missing) —
+                // keep the prior behaviour of not double-counting under prospects.
+                continue;
+            }
+            if (cust) {
+                bump(custAgg, String(cust.id), cust.full_name, agentName, a.activity_date);
+                continue;
             }
             bump(prospAgg, pid, prosp?.full_name, agentName, a.activity_date);
         }

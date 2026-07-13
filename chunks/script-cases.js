@@ -279,15 +279,15 @@
             if (_caseFilters.search) {
                 const q = _caseFilters.search.toLowerCase();
                 cases = cases.filter(c => {
+                    // M11 (audit): the Success Case Library is anonymized (cards never
+                    // show the person's name). Searching MUST NOT match the hidden
+                    // prospect/customer full_name — that turned the search box into a
+                    // de-anonymization oracle ("type a name → see if they're a client,
+                    // and their profile/amount"). Match only fields shown on the card.
                     if ((c.title || '').toLowerCase().includes(q)) return true;
-                    if (c.prospect_id) {
-                        const p = prospectMap.get(String(c.prospect_id));
-                        if (p?.full_name?.toLowerCase().includes(q)) return true;
-                    }
-                    if (c.customer_id) {
-                        const cust = customerMap.get(String(c.customer_id));
-                        if (cust?.full_name?.toLowerCase().includes(q)) return true;
-                    }
+                    if ((c.product || '').toLowerCase().includes(q)) return true;
+                    if ((c.sales_idea || '').toLowerCase().includes(q)) return true;
+                    if ((c.success_story || '').toLowerCase().includes(q)) return true;
                     return false;
                 });
             }

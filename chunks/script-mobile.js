@@ -1355,7 +1355,11 @@
                 const person = personId ? personMap.get(String(personId)) : null;
                 const time = (a.start_time || '00:00').slice(0, 5);
                 const title = a.activity_type || 'Activity';
-                const sub = person ? person.full_name : (a.notes || a.title || '—');
+                // M10 (audit): only show the client name / raw notes for activities the
+                // viewer owns (or is scoped to). RLS now returns same-team & open/public
+                // rows the client-side scope filter used to clamp, so an ungated subtitle
+                // would surface a peer's client name or note text. Non-owned → generic.
+                const sub = _mcalOwned(a) ? (person ? person.full_name : (a.notes || a.title || '—')) : '—';
                 return { time, title, sub, icon: _mhomeIcon(title) };
             });
 

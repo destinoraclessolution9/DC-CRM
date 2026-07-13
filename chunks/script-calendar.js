@@ -6077,7 +6077,15 @@
         }
     };
 
+    // H2 (audit CLOSING_AUDIT_2026-07-13): guards against a mobile double-tap
+    // running the whole closing flow twice concurrently — both reads would see
+    // status:'draft' / npo_sale_id:null and mint duplicate npo_sales orders +
+    // duplicate approval_queue entries. Set synchronously before any await.
+    let _moSaving = false;
     const saveMeetingOutcome = async (activityId) => {
+        if (_moSaving) { try { UI.toast.info('Saving… please wait.'); } catch (_) {} return; }
+        _moSaving = true;
+        try {
         // collectMeetingOutcomeData lives in the activities chunk — guarantee it's
         // loaded so the save doesn't silently no-op into empty data on mobile.
         await _ensureActivitiesChunk();
@@ -6152,8 +6160,8 @@
 
         // Require an Order Form photo when closing — covers the 3 PREON templates.
         // Only enforced when the photo capture UI was rendered (i.e. linked to a prospect).
-        if (isClosed && document.getElementById('mo-order-form-thumbs') && !(window.app.hasOrderFormPhoto || (() => false))('mo')) {
-            UI.toast.error('Please attach the Order Form photo before saving the closing.');
+        if (isClosed && document.getElementById('mo-order-form-thumbs') && !(window.app.hasOrderFormPhoto || (() => false))('mo', activityId)) {
+            UI.toast.error('Please attach the Order Form photo for this sale before saving the closing.');
             document.getElementById('mo-order-form-camera')?.parentElement?.scrollIntoView({ behavior: 'smooth', block: 'center' });
             return;
         }
@@ -6171,7 +6179,9 @@
         let invoice_file_name = null;
         const _moFileInput = document.getElementById('mo-invoice-file');
         const _moFile = _moFileInput?.files?.[0] || null;
-        if (_moFile) {
+        if (_moFile && _moFile.size > 8 * 1024 * 1024) {
+            UI.toast.error('Invoice file too large (max 8 MB). Save proceeded without it — attach a smaller file.');
+        } else if (_moFile) {
             try {
                 const sb = window.supabase || window.supabaseClient;
                 if (sb && sb.storage) {
@@ -6181,19 +6191,27 @@
                         .from('attachments')
                         .upload(path, _moFile, { upsert: false, contentType: _moFile.type });
                     if (upErr) throw upErr;
-                    const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
-                    invoice_file = urlData?.publicUrl || null;
+                    // C2 (audit): persist the storage PATH, not a permanent public URL.
+                    // Render code re-signs it via resolveAttachmentSrc so a private
+                    // bucket keeps working and no public PII URL is stored.
+                    invoice_file = path;
                 } else {
-                    // Storage unavailable — fall back to base64 so the file
-                    // still survives the save (chunkier but recoverable).
-                    invoice_file = await new Promise((resolve, reject) => {
-                        const reader = new FileReader();
-                        reader.onload = e => resolve(e.target.result);
-                        reader.onerror = () => reject(reader.error);
-                        reader.readAsDataURL(_moFile);
-                    });
+                    // Storage unavailable — fall back to base64 ONLY for small files.
+                    // M6 (audit): a multi-MB data-URI embedded in the prospect's
+                    // closing_record JSONB bloats every subsequent prospect update and
+                    // poisons the SWR/delta-sync payload — cap it hard.
+                    if (_moFile.size > 512 * 1024) {
+                        UI.toast.error('Storage offline — invoice not saved (file too large to embed). Re-attach when back online.');
+                    } else {
+                        invoice_file = await new Promise((resolve, reject) => {
+                            const reader = new FileReader();
+                            reader.onload = e => resolve(e.target.result);
+                            reader.onerror = () => reject(reader.error);
+                            reader.readAsDataURL(_moFile);
+                        });
+                    }
                 }
-                invoice_file_name = _moFile.name;
+                if (invoice_file) invoice_file_name = _moFile.name;
             } catch (e) {
                 console.warn('saveMeetingOutcome: invoice upload failed:', e);
                 UI.toast.error('Invoice upload failed: ' + (e.message || e));
@@ -6262,6 +6280,10 @@
                 const prospect = await AppDataStore.getById('prospects', activity.prospect_id);
                 const existingCR = prospect?.closing_record || null;
                 const existingStatus = existingCR?.status || 'draft';
+                // M7 (audit): a prospect already converted to a customer must not be
+                // re-flipped to pending_approval nor file a duplicate new_customer
+                // approval on a repeat sale (the manual approve path guards this too).
+                const _alreadyConverted = prospect?.status === 'converted' || prospect?.conversion_status === 'approved';
                 if (existingStatus === 'draft') {
                     const paymentMethod = mo.payment_method || 'Cash';
                     // mo.* returns null when the customer-info section wasn't
@@ -6368,6 +6390,23 @@
                                 const saleId = saleRow && saleRow.id;
                                 if (saleId != null) {
                                     newCR.npo_sale_id = saleId;
+                                    // H1 (audit): durably record the sale id on closing_record NOW,
+                                    // before items/installments and before the full closing_record
+                                    // persist below. If any later step throws, a retry re-reads this
+                                    // stamp (fresh, cache invalidated) and the !newCR.npo_sale_id guard
+                                    // skips re-creating the sale — was: the stamp lived only in-memory
+                                    // on newCR, so a failed persist made the next save mint a duplicate
+                                    // npo_sales + full schedule → double PORT count.
+                                    try {
+                                        await sb.rpc('set_closing_record_field', {
+                                            p_prospect_id: activity.prospect_id,
+                                            p_key: 'npo_sale_id',
+                                            p_value: saleId,
+                                        });
+                                        AppDataStore.invalidateCache && AppDataStore.invalidateCache('prospects');
+                                    } catch (stampErr) {
+                                        console.warn('NPO sale-id durable stamp failed (retry-dup risk):', stampErr);
+                                    }
                                     // one item row per ticked product
                                     const items = (Array.isArray(mo.npo_products) ? mo.npo_products : []).map(p => ({
                                         sale_id: saleId,
@@ -6404,7 +6443,7 @@
 
                     try {
                         const prospectUpdates = { closing_record: newCR };
-                        if (hasRequiredFields && saleAmount >= 2000) {
+                        if (hasRequiredFields && saleAmount >= 2000 && !_alreadyConverted) {
                             prospectUpdates.conversion_status = 'pending_approval';
                             prospectUpdates.conversion_requested_at = new Date().toISOString();
                             prospectUpdates.conversion_requested_by = _state.cu?.id;
@@ -6435,7 +6474,7 @@
                                     snapshot_after: { ...newCR, sale_amount: saleAmount, prospect_name: prospect?.full_name },
                                     description: `New sale RM ${saleAmount.toLocaleString()} for ${prospect?.full_name || 'prospect'}`
                                 });
-                                if (saleAmount >= 2000) {
+                                if (saleAmount >= 2000 && !_alreadyConverted) {
                                     await AppDataStore.create('approval_queue', {
                                         approval_type: 'new_customer',
                                         status: 'pending',
@@ -6493,6 +6532,7 @@
         else if (crSyncStatus === 'failed')               UI.toast.error('Activity saved but closing record sync failed — retry from the prospect profile');
         else                                              UI.toast.success('Meeting outcome saved');
         if (document.querySelector('.calendar-view-container')) { await renderCalendar(); await renderTodayActivities(); }
+        } finally { _moSaving = false; }
     };
 
     // ── Helpers for multi-select checkbox fields in Post-Meetup Notes ──

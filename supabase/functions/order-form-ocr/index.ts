@@ -37,7 +37,7 @@ function json(body: unknown, status = 200) {
   });
 }
 
-async function requireAuth(req: Request): Promise<{ ok: true } | { ok: false; reason: string; status: number }> {
+async function requireAuth(req: Request): Promise<{ ok: true; userId: string } | { ok: false; reason: string; status: number }> {
   const authHeader = req.headers.get("Authorization") || "";
   const token = authHeader.replace(/^Bearer\s+/i, "");
   if (!token) return { ok: false, reason: "no_token", status: 401 };
@@ -57,7 +57,24 @@ async function requireAuth(req: Request): Promise<{ ok: true } | { ok: false; re
   const rows = await userRes.json();
   if (!Array.isArray(rows) || rows.length === 0) return { ok: false, reason: "not_in_crm", status: 403 };
 
-  return { ok: true };
+  return { ok: true, userId: String(rows[0]?.id || who.email) };
+}
+
+// M9 (audit CLOSING_AUDIT_2026-07-13): lightweight per-user sliding-window rate
+// limit to blunt Gemini cost/quota drain from a single authenticated account.
+// In-memory per isolate (best-effort — a fully durable limit would use a table);
+// fails OPEN on any error so a limiter bug never blocks a legitimate scan.
+const _rlHits = new Map<string, number[]>();
+const RL_MAX = 20;             // max requests…
+const RL_WINDOW_MS = 60_000;   // …per rolling minute, per user
+function rateLimited(key: string): boolean {
+  try {
+    const now = Date.now();
+    const arr = (_rlHits.get(key) || []).filter((t) => now - t < RL_WINDOW_MS);
+    arr.push(now);
+    _rlHits.set(key, arr);
+    return arr.length > RL_MAX;
+  } catch { return false; }
 }
 
 // One unified extraction prompt that ALSO classifies the form.
@@ -293,6 +310,9 @@ Deno.serve(async (req: Request) => {
 
   const auth = await requireAuth(req);
   if (!auth.ok) return json({ ok: false, error: auth.reason }, auth.status);
+  if (rateLimited(auth.userId)) {
+    return json({ ok: false, error: "rate_limited", detail: "Too many order-form scans — wait a minute and try again." }, 429);
+  }
 
   let imageBase64 = "";
   let mimeType = "image/jpeg";

@@ -92,6 +92,16 @@
         return escapeHtml(s);
     };
 
+    // C2 (audit CLOSING_AUDIT_2026-07-13): invoice files are now stored as private
+    // storage PATHS (not permanent public URLs). Render a link that resolves to a
+    // short-lived signed URL on click (window._openAttachment → resolveAttachmentSrc)
+    // instead of a raw href — works on a private bucket and never exposes a public
+    // PII URL. Legacy public-URL / data-URI values still resolve via the same opener.
+    const invoiceLink = (val, innerHtml, style) => {
+        if (!val) return '';
+        return `<a href="#" onclick="event.preventDefault();window._openAttachment&&window._openAttachment('${UI.escJsAttr(String(val))}')" style="${style || 'color:var(--primary);'};cursor:pointer;">${innerHtml}</a>`;
+    };
+
 let _sortField = 'score';
 let _sortDirection = 'desc';
 // ── Pagination state for prospects table ──
@@ -2952,7 +2962,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                                 <div><span style="color:var(--gray-400);">Invoice:</span> ${escapeHtml(h.invoice_number||'-')}</div>
                                 <div style="grid-column:1/-1;">
                                     ${h.invoice_file
-                                        ? `<a href="${safeUrl(h.invoice_file)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(h.invoice_file_name||'View invoice')}</a>`
+                                        ? invoiceLink(h.invoice_file, `<i class="fas fa-paperclip"></i> ${escapeHtml(h.invoice_file_name||'View invoice')}`)
                                         : `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px;background:#fffbeb;border:1px dashed #f59e0b;border-radius:6px;padding:6px 8px;">
                                             <span style="color:#92400e;"><i class="fas fa-exclamation-triangle"></i> No invoice attached.</span>
                                             <input type="file" id="crh-inv-${pid}-${hi}" accept="image/*,application/pdf" style="font-size:11px;flex:1;min-width:140px;">
@@ -3074,7 +3084,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 <div class="form-group" style="margin-bottom:14px;">
                     <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Upload Purchased Invoice <span style="font-size:11px;color:var(--gray-400);font-weight:normal;">(AI auto-fill on upload)</span></label>
                     <input id="cr-invoice-file" type="file" class="form-control" accept="image/png,image/jpeg,application/pdf" onchange="app.scanInvoiceWithAI(this,'cr','cr')">
-                    ${d.invoice_file ? `<div style="margin-top:6px;font-size:11px;color:var(--gray-500);"><i class="fas fa-paperclip"></i> Current: <a href="${safeUrl(d.invoice_file)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">${escapeHtml(d.invoice_file_name || 'view')}</a> <span style="color:var(--gray-400);">(choosing a new file will replace it)</span></div>` : ''}
+                    ${d.invoice_file ? `<div style="margin-top:6px;font-size:11px;color:var(--gray-500);"><i class="fas fa-paperclip"></i> Current: ${invoiceLink(d.invoice_file, escapeHtml(d.invoice_file_name || 'view'))} <span style="color:var(--gray-400);">(choosing a new file will replace it)</span></div>` : ''}
                 </div>
 
                 <div class="pv-sub">📁 Case Study (Optional)</div>
@@ -3122,7 +3132,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 ` : ''}
                 <div class="pv-row"><span class="pv-lbl">Invoice No.</span><span class="pv-val">${escapeHtml(d.invoice_number || '-')}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Collection Date</span><span class="pv-val">${escapeHtml(d.closing_date || '-')}</span></div>
-                <div class="pv-row"><span class="pv-lbl">Invoice File</span><span class="pv-val">${d.invoice_file ? `<a href="${safeUrl(d.invoice_file)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(d.invoice_file_name || 'View')}</a>` : '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Invoice File</span><span class="pv-val">${d.invoice_file ? invoiceLink(d.invoice_file, `<i class="fas fa-paperclip"></i> ${escapeHtml(d.invoice_file_name || 'View')}`) : '-'}</span></div>
                 ${(d.sales_idea || d.plan_details || d.success_story) ? `
                 <div class="pv-sub">Case Study</div>
                 ${d.sales_idea ? `<div class="pv-row"><span class="pv-lbl">Sales Idea</span><span class="pv-val">${escapeHtml(d.sales_idea)}</span></div>` : ''}
@@ -3155,7 +3165,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 ` : ''}
                 <div class="pv-row"><span class="pv-lbl">Invoice No.</span><span class="pv-val">${escapeHtml(d.invoice_number || '-')}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Collection Date</span><span class="pv-val">${escapeHtml(d.closing_date || '-')}</span></div>
-                <div class="pv-row"><span class="pv-lbl">Invoice File</span><span class="pv-val">${d.invoice_file ? `<a href="${safeUrl(d.invoice_file)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(d.invoice_file_name || 'View')}</a>` : '-'}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Invoice File</span><span class="pv-val">${d.invoice_file ? invoiceLink(d.invoice_file, `<i class="fas fa-paperclip"></i> ${escapeHtml(d.invoice_file_name || 'View')}`) : '-'}</span></div>
                 ${(d.sales_idea || d.plan_details || d.success_story) ? `
                 <div class="pv-sub">Case Study</div>
                 ${d.sales_idea ? `<div class="pv-row"><span class="pv-lbl">Sales Idea</span><span class="pv-val">${escapeHtml(d.sales_idea)}</span></div>` : ''}
@@ -3561,7 +3571,7 @@ const renderCustomerClosingTab = async (customer, container) => {
                     <td style="padding:6px 10px;">${UI.formatCurrency(amt0, { currency: _cur, dp: 2 })}</td>
                     <td style="padding:6px 10px;"><span style="background:#dcfce7;color:#166534;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;">PAID</span></td>
                     <td style="padding:6px 10px;">${(()=>{ const ds=cr0.delivery_status||'Pending Delivery'; const dc={'Pending Delivery':'background:#fef3c7;color:#92400e','Dispatched':'background:#dbeafe;color:#1e40af','Delivered':'background:#dcfce7;color:#166534'}; return `<span style="${dc[ds]||dc['Pending Delivery']};border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;cursor:pointer;" onclick="app.updateConversionDelivery(${origP.id},${customer.id})" title="Click to update">${ds} ✎</span>`; })()}</td>
-                    <td style="padding:6px 10px;">${cr0.invoice_file ? `<a href="${safeUrl(cr0.invoice_file)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> View</a>` : '-'}</td>
+                    <td style="padding:6px 10px;">${cr0.invoice_file ? invoiceLink(cr0.invoice_file, `<i class="fas fa-paperclip"></i> View`, 'color:var(--primary);font-size:12px;') : '-'}</td>
                     <td style="padding:6px 10px;font-size:11px;color:var(--gray-400);">Locked</td>
                 </tr>`;
         }
@@ -3710,7 +3720,7 @@ const renderCustomerClosingTab = async (customer, container) => {
                             <div><span style="color:var(--gray-400);">Invoice:</span> ${escapeHtml(h.invoice_number||'-')}</div>
                             <div style="grid-column:1/-1;">
                                 ${h.invoice_file
-                                    ? `<a href="${safeUrl(h.invoice_file)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(h.invoice_file_name||'View invoice')}</a>`
+                                    ? invoiceLink(h.invoice_file, `<i class="fas fa-paperclip"></i> ${escapeHtml(h.invoice_file_name||'View invoice')}`)
                                     : `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px;background:#fffbeb;border:1px dashed #f59e0b;border-radius:6px;padding:6px 8px;">
                                         <span style="color:#92400e;"><i class="fas fa-exclamation-triangle"></i> No invoice attached.</span>
                                         <input type="file" id="crh-inv-${pid}-${hi}" accept="image/*,application/pdf" style="font-size:11px;flex:1;min-width:140px;">
@@ -5037,17 +5047,22 @@ const gatherClosingFormData = async (existingCr = {}) => {
     const file = fileInput?.files?.[0] || null;
     let invoice_file = existingCr.invoice_file || null;
     let invoice_file_name = existingCr.invoice_file_name || null;
-    if (file) {
+    if (file && file.size > 8 * 1024 * 1024) {
+        throw new Error('Invoice file too large (max 8 MB).');
+    } else if (file) {
         const sb = window.supabase || window.supabaseClient;
         if (sb && sb.storage) {
             const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
             const path = `invoices/${Date.now()}_${safeName}`;
             const { error: upErr } = await sb.storage.from('attachments').upload(path, file, { upsert: false, contentType: file.type });
             if (upErr) throw new Error('Invoice upload failed: ' + upErr.message);
-            const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
-            invoice_file = urlData?.publicUrl || null;
+            // C2 (audit): store the storage PATH, not a permanent public URL.
+            invoice_file = path;
+        } else if (file.size > 512 * 1024) {
+            // M6 (audit): don't embed a multi-MB data-URI into closing_record JSONB.
+            throw new Error('Storage offline — invoice too large to save. Re-attach when back online.');
         } else {
-            // Fallback to Base64 if storage unavailable
+            // Fallback to Base64 only for small files when storage is unavailable.
             invoice_file = await new Promise((resolve, reject) => {
                 const reader = new FileReader();
                 reader.onload = e => resolve(e.target.result);
@@ -5055,7 +5070,7 @@ const gatherClosingFormData = async (existingCr = {}) => {
                 reader.readAsDataURL(file);
             });
         }
-        invoice_file_name = file.name;
+        if (invoice_file) invoice_file_name = file.name;
     }
 
     return {
@@ -5929,6 +5944,13 @@ const _mirrorCrToActivity = async (prospectId, cr) => {
 const saveClosingRecord = async (prospectId) => {
     const prospect = await AppDataStore.getById('prospects', prospectId);
     const existingCr = prospect?.closing_record || {};
+    // M3 (audit): never let "Save Draft" demote/overwrite a record that is already
+    // submitted or approved (the editable form only renders for drafts, but a stale
+    // second tab / device could still POST here and slip edits past the manager
+    // review snapshot). The server prospects_approval_guard trigger also blocks this.
+    if (existingCr.status === 'submitted' || existingCr.status === 'approved') {
+        return UI.toast.error('This closing record is ' + existingCr.status + ' and is locked — it can no longer be edited as a draft.');
+    }
     const data = await gatherClosingFormData(existingCr);
     if (!data.full_name) return UI.toast.error('Full name is required');
     // Spread existingCr first so fields like pre2025_purchases survive a draft re-save.
@@ -5960,6 +5982,10 @@ const saveClosingRecord = async (prospectId) => {
 const submitClosingRecord = async (prospectId) => {
     const prospect = await AppDataStore.getById('prospects', prospectId);
     const existingCr = prospect?.closing_record || {};
+    // M3 (audit): don't re-submit / overwrite a record already submitted or approved.
+    if (existingCr.status === 'submitted' || existingCr.status === 'approved') {
+        return UI.toast.error('This closing record is already ' + existingCr.status + ' — it is locked pending manager action.');
+    }
     const data = await gatherClosingFormData(existingCr);
     if (!data.full_name) return UI.toast.error('Full name is required');
     if (!data.product) return UI.toast.error('Product/service is required');
@@ -6013,6 +6039,16 @@ const submitClosingRecord = async (prospectId) => {
         console.warn('submitClosingRecord primary update failed:', err);
         UI.toast.error('Failed to submit closing record. Please retry.');
         return;
+    }
+
+    // H3 (audit): the DC Closing Record form does NOT create the npo_sales /
+    // npo_sale_items / npo_installments rows — only the Meeting Outcome flow does.
+    // So an NPO deal submitted here books the sale but is invisible in the NPO
+    // Orders tab / PORT KPI. Warn explicitly instead of silently dropping it.
+    if (data.payment_method === 'NPO' && !existingCr.npo_sale_id) {
+        UI.toast.warning
+            ? UI.toast.warning('Submitted. NOTE: create the NPO installment order from the Meeting Outcome (calendar) flow so it appears in NPO Orders / PORT.')
+            : UI.toast.error('Submitted, but the NPO installment order was not created here — add it via the Meeting Outcome flow so it shows in NPO Orders / PORT.');
     }
 
     // Arm the credit-card-renewal reminder (POP/NPO installment charged to a card).
@@ -6110,6 +6146,7 @@ const uploadHistoryInvoice = async (prospectId, historyIndex) => {
     const history = [...(Array.isArray(prospect?.closing_records_history) ? prospect.closing_records_history : [])];
     if (historyIndex < 0 || historyIndex >= history.length) return UI.toast.error('Record not found');
 
+    if (file.size > 8 * 1024 * 1024) return UI.toast.error('Invoice file too large (max 8 MB).');
     let invoice_file = null;
     const invoice_file_name = file.name;
     try {
@@ -6121,10 +6158,11 @@ const uploadHistoryInvoice = async (prospectId, historyIndex) => {
                 .from('attachments')
                 .upload(path, file, { upsert: false, contentType: file.type });
             if (upErr) throw upErr;
-            const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
-            invoice_file = urlData?.publicUrl || null;
+            // C2 (audit): store the storage PATH, not a permanent public URL.
+            invoice_file = path;
         }
-        if (!invoice_file) {
+        if (!invoice_file && file.size <= 512 * 1024) {
+            // M6 (audit): only small files fall back to an embedded data-URI.
             invoice_file = await new Promise((resolve, reject) => {
                 const reader = new FileReader();
                 reader.onload = e => resolve(e.target.result);
@@ -6134,6 +6172,10 @@ const uploadHistoryInvoice = async (prospectId, historyIndex) => {
         }
     } catch (e) {
         console.warn('uploadHistoryInvoice: storage upload failed:', e);
+        if (file.size > 512 * 1024) {
+            UI.toast.error('Upload failed and file is too large to embed offline: ' + (e.message || e));
+            return;
+        }
         try {
             invoice_file = await new Promise((resolve, reject) => {
                 const reader = new FileReader();

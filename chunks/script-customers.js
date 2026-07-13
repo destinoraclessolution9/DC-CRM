@@ -1307,7 +1307,7 @@ const renderPurchaseHistoryTab = async (customer, containerId = 'profile-tab-con
                 <td><strong>${escapeHtml(cr.product || '-')}</strong> <span style="font-size:11px;color:var(--gray-400);">(Conversion Sale)</span></td>
                 <td>${UI.formatCurrency(amt, { currency: _custCur })}</td>
                 <td><span class="score-badge" style="font-size:11px;background:#dcfce7;color:#166534;">PAID</span></td>
-                <td>${(() => { const _h = _safeHref(cr.invoice_file); return _h ? `<a href="${_h}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">View</a>` : '-'; })()}</td>
+                <td>${cr.invoice_file ? `<a href="#" onclick="event.preventDefault();window._openAttachment&&window._openAttachment('${UI.escJsAttr(String(cr.invoice_file))}')" style="color:var(--primary);cursor:pointer;">View</a>` : '-'}</td>
                 <td><span style="font-size:11px;color:var(--gray-400);">Locked</span></td>
             </tr>`;
     })() : '';
