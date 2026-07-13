@@ -36,7 +36,11 @@
   };
   const mask = (s) => { s = String(s || ''); return s.length > 6 ? s.slice(0, 3) + '…' + s.slice(-2) : s; };
   try {
-    add('Page build', '2026-07-13 r5');
+    add('Page build', '2026-07-13 r6');
+    try {
+      const le = localStorage.getItem('mcal-last-error');
+      add('Last calendar render error', le ? le : '(none recorded)', le ? 'bad' : 'ok');
+    } catch (_) { /* best-effort */ }
     try {
       if (navigator.storage && navigator.storage.estimate) {
         const est = await navigator.storage.estimate();

@@ -1909,7 +1909,34 @@
         return w.length >= 2 ? `${w[0]} ${w[1].charAt(0)}` : t;
     };
 
+    // Crash breadcrumb (2026-07-13): every mobile-calendar call site swallows
+    // rejections (.catch(() => {})), so a mid-render exception dies INVISIBLY —
+    // the grid just stays blank with no console trace reachable on iOS
+    // standalone. Wrap the real renderer: persist the last error to
+    // localStorage (surfaced by /diag.html) and paint a visible notice in the
+    // grid instead of silent emptiness. Rethrow is pointless (callers swallow).
     const showMobileCalendarView = async (viewport) => {
+        try {
+            return await _showMobileCalendarViewImpl(viewport);
+        } catch (e) {
+            try {
+                localStorage.setItem('mcal-last-error', JSON.stringify({
+                    ts: new Date().toISOString(),
+                    msg: (e && e.message) || String(e),
+                    stack: String((e && e.stack) || '').slice(0, 600),
+                }));
+            } catch (_) { /* best-effort breadcrumb */ }
+            try { console.error('[mcal] month render crashed:', e); } catch (_) { /* noop */ }
+            try {
+                const g = document.getElementById('mcal-grid');
+                if (g && !g.querySelector('.mcal-cell')) {
+                    g.innerHTML = '<div style="grid-column:1/-1;padding:28px 14px;text-align:center;color:#b91c1c;font-size:13px;">' +
+                        '⚠️ Calendar failed to draw.<br><span style="color:#6b7280">Pull down to retry, or open ☰ → 🩺 and send a screenshot.</span></div>';
+                }
+            } catch (_) { /* display best-effort */ }
+        }
+    };
+    const _showMobileCalendarViewImpl = async (viewport) => {
         if (!viewport) return;
         viewport.classList.add('mcal-active');
         _mcalView = 'month';
