@@ -2060,6 +2060,11 @@
         const _DRAFTS_KEY  = 'mcal-drafts-v1';
         const _REFILLS_KEY = 'mcal-refills-v1';
         let allPeople     = _forceFresh ? null : _lsGet(_PEOPLE_KEY,  8 * 60 * 60 * 1000);
+        // An EMPTY cached people list is a frozen failed fetch, not reality —
+        // treat it as a miss so it refetches now instead of blocking birthday
+        // markers/client names for the rest of the 8h TTL (self-heals devices
+        // that cached [] before the write-guard below existed).
+        if (Array.isArray(allPeople) && allPeople.length === 0) allPeople = null;
         let cachedDrafts  = _forceFresh ? null : _lsGet(_DRAFTS_KEY,   5 * 60 * 1000);
         let cachedRefills = _forceFresh ? null : _lsGet(_REFILLS_KEY,  5 * 60 * 1000);
         const _needPeople  = !allPeople;
@@ -2143,7 +2148,12 @@
                     // resolve the correct FK target instead of probing by ambiguous
                     // (overlapping) id — customers get _isCustomer:true.
                     const fresh = [...(p || []), ...((c || []).map(x => ({ ...x, _isCustomer: true })))];
-                    _lsSet(_PEOPLE_KEY, fresh);
+                    // Never cache an EMPTY people list (8h TTL): the fetches above
+                    // .catch(() => []) so a failed/degraded fetch is indistinguishable
+                    // from "no people" — and this CRM always has people. Caching []
+                    // suppressed birthday markers + client names for hours
+                    // (observed live 2026-07-13: mcal-people-v5 frozen at 0 rows).
+                    if (fresh.length > 0) _lsSet(_PEOPLE_KEY, fresh);
                 }
                 if (d !== null) _lsSet(_DRAFTS_KEY,  d);
                 if (r !== null) _lsSet(_REFILLS_KEY, r);
