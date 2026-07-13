@@ -917,12 +917,11 @@
             filters: { activity_date: todayStr },
             sort: 'start_time', sortDir: 'asc', limit: 50, offset: 0, countMode: null,
         };
-        if (typeof isSystemAdmin === 'function' && !isSystemAdmin(_state.cu) && visibleIds !== 'all') {
-            actQueryOpts.scopeFields = [
-                { field: 'lead_agent_id', values: visibleIds },
-                { field: 'visibility', values: ['open', 'public', 'team'] }
-            ];
-        }
+        // NO client-side activity scoping — RLS activities_scoped_select is
+        // authoritative and matches the desktop RPC. The old AND-filter here hid
+        // all visibility='closed' client work (CALL/FTF/CPS default) from every
+        // L3+ user's Home agenda (bug 2026-07-13; see Month view comment).
+        // visibleIds stays resolved above for birthday/name scoping only.
 
         // 1-hour people cache — prospects+customers rarely change mid-session and
         // are only needed for birthday lookup + activity name display on this view.
@@ -2046,9 +2045,16 @@
             return Array.isArray(visibleIds) && visibleIds.some(id => String(id) === String(ownerId));
         };
 
-        const _scopeFields = (typeof isSystemAdmin === 'function' && !isSystemAdmin(_state.cu) && visibleIds !== 'all')
-            ? [ { field: 'lead_agent_id', values: visibleIds }, { field: 'visibility', values: ['open', 'public', 'team'] } ]
-            : null;
+        // NO client-side activity scoping: the activities_scoped_select RLS policy
+        // is authoritative and matches the desktop get_calendar_window RPC exactly
+        // (own + subtree + co-agent rows at ANY visibility, plus open/public and
+        // same-team-chain rows). The old client filter here ANDed
+        // `lead_agent_id IN subtree` with `visibility IN (open,public,team)` —
+        // strictly narrower than RLS — which hid ALL ordinary client work
+        // (CALL/FTF/CPS default to visibility 'closed') from every L3+ user and
+        // left team leaders staring at an empty month (bug 2026-07-13). The
+        // server cannot return anything RLS forbids, so no filter is needed.
+        const _scopeFields = null;
         // gte/lte range replaces 31-item IN list — faster Postgres plan
         const _buildActOpts = (gteStr, lteStr) => {
             const o = { gte: { activity_date: gteStr }, lte: { activity_date: lteStr }, sort: 'start_time', sortDir: 'asc', limit: 1000, offset: 0, countMode: null };
@@ -2875,19 +2881,15 @@
     const _mcalDayNamesShort = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     const _mcalMonNamesShort = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-    // Resolve the activity ownership-scope fields exactly as the Month view
-    // does (see _scopeFields in showMobileCalendarView): non-admin agents are
-    // limited to their visible agent set + open/public visibility.
+    // Resolve the viewer's visible agent set (still needed for birthday/name
+    // masking) but return NO activity scope fields: RLS activities_scoped_select
+    // is authoritative and matches the desktop RPC (see the Month view's
+    // _scopeFields comment — the old client AND-filter starved L3+ users of all
+    // visibility='closed' client work; bug 2026-07-13).
     const _mcalScopeFields = async () => {
         const visibleIds = (typeof getVisibleUserIds === 'function')
             ? await getVisibleUserIds(_state.cu).catch(() => 'all') : 'all';
         _mcalVisibleScope = visibleIds;
-        if (typeof isSystemAdmin === 'function' && !isSystemAdmin(_state.cu) && visibleIds !== 'all') {
-            return [
-                { field: 'lead_agent_id', values: visibleIds },
-                { field: 'visibility', values: ['open', 'public', 'team'] },
-            ];
-        }
         return null;
     };
 

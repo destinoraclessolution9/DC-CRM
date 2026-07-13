@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex,nofollow">
+<title>CRM Diagnostics</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 16px; background: #fdf2f4; color: #111; }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  .row { background: #fff; border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; font-size: 15px; line-height: 1.45; box-shadow: 0 1px 3px rgba(0,0,0,.08); word-break: break-word; }
+  .k { color: #6b7280; font-size: 12px; text-transform: uppercase; letter-spacing: .4px; }
+  .ok { color: #047857; font-weight: 700; }
+  .bad { color: #b91c1c; font-weight: 700; }
+  .warn { color: #b45309; font-weight: 700; }
+  #status { font-size: 13px; color: #6b7280; margin-bottom: 10px; }
+</style>
+</head>
+<body>
+<h1>悅客匯 CRM — Calendar Diagnostics</h1>
+<div id="status">Running…</div>
+<div id="out"></div>
+<script src="libs/supabase-js-2.106.2.min.js"></script>
+<script src="supabase-init.js"></script>
+<script>
+(async () => {
+  const out = document.getElementById('out');
+  const add = (label, value, cls) => {
+    const d = document.createElement('div');
+    d.className = 'row';
+    d.innerHTML = '<div class="k">' + label + '</div><div class="' + (cls || '') + '">' + value + '</div>';
+    out.appendChild(d);
+  };
+  const mask = (s) => { s = String(s || ''); return s.length > 6 ? s.slice(0, 3) + '…' + s.slice(-2) : s; };
+  try {
+    add('Page build', '2026-07-13 r3');
+    // 1. localStorage health + auth blob presence
+    let lsWritable = false;
+    try { localStorage.setItem('__diag_t', '1'); localStorage.removeItem('__diag_t'); lsWritable = true; } catch (_) {}
+    add('localStorage writable', lsWritable ? 'YES' : 'NO — private mode / blocked storage?', lsWritable ? 'ok' : 'bad');
+    const rawAuth = (() => { try { return localStorage.getItem(window.SUPABASE_AUTH_STORAGE_KEY || 'fs-crm-auth-v1'); } catch (_) { return null; } })();
+    let blobInfo = 'ABSENT';
+    let blobExpMs = null;
+    if (rawAuth) {
+      try {
+        const b = JSON.parse(rawAuth);
+        const exp = b.expires_at || (b.currentSession && b.currentSession.expires_at);
+        blobExpMs = exp ? exp * 1000 : null;
+        blobInfo = 'present; token expires ' + (exp ? new Date(exp * 1000).toLocaleString() : 'unknown');
+      } catch (_) { blobInfo = 'present but UNPARSEABLE'; }
+    }
+    add('Stored auth blob (fs-crm-auth-v1)', blobInfo, rawAuth ? (blobExpMs && blobExpMs > Date.now() ? 'ok' : 'warn') : 'bad');
+
+    // 2. Live session per supabase-js
+    const { data: sess, error: sessErr } = await window.supabase.auth.getSession();
+    const session = sess && sess.session;
+    add('supabase-js session', session
+      ? 'LIVE as ' + mask(session.user && session.user.email) + ' (uid ' + mask(session.user && session.user.id) + ')'
+      : 'NONE' + (sessErr ? ' — ' + (sessErr.message || sessErr) : ''), session ? 'ok' : 'bad');
+    if (!session) { document.getElementById('status').textContent = 'Done (no session — log in on this browser first, then reopen this page).'; return; }
+
+    // 3. users profile rows for this auth account (id + level only)
+    const su = session.user || {};
+    const profQ = await window.supabase.from('users').select('id, role').eq('auth_user_id', su.id);
+    if (profQ.error) {
+      add('users row by auth link', 'ERROR ' + (profQ.error.code || '') + ': ' + (profQ.error.message || ''), 'bad');
+    } else {
+      add('users row by auth link', (profQ.data || []).length + ' row(s): ' +
+        (profQ.data || []).map(r => 'id ' + mask(r.id) + ' / ' + String(r.role || '').split(' ').slice(0, 2).join(' ')).join(' | '),
+        (profQ.data || []).length === 1 ? 'ok' : 'warn');
+    }
+
+    // 4. THE calendar query (exact mobile shape): July window, date-range only
+    const t0 = Date.now();
+    const actQ = await window.supabase.from('activities')
+      .select('id, activity_type, activity_date, visibility', { count: 'exact' })
+      .gte('activity_date', '2026-06-29')
+      .lte('activity_date', '2026-08-03')
+      .limit(5);
+    if (actQ.error) {
+      add('activities July window (RLS as you)', 'ERROR ' + (actQ.error.code || '') + ': ' + (actQ.error.message || ''), 'bad');
+    } else {
+      add('activities July window (RLS as you)', (actQ.count != null ? actQ.count : (actQ.data || []).length) +
+        ' rows visible (' + (Date.now() - t0) + 'ms)', (actQ.count || (actQ.data || []).length) > 0 ? 'ok' : 'bad');
+    }
+
+    // 5. Desktop RPC as you (admin=false, ids=null → RPC own visibility logic)
+    const meRow = (profQ.data && profQ.data[0]) || null;
+    if (meRow) {
+      const t1 = Date.now();
+      const rpcQ = await window.supabase.rpc('get_calendar_window', {
+        p_range_start: '2026-06-29', p_range_end: '2026-08-03',
+        p_user_id: meRow.id, p_visible_ids: null, p_is_admin: false,
+        p_agent_filter: null, p_type_filter: null,
+      });
+      if (rpcQ.error) {
+        add('get_calendar_window RPC (as you)', 'ERROR ' + (rpcQ.error.code || '') + ': ' + (rpcQ.error.message || ''), 'bad');
+      } else {
+        add('get_calendar_window RPC (as you)', (rpcQ.data || []).length + ' rows (' + (Date.now() - t1) + 'ms)', (rpcQ.data || []).length > 0 ? 'ok' : 'bad');
+      }
+    }
+
+    // 6. What the app shell thinks (only meaningful inside the app, harmless here)
+    add('App version marker', (document.querySelector('script[src^="script."]') || {}).src || 'n/a (diag page)');
+    document.getElementById('status').textContent = 'Done. Please screenshot this whole page.';
+  } catch (e) {
+    add('UNEXPECTED', (e && e.message) || String(e), 'bad');
+    document.getElementById('status').textContent = 'Done with errors — screenshot please.';
+  }
+})();
+</script>
+</body>
+</html>
