@@ -18,6 +18,7 @@
 </head>
 <body>
 <h1>悅客匯 CRM — Calendar Diagnostics</h1>
+<div class="row"><a href="/" style="color:#be123c;font-weight:700;text-decoration:none;">← Back to CRM</a></div>
 <div id="status">Running…</div>
 <div id="out"></div>
 <script src="libs/supabase-js-2.106.2.min.js"></script>
@@ -33,7 +34,18 @@
   };
   const mask = (s) => { s = String(s || ''); return s.length > 6 ? s.slice(0, 3) + '…' + s.slice(-2) : s; };
   try {
-    add('Page build', '2026-07-13 r3');
+    add('Page build', '2026-07-13 r4');
+    // Container introspection — which world is this page running in?
+    add('Standalone app mode', (navigator.standalone === true) ? 'YES (home-screen app container)' : 'no (browser tab)', '');
+    add('One-shot purge flag', localStorage.getItem('_cache_purge_2026_07_13') ? 'PRESENT — new build has run here' : 'ABSENT — this container has NOT run today\'s build yet', localStorage.getItem('_cache_purge_2026_07_13') ? 'ok' : 'bad');
+    try {
+      const mk = Object.keys(localStorage).filter(k => k.startsWith('mcal-') || k.startsWith('mhome-'));
+      add('Mobile cache keys', mk.length ? mk.map(k => { let n = '?'; try { const v = JSON.parse(localStorage.getItem(k)); n = Array.isArray(v && v.val) ? v.val.length + ' rows' : (typeof (v && v.val) === 'string' ? v.val.length + ' chars' : 'obj'); } catch (_) { n = 'raw'; } return k + ' (' + n + ')'; }).join('<br>') : '(none)');
+    } catch (_) { add('Mobile cache keys', 'unreadable'); }
+    try {
+      const hls = window.AppDataStore && typeof AppDataStore.hasLiveSession === 'function' ? AppDataStore.hasLiveSession() : 'n/a (data layer not loaded on this page)';
+      add('hasLiveSession()', String(hls));
+    } catch (_) { /* data layer absent on diag page — fine */ }
     // 1. localStorage health + auth blob presence
     let lsWritable = false;
     try { localStorage.setItem('__diag_t', '1'); localStorage.removeItem('__diag_t'); lsWritable = true; } catch (_) {}
