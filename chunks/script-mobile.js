@@ -1916,6 +1916,21 @@
     // localStorage (surfaced by /diag.html) and paint a visible notice in the
     // grid instead of silent emptiness. Rethrow is pointless (callers swallow).
     const showMobileCalendarView = async (viewport) => {
+        // Freeze detector (2026-07-14): a main-thread HANG (not a throw) leaves no
+        // error anywhere — the user kills the app and every trace dies with it,
+        // EXCEPT synchronous localStorage writes. The impl stamps a stage marker
+        // at each phase; if we arrive here and the previous run's marker never
+        // reached 'done', the last render froze mid-flight — record WHERE.
+        try {
+            const prev = JSON.parse(localStorage.getItem('mcal-hang-stage') || 'null');
+            if (prev && prev.s && prev.s !== 'done') {
+                localStorage.setItem('mcal-last-error', JSON.stringify({
+                    ts: new Date().toISOString(), where: 'freeze-detector',
+                    msg: 'previous month render never completed — froze after stage: ' + prev.s,
+                    prevTs: prev.ts,
+                }));
+            }
+        } catch (_) { /* best-effort */ }
         try {
             return await _showMobileCalendarViewImpl(viewport);
         } catch (e) {
@@ -1938,6 +1953,11 @@
     };
     const _showMobileCalendarViewImpl = async (viewport) => {
         if (!viewport) return;
+        // Freeze-detector stage stamps — synchronous localStorage writes survive
+        // a main-thread hang + app kill; the wrapper reports the last stage on
+        // the next launch and /diag displays it. Cleared to 'done' on success.
+        const _stage = (s) => { try { localStorage.setItem('mcal-hang-stage', JSON.stringify({ s, ts: Date.now() })); } catch (_) { /* best-effort */ } };
+        _stage('start');
         viewport.classList.add('mcal-active');
         _mcalView = 'month';
 
@@ -2073,6 +2093,7 @@
 
         const visibleIds = await _visibleIdsP;
         _mcalVisibleScope = visibleIds;
+        _stage('visible-ids');
 
         // RBAC: birthday grid markers + the coming-up count are scoped to the
         // viewer's visible agent set so agents don't see other agents' clients'
@@ -2127,6 +2148,7 @@
         _mcalPerf('phase1:activities:start');
         const actResult = await _actsP;
         _mcalPerf('phase1:activities:done');
+        _stage('acts-fetched');
 
         // Phase 2 (fire-and-forget): people / drafts / refills.
         // These power person-names on cards, the birthday markers, and the
@@ -2260,6 +2282,7 @@
             activities = (actResult?.data || []).filter(_mcalKeepAct);
             if (_mcalTrust) _lsSet(_mcalActsKey, activities);
         }
+        _stage('acts-resolved');
         const personMap = new Map(allPeople.map(p => [String(p.id), p]));
         _mcalPersonMap = personMap;
 
@@ -2358,6 +2381,7 @@
             cells.push(`<div class="mcal-cell muted"><span class="num">${d > 0 ? d : ''}</span></div>`);
         }
 
+        _stage('cells-built');
         const grid = document.getElementById('mcal-grid');
         if (grid) {
             grid.innerHTML = cells.join('');
@@ -2366,6 +2390,7 @@
             if (_mcalTrust) _lsSet(_mcalSnapKey, cells.join(''));
             _mcalPerf('grid-painted');
         }
+        _stage('grid-painted');
 
         // ── Coming-up strip ─────────────────────────────────────
         const todayStr = `${todayY}-${String(todayM+1).padStart(2,'0')}-${String(todayDay).padStart(2,'0')}`;
@@ -2420,6 +2445,7 @@
             </div>`;
             if (_mcalTrust) _lsSet(_mcalSnapKey + '-coming', comingHost.innerHTML);
         }
+        _stage('done');
 
         // ── SWR background revalidate ──────────────────────────
         // After the cached grid is painted, quietly re-fetch the FULL month

@@ -36,7 +36,11 @@
   };
   const mask = (s) => { s = String(s || ''); return s.length > 6 ? s.slice(0, 3) + '…' + s.slice(-2) : s; };
   try {
-    add('Page build', '2026-07-14 r7');
+    add('Page build', '2026-07-14 r8');
+    try {
+      const hs = JSON.parse(localStorage.getItem('mcal-hang-stage') || 'null');
+      add('Month render last stage', hs ? (hs.s + ' @ ' + new Date(hs.ts).toLocaleTimeString() + (hs.s === 'done' ? '' : ' — DID NOT FINISH (froze after this stage)')) : '(never ran)', hs && hs.s !== 'done' ? 'bad' : 'ok');
+    } catch (_) { /* best-effort */ }
     try {
       const le = localStorage.getItem('mcal-last-error');
       add('Last calendar error breadcrumb', le ? le : '(none recorded)', le ? 'bad' : 'ok');
