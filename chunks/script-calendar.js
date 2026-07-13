@@ -3033,6 +3033,29 @@
                     rangeStart, monthEnd, html, grid, visibleIds,
                 });
             }
+            // Dead-session authz denial. When the local auth token is missing/expired,
+            // supabase-js sends the request as the ANON role, and anon has no EXECUTE
+            // on get_calendar_window (deliberately revoked) — so a silently-dropped
+            // session surfaces HERE as a 42501/JWT error, NOT as the empty read the
+            // guard below catches. Without this branch the code fell through to the
+            // generic toast and left the skeleton grid up forever with no re-login
+            // prompt (bug 2026-07-13, desktop). The 401/42501 is a real server
+            // response — proof Supabase is reachable — so pass serverConfirmed to let
+            // the probe act even for the boot-time offline-resume (_offline) user.
+            // A 42501 with a LIVE local token is a different beast (lost grant,
+            // incident 2026-06-25) and must stay on the loud toast path below.
+            const isAuthzErr = lightRes.error.code === '42501' || lightRes.error.code === 'PGRST301'
+                || /permission denied|jwt expired|invalid jwt/i.test(msg);
+            let _tokenDead = false;
+            try {
+                _tokenDead = !!(window.AppDataStore && typeof AppDataStore.hasLiveSession === 'function'
+                    && !AppDataStore.hasLiveSession());
+            } catch (_) { /* treat as live — fall through to the toast path */ }
+            if (isAuthzErr && _tokenDead) {
+                _paintOfflineFallback('session expired — keeping last view');
+                try { if (typeof window._checkSessionAlive === 'function') window._checkSessionAlive('calendar_rpc_denied', { serverConfirmed: true }); } catch (_) { /* best-effort */ }
+                return;
+            }
             // Network/offline — prefer stale snapshot over blank grid.
             // navigator.onLine is unreliable on Android (true even when server
             // unreachable), so also match common fetch-failure message patterns.
@@ -3062,7 +3085,8 @@
             && window.AppDataStore && typeof AppDataStore.hasLiveSession === 'function'
             && !AppDataStore.hasLiveSession()) {
             if (myToken === _state.rct) _paintOfflineFallback('session may have expired — keeping last view');
-            try { if (typeof window._checkSessionAlive === 'function') window._checkSessionAlive('calendar_empty_read'); } catch (_) { /* best-effort */ }
+            // 200 + [] is a real server response → serverConfirmed, same as the authz branch.
+            try { if (typeof window._checkSessionAlive === 'function') window._checkSessionAlive('calendar_empty_read', { serverConfirmed: true }); } catch (_) { /* best-effort */ }
             return;
         }
 

@@ -1987,8 +1987,18 @@ const Auth = {
     // Conservative liveness probe. Returns without acting unless the live session
     // is *definitively* gone (token absent/expired AND supabase-js confirms no
     // session, with no ambiguous error). Fire-and-forget friendly.
-    async function _checkSessionAlive(reason) {
-        if (!_currentUser || _currentUser._offline) return;          // logged-out shell only; never the offline user
+    //
+    // opts.serverConfirmed: the caller just received a REAL HTTP response from
+    // Supabase (e.g. a 401/42501 authz denial, or a 200 empty read). That proves
+    // the server is reachable RIGHT NOW, which resolves the ambiguity that put
+    // the boot-time offline-resume user (`_currentUser._offline`) into a zombie
+    // state (cached shell + every request downgraded to anon, no prompt ever —
+    // bug 2026-07-13: desktop calendar stuck on skeletons). Only with that proof
+    // do we probe an _offline user; ambient probes (interval/visibility/online)
+    // still skip them so a merely-offline user is never bounced.
+    async function _checkSessionAlive(reason, opts) {
+        if (!_currentUser) return;                                   // logged-out shell only
+        if (_currentUser._offline && !(opts && opts.serverConfirmed)) return; // offline-resume user: only server-confirmed callers may probe
         if (window._sessionExpiredShown || window._sessionWatchSuppressed) return;
         if (window._SUPABASE_LIB_FAILED) return;                     // lib never loaded — a different failure mode
         let live = true;
@@ -1998,7 +2008,15 @@ const Auth = {
         // refresh) before disrupting the user. Only a clean no-session acts.
         try {
             const { data, error } = await window.supabase.auth.getSession();
-            if (error) return;                                       // ambiguous (network) → leave the user alone
+            if (error) {
+                // A server-ANSWERED auth error (400/401/403) on the refresh attempt is
+                // a definitively dead refresh token — but only trust the status when
+                // the caller proved reachability (serverConfirmed); otherwise ambiguous.
+                if (opts && opts.serverConfirmed && (error.status === 400 || error.status === 401 || error.status === 403)) {
+                    _showSessionExpired(reason);
+                }
+                return;                                              // ambiguous (network) → leave the user alone
+            }
             if (data && data.session) return;                        // refresh repopulated it → self-healed
         } catch (_) { return; }                                      // ambiguous → leave the user alone
         _showSessionExpired(reason);
