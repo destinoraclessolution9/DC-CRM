@@ -5073,10 +5073,11 @@
         if (document.getElementById('is-closing')?.checked) {
             activity.is_closing = true;
             activity.solution_sold = document.getElementById('solution-sold')?.value;
-            activity.amount_closed = document.getElementById('amount-closed')?.value;
+            // '' is rejected by the Postgres numeric/date columns — coerce to NULL.
+            activity.amount_closed = document.getElementById('amount-closed')?.value || null;
             activity.payment_method = document.getElementById('payment-method')?.value;
             activity.invoice_number = document.getElementById('invoice-number')?.value;
-            activity.collection_date = document.getElementById('collection-date')?.value;
+            activity.collection_date = document.getElementById('collection-date')?.value || null;
             const imgInput = document.getElementById('redemption-image');
             if (imgInput && imgInput.files.length > 0) activity.redemption_image_name = imgInput.files[0].name;
 

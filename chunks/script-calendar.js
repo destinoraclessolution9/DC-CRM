@@ -6206,17 +6206,20 @@
             unable_to_serve: mo.unable_to_serve,
         };
         if (isClosed) {
+            // Blank inputs read back as '' — Postgres date/numeric columns reject
+            // empty strings ("invalid input syntax for type date"), so send NULL.
+            const _orNull = (v) => (v === '' || v == null ? null : v);
             updates.solution_sold = mo.solution_sold;
-            updates.amount_closed = mo.amount_closed;
-            updates.closing_amount = mo.amount_closed;
+            updates.amount_closed = _orNull(mo.amount_closed);
+            updates.closing_amount = _orNull(mo.amount_closed);
             updates.payment_method = mo.payment_method;
             updates.invoice_number = mo.invoice_number;
-            updates.collection_date = mo.collection_date;
-            updates.order_date = mo.order_date;
+            updates.collection_date = _orNull(mo.collection_date);
+            updates.order_date = _orNull(mo.order_date);
             if (updates.payment_method === 'POP') {
-                updates.pop_monthly_amount = mo.pop_monthly;
-                updates.pop_tenure = mo.pop_tenure;
-                updates.pop_down_payment = mo.pop_down;
+                updates.pop_monthly_amount = _orNull(mo.pop_monthly);
+                updates.pop_tenure = _orNull(mo.pop_tenure);
+                updates.pop_down_payment = _orNull(mo.pop_down);
             }
         }
         if (updates.unable_to_serve) {
