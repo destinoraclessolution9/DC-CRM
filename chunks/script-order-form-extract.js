@@ -625,7 +625,7 @@
             if (expRow && expBody) {
                 expRow.style.display = '';
                 const record = _ofeAllRows.find(r => String(r.id) === String(id));
-                if (record) expBody.innerHTML = _ofeFieldCard(record);
+                if (record) { expBody.innerHTML = _ofeFieldCard(record); try { window._resolveAttachmentImages && window._resolveAttachmentImages(expBody); } catch (_) {} }
             }
             UI.toast.success(`Marked as ${newStatus}`);
         } catch (err) {
@@ -642,7 +642,7 @@
         expRow.style.display = isOpen ? 'none' : '';
         if (!isOpen && expBody) {
             const record = _ofeAllRows.find(r => String(r.id) === String(id));
-            if (record) expBody.innerHTML = _ofeFieldCard(record);
+            if (record) { expBody.innerHTML = _ofeFieldCard(record); try { window._resolveAttachmentImages && window._resolveAttachmentImages(expBody); } catch (_) {} }
         }
     };
 
@@ -680,7 +680,7 @@
         }).join('');
 
         const photoHtml = record.file_url
-            ? `<img src="${esc(record.file_url)}" loading="lazy"
+            ? `<img data-attach-src="${esc(String(record.file_url))}" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" loading="lazy"
                     style="width:100%;border-radius:8px;border:1px solid var(--border,#e2e8f0);margin-bottom:10px;cursor:zoom-in;"
                     onclick="window._openAttachment && window._openAttachment('${UI.escJsAttr(record.file_url)}')">`
             : `<div style="width:100%;aspect-ratio:3/4;background:var(--gray-100);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--gray-300);margin-bottom:10px;font-size:28px;">

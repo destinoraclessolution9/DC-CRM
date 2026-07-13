@@ -7048,7 +7048,7 @@
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;max-height:60vh;overflow:auto;padding:4px;">
                 ${photos.map(url => `
                     <div style="position:relative;">
-                        <img loading="lazy" decoding="async" src="${escapeHtml(url)}" style="width:100%;height:120px;border-radius:6px;object-fit:cover;cursor:zoom-in;border:1px solid var(--gray-200);" onclick="window._openAttachment && window._openAttachment('${UI.escJsAttr(String(url))}')">
+                        <img loading="lazy" decoding="async" data-attach-src="${escapeHtml(String(url))}" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" style="width:100%;height:120px;border-radius:6px;object-fit:cover;cursor:zoom-in;border:1px solid var(--gray-200);" onclick="window._openAttachment && window._openAttachment('${UI.escJsAttr(String(url))}')">
                         <button type="button" class="btn-icon" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border-radius:50%;width:22px;height:22px;font-size:11px;padding:0;" title="Remove" onclick="event.stopPropagation();app.removeAttendeePhoto(${attendeeRowId}, '${UI.escJsAttr(String(url))}')"><i class="fas fa-times"></i></button>
                     </div>
                 `).join('')}
@@ -7058,6 +7058,8 @@
         UI.showModal(`Discussion Papers (${photos.length})`, content, [
             { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
         ]);
+        // C2: modal outside #content-viewport → resolve data-attach-src to signed URLs.
+        try { window._resolveAttachmentImages && setTimeout(() => window._resolveAttachmentImages(), 0); } catch (_) {}
     };
 
     const removeAttendeePhoto = async (attendeeRowId, url) => {
