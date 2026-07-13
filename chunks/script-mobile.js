@@ -2182,12 +2182,26 @@
         const refillsR = cachedRefills;
 
         // Resolve this month's activity set from cache or fresh fetch.
+        // Dead-session guard: without a live local token, queryAdvanced resolves
+        // from the local snapshot fallback (or an anon RLS empty read) — that
+        // result is NOT the truth and must never be persisted. mcal-acts has no
+        // TTL, so caching a dead-session [] kept the month empty even after a
+        // fresh login (bug 2026-07-13, mobile). Also route to the session probe —
+        // it self-earns server proof via a health-endpoint check, so a genuinely
+        // offline user is never bounced.
+        const _mcalLive = (() => {
+            try { return !window.AppDataStore || typeof AppDataStore.hasLiveSession !== 'function' || AppDataStore.hasLiveSession(); }
+            catch (_) { return true; }
+        })();
+        if (!_mcalLive) {
+            try { if (typeof window._checkSessionAlive === 'function') window._checkSessionAlive('mcal_dead_session', { probeReachability: true }); } catch (_) { /* best-effort */ }
+        }
         let activities;
         if (_actMode === 'cache') {
             activities = (_cachedActs || []).filter(_mcalKeepAct);
         } else {
             activities = (actResult?.data || []).filter(_mcalKeepAct);
-            _lsSet(_mcalActsKey, activities);
+            if (_mcalLive) _lsSet(_mcalActsKey, activities);
         }
         const personMap = new Map(allPeople.map(p => [String(p.id), p]));
         _mcalPersonMap = personMap;
@@ -2290,7 +2304,9 @@
         const grid = document.getElementById('mcal-grid');
         if (grid) {
             grid.innerHTML = cells.join('');
-            _lsSet(_mcalSnapKey, cells.join(''));
+            // Only snapshot a grid built from live data — a dead-session render
+            // (empty/stale) must not become the instant-restore for next launch.
+            if (_mcalLive) _lsSet(_mcalSnapKey, cells.join(''));
             _mcalPerf('grid-painted');
         }
 
@@ -2345,7 +2361,7 @@
                     </button>
                 </div>
             </div>`;
-            _lsSet(_mcalSnapKey + '-coming', comingHost.innerHTML);
+            if (_mcalLive) _lsSet(_mcalSnapKey + '-coming', comingHost.innerHTML);
         }
 
         // ── SWR background revalidate ──────────────────────────
@@ -2366,6 +2382,14 @@
                 const _staleSig = _sig(activities);
                 AppDataStore.queryAdvanced('activities', _buildActOpts(monthStartStr, monthEndStr))
                     .then(res => {
+                        // Dead-session guard: a revalidate without a live token
+                        // resolves from the local fallback / anon empty read.
+                        // Overwriting the (good) cache with it — and re-rendering —
+                        // would make a zombie session actively WIPE a healthy view.
+                        try {
+                            if (window.AppDataStore && typeof AppDataStore.hasLiveSession === 'function'
+                                && !AppDataStore.hasLiveSession()) return;
+                        } catch (_) { /* treat as live */ }
                         const freshRaw = (res?.data || []).filter(_mcalKeepAct);
                         // Preserve any optimistic rows still pending — they're not
                         // in Supabase yet but the user expects to see them.

@@ -3016,6 +3016,22 @@ class DataStore {
             return { data: this._stripTombstones(tableName, data), count, limit, offset };
         } catch (e) {
             console.error(`queryAdvanced error on ${tableName}:`, e);
+            // Dead-session net: the local no-live-session throw above means every
+            // view fed by queryAdvanced (mobile Home/Calendar/Clients, pickers)
+            // silently renders cached/empty data with no re-login prompt (bug
+            // 2026-07-13, mobile). Route to the conservative session probe,
+            // throttled to one probe per 30s. The probe self-earns server proof
+            // via the auth health endpoint before acting, so a genuinely offline
+            // user is never disturbed, and it no-ops entirely on healthy tokens.
+            try {
+                if (/no live auth session/i.test((e && e.message) || '') && typeof window._checkSessionAlive === 'function') {
+                    const _now = Date.now();
+                    if (!window.__qadvProbeTs || _now - window.__qadvProbeTs > 30000) {
+                        window.__qadvProbeTs = _now;
+                        window._checkSessionAlive('queryadvanced_dead_session', { probeReachability: true });
+                    }
+                }
+            } catch (_) { /* best-effort */ }
             // Fallback: filter cached/local data client-side with pagination.
             const all = await this.getAll(tableName);
             // Telemetry only (no cap — capping before the filter would return

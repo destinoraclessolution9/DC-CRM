@@ -1887,7 +1887,11 @@ const Auth = {
 
     async function logout() {
         try { window._sessionWatchSuppressed = true; } catch (_) { /* suppress the expired-session prompt during an intentional sign-out */ }
-        await Auth.logout();
+        // Never let a failed server-side signOut abort the LOCAL logout — in the
+        // dead-session/zombie state (no live token) signOut can error, and the
+        // one thing a stuck user needs is for Logout to always clear this device.
+        // (switchAccount() below already wraps it; this was the only unguarded call.)
+        try { await Auth.logout(); } catch (_) { /* proceed with local wipe regardless */ }
         _currentUser = null;
         try { (window.app._clearMobileSnapshots || (() => {}))(); } catch (_) { /* intentional: best-effort cache wipe */ } // wipe per-user mobile Home/Calendar caches (shared-device leak)
         _wipeCachedData();   // wipe cached PII (fs_crm_* + crm-data-v1) on explicit logout
@@ -1998,7 +2002,24 @@ const Auth = {
     // still skip them so a merely-offline user is never bounced.
     async function _checkSessionAlive(reason, opts) {
         if (!_currentUser) return;                                   // logged-out shell only
-        if (_currentUser._offline && !(opts && opts.serverConfirmed)) return; // offline-resume user: only server-confirmed callers may probe
+        let _confirmed = !!(opts && opts.serverConfirmed);
+        // opts.probeReachability: the caller suspects a dead session but has no
+        // HTTP response to prove the server is reachable (e.g. the mobile data
+        // path, whose dead-session detection throws locally BEFORE any network
+        // call). Earn the confirmation live: only a clean 200 from the auth
+        // health endpoint counts — a 521/timeout/failure means Supabase may
+        // genuinely be down, so the offline-resume user is left alone.
+        if (_currentUser._offline && !_confirmed && opts && opts.probeReachability) {
+            try {
+                const ctl = new AbortController();
+                const t = setTimeout(() => { try { ctl.abort(); } catch (_) { /* noop */ } }, 4000);
+                const resp = await fetch((window.SUPABASE_URL || '') + '/auth/v1/health',
+                    { method: 'GET', cache: 'no-store', signal: ctl.signal, headers: { apikey: window.__SUPABASE_ANON || '' } });
+                clearTimeout(t);
+                _confirmed = !!(resp && resp.ok);
+            } catch (_) { _confirmed = false; }
+        }
+        if (_currentUser._offline && !_confirmed) return;            // offline-resume user: only server-confirmed callers may probe
         if (window._sessionExpiredShown || window._sessionWatchSuppressed) return;
         if (window._SUPABASE_LIB_FAILED) return;                     // lib never loaded — a different failure mode
         let live = true;
@@ -2011,8 +2032,8 @@ const Auth = {
             if (error) {
                 // A server-ANSWERED auth error (400/401/403) on the refresh attempt is
                 // a definitively dead refresh token — but only trust the status when
-                // the caller proved reachability (serverConfirmed); otherwise ambiguous.
-                if (opts && opts.serverConfirmed && (error.status === 400 || error.status === 401 || error.status === 403)) {
+                // reachability was proved (serverConfirmed or a passed health probe).
+                if (_confirmed && (error.status === 400 || error.status === 401 || error.status === 403)) {
                     _showSessionExpired(reason);
                 }
                 return;                                              // ambiguous (network) → leave the user alone
@@ -2466,6 +2487,19 @@ function _wireLoginBtn() {
             updateUserDisplay();
             updateNavVisibility();
             UI.toast.success(`Welcome ${profile.full_name}!`);
+            // Wipe mobile calendar/home caches on every fresh login. A session that
+            // died WITHOUT an explicit logout (dead-session → re-login flow) skips
+            // logout()'s cache wipe, so mcal-* snapshots poisoned with empty
+            // anon-read data during the dead period would keep rendering an empty
+            // month AFTER a successful login (bug 2026-07-13, mobile). Inline by
+            // prefix — chunk-independent (app._clearMobileSnapshots may not be
+            // loaded at login time).
+            try {
+                Object.keys(localStorage)
+                    .filter(k => (k.startsWith('mcal-') || k.startsWith('mhome-') || k.startsWith('mp-list-snap-'))
+                        && k !== 'mcal-retry-queue-v1') // durable offline-insert queue must survive (mirrors _clearMobileSnapshots)
+                    .forEach(k => { try { localStorage.removeItem(k); } catch (_) { /* best-effort */ } });
+            } catch (_) { /* best-effort cache hygiene */ }
             // Arm the web inactivity auto-logout now that _currentUser is set
             // (initSecurity ran pre-auth during boot and bailed on the cu guard).
             try { (window.app.initSessionTimeout || (() => {}))(); } catch (_) { /* best-effort timer arm */ }
