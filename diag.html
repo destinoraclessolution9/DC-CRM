@@ -23,6 +23,8 @@
 <div id="out"></div>
 <script src="libs/supabase-js-2.106.2.min.js"></script>
 <script src="supabase-init.js"></script>
+<script src="data-helpers.js"></script>
+<script src="data.js"></script>
 <script>
 (async () => {
   const out = document.getElementById('out');
@@ -34,7 +36,13 @@
   };
   const mask = (s) => { s = String(s || ''); return s.length > 6 ? s.slice(0, 3) + '…' + s.slice(-2) : s; };
   try {
-    add('Page build', '2026-07-13 r4');
+    add('Page build', '2026-07-13 r5');
+    try {
+      if (navigator.storage && navigator.storage.estimate) {
+        const est = await navigator.storage.estimate();
+        add('Storage quota', Math.round((est.usage || 0) / 1024) + ' KB used of ' + Math.round((est.quota || 0) / 1048576) + ' MB');
+      }
+    } catch (_) { /* estimate unsupported */ }
     // Container introspection — which world is this page running in?
     add('Standalone app mode', (navigator.standalone === true) ? 'YES (home-screen app container)' : 'no (browser tab)', '');
     add('One-shot purge flag', localStorage.getItem('_cache_purge_2026_07_13') ? 'PRESENT — new build has run here' : 'ABSENT — this container has NOT run today\'s build yet', localStorage.getItem('_cache_purge_2026_07_13') ? 'ok' : 'bad');
@@ -112,7 +120,31 @@
       }
     }
 
-    // 6. What the app shell thinks (only meaningful inside the app, harmless here)
+    // 6. THE APP'S OWN DATA PATH — exactly what the mobile month view calls.
+    // This goes through AppDataStore.queryAdvanced (loaded above), including
+    // its hasLiveSession gate, light-select column list, fallback and
+    // _degraded marking — reproducing the calendar fetch 1:1 in this container.
+    try {
+      const t2 = Date.now();
+      const qa = await window.AppDataStore.queryAdvanced('activities', {
+        gte: { activity_date: '2026-06-29' }, lte: { activity_date: '2026-08-03' },
+        sort: 'start_time', sortDir: 'asc', limit: 1000, offset: 0, countMode: null,
+      });
+      const rows = (qa && qa.data) || [];
+      add('queryAdvanced month fetch (app path)',
+        rows.length + ' rows, degraded=' + String(!!(qa && qa._degraded)) + ' (' + (Date.now() - t2) + 'ms)',
+        rows.length > 0 && !(qa && qa._degraded) ? 'ok' : 'bad');
+      if (rows.length > 0) {
+        const s = rows[0];
+        const dates = new Set(rows.map(r => String(r.activity_date || '').slice(0, 10)).filter(Boolean));
+        add('Sample row / date grouping',
+          'activity_date=' + JSON.stringify(s.activity_date) + ' → key "' + String(s.activity_date || '').slice(0, 10) + '"; '
+          + dates.size + ' distinct dates; fields: ' + Object.keys(s).slice(0, 12).join(','));
+      }
+      add('hasLiveSession (data layer)', String(window.AppDataStore.hasLiveSession()), window.AppDataStore.hasLiveSession() ? 'ok' : 'bad');
+    } catch (qaErr) {
+      add('queryAdvanced month fetch (app path)', 'THREW: ' + ((qaErr && qaErr.message) || String(qaErr)), 'bad');
+    }
     add('App version marker', (document.querySelector('script[src^="script."]') || {}).src || 'n/a (diag page)');
     document.getElementById('status').textContent = 'Done. Please screenshot this whole page.';
   } catch (e) {
