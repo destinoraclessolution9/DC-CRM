@@ -1293,7 +1293,7 @@
     };
     const _renderInstallmentRow = (saleId, i) => {
         const slip = i.slip_url
-            ? `<a href="${escapeHtml(i.slip_url)}" target="_blank" rel="noopener" style="color:#0e7490;font-size:12px;">slip${i.is_manual_transfer ? ' (manual)' : ''}</a>`
+            ? `<a href="#" onclick="event.preventDefault();window._openAttachment&&window._openAttachment('${UI.escJsAttr(String(i.slip_url))}')" style="color:#0e7490;font-size:12px;cursor:pointer;">slip${i.is_manual_transfer ? ' (manual)' : ''}</a>`
             : (i.is_manual_transfer ? '<span style="color:var(--gray-500);font-size:12px;">manual</span>' : '');
         const paidInfo = i.status === 'paid'
             ? `<span style="font-size:12px;color:var(--gray-600);">${escapeHtml(i.paid_date || '')}</span> ${slip}`
