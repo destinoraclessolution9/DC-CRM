@@ -3659,7 +3659,7 @@ const renderCustomerClosingTab = async (customer, container) => {
                 <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;color:var(--gray-500);">${escapeHtml(r.notes || '-')}</td>
                 <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;text-align:center;">
                     ${r.attachment_data
-                        ? `<a href="${safeUrl(r.attachment_data)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(r.attachment_name||'View attachment')}" style="color:var(--primary);margin-right:4px;"><i class="fas fa-paperclip"></i></a>`
+                        ? `<a href="#" onclick="event.preventDefault();window._openAttachment&&window._openAttachment('${UI.escJsAttr(String(r.attachment_data))}')" title="${escapeHtml(r.attachment_name||'View attachment')}" style="color:var(--primary);margin-right:4px;cursor:pointer;"><i class="fas fa-paperclip"></i></a>`
                         : `<label for="pre2025-att-${pid}-${i}" title="Attach file" style="cursor:pointer;color:var(--gray-400);margin-right:4px;"><i class="fas fa-paperclip"></i></label>`
                     }
                     <input type="file" id="pre2025-att-${pid}-${i}" style="display:none" accept="image/*,application/pdf" onchange="event.stopPropagation();app.addPrePurchaseAttachment(${pid},${i},this)">
