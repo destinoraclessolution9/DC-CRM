@@ -86,6 +86,8 @@
         totalMeetings: "Agent meetings & training - Events and internal agent meetings only",
         clientMeetings: "Client meetings - CPS, FTF, and FSA meetings with prospects/customers",
         activityHeadcount: "Event attendance - Sum of attendees by activity title",
+        neaPitching: "NEA Pitching - Distinct people pitched the DC 代理配套 (Agent Package), taken from Post-Meetup Notes → Potential & Opportunities. Same person counts once no matter how many meetings.",
+        fengshuiPitching: "Fengshui Pitching - Distinct people pitched a Feng Shui audit (灵活 flexi or 专案 project), taken from Post-Meetup Notes → Potential & Opportunities. Same person counts once even if both were ticked.",
         agentHours: "Agent operating hours this week (Mon–Sun) vs weekly target — Full-time 45h, Part-time 20h. Sums the duration of every calendar item each agent led or attended (any activity type); 1h is assumed when an event has no start/end time. Always the current week, regardless of the date filter above."
     };
 
@@ -1376,18 +1378,20 @@
         // RPC fast path inside getConversionRate. getActiveAgents uses a rolling
         // 60-day window (ignores from/to) — the RPC replicates that exactly.
         const _ext = await _tryExtendedKpiRPC(from, to);
-        const [activityHeadcount, conversionRate, meetUpExistingCount, cfHeadcount, activeAgents, agentHoursSummary] = await Promise.all([
+        const [activityHeadcount, conversionRate, meetUpExistingCount, cfHeadcount, activeAgents, agentHoursSummary, neaPitching, fengshuiPitching] = await Promise.all([
             _ext ? _ext.activityHeadcount   : getActivityHeadcount(from, to),
             getConversionRate(from, to),
             _ext ? _ext.meetUpExistingCount : getMeetUpExistingCustomerCount(from, to),
             _ext ? _ext.cfHeadcount         : getCFHeadcount(from, to),
             _ext ? _ext.activeAgents        : getActiveAgents(),
             getAgentOperatingHoursSummary(),   // always current week, ignores from/to
+            getNeaPitchingHeadcount(from, to),      // P&O "DC 代理配套" ticks, deduped by person
+            getFengshuiPitchingHeadcount(from, to), // P&O 灵活/专案 ticks, deduped by person
         ]);
 
         // Fast path: try server-side aggregates first.
         const fast = await _tryKpiRPCs(from, to);
-        if (fast) return { ...fast, activityHeadcount, conversionRate, meetUpExistingCount, cfHeadcount, activeAgents, agentHours: agentHoursSummary.display, agentHoursPct: agentHoursSummary.pct };
+        if (fast) return { ...fast, activityHeadcount, conversionRate, meetUpExistingCount, cfHeadcount, activeAgents, neaPitching, fengshuiPitching, agentHours: agentHoursSummary.display, agentHoursPct: agentHoursSummary.pct };
 
         // Fallback: original 11-call client-side path.
         const [
@@ -1411,7 +1415,7 @@
             cpsCount, totalSales, popCaseCount, popSales,
             eppCaseCount, eppSales, newAgents, newCustomers,
             totalMeetings, clientMeetings, activityHeadcount, conversionRate, eppDetails,
-            meetUpExistingCount, cfHeadcount, activeAgents,
+            meetUpExistingCount, cfHeadcount, activeAgents, neaPitching, fengshuiPitching,
             agentHours: agentHoursSummary.display, agentHoursPct: agentHoursSummary.pct
         };
     };
@@ -2135,6 +2139,64 @@ const getActivityHeadcount = async (from, to) => {
     }
     return count;
 };
+
+// ── Pitching head-counts (Post-Meetup Notes → Potential & Opportunities) ─────
+// Two person-deduped head-counts sourced from the activity's
+// `opportunity_potential` field — the serialized checkbox-list the Post-Meetup
+// Notes "Potential & Opportunities" block writes (buildPostMeetupNotesBlock /
+// serializeMultiSelectToText). Format is `[Products] A, B | [Bujishu] C |
+// Remarks: …`. We parse ONLY the group-marked selected items (never the free
+// Remarks text) so a remark that happens to contain "专案"/"灵活" can't inflate
+// the count. parseSelectedItems lives in the calendar chunk (may be unloaded
+// when reporting runs), so its logic is re-declared here — same pattern as
+// _wrParseEventCategories above.
+const _parseOppSelected = (raw) => {
+    if (!raw) return [];
+    const remarksMatch = raw.match(/\|\s*Remarks:\s*([\s\S]*)/);
+    const itemsPart = remarksMatch ? raw.slice(0, remarksMatch.index) : raw;
+    const selected = [];
+    const groupRegex = /\[([^\]]+)\]\s*([^[|]*)/g;
+    let m;
+    while ((m = groupRegex.exec(itemsPart)) !== null) {
+        m[2].split(',').map(n => n.trim()).filter(Boolean).forEach(n => selected.push(n));
+    }
+    return selected;
+};
+
+// Count DISTINCT persons (prospect_id → customer_id → activity fallback) with at
+// least one in-range activity whose Potential & Opportunities selection matches
+// `predicate`. Repeat meetings by the same person collapse to 1 (the Set). Same
+// scope contract as getActivityTypeCount: date window, _visibleUserIds
+// (lead_agent_id), _currentRoleFilter, and _recInMarket market drill-down.
+const _pitchHeadcount = async (from, to, predicate, ctx) => {
+    const needUsers = _currentRoleFilter !== 'All';
+    const activities = await _reportActsInRange(from, to, ctx);
+    const users = needUsers ? await AppDataStore.getAll('users') : [];
+    const userMap = {};
+    users.forEach(u => { userMap[u.id] = u; });
+    const seen = new Set();
+    for (const a of activities) {
+        if (a.activity_date < from || a.activity_date > to) continue;
+        if (!_recInMarket(a)) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(a.lead_agent_id)) continue;
+        if (_currentRoleFilter !== 'All') {
+            const agent = userMap[a.lead_agent_id];
+            if (!agent || agent.role !== _currentRoleFilter) continue;
+        }
+        if (!_parseOppSelected(a.opportunity_potential || '').some(predicate)) continue;
+        seen.add(a.prospect_id ? 'p' + a.prospect_id : (a.customer_id ? 'c' + a.customer_id : 'a' + a.id));
+    }
+    return seen.size;
+};
+
+// NEA Pitching: person ticked "DC 代理配套" (Agent Package) in P&O.
+const getNeaPitchingHeadcount = (from, to) =>
+    _pitchHeadcount(from, to, s => s.includes('代理配套'), 'getNeaPitchingHeadcount');
+
+// Fengshui Pitching: person ticked 灵活 (flexi audit) OR 专案 (project audit) in
+// P&O. Deduped per person → ticking both still counts as 1.
+const getFengshuiPitchingHeadcount = (from, to) =>
+    _pitchHeadcount(from, to, s => s.includes('灵活') || s.includes('专案'), 'getFengshuiPitchingHeadcount');
 
 // ── Weekly-report auto-fill getters ────────────────────────────────────────
 // Two scope-correct, date-windowed counters cloned from the proven KPI getters
@@ -2873,6 +2935,52 @@ const _buildClientMeetingsDetailsLegacy = async (from, to) => {
     return renderDetailTable(['Date', 'Type', 'Title', 'Lead Agent', 'Customer / Prospect'], rows);
 };
 
+// Drill-down for the two pitching head-counts: one row per DISTINCT person
+// (matching the card's deduped count), showing which target product(s) they
+// ticked and their latest such meeting. Same scope gates as the getters.
+const _buildPitchDetails = async (from, to, predicate) => {
+    const activities = await AppDataStore.getAll('activities');
+    const [users, customers, prospects] = await Promise.all([
+        AppDataStore.getAll('users'),
+        AppDataStore.getAll('customers'),
+        AppDataStore.getAll('prospects')
+    ]);
+    const userMap = {}; users.forEach(u => { userMap[String(u.id)] = u; });
+    const custMap = {}; customers.forEach(c => { custMap[String(c.id)] = c; });
+    const prospMap = {}; prospects.forEach(p => { prospMap[String(p.id)] = p; });
+    const byPerson = new Map();
+    for (const a of activities) {
+        if (a.activity_date < from || a.activity_date > to) continue;
+        if (!_recInMarket(a)) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(a.lead_agent_id)) continue;
+        if (_currentRoleFilter !== 'All') {
+            const agent = userMap[String(a.lead_agent_id)];
+            if (!agent || agent.role !== _currentRoleFilter) continue;
+        }
+        const hits = _parseOppSelected(a.opportunity_potential || '').filter(predicate);
+        if (!hits.length) continue;
+        const key = a.prospect_id ? 'p' + a.prospect_id : (a.customer_id ? 'c' + a.customer_id : 'a' + a.id);
+        const cust = a.customer_id ? custMap[String(a.customer_id)] : null;
+        const prosp = a.prospect_id ? prospMap[String(a.prospect_id)] : null;
+        const name = cust?.full_name || prosp?.full_name || a.contact_name || '—';
+        const agentName = userMap[String(a.lead_agent_id)]?.full_name || '—';
+        const rec = byPerson.get(key) || { name, agent: agentName, ticked: new Set(), date: a.activity_date };
+        hits.forEach(h => rec.ticked.add(h));
+        if ((a.activity_date || '') > (rec.date || '')) rec.date = a.activity_date;
+        byPerson.set(key, rec);
+    }
+    const rows = [...byPerson.values()]
+        .sort((x, y) => (y.date || '').localeCompare(x.date || ''))
+        .map(r => [r.date || '—', r.name, r.agent, [...r.ticked].join(', ') || '—']);
+    return renderDetailTable(['Last Meet', 'Customer / Prospect', 'Lead Agent', 'Pitched'], rows);
+};
+
+const buildNeaPitchingDetails = (from, to) =>
+    _buildPitchDetails(from, to, s => s.includes('代理配套'));
+
+const buildFengshuiPitchingDetails = (from, to) =>
+    _buildPitchDetails(from, to, s => s.includes('灵活') || s.includes('专案'));
+
 const buildMeetUpExistingDetails = async (from, to) => {
     const _det = await _tryActivityDetails(from, to, CLIENT_MEETING_TYPES, '%golden road%');
     if (_det) {
@@ -3103,6 +3211,8 @@ const showKPIDetails = async (key) => {
         conversionRate: 'Conversion Rate',
         totalMeetings: 'Meetings & Training',
         clientMeetings: 'Client Meetings',
+        neaPitching: 'NEA Pitching',
+        fengshuiPitching: 'Fengshui Pitching',
         activityHeadcount: 'Activity Attendance',
         meetUpExistingCount: 'Meet Up (Existing Customers)',
         cfHeadcount: 'CF Headcount (CPS Referrers)',
@@ -3134,6 +3244,8 @@ const showKPIDetails = async (key) => {
         else if (key === 'conversionRate')   body = await buildConversionDetails(from, to);
         else if (key === 'totalMeetings')    body = await buildMeetingsDetails(from, to);
         else if (key === 'clientMeetings')   body = await buildClientMeetingsDetails(from, to);
+        else if (key === 'neaPitching')      body = await buildNeaPitchingDetails(from, to);
+        else if (key === 'fengshuiPitching') body = await buildFengshuiPitchingDetails(from, to);
         else if (key === 'activityHeadcount')  body = await buildActivityHeadcountDetails(from, to);
         else if (key === 'meetUpExistingCount') body = await buildMeetUpExistingDetails(from, to);
         else if (key === 'cfHeadcount')        body = await buildCFHeadcountDetails(from, to);
@@ -3175,6 +3287,8 @@ const showKPIDetails = async (key) => {
             { label: 'Conversion Rate', value: `${kpis.conversionRate}% `, prev: prevKpis.conversionRate, icon: '📈', color: 'purple', key: 'conversionRate' },
             { label: 'Meetings & Training', value: kpis.totalMeetings, prev: prevKpis.totalMeetings, icon: '📅', color: 'orange', key: 'totalMeetings' },
             { label: 'Client Meetings', value: kpis.clientMeetings, prev: prevKpis.clientMeetings, icon: '🤝', color: 'blue', key: 'clientMeetings' },
+            { label: 'NEA Pitching', value: kpis.neaPitching || 0, prev: prevKpis.neaPitching || 0, icon: '🧧', color: 'orange', key: 'neaPitching' },
+            { label: 'Fengshui Pitching', value: kpis.fengshuiPitching || 0, prev: prevKpis.fengshuiPitching || 0, icon: '🧭', color: 'green', key: 'fengshuiPitching' },
             { label: 'Activity Attendance', value: kpis.activityHeadcount, prev: prevKpis.activityHeadcount, icon: '📊', color: 'purple', key: 'activityHeadcount' },
             { label: 'Agent Hours (Wk)', value: kpis.agentHours, prev: prevKpis.agentHours, icon: '⏱️', key: 'agentHours',
               color: (kpis.agentHoursPct >= 90 ? 'green' : kpis.agentHoursPct >= 60 ? 'orange' : 'red') }
