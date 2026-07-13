@@ -2804,6 +2804,26 @@ function _wireLoginBtn() {
         return;
     }
 
+    // One-shot poisoned-cache purge (2026-07-13). During the dead-session window
+    // the mobile month caches (no-TTL mcal-acts + grid snapshots) and the
+    // activities SWR snapshot could be frozen as "empty" — and iOS home-screen
+    // containers SURVIVE delete/re-add, so stranded devices kept rendering the
+    // poison no matter what the user did. Purge once per device on first boot of
+    // this build; the _degraded/_mcalTrust guards added the same day prevent
+    // re-poisoning, so this never needs to run twice. Durable offline-insert
+    // queue (mcal-retry-queue-v1) is preserved.
+    try {
+        if (!localStorage.getItem('_cache_purge_2026_07_13')) {
+            Object.keys(localStorage)
+                .filter(k => (k.startsWith('mcal-') || k.startsWith('mhome-') || k.startsWith('mp-list-snap-')
+                    || k === 'fs_crm_activities' || k === 'fs_crm_activities_last_sync')
+                    && k !== 'mcal-retry-queue-v1')
+                .forEach(k => { try { localStorage.removeItem(k); } catch (_) { /* per-key best-effort */ } });
+            localStorage.setItem('_cache_purge_2026_07_13', '1');
+            console.info('[init] one-shot mobile cache purge applied (2026-07-13)');
+        }
+    } catch (_) { /* best-effort hygiene */ }
+
     try {
         // Try to restore session — use getSession() first (reads localStorage, works
         // offline / on slow mobile networks). getUser() always makes a network round-trip
