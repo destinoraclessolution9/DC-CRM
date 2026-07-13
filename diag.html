@@ -36,11 +36,17 @@
   };
   const mask = (s) => { s = String(s || ''); return s.length > 6 ? s.slice(0, 3) + '…' + s.slice(-2) : s; };
   try {
-    add('Page build', '2026-07-13 r6');
+    add('Page build', '2026-07-14 r7');
     try {
       const le = localStorage.getItem('mcal-last-error');
-      add('Last calendar render error', le ? le : '(none recorded)', le ? 'bad' : 'ok');
+      add('Last calendar error breadcrumb', le ? le : '(none recorded)', le ? 'bad' : 'ok');
     } catch (_) { /* best-effort */ }
+    try {
+      const log = JSON.parse(localStorage.getItem('crm_error_log') || '[]');
+      add('Recent app errors (' + log.length + ' logged)', log.length
+        ? log.slice(0, 5).map(x => (x.ts || '').slice(5, 19) + ' [' + (x.type || '?') + '] ' + String(x.msg || '').slice(0, 160) + (x.src ? ' @' + String(x.src).split('/').pop() + ':' + x.line : '')).join('<br><br>')
+        : '(none)', log.length ? 'warn' : 'ok');
+    } catch (_) { add('Recent app errors', 'unreadable'); }
     try {
       if (navigator.storage && navigator.storage.estimate) {
         const est = await navigator.storage.estimate();

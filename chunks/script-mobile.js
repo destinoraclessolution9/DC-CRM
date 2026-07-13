@@ -2707,23 +2707,42 @@
     // deleted/orphaned contact: if the lookup misses we drop back to details.
     const mcalOpenEvent = async (activityId, prospectId, customerId) => {
         try { UI.hideModal(); } catch (_) { /* intentional: best-effort modal cleanup before navigating */ }
+        // Timeout guard (2026-07-14): getById/detail renders have no internal
+        // timeout — on a slow/stalled connection the await never settles, the
+        // sheet has already closed, and the tap reads as "app hung" with zero
+        // feedback. Race every step; on timeout fall through to the next path
+        // so the tap ALWAYS produces something (detail modal or an error toast).
+        const _race = (p, ms, label) => Promise.race([
+            p,
+            new Promise((_, rej) => setTimeout(() => rej(new Error(label + ' timed out after ' + (ms / 1000) + 's')), ms)),
+        ]);
         try {
-            if (prospectId) {
-                const p = await AppDataStore.getById('prospects', prospectId);
-                if (p) { await window.app.showProspectDetail(prospectId); return; }
-            } else if (customerId) {
-                const c = await AppDataStore.getById('customers', customerId);
-                if (c) { await window.app.showCustomerDetail(customerId); return; }
-            }
-        } catch (e) { console.error(e); }
-        // No linked contact (or it was removed) — show the activity details.
-        // viewActivityDetails (incl. the attendee list) lives in the calendar
-        // chunk, which the mobile calendar never loads on its own — so without
-        // this on-demand load the tap silently no-ops and EVENT attendees never
-        // render. Mirrors the _loadChunk pattern used by the mobile follow-up
-        // sheets elsewhere in this file.
-        try { if (typeof window._loadChunk === 'function') await window._loadChunk('chunks/script-calendar.min.js'); } catch (_) { /* guarded below */ }
-        try { if (window.app.viewActivityDetails) await window.app.viewActivityDetails(activityId); } catch (e) { console.error(e); }
+            try {
+                if (prospectId) {
+                    const p = await _race(AppDataStore.getById('prospects', prospectId), 8000, 'prospect lookup');
+                    if (p) { await _race(window.app.showProspectDetail(prospectId), 12000, 'prospect detail'); return; }
+                } else if (customerId) {
+                    const c = await _race(AppDataStore.getById('customers', customerId), 8000, 'customer lookup');
+                    if (c) { await _race(window.app.showCustomerDetail(customerId), 12000, 'customer detail'); return; }
+                }
+            } catch (e) { console.error('[mcal] contact open failed, falling back to activity details:', e); }
+            // No linked contact (or it was removed / lookup failed) — show the
+            // activity details. viewActivityDetails lives in the calendar chunk,
+            // which the mobile calendar never loads on its own.
+            try { if (typeof window._loadChunk === 'function') await _race(window._loadChunk('chunks/script-calendar.min.js'), 10000, 'calendar chunk load'); } catch (_) { /* guarded below */ }
+            if (window.app.viewActivityDetails) await _race(window.app.viewActivityDetails(activityId), 12000, 'activity details');
+        } catch (e) {
+            // Never leave a dead tap: record the error (shown on /diag) and tell
+            // the user something happened instead of silent nothing.
+            try {
+                localStorage.setItem('mcal-last-error', JSON.stringify({
+                    ts: new Date().toISOString(), where: 'mcalOpenEvent',
+                    msg: (e && e.message) || String(e), stack: String((e && e.stack) || '').slice(0, 600),
+                }));
+            } catch (_) { /* best-effort breadcrumb */ }
+            console.error('[mcal] open activity failed:', e);
+            try { UI.toast.error('Could not open: ' + ((e && e.message) || 'unknown error')); } catch (_) { /* toast best-effort */ }
+        }
     };
     // Birthday WhatsApp greeting — id-only so nothing dynamic (names like
     // O'Brien) ever lands in an onclick attribute. Phone is looked up from the
@@ -2822,7 +2841,23 @@
             if (c) { await window.app.showCustomerDetail(id); return; }
         } catch (e) { console.error(e); }
     };
+    // Same never-dead-tap contract as mcalOpenEvent: a throw while building the
+    // day sheet must surface (breadcrumb + toast), not silently eat the tap.
     const mcalDayClick = (dateStr) => {
+        try {
+            return _mcalDayClickImpl(dateStr);
+        } catch (e) {
+            try {
+                localStorage.setItem('mcal-last-error', JSON.stringify({
+                    ts: new Date().toISOString(), where: 'mcalDayClick',
+                    msg: (e && e.message) || String(e), stack: String((e && e.stack) || '').slice(0, 600),
+                }));
+            } catch (_) { /* best-effort breadcrumb */ }
+            console.error('[mcal] day sheet failed:', e);
+            try { UI.toast.error('Could not open day: ' + ((e && e.message) || 'unknown error')); } catch (_) { /* toast best-effort */ }
+        }
+    };
+    const _mcalDayClickImpl = (dateStr) => {
         const allDay    = _mcalByDate.get(dateStr) || [];
         const dayBdays  = allDay.filter(a => a._isBirthday);
         const dayActs   = allDay.filter(a => !a._isBirthday && a.source !== 'birthday_auto');
