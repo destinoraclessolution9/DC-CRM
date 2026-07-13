@@ -2036,6 +2036,7 @@
             </div>
             <div id="mcal-coming-host">${_mcalCachedComing || ''}</div>
         </div>`;
+        _stage('header-built');
 
         // ── Perf instrumentation (mobile Tier 0) ─────────────────
         // Look for "[mcal-perf]" rows in the console to see where the cold
@@ -2091,7 +2092,27 @@
         const _needDrafts  = !cachedDrafts;
         const _needRefills = !cachedRefills;
 
-        const visibleIds = await _visibleIdsP;
+        _stage('caches-read');
+        // Hang-proofing (2026-07-14): the freeze detector showed renders stuck in
+        // this window. A wedged SHARED read promise (e.g. an in-flight-deduped
+        // getAll('users') that never settles) suspends this render forever — and
+        // because every navigation also awaits users data, the whole app reads as
+        // frozen (tab bar included). Never await unbounded here: on timeout fall
+        // back and RECORD which component was stuck. Fallback is strict-safe:
+        // [] masks client names + hides birthday markers, never widens visibility.
+        const _raceStage = (p, ms, fallback, label) => Promise.race([
+            p,
+            new Promise(res => setTimeout(() => {
+                try {
+                    localStorage.setItem('mcal-last-error', JSON.stringify({
+                        ts: new Date().toISOString(), where: 'hang-timeout',
+                        msg: label + ' did not settle within ' + (ms / 1000) + 's — rendered with fallback',
+                    }));
+                } catch (_) { /* best-effort breadcrumb */ }
+                res(fallback);
+            }, ms)),
+        ]);
+        const visibleIds = await _raceStage(_visibleIdsP, 6000, [], 'getVisibleUserIds/getAll(users)');
         _mcalVisibleScope = visibleIds;
         _stage('visible-ids');
 
@@ -2146,7 +2167,7 @@
         // activity cards still render via _mcalShortTitle's fallback to
         // activity_type.
         _mcalPerf('phase1:activities:start');
-        const actResult = await _actsP;
+        const actResult = await _raceStage(_actsP, 12000, { data: [], _degraded: true }, 'queryAdvanced(activities)');
         _mcalPerf('phase1:activities:done');
         _stage('acts-fetched');
 
