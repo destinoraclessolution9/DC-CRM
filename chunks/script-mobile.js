@@ -2078,7 +2078,7 @@
             _shouldRevalidate = true;
         } else {
             _actMode = 'full';
-            _actsP = AppDataStore.queryAdvanced('activities', _buildActOpts(monthStartStr, monthEndStr)).catch(() => ({ data: [] }));
+            _actsP = AppDataStore.queryAdvanced('activities', _buildActOpts(monthStartStr, monthEndStr)).catch(() => ({ data: [], _degraded: true }));
         }
 
         // ── Mobile Tier 1.1: decouple people / drafts / refills ──
@@ -2203,11 +2203,19 @@
             try { if (typeof window._checkSessionAlive === 'function') window._checkSessionAlive('mcal_dead_session', { probeReachability: true }); } catch (_) { /* best-effort */ }
         }
         let activities;
+        // _mcalTrust: this render is backed by a REAL server answer — live local
+        // token AND the fetch didn't degrade to the client-side fallback
+        // (_degraded from data.js on dead-session/timeout/overload). Only trusted
+        // renders may be persisted into the no-TTL mcal caches / grid snapshots;
+        // a transient NANO overload must never be frozen in as an empty month
+        // (bug 2026-07-13 round 2: post-CACHE_VERSION-bump fleet reload briefly
+        // starved the DB and Safari cached the failed fetch as []).
+        const _mcalTrust = _mcalLive && !(_actMode === 'full' && actResult && actResult._degraded);
         if (_actMode === 'cache') {
             activities = (_cachedActs || []).filter(_mcalKeepAct);
         } else {
             activities = (actResult?.data || []).filter(_mcalKeepAct);
-            if (_mcalLive) _lsSet(_mcalActsKey, activities);
+            if (_mcalTrust) _lsSet(_mcalActsKey, activities);
         }
         const personMap = new Map(allPeople.map(p => [String(p.id), p]));
         _mcalPersonMap = personMap;
@@ -2310,9 +2318,9 @@
         const grid = document.getElementById('mcal-grid');
         if (grid) {
             grid.innerHTML = cells.join('');
-            // Only snapshot a grid built from live data — a dead-session render
-            // (empty/stale) must not become the instant-restore for next launch.
-            if (_mcalLive) _lsSet(_mcalSnapKey, cells.join(''));
+            // Only snapshot a grid built from trusted data — a dead-session or
+            // degraded-fetch render must not become the instant-restore for next launch.
+            if (_mcalTrust) _lsSet(_mcalSnapKey, cells.join(''));
             _mcalPerf('grid-painted');
         }
 
@@ -2367,7 +2375,7 @@
                     </button>
                 </div>
             </div>`;
-            if (_mcalLive) _lsSet(_mcalSnapKey + '-coming', comingHost.innerHTML);
+            if (_mcalTrust) _lsSet(_mcalSnapKey + '-coming', comingHost.innerHTML);
         }
 
         // ── SWR background revalidate ──────────────────────────
@@ -2396,6 +2404,9 @@
                             if (window.AppDataStore && typeof AppDataStore.hasLiveSession === 'function'
                                 && !AppDataStore.hasLiveSession()) return;
                         } catch (_) { /* treat as live */ }
+                        // Degraded result (client-side fallback, not a server answer) —
+                        // never overwrite the cache or re-render from it.
+                        if (res && res._degraded) return;
                         const freshRaw = (res?.data || []).filter(_mcalKeepAct);
                         // Preserve any optimistic rows still pending — they're not
                         // in Supabase yet but the user expects to see them.

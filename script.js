@@ -2947,7 +2947,17 @@ function _wireLoginBtn() {
                             const _rawUsers = localStorage.getItem('fs_crm_users');
                             const _allUsers = _rawUsers ? JSON.parse(_rawUsers) : [];
                             const _offlineUser = Array.isArray(_allUsers) && _allUsers.find(u => u.email === _offlineEmail);
-                            if (_offlineUser) {
+                            // If the null session came from OUR OWN 6s getSession timeout (slow
+                            // network / briefly-overloaded auth), the session may be perfectly
+                            // refreshable — wiping it would force a spurious re-login under load
+                            // (e.g. during the post-CACHE_VERSION-bump fleet reload). Only a
+                            // genuine, server-answered "no session" may trigger the wipe below.
+                            const _sessNullFromTimeout = !!(sessionResponse && sessionResponse.error
+                                && /getSession timeout/i.test(sessionResponse.error.message || ''));
+                            if (_offlineUser && _sessNullFromTimeout) {
+                                console.info('[init] getSession timed out — resuming from cache (no wipe) for:', _offlineEmail);
+                                _currentUser = { ..._offlineUser, _offline: true };
+                            } else if (_offlineUser) {
                                 // Reachability gate (2026-07-13): getSession()=null is AMBIGUOUS —
                                 // Supabase down (offline resume is right) vs the stored session
                                 // genuinely dead (offline resume creates a ZOMBIE shell: every read

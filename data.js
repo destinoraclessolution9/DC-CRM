@@ -3117,7 +3117,13 @@ class DataStore {
                 });
             }
             const total = filtered.length;
-            return { data: filtered.slice(offset, offset + limit), count: total, limit, offset };
+            // _degraded flags that this result came from the CLIENT-SIDE fallback
+            // (server path threw: dead session, timeout, overload), NOT from a
+            // server answer. Callers that persist results into their own caches
+            // (e.g. the mobile calendar's no-TTL mcal-acts snapshot) must skip
+            // caching degraded data — a transient outage otherwise gets frozen
+            // in as "this month is empty" (bug 2026-07-13 round 2).
+            return { data: filtered.slice(offset, offset + limit), count: total, limit, offset, _degraded: true };
         }
     }
 
