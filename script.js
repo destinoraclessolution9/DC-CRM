@@ -2948,8 +2948,37 @@ function _wireLoginBtn() {
                             const _allUsers = _rawUsers ? JSON.parse(_rawUsers) : [];
                             const _offlineUser = Array.isArray(_allUsers) && _allUsers.find(u => u.email === _offlineEmail);
                             if (_offlineUser) {
-                                console.info('[init] Supabase offline — resuming from cache for:', _offlineEmail);
-                                _currentUser = { ..._offlineUser, _offline: true };
+                                // Reachability gate (2026-07-13): getSession()=null is AMBIGUOUS —
+                                // Supabase down (offline resume is right) vs the stored session
+                                // genuinely dead (offline resume creates a ZOMBIE shell: every read
+                                // downgrades to anon, every view renders empty, and stranded PWA
+                                // containers stay broken across relaunches). A quick live probe of
+                                // the auth health endpoint resolves it: a clean 200 proves the
+                                // server is up, so the dead session is real — wipe it and land on
+                                // the LOGIN screen (remember_me_email keeps the field pre-filled)
+                                // instead of resuming a shell that can only show emptiness. On
+                                // probe failure/timeout (genuinely offline) keep the old behavior.
+                                let _authUp = false;
+                                try {
+                                    const _ctl = new AbortController();
+                                    const _t = setTimeout(() => { try { _ctl.abort(); } catch (_) { /* noop */ } }, 3000);
+                                    const _hr = await fetch((window.SUPABASE_URL || '') + '/auth/v1/health',
+                                        { method: 'GET', cache: 'no-store', signal: _ctl.signal, headers: { apikey: window.__SUPABASE_ANON || '' } });
+                                    clearTimeout(_t);
+                                    _authUp = !!(_hr && _hr.ok);
+                                } catch (_) { _authUp = false; }
+                                if (_authUp) {
+                                    console.warn('[init] stored session is dead but Supabase is reachable — routing to login instead of offline resume');
+                                    try { localStorage.removeItem('remember_me'); } catch (_) { /* best-effort */ }
+                                    try { localStorage.removeItem(_sbKey); } catch (_) { /* best-effort */ }
+                                    try {
+                                        Object.keys(localStorage).filter(k => /^sb-.+-auth-token$/.test(k))
+                                            .forEach(k => { try { localStorage.removeItem(k); } catch (_) { /* per-key best-effort */ } });
+                                    } catch (_) { /* best-effort */ }
+                                } else {
+                                    console.info('[init] Supabase offline — resuming from cache for:', _offlineEmail);
+                                    _currentUser = { ..._offlineUser, _offline: true };
+                                }
                             }
                         }
                     }
