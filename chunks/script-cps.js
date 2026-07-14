@@ -657,6 +657,9 @@ const openShareCpsIntakeLinkModal = async () => {
                 </div>
                 <p class="help-text" style="margin-top:8px; font-size:12px; color:var(--gray-500);">The link expires in 7 days or once the prospect submits.</p>
             </div>
+            ${isMobile() ? `<div style="text-align:center; margin-top:-2px;">
+                <a href="#" onclick="event.preventDefault(); (window.app.mcalWa || function(){})();" style="font-size:12px; color:var(--gray-500); text-decoration:underline;">Or message today's appointments instead →</a>
+            </div>` : ''}
         </div>
     `, [
         { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
