@@ -2100,9 +2100,14 @@
         // frozen (tab bar included). Never await unbounded here: on timeout fall
         // back and RECORD which component was stuck. Fallback is strict-safe:
         // [] masks client names + hides birthday markers, never widens visibility.
-        const _raceStage = (p, ms, fallback, label) => Promise.race([
-            p,
-            new Promise(res => setTimeout(() => {
+        // NOTE: the timer is cancelled when the primary settles — a bare
+        // Promise.race leaves the losing timer alive, which wrote FALSE
+        // "did not settle" breadcrumbs 6-12s after perfectly healthy renders.
+        const _raceStage = (p, ms, fallback, label) => new Promise((res) => {
+            let settled = false;
+            const t = setTimeout(() => {
+                if (settled) return;
+                settled = true;
                 try {
                     localStorage.setItem('mcal-last-error', JSON.stringify({
                         ts: new Date().toISOString(), where: 'hang-timeout',
@@ -2110,8 +2115,12 @@
                     }));
                 } catch (_) { /* best-effort breadcrumb */ }
                 res(fallback);
-            }, ms)),
-        ]);
+            }, ms);
+            Promise.resolve(p).then(
+                (v) => { if (settled) return; settled = true; clearTimeout(t); res(v); },
+                ()  => { if (settled) return; settled = true; clearTimeout(t); res(fallback); }
+            );
+        });
         const visibleIds = await _raceStage(_visibleIdsP, 6000, [], 'getVisibleUserIds/getAll(users)');
         _mcalVisibleScope = visibleIds;
         _stage('visible-ids');
@@ -2759,10 +2768,21 @@
         // sheet has already closed, and the tap reads as "app hung" with zero
         // feedback. Race every step; on timeout fall through to the next path
         // so the tap ALWAYS produces something (detail modal or an error toast).
-        const _race = (p, ms, label) => Promise.race([
-            p,
-            new Promise((_, rej) => setTimeout(() => rej(new Error(label + ' timed out after ' + (ms / 1000) + 's')), ms)),
-        ]);
+        // Timer is cancelled when the primary settles — a bare Promise.race
+        // leaves the loser alive, and its later rejection would land in the
+        // global unhandledrejection log as a FALSE timeout entry.
+        const _race = (p, ms, label) => new Promise((res, rej) => {
+            let settled = false;
+            const t = setTimeout(() => {
+                if (settled) return;
+                settled = true;
+                rej(new Error(label + ' timed out after ' + (ms / 1000) + 's'));
+            }, ms);
+            Promise.resolve(p).then(
+                (v) => { if (settled) return; settled = true; clearTimeout(t); res(v); },
+                (e) => { if (settled) return; settled = true; clearTimeout(t); rej(e); }
+            );
+        });
         try {
             try {
                 if (prospectId) {
