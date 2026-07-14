@@ -3542,11 +3542,23 @@ function _wireLoginBtn() {
             if (userDisplay) userDisplay.textContent = displayName;
             const initials2 = (displayName || 'U').split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
             const svgNav = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Ccircle cx='32' cy='32' r='32' fill='%238B1A1A'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='central' text-anchor='middle' font-size='22' font-weight='700' font-family='sans-serif' fill='white'%3E${encodeURIComponent(initials2)}%3C/text%3E%3C/svg%3E`;
-            const avatarSrc = (_currentUser.avatar_url && (_currentUser.avatar_url.startsWith('http') || _currentUser.avatar_url.startsWith('data:')))
-                ? _currentUser.avatar_url : svgNav;
-            if (userAvatar) { userAvatar.src = avatarSrc; userAvatar.onerror = () => { userAvatar.src = svgNav; }; }
-            const drawerAvatar = document.getElementById('drawer-user-avatar');
-            if (drawerAvatar) { drawerAvatar.src = avatarSrc; drawerAvatar.onerror = () => { drawerAvatar.src = svgNav; }; }
+            // avatar_url may be an inline data: URI, an external URL, a stored
+            // attachments PUBLIC url (now private → 404 after the C2 bucket flip),
+            // or a bare storage path. Show initials immediately, then async-upgrade
+            // to a signed URL via the resolver so the private flip doesn't leave a
+            // broken avatar. Worst case it stays initials (same as the old onerror).
+            const _av = _currentUser.avatar_url;
+            const applyAvatar = (el) => {
+                if (!el) return;
+                el.onerror = () => { el.src = svgNav; };
+                if (_av && _av.startsWith('data:')) { el.src = _av; return; }
+                el.src = svgNav;
+                if (_av && AppDataStore.resolveAttachmentSrc) {
+                    AppDataStore.resolveAttachmentSrc(_av).then((u) => { if (u) el.src = u; }).catch(() => {});
+                }
+            };
+            applyAvatar(userAvatar);
+            applyAvatar(document.getElementById('drawer-user-avatar'));
             try { renderMarketSwitcher(); } catch (_) { /* switcher is non-critical chrome */ }
         } else {
             if (userDisplay) userDisplay.textContent = 'Guest';
