@@ -6101,10 +6101,12 @@
         // Safety net: if the save stalls (degraded backend), inform the user after 30s.
         // We deliberately do NOT release _moSaving here — the H2 lock must stay held
         // until this save actually settles, or a concurrent retry could mint a duplicate
-        // npo_sales order (audit F2). The write calls are now timeout-bounded
-        // (AppDataStore.update 20s + _dbRace on the direct npo calls), so the `finally`
-        // reliably releases the lock; if something truly unbounded hangs, the lock stays
-        // held and the user is told to reload (fresh state) rather than double-submit.
+        // npo_sales order (audit F2). The write calls are now timeout-bounded — AppDataStore
+        // update()/add() 20s (covers the activities update, closing_record persist, and
+        // approval_queue create), _dbRace on the direct npo_sales/items/installments inserts +
+        // the stamp rpc + the invoice upload — so the `finally` reliably releases the lock; if
+        // something still hangs, the lock stays held and the user is told to reload rather than
+        // double-submit.
         const _moWatchdog = setTimeout(() => {
             if (_moSaving) {
                 try { UI.toast.info('Still saving — the server is slow. Please wait; if it does not finish, reload the page and check the record before re-entering.'); } catch (_) {}
@@ -6212,9 +6214,9 @@
                 if (sb && sb.storage) {
                     const safeName = _moFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
                     const path = `invoices/${Date.now()}_${safeName}`;
-                    const { error: upErr } = await sb.storage
+                    const { error: upErr } = await _dbRace(sb.storage
                         .from('attachments')
-                        .upload(path, _moFile, { upsert: false, contentType: _moFile.type });
+                        .upload(path, _moFile, { upsert: false, contentType: _moFile.type }), 30000, 'invoice upload');
                     if (upErr) throw upErr;
                     // C2 (audit): persist the storage PATH, not a permanent public URL.
                     // Render code re-signs it via resolveAttachmentSrc so a private
@@ -6442,7 +6444,7 @@
                                         delivery_status: 'pending',
                                     }));
                                     if (items.length) {
-                                        const { error: itemErr } = await sb.from('npo_sale_items').insert(items).select();
+                                        const { error: itemErr } = await _dbRace(sb.from('npo_sale_items').insert(items).select(), 20000, 'npo_sale_items insert');
                                         if (itemErr) { npoOrderFailed = true; console.warn('NPO sale items insert failed:', itemErr); }
                                     }
                                     // installment schedule: seq 1..tenure, deposit is on the sale (not a row)
@@ -6450,7 +6452,7 @@
                                     for (let seq = 1; seq <= tenure; seq++) {
                                         inst.push({ sale_id: saleId, seq, due_date: _addMonths(startDate, seq), amount: monthly, status: 'due' });
                                     }
-                                    const { error: instErr } = await sb.from('npo_installments').insert(inst).select();
+                                    const { error: instErr } = await _dbRace(sb.from('npo_installments').insert(inst).select(), 20000, 'npo_installments insert');
                                     if (instErr) { npoOrderFailed = true; console.warn('NPO installments insert failed:', instErr); }
                                     ['npo_sales', 'npo_sale_items', 'npo_installments'].forEach(t => {
                                         try { AppDataStore.invalidateCache && AppDataStore.invalidateCache(t); } catch (_) {}

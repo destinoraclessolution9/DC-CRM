@@ -2222,11 +2222,18 @@ class DataStore {
         const _strippedFKCols = []; // FK columns dropped by a 23503 retry — warn the user the link was lost
         for (let attempt = 0; attempt < 15; attempt++) {
             try {
-                const { data, error } = await this._writeClient()
-                    .from(tableName)
-                    .insert(insertData)
-                    .select()
-                    .single();
+                // Bound the insert with a timeout (parity with update()) so a degraded
+                // backend can't hang a create indefinitely — on NETWORK_TIMEOUT the loop
+                // breaks and the offline-queue preserves the row (ids are client-stamped,
+                // so the queued re-push is idempotent).
+                const { data, error } = await this._timedFetch(
+                    this._writeClient()
+                        .from(tableName)
+                        .insert(insertData)
+                        .select()
+                        .single(),
+                    20000
+                );
                 if (error) throw error;
                 // A 23503 retry dropped an FK column to let the row save. The row
                 // is now orphaned from its referenced record — tell the user so a
@@ -2619,11 +2626,16 @@ class DataStore {
                     let lastInsertErr = null;
                     for (let insAttempt = 0; insAttempt < 30; insAttempt++) {
                         try {
-                            const { data: insData, error: insErr } = await this._writeClient()
-                                .from(tableName)
-                                .insert(insertPayload)
-                                .select()
-                                .single();
+                            // Timeout-bounded (parity with the primary update) so the
+                            // PGRST116 recovery-insert can't hang on a degraded backend.
+                            const { data: insData, error: insErr } = await this._timedFetch(
+                                this._writeClient()
+                                    .from(tableName)
+                                    .insert(insertPayload)
+                                    .select()
+                                    .single(),
+                                20000
+                            );
                             if (!insErr && insData) { inserted = insData; break; }
                             if (insErr) {
                                 lastInsertErr = insErr;

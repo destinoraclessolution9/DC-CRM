@@ -2504,11 +2504,13 @@ const _renderDeliveryListing = async () => {
         <th scope="col">Invoice / Photo</th>
     </tr></thead><tbody>`;
     rows.forEach((l, i) => {
-        const _h = _safeHref(l.proof);
+        // C2 (audit): proof/invoice_file are now stored as private storage PATHS —
+        // open via a signed URL (window._openAttachment). _safeHref only accepted
+        // http(s) URLs, so a path-stored proof showed "Upload" as if none existed.
         const statusStyle = _deliveryStatusColors[l.status] || '';
         const statusSel = `<select class="form-control" style="font-size:12px;padding:4px 6px;border-radius:6px;${statusStyle};" title="Update delivery status" onchange="app._setDeliveryFromListing('${l.kind}', ${l.id}, ${l.customerId}, this.value)">${_DELIVERY_STATUSES.map(s => `<option value="${s}" ${s === l.status ? 'selected' : ''}>${s}</option>`).join('')}</select>`;
-        const proofCell = _h
-            ? `<a href="${_h}" target="_blank" rel="noopener noreferrer" class="btn-sm secondary"><i class="fas fa-image"></i> View</a>`
+        const proofCell = l.proof
+            ? `<a href="#" onclick="event.preventDefault();window._openAttachment&&window._openAttachment('${UI.escJsAttr(String(l.proof))}')" class="btn-sm secondary" style="cursor:pointer;"><i class="fas fa-image"></i> View</a>`
             : (l.kind === 'purchase'
                 ? `<button class="btn-sm secondary" onclick="app.uploadPaymentProof(${l.id}, ${l.customerId})"><i class="fas fa-upload"></i> Upload</button>`
                 : '<span style="color:var(--gray-400);">—</span>');
