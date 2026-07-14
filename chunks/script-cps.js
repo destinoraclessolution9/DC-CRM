@@ -712,6 +712,9 @@ const saveCpsIntakeLink = async () => {
         if (linkBlock && linkInput) {
             linkInput.value = url;
             linkBlock.style.display = 'block';
+            // On a phone the revealed Copy/WhatsApp buttons can land below the modal
+            // fold — bring them into view so the share action is reachable.
+            try { linkBlock.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (_) {}
         }
         UI.toast.success('Link generated! Share it with the prospect.');
     } catch (err) {
@@ -764,7 +767,9 @@ const shareCpsIntakeWhatsApp = () => {
     if (venueAddress) msg += `\n🏠 地址 Address: ${venueAddress}`;
     if (wazeLink) msg += `\n🗺️ Waze: ${wazeLink}`;
 
-    window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
+    // Standalone-PWA safe (window.open('_blank') is a no-op in an installed iOS
+    // home-screen app): prefer the native share sheet on mobile, else open/navigate.
+    _utils._waOpen(`https://wa.me/?text=${encodeURIComponent(msg)}`, msg);
 };
 
 const _buildPendingCpsIntakesHtml = (intakes) => {

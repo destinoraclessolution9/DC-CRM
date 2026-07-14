@@ -1512,7 +1512,29 @@ const appLogic = (() => {
             (window.app.closeMobileDrawer || (() => {}))();
         }
     };
-    Object.assign(window._crmUtils, { isMobile });
+    // Open a WhatsApp deep link (or native share sheet) in a way that survives an
+    // INSTALLED standalone PWA. On an iOS home-screen app window.open(url,'_blank')
+    // is a silent no-op — which is why both CPS-intake WhatsApp touchpoints (the
+    // share-link modal and the post-approval confirmation) were dead on mobile.
+    // Prefer navigator.share when we have message text AND we're on mobile (works
+    // in standalone, and is the only sane path when no phone number is known);
+    // otherwise open a tab and, if the browser blocked/no-op'd it, fall back to a
+    // same-window navigation, which DOES deep-link into WhatsApp inside standalone.
+    const _waOpen = (url, text) => {
+        try {
+            if (isMobile() && navigator.share && text) {
+                navigator.share({ text }).catch((err) => {
+                    if (err && err.name === 'AbortError') return; // user dismissed the sheet
+                    const w = window.open(url, '_blank', 'noopener');
+                    if (!w) window.location.href = url;
+                });
+                return;
+            }
+        } catch (_) { /* navigator.share threw synchronously — fall through to open */ }
+        const w = window.open(url, '_blank', 'noopener');
+        if (!w) window.location.href = url;
+    };
+    Object.assign(window._crmUtils, { isMobile, _waOpen });
 
 
     // ==================== PHASE 14: OFFLINE SUPPORT ====================
@@ -3547,7 +3569,7 @@ function _wireLoginBtn() {
     // Self-reference guard (matches the auto-generated stubs below): the old
     // `(window.app.X || (() => {}))(id)` form recursed because window.app.X IS
     // this stub until the cps chunk's Object.assign overwrites it.
-    const openApproveCpsIntakeModal = async (...a) => { const _r = window.app.openApproveCpsIntakeModal; if (_r && _r !== openApproveCpsIntakeModal) return _r(...a); };
+    const openApproveCpsIntakeModal = async (...a) => { await _loadChunkOnce('chunks/script-cps.min.js'); const _r = window.app.openApproveCpsIntakeModal; if (_r && _r !== openApproveCpsIntakeModal) return _r(...a); };
     const showBookingSettingsView  = async (vp) => (window.app.showBookingSettingsView   || (() => {}))(vp);
     // ===== LEAD FORMS + SURVEYS + CONTRACTS + CUSTOM FIELDS + PORTAL =====
     // [CHUNK: forms] ~1164 lines extracted to chunks/script-forms.js
@@ -4922,8 +4944,8 @@ function _wireLoginBtn() {
     const saveCpsIntakeLink = async (...a) => { const _r = window.app.saveCpsIntakeLink; if (_r && _r !== saveCpsIntakeLink) return _r(...a); };
     const copyCpsIntakeLink = async (...a) => { const _r = window.app.copyCpsIntakeLink; if (_r && _r !== copyCpsIntakeLink) return _r(...a); };
     const shareCpsIntakeWhatsApp = async (...a) => { const _r = window.app.shareCpsIntakeWhatsApp; if (_r && _r !== shareCpsIntakeWhatsApp) return _r(...a); };
-    const renderPendingCpsIntakes = async (...a) => { const _r = window.app.renderPendingCpsIntakes; if (_r && _r !== renderPendingCpsIntakes) return _r(...a); };
-    const rejectCpsIntake = async (...a) => { const _r = window.app.rejectCpsIntake; if (_r && _r !== rejectCpsIntake) return _r(...a); };
+    const renderPendingCpsIntakes = async (...a) => { await _loadChunkOnce('chunks/script-cps.min.js'); const _r = window.app.renderPendingCpsIntakes; if (_r && _r !== renderPendingCpsIntakes) return _r(...a); };
+    const rejectCpsIntake = async (...a) => { await _loadChunkOnce('chunks/script-cps.min.js'); const _r = window.app.rejectCpsIntake; if (_r && _r !== rejectCpsIntake) return _r(...a); };
     const scanCpsForm = async (...a) => { await _loadChunkOnce('chunks/script-cps.min.js'); const _r = window.app.scanCpsForm; if (_r && _r !== scanCpsForm) return _r(...a); };
     const handleCpsScanFile = async (...a) => { await _loadChunkOnce('chunks/script-cps.min.js'); const _r = window.app.handleCpsScanFile; if (_r && _r !== handleCpsScanFile) return _r(...a); };
     const renderCpsScanReview = async (...a) => { const _r = window.app.renderCpsScanReview; if (_r && _r !== renderCpsScanReview) return _r(...a); };
