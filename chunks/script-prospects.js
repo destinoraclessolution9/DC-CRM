@@ -5998,18 +5998,27 @@ const submitClosingRecord = async (prospectId) => {
     if (!data.sale_amount) return UI.toast.error('Amount closed is required');
     if (!data.invoice_number) return UI.toast.error('Invoice number is required');
     if (!data.invoice_file) {
-        UI.showModal(
-            '📎 Invoice Upload Required',
-            `<div style="padding:8px 0;">
-                <p style="font-size:15px;color:var(--gray-700);margin-bottom:12px;">Please upload the <strong>purchase invoice</strong> before submitting for approval.</p>
-                <div style="background:#fef9c3;border:1px solid #fcd34d;border-radius:8px;padding:12px;font-size:13px;color:#92400e;">
-                    <i class="fas fa-exclamation-triangle" style="margin-right:6px;"></i>
-                    The invoice is required as proof of purchase. Save a draft first, attach the invoice file, then submit.
-                </div>
-            </div>`,
-            [{ label: 'OK, I\'ll Upload It', type: 'primary', action: 'UI.hideModal()' }]
-        );
-        return;
+        // M2 (owner: YES — a signed order-form PHOTO counts as the invoice/proof of
+        // purchase). Only block if there is ALSO no order-form photo on file.
+        let _hasOrderFormPhoto = false;
+        try {
+            const _ofs = await AppDataStore.query('prospect_attachments', { prospect_id: prospectId, attachment_type: 'order_form' });
+            _hasOrderFormPhoto = Array.isArray(_ofs) && _ofs.length > 0;
+        } catch (_) { /* best-effort; fall back to requiring the invoice file */ }
+        if (!_hasOrderFormPhoto) {
+            UI.showModal(
+                '📎 Invoice / Order Form Required',
+                `<div style="padding:8px 0;">
+                    <p style="font-size:15px;color:var(--gray-700);margin-bottom:12px;">Please attach the <strong>signed order form photo</strong> or upload the <strong>purchase invoice</strong> before submitting for approval.</p>
+                    <div style="background:#fef9c3;border:1px solid #fcd34d;border-radius:8px;padding:12px;font-size:13px;color:#92400e;">
+                        <i class="fas fa-exclamation-triangle" style="margin-right:6px;"></i>
+                        Proof of purchase is required. Either take the order-form photo in the Meeting Outcome flow, or save a draft here and attach the invoice file, then submit.
+                    </div>
+                </div>`,
+                [{ label: 'OK, I\'ll Attach It', type: 'primary', action: 'UI.hideModal()' }]
+            );
+            return;
+        }
     }
     // Credit-card installment (POP/NPO): expiry is compulsory to submit when the closer
     // flagged the installment as charged to a credit card.

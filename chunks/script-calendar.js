@@ -6085,6 +6085,15 @@
     const saveMeetingOutcome = async (activityId) => {
         if (_moSaving) { try { UI.toast.info('Saving… please wait.'); } catch (_) {} return; }
         _moSaving = true;
+        // Safety net: if the save stalls (degraded backend, or a direct npo_sales /
+        // rpc call that bypasses AppDataStore's write timeout), release the lock +
+        // warn after 30s so a hang never permanently blocks future saves.
+        const _moWatchdog = setTimeout(() => {
+            if (_moSaving) {
+                _moSaving = false;
+                try { UI.toast.error('Saving is taking too long — the server may be slow. Your entry is kept; reload and retry if it does not finish.'); } catch (_) {}
+            }
+        }, 30000);
         try {
         // collectMeetingOutcomeData lives in the activities chunk — guarantee it's
         // loaded so the save doesn't silently no-op into empty data on mobile.
@@ -6532,7 +6541,7 @@
         else if (crSyncStatus === 'failed')               UI.toast.error('Activity saved but closing record sync failed — retry from the prospect profile');
         else                                              UI.toast.success('Meeting outcome saved');
         if (document.querySelector('.calendar-view-container')) { await renderCalendar(); await renderTodayActivities(); }
-        } finally { _moSaving = false; }
+        } finally { clearTimeout(_moWatchdog); _moSaving = false; }
     };
 
     // ── Helpers for multi-select checkbox fields in Post-Meetup Notes ──

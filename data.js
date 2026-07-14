@@ -2530,12 +2530,21 @@ class DataStore {
         }
         for (let attempt = 0; attempt < 15; attempt++) {
             try {
-                const { data, error } = await this._writeClient()
-                    .from(tableName)
-                    .update(updateData)
-                    .eq('id', id)
-                    .select()
-                    .single();
+                // Writes had NO timeout, so a degraded/overloaded backend (e.g. a
+                // Supabase incident) left saves hanging indefinitely — the spinner
+                // never cleared and the in-flight lock stayed stuck. Race the write
+                // against a timeout (same helper reads use); on timeout the loop
+                // breaks (NETWORK_TIMEOUT isn't a schema/PGRST116 case) and the
+                // offline-queue fallback preserves the edit + syncs it later.
+                const { data, error } = await this._timedFetch(
+                    this._writeClient()
+                        .from(tableName)
+                        .update(updateData)
+                        .eq('id', id)
+                        .select()
+                        .single(),
+                    20000
+                );
                 if (error) throw error;
                 let _mirrorUpdated = false;
                 try {
