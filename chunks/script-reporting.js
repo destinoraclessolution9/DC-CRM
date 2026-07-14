@@ -2987,16 +2987,23 @@ const _buildClientMeetingsDetailsLegacy = async (from, to) => {
 // ticked and their latest such meeting. Same scope gates as the getters.
 const _buildPitchDetails = async (from, to, predicate) => {
     const activities = await AppDataStore.getAll('activities');
-    const [users, customers, prospects] = await Promise.all([
+    const [users, customers] = await Promise.all([
         AppDataStore.getAll('users'),
-        AppDataStore.getAll('customers'),
-        AppDataStore.getAll('prospects')
+        AppDataStore.getAll('customers')
     ]);
     const userMap = {}; users.forEach(u => { userMap[String(u.id)] = u; });
     const custMap = {}; customers.forEach(c => { custMap[String(c.id)] = c; });
-    const prospMap = {}; prospects.forEach(p => { prospMap[String(p.id)] = p; });
     const custToProspect = _buildCustToProspect(customers);
-    const byPerson = new Map();
+
+    // First pass: keep the matched pitch activities and collect the prospect ids
+    // whose names we must resolve. Prospects are loaded server-side-paged
+    // (queryAdvanced / prospects_page) and are NEVER bulk-loaded into
+    // getAll('prospects') — that cache stays empty (customers, a small table, is
+    // the opposite), so resolving prospect names off getAll produced "—" for
+    // every prospect-linked pitch. Resolve each prospect by id instead: getById
+    // does a targeted select=* that always works (same path the detail view uses).
+    const matched = [];
+    const prospectIds = new Set();
     for (const a of activities) {
         if (a.activity_date < from || a.activity_date > to) continue;
         if (!_recInMarket(a)) continue;
@@ -3007,19 +3014,31 @@ const _buildPitchDetails = async (from, to, predicate) => {
         }
         const hits = _parseOppSelected(a.opportunity_potential || '').filter(predicate);
         if (!hits.length) continue;
+        matched.push({ a, hits });
+        if (a.prospect_id != null) prospectIds.add(a.prospect_id);
+    }
+    const prospMap = {};
+    await Promise.all([...prospectIds].map(async (id) => {
+        try { const p = await AppDataStore.getById('prospects', id); if (p) prospMap[String(id)] = p; }
+        catch (_) { /* leave unresolved → falls back to '—' */ }
+    }));
+
+    const byPerson = new Map();
+    for (const { a, hits } of matched) {
         const key = _pitchPersonKey(a, custToProspect);
         const cust = a.customer_id ? custMap[String(a.customer_id)] : null;
         const prosp = a.prospect_id ? prospMap[String(a.prospect_id)] : null;
-        const name = cust?.full_name || prosp?.full_name || a.contact_name || '—';
+        const name = cust?.full_name || prosp?.full_name || a.contact_name || '';
         const agentName = userMap[String(a.lead_agent_id)]?.full_name || '—';
-        const rec = byPerson.get(key) || { name, agent: agentName, ticked: new Set(), date: a.activity_date };
+        const rec = byPerson.get(key) || { name: '', agent: agentName, ticked: new Set(), date: a.activity_date };
+        if (!rec.name && name) rec.name = name;   // upgrade if an earlier row for this person had no resolvable name
         hits.forEach(h => rec.ticked.add(h));
         if ((a.activity_date || '') > (rec.date || '')) rec.date = a.activity_date;
         byPerson.set(key, rec);
     }
     const rows = [...byPerson.values()]
         .sort((x, y) => (y.date || '').localeCompare(x.date || ''))
-        .map(r => [r.date || '—', r.name, r.agent, [...r.ticked].join(', ') || '—']);
+        .map(r => [r.date || '—', r.name || '—', r.agent, [...r.ticked].join(', ') || '—']);
     return renderDetailTable(['Last Meet', 'Customer / Prospect', 'Lead Agent', 'Pitched'], rows);
 };
 
