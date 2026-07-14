@@ -596,7 +596,7 @@ const openHighlightModal = async (highlightId = null) => {
                         if (this.value) { prev.src = this.value; prev.style.display='block'; document.getElementById('highlight-image-file').value=''; document.getElementById('highlight-image-preview').style.display='none'; }
                         else { prev.style.display='none'; }
                     ">
-                    <img loading="lazy" decoding="async" id="highlight-url-preview" data-attach-src="${esc(String(h?.image_url || ''))}" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;${h?.image_url ? '' : 'display:none;'}" onerror="this.style.display='none'">
+                    <img loading="lazy" decoding="async" id="highlight-url-preview" ${h?.image_url ? `data-attach-src="${esc(String(h.image_url))}"` : ''} src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;${h?.image_url ? '' : 'display:none;'}" onerror="this.style.display='none'">
                 </div>
             </div>
             <div class="form-group">

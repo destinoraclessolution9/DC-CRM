@@ -27,6 +27,11 @@
 -- Additive/idempotent (drop+recreate the read policy only). Access-control = USER-APPLIED.
 -- =====================================================================
 
+-- Atomic swap: wrap in a transaction so there is never a window where the target
+-- SELECT policy is dropped but not yet recreated (RLS default-deny would otherwise
+-- briefly block authenticated attachment reads).
+begin;
+
 -- Remove the flawed owner-scoped policy if it was ever applied.
 drop policy if exists attachments_scope_read on storage.objects;
 
@@ -35,6 +40,8 @@ drop policy if exists attachments_authenticated_select on storage.objects;
 create policy attachments_authenticated_select on storage.objects
   for select to authenticated
   using (bucket_id = 'attachments');
+
+commit;
 
 -- Verify:
 --   select polname, polcmd from pg_policy p join pg_class c on c.oid=p.polrelid

@@ -6098,13 +6098,16 @@
     const saveMeetingOutcome = async (activityId) => {
         if (_moSaving) { try { UI.toast.info('Saving… please wait.'); } catch (_) {} return; }
         _moSaving = true;
-        // Safety net: if the save stalls (degraded backend, or a direct npo_sales /
-        // rpc call that bypasses AppDataStore's write timeout), release the lock +
-        // warn after 30s so a hang never permanently blocks future saves.
+        // Safety net: if the save stalls (degraded backend), inform the user after 30s.
+        // We deliberately do NOT release _moSaving here — the H2 lock must stay held
+        // until this save actually settles, or a concurrent retry could mint a duplicate
+        // npo_sales order (audit F2). The write calls are now timeout-bounded
+        // (AppDataStore.update 20s + _dbRace on the direct npo calls), so the `finally`
+        // reliably releases the lock; if something truly unbounded hangs, the lock stays
+        // held and the user is told to reload (fresh state) rather than double-submit.
         const _moWatchdog = setTimeout(() => {
             if (_moSaving) {
-                _moSaving = false;
-                try { UI.toast.error('Saving is taking too long — the server may be slow. Your entry is kept; reload and retry if it does not finish.'); } catch (_) {}
+                try { UI.toast.info('Still saving — the server is slow. Please wait; if it does not finish, reload the page and check the record before re-entering.'); } catch (_) {}
             }
         }, 30000);
         try {
