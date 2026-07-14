@@ -3000,8 +3000,7 @@ const _buildPitchDetails = async (from, to, predicate) => {
     // (queryAdvanced / prospects_page) and are NEVER bulk-loaded into
     // getAll('prospects') — that cache stays empty (customers, a small table, is
     // the opposite), so resolving prospect names off getAll produced "—" for
-    // every prospect-linked pitch. Resolve each prospect by id instead: getById
-    // does a targeted select=* that always works (same path the detail view uses).
+    // every prospect-linked pitch. Fetch only the ids we need instead.
     const matched = [];
     const prospectIds = new Set();
     for (const a of activities) {
@@ -3017,11 +3016,16 @@ const _buildPitchDetails = async (from, to, predicate) => {
         matched.push({ a, hits });
         if (a.prospect_id != null) prospectIds.add(a.prospect_id);
     }
+    // Resolve every needed prospect name in ONE round-trip via .in('id', …)
+    // (queryPaged) rather than N per-id getById fetches — the prospects bulk
+    // cache is empty so each getById would otherwise be its own network call.
     const prospMap = {};
-    await Promise.all([...prospectIds].map(async (id) => {
-        try { const p = await AppDataStore.getById('prospects', id); if (p) prospMap[String(id)] = p; }
-        catch (_) { /* leave unresolved → falls back to '—' */ }
-    }));
+    if (prospectIds.size) {
+        try {
+            const rows = await AppDataStore.queryPaged('prospects', { filters: { id: [...prospectIds] }, select: 'id,full_name' });
+            (rows || []).forEach(p => { prospMap[String(p.id)] = p; });
+        } catch (_) { /* leave unresolved → falls back to '—' */ }
+    }
 
     const byPerson = new Map();
     for (const { a, hits } of matched) {
