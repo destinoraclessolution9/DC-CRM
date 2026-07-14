@@ -2467,6 +2467,26 @@ function _wireLoginBtn() {
             }
 
             _currentUser = profile;
+            // Self-heal the auth link (2026-07-14): admin-created staff rows have
+            // NULL users.auth_user_id, and EVERY RLS helper maps the session via
+            // auth_user_id = auth.uid() — an unlinked user logs in successfully
+            // yet sees a completely empty CRM. Nothing else ever wrote this
+            // column; backfill it on login (guarded: only when absent/stale, and
+            // only onto the row the email-based profile resolution chose).
+            try {
+                if (user?.id && profile.auth_user_id !== user.id) {
+                    // Guard: never create a SECOND row claiming this auth account —
+                    // current_user_row_id() is LIMIT 1 without ORDER BY, and two
+                    // linked rows would make RLS resolve to an arbitrary one.
+                    const _claimed = await AppDataStore.query('users', { auth_user_id: user.id });
+                    if (!_claimed || _claimed.length === 0) {
+                        await AppDataStore.update('users', profile.id, { auth_user_id: user.id });
+                        profile.auth_user_id = user.id;
+                    } else if (String(_claimed[0]?.id) !== String(profile.id)) {
+                        console.warn('[auth-link] auth account already linked to users row', _claimed[0]?.id, '— not relinking to', profile.id, '(needs admin review)');
+                    }
+                }
+            } catch (_lnkErr) { console.warn('auth_user_id backfill failed (non-fatal):', _lnkErr?.message || _lnkErr); }
             // Cross-user purge: if a DIFFERENT account than the one whose cached
             // snapshots are present just logged in (shared device), wipe every
             // table cache — not just the 4-table allowlist below — before any read.
@@ -2895,6 +2915,20 @@ function _wireLoginBtn() {
                 }
                 if (profile) {
                     _currentUser = profile;
+                    // Self-heal the auth link on restore too (see login-path comment):
+                    // covers users who signed in before the login-path backfill shipped.
+                    try {
+                        if (authUser?.id && profile.auth_user_id !== authUser.id) {
+                            // Same second-claim guard as the login path (see comment there).
+                            const _claimed = await AppDataStore.query('users', { auth_user_id: authUser.id });
+                            if (!_claimed || _claimed.length === 0) {
+                                await AppDataStore.update('users', profile.id, { auth_user_id: authUser.id });
+                                profile.auth_user_id = authUser.id;
+                            } else if (String(_claimed[0]?.id) !== String(profile.id)) {
+                                console.warn('[auth-link] auth account already linked to users row', _claimed[0]?.id, '— not relinking to', profile.id, '(needs admin review)');
+                            }
+                        }
+                    } catch (_lnkErr) { console.warn('auth_user_id backfill failed (non-fatal):', _lnkErr?.message || _lnkErr); }
                     // Cross-user purge on restore: if the restored identity differs
                     // from the snapshots on disk (shared device), wipe all caches.
                     _resetCachesIfIdentityChanged(profile.id);
