@@ -3322,24 +3322,24 @@ const showKPIDetails = async (key) => {
             { label: 'POP Cases', value: kpis.popCaseCount, prev: prevKpis.popCaseCount, icon: '📦', color: 'orange', key: 'popCaseCount',
               subType: 'pop', popTotal: (kpis.popSales || 0).toLocaleString(),
               subHtml: `<div style="font-size:12px;color:var(--gray-500);margin-top:2px;">RM ${(kpis.popSales || 0).toLocaleString()} total</div>` },
-            { label: 'EPP Cases', value: kpis.eppCaseCount, prev: prevKpis.eppCaseCount, icon: '💳', color: 'purple', key: 'eppCaseCount',
-              subType: 'epp', eppDetails,
-              subHtml: (kpis.eppDetails || []).length > 0
-                ? (kpis.eppDetails || []).map(d => `<div style="font-size:11px;color:var(--gray-500);line-height:1.6;">${escapeHtml(d.bank)} &middot; ${escapeHtml(d.months)} months &times;${escapeHtml(d.count)}</div>`).join('')
-                : '' },
+            { label: 'NEA Pitching', value: kpis.neaPitching || 0, prev: prevKpis.neaPitching || 0, icon: '🧧', color: 'orange', key: 'neaPitching' },
+            { label: 'New Agents', value: kpis.newAgents, prev: prevKpis.newAgents, icon: '👤', color: 'blue', key: 'newAgents' },
             { label: 'Active Agents', value: kpis.activeAgents || 0, prev: prevKpis.activeAgents || 0, icon: '⚡', color: 'green', key: 'activeAgents',
               subType: 'active',
               subHtml: `<div style="font-size:12px;color:var(--gray-500);margin-top:2px;">Past 60 days · click for team breakdown</div>` },
-            { label: 'New Agents', value: kpis.newAgents, prev: prevKpis.newAgents, icon: '👤', color: 'blue', key: 'newAgents' },
+            { label: 'Fengshui Pitching', value: kpis.fengshuiPitching || 0, prev: prevKpis.fengshuiPitching || 0, icon: '🧭', color: 'green', key: 'fengshuiPitching' },
             { label: 'New Customers', value: kpis.newCustomers, prev: prevKpis.newCustomers, icon: '👥', color: 'green', key: 'newCustomers' },
             { label: 'Conversion Rate', value: `${kpis.conversionRate}% `, prev: prevKpis.conversionRate, icon: '📈', color: 'purple', key: 'conversionRate' },
             { label: 'Meetings & Training', value: kpis.totalMeetings, prev: prevKpis.totalMeetings, icon: '📅', color: 'orange', key: 'totalMeetings' },
             { label: 'Client Meetings', value: kpis.clientMeetings, prev: prevKpis.clientMeetings, icon: '🤝', color: 'blue', key: 'clientMeetings' },
-            { label: 'NEA Pitching', value: kpis.neaPitching || 0, prev: prevKpis.neaPitching || 0, icon: '🧧', color: 'orange', key: 'neaPitching' },
-            { label: 'Fengshui Pitching', value: kpis.fengshuiPitching || 0, prev: prevKpis.fengshuiPitching || 0, icon: '🧭', color: 'green', key: 'fengshuiPitching' },
             { label: 'Activity Attendance', value: kpis.activityHeadcount, prev: prevKpis.activityHeadcount, icon: '📊', color: 'purple', key: 'activityHeadcount' },
             { label: 'Agent Hours (Wk)', value: kpis.agentHours, prev: prevKpis.agentHours, icon: '⏱️', key: 'agentHours',
-              color: (kpis.agentHoursPct >= 90 ? 'green' : kpis.agentHoursPct >= 60 ? 'orange' : 'red') }
+              color: (kpis.agentHoursPct >= 90 ? 'green' : kpis.agentHoursPct >= 60 ? 'orange' : 'red') },
+            { label: 'EPP Cases', value: kpis.eppCaseCount, prev: prevKpis.eppCaseCount, icon: '💳', color: 'purple', key: 'eppCaseCount',
+              subType: 'epp', eppDetails,
+              subHtml: (kpis.eppDetails || []).length > 0
+                ? (kpis.eppDetails || []).map(d => `<div style="font-size:11px;color:var(--gray-500);line-height:1.6;">${escapeHtml(d.bank)} &middot; ${escapeHtml(d.months)} months &times;${escapeHtml(d.count)}</div>`).join('')
+                : '' }
         ];
     };
 
