@@ -2,6 +2,12 @@
 -- prospects_approval_guard_2026-07-13.sql
 -- Audit CLOSING_AUDIT_2026-07-13 finding C1 (CRITICAL) + M3 (MEDIUM).
 --
+-- ✅ APPLIED to live remuwhxvzkzjtgbzqjaa 2026-07-14 (Management API).
+--    Verified by rolled-back simulation impersonating an L12 (non-manager)
+--    agent: conversion_status->'approved' BLOCKED ("not authorized to
+--    approve a conversion"), status->'converted' BLOCKED, ->'pending_approval'
+--    ALLOWED. Manager (level<=4) and service-role (auth.uid() null) bypass.
+--
 -- The manager-approval gate on the sales-closing money path was enforced
 -- ONLY client-side (script-approvals.js isManagement()). Server-side, the
 -- prospects UPDATE RLS (sec_2026-06-19_writes.sql) scopes by ROW OWNERSHIP
