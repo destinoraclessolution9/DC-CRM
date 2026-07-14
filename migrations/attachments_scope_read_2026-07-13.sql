@@ -1,4 +1,9 @@
 -- =====================================================================
+-- ⛔ SUPERSEDED — DO NOT APPLY. See attachments_read_policy_2026-07-14.sql.
+--    The owner-based scoping below is invalid: live audit found 511/663 objects
+--    have owner IS NULL, so the owner-null allowance re-opens them to all
+--    authenticated users. Kept for history only.
+-- =====================================================================
 -- attachments_scope_read_2026-07-13.sql
 -- Audit CLOSING_AUDIT_2026-07-13 finding C2 (CRITICAL) / F4 (MEDIUM).
 --

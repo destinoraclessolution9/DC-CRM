@@ -596,7 +596,7 @@ const openHighlightModal = async (highlightId = null) => {
                         if (this.value) { prev.src = this.value; prev.style.display='block'; document.getElementById('highlight-image-file').value=''; document.getElementById('highlight-image-preview').style.display='none'; }
                         else { prev.style.display='none'; }
                     ">
-                    <img loading="lazy" decoding="async" id="highlight-url-preview" src="${esc(h?.image_url || '')}" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;${h?.image_url ? '' : 'display:none;'}" onerror="this.style.display='none'">
+                    <img loading="lazy" decoding="async" id="highlight-url-preview" data-attach-src="${esc(String(h?.image_url || ''))}" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;${h?.image_url ? '' : 'display:none;'}" onerror="this.style.display='none'">
                 </div>
             </div>
             <div class="form-group">
@@ -620,6 +620,10 @@ const openHighlightModal = async (highlightId = null) => {
         { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
         { label: isEdit ? 'Save Changes' : 'Add Highlight', type: 'primary', action: '(async () => { await app.saveHighlight(); })()' }
     ]);
+    // C2: resolve the stored image_url (a private storage path) to a signed URL for
+    // the preview; a pasted external URL still resolves as-is (resolveAttachmentSrc
+    // passes non-bucket URLs through). Modal is outside #content-viewport.
+    try { window._resolveAttachmentImages && setTimeout(() => window._resolveAttachmentImages(), 0); } catch (_) {}
 };
 
 const saveHighlight = async () => {

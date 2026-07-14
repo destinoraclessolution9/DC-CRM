@@ -6067,6 +6067,10 @@
             { label: 'Save', type: 'primary', action: `(async () => { await app.saveMeetingOutcome(${activityId}); })()` }
         ]);
 
+        // C2: the modal renders outside #content-viewport, so resolve any
+        // data-attach-src photo thumbnails in it (post-meetup papers) to signed URLs.
+        try { window._resolveAttachmentImages && setTimeout(() => window._resolveAttachmentImages(), 0); } catch (_) {}
+
         // Backup load of existing order-form photos — the inline <img onload> trick
         // in the closing block also triggers this, but if CSP blocks data URIs the
         // explicit call here still fires.
@@ -6076,6 +6080,15 @@
             }, 0);
         }
     };
+
+    // C11 (audit): race a direct Supabase call against a timeout so an npo_sales /
+    // rpc call (which bypasses AppDataStore.update()'s write timeout) can't hang the
+    // save on a degraded backend. On timeout it rejects, which the caller's own
+    // try/catch already handles (npoOrderFailed flag / warning).
+    const _dbRace = (p, ms, label) => Promise.race([
+        Promise.resolve(p),
+        new Promise((_, rej) => setTimeout(() => rej(new Error((label || 'DB call') + ' timed out after ' + ms + 'ms')), ms)),
+    ]);
 
     // H2 (audit CLOSING_AUDIT_2026-07-13): guards against a mobile double-tap
     // running the whole closing flow twice concurrently — both reads would see
@@ -6394,7 +6407,7 @@
                                     start_date: startDate, status: 'active',
                                     responsible_agent_id: activity.lead_agent_id || uid, created_by: uid,
                                 };
-                                const { data: saleRow, error: saleErr } = await sb.from('npo_sales').insert(salePayload).select().single();
+                                const { data: saleRow, error: saleErr } = await _dbRace(sb.from('npo_sales').insert(salePayload).select().single(), 20000, 'npo_sales insert');
                                 if (saleErr) throw saleErr;
                                 const saleId = saleRow && saleRow.id;
                                 if (saleId != null) {
@@ -6407,11 +6420,11 @@
                                     // on newCR, so a failed persist made the next save mint a duplicate
                                     // npo_sales + full schedule → double PORT count.
                                     try {
-                                        await sb.rpc('set_closing_record_field', {
+                                        await _dbRace(sb.rpc('set_closing_record_field', {
                                             p_prospect_id: activity.prospect_id,
                                             p_key: 'npo_sale_id',
                                             p_value: saleId,
-                                        });
+                                        }), 15000, 'npo_sale_id stamp');
                                         AppDataStore.invalidateCache && AppDataStore.invalidateCache('prospects');
                                     } catch (stampErr) {
                                         console.warn('NPO sale-id durable stamp failed (retry-dup risk):', stampErr);
