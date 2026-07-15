@@ -940,7 +940,16 @@
             } catch(_) { return null; /* intentional: corrupt cache entry treated as miss */ }
         };
         const _mhomeLsSet = (key, val) => {
-            try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), val })); } catch(_) { /* intentional: localStorage write is best-effort (quota/private mode) */ }
+            try {
+                const s = JSON.stringify({ ts: Date.now(), val });
+                // Size cap (2026-07-16 r13): a synchronous localStorage write of a
+                // large value blocks the main thread on iOS. Skip persisting an
+                // oversized cache (>180KB) — it's an optimization, so the next
+                // render just re-fetches (async, non-blocking); evict any prior
+                // oversized copy so the store shrinks.
+                if (s.length > 180 * 1024) { try { localStorage.removeItem(key); } catch(_) {} return; }
+                localStorage.setItem(key, s);
+            } catch(_) { /* intentional: localStorage write is best-effort (quota/private mode) */ }
         };
         // Pull-to-refresh forces a one-time bypass of every cold cache below.
         const _mhomeForce = _mobileForceFresh; _mobileForceFresh = false;
@@ -1907,6 +1916,12 @@
                     // per-uid caches belonging to OTHER users (leak across logins)
                     const um = k.match(/^(?:mcal|mhome)-[a-z0-9-]*?-(\d{10,})$/i);
                     if (um && curUid && um[1] !== curUid) { toRemove.push(k); continue; }
+                    // Oversized CURRENT mobile caches (>180KB) — evict now so the
+                    // r13 write-cap's effect is immediate, not only on next write.
+                    if (/^(?:mcal|mhome)-/.test(k)) {
+                        const _v = localStorage.getItem(k);
+                        if (_v && _v.length > 180 * 1024) { toRemove.push(k); continue; }
+                    }
                 }
                 for (const k of toRemove) { try { localStorage.removeItem(k); } catch (_) { /* best-effort */ } }
                 if (toRemove.length && window.__FS_DEBUG_SWR) console.log('[mcal] idle-pruned ' + toRemove.length + ' stale cache keys');
@@ -2024,7 +2039,7 @@
             } catch (_) { /* display best-effort */ }
         }
     };
-    const MCAL_BUILD = '2026-07-16-r12-smallstore';
+    const MCAL_BUILD = '2026-07-16-r13-capped';
     let _mcalBuildStamped = false;
     const _showMobileCalendarViewImpl = async (viewport) => {
         if (!viewport) return;
@@ -2095,7 +2110,13 @@
             } catch(_) { return null; /* intentional: corrupt cache entry treated as miss */ }
         };
         const _lsSet = (key, val) => {
-            try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), val })); } catch(_) { /* intentional: localStorage write is best-effort (quota/private mode) */ }
+            try {
+                const s = JSON.stringify({ ts: Date.now(), val });
+                // Size cap (2026-07-16 r13) — see _mhomeLsSet: skip an oversized
+                // synchronous localStorage write (iOS main-thread flush freeze).
+                if (s.length > 180 * 1024) { try { localStorage.removeItem(key); } catch(_) {} return; }
+                localStorage.setItem(key, s);
+            } catch(_) { /* intentional: localStorage write is best-effort (quota/private mode) */ }
         };
 
         // A: Instant grid shell — ZERO synchronous localStorage before first paint.

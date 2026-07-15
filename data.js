@@ -1629,11 +1629,9 @@ class DataStore {
                     });
                     this._cacheSet(tableName, merged);
                     setTimeout(() => {
-                        try {
-                            localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(this._sanitizeForStorage(tableName, merged)));
-                            // Record sync time so _swrRevalidate can use delta fetch next time
-                            localStorage.setItem(`fs_crm_${tableName}_last_sync`, new Date().toISOString());
-                        } catch (_) { /* intentional: snapshot persist is best-effort cache write */ }
+                        // Size-capped: large tables go to async Cache API, not a
+                        // blocking synchronous localStorage write (iOS freeze).
+                        this._persistTableSnapshot(tableName, merged, new Date().toISOString());
                     }, 0);
                     return merged;
                 }
@@ -3430,7 +3428,14 @@ class DataStore {
             // Persist for next session — non-blocking. setTimeout defers the
             // JSON.stringify off the critical path.
             setTimeout(() => {
-                try { localStorage.setItem(`fs_crm_${cacheKey}`, JSON.stringify(result)); } catch (_) { /* intentional: derived-snapshot persist is best-effort cache write */ }
+                try {
+                    const _j = JSON.stringify(result);
+                    // Size-capped: skip persisting an oversized derived snapshot —
+                    // a large synchronous localStorage write blocks the main thread
+                    // on iOS (recomputed cheaply next session anyway).
+                    if (_j.length <= DataStore._LS_TABLE_MAX) localStorage.setItem(`fs_crm_${cacheKey}`, _j);
+                    else { try { localStorage.removeItem(`fs_crm_${cacheKey}`); } catch (_) { /* best-effort */ } }
+                } catch (_) { /* intentional: derived-snapshot persist is best-effort cache write */ }
             }, 0);
             return result;
         } catch (e) {
@@ -3758,7 +3763,10 @@ class DataStore {
             this._cacheSet(cacheKey, result);
             setTimeout(() => {
                 try {
-                    localStorage.setItem(`fs_crm_${cacheKey}`, JSON.stringify([...result.entries()]));
+                    const _j = JSON.stringify([...result.entries()]);
+                    // Size-capped (iOS freeze): skip an oversized synchronous write.
+                    if (_j.length <= DataStore._LS_TABLE_MAX) localStorage.setItem(`fs_crm_${cacheKey}`, _j);
+                    else { try { localStorage.removeItem(`fs_crm_${cacheKey}`); } catch (_) { /* best-effort */ } }
                 } catch (_) { /* intentional: per-page activity snapshot persist is best-effort */ }
             }, 0);
             return result;
