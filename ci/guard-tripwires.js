@@ -58,6 +58,8 @@ const TRIPWIRES = [
     'race timers are cancelled on settle — bare Promise.race wrote FALSE timeout breadcrumbs'],
   ['chunks/script-mobile.js', 'slow-storage',
     'storage-latency probe (WebKit localStorage stalls are the leading freeze theory)'],
+  ['chunks/script-mobile.js', 'ZERO synchronous localStorage before first paint',
+    'calendar paint path must not sync-read localStorage (iOS main-thread block = the 07-13..15 freeze)'],
   ['chunks/script-calendar.js', 'calendar_rpc_denied',
     'desktop 42501-with-dead-token routes to the session flow instead of stranding skeletons'],
 
