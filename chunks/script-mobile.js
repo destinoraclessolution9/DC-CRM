@@ -1957,7 +1957,25 @@
         // a main-thread hang + app kill; the wrapper reports the last stage on
         // the next launch and /diag displays it. Cleared to 'done' on success.
         const _stage = (s) => { try { localStorage.setItem('mcal-hang-stage', JSON.stringify({ s, ts: Date.now() })); } catch (_) { /* best-effort */ } };
-        _stage('start');
+        // Storage-latency probe (2026-07-15): a freeze recurred stuck between two
+        // ADJACENT stamps in pure-sync code (start → header-built) — the only
+        // thing that can block there is the storage layer itself (WebKit
+        // localStorage can stall the main thread while the container DB is
+        // compacting/wedged). Time the first write; a slow one is recorded so
+        // /diag can prove/refute the storage-stall theory on the next freeze.
+        {
+            const _t0 = Date.now();
+            _stage('start');
+            const _dt = Date.now() - _t0;
+            if (_dt > 300) {
+                try {
+                    localStorage.setItem('mcal-last-error', JSON.stringify({
+                        ts: new Date().toISOString(), where: 'slow-storage',
+                        msg: 'localStorage write took ' + _dt + 'ms — container storage layer is stalling',
+                    }));
+                } catch (_) { /* best-effort */ }
+            }
+        }
         viewport.classList.add('mcal-active');
         _mcalView = 'month';
 
@@ -1974,6 +1992,7 @@
         const userName = (_state.cu?.preferred_name || _state.cu?.full_name || 'there').split(' ')[0];
         const avatarUrl = _state.cu?.avatar_url
             || `https://ui-avatars.com/api/?name=${encodeURIComponent(_state.cu?.full_name || 'U')}&background=8B0000&color=fff`;
+        _stage('dates-cu');
 
         // ── Persistent cache helpers (survive tab-close unlike sessionStorage) ──
         const _lsGet = (key, ttl) => {
@@ -1995,6 +2014,7 @@
         const _mcalCachedComing = _lsGet(_mcalSnapKey + '-coming', 8 * 60 * 60 * 1000);
         const _mcalInitGrid = _mcalCachedGrid
             || Array.from({length: 42}).map(() => '<div class="mcal-cell muted"></div>').join('');
+        _stage('snap-read');
 
         viewport.innerHTML = `
         <div class="mcal">
