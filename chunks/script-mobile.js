@@ -2039,7 +2039,7 @@
             } catch (_) { /* display best-effort */ }
         }
     };
-    const MCAL_BUILD = '2026-07-16-r13-capped';
+    const MCAL_BUILD = '2026-07-16-r14-fasttap';
     let _mcalBuildStamped = false;
     const _showMobileCalendarViewImpl = async (viewport) => {
         if (!viewport) return;

@@ -2161,6 +2161,26 @@ class DataStore {
             if (found) return found;
         }
 
+        // Tier 2.5 — async overflow cache. Large tables (prospects/customers/
+        // activities) now live in the Cache API tier instead of localStorage
+        // (data.js _persistTableSnapshot moved them off the synchronous store to
+        // cure the iOS freeze), so _swrGetLocal returns null for them. Without
+        // this check getById fell straight through to a network round-trip per
+        // call — so an activity tap that resolves a prospect + renders a profile
+        // (several serial getById calls) took 10+ s on mobile (regression
+        // 2026-07-16). Read the async snapshot, prime the in-memory cache so
+        // sibling getById calls hit Tier 1, then fall through to network only if
+        // the row genuinely isn't cached.
+        try {
+            const overflow = await this._cacheApiGet(tableName);
+            if (overflow && overflow.length > 0) {
+                this._cacheSet(tableName, overflow);
+                this._swrRevalidate(tableName).catch(() => {});
+                const found = overflow.find(r => String(r.id) === String(id));
+                if (found) return found;
+            }
+        } catch (_) { /* overflow tier miss/unavailable — fall through to network */ }
+
         try {
             const { data, error } = await this._readClient()
                 .from(tableName)
