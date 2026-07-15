@@ -1849,6 +1849,73 @@
             toRemove.forEach(k => { try { localStorage.removeItem(k); } catch(_) { /* intentional: per-key removal is best-effort */ } });
         } catch(_) { /* intentional: cache clear is best-effort (localStorage may be unavailable) */ }
     };
+
+    // ── iOS freeze cure (2026-07-16, after the 4-day deep study) ──────────────
+    // ROOT CAUSE: iOS/WebKit localStorage is synchronous; when the origin store
+    // is large, a getItem/setItem/REMOVEITEM can force WebKit to flush/compact
+    // the whole store on the main thread — a multi-second hang (tab bar dead,
+    // no JS error, recovers on relaunch). Two amplifiers the study confirmed:
+    //   (1) the mobile month render did a SYNCHRONOUS removeItem on the pre-paint
+    //       path whenever a TTL'd cache (mcal-drafts-v1, 5-min TTL, the 599-row
+    //       key) had expired — i.e. after ~5-10 min idle → the reported freeze;
+    //   (2) the ONLY size pruner (data.js) runs at boot and ignores the entire
+    //       mcal-*/mhome-* cluster, so the store grows unbounded during a session
+    //       until the app is killed ("works after re-add, freezes after 10 min").
+    // Cure: (A) NEVER removeItem synchronously — batch evictions to idle;
+    //       (B) shrink the mobile cluster in idle time, once per session.
+
+    // (A) Deferred eviction queue — replaces every synchronous removeItem on the
+    // render path. A stale entry left a few seconds longer is harmless.
+    const _mcalEvictQueue = new Set();
+    let _mcalEvictScheduled = false;
+    const _mcalFlushEvict = () => {
+        _mcalEvictScheduled = false;
+        const keys = [..._mcalEvictQueue]; _mcalEvictQueue.clear();
+        for (const k of keys) { try { localStorage.removeItem(k); } catch (_) { /* best-effort */ } }
+    };
+    const _mcalDeferEvict = (key) => {
+        try { _mcalEvictQueue.add(key); } catch (_) { return; }
+        if (_mcalEvictScheduled) return;
+        _mcalEvictScheduled = true;
+        if (typeof requestIdleCallback === 'function') requestIdleCallback(_mcalFlushEvict, { timeout: 5000 });
+        else setTimeout(_mcalFlushEvict, 1200);
+    };
+
+    // (B) Session-once mobile-cluster pruner — reclaims what data.js never touches.
+    let _mcalPrunedThisSession = false;
+    const _mcalPruneStoreOnce = () => {
+        if (_mcalPrunedThisSession) return;
+        _mcalPrunedThisSession = true;
+        const run = () => {
+            try {
+                const curUid = String((typeof _state !== 'undefined' && _state && _state.cu && _state.cu.id) || '');
+                const now = new Date();
+                const keepMonths = new Set();
+                for (let d = -1; d <= 1; d++) {
+                    const m = new Date(now.getFullYear(), now.getMonth() + d, 1);
+                    keepMonths.add(`mcal-acts-${m.getFullYear()}-${m.getMonth()}`);
+                }
+                const todaySnapTag = `-${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
+                const toRemove = [];
+                for (let i = 0; i < localStorage.length; i++) {
+                    const k = localStorage.key(i);
+                    if (!k) continue;
+                    if (k === _MCAL_RETRY_QUEUE_KEY) continue;                       // keep offline retry queue
+                    if (/^mcal-acts-\d+-\d+$/.test(k) && !keepMonths.has(k)) { toRemove.push(k); continue; }
+                    if (/^mcal-snap-\d+-\d+(-coming)?$/.test(k) && !keepMonths.has(k.replace(/-coming$/, '').replace(/^mcal-snap-/, 'mcal-acts-'))) { toRemove.push(k); continue; }
+                    if (/^mhome-snap-\d+-\d+-\d+-\d+$/.test(k) && !k.endsWith(todaySnapTag)) { toRemove.push(k); continue; }
+                    // per-uid caches belonging to OTHER users (leak across logins)
+                    const um = k.match(/^(?:mcal|mhome)-[a-z0-9-]*?-(\d{10,})$/i);
+                    if (um && curUid && um[1] !== curUid) { toRemove.push(k); continue; }
+                }
+                for (const k of toRemove) { try { localStorage.removeItem(k); } catch (_) { /* best-effort */ } }
+                if (toRemove.length && window.__FS_DEBUG_SWR) console.log('[mcal] idle-pruned ' + toRemove.length + ' stale cache keys');
+            } catch (_) { /* best-effort */ }
+        };
+        if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 8000 });
+        else setTimeout(run, 1500);
+    };
+
     const _mcalColorForType = (type) => {
         const t = String(type || '').toLowerCase();
         if (t.includes('birthday') || t.includes('all day') || t.includes('all-day')) return 'allday';
@@ -1957,7 +2024,7 @@
             } catch (_) { /* display best-effort */ }
         }
     };
-    const MCAL_BUILD = '2026-07-16-r10-minwrites';
+    const MCAL_BUILD = '2026-07-16-r11-noflush';
     let _mcalBuildStamped = false;
     const _showMobileCalendarViewImpl = async (viewport) => {
         if (!viewport) return;
@@ -2018,7 +2085,12 @@
                 const raw = localStorage.getItem(key);
                 if (!raw) return null;
                 const { ts, val } = JSON.parse(raw);
-                if (Date.now() - ts > ttl) { localStorage.removeItem(key); return null; }
+                // DEFER eviction (2026-07-16): a synchronous removeItem here forced
+                // a WebKit whole-store flush on the pre-paint path — the confirmed
+                // "~10 min idle → Calendar freezes" trigger (mcal-drafts-v1 5-min
+                // TTL). Queue the key for idle removal instead; a stale value is
+                // harmless (we return null, and the next write overwrites it).
+                if (Date.now() - ts > ttl) { _mcalDeferEvict(key); return null; }
                 return val;
             } catch(_) { return null; /* intentional: corrupt cache entry treated as miss */ }
         };
@@ -2082,6 +2154,10 @@
             <div id="mcal-coming-host">${_mcalCachedComing || ''}</div>
         </div>`;
         _stage('header-built');
+        // Shell is on screen — schedule the idle store-shrinker (once/session).
+        // Reclaims the mobile cache cluster data.js never prunes, so subsequent
+        // synchronous localStorage ops stay fast (see the cure note up top).
+        _mcalPruneStoreOnce();
 
         // ── Perf instrumentation (mobile Tier 0) ─────────────────
         // Look for "[mcal-perf]" rows in the console to see where the cold

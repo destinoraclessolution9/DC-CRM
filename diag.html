@@ -36,13 +36,13 @@
   };
   const mask = (s) => { s = String(s || ''); return s.length > 6 ? s.slice(0, 3) + '…' + s.slice(-2) : s; };
   try {
-    add('Page build', '2026-07-16 r10');
+    add('Page build', '2026-07-16 r11');
     // Which mobile CHUNK build has actually run in this container? (earlier
     // rounds couldn't distinguish old vs new — this removes the ambiguity.)
     try {
       const b = localStorage.getItem('mcal-build');
       add('Calendar code build', b ? b : '(none yet — open Calendar once, then reload this page)',
-        b === '2026-07-16-r10-minwrites' ? 'ok' : 'warn');
+        b === '2026-07-16-r11-noflush' ? 'ok' : 'warn');
     } catch (_) { /* best-effort */ }
     // Live main-thread storage-read timing: this is the operation the freeze
     // fix removed from the render path. If this reads slowly HERE, the device's
@@ -54,6 +54,16 @@
       const dt = performance.now() - t0;
       add('Storage read timing', keys.length + ' keys / ' + Math.round(bytes / 1024) + ' KB read in ' + dt.toFixed(1) + 'ms',
         dt > 200 ? 'bad' : 'ok');
+    } catch (_) { /* best-effort */ }
+    // Largest localStorage keys (whole store) — proves the r11 pruner shrank it.
+    try {
+      const sizes = Object.keys(localStorage)
+        .map(k => [k, ((localStorage.getItem(k) || '').length * 2)])
+        .sort((a, b) => b[1] - a[1]);
+      const totalKB = Math.round(sizes.reduce((s, x) => s + x[1], 0) / 1024);
+      add('Total localStorage / top keys',
+        totalKB + ' KB total<br>' + sizes.slice(0, 6).map(x => x[0] + ' — ' + Math.round(x[1] / 1024) + ' KB').join('<br>'),
+        totalKB > 1500 ? 'bad' : 'ok');
     } catch (_) { /* best-effort */ }
     try {
       const hs = JSON.parse(localStorage.getItem('mcal-hang-stage') || 'null');

@@ -60,6 +60,10 @@ const TRIPWIRES = [
     'storage-latency probe (WebKit localStorage stalls are the leading freeze theory)'],
   ['chunks/script-mobile.js', 'ZERO synchronous localStorage before first paint',
     'calendar paint path must not sync-read localStorage (iOS main-thread block = the 07-13..15 freeze)'],
+  ['chunks/script-mobile.js', '_mcalDeferEvict',
+    'TTL eviction must be deferred, never a synchronous removeItem on the render path (WebKit flush = the ~10min freeze)'],
+  ['chunks/script-mobile.js', '_mcalPruneStoreOnce',
+    'session store-shrinker: reclaims the mobile cache cluster data.js never prunes, keeping the store small enough that sync ops stay fast'],
   ['chunks/script-calendar.js', 'calendar_rpc_denied',
     'desktop 42501-with-dead-token routes to the session flow instead of stranding skeletons'],
 
