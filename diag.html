@@ -36,7 +36,25 @@
   };
   const mask = (s) => { s = String(s || ''); return s.length > 6 ? s.slice(0, 3) + '…' + s.slice(-2) : s; };
   try {
-    add('Page build', '2026-07-14 r8');
+    add('Page build', '2026-07-15 r9');
+    // Which mobile CHUNK build has actually run in this container? (earlier
+    // rounds couldn't distinguish old vs new — this removes the ambiguity.)
+    try {
+      const b = localStorage.getItem('mcal-build');
+      add('Calendar code build', b ? b : '(none yet — open Calendar once, then reload this page)',
+        b === '2026-07-15-r9-nosnapread' ? 'ok' : 'warn');
+    } catch (_) { /* best-effort */ }
+    // Live main-thread storage-read timing: this is the operation the freeze
+    // fix removed from the render path. If this reads slowly HERE, the device's
+    // storage layer is the confirmed culprit.
+    try {
+      const keys = Object.keys(localStorage).filter(k => k.startsWith('mcal-') || k.startsWith('mhome-'));
+      let bytes = 0; const t0 = performance.now();
+      for (const k of keys) { const v = localStorage.getItem(k); bytes += v ? v.length : 0; }
+      const dt = performance.now() - t0;
+      add('Storage read timing', keys.length + ' keys / ' + Math.round(bytes / 1024) + ' KB read in ' + dt.toFixed(1) + 'ms',
+        dt > 200 ? 'bad' : 'ok');
+    } catch (_) { /* best-effort */ }
     try {
       const hs = JSON.parse(localStorage.getItem('mcal-hang-stage') || 'null');
       add('Month render last stage', hs ? (hs.s + ' @ ' + new Date(hs.ts).toLocaleTimeString() + (hs.s === 'done' ? '' : ' — DID NOT FINISH (froze after this stage)')) : '(never ran)', hs && hs.s !== 'done' ? 'bad' : 'ok');

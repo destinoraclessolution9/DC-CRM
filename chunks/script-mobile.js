@@ -1951,8 +1951,12 @@
             } catch (_) { /* display best-effort */ }
         }
     };
+    const MCAL_BUILD = '2026-07-15-r9-nosnapread';
     const _showMobileCalendarViewImpl = async (viewport) => {
         if (!viewport) return;
+        // Loud build marker (2026-07-15): shown on /diag so the running container
+        // version is UNAMBIGUOUS — earlier rounds couldn't tell old vs new chunk.
+        try { localStorage.setItem('mcal-build', MCAL_BUILD); } catch (_) { /* best-effort */ }
         // Freeze-detector stage stamps — synchronous localStorage writes survive
         // a main-thread hang + app kill; the wrapper reports the last stage on
         // the next launch and /diag displays it. Cleared to 'done' on success.
@@ -2008,12 +2012,19 @@
             try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), val })); } catch(_) { /* intentional: localStorage write is best-effort (quota/private mode) */ }
         };
 
-        // A: Instant snapshot restore — 8hr TTL survives app close on Android
-        const _mcalSnapKey = `mcal-snap-${_mcalYear}-${_mcalMonth}`;
-        const _mcalCachedGrid   = _lsGet(_mcalSnapKey,           8 * 60 * 60 * 1000);
-        const _mcalCachedComing = _lsGet(_mcalSnapKey + '-coming', 8 * 60 * 60 * 1000);
-        const _mcalInitGrid = _mcalCachedGrid
-            || Array.from({length: 42}).map(() => '<div class="mcal-cell muted"></div>').join('');
+        // A: Instant grid shell — ZERO synchronous localStorage before first paint.
+        // ROOT CAUSE (2026-07-15): the old "instant snapshot restore" read two
+        // large mcal-snap-* strings from localStorage HERE, before painting. On
+        // iOS/WebKit a synchronous localStorage read can BLOCK the main thread
+        // for seconds when the storage layer is contended (background sync, a
+        // second tab of the same origin, OS housekeeping) — a total freeze incl.
+        // the tab bar, with NO JS error, intermittent, clearing on relaunch.
+        // That matches every "Calendar hangs" report 2026-07-13..15. The month
+        // data fetch is ~150ms (see /diag), so painting an EMPTY grid and letting
+        // the fast fetch fill it costs a barely-perceptible flash and can never
+        // freeze. Snapshot writes below are likewise deferred off the paint path.
+        const _mcalCachedComing = '';
+        const _mcalInitGrid = Array.from({length: 42}).map(() => '<div class="mcal-cell muted"></div>').join('');
         _stage('snap-read');
 
         viewport.innerHTML = `
@@ -2435,9 +2446,10 @@
         const grid = document.getElementById('mcal-grid');
         if (grid) {
             grid.innerHTML = cells.join('');
-            // Only snapshot a grid built from trusted data — a dead-session or
-            // degraded-fetch render must not become the instant-restore for next launch.
-            if (_mcalTrust) _lsSet(_mcalSnapKey, cells.join(''));
+            // Snapshot WRITE removed (2026-07-15): its only reader was the
+            // pre-paint snapshot restore, now deleted (blocked the main thread).
+            // Writing a large string to localStorage nothing reads is pure
+            // freeze-risk with zero benefit. (_mcalTrust kept below for acts cache.)
             _mcalPerf('grid-painted');
         }
         _stage('grid-painted');
@@ -2493,7 +2505,8 @@
                     </button>
                 </div>
             </div>`;
-            if (_mcalTrust) _lsSet(_mcalSnapKey + '-coming', comingHost.innerHTML);
+            // Coming-strip snapshot WRITE removed (2026-07-15): reader deleted
+            // with the pre-paint restore — see the grid-snapshot note above.
         }
         _stage('done');
 
