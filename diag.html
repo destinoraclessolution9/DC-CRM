@@ -36,13 +36,13 @@
   };
   const mask = (s) => { s = String(s || ''); return s.length > 6 ? s.slice(0, 3) + '…' + s.slice(-2) : s; };
   try {
-    add('Page build', '2026-07-16 r14');
+    add('Page build', '2026-07-16 r15');
     // Which mobile CHUNK build has actually run in this container? (earlier
     // rounds couldn't distinguish old vs new — this removes the ambiguity.)
     try {
       const b = localStorage.getItem('mcal-build');
       add('Calendar code build', b ? b : '(none yet — open Calendar once, then reload this page)',
-        b === '2026-07-16-r14-fasttap' ? 'ok' : 'warn');
+        b === '2026-07-16-r15-lean' ? 'ok' : 'warn');
     } catch (_) { /* best-effort */ }
     // Live main-thread storage-read timing: this is the operation the freeze
     // fix removed from the render path. If this reads slowly HERE, the device's
@@ -68,6 +68,10 @@
     try {
       const hs = JSON.parse(localStorage.getItem('mcal-hang-stage') || 'null');
       add('Month render last stage', hs ? (hs.s + ' @ ' + new Date(hs.ts).toLocaleTimeString() + (hs.s === 'done' ? '' : ' — DID NOT FINISH (froze after this stage)')) : '(never ran)', hs && hs.s !== 'done' ? 'bad' : 'ok');
+    } catch (_) { /* best-effort */ }
+    try {
+      const rm = JSON.parse(localStorage.getItem('mcal-render-ms') || 'null');
+      if (rm) add('Last render duration', rm.ms + ' ms @ ' + new Date(rm.ts).toLocaleTimeString(), rm.ms > 1500 ? 'bad' : (rm.ms > 600 ? 'warn' : 'ok'));
     } catch (_) { /* best-effort */ }
     try {
       const le = localStorage.getItem('mcal-last-error');

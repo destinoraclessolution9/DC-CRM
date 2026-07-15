@@ -1916,12 +1916,10 @@
                     // per-uid caches belonging to OTHER users (leak across logins)
                     const um = k.match(/^(?:mcal|mhome)-[a-z0-9-]*?-(\d{10,})$/i);
                     if (um && curUid && um[1] !== curUid) { toRemove.push(k); continue; }
-                    // Oversized CURRENT mobile caches (>180KB) — evict now so the
-                    // r13 write-cap's effect is immediate, not only on next write.
-                    if (/^(?:mcal|mhome)-/.test(k)) {
-                        const _v = localStorage.getItem(k);
-                        if (_v && _v.length > 180 * 1024) { toRemove.push(k); continue; }
-                    }
+                    // (r14: dropped the per-key getItem size-scan — the _lsSet/
+                    // _mhomeLsSet write-cap already prevents oversized writes and
+                    // evicts on the next write, so scanning every value here just
+                    // added main-thread work for no benefit.)
                 }
                 for (const k of toRemove) { try { localStorage.removeItem(k); } catch (_) { /* best-effort */ } }
                 if (toRemove.length && window.__FS_DEBUG_SWR) console.log('[mcal] idle-pruned ' + toRemove.length + ' stale cache keys');
@@ -2039,7 +2037,7 @@
             } catch (_) { /* display best-effort */ }
         }
     };
-    const MCAL_BUILD = '2026-07-16-r14-fasttap';
+    const MCAL_BUILD = '2026-07-16-r15-lean';
     let _mcalBuildStamped = false;
     const _showMobileCalendarViewImpl = async (viewport) => {
         if (!viewport) return;
@@ -2412,8 +2410,12 @@
         }
 
         // Pre-warm the gendered birthday posters so the day-sheet WhatsApp button
-        // can share the image file synchronously inside the tap.
-        _mcalWarmBdayPosters();
+        // can share the image file synchronously inside the tap. Deferred to idle
+        // (r14): image load + canvas + toBlob competed with the render for the
+        // main thread; the posters aren't needed until a birthday WA tap, so warm
+        // them after the calendar is on screen.
+        if (typeof requestIdleCallback === 'function') requestIdleCallback(() => { _mcalWarmBdayPosters(); }, { timeout: 5000 });
+        else setTimeout(() => { _mcalWarmBdayPosters(); }, 800);
 
         // First-paint fallbacks: ensure downstream code handles missing data
         // without throwing. On cold load these are empty; the Phase 2 re-render
@@ -2644,6 +2646,9 @@
             // with the pre-paint restore — see the grid-snapshot note above.
         }
         _stage('done');
+        // Record the real render duration so /diag shows how fast the calendar
+        // actually renders on THIS device — ground truth instead of guesswork.
+        try { localStorage.setItem('mcal-render-ms', JSON.stringify({ ms: Math.round(performance.now() - _mcalPerfT0), ts: new Date().toISOString() })); } catch (_) { /* best-effort */ }
 
         // ── SWR background revalidate ──────────────────────────
         // After the cached grid is painted, quietly re-fetch the FULL month
