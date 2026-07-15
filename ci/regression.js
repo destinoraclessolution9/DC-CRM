@@ -193,6 +193,18 @@ console.log('\n── Step 9: Business-logic unit tests ────────
   }
 }
 
+// ── Step 10: Reliability guard tripwires ───────────────────────────────────
+// Each guard fixed a real 2026-07-13/15 production incident (dead-session
+// zombies, cache poisoning, silent render/tap failures). See the file header
+// of ci/guard-tripwires.js for the rules when refactoring one.
+console.log('\n── Step 10: Reliability guard tripwires ──────────────────');
+try {
+  execSync(`node "${path.join(__dirname,'guard-tripwires.js')}"`, { stdio: 'inherit' });
+  pass('guard-tripwires.js clean');
+} catch {
+  fail('reliability guard(s) missing (see above)');
+}
+
 // ── Summary ────────────────────────────────────────────────────────────────
 console.log('\n─────────────────────────────────────────────────────────');
 if (fails === 0) {
