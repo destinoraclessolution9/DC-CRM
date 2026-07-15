@@ -75,7 +75,15 @@
     } catch (_) { /* best-effort */ }
     try {
       const le = localStorage.getItem('mcal-last-error');
-      add('Last calendar error breadcrumb', le ? le : '(none recorded)', le ? 'bad' : 'ok');
+      if (!le) { add('Last calendar error breadcrumb', '(none recorded)', 'ok'); }
+      else {
+        // Age-aware: a breadcrumb older than 6h is HISTORICAL (from before the
+        // current fix), not a live problem — show it neutral, not alarming red.
+        let ageMs = Infinity;
+        try { ageMs = Date.now() - new Date(JSON.parse(le).ts).getTime(); } catch (_) {}
+        const historical = ageMs > 6 * 60 * 60 * 1000;
+        add('Last calendar error breadcrumb', (historical ? '(HISTORICAL — before the current build, not a live issue)\n' : '') + le, historical ? 'warn' : 'bad');
+      }
     } catch (_) { /* best-effort */ }
     try {
       const log = JSON.parse(localStorage.getItem('crm_error_log') || '[]');
