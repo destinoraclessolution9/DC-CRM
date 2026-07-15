@@ -2024,7 +2024,7 @@
             } catch (_) { /* display best-effort */ }
         }
     };
-    const MCAL_BUILD = '2026-07-16-r11-noflush';
+    const MCAL_BUILD = '2026-07-16-r12-smallstore';
     let _mcalBuildStamped = false;
     const _showMobileCalendarViewImpl = async (viewport) => {
         if (!viewport) return;
@@ -2312,7 +2312,7 @@
             Promise.all([
                 _needPeople  ? AppDataStore.queryAdvanced('prospects', { select: 'id,full_name,date_of_birth,responsible_agent_id,phone,gender', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []) : Promise.resolve(null),
                 _needPeople  ? AppDataStore.queryAdvanced('customers', { select: 'id,full_name,date_of_birth,responsible_agent_id,phone,gender,customer_since', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []) : Promise.resolve(null),
-                _needDrafts  ? AppDataStore.getAll('follow_up_drafts').catch(() => []) : Promise.resolve(null),
+                _needDrafts  ? AppDataStore.query('follow_up_drafts', { status: 'pending' }).catch(() => []) : Promise.resolve(null),  // pending-only: the coming-up strip counts overdue=pending-past-due; caching all 599 full rows (incl. message text) bloated mcal-drafts to 657KB and fed the iOS storage freeze (2026-07-16). Matches the mobile Home fetch.
                 _needRefills ? AppDataStore.query('refill_reminders', { status: 'pending' }).catch(() => []) : Promise.resolve(null),
             ]).then(([p, c, d, r]) => {
                 _mcalPerf('phase2:people-drafts-refills:done');

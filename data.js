@@ -208,6 +208,11 @@ class DataStore {
         // largest fs_crm_ keys first.
         try { this._pruneStorageIfFull(); } catch (_) { /* intentional: startup pruning is best-effort; never block construction */ }
 
+        // Migrate already-bloated fs_crm_* snapshots (from before the 120KB size
+        // cap) into the async Cache API tier, shrinking the synchronous store
+        // below the iOS WebKit flush-stall zone (the 2026-07 mobile-freeze fix).
+        try { this._evictOversizedSnapshotsOnce(); } catch (_) { /* intentional: best-effort; never block construction */ }
+
         // Clear delta cursors poisoned by pre-guard builds (see method docs).
         try { this._healPoisonedSyncCursors(); } catch (_) { /* intentional: cursor heal is best-effort; never block construction */ }
     }
@@ -554,10 +559,7 @@ class DataStore {
                     tablesPrimed.push(t);
                     // Persist async — same pattern as _getAllImpl writes.
                     setTimeout(() => {
-                        try {
-                            localStorage.setItem(`fs_crm_${t}`, JSON.stringify(this._sanitizeForStorage(t, rows)));
-                            localStorage.setItem(`fs_crm_${t}_last_sync`, new Date().toISOString());
-                        } catch (_) { /* intentional: snapshot persist is a cache optimization; quota/storage failure is non-fatal */ }
+                        this._persistTableSnapshot(t, rows, new Date().toISOString());
                     }, 0);
                 }
             }
@@ -689,7 +691,7 @@ class DataStore {
         for (const table of tables) {
             const cached = this._cache.get(table);
             if (!cached || !Array.isArray(cached.data)) continue;
-            try { localStorage.setItem(`fs_crm_${table}`, JSON.stringify(this._sanitizeForStorage(table, cached.data))); } catch (_) { /* intentional: realtime snapshot persist is best-effort cache write */ }
+            this._persistTableSnapshot(table, cached.data, null); // size-capped; no last_sync advance for realtime
             // Do NOT advance fs_crm_<table>_last_sync here. Receiving realtime events
             // proves nothing about events MISSED during a websocket drop/reconnect
             // (supabase-js does not replay missed postgres_changes). Bumping the cursor
@@ -985,6 +987,67 @@ class DataStore {
         } catch (_) { /* intentional: overflow-tier write is best-effort; data still in memory/server */ }
     }
 
+    // iOS freeze cure (2026-07-16): a SYNCHRONOUS localStorage write/flush of a
+    // LARGE value blocks the main thread on iOS/WebKit (the whole origin store is
+    // rewritten to disk) for seconds. Route any table whose JSON exceeds ~120KB
+    // to the ASYNC Cache API tier instead of localStorage, and drop the oversized
+    // localStorage copy — keeping the synchronous store well under the WebKit
+    // flush-stall zone. The tiny *_last_sync cursor stays in localStorage so
+    // delta-sync still works. Small tables keep the fast sync localStorage path.
+    static get _LS_TABLE_MAX() { return 120 * 1024; }
+    _persistTableSnapshot(tableName, rows, syncStamp) {
+        let json;
+        try { json = JSON.stringify(this._sanitizeForStorage(tableName, rows)); }
+        catch (_) { return; }
+        if (json.length > DataStore._LS_TABLE_MAX) {
+            try { localStorage.removeItem(`fs_crm_${tableName}`); } catch (_) { /* best-effort */ }
+            try { this._cacheApiSet(tableName, rows); } catch (_) { /* best-effort */ }
+            if (syncStamp) { try { localStorage.setItem(`fs_crm_${tableName}_last_sync`, syncStamp); } catch (_) { /* best-effort */ } }
+            return;
+        }
+        try {
+            localStorage.setItem(`fs_crm_${tableName}`, json);
+            if (syncStamp) localStorage.setItem(`fs_crm_${tableName}_last_sync`, syncStamp);
+        } catch (_) {
+            // Quota — fall back to the async overflow tier.
+            try { localStorage.removeItem(`fs_crm_${tableName}`); } catch (_) { /* best-effort */ }
+            try { this._cacheApiSet(tableName, rows); } catch (_) { /* best-effort */ }
+        }
+    }
+
+    // One-time (idle) migration of ALREADY-bloated fs_crm_* snapshots written
+    // before the size cap existed — moves them to the async Cache API tier so an
+    // existing large store shrinks below the flush-stall zone immediately. Runs
+    // deferred so its own reads/removes never block boot.
+    _evictOversizedSnapshotsOnce() {
+        if (this._oversizedEvicted) return;
+        this._oversizedEvicted = true;
+        const PROTECT = new Set(['fs_crm_tombstones', 'fs_crm_sync_queue', 'fs_crm_sync_queue_dead', 'fs_crm_cache_epoch']);
+        const run = () => {
+            try {
+                const big = [];
+                for (let i = 0; i < localStorage.length; i++) {
+                    const k = localStorage.key(i);
+                    if (!k || !k.startsWith('fs_crm_') || k.endsWith('_last_sync') || PROTECT.has(k)) continue;
+                    const v = localStorage.getItem(k);
+                    if (v && v.length > DataStore._LS_TABLE_MAX) big.push([k, v]);
+                }
+                for (const [k, v] of big) {
+                    // Simple table snapshots (fs_crm_<name>) get preserved in Cache
+                    // API; derived caches (fs_crm___latact_* etc.) are just dropped
+                    // (they regenerate on next query).
+                    const table = k.slice('fs_crm_'.length);
+                    if (/^[a-z_]+$/.test(table)) {
+                        try { const rows = JSON.parse(v); if (Array.isArray(rows)) this._cacheApiSet(table, rows); } catch (_) { /* best-effort */ }
+                    }
+                    try { localStorage.removeItem(k); } catch (_) { /* best-effort */ }
+                }
+            } catch (_) { /* best-effort */ }
+        };
+        if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 8000 });
+        else setTimeout(run, 2000);
+    }
+
     // Background fetch that refreshes stale data. Dedupes with _inFlightGetAll
     // so a concurrent { fresh: true } call shares this network request. Only
     // emits dataChanged when the fresh rows actually differ from the stale
@@ -1067,10 +1130,7 @@ class DataStore {
                         }
                         const nextSync = _cursor || lastSync;
                         setTimeout(() => {
-                            try {
-                                localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(this._sanitizeForStorage(tableName, result)));
-                                if (nextSync) localStorage.setItem(`fs_crm_${tableName}_last_sync`, nextSync);
-                            } catch (_) { /* intentional: delta-merge persist is best-effort cache write */ }
+                            this._persistTableSnapshot(tableName, result, nextSync || null);
                         }, 0);
                         if (window.__FS_DEBUG_SWR) console.log(`[SWR] ${tableName}: delta sync — ${delta.length} changed rows merged`);
                         this.emit('dataChanged', { action: 'revalidate', table: tableName });
@@ -1580,23 +1640,9 @@ class DataStore {
             } catch (_) { /* intentional: local-field merge is an enhancement; fall through to plain server result */ }
             this._cacheSet(tableName, result);
             setTimeout(() => {
-                try {
-                    localStorage.setItem(`fs_crm_${tableName}`, JSON.stringify(this._sanitizeForStorage(tableName, result)));
-                    // Record sync time so _swrRevalidate can use delta fetch next time
-                    localStorage.setItem(`fs_crm_${tableName}_last_sync`, new Date().toISOString());
-                } catch (lsErr) {
-                    // QuotaExceededError — localStorage full. Write to Cache API
-                    // overflow tier so this table isn't lost for the next reload.
-                    const isQuota = lsErr && (
-                        lsErr.name === 'QuotaExceededError' ||
-                        lsErr.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
-                        (lsErr.code !== undefined && lsErr.code === 22)
-                    );
-                    if (isQuota) {
-                        this._cacheApiSet(tableName, result).catch(() => {});
-                        if (window.__FS_DEBUG_SWR) console.log(`[SWR] ${tableName}: localStorage quota exceeded — wrote to Cache API overflow`);
-                    }
-                }
+                // Size-capped persist: large tables go to the async Cache API tier
+                // instead of a blocking synchronous localStorage write (iOS freeze).
+                this._persistTableSnapshot(tableName, result, new Date().toISOString());
             }, 0);
             return result;
         } catch (e) {
