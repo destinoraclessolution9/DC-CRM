@@ -1923,7 +1923,13 @@
         // reached 'done', the last render froze mid-flight — record WHERE.
         try {
             const prev = JSON.parse(localStorage.getItem('mcal-hang-stage') || 'null');
-            if (prev && prev.s && prev.s !== 'done') {
+            // STALENESS GUARD (2026-07-16): only a stamp that survived an app
+            // kill+relaunch is a real freeze — its ts is OLD. A fresh non-'done'
+            // stamp means a render is simply IN FLIGHT right now (background
+            // revalidate / month-nav re-render call this wrapper re-entrantly),
+            // NOT a freeze. Without this, every concurrent re-render wrote a
+            // false 'freeze-detector' breadcrumb. 15s cleanly separates the two.
+            if (prev && prev.s && prev.s !== 'done' && (Date.now() - (prev.ts || 0)) > 15000) {
                 localStorage.setItem('mcal-last-error', JSON.stringify({
                     ts: new Date().toISOString(), where: 'freeze-detector',
                     msg: 'previous month render never completed — froze after stage: ' + prev.s,
@@ -1951,22 +1957,30 @@
             } catch (_) { /* display best-effort */ }
         }
     };
-    const MCAL_BUILD = '2026-07-15-r9-nosnapread';
+    const MCAL_BUILD = '2026-07-16-r10-minwrites';
+    let _mcalBuildStamped = false;
     const _showMobileCalendarViewImpl = async (viewport) => {
         if (!viewport) return;
-        // Loud build marker (2026-07-15): shown on /diag so the running container
-        // version is UNAMBIGUOUS — earlier rounds couldn't tell old vs new chunk.
-        try { localStorage.setItem('mcal-build', MCAL_BUILD); } catch (_) { /* best-effort */ }
-        // Freeze-detector stage stamps — synchronous localStorage writes survive
-        // a main-thread hang + app kill; the wrapper reports the last stage on
-        // the next launch and /diag displays it. Cleared to 'done' on success.
-        const _stage = (s) => { try { localStorage.setItem('mcal-hang-stage', JSON.stringify({ s, ts: Date.now() })); } catch (_) { /* best-effort */ } };
-        // Storage-latency probe (2026-07-15): a freeze recurred stuck between two
-        // ADJACENT stamps in pure-sync code (start → header-built) — the only
-        // thing that can block there is the storage layer itself (WebKit
-        // localStorage can stall the main thread while the container DB is
-        // compacting/wedged). Time the first write; a slow one is recorded so
-        // /diag can prove/refute the storage-stall theory on the next freeze.
+        // Build marker — write at most ONCE per page load (was every render).
+        if (!_mcalBuildStamped) { try { localStorage.setItem('mcal-build', MCAL_BUILD); _mcalBuildStamped = true; } catch (_) { /* best-effort */ } }
+        // ROOT CAUSE (2026-07-16): the "Calendar hangs, tab bar dead, no JS
+        // error, intermittent, recovers on relaunch" freeze is a WebKit
+        // localStorage flush stall. iOS batches localStorage writes in memory
+        // and periodically flushes the ENTIRE store (~730KB here) to disk
+        // SYNCHRONOUSLY on the main thread — a multi-second block that lands on
+        // whichever setItem happens to trigger the flush. The render was doing
+        // ~13 synchronous writes (10 of them these very stage stamps), so it hit
+        // a flush often; each time we removed one write the freeze moved to the
+        // next write. FIX: fine-grained stage is tracked IN MEMORY; only 'start'
+        // and 'done' touch localStorage (2 writes, not 10). The slow-* timing
+        // breadcrumbs below localize any residual stall.
+        let _mcalStageMem = 'init';
+        const _stage = (s) => {
+            _mcalStageMem = s;
+            if (s === 'start' || s === 'done') {
+                try { localStorage.setItem('mcal-hang-stage', JSON.stringify({ s, ts: Date.now() })); } catch (_) { /* best-effort */ }
+            }
+        };
         {
             const _t0 = Date.now();
             _stage('start');
@@ -1975,7 +1989,7 @@
                 try {
                     localStorage.setItem('mcal-last-error', JSON.stringify({
                         ts: new Date().toISOString(), where: 'slow-storage',
-                        msg: 'localStorage write took ' + _dt + 'ms — container storage layer is stalling',
+                        msg: 'localStorage write (start stamp) took ' + _dt + 'ms — WebKit store flush stalling the main thread',
                     }));
                 } catch (_) { /* best-effort */ }
             }
@@ -2341,7 +2355,17 @@
             activities = (_cachedActs || []).filter(_mcalKeepAct);
         } else {
             activities = (actResult?.data || []).filter(_mcalKeepAct);
-            if (_mcalTrust) _lsSet(_mcalActsKey, activities);
+            // DEFERRED write (2026-07-16): persisting the activities cache is a
+            // large synchronous localStorage write (freeze risk — see the flush
+            // note at render top). It only speeds up the NEXT visit, so push it
+            // off the render path to an idle callback. Snapshot into a local so a
+            // later navigation can't mutate what we persist.
+            if (_mcalTrust) {
+                const _actsToCache = activities;
+                const _persistActs = () => { try { _lsSet(_mcalActsKey, _actsToCache); } catch (_) { /* best-effort */ } };
+                if (typeof requestIdleCallback === 'function') requestIdleCallback(_persistActs, { timeout: 4000 });
+                else setTimeout(_persistActs, 0);
+            }
         }
         _stage('acts-resolved');
         const personMap = new Map(allPeople.map(p => [String(p.id), p]));
@@ -2445,11 +2469,25 @@
         _stage('cells-built');
         const grid = document.getElementById('mcal-grid');
         if (grid) {
-            grid.innerHTML = cells.join('');
-            // Snapshot WRITE removed (2026-07-15): its only reader was the
-            // pre-paint snapshot restore, now deleted (blocked the main thread).
-            // Writing a large string to localStorage nothing reads is pure
-            // freeze-risk with zero benefit. (_mcalTrust kept below for acts cache.)
+            // Tiebreaker timing (2026-07-16): the 07-15 freeze sat between
+            // 'cells-built' and 'grid-painted'. That span now has NO localStorage
+            // write (stage stamps are in-memory + the snapshot write is gone), so
+            // only the innerHTML DOM assignment remains. Time it: a slow-but-
+            // completing assignment records 'slow-innerHTML'; if the freeze is
+            // truly gone, this never fires. (Snapshot write removed 2026-07-15 —
+            // its only reader was the deleted pre-paint restore.)
+            const _gridHtml = cells.join('');
+            const _ihT0 = Date.now();
+            grid.innerHTML = _gridHtml;
+            const _ihDt = Date.now() - _ihT0;
+            if (_ihDt > 400) {
+                try {
+                    localStorage.setItem('mcal-last-error', JSON.stringify({
+                        ts: new Date().toISOString(), where: 'slow-innerHTML',
+                        msg: 'grid innerHTML took ' + _ihDt + 'ms for ' + cells.length + ' cells / ' + _gridHtml.length + ' chars',
+                    }));
+                } catch (_) { /* best-effort */ }
+            }
             _mcalPerf('grid-painted');
         }
         _stage('grid-painted');
