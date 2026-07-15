@@ -710,6 +710,19 @@ h1, h2, h3, h4 {
     -webkit-backdrop-filter: blur(8px);
 }
 
+/* iOS perf (2026-07-16): backdrop-filter blur over the full mobile calendar
+   grid (42 cells + dozens of colored event chips) forces WebKit to render the
+   whole background to a texture and blur it on the compositor when a modal
+   opens — a multi-SECOND stall on iPhone (the reported "day sheet takes 3s to
+   open"). The dim rgba overlay alone reads fine; drop the blur on mobile where
+   it is both the most expensive and the least visible. */
+@media (max-width: 768px) {
+    .modal-overlay {
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+    }
+}
+
 .modal-box {
     border-radius: var(--radius-xl);
     box-shadow: var(--shadow-lg);

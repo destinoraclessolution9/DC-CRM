@@ -2037,7 +2037,7 @@
             } catch (_) { /* display best-effort */ }
         }
     };
-    const MCAL_BUILD = '2026-07-16-r15-lean';
+    const MCAL_BUILD = '2026-07-16-r16-noblur';
     let _mcalBuildStamped = false;
     const _showMobileCalendarViewImpl = async (viewport) => {
         if (!viewport) return;
@@ -3085,7 +3085,14 @@
     // day sheet must surface (breadcrumb + toast), not silently eat the tap.
     const mcalDayClick = (dateStr) => {
         try {
-            return _mcalDayClickImpl(dateStr);
+            const _t0 = performance.now();
+            const _r = _mcalDayClickImpl(dateStr);
+            // Record how long BUILDING + opening the day sheet takes in JS. If this
+            // is small (<50ms) but the sheet still feels slow to appear, the cost
+            // is browser COMPOSITING (the modal-overlay backdrop blur, dropped on
+            // mobile 2026-07-16), not our code. Surfaced on /diag.
+            try { localStorage.setItem('mcal-daysheet-ms', JSON.stringify({ ms: Math.round(performance.now() - _t0), ts: new Date().toISOString() })); } catch (_) { /* best-effort */ }
+            return _r;
         } catch (e) {
             try {
                 localStorage.setItem('mcal-last-error', JSON.stringify({
