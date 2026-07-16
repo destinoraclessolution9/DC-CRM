@@ -2120,6 +2120,13 @@
         return false;
     };
 
+    // Race a storage/OCR call against a timeout so a slow mobile connection can't
+    // hang the photo-scan flow indefinitely (the upload + edge-function calls have
+    // no built-in timeout, unlike AppDataStore reads/writes).
+    const _ffRace = (p, ms, label) => Promise.race([
+        Promise.resolve(p),
+        new Promise((_, rej) => setTimeout(() => rej(new Error((label || 'request') + ' timed out — check your connection and try again.')), ms)),
+    ]);
     const handleOrderFormFile = async (input, prefix, prospectId, activityId) => {
         const file = input.files && input.files[0];
         if (!file) return;
@@ -2159,7 +2166,7 @@
             setStatus('#e3f2fd', '#1565c0', '<i class="fas fa-spinner fa-spin"></i> Uploading photo…');
             const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
             const path = `order_forms/${prospectId}_${Date.now()}_${formTypeHint}_${safeName}`;
-            const { error: upErr } = await sb.storage.from('attachments').upload(path, file, { upsert: false, contentType: file.type });
+            const { error: upErr } = await _ffRace(sb.storage.from('attachments').upload(path, file, { upsert: false, contentType: file.type }), 45000, 'Photo upload');
             if (upErr) throw upErr;
             // C2 (audit): keep the storage PATH (not a permanent public URL). Render
             // + open code re-signs it via resolveAttachmentSrc, so a private bucket
@@ -2208,9 +2215,9 @@
                 const [meta, b64] = String(dataUrl).split(',');
                 const mime = (meta.match(/data:(.*?);base64/) || [])[1] || file.type || 'image/jpeg';
                 if (!sb.functions) throw new Error('Supabase functions client not available');
-                const { data: _res, error } = await sb.functions.invoke('order-form-ocr', {
+                const { data: _res, error } = await _ffRace(sb.functions.invoke('order-form-ocr', {
                     body: { image_base64: b64, mime_type: mime, form_type: formTypeHint },
-                });
+                }), 30000, 'AI read');
                 if (error) throw new Error(error.message || 'Edge function call failed');
                 if (!_res || _res.ok === false) throw new Error(_res?.detail || _res?.error || 'OCR failed');
                 res = _res;
@@ -5274,7 +5281,7 @@
                 if (sb && sb.storage) {
                     const safeName = _pendingCpsFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
                     const path = `activity_photos/${savedActivity.id}_${Date.now()}_${safeName}`;
-                    const { error: upErr } = await sb.storage.from('attachments').upload(path, _pendingCpsFile, { upsert: false, contentType: _pendingCpsFile.type });
+                    const { error: upErr } = await _ffRace(sb.storage.from('attachments').upload(path, _pendingCpsFile, { upsert: false, contentType: _pendingCpsFile.type }), 45000, 'Photo upload');
                     if (upErr) throw upErr;
                     const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
                     if (urlData?.publicUrl) {
