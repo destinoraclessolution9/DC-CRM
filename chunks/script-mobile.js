@@ -942,12 +942,14 @@
         const _mhomeLsSet = (key, val) => {
             try {
                 const s = JSON.stringify({ ts: Date.now(), val });
-                // Size cap (2026-07-16 r13): a synchronous localStorage write of a
-                // large value blocks the main thread on iOS. Skip persisting an
-                // oversized cache (>180KB) — it's an optimization, so the next
-                // render just re-fetches (async, non-blocking); evict any prior
-                // oversized copy so the store shrinks.
-                if (s.length > 180 * 1024) { try { localStorage.removeItem(key); } catch(_) {} return; }
+                // Size guard, relaxed r17: the freeze was cured by moving the big
+                // fs_crm_* tables to the async Cache API tier (r12), so the mobile
+                // caches persisting at their natural size (~200-400KB) keeps the
+                // store ~1.5-1.9MB — safe (render is 4ms). The old 180KB cap was
+                // over-aggressive: it SKIPPED persisting people/customers/drafts,
+                // forcing a network RE-FETCH on every screen open = the reported
+                // lag. Only block a pathologically huge value (>800KB).
+                if (s.length > 800 * 1024) { try { localStorage.removeItem(key); } catch(_) {} return; }
                 localStorage.setItem(key, s);
             } catch(_) { /* intentional: localStorage write is best-effort (quota/private mode) */ }
         };
@@ -2037,7 +2039,7 @@
             } catch (_) { /* display best-effort */ }
         }
     };
-    const MCAL_BUILD = '2026-07-16-r16-noblur';
+    const MCAL_BUILD = '2026-07-16-r17-nofetch';
     let _mcalBuildStamped = false;
     const _showMobileCalendarViewImpl = async (viewport) => {
         if (!viewport) return;
@@ -2110,9 +2112,9 @@
         const _lsSet = (key, val) => {
             try {
                 const s = JSON.stringify({ ts: Date.now(), val });
-                // Size cap (2026-07-16 r13) — see _mhomeLsSet: skip an oversized
-                // synchronous localStorage write (iOS main-thread flush freeze).
-                if (s.length > 180 * 1024) { try { localStorage.removeItem(key); } catch(_) {} return; }
+                // Size guard, relaxed r17 (see _mhomeLsSet): 180KB was too tight
+                // and forced network re-fetches (lag); only block >800KB now.
+                if (s.length > 800 * 1024) { try { localStorage.removeItem(key); } catch(_) {} return; }
                 localStorage.setItem(key, s);
             } catch(_) { /* intentional: localStorage write is best-effort (quota/private mode) */ }
         };
