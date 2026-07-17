@@ -3797,6 +3797,7 @@
                     <div class="mp-sub">Hi ${_mhomeEsc(userName)}, your community awaits 🌸</div>
                 </div>
                 <div class="mp-actions">
+                    <button class="mp-search-btn" id="mp-delivery-btn" style="display:${_mpTab === 'customers' ? 'flex' : 'none'};" onclick="app.mpOpenDeliveryListing()" aria-label="Product Delivery Listing" title="Product Delivery Listing"><i class="fas fa-truck"></i></button>
                     <button class="mp-search-btn" onclick="document.getElementById('mp-search-input')?.focus()" aria-label="Search"><i class="fas fa-search"></i></button>
                     <div class="mp-avatar" onclick="app.openMobileDrawer()" role="button" aria-label="Profile" style="background-image:url('${_mhomeEsc(avatarUrl)}')"></div>
                 </div>
@@ -4014,6 +4015,10 @@
         // Update only the filter badge inline rather than re-rendering the
         // shell — re-rendering would blow away the search-input focus state.
         _mpUpdateFilterBtn();
+        // Delivery-listing header button is a Customers-tab feature (desktop parity);
+        // the shell isn't re-rendered on tab switch, so toggle it here.
+        const _dBtn = document.getElementById('mp-delivery-btn');
+        if (_dBtn) _dBtn.style.display = (tab === 'customers') ? 'flex' : 'none';
         await _mpRenderList();
     };
 
@@ -4043,6 +4048,18 @@
         _mpSearch = v || '';
         clearTimeout(_mpSearchTimer);
         _mpSearchTimer = setTimeout(() => { _mpRenderList(); }, 220);
+    };
+    // Product Delivery Listing — desktop parity (Customers-tab header button).
+    // The board lives in the customers chunk; ensure it's loaded before the
+    // call so a tap can't silently no-op when the eager post-login chunk
+    // burst hasn't finished yet (cross-chunk lazy-stub trap).
+    const mpOpenDeliveryListing = async () => {
+        try { await window._loadChunk('chunks/script-customers.min.js'); } catch (_) { /* guarded below */ }
+        if (typeof window.app?.openDeliveryListing === 'function') {
+            await window.app.openDeliveryListing();
+        } else {
+            UI.toast.error('Delivery listing is unavailable right now — check your connection.');
+        }
     };
     const mpAdd = () => {
         if (_mpTab === 'customers' && typeof window.app?.openAddCustomerModal === 'function') {
@@ -4348,6 +4365,7 @@
         mpSwitchTab,
         mpSearchInput,
         mpAdd,
+        mpOpenDeliveryListing,
         mpOpenFilters,
         mpApplyFilters,
         mpClearFilters,

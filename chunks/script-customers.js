@@ -2543,6 +2543,9 @@ const _renderDeliveryListing = async () => {
     });
     html += `</tbody></table></div><div style="margin-top:10px;font-size:12px;color:var(--gray-500);">${rows.length} line${rows.length !== 1 ? 's' : ''} shown</div>`;
     body.innerHTML = html;
+    // Mobile renders .prospects-table as stacked cards keyed off td[data-label];
+    // the labeler normally runs on navigateTo, not on modal renders. No-op on desktop.
+    (window.app.applyMobileTableLabels || (() => {}))();
 };
 
 // Inline status change from the listing — reuses the shared _setDelivery writer
