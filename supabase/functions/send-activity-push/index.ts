@@ -346,10 +346,31 @@ serve(async (req: Request) => {
       });
     }
 
+    // Harden caller-supplied fields. This function accepts ANY authenticated
+    // JWT (not just service_role), and the tag/notificationclick handler in
+    // sw.js opens data.url — so an unconstrained absolute URL would let any
+    // logged-in user deliver a CRM-branded push that taps through to an
+    // off-site phishing page. Every legitimate caller passes an in-app RELATIVE
+    // link ("./index.html#..."), so reject anything that isn't relative, and
+    // cap text so a caller can't stuff an oversized notification.
+    const safeInAppUrl = (u: unknown): string => {
+      const DEFAULT = "./index.html#calendar";
+      if (typeof u !== "string" || u.length === 0 || u.length > 512) return DEFAULT;
+      // Absolute (scheme:), protocol-relative (//host), or backslash tricks → reject.
+      if (/^[a-z][a-z0-9+.-]*:/i.test(u) || u.startsWith("//") || u.includes("\\")) return DEFAULT;
+      // Must be a same-origin relative path or hash.
+      if (!(u.startsWith("./") || u.startsWith("/") || u.startsWith("#"))) return DEFAULT;
+      return u;
+    };
+    const clampText = (s: unknown, max: number, fallback: string): string => {
+      if (typeof s !== "string" || s.length === 0) return fallback;
+      return s.length > max ? s.slice(0, max) : s;
+    };
+
     const payload = JSON.stringify({
-      title: title || "New Calendar Activity",
-      body: body || (activity
-        ? `${activity.type || "Activity"}: ${activity.title || activity.subject || ""}`
+      title: clampText(title, 150, "New Calendar Activity"),
+      body: clampText(body, 300, activity
+        ? `${activity.type || "Activity"}: ${activity.title || activity.subject || ""}`.slice(0, 300)
         : ""),
       tag: `activity_${activity?.id || Date.now()}`,
       icon: "icons/icon-192x192.png",
@@ -357,7 +378,7 @@ serve(async (req: Request) => {
       data: {
         type: "activity_created",
         activityId: activity?.id,
-        url: url || "./index.html#calendar",
+        url: safeInAppUrl(url),
       },
     });
 

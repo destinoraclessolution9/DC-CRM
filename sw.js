@@ -330,7 +330,20 @@ self.addEventListener('notificationclick', (event) => {
             .then((clientList) => {
                 // Resolve the target against the SW scope so a relative URL
                 // ("./index.html#calendar") compares correctly against client URLs.
-                const absTarget = new URL(targetUrl, self.location.origin).href;
+                // Defense-in-depth: a push notification must only ever open an
+                // in-app (same-origin) URL. send-activity-push already clamps the
+                // url server-side, but never navigate/openWindow to an off-origin
+                // target here even if a malformed/hostile payload slips one in —
+                // that would turn a CRM push into an off-site redirect.
+                let absTarget;
+                try {
+                    absTarget = new URL(targetUrl, self.location.origin).href;
+                    if (new URL(absTarget).origin !== self.location.origin) {
+                        absTarget = new URL('./index.html', self.location.origin).href;
+                    }
+                } catch (_) {
+                    absTarget = new URL('./index.html', self.location.origin).href;
+                }
                 // Normalize the SPA root: senders pass "./index.html#…" (pathname
                 // "/index.html") but live tabs / the installed PWA sit at "/"
                 // (manifest start_url). Treat "/index.html" and "/" as the same
