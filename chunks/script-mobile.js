@@ -1807,19 +1807,28 @@
     // person from an id-only onclick outside the calendar view.
     let _mhomeBdayList = [];
     // Clipboard image-write requires PNG on Chrome (image/jpeg throws). Normalize
-    // any uploaded format → PNG at warm time (off the tap gesture). PNG passes
-    // through untouched; decode failure falls back to the original blob.
+    // any uploaded format → PNG at warm time (off the tap gesture), and DOWNSCALE
+    // big uploads: the admin posters are ~1.8 MB / full-res, and writing that to
+    // the iOS clipboard takes long enough to lose the race against the app
+    // switch to WhatsApp (live 2026-07-17: greeting arrived, Paste stayed empty).
+    // ≤1280px PNG is plenty for a chat image — WhatsApp recompresses anyway.
+    // Small PNGs pass through untouched; decode failure falls back to the
+    // original blob.
+    const _BDAY_MAX_PX = 1280;
+    const _BDAY_PASS_BYTES = 700 * 1024;
     const _toPngBlob = (blob) => new Promise((resolve) => {
         if (!blob) return resolve(null);
-        if (blob.type === 'image/png') return resolve(blob);
+        if (blob.type === 'image/png' && blob.size <= _BDAY_PASS_BYTES) return resolve(blob);
         try {
             const img = new Image();
             const u = URL.createObjectURL(blob);
             img.onload = () => {
                 try {
+                    const scale = Math.min(1, _BDAY_MAX_PX / Math.max(img.naturalWidth, img.naturalHeight, 1));
                     const c = document.createElement('canvas');
-                    c.width = img.naturalWidth; c.height = img.naturalHeight;
-                    c.getContext('2d').drawImage(img, 0, 0);
+                    c.width  = Math.max(1, Math.round(img.naturalWidth  * scale));
+                    c.height = Math.max(1, Math.round(img.naturalHeight * scale));
+                    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
                     c.toBlob(b => { URL.revokeObjectURL(u); resolve(b || blob); }, 'image/png');
                 } catch (_) { URL.revokeObjectURL(u); resolve(blob); }
             };
@@ -3059,20 +3068,37 @@
         const _isFemale = _g.startsWith('f') || _g.includes('女');
         const _posterBlob = _isFemale ? _mcalBdayBlob.female : _mcalBdayBlob.male;
         let _attemptedCopy = false;
+        let _copied = false;
+        let _copyP = null;
         if (_posterBlob && navigator.clipboard && window.ClipboardItem) {
             try {
-                // Fire-and-forget (no await) so the gesture survives for the chat
-                // open below. If the write REJECTS (iOS can refuse once the app
-                // backgrounds mid-write), say so — the toast renders when the
-                // agent returns, and a re-tap with the app focused re-copies
-                // (the wish log below de-dupes, so re-tapping is safe).
-                navigator.clipboard.write([new ClipboardItem({ 'image/png': _posterBlob })])
-                    .catch(() => { try { UI.toast.error('Poster did not copy — come back and tap the button again to re-copy.'); } catch (_) { /* toast best-effort */ } });
+                // Start the write synchronously IN the tap (transient activation
+                // is checked at call time). Whether we may WAIT for it depends on
+                // how the chat gets opened below.
+                _copyP = navigator.clipboard.write([new ClipboardItem({ 'image/png': _posterBlob })]).then(() => { _copied = true; });
+                _copyP.catch(() => { /* handled via _copied/toasts below */ });
                 _attemptedCopy = true;
             } catch (_) { /* clipboard image unsupported → open chat with text only */ }
         }
-        mhomeWa(id, person.phone, greeting); // open the prospect's chat (greeting pre-filled) — gesture still fresh
-        if (_attemptedCopy) UI.toast.success('📋 Poster copied! In the chat: tap the message box → Paste, then Send.');
+        if (_attemptedCopy && _mhomeStandalone()) {
+            // Installed PWA: the chat opens via SAME-WINDOW navigation (mhomeWa),
+            // which needs no user gesture — so we can wait for the copy to LAND
+            // before leaving. Fire-and-forget lost the race against the app
+            // switch (live 2026-07-17: greeting arrived, but WhatsApp had no
+            // Paste — iOS discards a clipboard write that is still in flight
+            // when the page backgrounds). Bounded so a hung write can never
+            // block the chat open.
+            try { await Promise.race([_copyP, new Promise(r => setTimeout(r, 1500))]); } catch (_) { /* copy refused → open with text only */ }
+        }
+        mhomeWa(id, person.phone, greeting); // open the prospect's chat (greeting pre-filled)
+        // Standalone waited, so _copied is the truth there. Browser tabs cannot
+        // wait (window.open must fire in-gesture) — stay optimistic, and the
+        // catch below corrects the record if the write later rejects.
+        if (_copied || (_attemptedCopy && !_mhomeStandalone())) {
+            UI.toast.success('📋 Poster copied! In the chat: tap the message box → Paste, then Send.');
+            if (!_copied && _copyP) _copyP.catch(() => { try { UI.toast.error('Poster did not copy — come back and tap the button again to re-copy.'); } catch (_) { /* toast best-effort */ } });
+        }
+        else if (_attemptedCopy) UI.toast.info('Poster is still copying — if Paste is empty in the chat, come back and tap the button again.');
         else if (_posterBlob) UI.toast.info('Chat opened with the greeting — the poster could not auto-copy on this device.');
         // Log the wish as an activity — parity with desktop executeSendBirthdayWish.
         // The mobile people map merges prospects + customers with NO type tag, so
