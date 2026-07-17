@@ -1523,13 +1523,35 @@
         }
     };
 
+    // Installed home-screen app (iOS "Add to Home Screen" / Android TWA)?
+    // display-mode:standalone is the spec signal; navigator.standalone is the
+    // legacy iOS one.
+    const _mhomeStandalone = () => {
+        try {
+            return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+                || window.navigator.standalone === true;
+        } catch (_) { return false; }
+    };
     // Quick handler — open WhatsApp for the given phone, or fall back to
     // navigating to the customer/prospect detail when no phone is on file.
     const mhomeWa = (id, phone, text) => {
         const num = _mhomeWaPhone(phone);
         if (num) {
             const _q = (typeof text === 'string' && text.length) ? `?text=${encodeURIComponent(text)}` : '';
-            window.open(`https://wa.me/${num}${_q}`, '_blank', 'noopener');
+            const url = `https://wa.me/${num}${_q}`;
+            // Installed-PWA-safe open. From a standalone home-screen app,
+            // window.open('_blank') either no-ops or routes through an in-app
+            // browser sheet whose wa.me interstitial can DROP the ?text= payload
+            // (verified live 2026-07-17: chat opened, greeting+poster gone —
+            // user_events showed mcalBirthdayWa ran + logged, yet the message
+            // never reached WhatsApp). Same-window navigation lets the OS
+            // intercept the universal link directly, handing WhatsApp the FULL
+            // URL (text intact) while the SPA page stays alive underneath.
+            if (_mhomeStandalone()) { window.location.href = url; return; }
+            // Browser tab: unchanged. NOTE: 'noopener' makes window.open return
+            // null by spec even on success — do NOT add an if(!w) same-window
+            // fallback here, it would double-fire on every normal browser.
+            window.open(url, '_blank', 'noopener');
         } else if (id) {
             // No usable phone → open the SPECIFIC record (id may be a prospect OR a
             // customer), not the generic Clients list. Resolve the entity type the
@@ -3039,8 +3061,13 @@
         let _attemptedCopy = false;
         if (_posterBlob && navigator.clipboard && window.ClipboardItem) {
             try {
-                // Fire-and-forget (no await) so the gesture survives for window.open below.
-                navigator.clipboard.write([new ClipboardItem({ 'image/png': _posterBlob })]).catch(() => {});
+                // Fire-and-forget (no await) so the gesture survives for the chat
+                // open below. If the write REJECTS (iOS can refuse once the app
+                // backgrounds mid-write), say so — the toast renders when the
+                // agent returns, and a re-tap with the app focused re-copies
+                // (the wish log below de-dupes, so re-tapping is safe).
+                navigator.clipboard.write([new ClipboardItem({ 'image/png': _posterBlob })])
+                    .catch(() => { try { UI.toast.error('Poster did not copy — come back and tap the button again to re-copy.'); } catch (_) { /* toast best-effort */ } });
                 _attemptedCopy = true;
             } catch (_) { /* clipboard image unsupported → open chat with text only */ }
         }
