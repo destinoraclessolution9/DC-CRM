@@ -929,7 +929,7 @@
         // RLS/scope-filtered to the viewer, so a stale session-restore onto a
         // different profile must NOT surface the prior user's private data.
         const _mhomeUid = String(_state.cu?.id || 'anon');
-        const _mhomePeopleKey = 'mhome-people-v1-' + _mhomeUid;
+        const _mhomePeopleKey = 'mhome-people-v2-' + _mhomeUid; // v2: customer rows tagged _isCustomer (birthday wish logs to the right table)
         const _mhomeLsGet = (key, ttl) => {
             try {
                 const raw = localStorage.getItem(key);
@@ -1101,6 +1101,12 @@
             ..._dedupClientByBday(allPeople.filter(p => _bdayMatch(p) && _bdayOwnerVisible(p.responsible_agent_id || p.lead_agent_id))),
             ..._dedupStaffByBday(cachedUsers.filter(_isStaffUser)).filter(_staffBdayMatch),
         ];
+        // Stash for mhomeBirthdayWa (id-only onclick) + warm the poster blobs so
+        // the clipboard copy has bytes ready by tap time — the calendar warms
+        // them on its own load, but home was never warming (poster silently
+        // missing when the wish was sent from here).
+        _mhomeBdayList = birthdays;
+        if (birthdays.length) { try { _mcalWarmBdayPosters(); } catch (_) { /* warm is best-effort */ } }
         const refills = cachedRefills;
 
         const apptCount = activities.length;
@@ -1120,7 +1126,9 @@
         const suggestedAction = oldestPerson
             ? `app.mhomeWa(${oldestPerson.id ?? 'null'}, '${UI.escJsAttr(oldestPerson.phone || '')}')`
             : (birthdays[0]
-                ? `app.mhomeWa(${birthdays[0].id ?? 'null'}, '${UI.escJsAttr(birthdays[0].phone || '')}')`
+                // Birthday suggestion → the FULL wish flow (greeting + poster +
+                // log), not a bare chat open with an empty message box.
+                ? `app.mhomeBirthdayWa(${birthdays[0].id ?? 'null'}, ${!!birthdays[0].role})`
                 : `app.navigateTo('calendar')`);
 
         const scheduleRows = activities.slice(0, 4).map(a => {
@@ -1185,7 +1193,6 @@
             const bday = birthdays[0];
             if (bday) {
                 const isToday = _staffMD(bday) === todayMD;
-                const phone = UI.escJsAttr(bday.phone || '');
                 const isAgent = !!bday.role;
                 rows.push(`
                 <div class="mhome-att-row birthday">
@@ -1195,7 +1202,7 @@
                         <div class="mhome-att-need">${isToday ? 'Birthday today' : 'Birthday tomorrow'}</div>
                         <div class="mhome-att-sub">Send your wishes</div>
                     </div>
-                    <button class="mhome-att-btn wish" onclick="app.mhomeWa(${bday.id ?? 'null'}, '${phone}')">
+                    <button class="mhome-att-btn wish" onclick="app.mhomeBirthdayWa(${bday.id ?? 'null'}, ${isAgent})">
                         <i class="fas fa-heart"></i> Send Wish
                     </button>
                 </div>`);
@@ -1342,6 +1349,9 @@
                 ..._dedupClientByBday(allPeople.filter(p => _bdayMatch(p) && _bdayOwnerVisible(p.responsible_agent_id || p.lead_agent_id))),
                 ..._dedupStaffByBday(cachedUsers.filter(_isStaffUser)).filter(_staffBdayMatch),
             ];
+            // Parity with _composeBody: stash for mhomeBirthdayWa + warm posters.
+            _mhomeBdayList = birthdays;
+            if (birthdays.length) { try { _mcalWarmBdayPosters(); } catch (_) { /* warm is best-effort */ } }
             const refills = cachedRefills;
 
             const apptCount = activities.length;
@@ -1360,7 +1370,9 @@
             // Plain action descriptor — the JSX maps {kind} to a window.app.* call.
             let suggestedAction;
             if (oldestPerson) suggestedAction = { kind: 'wa', id: oldestPerson.id ?? null, phone: oldestPerson.phone || '' };
-            else if (birthdays[0]) suggestedAction = { kind: 'wa', id: birthdays[0].id ?? null, phone: birthdays[0].phone || '' };
+            // Birthday suggestion → the FULL wish flow (greeting + poster + log).
+            // phone kept for the island's version-skew fallback to plain mhomeWa.
+            else if (birthdays[0]) suggestedAction = { kind: 'bday', id: birthdays[0].id ?? null, isStaff: !!birthdays[0].role, phone: birthdays[0].phone || '' };
             else suggestedAction = { kind: 'nav', view: 'calendar' };
 
             const scheduleRows = activities.slice(0, 4).map(a => {
@@ -1474,10 +1486,12 @@
                 if (!refIds.size) return;
                 const idArr = [...refIds];
                 const [pp, cc] = await Promise.all([
-                    AppDataStore.queryAdvanced('prospects', { scopeField: 'id', scopeValues: idArr, select: 'id,full_name,phone,date_of_birth', countMode: null, limit: idArr.length }).catch(() => ({ data: [] })),
-                    AppDataStore.queryAdvanced('customers', { scopeField: 'id', scopeValues: idArr, select: 'id,full_name,phone,date_of_birth', countMode: null, limit: idArr.length }).catch(() => ({ data: [] })),
+                    AppDataStore.queryAdvanced('prospects', { scopeField: 'id', scopeValues: idArr, select: 'id,full_name,phone,date_of_birth,gender', countMode: null, limit: idArr.length }).catch(() => ({ data: [] })),
+                    AppDataStore.queryAdvanced('customers', { scopeField: 'id', scopeValues: idArr, select: 'id,full_name,phone,date_of_birth,gender', countMode: null, limit: idArr.length }).catch(() => ({ data: [] })),
                 ]);
-                const partialPeople = [...(pp.data || []), ...(cc.data || [])];
+                // Tag customer rows: prospect/customer id sequences overlap, so an
+                // untagged row would make the birthday wish log ambiguous.
+                const partialPeople = [...(pp.data || []), ...(cc.data || []).map(c => ({ ...c, _isCustomer: true }))];
                 _mhomePerf('cold-bg:refids:done');
                 if (_state.cv === 'home' && document.getElementById('mhome-body')) {
                     _mhomePaint(partialPeople, cachedUsers, cachedCustomers || [], true);
@@ -1492,7 +1506,10 @@
                     AppDataStore.getAll('prospects').catch(() => []),
                     AppDataStore.getAll('customers').catch(() => []),
                 ]);
-                cachedPeople    = [...(allP || []), ...(allC || [])];
+                // Tag customer rows (same reason as the partial pass above); the tag
+                // persists into the mhome-people cache so a wish sent from a warm
+                // cache still logs against the right table.
+                cachedPeople    = [...(allP || []), ...(allC || []).map(c => ({ ...c, _isCustomer: true }))];
                 cachedCustomers = allC || [];
                 if (cachedPeople.length) {
                     _mhomeLsSet(_mhomePeopleKey,    cachedPeople);
@@ -1763,6 +1780,10 @@
     // await-to-fetch at tap time. male = navy poster, female = pink poster.
     let _mcalBdayBlob = { male: null, female: null };
     let _mcalBdayWarmed = false;
+    // Birthday rows shown on the HOME screen (clients + staff), stashed by
+    // _composeBody / buildHomeIslandData so mhomeBirthdayWa can resolve the
+    // person from an id-only onclick outside the calendar view.
+    let _mhomeBdayList = [];
     // Clipboard image-write requires PNG on Chrome (image/jpeg throws). Normalize
     // any uploaded format → PNG at warm time (off the tap gesture). PNG passes
     // through untouched; decode failure falls back to the original blob.
@@ -2992,6 +3013,15 @@
     const mcalBirthdayWa = async (id, isCustomer) => {
         const person = _mcalPersonMap.get(String(id));
         if (!person || !_mhomeWaPhone(person.phone)) return;
+        return _bdayWaSend(person, isCustomer);
+    };
+    // Shared birthday-wish sender — the calendar day sheet (above) and the home
+    // screen's Send Wish (mhomeBirthdayWa below) both land here so the greeting,
+    // poster copy and activity log can never drift apart again (the home button
+    // used to open a BARE chat: no text, no poster). Everything up to the chat
+    // open stays synchronous so the tap gesture survives.
+    const _bdayWaSend = async (person, isCustomer) => {
+        const id = person.id;
         const greeting = `Happy Birthday, ${person.full_name || ''}! 🎂 Wishing you a wonderful year ahead.`;
         // Option 2 — "direct chat + paste the poster". female → pink, everyone
         // else (male/other/unknown) → navy. We FIRE the clipboard copy but do
@@ -3061,6 +3091,32 @@
         const firstName = (s.full_name || '').split(' ')[0] || s.full_name || '';
         const greeting = `${firstName}，生日快乐！🎉 祝您新岁安康，诸事顺遂。— DestinOraclesSolution Team`;
         mhomeWa(id, s.phone, greeting);
+    };
+    // Home-screen "Send Wish" — full parity with the calendar birthday button.
+    // The home renderers stash their birthday rows in _mhomeBdayList right
+    // before painting (id-only onclick, no dynamic strings), because
+    // _mcalPersonMap/_mcalStaffList are only populated by the CALENDAR view —
+    // the old wiring (bare mhomeWa) opened the chat with NO greeting and NO
+    // poster. Staff rows get the text-only team greeting (staff aren't
+    // contacts → no birthday_auto log, no poster).
+    const mhomeBirthdayWa = (id, isStaff) => {
+        const row = (_mhomeBdayList || []).find(b => String(b.id) === String(id) && !!b.role === !!isStaff);
+        // Snapshot-restore window: the button HTML can paint before the data
+        // pass stashes _mhomeBdayList. Ask for a re-tap rather than opening a
+        // possibly-WRONG same-id profile with a misleading "no phone" toast.
+        if (!row) { UI.toast.info('Still loading today\'s data — please tap again in a moment.'); return; }
+        if (isStaff) {
+            const firstName = (row.full_name || '').split(' ')[0] || row.full_name || '';
+            // id=null: the no-phone fallback must never open a same-id PROSPECT.
+            mhomeWa(null, row.phone, `${firstName}，生日快乐！🎉 祝您新岁安康，诸事顺遂。— DestinOraclesSolution Team`);
+            return;
+        }
+        if (!_mhomeWaPhone(row.phone)) { mhomeWa(row.id, ''); return; } // no phone → profile
+        // Customer rows are tagged _isCustomer at fetch/merge time; older cached
+        // rows fall back to the customer_since heuristic, else undefined →
+        // _bdayWaSend resolves by probe (prospect/customer id sequences overlap).
+        const isCust = (typeof row._isCustomer === 'boolean') ? row._isCustomer : (row.customer_since ? true : undefined);
+        _bdayWaSend(row, isCust);
     };
     // Open a birthday person's profile — mirrors mcalOpenEvent: try prospect,
     // then customer, routing to the matching detail view. id-only.
@@ -4208,6 +4264,7 @@
         showMobileMenu,
         showMobileHomeView,
         mhomeWa,
+        mhomeBirthdayWa,
         mhomeFollowupWa,
         mhomeOpenFollowups,
         mhomeOpenRefills,

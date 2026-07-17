@@ -24,8 +24,18 @@ const callArgs = (name, ...args) => { const f = app()[name]; if (typeof f === 'f
 
 const runAction = (action) => {
     if (!action) return;
+    if (action.kind === 'bday') { sendBirthdayWish(action.id, !!action.isStaff, action.phone || ''); return; }
     if (action.kind === 'wa') { callArgs('mhomeWa', action.id, action.phone || ''); return; }
     if (action.kind === 'nav') { callArgs('navigateTo', action.view); return; }
+};
+
+// Birthday wish → the chunk's full flow (greeting + poster + activity log).
+// Falls back to a bare chat open only during version skew (old chunk cached
+// without mhomeBirthdayWa) so the button is never dead.
+const sendBirthdayWish = (id, isStaff, phone) => {
+    const f = app().mhomeBirthdayWa;
+    if (typeof f === 'function') f(id, isStaff);
+    else callArgs('mhomeWa', id, phone || '');
 };
 
 // Pending spinner — mirrors the legacy _pendNum marker for the cold partial pass.
@@ -159,7 +169,7 @@ function AttentionCard({ rows }) {
                         <div className="mhome-att-need">{r.need}</div>
                         <div className="mhome-att-sub">{r.sub}</div>
                     </div>
-                    <button className="mhome-att-btn wish" onClick={() => callArgs('mhomeWa', r.waId, r.waPhone || '')}>
+                    <button className="mhome-att-btn wish" onClick={() => sendBirthdayWish(r.waId, !!r.isAgent, r.waPhone || '')}>
                         <i className="fas fa-heart"></i> Send Wish
                     </button>
                 </div>
