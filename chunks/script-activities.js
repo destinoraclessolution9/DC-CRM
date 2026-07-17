@@ -4959,7 +4959,7 @@
                 } else if (_credit === 'both') {
                     activity.lead_agent_id = _selfId;
                     // co_agents is an array of {id,name,co_role,status} OBJECTS, not raw
-                    // IDs (see _notifyActivityCreated + addCoAgent). Push a proper object
+                    // IDs (see _notifyCoAgentAdded + addCoAgent). Push a proper object
                     // and dedup by id so the agent is notified + renders correctly.
                     const _agentName = (_cpsAssignSel?.options?.[_cpsAssignSel.selectedIndex]?.text || 'Agent').replace(/\s*\(.*$/, '').trim() || 'Agent';
                     const _ca = Array.isArray(activity.co_agents) ? activity.co_agents.slice() : [];
@@ -5439,8 +5439,14 @@
             } catch (e) { console.warn('Milestone auto-mark failed:', e); }
         })();
 
-        // === Push notification: alert lead agent, co-agents, and management ===
-        _notifyActivityCreated(savedActivity).catch(() => {});
+        // === Push notification ===
+        // Handled SERVER-SIDE: the on_activity_insert DB trigger calls the
+        // notify-on-activity edge function, which computes a visibility-scoped
+        // audience (ordinary CPS/CALL/FTF → owner + co-agents + SAME-team
+        // leaders L3–L5 only; team events → own team; open events → all staff).
+        // The old client-side fan-out here pushed to every L1–L5 org-wide, so
+        // cross-team leaders were pinged about other teams' CPS entries —
+        // removed 2026-07-17. Do NOT re-add a client broadcast.
 
         // === Follow-Up Automation: trigger CPS-based follow-ups (data-driven, non-blocking) ===
         if (activity.activity_type === 'CPS' && activity.prospect_id) {
@@ -5507,63 +5513,21 @@
 
     const saveAndAddAnother = async () => await saveActivity(true);
 
-    // ========== PUSH NOTIFICATIONS: notify subscribed users when an activity is created ==========
-    // Fire-and-forget: never blocks the save flow, never throws.
-    // Targets = lead_agent + co_agents + admins/team leads, minus the creator themselves.
-    const _notifyActivityCreated = async (savedActivity) => {
-        try {
-            if (!savedActivity || !window.PushNotif) return;
-            const targets = new Set();
-            if (savedActivity.lead_agent_id != null) targets.add(String(savedActivity.lead_agent_id));
-            if (Array.isArray(savedActivity.co_agents)) {
-                // co_agents is an array of {id, name, co_role, status} objects — not raw IDs.
-                // The previous version iterated each object as if it were an ID and pushed
-                // "[object Object]" into the targets set, so co-agents never got notified.
-                savedActivity.co_agents.forEach(ca => {
-                    if (ca && ca.id != null) targets.add(String(ca.id));
-                });
-            }
-            // Include admins / team leads so management sees new activity across the org.
-            try {
-                const allUsers = await AppDataStore.getAll('users');
-                (allUsers || []).forEach(u => {
-                    // Use the canonical role system (getUserLevel + _crmUtils predicates) so
-                    // named/Chinese-only roles (which _getUserLevel maps to L12-L14) resolve
-                    // correctly instead of the inline /level (\d+)/ regex defaulting them to 99.
-                    const lvl = getUserLevel(u);
-                    const isLead = lvl <= 4 || isManagement(u) || isTeamLeaderOrAbove(u);
-                    if (isLead && u.id != null) targets.add(String(u.id));
-                });
-            } catch (e) { /* admin broadcast is best-effort */ }
-
-            // Don't self-notify the creator — they just did it.
-            if (_state.cu && _state.cu.id != null) targets.delete(String(_state.cu.id));
-            if (targets.size === 0) return;
-
-            const whoLabel = _state.cu
-                ? (_state.cu.full_name || _state.cu.name || _state.cu.email || 'Someone')
-                : 'Someone';
-            const typeLabel = savedActivity.activity_type || savedActivity.type || 'Activity';
-            const titleLabel = savedActivity.activity_title || savedActivity.title || savedActivity.subject || '';
-            const dateLabel = savedActivity.activity_date || savedActivity.date || '';
-
-            await window.PushNotif.sendActivityPush(
-                savedActivity,
-                Array.from(targets),
-                {
-                    title: `New ${typeLabel} scheduled`,
-                    body: `${whoLabel}: ${titleLabel}${dateLabel ? ` (${dateLabel})` : ''}`,
-                    url: `./index.html#calendar`,
-                }
-            );
-        } catch (e) {
-            // Never let notification errors affect the activity save flow.
-            console.warn('[PushNotif] notifyActivityCreated failed:', e);
-        }
-    };
+    // ========== PUSH NOTIFICATIONS ==========
+    // "New activity" fan-out lives SERVER-SIDE in
+    // supabase/functions/notify-on-activity, fired by the on_activity_insert
+    // DB trigger for EVERY insert path (desktop save, mobile/calendar
+    // quick-add, AI, gcal import, order-form OCR, past records). Audience
+    // matrix: open/public → all staff L1–L12; team → own team; closed EVENT →
+    // upward reporting chain; ordinary CPS/CALL/FTF → owner + co-agents +
+    // same-team leaders (L3–L5) ONLY. The client must never broadcast "new
+    // activity" pushes itself — the removed version here blasted every L1–L5
+    // org-wide, leaking cross-team activity. The client-side pushes below
+    // cover UPDATE flows the insert trigger can't see (co-agent invite on
+    // edit, invite responses) plus 福运相随 highlights.
 
     // Notify only specific co-agents (delta case: someone was added to an existing activity).
-    // Uses the same Edge Function as _notifyActivityCreated so all push infra is shared.
+    // Uses the same send-activity-push Edge Function as the server-side fan-out so push infra is shared.
     const _notifyCoAgentAdded = async (savedActivity, newCoAgentIds) => {
         try {
             if (!savedActivity || !window.PushNotif) return;
