@@ -382,11 +382,24 @@ serve(async (req: Request) => {
       },
     });
 
+    // Fan out in bounded batches instead of one Promise.all over every
+    // subscription. An "open event" notifies the whole roster, so as the team
+    // grows this list grows with it; sending all at once would fire hundreds of
+    // concurrent VAPID-signed HTTPS requests in a single invocation and
+    // eventually exhaust connections / hit the function timeout. Batching keeps
+    // peak concurrency flat regardless of headcount. Size is env-tunable (not a
+    // baked-in constant) so it can be raised/lowered without a code change.
+    const PUSH_BATCH = Math.max(1, Number(Deno.env.get("PUSH_BATCH")) || 100);
     let sent = 0;
     const toDelete: string[] = [];
-    const results = await Promise.all(subs.map((s: any) =>
-      sendWebPush({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload),
-    ));
+    const results: Array<{ ok: boolean; status?: number; error?: unknown }> = [];
+    for (let i = 0; i < subs.length; i += PUSH_BATCH) {
+      const slice = subs.slice(i, i + PUSH_BATCH);
+      const batch = await Promise.all(slice.map((s: any) =>
+        sendWebPush({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload),
+      ));
+      results.push(...batch);
+    }
     results.forEach((r, i) => {
       if (r.ok) sent++;
       else if (r.status === 404 || r.status === 410) toDelete.push(subs[i].id);
