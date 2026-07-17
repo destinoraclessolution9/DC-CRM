@@ -356,10 +356,19 @@ serve(async (req: Request) => {
     const safeInAppUrl = (u: unknown): string => {
       const DEFAULT = "./index.html#calendar";
       if (typeof u !== "string" || u.length === 0 || u.length > 512) return DEFAULT;
-      // Absolute (scheme:), protocol-relative (//host), or backslash tricks → reject.
+      // Reject ASCII control chars first: the WHATWG URL parser STRIPS interior
+      // tab/newline/CR before parsing, so "/\t/evil.com" would otherwise
+      // collapse to a protocol-relative "//evil.com" and resolve OFF-origin.
+      if (/[\u0000-\u001f\u007f]/.test(u)) return DEFAULT;
+      // Absolute (scheme:), protocol-relative (//host), or backslash tricks -> reject.
       if (/^[a-z][a-z0-9+.-]*:/i.test(u) || u.startsWith("//") || u.includes("\\")) return DEFAULT;
       // Must be a same-origin relative path or hash.
       if (!(u.startsWith("./") || u.startsWith("/") || u.startsWith("#"))) return DEFAULT;
+      // Authoritative check: resolve with the SAME parser the client will use and
+      // require the result to stay on the base origin (i.e. the input really was
+      // relative). Closes any normalization gap the string checks miss.
+      try { const b = "https://app.invalid"; if (new URL(u, b).origin !== b) return DEFAULT; }
+      catch { return DEFAULT; }
       return u;
     };
     const clampText = (s: unknown, max: number, fallback: string): string => {
