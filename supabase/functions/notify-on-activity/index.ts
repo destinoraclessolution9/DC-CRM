@@ -234,14 +234,23 @@ Deno.serve(async (req: Request) => {
           }
         });
       } else {
-        // Owner has no team label — fall back to their upward chain.
+        // Owner has no team label → same_team_chain RLS matches nobody, so the
+        // only readers are the upward reporting chain. Cap at L10: RLS
+        // current_user_visible_ids() yields a downline only for L<=10 (L11+ see
+        // self only), so an L11/L12 ancestor couldn't open the activity and
+        // must not be pinged about it.
         audience = "team_fallback_chain";
-        addChain(3, 12);
+        addChain(3, 10);
       }
-    } else if (EVENT_TYPES.has(String(record.activity_type ?? ""))) {
-      // Closed/private event → organizer's upward hierarchy (no L1–L2 ping).
+    } else if (EVENT_TYPES.has(String(record.activity_type ?? "").toUpperCase())) {
+      // Closed/private event → organizer's upward reporting chain. Cap at L10
+      // (not L12): RLS only lets an ancestor read a closed activity via its
+      // downline (current_user_visible_ids), which is self-only for L11+, so a
+      // higher ancestor would be notified about something they can't open.
+      // activity_type is upper-cased before the EVENT_TYPES test to match the
+      // lower-cased visibility handling above (the column is free-text).
       audience = "closed_event_chain";
-      addChain(3, 12);
+      addChain(3, 10);
     } else {
       // Ordinary activity (CPS/CALL/FTF/…): the owner's team leader(s) ONLY —
       // resolved via the upward reporting_to chain filtered to the leader band
