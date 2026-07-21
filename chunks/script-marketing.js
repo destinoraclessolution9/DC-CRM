@@ -1198,8 +1198,19 @@
         `, [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }]);
     };
 
-    const viewProductImage = (url, label) => {
-        UI.showModal(label, `<div style="text-align:center;"><img loading="lazy" decoding="async" src="${url}" crossorigin="anonymous" style="max-width:100%;max-height:70vh;border-radius:6px;"></div>`,
+    const viewProductImage = async (url, label) => {
+        // Product/poster images live in the PRIVATE `attachments` bucket, so a
+        // stored getPublicUrl() string 400s if rendered directly. Re-sign it to
+        // a short-lived signed URL at view time (mirrors the app-wide pattern in
+        // app-init.js resolveAttachmentImages / _openAttachment). Falls back to
+        // the raw url for external images or if signing is unavailable.
+        let src = url;
+        try {
+            if (AppDataStore && typeof AppDataStore.resolveAttachmentSrc === 'function') {
+                src = (await AppDataStore.resolveAttachmentSrc(url)) || url;
+            }
+        } catch (_) { src = url; }
+        UI.showModal(label, `<div style="text-align:center;"><img loading="lazy" decoding="async" src="${src}" crossorigin="anonymous" style="max-width:100%;max-height:70vh;border-radius:6px;"></div>`,
             [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }]);
     };
 
@@ -1352,6 +1363,7 @@
                         id: p.id,
                         name: p.package_name || p.name || 'Promotion',
                         posterUrl: p.poster_url || null,
+                        posterPath: p.poster_url || null,
                         productNames,
                         requirement: p.requirement || '',
                         hasTimeFrame: !!(p.start_date || p.end_date),
@@ -1364,6 +1376,20 @@
                         hasDiscount, originalStr, savePct,
                     };
                 });
+
+                // Poster images live in the PRIVATE `attachments` bucket, so the
+                // stored poster_url (a getPublicUrl string) 400s if rendered
+                // directly — it must be re-signed. Swap posterUrl for a short-lived
+                // signed URL for the inline hero <img>; posterPath keeps the
+                // original so "View full poster" re-signs fresh at click time
+                // (a page left open past the ~60-min TTL still enlarges). A signing
+                // failure nulls posterUrl → the card degrades to the placeholder.
+                await Promise.all(promos.map(async (pm) => {
+                    if (!pm.posterUrl) return;
+                    try { pm.posterUrl = await AppDataStore.resolveAttachmentSrc(pm.posterUrl); }
+                    catch (_) { pm.posterUrl = null; }
+                }));
+
                 container.innerHTML = '<div id="monthly-promo-react-root"></div>';
                 window.CRMReact.mountMonthlyPromotion(document.getElementById('monthly-promo-react-root'), {
                     promos, totalPromos: allPromos.length,

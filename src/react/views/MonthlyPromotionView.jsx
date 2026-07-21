@@ -24,17 +24,21 @@ const chip = { fontSize: '12px', color: 'var(--gray-600)', background: 'var(--gr
 
 function openPoster(m) {
     try {
-        if (m.posterUrl && window.app && typeof window.app.viewProductImage === 'function') {
-            window.app.viewProductImage(m.posterUrl, m.name || 'Poster');
+        // Prefer the ORIGINAL stored URL (posterPath) — app.viewProductImage
+        // re-signs it fresh at click time, so the enlarge works even if the
+        // inline hero's signed URL has since expired. Falls back to posterUrl.
+        const src = m.posterPath || m.posterUrl;
+        if (src && window.app && typeof window.app.viewProductImage === 'function') {
+            window.app.viewProductImage(src, m.name || 'Poster');
         }
     } catch (_) { /* noop */ }
 }
 
-function PromoHero({ m }) {
+function PromoHero({ m, onImgError }) {
     if (m.posterUrl) {
         return (
             <div style={{ position: 'relative', aspectRatio: '16 / 9', background: '#f3f4f6', borderBottom: '1px solid var(--gray-200)', cursor: 'zoom-in' }} onClick={() => openPoster(m)} title="Tap to view full poster">
-                <img src={m.posterUrl} alt={m.name} loading="lazy" decoding="async" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                <img src={m.posterUrl} alt={m.name} loading="lazy" decoding="async" onError={onImgError} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                 {m.hasDiscount && (
                     <span style={{ position: 'absolute', top: '10px', right: '10px', background: '#A32D2D', color: '#fff', fontSize: '12px', fontWeight: 700, padding: '3px 9px', borderRadius: '6px' }}>
                         <i className="fas fa-tag" style={{ marginRight: '4px' }}></i>Save {m.savePct}%
@@ -57,9 +61,14 @@ function PromoHero({ m }) {
 }
 
 function PromoCard({ m }) {
+    // If the poster fails to load (deleted object, expired signature, offline),
+    // fall back to the clean "No poster" placeholder instead of the browser's
+    // broken-image icon, and hide the now-useless "View full poster" action.
+    const [posterBroken, setPosterBroken] = React.useState(false);
+    const view = posterBroken ? { ...m, posterUrl: null } : m;
     return (
         <div style={cardOuter}>
-            <PromoHero m={m} />
+            <PromoHero m={view} onImgError={() => setPosterBroken(true)} />
             <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', flex: 1 }}>
                 <div style={{ fontSize: '16px', fontWeight: 700, color: BRAND, marginBottom: '2px' }}>{m.name}</div>
                 {m.productNames.length > 0 && (
@@ -91,7 +100,7 @@ function PromoCard({ m }) {
                         <div style={{ fontSize: '12px', color: 'var(--gray-700)', lineHeight: 1.4 }}>{m.agentNote}</div>
                     </div>
                 )}
-                {m.posterUrl && (
+                {view.posterUrl && (
                     <div style={{ display: 'flex', gap: '8px', marginTop: 'auto', paddingTop: '10px' }}>
                         <button onClick={() => openPoster(m)} title="View full poster" aria-label="View full poster" style={{ flex: 1, background: '#fff', color: 'var(--gray-700)', border: '1px solid var(--gray-300)', borderRadius: '6px', padding: '9px 12px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
                             <i className="fas fa-expand"></i>View full poster
