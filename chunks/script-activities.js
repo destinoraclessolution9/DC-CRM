@@ -3267,18 +3267,33 @@
             UI.toast.error('Prospect not found');
             return;
         }
-        // Mutually exclusive: ticking one auto-unticks the other.
-        let newType;
-        if (checked) {
-            newType = dateType; // 'solar' or 'lunar'
-        } else {
-            newType = null;
-        }
+        // Solar and lunar are INDEPENDENT flags, exactly as the intake form
+        // (buildBasicInfoBlock/collectBasicInfoData) treats them — an agent can
+        // tick both there and it stores 'both'. This used to force mutual
+        // exclusivity, so ticking one box on the profile silently cleared the
+        // other and a 'both' prospect could never be reproduced from this screen.
+        // Recompute from the pair instead of overwriting with a single value.
+        let useSolar = ['solar', 'both'].includes(prospect.life_chart_type);
+        let useLunar = ['lunar', 'both'].includes(prospect.life_chart_type);
+        if (dateType === 'solar') useSolar = !!checked;
+        else useLunar = !!checked;
+        let newType = null;
+        if (useSolar && useLunar) newType = 'both';
+        else if (useSolar) newType = 'solar';
+        else if (useLunar) newType = 'lunar';
 
         let writeOk = false;
         try {
-            await AppDataStore.update('prospects', prospectId, { life_chart_type: newType });
-            writeOk = true;
+            // Verify the value came BACK on the saved row rather than trusting a
+            // non-throwing update(). AppDataStore.update() answers a 42703
+            // ("column does not exist") by stripping that column and retrying, so
+            // a missing column resolves successfully with the field silently
+            // dropped — which is exactly how this tick looked saved for months
+            // while never persisting. Coalesce undefined→null so clearing the
+            // flag on a row that has no stored value still counts as a success.
+            const saved = await AppDataStore.update('prospects', prospectId, { life_chart_type: newType });
+            writeOk = ((saved?.life_chart_type ?? null) === newType);
+            if (!writeOk) console.warn('life_chart_type did not persist — column missing from prospects?', saved);
         } catch (e) {
             console.warn('life_chart_type update failed:', e);
         }
@@ -3305,8 +3320,8 @@
                 const lbl = row ? row.querySelector('.pv-lbl') : null;
                 const val = row ? row.querySelector('.pv-val') : null;
                 let isActive = false;
-                if (oc.includes("'solar'")) { isActive = newType === 'solar'; chk.checked = isActive; }
-                else if (oc.includes("'lunar'")) { isActive = newType === 'lunar'; chk.checked = isActive; }
+                if (oc.includes("'solar'")) { isActive = ['solar', 'both'].includes(newType); chk.checked = isActive; }
+                else if (oc.includes("'lunar'")) { isActive = ['lunar', 'both'].includes(newType); chk.checked = isActive; }
                 else return; // ignore checkboxes unrelated to life-chart type
                 // Mirror the initial render: bold + red on BOTH the label and the
                 // value when active, cleared when inactive.

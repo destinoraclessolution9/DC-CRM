@@ -2297,10 +2297,18 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         `;
     }
     else if (tab === 'personal') {
+        // Solar and lunar are independent flags, so life_chart_type can be 'both'
+        // — that is what the intake form (buildBasicInfoBlock) writes when an agent
+        // ticks both "Use for life chart" boxes. Matching its ['solar','both'] test
+        // here keeps the two screens in agreement; a strict === 'solar' comparison
+        // rendered a 'both' prospect with NEITHER box ticked.
+        const lctSolar = ['solar', 'both'].includes(prospect.life_chart_type);
+        const lctLunar = ['lunar', 'both'].includes(prospect.life_chart_type);
+        const lctHi = 'font-weight:700;color:#dc2626;';
         container.innerHTML = `
             <div class="pv-sub">Birth &amp; Identity</div>
-            <div class="pv-row"><span class="pv-lbl" style="${prospect.life_chart_type === 'solar' ? 'font-weight:700;color:#dc2626;' : ''}">Date of Birth</span><span class="pv-val" style="display:flex;align-items:center;gap:8px;${prospect.life_chart_type === 'solar' ? 'font-weight:700;color:#dc2626;' : ''}"><input type="checkbox" ${prospect.life_chart_type === 'solar' ? 'checked' : ''} onchange="event.stopPropagation();app.toggleLifeChartType(${prospect.id},'solar',this.checked)" title="Use for life chart">${escapeHtml(prospect.date_of_birth || '-')}</span></div>
-            <div class="pv-row"><span class="pv-lbl" style="${prospect.life_chart_type === 'lunar' ? 'font-weight:700;color:#dc2626;' : ''}">Lunar Birth</span><span class="pv-val" style="display:flex;align-items:center;gap:8px;${prospect.life_chart_type === 'lunar' ? 'font-weight:700;color:#dc2626;' : ''}"><input type="checkbox" ${prospect.life_chart_type === 'lunar' ? 'checked' : ''} onchange="event.stopPropagation();app.toggleLifeChartType(${prospect.id},'lunar',this.checked)" title="Use for life chart">${escapeHtml(prospect.lunar_birth || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl" style="${lctSolar ? lctHi : ''}">Date of Birth</span><span class="pv-val" style="display:flex;align-items:center;gap:8px;${lctSolar ? lctHi : ''}"><input type="checkbox" ${lctSolar ? 'checked' : ''} onchange="event.stopPropagation();app.toggleLifeChartType(${prospect.id},'solar',this.checked)" title="Use for life chart">${escapeHtml(prospect.date_of_birth || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl" style="${lctLunar ? lctHi : ''}">Lunar Birth</span><span class="pv-val" style="display:flex;align-items:center;gap:8px;${lctLunar ? lctHi : ''}"><input type="checkbox" ${lctLunar ? 'checked' : ''} onchange="event.stopPropagation();app.toggleLifeChartType(${prospect.id},'lunar',this.checked)" title="Use for life chart">${escapeHtml(prospect.lunar_birth || '-')}</span></div>
             <div class="pv-row"><span class="pv-lbl">IC Number</span><span class="pv-val">${escapeHtml(prospect.ic_number || '-')}</span></div>
             <div class="pv-row"><span class="pv-lbl">Ming Gua</span><span class="pv-val"><span class="badge info">${prospect.ming_gua || '—'}</span></span></div>
             <div class="pv-sub">Family</div>
