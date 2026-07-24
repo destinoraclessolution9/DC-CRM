@@ -31,6 +31,23 @@
     const isSafeFileData = (s) => typeof s === 'string' && /^(data:|https?:)/i.test(s) && !/^data:text\/html/i.test(s);
     const isSafeImageData = (s) => typeof s === 'string' && (/^data:image\//i.test(s) || /^https?:/i.test(s));
     const isSafePdfData = (s) => typeof s === 'string' && (/^data:application\/pdf/i.test(s) || /^https?:/i.test(s));
+    // SYNCHRONOUS base64 data-URI → Blob. Kept sync (no fetch/await) so the WhatsApp
+    // share below can convert the file and call navigator.share() inside the same
+    // click, preserving the transient user activation the Web Share API requires.
+    const dataUriToBlob = (dataUri) => {
+        const m = /^data:([^;,]*)(;base64)?,([\s\S]*)$/i.exec(dataUri || '');
+        if (!m) return null;
+        const mime = m[1] || 'application/octet-stream';
+        let bytes;
+        if (m[2]) {                       // base64 payload
+            const bin = atob(m[3]);
+            bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        } else {                          // URL-encoded text payload
+            bytes = new TextEncoder().encode(decodeURIComponent(m[3]));
+        }
+        return new Blob([bytes], { type: mime });
+    };
     // ── Chunk-local state (documents view only) ──
     let _currentFolder = null;
     let _viewMode = 'list';
@@ -39,6 +56,9 @@
     let _fileSortDirection = 'asc';
     let _fileFilter = '';
     let _draggedFileId = null;
+    // Fully-loaded doc (incl. its base64 `data`) cached when the Share modal opens,
+    // so shareFileWhatsApp() can build the file blob without an await (see there).
+    let _shareModalDoc = null;
 
     // ── Metadata-only documents fetch (excludes the heavy base64 `data` blob) ──
     // Every folder/list render used getAll('documents'), which selects `*` for
@@ -608,6 +628,9 @@
         // getById can return null (row deleted concurrently / RLS deny / offline) —
         // guard before dereferencing file.filename below.
         if (!file) { UI.toast.error('File not found'); return; }
+        // Stash the full doc (with its `data` blob) so the WhatsApp button can share
+        // the actual file synchronously inside the click (no await → gesture survives).
+        _shareModalDoc = file;
         const userMap = new Map((allUsers || []).map(u => [String(u.id), u]));
         // Scope share targets to the current user's visibility set (role system) —
         // a low-level agent must not be able to enumerate / share to the whole org.
@@ -626,6 +649,11 @@
         const content = `
             <div class="share-modal">
                 <h3>Share: ${escapeHtml(file.filename)}</h3>
+                <button class="btn" style="background:#25D366;color:#fff;width:100%;margin-bottom:16px;display:flex;align-items:center;justify-content:center;gap:8px;" onclick="app.shareFileWhatsApp(${fileId})">
+                    <i class="fab fa-whatsapp" style="font-size:18px;"></i> Send via WhatsApp
+                </button>
+                <div class="share-hint" style="font-size:12px;color:var(--gray-500,#6b7280);margin:-8px 0 14px;">On your phone this attaches the file to a WhatsApp chat; on desktop it opens WhatsApp with the file name and downloads the file to attach.</div>
+                <div class="share-divider" style="border-top:1px solid var(--gray-200,#e5e7eb);margin-bottom:14px;"></div>
                 <div class="share-form">
                     <select id="share-user" class="form-control"><option value="">Select User...</option>${users.map(u => `<option value="${escapeHtml(u.id)}">${escapeHtml(u.full_name)}</option>`).join('')}</select>
                     <button class="btn primary" onclick="app.createShare(${fileId})">Add Share</button>
@@ -657,6 +685,49 @@
         UI.toast.success('Share removed');
         if (_share && _share.document_id != null) await openShareModal(_share.document_id);
         else UI.hideModal();
+    };
+
+    // ── Send a document to WhatsApp ────────────────────────────────────
+    // Documents are stored as base64 data-URIs, so there is no public link to drop
+    // into a wa.me message. On mobile the Web Share API hands the ACTUAL file to the
+    // native share sheet (the sender taps WhatsApp and the file is attached for real);
+    // desktop / unsupported browsers fall back to opening WhatsApp with the file name
+    // as text plus a download so the sender can attach it manually.
+    //
+    // NOT async, and synchronous up to navigator.share()/window.open(): both need
+    // transient user activation, which any await before them would consume (same lesson
+    // as sendVoucherWhatsApp / mhomeWa). openShareModal caches the fully-loaded doc in
+    // _shareModalDoc, so no DB read is needed here and the click's gesture stays live.
+    const shareFileWhatsApp = (fileId) => {
+        const file = (_shareModalDoc && String(_shareModalDoc.id) === String(fileId)) ? _shareModalDoc : null;
+        const title = (file && file.filename) || 'document';
+        const src = file && file.data;
+
+        // PRIMARY (gesture-safe): share the real file via the native sheet. The
+        // data-URI → Blob conversion is synchronous (atob), so the gesture survives.
+        if (src && /^data:/i.test(src) && isSafeFileData(src) && navigator.share && navigator.canShare) {
+            try {
+                const blob = dataUriToBlob(src);
+                if (blob) {
+                    const shareFile = new File([blob], title, { type: blob.type || file.mime_type || 'application/octet-stream' });
+                    if (navigator.canShare({ files: [shareFile] })) {
+                        navigator.share({ files: [shareFile], title, text: title }).catch(() => {});
+                        return;
+                    }
+                }
+            } catch (_) { /* fall through to wa.me */ }
+        }
+
+        // FALLBACK (gesture-safe): open WhatsApp with the file name (plus an http(s)
+        // link if the record happens to carry one), then download the file so it can
+        // be attached manually. wa.me cannot carry a file.
+        const link = (typeof src === 'string' && /^https?:\/\//i.test(src)) ? src : '';
+        const text = link ? `${title}\n${link}` : title;
+        window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
+        if (!link && file) {
+            downloadFile(fileId);
+            UI.toast.info('WhatsApp opened — attach the downloaded file to your chat.');
+        }
     };
 
     const initDefaultFolders = async () => {
@@ -1566,6 +1637,7 @@ In a production system, this would show the actual file contents.
         downloadVersion,
         restoreVersion,
         openShareModal,
+        shareFileWhatsApp,
         createShare,
         removeShare,
         loadFolderContents,
