@@ -1662,9 +1662,14 @@ const getActiveAgents = async () => {
 
     // Collect active agent IDs
     const activeSet = new Set();
-    // (1) Led any activity in the past 60 days
+    // (1) Led any activity in the past 60 days.
+    // This branch is deliberately activity_type-agnostic, so it is the one place
+    // the EVENT_CLOSING sentinel does NOT slip past on its own — exclude it, or a
+    // dormant agent would read as "active" purely because someone recorded a sale
+    // against an attendee they registered.
     for (const a of allActivities) {
         if (!a.lead_agent_id || (a.activity_date || '') < cutoffStr) continue;
+        if (a.activity_type === 'EVENT_CLOSING') continue;
         activeSet.add(String(a.lead_agent_id));
     }
     // (2) Attended any recent event as an agent attendee
@@ -1737,6 +1742,13 @@ const _computeAgentWeekHours = async () => {
     for (const a of activities) {
         const d = a.activity_date || '';
         if (d < from || d > to) continue;
+        // EVENT_CLOSING rows are bookkeeping, not worked time: they exist only to
+        // carry a per-attendee sale off an event the agent is ALREADY credited
+        // for. _activityDurationHours falls back to 1h whenever the duration is
+        // not positive, so counting them would add a phantom hour per closing on
+        // top of the event's own hours. Excluded from both the hours tally and
+        // the CPS-per-agent column below.
+        if (a.activity_type === 'EVENT_CLOSING') continue;
         actMap[a.id] = a;
         weekActIds.push(a.id);
         if (a.activity_type === 'CPS' && a.lead_agent_id != null) {

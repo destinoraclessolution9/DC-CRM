@@ -2490,7 +2490,11 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         `;
     }
     else if (tab === 'activity') {
-        const MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP'];
+        // EVENT_CLOSING is the per-attendee closing child (see
+        // openAttendeeClosingModal in chunks/script-calendar.js) — it carries a
+        // real sale for this prospect, so it belongs in Meet Up History where the
+        // "Sale Closed" badge / Close Sale button already live.
+        const MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP','EVENT_CLOSING'];
         const _prospectActs = await AppDataStore.getActivitiesForProspect(prospectId, { limit: 500 });
         const activities = _prospectActs.filter(a => MEETUP_TYPES.includes(a.activity_type));
 
@@ -2517,7 +2521,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 <div class="meet-card">
                     <div class="meet-card-hdr">
                         <div>
-                            <span class="meet-type"><i class="fas fa-user-friends"></i> ${a.activity_type || 'Meeting'}${a.activity_title ? ' — ' + escapeHtml(a.activity_title) : ''}</span>
+                            <span class="meet-type"><i class="fas ${a.activity_type === 'EVENT_CLOSING' ? 'fa-handshake' : 'fa-user-friends'}"></i> ${a.activity_type === 'EVENT_CLOSING' ? 'Event Closing' : (a.activity_type || 'Meeting')}${a.activity_title ? ' — ' + escapeHtml(a.activity_title) : ''}</span>
                             ${a.co_agents && a.co_agents.length > 0 ? `<span style="font-size:11px;color:var(--gray-500);margin-top:2px;display:block;"><i class="fas fa-user-plus"></i> ${escapeHtml(a.co_agents.map(c => c.name || c.full_name).join(', '))}</span>` : ''}
                             ${a.consultants && a.consultants.length > 0 ? `<span style="font-size:11px;color:var(--gray-500);margin-top:2px;display:block;">${a.consultants.map(c => {
                                 const icon = c.status === 'accepted' ? '✅' : c.status === 'rejected' ? '❌' : '⏳';

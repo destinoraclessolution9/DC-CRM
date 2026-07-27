@@ -36,6 +36,12 @@
     // scheduled meeting. They are marked source='birthday_auto' and hidden from every calendar
     // surface (month grid / today's list / day & week views / mobile) so they don't clutter it.
     const _isAutoTouchLog = (a) => !!(a && a.source === 'birthday_auto');
+    // Same idea, second case: EVENT_CLOSING rows are the per-attendee closing
+    // children minted by openAttendeeClosingModal. They are bookkeeping attached
+    // to an event that is ALREADY on the calendar — one event with ten buyers
+    // would otherwise draw eleven tiles on the same day. They stay fully visible
+    // on the prospect's Meet Up History and in the event's attendee list.
+    const _isHiddenFromGrid = (a) => _isAutoTouchLog(a) || !!(a && a.activity_type === 'EVENT_CLOSING');
     // Entity-name visibility gate (shared by month tile / today list / week / day
     // views and the detail modal so they can never drift again). The client
     // (prospect/customer) name on an activity the viewer does NOT personally own
@@ -2704,7 +2710,7 @@
         for (let i = 1; i <= daysInMonth; i++) {
             const isToday = isCurrentMonth && i === todayDate.getDate();
             const dateStr = `${year}-${(month + 1).toString().padStart(2, '0')}-${i.toString().padStart(2, '0')}`;
-            const dayActivities = activities.filter(a => a.activity_date === dateStr && !_isAutoTouchLog(a))
+            const dayActivities = activities.filter(a => a.activity_date === dateStr && !_isHiddenFromGrid(a))
                 .sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
             let activityHtml = '';
             let renderedInCell = 0;
@@ -3176,7 +3182,7 @@
         for (let i = 1; i <= daysInMonth; i++) {
             const isToday = isCurrentMonth && i === todayDate.getDate();
             const dateStr = `${year}-${(month + 1).toString().padStart(2, '0')}-${i.toString().padStart(2, '0')}`;
-            const dayActivities = activities.filter(a => a.activity_date === dateStr && !_isAutoTouchLog(a))
+            const dayActivities = activities.filter(a => a.activity_date === dateStr && !_isHiddenFromGrid(a))
                 .sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
 
             let activityHtml = '';
@@ -3445,7 +3451,7 @@
         const existingEventIds = new Set(allEventsRTA.map(e => String(e.id)));
         const userMapRTA = new Map(allUsersRTA.map(u => [String(u.id), u]));
 
-        let activities = (actResult.data || []).filter(a => !_isAutoTouchLog(a));
+        let activities = (actResult.data || []).filter(a => !_isHiddenFromGrid(a));
 
         // Case status filter (computed — must stay client-side); EVENTs have no
         // closing_amount so always pass them through regardless of the filter.
@@ -4621,7 +4627,7 @@
         const dayActivities = [];
         const seenEventSlotsDV = new Set();
         for (const a of rawActivitiesDV) {
-            if (_isAutoTouchLog(a)) continue;
+            if (_isHiddenFromGrid(a)) continue;
             if (a.activity_type === 'EVENT' && a.event_id) {
                 const slotKey = `${a.event_id}|${a.start_time || ''}|${a.end_time || ''}`;
                 if (seenEventSlotsDV.has(slotKey)) continue;
@@ -4940,7 +4946,10 @@
                     <h4>Actions</h4>
                     <div class="act-actions-list">
                         ${(() => {
-                            const _MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP'];
+                            // EVENT_CLOSING is the per-attendee closing child minted by
+                            // openAttendeeClosingModal — it IS prospect-linked, so it gets the
+                            // same Prospect / Closing / Minutes actions as a real meet-up.
+                            const _MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP','EVENT_CLOSING'];
                             const _isMeetup = _MEETUP_TYPES.includes(activity.activity_type);
                             const _entityId = activity.prospect_id || activity.customer_id;
                             const _isProspect = !!activity.prospect_id;
@@ -5135,6 +5144,7 @@
                                 <input type="checkbox" ${unattendedChecked} onchange="app.toggleAttendeeUnattended(${att.id}, this.checked, ${entityId}, '${UI.escJsAttr(String(att.attendee_type||'prospect'))}', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}')"> Unattended
                             </label>
                             ${entityId ? `<button class="btn btn-sm secondary" onclick="(async()=>{ await app.openAttendeePostEventModal(${att.id}, ${activityId}, ${entityId}); })()">Post Event</button>` : ''}
+                            ${entityId ? `<button class="btn btn-sm secondary" style="color:#065f46;border-color:#065f46;" title="Record a sale for this attendee" onclick="(async()=>{ await app.openAttendeeClosingModal(${att.id}, ${activityId}); })()"><i class="fas fa-clipboard-check"></i> Closing</button>` : ''}
                         </div>
                     </div>
                 `;
@@ -6958,6 +6968,20 @@
         UI.toast.success('Post-event notes saved');
 
         if (prospectId) {
+            // The 3rd arg is the attendee's ENTITY id, which is a customers.id
+            // when attendee_type === 'customer' — sending that to
+            // showProspectDetail lands on a wrong (or nonexistent) prospect.
+            // Branch on the attendee row's own type, the same rule
+            // showAttendeeDetails uses (chunks/script-activities.js:3339).
+            let _attType = 'prospect';
+            try {
+                const _att = await AppDataStore.getById('event_attendees', attendeeId);
+                _attType = _att?.attendee_type || 'prospect';
+            } catch (_) { /* intentional: unresolved type falls back to the prospect route */ }
+            if (_attType === 'customer') {
+                await (window.app.showCustomerDetail || (() => {}))(prospectId);
+                return;
+            }
             await (window.app.showProspectDetail || (() => {}))(prospectId);
             setTimeout(async () => {
                 for (const tab of ['potential', 'nextactions']) {
@@ -6975,6 +6999,140 @@
                 document.getElementById(`acc-potential-${prospectId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }, 400);
         }
+    };
+
+    // ──────────────────────────────────────────────────────────────────────
+    // PER-ATTENDEE CLOSING (event attendance → sale)
+    //
+    // An event has ONE activity row but MANY attendees, and the entire money
+    // path in saveMeetingOutcome is gated on `activity.prospect_id` (see the
+    // `if (activity?.prospect_id)` above) — so a sale cannot hang off the
+    // shared event row. Instead we mint (or reuse) a small CHILD activity that
+    // IS linked to this attendee's prospect, then hand it to the existing
+    // openMeetingOutcomeModal. Every downstream step then runs unchanged:
+    // closing_record mirror, auto-submit, approval_queue → purchases → LTV,
+    // NPO order materialisation, card-expiry reminder.
+    //
+    // The child's activity_type is the sentinel EVENT_CLOSING. Every
+    // activity-row KPI is a POSITIVE-list test — client-side (`!== 'CPS'`,
+    // `CLIENT_MEETING_TYPES.includes`, `=== 'FTF' || === 'GR'`) and server-side
+    // (kpi_activity_summary: `= 'CPS'`, `IN ('EVENT','AGENT_MEETING','FTF',
+    // 'FSA')`) — so the sentinel is counted by NONE of them and a closing can
+    // never inflate CPS / Meetings / Client Meetings / People Met. The two
+    // type-AGNOSTIC consumers (agent operating hours, active-agent detection)
+    // are excluded explicitly in chunks/script-reporting.js.
+    //
+    // We deliberately create NO event_attendees row for the child, so the
+    // Activity Attendance headcount — which starts from event_attendees — is
+    // untouched.
+    const EVENT_CLOSING_TYPE = 'EVENT_CLOSING';
+
+    // Resolve an attendee row to the prospect id that owns the money path.
+    // A prospect attendee IS the prospect. A customer attendee routes through
+    // customers.converted_from_prospect_id: approval archives closing_record
+    // into closing_records_history and NULLs the slot, so a repeat sale for an
+    // already-converted customer is a supported path.
+    const _resolveAttendeeProspect = async (att) => {
+        const entityId = att.entity_id || att.attendee_id || null;
+        const kind = (att.attendee_type || 'prospect') === 'customer' ? 'customer' : 'prospect';
+        if (!entityId) return { entityId: null, kind, prospectId: null };
+        if (kind === 'prospect') return { entityId, kind, prospectId: entityId };
+        const customer = await AppDataStore.getById('customers', entityId).catch(() => null);
+        return { entityId, kind, prospectId: customer?.converted_from_prospect_id || null, customer };
+    };
+
+    const openAttendeeClosingModal = async (attendeeId, activityId) => {
+        // buildMeetingOutcomeBlock lives in the activities chunk, which is often
+        // NOT loaded on mobile when an event is tapped — without this the modal
+        // opens with an empty body (same failure openMeetingOutcomeModal guards).
+        await _ensureActivitiesChunk();
+
+        const att = await AppDataStore.getById('event_attendees', attendeeId);
+        if (!att) { UI.toast.error('Attendee not found'); return; }
+        const parent = (await _lookupActivityRobust(activityId)) || {};
+
+        const { entityId, kind, prospectId } = await _resolveAttendeeProspect(att);
+        if (!entityId) { UI.toast.error('This attendee has no linked profile to close against.'); return; }
+
+        // Customer that was never a prospect (imported / created directly):
+        // there is no closing_record to write, so use the CRM's existing
+        // repeat-purchase mechanism rather than inventing a second money path.
+        // NOTE: Add Purchase books straight to `purchases` with no manager
+        // approval — that is how every other customer purchase already works.
+        if (kind === 'customer' && !prospectId) {
+            UI.hideModal();
+            UI.toast.info('No linked prospect record — recording this as a customer purchase.');
+            await (window.app.openAddPurchaseModal || (() => {
+                UI.toast.error('Open the customer profile → Purchases → Add Purchase to record this sale.');
+            }))(entityId);
+            return;
+        }
+
+        // Find-or-create the child. Reusing the same row on a second click is
+        // what stops repeat clicks minting duplicate approval_queue 'new_sale'
+        // entries (and therefore duplicate `purchases` rows).
+        //
+        // The authoritative dedup key is event_attendees.closing_activity_id:
+        // that table is world-readable to authenticated users, so EVERY agent
+        // resolves the same child — whereas the activities row itself stays
+        // visibility 'closed' (the default for ordinary activities), because an
+        // 'open' closing row would expose amount_closed / solution_sold to the
+        // whole org via the RLS `visibility in ('open','public')` arm.
+        // The (event, prospect, type) query is a fallback for rows written
+        // before the stamp, or when the stamp write failed.
+        let child = null;
+        if (att.closing_activity_id) {
+            child = await AppDataStore.getById('activities', att.closing_activity_id).catch(() => null);
+        }
+        if (!child) {
+            try {
+                const existing = await AppDataStore.query('activities', {
+                    event_id: parent.event_id,
+                    prospect_id: prospectId,
+                    activity_type: EVENT_CLOSING_TYPE,
+                });
+                child = (existing || [])[0] || null;
+            } catch (e) {
+                console.warn('openAttendeeClosingModal: child lookup failed — will create', e);
+            }
+        }
+
+        if (!child) {
+            const payload = {
+                activity_type: EVENT_CLOSING_TYPE,
+                activity_title: parent.activity_title || 'Event',
+                activity_date: parent.activity_date || _localDateStr(new Date()),
+                start_time: parent.start_time || null,
+                end_time: parent.end_time || null,
+                prospect_id: prospectId,
+                event_id: parent.event_id || null,
+                lead_agent_id: _state.cu?.id || null,
+                visibility: 'closed',
+            };
+            if (parent.country) payload.country = parent.country;
+            try {
+                child = await AppDataStore.create('activities', payload);
+            } catch (e) {
+                console.error('openAttendeeClosingModal: could not create the closing record', e);
+                UI.toast.error('Could not start the closing: ' + (e?.message || 'unknown error'));
+                return;
+            }
+        }
+        if (!child?.id) { UI.toast.error('Could not start the closing — please try again.'); return; }
+
+        // Stamp the link back so the next click (by anyone) reuses this row.
+        // Best-effort: a failure here only costs us the fast path, since the
+        // (event, prospect, type) fallback query above still finds the child.
+        if (String(att.closing_activity_id || '') !== String(child.id)) {
+            try {
+                await AppDataStore.update('event_attendees', attendeeId, { closing_activity_id: child.id });
+            } catch (e) {
+                console.warn('openAttendeeClosingModal: closing_activity_id stamp failed', e);
+            }
+        }
+
+        // Everything below here is the STANDARD closing flow, untouched.
+        await openMeetingOutcomeModal(child.id);
     };
 
     // Returns activity-shaped records for every event_attendees row that
@@ -7190,7 +7348,7 @@
     const openMeetupHistoryModal = async (prospectId) => {
         const prospect = await AppDataStore.getById('prospects', prospectId);
         if (!prospect) { UI.toast.error('Prospect not found'); return; }
-        const MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP'];
+        const MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP','EVENT_CLOSING'];
         // Scale-safe: indexed per-prospect activity fetch (eq prospect_id, has its
         // own getAll fallback) instead of scanning the WHOLE activities table.
         const ownActivities = (await AppDataStore.getActivitiesForProspect(prospectId, { limit: 2000 }))
@@ -7513,6 +7671,7 @@
         savePostMeetupNotes,
         openAttendeePostEventModal,
         saveAttendeePostEventNotes,
+        openAttendeeClosingModal,
         getProspectAttendeeNotes,
         viewAttendeePhotos,
         removeAttendeePhoto,

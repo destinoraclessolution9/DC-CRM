@@ -988,7 +988,7 @@
         _mhomePerf('foreground:activities:start');
         const actResult = await AppDataStore.queryAdvanced('activities', actQueryOpts).catch(() => ({ data: [] }));
         _mhomePerf('foreground:activities:done');
-        const activities = (actResult.data || []).filter(a => a.activity_type !== 'EVENT' && a.source !== 'birthday_auto');
+        const activities = (actResult.data || []).filter(a => a.activity_type !== 'EVENT' && a.activity_type !== 'EVENT_CLOSING' && a.source !== 'birthday_auto');
 
         // Background data — repaint when each lands. The guard
         // (_state.cv === 'home') makes a stale repaint harmless if the
@@ -2024,7 +2024,13 @@
     // to be excluded from the mobile calendar entirely, so they never appeared
     // on a phone even when marked Open — visibility scoping is already applied
     // by the fetch's scopeFields (lead ∈ visible OR visibility IN open/public).
-    const _mcalKeepAct = (a) => a.activity_type !== 'EVENT' || !!(a.activity_title || a.event_title || a.title);
+    // EVENT_CLOSING rows are the per-attendee closing children (see
+    // openAttendeeClosingModal in chunks/script-calendar.js) — bookkeeping hung off
+    // an event that is already on the grid, so they're hidden here exactly like the
+    // desktop `_isHiddenFromGrid` does. Still visible on the prospect's Meet Up
+    // History and in the event's attendee list.
+    const _mcalKeepAct = (a) => a.activity_type !== 'EVENT_CLOSING'
+        && (a.activity_type !== 'EVENT' || !!(a.activity_title || a.event_title || a.title));
     const _mcalShortTitle = (a, personMap) => {
         // EVENT tiles show the event's own title (e.g. "AI 與 風水"), never a
         // client name — an event is a group activity with attendees, not a single
@@ -2582,7 +2588,7 @@
         for (let d = 1; d <= daysInMonth; d++) {
             const k = `${_mcalYear}-${String(_mcalMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
             const isToday = (_mcalYear === todayY && _mcalMonth === todayM && d === todayDay);
-            const dayActs = (byDate.get(k) || []).filter(a => a.source !== 'birthday_auto');
+            const dayActs = (byDate.get(k) || []).filter(a => a.source !== 'birthday_auto' && a.activity_type !== 'EVENT_CLOSING');
             const visibleActs = dayActs.slice(0, 3);
             const overflow = Math.max(0, dayActs.length - 3);
             const evtsHtml = visibleActs.map(a => {
@@ -3218,7 +3224,7 @@
     const _mcalDayClickImpl = (dateStr) => {
         const allDay    = _mcalByDate.get(dateStr) || [];
         const dayBdays  = allDay.filter(a => a._isBirthday);
-        const dayActs   = allDay.filter(a => !a._isBirthday && a.source !== 'birthday_auto');
+        const dayActs   = allDay.filter(a => !a._isBirthday && a.source !== 'birthday_auto' && a.activity_type !== 'EVENT_CLOSING');
         const sorted    = [...dayActs].sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
 
         const d = new Date(dateStr + 'T00:00:00');
