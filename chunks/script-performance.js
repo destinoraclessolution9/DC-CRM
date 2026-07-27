@@ -139,6 +139,39 @@ const showRankingPerformanceView = async (container) => {
         if (!bucket) { bucket = []; activitiesByAgent.set(k, bucket); }
         bucket.push(a);
     }
+
+    // "Closed for others" — RECOGNITION ONLY, deliberately separate from money.
+    //
+    // Every RM figure in this CRM is attributed to the record OWNER, and that is
+    // not changing: `sales`, `closingsByOwner`, `closingRate` and
+    // `performanceScore` below are all untouched by this map. Owner attribution
+    // hides one real thing though — an agent who closes a sale for a colleague's
+    // prospect (the normal case at an event, via the per-attendee Closing button)
+    // shows up nowhere at all. This counts those closes so they are visible.
+    //
+    // Deliberately a COUNT, never an RM total: the amount lives on
+    // activities.closing_amount, which is NOT audited revenue — `purchases` is —
+    // so summing it anywhere near the Sales column would invite a false
+    // reconciliation. See script.js bookPurchaseOnce for the audited path.
+    //
+    // Owner must be RESOLVABLE from the maps: for a scoped (non-admin) viewer,
+    // _custAgentMap/_prospAgentMap are RLS-clipped, and an unresolvable owner
+    // would otherwise fall back to lead_agent_id and read as "closed for someone
+    // else" against themselves. When we can't tell, we don't count.
+    const closedForOthers = new Map();
+    for (const a of allActivities) {
+        if (!a.activity_date) continue;
+        if (a.activity_date < monthStart || a.activity_date > monthEnd) continue;
+        if (!(a.is_closing === true || a.activity_type === 'EVENT_CLOSING')) continue;
+        if (a.lead_agent_id == null) continue;
+        const trueOwner = a.customer_id != null
+            ? _custAgentMap.get(String(a.customer_id))
+            : (a.prospect_id != null ? _prospAgentMap.get(String(a.prospect_id)) : null);
+        if (!trueOwner) continue;                       // owner unknown -> don't guess
+        if (String(trueOwner) === String(a.lead_agent_id)) continue;  // own book
+        const ck = String(a.lead_agent_id);
+        closedForOthers.set(ck, (closedForOthers.get(ck) || 0) + 1);
+    }
     // Bucket purchases for the current month twice, by two DIFFERENT bases:
     //   • purchasesByAgent — drives totalSales ($): honours an explicit p.agent_id
     //     (assign-on-behalf SALES credit) when present, else the customer's owner.
@@ -210,6 +243,11 @@ const showRankingPerformanceView = async (container) => {
             prospects: prospects.length,
             followupRate,
             closingRate,
+            // Recognition only — count of sales this agent closed on ANOTHER
+            // agent's prospect/customer. Deliberately excluded from
+            // performanceScore so it can never shift the ranking or double-count
+            // against the owner-attributed sales figure.
+            closedForOthers: closedForOthers.get(aid) || 0,
             // Overall performance score
             performanceScore: Math.round(cpsCount * 5 + totalSales / 1000 + meetingCount * 3 + followupRate * 0.5 + closingRate * 0.8)
         });

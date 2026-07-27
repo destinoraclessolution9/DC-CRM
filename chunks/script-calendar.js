@@ -6479,14 +6479,66 @@
                     }
 
                     try {
-                        const prospectUpdates = { closing_record: newCR };
-                        if (hasRequiredFields && saleAmount >= 2000 && !_alreadyConverted) {
-                            prospectUpdates.conversion_status = 'pending_approval';
-                            prospectUpdates.conversion_requested_at = new Date().toISOString();
-                            prospectUpdates.conversion_requested_by = _state.cu?.id;
+                        const _wantsConversion = !!(hasRequiredFields && saleAmount >= 2000 && !_alreadyConverted);
+
+                        // Persist via the submit_closing_record RPC FIRST.
+                        //
+                        // AppDataStore.update issues .update().eq('id',id).select().single()
+                        // — PostgREST `return=representation` — and RLS filters the RETURNING
+                        // rows. A closer who cannot SELECT the owner's prospect therefore gets
+                        // an EMPTY representation, PGRST116, and the whole write is rolled back
+                        // (and prospects.auth_write_update is scoped to
+                        // current_user_visible_ids() anyway, so it would be denied regardless).
+                        // The sale then never reaches approval_queue and never becomes a
+                        // `purchases` row — silent revenue loss. Measured live 2026-07-27:
+                        // 4 of 11 cross-owner event attendees hit this.
+                        //
+                        // The RPC is SECURITY DEFINER and returns jsonb (no RETURNING for RLS
+                        // to filter). It writes ONLY closing_record + the conversion-request
+                        // fields, refuses to overwrite a submitted/approved record, and checks
+                        // the caller is management / on the prospect / the lead agent of an
+                        // activity linked to it.
+                        let _rpcDone = false;
+                        try {
+                            const _sb = window.supabase || window.supabaseClient;
+                            if (_sb?.rpc) {
+                                const { data: _r, error: _e } = await _dbRace(_sb.rpc('submit_closing_record', {
+                                    p_prospect_id: activity.prospect_id,
+                                    p_closing_record: newCR,
+                                    p_request_conversion: _wantsConversion,
+                                }), 20000, 'submit_closing_record');
+                                if (_e) throw _e;
+                                if (_r && _r.ok) {
+                                    _rpcDone = true;
+                                    AppDataStore.invalidateCache && AppDataStore.invalidateCache('prospects');
+                                } else if (_r && _r.reason === 'locked') {
+                                    // Already submitted/approved — same outcome as the client's
+                                    // own draft check; don't fall through and overwrite it.
+                                    _rpcDone = true;
+                                    crSyncStatus = 'locked';
+                                }
+                            }
+                        } catch (_rpcErr) {
+                            // RPC missing / unreachable — fall back to the direct write below,
+                            // which still works for anyone who owns or can see the prospect.
+                            console.warn('submit_closing_record RPC unavailable, falling back:', _rpcErr);
                         }
-                        await AppDataStore.update('prospects', activity.prospect_id, prospectUpdates);
-                        crSyncStatus = hasRequiredFields ? 'submitted' : 'synced';
+
+                        if (!_rpcDone) {
+                            const prospectUpdates = { closing_record: newCR };
+                            if (_wantsConversion) {
+                                prospectUpdates.conversion_status = 'pending_approval';
+                                // NOTE: `conversion_requested_at` is NOT a real column on
+                                // prospects (verified live 2026-07-27) — sending it just cost a
+                                // failed insert + unknown-column strip-retry on every save
+                                // (data.js:2338-2342). Dropped. Three other writers still send
+                                // it: chunks/script-approvals.js:602, chunks/script-journey.js:597,
+                                // chunks/script-prospects.js:6055.
+                                prospectUpdates.conversion_requested_by = _state.cu?.id;
+                            }
+                            await AppDataStore.update('prospects', activity.prospect_id, prospectUpdates);
+                        }
+                        if (crSyncStatus !== 'locked') crSyncStatus = hasRequiredFields ? 'submitted' : 'synced';
                     } catch (e) {
                         console.warn('Failed to sync closing_record:', e);
                         crSyncStatus = 'failed';

@@ -58,6 +58,11 @@ export function RankingView({ agentStats = [], monthLabel = '' }) {
                             <th scope="col" style={right}>Prospects</th>
                             <th scope="col" style={right}>Follow-up %</th>
                             <th scope="col" style={right}>Closing %</th>
+                            {/* Recognition only — sales this agent closed on ANOTHER agent's
+                                prospect/customer. The RM still credits the owner (every money
+                                figure in the CRM is owner-attributed); this makes the closer
+                                visible. A count, never an amount — see chunks/script-performance.js. */}
+                            <th scope="col" style={right} title="Sales this agent closed on another agent's prospect or customer. Recognition only — the sales RM still credits the record owner.">Closed for others</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -73,10 +78,11 @@ export function RankingView({ agentStats = [], monthLabel = '' }) {
                                 <td style={right}>{a.prospects}</td>
                                 <td style={right}><span className={`badge ${rateBadgeClass(a.followupRate, 80, 50)}`}>{a.followupRate}%</span></td>
                                 <td style={right}><span className={`badge ${rateBadgeClass(a.closingRate, 30, 15)}`}>{a.closingRate}%</span></td>
+                                <td style={right}>{a.closedForOthers ? a.closedForOthers : <span style={{ color: 'var(--gray-400)' }}>—</span>}</td>
                             </tr>
                         ))}
                         {agentStats.length === 0 && (
-                            <tr><td colSpan="10" style={{ textAlign: 'center', padding: '20px' }}>No agent data available</td></tr>
+                            <tr><td colSpan="11" style={{ textAlign: 'center', padding: '20px' }}>No agent data available</td></tr>
                         )}
                     </tbody>
                 </table>
