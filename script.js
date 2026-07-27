@@ -687,6 +687,98 @@ const appLogic = (() => {
         },
     });
 
+    // Durable, cross-session duplicate-purchase guard shared by every AUTOMATIC
+    // booking path (approveQueueEntry new_sale / approveClosingRecord additional
+    // sale / approveProspectConversion first sale / closeDealWon).
+    //
+    // WHY this exists: those paths were protected only by `_convInFlight`, an
+    // in-memory Set. It stops a double-click inside ONE tab and nothing else — it
+    // does not survive a reload, and it is invisible to a second manager or to the
+    // same manager the next day. A re-run therefore booked the sale twice and
+    // double-bumped lifetime_value, corrupting LTV, leaderboards and every
+    // purchases-derived KPI (revenue is read from `purchases`, never from the
+    // activity's closing columns).
+    //
+    // Match rule, deliberately narrow so it can never swallow a genuine second sale:
+    //   • invoice present -> duplicate iff same invoice AND same amount AND same item.
+    //     Invoice alone is NOT enough: one invoice can legitimately span several
+    //     product lines, and matching on the number only would silently drop the
+    //     second line. A genuine re-run replays all three fields identically.
+    //   • no invoice -> duplicate iff same date + same amount (to the cent) + same item.
+    //
+    // It ALSO reconciles the pipeline's placeholder row (see PIPELINE_INVOICE_PREFIX):
+    // closeDealWon can book a synthetic 'Deal closed (pipeline)' row BEFORE the real
+    // closing paperwork is filed, and the two are structurally un-matchable (the
+    // pipeline row has no invoice and a different item/amount). Stamping it with a
+    // deterministic per-prospect marker lets the later approval UPDATE that row into
+    // the real sale — adjusting LTV by the delta only — instead of booking a second
+    // one. Overwriting the marker consumes it, so a genuine repeat sale later still
+    // books a fresh row.
+    //
+    // Fails OPEN: if the existence read fails we still book. Silently dropping a real
+    // sale is worse than a duplicate. Note the read goes STRAIGHT to Supabase rather
+    // than through AppDataStore.query(), which swallows read errors and substitutes a
+    // stale localStorage snapshot — deciding "already booked" from a stale mirror is
+    // exactly the silent revenue loss this must never cause.
+    const PIPELINE_INVOICE_PREFIX = 'PIPE-';
+    Object.assign(window._crmUtils, {
+        PIPELINE_INVOICE_PREFIX,
+        bookPurchaseOnce: async (customerId, purchase, opts = {}) => {
+            const label = opts.label || 'purchase';
+            const _norm = (v) => String(v == null ? '' : v).trim().toLowerCase();
+            const _money = (v) => Math.round((parseFloat(v) || 0) * 100);
+            const invoice = _norm(purchase?.invoice);
+            const pipeMarker = opts.supersedePipelineFor != null
+                ? _norm(PIPELINE_INVOICE_PREFIX + opts.supersedePipelineFor)
+                : '';
+
+            let rows = null;
+            try {
+                const sb = window.supabase || window.supabaseClient;
+                if (!sb) throw new Error('supabase client unavailable');
+                const { data, error } = await sb
+                    .from('purchases')
+                    .select('id,invoice,date,amount,item')
+                    .eq('customer_id', customerId);
+                if (error) throw error;
+                rows = data || [];
+            } catch (e) {
+                console.warn(`[bookPurchaseOnce] duplicate check failed for ${label}; booking anyway`, e);
+            }
+
+            if (rows) {
+                const sameLine = (r) => _money(r.amount) === _money(purchase?.amount)
+                    && _norm(r.item) === _norm(purchase?.item);
+                const existing = rows.find(r => invoice
+                    ? (_norm(r.invoice) === invoice && sameLine(r))
+                    : (_norm(r.date) === _norm(purchase?.date) && sameLine(r)));
+                if (existing) {
+                    console.warn(`[bookPurchaseOnce] skipped duplicate ${label} for customer ${customerId}`, {
+                        existingPurchaseId: existing.id, invoice: purchase?.invoice, amount: purchase?.amount,
+                    });
+                    return { booked: false, reason: 'duplicate', existing };
+                }
+
+                const pipeRow = pipeMarker ? rows.find(r => _norm(r.invoice) === pipeMarker) : null;
+                if (pipeRow) {
+                    const delta = (parseFloat(purchase?.amount) || 0) - (parseFloat(pipeRow.amount) || 0);
+                    await AppDataStore.update('purchases', pipeRow.id, { ...purchase });
+                    // countDelta 0 — the row already counted towards total_purchases.
+                    if (delta) await window._crmUtils.adjustCustomerLtv(customerId, delta, 0);
+                    console.warn(`[bookPurchaseOnce] reconciled pipeline placeholder into ${label}`, {
+                        purchaseId: pipeRow.id, amountDelta: delta,
+                    });
+                    return { booked: true, reconciled: true, row: { ...pipeRow, ...purchase } };
+                }
+            }
+
+            const row = await AppDataStore.create('purchases', purchase);
+            // Only move LTV when the row actually landed, so the two can never diverge.
+            await window._crmUtils.adjustCustomerLtv(customerId, parseFloat(purchase?.amount) || 0, 1);
+            return { booked: true, row };
+        },
+    });
+
     // Phase 10: Search Panel State
     let _searchPanelVisible = false;
     let _currentSearchEntity = 'prospects'; // default entity

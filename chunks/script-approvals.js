@@ -361,7 +361,12 @@ const approveQueueEntry = async (entryId) => {
                     });
                 }
                 if (customer) {
-                    await AppDataStore.create('purchases', {
+                    // bookPurchaseOnce = durable duplicate guard + atomic LTV bump
+                    // (audit #8/#16/#22). _convInFlight above only covers ONE tab;
+                    // this also stops a re-approval after a reload, a second
+                    // manager, or a sale already booked by the pipeline's
+                    // closeDealWon path.
+                    const _res = await _utils.bookPurchaseOnce(customer.id, {
                         customer_id: customer.id,
                         date: cr.closing_date || _localToday,
                         invoice: cr.invoice_number || '',
@@ -370,10 +375,10 @@ const approveQueueEntry = async (entryId) => {
                         currency: UI.currencyForCountry(prospect.country),
                         status: 'COMPLETED',
                         payment_method: cr.payment_method || 'Cash'
-                    });
-                    // Atomic, race-free LTV + total_purchases bump (audit #8/#16/#22) —
-                    // matches savePurchase/deletePurchase so all purchase paths agree.
-                    await _utils.adjustCustomerLtv(customer.id, amt, 1);
+                    }, { label: 'new_sale approval', supersedePipelineFor: entry.prospect_id });
+                    if (_res && _res.booked === false) {
+                        try { UI.toast.info('This sale was already recorded — approving without adding a duplicate purchase.'); } catch (_) {}
+                    }
                 }
                 } finally {
                     _convInFlight.delete(_saleKey);
@@ -539,7 +544,10 @@ const approveClosingRecord = async (prospectId) => {
             customer = newCust;
         }
         if (customer) {
-            await AppDataStore.create('purchases', {
+            // Durable duplicate guard + atomic LTV bump (audit #8/#16/#22) — see
+            // bookPurchaseOnce. Covers the re-approval / second-manager / already-
+            // booked-by-pipeline cases that _convInFlight cannot see.
+            const _res = await _utils.bookPurchaseOnce(customer.id, {
                 customer_id: customer.id,
                 date: cr.closing_date || cr.order_date || _localToday,
                 invoice: cr.invoice_number || '',
@@ -548,9 +556,10 @@ const approveClosingRecord = async (prospectId) => {
                 currency: UI.currencyForCountry(prospect.country),
                 status: 'COMPLETED',
                 payment_method: cr.payment_method || 'Cash'
-            });
-            // Atomic, race-free LTV + total_purchases bump (audit #8/#16/#22).
-            await _utils.adjustCustomerLtv(customer.id, saleAmount, 1);
+            }, { label: 'additional sale approval', supersedePipelineFor: prospectId });
+            if (_res && _res.booked === false) {
+                try { UI.toast.info('This sale was already recorded — approving without adding a duplicate purchase.'); } catch (_) {}
+            }
         }
         const existingHistory = Array.isArray(prospect.closing_records_history) ? prospect.closing_records_history : [];
         await AppDataStore.update('prospects', prospectId, {
@@ -762,7 +771,8 @@ const approveProspectConversion = async (prospectId) => {
         // is blocked by the already-converted guard and would leave LTV=0 silently.
         // Surface a specific, actionable message so the manager records it manually.
         try {
-            await AppDataStore.create('purchases', {
+            // Durable duplicate guard + atomic LTV bump — see bookPurchaseOnce.
+            await _utils.bookPurchaseOnce(newCustomerId, {
                 customer_id: newCustomerId,
                 date: cr?.closing_date || _localToday,
                 invoice: cr?.invoice_number || '',
@@ -771,8 +781,7 @@ const approveProspectConversion = async (prospectId) => {
                 currency: UI.currencyForCountry(prospect.country),
                 status: 'COMPLETED',
                 payment_method: cr?.payment_method || 'Cash'
-            });
-            await _utils.adjustCustomerLtv(newCustomerId, saleAmount, 1);
+            }, { label: 'first-conversion sale', supersedePipelineFor: prospectId });
         } catch (saleErr) {
             console.error('[approveProspectConversion] sale booking failed', saleErr);
             try { UI.toast.error(`Customer created, but recording the RM ${saleAmount.toLocaleString()} sale failed — please add the purchase manually from the customer profile.`); } catch (_) {}

@@ -3084,23 +3084,54 @@ const closeDealWon = async (prospectId) => {
 
     // Guard create + purchases + LTV in try/catch — a failed write must surface to the
     // user, not silently leave a half-converted prospect.
+    // Double-book guard (cross-path). A prospect can reach Closed-Won while a real
+    // closing already sits in the Manager Approval Queue: saveMeetingOutcome writes
+    // prospects.closing_record status='submitted' AND files an approval_queue
+    // 'new_sale' row. If we ALSO mint a synthetic deal_value purchase here, the
+    // manager's later approval books the SAME commercial event a second time —
+    // approveQueueEntry's `status === 'converted'` branch finds the customer we just
+    // created and adds its own purchases row + LTV bump. The fields differ (invoice /
+    // product / amount / date), so no field-level dedup can catch it.
+    //
+    // So: convert the prospect, but leave the money to the approval path, which is
+    // the invoice-backed record and the one leadership signs off. Only book the
+    // synthetic row when nothing is queued to book it later.
+    // Read the closing record off the NETWORK, not the SWR tiers. getById serves from
+    // the in-memory / localStorage / Cache-API snapshots first, so a prospect cached
+    // before the closing was filed would report closing_record = null and we'd book a
+    // duplicate. getByIdFull always issues select=*; fall back to the cached row only
+    // if that read fails, which preserves today's behaviour offline.
+    const _freshProspect = await AppDataStore.getByIdFull('prospects', prospectId).catch(() => null);
+    const _cr = (_freshProspect || prospect).closing_record;
+    const _crStatus = _cr?.status || '';
+    const _saleAwaitingApproval = !!_cr
+        && (_crStatus === 'submitted' || _crStatus === 'approved')
+        && (parseFloat(_cr.sale_amount) || 0) > 0;
+
     let created;
     try {
         created = await AppDataStore.create('customers', customer);
         const customerId = created?.id ?? created?.[0]?.id;
-        if (customerId != null && amount > 0) {
+        if (customerId != null && amount > 0 && !_saleAwaitingApproval) {
             // Canonical purchase row (column is `date`, keyed by customer_id) +
-            // atomic lifetime_value/total_purchases bump via the shared adjuster.
-            await AppDataStore.create('purchases', {
+            // atomic lifetime_value/total_purchases bump, both via the shared
+            // durable-duplicate-guarded booker.
+            await _utils.bookPurchaseOnce(customerId, {
                 customer_id: customerId,
                 date: closeDate,
+                // Deterministic placeholder marker. This row has no real invoice, so
+                // when the paperwork is filed LATER the approval path's purchase
+                // (real invoice / product / amount) is structurally un-matchable
+                // against it and would book the SAME deal twice. The marker lets
+                // bookPurchaseOnce reconcile this row in place instead. Overwriting
+                // it consumes the marker, so a genuine repeat sale still books fresh.
+                invoice: `${_utils.PIPELINE_INVOICE_PREFIX || 'PIPE-'}${prospect.id}`,
                 item: 'Deal closed (pipeline)',
                 amount: amount,
                 currency: UI.currencyForCountry(prospect.country),
                 status: 'COMPLETED',
                 payment_method: 'Cash'
-            });
-            await _utils.adjustCustomerLtv(customerId, amount, 1);
+            }, { label: 'pipeline closed-won' });
         }
         customer.id = customerId;
     } catch (e) {
@@ -3144,7 +3175,16 @@ const closeDealWon = async (prospectId) => {
     } catch (e) { console.warn('deal_closed webhook dispatch failed:', e); }
 
     UI.hideModal();
-    UI.toast.success(`Deal closed at RM ${amount.toLocaleString()} !Customer created.`);
+    if (_saleAwaitingApproval) {
+        // Be explicit about WHY no purchase was booked here, so nobody re-enters it
+        // by hand and creates the very duplicate this guard exists to prevent.
+        // Deliberately does NOT promise the Manager Approval Queue: a closing filed by
+        // a manager skips the queue entirely (saveMeetingOutcome only files queue rows
+        // for non-managers) and is approved straight from the DC Closing Record tab.
+        UI.toast.success(`Customer created. The RM ${(parseFloat(_cr.sale_amount) || 0).toLocaleString()} closing is awaiting approval — it gets booked once approved, so it is not recorded twice here.`);
+    } else {
+        UI.toast.success(`Deal closed at RM ${amount.toLocaleString()} !Customer created.`);
+    }
     await showPipelineView(document.getElementById('content-viewport'));
     } finally {
         _closeWonInFlight.delete(_key);
