@@ -3207,12 +3207,17 @@ const _buildActivityHeadcountDetailsLegacy = async (from, to) => {
         const ev = eventMap[att.event_id];
         const eventTitle = ev?.event_title || ev?.title || `Event #${att.event_id}`;
 
+        // Which of the three buckets this head lands in — reused for the per-event
+        // split so the By Event table always reconciles with the count cards.
+        let bucket;
         if (att.attendee_type === 'agent') {
             const name = userMap[entityId]?.full_name || att.entity_name || '—';
             agentRows.push([date, eventTitle, name]);
+            bucket = 'agent';
         } else if (att.attendee_type === 'customer') {
             const name = custMap[entityId]?.full_name || att.entity_name || '—';
             customerRows.push([date, eventTitle, name]);
+            bucket = 'customer';
         } else {
             // Prospect-typed attendee. If this head is really an existing customer
             // (converted prospect, or name/phone match), count them under Customer
@@ -3221,10 +3226,12 @@ const _buildActivityHeadcountDetailsLegacy = async (from, to) => {
             const name = prosp?.full_name || att.entity_name || '—';
             const isCustomer = convertedProspectIds.has(String(entityId)) ||
                 _matchesCustomer(prosp?.full_name || att.entity_name, prosp?.phone);
-            if (isCustomer) customerRows.push([date, eventTitle, name]);
-            else prospectRows.push([date, eventTitle, name]);
+            if (isCustomer) { customerRows.push([date, eventTitle, name]); bucket = 'customer'; }
+            else { prospectRows.push([date, eventTitle, name]); bucket = 'prospect'; }
         }
-        byEvent[eventTitle] = (byEvent[eventTitle] || 0) + 1;
+        if (!byEvent[eventTitle]) byEvent[eventTitle] = { customer: 0, prospect: 0, agent: 0, total: 0 };
+        byEvent[eventTitle][bucket]++;
+        byEvent[eventTitle].total++;
     }
 
     return _renderActivityHeadcount(customerRows, prospectRows, agentRows, byEvent);
@@ -3233,28 +3240,60 @@ const _buildActivityHeadcountDetailsLegacy = async (from, to) => {
 // Shared render for buildActivityHeadcountDetails — the legacy client scan builds
 // customerRows/prospectRows/agentRows/byEvent, then renders here. Customer and
 // Prospect are separate buckets; a head counted as a customer is never also a
-// prospect (the builder reclassifies such rows into customerRows).
+// prospect (the builder reclassifies such rows into customerRows). byEvent maps
+// event title -> { customer, prospect, agent, total } so the per-event table
+// splits the same way as the count cards and sums back to the Total card.
 const _renderActivityHeadcount = (customerRows, prospectRows, agentRows, byEvent) => {
     const customerCount = customerRows.length;
     const prospectCount = prospectRows.length;
     const agentCount = agentRows.length;
+    const totalCount = customerCount + prospectCount + agentCount;
 
-    const summaryByEvent = Object.keys(byEvent).length
+    const eventEntries = Object.entries(byEvent).sort((a, b) => b[1].total - a[1].total);
+    const evCell = (v) => `<td style="text-align:right;padding:5px 8px;font-variant-numeric:tabular-nums;">${v}</td>`;
+    const summaryByEvent = eventEntries.length
         ? `<div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;padding:12px 16px;margin-bottom:14px;">
              <div style="font-size:12px;color:var(--gray-500);margin-bottom:8px;font-weight:600;">By Event:</div>
-             ${Object.entries(byEvent).sort((a,b) => b[1]-a[1]).map(([name, c]) => `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;"><span>${escapeHtml(name)}</span><strong>${c} attendee${c===1?'':'s'}</strong></div>`).join('')}
+             <div style="overflow-x:auto;">
+             <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:360px;">
+               <thead><tr style="color:var(--gray-500);font-size:11px;text-transform:uppercase;letter-spacing:.03em;">
+                 <th scope="col" style="text-align:left;padding:4px 8px 6px 0;font-weight:600;">Event</th>
+                 <th scope="col" style="text-align:right;padding:4px 8px 6px;font-weight:600;">Customer</th>
+                 <th scope="col" style="text-align:right;padding:4px 8px 6px;font-weight:600;">Prospect</th>
+                 <th scope="col" style="text-align:right;padding:4px 8px 6px;font-weight:600;">Agent</th>
+                 <th scope="col" style="text-align:right;padding:4px 0 6px 8px;font-weight:600;">Total</th>
+               </tr></thead>
+               <tbody>
+               ${eventEntries.map(([name, d]) => `<tr style="border-top:1px solid #ddd6fe;">
+                 <td style="padding:5px 8px 5px 0;">${escapeHtml(name)}</td>
+                 ${evCell(d.customer)}${evCell(d.prospect)}${evCell(d.agent)}
+                 <td style="text-align:right;padding:5px 0 5px 8px;font-weight:700;font-variant-numeric:tabular-nums;">${d.total}</td>
+               </tr>`).join('')}
+               </tbody>
+               <tfoot><tr style="border-top:2px solid #c4b5fd;font-weight:700;">
+                 <td style="padding:6px 8px 0 0;">Total</td>
+                 <td style="text-align:right;padding:6px 8px 0;font-variant-numeric:tabular-nums;">${customerCount}</td>
+                 <td style="text-align:right;padding:6px 8px 0;font-variant-numeric:tabular-nums;">${prospectCount}</td>
+                 <td style="text-align:right;padding:6px 8px 0;font-variant-numeric:tabular-nums;">${agentCount}</td>
+                 <td style="text-align:right;padding:6px 0 0 8px;font-variant-numeric:tabular-nums;">${totalCount}</td>
+               </tr></tfoot>
+             </table>
+             </div>
            </div>`
         : '';
 
+    // Grid (not flex) so the four cards stay equal-width: 4-up on desktop and a
+    // clean 2x2 on a phone-width modal, instead of flex-wrap's lopsided 3 + 1.
     const badge = (n, label, bg, border, color) => `
-        <div style="background:${bg};border:1px solid ${border};border-radius:6px;padding:10px 16px;flex:1;text-align:center;">
+        <div style="background:${bg};border:1px solid ${border};border-radius:6px;padding:10px 12px;box-sizing:border-box;min-width:0;text-align:center;">
             <div style="font-size:20px;font-weight:700;color:${color};">${n}</div>
             <div style="font-size:12px;color:var(--gray-500);">${label}</div>
         </div>`;
-    const countBadge = `<div style="display:flex;gap:12px;margin-bottom:14px;">
+    const countBadge = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:12px;margin-bottom:14px;">
         ${badge(customerCount, 'Customer', '#dcfce7', '#86efac', '#166534')}
         ${badge(prospectCount, 'Prospect', '#e0f2fe', '#7dd3fc', '#0369a1')}
         ${badge(agentCount, 'Agent', '#fef3c7', '#fcd34d', '#92400e')}
+        ${badge(totalCount, 'Total', '#ede9fe', '#c4b5fd', '#5b21b6')}
     </div>`;
 
     const section = (title, count, rows, cols) => `<div style="margin-bottom:18px;">
