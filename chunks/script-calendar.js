@@ -7187,18 +7187,31 @@
         await openMeetingOutcomeModal(child.id);
     };
 
-    // Returns activity-shaped records for every event_attendees row that
-    // captures post-event notes for this prospect. Lets the prospect
-    // profile read sites (meetup history modal, potential / nextactions /
-    // events tabs) merge attendee-side notes alongside activity-owner
-    // notes without rewriting their render code.
-    const getProspectAttendeeNotes = async (prospectId) => {
+    // Returns activity-shaped records for the event_attendees rows belonging to
+    // this prospect. Lets the prospect profile read sites (meetup history modal,
+    // potential / nextactions / events tabs) merge attendee-side notes alongside
+    // activity-owner notes without rewriting their render code.
+    //
+    // opts.includeWithoutNotes — attendance ALONE is a profile-worthy fact: a
+    // prospect who paid, got a ticket and turned up must show on their own
+    // profile BEFORE anyone types post-event notes. Note-consuming callers
+    // (Meet Up History, the potential / nextactions tabs) aggregate note text,
+    // so they keep the notes-only default; the profile's Activities and Events
+    // tab opts in to the full attendance list. Every row is tagged `_hasNotes`
+    // so a caller can still tell the two apart after the fact.
+    // opts.attendeeType — the same event mixes 'prospect' and 'customer'
+    // attendees, and the customer profile needs the identical read. Defaults to
+    // 'prospect' so every existing call site keeps its behaviour.
+    const getProspectAttendeeNotes = async (prospectId, opts = {}) => {
         if (!prospectId) return [];
+        const includeWithoutNotes = opts.includeWithoutNotes === true;
+        const wantType = opts.attendeeType || 'prospect';
+        const _hasNotes = (a) => !!(a.note_key_points || a.note_needs || a.note_pain_points ||
+            a.opportunity_potential || a.next_action || a.summary);
         const _matchesProspect = (a) =>
             String(a.entity_id || a.attendee_id) === String(prospectId) &&
-            (a.attendee_type || 'prospect') === 'prospect' &&
-            (a.note_key_points || a.note_needs || a.note_pain_points ||
-             a.opportunity_potential || a.next_action || a.summary);
+            (a.attendee_type || 'prospect') === wantType &&
+            (includeWithoutNotes || _hasNotes(a));
 
         // Scale-safe: fetch ONLY this prospect's attendee rows server-side via an
         // OR on the two possible id columns (a SUPERSET of the client filter),
@@ -7249,6 +7262,15 @@
                 activity_date: parent.activity_date || (att.created_at ? String(att.created_at).slice(0, 10) : ''),
                 event_id: parent.event_id || att.event_id,
                 prospect_id: prospectId,
+                // Attendance state — the profile renders these as status chips so
+                // a note-less attendance row still says something useful.
+                _hasNotes: _hasNotes(att),
+                paid: !!att.paid,
+                ticket_created: !!att.ticket_created,
+                attended: !!att.attended,
+                attendance_status: att.attendance_status || 'Registered',
+                added_by_name: att.added_by_name || '',
+                closing_activity_id: att.closing_activity_id || null,
                 note_key_points: att.note_key_points || '',
                 note_needs: att.note_needs || '',
                 note_pain_points: att.note_pain_points || '',

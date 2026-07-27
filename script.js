@@ -5523,6 +5523,22 @@ function _wireLoginBtn() {
         saveMeetingOutcome:       _lazyStub('chunks/script-calendar.min.js', 'saveMeetingOutcome'),
         openMeetupHistoryModal:   _lazyStub('chunks/script-calendar.min.js', 'openMeetupHistoryModal'),
 
+        // Per-attendee event helpers — also calendar-owned, and reached from the
+        // PROSPECT/CUSTOMER profile, which never loads the calendar chunk on its
+        // own. Without these stubs getProspectAttendeeNotes was undefined there,
+        // so the profile's `|| (() => Promise.resolve([]))` fallback silently
+        // returned zero attendances and every event the person attended
+        // disappeared from their profile; the Post Event Notes / Photos /
+        // Closing buttons rendered by those tabs were dead taps for the same
+        // reason. openAttendeePostEventModal self-ensures the activities chunk,
+        // so a single-chunk stub is enough for all of them.
+        getProspectAttendeeNotes:   _lazyStub('chunks/script-calendar.min.js', 'getProspectAttendeeNotes'),
+        openAttendeePostEventModal: _lazyStub('chunks/script-calendar.min.js', 'openAttendeePostEventModal'),
+        saveAttendeePostEventNotes: _lazyStub('chunks/script-calendar.min.js', 'saveAttendeePostEventNotes'),
+        openAttendeeClosingModal:   _lazyStub('chunks/script-calendar.min.js', 'openAttendeeClosingModal'),
+        viewAttendeePhotos:         _lazyStub('chunks/script-calendar.min.js', 'viewAttendeePhotos'),
+        removeAttendeePhoto:        _lazyStub('chunks/script-calendar.min.js', 'removeAttendeePhoto'),
+
         // Phase 11: DMS — implemented by chunks/script-documents.js
 
         // Phase 12 Marketing Functions (chunk-loaded — call via window.app.*)

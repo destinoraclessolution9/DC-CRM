@@ -3170,8 +3170,15 @@
     const toggleAttendeeAttended = async (attendeeId, checked, entityId, entityType, eventId, activityDate) => {
         const status = checked ? 'Attended' : 'Registered';
         await AppDataStore.update('event_attendees', attendeeId, { attended: checked, attendance_status: status });
+        // This update IS the record of attendance — the profile reads
+        // event_attendees directly now — so confirm it here rather than inside
+        // the event_registrations try below. Previously a failed mirror-write
+        // swallowed the toast entirely and the tick looked like it did nothing.
+        UI.toast.success(checked ? 'Marked as Attended' : 'Attendance removed');
 
-        // Write back to event_registrations so it appears in prospect/customer profile
+        // Mirror into event_registrations (points ledger + legacy readers). Best
+        // effort: the profile no longer depends on it, so a failure here must not
+        // contradict the confirmation above.
         if (entityId && eventId) {
             try {
                 // Scale-safe: scoped query by event_id+attendee_id instead of a whole-table
@@ -3190,8 +3197,6 @@
                         created_at: new Date().toISOString()
                     });
                 }
-                UI.toast.success(checked ? 'Marked as Attended' : 'Attendance removed');
-
                 // Trigger follow-up: event attendance triggers (data-driven)
                 if (checked && entityId && eventId) {
                     dispatchOnEventAttendanceTriggers(entityId, entityType || 'prospect', eventId, activityDate).catch(e => console.warn('Event attendance follow-up failed:', e));
@@ -3219,6 +3224,9 @@
         // returns to plain Registered.
         const status = checked ? 'No Show' : 'Registered';
         await AppDataStore.update('event_attendees', attendeeId, { attended: false, attendance_status: status });
+        // Confirm off the attendee write (see toggleAttendeeAttended) — the
+        // registrations mirror below is best-effort and must not own the toast.
+        UI.toast.success(checked ? 'Marked as Unattended (No Show)' : 'Unattended cleared');
 
         if (entityId && eventId) {
             try {
@@ -3237,7 +3245,6 @@
                         created_at: new Date().toISOString()
                     });
                 }
-                UI.toast.success(checked ? 'Marked as Unattended (No Show)' : 'Unattended cleared');
             } catch (err) {
                 console.error('toggleAttendeeUnattended write-back error:', err);
             }

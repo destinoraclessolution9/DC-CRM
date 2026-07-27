@@ -2599,7 +2599,10 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             AppDataStore.getAll('events'),
             AppDataStore.getAll('event_registrations'),
             AppDataStore.getActivitiesForProspect(prospectId, { limit: 500 }),
-            (window.app.getProspectAttendeeNotes || (() => Promise.resolve([])))(prospectId),
+            // includeWithoutNotes: attendance is the fact this tab exists to show.
+            // Without it a prospect who paid, got a ticket and turned up stayed
+            // invisible here until someone typed post-event notes.
+            (window.app.getProspectAttendeeNotes || (() => Promise.resolve([])))(prospectId, { includeWithoutNotes: true }),
         ]);
         const eventsById = new Map((allEvents || []).map(e => [String(e.id), e]));
         const validEventIds = new Set(eventsById.keys());
@@ -2611,14 +2614,26 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         // (the prospect both hosted and attended) — the owner row wins.
         const ownActivityIds = new Set(ownEvents.map(a => String(a.id)));
         const attendeeEvents = _attendeeNotes.filter(a => !ownActivityIds.has(String(a._parentActivityId)));
+        // Attendance rows can carry no date at all when their parent activity is
+        // unreadable — treat a missing date as oldest instead of letting NaN make
+        // the comparator non-deterministic.
+        const _ts = (d) => { const t = Date.parse(d || ''); return Number.isNaN(t) ? 0 : t; };
         const activityEvents = [...ownEvents, ...attendeeEvents]
-            .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
+            .sort((a, b) => _ts(b.activity_date) - _ts(a.activity_date));
 
+        // Every event already represented by an attendance card above. The
+        // registrations table is a second, weaker record of the same fact (it is
+        // only written as a side-effect of the Attended tick), so showing both
+        // lists the same event twice.
+        const coveredEventIds = new Set(
+            activityEvents.map(a => a.event_id).filter(v => v != null).map(String)
+        );
         const VALID_REG_STATUSES = new Set(['Registered', 'Attended', 'No Show']);
         const registrations = (allRegs || []).filter(
             r => r.attendee_type === 'prospect'
                 && r.attendee_id == prospectId
                 && VALID_REG_STATUSES.has(r.attendance_status)
+                && !coveredEventIds.has(String(r.event_id))
         );
 
         const typeIcon = { EVENT: 'fa-calendar-star', AGENT_MEETING: 'fa-handshake', AGENT_TRAINING: 'fa-graduation-cap', SITE: 'fa-map-marker-alt' };
@@ -2644,8 +2659,31 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                         ? `<button class="btn btn-sm secondary" style="color:var(--primary);border-color:var(--primary);" onclick="event.stopPropagation();app.viewAttendeePhotos(${a._attendeeRowId})"><i class="fas fa-images"></i> Photos (${photoCount})</button>`
                         : `<button class="btn btn-sm secondary" style="color:var(--primary);border-color:var(--primary);" onclick="event.stopPropagation();app.viewActivityPhotos(${a.id})"><i class="fas fa-images"></i> Photos (${photoCount})</button>`)
                     : '';
+                // Source/status tag reflects what actually happened, not just
+                // "this row came from event_attendees".
+                const _statusLabel = a.attendance_status === 'No Show' ? 'no show'
+                    : (a.attended || a.attendance_status === 'Attended') ? 'attended'
+                    : 'registered';
+                const _statusBg = _statusLabel === 'attended' ? '#dcfce7'
+                    : _statusLabel === 'no show' ? '#fee2e2' : 'var(--gray-100)';
+                const _statusFg = _statusLabel === 'attended' ? '#166534'
+                    : _statusLabel === 'no show' ? '#991b1b' : 'var(--gray-600)';
                 const sourceTag = a._isAttendeeNote
-                    ? `<span style="font-size:10px;background:var(--gray-100);color:var(--gray-600);padding:1px 6px;border-radius:10px;margin-left:6px;">attended</span>`
+                    ? `<span style="font-size:10px;background:${_statusBg};color:${_statusFg};padding:1px 6px;border-radius:10px;margin-left:6px;">${_statusLabel}</span>`
+                    : '';
+                // Attendance detail line — the whole point of surfacing note-less
+                // rows is that Paid / Ticket / Added-by are themselves the record.
+                const chip = (on, label) =>
+                    `<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:${on ? '#dcfce7' : 'var(--gray-100)'};color:${on ? '#166534' : 'var(--gray-500)'};">${on ? '✓' : '—'} ${label}</span>`;
+                const attendanceRow = a._isAttendeeNote
+                    ? `<div class="meet-section"><div class="meet-lbl">Attendance</div>
+                           <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:2px;">
+                               ${chip(a.paid, 'Paid')}
+                               ${chip(a.ticket_created, 'Ticket')}
+                               ${chip(a.attended || a.attendance_status === 'Attended', 'Attended')}
+                               ${a.added_by_name ? `<span style="font-size:11px;color:var(--gray-500);">Added by ${escapeHtml(a.added_by_name)}</span>` : ''}
+                           </div>
+                       </div>`
                     : '';
                 html += `
                     <div class="meet-card" style="margin-bottom:10px;">
@@ -2656,6 +2694,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                             </div>
                             <button class="btn btn-sm secondary" style="font-size:12px;padding:4px 8px;" onclick="event.stopPropagation();app.viewActivityDetails(${detailsId})">Details</button>
                         </div>
+                        ${attendanceRow}
                         ${a.summary || a.note_key_points ? `<div class="meet-section"><div class="meet-lbl">Key Points</div><div class="meet-txt">${escapeHtml(a.summary || a.note_key_points)}</div></div>` : ''}
                         ${a.note_needs ? `<div class="meet-section"><div class="meet-lbl">Needs</div><div class="meet-txt">${escapeHtml(a.note_needs)}</div></div>` : ''}
                         ${a.note_pain_points ? `<div class="meet-section"><div class="meet-lbl">Pain Points</div><div class="meet-txt">${escapeHtml(a.note_pain_points)}</div></div>` : ''}

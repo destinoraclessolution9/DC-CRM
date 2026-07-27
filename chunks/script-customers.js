@@ -825,22 +825,45 @@ const switchProfileTab = async (btn, tabName, cId) => {
     else if (tabName === 'referrals') await renderReferralsTab(customer);
     else if (tabName === 'contracts') await (window.app.renderCustomerContractsTab || (() => {}))(customer);
     else if (tabName === 'events') {
-        const [allRegs, allEvents] = await Promise.all([
+        // Same fix as switchCustomerProfileTab('events'): event_attendees is the
+        // row the event modal writes, event_registrations only the Attended-tick
+        // side-effect. Read both, attendees first, and never list an event twice.
+        const [allRegs, allEvents, attendeeRows] = await Promise.all([
             AppDataStore.getAll('event_registrations'),
             AppDataStore.getAll('events'),
+            (window.app.getProspectAttendeeNotes || (() => Promise.resolve([])))(
+                customerId, { includeWithoutNotes: true, attendeeType: 'customer' }
+            ),
         ]);
+        const eventsById = new Map((allEvents || []).map(e => [String(e.id), e]));
+        const coveredEventIdsC = new Set(
+            (attendeeRows || []).map(a => a.event_id).filter(v => v != null).map(String)
+        );
         const VALID_REG_STATUSES_C = new Set(['Registered', 'Attended', 'No Show']);
         const registrations = (allRegs || []).filter(
             r => r.attendee_type === 'customer'
                 && r.attendee_id == customerId
                 && VALID_REG_STATUSES_C.has(r.attendance_status)
+                && !coveredEventIdsC.has(String(r.event_id))
         );
-        const eventsById = new Map((allEvents || []).map(e => [String(e.id), e]));
+        const _tsC = (d) => { const t = Date.parse(d || ''); return Number.isNaN(t) ? 0 : t; };
+        const sortedAttendeesC = [...(attendeeRows || [])]
+            .sort((a, b) => _tsC(b.activity_date) - _tsC(a.activity_date));
         let html = '<h4>Events Attended</h4>';
-        if (registrations.length === 0) {
+        if (registrations.length === 0 && sortedAttendeesC.length === 0) {
             html += '<p>No events attended.</p>';
         } else {
             html += '<table class="events-table"><thead><tr><th scope="col">Event</th><th scope="col">Date</th><th scope="col">Status</th><th scope="col">Points</th></tr></thead><tbody>';
+            for (const a of sortedAttendeesC) {
+                const event = eventsById.get(String(a.event_id));
+                const title = a.activity_title || event?.title || event?.event_title || 'Event';
+                const status = a.attendance_status === 'No Show' ? 'No Show'
+                    : (a.attended || a.attendance_status === 'Attended') ? 'Attended'
+                    : 'Registered';
+                const flags = [a.paid ? 'Paid' : null, a.ticket_created ? 'Ticket' : null]
+                    .filter(Boolean).join(' · ');
+                html += `<tr><td>${escapeHtml(title)}</td><td>${escapeHtml(a.activity_date || '-')}</td><td>${escapeHtml(status)}${flags ? ` <span style="color:var(--gray-500);font-size:11px;">(${escapeHtml(flags)})</span>` : ''}</td><td>-</td></tr>`;
+            }
             for (const r of registrations) {
                 const event = eventsById.get(String(r.event_id));
                 // escape attendance_status like every sibling field (defense in depth;
@@ -930,32 +953,62 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
         await renderCustomerActivityTab(customer, container.id);
     }
     else if (tab === 'events') {
-        const [allRegs, allEvents] = await Promise.all([
+        // event_attendees is the row the event modal actually writes when a
+        // customer is added to an event; event_registrations is only a
+        // side-effect of the "Attended" tick. Reading registrations alone hid
+        // every attendance that had not been ticked (or whose write-back
+        // failed), so read attendees FIRST and treat registrations as a
+        // supplement for events attendees does not already cover.
+        const [allRegs, allEvents, attendeeRows] = await Promise.all([
             AppDataStore.getAll('event_registrations'),
             AppDataStore.getAll('events'),
+            (window.app.getProspectAttendeeNotes || (() => Promise.resolve([])))(
+                customerId, { includeWithoutNotes: true, attendeeType: 'customer' }
+            ),
         ]);
+        const eventsById = new Map((allEvents || []).map(e => [String(e.id), e]));
+        const coveredEventIds = new Set(
+            (attendeeRows || []).map(a => a.event_id).filter(v => v != null).map(String)
+        );
         const VALID_REG_STATUSES_C2 = new Set(['Registered', 'Attended', 'No Show']);
         const registrations = (allRegs || []).filter(
             r => r.attendee_type === 'customer'
                 && r.attendee_id == customerId
                 && VALID_REG_STATUSES_C2.has(r.attendance_status)
+                && !coveredEventIds.has(String(r.event_id))
         );
-        const eventsById = new Map((allEvents || []).map(e => [String(e.id), e]));
-        if (registrations.length === 0) {
+        const _ts = (d) => { const t = Date.parse(d || ''); return Number.isNaN(t) ? 0 : t; };
+        const sortedAttendees = [...(attendeeRows || [])]
+            .sort((a, b) => _ts(b.activity_date) - _ts(a.activity_date));
+
+        if (registrations.length === 0 && sortedAttendees.length === 0) {
             container.innerHTML = '<p style="text-align:center;padding:20px;color:var(--gray-400);">No events attended yet.</p>';
         } else {
             let totalPts = 0;
             let rows = '';
+            for (const a of sortedAttendees) {
+                const event = eventsById.get(String(a.event_id));
+                const title = a.activity_title || event?.title || event?.event_title || 'Event';
+                const status = a.attendance_status === 'No Show' ? 'No Show'
+                    : (a.attended || a.attendance_status === 'Attended') ? 'Attended'
+                    : 'Registered';
+                const statusColor = status === 'Attended' ? 'var(--success)'
+                    : status === 'No Show' ? 'var(--danger)' : 'var(--gray-500)';
+                const flags = [a.paid ? 'Paid' : null, a.ticket_created ? 'Ticket' : null]
+                    .filter(Boolean).join(' · ');
+                rows += `<div class="pv-row"><span class="pv-lbl">${escapeHtml(a.activity_date || '-')}</span><span class="pv-val" style="display:flex;justify-content:space-between;gap:8px;">${escapeHtml(title)} <span style="color:${statusColor};font-weight:600;flex-shrink:0;">${status}${flags ? ` <span style="color:var(--gray-500);font-weight:400;">(${escapeHtml(flags)})</span>` : ''}</span></span></div>`;
+            }
             for (const r of registrations) {
                 const event = eventsById.get(String(r.event_id));
                 const pts = r.points_awarded || 0;
                 totalPts += pts;
                 rows += `<div class="pv-row"><span class="pv-lbl">${escapeHtml(r.event_date || '-')}</span><span class="pv-val" style="display:flex;justify-content:space-between;">${escapeHtml(event?.title || 'Unknown')} <span style="color:var(--success);font-weight:600;flex-shrink:0;">+${pts} pts</span></span></div>`;
             }
+            const totalEvents = registrations.length + sortedAttendees.length;
             container.innerHTML = `
                 ${rows}
                 <div style="display:flex;justify-content:space-between;font-weight:700;margin-top:12px;padding-top:12px;border-top:1px solid var(--gray-200);">
-                    <span>Total Events: ${registrations.length}</span>
+                    <span>Total Events: ${totalEvents}</span>
                     <span style="color:var(--primary);">${totalPts} Points</span>
                 </div>
             `;
