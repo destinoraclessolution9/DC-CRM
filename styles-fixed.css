@@ -652,6 +652,13 @@ body {
     color: var(--gray-300);
 }
 
+/* Leading/trailing spill-over cells now render their real activity cards
+   (2026-07-29) instead of a bare date number — an empty cell used to read as
+   "nothing scheduled". Keep them visibly secondary to the current month. */
+.calendar-cell.other-month-cell .grid-activities {
+    opacity: 0.62;
+}
+
 .calendar-cell.today {
     background-color: #f0f9ff;
 }

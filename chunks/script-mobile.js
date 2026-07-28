@@ -1777,6 +1777,38 @@
     // brand palette. Uses the same activity dataset as the desktop calendar.
     let _mcalYear = null;
     let _mcalMonth = null;
+
+    // ── Month-grid geometry ──────────────────────────────────────────────────
+    // The grid always paints 6 rows × 7 days, so its first and last cells belong
+    // to the NEIGHBOURING months. Everything that talks about "the month's
+    // activities" — the fetch range, the localStorage cache, the optimistic
+    // insert — has to agree on that 42-day window, so the geometry lives here.
+    const MCAL_GRID_CELLS = 42;
+    const _mcalFmtD = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    // Monday-start offset of the 1st (Sun=0..Sat=6 → Mon=0..Sun=6).
+    const _mcalStartOffset = (y, mIdx) => (new Date(y, mIdx, 1).getDay() + 6) % 7;
+    const _mcalGridDate = (y, mIdx, i) => new Date(y, mIdx, 1 - _mcalStartOffset(y, mIdx) + i);
+    // v2 = 42-day grid window. Unversioned v1 keys held a single calendar month;
+    // they are always stale now and the pruner collects them.
+    const _mcalActsKeyFor = (y, mIdx) => `mcal-acts-v2-${y}-${mIdx}`;
+
+    // Which grid cache owns a row dated `dateStr`? Prefer the grid the user is
+    // looking at whenever its window covers that date — a save on 1 Aug made
+    // from the July grid must land in JULY's cache, or the spill-over cell the
+    // user just tapped would stay empty until the next revalidate.
+    const _mcalGridKeyForDate = (dateStr) => {
+        const [y, m, d] = String(dateStr || '').slice(0, 10).split('-').map(n => parseInt(n, 10));
+        if (!y || !m || !d) return null;
+        const target = new Date(y, m - 1, d);
+        if (_mcalYear != null && _mcalMonth != null) {
+            const first = _mcalGridDate(_mcalYear, _mcalMonth, 0);
+            const last  = _mcalGridDate(_mcalYear, _mcalMonth, MCAL_GRID_CELLS - 1);
+            if (target >= first && target <= last) {
+                return { key: _mcalActsKeyFor(_mcalYear, _mcalMonth), y: _mcalYear, m: _mcalMonth };
+            }
+        }
+        return { key: _mcalActsKeyFor(y, m - 1), y, m: m - 1 };
+    };
     let _mcalByDate = new Map();
     let _mcalPersonMap = new Map();
     // Cached getVisibleUserIds() result for the calendar surfaces, refreshed on
@@ -1953,10 +1985,13 @@
             try {
                 const curUid = String((typeof _state !== 'undefined' && _state && _state.cu && _state.cu.id) || '');
                 const now = new Date();
+                // Bare "<year>-<monthIndex>" tags — the key PREFIXES are versioned
+                // (mcal-acts-v2-…) so matching on the tag keeps this pruner from
+                // having to move in lockstep with every cache-shape bump.
                 const keepMonths = new Set();
                 for (let d = -1; d <= 1; d++) {
                     const m = new Date(now.getFullYear(), now.getMonth() + d, 1);
-                    keepMonths.add(`mcal-acts-${m.getFullYear()}-${m.getMonth()}`);
+                    keepMonths.add(`${m.getFullYear()}-${m.getMonth()}`);
                 }
                 const todaySnapTag = `-${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
                 const toRemove = [];
@@ -1964,8 +1999,13 @@
                     const k = localStorage.key(i);
                     if (!k) continue;
                     if (k === _MCAL_RETRY_QUEUE_KEY) continue;                       // keep offline retry queue
-                    if (/^mcal-acts-\d+-\d+$/.test(k) && !keepMonths.has(k)) { toRemove.push(k); continue; }
-                    if (/^mcal-snap-\d+-\d+(-coming)?$/.test(k) && !keepMonths.has(k.replace(/-coming$/, '').replace(/^mcal-snap-/, 'mcal-acts-'))) { toRemove.push(k); continue; }
+                    // mcal-acts-v2-<y>-<m> = the 42-day grid window. Unversioned v1
+                    // keys held one calendar month and are dead weight now — the
+                    // `!== '2'` arm collects them regardless of which month.
+                    const _am = k.match(/^mcal-acts-(?:v(\d+)-)?(\d+-\d+)$/);
+                    if (_am) { if (_am[1] !== '2' || !keepMonths.has(_am[2])) toRemove.push(k); continue; }
+                    const _sm = k.match(/^mcal-snap-(\d+-\d+)(?:-coming)?$/);
+                    if (_sm) { if (!keepMonths.has(_sm[1])) toRemove.push(k); continue; }
                     if (/^mhome-snap-\d+-\d+-\d+-\d+$/.test(k) && !k.endsWith(todaySnapTag)) { toRemove.push(k); continue; }
                     // per-uid caches belonging to OTHER users (leak across logins)
                     const um = k.match(/^(?:mcal|mhome)-[a-z0-9-]*?-(\d{10,})$/i);
@@ -2141,10 +2181,6 @@
         if (_mcalYear == null) { _mcalYear = todayD.getFullYear(); _mcalMonth = todayD.getMonth(); }
 
         const firstDay = new Date(_mcalYear, _mcalMonth, 1);
-        const daysInMonth = new Date(_mcalYear, _mcalMonth + 1, 0).getDate();
-        const prevMonthLastDay = new Date(_mcalYear, _mcalMonth, 0).getDate();
-        // Convert Sun=0..Sat=6 to Mon=0..Sun=6
-        const startOffset = (firstDay.getDay() + 6) % 7;
         const monthName = firstDay.toLocaleDateString('en-US', { month: 'long' });
 
         const userName = (_state.cu?.preferred_name || _state.cu?.full_name || 'there').split(' ')[0];
@@ -2247,9 +2283,15 @@
         };
         _mcalPerf('mcal:start');
 
-        // ── Fetch month activities + supporting data ─────────────
-        const monthStartStr = `${_mcalYear}-${String(_mcalMonth+1).padStart(2,'0')}-01`;
-        const monthEndStr = `${_mcalYear}-${String(_mcalMonth+1).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`;
+        // ── Fetch the visible GRID window + supporting data ──────
+        // The grid paints 6 rows × 7 days, so its first and last cells belong to
+        // the neighbouring months. Fetching only 01→last-day (the pre-2026-07-29
+        // range) left every spill-over cell with no data to draw, and users read
+        // a blank 1-2 Aug in a July grid as "nothing scheduled at all".
+        const _fmtD = _mcalFmtD;
+        const _gridDate = (i) => _mcalGridDate(_mcalYear, _mcalMonth, i);
+        const gridStartStr = _fmtD(_gridDate(0));
+        const gridEndStr   = _fmtD(_gridDate(MCAL_GRID_CELLS - 1));
 
         // Strategy: cache-first instant paint + background full-month revalidate.
         //   - Past months are immutable → cache only, no network.
@@ -2258,15 +2300,21 @@
         //     This catches activities added from other devices/sessions without
         //     making the user wait. Saves done in this session use the optimistic
         //     insert path (see _mcalOptimisticInsert below) so they appear instantly.
-        const _fmtD = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
         const _todayStr = _fmtD(todayD);
-        const _isPastMonth = monthEndStr < _todayStr;
+        // Judge "past" by the LAST VISIBLE day, not the last day of the month: a
+        // past month's trailing cells can land in the current month, and the
+        // cache-only + no-revalidate short-circuit below would otherwise freeze
+        // those days empty forever.
+        const _isPastMonth = gridEndStr < _todayStr;
 
         // Pull-to-refresh forces a full refetch once.
         const _forceFresh = _mobileForceFresh; _mobileForceFresh = false;
 
-        // Persistent raw-activity cache for this month (no TTL — until edited).
-        const _mcalActsKey = `mcal-acts-${_mcalYear}-${_mcalMonth}`;
+        // Persistent raw-activity cache for this grid window (no TTL — until
+        // edited). A v1 entry held a single calendar month, so it would render
+        // the spill-over cells empty with no revalidate on past months to ever
+        // heal them; the version bump retires those.
+        const _mcalActsKey = _mcalActsKeyFor(_mcalYear, _mcalMonth);
         const _lsGetRaw = (key) => { try { const r = localStorage.getItem(key); if (!r) return null; return JSON.parse(r).val; } catch(_) { return null; /* intentional: corrupt cache entry treated as miss */ } };
         const _cachedActs = _forceFresh ? null : _lsGetRaw(_mcalActsKey);
 
@@ -2367,7 +2415,7 @@
             _shouldRevalidate = true;
         } else {
             _actMode = 'full';
-            _actsP = AppDataStore.queryAdvanced('activities', _buildActOpts(monthStartStr, monthEndStr)).catch(() => ({ data: [], _degraded: true }));
+            _actsP = AppDataStore.queryAdvanced('activities', _buildActOpts(gridStartStr, gridEndStr)).catch(() => ({ data: [], _degraded: true }));
         }
 
         // ── Mobile Tier 1.1: decouple people / drafts / refills ──
@@ -2545,16 +2593,21 @@
         // who exist as both a prospect and a customer (prefer customer) so a
         // converted-but-not-removed prospect doesn't double a birthday marker.
         const mmdd = (m, d) => `${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+        // MM-DD → the date key of the visible cell it lands on. Built from the
+        // whole 42-cell window (not just this month) so a birthday on a
+        // spill-over day still gets its 🎂 marker now that those cells render.
+        const _visibleByMD = new Map();
+        for (let i = 0; i < MCAL_GRID_CELLS; i++) {
+            const cd = _gridDate(i);
+            const md = mmdd(cd.getMonth() + 1, cd.getDate());
+            if (!_visibleByMD.has(md)) _visibleByMD.set(md, _fmtD(cd));
+        }
         for (const p of _dedupClientByBday(allPeople)) {
             const dob = p.date_of_birth || '';
             if (!dob || dob.length < 10) continue;
             if (!_mcalBdayOwnerVisible(p.responsible_agent_id || p.lead_agent_id)) continue;
-            const md = dob.slice(5, 10); // MM-DD
-            // Find the date in this month with this MM-DD
-            const [_pm, _pd] = md.split('-').map(n => parseInt(n));
-            if (_pm - 1 !== _mcalMonth) continue;
-            if (_pd < 1 || _pd > daysInMonth) continue;
-            const k = `${_mcalYear}-${String(_mcalMonth+1).padStart(2,'0')}-${String(_pd).padStart(2,'0')}`;
+            const k = _visibleByMD.get(dob.slice(5, 10)); // MM-DD → visible cell
+            if (!k) continue;
             if (!byDate.has(k)) byDate.set(k, []);
             byDate.get(k).push({ activity_type: 'All Day Birthday', _isBirthday: true, _person: p });
         }
@@ -2563,10 +2616,8 @@
         for (const s of _mcalStaffList) {
             const md = _staffMD(s);
             if (!md) continue;
-            const [_pm, _pd] = md.split('-').map(n => parseInt(n));
-            if (_pm - 1 !== _mcalMonth) continue;
-            if (_pd < 1 || _pd > daysInMonth) continue;
-            const k = `${_mcalYear}-${String(_mcalMonth+1).padStart(2,'0')}-${String(_pd).padStart(2,'0')}`;
+            const k = _visibleByMD.get(md);
+            if (!k) continue;
             if (!byDate.has(k)) byDate.set(k, []);
             byDate.get(k).push({ activity_type: 'All Day Birthday', _isBirthday: true, _isStaff: true, _person: s });
         }
@@ -2578,16 +2629,16 @@
         const todayDay = todayD.getDate();
         const cells = [];
 
-        // Prev month spillover
-        for (let i = startOffset; i > 0; i--) {
-            const d = prevMonthLastDay - i + 1;
-            cells.push(`<div class="mcal-cell muted"><span class="num">${d}</span></div>`);
-        }
-
-        // Current month
-        for (let d = 1; d <= daysInMonth; d++) {
-            const k = `${_mcalYear}-${String(_mcalMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-            const isToday = (_mcalYear === todayY && _mcalMonth === todayM && d === todayDay);
+        // One pass over all 42 visible cells. Leading/trailing spill-over days
+        // draw the SAME event chips as in-month days — they used to be
+        // number-only stubs with no onclick, so a phone user could not even tap
+        // through to check whether the 1st of next month was really free.
+        for (let i = 0; i < MCAL_GRID_CELLS; i++) {
+            const cellDate = _gridDate(i);
+            const k = _fmtD(cellDate);
+            const d = cellDate.getDate();
+            const isOther = cellDate.getMonth() !== _mcalMonth || cellDate.getFullYear() !== _mcalYear;
+            const isToday = (cellDate.getFullYear() === todayY && cellDate.getMonth() === todayM && d === todayDay);
             const dayActs = (byDate.get(k) || []).filter(a => a.source !== 'birthday_auto' && a.activity_type !== 'EVENT_CLOSING');
             const visibleActs = dayActs.slice(0, 3);
             const overflow = Math.max(0, dayActs.length - 3);
@@ -2607,22 +2658,10 @@
             }).join('');
             const moreLink = overflow > 0 ? `<span class="more" onclick="event.stopPropagation();app.mcalDayClick('${k}')">+${overflow} more</span>` : '';
             cells.push(`
-                <div class="mcal-cell ${isToday ? 'today' : ''}" onclick="app.mcalDayClick('${k}')">
+                <div class="mcal-cell ${isToday ? 'today' : ''}${isOther ? ' muted' : ''}" onclick="app.mcalDayClick('${k}')">
                     <span class="num">${d}</span>
                     <div class="events">${evtsHtml}${moreLink}</div>
                 </div>`);
-        }
-
-        // Next month spillover to fill grid (multiple of 7)
-        const used = startOffset + daysInMonth;
-        const trail = (7 - (used % 7)) % 7;
-        for (let i = 1; i <= trail; i++) {
-            cells.push(`<div class="mcal-cell muted"><span class="num">${i}</span></div>`);
-        }
-        // Pad to 6 rows (42) for consistent height
-        while (cells.length < 42) {
-            const d = (cells.length - startOffset - daysInMonth) + 1;
-            cells.push(`<div class="mcal-cell muted"><span class="num">${d > 0 ? d : ''}</span></div>`);
         }
 
         _stage('cells-built');
@@ -2726,7 +2765,7 @@
                     .sort()
                     .join(';');
                 const _staleSig = _sig(activities);
-                AppDataStore.queryAdvanced('activities', _buildActOpts(monthStartStr, monthEndStr))
+                AppDataStore.queryAdvanced('activities', _buildActOpts(gridStartStr, gridEndStr))
                     .then(res => {
                         // Dead-session guard: a revalidate without a live token
                         // resolves from the local fallback / anon empty read.
@@ -2780,9 +2819,9 @@
     const _mcalOptimisticInsert = (row) => {
         if (!row || !row.activity_date || !row.id) return;
         const dateStr = String(row.activity_date).slice(0, 10);
-        const [y, m] = dateStr.split('-').map(n => parseInt(n, 10));
-        if (!y || !m) return;
-        const key = `mcal-acts-${y}-${m - 1}`;
+        const owner = _mcalGridKeyForDate(dateStr);
+        if (!owner) return;
+        const { key } = owner;
         let cached = [];
         try { cached = JSON.parse(localStorage.getItem(key) || '{}').val || []; } catch(_) { /* intentional: corrupt cache treated as empty */ }
         if (!Array.isArray(cached)) cached = [];
@@ -2791,9 +2830,11 @@
         cached.push(row);
         try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), val: cached })); } catch(_) { /* intentional: optimistic cache write is best-effort */ }
         _mcalOptimisticRows.set(String(row.id), { key, row });
-        // If the calendar is currently showing this month, re-render now.
+        // If the calendar is currently showing the grid that owns this row,
+        // re-render now. Matching on owner.y/owner.m (not the row's own month)
+        // means a save on a spill-over day repaints the grid it was made from.
         const vp = document.getElementById('content-viewport');
-        if (vp && vp.classList.contains('mcal-active') && _mcalView === 'month' && _mcalYear === y && _mcalMonth === (m - 1)) {
+        if (vp && vp.classList.contains('mcal-active') && _mcalView === 'month' && _mcalYear === owner.y && _mcalMonth === owner.m) {
             showMobileCalendarView(vp).catch(() => {});
         }
     };
@@ -2818,7 +2859,7 @@
         // Re-render the mobile calendar if it's still showing the same month —
         // the SWR revalidation may have raced ahead and wiped the optimistic cell
         // before the real row arrived, so we repaint to ensure it stays visible.
-        const [_swY, _swM] = key.replace('mcal-acts-', '').split('-').map(Number);
+        const [_swY, _swM] = key.replace(/^mcal-acts-(?:v\d+-)?/, '').split('-').map(Number);
         const _swVp = document.getElementById('content-viewport');
         if (_swVp && _swVp.classList.contains('mcal-active') && _mcalView === 'month' &&
             !isNaN(_swY) && !isNaN(_swM) && _mcalYear === _swY && _mcalMonth === _swM) {
@@ -2836,9 +2877,7 @@
         // session's give-up path silently failed to flag the row (no ⚠ ever shown).
         let key = _mcalOptimisticRows.get(String(tmpId))?.key;
         if (!key && activityData && activityData.activity_date) {
-            const dateStr = String(activityData.activity_date).slice(0, 10);
-            const [y, m] = dateStr.split('-').map(n => parseInt(n, 10));
-            if (y && m) key = `mcal-acts-${y}-${m - 1}`;
+            key = _mcalGridKeyForDate(activityData.activity_date)?.key || null;
         }
         if (!key) return;
         let cached = [];

@@ -2631,10 +2631,10 @@
     // hasn't been deployed yet (e.g. during the gap between code push and
     // migration apply). Once the RPC is verified live, this function and the
     // fallback branch above can be deleted.
-    const _renderCalendarLegacy = async ({ myToken, year, month, daysInMonth, startDay, rangeStart, monthEnd, html, grid, visibleIds }) => {
+    const _renderCalendarLegacy = async ({ myToken, year, month, startDay, rangeStart, rangeEnd, grid, visibleIds }) => {
         const actQueryOpts = {
             gte: { activity_date: rangeStart },
-            lte: { activity_date: monthEnd },
+            lte: { activity_date: rangeEnd },
             sort: 'activity_date',
             sortDir: 'asc',
             limit: 5000,
@@ -2658,7 +2658,7 @@
         }
         const needsCoAgentMerge = !isSystemAdmin(_state.cu) && _state.cu?.id != null;
         const coAgentFetch = needsCoAgentMerge
-            ? _fetchActivitiesAsCoAgent(rangeStart, monthEnd)
+            ? _fetchActivitiesAsCoAgent(rangeStart, rangeEnd)
             : Promise.resolve([]);
         const [actResult, allEvents, allUsers, coAgentRows] = await Promise.all([
             AppDataStore.queryAdvanced('activities', actQueryOpts),
@@ -2703,54 +2703,15 @@
         ]);
         const prospectMap = new Map(prospectResult.data.map(p => [String(p.id), p]));
         const customerMap = new Map(customerResult.data.map(c => [String(c.id), c]));
-        const todayDate = new Date();
-        const isCurrentMonth = todayDate.getMonth() === month && todayDate.getFullYear() === year;
         const isMobileCalendar = window.innerWidth < 768;
         const maxRenderPerCell = isMobileCalendar ? 2 : Infinity;
-        for (let i = 1; i <= daysInMonth; i++) {
-            const isToday = isCurrentMonth && i === todayDate.getDate();
-            const dateStr = `${year}-${(month + 1).toString().padStart(2, '0')}-${i.toString().padStart(2, '0')}`;
-            const dayActivities = activities.filter(a => a.activity_date === dateStr && !_isHiddenFromGrid(a))
-                .sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
-            let activityHtml = '';
-            let renderedInCell = 0;
-            let skippedInCell = 0;
-            const seenIds = new Set();
-            const seenEventSlots = new Set();
-            for (const a of dayActivities) {
-                if (seenIds.has(a.id)) continue;
-                seenIds.add(a.id);
-                if (a.activity_type === 'EVENT' && a.event_id) {
-                    const slotKey = `${a.event_id}|${a.start_time || ''}|${a.end_time || ''}`;
-                    if (seenEventSlots.has(slotKey)) continue;
-                    seenEventSlots.add(slotKey);
-                }
-                // Unified card builder (shared with the main RPC path). Returns ''
-                // when the ownership/entity gate produces no name — matches the
-                // legacy `if (!entityName) continue;` (no per-cell cap consumed).
-                const _cardHtml = buildAppointmentCardHtml(a, { prospectMap, customerMap, userMap, eventMap, entityScope: visibleIds });
-                if (!_cardHtml) continue;
-                if (renderedInCell >= maxRenderPerCell) { skippedInCell++; continue; }
-                activityHtml += _cardHtml;
-                renderedInCell++;
-            }
-            if (skippedInCell > 0) {
-                activityHtml += `<div class="more-events-indicator" onclick="event.stopPropagation(); app.openDayView('${dateStr}')">+${skippedInCell} more</div>`;
-            }
-            html += `
-                <div class="calendar-cell ${isToday ? 'today' : ''}" onclick="app.openActivityModal('${dateStr}')">
-                    <span class="date-num">${i}</span>
-                    <div class="grid-activities">${activityHtml}</div>
-                </div>`;
-        }
-        const totalCells = startDay + daysInMonth;
-        const remainingCells = 42 - totalCells;
-        for (let i = 1; i <= remainingCells; i++) {
-            const nextMonth = month === 11 ? 0 : month + 1;
-            const nextYear = month === 11 ? year + 1 : year;
-            const nextDateStr = `${nextYear}-${(nextMonth + 1).toString().padStart(2, '0')}-${i.toString().padStart(2, '0')}`;
-            html += `<div class="calendar-cell" onclick="app.openActivityModal('${nextDateStr}')"><span class="date-num other-month">${i}</span></div>`;
-        }
+        // Same 42-cell builder as the RPC path — keeps the two paths from
+        // drifting (they had already drifted once on the card markup).
+        const html = buildMonthGridHtml({
+            year, month, startDay, activities,
+            ctx: { prospectMap, customerMap, userMap, eventMap, entityScope: visibleIds },
+            maxRenderPerCell,
+        });
         if (myToken !== _state.rct) return;
         grid.innerHTML = html;
         _getVenuesCached();
@@ -2816,18 +2777,90 @@
         return merged;
     };
 
+    // The month grid always paints 6 rows × 7 days, so the visible window runs
+    // from the first leading spill-over day to the last trailing one — NOT from
+    // the 1st to the last of the month.
+    const CAL_GRID_CELLS = 42;
+    const _calYmd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
     // Pure HTML builder for one month-grid day cell — extracted verbatim from
     // _renderCalendarImpl. The per-day activity loop (filter/dedup/+N-more, which
-    // uses `continue`) stays in the orchestrator; this only wraps the already-
-    // assembled `activityHtml` string in the cell markup.
-    const buildMonthDayCellHtml = (dayNum, dateStr, isToday, activityHtml) => {
+    // uses `continue`) lives in buildCellActivityHtml; this only wraps the
+    // already-assembled `activityHtml` string in the cell markup.
+    const buildMonthDayCellHtml = (dayNum, dateStr, isToday, activityHtml, isOtherMonth, hasActivities) => {
+        // A spill-over day that actually carries work opens the day view (it
+        // re-anchors _state.cd on that date and refetches, so it works across the
+        // month boundary); an empty one keeps the tap-to-create shortcut.
+        const onclick = (isOtherMonth && hasActivities)
+            ? `app.openDayView('${dateStr}')`
+            : `app.openActivityModal('${dateStr}')`;
         return `
-                <div class="calendar-cell ${isToday ? 'today' : ''}" onclick="app.openActivityModal('${dateStr}')">
-                    <span class="date-num">${dayNum}</span>
+                <div class="calendar-cell ${isToday ? 'today' : ''}${isOtherMonth ? ' other-month-cell' : ''}" onclick="${onclick}">
+                    <span class="date-num${isOtherMonth ? ' other-month' : ''}">${dayNum}</span>
                     <div class="grid-activities">
                         ${activityHtml}
                     </div>
                 </div>`;
+    };
+
+    // Builds the activity stack for ONE day cell. Returns the markup plus the
+    // number of cards that survived the ownership/entity gate, so the caller can
+    // decide the cell's click target.
+    const buildCellActivityHtml = (dateStr, activities, ctx, maxRenderPerCell) => {
+        const dayActivities = activities.filter(a => a.activity_date === dateStr && !_isHiddenFromGrid(a))
+            .sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
+
+        let activityHtml = '';
+        let renderedInCell = 0;
+        let skippedInCell = 0;
+        const seenIds = new Set();
+        // Defensive dedup: when multiple agents create separate EVENT activity
+        // rows for the same event on the same day at the same time, collapse them
+        // to a single calendar card. Without this we render N visually-identical
+        // cards (one per agent), which looks broken to the viewer. Non-EVENT
+        // activities are not deduped — each agent's CPS/FTF/etc is its own row.
+        const seenEventSlots = new Set();
+
+        for (const a of dayActivities) {
+            if (seenIds.has(a.id)) continue;
+            seenIds.add(a.id);
+            if (a.activity_type === 'EVENT' && a.event_id) {
+                const slotKey = `${a.event_id}|${a.start_time || ''}|${a.end_time || ''}`;
+                if (seenEventSlots.has(slotKey)) continue;
+                seenEventSlots.add(slotKey);
+            }
+            // Returns '' when the ownership/entity gate yields no name — matches
+            // the previous `if (entityName) { … }` guard (no cap consumed).
+            const _cardHtml = buildAppointmentCardHtml(a, ctx);
+            if (!_cardHtml) continue;
+            if (renderedInCell >= maxRenderPerCell) { skippedInCell++; continue; }
+            activityHtml += _cardHtml;
+            renderedInCell++;
+        }
+
+        // "+N more" indicator (mobile only — desktop has an Infinity cap so this never fires)
+        if (skippedInCell > 0) {
+            activityHtml += `<div class="more-events-indicator" onclick="event.stopPropagation(); app.openDayView('${dateStr}')">+${skippedInCell} more</div>`;
+        }
+        return { activityHtml, count: renderedInCell + skippedInCell };
+    };
+
+    // Builds all 42 cells of the month grid in ONE pass. Leading/trailing
+    // spill-over days go through exactly the same card builder as in-month days —
+    // before 2026-07-29 they were number-only stubs, so an activity on e.g. Aug 1
+    // was invisible in the July grid and users read the blank cell as "nothing
+    // scheduled" rather than "not rendered".
+    const buildMonthGridHtml = ({ year, month, startDay, activities, ctx, maxRenderPerCell }) => {
+        const todayStr = _calYmd(new Date());
+        let html = '';
+        for (let cell = 0; cell < CAL_GRID_CELLS; cell++) {
+            const cellDate = new Date(year, month, 1 - startDay + cell);
+            const dateStr = _calYmd(cellDate);
+            const isOtherMonth = cellDate.getMonth() !== month || cellDate.getFullYear() !== year;
+            const { activityHtml, count } = buildCellActivityHtml(dateStr, activities, ctx, maxRenderPerCell);
+            html += buildMonthDayCellHtml(cellDate.getDate(), dateStr, dateStr === todayStr, activityHtml, isOtherMonth, count > 0);
+        }
+        return html;
     };
 
     const _renderCalendarImpl = async () => {
@@ -2891,35 +2924,21 @@
 
         try {
 
-        let html = '';
-
         const year = _state.cd.getFullYear();
         const month = _state.cd.getMonth();
 
         const firstDayOfMonth = new Date(year, month, 1);
-        const daysInMonth = new Date(year, month + 1, 0).getDate();
 
         // Adjust to Monday start (0=Mon, 6=Sun)
         let startDay = firstDayOfMonth.getDay() - 1;
         if (startDay === -1) startDay = 6;
 
-        const daysInPrevMonth = new Date(year, month, 0).getDate();
-
-        // Previous month overflow days
-        for (let i = startDay - 1; i >= 0; i--) {
-            const dateNum = daysInPrevMonth - i;
-            const prevMonth = month === 0 ? 11 : month - 1;
-            const prevYear = month === 0 ? year - 1 : year;
-            const prevDateStr = `${prevYear}-${(prevMonth + 1).toString().padStart(2, '0')}-${dateNum.toString().padStart(2, '0')}`;
-            html += `<div class="calendar-cell" onclick="app.openActivityModal('${prevDateStr}')"><span class="date-num other-month">${dateNum}</span></div>`;
-        }
-
-        // ── Visible date range (incl. prev-month overflow + next-month overflow) ──
-        const nextMonth = month === 11 ? 0 : month + 1;
-        const nextYear = month === 11 ? year + 1 : year;
-        const monthEnd = `${nextYear}-${(nextMonth + 1).toString().padStart(2, '0')}-01`;
-        const prevOverflow = new Date(year, month, 1 - startDay);
-        const rangeStart = `${prevOverflow.getFullYear()}-${(prevOverflow.getMonth() + 1).toString().padStart(2, '0')}-${prevOverflow.getDate().toString().padStart(2, '0')}`;
+        // ── Visible date range = the 42 cells actually on screen ─────────────
+        // Fetching month-01 → next-month-01 (the pre-2026-07-29 range) left the
+        // trailing spill-over days with no data to render, so a July grid could
+        // never show an activity on Aug 3-9.
+        const rangeStart = _calYmd(new Date(year, month, 1 - startDay));
+        const rangeEnd   = _calYmd(new Date(year, month, 1 - startDay + (CAL_GRID_CELLS - 1)));
 
         // Hot window = yesterday → today + 7 days. Full activity rows for this
         // window are warmed into _state.hac so click-to-detail is instant
@@ -2929,9 +2948,8 @@
         const _todayJs = new Date();
         const _yJs = new Date(_todayJs); _yJs.setDate(_todayJs.getDate() - 1);
         const _hotEndJs = new Date(_todayJs); _hotEndJs.setDate(_todayJs.getDate() + 7);
-        const _ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-        const hotStart = _ymd(_yJs);
-        const hotEnd   = _ymd(_hotEndJs);
+        const hotStart = _calYmd(_yJs);
+        const hotEnd   = _calYmd(_hotEndJs);
 
         // Translate getVisibleUserIds → RPC params. 'all' (admin/lead) maps to
         // is_admin=true so the RPC short-circuits the OR scope.
@@ -2942,7 +2960,7 @@
 
         const lightParams = {
             p_range_start:  rangeStart,
-            p_range_end:    monthEnd,
+            p_range_end:    rangeEnd,
             p_user_id:      userId,
             p_visible_ids:  isAdmin ? null : visibleIdsArr,
             p_is_admin:     isAdmin,
@@ -3035,8 +3053,8 @@
             if (missing) {
                 console.warn('[calendar] RPC not yet deployed, using legacy fetch path');
                 return await _renderCalendarLegacy({
-                    myToken, year, month, daysInMonth, startDay,
-                    rangeStart, monthEnd, html, grid, visibleIds,
+                    myToken, year, month, startDay,
+                    rangeStart, rangeEnd, grid, visibleIds,
                 });
             }
             // Dead-session authz denial. When the local auth token is missing/expired,
@@ -3102,7 +3120,7 @@
         // immediately. Once the server acknowledges, the optimistic entry is
         // cleared (in data.js) and the real row from the next fetch replaces it.
         if (typeof window._mergeOptimisticActivities === 'function') {
-            activities = window._mergeOptimisticActivities(activities, rangeStart, monthEnd);
+            activities = window._mergeOptimisticActivities(activities, rangeStart, rangeEnd);
         }
 
         // Hot cache is populated by the fire-and-forget block above (Tier 1.1)
@@ -3169,8 +3187,6 @@
             }
         }
 
-        const todayDate = new Date();
-        const isCurrentMonth = todayDate.getMonth() === month && todayDate.getFullYear() === year;
         // Cap rendered cards per cell on mobile. Previously every activity was
         // emitted to the DOM and CSS hid the overflow with `display:none`,
         // bloating a busy day's cell with dozens of nodes + inline onclicks.
@@ -3179,65 +3195,11 @@
         const isMobileCalendar = window.innerWidth < 768;
         const maxRenderPerCell = isMobileCalendar ? 2 : Infinity;
 
-        for (let i = 1; i <= daysInMonth; i++) {
-            const isToday = isCurrentMonth && i === todayDate.getDate();
-            const dateStr = `${year}-${(month + 1).toString().padStart(2, '0')}-${i.toString().padStart(2, '0')}`;
-            const dayActivities = activities.filter(a => a.activity_date === dateStr && !_isHiddenFromGrid(a))
-                .sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
-
-            let activityHtml = '';
-            let renderedInCell = 0;
-            let skippedInCell = 0;
-            const seenIds = new Set();
-            // Defensive dedup: when multiple agents create separate EVENT activity
-            // rows for the same event on the same day at the same time, collapse them
-            // to a single calendar card. Without this we render N visually-identical
-            // cards (one per agent), which looks broken to the viewer. Non-EVENT
-            // activities are not deduped — each agent's CPS/FTF/etc is its own row.
-            const seenEventSlots = new Set();
-
-            for (const a of dayActivities) {
-                if (!seenIds.has(a.id)) {
-                    seenIds.add(a.id);
-                    if (a.activity_type === 'EVENT' && a.event_id) {
-                        const slotKey = `${a.event_id}|${a.start_time || ''}|${a.end_time || ''}`;
-                        if (seenEventSlots.has(slotKey)) continue;
-                        seenEventSlots.add(slotKey);
-                    }
-                    // Unified card builder (shared with the legacy fetch path).
-                    // Returns '' when the ownership/entity gate yields no name —
-                    // matches the previous `if (entityName) { … }` guard. The cap
-                    // and "+N more" accounting are unchanged.
-                    const _cardHtml = buildAppointmentCardHtml(a, { prospectMap, customerMap, userMap, eventMap, entityScope: visibleIds });
-                    if (_cardHtml) {
-                        if (renderedInCell >= maxRenderPerCell) {
-                            skippedInCell++;
-                            continue;
-                        }
-                        activityHtml += _cardHtml;
-                        renderedInCell++;
-                    }
-                }
-            }
-
-            // "+N more" indicator (mobile only — desktop has Infinity cap so this never fires)
-            if (skippedInCell > 0) {
-                activityHtml += `<div class="more-events-indicator" onclick="event.stopPropagation(); app.openDayView('${dateStr}')">+${skippedInCell} more</div>`;
-            }
-
-            html += buildMonthDayCellHtml(i, dateStr, isToday, activityHtml);
-        }
-
-        // Next month overflow days
-        const totalCells = startDay + daysInMonth;
-        const remainingCells = 42 - totalCells; // 6 rows of 7 = 42
-
-        for (let i = 1; i <= remainingCells; i++) {
-            const nextMonth = month === 11 ? 0 : month + 1;
-            const nextYear = month === 11 ? year + 1 : year;
-            const nextDateStr = `${nextYear}-${(nextMonth + 1).toString().padStart(2, '0')}-${i.toString().padStart(2, '0')}`;
-            html += `<div class="calendar-cell" onclick="app.openActivityModal('${nextDateStr}')"><span class="date-num other-month">${i}</span></div>`;
-        }
+        const html = buildMonthGridHtml({
+            year, month, startDay, activities,
+            ctx: { prospectMap, customerMap, userMap, eventMap, entityScope: visibleIds },
+            maxRenderPerCell,
+        });
 
         // Discard if a newer render started while this one's fetches were in flight.
         if (myToken !== _state.rct) return;
