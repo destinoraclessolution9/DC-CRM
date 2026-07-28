@@ -727,6 +727,31 @@ const appLogic = (() => {
             const label = opts.label || 'purchase';
             const _norm = (v) => String(v == null ? '' : v).trim().toLowerCase();
             const _money = (v) => Math.round((parseFloat(v) || 0) * 100);
+
+            // Freeze WHO IS CREDITED with this sale onto the row, so reassigning the
+            // customer later cannot rewrite historical revenue (every reader resolves
+            // coalesce(agent_id, customers.responsible_agent_id) — see
+            // migrations/purchases_frozen_agent_credit_2026-07-28.sql). This is the
+            // OWNER at time of sale, not the closer; owner attribution is deliberate.
+            if (purchase && purchase.agent_id == null) {
+                try {
+                    // getByIdFull always hits the network (select=*). getById serves from
+                    // the in-memory / localStorage / Cache-API tiers, and a customer cached
+                    // BEFORE a reassignment would freeze the WRONG agent onto the row
+                    // permanently — a frozen value never self-heals. Fall back to the
+                    // cached read so an offline/RLS-denied lookup behaves as before.
+                    const _c = (await AppDataStore.getByIdFull('customers', customerId).catch(() => null))
+                             || await AppDataStore.getById('customers', customerId);
+                    if (_c?.responsible_agent_id != null) {
+                        purchase = { ...purchase, agent_id: _c.responsible_agent_id };
+                    }
+                } catch (e) {
+                    // Non-fatal: a null agent_id just falls back to the live owner,
+                    // i.e. exactly the old behaviour for this one row.
+                    console.warn(`[bookPurchaseOnce] could not resolve credited agent for ${label}`, e);
+                }
+            }
+
             const invoice = _norm(purchase?.invoice);
             const pipeMarker = opts.supersedePipelineFor != null
                 ? _norm(PIPELINE_INVOICE_PREFIX + opts.supersedePipelineFor)
@@ -738,7 +763,7 @@ const appLogic = (() => {
                 if (!sb) throw new Error('supabase client unavailable');
                 const { data, error } = await sb
                     .from('purchases')
-                    .select('id,invoice,date,amount,item')
+                    .select('id,invoice,date,amount,item,agent_id')
                     .eq('customer_id', customerId);
                 if (error) throw error;
                 rows = data || [];
@@ -762,13 +787,21 @@ const appLogic = (() => {
                 const pipeRow = pipeMarker ? rows.find(r => _norm(r.invoice) === pipeMarker) : null;
                 if (pipeRow) {
                     const delta = (parseFloat(purchase?.amount) || 0) - (parseFloat(pipeRow.amount) || 0);
-                    await AppDataStore.update('purchases', pipeRow.id, { ...purchase });
+                    // Keep the credit frozen when the placeholder already carried one.
+                    // That row was booked (and reported) at Closed-Won time; approval can
+                    // come days later, by which point the customer may have been
+                    // reassigned. Letting the approval-time owner overwrite it would
+                    // restate a sale that has already been credited — exactly what
+                    // freezing exists to prevent. New rows still stamp the current owner.
+                    const _patch = { ...purchase };
+                    if (pipeRow.agent_id != null) _patch.agent_id = pipeRow.agent_id;
+                    await AppDataStore.update('purchases', pipeRow.id, _patch);
                     // countDelta 0 — the row already counted towards total_purchases.
                     if (delta) await window._crmUtils.adjustCustomerLtv(customerId, delta, 0);
                     console.warn(`[bookPurchaseOnce] reconciled pipeline placeholder into ${label}`, {
                         purchaseId: pipeRow.id, amountDelta: delta,
                     });
-                    return { booked: true, reconciled: true, row: { ...pipeRow, ...purchase } };
+                    return { booked: true, reconciled: true, row: { ...pipeRow, ..._patch } };
                 }
             }
 

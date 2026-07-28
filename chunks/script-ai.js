@@ -98,9 +98,11 @@
 
         const customerMap = new Map((customers || []).map(c => [String(c.id), c]));
         const userMap = new Map((users || []).map(u => [String(u.id), u]));
-        // purchases carry no agent_id → resolve via customer.responsible_agent_id
-        // (same rule as reporting._getPurchaseAgentId).
-        const purchaseAgentId = (p) => (customerMap.get(String(p.customer_id)) || {}).responsible_agent_id || p.agent_id;
+        // Sale credit is frozen on p.agent_id at booking time, so a later customer
+        // reassignment can't restate history; fall back to the live owner for rows
+        // booked before that column existed. Same rule as
+        // reporting._getPurchaseAgentId and the server RPCs.
+        const purchaseAgentId = (p) => p.agent_id || (customerMap.get(String(p.customer_id)) || {}).responsible_agent_id;
 
         return {
             cu, seeAll, ownedByViewer, purchaseAgentId,
@@ -376,14 +378,6 @@
     // Per-agent performance aggregates over the scoped data. Built in single
     // passes (no nested O(customers×purchases) scan).
     const _computeAgentPerformance = (data) => {
-        // per-customer non-package purchase total (one pass)
-        const custPurchaseTotal = new Map();
-        for (const p of data.purchases) {
-            if (p.is_agent_package) continue;
-            const k = String(p.customer_id);
-            custPurchaseTotal.set(k, (custPurchaseTotal.get(k) || 0) + _num(p.amount));
-        }
-
         // accumulate per-agent buckets in single passes
         const acc = new Map();
         const bucket = (aid) => {
@@ -401,8 +395,18 @@
         for (const c of data.customers) {
             if (c.responsible_agent_id == null) continue;
             const b = bucket(c.responsible_agent_id);
-            b.customers += 1;
-            b.pipelineValue += custPurchaseTotal.get(String(c.id)) || 0;
+            b.customers += 1;   // headcount IS legitimately owner-based
+        }
+        // Sale money is bucketed by the CREDITED agent (p.agent_id frozen at booking,
+        // else the customer's live owner) — the same rule as Reports and Ranking.
+        // Bucketing it via the customer's current owner, as this used to, restated
+        // history the moment a customer was reassigned and made this panel disagree
+        // with the Reports tab. See migrations/purchases_frozen_agent_credit_2026-07-28.sql.
+        for (const p of data.purchases) {
+            if (p.is_agent_package) continue;
+            const aid = data.purchaseAgentId(p);
+            if (aid == null) continue;
+            bucket(aid).pipelineValue += _num(p.amount);
         }
         for (const a of data.activities) {
             if (a.lead_agent_id == null) continue;

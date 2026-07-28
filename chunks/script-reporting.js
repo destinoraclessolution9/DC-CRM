@@ -1026,8 +1026,9 @@
                 }
             } catch (_) { /* fall through to legacy */ }
         }
-        // Purchases have no agent_id column — scope (visibleUserIds / role / market)
-        // and any per-agent filter must resolve the agent via the linked customer
+        // Sale credit resolves as p.agent_id (frozen at booking) ELSE the linked
+        // customer's live owner — scope (visibleUserIds / role / market) and any
+        // per-agent filter must use that same rule via _getPurchaseAgentId
         // (same contract as _passesPurchaseFilter / the KPI getters), or this branch
         // silently returns all-zeros / org-wide. _getPurchaseBase loads customers +
         // users so both the scope filter and the agent filter can resolve.
@@ -1492,9 +1493,16 @@ const getCPSCount = async (from, to) => {
     return count;
 };
   
-// Shared helper: resolves agent ID for a purchase via its linked customer
+// Shared helper: which agent is credited with this sale.
+// p.agent_id FIRST — it is the owner frozen at the moment the sale was booked, so
+// reassigning the customer later cannot rewrite historical revenue. Falls back to
+// the live owner for rows booked before the column existed (and for the two legacy
+// rows with no customer_id). Same expression as the server RPCs
+// (coalesce(p.agent_id, c.responsible_agent_id)) — this MUST stay agent-first or the
+// Reports tab and the Ranking tab would show different sales for the same agent.
+// See migrations/purchases_frozen_agent_credit_2026-07-28.sql.
 const _getPurchaseAgentId = (p, customerMap) =>
-    (customerMap[p.customer_id] || {}).responsible_agent_id || p.agent_id;
+    p.agent_id || (customerMap[p.customer_id] || {}).responsible_agent_id;
 
 const _getPurchaseBase = async () => {
     const needUsers = _currentRoleFilter !== 'All' || _visibleUserIds !== 'all';
@@ -2511,7 +2519,8 @@ const buildTotalSalesDetails = async (from, to) => {
     for (const p of purchases) {
         if (p.date < from || p.date > to || p.is_agent_package) continue;
         if (_scoped && (p.currency || 'MYR') !== UI.currencyForCountry(_ms)) continue;
-        const agentId = custMap[p.customer_id]?.responsible_agent_id || p.agent_id;
+        // agent-first: frozen sale credit wins over the live owner (see _getPurchaseAgentId)
+        const agentId = p.agent_id || custMap[p.customer_id]?.responsible_agent_id;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(agentId))) continue;
         if (_currentRoleFilter !== 'All') {
             const agent = userMap[agentId] || userMap[String(agentId)];
@@ -2555,7 +2564,10 @@ const buildPOPDetails = async (from, to) => {
     for (const p of purchases) {
         if (p.payment_method !== 'POP' || p.date < from || p.date > to) continue;
         if (_scoped && (p.currency || 'MYR') !== UI.currencyForCountry(_ms)) continue;
-        const agentId = custMap[p.customer_id]?.responsible_agent_id;
+        // agent-first, matching the card this drills into (see _getPurchaseAgentId).
+        // Owner-only here would list a different set of sales than the POP/EPP totals
+        // once a customer has been reassigned.
+        const agentId = p.agent_id || custMap[p.customer_id]?.responsible_agent_id;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(agentId))) continue;
         if (_currentRoleFilter !== 'All') {
             const agent = userMap[agentId] || userMap[String(agentId)];
@@ -2605,7 +2617,10 @@ const buildEPPCasesDetails = async (from, to) => {
     for (const p of purchases) {
         if (p.payment_method !== 'EPP' || p.date < from || p.date > to) continue;
         if (_scoped && (p.currency || 'MYR') !== UI.currencyForCountry(_ms)) continue;
-        const agentId = custMap[p.customer_id]?.responsible_agent_id;
+        // agent-first, matching the card this drills into (see _getPurchaseAgentId).
+        // Owner-only here would list a different set of sales than the POP/EPP totals
+        // once a customer has been reassigned.
+        const agentId = p.agent_id || custMap[p.customer_id]?.responsible_agent_id;
         if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(agentId))) continue;
         if (_currentRoleFilter !== 'All') {
             const agent = userMap[agentId] || userMap[String(agentId)];
@@ -3663,12 +3678,13 @@ const renderAgentLeaderboard = async () => {
     const ranges = getDateRanges(_currentTimeFilter, _customDateFrom, _customDateTo);
 
     // ── Per-agent sales (current + previous period) ────────────────────────
-    // Resolve each purchase's agent via its customer's responsible_agent_id —
-    // purchases has NO agent_id column, so the old `p.agent_id === agent.id`
-    // match was ALWAYS false and this leaderboard always rendered zero. Try the
-    // server aggregation first (one grouped pass, scalable); on any guard/RPC
-    // error fall back to a CORRECTED client computation (same customer-based
-    // resolution). Either path now produces the right numbers.
+    // Resolve each purchase's agent as p.agent_id (frozen at booking) ELSE its
+    // customer's live responsible_agent_id. (Historical note: a 2026-04 bug matched
+    // `p.agent_id === agent.id` against a column that did not exist yet, so this
+    // leaderboard always rendered zero; the column is real as of
+    // migrations/purchases_frozen_agent_credit_2026-07-28.sql.) Try the server
+    // aggregation first (one grouped pass, scalable); on any guard/RPC error fall
+    // back to a client computation using the SAME resolution rule.
     const salesByAgent = new Map(); // String(agentId) -> { current, prev }
     const _lbScopeIds = (_visibleUserIds === 'all' || !Array.isArray(_visibleUserIds))
         ? null
@@ -3693,7 +3709,10 @@ const renderAgentLeaderboard = async () => {
         ]);
         const custAgent = new Map(allCustomers.map(c => [String(c.id), c.responsible_agent_id]));
         for (const p of allPurchases) {
-            const aid = custAgent.get(String(p.customer_id));
+            // Must mirror agent_sales_by_period's coalesce(p.agent_id, c.responsible_agent_id):
+            // this fallback replaces that RPC, so resolving owner-only here would hand
+            // back different per-agent totals than the server path it stands in for.
+            const aid = p.agent_id ?? custAgent.get(String(p.customer_id));
             if (aid == null) continue;
             const key = String(aid);
             let s = salesByAgent.get(key);

@@ -1408,10 +1408,34 @@ const confirmDeleteAgent = async (agentId) => {
         // by) — otherwise customers keep pointing at the deleted id and render as
         // 'Agent #<id>' / unknown owner, and any FK on these columns would make the
         // final users delete throw after prospects/activities were unassigned.
+        // Capture the customers this agent owns BEFORE nulling them — needed below to
+        // tell "sale whose customer is now ownerless" from "sale whose customer has
+        // since moved to a live agent".
+        let _orphanCustomerIds = [];
+        try {
+            _orphanCustomerIds = (await AppDataStore.query('customers', { responsible_agent_id: agentId }) || [])
+                .map(c => c.id).filter(id => id != null);
+        } catch (e) {
+            console.warn('deleteAgent: could not enumerate owned customers; leaving frozen sale credit intact', e);
+        }
         await _fkClear(wc.from('customers').update({ responsible_agent_id: null }).eq('responsible_agent_id', agentId), 'unassign customers (responsible_agent_id)');
         await _fkClear(wc.from('customers').update({ agent_id: null }).eq('agent_id', agentId), 'unassign customers (agent_id)');
         // Clear activities linked to this agent
         await _fkClear(wc.from('activities').update({ lead_agent_id: null }).eq('lead_agent_id', agentId), 'unassign activities');
+        // Frozen sale credit (purchases.agent_id) pointing at this agent.
+        //
+        // Do NOT blanket-null it. agent_id wins over customers.responsible_agent_id
+        // everywhere (coalesce), so nulling a sale whose customer has SINCE been
+        // reassigned to a live agent would hand that agent the deleted agent's
+        // historical revenue — the exact retroactive transfer this column exists to
+        // prevent. Only clear rows that would otherwise be stranded: those whose
+        // customer we just made ownerless, and those with no customer at all. Sales
+        // belonging to a customer someone else now owns keep the deleted id, and
+        // simply resolve to no live agent — same as an unassigned customer today.
+        if (_orphanCustomerIds.length) {
+            await _fkClear(wc.from('purchases').update({ agent_id: null }).eq('agent_id', agentId).in('customer_id', _orphanCustomerIds), 'unassign purchases (ownerless customers)');
+        }
+        await _fkClear(wc.from('purchases').update({ agent_id: null }).eq('agent_id', agentId).is('customer_id', null), 'unassign purchases (no customer)');
         // Delete agent_targets and agent_stats rows for this agent
         await _fkClear(wc.from('agent_targets').delete().eq('agent_id', agentId), 'delete agent_targets');
         await _fkClear(wc.from('agent_stats').delete().eq('agent_id', agentId), 'delete agent_stats');

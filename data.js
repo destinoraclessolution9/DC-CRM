@@ -1470,7 +1470,7 @@ class DataStore {
     }
 
     // Windowed `purchases` read (inclusive date window + optional customer scope;
-    // purchases has no agent_id — agent is resolved via customer.responsible_agent_id).
+    // purchases credit = agent_id (frozen at booking) else customer.responsible_agent_id).
     // Date column is `date` (NOT purchase_date — that lives on refill_reminders).
     // CAVEAT: a gte/lte window EXCLUDES null-date rows. Reporting deliberately KEEPS
     // null-date purchases (see report_purchase_details RPC), so those getters must
@@ -3267,7 +3267,7 @@ class DataStore {
     // ── Agent leaderboard sales aggregation ───────────────────────────────
     // Per-agent purchase totals for a current + previous period in one grouped
     // server pass (agent_sales_by_period RPC), resolving each purchase's agent
-    // via its customer's responsible_agent_id (purchases has no agent_id). Scope
+    // via p.agent_id (frozen at booking) else its customer's responsible_agent_id. Scope
     // is applied server-side via visibleAgentIds (null = unrestricted). Throws on
     // no-session / RPC error so renderAgentLeaderboard falls back to a corrected
     // client computation. Returns [{ agent_id, current_sales, prev_sales }].

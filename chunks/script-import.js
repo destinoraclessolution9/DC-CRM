@@ -1117,6 +1117,10 @@ const startImport = async () => {
                 // mirroring approveClosingRecord / savePurchase (column is `date`).
                 await AppDataStore.create('purchases', {
                     customer_id: savedCustomer.id,
+                    // Freeze sale credit at booking time (see
+                    // migrations/purchases_frozen_agent_credit_2026-07-28.sql) so a later
+                    // reassignment of this imported customer can't restate history.
+                    agent_id: assignedAgentId ?? null,
                     date: _impLocalDay(),
                     invoice: 'IMPORT-CONVERT',
                     item: '',
@@ -1152,6 +1156,8 @@ const startImport = async () => {
         try {
             await AppDataStore.create('purchases', {
                 customer_id: savedCustomer.id,
+                // Frozen sale credit — see the note on the auto-convert purchase above.
+                agent_id: savedCustomer.responsible_agent_id ?? null,
                 date: _openingBalanceDate(record.customer_since),
                 invoice: 'IMPORT-OPENING',
                 item: 'Opening balance (imported)',
@@ -1850,6 +1856,9 @@ const _renderReassignSummary = (s) => {
         lines.push(`<li><strong>${escapeHtml(s.prospectName || 'This prospect')}</strong>'s ownership will move from <strong>${escapeHtml(s.fromAgentName)}</strong> to <strong>${escapeHtml(s.toAgentName)}</strong>.</li>`);
         if (s.willCascadeCustomer && s.linkedCustomerCount > 0) {
             lines.push(`<li>✓ <strong>${s.linkedCustomerCount}</strong> linked customer record${s.linkedCustomerCount > 1 ? 's' : ''} will also move (incl. future commission &amp; renewal credit).</li>`);
+            // Sales credit is frozen per purchase at booking time, so this is now
+            // literally true rather than aspirational — past revenue does not restate.
+            lines.push(`<li>Past sales stay credited to ${escapeHtml(s.fromAgentName)} — only future sales count for ${escapeHtml(s.toAgentName)}.</li>`);
         } else if (s.linkedCustomerCount > 0) {
             lines.push(`<li>⚠ ${s.linkedCustomerCount} linked customer record${s.linkedCustomerCount > 1 ? 's' : ''} will <strong>stay with ${escapeHtml(s.fromAgentName)}</strong> (customer commission stays on old agent).</li>`);
         } else {

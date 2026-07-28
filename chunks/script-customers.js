@@ -80,7 +80,9 @@
         return '****';
     };
 
-    // ── Duplicated from prospects-core: shared server-pagination helper.    // Reads only header globals (getVisibleUserIds/_state.cu/AppDataStore),    // so a verbatim copy is safe and keeps _bffGetCustomers an intra-chunk call.
+    // ── Duplicated from prospects-core: shared server-pagination helper.
+    // Reads only header globals (getVisibleUserIds/_state.cu/AppDataStore),
+    // so a verbatim copy is safe and keeps _bffGetCustomers an intra-chunk call.
 const _serverPage = async (table, opts = {}) => {
     try {
         const o = { countMode: 'planned', ...opts };
@@ -2197,12 +2199,28 @@ const savePurchase = async (customerId) => {
         // The old code stored the fake string 'image_uploaded.png' and dropped the
         // bytes (audit #12) — we upload the real file post-insert and store its URL.
         const _proofFile = document.getElementById('pur-file')?.files?.[0] || null;
-        // Fetch customer for the post-save re-render fallback. NOTE: purchases are
-        // agent-attributed via the customers.responsible_agent_id join in the reporting
-        // RPCs (no agent column on the purchase row) — do NOT add one (prior bug).
-        const customer = await AppDataStore.getById('customers', customerId);
+        // Fetch customer for the post-save re-render fallback AND to stamp the
+        // credited agent below.
+        //
+        // NOTE (supersedes the old "purchases have no agent column — do NOT add one"
+        // warning): purchases.agent_id now EXISTS and is created by
+        // migrations/purchases_frozen_agent_credit_2026-07-28.sql. The original 2026-04
+        // bug was a PHANTOM column — code wrote and read agent_id with no migration
+        // behind it, causing a silent strip-retry on every save and an always-zero
+        // leaderboard. The column is real now and every reader resolves
+        // coalesce(agent_id, customers.responsible_agent_id), so writing it is correct.
+        // Network-first for the CREDIT source: a cached row from before a
+        // reassignment would freeze the wrong agent onto this sale forever. Falls
+        // back to the cached read (which also feeds currency + the post-save
+        // re-render) when the network read is unavailable.
+        const customer = (await AppDataStore.getByIdFull('customers', customerId).catch(() => null))
+                       || await AppDataStore.getById('customers', customerId);
         const pur = {
             customer_id: customerId,
+            // Freeze sale credit at booking time so a later reassignment of this
+            // customer cannot restate historical revenue. This is the OWNER now, not
+            // the closer — owner attribution is deliberate.
+            agent_id: customer?.responsible_agent_id ?? null,
             // Local calendar day (MYT is UTC+8): a UTC date would stamp early-morning
             // sales with YESTERDAY, mis-bucketing them in monthly/quarterly reports
             // and the delivery-board maturity math (audit #5/#11).

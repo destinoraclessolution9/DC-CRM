@@ -386,7 +386,10 @@ const approveQueueEntry = async (entryId) => {
             }
         }
         if (prospect?.closing_record?.status === 'submitted') {
-            const approvedCr = { ...prospect.closing_record, status: 'approved', approved_at: now };
+            // Freeze who was credited, so the L1 Purchases History ledger stops
+            // reading a live owner (parity with purchases.agent_id).
+            const approvedCr = { ...prospect.closing_record, status: 'approved', approved_at: now,
+                credited_agent_id: prospect.closing_record.credited_agent_id ?? prospect.responsible_agent_id ?? null };
             const existingHistory = Array.isArray(prospect.closing_records_history) ? prospect.closing_records_history : [];
             await AppDataStore.update('prospects', entry.prospect_id, {
                 closing_record: null,
@@ -563,7 +566,8 @@ const approveClosingRecord = async (prospectId) => {
         }
         const existingHistory = Array.isArray(prospect.closing_records_history) ? prospect.closing_records_history : [];
         await AppDataStore.update('prospects', prospectId, {
-            closing_records_history: [...existingHistory, { ...cr, status: 'approved', approved_at: now }],
+            closing_records_history: [...existingHistory, { ...cr, status: 'approved', approved_at: now,
+                credited_agent_id: cr.credited_agent_id ?? prospect.responsible_agent_id ?? null }],
             closing_record: null
         });
         UI.toast.success(`Sale of RM ${saleAmount.toLocaleString()} approved!`);

@@ -6330,7 +6330,7 @@ const archiveAndNewClosingRecord = async (prospectId) => {
     const cr = prospect.closing_record;
     const existingHistory = Array.isArray(prospect.closing_records_history) ? prospect.closing_records_history : [];
     await AppDataStore.update('prospects', prospectId, {
-        closing_records_history: [...existingHistory, cr],
+        closing_records_history: [...existingHistory, { ...cr, credited_agent_id: cr.credited_agent_id ?? prospect.responsible_agent_id ?? null }],
         closing_record: null
     });
     const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
@@ -6393,8 +6393,12 @@ const _loadPurchasesHistory = async () => {
                 rows.push({
                     prospectId: p.id,
                     customerName: p.full_name || '-',
-                    agentId: h.lead_agent_id || p.responsible_agent_id,
-                    agentName: agentMap[String(h.lead_agent_id || p.responsible_agent_id)] || '-',
+                    // credited_agent_id is frozen when the record is archived, so this
+                    // ledger stops restating on reassignment — matching purchases.agent_id
+                    // by construction (both resolve the customer's owner at that moment).
+                    // Rows archived before the stamp fall back to the old chain.
+                    agentId: h.credited_agent_id || h.lead_agent_id || p.responsible_agent_id,
+                    agentName: agentMap[String(h.credited_agent_id || h.lead_agent_id || p.responsible_agent_id)] || '-',
                     date: h.closing_date || (h.approved_at ? h.approved_at.split('T')[0] : ''),
                     invoiceNo: h.invoice_number || '-',
                     product: h.product || '-',
@@ -6411,8 +6415,12 @@ const _loadPurchasesHistory = async () => {
                 rows.push({
                     prospectId: p.id,
                     customerName: p.full_name || '-',
-                    agentId: h.lead_agent_id || p.responsible_agent_id,
-                    agentName: agentMap[String(h.lead_agent_id || p.responsible_agent_id)] || '-',
+                    // credited_agent_id is frozen when the record is archived, so this
+                    // ledger stops restating on reassignment — matching purchases.agent_id
+                    // by construction (both resolve the customer's owner at that moment).
+                    // Rows archived before the stamp fall back to the old chain.
+                    agentId: h.credited_agent_id || h.lead_agent_id || p.responsible_agent_id,
+                    agentName: agentMap[String(h.credited_agent_id || h.lead_agent_id || p.responsible_agent_id)] || '-',
                     date: h.closing_date || (h.approved_at ? h.approved_at.split('T')[0] : ''),
                     invoiceNo: h.invoice_number || '-',
                     product: h.product || '-',

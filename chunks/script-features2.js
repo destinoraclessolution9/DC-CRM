@@ -939,9 +939,24 @@ const _fetchSpecialProgramSource = async (table, scope = null) => {
     if (scope && scope.agentIds) {
         const opts = { countMode: null, limit: _SP_SCOPED_CAP, offset: 0 };
         if (table === 'purchases') {
-            // purchases has no agent_id — scope by the owning customers' ids.
-            opts.scopeField = 'customer_id';
-            opts.scopeValues = scope.customerIds || [];
+            // Credit is p.agent_id (frozen at booking) ?? the customer's live owner, so
+            // this prefilter must be a SUPERSET of both arms or _buildSpecialProgramIndex
+            // never sees the row. Customer-id alone silently dropped a sale a participant
+            // is still credited for once that customer was reassigned to a non-participant
+            // — the participant's program progress quietly went backwards.
+            // Empty arms are dropped: data.js renders `field.in.()` for an empty array,
+            // which PostgREST rejects outright.
+            const _arms = [];
+            if ((scope.customerIds || []).length) _arms.push({ field: 'customer_id', values: scope.customerIds });
+            if ((scope.agentIds || []).length)    _arms.push({ field: 'agent_id',    values: scope.agentIds });
+            if (_arms.length > 1) {
+                opts.scopeFields = _arms;
+            } else if (_arms.length === 1) {
+                opts.scopeField = _arms[0].field;
+                opts.scopeValues = _arms[0].values;
+            } else {
+                return [];   // no participants and no owned customers — nothing to score
+            }
         } else if (table === 'customers') {
             opts.scopeField = 'responsible_agent_id';
             opts.scopeValues = scope.agentIds;
@@ -1195,7 +1210,7 @@ const renderSpecialPrograms = async () => {
 
     // Scope the source fetches to just the participant agents' rows (server-side)
     // instead of downloading whole tables. customers+activities scope by agent id;
-    // purchases (no agent_id column) scopes by the owning customers' ids, which we
+    // purchases scopes by the owning customers' ids (server-side prefilter), which we
     // derive from the already-scoped customers set.
     const agentIds = [...new Set(allParts.map(p => p.agent_id).filter(v => v != null))];
     const [customers, activities] = await Promise.all([
@@ -1343,7 +1358,7 @@ const renderSpecialProgramsTable = async () => {
 
     // Scope the source fetches to just the participant agents' rows (server-side)
     // instead of downloading whole tables. customers+activities scope by agent id;
-    // purchases (no agent_id column) scopes by the owning customers' ids, which we
+    // purchases scopes by the owning customers' ids (server-side prefilter), which we
     // derive from the already-scoped customers set.
     const agentIds = [...new Set(allParts.map(p => p.agent_id).filter(v => v != null))];
     const [customers, activities] = await Promise.all([
