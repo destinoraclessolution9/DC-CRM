@@ -6544,12 +6544,13 @@
                             const prospectUpdates = { closing_record: newCR };
                             if (_wantsConversion) {
                                 prospectUpdates.conversion_status = 'pending_approval';
-                                // NOTE: `conversion_requested_at` is NOT a real column on
-                                // prospects (verified live 2026-07-27) — sending it just cost a
-                                // failed insert + unknown-column strip-retry on every save
-                                // (data.js:2338-2342). Dropped. Three other writers still send
-                                // it: chunks/script-approvals.js:602, chunks/script-journey.js:597,
-                                // chunks/script-prospects.js:6055.
+                                // conversion_requested_at is a real column as of
+                                // migrations/prospects_conversion_requested_at_2026-07-29.sql.
+                                // It was dropped from here on 2026-07-27 because writing it
+                                // then cost a failed write + unknown-column strip-retry
+                                // (data.js:2338-2342) and persisted nothing. Restored — the
+                                // RPC path above stamps it too.
+                                prospectUpdates.conversion_requested_at = new Date().toISOString();
                                 prospectUpdates.conversion_requested_by = _state.cu?.id;
                             }
                             await AppDataStore.update('prospects', activity.prospect_id, prospectUpdates);
