@@ -3071,6 +3071,21 @@ tr.row-unable td { opacity: 0.65; }
     padding: 4px;
 }
 
+/* "All day" rows (2026-07-29): activities saved with no start time have no
+   hour cell to sit in. They used to be dropped from the Week/Day views even
+   though the month grid and mobile both show them. */
+.week-hour-row.week-allday-row {
+    min-height: 44px;
+    background: var(--gray-50);
+    border-bottom: 2px solid var(--gray-200);
+}
+
+.timeline-hour.timeline-allday {
+    min-height: 0;
+    background: var(--gray-50);
+    border-bottom: 2px solid var(--gray-200);
+}
+
 .week-activity {
     font-size: 11px;
     padding: 2px 4px;

@@ -4477,16 +4477,62 @@
         // Rows with no start_time are skipped here just as the `a.start_time &&`
         // guard skipped them before.
         const wvActivityBuckets = new Map();
+        // Activities saved with no start_time have no hour cell to live in, so
+        // the grid used to drop them entirely — they show on the month grid and
+        // on mobile, which made a week look emptier than the month it came from.
+        // They get an "All day" row above the hour grid instead.
+        const wvAllDay = new Map();
+        // Hour window: 08:00-20:00 by default, widened when THIS week actually
+        // has something earlier or later. The old fixed window silently hid
+        // early-morning and after-9pm activities.
+        let wvMinHour = 8, wvMaxHour = 20;
         for (const a of activities) {
-            if (!a.activity_date || !a.start_time) continue;
+            if (!a.activity_date) continue;
+            if (!a.start_time) {
+                const dk = String(a.activity_date).slice(0, 10);
+                let dbucket = wvAllDay.get(dk);
+                if (!dbucket) { dbucket = []; wvAllDay.set(dk, dbucket); }
+                dbucket.push(a);
+                continue;
+            }
             const bk = `${a.activity_date} ${a.start_time.slice(0, 2)}`;
             let bucket = wvActivityBuckets.get(bk);
             if (!bucket) { bucket = []; wvActivityBuckets.set(bk, bucket); }
             bucket.push(a);
+            const h = parseInt(a.start_time.slice(0, 2), 10);
+            if (Number.isFinite(h)) {
+                if (h < wvMinHour) wvMinHour = h;
+                if (h > wvMaxHour) wvMaxHour = h;
+            }
         }
 
-        // Time async slots (8 AM to 8 PM)
-        for (let hour = 8; hour <= 20; hour++) {
+        // Client names are private to the activity owner/co-agents (match the
+        // month-grid _tileOwned gate) — otherwise the week view leaked every
+        // agent's prospect/customer names.
+        const _wvName = (a) => {
+            const prospect = a.prospect_id ? prospectMapWV.get(String(a.prospect_id)) : null;
+            const customer = a.customer_id ? customerMapWV.get(String(a.customer_id)) : null;
+            return _canViewEntityName(a, visibleIdsWV)
+                ? (prospect?.full_name || customer?.full_name || a.activity_title || 'Activity')
+                : (a.activity_title || a.activity_type || 'Activity');
+        };
+
+        if (wvAllDay.size > 0) {
+            html += '<div class="week-hour-row week-allday-row">';
+            html += '<div class="hour-label">All day</div>';
+            for (let day = 0; day < 7; day++) {
+                const dayDate = new Date(startOfWeek);
+                dayDate.setDate(startOfWeek.getDate() + day);
+                html += '<div class="week-hour-cell">';
+                for (const a of wvAllDay.get(_fmtWV(dayDate)) || []) {
+                    html += buildWeekActivityHtml(a, _wvName(a));
+                }
+                html += '</div>';
+            }
+            html += '</div>';
+        }
+
+        for (let hour = wvMinHour; hour <= wvMaxHour; hour++) {
             html += '<div class="week-hour-row">';
             html += `<div class="hour-label">${hour.toString().padStart(2, '0')}:00</div>`;
 
@@ -4500,17 +4546,7 @@
 
                 html += '<div class="week-hour-cell">';
                 for (const a of dayActivities) {
-                    const prospect = a.prospect_id ? prospectMapWV.get(String(a.prospect_id)) : null;
-                    const customer = a.customer_id ? customerMapWV.get(String(a.customer_id)) : null;
-                    // Client names are private to the activity owner/co-agents (match the
-                    // month-grid _tileOwned gate) — otherwise the week view leaked every
-                    // agent's prospect/customer names. Also escape to prevent stored XSS.
-                    const _wvOwned = _canViewEntityName(a, visibleIdsWV);
-                    const name = _wvOwned
-                        ? (prospect?.full_name || customer?.full_name || a.activity_title || 'Activity')
-                        : (a.activity_title || a.activity_type || 'Activity');
-
-                    html += buildWeekActivityHtml(a, name);
+                    html += buildWeekActivityHtml(a, _wvName(a));
                 }
                 html += '</div>';
             }
@@ -4613,13 +4649,13 @@
         const customerMapDV = new Map(((_dvCRes && _dvCRes.data) || []).map(c => [String(c.id), c]));
         const userMapDV = new Map((allUsersDV || []).map(u => [String(u.id), u]));
 
-        // Calculate summary stats over ONLY the activities the timeline actually
-        // renders (those with a start_time). Counting start_time-less rows in the
-        // headline totals made the summary claim more than the grid showed.
-        const timedActivities = dayActivities.filter(a => a.start_time);
-        const totalActivities = timedActivities.length;
-        const totalMeetings = timedActivities.filter(a => a.activity_type === 'FTF').length;
-        const totalCalls = timedActivities.filter(a => a.activity_type === 'CALL' || a.activity_type === 'WHATSAPP').length;
+        // Summary stats cover everything the timeline renders. Untimed rows used
+        // to be excluded here because the timeline dropped them; now that they
+        // appear in the All-day strip below, counting them keeps the summary and
+        // the grid in agreement again.
+        const totalActivities = dayActivities.length;
+        const totalMeetings = dayActivities.filter(a => a.activity_type === 'FTF').length;
+        const totalCalls = dayActivities.filter(a => a.activity_type === 'CALL' || a.activity_type === 'WHATSAPP').length;
 
         let html = '<div class="enhanced-day-view">';
         html += `
@@ -4648,6 +4684,36 @@
                 <div class="timeline">
         `;
 
+        // One card builder for both the All-day strip and the hour rows.
+        const _dvCard = (a) => {
+            const prospect = a.prospect_id ? prospectMapDV.get(String(a.prospect_id)) : null;
+            const customer = a.customer_id ? customerMapDV.get(String(a.customer_id)) : null;
+            const _dvOwned = _canViewEntityName(a, visibleIdsDV);
+            const name = _dvOwned ? (prospect?.full_name || customer?.full_name || '') : '';
+            const agent = userMapDV.get(String(a.lead_agent_id));
+            const when = a.start_time ? `${a.start_time} - ${a.end_time || '?'}` : 'All day';
+            return `
+                    <div class="timeline-activity ${String(a.activity_type || '').toLowerCase()}" onclick="app.viewActivityDetails(${a.id})">
+                        <div class="activity-time">${esc(when)}</div>
+                        <div class="activity-title"><strong>${esc(a.activity_title || a.activity_type)}</strong> ${esc(name)}</div>
+                        <div class="activity-agent">Agent: ${esc(agent?.full_name || 'Unknown')}</div>
+                    </div>
+                `;
+        };
+
+        // All-day strip. Activities saved without a start time render on the
+        // month grid and on mobile, so dropping them here made a day the user
+        // had just tapped through to look empty.
+        const untimedDV = dayActivities.filter(a => !a.start_time);
+        if (untimedDV.length > 0) {
+            html += `
+                <div class="timeline-hour timeline-allday">
+                    <div class="timeline-label">All day</div>
+                    <div class="timeline-slot">${untimedDV.map(_dvCard).join('')}</div>
+                </div>
+            `;
+        }
+
         // Group activities by hour
         for (let hour = 0; hour < 24; hour++) {
             const hourStr = hour.toString().padStart(2, '0');
@@ -4660,19 +4726,7 @@
             `;
 
             for (const a of hourActivities) {
-                const prospect = a.prospect_id ? prospectMapDV.get(String(a.prospect_id)) : null;
-                const customer = a.customer_id ? customerMapDV.get(String(a.customer_id)) : null;
-                const _dvOwned = _canViewEntityName(a, visibleIdsDV);
-                const name = _dvOwned ? (prospect?.full_name || customer?.full_name || '') : '';
-                const agent = userMapDV.get(String(a.lead_agent_id));
-
-                html += `
-                    <div class="timeline-activity ${String(a.activity_type || '').toLowerCase()}" onclick="app.viewActivityDetails(${a.id})">
-                        <div class="activity-time">${a.start_time} - ${a.end_time || '?'}</div>
-                        <div class="activity-title"><strong>${esc(a.activity_title || a.activity_type)}</strong> ${esc(name)}</div>
-                        <div class="activity-agent">Agent: ${esc(agent?.full_name || 'Unknown')}</div>
-                    </div>
-                `;
+                html += _dvCard(a);
             }
 
             html += '</div></div>';
