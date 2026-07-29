@@ -456,7 +456,14 @@ const openLatestMeetupNotes = async (prospectId) => {
 };
 
 const openEditPotentialModal = async (prospectId) => {
-    const prospect = await AppDataStore.getById('prospects', prospectId);
+    // Prefill from the FULL row (select=*, no cache tier). savePotential re-emits
+    // all nine fields from the DOM, so any field the prefill misses is written
+    // back as blank — and cached rows are projected down to the data.js
+    // light-select column list. Fall back to the cached read when the network
+    // call comes back empty (offline) so the modal still opens.
+    const prospect = (AppDataStore.getByIdFull
+        ? await AppDataStore.getByIdFull('prospects', prospectId)
+        : null) || await AppDataStore.getById('prospects', prospectId);
     if (!prospect) return;
 
     const content = `
@@ -525,9 +532,23 @@ const savePotential = async (prospectId) => {
         decision_maker: document.getElementById('pot-decision-maker')?.value || 'unknown',
         budget_range: document.getElementById('pot-budget')?.value || ''
     };
-    await AppDataStore.update('prospects', prospectId, data);
+    const saved = await AppDataStore.update('prospects', prospectId, data);
+    // Echo-verify: AppDataStore.update() answers a 42703 ("column does not
+    // exist") by stripping that column and retrying, so a missing column
+    // resolves SUCCESSFULLY with the field silently discarded. Seven of these
+    // nine columns were missing until 2026-07-29 and this modal reported
+    // "updated" every time. A stripped column is absent from the returned row
+    // (update selects the row back), so a missing KEY — not a falsy value — is
+    // the signal. Warn instead of claiming success rather than fail the save:
+    // whatever did land is already committed.
+    const dropped = saved ? Object.keys(data).filter(k => !(k in saved)) : [];
     UI.hideModal();
-    UI.toast.success('Potential & Opportunities updated');
+    if (dropped.length) {
+        console.warn('savePotential: columns missing from prospects —', dropped);
+        UI.toast.error(`Saved, but these fields could not be stored: ${dropped.join(', ')}`);
+    } else {
+        UI.toast.success('Potential & Opportunities updated');
+    }
     await (window.app.showProspectDetail || (() => {}))(prospectId);
 };
 

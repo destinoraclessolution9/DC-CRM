@@ -1579,7 +1579,17 @@ const openProspectModal = async (prospectId = null) => {
         UI.toast.error('Could not load the prospect form. Please reload and try again.');
         return;
     }
-    const prospect = prospectId ? await AppDataStore.getById('prospects', prospectId) : null;
+    // Edit mode prefills from the FULL row (select=*, no cache tier). The form is
+    // save-the-whole-record: collectBasicInfoData re-emits every basic-info column
+    // from the DOM, so any column the prefill misses gets written back as blank.
+    // Snapshot rows are projected down to the light-select column list, so a
+    // column absent from it (life_chart_type was, for months) rendered unticked
+    // here and then overwrote the stored value on save. Fall back to the cached
+    // read when the network call comes back empty (offline) so the modal still opens.
+    const prospect = prospectId
+        ? ((AppDataStore.getByIdFull ? await AppDataStore.getByIdFull('prospects', prospectId) : null)
+            || await AppDataStore.getById('prospects', prospectId))
+        : null;
     if (prospectId) {
         if (!prospect) {
             UI.toast.error('Prospect not found.');
@@ -2305,6 +2315,13 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         const lctSolar = ['solar', 'both'].includes(prospect.life_chart_type);
         const lctLunar = ['lunar', 'both'].includes(prospect.life_chart_type);
         const lctHi = 'font-weight:700;color:#dc2626;';
+        // The Employment block below used to carry two more rows, "Job Description"
+        // (job_description) and "Title & Role" (emp_title_role). Removed 2026-07-29:
+        // neither is a column on prospects and NO screen, form, importer or OCR path
+        // in the codebase ever wrote them, so both rendered a literal "-" for every
+        // prospect. Re-add them only together with real inputs on the shared
+        // basic-info form (buildBasicInfoBlock + collectBasicInfoData) AND the columns
+        // in data.js _lightSelects.prospects — otherwise they go blank again.
         container.innerHTML = `
             <div class="pv-sub">Birth &amp; Identity</div>
             <div class="pv-row"><span class="pv-lbl" style="${lctSolar ? lctHi : ''}">Date of Birth</span><span class="pv-val" style="display:flex;align-items:center;gap:8px;${lctSolar ? lctHi : ''}"><input type="checkbox" ${lctSolar ? 'checked' : ''} onchange="event.stopPropagation();app.toggleLifeChartType(${prospect.id},'solar',this.checked)" title="Use for life chart">${escapeHtml(prospect.date_of_birth || '-')}</span></div>
@@ -2328,8 +2345,6 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             <div class="pv-sub">Employment</div>
             <div class="pv-row"><span class="pv-lbl">Occupation</span><span class="pv-val">${escapeHtml(prospect.occupation || '-')}</span></div>
             <div class="pv-row"><span class="pv-lbl">Company</span><span class="pv-val">${escapeHtml(prospect.company_name || '-')}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Job Description</span><span class="pv-val">${escapeHtml(prospect.job_description || '-')}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Title &amp; Role</span><span class="pv-val">${escapeHtml(prospect.emp_title_role || '-')}</span></div>
             <div class="pv-row"><span class="pv-lbl">Income Range</span><span class="pv-val">${escapeHtml(prospect.income_range || '-')}</span></div>
             <div class="pv-sub">Own Business</div>
             <div class="pv-row"><span class="pv-lbl">Own Business?</span><span class="pv-val">${prospect.is_own_business ? '✅ Yes' : (prospect.is_own_business === false ? 'No' : '-')}</span></div>
@@ -3918,8 +3933,12 @@ const downloadProspectVCard = async (prospectId) => {
         : (p.company_name || '');
     if (org.replace(/;/g, '')) lines.push(`ORG:${esc(org)}`);
 
-    const title = p.emp_title_role || p.occupation;
-    if (title) lines.push(`TITLE:${esc(title)}`);
+    // Was `p.emp_title_role || p.occupation` — emp_title_role is not a column on
+    // prospects and nothing ever wrote it, so the left side never won. Dropped
+    // with the two dead Employment rows (2026-07-29); business_title_role is the
+    // real "customer title" field, but it applies only to own-business prospects
+    // and the profile already surfaces it there, so occupation stays the vCard TITLE.
+    if (p.occupation) lines.push(`TITLE:${esc(p.occupation)}`);
 
     if (p.address || p.city || p.state || p.postal_code) {
         lines.push(

@@ -3267,9 +3267,17 @@
 
     const toggleLifeChartType = async (prospectId, dateType, checked) => {
         // Read the FRESHEST state (bypass cache) so concurrent toggles on both
-        // solar and lunar don't race and overwrite each other.
+        // solar and lunar don't race and overwrite each other. getByIdFull sends
+        // select=* and skips every cache tier — getById could still answer from a
+        // snapshot row, and snapshot rows are projected down to the light-select
+        // column list, which for a long time had no life_chart_type at all. A row
+        // missing the key reads as "neither ticked", so ticking lunar on a 'both'
+        // prospect silently dropped solar. Fall back to getById when the network
+        // call comes back empty (offline) rather than aborting the toggle.
         AppDataStore.invalidateCache('prospects');
-        const prospect = await AppDataStore.getById('prospects', prospectId);
+        const prospect = (AppDataStore.getByIdFull
+            ? await AppDataStore.getByIdFull('prospects', prospectId)
+            : null) || await AppDataStore.getById('prospects', prospectId);
         if (!prospect) {
             UI.toast.error('Prospect not found');
             return;

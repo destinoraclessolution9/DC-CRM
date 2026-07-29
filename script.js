@@ -2991,6 +2991,35 @@ function _wireLoginBtn() {
         }
     } catch (_) { /* best-effort hygiene */ }
 
+    // One-shot prospects-snapshot purge (2026-07-29). data.js _lightSelects.prospects
+    // was missing life_chart_type / marital_status / children (and the seven
+    // "Potential & Opportunities" columns added the same day), so every cached
+    // prospect row was written to the snapshot WITHOUT those keys. Widening the
+    // select fixes new fetches, but delta-sync only re-downloads rows whose
+    // updated_at moved — an untouched prospect would keep serving the
+    // column-stripped row from this device's snapshot forever, and the "Use for
+    // life chart" tick would still read back empty. Drop the prospects snapshot
+    // (both tiers) once per device so the next read re-fetches with the full
+    // column list. The _last_sync cursor goes too — without that reset, delta-sync
+    // would repopulate from the cursor and skip the full re-download.
+    try {
+        if (!localStorage.getItem('_prospect_cols_purge_2026_07_29')) {
+            try { localStorage.removeItem('fs_crm_prospects'); } catch (_) { /* per-key best-effort */ }
+            try { localStorage.removeItem('fs_crm_prospects_last_sync'); } catch (_) { /* per-key best-effort */ }
+            // Large tables live in the async Cache API tier, not localStorage
+            // (see data.js _persistTableSnapshot) — clearing only localStorage
+            // would leave the stripped rows in place on exactly the devices
+            // (mobile/PWA) that hit this hardest.
+            if (typeof caches !== 'undefined') {
+                caches.open('crm-data-v1')
+                    .then(c => c.delete('/crm-data/fs_crm_prospects'))
+                    .catch(() => { /* overflow tier absent — nothing to purge */ });
+            }
+            localStorage.setItem('_prospect_cols_purge_2026_07_29', '1');
+            console.info('[init] one-shot prospects snapshot purge applied (2026-07-29)');
+        }
+    } catch (_) { /* best-effort hygiene */ }
+
     try {
         // Try to restore session — use getSession() first (reads localStorage, works
         // offline / on slow mobile networks). getUser() always makes a network round-trip
