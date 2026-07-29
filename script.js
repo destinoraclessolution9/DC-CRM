@@ -3002,8 +3002,18 @@ function _wireLoginBtn() {
     // (both tiers) once per device so the next read re-fetches with the full
     // column list. The _last_sync cursor goes too — without that reset, delta-sync
     // would repopulate from the cursor and skip the full re-download.
+    //
+    // Key re-bumped to …_29b after the life_chart_type backfill
+    // (migrations/life_chart_type_backfill_2026-07-29.sql) filled 719 previously
+    // blank rows. That UPDATE deliberately did NOT touch updated_at — there is no
+    // trigger, and bumping it would have made all 719 prospects look freshly
+    // modified — so delta-sync has no way to notice them. Devices that had
+    // already run the …_29 purge in the ~40 min between the deploy and the
+    // backfill were holding a snapshot with life_chart_type: null and would have
+    // served it forever. A new key makes every device purge exactly once more.
+    // Same reasoning applies to any future bulk UPDATE that skips updated_at.
     try {
-        if (!localStorage.getItem('_prospect_cols_purge_2026_07_29')) {
+        if (!localStorage.getItem('_prospect_cols_purge_2026_07_29b')) {
             try { localStorage.removeItem('fs_crm_prospects'); } catch (_) { /* per-key best-effort */ }
             try { localStorage.removeItem('fs_crm_prospects_last_sync'); } catch (_) { /* per-key best-effort */ }
             // Large tables live in the async Cache API tier, not localStorage
@@ -3015,8 +3025,9 @@ function _wireLoginBtn() {
                     .then(c => c.delete('/crm-data/fs_crm_prospects'))
                     .catch(() => { /* overflow tier absent — nothing to purge */ });
             }
-            localStorage.setItem('_prospect_cols_purge_2026_07_29', '1');
-            console.info('[init] one-shot prospects snapshot purge applied (2026-07-29)');
+            try { localStorage.removeItem('_prospect_cols_purge_2026_07_29'); } catch (_) { /* superseded key — best-effort cleanup */ }
+            localStorage.setItem('_prospect_cols_purge_2026_07_29b', '1');
+            console.info('[init] one-shot prospects snapshot purge applied (2026-07-29b)');
         }
     } catch (_) { /* best-effort hygiene */ }
 
