@@ -52,13 +52,36 @@
 
 // ========== PHASE 6: PIPELINE & SALES FORCE MODULE ==========
 
-// ===== PIPELINE MANAGEMENT — v6 Activity-Scored Model with Editable Config =====
+// ===== PIPELINE MANAGEMENT — v7 Evidence + Fit + Calibration Model =====
 //
 // Philosophy: CPS is a hard gate. After CPS, every activity adds a decay-weighted
 // contribution to each product category via a multiplier matrix. The best-scoring
 // category becomes the "Target to Sign". Referral from a recent-purchase customer
 // adds a flat +20% bonus. All weights are editable by Super Admin at runtime and
 // persisted in the pipeline_config Supabase table.
+//
+// v7 (2026-07-31, PIPELINE_V7_PLAN.md) adds four organs on top of the v6 engine:
+//  1. STAGE CAPS — probability is CEILED by derived funnel stage (no proposal →
+//     45, proposal sent → 75, closing started → 95). Activity volume alone can no
+//     longer reach 100%; advancing the funnel can. Stage is derived from facts
+//     (proposed_solutions rows, prospect.closing_record, is_closing activities) —
+//     NEVER from the stale legacy drag-Kanban `pipeline_stage` column.
+//  2. NEGATIVE SIGNALS — activities.outcome (positive/neutral/negative/
+//     not_interested) multiplies contributions; negatives subtract with the same
+//     decay so bad news fades like good news. A not_interested within the
+//     suppression window removes the prospect from the pipeline entirely and
+//     also blocks the manual-potential door.
+//  3. FIT — affordability/authority/urgency/owner from the prospect's own fields
+//     blend to a 0-100 fit that squeezes into a multiplicative dampener
+//     [fit_mult_min, fit_mult_max] on the behavior probability. Unknown data is
+//     neutral (50) — sparse records are not punished. Fit can shrink or amplify
+//     earned evidence, never fabricate it.
+//  4. REPEAT DAMPENER + DECLARED CAP — per activity type only the top N
+//     contributions count fully (logging 15 calls ≠ 15 signals), and the
+//     manual-potential door is capped (declared belief can reach WARM, never HOT;
+//     evidence outranks belief on ties).
+// Every knob lives in constants below (flat keys → auto-wired into the rules
+// modal); the daily snapshot + Calibration report close the feedback loop.
 
 const DEFAULT_PIPELINE_CONFIG = {
     version: 1,
@@ -118,6 +141,34 @@ const DEFAULT_PIPELINE_CONFIG = {
         referral_customer_purchase_window_days: 180,
         cps_required: true,
         history_retention: 25,
+        // v7 stage caps — probability ceiling by derived funnel stage.
+        // Set all three to 100 to disable capping.
+        stage_cap_cps_only: 45,
+        stage_cap_proposal: 75,
+        stage_cap_closing: 95,
+        // v7 repeat dampener — per activity TYPE, only the top N contributions
+        // count fully; the rest are multiplied by repeat_factor (1 = off).
+        repeat_top_n: 3,
+        repeat_factor: 0.3,
+        // v7 declared-only ceiling — manual potential (no scoring behavior) can
+        // reach WARM but never HOT. 100 = off.
+        potential_prob_cap: 65,
+        // v7 outcome multipliers — activities.outcome scales its contribution.
+        // Negative values SUBTRACT (with the same time decay). All 1 = off.
+        outcome_mult_positive: 1.1,
+        outcome_mult_negative: -0.5,
+        outcome_mult_not_interested: -1,
+        // A not_interested outcome younger than this suppresses the prospect
+        // from the pipeline (and blocks the manual-potential door). 0 = off.
+        not_interested_suppress_days: 60,
+        // v7 fit — component weights (any scale; normalized by their sum) and
+        // the multiplier band the 0-100 fit maps into. min=max=1 = off.
+        fit_weight_affordability: 40,
+        fit_weight_authority: 30,
+        fit_weight_urgency: 20,
+        fit_weight_owner: 10,
+        fit_mult_min: 0.7,
+        fit_mult_max: 1.2,
     },
 };
 
@@ -415,6 +466,127 @@ const checkReferralBonus = async (prospect, config, allReferrals, allPurchases, 
     return result;
 };
 
+// ---- v7: derive the funnel stage from facts already on hand. Deliberately
+// ignores the stale legacy `pipeline_stage` drag-Kanban column. Order matters —
+// the strongest evidence wins:
+//   'closing'  — a closing record on the prospect, or any is_closing activity
+//   'proposal' — at least one proposed_solutions row
+//   'cps_only' — scored, but nothing concrete offered yet
+// When no prefetched solutions map is supplied (Explain modal, archive path) a
+// single per-prospect query fills the gap — those callers are low-volume.
+const _derivePipelineStage = async (prospect, prospectActivities, prefetched) => {
+    const _hist = prospect.closing_records_history;
+    const hasClosing = !!(prospect.closing_record
+        || (Array.isArray(_hist) && _hist.length)
+        || (typeof _hist === 'string' && _hist.length > 2)
+        || (prospectActivities || []).some(a => a.is_closing || a.closing_amount || a.amount_closed));
+    if (hasClosing) return 'closing';
+    let solutions;
+    if (prefetched?.solutionsByProspect) {
+        solutions = prefetched.solutionsByProspect.get(String(prospect.id)) || [];
+    } else if (prefetched?.allSolutions) {
+        solutions = prefetched.allSolutions.filter(s => String(s.prospect_id) === String(prospect.id));
+    } else {
+        try { solutions = await AppDataStore.query('proposed_solutions', { prospect_id: prospect.id }); }
+        catch (_) { solutions = []; }
+    }
+    return (solutions && solutions.length > 0) ? 'proposal' : 'cps_only';
+};
+
+const _stageCapFor = (stage, config) => {
+    const c = config.constants || {};
+    if (stage === 'closing') return c.stage_cap_closing ?? 95;
+    if (stage === 'proposal') return c.stage_cap_proposal ?? 75;
+    return c.stage_cap_cps_only ?? 45;
+};
+
+const _stageLabel = (stage) => stage === 'closing' ? 'Closing started'
+    : stage === 'proposal' ? 'Proposal sent'
+    : 'No proposal yet';
+
+// ---- v7: outcome multiplier for one activity (activities.outcome column).
+// Unset/unknown outcomes are neutral ×1 so pre-v7 history scores unchanged.
+const _outcomeMultiplier = (activity, config) => {
+    const c = config.constants || {};
+    const o = activity.outcome;
+    if (o === 'positive') return c.outcome_mult_positive ?? 1.1;
+    if (o === 'negative') return c.outcome_mult_negative ?? -0.5;
+    if (o === 'not_interested') return c.outcome_mult_not_interested ?? -1;
+    return 1.0;
+};
+
+// ---- v7: extract the LARGEST money figure from free text like "RM 15k-20k/mo",
+// "15,000 and above", "2500". Returns null when no number is present.
+const _parseMoneyMax = (text) => {
+    if (text == null) return null;
+    const s = String(text).toLowerCase().replace(/,/g, '');
+    const re = /(\d+(?:\.\d+)?)\s*(k)?/g;
+    let m; const nums = [];
+    while ((m = re.exec(s)) !== null) {
+        let v = parseFloat(m[1]);
+        if (m[2]) v *= 1000;
+        if (!isNaN(v) && v > 0) nums.push(v);
+    }
+    return nums.length ? Math.max(...nums) : null;
+};
+
+// ---- v7: FIT — how well the person matches the target category, from fields the
+// agent already records (Edit Potential & Opportunities + basic info). Components
+// score 0-100 with UNKNOWN data neutral at 50 (sparse records are not punished —
+// and filling the potential modal now visibly moves the score). The weighted
+// blend maps into a multiplicative band [fit_mult_min, fit_mult_max] applied to
+// the behavior probability — multiplicative on purpose: fit can shrink or
+// amplify earned evidence, never fabricate probability from static traits.
+const _calcFitScore = (prospect, category, config) => {
+    const c = config.constants || {};
+    const comps = [];
+    // Affordability — budget_range (or income_range as a soft proxy) vs the
+    // target category's default price.
+    const price = category?.default_amount ?? null;
+    const budgetMax = _parseMoneyMax(prospect.budget_range);
+    const incomeMax = _parseMoneyMax(prospect.income_range);
+    let afford = 50, affordNote = 'no budget/income on record';
+    if (price != null && budgetMax != null) {
+        afford = budgetMax >= price ? 100 : budgetMax >= price * 0.5 ? 60 : 25;
+        affordNote = `budget ~RM${Math.round(budgetMax).toLocaleString()} vs RM${Number(price).toLocaleString()}`;
+    } else if (price != null && incomeMax != null) {
+        afford = incomeMax >= price ? 90 : incomeMax >= price * 0.5 ? 55 : 30;
+        affordNote = `income ~RM${Math.round(incomeMax).toLocaleString()} vs RM${Number(price).toLocaleString()}`;
+    } else if (price == null) {
+        affordNote = 'target has no fixed price';
+    }
+    comps.push({ key: 'affordability', label: 'Affordability', weight: c.fit_weight_affordability ?? 40, score: afford, note: affordNote });
+    // Authority — decision_maker yes/no/unknown from the potential modal.
+    const dm = String(prospect.decision_maker || 'unknown').toLowerCase();
+    comps.push({ key: 'authority', label: 'Decision maker', weight: c.fit_weight_authority ?? 30,
+        score: dm === 'yes' ? 100 : dm === 'no' ? 20 : 50, note: dm });
+    // Urgency — decision_timeline free text bucketed.
+    const tl = String(prospect.decision_timeline || '').toLowerCase();
+    let urg = 50;
+    if (tl) {
+        if (/(immediat|asap|now|this (week|month)|within (a |1 |one )?month|马上|立刻|这个月|尽快)/.test(tl)) urg = 100;
+        else if (/(quarter|within (2|3) months?|2 months?|3 months?|两个月|三个月)/.test(tl)) urg = 70;
+        else if (/(6 months?|half year|半年)/.test(tl)) urg = 50;
+        else if (/(next year|year|明年|以后)/.test(tl)) urg = 30;
+        else urg = 60; // filled but unrecognized — a stated timeline beats unknown
+    }
+    comps.push({ key: 'urgency', label: 'Timeline', weight: c.fit_weight_urgency ?? 20, score: urg, note: tl || 'unknown' });
+    // Owner — only meaningful when the target is agent_package or fengshui
+    // (office audit); neutral for every other category.
+    const occ = String(prospect.occupation || '').toLowerCase();
+    const isOwner = prospect.is_own_business === true || /business|owner|boss|founder|director|老板|创业|东主/.test(occ);
+    const ownerRelevant = !!category && (category.id === 'agent_package' || category.id === 'fengshui');
+    comps.push({ key: 'owner', label: 'Business owner', weight: c.fit_weight_owner ?? 10,
+        score: ownerRelevant ? (isOwner ? 100 : 40) : 50, note: ownerRelevant ? (isOwner ? 'yes' : 'no') : 'n/a for this target' });
+
+    const totalW = comps.reduce((s, x) => s + (Number(x.weight) || 0), 0) || 1;
+    const fit = Math.round(comps.reduce((s, x) => s + x.score * (Number(x.weight) || 0), 0) / totalW);
+    const mMin = c.fit_mult_min ?? 0.7;
+    const mMax = c.fit_mult_max ?? 1.2;
+    const mult = Math.round((mMin + (mMax - mMin) * (fit / 100)) * 100) / 100;
+    return { fit, mult, components: comps };
+};
+
 // ---- MAIN: calculate pipeline entry for one prospect ----
 // Returns an object with qualified flag, probability, category, breakdown, referral info
 // prefetched: optional { allReferrals, allPurchases, allSolutions } to avoid N+1 in bulk calcs
@@ -438,6 +610,38 @@ const calcPipelineEntry = async (prospect, prospectActivities, prefetched) => {
         ? Math.floor((now - lastActivityDate) / (1000 * 60 * 60 * 24))
         : 999;
 
+    // v7 SUPPRESSION — an explicit recent "not interested" removes the prospect
+    // from the pipeline entirely. Checked BEFORE the CPS gate so the flag rides
+    // every unqualified return, and _applyPotentialBoost refuses to re-qualify a
+    // suppressed entry (an explicit no beats a gut feeling).
+    const _suppressDays = config.constants?.not_interested_suppress_days ?? 60;
+    if (_suppressDays > 0) {
+        let _niAge = null;
+        for (const a of prospectActivities) {
+            if (a.outcome !== 'not_interested') continue;
+            const age = Math.floor((now - new Date(a.activity_date)) / (1000 * 60 * 60 * 24));
+            if (age <= _suppressDays && (_niAge === null || age < _niAge)) _niAge = age;
+        }
+        if (_niAge !== null) {
+            return {
+                qualified: false,
+                suppressed: true,
+                probability: 0,
+                category: null,
+                categoryScores: {},
+                breakdown: [],
+                referralInfo: { applied: false, reason: `Not interested ${_niAge}d ago` },
+                daysSinceLast,
+                lastActivityDate,
+                latestOppPotential,
+                latestNextAction,
+                stage: null, stageCap: null, fit: null,
+                action: `Respect the no — pause pitching; revisit after ${_suppressDays - _niAge}d or log a new positive touch`,
+                reason: `Marked NOT INTERESTED ${_niAge} day(s) ago (suppressed for ${_suppressDays}d)`,
+            };
+        }
+    }
+
     // CPS HARD GATE — no CPS anywhere in history means prospect is not scored
     const hasCPS = prospectActivities.some(a => a.activity_type === 'CPS');
     if (config.constants?.cps_required && !hasCPS) {
@@ -452,6 +656,7 @@ const calcPipelineEntry = async (prospect, prospectActivities, prefetched) => {
             lastActivityDate,
             latestOppPotential,
             latestNextAction,
+            stage: null, stageCap: null, fit: null,
             action: 'Book CPS discovery session — required to enter pipeline',
             reason: 'No CPS on file',
         };
@@ -469,12 +674,13 @@ const calcPipelineEntry = async (prospect, prospectActivities, prefetched) => {
         activityTs.set(act, new Date(act.activity_date).getTime());
     }
 
-    // Score every category using weights × decay × multiplier
+    // Score every category using weights × decay × multiplier × outcome (v7)
     const categoryScores = {};
     const breakdownByCat = {};
     const categories = config.categories || [];
+    const _repTopN = Math.max(0, Math.round(config.constants?.repeat_top_n ?? 3));
+    const _repFactor = config.constants?.repeat_factor ?? 0.3;
     for (const cat of categories) {
-        let score = 0;
         const contribs = [];
         for (const act of prospectActivities) {
             const base = config.activity_weights?.[act.activity_type] || 0;
@@ -484,19 +690,45 @@ const calcPipelineEntry = async (prospect, prospectActivities, prefetched) => {
             if (decay === 0) continue;
             const text = activityTexts.get(act) || '';
             const mult = _pipelineActivityMultiplier(act, cat.id, config, text);
-            const contribution = base * decay * mult;
-            if (contribution > 0) {
-                score += contribution;
-                contribs.push({
-                    activity_type: act.activity_type,
-                    event_title: text.slice(0, 40),
-                    age_days: age,
-                    base,
-                    decay,
-                    multiplier: mult,
-                    contribution: Math.round(contribution * 100) / 100,
-                });
+            const outcomeMult = _outcomeMultiplier(act, config);
+            const contribution = base * decay * mult * outcomeMult;
+            if (contribution === 0) continue;
+            contribs.push({
+                activity_type: act.activity_type,
+                event_title: text.slice(0, 40),
+                age_days: age,
+                base,
+                decay,
+                multiplier: mult,
+                outcome: act.outcome || null,
+                outcome_mult: outcomeMult,
+                contribution,
+            });
+        }
+        // v7 repeat dampener: per activity TYPE, only the top N positive
+        // contributions count fully — the rest are multiplied by repeat_factor
+        // (logging 15 calls is 3 signals + 12 echoes, not 15 signals).
+        // Negative contributions are never dampened: bad news always counts.
+        if (_repFactor < 1) {
+            const byType = new Map();
+            for (const x of contribs) {
+                if (x.contribution <= 0) continue;
+                let b = byType.get(x.activity_type);
+                if (!b) { b = []; byType.set(x.activity_type, b); }
+                b.push(x);
             }
+            for (const bucket of byType.values()) {
+                bucket.sort((a, b) => b.contribution - a.contribution);
+                for (let i = _repTopN; i < bucket.length; i++) {
+                    bucket[i].dampened = true;
+                    bucket[i].contribution = bucket[i].contribution * _repFactor;
+                }
+            }
+        }
+        let score = 0;
+        for (const x of contribs) {
+            score += x.contribution;
+            x.contribution = Math.round(x.contribution * 100) / 100;
         }
         categoryScores[cat.id] = Math.round(score * 100) / 100;
         breakdownByCat[cat.id] = contribs;
@@ -524,6 +756,7 @@ const calcPipelineEntry = async (prospect, prospectActivities, prefetched) => {
             lastActivityDate,
             latestOppPotential,
             latestNextAction,
+            stage: null, stageCap: null, fit: null,
             action: 'Reactivate with an event invitation or follow-up call',
             reason: 'No scoring activity',
         };
@@ -531,13 +764,27 @@ const calcPipelineEntry = async (prospect, prospectActivities, prefetched) => {
 
     const bestCategory = categories.find(c => c.id === bestCatId) || null;
     const K = config.constants?.score_to_prob_k || 2.5;
-    let probability = Math.min(100, Math.round(bestScore * K));
+    const behaviorPct = Math.min(100, Math.round(bestScore * K));
+
+    // v7 FIT — multiplicative dampener on the behavior probability.
+    const fitInfo = _calcFitScore(prospect, bestCategory, config);
+    let probability = Math.round(behaviorPct * fitInfo.mult);
 
     // Apply customer referral bonus
     const referralInfo = await checkReferralBonus(prospect, config, prefetched?.allReferrals, prefetched?.allPurchases, prefetched?.referralsByProspect, prefetched?.purchasesByCustomer);
     if (referralInfo.applied) {
-        probability = Math.min(100, probability + referralInfo.bonusPct);
+        probability = probability + referralInfo.bonusPct;
     }
+    probability = Math.min(100, probability);
+
+    // v7 STAGE CAP — the funnel stage is the probability CEILING. Activity
+    // volume alone can no longer reach 100%; sending a proposal / starting a
+    // closing record raises the ceiling.
+    const stage = await _derivePipelineStage(prospect, prospectActivities, prefetched);
+    const stageCap = _stageCapFor(stage, config);
+    const preCapProbability = probability;
+    probability = Math.min(stageCap, probability);
+    const capApplied = preCapProbability > probability;
 
     const action = generatePipelineAction(bestCategory, daysSinceLast, true, referralInfo, breakdownByCat[bestCatId]);
 
@@ -549,6 +796,14 @@ const calcPipelineEntry = async (prospect, prospectActivities, prefetched) => {
         breakdown: breakdownByCat[bestCatId] || [],
         referralInfo,
         rawScore: bestScore,
+        behaviorPct,
+        fit: fitInfo.fit,
+        fitMult: fitInfo.mult,
+        fitComponents: fitInfo.components,
+        stage,
+        stageCap,
+        capApplied,
+        preCapProbability,
         daysSinceLast,
         lastActivityDate,
         latestOppPotential,
@@ -819,10 +1074,18 @@ const _plProbMeta = (prob) => ({
 // manual close_probability or potential_level is treated as qualified with a derived
 // probability. Applied to BOTH the Focus list rows and the Auto-Generated table so
 // the same prospect can't show HOT 70% in one and COLD 0% in the other on one screen.
+// v7: declared belief is CAPPED at potential_prob_cap (default 65 — WARM, never
+// HOT), and a suppressed entry (recent explicit "not interested") is never
+// re-qualified by gut feel. The declared value survives on declaredProbability
+// so the Explain modal can show both numbers.
 const _applyPotentialBoost = (entry, prospect) => {
+    if (entry.suppressed) return entry;
     if (!entry.qualified && (prospect.close_probability > 0 || prospect.potential_level)) {
-        entry.probability = prospect.close_probability > 0 ? prospect.close_probability
+        const declared = prospect.close_probability > 0 ? prospect.close_probability
             : (String(prospect.potential_level) === 'High' ? 70 : String(prospect.potential_level) === 'Medium' ? 40 : 20);
+        const cap = (_pipelineConfig?.constants?.potential_prob_cap) ?? 65;
+        entry.declaredProbability = declared;
+        entry.probability = Math.min(declared, cap);
         entry.qualified = true;
         entry.fromPotential = true;
         entry.potentialLevel = prospect.potential_level;
@@ -831,6 +1094,42 @@ const _applyPotentialBoost = (entry, prospect) => {
         }
     }
     return entry;
+};
+
+// ---- v7 P3: daily calibration snapshot ------------------------------------
+// Writes ONE bulk insert per user per local day capturing every qualified row's
+// predicted probability, so the Calibration report can later compare prediction
+// against the 90-day outcome. Throttled via localStorage (one attempt per day
+// per device, success or not — never a retry loop against the NANO instance).
+// Failures are silent: the table may not exist yet on an older DB, and the
+// UNIQUE(snapped_at,user_id,prospect_id) constraint rejects same-day dupes from
+// a second device — both are harmless.
+const _maybeSnapshotPipeline = async (enriched) => {
+    const uid = _state.cu?.id;
+    if (!uid) return;
+    const _n = new Date();
+    const today = `${_n.getFullYear()}-${String(_n.getMonth() + 1).padStart(2, '0')}-${String(_n.getDate()).padStart(2, '0')}`;
+    const lsKey = `fs_crm_plsnap_${uid}`;
+    try { if (localStorage.getItem(lsKey) === today) return; } catch (_) { return; }
+    try {
+        const rows = (enriched || []).slice(0, 200).map(p => ({
+            snapped_at: today,
+            user_id: uid,
+            prospect_id: p.id,
+            probability: Math.round(p._pipeline.probability || 0),
+            raw_score: p._pipeline.rawScore ?? null,
+            category: p._pipeline.fromPotential ? 'potential' : (p._pipeline.category?.id || null),
+            stage: p._pipeline.stage || null,
+            fit: p._pipeline.fit ?? null,
+            from_potential: !!p._pipeline.fromPotential,
+            potential_level: p._pipeline.potentialLevel || null,
+        }));
+        if (rows.length) await AppDataStore.createMany('pipeline_snapshots', rows);
+    } catch (e) {
+        console.warn('[pipeline-snapshot] skipped:', e && e.message);
+    } finally {
+        try { localStorage.setItem(lsKey, today); } catch (_) { /* intentional: quota — retry tomorrow */ }
+    }
 };
 
 const _buildFocusRowData = async (rec, idx, actsByProspect, readOnly, prefetched) => {
@@ -900,6 +1199,13 @@ const _buildSystemRowData = async (prospect, prefetched) => {
             label: (c.activity_type === 'EVENT' && c.event_title ? c.event_title.slice(0, 18) : c.activity_type)
                 + (c.multiplier > 1 ? ` ×${c.multiplier}` : ''),
         }));
+    }
+    // v7 chips: derived stage (with the cap when it actually bit) + fit score.
+    if (!entry.fromPotential && entry.stage) {
+        signals.push({ kind: 'stage', label: _stageLabel(entry.stage) + (entry.capApplied ? ` — capped ${entry.stageCap}%` : '') });
+    }
+    if (!entry.fromPotential && entry.fit != null) {
+        signals.push({ kind: 'fit', label: `Fit ${entry.fit}` });
     }
     return {
         prospectId: prospect.id,
@@ -1055,34 +1361,31 @@ const buildPipelineIslandData = async () => {
         focusRows = (await Promise.all(focusList.map((rec, idx) => _buildFocusRowData(rec, idx, _actsByProspect, false, _plPrefetched)))).filter(Boolean);
     }
 
-    // Auto-generated (system) table — enriched + sorted exactly as STEP 6
+    // Auto-generated (system) table — enriched + sorted exactly as STEP 6.
+    // v7: the manual-potential door goes through _applyPotentialBoost (single
+    // source of truth — declared cap + suppression respect live there), and
+    // evidence-qualified rows outrank declared-only rows on probability ties.
     const enrichedRaw = await Promise.all(activeProspects.map(async (p) => {
         const acts = _actsByProspect.get(p.id) || [];
         const pipeline = await calcPipelineEntry(p, acts, _plPrefetched);
-        if (!pipeline.qualified && (p.close_probability > 0 || p.potential_level)) {
-            const potentialProb = p.close_probability > 0
-                ? p.close_probability
-                : (String(p.potential_level) === 'High' ? 70 : String(p.potential_level) === 'Medium' ? 40 : 20);
-            pipeline.qualified = true;
-            pipeline.probability = potentialProb;
-            pipeline.fromPotential = true;
-            pipeline.potentialLevel = p.potential_level;
-            if (!pipeline.action || pipeline.action.startsWith('Complete prerequisite') || pipeline.action.startsWith('Book CPS')) {
-                pipeline.action = `Potential: ${p.potential_level || 'Set'} – follow up to advance to close`;
-            }
-        }
+        _applyPotentialBoost(pipeline, p);
         return { ...p, _pipeline: pipeline };
     }));
     const enriched = enrichedRaw
         .filter(p => p._pipeline.qualified)
         .sort((a, b) => {
             if (b._pipeline.probability !== a._pipeline.probability) return b._pipeline.probability - a._pipeline.probability;
+            const fp = (a._pipeline.fromPotential ? 1 : 0) - (b._pipeline.fromPotential ? 1 : 0);
+            if (fp !== 0) return fp;
             const da = a._pipeline.lastActivityDate ? a._pipeline.lastActivityDate.getTime() : 0;
             const db = b._pipeline.lastActivityDate ? b._pipeline.lastActivityDate.getTime() : 0;
             if (db !== da) return db - da;
             return (a.name || a.full_name || '').localeCompare(b.name || b.full_name || '');
         });
     const systemRows = await Promise.all(enriched.map(p => _buildSystemRowData(p, _plPrefetched)));
+
+    // v7 P3: daily calibration snapshot — fire-and-forget, throttled inside.
+    try { _maybeSnapshotPipeline(enriched); } catch (_) { /* intentional: snapshot is best-effort */ }
 
     // Team sections (leader+, current month only)
     let teamSections = [];
@@ -1603,21 +1906,9 @@ const showPipelineView = async (container) => {
     const enrichedRaw = await Promise.all(activeProspects.map(async (p) => {
         const acts = _actsByProspect.get(p.id) || [];
         const pipeline = await calcPipelineEntry(p, acts, _plPrefetched);
-        // Also qualify prospects with explicit potential data set (manual override)
-        if (!pipeline.qualified && (p.close_probability > 0 || p.potential_level)) {
-            const potentialProb = p.close_probability > 0
-                ? p.close_probability
-                : (String(p.potential_level) === 'High' ? 70 : String(p.potential_level) === 'Medium' ? 40 : 20);
-            pipeline.qualified = true;
-            pipeline.probability = potentialProb;
-            pipeline.fromPotential = true;
-            pipeline.potentialLevel = p.potential_level;
-            if (!pipeline.action || pipeline.action.startsWith('Complete prerequisite') || pipeline.action.startsWith('Book CPS')) {
-                // Plain text (audit L576/L1479) — consumed by the plain-payload builders;
-                // matches the parallel line in _buildFocusRowData's path (no <strong>).
-                pipeline.action = `Potential: ${p.potential_level || 'Set'} – follow up to advance to close`;
-            }
-        }
+        // v7: manual-potential door via the single helper (declared cap +
+        // suppression respect live in _applyPotentialBoost).
+        _applyPotentialBoost(pipeline, p);
         return { ...p, _pipeline: pipeline };
     }));
 
@@ -1625,6 +1916,8 @@ const showPipelineView = async (container) => {
         .filter(p => p._pipeline.qualified)
         .sort((a, b) => {
             if (b._pipeline.probability !== a._pipeline.probability) return b._pipeline.probability - a._pipeline.probability;
+            const fp = (a._pipeline.fromPotential ? 1 : 0) - (b._pipeline.fromPotential ? 1 : 0);
+            if (fp !== 0) return fp;
             const da = a._pipeline.lastActivityDate ? a._pipeline.lastActivityDate.getTime() : 0;
             const db = b._pipeline.lastActivityDate ? b._pipeline.lastActivityDate.getTime() : 0;
             if (db !== da) return db - da;
@@ -1809,6 +2102,13 @@ const renderSystemRow = async (prospect, probBadge, prefetched) => {
             const boost = c.multiplier > 1 ? ` ×${c.multiplier}` : '';
             return `<span style="background:#D1FAE5;color:#065F46;padding:2px 5px;border-radius:4px;font-size:10px;">✓ ${escapeHtml(label)}${boost}</span>`;
         }).join(' ');
+    }
+    // v7 chips: derived stage + fit (mirrors the JSX payload's signal kinds).
+    if (!entry.fromPotential && entry.stage) {
+        signalsHtml += ` <span style="background:#FEF3C7;color:#92400E;padding:2px 5px;border-radius:4px;font-size:10px;">${escapeHtml(_stageLabel(entry.stage))}${entry.capApplied ? ` — capped ${entry.stageCap}%` : ''}</span>`;
+    }
+    if (!entry.fromPotential && entry.fit != null) {
+        signalsHtml += ` <span style="background:#DBEAFE;color:#1E40AF;padding:2px 5px;border-radius:4px;font-size:10px;">Fit ${entry.fit}</span>`;
     }
     const referralBadge = entry.referralInfo?.applied
         ? `<span style="background:#FEF3C7;color:#92400E;padding:2px 5px;border-radius:4px;font-size:10px;margin-left:4px;" title="Referred by customer with recent purchase — +${entry.referralInfo.bonusPct}%">⭐ Customer referral +${entry.referralInfo.bonusPct}%</span>`
@@ -2488,18 +2788,49 @@ const _renderPipelineConfigModal = (isAdmin) => {
             </div>
         </details>`;
 
+    // === Section 7: v7 — Stage caps / dampeners / outcomes / fit ===
+    const _c7 = (field, label, fallback, step = 1) => `
+                <div>
+                    <label style="font-size:11px;color:#6B7280;display:block;margin-bottom:2px;">${label}</label>
+                    <input type="number" step="${step}" value="${consts[field] ?? fallback}" ${disabled} data-kind="const" data-field="${field}" style="width:100%;border:1px solid #E5E7EB;padding:6px;">
+                </div>`;
+    const v7Section = `
+        <details open style="margin-bottom:14px;">
+            <summary style="cursor:pointer;font-size:14px;font-weight:600;padding:8px 0;">7. v7 — Stage Caps · Dampeners · Outcomes · Fit</summary>
+            <div style="font-size:11px;color:#6B7280;margin:4px 0 8px;">Stage caps are probability ceilings by derived funnel stage (100 = off). Repeat factor dampens same-type activity spam (1 = off). Outcome multipliers scale by activities' recorded outcome (negatives subtract). Fit maps 0-100 into the multiplier band (min=max=1 = off).</div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;max-width:700px;">
+                ${_c7('stage_cap_cps_only', 'Cap: no proposal (%)', 45)}
+                ${_c7('stage_cap_proposal', 'Cap: proposal sent (%)', 75)}
+                ${_c7('stage_cap_closing', 'Cap: closing started (%)', 95)}
+                ${_c7('repeat_top_n', 'Repeat: top N full', 3)}
+                ${_c7('repeat_factor', 'Repeat: factor beyond N', 0.3, 0.05)}
+                ${_c7('potential_prob_cap', 'Declared potential cap (%)', 65)}
+                ${_c7('outcome_mult_positive', 'Outcome × positive', 1.1, 0.05)}
+                ${_c7('outcome_mult_negative', 'Outcome × negative', -0.5, 0.05)}
+                ${_c7('outcome_mult_not_interested', 'Outcome × not interested', -1, 0.05)}
+                ${_c7('not_interested_suppress_days', 'Not-interested cool-off (days)', 60)}
+                ${_c7('fit_mult_min', 'Fit multiplier min', 0.7, 0.05)}
+                ${_c7('fit_mult_max', 'Fit multiplier max', 1.2, 0.05)}
+                ${_c7('fit_weight_affordability', 'Fit weight: affordability', 40)}
+                ${_c7('fit_weight_authority', 'Fit weight: decision maker', 30)}
+                ${_c7('fit_weight_urgency', 'Fit weight: timeline', 20)}
+                ${_c7('fit_weight_owner', 'Fit weight: business owner', 10)}
+            </div>
+        </details>`;
+
     const historyBtn = isAdmin
-        ? `<button class="btn secondary btn-sm" onclick="app.showPipelineConfigHistory()"><i class="fas fa-history"></i> History</button>`
+        ? `<button class="btn secondary btn-sm" onclick="app.showPipelineConfigHistory()"><i class="fas fa-history"></i> History</button>
+           <button class="btn secondary btn-sm" onclick="app.showPipelineCalibration()" title="Predicted vs actual close rates from daily snapshots"><i class="fas fa-bullseye"></i> Calibration</button>`
         : '';
 
     const content = `
         <div style="padding:4px;max-width:100%;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding:10px 12px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;">
                 <div>
-                    <div style="font-size:13px;font-weight:600;color:#92400E;">Pipeline Scoring Rules v6</div>
+                    <div style="font-size:13px;font-weight:600;color:#92400E;">Pipeline Scoring Rules v7</div>
                     <div style="font-size:11px;color:#78350F;">Config version ${cfg.version || 1} · ${adminBadge}</div>
                 </div>
-                ${historyBtn}
+                <div style="display:flex;gap:6px;">${historyBtn}</div>
             </div>
             ${categoriesSection}
             ${weightsSection}
@@ -2507,6 +2838,7 @@ const _renderPipelineConfigModal = (isAdmin) => {
             ${boostersSection}
             ${matrixSection}
             ${constsSection}
+            ${v7Section}
         </div>`;
 
     const saveBtn = isAdmin
@@ -2631,6 +2963,189 @@ const savePipelineRules = async () => {
     UI.hideModal();
     const container = document.getElementById('content-viewport');
     if (container) await showPipelineView(container);
+};
+
+// ===== v7 P3: CALIBRATION REPORT ============================================
+// Answers "when the engine said 70%, how often did they actually buy?" from the
+// daily pipeline_snapshots (+ monthly_focus_archive as a seed), resolved against
+// purchases within 90 days of the snapshot. Also scores each agent's declared
+// High/Medium/Low accuracy, and derives a suggested K from the resolved rows.
+// Snapshots are deduped to ONE per prospect per calendar month (latest wins) so
+// long-lived prospects don't dominate the bands.
+const _calibResolveOutcome = (prospectId, snappedAtMs, purchasesByProspect) => {
+    const purchases = purchasesByProspect.get(String(prospectId)) || [];
+    const windowMs = 90 * 24 * 60 * 60 * 1000;
+    return purchases.some(p => {
+        const d = p.purchase_date || p.created_at || p.date || null;
+        if (!d) return false;
+        const t = new Date(d).getTime();
+        return t >= snappedAtMs && t <= snappedAtMs + windowMs;
+    });
+};
+
+const showPipelineCalibration = async () => {
+    if (!isSystemAdmin(_state.cu)) { UI.toast.error('Super Admin only'); return; }
+    UI.showModal('Pipeline Calibration', '<div style="padding:24px;text-align:center;color:#6B7280;"><i class="fas fa-spinner fa-spin"></i> Crunching snapshots vs outcomes…</div>', [
+        { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
+    ]);
+    let snaps = [], purchases = [], archive = [], users = [];
+    try {
+        [snaps, purchases, archive, users] = await Promise.all([
+            AppDataStore.queryPaged('pipeline_snapshots', { filters: {} }).catch(() => []),
+            AppDataStore.getAll('purchases').catch(() => []),
+            AppDataStore.queryPaged('monthly_focus_archive', { filters: {} }).catch(() => []),
+            AppDataStore.getAll('users').catch(() => []),
+        ]);
+    } catch (_) { /* render with whatever arrived */ }
+    const purchasesByProspect = _bucketByStringKey(purchases || [], 'prospect_id');
+    const userName = new Map((users || []).map(u => [String(u.id), u.full_name || `#${u.id}`]));
+    const nowMs = Date.now();
+    const matureMs = nowMs - 90 * 24 * 60 * 60 * 1000;
+
+    // Normalize snapshots + archive seed into one sample shape.
+    const samples = [];
+    for (const s of (snaps || [])) {
+        if (!s.snapped_at || s.prospect_id == null) continue;
+        samples.push({
+            prospect_id: s.prospect_id, user_id: s.user_id,
+            ms: new Date(s.snapped_at).getTime(),
+            monthKey: String(s.snapped_at).slice(0, 7),
+            probability: Math.round(Number(s.probability) || 0),
+            raw_score: s.raw_score != null ? Number(s.raw_score) : null,
+            from_potential: !!s.from_potential,
+            potential_level: s.potential_level || null,
+            source: 'snapshot',
+        });
+    }
+    for (const a of (archive || [])) {
+        if (!a.month || a.prospect_id == null) continue;
+        // Archive rows are written at month-roll — treat as end-of-month samples.
+        samples.push({
+            prospect_id: a.prospect_id, user_id: a.user_id,
+            ms: new Date(a.month + '-28').getTime(),
+            monthKey: String(a.month),
+            probability: Math.round(parseInt(a.probability || 0, 10) || 0),
+            raw_score: null, from_potential: false, potential_level: null,
+            source: 'archive',
+        });
+    }
+    // Dedupe: one sample per prospect per month (latest ms wins; snapshots beat archive).
+    const byKey = new Map();
+    for (const s of samples) {
+        const k = `${s.prospect_id}|${s.monthKey}`;
+        const prev = byKey.get(k);
+        if (!prev || s.ms > prev.ms || (s.ms === prev.ms && prev.source === 'archive')) byKey.set(k, s);
+    }
+    const deduped = [...byKey.values()];
+    const resolved = deduped.filter(s => s.ms <= matureMs);
+    const pending = deduped.length - resolved.length;
+    for (const s of resolved) s.closed = _calibResolveOutcome(s.prospect_id, s.ms, purchasesByProspect);
+
+    // Reliability bands
+    const BANDS = [[0, 19], [20, 39], [40, 59], [60, 79], [80, 100]];
+    const bandRows = BANDS.map(([lo, hi]) => {
+        const rows = resolved.filter(s => s.probability >= lo && s.probability <= hi);
+        const n = rows.length;
+        const closes = rows.filter(s => s.closed).length;
+        const avgPred = n ? Math.round(rows.reduce((t, s) => t + s.probability, 0) / n) : 0;
+        const actual = n ? Math.round((closes / n) * 100) : null;
+        return { lo, hi, n, avgPred, actual, delta: (n && actual != null) ? actual - avgPred : null };
+    });
+
+    // Suggested K — least squares through the origin on resolved behavior rows.
+    const kRows = resolved.filter(s => !s.from_potential && s.raw_score != null && s.raw_score > 0);
+    let suggestedK = null;
+    if (kRows.length >= 30) {
+        const num = kRows.reduce((t, s) => t + s.raw_score * (s.closed ? 100 : 0), 0);
+        const den = kRows.reduce((t, s) => t + s.raw_score * s.raw_score, 0);
+        if (den > 0) suggestedK = Math.min(10, Math.max(0.5, Math.round((num / den) * 100) / 100));
+    }
+    const cfg = await loadPipelineConfig();
+    const currentK = cfg.constants?.score_to_prob_k || 2.5;
+
+    // Agent judgment — declared High/Medium/Low vs 90d outcome, per agent.
+    const judgeMap = new Map();
+    for (const s of resolved.filter(x => x.from_potential)) {
+        const k = `${s.user_id}|${s.potential_level || '(probability)'}`;
+        let j = judgeMap.get(k);
+        if (!j) { j = { user_id: s.user_id, level: s.potential_level || '(probability)', n: 0, closes: 0 }; judgeMap.set(k, j); }
+        j.n++; if (s.closed) j.closes++;
+    }
+    const judgeRows = [...judgeMap.values()].sort((a, b) => b.n - a.n).slice(0, 20);
+
+    const bandHtml = bandRows.map(b => `
+        <tr style="border-bottom:1px solid #F3F4F6;">
+            <td style="padding:6px 8px;font-size:11px;">${b.lo}–${b.hi}%</td>
+            <td style="padding:6px 8px;font-size:11px;text-align:right;">${b.n}</td>
+            <td style="padding:6px 8px;font-size:11px;text-align:right;">${b.n ? b.avgPred + '%' : '—'}</td>
+            <td style="padding:6px 8px;font-size:11px;text-align:right;font-weight:600;">${b.actual != null ? b.actual + '%' : '—'}</td>
+            <td style="padding:6px 8px;font-size:11px;text-align:right;color:${b.delta == null ? '#9CA3AF' : Math.abs(b.delta) <= 10 ? '#059669' : '#DC2626'};">${b.delta == null ? '—' : (b.delta > 0 ? '+' : '') + b.delta}</td>
+        </tr>`).join('');
+
+    const judgeHtml = judgeRows.length ? judgeRows.map(j => `
+        <tr style="border-bottom:1px solid #F3F4F6;">
+            <td style="padding:6px 8px;font-size:11px;">${escapeHtml(userName.get(String(j.user_id)) || `#${j.user_id}`)}</td>
+            <td style="padding:6px 8px;font-size:11px;">${escapeHtml(String(j.level))}</td>
+            <td style="padding:6px 8px;font-size:11px;text-align:right;">${j.n}</td>
+            <td style="padding:6px 8px;font-size:11px;text-align:right;font-weight:600;">${Math.round((j.closes / j.n) * 100)}%</td>
+        </tr>`).join('') : '<tr><td colspan="4" style="padding:10px;text-align:center;color:#9CA3AF;">No matured declared-potential samples yet</td></tr>';
+
+    const kBlock = suggestedK != null
+        ? `<div style="margin-top:8px;padding:10px;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;font-size:12px;">
+             Suggested K from ${kRows.length} matured samples: <strong>${suggestedK}</strong> (current ${currentK}).
+             <button class="btn secondary btn-sm" style="margin-left:8px;" onclick="app.applyCalibrationK(${suggestedK})"><i class="fas fa-check"></i> Apply</button>
+           </div>`
+        : `<div style="margin-top:8px;font-size:11px;color:#9CA3AF;">Suggested K appears after ≥30 matured behavior samples (currently ${kRows.length}).</div>`;
+
+    const content = `
+        <div style="padding:4px;max-height:70vh;overflow-y:auto;">
+            <div style="font-size:12px;color:#374151;margin-bottom:10px;">
+                ${deduped.length} samples (one per prospect per month) · <strong>${resolved.length}</strong> matured (≥90 days old) · ${pending} still maturing.
+                A sample counts as CLOSED when the prospect purchased within 90 days of the snapshot.
+            </div>
+            <h4 style="font-size:13px;margin:10px 0 6px;">Reliability — predicted vs actual close rate</h4>
+            <table style="width:100%;border-collapse:collapse;font-size:11px;">
+                <thead><tr style="background:#F9FAFB;">
+                    <th scope="col" style="padding:6px 8px;text-align:left;">Predicted band</th>
+                    <th scope="col" style="padding:6px 8px;text-align:right;">n</th>
+                    <th scope="col" style="padding:6px 8px;text-align:right;">Avg predicted</th>
+                    <th scope="col" style="padding:6px 8px;text-align:right;">Actual closed</th>
+                    <th scope="col" style="padding:6px 8px;text-align:right;">Δ</th>
+                </tr></thead>
+                <tbody>${bandHtml}</tbody>
+            </table>
+            ${kBlock}
+            <h4 style="font-size:13px;margin:14px 0 6px;">Agent judgment — declared potential vs reality</h4>
+            <table style="width:100%;border-collapse:collapse;font-size:11px;">
+                <thead><tr style="background:#F9FAFB;">
+                    <th scope="col" style="padding:6px 8px;text-align:left;">Agent</th>
+                    <th scope="col" style="padding:6px 8px;text-align:left;">Declared</th>
+                    <th scope="col" style="padding:6px 8px;text-align:right;">n</th>
+                    <th scope="col" style="padding:6px 8px;text-align:right;">Closed</th>
+                </tr></thead>
+                <tbody>${judgeHtml}</tbody>
+            </table>
+            <div style="margin-top:10px;font-size:10px;color:#9CA3AF;">Snapshots are written once per user per day when the pipeline opens; the report gains power as they mature. Archive months seed the history.</div>
+        </div>`;
+    UI.showModal('Pipeline Calibration', content, [
+        { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
+    ]);
+};
+
+const applyCalibrationK = async (k) => {
+    if (!isSystemAdmin(_state.cu)) { UI.toast.error('Super Admin only'); return; }
+    const kNum = parseFloat(k);
+    if (isNaN(kNum) || kNum <= 0) { UI.toast.error('Invalid K'); return; }
+    const cfg = await loadPipelineConfig();
+    const next = _pipelineDraftClone(cfg);
+    next.constants = { ...(next.constants || {}), score_to_prob_k: kNum };
+    try {
+        await savePipelineConfigJson(next, `Calibration: K → ${kNum}`);
+        UI.toast.success(`K updated to ${kNum}`);
+        UI.hideModal();
+    } catch (_) {
+        UI.toast.error('Could not save K. Please retry.');
+    }
 };
 
 // CRUD actions that mutate the draft and re-render the modal
@@ -2770,6 +3285,33 @@ const showPipelineExplain = async (prospectId) => {
     const cfg = await loadPipelineConfig();
     const K = cfg.constants?.score_to_prob_k || 2.5;
 
+    // v7: run the same manual-potential door as the tables so this modal never
+    // shows "not in pipeline" for a prospect the table lists at 65%.
+    _applyPotentialBoost(entry, prospect);
+
+    if (entry.fromPotential) {
+        const declared = entry.declaredProbability ?? entry.probability;
+        const capped = declared > entry.probability;
+        const content = `
+            <div style="padding:8px;">
+                <div style="background:#EDE9FE;border:1px solid #DDD6FE;border-radius:8px;padding:12px;">
+                    <div style="font-size:18px;font-weight:700;color:#5B21B6;">${entry.probability}%</div>
+                    <div style="font-size:12px;color:#5B21B6;">Declared potential — not evidence-scored</div>
+                </div>
+                <p style="font-size:12px;color:#374151;margin-top:10px;">This prospect has no qualifying pipeline behavior (CPS + scored activity in the decay window). The number comes from the agent's own assessment on the profile:</p>
+                <ul style="font-size:12px;color:#374151;margin:6px 0 0 18px;">
+                    ${prospect.potential_level ? `<li>Potential level: <strong>${escapeHtml(String(prospect.potential_level))}</strong></li>` : ''}
+                    ${prospect.close_probability > 0 ? `<li>Agent's close probability: <strong>${prospect.close_probability}%</strong></li>` : ''}
+                    ${capped ? `<li style="color:#92400E;">Declared ${declared}% is <strong>capped at ${entry.probability}%</strong> — belief can reach WARM, never HOT. Log evidence (CPS, events, a proposal) to earn a higher score.</li>` : ''}
+                </ul>
+                ${entry.action ? `<div style="margin-top:12px;padding:10px;background:#F0FDF4;border-left:3px solid #10B981;font-size:12px;"><strong>Next Best Action:</strong> ${entry.action}</div>` : ''}
+            </div>`;
+        UI.showModal(`Score Breakdown — ${escapeHtml(prospect.name || prospect.full_name || '')}`, content, [
+            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
+        ]);
+        return;
+    }
+
     if (!entry.qualified) {
         const content = `
             <div style="padding:8px;">
@@ -2785,16 +3327,24 @@ const showPipelineExplain = async (prospectId) => {
         return;
     }
 
-    const breakdownRows = (entry.breakdown || []).sort((a, b) => b.contribution - a.contribution).map(c => `
+    const breakdownRows = (entry.breakdown || []).sort((a, b) => b.contribution - a.contribution).map(c => {
+        const outcomeMark = c.outcome === 'positive' ? ' <span title="outcome: positive">👍</span>'
+            : c.outcome === 'negative' ? ' <span title="outcome: negative">👎</span>'
+            : c.outcome === 'not_interested' ? ' <span title="outcome: not interested">🚫</span>' : '';
+        const dampMark = c.dampened ? ` <span title="repeat dampened — beyond top ${cfg.constants?.repeat_top_n ?? 3} of this type">⤓</span>` : '';
+        const multCell = `×${c.multiplier}${(c.outcome_mult != null && c.outcome_mult !== 1) ? ` · ×${c.outcome_mult}` : ''}`;
+        const neg = c.contribution < 0;
+        return `
         <tr style="border-bottom:1px solid #F3F4F6;">
-            <td style="padding:6px 8px;font-size:11px;">${escapeHtml(c.activity_type)}</td>
+            <td style="padding:6px 8px;font-size:11px;">${escapeHtml(c.activity_type)}${outcomeMark}${dampMark}</td>
             <td style="padding:6px 8px;font-size:11px;color:#6B7280;">${escapeHtml((c.event_title || '').slice(0, 30))}</td>
             <td style="padding:6px 8px;font-size:11px;text-align:right;">${c.age_days}d</td>
             <td style="padding:6px 8px;font-size:11px;text-align:right;">${c.base}</td>
             <td style="padding:6px 8px;font-size:11px;text-align:right;">×${c.decay}</td>
-            <td style="padding:6px 8px;font-size:11px;text-align:right;">×${c.multiplier}</td>
-            <td style="padding:6px 8px;font-size:11px;text-align:right;font-weight:600;color:#059669;">+${c.contribution}</td>
-        </tr>`).join('');
+            <td style="padding:6px 8px;font-size:11px;text-align:right;">${multCell}</td>
+            <td style="padding:6px 8px;font-size:11px;text-align:right;font-weight:600;color:${neg ? '#DC2626' : '#059669'};">${neg ? '' : '+'}${c.contribution}</td>
+        </tr>`;
+    }).join('');
 
     const allCatScores = Object.entries(entry.categoryScores || {})
         .sort((a, b) => b[1] - a[1])
@@ -2812,12 +3362,30 @@ const showPipelineExplain = async (prospectId) => {
         ? `<tr><td colspan="2" style="padding:6px 8px;font-size:12px;color:#92400E;">+ Customer referral bonus <span style="font-size:10px;color:#9CA3AF;">(purchase ${entry.referralInfo.lastPurchaseDate ? new Date(entry.referralInfo.lastPurchaseDate).toLocaleDateString('en-GB') : '—'})</span></td><td style="padding:6px 8px;font-size:12px;text-align:right;font-weight:600;color:#D97706;">+${entry.referralInfo.bonusPct}%</td></tr>`
         : `<tr><td colspan="3" style="padding:6px 8px;font-size:11px;color:#9CA3AF;">Referral bonus: ${escapeHtml(entry.referralInfo?.reason || 'not applied')}</td></tr>`;
 
+    // v7 rows: fit dampener + stage cap in the bonuses/penalties table.
+    const fitRow = entry.fitMult != null
+        ? `<tr><td colspan="2" style="padding:6px 8px;font-size:12px;color:#1E40AF;">Fit dampener <span style="font-size:10px;color:#9CA3AF;">(fit ${entry.fit}/100 → band)</span></td><td style="padding:6px 8px;font-size:12px;text-align:right;font-weight:600;color:#1E40AF;">×${entry.fitMult}</td></tr>`
+        : '';
+    const capRow = entry.stage
+        ? (entry.capApplied
+            ? `<tr><td colspan="2" style="padding:6px 8px;font-size:12px;color:#92400E;">Stage ceiling — ${escapeHtml(_stageLabel(entry.stage))} <span style="font-size:10px;color:#9CA3AF;">(was ${entry.preCapProbability}%)</span></td><td style="padding:6px 8px;font-size:12px;text-align:right;font-weight:600;color:#DC2626;">≤ ${entry.stageCap}%</td></tr>`
+            : `<tr><td colspan="3" style="padding:6px 8px;font-size:11px;color:#9CA3AF;">Stage ceiling ${entry.stageCap}% (${escapeHtml(_stageLabel(entry.stage))}) — not reached</td></tr>`)
+        : '';
+
+    const fitCompRows = (entry.fitComponents || []).map(f => `
+        <tr style="border-bottom:1px solid #F3F4F6;">
+            <td style="padding:6px 8px;font-size:11px;">${escapeHtml(f.label)}</td>
+            <td style="padding:6px 8px;font-size:11px;color:#6B7280;">${escapeHtml(String(f.note || ''))}</td>
+            <td style="padding:6px 8px;font-size:11px;text-align:right;">${f.weight}</td>
+            <td style="padding:6px 8px;font-size:11px;text-align:right;font-weight:600;">${f.score}</td>
+        </tr>`).join('');
+
     const content = `
         <div style="padding:4px;max-height:70vh;overflow-y:auto;">
             <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:12px;margin-bottom:14px;">
                 <div style="font-size:18px;font-weight:700;color:#1E40AF;">${entry.probability}%</div>
-                <div style="font-size:12px;color:#1E40AF;">Target: <strong>${escapeHtml(entry.category?.name || '')}</strong></div>
-                <div style="font-size:11px;color:#6B7280;margin-top:2px;">Raw score ${entry.rawScore} × K(${K}) = ${Math.min(100, Math.round(entry.rawScore * K))}% ${entry.referralInfo?.applied ? `+ ${entry.referralInfo.bonusPct}% referral bonus` : ''}</div>
+                <div style="font-size:12px;color:#1E40AF;">Target: <strong>${escapeHtml(entry.category?.name || '')}</strong> · Stage: <strong>${escapeHtml(_stageLabel(entry.stage))}</strong></div>
+                <div style="font-size:11px;color:#6B7280;margin-top:2px;">Raw ${entry.rawScore} × K(${K}) = ${entry.behaviorPct}% × fit ${entry.fitMult}${entry.referralInfo?.applied ? ` + ${entry.referralInfo.bonusPct} referral` : ''} = ${entry.preCapProbability}%${entry.capApplied ? ` → capped at ${entry.stageCap}% (${escapeHtml(_stageLabel(entry.stage))})` : ''}</div>
             </div>
 
             <h4 style="font-size:13px;margin:12px 0 6px;">Activity contributions (sorted)</h4>
@@ -2844,9 +3412,20 @@ const showPipelineExplain = async (prospectId) => {
                 <tbody>${allCatScores}</tbody>
             </table>
 
+            <h4 style="font-size:13px;margin:14px 0 6px;">Fit components <span style="font-weight:400;color:#9CA3AF;font-size:10px;">(unknown data scores neutral 50 — fill the Potential &amp; Opportunities form to move these)</span></h4>
+            <table style="width:100%;border-collapse:collapse;font-size:11px;">
+                <thead><tr style="background:#F9FAFB;">
+                    <th scope="col" style="padding:6px 8px;text-align:left;">Component</th>
+                    <th scope="col" style="padding:6px 8px;text-align:left;">Basis</th>
+                    <th scope="col" style="padding:6px 8px;text-align:right;">Weight</th>
+                    <th scope="col" style="padding:6px 8px;text-align:right;">Score</th>
+                </tr></thead>
+                <tbody>${fitCompRows || '<tr><td colspan="4" style="padding:10px;text-align:center;color:#9CA3AF;">No fit data</td></tr>'}</tbody>
+            </table>
+
             <h4 style="font-size:13px;margin:14px 0 6px;">Bonuses / Penalties</h4>
             <table style="width:100%;border-collapse:collapse;font-size:11px;">
-                <tbody>${referralRow}</tbody>
+                <tbody>${fitRow}${referralRow}${capRow}</tbody>
             </table>
 
             ${entry.action ? `<div style="margin-top:14px;padding:10px;background:#F0FDF4;border-left:3px solid #10B981;font-size:12px;"><strong>Next Best Action:</strong> ${entry.action}</div>` : ''}
@@ -3888,6 +4467,11 @@ const viewJustification = async (overrideId) => {
         showPipelineConfigHistory,
         rollbackPipelineConfig,
         showPipelineExplain,
+        _derivePipelineStage,
+        _calcFitScore,
+        _applyPotentialBoost,
+        showPipelineCalibration,
+        applyCalibrationK,
         savePipelineConfig,
         showProspectMenu,
         showComments,

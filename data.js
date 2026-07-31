@@ -212,7 +212,10 @@ class DataStore {
             // long discussion_summary field — only needed in detail/edit view.
             // photo_urls is included: it is a JSONB array of short URLs (not a blob)
             // and must appear in list/tab views so Meet Up History can show thumbnails.
-            activities: 'id,activity_type,activity_date,activity_title,prospect_id,customer_id,lead_agent_id,start_time,end_time,visibility,co_agents,event_id,closing_amount,amount_closed,is_closing,solution_sold,location_address,venue,status,unable_to_serve,unable_reason,note_key_points,note_outcome,note_next_steps,cps_invitation_method,cps_invitation_details,source,created_at,updated_at,score_value,is_closed,next_action,next_action_done,completed_at,photo_urls,opportunity_potential'
+            // 2026-07-31: `outcome` added with its migration (pipeline v7 negative
+            // signals) — the pipeline scorer reads it from list fetches, so DDL
+            // without this line reproduces the invisible-column bug.
+            activities: 'id,activity_type,activity_date,activity_title,prospect_id,customer_id,lead_agent_id,start_time,end_time,visibility,co_agents,event_id,closing_amount,amount_closed,is_closing,solution_sold,location_address,venue,status,unable_to_serve,unable_reason,note_key_points,note_outcome,note_next_steps,cps_invitation_method,cps_invitation_details,source,created_at,updated_at,score_value,is_closed,next_action,next_action_done,completed_at,photo_urls,opportunity_potential,outcome'
         };
 
         // Prune the SWR cache at startup if localStorage is close to its

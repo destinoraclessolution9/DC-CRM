@@ -170,6 +170,10 @@ function SystemRow({ row }) {
                 <div style={{ marginTop: '4px', display: 'flex', flexWrap: 'wrap', gap: '2px' }}>
                     {row.signals.map((s, i) => s.kind === 'potential'
                         ? <span key={i} style={{ background: '#EDE9FE', color: '#5B21B6', padding: '2px 5px', borderRadius: '4px', fontSize: '10px' }}>⭐ {s.label}</span>
+                        : s.kind === 'stage'
+                        ? <span key={i} style={{ background: '#FEF3C7', color: '#92400E', padding: '2px 5px', borderRadius: '4px', fontSize: '10px' }}>{s.label}</span>
+                        : s.kind === 'fit'
+                        ? <span key={i} style={{ background: '#DBEAFE', color: '#1E40AF', padding: '2px 5px', borderRadius: '4px', fontSize: '10px' }}>{s.label}</span>
                         : <span key={i} style={{ background: '#D1FAE5', color: '#065F46', padding: '2px 5px', borderRadius: '4px', fontSize: '10px' }}>✓ {s.label}</span>)}
                 </div>
                 {row.latestOppPotential ? <div style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '4px' }}>{row.latestOppPotential}</div> : null}

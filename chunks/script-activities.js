@@ -320,6 +320,13 @@
                     </div>
                     <div class="form-group">
                         <label>Outcome:</label>
+                        <select id="activity-outcome" class="form-control" style="margin-bottom:6px;">
+                            <option value="">— How did it go? —</option>
+                            <option value="positive">👍 Positive — moving forward</option>
+                            <option value="neutral">😐 Neutral</option>
+                            <option value="negative">👎 Negative — cooled off</option>
+                            <option value="not_interested">🚫 Not interested — stop pitching</option>
+                        </select>
                         <div style="display:flex; gap:8px;">
                             <textarea id="note-outcome" class="form-control" rows="2" placeholder="What was the result?"></textarea>
                             <button class="btn-icon" onclick="app.openVoiceRecorder('note-outcome', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
@@ -495,6 +502,7 @@
         setField('end-time', activity.end_time);
         setField('note-key-points', activity.note_key_points);
         setField('note-outcome', activity.note_outcome);
+        setField('activity-outcome', activity.outcome);
         setField('note-next-steps', activity.note_next_steps);
         setField('note-needs', activity.note_needs);
         setField('note-pain-points', activity.note_pain_points);
@@ -647,6 +655,9 @@
         summary: document.getElementById('cps-summary')?.value?.trim() || document.getElementById('note-key-points')?.value,
         note_key_points: document.getElementById('note-key-points')?.value,
         note_outcome: document.getElementById('note-outcome')?.value,
+        // v7 pipeline signal — typed outcome; undefined when the select isn't in
+        // this form variant (dropped from the JSON payload, never clobbers).
+        outcome: document.getElementById('activity-outcome')?.value || undefined,
         note_next_steps: document.getElementById('note-next-steps')?.value,
         note_needs: document.getElementById('note-needs')?.value,
         note_pain_points: document.getElementById('note-pain-points')?.value,
@@ -1192,6 +1203,17 @@
         return `
             <div class="post-meetup-notes-block" data-prefix="${prefix}">
                 <div class="form-group">
+                    <label>Meeting Result:</label>
+                    <select id="${prefix}-outcome-type" class="form-control" ${disabled}>
+                        <option value="" ${!a.outcome ? 'selected' : ''}>— How did it go? —</option>
+                        <option value="positive" ${a.outcome === 'positive' ? 'selected' : ''}>👍 Positive — moving forward</option>
+                        <option value="neutral" ${a.outcome === 'neutral' ? 'selected' : ''}>😐 Neutral</option>
+                        <option value="negative" ${a.outcome === 'negative' ? 'selected' : ''}>👎 Negative — cooled off</option>
+                        <option value="not_interested" ${a.outcome === 'not_interested' ? 'selected' : ''}>🚫 Not interested — stop pitching</option>
+                    </select>
+                    <div style="font-size:11px;color:var(--gray-400);margin-top:3px;"><i class="fas fa-link"></i> Feeds the pipeline: negative results subtract score; "Not interested" pauses the prospect for the cool-off period.</div>
+                </div>
+                <div class="form-group">
                     <label>Key Points Discussed:</label>
                     <div style="display:flex;gap:8px;">
                         <textarea id="${prefix}-key-points" class="form-control" rows="2" placeholder="Main discussion points..." ${disabled}>${escapeHtml(a.note_key_points || '')}</textarea>
@@ -1286,6 +1308,9 @@
         return {
             note_key_points: keyPoints,
             summary: keyPoints,
+            // v7 pipeline signal — typed outcome; undefined when unset so the
+            // JSON payload drops the key instead of clobbering a stored value.
+            outcome: document.getElementById(`${prefix}-outcome-type`)?.value || undefined,
             note_needs: document.getElementById(`${prefix}-needs`)?.value || '',
             note_pain_points: document.getElementById(`${prefix}-pain-points`)?.value || '',
             opportunity_potential: (window.app.serializeMultiSelectToText || (() => ''))(`${prefix}-opp-items`, `${prefix}-opportunity-remarks`),
@@ -5222,6 +5247,9 @@
         activity.summary = document.getElementById('note-key-points')?.value || '';
         activity.note_key_points = document.getElementById('note-key-points')?.value || '';
         activity.note_outcome = document.getElementById('note-outcome')?.value || '';
+        // v7 pipeline signal — typed outcome select (empty → not stored)
+        const _outcomeTypeVal = document.getElementById('activity-outcome')?.value;
+        if (_outcomeTypeVal) activity.outcome = _outcomeTypeVal;
         activity.note_next_steps = document.getElementById('note-next-steps')?.value || '';
         activity.note_needs = document.getElementById('note-needs')?.value || '';
         activity.note_pain_points = document.getElementById('note-pain-points')?.value || '';
