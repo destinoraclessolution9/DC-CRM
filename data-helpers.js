@@ -112,7 +112,110 @@
         return fingerprint(a) !== fingerprint(b);
     }
 
-    const api = { classifyQueueError, extractUnknownCol, isSchemaError, isAbortError, snapshotsDiffer };
+    // Referral-network counts for the mobile Clients list: for each person,
+    // how many CPS-verified people they referred directly, and how many are in
+    // their entire downline group (all levels). Pure — takes plain row arrays.
+    //
+    // Model notes (see MOBILE_REFERRAL_COUNT_PLAN.md):
+    // - Three referral write shapes exist: {referrer_id, referrer_type} (CPS
+    //   intake + manual referral), {referrer_customer_id} (customer "Refer a
+    //   Friend" — carries NO referrer_id), plus prospects stamped with
+    //   referred_by_id/referred_by_type (safety net for rows whose auto-referral
+    //   insert failed; deduped against the referrals rows by (parent, child)).
+    // - A customer with converted_from_prospect_id collapses into its prospect
+    //   node so chains survive conversion (B converts, then refers → still B's
+    //   group).
+    // - Only members that "did CPS" are COUNTED, but traversal passes through
+    //   every member (A→M(no CPS)→N(CPS): N counts for A, M doesn't). Markers:
+    //   referral row source 'CPS', prospect cps_form_date/cps_form_url/
+    //   cps_agent_id, or a CPS activity on either identity.
+    function buildReferralCounts(opts) {
+        const referrals  = (opts && opts.referrals)  || [];
+        const prospects  = (opts && opts.prospects)  || [];
+        const customers  = (opts && opts.customers)  || [];
+        const activities = (opts && opts.activities) || [];
+
+        const custToProspect = new Map();
+        for (const c of customers) {
+            if (c && c.id != null && c.converted_from_prospect_id != null) {
+                custToProspect.set(String(c.id), String(c.converted_from_prospect_id));
+            }
+        }
+        const canon = (type, id) => {
+            if (id == null || id === '') return null;
+            const t = String(type || 'prospect').toLowerCase();
+            if (t === 'customer') {
+                const p = custToProspect.get(String(id));
+                return p ? `prospect:${p}` : `customer:${id}`;
+            }
+            return `${t}:${id}`;
+        };
+
+        const cps = new Set();
+        for (const a of activities) {
+            if (!a || a.activity_type !== 'CPS') continue;
+            if (a.prospect_id != null) cps.add(canon('prospect', a.prospect_id));
+            if (a.customer_id != null) cps.add(canon('customer', a.customer_id));
+        }
+        for (const p of prospects) {
+            if (!p || p.id == null) continue;
+            if (p.cps_form_date || p.cps_form_url || p.cps_agent_id) cps.add(`prospect:${p.id}`);
+        }
+
+        // parent canonical key → Set of child canonical keys (children are
+        // always prospects — referred_prospect_id is the only child pointer).
+        const children = new Map();
+        const addEdge = (parentKey, childProspectId, viaCpsIntake) => {
+            if (!parentKey || childProspectId == null) return;
+            const childKey = canon('prospect', childProspectId);
+            if (childKey === parentKey) return; // self-referral bad data
+            let set = children.get(parentKey);
+            if (!set) { set = new Set(); children.set(parentKey, set); }
+            set.add(childKey);
+            // A referral row written by the CPS intake flow is itself proof the
+            // referred person came for CPS (survives RLS-scoped-out activities).
+            if (viaCpsIntake) cps.add(childKey);
+        };
+        for (const r of referrals) {
+            if (!r || r.referred_prospect_id == null) continue;
+            const viaCps = r.referral_source === 'CPS';
+            if (r.referrer_id != null) {
+                addEdge(canon(r.referrer_type || 'prospect', r.referrer_id), r.referred_prospect_id, viaCps);
+            } else if (r.referrer_customer_id != null) {
+                addEdge(canon('customer', r.referrer_customer_id), r.referred_prospect_id, viaCps);
+            }
+        }
+        for (const p of prospects) {
+            if (!p || p.id == null || p.referred_by_id == null) continue;
+            addEdge(canon(p.referred_by_type || 'prospect', p.referred_by_id), p.id, false);
+        }
+
+        // BFS with a visited set — referral data can contain cycles (A→B→A);
+        // the walk must terminate and count each member once.
+        const countsFor = (type, id) => {
+            const start = canon(type, id);
+            if (!start) return { direct: 0, total: 0 };
+            const kids = children.get(start);
+            let direct = 0;
+            if (kids) for (const k of kids) { if (cps.has(k)) direct++; }
+            let total = 0;
+            const visited = new Set([start]);
+            const queue = kids ? Array.from(kids) : [];
+            for (let i = 0; i < queue.length; i++) {
+                const k = queue[i];
+                if (visited.has(k)) continue;
+                visited.add(k);
+                if (cps.has(k)) total++;
+                const next = children.get(k);
+                if (next) for (const n of next) { if (!visited.has(n)) queue.push(n); }
+            }
+            return { direct, total };
+        };
+
+        return { countsFor };
+    }
+
+    const api = { classifyQueueError, extractUnknownCol, isSchemaError, isAbortError, snapshotsDiffer, buildReferralCounts };
     // Browser global (loaded before data.js). Also export for Node tests.
     if (typeof window !== 'undefined') window._dataHelpers = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

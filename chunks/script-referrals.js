@@ -441,13 +441,17 @@
                 .node-memo-btn { cursor: pointer; transition: fill 0.2s; }
                 .node-memo-btn:hover { fill: #3b82f6; }
                 
-                /* Responsive */
+                /* Responsive — also the landing surface for the mobile Clients
+                   list count-chip tap-through, so the tree must be readable and
+                   pannable at phone width, not a desktop layout squeezed in. */
                 @media (max-width: 768px) {
-                    .ref-v2-header { flex-direction: column; align-items: flex-start; }
+                    .referrals-view-v2 { padding: 12px; }
+                    .ref-v2-header { flex-direction: column; align-items: flex-start; margin-bottom: 14px; gap: 10px; }
                     .search-box-v2 { width: 100%; }
                     .top-referrers-strip { flex-direction: column; align-items: flex-start; }
                     .collapsible-content { padding: 10px; }
                     .leaderboard-table-v2 th:nth-child(4), .leaderboard-table-v2 td:nth-child(4) { display: none; }
+                    .tree-visualization { min-height: 60vh; touch-action: none; }
                 }
             `;
     };
@@ -518,9 +522,16 @@
             renderReferralSummaryAndLeaderboard().catch(e => console.warn('referral summary failed:', e));
         }
 
-        // Every user sees themselves as the first node of their own tree
+        // Count-chip tap handoff from the mobile Clients list (mpOpenReferralTree
+        // sets pendingTreeFocus, then routes here through the lazy router).
+        // Consumed exactly once; otherwise every user sees themselves as the
+        // first node of their own tree, exactly as before.
         const user = _state.cu;
-        if (user) {
+        const _focus = _state.pendingTreeFocus;
+        if (_focus && _focus.id != null) {
+            delete _state.pendingTreeFocus;
+            app.showReferralTree(_focus.id, _focus.type || 'prospect').catch(e => console.warn('referral tree failed:', e));
+        } else if (user) {
             app.showReferralTree(user.id, 'user').catch(e => console.warn('referral tree failed:', e));
         }
     };
@@ -864,14 +875,24 @@
                 eventAttendanceCount.set(key, (eventAttendanceCount.get(key) || 0) + 1);
             }
         }
+        // Composite referrer key for a referral row. Two write shapes exist:
+        // {referrer_id, referrer_type} (CPS intake + manual add) and
+        // {referrer_customer_id} from the customer "Refer a Friend" modal —
+        // the latter carries NO referrer_id, so skipping keyless rows silently
+        // dropped customer-made referrals from the tree and its counts.
+        const _referrerKeyOf = (r) => {
+            if (!r) return null;
+            if (r.referrer_id) return `${r.referrer_type || 'prospect'}:${r.referrer_id}`;
+            if (r.referrer_customer_id) return `customer:${r.referrer_customer_id}`;
+            return null;
+        };
+
         // Referral count per referrer (how many people they referred), keyed by
         // composite referrer_type:referrer_id.
         const referralCountByReferrer = new Map();
         for (const r of allReferrals) {
-            if (r.referrer_id) {
-                const key = `${r.referrer_type || 'prospect'}:${r.referrer_id}`;
-                referralCountByReferrer.set(key, (referralCountByReferrer.get(key) || 0) + 1);
-            }
+            const key = _referrerKeyOf(r);
+            if (key) referralCountByReferrer.set(key, (referralCountByReferrer.get(key) || 0) + 1);
         }
 
         // 2. Resolve permissions once. For level 1-2 we short-circuit to full
@@ -906,12 +927,12 @@
         }
 
         // Referrals grouped by referrer_type:referrer_id (composite key to avoid
-        // cross-type ID collisions — e.g. user id 5 vs prospect id 5).
+        // cross-type ID collisions — e.g. user id 5 vs prospect id 5). Includes
+        // referrer_customer_id rows under customer:<id> via _referrerKeyOf.
         const referralsByReferrer = new Map();
         for (const r of allReferrals) {
-            if (!r || !r.referrer_id) continue;
-            const rType = r.referrer_type || 'prospect';
-            const key = `${rType}:${r.referrer_id}`;
+            const key = _referrerKeyOf(r);
+            if (!key) continue;
             if (!referralsByReferrer.has(key)) referralsByReferrer.set(key, []);
             referralsByReferrer.get(key).push(r);
         }

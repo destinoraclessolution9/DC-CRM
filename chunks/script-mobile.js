@@ -3818,7 +3818,7 @@
         // Client lists rarely change between visits, so a fresh snapshot is served
         // as-is with no background refetch; it refreshes only on edit, pull-to-
         // refresh, or after the TTL expires.
-        const _mpSnapKey = `mp-list-snap-v3-${_mpTab}`;
+        const _mpSnapKey = `mp-list-snap-v4-${_mpTab}`;
         let _mpSnapHtml;
         if (!_mpForce) {
             try {
@@ -3901,6 +3901,7 @@
         const searchTerm = (_mpSearch || '').trim();
         let rows = [];
         let _serverSearched = false;
+        let _mpRefCounts = null; // (direct/total) CPS referral counts, built alongside the fetch
         try {
             let tableRowsPromise;
             if (searchTerm) {
@@ -3914,11 +3915,31 @@
             } else {
                 tableRowsPromise = AppDataStore.getAll(table);
             }
-            const [tableRows, agentRows] = await Promise.all([
+            // Referral-count chips need the whole graph, not just the rendered
+            // rows: referrals (edges), customers (converted_from_prospect_id
+            // identity merge), prospects (referred_by stamps + CPS row markers),
+            // activities (CPS marker). All four are SWR-primed at boot, so these
+            // are cache hits, not cold fetches. When the current tab already
+            // fetched the FULL table (no server search narrowing it), reuse it.
+            const [tableRows, agentRows, refRows, custRows, prosRows, actRows] = await Promise.all([
                 tableRowsPromise,
                 _mpAgentMap ? Promise.resolve(null) : AppDataStore.getAll('users').catch(() => []),
+                AppDataStore.getAll('referrals').catch(() => []),
+                (table === 'customers' && !searchTerm) ? Promise.resolve(null) : AppDataStore.getAll('customers').catch(() => []),
+                (table === 'prospects' && !searchTerm) ? Promise.resolve(null) : AppDataStore.getAll('prospects').catch(() => []),
+                AppDataStore.getAll('activities').catch(() => []),
             ]);
             rows = tableRows || [];
+            try {
+                _mpRefCounts = (window._dataHelpers && window._dataHelpers.buildReferralCounts)
+                    ? window._dataHelpers.buildReferralCounts({
+                        referrals: refRows || [],
+                        prospects: prosRows || (table === 'prospects' ? (tableRows || []) : []),
+                        customers: custRows || (table === 'customers' ? (tableRows || []) : []),
+                        activities: actRows || [],
+                    })
+                    : null;
+            } catch (_) { _mpRefCounts = null; /* intentional: chips are enhancement-only — never block the list */ }
             if (agentRows) {
                 _mpAgentMap = new Map(
                     agentRows.filter(u => u.agent_code || u.full_name)
@@ -4001,8 +4022,18 @@
             const pal = palettes[i % palettes.length];
             const phone = UI.escJsAttr(p.phone || '');
             const agentEntry = p.responsible_agent_id ? (_mpAgentMap?.get(String(p.responsible_agent_id)) || null) : null;
-            const agentCode = agentEntry?.code || '';
             const agentName = agentEntry?.name || '';
+            // Ming Gua digit ("MG4" → "4") shown as <4>; CPS referral counts as
+            // (direct/total), hidden when the group is empty. Replaces the old
+            // agent_code display (same value on every row — useless to the viewer).
+            const mgDigit = String(p.ming_gua || '').replace(/\D/g, '');
+            const refCounts = _mpRefCounts ? _mpRefCounts.countsFor(isCust ? 'customer' : 'prospect', p.id) : null;
+            // Tree tap target: a converted customer's referral history lives under
+            // their ORIGINAL prospect identity (the counts helper merges the two,
+            // but the tree walks raw type:id keys) — open the tree as that
+            // prospect or a linked-but-empty customer root would render alone.
+            const refTreeId = (isCust && p.converted_from_prospect_id) ? p.converted_from_prospect_id : p.id;
+            const refTreeType = (isCust && !p.converted_from_prospect_id) ? 'customer' : 'prospect';
             const lastActRaw = p.last_activity_date || '';
             const lastAct = lastActRaw
                 ? new Date(lastActRaw).toLocaleDateString('en-MY', { day: 'numeric', month: 'short' })
@@ -4014,8 +4045,9 @@
                 <div class="mp-card-text">
                     <div class="mp-card-name-row">
                         <div class="mp-card-name${(p.unable_to_serve || p.manual_grade === 'F') ? ' name-unable' : ''}">${_mhomeEsc(p.full_name || 'Unknown')}</div>
+                        ${mgDigit ? `<span class="mp-chip minggua">&lt;${mgDigit}&gt;</span>` : ''}
+                        ${(refCounts && refCounts.total > 0) ? `<button class="mp-chip refcount" onclick="event.stopPropagation();app.mpOpenReferralTree(${refTreeId ?? 'null'},'${refTreeType}')" aria-label="View referral network">(${refCounts.direct}/${refCounts.total})</button>` : ''}
                         ${phone ? `<button class="mp-card-wa" onclick="event.stopPropagation();app.mhomeWa(${p.id ?? 'null'},'${phone}')" aria-label="WhatsApp"><i class="fab fa-whatsapp"></i></button>` : ''}
-                        ${agentCode ? `<span class="mp-card-agent">${_mhomeEsc(agentCode)}</span>` : ''}
                     </div>
                     <div class="mp-card-meta">
                         ${p.unable_to_serve ? `<span class="badge-unable">Unable to Serve</span>` : ''}${p.manual_grade === 'F' ? `<span class="badge-unable">Dropped (F)</span>` : ''}
@@ -4039,7 +4071,7 @@
         // page reload would paint that narrowed list while the in-memory
         // filter state is empty — UI says "no filters" but list is narrowed.
         if (!_mpSearch && !_mpHasActiveFilters()) {
-            try { localStorage.setItem(`mp-list-snap-v3-${_mpTab}`, JSON.stringify({ ts: Date.now(), val: html + truncNote })); } catch(_) { /* intentional: snapshot persistence is best-effort */ }
+            try { localStorage.setItem(`mp-list-snap-v4-${_mpTab}`, JSON.stringify({ ts: Date.now(), val: html + truncNote })); } catch(_) { /* intentional: snapshot persistence is best-effort */ }
         }
     };
 
@@ -4098,6 +4130,17 @@
     // The board lives in the customers chunk; ensure it's loaded before the
     // call so a tap can't silently no-op when the eager post-login chunk
     // burst hasn't finished yet (cross-chunk lazy-stub trap).
+    // Count-chip tap → Referral Relationships view focused on the tapped person.
+    // Routes through the standard router so the referrals chunk lazy-loads first
+    // (a direct cross-chunk app.showReferralTree() call from this card would hit
+    // the lazy-stub no-op trap). script-referrals.js consumes pendingTreeFocus
+    // once on view init and falls back to the usual self-tree when absent.
+    const mpOpenReferralTree = (id, type) => {
+        if (id == null) return;
+        _state.pendingTreeFocus = { id, type: type || 'prospect' };
+        navigateTo('referrals');
+    };
+
     const mpOpenDeliveryListing = async () => {
         try { await window._loadChunk('chunks/script-customers.min.js'); } catch (_) { /* guarded below */ }
         if (typeof window.app?.openDeliveryListing === 'function') {
@@ -4231,7 +4274,7 @@
         // Drop the snapshot so a stale unfiltered cache doesn't paint over the
         // narrowed list on the next visit. _mpRenderList skips saving while
         // filters are active, so this stays clear until filters are reset.
-        try { localStorage.removeItem(`mp-list-snap-v3-${_mpTab}`); } catch(_) { /* intentional: snapshot eviction is best-effort */ }
+        try { localStorage.removeItem(`mp-list-snap-v4-${_mpTab}`); } catch(_) { /* intentional: snapshot eviction is best-effort */ }
         _mpUpdateFilterBtn();
         await _mpRenderList();
     };
@@ -4239,7 +4282,7 @@
     const mpClearFilters = async () => {
         _mpFilters = { status: '', agentId: '', mingGua: '', scoreMin: '', scoreMax: '', pipelineStage: '' };
         UI.hideModal();
-        try { localStorage.removeItem(`mp-list-snap-v3-${_mpTab}`); } catch(_) { /* intentional: snapshot eviction is best-effort */ }
+        try { localStorage.removeItem(`mp-list-snap-v4-${_mpTab}`); } catch(_) { /* intentional: snapshot eviction is best-effort */ }
         _mpUpdateFilterBtn();
         await _mpRenderList();
     };
@@ -4414,6 +4457,7 @@
         mpOpenFilters,
         mpApplyFilters,
         mpClearFilters,
+        mpOpenReferralTree,
         applyMobileTableLabels,
         initSwipeActions,
         initPullToRefresh,
