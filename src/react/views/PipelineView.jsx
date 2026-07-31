@@ -242,6 +242,19 @@ function PipelineFullJsx({ data, onReady }) {
                         <option value="warm">Warm</option>
                         <option value="hot">Hot</option>
                     </select>
+                    <select className="form-control" style={{ width: '170px', height: '38px' }} value={data.targetFilter || 'all'} onChange={(e) => call('setPipelineFilter', 'target', e.target.value)}>
+                        <option value="all">All Targets</option>
+                        {(data.categories || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        <option value="potential">Prospect Potential</option>
+                        <option value="nosignal">General — no signal</option>
+                    </select>
+                    <select className="form-control" style={{ width: '130px', height: '38px' }} value={data.bandFilter || 'all'} onChange={(e) => call('setPipelineFilter', 'band', e.target.value)}>
+                        <option value="all">All Bands</option>
+                        <option value="hot">🔥 HOT ≥80</option>
+                        <option value="warm">⚡ WARM 50-79</option>
+                        <option value="cold">❄️ COLD &lt;50</option>
+                    </select>
+                    <button className="btn secondary" onClick={() => call('showPipelineProductPivot')} title="Per-product contenders and expected revenue"><i className="fas fa-boxes"></i> By Product</button>
                     <button className="btn secondary" onClick={() => call('refreshPipeline')}><i className="fas fa-sync-alt"></i> Refresh</button>
                     <button className="btn primary" onClick={() => call('openPipelineConfigModal')}><i className="fas fa-info-circle"></i> Rules</button>
                 </div>
@@ -356,7 +369,14 @@ function PipelineFullJsx({ data, onReady }) {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                         <h2 style={{ fontSize: '18px', fontWeight: 600, margin: 0 }}>📊 Auto-Generated Pipeline</h2>
-                        <span id="pl-table2-count"><span style={{ background: '#F3F4F6', padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 600 }}>{sys.qualifiedCount} qualified</span></span>
+                        <span id="pl-table2-count"><span style={{ background: '#F3F4F6', padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 600 }}>
+                            {sys.summary ? `${sys.summary.shown} of ${sys.summary.total} qualified (${sys.summary.pct}%)` : `${sys.qualifiedCount} qualified`}
+                        </span></span>
+                        {sys.summary ? (
+                            <span style={{ fontSize: '11px', color: '#6B7280' }} title="Weighted = Σ amount × probability. Denominator = qualified prospects in the current Agent/Status scope.">
+                                Σ RM {fmtRM(sys.summary.sumAmount)} · weighted RM {fmtRM(sys.summary.weightedAmount)}{sys.summary.noAmountCount ? ` · +${sys.summary.noAmountCount} no fixed amount` : ''}
+                            </span>
+                        ) : null}
                     </div>
                     <p style={{ fontSize: '11px', color: '#9CA3AF', margin: 0 }}>Sorted: highest probability → most recent activity → name</p>
                 </div>

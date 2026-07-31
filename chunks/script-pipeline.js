@@ -172,6 +172,11 @@ const DEFAULT_PIPELINE_CONFIG = {
         // implicit past+unattended rule would punish data hygiene, not
         // prospect behavior. 0 = off.
         no_show_penalty: 3,
+        // v7.2 by-product pivot — a prospect is a CONTENDER for a product when
+        // their product-specific evidence share ≥ pivot_share_min AND their
+        // close probability ≥ pivot_prob_min.
+        pivot_share_min: 30,
+        pivot_prob_min: 50,
         // v7 fit — component weights (any scale; normalized by their sum) and
         // the multiplier band the 0-100 fit maps into. min=max=1 = off.
         fit_weight_affordability: 40,
@@ -849,8 +854,33 @@ const calcPipelineEntry = async (prospect, prospectActivities, prefetched) => {
     const K = config.constants?.score_to_prob_k || 2.5;
     const behaviorPct = Math.min(100, Math.round(bestScore * K));
 
+    // v7.2 PRODUCT SHARES — separate engagement from preference. Type-neutral
+    // evidence (CPS, calls) lifts every category equally; only the delta above
+    // the common floor is product-specific evidence. share_c answers "IF she
+    // buys, which product" — P(buy c) = probability × share_c.
+    //   noProductSignal: all categories tied (e.g. CPS-only) — the winner is an
+    //     iteration-order artifact, so the UI must say "General — no product
+    //     signal yet" instead of pretending the first config row is the target.
+    //   tiedCatIds: >1 category at the exact top score (e.g. 汇集 boosts
+    //     fengshui AND calligraphy identically) — show every name, and let the
+    //     target filter match any of them.
+    const _scoreVals = Object.values(categoryScores);
+    const _scoreFloor = _scoreVals.length ? Math.min(..._scoreVals) : 0;
+    const _specTotal = _scoreVals.reduce((t, s) => t + (s - _scoreFloor), 0);
+    const noProductSignal = !(_specTotal > 0);
+    let productShares = null;
+    if (!noProductSignal) {
+        productShares = {};
+        for (const [id, s] of Object.entries(categoryScores)) {
+            const share = Math.round(((s - _scoreFloor) / _specTotal) * 100);
+            if (share > 0) productShares[id] = share;
+        }
+    }
+    const tiedCatIds = Object.entries(categoryScores)
+        .filter(([, s]) => s === bestScore).map(([id]) => id);
+
     // v7 FIT — multiplicative dampener on the behavior probability.
-    const fitInfo = _calcFitScore(prospect, bestCategory, config);
+    const fitInfo = _calcFitScore(prospect, noProductSignal ? null : bestCategory, config);
     let probability = Math.round(behaviorPct * fitInfo.mult);
 
     // Apply customer referral bonus
@@ -869,7 +899,13 @@ const calcPipelineEntry = async (prospect, prospectActivities, prefetched) => {
     probability = Math.min(stageCap, probability);
     const capApplied = preCapProbability > probability;
 
-    const action = generatePipelineAction(bestCategory, daysSinceLast, true, referralInfo, breakdownByCat[bestCatId]);
+    let action;
+    if (noProductSignal) {
+        // Winner is an artifact — never suggest a product-specific close.
+        action = 'Engaged but undecided — invite to a product event (分享会 / 汇集 / museum) to discover preference';
+    } else {
+        action = generatePipelineAction(bestCategory, daysSinceLast, true, referralInfo, breakdownByCat[bestCatId]);
+    }
 
     return {
         qualified: true,
@@ -887,6 +923,9 @@ const calcPipelineEntry = async (prospect, prospectActivities, prefetched) => {
         stageCap,
         capApplied,
         preCapProbability,
+        productShares,
+        noProductSignal,
+        tiedCatIds: tiedCatIds.length > 1 ? tiedCatIds : null,
         daysSinceLast,
         lastActivityDate,
         latestOppPotential,
@@ -896,6 +935,32 @@ const calcPipelineEntry = async (prospect, prospectActivities, prefetched) => {
         missingPrereqs: [],
         completedPrereqs: [],
     };
+};
+
+// v7.1 filter predicate — shared by the JSX payload path and the legacy STEP-6
+// path so the two render modes can never disagree on what "filtered" means.
+// target: 'all' | 'potential' (declared-only door) | 'nosignal' (engaged,
+// undecided) | a category id (winner OR exact-tie co-winner both match).
+// band: 'all' | 'hot' ≥80 | 'warm' 50-79 | 'cold' <50 — same cutoffs as
+// _plProbMeta and the probBadge renderers.
+const _pipelineRowMatchesFilter = (entry, target, band) => {
+    if (target && target !== 'all') {
+        if (target === 'potential') { if (!entry.fromPotential) return false; }
+        else if (target === 'nosignal') { if (entry.fromPotential || !entry.noProductSignal) return false; }
+        else {
+            if (entry.fromPotential || entry.noProductSignal) return false;
+            const winner = entry.category?.id === target;
+            const coWinner = Array.isArray(entry.tiedCatIds) && entry.tiedCatIds.includes(target);
+            if (!winner && !coWinner) return false;
+        }
+    }
+    if (band && band !== 'all') {
+        const p = entry.probability || 0;
+        if (band === 'hot' && !(p >= 80)) return false;
+        if (band === 'warm' && !(p >= 50 && p < 80)) return false;
+        if (band === 'cold' && !(p < 50)) return false;
+    }
+    return true;
 };
 
 const generatePipelineAction = (category, daysSinceLast, isQualified, referralInfo, breakdown) => {
@@ -1110,6 +1175,14 @@ const getPipelineAmount = async (prospect, category, allSolutions, solutionsByPr
 
 let _pipelineAgentFilter = 'all';
 let _pipelineStatusFilter = 'all';
+// v7.1 — filter the Auto-Generated table by Target-to-Sign product and by
+// probability band. In-memory like the pair above (reset on reload). The Month
+// Focus list is NEVER filtered — it is a hand-picked priority list.
+let _pipelineTargetFilter = 'all';
+let _pipelineBandFilter = 'all';
+// v7.2 — last full (unfiltered) enriched list, cached for the By-Product pivot
+// so opening the pivot never re-runs the scoring pass.
+let _lastEnriched = null;
 let _focusViewMonth = 'current'; // 'current' or 'YYYY-MM' for viewing archived month
 
 // React-island flag (default-on, PROMOTED 2026-06-16 after opt-in verify:
@@ -1195,18 +1268,31 @@ const _maybeSnapshotPipeline = async (enriched) => {
     const lsKey = `fs_crm_plsnap_${uid}`;
     try { if (localStorage.getItem(lsKey) === today) return; } catch (_) { return; }
     try {
-        const rows = (enriched || []).slice(0, 200).map(p => ({
-            snapped_at: today,
-            user_id: uid,
-            prospect_id: p.id,
-            probability: Math.round(p._pipeline.probability || 0),
-            raw_score: p._pipeline.rawScore ?? null,
-            category: p._pipeline.fromPotential ? 'potential' : (p._pipeline.category?.id || null),
-            stage: p._pipeline.stage || null,
-            fit: p._pipeline.fit ?? null,
-            from_potential: !!p._pipeline.fromPotential,
-            potential_level: p._pipeline.potentialLevel || null,
-        }));
+        const rows = (enriched || []).slice(0, 200).map(p => {
+            // v7.2 — record the preference split so calibration can later test
+            // per-product accuracy: winner's share + the runner-up category.
+            const ps = p._pipeline.productShares || null;
+            let topShare = null, top2 = null;
+            if (ps) {
+                const sorted = Object.entries(ps).sort((a, b) => b[1] - a[1]);
+                topShare = p._pipeline.category ? (ps[p._pipeline.category.id] ?? sorted[0]?.[1] ?? null) : (sorted[0]?.[1] ?? null);
+                top2 = sorted[1]?.[0] || null;
+            }
+            return {
+                snapped_at: today,
+                user_id: uid,
+                prospect_id: p.id,
+                probability: Math.round(p._pipeline.probability || 0),
+                raw_score: p._pipeline.rawScore ?? null,
+                category: p._pipeline.fromPotential ? 'potential' : (p._pipeline.noProductSignal ? 'nosignal' : (p._pipeline.category?.id || null)),
+                stage: p._pipeline.stage || null,
+                fit: p._pipeline.fit ?? null,
+                from_potential: !!p._pipeline.fromPotential,
+                potential_level: p._pipeline.potentialLevel || null,
+                top_share: topShare,
+                top2_category: top2,
+            };
+        });
         if (rows.length) await AppDataStore.createMany('pipeline_snapshots', rows);
     } catch (e) {
         console.warn('[pipeline-snapshot] skipped:', e && e.message);
@@ -1267,9 +1353,27 @@ const _buildFocusRowData = async (rec, idx, actsByProspect, readOnly, prefetched
     };
 };
 
+// v7.2 — the target label a row should show. The winner category is an
+// iteration-order ARTIFACT when noProductSignal (e.g. CPS-only), and hides
+// co-winners on exact ties (e.g. 汇集 boosting two categories identically) —
+// both cases get honest text instead of the first config row's name.
+const _targetLabelFor = async (entry) => {
+    if (entry.fromPotential) return 'Prospect Potential';
+    if (entry.noProductSignal) return 'General — no product signal yet';
+    if (Array.isArray(entry.tiedCatIds) && entry.tiedCatIds.length > 1) {
+        const cfg = await loadPipelineConfig();
+        const names = entry.tiedCatIds.map(id => (cfg.categories || []).find(c => c.id === id)?.name || id);
+        return names.join(' / ');
+    }
+    return entry.category?.name || '';
+};
+
 const _buildSystemRowData = async (prospect, prefetched) => {
     const entry = prospect._pipeline;
-    const amount = await getPipelineAmount(prospect, entry.category, prefetched?.allSolutions, prefetched?.solutionsByProspect);
+    // No-signal rows must not price against the artifact winner — fall through
+    // to the prospect's own estimated values or "Varies".
+    const _amtCategory = entry.noProductSignal ? null : entry.category;
+    const amount = await getPipelineAmount(prospect, _amtCategory, prefetched?.allSolutions, prefetched?.solutionsByProspect);
     const noteCount = await getNoteCount(prospect.id);
 
     let signals = [];
@@ -1294,7 +1398,7 @@ const _buildSystemRowData = async (prospect, prefetched) => {
         prospectId: prospect.id,
         name: prospect.name || prospect.full_name || '',
         lastActivity: entry.lastActivityDate ? entry.lastActivityDate.toLocaleDateString('en-GB') : 'None',
-        target: entry.fromPotential ? 'Prospect Potential' : (entry.category?.name || ''),
+        target: await _targetLabelFor(entry),
         referral: entry.referralInfo?.applied ? { bonusPct: entry.referralInfo.bonusPct } : null,
         signals,
         latestOppPotential: entry.latestOppPotential || '',
@@ -1465,10 +1569,35 @@ const buildPipelineIslandData = async () => {
             if (db !== da) return db - da;
             return (a.name || a.full_name || '').localeCompare(b.name || b.full_name || '');
         });
-    const systemRows = await Promise.all(enriched.map(p => _buildSystemRowData(p, _plPrefetched)));
 
     // v7 P3: daily calibration snapshot — fire-and-forget, throttled inside.
+    // MUST run on the FULL enriched list, before the v7.1 view filters below:
+    // the calibration dataset never shrinks because someone was filtering.
     try { _maybeSnapshotPipeline(enriched); } catch (_) { /* intentional: snapshot is best-effort */ }
+    _lastEnriched = enriched;
+
+    // v7.1 — Target/Band filters apply to the Auto-Generated table only.
+    const shownEnriched = enriched.filter(p => _pipelineRowMatchesFilter(p._pipeline, _pipelineTargetFilter, _pipelineBandFilter));
+    const systemRows = await Promise.all(shownEnriched.map(p => _buildSystemRowData(p, _plPrefetched)));
+
+    // v7.1 — share summary. Denominator = qualified prospects in the current
+    // Agent/Status scope; weighted = Σ amount × probability (defensible now
+    // that stage caps made probabilities honest). Null amounts (agent package
+    // "Varies") are excluded from both sums and counted separately.
+    let _sumAmount = 0, _weightedAmount = 0, _noAmountCount = 0;
+    for (const r of systemRows) {
+        if (r.amount == null) { _noAmountCount++; continue; }
+        _sumAmount += r.amount;
+        _weightedAmount += r.amount * (r.prob?.prob || 0) / 100;
+    }
+    const summary = {
+        shown: systemRows.length,
+        total: enriched.length,
+        pct: enriched.length ? Math.round(systemRows.length / enriched.length * 100) : 0,
+        sumAmount: Math.round(_sumAmount),
+        weightedAmount: Math.round(_weightedAmount),
+        noAmountCount: _noAmountCount,
+    };
 
     // Team sections (leader+, current month only)
     let teamSections = [];
@@ -1527,9 +1656,13 @@ const buildPipelineIslandData = async () => {
         }
     }
 
+    const _plCfgForPayload = await loadPipelineConfig();
     return {
         agentFilter: String(_pipelineAgentFilter),
         statusFilter: _pipelineStatusFilter,
+        targetFilter: _pipelineTargetFilter,
+        bandFilter: _pipelineBandFilter,
+        categories: (_plCfgForPayload.categories || []).map(c => ({ id: c.id, name: c.name })),
         agents: agents.map(a => ({ id: a.id, name: a.full_name || '' })),
         actionPlan,
         focus: {
@@ -1544,6 +1677,7 @@ const buildPipelineIslandData = async () => {
         system: {
             qualifiedCount: enriched.length,
             rows: systemRows,
+            summary,
         },
     };
 };
@@ -1610,7 +1744,7 @@ const buildPipelineSkeletonHtml = (_skelHelpers) => {
 };
 
 // STEP 2 header controls (agent + status filters, refresh, rules).
-const buildPipelineHeaderControlsHtml = (agents, agentFilter, statusFilter) => {
+const buildPipelineHeaderControlsHtml = (agents, agentFilter, statusFilter, categories = [], targetFilter = 'all', bandFilter = 'all') => {
     return `
         <select class="form-control" style="width:160px;height:38px;" onchange="app.setPipelineFilter('agent', this.value)">
             <option value="all">All Agents</option>
@@ -1623,6 +1757,19 @@ const buildPipelineHeaderControlsHtml = (agents, agentFilter, statusFilter) => {
             <option value="warm" ${statusFilter === 'warm' ? 'selected' : ''}>Warm</option>
             <option value="hot" ${statusFilter === 'hot' ? 'selected' : ''}>Hot</option>
         </select>
+        <select class="form-control" style="width:170px;height:38px;" onchange="(async () => { await app.setPipelineFilter('target', this.value); })()">
+            <option value="all">All Targets</option>
+            ${categories.map(c => `<option value="${escapeHtml(c.id)}" ${targetFilter === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}
+            <option value="potential" ${targetFilter === 'potential' ? 'selected' : ''}>Prospect Potential</option>
+            <option value="nosignal" ${targetFilter === 'nosignal' ? 'selected' : ''}>General — no signal</option>
+        </select>
+        <select class="form-control" style="width:130px;height:38px;" onchange="(async () => { await app.setPipelineFilter('band', this.value); })()">
+            <option value="all">All Bands</option>
+            <option value="hot" ${bandFilter === 'hot' ? 'selected' : ''}>🔥 HOT ≥80</option>
+            <option value="warm" ${bandFilter === 'warm' ? 'selected' : ''}>⚡ WARM 50-79</option>
+            <option value="cold" ${bandFilter === 'cold' ? 'selected' : ''}>❄️ COLD &lt;50</option>
+        </select>
+        <button class="btn secondary" onclick="app.showPipelineProductPivot()" title="Per-product contenders and expected revenue"><i class="fas fa-boxes"></i> By Product</button>
         <button class="btn secondary" onclick="app.refreshPipeline()"><i class="fas fa-sync-alt"></i> Refresh</button>
         <button class="btn primary" onclick="app.openPipelineConfigModal()"><i class="fas fa-info-circle"></i> Rules</button>`;
 };
@@ -1858,7 +2005,9 @@ const showPipelineView = async (container) => {
     // Fill header controls as soon as agents are available
     const _plHdrCtrl = document.getElementById('pl-header-controls');
     if (_plHdrCtrl) {
-        _plHdrCtrl.innerHTML = buildPipelineHeaderControlsHtml(agents, _pipelineAgentFilter, _pipelineStatusFilter);
+        const _hdrCfg = await loadPipelineConfig();
+        _plHdrCtrl.innerHTML = buildPipelineHeaderControlsHtml(agents, _pipelineAgentFilter, _pipelineStatusFilter,
+            (_hdrCfg.categories || []).map(c => ({ id: c.id, name: c.name })), _pipelineTargetFilter, _pipelineBandFilter);
     }
 
     // Filter prospects
@@ -2007,7 +2156,15 @@ const showPipelineView = async (container) => {
             return (a.name || a.full_name || '').localeCompare(b.name || b.full_name || '');
         });
 
-    const systemRows = (await Promise.all(enriched.map(p => renderSystemRow(p, probBadge, _plPrefetched)))).join('');
+    // v7 P3 + v7.2 pivot cache: snapshot + cache run on the FULL enriched list
+    // BEFORE the v7.1 view filters (mirrors the JSX path exactly).
+    try { _maybeSnapshotPipeline(enriched); } catch (_) { /* intentional: best-effort */ }
+    _lastEnriched = enriched;
+
+    // v7.1 — Target/Band filters (Auto-Generated table only; shared predicate
+    // with the JSX path so the two render modes can never disagree).
+    const _lgShown = enriched.filter(p => _pipelineRowMatchesFilter(p._pipeline, _pipelineTargetFilter, _pipelineBandFilter));
+    const systemRows = (await Promise.all(_lgShown.map(p => renderSystemRow(p, probBadge, _plPrefetched)))).join('');
 
     // Fill table 2 — replaces skeleton rows
     const _tbody2 = document.getElementById('pipeline-list-body');
@@ -2016,7 +2173,18 @@ const showPipelineView = async (container) => {
     }
     const _countEl = document.getElementById('pl-table2-count');
     if (_countEl) {
-        _countEl.innerHTML = `<span style="background:#F3F4F6;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;">${enriched.length} qualified</span>`;
+        // v7.1 share summary — same arithmetic as the JSX payload's summary.
+        let _lgSum = 0, _lgW = 0, _lgNoAmt = 0;
+        for (const p of _lgShown) {
+            const e = p._pipeline;
+            const amt = await getPipelineAmount(p, e.noProductSignal ? null : e.category, _plPrefetched?.allSolutions, _plPrefetched?.solutionsByProspect);
+            if (amt == null) { _lgNoAmt++; continue; }
+            _lgSum += Number(amt);
+            _lgW += Number(amt) * (e.probability || 0) / 100;
+        }
+        const _lgPct = enriched.length ? Math.round(_lgShown.length / enriched.length * 100) : 0;
+        _countEl.innerHTML = `<span style="background:#F3F4F6;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;">${_lgShown.length} of ${enriched.length} qualified (${_lgPct}%)</span>
+            <span style="font-size:11px;color:#6B7280;margin-left:8px;" title="Weighted = Σ amount × probability. Denominator = qualified prospects in the current Agent/Status scope.">Σ RM ${Math.round(_lgSum).toLocaleString()} · weighted RM ${Math.round(_lgW).toLocaleString()}${_lgNoAmt ? ` · +${_lgNoAmt} no fixed amount` : ''}</span>`;
     }
 
     // ── STEP 7: Team sections (uses enriched + allUsers, fill last) ────────
@@ -2171,8 +2339,10 @@ const renderFocusRow = async (rec, idx, actsByProspect, probBadge, readOnly = fa
 
 const renderSystemRow = async (prospect, probBadge, prefetched) => {
     const entry = prospect._pipeline;
-    const amount = await getPipelineAmount(prospect, entry.category, prefetched?.allSolutions, prefetched?.solutionsByProspect);
+    // v7.2: no-signal rows price against nothing, not the artifact winner.
+    const amount = await getPipelineAmount(prospect, entry.noProductSignal ? null : entry.category, prefetched?.allSolutions, prefetched?.solutionsByProspect);
     const noteCount = await getNoteCount(prospect.id);
+    const _legacyTarget = await _targetLabelFor(entry);
 
     // v6: show top-3 contributing activities instead of prereq pills
     let signalsHtml = '';
@@ -2207,7 +2377,7 @@ const renderSystemRow = async (prospect, probBadge, prefetched) => {
                 <div style="font-size:11px;color:#9CA3AF;">Last activity: ${entry.lastActivityDate ? entry.lastActivityDate.toLocaleDateString('en-GB') : 'None'}</div>
             </td>
             <td style="padding:14px 12px;">
-                <div style="font-weight:500;color:#1E40AF;">${entry.fromPotential ? 'Prospect Potential' : escapeHtml(entry.category?.name || '')}${referralBadge}</div>
+                <div style="font-weight:500;color:#1E40AF;">${escapeHtml(_legacyTarget)}${referralBadge}</div>
                 <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:2px;">${signalsHtml}</div>
                 ${entry.latestOppPotential ? `<div style="font-size:11px;color:#9CA3AF;margin-top:4px;">${escapeHtml(entry.latestOppPotential)}</div>` : ''}
             </td>
@@ -2666,6 +2836,8 @@ const removeFromFocusList = async (listItemId) => {
 const setPipelineFilter = async (type, value) => {
     if (type === 'agent') _pipelineAgentFilter = value;
     if (type === 'status') _pipelineStatusFilter = value;
+    if (type === 'target') _pipelineTargetFilter = value;
+    if (type === 'band') _pipelineBandFilter = value;
     await refreshPipeline();
 };
 
@@ -2893,6 +3065,8 @@ const _renderPipelineConfigModal = (isAdmin) => {
                 ${_c7('outcome_mult_not_interested', 'Outcome × not interested', -1, 0.05)}
                 ${_c7('not_interested_suppress_days', 'Not-interested cool-off (days)', 60)}
                 ${_c7('no_show_penalty', 'Event no-show penalty (pts)', 3, 0.5)}
+                ${_c7('pivot_share_min', 'Pivot: contender share ≥ (%)', 30)}
+                ${_c7('pivot_prob_min', 'Pivot: contender prob ≥ (%)', 50)}
                 ${_c7('fit_mult_min', 'Fit multiplier min', 0.7, 0.05)}
                 ${_c7('fit_mult_max', 'Fit multiplier max', 1.2, 0.05)}
                 ${_c7('fit_weight_affordability', 'Fit weight: affordability', 40)}
@@ -3216,6 +3390,94 @@ const showPipelineCalibration = async () => {
     ]);
 };
 
+// ===== v7.2: BY-PRODUCT PIVOT ===============================================
+// Answers "who can buy product X with high %" per product line. A CONTENDER
+// for product c is an evidence-scored prospect with share_c ≥ pivot_share_min
+// AND probability ≥ pivot_prob_min. P(buy c) = probability × share_c.
+// Expected revenue = Σ default_amount × P(buy c) over affordable contenders —
+// a KNOWN budget below half the product's price marks the row blocked and
+// excludes it from the money sum (unknown budgets pass; "can buy" stays
+// lenient by default). Reads the cached full enriched list — never re-scores.
+const showPipelineProductPivot = async () => {
+    const enriched = _lastEnriched;
+    if (!enriched || !enriched.length) {
+        UI.toast.error('Open the Potential Pipeline first — no scored rows in memory yet.');
+        return;
+    }
+    const cfg = await loadPipelineConfig();
+    const shareMin = cfg.constants?.pivot_share_min ?? 30;
+    const probMin = cfg.constants?.pivot_prob_min ?? 50;
+    const lines = (cfg.categories || []).map(cat => {
+        const contenders = [];
+        for (const p of enriched) {
+            const e = p._pipeline;
+            if (e.fromPotential || e.noProductSignal || !e.productShares) continue;
+            const share = e.productShares[cat.id] || 0;
+            if (share < shareMin || (e.probability || 0) < probMin) continue;
+            let blocked = false;
+            if (cat.default_amount != null) {
+                const b = _parseMoneyMax(p.budget_range);
+                if (b != null && b < cat.default_amount * 0.5) blocked = true;
+            }
+            contenders.push({
+                id: p.id,
+                name: p.name || p.full_name || '',
+                share,
+                prob: e.probability || 0,
+                pBuy: Math.round((e.probability || 0) * share / 100),
+                blocked,
+            });
+        }
+        contenders.sort((a, b) => b.pBuy - a.pBuy);
+        const expected = cat.default_amount != null
+            ? Math.round(contenders.filter(c => !c.blocked).reduce((t, c) => t + cat.default_amount * c.pBuy / 100, 0))
+            : null;
+        return { cat, contenders, expected, blockedCount: contenders.filter(c => c.blocked).length };
+    });
+    const noSignalCount = enriched.filter(p => p._pipeline.noProductSignal && !p._pipeline.fromPotential).length;
+    const declaredCount = enriched.filter(p => p._pipeline.fromPotential).length;
+
+    const lineRows = lines.map(l => {
+        const top = l.contenders.slice(0, 3).map(c =>
+            `<span style="white-space:nowrap;${c.blocked ? 'color:#9CA3AF;text-decoration:line-through;' : ''}" title="${c.blocked ? 'budget below half price — excluded from expected revenue' : `P(buy) ${c.pBuy}% = ${c.prob}% × share ${c.share}%`}">
+                <a href="javascript:void(0)" onclick="event.stopPropagation();app.showPipelineExplain(${c.id})" style="color:${c.blocked ? '#9CA3AF' : '#2563EB'};">${escapeHtml(c.name)}</a> ${c.pBuy}%</span>`
+        ).join(', ');
+        const more = l.contenders.length > 3 ? ` <span style="color:#9CA3AF;">+${l.contenders.length - 3} more</span>` : '';
+        return `
+        <tr style="border-bottom:1px solid #F3F4F6;">
+            <td style="padding:8px;font-size:12px;font-weight:500;">${escapeHtml(l.cat.name)}</td>
+            <td style="padding:8px;font-size:12px;text-align:right;font-weight:600;">${l.contenders.length}</td>
+            <td style="padding:8px;font-size:12px;text-align:right;">${l.expected == null ? '<span style="color:#92400E;">Varies</span>' : 'RM ' + l.expected.toLocaleString()}</td>
+            <td style="padding:8px;font-size:12px;text-align:right;color:${l.blockedCount ? '#DC2626' : '#9CA3AF'};">${l.blockedCount || '—'}</td>
+            <td style="padding:8px;font-size:11px;">${top || '<span style="color:#9CA3AF;">none</span>'}${more}</td>
+        </tr>`;
+    }).join('');
+
+    const content = `
+        <div style="padding:4px;max-height:70vh;overflow-y:auto;">
+            <div style="font-size:11px;color:#6B7280;margin-bottom:8px;">
+                Contender = product-specific evidence share ≥ ${shareMin}% AND close probability ≥ ${probMin}% (both editable in Rules §7).
+                P(buy) = probability × share. Expected RM excludes prospects whose recorded budget is under half the product's price.
+            </div>
+            <table style="width:100%;border-collapse:collapse;">
+                <thead><tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">
+                    <th scope="col" style="padding:8px;text-align:left;font-size:11px;color:#6B7280;">Product line</th>
+                    <th scope="col" style="padding:8px;text-align:right;font-size:11px;color:#6B7280;">Contenders</th>
+                    <th scope="col" style="padding:8px;text-align:right;font-size:11px;color:#6B7280;">Expected RM</th>
+                    <th scope="col" style="padding:8px;text-align:right;font-size:11px;color:#6B7280;">Budget-blocked</th>
+                    <th scope="col" style="padding:8px;text-align:left;font-size:11px;color:#6B7280;">Top contenders</th>
+                </tr></thead>
+                <tbody>${lineRows}</tbody>
+            </table>
+            <div style="margin-top:10px;font-size:11px;color:#6B7280;">
+                Not in any product line: <strong>${noSignalCount}</strong> engaged-but-undecided (invite to a product event) · <strong>${declaredCount}</strong> declared-potential only (no scored behavior).
+            </div>
+        </div>`;
+    UI.showModal('Pipeline — By Product', content, [
+        { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
+    ]);
+};
+
 const applyCalibrationK = async (k) => {
     if (!isSystemAdmin(_state.cu)) { UI.toast.error('Super Admin only'); return; }
     const kNum = parseFloat(k);
@@ -3472,11 +3734,42 @@ const showPipelineExplain = async (prospectId) => {
             <td style="padding:6px 8px;font-size:11px;text-align:right;font-weight:600;">${f.score}</td>
         </tr>`).join('');
 
+    // v7.2 — product mix: preference (share of product-SPECIFIC evidence) and
+    // P(buy c) = probability × share. Neutral evidence (CPS, calls) lifts every
+    // category equally, so only the delta above the common floor counts here.
+    const _explainTarget = await _targetLabelFor(entry);
+    let productMixBlock;
+    if (entry.noProductSignal) {
+        productMixBlock = `<div style="margin:8px 0;padding:10px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;font-size:12px;color:#92400E;">
+            All product categories are tied — every signal so far (CPS, calls) measures <strong>engagement</strong>, not product preference. The "Target" is undetermined; invite them to a product event (分享会 / 汇集 / museum) to discover it.</div>`;
+    } else {
+        const mixRows = Object.entries(entry.productShares || {})
+            .sort((a, b) => b[1] - a[1])
+            .map(([id, share]) => {
+                const cat = cfg.categories.find(c => c.id === id);
+                const pBuy = Math.round((entry.probability || 0) * share / 100);
+                return `<tr style="border-bottom:1px solid #F3F4F6;">
+                    <td style="padding:6px 8px;font-size:11px;">${escapeHtml(cat?.name || id)}</td>
+                    <td style="padding:6px 8px;font-size:11px;text-align:right;">${share}%</td>
+                    <td style="padding:6px 8px;font-size:11px;text-align:right;font-weight:600;">${pBuy}%</td>
+                </tr>`;
+            }).join('');
+        productMixBlock = `
+            <table style="width:100%;border-collapse:collapse;font-size:11px;">
+                <thead><tr style="background:#F9FAFB;">
+                    <th scope="col" style="padding:6px 8px;text-align:left;">Product</th>
+                    <th scope="col" style="padding:6px 8px;text-align:right;">Preference share</th>
+                    <th scope="col" style="padding:6px 8px;text-align:right;">P(buys this)</th>
+                </tr></thead>
+                <tbody>${mixRows}</tbody>
+            </table>`;
+    }
+
     const content = `
         <div style="padding:4px;max-height:70vh;overflow-y:auto;">
             <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:12px;margin-bottom:14px;">
                 <div style="font-size:18px;font-weight:700;color:#1E40AF;">${entry.probability}%</div>
-                <div style="font-size:12px;color:#1E40AF;">Target: <strong>${escapeHtml(entry.category?.name || '')}</strong> · Stage: <strong>${escapeHtml(_stageLabel(entry.stage))}</strong></div>
+                <div style="font-size:12px;color:#1E40AF;">Target: <strong>${escapeHtml(_explainTarget)}</strong> · Stage: <strong>${escapeHtml(_stageLabel(entry.stage))}</strong></div>
                 <div style="font-size:11px;color:#6B7280;margin-top:2px;">Raw ${entry.rawScore} × K(${K}) = ${entry.behaviorPct}% × fit ${entry.fitMult}${entry.referralInfo?.applied ? ` + ${entry.referralInfo.bonusPct} referral` : ''} = ${entry.preCapProbability}%${entry.capApplied ? ` → capped at ${entry.stageCap}% (${escapeHtml(_stageLabel(entry.stage))})` : ''}</div>
             </div>
 
@@ -3503,6 +3796,9 @@ const showPipelineExplain = async (prospectId) => {
                 </tr></thead>
                 <tbody>${allCatScores}</tbody>
             </table>
+
+            <h4 style="font-size:13px;margin:14px 0 6px;">Product mix <span style="font-weight:400;color:#9CA3AF;font-size:10px;">(share of product-specific evidence — engagement signals lift all categories equally and are excluded)</span></h4>
+            ${productMixBlock}
 
             <h4 style="font-size:13px;margin:14px 0 6px;">Fit components <span style="font-weight:400;color:#9CA3AF;font-size:10px;">(unknown data scores neutral 50 — fill the Potential &amp; Opportunities form to move these)</span></h4>
             <table style="width:100%;border-collapse:collapse;font-size:11px;">
@@ -4563,8 +4859,11 @@ const viewJustification = async (overrideId) => {
         _derivePipelineStage,
         _calcFitScore,
         _applyPotentialBoost,
+        _pipelineRowMatchesFilter,
+        _targetLabelFor,
         showPipelineCalibration,
         applyCalibrationK,
+        showPipelineProductPivot,
         savePipelineConfig,
         showProspectMenu,
         showComments,
