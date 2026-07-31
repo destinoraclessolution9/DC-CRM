@@ -70,7 +70,9 @@
 //     not_interested) multiplies contributions; negatives subtract with the same
 //     decay so bad news fades like good news. A not_interested within the
 //     suppression window removes the prospect from the pipeline entirely and
-//     also blocks the manual-potential door.
+//     also blocks the manual-potential door. Event no-shows (event_attendees
+//     rows explicitly marked attendance_status='No Show') subtract a flat
+//     decay-weighted penalty per missed event, aged from the event's date.
 //  3. FIT — affordability/authority/urgency/owner from the prospect's own fields
 //     blend to a 0-100 fit that squeezes into a multiplicative dampener
 //     [fit_mult_min, fit_mult_max] on the behavior probability. Unknown data is
@@ -161,6 +163,15 @@ const DEFAULT_PIPELINE_CONFIG = {
         // A not_interested outcome younger than this suppresses the prospect
         // from the pipeline (and blocks the manual-potential door). 0 = off.
         not_interested_suppress_days: 60,
+        // v7.1 event no-show penalty — flat points subtracted per event the
+        // prospect registered for but skipped, decayed by the EVENT's age like
+        // any activity contribution. Counts ONLY explicit
+        // event_attendees.attendance_status='No Show' marks: the 2026-07-31
+        // live probe found 21 of 24 past-event registrations still sitting at
+        // 'Registered' (organizers rarely re-mark after the event), so an
+        // implicit past+unattended rule would punish data hygiene, not
+        // prospect behavior. 0 = off.
+        no_show_penalty: 3,
         // v7 fit — component weights (any scale; normalized by their sum) and
         // the multiplier band the 0-100 fit maps into. min=max=1 = off.
         fit_weight_affordability: 40,
@@ -338,7 +349,40 @@ const _getPipelineEventsMap = async () => {
     _pipelineEventsCacheTs = Date.now();
     return map;
 };
-const _invalidatePipelineEventsCache = () => { _pipelineEventsCache = null; };
+const _invalidatePipelineEventsCache = () => { _pipelineEventsCache = null; _pipelineNoShowsCache = null; };
+
+// Module-level cache: prospect no-show rows keyed by prospect id (TTL 60s, same
+// lifecycle as the events map above — attendance edits ride event save flows, so
+// the invalidator clears both). ONE bulk event_attendees fetch per render burst
+// feeds every calcPipelineEntry call, prefetched or not (plan trap §5: no new
+// N+1). Linkage mirrors the calendar chunk's canonical attendee→prospect match:
+// String(entity_id || attendee_id) with attendee_type defaulting to 'prospect'.
+// Note: event_attendees has NO _lightSelects entry — getAll sends select=*, so
+// attendance_status / event_id / entity_id all arrive; nothing to append in
+// data.js for this read (verified 2026-07-31).
+let _pipelineNoShowsCache = null;
+let _pipelineNoShowsCacheTs = 0;
+const _getPipelineNoShowsMap = async () => {
+    if (_pipelineNoShowsCache && Date.now() - _pipelineNoShowsCacheTs < 60000) {
+        return _pipelineNoShowsCache;
+    }
+    const map = new Map();
+    try {
+        const rows = await AppDataStore.getAll('event_attendees');
+        for (const a of (rows || [])) {
+            if (String(a.attendance_status || '').trim().toLowerCase() !== 'no show') continue;
+            if ((a.attendee_type || 'prospect') !== 'prospect') continue;
+            const key = String(a.entity_id || a.attendee_id || '');
+            if (!key || key === 'null' || key === 'undefined') continue;
+            let bucket = map.get(key);
+            if (!bucket) { bucket = []; map.set(key, bucket); }
+            bucket.push(a);
+        }
+    } catch (_) { /* offline / degraded read → no penalties this pass; never block scoring */ }
+    _pipelineNoShowsCache = map;
+    _pipelineNoShowsCacheTs = Date.now();
+    return map;
+};
 
 // ---- Perf helper: compile a case-insensitive RegExp ONCE per pattern string.
 // _pipelineActivityMultiplier runs per (category × activity); recompiling the
@@ -674,6 +718,41 @@ const calcPipelineEntry = async (prospect, prospectActivities, prefetched) => {
         activityTs.set(act, new Date(act.activity_date).getTime());
     }
 
+    // v7.1 EVENT NO-SHOW PENALTY — flat decay-weighted deduction per event the
+    // prospect registered for and explicitly skipped (attendance_status
+    // 'No Show'; stale 'Registered' rows never count — see the constants note).
+    // Resolved ONCE here: the penalty is identical across categories, so
+    // category RANKING never moves, only the level. The linked event's date
+    // drives the decay (falls back to the registration row's created_at);
+    // rows with no dateable anchor are skipped rather than guessed.
+    const _nsPenalty = Number(config.constants?.no_show_penalty) || 0;
+    const noShowContribs = [];
+    if (_nsPenalty > 0) {
+        const _nsRows = (await _getPipelineNoShowsMap()).get(String(prospect.id)) || [];
+        for (const ns of _nsRows) {
+            const ev = ns.event_id != null ? (eventsMap.get(ns.event_id) || eventsMap.get(String(ns.event_id))) : null;
+            const when = (ev && ev.date) || ns.created_at;
+            if (!when) continue;
+            const whenMs = new Date(when).getTime();
+            if (isNaN(whenMs)) continue;
+            const age = Math.max(0, Math.floor((nowMs - whenMs) / (1000 * 60 * 60 * 24)));
+            const decay = _pipelineDecayFactor(age, config);
+            if (decay === 0) continue;
+            noShowContribs.push({
+                activity_type: 'NO-SHOW',
+                no_show: true,
+                event_title: (ev && (ev.title || ev.name)) || 'Registered event (not attended)',
+                age_days: age,
+                base: -_nsPenalty,
+                decay,
+                multiplier: 1,
+                outcome: null,
+                outcome_mult: 1,
+                contribution: -_nsPenalty * decay,
+            });
+        }
+    }
+
     // Score every category using weights × decay × multiplier × outcome (v7)
     const categoryScores = {};
     const breakdownByCat = {};
@@ -705,6 +784,10 @@ const calcPipelineEntry = async (prospect, prospectActivities, prefetched) => {
                 contribution,
             });
         }
+        // v7.1: no-show penalty rows join every category's ledger (cloned — the
+        // rounding pass below mutates contribution in place). They are negative,
+        // so the repeat dampener never touches them: skipped events always count.
+        for (const ns of noShowContribs) contribs.push({ ...ns });
         // v7 repeat dampener: per activity TYPE, only the top N positive
         // contributions count fully — the rest are multiplied by repeat_factor
         // (logging 15 calls is 3 signals + 12 echoes, not 15 signals).
@@ -822,7 +905,7 @@ const generatePipelineAction = (category, daysSinceLast, isQualified, referralIn
     const name = escapeHtml(category.name || '');
     // Hands-on close for bujishu
     if (catId === 'bujishu') {
-        const hasWangHouse = (breakdown || []).some(b => /wang.?house|mattress|bed.?set|curtain|sofa/i.test(b.event_title || ''));
+        const hasWangHouse = (breakdown || []).some(b => !b.no_show && /wang.?house|mattress|bed.?set|curtain|sofa/i.test(b.event_title || ''));
         if (hasWangHouse) return `Close ${name} — prospect has touched product, follow up within 7 days`;
         return `Schedule Wang House / mattress / curtain / sofa trial — unlocks Bujishu close`;
     }
@@ -2797,7 +2880,7 @@ const _renderPipelineConfigModal = (isAdmin) => {
     const v7Section = `
         <details open style="margin-bottom:14px;">
             <summary style="cursor:pointer;font-size:14px;font-weight:600;padding:8px 0;">7. v7 — Stage Caps · Dampeners · Outcomes · Fit</summary>
-            <div style="font-size:11px;color:#6B7280;margin:4px 0 8px;">Stage caps are probability ceilings by derived funnel stage (100 = off). Repeat factor dampens same-type activity spam (1 = off). Outcome multipliers scale by activities' recorded outcome (negatives subtract). Fit maps 0-100 into the multiplier band (min=max=1 = off).</div>
+            <div style="font-size:11px;color:#6B7280;margin:4px 0 8px;">Stage caps are probability ceilings by derived funnel stage (100 = off). Repeat factor dampens same-type activity spam (1 = off). Outcome multipliers scale by activities' recorded outcome (negatives subtract). Fit maps 0-100 into the multiplier band (min=max=1 = off). No-show penalty subtracts flat decay-weighted points per event explicitly marked "No Show" on the attendee list (0 = off).</div>
             <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;max-width:700px;">
                 ${_c7('stage_cap_cps_only', 'Cap: no proposal (%)', 45)}
                 ${_c7('stage_cap_proposal', 'Cap: proposal sent (%)', 75)}
@@ -2809,6 +2892,7 @@ const _renderPipelineConfigModal = (isAdmin) => {
                 ${_c7('outcome_mult_negative', 'Outcome × negative', -0.5, 0.05)}
                 ${_c7('outcome_mult_not_interested', 'Outcome × not interested', -1, 0.05)}
                 ${_c7('not_interested_suppress_days', 'Not-interested cool-off (days)', 60)}
+                ${_c7('no_show_penalty', 'Event no-show penalty (pts)', 3, 0.5)}
                 ${_c7('fit_mult_min', 'Fit multiplier min', 0.7, 0.05)}
                 ${_c7('fit_mult_max', 'Fit multiplier max', 1.2, 0.05)}
                 ${_c7('fit_weight_affordability', 'Fit weight: affordability', 40)}
@@ -3332,11 +3416,12 @@ const showPipelineExplain = async (prospectId) => {
             : c.outcome === 'negative' ? ' <span title="outcome: negative">👎</span>'
             : c.outcome === 'not_interested' ? ' <span title="outcome: not interested">🚫</span>' : '';
         const dampMark = c.dampened ? ` <span title="repeat dampened — beyond top ${cfg.constants?.repeat_top_n ?? 3} of this type">⤓</span>` : '';
+        const nsMark = c.no_show ? ' <span title="registered for this event but did not attend">🚷</span>' : '';
         const multCell = `×${c.multiplier}${(c.outcome_mult != null && c.outcome_mult !== 1) ? ` · ×${c.outcome_mult}` : ''}`;
         const neg = c.contribution < 0;
         return `
         <tr style="border-bottom:1px solid #F3F4F6;">
-            <td style="padding:6px 8px;font-size:11px;">${escapeHtml(c.activity_type)}${outcomeMark}${dampMark}</td>
+            <td style="padding:6px 8px;font-size:11px;">${escapeHtml(c.activity_type)}${outcomeMark}${dampMark}${nsMark}</td>
             <td style="padding:6px 8px;font-size:11px;color:#6B7280;">${escapeHtml((c.event_title || '').slice(0, 30))}</td>
             <td style="padding:6px 8px;font-size:11px;text-align:right;">${c.age_days}d</td>
             <td style="padding:6px 8px;font-size:11px;text-align:right;">${c.base}</td>
@@ -3365,6 +3450,13 @@ const showPipelineExplain = async (prospectId) => {
     // v7 rows: fit dampener + stage cap in the bonuses/penalties table.
     const fitRow = entry.fitMult != null
         ? `<tr><td colspan="2" style="padding:6px 8px;font-size:12px;color:#1E40AF;">Fit dampener <span style="font-size:10px;color:#9CA3AF;">(fit ${entry.fit}/100 → band)</span></td><td style="padding:6px 8px;font-size:12px;text-align:right;font-weight:600;color:#1E40AF;">×${entry.fitMult}</td></tr>`
+        : '';
+    // v7.1: no-show total — the per-event penalty rows sit in the activity table
+    // above (red, 🚷); this line makes the combined deduction visible at a glance.
+    const _nsBreakdownRows = (entry.breakdown || []).filter(c => c.no_show);
+    const _nsTotal = Math.round(_nsBreakdownRows.reduce((s, c) => s + (c.contribution || 0), 0) * 100) / 100;
+    const noShowRow = _nsBreakdownRows.length
+        ? `<tr><td colspan="2" style="padding:6px 8px;font-size:12px;color:#DC2626;">Event no-show penalty <span style="font-size:10px;color:#9CA3AF;">(registered, did not attend × ${_nsBreakdownRows.length})</span></td><td style="padding:6px 8px;font-size:12px;text-align:right;font-weight:600;color:#DC2626;">${_nsTotal} pts</td></tr>`
         : '';
     const capRow = entry.stage
         ? (entry.capApplied
@@ -3425,7 +3517,7 @@ const showPipelineExplain = async (prospectId) => {
 
             <h4 style="font-size:13px;margin:14px 0 6px;">Bonuses / Penalties</h4>
             <table style="width:100%;border-collapse:collapse;font-size:11px;">
-                <tbody>${fitRow}${referralRow}${capRow}</tbody>
+                <tbody>${fitRow}${referralRow}${noShowRow}${capRow}</tbody>
             </table>
 
             ${entry.action ? `<div style="margin-top:14px;padding:10px;background:#F0FDF4;border-left:3px solid #10B981;font-size:12px;"><strong>Next Best Action:</strong> ${entry.action}</div>` : ''}
@@ -4424,6 +4516,7 @@ const viewJustification = async (overrideId) => {
         _pipelineActivityText,
         _getPipelineEventsMap,
         _invalidatePipelineEventsCache,
+        _getPipelineNoShowsMap,
         _pipelineActivityMultiplier,
         checkReferralBonus,
         calcPipelineEntry,
