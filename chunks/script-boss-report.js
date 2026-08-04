@@ -49,14 +49,157 @@
         selectedRun: null,
         salesFile: null, salesFileName: null, salesLoading: false,
         trackingFile: null, trackingFileName: null, trackingLoading: false,
-        skusMap: null,
         reportText: null,
+        unmapped: null,   // { code: unitsSold } collected by the last brGenerate
     };
 
     const _brGetSkus   = () => { try { const r = localStorage.getItem('br_skus');          return r ? JSON.parse(r) : null; } catch { return null; } };
     const _brGetBals   = () => { try { const r = localStorage.getItem('br_balances');       return r ? JSON.parse(r) : {}; }  catch { return {}; }  };
     const _brGetTgts   = (mk) => { try { const r = localStorage.getItem(`br_targets_${mk}`); return r ? JSON.parse(r) : {}; } catch { return {}; } };
-    const _brIsEgg     = (c) => { const s = String(c||'').toUpperCase(); return s.startsWith('FMLEGG')||s.startsWith('FMLENX')||s.startsWith('FWHEGG'); };
+
+    // ── PRODUCT CATALOG ─────────────────────────────────────────────────
+    // Source of truth: Supabase br_product_group + br_product_sku, created by
+    // migrations/boss_report_catalog_2026-08-04.sql. Before that migration is
+    // applied (or if the read fails / we're offline) we fall back to the group
+    // list that used to be hardcoded here plus the legacy localStorage `br_skus`
+    // mapping — so this chunk behaves as it always did on an un-migrated DB and
+    // deploy order between code and SQL does not matter.
+    const _brSb = () => (typeof window !== 'undefined' && window.supabase) ? window.supabase : null;
+
+    // The four groups exactly as they were hardcoded before the catalog existed.
+    // Also seeded by the migration; kept here as the un-migrated/offline fallback.
+    const _BR_FALLBACK_GROUPS = [
+        { key:'oceanSold', label:'Ocean sold',      sort_order:10, is_egg:false, exclude_online_pattern:'formula2u|mbb', active:true },
+        { key:'yangPower', label:'Yang power sold', sort_order:20, is_egg:false, exclude_online_pattern:null,            active:true },
+        { key:'d3k2',      label:'D3k2 Sold',       sort_order:30, is_egg:false, exclude_online_pattern:null,            active:true },
+        { key:'eyePlus',   label:'Eye+',            sort_order:40, is_egg:false, exclude_online_pattern:null,            active:true },
+    ];
+    // Egg-code prefixes — the pre-catalog _brIsEgg test. Kept as the fallback for
+    // any code with NO catalog row, otherwise every egg code would suddenly
+    // surface in the new "codes not in the catalog" banner. A code mapped to a
+    // group flagged is_egg is excluded too, which is the editable replacement.
+    const _BR_EGG_PREFIXES = ['FMLEGG','FMLENX','FWHEGG'];
+
+    // catalog = { groups:[…], byKey:{key→group}, skus:{code→row}, upper:{CODE→row}, source:'db'|'local' }
+    let _brCatalog = null;
+
+    // Derive a stable group key from a free-text label (legacy xlsx `Group`
+    // values, and new lines added in the editor). Must be deterministic: it is
+    // the localStorage `br_balances` key and the `br-bal-<key>` DOM id, so a
+    // drifting key would orphan the carried-forward balance.
+    const _brSlugKey = (label) => {
+        const parts = String(label||'').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
+        if (!parts.length) return 'group';
+        return parts[0] + parts.slice(1).map(p => p[0].toUpperCase() + p.slice(1)).join('');
+    };
+
+    const _brBuildCatalog = (groups, skuRows, source) => {
+        const gs = (groups||[]).slice().sort((a,b) =>
+            (Number(a.sort_order)||0) - (Number(b.sort_order)||0) || String(a.label||'').localeCompare(String(b.label||'')));
+        const byKey = {}, skus = {}, upper = {};
+        for (const g of gs) byKey[g.key] = g;
+        for (const s of (skuRows||[])) {
+            const code = String(s.code||'').trim();
+            if (!code) continue;
+            skus[code] = s;
+            // Secondary index only consulted when the exact-case lookup misses,
+            // so every code that matched before still matches identically.
+            const uc = code.toUpperCase();
+            if (!(uc in upper)) upper[uc] = s;
+        }
+        return { groups: gs, byKey, skus, upper, source };
+    };
+
+    const _brLookupSku = (catalog, code) => {
+        if (!catalog) return null;
+        const c = String(code||'').trim();
+        if (!c) return null;
+        return catalog.skus[c] || catalog.upper[c.toUpperCase()] || null;
+    };
+
+    // Resolve a code to its ACTIVE group, or null. Used by both parsers.
+    const _brResolveGroup = (catalog, code) => {
+        const sku = _brLookupSku(catalog, code);
+        if (!sku || !sku.group_key) return null;
+        const g = catalog.byKey[sku.group_key];
+        if (!g) return null;
+        return { sku, group: g };
+    };
+
+    const _brIsEgg = (code, catalog) => {
+        const cat = catalog || _brCatalog;
+        const hit = cat ? _brResolveGroup(cat, code) : null;
+        if (hit) return !!hit.group.is_egg;
+        const s = String(code||'').toUpperCase();
+        return _BR_EGG_PREFIXES.some(p => s.startsWith(p));
+    };
+
+    const _brLoadCatalog = async (force = false) => {
+        if (_brCatalog && !force) return _brCatalog;
+        const sb = _brSb();
+        if (sb) {
+            try {
+                const [gr, sr] = await Promise.all([
+                    sb.from('br_product_group').select('*').order('sort_order', { ascending: true }),
+                    sb.from('br_product_sku').select('*'),
+                ]);
+                if (!gr.error && !sr.error && Array.isArray(gr.data) && gr.data.length) {
+                    _brCatalog = _brBuildCatalog(gr.data, sr.data, 'db');
+                    try { localStorage.setItem('br_catalog_cache', JSON.stringify({ groups: gr.data, skus: sr.data || [] })); } catch (_) { /* cache is best-effort */ }
+                    return _brCatalog;
+                }
+                if (gr.error) console.warn('[boss-report] catalog read failed, using fallback:', gr.error.message);
+            } catch (e) {
+                console.warn('[boss-report] catalog read threw, using fallback:', e && e.message);
+            }
+        }
+        // Fallback A — last good DB snapshot.
+        try {
+            const raw = localStorage.getItem('br_catalog_cache');
+            const c = raw ? JSON.parse(raw) : null;
+            if (c && Array.isArray(c.groups) && c.groups.length) {
+                _brCatalog = _brBuildCatalog(c.groups, c.skus, 'local');
+                return _brCatalog;
+            }
+        } catch (_) { /* fall through to the legacy mapping */ }
+        // Fallback B — pre-catalog behaviour: hardcoded groups + legacy br_skus.
+        // A legacy `Group` label that is not one of the four gets a synthesized
+        // group rather than being dropped: those quantities were previously
+        // tallied and then silently discarded by the hardcoded report loop.
+        const legacy = _brGetSkus() || {};
+        const groups = _BR_FALLBACK_GROUPS.slice();
+        const byLabel = {};
+        for (const g of groups) byLabel[g.label.toLowerCase()] = g;
+        const rows = [];
+        let extraOrder = 100;
+        for (const [code, v] of Object.entries(legacy)) {
+            const label = String(v?.group||'').trim();
+            let g = byLabel[label.toLowerCase()];
+            if (!g && label) {
+                g = { key: _brSlugKey(label), label, sort_order: extraOrder += 10, is_egg:false, exclude_online_pattern:null, active:true };
+                byLabel[label.toLowerCase()] = g;
+                groups.push(g);
+            }
+            rows.push({ code, name:'', attribute:'', group_key: g ? g.key : null, unit_qty: Number(v?.qty)||1, active:true });
+        }
+        _brCatalog = _brBuildCatalog(groups, rows, 'local');
+        return _brCatalog;
+    };
+
+    // The balance blocks that print in the report: active, non-egg, in order.
+    const _brBalGroups = (catalog) => ((catalog || _brCatalog)?.groups || _BR_FALLBACK_GROUPS)
+        .filter(g => g.active !== false && !g.is_egg);
+
+    // Status line under the SKUs Mapping tile.
+    const _brCatalogLabel = (catalog) => {
+        const cat = catalog || _brCatalog;
+        if (!cat) return 'Not loaded';
+        const n = Object.keys(cat.skus||{}).length;
+        const lines = _brBalGroups(cat).length;
+        return cat.source === 'db'
+            ? `${n} codes • ${lines} product lines`
+            : `${n} codes • ${lines} lines (local — catalog table not found)`;
+    };
 
     const _brMonthKey  = () => { const n=new Date(); return `${n.getFullYear()}_${String(n.getMonth()+1).padStart(2,'0')}`; };
     const _brMonthBounds = () => {
@@ -69,35 +212,73 @@
         return { start: `${y}-${m}-01`, end: `${y}-${m}-${String(last).padStart(2,'0')}` };
     };
 
+    // Parse the SKUs mapping workbook into catalog-shaped rows. Optional
+    // Product Name / Attribute (or Size) columns are picked up when present so a
+    // bulk upload can fill the editor's descriptive fields too.
+    //
+    // Returns { rows, noQty, noGroup }. `noQty` lists codes whose `Quantities`
+    // cell was BLANK: those default to 1, and a blank on a multi-pack row (e.g.
+    // "Pre Buy 50 bottle") silently under-deducts 50×. The import preview shows
+    // them so the admin can catch it before committing.
     const _brParseSkusXlsx = async (buf) => {
         await window._ensureXlsx();
         const wb = XLSX.read(buf, { type: 'array' });
         const sheet = wb.Sheets[wb.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(sheet);
-        const map = {};
+        const out = [], noQty = [], noGroup = [];
         for (const row of rows) {
-            const code = String(row['Product Code']||'').trim();
+            const code  = String(row['Product Code']||'').trim();
+            if (!code) continue;
             const group = String(row['Group']||'').trim();
-            const qty = Number(row['Quantities'])||1;
-            if (code && group) map[code] = { group, qty };
+            if (!group) { noGroup.push(code); continue; }
+            const rawQty = row['Quantities'];
+            const hasQty = rawQty !== undefined && rawQty !== null && String(rawQty).trim() !== '';
+            const n = hasQty ? Number(rawQty) : 1;
+            if (!hasQty) noQty.push(code);
+            out.push({
+                code, group,
+                qty: (isFinite(n) && n > 0) ? Math.round(n) : 1,
+                name:      String(row['Product Name'] || row['Name'] || '').trim(),
+                attribute: String(row['Attribute'] || row['Size'] || '').trim(),
+            });
         }
-        return map;
+        return { rows: out, noQty, noGroup };
     };
 
-    const _brParseSalesXlsx = async (buf, skusMap) => {
+    // Precompile each group's online-exclusion regex once per parse instead of
+    // per row. An invalid pattern typed in the editor degrades to "no exclusion"
+    // rather than throwing mid-parse and failing the whole report.
+    const _brExcludeRes = (catalog) => {
+        const m = {};
+        for (const g of (catalog?.groups || [])) {
+            if (!g.exclude_online_pattern) continue;
+            try { m[g.key] = new RegExp(g.exclude_online_pattern, 'i'); }
+            catch (_) { console.warn('[boss-report] invalid exclude pattern on group', g.key); }
+        }
+        return m;
+    };
+
+    // Returns { sold, unmapped }. `sold` is keyed by GROUP KEY (was: group label).
+    // `unmapped` collects codes that were sold but have no catalog row, so the
+    // caller can warn instead of silently discarding them — previously a
+    // `continue` here meant a brand-new product code was never deducted and the
+    // balance was overstated with no indication anything had been skipped.
+    const _brParseSalesXlsx = async (buf, catalog) => {
         await window._ensureXlsx();
         const wb = XLSX.read(buf, { type: 'array' });
         const sheet = wb.Sheets['Itemised'];
         if (!sheet) throw new Error('"Itemised" sheet not found in FORMULA Sales file');
         const rows = XLSX.utils.sheet_to_json(sheet);
         const sold = { KL: {}, PG: {} };
+        const unmapped = {};
         for (const row of rows) {
             const pNum = String(row['Purchase Number']||'');
             const code = String(row['Product Code']||'').trim();
             // Clamp to >= 0: a negative/garbage Quantity cell would silently over- or
             // under-deduct the product balance. A sold quantity can never be negative.
             const qty  = Math.max(0, Number(row['Quantity']) || 0);
-            if (_brIsEgg(code)) continue;
+            if (!code) continue;
+            if (_brIsEgg(code, catalog)) continue;
             // Scope: the Product Balance section is KL/PG-only by design (the report
             // template and balance inputs have no JB column — JB exists only in the
             // egg run totals, not in these wholesale-product balance files). Purchase
@@ -105,15 +286,17 @@
             // excluded from these sold totals.
             const region = pNum.startsWith('F') ? 'KL' : pNum.startsWith('P') ? 'PG' : null;
             if (!region) continue;
-            const sku = skusMap[code];
-            if (!sku) continue;
-            const g = sku.group.trim();
-            sold[region][g] = (sold[region][g]||0) + qty * sku.qty;
+            const hit = _brResolveGroup(catalog, code);
+            if (!hit) { if (qty > 0) unmapped[code] = (unmapped[code]||0) + qty; continue; }
+            // Deactivated product / product line = a deliberate admin choice to
+            // stop counting it, so skip quietly rather than flagging it as unmapped.
+            if (hit.sku.active === false || hit.group.active === false) continue;
+            sold[region][hit.group.key] = (sold[region][hit.group.key]||0) + qty * (Number(hit.sku.unit_qty)||1);
         }
-        return sold;
+        return { sold, unmapped };
     };
 
-    const _brParseTrackingCsv = (csvText, skusMap) => {
+    const _brParseTrackingCsv = (csvText, catalog) => {
         // Throw (rather than silently returning empty) when PapaParse is missing,
         // so brGenerate's catch surfaces the failure instead of treating the
         // tracking file as 'sold nothing' and under-deducting the balance.
@@ -122,11 +305,14 @@
         }
         const rows = Papa.parse(csvText, { header:true, skipEmptyLines:true }).data;
         const sold = { KL: {}, PG: {} };
+        const unmapped = {};
+        const excl = _brExcludeRes(catalog);
         for (const row of rows) {
             const code    = String(row['Product Code']||'').trim();
             const qty     = Number(row['Quantity'])||0;
             const selfCol = String(row['Self Collection']||'');
-            if (_brIsEgg(code)) continue;
+            if (!code) continue;
+            if (_brIsEgg(code, catalog)) continue;
             // Region = the FULFILLING warehouse the stock leaves, NOT the customer's
             // delivery State. PG only fulfils its own Bay-Avenue self-collection; the KL
             // warehouse ships every other order (incl. deliveries to Penang addresses),
@@ -135,16 +321,21 @@
             let region;
             if (selfCol.includes('Bay Avenue, PG')) region = 'PG';
             else region = 'KL';
-            const sku = skusMap[code];
-            if (!sku) continue;
-            const g = sku.group.trim();
-            if (g === 'Ocean sold' && /formula2u|mbb/i.test(selfCol)) continue;
-            sold[region][g] = (sold[region][g]||0) + qty * sku.qty;
+            const hit = _brResolveGroup(catalog, code);
+            if (!hit) { if (qty > 0) unmapped[code] = (unmapped[code]||0) + qty; continue; }
+            if (hit.sku.active === false || hit.group.active === false) continue;
+            // Per-group online exclusion, previously hardcoded as
+            // `g === 'Ocean sold' && /formula2u|mbb/i` — a business rule keyed to a
+            // string literal, so renaming the group silently disabled it. It now
+            // lives on the group row (exclude_online_pattern) and travels with it.
+            const re = excl[hit.group.key];
+            if (re && re.test(selfCol)) continue;
+            sold[region][hit.group.key] = (sold[region][hit.group.key]||0) + qty * (Number(hit.sku.unit_qty)||1);
         }
-        return sold;
+        return { sold, unmapped };
     };
 
-    const _brBuildScaffoldHtml = (runsLength, runOpts, balInputs, tgtInputs, monthLabel, skusMap, skusDate) => `
+    const _brBuildScaffoldHtml = (runsLength, runOpts, balInputs, tgtInputs, monthLabel, catalogLabel) => `
         <div style="padding:24px;max-width:860px;">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
                 <div>
@@ -168,8 +359,11 @@
 
             <!-- 2. Product Balance Files -->
             <div style="background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);margin-bottom:16px;">
-                <h3 style="margin-top:0;margin-bottom:6px;">2. Product Balance Files</h3>
-                <p style="color:var(--gray-500);font-size:13px;margin:0 0 16px;">Upload both sales files each week. SKUs mapping is one-time and auto-cached.</p>
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                    <h3 style="margin:0;">2. Product Balance Files</h3>
+                    <button class="btn secondary" style="font-size:12px;" onclick="app.brManageCatalog()"><i class="fas fa-sliders-h"></i> Manage Catalog</button>
+                </div>
+                <p style="color:var(--gray-500);font-size:13px;margin:0 0 16px;">Upload both sales files each week. Product codes and product lines are managed in <strong>Manage Catalog</strong> — no code change needed to add one.</p>
                 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;">
                     <div style="border:2px dashed var(--gray-300);border-radius:8px;padding:14px;text-align:center;cursor:pointer;" onclick="document.getElementById('br-inp-sales').click()">
                         <i class="fas fa-file-excel" style="font-size:22px;color:#16a34a;display:block;margin-bottom:6px;"></i>
@@ -188,13 +382,14 @@
                     <div style="border:2px dashed var(--gray-300);border-radius:8px;padding:14px;text-align:center;cursor:pointer;" onclick="document.getElementById('br-inp-skus').click()">
                         <i class="fas fa-table" style="font-size:22px;color:#f59e0b;display:block;margin-bottom:6px;"></i>
                         <div style="font-weight:600;font-size:13px;">SKUs Mapping</div>
-                        <div style="font-size:11px;color:var(--gray-500);">One-time (.xlsx)</div>
-                        <div id="br-lbl-skus" style="font-size:11px;color:#059669;margin-top:4px;min-height:14px;">${skusMap ? `Cached ${skusDate||''}` : 'Not loaded'}</div>
+                        <div style="font-size:11px;color:var(--gray-500);">Bulk import (.xlsx)</div>
+                        <div id="br-lbl-skus" style="font-size:11px;color:#059669;margin-top:4px;min-height:14px;">${escapeHtml(catalogLabel||'')}</div>
                         <input type="file" id="br-inp-skus" accept=".xlsx" style="display:none;" onchange="app.brLoadSkus(this)">
                     </div>
                 </div>
+                <div id="br-unmapped" style="display:none;margin-bottom:16px;"></div>
                 <div style="font-weight:600;font-size:13px;margin-bottom:10px;">Last week's balances</div>
-                ${balInputs}
+                <div id="br-bal-rows">${balInputs}</div>
             </div>
 
             <!-- 3. Monthly Targets -->
@@ -241,18 +436,21 @@
         const now  = new Date();
         const monthLabel = now.toLocaleString('default', { month:'long', year:'numeric' });
 
-        _brState.skusMap = _brGetSkus();
-        const skusDate = localStorage.getItem('br_skus_date');
+        // Catalog drives the balance rows, the parsers and the report blocks. Read
+        // fresh on every view visit so an edit made in another tab/device shows up.
+        const catalog = await _brLoadCatalog(true);
+        const catalogLabel = _brCatalogLabel(catalog);
 
         // Reset the per-week upload buffers on every view visit so the in-memory
         // state matches the freshly-rendered (empty) upload labels. Otherwise a
         // week-old salesFile/trackingFile buffer survives at module scope, the
         // labels read blank (nothing loaded), yet brGenerate's !salesFile &&
         // !trackingFile check passes and silently deducts last week's sold
-        // quantities from this week's opening balances. skusMap is intentionally
-        // kept — it's the one-time cached mapping re-read from localStorage above.
+        // quantities from this week's opening balances. The catalog is intentionally
+        // kept — it is durable configuration, not a per-week upload.
         _brState.salesFile = null; _brState.salesFileName = null; _brState.salesLoading = false;
         _brState.trackingFile = null; _brState.trackingFileName = null; _brState.trackingLoading = false;
+        _brState.unmapped = null;
 
         // React island — render-once scaffold (same ids + app.* handlers).
         if (_reactBossReportOn()) {
@@ -264,7 +462,10 @@
             try {
                 window.CRMReact.mountBossReport(document.getElementById('boss-report-react-root'), {
                     runs: runData, bals, tgts, monthLabel,
-                    skusLabel: _brState.skusMap ? `Cached ${skusDate||''}` : 'Not loaded',
+                    skusLabel: catalogLabel,
+                    // Balance rows are catalog-driven — the island no longer owns a
+                    // hardcoded BAL_GROUPS copy that could drift from the chunk.
+                    balGroups: _brBalGroups(catalog).map(g => ({ key: g.key, label: g.label })),
                 });
                 return;
             } catch (e) {
@@ -279,12 +480,7 @@
             return `<option value="${escapeHtml(r.id)}">${escapeHtml(label)}</option>`;
         }).join('');
 
-        const balGroups = [
-            { key:'oceanSold', label:'Ocean sold' },
-            { key:'yangPower', label:'Yang power sold' },
-            { key:'d3k2',      label:'D3k2 Sold' },
-            { key:'eyePlus',   label:'Eye+' },
-        ];
+        const balGroups = _brBalGroups(catalog);
         const tgtGroups = [
             { key:'klKepong',  label:'KL Kepong + SG Puchong & Sunway' },
             { key:'klCheras',  label:'KL Cheras' },
@@ -295,9 +491,9 @@
 
         const balInputs = balGroups.map(g=>`
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
-                <label style="width:160px;font-size:13px;color:var(--gray-700);">${g.label}</label>
-                <input type="number" id="br-bal-${g.key}" class="form-control" style="width:110px;"
-                    value="${bals[g.key]||''}" placeholder="0" min="0">
+                <label style="width:160px;font-size:13px;color:var(--gray-700);">${escapeHtml(g.label)}</label>
+                <input type="number" id="br-bal-${escapeHtml(g.key)}" class="form-control" style="width:110px;"
+                    value="${bals[g.key] == null ? '' : bals[g.key]}" placeholder="0" min="0">
             </div>`).join('');
 
         const tgtInputs = tgtGroups.map(g=>`
@@ -307,7 +503,7 @@
                     value="${tgts[g.key]||''}" placeholder="0" min="0">
             </div>`).join('');
 
-        container.innerHTML = _brBuildScaffoldHtml(runs.length, runOpts, balInputs, tgtInputs, monthLabel, _brState.skusMap, skusDate);
+        container.innerHTML = _brBuildScaffoldHtml(runs.length, runOpts, balInputs, tgtInputs, monthLabel, catalogLabel);
     };
 
     const brLoadSales = (input) => {
@@ -335,6 +531,9 @@
         fr.readAsText(file, 'utf-8');
     };
 
+    // Bulk import. Parses the workbook, then shows a diff against the current
+    // catalog and waits for confirmation — a silent overwrite of the mapping is
+    // exactly the kind of change that shifts every balance without anyone noticing.
     const brLoadSkus = (input) => {
         const file = input.files[0]; if (!file) return;
         const lbl = document.getElementById('br-lbl-skus');
@@ -342,16 +541,45 @@
         const fr = new FileReader();
         fr.onload = async e => {
             try {
-                const map = await _brParseSkusXlsx(e.target.result);
-                _brState.skusMap = map;
-                const dateStr = new Date().toLocaleDateString();
-                localStorage.setItem('br_skus', JSON.stringify(map));
-                localStorage.setItem('br_skus_date', dateStr);
-                if (lbl) lbl.textContent = `✓ Cached ${dateStr} (${Object.keys(map).length} codes)`;
-                UI.toast.success('SKUs mapping cached');
-            } catch(err) { if (lbl) lbl.textContent = 'Error: '+err.message; UI.toast.error('SKUs parse failed'); }
+                const parsed  = await _brParseSkusXlsx(e.target.result);
+                const catalog = await _brLoadCatalog();
+                if (lbl) lbl.textContent = _brCatalogLabel(catalog);
+                _brCatUI.import = _brDiffImport(parsed, catalog);
+                _brCatUI.import.fileName = file.name;
+                await brManageCatalog('import');
+            } catch(err) {
+                if (lbl) lbl.textContent = 'Error: '+err.message;
+                UI.toast.error('SKUs parse failed');
+            } finally {
+                // Let the same file be re-selected after a cancel.
+                try { input.value = ''; } catch (_) { /* not settable in some browsers */ }
+            }
         };
         fr.readAsArrayBuffer(file);
+    };
+
+    // Compare parsed workbook rows against the live catalog.
+    const _brDiffImport = (parsed, catalog) => {
+        const byLabel = {};
+        for (const g of (catalog?.groups||[])) byLabel[g.label.trim().toLowerCase()] = g;
+        const added = [], changed = [], same = [], newGroups = [];
+        const seenNewGroup = {};
+        for (const r of parsed.rows) {
+            const lk = r.group.trim().toLowerCase();
+            let g = byLabel[lk];
+            if (!g && !seenNewGroup[lk]) {
+                seenNewGroup[lk] = true;
+                newGroups.push({ key: _brSlugKey(r.group), label: r.group.trim() });
+            }
+            const groupKey = g ? g.key : (newGroups.find(n => n.label.toLowerCase() === lk) || {}).key;
+            const prev = _brLookupSku(catalog, r.code);
+            const row = { code: r.code, name: r.name, attribute: r.attribute, group_key: groupKey, unit_qty: r.qty };
+            if (!prev) { added.push(row); continue; }
+            if (String(prev.group_key||'') !== String(groupKey||'') || (Number(prev.unit_qty)||1) !== r.qty) {
+                changed.push({ ...row, was: { group_key: prev.group_key, unit_qty: Number(prev.unit_qty)||1 } });
+            } else same.push(row);
+        }
+        return { added, changed, same, newGroups, noQty: parsed.noQty, noGroup: parsed.noGroup };
     };
 
     const brSaveTargets = () => {
@@ -372,12 +600,9 @@
     const _brEscapeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
     const _brParseFinalBalances = (text) => {
-        const groups = [
-            { key:'oceanSold', label:'Ocean sold' },
-            { key:'yangPower', label:'Yang power sold' },
-            { key:'d3k2',      label:'D3k2 Sold' },
-            { key:'eyePlus',   label:'Eye+' },
-        ];
+        // Group list comes from the catalog (was a 4th hardcoded copy). Labels are
+        // regex-escaped below, so a line named 'Eye+' or 'D3 (K2)' still matches.
+        const groups = _brBalGroups();
         const bals = {};
         // 1) Locate each product-block header. The label is anchored to the START of a
         //    line (m flag) so an earlier free-text mention of the same words isn't taken
@@ -532,17 +757,14 @@ Gold-${totGold}`;
         const wsSection = `Wholesales Week/ Month/ Target (${monthLabel})\n${wsLines}`;
 
         // ── SECTION 3: PRODUCT BALANCE (from uploaded files) ──
-        const skusMap = _brState.skusMap;
-        const balGroups = [
-            { key:'oceanSold', skuGroup:'Ocean sold',      label:'Ocean sold' },
-            { key:'yangPower', skuGroup:'Yang power sold', label:'Yang power sold' },
-            { key:'d3k2',      skuGroup:'D3k2 Sold',       label:'D3k2 Sold' },
-            { key:'eyePlus',   skuGroup:'Eye+',            label:'Eye+' },
-        ];
+        const catalog   = await _brLoadCatalog();
+        const balGroups = _brBalGroups(catalog);
+        const hasSkus   = Object.keys(catalog?.skus || {}).length > 0;
+        const unmapped  = {};
 
         let balSection = '';
-        if (!skusMap) {
-            balSection = 'Product Balance\n[Upload SKUs mapping file to enable this section]';
+        if (!hasSkus) {
+            balSection = 'Product Balance\n[Add product codes in Manage Catalog (or import the SKUs mapping file) to enable this section]';
         } else if (!_brState.salesFile && !_brState.trackingFile) {
             balSection = 'Product Balance\n[Upload FORMULA Sales and/or Order Tracking files to enable this section]';
         } else {
@@ -554,8 +776,9 @@ Gold-${totGold}`;
             // persisting a wrong carry-forward baseline. Abort on failure.
             if (_brState.salesFile) {
                 try {
-                    const s = await _brParseSalesXlsx(_brState.salesFile, skusMap);
-                    for (const rg of ['KL','PG']) for (const [g,q] of Object.entries(s[rg]||{})) sold[rg][g]=(sold[rg][g]||0)+q;
+                    const s = await _brParseSalesXlsx(_brState.salesFile, catalog);
+                    for (const rg of ['KL','PG']) for (const [g,q] of Object.entries(s.sold[rg]||{})) sold[rg][g]=(sold[rg][g]||0)+q;
+                    for (const [c,q] of Object.entries(s.unmapped)) unmapped[c]=(unmapped[c]||0)+q;
                 } catch(e) {
                     UI.toast.error('FORMULA Sales parse failed — report not generated: '+(e?.message||e));
                     return; // do not generate with zero sold for an uploaded file
@@ -563,8 +786,9 @@ Gold-${totGold}`;
             }
             if (_brState.trackingFile) {
                 try {
-                    const s = _brParseTrackingCsv(_brState.trackingFile, skusMap);
-                    for (const rg of ['KL','PG']) for (const [g,q] of Object.entries(s[rg]||{})) sold[rg][g]=(sold[rg][g]||0)+q;
+                    const s = _brParseTrackingCsv(_brState.trackingFile, catalog);
+                    for (const rg of ['KL','PG']) for (const [g,q] of Object.entries(s.sold[rg]||{})) sold[rg][g]=(sold[rg][g]||0)+q;
+                    for (const [c,q] of Object.entries(s.unmapped)) unmapped[c]=(unmapped[c]||0)+q;
                 } catch(e) {
                     UI.toast.error('Order Tracking parse failed — report not generated: '+(e?.message||e));
                     return; // do not generate with zero sold for an uploaded file
@@ -578,9 +802,8 @@ Gold-${totGold}`;
             }
             let balLines = `Product Balance\n${balDate}`;
             for (const g of balGroups) {
-                const sg = g.skuGroup;
-                const klSold = Math.round(sold.KL[sg]||0);
-                const pgSold = Math.round(sold.PG[sg]||0);
+                const klSold = Math.round(sold.KL[g.key]||0);
+                const pgSold = Math.round(sold.PG[g.key]||0);
                 const prev   = prevBals[g.key]||0;
                 const bal    = Math.max(0, prev - klSold - pgSold);
                 balLines += `\n${g.label}\nKL-${klSold}\nPG-${pgSold}\nBalance - ${bal}\n`;
@@ -597,6 +820,12 @@ Gold-${totGold}`;
         const report = [eggSection, wsSection, balSection].join(sep);
         _brState.reportText = report;
 
+        // Surface codes that were sold but have no catalog row. Without this the
+        // parsers just `continue` past them: the units are never deducted and the
+        // balance silently reads high, with nothing on screen to say so.
+        _brState.unmapped = Object.keys(unmapped).length ? unmapped : null;
+        _brRenderUnmapped();
+
         const outEl = document.getElementById('br-output');
         const txtEl = document.getElementById('br-text');
         if (outEl) outEl.style.display = '';
@@ -604,10 +833,448 @@ Gold-${totGold}`;
         outEl?.scrollIntoView({ behavior:'smooth', block:'start' });
     };
 
+    const _brRenderUnmapped = () => {
+        const host = document.getElementById('br-unmapped');
+        if (!host) return;
+        const um = _brState.unmapped;
+        if (!um) { host.style.display = 'none'; host.innerHTML = ''; return; }
+        const entries = Object.entries(um).sort((a,b) => b[1]-a[1]);
+        const totalUnits = entries.reduce((s,[,q]) => s+q, 0);
+        const chips = entries.slice(0, 12).map(([c,q]) =>
+            `<span style="display:inline-block;background:#fff;border:1px solid #fcd34d;border-radius:4px;padding:2px 6px;margin:2px 4px 2px 0;font-family:monospace;font-size:11px;">${escapeHtml(c)} <strong>${q}</strong></span>`).join('');
+        const more = entries.length > 12 ? `<span style="font-size:11px;color:#92400e;">+${entries.length-12} more</span>` : '';
+        host.style.display = '';
+        host.innerHTML = `
+            <div style="background:#fffbeb;border:1px solid #fbbf24;border-radius:8px;padding:12px 14px;">
+                <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
+                    <div style="min-width:0;">
+                        <div style="font-weight:600;font-size:13px;color:#92400e;">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            ${entries.length} product code${entries.length===1?'':'s'} sold this week ${entries.length===1?'is':'are'} not in the catalog — ${totalUnits} unit${totalUnits===1?'':'s'} were not deducted.
+                        </div>
+                        <div style="margin-top:6px;">${chips}${more}</div>
+                    </div>
+                    <button class="btn primary" style="font-size:12px;white-space:nowrap;" onclick="app.brManageCatalog('products', true)">
+                        <i class="fas fa-plus"></i> Add them
+                    </button>
+                </div>
+            </div>`;
+    };
+
     const brCopy = () => {
         const text = document.getElementById('br-text')?.value || _brState.reportText || '';
         if (!text.trim()) { UI.toast.error('Generate report first'); return; }
         navigator.clipboard.writeText(text).then(()=>UI.toast.success('Copied!')).catch(()=>UI.toast.error('Copy failed'));
+    };
+
+    // ==================== CATALOG EDITOR ====================
+    // Add / rename / retire product codes and whole product lines from the UI.
+    // Writes go straight to Supabase when the catalog tables exist; otherwise
+    // they persist to this browser only and the modal says so plainly.
+
+    let _brCatUI = { tab:'products', q:'', editSku:null, editGroup:null, pending:[], import:null };
+
+    // Escape for interpolation into a single-quoted JS string inside a
+    // double-quoted HTML attribute (onclick="app.x('…')").
+    const _brAttr = (s) => String(s ?? '')
+        .replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;').replace(/\r?\n/g, ' ');
+
+    const _brCatWritable = () => _brCatalog && _brCatalog.source === 'db' && !!_brSb();
+
+    // Persist a mutated fallback catalog to this browser. Also mirrors to the
+    // legacy `br_skus` shape so an older cached chunk keeps working.
+    const _brPersistLocal = () => {
+        try {
+            const groups = _brCatalog.groups;
+            const skus = Object.values(_brCatalog.skus);
+            localStorage.setItem('br_catalog_cache', JSON.stringify({ groups, skus }));
+            const legacy = {};
+            for (const s of skus) {
+                const g = _brCatalog.byKey[s.group_key];
+                if (g) legacy[s.code] = { group: g.label, qty: Number(s.unit_qty)||1 };
+            }
+            localStorage.setItem('br_skus', JSON.stringify(legacy));
+            localStorage.setItem('br_skus_date', new Date().toLocaleDateString());
+        } catch (e) { console.warn('[boss-report] local catalog persist failed:', e && e.message); }
+    };
+
+    const _brUpsert = async (table, rows) => {
+        if (!rows.length) return;
+        const sb = _brSb();
+        const stamped = rows.map(r => ({ ...r, updated_at: new Date().toISOString(), updated_by: _state.cu?.id ?? null }));
+        const { error } = await sb.from(table).upsert(stamped, { onConflict: table === 'br_product_sku' ? 'code' : 'key' });
+        if (error) throw new Error(error.message);
+    };
+
+    // Apply a set of group/sku rows to whichever backing store is in play, then
+    // refresh the in-memory catalog and every surface that renders from it.
+    const _brApply = async ({ groups = [], skus = [], deleteSku = null, deleteGroup = null }) => {
+        if (!isSystemAdmin(_state.cu)) { UI.toast.error('Access denied'); return false; }
+        try {
+            if (_brCatWritable()) {
+                const sb = _brSb();
+                if (groups.length) await _brUpsert('br_product_group', groups);
+                if (skus.length)   await _brUpsert('br_product_sku', skus);
+                if (deleteSku) {
+                    const { error } = await sb.from('br_product_sku').delete().eq('code', deleteSku);
+                    if (error) throw new Error(error.message);
+                }
+                if (deleteGroup) {
+                    const { error } = await sb.from('br_product_group').delete().eq('key', deleteGroup);
+                    if (error) throw new Error(error.message);
+                }
+                await _brLoadCatalog(true);
+            } else {
+                for (const g of groups) _brCatalog.byKey[g.key] = { ..._brCatalog.byKey[g.key], ...g };
+                for (const s of skus)   _brCatalog.skus[s.code]  = { ..._brCatalog.skus[s.code], ...s };
+                if (deleteSku)   delete _brCatalog.skus[deleteSku];
+                if (deleteGroup) delete _brCatalog.byKey[deleteGroup];
+                _brCatalog = _brBuildCatalog(Object.values(_brCatalog.byKey), Object.values(_brCatalog.skus), 'local');
+                _brPersistLocal();
+            }
+        } catch (e) {
+            UI.toast.error('Save failed: ' + (e?.message || e));
+            return false;
+        }
+        _brSyncBalRows();
+        const lbl = document.getElementById('br-lbl-skus');
+        if (lbl) lbl.textContent = _brCatalogLabel(_brCatalog);
+        // Drop any newly-mapped codes off the unmapped banner.
+        if (_brState.unmapped) {
+            for (const code of Object.keys(_brState.unmapped)) {
+                if (_brResolveGroup(_brCatalog, code)) delete _brState.unmapped[code];
+            }
+            if (!Object.keys(_brState.unmapped).length) _brState.unmapped = null;
+            _brRenderUnmapped();
+        }
+        return true;
+    };
+
+    // Rebuild the "Last week's balances" inputs after a catalog change, keeping
+    // whatever the admin had already typed. Works for both the legacy scaffold
+    // and the React island — both render into #br-bal-rows, and the island is
+    // mount-once so direct DOM mutation is safe there (same contract the file
+    // labels and report textarea already rely on).
+    const _brSyncBalRows = () => {
+        const host = document.getElementById('br-bal-rows');
+        if (!host) return;
+        const cur = {};
+        host.querySelectorAll('input[id^="br-bal-"]').forEach(el => {
+            if (el.value !== '') cur[el.id.replace(/^br-bal-/, '')] = el.value;
+        });
+        const saved = _brGetBals();
+        host.innerHTML = _brBalGroups().map(g => {
+            const v = cur[g.key] != null ? cur[g.key] : (saved[g.key] == null ? '' : saved[g.key]);
+            return `
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                <label style="width:160px;font-size:13px;color:var(--gray-700);">${escapeHtml(g.label)}</label>
+                <input type="number" id="br-bal-${escapeHtml(g.key)}" class="form-control" style="width:110px;"
+                    value="${escapeHtml(String(v))}" placeholder="0" min="0">
+            </div>`;
+        }).join('');
+    };
+
+    const brManageCatalog = async (tab, fromUnmapped) => {
+        if (!isSystemAdmin(_state.cu)) { UI.toast.error('Access denied'); return; }
+        await _brLoadCatalog(!_brCatalog);
+        _brCatUI.tab = tab || 'products';
+        if (fromUnmapped && _brState.unmapped) {
+            _brCatUI.pending = Object.keys(_brState.unmapped);
+            _brCatUI.editSku = _brCatUI.pending[0] || null;
+            _brCatUI.q = '';
+        }
+        UI.showModal('Product Catalog', '<div id="br-cat-body"></div>',
+            [{ label: 'Close', action: 'UI.hideModal()' }], 'fullscreen');
+        _brCatRender();
+    };
+
+    const brCatTab = (tab) => { _brCatUI.tab = tab; _brCatUI.import = (tab === 'import') ? _brCatUI.import : null; _brCatRender(); };
+    const brCatSearch = (v) => { _brCatUI.q = String(v||''); _brCatRender(true); };
+    const brCatEditSku = (code) => { _brCatUI.editSku = code || null; _brCatUI.tab = 'products'; _brCatRender(); };
+    const brCatEditGroup = (key) => { _brCatUI.editGroup = key || null; _brCatUI.tab = 'lines'; _brCatRender(); };
+
+    const _brGroupOptions = (selected) => (_brCatalog?.groups || [])
+        .map(g => `<option value="${escapeHtml(g.key)}"${g.key === selected ? ' selected' : ''}>${escapeHtml(g.label)}${g.active === false ? ' (inactive)' : ''}</option>`)
+        .join('');
+
+    const _brCatRender = (keepFocus) => {
+        const host = document.getElementById('br-cat-body');
+        if (!host) return;
+        const cat = _brCatalog;
+        const warn = _brCatWritable() ? '' : `
+            <div style="background:#fffbeb;border:1px solid #fbbf24;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:#92400e;">
+                <strong>Saving to this browser only.</strong> The shared catalog tables were not found —
+                run <code>migrations/boss_report_catalog_2026-08-04.sql</code> in Supabase to share the catalog
+                across devices and users.
+            </div>`;
+        const tabBtn = (id, label) => `<button class="btn ${_brCatUI.tab===id?'primary':'secondary'}" style="font-size:12px;" onclick="app.brCatTab('${id}')">${label}</button>`;
+        host.innerHTML = `
+            ${warn}
+            <div style="display:flex;gap:8px;margin-bottom:16px;">
+                ${tabBtn('products','Products')}${tabBtn('lines','Product Lines')}
+                ${_brCatUI.import ? tabBtn('import','Import Preview') : ''}
+            </div>
+            ${_brCatUI.tab === 'lines' ? _brCatLinesHtml(cat) : _brCatUI.tab === 'import' ? _brCatImportHtml() : _brCatProductsHtml(cat)}`;
+        if (keepFocus) {
+            const q = document.getElementById('br-cat-q');
+            if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
+        }
+    };
+
+    const _brCatProductsHtml = (cat) => {
+        const editing = _brCatUI.editSku ? (_brLookupSku(cat, _brCatUI.editSku) || { code: _brCatUI.editSku }) : null;
+        const q = _brCatUI.q.trim().toLowerCase();
+        const all = Object.values(cat.skus||{}).sort((a,b) => String(a.code).localeCompare(String(b.code)));
+        const rows = q
+            ? all.filter(s => `${s.code} ${s.name||''} ${s.attribute||''}`.toLowerCase().includes(q))
+            : all;
+        const shown = rows.slice(0, 200);
+        const pend = _brCatUI.pending.length ? `
+            <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;">
+                <strong>${_brCatUI.pending.length} code${_brCatUI.pending.length===1?'':'s'} to add</strong> from the last report:
+                ${_brCatUI.pending.map(c => `<a href="#" onclick="event.preventDefault();app.brCatEditSku('${_brAttr(c)}')" style="font-family:monospace;margin-right:8px;">${escapeHtml(c)}</a>`).join('')}
+            </div>` : '';
+        return `
+            ${pend}
+            <div style="background:var(--gray-50,#f9fafb);border:1px solid var(--gray-200);border-radius:8px;padding:14px;margin-bottom:16px;">
+                <div style="font-weight:600;font-size:13px;margin-bottom:10px;">${editing ? 'Edit product' : 'Add product'}</div>
+                <!-- auto-fit so the five fields stack to 2 columns / 1 column on a
+                     phone (Boss Report is reachable from the mobile drawer). -->
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;align-items:end;">
+                    <div><label style="font-size:11px;color:var(--gray-500);">Product Code</label>
+                        <input id="br-cat-code" class="form-control" placeholder="AGENTFMLYANG002" value="${escapeHtml(editing?.code||'')}"></div>
+                    <div><label style="font-size:11px;color:var(--gray-500);">Name</label>
+                        <input id="br-cat-name" class="form-control" placeholder="YANG POWER (AGENT PROMOTION)" value="${escapeHtml(editing?.name||'')}"></div>
+                    <div><label style="font-size:11px;color:var(--gray-500);">Attribute / Size</label>
+                        <input id="br-cat-attr" class="form-control" placeholder="Pre Buy 50 bottle" value="${escapeHtml(editing?.attribute||'')}"></div>
+                    <div><label style="font-size:11px;color:var(--gray-500);">Product line</label>
+                        <select id="br-cat-group" class="form-control">${_brGroupOptions(editing?.group_key)}</select></div>
+                    <div><label style="font-size:11px;color:var(--gray-500);">Unit qty</label>
+                        <input id="br-cat-qty" type="number" min="1" step="1" class="form-control" value="${editing?.unit_qty ?? 1}"></div>
+                </div>
+                <div style="font-size:11px;color:var(--gray-500);margin-top:8px;">
+                    <strong>Unit qty</strong> = how many bottles one sold unit removes from stock. A "Pre Buy 50 bottle" pack is <strong>50</strong>; a single bottle is <strong>1</strong>.
+                </div>
+                <div style="margin-top:12px;display:flex;gap:8px;">
+                    <button class="btn primary" onclick="(async () => { await app.brCatSaveSku(); })()"><i class="fas fa-save"></i> ${editing ? 'Save' : 'Add product'}</button>
+                    ${editing ? `<button class="btn secondary" onclick="app.brCatEditSku('')">Cancel</button>` : ''}
+                </div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:12px;">
+                <input id="br-cat-q" class="form-control" style="max-width:280px;" placeholder="Search code / name…"
+                    value="${escapeHtml(_brCatUI.q)}" oninput="app.brCatSearch(this.value)">
+                <div style="font-size:12px;color:var(--gray-500);">${rows.length} of ${all.length} products${shown.length < rows.length ? ` — showing first ${shown.length}` : ''}</div>
+            </div>
+            <div style="max-height:46vh;overflow:auto;border:1px solid var(--gray-200);border-radius:8px;">
+                <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                    <thead><tr style="background:var(--gray-50,#f9fafb);position:sticky;top:0;">
+                        <th style="text-align:left;padding:8px;">Code</th>
+                        <th style="text-align:left;padding:8px;">Name</th>
+                        <th style="text-align:left;padding:8px;">Attribute</th>
+                        <th style="text-align:left;padding:8px;">Line</th>
+                        <th style="text-align:right;padding:8px;">Unit qty</th>
+                        <th style="text-align:right;padding:8px;">&nbsp;</th>
+                    </tr></thead>
+                    <tbody>
+                        ${shown.length ? shown.map(s => {
+                            const g = cat.byKey[s.group_key];
+                            const off = s.active === false;
+                            return `<tr style="border-top:1px solid var(--gray-200);${off?'opacity:.5;':''}">
+                                <td style="padding:6px 8px;font-family:monospace;">${escapeHtml(s.code)}</td>
+                                <td style="padding:6px 8px;">${escapeHtml(s.name||'')}</td>
+                                <td style="padding:6px 8px;">${escapeHtml(s.attribute||'')}</td>
+                                <td style="padding:6px 8px;">${g ? escapeHtml(g.label) : '<span style="color:#dc2626;">— none —</span>'}</td>
+                                <td style="padding:6px 8px;text-align:right;">${Number(s.unit_qty)||1}</td>
+                                <td style="padding:6px 8px;text-align:right;white-space:nowrap;">
+                                    <button class="btn small secondary" onclick="app.brCatEditSku('${_brAttr(s.code)}')"><i class="fas fa-pen"></i></button>
+                                    <button class="btn small secondary" onclick="(async () => { await app.brCatToggleSku('${_brAttr(s.code)}'); })()">${off?'Enable':'Disable'}</button>
+                                    <button class="btn small" style="color:#dc2626;" onclick="(async () => { await app.brCatDeleteSku('${_brAttr(s.code)}'); })()"><i class="fas fa-trash"></i></button>
+                                </td></tr>`;
+                        }).join('') : `<tr><td colspan="6" style="padding:16px;text-align:center;color:var(--gray-500);">No products yet — add one above, or import the SKUs mapping file.</td></tr>`}
+                    </tbody>
+                </table>
+            </div>`;
+    };
+
+    const _brCatLinesHtml = (cat) => {
+        const editing = _brCatUI.editGroup ? cat.byKey[_brCatUI.editGroup] : null;
+        return `
+            <div style="background:var(--gray-50,#f9fafb);border:1px solid var(--gray-200);border-radius:8px;padding:14px;margin-bottom:16px;">
+                <div style="font-weight:600;font-size:13px;margin-bottom:10px;">${editing ? 'Edit product line' : 'Add product line'}</div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;align-items:end;">
+                    <div><label style="font-size:11px;color:var(--gray-500);">Label (prints in the report)</label>
+                        <input id="br-cat-glabel" class="form-control" placeholder="Collagen sold" value="${escapeHtml(editing?.label||'')}"></div>
+                    <div><label style="font-size:11px;color:var(--gray-500);">Order</label>
+                        <input id="br-cat-gorder" type="number" step="10" class="form-control" value="${editing?.sort_order ?? ((cat.groups.filter(g=>!g.is_egg).length+1)*10)}"></div>
+                    <div><label style="font-size:11px;color:var(--gray-500);">Online exclusion (optional regex)</label>
+                        <input id="br-cat-gexcl" class="form-control" placeholder="formula2u|mbb" value="${escapeHtml(editing?.exclude_online_pattern||'')}"></div>
+                    <div><label style="font-size:11px;color:var(--gray-500);">&nbsp;</label>
+                        <label style="display:flex;align-items:center;gap:6px;font-size:12px;height:38px;">
+                            <input type="checkbox" id="br-cat-gegg" ${editing?.is_egg ? 'checked' : ''}> Eggs
+                        </label></div>
+                </div>
+                <div style="font-size:11px;color:var(--gray-500);margin-top:8px;">
+                    <strong>Online exclusion</strong> skips Order Tracking rows whose "Self Collection" cell matches this pattern.
+                    <strong>Eggs</strong> keeps the line out of the Product Balance entirely (eggs are reported from the committed egg run).
+                </div>
+                <div style="margin-top:12px;display:flex;gap:8px;">
+                    <button class="btn primary" onclick="(async () => { await app.brCatSaveGroup(); })()"><i class="fas fa-save"></i> ${editing ? 'Save' : 'Add line'}</button>
+                    ${editing ? `<button class="btn secondary" onclick="app.brCatEditGroup('')">Cancel</button>` : ''}
+                </div>
+            </div>
+            <div style="border:1px solid var(--gray-200);border-radius:8px;overflow:hidden;">
+                <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                    <thead><tr style="background:var(--gray-50,#f9fafb);">
+                        <th style="text-align:left;padding:8px;">Label</th>
+                        <th style="text-align:right;padding:8px;">Order</th>
+                        <th style="text-align:left;padding:8px;">Exclusion</th>
+                        <th style="text-align:right;padding:8px;">Products</th>
+                        <th style="text-align:right;padding:8px;">&nbsp;</th>
+                    </tr></thead>
+                    <tbody>
+                        ${cat.groups.map(g => {
+                            const n = Object.values(cat.skus).filter(s => s.group_key === g.key).length;
+                            const off = g.active === false;
+                            return `<tr style="border-top:1px solid var(--gray-200);${off?'opacity:.5;':''}">
+                                <td style="padding:6px 8px;">${escapeHtml(g.label)}${g.is_egg?' <span style="font-size:10px;color:var(--gray-500);">(eggs)</span>':''}</td>
+                                <td style="padding:6px 8px;text-align:right;">${Number(g.sort_order)||0}</td>
+                                <td style="padding:6px 8px;font-family:monospace;">${escapeHtml(g.exclude_online_pattern||'')}</td>
+                                <td style="padding:6px 8px;text-align:right;">${n}</td>
+                                <td style="padding:6px 8px;text-align:right;white-space:nowrap;">
+                                    <button class="btn small secondary" onclick="app.brCatEditGroup('${_brAttr(g.key)}')"><i class="fas fa-pen"></i></button>
+                                    <button class="btn small secondary" onclick="(async () => { await app.brCatToggleGroup('${_brAttr(g.key)}'); })()">${off?'Enable':'Disable'}</button>
+                                    <button class="btn small" style="color:#dc2626;" onclick="(async () => { await app.brCatDeleteGroup('${_brAttr(g.key)}'); })()"><i class="fas fa-trash"></i></button>
+                                </td></tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+            <p style="font-size:11px;color:var(--gray-500);margin-top:10px;">
+                Disabling a line keeps its history but stops it printing in the report and stops its sales being deducted.
+                A line with products attached cannot be deleted — move or delete those products first.
+            </p>`;
+    };
+
+    const _brCatImportHtml = () => {
+        const d = _brCatUI.import;
+        if (!d) return '<p>Nothing to import.</p>';
+        const list = (rows, fmt) => rows.length
+            ? `<div style="max-height:150px;overflow:auto;font-family:monospace;font-size:11px;line-height:1.7;">${rows.map(fmt).join('')}</div>`
+            : '<div style="font-size:12px;color:var(--gray-500);">None</div>';
+        const gLabel = (k) => escapeHtml((_brCatalog.byKey[k] || (d.newGroups.find(n=>n.key===k)) || {}).label || '—');
+        const box = (title, colour, body) => `
+            <div style="border:1px solid ${colour};border-radius:8px;padding:12px;margin-bottom:12px;">
+                <div style="font-weight:600;font-size:13px;margin-bottom:8px;">${title}</div>${body}</div>`;
+        return `
+            <p style="font-size:13px;color:var(--gray-600);margin-top:0;">
+                <strong>${escapeHtml(d.fileName||'Workbook')}</strong> — review before applying. Nothing has been saved yet.
+            </p>
+            ${box(`${d.added.length} new product${d.added.length===1?'':'s'}`, '#86efac',
+                list(d.added, r => `<div>${escapeHtml(r.code)} → ${gLabel(r.group_key)} × ${r.unit_qty}</div>`))}
+            ${box(`${d.changed.length} changed`, '#fbbf24',
+                list(d.changed, r => `<div>${escapeHtml(r.code)}: ${gLabel(r.was.group_key)} × ${r.was.unit_qty} → ${gLabel(r.group_key)} × ${r.unit_qty}</div>`))}
+            ${d.newGroups.length ? box(`${d.newGroups.length} new product line${d.newGroups.length===1?'':'s'} will be created`, '#93c5fd',
+                list(d.newGroups, g => `<div>${escapeHtml(g.label)}</div>`)) : ''}
+            ${d.noQty.length ? box(`⚠ ${d.noQty.length} row${d.noQty.length===1?'':'s'} with a blank "Quantities" cell — defaulting to 1`, '#fbbf24',
+                `<p style="font-size:12px;margin:0 0 8px;color:#92400e;">A blank on a multi-pack row (e.g. "Pre Buy 50 bottle") deducts 1 instead of 50. Fix the workbook, or correct these after importing.</p>`
+                + list(d.noQty, c => `<div>${escapeHtml(c)}</div>`)) : ''}
+            ${d.noGroup.length ? box(`${d.noGroup.length} row${d.noGroup.length===1?'':'s'} skipped — no Group`, '#fca5a5',
+                list(d.noGroup, c => `<div>${escapeHtml(c)}</div>`)) : ''}
+            <div style="font-size:12px;color:var(--gray-500);margin-bottom:12px;">${d.same.length} unchanged. Import never deletes: products missing from the workbook are left alone.</div>
+            <div style="display:flex;gap:8px;">
+                <button class="btn primary" onclick="(async () => { await app.brCatImportApply(); })()"><i class="fas fa-check"></i> Apply import</button>
+                <button class="btn secondary" onclick="app.brCatTab('products')">Cancel</button>
+            </div>`;
+    };
+
+    const brCatImportApply = async () => {
+        const d = _brCatUI.import;
+        if (!d) return;
+        const groups = d.newGroups.map((g, i) => ({
+            key: g.key, label: g.label, sort_order: 1000 + i*10, is_egg: false, exclude_online_pattern: null, active: true,
+        }));
+        const skus = [...d.added, ...d.changed].map(r => ({
+            code: r.code, name: r.name || '', attribute: r.attribute || '',
+            group_key: r.group_key, unit_qty: r.unit_qty, active: true,
+        }));
+        if (!await _brApply({ groups, skus })) return;
+        _brCatUI.import = null;
+        _brCatUI.tab = 'products';
+        _brCatRender();
+        UI.toast.success(`Imported — ${skus.length} product${skus.length===1?'':'s'} written`);
+    };
+
+    const brCatSaveSku = async () => {
+        const code = (document.getElementById('br-cat-code')?.value || '').trim();
+        const grp  = document.getElementById('br-cat-group')?.value || '';
+        const qty  = Number(document.getElementById('br-cat-qty')?.value);
+        if (!code) { UI.toast.error('Product Code is required'); return; }
+        if (!grp)  { UI.toast.error('Pick a product line (add one on the Product Lines tab first)'); return; }
+        if (!isFinite(qty) || qty < 1) { UI.toast.error('Unit qty must be 1 or more'); return; }
+        const row = {
+            code,
+            name:      (document.getElementById('br-cat-name')?.value || '').trim(),
+            attribute: (document.getElementById('br-cat-attr')?.value || '').trim(),
+            group_key: grp, unit_qty: Math.round(qty), active: true,
+        };
+        // Renaming a code = insert new + remove old, so the mapping doesn't fork.
+        const oldCode = _brCatUI.editSku && _brCatUI.editSku !== code ? _brCatUI.editSku : null;
+        if (!await _brApply({ skus: [row], deleteSku: oldCode })) return;
+        _brCatUI.pending = _brCatUI.pending.filter(c => c !== code && c !== oldCode);
+        _brCatUI.editSku = _brCatUI.pending[0] || null;
+        _brCatRender();
+        UI.toast.success(`${escapeHtml(code)} saved`);
+    };
+
+    const brCatToggleSku = async (code) => {
+        const s = _brLookupSku(_brCatalog, code);
+        if (!s) return;
+        if (await _brApply({ skus: [{ ...s, active: s.active === false }] })) _brCatRender();
+    };
+
+    const brCatDeleteSku = async (code) => {
+        if (!window.confirm(`Delete product ${code}? Its sales will stop being deducted and it will show as an unmapped code.`)) return;
+        if (await _brApply({ deleteSku: code })) { _brCatRender(); UI.toast.success('Product deleted'); }
+    };
+
+    const brCatSaveGroup = async () => {
+        const label = (document.getElementById('br-cat-glabel')?.value || '').trim();
+        if (!label) { UI.toast.error('Label is required'); return; }
+        const excl = (document.getElementById('br-cat-gexcl')?.value || '').trim();
+        if (excl) { try { new RegExp(excl); } catch (e) { UI.toast.error('Online exclusion is not a valid pattern'); return; } }
+        const existing = _brCatUI.editGroup ? _brCatalog.byKey[_brCatUI.editGroup] : null;
+        // Keep the key stable across a rename: it is the br_balances key and the
+        // br-bal-* DOM id, so regenerating it would orphan the carried balance.
+        let key = existing ? existing.key : _brSlugKey(label);
+        if (!existing) {
+            let n = 2; const base = key;
+            while (_brCatalog.byKey[key]) key = `${base}${n++}`;
+        }
+        const row = {
+            key, label,
+            sort_order: Number(document.getElementById('br-cat-gorder')?.value) || 0,
+            is_egg: !!document.getElementById('br-cat-gegg')?.checked,
+            exclude_online_pattern: excl || null,
+            active: existing ? existing.active !== false : true,
+        };
+        if (!await _brApply({ groups: [row] })) return;
+        _brCatUI.editGroup = null;
+        _brCatRender();
+        UI.toast.success('Product line saved');
+    };
+
+    const brCatToggleGroup = async (key) => {
+        const g = _brCatalog.byKey[key];
+        if (!g) return;
+        if (await _brApply({ groups: [{ ...g, active: g.active === false }] })) _brCatRender();
+    };
+
+    const brCatDeleteGroup = async (key) => {
+        const n = Object.values(_brCatalog.skus).filter(s => s.group_key === key).length;
+        if (n) { UI.toast.error(`${n} product${n===1?' is':'s are'} still on this line — move or delete them first`); return; }
+        if (!window.confirm('Delete this product line? It will stop printing in the report.')) return;
+        if (await _brApply({ deleteGroup: key })) { _brCatRender(); UI.toast.success('Product line deleted'); }
     };
 
     // ==================== /BOSS REPORT ====================
@@ -624,5 +1291,18 @@ Gold-${totGold}`;
         brGenerate,
         brSaveFinal,
         brCopy,
+        // Catalog editor
+        brManageCatalog,
+        brCatTab,
+        brCatSearch,
+        brCatEditSku,
+        brCatSaveSku,
+        brCatToggleSku,
+        brCatDeleteSku,
+        brCatEditGroup,
+        brCatSaveGroup,
+        brCatToggleGroup,
+        brCatDeleteGroup,
+        brCatImportApply,
     });
 })();

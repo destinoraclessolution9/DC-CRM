@@ -23,7 +23,12 @@ const dzTitle = { fontWeight: 600, fontSize: '13px' };
 const dzSub = { fontSize: '11px', color: 'var(--gray-500)' };
 const dzLbl = { fontSize: '11px', color: '#059669', marginTop: '4px', minHeight: '14px' };
 
-const BAL_GROUPS = [
+// Balance rows are CATALOG-DRIVEN and arrive as the `balGroups` prop (chunk →
+// br_product_group). This island used to hold a 4th hardcoded copy of the group
+// list, which had to be edited in lockstep with three sites in the chunk. The
+// fallback below is only used if the prop is missing (a stale chunk paired with
+// a fresh bundle), and matches the pre-catalog hardcoded list exactly.
+const BAL_GROUPS_FALLBACK = [
     { key: 'oceanSold', label: 'Ocean sold' },
     { key: 'yangPower', label: 'Yang power sold' },
     { key: 'd3k2', label: 'D3k2 Sold' },
@@ -63,7 +68,9 @@ function Dropzone({ inputId, lblId, icon, iconColor, title, sub, accept, onChang
     );
 }
 
-export function BossReportView({ runs = [], bals = {}, tgts = {}, monthLabel = '', skusLabel = 'Not loaded' }) {
+export function BossReportView({ runs = [], bals = {}, tgts = {}, monthLabel = '', skusLabel = 'Not loaded', balGroups }) {
+    const balRows = (Array.isArray(balGroups) && balGroups.length) ? balGroups : BAL_GROUPS_FALLBACK;
+
     try {
         window.__REACT_BOSSREPORT_STATE = 'ready';
         window.__REACT_BOSSREPORT_RUNS = runs.length;
@@ -96,18 +103,30 @@ export function BossReportView({ runs = [], bals = {}, tgts = {}, monthLabel = '
 
             {/* 2. Product Balance Files */}
             <div style={card}>
-                <h3 style={{ marginTop: 0, marginBottom: '6px' }}>2. Product Balance Files</h3>
-                <p style={{ color: 'var(--gray-500)', fontSize: '13px', margin: '0 0 16px' }}>Upload both sales files each week. SKUs mapping is one-time and auto-cached.</p>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <h3 style={{ margin: 0 }}>2. Product Balance Files</h3>
+                    <button className="btn secondary" style={{ fontSize: '12px' }} onClick={() => { const f = app().brManageCatalog; if (f) f(); }}>
+                        <i className="fas fa-sliders-h"></i> Manage Catalog
+                    </button>
+                </div>
+                <p style={{ color: 'var(--gray-500)', fontSize: '13px', margin: '0 0 16px' }}>Upload both sales files each week. Product codes and product lines are managed in <strong>Manage Catalog</strong> — no code change needed to add one.</p>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '12px', marginBottom: '20px' }}>
                     <Dropzone inputId="br-inp-sales" lblId="br-lbl-sales" icon="fa-file-excel" iconColor="#16a34a"
                         title="FORMULA Sales" sub="POS retail (.xlsx)" accept=".xlsx" onChangeName="brLoadSales" />
                     <Dropzone inputId="br-inp-track" lblId="br-lbl-track" icon="fa-file-csv" iconColor="#2563eb"
                         title="Order Tracking" sub="Online sales (.csv)" accept=".csv" onChangeName="brLoadTracking" />
                     <Dropzone inputId="br-inp-skus" lblId="br-lbl-skus" icon="fa-table" iconColor="#f59e0b"
-                        title="SKUs Mapping" sub="One-time (.xlsx)" accept=".xlsx" onChangeName="brLoadSkus" lblText={skusLabel} />
+                        title="SKUs Mapping" sub="Bulk import (.xlsx)" accept=".xlsx" onChangeName="brLoadSkus" lblText={skusLabel} />
                 </div>
+                {/* Filled by the chunk after each generate: codes sold with no catalog row. */}
+                <div id="br-unmapped" style={{ display: 'none', marginBottom: '16px' }}></div>
                 <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '10px' }}>Last week's balances</div>
-                {BAL_GROUPS.map((g) => <NumRow key={g.key} idPrefix="br-bal" g={g} value={bals[g.key]} labelWidth="160px" />)}
+                {/* Stable host id — the chunk rewrites these rows in place when the
+                    catalog changes, preserving typed values. Safe because this island
+                    is mount-once and never re-rendered. */}
+                <div id="br-bal-rows">
+                    {balRows.map((g) => <NumRow key={g.key} idPrefix="br-bal" g={g} value={bals[g.key]} labelWidth="160px" />)}
+                </div>
             </div>
 
             {/* 3. Monthly Targets */}
