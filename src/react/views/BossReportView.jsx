@@ -34,7 +34,8 @@ const BAL_GROUPS_FALLBACK = [
     { key: 'd3k2', label: 'D3k2 Sold' },
     { key: 'eyePlus', label: 'Eye+' },
 ];
-const TGT_GROUPS = [
+// Likewise catalog-driven (chunk → br_wholesale_group), passed as `tgtGroups`.
+const TGT_GROUPS_FALLBACK = [
     { key: 'klKepong', label: 'KL Kepong + SG Puchong & Sunway' },
     { key: 'klCheras', label: 'KL Cheras' },
     { key: 'pgCenter', label: 'PG Center' },
@@ -68,8 +69,9 @@ function Dropzone({ inputId, lblId, icon, iconColor, title, sub, accept, onChang
     );
 }
 
-export function BossReportView({ runs = [], bals = {}, tgts = {}, monthLabel = '', skusLabel = 'Not loaded', balGroups }) {
+export function BossReportView({ runs = [], bals = {}, tgts = {}, monthLabel = '', skusLabel = 'Not loaded', balGroups, tgtGroups }) {
     const balRows = (Array.isArray(balGroups) && balGroups.length) ? balGroups : BAL_GROUPS_FALLBACK;
+    const tgtRows = (Array.isArray(tgtGroups) && tgtGroups.length) ? tgtGroups : TGT_GROUPS_FALLBACK;
 
     try {
         window.__REACT_BOSSREPORT_STATE = 'ready';
@@ -131,14 +133,23 @@ export function BossReportView({ runs = [], bals = {}, tgts = {}, monthLabel = '
 
             {/* 3. Monthly Targets */}
             <div style={{ ...card, marginBottom: '20px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px', gap: '8px', flexWrap: 'wrap' }}>
                     <h3 style={{ margin: 0 }}>3. Monthly Targets — {monthLabel}</h3>
-                    <button className="btn secondary" style={{ fontSize: '12px' }} onClick={() => { const f = app().brSaveTargets; if (f) f(); }}>
-                        <i className="fas fa-save"></i> Save
-                    </button>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                        <button className="btn secondary" style={{ fontSize: '12px' }} onClick={() => { const f = app().brManageCatalog; if (f) f('wholesale'); }}>
+                            <i className="fas fa-sliders-h"></i> Manage Groups
+                        </button>
+                        <button className="btn secondary" style={{ fontSize: '12px' }} onClick={() => { const f = app().brSaveTargets; if (f) f(); }}>
+                            <i className="fas fa-save"></i> Save
+                        </button>
+                    </div>
                 </div>
-                <p style={{ color: 'var(--gray-500)', fontSize: '13px', margin: '0 0 14px' }}>Set once on the 1st of each month. Carton targets per wholesale group.</p>
-                {TGT_GROUPS.map((g) => <NumRow key={g.key} idPrefix="br-tgt" g={g} value={tgts[g.key]} labelWidth="260px" />)}
+                <p style={{ color: 'var(--gray-500)', fontSize: '13px', margin: '0 0 14px' }}>Set once on the 1st of each month. Carton targets per wholesale group — groups are editable in <strong>Manage Groups</strong>.</p>
+                {/* Filled by the chunk after each generate: egg-run groups on no line. */}
+                <div id="br-ws-unassigned" style={{ display: 'none', marginBottom: '14px' }}></div>
+                <div id="br-tgt-rows">
+                    {tgtRows.map((g) => <NumRow key={g.key} idPrefix="br-tgt" g={g} value={tgts[g.key]} labelWidth="260px" />)}
+                </div>
             </div>
 
             <button className="btn primary" style={{ width: '100%', padding: '14px', fontSize: '15px', marginBottom: '20px' }}

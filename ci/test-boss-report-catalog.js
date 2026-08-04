@@ -55,7 +55,12 @@ global.localStorage = {
     setItem: (k, v) => store.set(k, String(v)),
     removeItem: (k) => store.delete(k),
 };
-global.document = { getElementById: (id) => (DOM.has(id) ? DOM.get(id) : null) };
+global.document = {
+    getElementById: (id) => (DOM.has(id) ? DOM.get(id) : null),
+    // No real DOM here: the wholesale source-key checkboxes cannot be ticked, so
+    // those tests drive the free-text `br-ws-extra` field instead.
+    querySelectorAll: () => [],
+};
 global.location = { search: '' };
 // Node 24 exposes `navigator` as a getter-only global — brCopy is not under test.
 try { Object.defineProperty(global, 'navigator', { value: { clipboard: { writeText: async () => {} } }, configurable: true }); } catch (_) { /* fine */ }
@@ -200,7 +205,7 @@ const oldBalSection = (balDate, opening) => {
 const resetDom = (openingBals, groupKeys) => {
     DOM.clear();
     el('br-run-select').value = String(RUN.id);
-    el('br-output'); el('br-text'); el('br-unmapped'); el('br-bal-rows');
+    ['br-output','br-text','br-unmapped','br-bal-rows','br-ws-unassigned','br-tgt-rows'].forEach(el);
     for (const k of groupKeys) el(`br-bal-${k}`).value = String(openingBals[k] ?? '');
 };
 // A view visit is what refreshes the catalog in production (showBossReportView
@@ -231,16 +236,30 @@ const loadBoth = (salesRows, trackRows) => {
     if (trackRows) A.brLoadTracking({ files: [csvOf(trackRows)] });
 };
 
-// Supabase stub returning a fixture catalog.
-const fakeSb = (groups, skus) => ({
+// Supabase stub returning a fixture catalog. `ws` omitted => the wholesale-group
+// table is absent (PGRST205), which is the real pre-migration state.
+const wsWrites = [];
+const targetWrites = [];
+const fakeSb = (groups, skus, ws, targets) => ({
     from: (table) => ({
         select: () => {
-            const rows = table === 'br_product_group' ? groups : skus;
-            const res = Promise.resolve({ data: rows, error: null });
-            res.order = () => Promise.resolve({ data: rows, error: null });
+            const rows = table === 'br_product_group' ? groups
+                       : table === 'br_product_sku' ? skus
+                       : table === 'br_wholesale_group' ? ws
+                       : targets;
+            const err = rows === undefined
+                ? { message: `Could not find the table 'public.${table}'`, code: 'PGRST205' } : null;
+            const payload = { data: err ? null : rows, error: err };
+            const res = Promise.resolve(payload);
+            res.order = () => Promise.resolve(payload);
+            res.eq = () => Promise.resolve(payload);
             return res;
         },
-        upsert: async () => ({ error: null }),
+        upsert: async (rows) => {
+            if (table === 'br_wholesale_group') wsWrites.push(...rows);
+            if (table === 'br_wholesale_target') targetWrites.push(...rows);
+            return { error: null };
+        },
         delete: () => ({ eq: async () => ({ error: null }) }),
     }),
 });
@@ -454,6 +473,137 @@ const run = async () => {
     ok('E6 non-admin write denied', toasts.some(t => t[0] === 'error' && /Access denied/.test(t[1])), JSON.stringify(toasts));
     ok('E6 nothing persisted for non-admin', !JSON.parse(store.get('br_skus') || '{}').SNEAK001);
     global.window._appState.cu = SUPER_ADMIN;
+
+    // ── 8. SECTION 3: wholesale groups + monthly targets ────────────────────
+    // Same disease as Section 2 — five groups hardcoded in four places, and the
+    // only copy carrying source_keys was the one inside brGenerate. A by_group
+    // key belonging to no line was dropped from the report without a word.
+    const WS = [
+        { key:'klKepong',   label:'KL Kepong + SG Puchong & Sunway', source_keys:['KL Kepong','SG Puchong & Sunway'], sort_order:10, active:true },
+        { key:'klCheras',   label:'KL Cheras',   source_keys:['KL Cheras'],   sort_order:20, active:true },
+        { key:'pgCenter',   label:'PG Center',   source_keys:['PG Center'],   sort_order:30, active:true },
+        { key:'pgMainland', label:'PG Mainland', source_keys:['PG Mainland'], sort_order:40, active:true },
+        { key:'pgSouth',    label:'PG South',    source_keys:['PG South'],    sort_order:50, active:true },
+    ];
+    const wsLine = (rep, label) => new RegExp('^' + label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ' - .*$', 'm').exec(rep)?.[0];
+
+    // 8a. DB-driven groups reproduce the hardcoded output exactly.
+    store.clear();
+    global.window.supabase = fakeSb(GROUPS, SKUS, WS, []);
+    await visitView();
+    resetDom(openingV2, Object.keys(openingV2));
+    loadBoth(SALES_ROWS, TRACK_ROWS);
+    report = await runGenerate();
+    eq('W1 combined-source line matches the hardcoded behaviour',
+        wsLine(report, 'KL Kepong + SG Puchong & Sunway'), 'KL Kepong + SG Puchong & Sunway - 7 / 0 / N/A');
+    eq('W1 single-source line', wsLine(report, 'KL Cheras'), 'KL Cheras - 2 / 0 / N/A');
+    ok('W1 no unassigned banner when every key is on a line',
+        el('br-ws-unassigned').style.display === 'none', el('br-ws-unassigned').innerHTML);
+
+    // 8b. A renamed line with a re-pointed source key.
+    const WS2 = WS.map(w => w.key === 'klCheras'
+        ? { ...w, label: 'KL Cheras & Ampang', source_keys: ['KL Cheras', 'PG South'] } : w);
+    store.clear();
+    global.window.supabase = fakeSb(GROUPS, SKUS, WS2, []);
+    await visitView();
+    resetDom(openingV2, Object.keys(openingV2));
+    loadBoth(SALES_ROWS, TRACK_ROWS);
+    report = await runGenerate();
+    eq('W2 renamed line sums its new source keys (2 + 1)',
+        wsLine(report, 'KL Cheras & Ampang'), 'KL Cheras & Ampang - 3 / 0 / N/A');
+    ok('W2 old label gone', !report.includes('\nKL Cheras - '));
+
+    // 8c. An egg-run group on NO line is surfaced, not silently dropped.
+    const WS3 = WS.filter(w => w.key !== 'pgMainland' && w.key !== 'pgSouth');
+    store.clear();
+    global.window.supabase = fakeSb(GROUPS, SKUS, WS3, []);
+    await visitView();
+    resetDom(openingV2, Object.keys(openingV2));
+    loadBoth(SALES_ROWS, TRACK_ROWS);
+    report = await runGenerate();
+    ok('W3 unassigned banner shown', el('br-ws-unassigned').style.display === '');
+    const wsBanner = el('br-ws-unassigned').innerHTML;
+    ok('W3 names both orphaned groups', wsBanner.includes('PG Mainland') && wsBanner.includes('PG South'), wsBanner);
+    ok('W3 counts the lost cartons', wsBanner.includes('2 cartons left out of the report'), wsBanner);
+    ok('W3 report omits the deleted lines', !report.includes('PG Mainland - '));
+
+    // 8d. Targets: dynamic keys, DB write, and DB-over-local precedence.
+    store.clear();
+    targetWrites.length = 0;
+    global.window.supabase = fakeSb(GROUPS, SKUS, WS, []);
+    await visitView();
+    DOM.clear(); el('br-tgt-rows');
+    for (const w of WS) el(`br-tgt-${w.key}`).value = String(({ klKepong: 350, klCheras: 120 })[w.key] ?? 0);
+    toasts.length = 0;
+    await A.brSaveTargets();
+    ok('W4 target save succeeded', toasts.some(t => t[0] === 'success'), JSON.stringify(toasts));
+    const mkNow = (() => { const d = new Date(); return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`; })();
+    eq('W4 wrote every catalog group to the DB', targetWrites.length, WS.length);
+    eq('W4 target row shape', targetWrites.find(r => r.group_key === 'klKepong').target, 350);
+    eq('W4 month_key matches the client month', targetWrites[0].month_key, mkNow);
+    eq('W4 mirrored to localStorage', JSON.parse(store.get(`br_targets_${mkNow}`)).klKepong, 350);
+
+    // A target held only in the DB (set on another device) must reach the report.
+    store.clear();
+    global.window.supabase = fakeSb(GROUPS, SKUS, WS, [{ group_key: 'klKepong', target: 400 }]);
+    await visitView();
+    resetDom(openingV2, Object.keys(openingV2));
+    loadBoth(SALES_ROWS, TRACK_ROWS);
+    report = await runGenerate();
+    eq('W5 DB target reaches the report (was localStorage-only → N/A)',
+        wsLine(report, 'KL Kepong + SG Puchong & Sunway'), 'KL Kepong + SG Puchong & Sunway - 7 / 0 / 400');
+
+    // 8e. Editor: validation, stable key on rename, and the write gate.
+    store.clear();
+    wsWrites.length = 0;
+    global.window.supabase = fakeSb(GROUPS, SKUS, WS, []);
+    await visitView();
+    DOM.clear(); ['br-cat-body', 'br-tgt-rows'].forEach(el);
+    el('br-ws-label').value = 'New Region'; el('br-ws-order').value = '60'; el('br-ws-extra').value = '';
+    toasts.length = 0;
+    await A.brCatSaveWs();
+    ok('W6 refuses a line with no source keys (it would always report 0)',
+        toasts.some(t => t[0] === 'error' && /at least one/.test(t[1])), JSON.stringify(toasts));
+
+    el('br-ws-extra').value = 'JB Tebrau, JB Skudai';
+    toasts.length = 0;
+    await A.brCatSaveWs();
+    ok('W7 saves with free-text source keys', toasts.some(t => t[0] === 'success'), JSON.stringify(toasts));
+    eq('W7 source keys split and trimmed', wsWrites.at(-1).source_keys, ['JB Tebrau', 'JB Skudai']);
+    eq('W7 key slugged from the label', wsWrites.at(-1).key, 'newRegion');
+
+    // Renaming must NOT regenerate the key — it is the target key and DOM id.
+    A.brCatEditWs('klKepong');
+    el('br-ws-label').value = 'KL Kepong (merged)';
+    el('br-ws-order').value = '10'; el('br-ws-extra').value = 'KL Kepong, SG Puchong & Sunway';
+    wsWrites.length = 0;
+    await A.brCatSaveWs();
+    eq('W8 rename keeps the key so the saved target is not orphaned', wsWrites.at(-1).key, 'klKepong');
+    eq('W8 label updated', wsWrites.at(-1).label, 'KL Kepong (merged)');
+
+    global.window._appState.cu = { id: 2, role: 'Level 4 Management' };
+    wsWrites.length = 0; toasts.length = 0;
+    el('br-ws-label').value = 'Sneak'; el('br-ws-extra').value = 'X';
+    await A.brCatSaveWs();
+    ok('W9 non-admin wholesale write denied',
+        toasts.some(t => t[0] === 'error' && /Access denied/.test(t[1])), JSON.stringify(toasts));
+    eq('W9 nothing written', wsWrites.length, 0);
+    toasts.length = 0;
+    await A.brSaveTargets();
+    ok('W9 non-admin target save denied', toasts.some(t => t[0] === 'error' && /Access denied/.test(t[1])));
+    global.window._appState.cu = SUPER_ADMIN;
+
+    // 8f. Pre-migration: wholesale table absent while products exist.
+    store.clear();
+    global.window.supabase = fakeSb(GROUPS, SKUS, undefined, undefined);
+    await visitView();
+    resetDom(openingV2, Object.keys(openingV2));
+    loadBoth(SALES_ROWS, TRACK_ROWS);
+    report = await runGenerate();
+    eq('W10 falls back to the hardcoded five when the table is absent',
+        wsLine(report, 'KL Kepong + SG Puchong & Sunway'), 'KL Kepong + SG Puchong & Sunway - 7 / 0 / N/A');
+    eq('W10 all five lines present',
+        report.split('________________________________________')[1].trim().split('\n').length - 1, 5);
 
     console.log(`\n${pass} passed, ${fail} failed`);
     process.exit(fail ? 1 : 0);

@@ -50,7 +50,8 @@
         salesFile: null, salesFileName: null, salesLoading: false,
         trackingFile: null, trackingFileName: null, trackingLoading: false,
         reportText: null,
-        unmapped: null,   // { code: unitsSold } collected by the last brGenerate
+        unmapped: null,     // { code: unitsSold }  — codes with no catalog row
+        wsUnassigned: null, // { by_group key: cartons } — keys under no wholesale group
     };
 
     const _brGetSkus   = () => { try { const r = localStorage.getItem('br_skus');          return r ? JSON.parse(r) : null; } catch { return null; } };
@@ -80,6 +81,23 @@
     // group flagged is_egg is excluded too, which is the editable replacement.
     const _BR_EGG_PREFIXES = ['FMLEGG','FMLENX','FWHEGG'];
 
+    // Section 3 / the report's Wholesales block, exactly as it was hardcoded.
+    // `source_keys` are summed out of the committed egg run's totals.by_group.
+    const _BR_FALLBACK_WS_GROUPS = [
+        { key:'klKepong',   label:'KL Kepong + SG Puchong & Sunway', source_keys:['KL Kepong','SG Puchong & Sunway'], sort_order:10, active:true },
+        { key:'klCheras',   label:'KL Cheras',                       source_keys:['KL Cheras'],                       sort_order:20, active:true },
+        { key:'pgCenter',   label:'PG Center',                       source_keys:['PG Center'],                       sort_order:30, active:true },
+        { key:'pgMainland', label:'PG Mainland',                     source_keys:['PG Mainland'],                     sort_order:40, active:true },
+        { key:'pgSouth',    label:'PG South',                        source_keys:['PG South'],                        sort_order:50, active:true },
+    ];
+    // by_group keys seen across the loaded egg runs — the pick-list in the editor.
+    // A source key is free text, and a typo silently reports 0, so offering the
+    // real keys as checkboxes is the difference between "wrong" and "impossible".
+    let _brObservedWsKeys = [];
+    // 'db' once br_wholesale_group has been read successfully; tracked separately
+    // from the product catalog's source because the two migrations are separate.
+    let _brWsSource = null;
+
     // catalog = { groups:[…], byKey:{key→group}, skus:{code→row}, upper:{CODE→row}, source:'db'|'local' }
     let _brCatalog = null;
 
@@ -93,7 +111,7 @@
         return parts[0] + parts.slice(1).map(p => p[0].toUpperCase() + p.slice(1)).join('');
     };
 
-    const _brBuildCatalog = (groups, skuRows, source) => {
+    const _brBuildCatalog = (groups, skuRows, source, wsRows) => {
         const gs = (groups||[]).slice().sort((a,b) =>
             (Number(a.sort_order)||0) - (Number(b.sort_order)||0) || String(a.label||'').localeCompare(String(b.label||'')));
         const byKey = {}, skus = {}, upper = {};
@@ -107,7 +125,13 @@
             const uc = code.toUpperCase();
             if (!(uc in upper)) upper[uc] = s;
         }
-        return { groups: gs, byKey, skus, upper, source };
+        // Array.isArray (not .length) so an explicitly-emptied list — the admin
+        // deleted every group — stays empty instead of resurrecting the defaults.
+        // The loader passes null, never [], when the table is absent or unseeded.
+        const ws = (Array.isArray(wsRows) ? wsRows.slice() : _BR_FALLBACK_WS_GROUPS.slice())
+            .map(w => ({ ...w, source_keys: Array.isArray(w.source_keys) ? w.source_keys : [] }))
+            .sort((a,b) => (Number(a.sort_order)||0) - (Number(b.sort_order)||0) || String(a.label||'').localeCompare(String(b.label||'')));
+        return { groups: gs, byKey, skus, upper, ws, source };
     };
 
     const _brLookupSku = (catalog, code) => {
@@ -136,19 +160,34 @@
 
     const _brLoadCatalog = async (force = false) => {
         if (_brCatalog && !force) return _brCatalog;
+        // Clear before re-reading: a stale 'db' would let _brWsWritable() send
+        // writes to a table this load could not actually reach.
+        _brWsSource = null;
         const sb = _brSb();
         if (sb) {
             try {
-                const [gr, sr] = await Promise.all([
+                // br_wholesale_group ships in a SEPARATE migration, so tolerate it
+                // being absent while br_product_group exists (and vice versa) —
+                // each half falls back to its own hardcoded list independently.
+                const [gr, sr, wr] = await Promise.all([
                     sb.from('br_product_group').select('*').order('sort_order', { ascending: true }),
                     sb.from('br_product_sku').select('*'),
+                    sb.from('br_wholesale_group').select('*').order('sort_order', { ascending: true }),
                 ]);
+                const wsRows = (!wr.error && Array.isArray(wr.data) && wr.data.length) ? wr.data : null;
+                _brWsSource = wsRows ? 'db' : null;
+                if (wr.error) console.warn('[boss-report] wholesale groups read failed, using fallback:', wr.error.message);
                 if (!gr.error && !sr.error && Array.isArray(gr.data) && gr.data.length) {
-                    _brCatalog = _brBuildCatalog(gr.data, sr.data, 'db');
-                    try { localStorage.setItem('br_catalog_cache', JSON.stringify({ groups: gr.data, skus: sr.data || [] })); } catch (_) { /* cache is best-effort */ }
+                    _brCatalog = _brBuildCatalog(gr.data, sr.data, 'db', wsRows);
+                    try { localStorage.setItem('br_catalog_cache', JSON.stringify({ groups: gr.data, skus: sr.data || [], ws: wsRows || [] })); } catch (_) { /* cache is best-effort */ }
                     return _brCatalog;
                 }
                 if (gr.error) console.warn('[boss-report] catalog read failed, using fallback:', gr.error.message);
+                // Products half missing but wholesale groups present: still honour them.
+                if (wsRows) {
+                    _brCatalog = _brBuildCatalog(_BR_FALLBACK_GROUPS, _brLegacySkuRows(), 'local', wsRows);
+                    return _brCatalog;
+                }
             } catch (e) {
                 console.warn('[boss-report] catalog read threw, using fallback:', e && e.message);
             }
@@ -158,14 +197,21 @@
             const raw = localStorage.getItem('br_catalog_cache');
             const c = raw ? JSON.parse(raw) : null;
             if (c && Array.isArray(c.groups) && c.groups.length) {
-                _brCatalog = _brBuildCatalog(c.groups, c.skus, 'local');
+                _brCatalog = _brBuildCatalog(c.groups, c.skus, 'local', Array.isArray(c.ws) ? c.ws : null);
                 return _brCatalog;
             }
         } catch (_) { /* fall through to the legacy mapping */ }
         // Fallback B — pre-catalog behaviour: hardcoded groups + legacy br_skus.
-        // A legacy `Group` label that is not one of the four gets a synthesized
-        // group rather than being dropped: those quantities were previously
-        // tallied and then silently discarded by the hardcoded report loop.
+        const lg = _brLegacyCatalogParts();
+        _brCatalog = _brBuildCatalog(lg.groups, lg.rows, 'local');
+        return _brCatalog;
+    };
+
+    // Convert the legacy localStorage `br_skus` map into catalog rows. A legacy
+    // `Group` label that is not one of the four gets a SYNTHESIZED group rather
+    // than being dropped: those quantities were previously tallied and then
+    // silently discarded by the hardcoded report loop.
+    const _brLegacyCatalogParts = () => {
         const legacy = _brGetSkus() || {};
         const groups = _BR_FALLBACK_GROUPS.slice();
         const byLabel = {};
@@ -182,13 +228,38 @@
             }
             rows.push({ code, name:'', attribute:'', group_key: g ? g.key : null, unit_qty: Number(v?.qty)||1, active:true });
         }
-        _brCatalog = _brBuildCatalog(groups, rows, 'local');
-        return _brCatalog;
+        return { groups, rows };
     };
+    const _brLegacySkuRows = () => _brLegacyCatalogParts().rows;
 
     // The balance blocks that print in the report: active, non-egg, in order.
     const _brBalGroups = (catalog) => ((catalog || _brCatalog)?.groups || _BR_FALLBACK_GROUPS)
         .filter(g => g.active !== false && !g.is_egg);
+
+    // Section 3 rows + the report's Wholesales lines: active, in order.
+    const _brWsGroups = (catalog) => ((catalog || _brCatalog)?.ws || _BR_FALLBACK_WS_GROUPS)
+        .filter(w => w.active !== false);
+
+    // Monthly targets. DB first so a target set on the desktop is visible when
+    // the report is generated on the phone — it was localStorage-only before, and
+    // a cross-device generate silently reported every target as N/A. The local
+    // copy stays as the offline mirror and the pre-migration fallback.
+    const _brLoadTargets = async (mk) => {
+        const local = _brGetTgts(mk);
+        const sb = _brSb();
+        if (!sb) return local;
+        try {
+            const { data, error } = await sb.from('br_wholesale_target').select('group_key,target').eq('month_key', mk);
+            if (error || !Array.isArray(data)) return local;
+            const remote = {};
+            for (const r of data) remote[r.group_key] = Number(r.target) || 0;
+            // DB wins per key, but a key only present locally survives — otherwise
+            // an empty table would blank targets saved before the migration.
+            const merged = { ...local, ...remote };
+            try { localStorage.setItem(`br_targets_${mk}`, JSON.stringify(merged)); } catch (_) { /* mirror is best-effort */ }
+            return merged;
+        } catch (_) { return local; }
+    };
 
     // Status line under the SKUs Mapping tile.
     const _brCatalogLabel = (catalog) => {
@@ -394,12 +465,16 @@
 
             <!-- 3. Monthly Targets -->
             <div style="background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);margin-bottom:20px;">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;gap:8px;flex-wrap:wrap;">
                     <h3 style="margin:0;">3. Monthly Targets — ${monthLabel}</h3>
-                    <button class="btn secondary" style="font-size:12px;" onclick="app.brSaveTargets()"><i class="fas fa-save"></i> Save</button>
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn secondary" style="font-size:12px;" onclick="app.brManageCatalog('wholesale')"><i class="fas fa-sliders-h"></i> Manage Groups</button>
+                        <button class="btn secondary" style="font-size:12px;" onclick="(async () => { await app.brSaveTargets(); })()"><i class="fas fa-save"></i> Save</button>
+                    </div>
                 </div>
-                <p style="color:var(--gray-500);font-size:13px;margin:0 0 14px;">Set once on the 1st of each month. Carton targets per wholesale group.</p>
-                ${tgtInputs}
+                <p style="color:var(--gray-500);font-size:13px;margin:0 0 14px;">Set once on the 1st of each month. Carton targets per wholesale group — groups are editable in <strong>Manage Groups</strong>.</p>
+                <div id="br-ws-unassigned" style="display:none;margin-bottom:14px;"></div>
+                <div id="br-tgt-rows">${tgtInputs}</div>
             </div>
 
             <button class="btn primary" style="width:100%;padding:14px;font-size:15px;margin-bottom:20px;" onclick="app.brGenerate()">
@@ -432,14 +507,22 @@
 
         const bals = _brGetBals();
         const mk   = _brMonthKey();
-        const tgts = _brGetTgts(mk);
         const now  = new Date();
         const monthLabel = now.toLocaleString('default', { month:'long', year:'numeric' });
 
-        // Catalog drives the balance rows, the parsers and the report blocks. Read
-        // fresh on every view visit so an edit made in another tab/device shows up.
+        // Catalog drives the balance rows, the wholesale rows, the parsers and the
+        // report blocks. Read fresh on every view visit so an edit made in another
+        // tab/device shows up.
         const catalog = await _brLoadCatalog(true);
         const catalogLabel = _brCatalogLabel(catalog);
+        const tgts = await _brLoadTargets(mk);
+
+        // The by_group keys that actually occur in the committed runs. Offered as
+        // checkboxes in the wholesale-group editor so a source key cannot be
+        // mistyped — a typo there silently reports 0 cartons for that line.
+        const seenKeys = new Set();
+        for (const r of runs) for (const k of Object.keys(r.totals?.by_group || {})) seenKeys.add(k);
+        _brObservedWsKeys = [...seenKeys].sort();
 
         // Reset the per-week upload buffers on every view visit so the in-memory
         // state matches the freshly-rendered (empty) upload labels. Otherwise a
@@ -463,9 +546,10 @@
                 window.CRMReact.mountBossReport(document.getElementById('boss-report-react-root'), {
                     runs: runData, bals, tgts, monthLabel,
                     skusLabel: catalogLabel,
-                    // Balance rows are catalog-driven — the island no longer owns a
-                    // hardcoded BAL_GROUPS copy that could drift from the chunk.
+                    // Balance + target rows are catalog-driven — the island no longer
+                    // owns hardcoded BAL_GROUPS/TGT_GROUPS copies that could drift.
                     balGroups: _brBalGroups(catalog).map(g => ({ key: g.key, label: g.label })),
+                    tgtGroups: _brWsGroups(catalog).map(w => ({ key: w.key, label: w.label })),
                 });
                 return;
             } catch (e) {
@@ -481,13 +565,7 @@
         }).join('');
 
         const balGroups = _brBalGroups(catalog);
-        const tgtGroups = [
-            { key:'klKepong',  label:'KL Kepong + SG Puchong & Sunway' },
-            { key:'klCheras',  label:'KL Cheras' },
-            { key:'pgCenter',  label:'PG Center' },
-            { key:'pgMainland',label:'PG Mainland' },
-            { key:'pgSouth',   label:'PG South' },
-        ];
+        const tgtGroups = _brWsGroups(catalog);
 
         const balInputs = balGroups.map(g=>`
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
@@ -498,9 +576,9 @@
 
         const tgtInputs = tgtGroups.map(g=>`
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
-                <label style="width:260px;font-size:13px;color:var(--gray-700);">${g.label}</label>
-                <input type="number" id="br-tgt-${g.key}" class="form-control" style="width:110px;"
-                    value="${tgts[g.key]||''}" placeholder="0" min="0">
+                <label style="width:260px;font-size:13px;color:var(--gray-700);">${escapeHtml(g.label)}</label>
+                <input type="number" id="br-tgt-${escapeHtml(g.key)}" class="form-control" style="width:110px;"
+                    value="${tgts[g.key] == null ? '' : tgts[g.key]}" placeholder="0" min="0">
             </div>`).join('');
 
         container.innerHTML = _brBuildScaffoldHtml(runs.length, runOpts, balInputs, tgtInputs, monthLabel, catalogLabel);
@@ -582,16 +660,37 @@
         return { added, changed, same, newGroups, noQty: parsed.noQty, noGroup: parsed.noGroup };
     };
 
-    const brSaveTargets = () => {
+    const brSaveTargets = async () => {
         // Defense in depth: re-check role at the handler (the view gate alone is
         // insufficient — these are exported on window.app and could be invoked
         // directly). Boss Report is Super Admin only.
         if (!isSystemAdmin(_state.cu)) { UI.toast.error('Access denied'); return; }
         const mk = _brMonthKey();
-        const groups = ['klCheras','klKepong','pgCenter','pgMainland','pgSouth'];
+        // Group list comes from the catalog (was a hardcoded 5-key array that had
+        // to be kept in step with three other sites).
         const tgts = {};
-        for (const g of groups) { const el = document.getElementById(`br-tgt-${g}`); if (el) tgts[g] = Number(el.value)||0; }
-        localStorage.setItem(`br_targets_${mk}`, JSON.stringify(tgts));
+        for (const g of _brWsGroups()) {
+            const el = document.getElementById(`br-tgt-${g.key}`);
+            if (el) tgts[g.key] = Number(el.value)||0;
+        }
+        // Local mirror first so the value is never lost if the DB write fails.
+        localStorage.setItem(`br_targets_${mk}`, JSON.stringify({ ..._brGetTgts(mk), ...tgts }));
+        const sb = _brSb();
+        if (sb && _brCatalog?.ws?.length && _brCatalog.source === 'db') {
+            try {
+                const rows = Object.entries(tgts).map(([group_key, target]) => ({
+                    group_key, month_key: mk, target,
+                    updated_at: new Date().toISOString(), updated_by: _state.cu?.id ?? null,
+                }));
+                const { error } = await sb.from('br_wholesale_target').upsert(rows, { onConflict: 'group_key,month_key' });
+                if (error) throw new Error(error.message);
+                UI.toast.success('Targets saved for '+mk.replace('_','/'));
+                return;
+            } catch (e) {
+                UI.toast.warning('Targets saved to this browser only — ' + (e?.message || e));
+                return;
+            }
+        }
         UI.toast.success('Targets saved for '+mk.replace('_','/'));
     };
 
@@ -707,7 +806,7 @@ Gold-${totGold}`;
         const mk = _brMonthKey();
         const now2 = new Date();
         const monthLabel = now2.toLocaleString('default', { month:'long', year:'numeric' });
-        const tgts = _brGetTgts(mk);
+        const tgts = await _brLoadTargets(mk);
         const byGroup = totals.by_group || {};
 
         // Month totals: sum latest run per week_start_date where run_at is within current month
@@ -741,20 +840,29 @@ Gold-${totGold}`;
             }
         } catch(e) { monthByGroup = { ...byGroup }; }
 
-        const wsGroups = [
-            { key:'klKepong',   src:['KL Kepong','SG Puchong & Sunway'], label:'KL Kepong + SG Puchong & Sunway' },
-            { key:'klCheras',   src:['KL Cheras'],                       label:'KL Cheras' },
-            { key:'pgCenter',   src:['PG Center'],                       label:'PG Center' },
-            { key:'pgMainland', src:['PG Mainland'],                     label:'PG Mainland' },
-            { key:'pgSouth',    src:['PG South'],                        label:'PG South' },
-        ];
+        // Wholesale lines come from the catalog (was a 4th hardcoded copy, and the
+        // only one carrying the source_keys mapping).
+        const wsGroups = _brWsGroups(await _brLoadCatalog());
         const wsLines = wsGroups.map(g => {
-            const wk = g.src.reduce((s,k)=>s+(byGroup[k]||0),0);
-            const mo = g.src.reduce((s,k)=>s+(monthByGroup[k]||0),0);
+            const src = g.source_keys || [];
+            const wk = src.reduce((s,k)=>s+(byGroup[k]||0),0);
+            const mo = src.reduce((s,k)=>s+(monthByGroup[k]||0),0);
             const tg = tgts[g.key]||0;
             return `${g.label} - ${wk} / ${mo} / ${tg||'N/A'}`;
         }).join('\n');
         const wsSection = `Wholesales Week/ Month/ Target (${monthLabel})\n${wsLines}`;
+
+        // A by_group key in the committed run that belongs to NO wholesale group
+        // was silently omitted from the report — the same class of quiet loss as an
+        // unmapped product code. Collect them (against ALL groups, active or not,
+        // so deactivating a line is not treated as an accident) and warn.
+        const _assigned = new Set();
+        for (const w of (_brCatalog?.ws || _BR_FALLBACK_WS_GROUPS)) for (const k of (w.source_keys||[])) _assigned.add(k);
+        _brState.wsUnassigned = null;
+        const _orphans = {};
+        for (const [k, v] of Object.entries(byGroup)) if ((Number(v)||0) > 0 && !_assigned.has(k)) _orphans[k] = Number(v)||0;
+        if (Object.keys(_orphans).length) _brState.wsUnassigned = _orphans;
+        _brRenderWsUnassigned();
 
         // ── SECTION 3: PRODUCT BALANCE (from uploaded files) ──
         const catalog   = await _brLoadCatalog();
@@ -833,6 +941,32 @@ Gold-${totGold}`;
         outEl?.scrollIntoView({ behavior:'smooth', block:'start' });
     };
 
+    const _brRenderWsUnassigned = () => {
+        const host = document.getElementById('br-ws-unassigned');
+        if (!host) return;
+        const um = _brState.wsUnassigned;
+        if (!um) { host.style.display = 'none'; host.innerHTML = ''; return; }
+        const entries = Object.entries(um).sort((a,b) => b[1]-a[1]);
+        const total = entries.reduce((s,[,q]) => s+q, 0);
+        host.style.display = '';
+        host.innerHTML = `
+            <div style="background:#fffbeb;border:1px solid #fbbf24;border-radius:8px;padding:12px 14px;">
+                <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                    <div style="min-width:0;">
+                        <div style="font-weight:600;font-size:13px;color:#92400e;">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            ${entries.length} group${entries.length===1?'':'s'} in this egg run ${entries.length===1?'is':'are'} not on any wholesale line — ${total} carton${total===1?'':'s'} left out of the report.
+                        </div>
+                        <div style="margin-top:6px;">${entries.map(([k,q]) =>
+                            `<span style="display:inline-block;background:#fff;border:1px solid #fcd34d;border-radius:4px;padding:2px 6px;margin:2px 4px 2px 0;font-size:11px;">${escapeHtml(k)} <strong>${q}</strong></span>`).join('')}</div>
+                    </div>
+                    <button class="btn primary" style="font-size:12px;white-space:nowrap;" onclick="app.brManageCatalog('wholesale')">
+                        <i class="fas fa-sliders-h"></i> Assign them
+                    </button>
+                </div>
+            </div>`;
+    };
+
     const _brRenderUnmapped = () => {
         const host = document.getElementById('br-unmapped');
         if (!host) return;
@@ -872,7 +1006,7 @@ Gold-${totGold}`;
     // Writes go straight to Supabase when the catalog tables exist; otherwise
     // they persist to this browser only and the modal says so plainly.
 
-    let _brCatUI = { tab:'products', q:'', editSku:null, editGroup:null, pending:[], import:null };
+    let _brCatUI = { tab:'products', q:'', editSku:null, editGroup:null, editWs:null, pending:[], import:null };
 
     // Escape for interpolation into a single-quoted JS string inside a
     // double-quoted HTML attribute (onclick="app.x('…')").
@@ -907,8 +1041,55 @@ Gold-${totGold}`;
         if (error) throw new Error(error.message);
     };
 
+    // Wholesale groups live in a SEPARATE migration from the product catalog, so
+    // they can be DB-backed while the product half is not, or vice versa.
+    const _brWsWritable = () => !!_brSb() && _brWsSource === 'db';
+
     // Apply a set of group/sku rows to whichever backing store is in play, then
     // refresh the in-memory catalog and every surface that renders from it.
+    const _brApplyWs = async ({ ws = [], deleteWs = null }) => {
+        if (!isSystemAdmin(_state.cu)) { UI.toast.error('Access denied'); return false; }
+        try {
+            if (_brWsWritable()) {
+                const sb = _brSb();
+                if (ws.length) await _brUpsert('br_wholesale_group', ws);
+                if (deleteWs) {
+                    const { error } = await sb.from('br_wholesale_group').delete().eq('key', deleteWs);
+                    if (error) throw new Error(error.message);
+                }
+                await _brLoadCatalog(true);
+            } else {
+                const byKey = {};
+                for (const w of (_brCatalog.ws || [])) byKey[w.key] = w;
+                for (const w of ws) byKey[w.key] = { ...byKey[w.key], ...w };
+                if (deleteWs) delete byKey[deleteWs];
+                _brCatalog = _brBuildCatalog(_brCatalog.groups, Object.values(_brCatalog.skus), _brCatalog.source, Object.values(byKey));
+                try {
+                    const raw = localStorage.getItem('br_catalog_cache');
+                    const c = raw ? JSON.parse(raw) : {};
+                    localStorage.setItem('br_catalog_cache', JSON.stringify({
+                        groups: c.groups || _brCatalog.groups,
+                        skus:   c.skus   || Object.values(_brCatalog.skus),
+                        ws:     _brCatalog.ws,
+                    }));
+                } catch (e) { console.warn('[boss-report] local ws persist failed:', e && e.message); }
+            }
+        } catch (e) {
+            UI.toast.error('Save failed: ' + (e?.message || e));
+            return false;
+        }
+        _brSyncTgtRows();
+        // Drop any newly-assigned keys off the unassigned banner.
+        if (_brState.wsUnassigned) {
+            const assigned = new Set();
+            for (const w of (_brCatalog.ws || [])) for (const k of (w.source_keys||[])) assigned.add(k);
+            for (const k of Object.keys(_brState.wsUnassigned)) if (assigned.has(k)) delete _brState.wsUnassigned[k];
+            if (!Object.keys(_brState.wsUnassigned).length) _brState.wsUnassigned = null;
+            _brRenderWsUnassigned();
+        }
+        return true;
+    };
+
     const _brApply = async ({ groups = [], skus = [], deleteSku = null, deleteGroup = null }) => {
         if (!isSystemAdmin(_state.cu)) { UI.toast.error('Access denied'); return false; }
         try {
@@ -975,6 +1156,26 @@ Gold-${totGold}`;
         }).join('');
     };
 
+    // Same contract as _brSyncBalRows, for Section 3's target inputs.
+    const _brSyncTgtRows = () => {
+        const host = document.getElementById('br-tgt-rows');
+        if (!host) return;
+        const cur = {};
+        host.querySelectorAll('input[id^="br-tgt-"]').forEach(el => {
+            if (el.value !== '') cur[el.id.replace(/^br-tgt-/, '')] = el.value;
+        });
+        const saved = _brGetTgts(_brMonthKey());
+        host.innerHTML = _brWsGroups().map(g => {
+            const v = cur[g.key] != null ? cur[g.key] : (saved[g.key] == null ? '' : saved[g.key]);
+            return `
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                <label style="width:260px;font-size:13px;color:var(--gray-700);">${escapeHtml(g.label)}</label>
+                <input type="number" id="br-tgt-${escapeHtml(g.key)}" class="form-control" style="width:110px;"
+                    value="${escapeHtml(String(v))}" placeholder="0" min="0">
+            </div>`;
+        }).join('');
+    };
+
     const brManageCatalog = async (tab, fromUnmapped) => {
         if (!isSystemAdmin(_state.cu)) { UI.toast.error('Access denied'); return; }
         await _brLoadCatalog(!_brCatalog);
@@ -1009,13 +1210,23 @@ Gold-${totGold}`;
                 across devices and users.
             </div>`;
         const tabBtn = (id, label) => `<button class="btn ${_brCatUI.tab===id?'primary':'secondary'}" style="font-size:12px;" onclick="app.brCatTab('${id}')">${label}</button>`;
+        const body = _brCatUI.tab === 'lines'     ? _brCatLinesHtml(cat)
+                   : _brCatUI.tab === 'wholesale' ? _brCatWholesaleHtml(cat)
+                   : _brCatUI.tab === 'import'    ? _brCatImportHtml()
+                   : _brCatProductsHtml(cat);
+        // The wholesale half has its own migration, so it carries its own warning.
+        const wsWarn = (_brCatUI.tab === 'wholesale' && !_brWsWritable()) ? `
+            <div style="background:#fffbeb;border:1px solid #fbbf24;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:#92400e;">
+                <strong>Saving to this browser only.</strong> The shared wholesale-group table was not found —
+                run <code>migrations/boss_report_wholesale_groups_2026-08-04.sql</code> in Supabase.
+            </div>` : '';
         host.innerHTML = `
-            ${warn}
-            <div style="display:flex;gap:8px;margin-bottom:16px;">
-                ${tabBtn('products','Products')}${tabBtn('lines','Product Lines')}
+            ${_brCatUI.tab === 'wholesale' ? wsWarn : warn}
+            <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
+                ${tabBtn('products','Products')}${tabBtn('lines','Product Lines')}${tabBtn('wholesale','Wholesale Groups')}
                 ${_brCatUI.import ? tabBtn('import','Import Preview') : ''}
             </div>
-            ${_brCatUI.tab === 'lines' ? _brCatLinesHtml(cat) : _brCatUI.tab === 'import' ? _brCatImportHtml() : _brCatProductsHtml(cat)}`;
+            ${body}`;
         if (keepFocus) {
             const q = document.getElementById('br-cat-q');
             if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
@@ -1154,6 +1365,115 @@ Gold-${totGold}`;
                 Disabling a line keeps its history but stops it printing in the report and stops its sales being deducted.
                 A line with products attached cannot be deleted — move or delete those products first.
             </p>`;
+    };
+
+    const _brCatWholesaleHtml = (cat) => {
+        const ws = cat.ws || [];
+        const editing = _brCatUI.editWs ? ws.find(w => w.key === _brCatUI.editWs) : null;
+        const selected = new Set(editing ? (editing.source_keys || []) : []);
+        // Union of the keys observed in the committed egg runs and any key already
+        // assigned — so a source key that has not appeared recently is never lost
+        // just because it is missing from the pick-list.
+        const assignedAnywhere = new Set();
+        for (const w of ws) for (const k of (w.source_keys||[])) assignedAnywhere.add(k);
+        const pickable = [...new Set([..._brObservedWsKeys, ...assignedAnywhere])].sort();
+        const boxes = pickable.length ? pickable.map((k, i) => `
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;padding:4px 8px;border:1px solid var(--gray-200);border-radius:6px;">
+                <input type="checkbox" class="br-ws-src" id="br-ws-src-${i}" value="${escapeHtml(k)}" ${selected.has(k) ? 'checked' : ''}>
+                ${escapeHtml(k)}
+            </label>`).join('')
+            : '<div style="font-size:12px;color:var(--gray-500);">No egg runs loaded — type the keys below instead.</div>';
+        const extras = [...selected].filter(k => !pickable.includes(k)).join(', ');
+        return `
+            <div style="background:var(--gray-50,#f9fafb);border:1px solid var(--gray-200);border-radius:8px;padding:14px;margin-bottom:16px;">
+                <div style="font-weight:600;font-size:13px;margin-bottom:10px;">${editing ? 'Edit wholesale group' : 'Add wholesale group'}</div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;align-items:end;">
+                    <div><label style="font-size:11px;color:var(--gray-500);">Label (prints in the report)</label>
+                        <input id="br-ws-label" class="form-control" placeholder="KL Kepong + SG Puchong &amp; Sunway" value="${escapeHtml(editing?.label||'')}"></div>
+                    <div><label style="font-size:11px;color:var(--gray-500);">Order</label>
+                        <input id="br-ws-order" type="number" step="10" class="form-control" value="${editing?.sort_order ?? ((ws.length+1)*10)}"></div>
+                </div>
+                <div style="margin-top:12px;">
+                    <label style="font-size:11px;color:var(--gray-500);">Egg-run groups counted on this line</label>
+                    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">${boxes}</div>
+                    <input id="br-ws-extra" class="form-control" style="margin-top:8px;" placeholder="Other keys, comma-separated (rarely needed)" value="${escapeHtml(extras)}">
+                    <div style="font-size:11px;color:var(--gray-500);margin-top:6px;">
+                        The report line sums these groups out of the selected egg run. Tick more than one to combine them
+                        (that is how "KL Kepong + SG Puchong &amp; Sunway" is a single line).
+                    </div>
+                </div>
+                <div style="margin-top:12px;display:flex;gap:8px;">
+                    <button class="btn primary" onclick="(async () => { await app.brCatSaveWs(); })()"><i class="fas fa-save"></i> ${editing ? 'Save' : 'Add group'}</button>
+                    ${editing ? `<button class="btn secondary" onclick="app.brCatEditWs('')">Cancel</button>` : ''}
+                </div>
+            </div>
+            <div style="border:1px solid var(--gray-200);border-radius:8px;overflow:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                    <thead><tr style="background:var(--gray-50,#f9fafb);">
+                        <th style="text-align:left;padding:8px;">Report line</th>
+                        <th style="text-align:right;padding:8px;">Order</th>
+                        <th style="text-align:left;padding:8px;">Counts these egg-run groups</th>
+                        <th style="text-align:right;padding:8px;">&nbsp;</th>
+                    </tr></thead>
+                    <tbody>
+                        ${ws.length ? ws.map(w => {
+                            const off = w.active === false;
+                            const srcs = (w.source_keys||[]);
+                            return `<tr style="border-top:1px solid var(--gray-200);${off?'opacity:.5;':''}">
+                                <td style="padding:6px 8px;">${escapeHtml(w.label)}</td>
+                                <td style="padding:6px 8px;text-align:right;">${Number(w.sort_order)||0}</td>
+                                <td style="padding:6px 8px;">${srcs.length ? srcs.map(k=>escapeHtml(k)).join(', ') : '<span style="color:#dc2626;">— none, this line always reports 0 —</span>'}</td>
+                                <td style="padding:6px 8px;text-align:right;white-space:nowrap;">
+                                    <button class="btn small secondary" onclick="app.brCatEditWs('${_brAttr(w.key)}')"><i class="fas fa-pen"></i></button>
+                                    <button class="btn small secondary" onclick="(async () => { await app.brCatToggleWs('${_brAttr(w.key)}'); })()">${off?'Enable':'Disable'}</button>
+                                    <button class="btn small" style="color:#dc2626;" onclick="(async () => { await app.brCatDeleteWs('${_brAttr(w.key)}'); })()"><i class="fas fa-trash"></i></button>
+                                </td></tr>`;
+                        }).join('') : `<tr><td colspan="4" style="padding:16px;text-align:center;color:var(--gray-500);">No wholesale groups.</td></tr>`}
+                    </tbody>
+                </table>
+            </div>
+            <p style="font-size:11px;color:var(--gray-500);margin-top:10px;">
+                Monthly targets are stored per group key, so renaming a line keeps its target. Deleting one deletes its targets too.
+            </p>`;
+    };
+
+    const brCatEditWs = (key) => { _brCatUI.editWs = key || null; _brCatUI.tab = 'wholesale'; _brCatRender(); };
+
+    const brCatSaveWs = async () => {
+        const label = (document.getElementById('br-ws-label')?.value || '').trim();
+        if (!label) { UI.toast.error('Label is required'); return; }
+        const picked = [...document.querySelectorAll('.br-ws-src')].filter(c => c.checked).map(c => c.value);
+        const extra = (document.getElementById('br-ws-extra')?.value || '').split(',').map(s => s.trim()).filter(Boolean);
+        const source_keys = [...new Set([...picked, ...extra])];
+        if (!source_keys.length) { UI.toast.error('Pick at least one egg-run group — a line with none always reports 0'); return; }
+        const existing = _brCatUI.editWs ? (_brCatalog.ws || []).find(w => w.key === _brCatUI.editWs) : null;
+        // Keep the key stable across a rename: it is the target key and the
+        // br-tgt-* DOM id, so regenerating it would orphan this month's target.
+        let key = existing ? existing.key : _brSlugKey(label);
+        if (!existing) {
+            let n = 2; const base = key;
+            while ((_brCatalog.ws || []).some(w => w.key === key)) key = `${base}${n++}`;
+        }
+        const row = {
+            key, label, source_keys,
+            sort_order: Number(document.getElementById('br-ws-order')?.value) || 0,
+            active: existing ? existing.active !== false : true,
+        };
+        if (!await _brApplyWs({ ws: [row] })) return;
+        _brCatUI.editWs = null;
+        _brCatRender();
+        UI.toast.success('Wholesale group saved');
+    };
+
+    const brCatToggleWs = async (key) => {
+        const w = (_brCatalog.ws || []).find(x => x.key === key);
+        if (!w) return;
+        if (await _brApplyWs({ ws: [{ ...w, active: w.active === false }] })) _brCatRender();
+    };
+
+    const brCatDeleteWs = async (key) => {
+        if (!window.confirm('Delete this wholesale group? Its line stops printing in the report and its saved monthly targets are removed.')) return;
+        if (await _brApplyWs({ deleteWs: key })) { _brCatRender(); UI.toast.success('Wholesale group deleted'); }
     };
 
     const _brCatImportHtml = () => {
@@ -1304,5 +1624,10 @@ Gold-${totGold}`;
         brCatToggleGroup,
         brCatDeleteGroup,
         brCatImportApply,
+        // Wholesale groups (Section 3)
+        brCatEditWs,
+        brCatSaveWs,
+        brCatToggleWs,
+        brCatDeleteWs,
     });
 })();
