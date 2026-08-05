@@ -612,6 +612,23 @@ const _openingBalanceDate = (cs) => {
     return today;
 };
 
+// Gender arrives as whatever the spreadsheet cell held — 'female', 'F', 'MALE',
+// '女'. Passing that through unchanged is what left prospects.gender holding six
+// spellings of two values, which the basic-info <select> and the advanced-search
+// gender filter both compare against the canonical 'Male'/'Female'/'Other' set.
+// Normalize at the write boundary so the column stays on that set (and so the
+// CHECK constraint in migrations/gender_normalize_*.sql can't reject an import).
+// Anything unrecognized is preserved verbatim rather than guessed at.
+const _impGender = (v) => {
+    const s = String(v ?? '').trim();
+    if (!s) return '';
+    const low = s.toLowerCase();
+    if (low === 'other') return 'Other';
+    if (low.startsWith('m') || s === '男') return 'Male';
+    if (low.startsWith('f') || s === '女') return 'Female';
+    return s;
+};
+
 const mapRowToRecord = (row, reverseMap, agentId, importType = 'prospects') => {
     const get = (field) => {
         const idx = reverseMap[field];
@@ -622,7 +639,7 @@ const mapRowToRecord = (row, reverseMap, agentId, importType = 'prospects') => {
     if (importType === 'customers') {
         return {
             full_name: get('full_name'),
-            gender: get('gender'),
+            gender: _impGender(get('gender')),
             nationality: get('nationality'),
             phone: get('phone'),
             email: get('email'),
@@ -652,7 +669,7 @@ const mapRowToRecord = (row, reverseMap, agentId, importType = 'prospects') => {
     return {
         full_name: get('full_name'),
         title: get('title'),
-        gender: get('gender'),
+        gender: _impGender(get('gender')),
         nationality: get('nationality'),
         phone: get('phone'),
         email: get('email'),

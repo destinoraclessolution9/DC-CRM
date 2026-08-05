@@ -39,7 +39,7 @@
   "chunks/script-settings.js": 800,
   "chunks/script-referrals.js": 1960,
   "chunks/script-reporting.js": 3780,
-  "chunks/script-search.js": 2400,
+  "chunks/script-search.js": 2430,
   "chunks/script-stock-take.js": 2450,
   "chunks/script-whatsapp.js": 713
 }

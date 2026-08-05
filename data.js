@@ -2994,7 +2994,8 @@ class DataStore {
     // only the rows the user actually needs travel over the wire.
     //
     // options = {
-    //   filters:      { status: 'active' },              // eq() filters
+    //   filters:      { status: 'active' },              // eq() filters (case-SENSITIVE)
+    //   ilike:        { gender: 'F%' },                   // case-INSENSITIVE match (LIKE pattern)
     //   search:       'john',                             // ilike search term
     //   searchFields: ['full_name','phone','email'],      // columns to search
     //   sort:         'full_name',                        // order column
@@ -3054,6 +3055,20 @@ class DataStore {
                 for (const [key, value] of Object.entries(options.filters)) {
                     if (value == null || value === '' || value === 'null' || value === 'undefined') continue;
                     q = q.eq(key, value);
+                }
+            }
+
+            // Case-insensitive equality / prefix filters. PostgREST .eq() is
+            // case-SENSITIVE, so a pushed-down eq on a free-text column silently
+            // drops every row stored in the other casing — `gender` alone holds
+            // seven forms ('Female'/'female'/'F'/'Male'/'male'/'M'/'') and an
+            // .eq('Female') saw barely half of them. Callers pass a LIKE pattern
+            // (e.g. { gender: 'F%' }) which compiles to .ilike() — an exact
+            // case-insensitive match when the pattern has no wildcard.
+            if (options.ilike) {
+                for (const [key, value] of Object.entries(options.ilike)) {
+                    if (value == null || value === '') continue;
+                    q = q.ilike(key, value);
                 }
             }
 
