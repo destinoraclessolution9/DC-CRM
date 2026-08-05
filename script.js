@@ -1583,6 +1583,39 @@ const appLogic = (() => {
         debounceCall: (key, fn, delay) => debounceCall(key, fn, delay),
     });
 
+    // ── WhatsApp deep links ──────────────────────────────────────────────────
+    // Canonical Malaysia MSISDN normalizer for wa.me. SINGLE SOURCE OF TRUTH:
+    // _mhomeWaPhone (script-mobile.js) and _evWaPhone (script-prospects.js) were
+    // independent forks and had already drifted — the prospects one was missing
+    // the bare-local branch below, so a number stored as "126379331" went to
+    // wa.me with no country code. Both now delegate here.
+    const waPhone = (raw) => {
+        const digits = String(raw || '').replace(/[^0-9+]/g, '').replace(/^\+/, '');
+        if (!digits) return '';
+        if (digits.startsWith('60')) return digits;
+        if (digits.startsWith('0'))  return '6' + digits;
+        // Bare local number with the leading 0 dropped — a MY mobile is 1XXXXXXXX
+        // (9–10 digits after the 0). Prefix the 60 country code so wa.me doesn't
+        // interpret it against the wrong country.
+        if (/^1\d{7,9}$/.test(digits)) return '60' + digits;
+        return digits;
+    };
+
+    // Open a WhatsApp chat for an ALREADY-normalized MSISDN (waPhone output).
+    // Digits-only input, so callers can inline it in an onclick attribute without
+    // an escaping hazard from a phone field containing a quote.
+    //
+    // Deliberately NOT async and synchronous up to window.open: popups require
+    // transient user activation, which any await before them would consume — the
+    // gesture would be lost and the chat would silently never open (same lesson
+    // as mhomeWa in script-mobile.js and openProspectWhatsApp in script-prospects.js).
+    const openWaChat = (num) => {
+        const n = String(num || '').replace(/[^0-9]/g, '');
+        if (!n) { UI.toast.error('No phone number on file'); return; }
+        window.open(`https://wa.me/${n}`, '_blank', 'noopener');
+    };
+    Object.assign(window._crmUtils, { waPhone, openWaChat });
+
     // ========== ADVANCED SEARCH + FILTER PANEL (Phase 5D) ==========
     // [CHUNK: search] ~1725 lines extracted to chunks/script-search.js
     // Loaded on-demand when user first opens the search panel.
@@ -5229,6 +5262,8 @@ function _wireLoginBtn() {
         debounceCall,
         ensureReferralFields,
         canViewNode,
+        waPhone,      // MY MSISDN normalizer for wa.me — canonical copy
+        openWaChat,   // list-row WhatsApp icons call this inline (must be on app.*)
 
         // Phase 16 WhatsApp Integration — implemented by chunks/script-whatsapp.js
         // (chunk Object.assign overwrites stubs after first navigation to 'whatsapp'

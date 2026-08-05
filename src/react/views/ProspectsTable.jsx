@@ -20,9 +20,10 @@ import { useState } from 'react';
 import { useProspects } from '../data/useProspects.js';
 import { EmptyState } from '../ui/EmptyState.jsx';
 import { ErrorState } from '../ui/ErrorState.jsx';
+import { WhatsAppButton } from '../ui/WhatsAppButton.jsx';
 
 const app = () => window.app || {};
-const SORT_TO_BFF = { name: 'full_name', score: 'score', activity: 'last_activity_date' };
+const SORT_TO_BFF ={ name: 'full_name', score: 'score', activity: 'last_activity_date' };
 
 function SortHeader({ label, field, sortField, sortDir }) {
     const active = sortField === field;
@@ -77,6 +78,7 @@ function ActionsCell({ p, meta }) {
             ) : (p.status !== 'converted' ? (
                 <button className="btn-icon" title="Convert to Customer" onClick={() => app().convertToCustomer && app().convertToCustomer(p.id)}><i className="fas fa-user-check"></i></button>
             ) : null)}
+            <WhatsAppButton phone={p.phone} />
             {meta.canDelete ? (
                 <button className="btn-icon" title="Delete" style={{ color: 'var(--red-500)' }} onClick={() => app().deleteProspect && app().deleteProspect(p.id)}><i className="fas fa-trash"></i></button>
             ) : null}

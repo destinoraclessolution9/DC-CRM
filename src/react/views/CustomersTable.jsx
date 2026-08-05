@@ -16,6 +16,7 @@
 import { useCustomers } from '../data/useCustomers.js';
 import { EmptyState } from '../ui/EmptyState.jsx';
 import { ErrorState } from '../ui/ErrorState.jsx';
+import { WhatsAppButton } from '../ui/WhatsAppButton.jsx';
 
 const app = () => window.app || {};
 
@@ -126,6 +127,7 @@ function Row({ c, meta }) {
                 <button className="btn-icon" title="Add Purchase" onClick={() => app().openAddPurchaseModal && app().openAddPurchaseModal(c.id)}><i className="fas fa-shopping-cart"></i></button>
                 <button className="btn-icon" title="Referral" onClick={(e) => { e.stopPropagation(); app().openCustomerReferralModal && app().openCustomerReferralModal(c.id); }}><i className="fas fa-user-plus"></i></button>
                 <button className="btn-icon" title="Recruit" onClick={() => app().openRecruitModal && app().openRecruitModal(c.id)}><i className="fas fa-user-tie"></i></button>
+                <WhatsAppButton phone={c.phone} />
             </td>
         </tr>
     );

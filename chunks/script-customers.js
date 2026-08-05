@@ -25,6 +25,7 @@
     const canAccessStockTake   = (u) => _utils.isSystemAdmin(u) || _utils.isStockTakeStaff(u);
     const debounce             = _utils.debounce;
     const debounceCall         = _utils.debounceCall;
+    const waPhone              = (raw) => _utils.waPhone(raw);
     // Permission helpers — defined in script.js IIFE, exported to _crmUtils after line ~755.
     const canViewProspect     = (p) => _utils.canViewProspect(p);
     const canViewCustomer     = (c) => _utils.canViewCustomer(c);
@@ -552,6 +553,13 @@ const renderCustomersTable = async () => {
                     <button class="btn-icon" title="Add Purchase" onclick="app.openAddPurchaseModal(${c.id})"><i class="fas fa-shopping-cart"></i></button>
                     <button class="btn-icon" title="Referral" onclick="event.stopPropagation(); app.openCustomerReferralModal(${c.id})"><i class="fas fa-user-plus"></i></button>
                     <button class="btn-icon" title="Recruit" onclick="app.openRecruitModal(${c.id})"><i class="fas fa-user-tie"></i></button>
+                    ${(() => {
+                        // Desktop-only WhatsApp shortcut. Opens the chat directly (wa.me),
+                        // NOT the Meta Business API modal the detail view uses. Number is
+                        // normalized at render so the inline onclick carries digits only.
+                        const _wa = waPhone(c.phone);
+                        return _wa ? `<button class="btn-icon" title="WhatsApp ${escapeHtml(c.phone)}" style="color:#25d366;" onclick="app.openWaChat('${_wa}')"><i class="fab fa-whatsapp"></i></button>` : '';
+                    })()}
                 </td>
             </tr>
         `;

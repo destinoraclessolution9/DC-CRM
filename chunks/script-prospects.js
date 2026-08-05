@@ -27,6 +27,7 @@
     const canAccessStockTake   = (u) => _utils.isSystemAdmin(u) || _utils.isStockTakeStaff(u);
     const debounce             = _utils.debounce;
     const debounceCall         = _utils.debounceCall;
+    const waPhone              = (raw) => _utils.waPhone(raw);
     // Permission helpers — defined in script.js IIFE, exported to _crmUtils after line ~755.
     const canViewProspect     = (p) => _utils.canViewProspect(p);
     const canViewCustomer     = (c) => _utils.canViewCustomer(c);
@@ -584,6 +585,14 @@ const buildProspectRowHtml = (p, ctx) => {
                     ` : (p.status !== 'converted' ? `
                         <button class="btn-icon" title="Convert to Customer" onclick="app.convertToCustomer(${p.id})"><i class="fas fa-user-check"></i></button>
                     ` : '')}
+                    ${(() => {
+                        // Desktop-only WhatsApp shortcut (mobile has its own on the mp cards).
+                        // Normalized at render time so the inline onclick carries DIGITS ONLY —
+                        // no escaping hazard from a phone field, and the open stays synchronous
+                        // inside the click gesture. Hidden (not disabled) when there's no number.
+                        const _wa = waPhone(p.phone);
+                        return _wa ? `<button class="btn-icon" title="WhatsApp ${escapeHtml(p.phone)}" style="color:#25d366;" onclick="app.openWaChat('${_wa}')"><i class="fab fa-whatsapp"></i></button>` : '';
+                    })()}
                     ${canDelete ? `<button class="btn-icon" title="Delete" style="color:var(--red-500);" onclick="app.deleteProspect(${p.id})"><i class="fas fa-trash"></i></button>` : ''}
                 </td>
             </tr>
@@ -1322,6 +1331,13 @@ const renderProspectCards = (pageProspects, userById, canReassign, activeAgents)
                         ${p.unable_to_serve ? `<span class="badge-unable">Unable to Serve</span>` : ''}${p.manual_grade === 'F' ? `<span class="badge-unable">Dropped (F)</span>` : ''}
                     </div>
                     <div class="prospect-card-score"><span class="score-badge score-${grade.replace('+','-plus')}">${p.score || 0} (${grade})</span></div>
+                    ${(() => {
+                        // Card view is the ONE prospects path the React island never takes
+                        // (renderProspectsTable excludes mode 'card'), so it needs its own
+                        // button. The card itself navigates on click → stopPropagation here.
+                        const _wa = waPhone(p.phone);
+                        return _wa ? `<button class="btn-icon" title="WhatsApp ${escapeHtml(p.phone)}" style="color:#25d366;flex-shrink:0;" onclick="event.stopPropagation();app.openWaChat('${_wa}')"><i class="fab fa-whatsapp"></i></button>` : '';
+                    })()}
                 </div>
                 <div class="prospect-card-row"><span>Ming Gua</span><span class="val">${p.ming_gua || '—'}</span></div>
                 <div class="prospect-card-row"><span>Agent</span><span class="val">${escapeHtml(agentName)}</span></div>
@@ -4506,15 +4522,12 @@ const _evIsVoucherAdmin = () =>
     (typeof isSystemAdmin === 'function' && isSystemAdmin(_state?.cu)) ||
     (typeof isMarketingManager === 'function' && isMarketingManager(_state?.cu));
 
-// Malaysia MSISDN normalizer for wa.me (mirror of _mhomeWaPhone in script-mobile.js,
-// duplicated because that helper is chunk-private).
-const _evWaPhone = (raw) => {
-    const digits = String(raw || '').replace(/[^0-9+]/g, '').replace(/^\+/, '');
-    if (!digits) return '';
-    if (digits.startsWith('60')) return digits;
-    if (digits.startsWith('0')) return '6' + digits;
-    return digits;
-};
+// Malaysia MSISDN normalizer for wa.me — now an alias for the canonical helper in
+// script.js. This used to be a hand-copied fork of _mhomeWaPhone and had fallen a
+// branch behind it: a number stored without its leading 0 (e.g. "126379331") was
+// handed to wa.me with NO country code, which resolves against the wrong country.
+// Voucher shares to such prospects silently opened the wrong/no chat.
+const _evWaPhone = (raw) => waPhone(raw);
 
 const _evGetConfig = async () => {
     const sb = window.supabase || window.supabaseClient;

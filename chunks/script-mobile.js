@@ -741,17 +741,11 @@
         const parts = String(name || '').trim().split(/\s+/).slice(0, 2);
         return parts.map(p => p.charAt(0).toUpperCase()).join('') || '?';
     };
-    const _mhomeWaPhone = (raw) => {
-        const digits = String(raw || '').replace(/[^0-9+]/g, '').replace(/^\+/, '');
-        if (!digits) return '';
-        if (digits.startsWith('60')) return digits;
-        if (digits.startsWith('0')) return '6' + digits;
-        // Bare local number with the leading 0 dropped — a MY mobile is 1XXXXXXXX
-        // (9–10 digits after the 0). Prefix the 60 country code so wa.me doesn't
-        // interpret it against the wrong country.
-        if (/^1\d{7,9}$/.test(digits)) return '60' + digits;
-        return digits;
-    };
+    // MY MSISDN normalizer for wa.me. The logic moved to script.js (_crmUtils.waPhone)
+    // when the desktop lists grew their own WhatsApp icons — this chunk-private copy
+    // and _evWaPhone in script-prospects.js had already drifted apart, so there is now
+    // one implementation and these are thin aliases. Behaviour here is unchanged.
+    const _mhomeWaPhone = (raw) => _utils.waPhone(raw);
 
     // Push channel for the full-JSX home body (SW-108, default-off). The JSX
     // island registers an `update(payload)` setter here on mount; the chunk's

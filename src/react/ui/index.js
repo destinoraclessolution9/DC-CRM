@@ -44,6 +44,7 @@ export { ProtectionBar } from './ProtectionBar.jsx';
 export { HealthBadge } from './HealthBadge.jsx';
 export { RoleGate } from './RoleGate.jsx';
 export { StatCard } from './StatCard.jsx';
+export { WhatsAppButton } from './WhatsAppButton.jsx';
 
 // ── Data table at scale (Phase 3) ────────────────────────────────────────────
 export { VirtualizedDataTable } from './VirtualizedDataTable.jsx';
