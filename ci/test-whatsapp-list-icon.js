@@ -132,7 +132,7 @@ function loadChunk(file, names) {
 }
 
 const P = loadChunk('chunks/script-prospects.js', ['buildProspectRowHtml', 'renderProspectCards', '_evWaPhone']);
-const C = loadChunk('chunks/script-customers.js', ['renderCustomersTable']);
+const C = loadChunk('chunks/script-customers.js', ['renderCustomersTable', 'showCustomerDetail']);
 
 // ── E7: the two chunk-private forks now delegate to the canonical helper ─────
 // _evWaPhone had fallen a branch behind _mhomeWaPhone: a number stored without
@@ -202,6 +202,49 @@ ok('customers row: calls openWaChat with the normalized number',
 ok('customers chunk: waPhone bound from _crmUtils',
     /const waPhone\s+= \(raw\) => _utils\.waPhone\(raw\)/.test(custSrc));
 
+// ── Customer DETAIL header (chunk-rendered; no React equivalent) ────────────
+// The header button used to open the Meta Business API composer while the
+// prospect detail header and every list row opened the chat directly. Render the
+// real header and assert the behaviours match.
+async function renderCustomerDetail(customer) {
+    let html = '';
+    const viewport = { set innerHTML(v) { html = v; }, get innerHTML() { return html; }, querySelectorAll: () => [] };
+    const prevGet = global.document.getElementById;
+    const prevQSA = global.document.querySelectorAll;
+    global.document.getElementById = (id) => (id === 'content-viewport' ? viewport : null);
+    global.document.querySelectorAll = () => [];
+    window.AppDataStore = new Proxy({}, {
+        get: (t, k) => (k === 'getById'
+            ? async (table) => (table === 'customers' ? customer : null)
+            : k === 'query' ? async () => [] : asyncNoop),
+    });
+    global.AppDataStore = window.AppDataStore;
+    try { await C.showCustomerDetail(customer.id); } finally {
+        global.document.getElementById = prevGet;
+        global.document.querySelectorAll = prevQSA;
+    }
+    return html;
+}
+
+let detailHtml = '';
+const detailTests = (async () => {
+    const withPhoneHtml = detailHtml = await renderCustomerDetail(
+        { id: 42, full_name: 'Chia Ying Ying', phone: '0107640462', customer_since: '2025-01-02' });
+    ok('customer detail: header WhatsApp button present', /fab fa-whatsapp/.test(withPhoneHtml));
+    ok('customer detail: opens the chat directly',
+        withPhoneHtml.includes("app.openWaChat('60107640462')"),
+        'must not route through openSendWhatsAppModal (the Meta composer)');
+    ok('customer detail: no longer opens the Meta composer',
+        !/openSendWhatsAppModal/.test(withPhoneHtml));
+
+    const noPhoneHtml = await renderCustomerDetail({ id: 43, full_name: 'No Phone', phone: null });
+    // Detail headers keep a stable button row, unlike list rows — an empty number
+    // reaches openWaChat, which toasts rather than opening a broken wa.me link.
+    ok('customer detail: button stays put without a phone', /fab fa-whatsapp/.test(noPhoneHtml));
+    ok('customer detail: empty number falls through to the toast',
+        noPhoneHtml.includes("app.openWaChat('')"));
+})();
+
 // ── React islands (default-on path) ─────────────────────────────────────────
 const waBtn = fs.readFileSync(path.join(ROOT, 'src/react/ui/WhatsAppButton.jsx'), 'utf8');
 ok('React button: delegates to the same normalizer', /app\(\)\.waPhone/.test(waBtn));
@@ -223,14 +266,20 @@ ok('built react-dist/react-island.js: contains the WhatsApp button',
     /fab fa-whatsapp/.test(fs.readFileSync(path.join(ROOT, 'react-dist/react-island.js'), 'utf8')),
     'run `npx vite build` — Vercel never runs vite, the bundle must be committed');
 
-// `WA_DUMP=1 node ci/test-whatsapp-list-icon.js > rows.html` emits the real
-// chunk-rendered rows so they can be eyeballed against the live stylesheets
-// without a logged-in session.
-if (process.env.WA_DUMP) {
-    console.log(`<table class="prospects-table"><tbody>${withPhone}${noPhone}</tbody></table>`);
-    console.log(`<div class="prospect-cards-grid">${cardHtml}</div>`);
+// The customer-detail render is async, so the summary waits on it.
+detailTests.then(() => {
+    // `WA_DUMP=1 node ci/test-whatsapp-list-icon.js > rows.html` emits the real
+    // chunk-rendered rows so they can be eyeballed against the live stylesheets
+    // without a logged-in session.
+    if (process.env.WA_DUMP) {
+        console.log(`<table class="prospects-table"><tbody>${withPhone}${noPhone}</tbody></table>`);
+        console.log(`<div class="prospect-cards-grid">${cardHtml}</div>`);
+        console.log(detailHtml);
+        process.exit(fail ? 1 : 0);
+    }
+    console.log(`\ntest-whatsapp-list-icon: ${pass} passed, ${fail} failed`);
     process.exit(fail ? 1 : 0);
-}
-
-console.log(`\ntest-whatsapp-list-icon: ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+}).catch((e) => {
+    console.error('harness crashed:', e);
+    process.exit(1);
+});

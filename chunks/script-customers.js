@@ -682,7 +682,14 @@ const showCustomerDetail = async (customerId) => {
                         ${(isSystemAdmin(_state.cu) || isMarketingManager(_state.cu)) && customer.converted_from_prospect_id != null ? iconBtn('Edit', 'fas fa-edit', `app.openProspectModal(${customer.converted_from_prospect_id})`) : ''}
                         ${iconBtn('Add Purchase', 'fas fa-plus', `app.openAddPurchaseModal(${customer.id})`)}
                         ${iconBtn('Refer a Friend', 'fas fa-user-plus', `app.openCustomerReferralModal(${customer.id})`)}
-                        ${iconBtn('WhatsApp', 'fab fa-whatsapp', `app.openSendWhatsAppModal('customer',${customer.id})`, {color:'#25d366'})}
+                        ${/* Opens the customer's chat directly, matching the prospect detail header
+                              and the list rows. This used to open openSendWhatsAppModal — the Meta
+                              Business API composer — which is a different job (templates, logged
+                              sends) and is still reachable from the WhatsApp view. Agents wanting
+                              to message a customer were going through a modal to get to the chat.
+                              Number is normalized here so the onclick carries digits only; an empty
+                              string makes openWaChat toast instead of opening a broken wa.me link. */
+                          iconBtn('WhatsApp', 'fab fa-whatsapp', `app.openWaChat('${waPhone(customer.phone)}')`, {color:'#25d366'})}
                         ${iconBtn('Portal Link', 'fas fa-external-link-alt', `app.sendPortalLink(${customer.id})`)}
                         ${iconBtn('Recruit as Agent', 'fas fa-user-tie', `app.openRecruitModal(${customer.id})`, {bg:'#6b21a8',color:'#fff',border:'none'})}
                     </div>
