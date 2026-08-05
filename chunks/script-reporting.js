@@ -77,6 +77,8 @@
         cpsAgentReferrers: "Distinct consultants who referred at least one of the period's CPS sessions. Same person counts once no matter how many they brought.",
         cpsClientReferrers: "Distinct prospects/customers who referred at least one of the period's CPS sessions. Same person counts once no matter how many they brought.",
         cpsUnattributed: "CPS sessions in the period with no referrer recorded. Should be 0 - the CPS intake form requires a referrer - so a non-zero value means legacy or imported rows.",
+        cfHeadcount: "CF Headcount - distinct NON-AGENT people (prospects/customers) who referred someone into a CPS this period. One referrer who brought 3 prospects counts once. Identical to the 'client referrers' figure on the CPS Consultations card - same computation, so they can never disagree.",
+        meetUpExistingCount: "Meet-ups with existing customers - FTF/FSA activities plus any activity titled 'Golden Road'.",
         totalSales: "Revenue including EPP but excluding agent packages",
         popCaseCount: "Pre-Owned Plan cases - Count of transactions with payment_method = POP",
         popSales: "Revenue from POP cases - Sum of POP transaction amounts",
@@ -1382,11 +1384,10 @@
         // RPC fast path inside getConversionRate. getActiveAgents uses a rolling
         // 60-day window (ignores from/to) — the RPC replicates that exactly.
         const _ext = await _tryExtendedKpiRPC(from, to);
-        const [activityHeadcount, conversionRate, meetUpExistingCount, cfHeadcount, activeAgents, agentHoursSummary, neaPitching, fengshuiPitching, cpsRef] = await Promise.all([
+        const [activityHeadcount, conversionRate, meetUpExistingCount, activeAgents, agentHoursSummary, neaPitching, fengshuiPitching, cpsRef] = await Promise.all([
             _ext ? _ext.activityHeadcount   : getActivityHeadcount(from, to),
             getConversionRate(from, to),
             _ext ? _ext.meetUpExistingCount : getMeetUpExistingCustomerCount(from, to),
-            _ext ? _ext.cfHeadcount         : getCFHeadcount(from, to),
             _ext ? _ext.activeAgents        : getActiveAgents(),
             getAgentOperatingHoursSummary(),   // always current week, ignores from/to
             getNeaPitchingHeadcount(from, to),      // P&O "DC 代理配套" ticks, deduped by person
@@ -1402,6 +1403,14 @@
             cpsClientReferrers: cpsRef.clients,
             cpsUnattributed:    cpsRef.unattributed,
         };
+        // CF Headcount IS the client-referrer head-count — same number as the CPS
+        // card's chip, by construction. Deliberately NOT read from
+        // kpi_extended_summary's cf_headcount: that RPC replicates the old
+        // `count(distinct customer_id)` bug (fixed in
+        // migrations/kpi_extended_summary_cf_fix_2026-08-05.sql), and even once
+        // fixed, a second implementation could drift from this one. cpsRef is
+        // already computed above, so this costs nothing.
+        const cfHeadcount = cpsRef.clients;
 
         // Fast path: try server-side aggregates first.
         const fast = await _tryKpiRPCs(from, to);
@@ -2207,28 +2216,27 @@ const renderPeopleMetSection = async () => {
         </div>`;
 };
 
-const getCFHeadcount = async (from, to) => {
-    // CF Headcount = unique existing customers who referred someone to a CPS session.
-    // One customer who brought 3 referrals still counts as 1.
-    const needUsers = _currentRoleFilter !== 'All' || _visibleUserIds !== 'all';
-    const activities = await _reportActsInRange(from, to, 'getCFHeadcount');
-    const users = needUsers ? await AppDataStore.getAll('users') : [];
-    const userMap = {};
-    users.forEach(u => { userMap[String(u.id)] = u; });
-    const uniqueReferrers = new Set();
-    for (const a of activities) {
-        if (a.activity_type !== 'CPS') continue;
-        if (a.activity_date < from || a.activity_date > to) continue;
-        if (!_recInMarket(a)) continue;
-        if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(a.lead_agent_id))) continue;
-        if (_currentRoleFilter !== 'All') {
-            const agent = userMap[String(a.lead_agent_id)];
-            if (!agent || agent.role !== _currentRoleFilter) continue;
-        }
-        if (a.customer_id) uniqueReferrers.add(String(a.customer_id));
-    }
-    return uniqueReferrers.size;
-};
+// CF Headcount = distinct NON-AGENT people who referred someone into a CPS in the
+// period. One referrer who brought 3 prospects still counts as 1.
+//
+// FIXED 2026-08-05. This used to count `distinct a.customer_id` on CPS activities
+// — but the CPS create path never writes customer_id (it writes prospect_id), so
+// the number was 0 of 227 rows for the entire history. It fed the boss's weekly
+// report CF cell and the quarterly CF Headcount target row, both reading zero.
+//
+// The referrer lives on the CONSULTED prospect (referred_by_id/_type), and the
+// intake picker offers exactly two kinds of people — Prospect and Consultant — so
+// "non-agent referrer" is simply the client side of that split.
+//
+// Deliberately delegates to getCPSReferrerSplit rather than re-scanning: the CPS
+// card's "client referrers" chip, this weekly-report cell and the quarterly target
+// row are then the SAME number by construction, not by two implementations
+// agreeing. Scoping/date/market gates come along for free.
+//
+// Scope note: the old version scoped with `_visibleUserIds.map(String).includes(String(...))`
+// while getCPSCount uses a raw `.includes(...)`. Sharing one implementation removes
+// that inconsistency too.
+const getCFHeadcount = async (from, to) => (await getCPSReferrerSplit(from, to)).clients;
 
 const getActivityHeadcount = async (from, to) => {
     const activities = await _reportActsInRange(from, to, 'getActivityHeadcount');
@@ -2548,10 +2556,14 @@ const buildCPSDetails = async (from, to) => {
     return _buildCPSDetailsLegacy(from, to);
 };
 
-const _buildCPSDetailsLegacy = async (from, to) => {
+// ONE scan behind BOTH referrer drill-downs (CPS sessions and CF Headcount), so
+// they can never disagree about who referred what. Returns the session rows, the
+// per-referrer rollup, and the count of sessions with no referrer recorded.
+// Same scope gates as getCPSCount / getCPSReferrerSplit.
+const _cpsSessionScan = async (from, to) => {
     // Date-windowed read (was getAll('activities') — a whole-table scan on every
     // drill-down click).
-    const activities = await _reportActsInRange(from, to, '_buildCPSDetailsLegacy');
+    const activities = await _reportActsInRange(from, to, '_cpsSessionScan');
     const [users, customers, prospects] = await Promise.all([
         AppDataStore.getAll('users'),
         AppDataStore.getAll('customers'),
@@ -2591,9 +2603,16 @@ const _buildCPSDetailsLegacy = async (from, to) => {
     }
 
     const referrers = [...byReferrer.values()].sort((x, y) => y.sessions - x.sessions);
+    const unattributed = rows.filter(r => r[4] === 'Not recorded').length;
+    return { rows, referrers, unattributed };
+};
+
+// CPS drill-down: every session + who referred it, plus the by-referrer rollup
+// that makes the card's two chips auditable.
+const _buildCPSDetailsLegacy = async (from, to) => {
+    const { rows, referrers, unattributed } = await _cpsSessionScan(from, to);
     const agentHeads = referrers.filter(r => r.isAgent).length;
     const clientHeads = referrers.length - agentHeads;
-    const unattributed = rows.filter(r => r[4] === 'Not recorded').length;
 
     const summary = `<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px;">
         <strong>${rows.length}</strong> CPS session${rows.length === 1 ? '' : 's'}
@@ -3235,56 +3254,30 @@ const _buildMeetUpExistingDetailsLegacy = async (from, to) => {
     return renderDetailTable(['Date', 'Type', 'Title', 'Lead Agent'], rows);
 };
 
+// CF Headcount drill-down — the non-agent referrers behind the number.
+//
+// Bypasses report_activity_details for the same reason buildCPSDetails does: that
+// RPC returns neither prospect_id nor the referrer columns, so it cannot resolve a
+// referrer at all. Its old fast path grouped by customer_id and therefore always
+// rendered an empty table.
+//
+// Shares _cpsSessionScan with the CPS drill-down, so the row count here is exactly
+// the CF number and exactly the CPS card's client-referrer chip.
 const buildCFHeadcountDetails = async (from, to) => {
-    const _det = await _tryActivityDetails(from, to, ['CPS']);
-    if (_det) {
-        const referrerMap = {};
-        for (const a of _det) {
-            if (!a.customer_id) continue;
-            const key = String(a.customer_id);
-            if (!referrerMap[key]) referrerMap[key] = { name: a.entity_name || '—', agent: a.agent_name || '—', sessions: 0 };
-            referrerMap[key].sessions++;
-        }
-        const rows = Object.values(referrerMap).map(r => [r.name, r.agent, r.sessions]);
-        const summary = `<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px;">
-        <strong>${rows.length}</strong> unique referrer${rows.length===1?'':'s'} brought <strong>${rows.reduce((s,r)=>s+r[2],0)}</strong> total CPS sessions
-    </div>`;
-        return summary + renderDetailTable(['Referrer (Customer)', 'Agent', 'CPS Sessions'], rows);
-    }
-    return _buildCFHeadcountDetailsLegacy(from, to);
-};
+    const { referrers } = await _cpsSessionScan(from, to);
+    const clients = referrers.filter(r => !r.isAgent);
+    const agentCount = referrers.length - clients.length;
+    const sessions = clients.reduce((s, r) => s + r.sessions, 0);
 
-const _buildCFHeadcountDetailsLegacy = async (from, to) => {
-    const activities = await AppDataStore.getAll('activities');
-    const [users, customers] = await Promise.all([
-        AppDataStore.getAll('users'),
-        AppDataStore.getAll('customers')
-    ]);
-    const userMap = {}; users.forEach(u => { userMap[String(u.id)] = u; });
-    const custMap = {}; customers.forEach(c => { custMap[String(c.id)] = c; });
-    // Collect one row per unique referrer (customer)
-    const referrerMap = {}; // customer_id → { name, sessions }
-    for (const a of activities) {
-        if (a.activity_type !== 'CPS') continue;
-        if (a.activity_date < from || a.activity_date > to) continue;
-        if (!_recInMarket(a)) continue;
-        if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(a.lead_agent_id))) continue;
-        if (_currentRoleFilter !== 'All') {
-            const agent = userMap[String(a.lead_agent_id)];
-            if (!agent || agent.role !== _currentRoleFilter) continue;
-        }
-        if (!a.customer_id) continue;
-        const key = String(a.customer_id);
-        if (!referrerMap[key]) {
-            referrerMap[key] = { name: custMap[key]?.full_name || '—', agent: userMap[String(a.lead_agent_id)]?.full_name || '—', sessions: 0 };
-        }
-        referrerMap[key].sessions++;
-    }
-    const rows = Object.values(referrerMap).map(r => [r.name, r.agent, r.sessions]);
     const summary = `<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px;">
-        <strong>${rows.length}</strong> unique referrer${rows.length===1?'':'s'} brought <strong>${rows.reduce((s,r)=>s+r[2],0)}</strong> total CPS sessions
+        <strong>${clients.length}</strong> client referrer${clients.length === 1 ? '' : 's'} brought <strong>${sessions}</strong> CPS session${sessions === 1 ? '' : 's'}
+        <div style="margin-top:4px;color:var(--gray-500);font-size:11px;">Non-agent referrers only — prospects and customers who recommended someone.
+        ${agentCount > 0 ? `${agentCount} agent referrer${agentCount === 1 ? '' : 's'} in this period ${agentCount === 1 ? 'is' : 'are'} counted on the CPS card instead, not here.` : ''}</div>
     </div>`;
-    return summary + renderDetailTable(['Referrer (Customer)', 'Agent', 'CPS Sessions'], rows);
+
+    return summary + renderDetailTable(['Referrer', 'CPS Sessions'],
+        clients.map(r => [r.name, r.sessions]),
+        'No client referrals in this period');
 };
 
 const buildActivityHeadcountDetails = async (from, to) => {
@@ -3477,7 +3470,7 @@ const showKPIDetails = async (key) => {
         fengshuiPitching: 'Fengshui Pitching',
         activityHeadcount: 'Activity Attendance',
         meetUpExistingCount: 'Meet Up (Existing Customers)',
-        cfHeadcount: 'CF Headcount (CPS Referrers)',
+        cfHeadcount: 'CF Headcount (Client Referrers)',
         agentHours: 'Agent Operating Hours (This Week)'
     };
     const title = titles[key] || 'Details';

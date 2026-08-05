@@ -52,24 +52,65 @@ render a third chip if a legacy import ever produces one, but today it is always
 
 ---
 
-## 3. Confirmed: the CF Headcount card is dead
+## 3. CF Headcount was dead — now FIXED
 
-I flagged this as a suspicion in the plan. The probe confirms it:
+The probe confirmed the suspicion:
 
 ```
 CPS activities with a customer_id: 0  (of 227)
 ```
 
-`getCFHeadcount` ([script-reporting.js:2123](chunks/script-reporting.js:2123)) — the card
-labelled **"CF Headcount (CPS Referrers)"** — counts distinct `a.customer_id` on CPS activities.
-The CPS create path never writes `customer_id`; it writes `prospect_id` only. So that card reads
-**0**, and its quarterly target row ([:3660](chunks/script-reporting.js:3660)) with it.
+`getCFHeadcount` counted distinct `a.customer_id` on CPS activities, but the CPS create path
+never writes `customer_id` — it writes `prospect_id`. So CF read **0 for its entire history**.
 
-The new "client referrers" number is what CF Headcount was meant to be.
+**It is not a KPI card.** There is no card with key `cfHeadcount`. The number actually surfaces in
+two boss-facing places, both of which have been reporting zero:
 
-**I did not touch it** — it is a separate metric with a target attached, and changing what it
-counts moves a number your team reports on. Your call: fix it, or retire it now that this card
-covers the same ground.
+1. the **weekly Monday report**, Section 2 **CF** cell (auto-filled)
+2. the **Quarterly Performance Breakdown** row *CF Headcount*, against `cf_headcount_target`
+
+### The definition, chosen from the data
+
+Owner picked **all non-agent referrers** over the narrower "only referrers who are customers":
+
+| | Mar | Apr | May | Jun | Jul | Aug |
+|---|---|---|---|---|---|---|
+| All non-agent referrers ✅ | 5 | 6 | 1 | 4 | 5 | 2 |
+| Only those with a customer record | 3 | 1 | 1 | 4 | **0** | **0** |
+
+All-time there are 42 client referrers but only 15 have a customer record, so the narrow reading
+reports 0 in months where referrals plainly happened.
+
+### How it is fixed
+
+`getCFHeadcount` now **delegates to `getCPSReferrerSplit`** and returns its client count. The CPS
+card's chip, the weekly-report CF cell and the quarterly row are therefore one number *by
+construction*, not two implementations that happen to agree. `calculateKPIs` derives CF from the
+split it already computes, so it costs nothing and no longer reads the RPC's `cf_headcount`.
+
+The CF drill-down shared the same bug (grouped by `customer_id`, always empty). It now shares
+`_cpsSessionScan` with the CPS drill-down and lists the client referrers, noting how many agent
+referrers were excluded and where they are counted instead.
+
+### ⚠️ One step left for you
+
+`migrations/kpi_extended_summary_cf_fix_2026-08-05.sql` — the server RPC carries the identical
+`count(distinct customer_id)` bug. **Applying it is optional**: the client no longer reads
+`cf_headcount` from the RPC, so every visible number is already correct. It is worth applying so
+the server aggregate is not a wrong-answer landmine for the next caller.
+
+Only the `cf` CTE changes — everything else is byte-identical to
+`kpi_extended_summary_2026-06-14.sql` (verified by diff). Rollback = re-run that file.
+Dry-run against live agrees with an independent formulation of the same definition:
+
+| Window | new CTE | independent check | old (broken) |
+|---|---|---|---|
+| Aug MTD | 1 | 1 | 0 |
+| Jul | 5 | 5 | 0 |
+| 2026 | 24 | 24 | 0 |
+
+I could not apply it myself — writing DDL through the browser was blocked by a permission
+guard. Paste it into the Supabase SQL editor, or tell me and I'll try another route.
 
 ---
 
@@ -149,7 +190,11 @@ HEAD, before my change) and a `script-fude.js` export I never touched.
 
 ## 7. Still open for you
 
-1. **Labels** — "agent referrer / client referrer", or your own wording?
-2. **CF Headcount** (§3) — fix it, or retire it?
+1. **Apply `migrations/kpi_extended_summary_cf_fix_2026-08-05.sql`** (§3) — optional cleanup;
+   every visible number is already correct without it.
+2. **Labels** — "agent referrer / client referrer", or your own wording?
 3. Should the split also land on the **Weekly Monday report** (`wr-cps`) and the **quarterly
    CPS Count** row? Not included.
+4. **Two future-dated CPS** (Aug 6 and Aug 15, keyed 2026-08-05). Outside the month-to-date
+   window, so they don't affect today's numbers — but a CPS is a completed consultation, so
+   check whether those dates are intentional.

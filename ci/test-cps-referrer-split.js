@@ -98,6 +98,7 @@ if (!src.includes(ANCHOR)) { console.error('FAIL: register anchor not found — 
 src = src.replace(ANCHOR, `window.__T = {
         getCPSReferrerSplit, getCPSCount, _cpsReferrerOf, _cpsSplitParts,
         _buildCPSDetailsLegacy, _kpiCardDefs,
+        getCFHeadcount, buildCFHeadcountDetails,
         setScope: (vis, role) => { _visibleUserIds = vis; _currentRoleFilter = role; },
     };
     ${ANCHOR}`);
@@ -287,7 +288,69 @@ eq('each chip is its own span, so wrapping never splits a phrase', spans.length,
 ok('chip row is flex-wrap', /display:flex;flex-wrap:wrap/.test(cpsCard.subHtml));
 ok('chips are not joined by a middot run', !cpsCard.subHtml.includes('·'));
 
-// ── 10. React island renders the same chips the legacy HTML does ────────────
+// ── 10. CF Headcount ────────────────────────────────────────────────────────
+// It used to count `distinct activities.customer_id` on CPS rows — a column the
+// CPS create path never writes — so it read 0 for its entire history while
+// feeding the boss's weekly-report CF cell and the quarterly CF target row.
+// It is now the CLIENT-referrer head-count, sharing ONE computation with the CPS
+// card's chip so the two can never disagree.
+// Agent and client counts are deliberately DIFFERENT (2 vs 3) — with equal counts
+// a mix-up between the two buckets would pass this test unnoticed.
+reset();
+USERS = [{ id: 7, full_name: 'Lead Agent', role: 'Level 3 Agent' }];
+cps(agentRef(11, 'Agent A'));
+cps(agentRef(12, 'Agent B'));
+cps(clientRef(21, 'Client One'));
+cps(clientRef(21, 'Client One'));
+cps(clientRef(22, 'Client Two'));
+cps(clientRef(23, 'Client Three'));
+const split10 = await T.getCPSReferrerSplit(FROM, TO);
+const cf10 = await T.getCFHeadcount(FROM, TO);
+eq('CF equals the client-referrer chip exactly', cf10, split10.clients);
+eq('CF is 3 for this fixture (not 0, and not the 2 agents)', cf10, 3);
+eq('agents are NOT counted in CF', split10.agents, 2);
+ok('CF is not silently the agent count', cf10 !== split10.agents);
+
+// The old implementation keyed on activities.customer_id. Prove CF no longer
+// depends on it: every fixture row has customer_id undefined, and CF is non-zero.
+ok('CF does not read activities.customer_id',
+    ACTIVITIES.every(a => a.customer_id == null) && cf10 === 3);
+
+// Agent-only period → CF is legitimately 0, but the CPS card still shows agents.
+reset();
+cps(agentRef(11, 'Agent A'));
+cps(agentRef(12, 'Agent B'));
+eq('an all-agent period gives CF 0', await T.getCFHeadcount(FROM, TO), 0);
+eq('…while the card still reports 2 agent referrers', (await T.getCPSReferrerSplit(FROM, TO)).agents, 2);
+
+// CF inherits the shared scope gates (it delegates, so this is structural).
+reset();
+cps(clientRef(21, 'Mine'),   { lead: 7 });
+cps(clientRef(22, 'Theirs'), { lead: 99 });
+T.setScope([7], 'All');
+eq('CF respects team scope', await T.getCFHeadcount(FROM, TO), 1);
+T.setScope('all', 'All');
+reset();
+cps(clientRef(21, 'In'),  { date: '2026-08-10' });
+cps(clientRef(22, 'Out'), { date: '2026-09-15' });
+eq('CF respects the date window', await T.getCFHeadcount(FROM, TO), 1);
+
+// CF drill-down must list exactly the referrers behind the number.
+reset();
+USERS = [{ id: 7, full_name: 'Lead Agent', role: 'Level 3 Agent' }];
+cps(agentRef(11, 'Excluded Agent'));
+cps(clientRef(21, 'Listed Client'));
+cps(clientRef(21, 'Listed Client'));
+const cfHtml = await T.buildCFHeadcountDetails(FROM, TO);
+eq('CF drill-down count matches the number', await T.getCFHeadcount(FROM, TO), 1);
+ok('CF drill-down states the client-referrer count', cfHtml.includes('<strong>1</strong> client referrer'));
+ok('CF drill-down states the sessions they brought', cfHtml.includes('<strong>2</strong> CPS session'));
+ok('CF drill-down lists the client referrer', cfHtml.includes('Listed Client'));
+ok('CF drill-down EXCLUDES agent referrers', !cfHtml.includes('Excluded Agent'));
+ok('CF drill-down explains where agents went', cfHtml.includes('counted on the CPS card instead'));
+ok('CF drill-down no longer says "Referrer (Customer)"', !cfHtml.includes('Referrer (Customer)'));
+
+// ── 11. React island renders the same chips the legacy HTML does ────────────
 // _buildKpiCards is not exported; assert the shared builder both paths call.
 const jsxParts = T._cpsSplitParts(cpsCard.cpsAgents, cpsCard.cpsClients, cpsCard.cpsUnattributed);
 eq('React receives the chips as an array, not a pre-joined string', jsxParts,
