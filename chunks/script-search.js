@@ -24,6 +24,18 @@
     const getVisibleCustomers  = (...a) => _utils.getVisibleCustomers(...a);
     const getVisibleActivities = (...a) => _utils.getVisibleActivities(...a);
     const navigateTo           = (v) => window.app.navigateTo(v);
+
+    // Gender is free text holding six spellings of two values ('Female'/'female'/
+    // 'F' · 'Male'/'male'/'M') from CSV imports; the filter dropdown offers only the
+    // capitalized pair, so `i.gender === 'Female'` matched 284 of 471 female
+    // prospects. Match on the first letter — same approach as genderEmoji (cases)
+    // and the mobile birthday poster. _genderIlike is the pushed-down equivalent:
+    // letters only, so raw input can never reach a LIKE pattern.
+    const _genderKey = (v) => String(v ?? '').trim().charAt(0).toLowerCase();
+    const _genderIlike = (v) => {
+        const k = _genderKey(v);
+        return /^[a-z]$/.test(k) ? `${k}%` : null;
+    };
     // Chunk-local search state (mirrors IIFE vars)
     let _searchPanelVisible = false;
     let _currentSearchEntity = 'prospects';
@@ -1222,7 +1234,7 @@ const performProspectSearch = async (filters) => {
             // Scope could not be reliably obtained — never push an unscoped query.
             throw new Error('prospect visibility scope unavailable — visibility-scoped fallback');
         }
-        const opts = { sort: 'id', sortDir: 'asc', countMode: null, limit: FETCH_CAP + 1, offset: 0, filters: {}, gte: {}, lte: {} };
+        const opts = { sort: 'id', sortDir: 'asc', countMode: null, limit: FETCH_CAP + 1, offset: 0, filters: {}, ilike: {}, gte: {}, lte: {} };
         // SCOPE — identical to getVisibleProspects' `.in(responsible_agent_id, visibleIds)`.
         // queryAdvanced's `filters` use `.eq()` (no array-IN), so the scope IN must
         // go through scopeField/scopeValues, which compiles to `.in()`. Admin ('all')
@@ -1236,7 +1248,8 @@ const performProspectSearch = async (filters) => {
         if (filters.basic.status)   opts.filters.status = filters.basic.status;
         if (filters.basic.agent)    opts.filters.responsible_agent_id = filters.basic.agent; // within scope; AND-combined with scope .in()
         if (filters.basic.pipeline) opts.filters.pipeline_stage = filters.basic.pipeline;
-        if (filters.basic.gender)   opts.filters.gender = filters.basic.gender;
+        // gender goes through ilike, NOT eq — see _genderIlike.
+        if (filters.basic.gender)   opts.ilike.gender = _genderIlike(filters.basic.gender);
         if (filters.basic.income)   opts.filters.income_range = filters.basic.income;
         if (filters.basic.state)    opts.filters.state = filters.basic.state;
         // ranges (== the client parseInt/parseFloat >= / <= checks below).
@@ -1297,7 +1310,8 @@ const performProspectSearch = async (filters) => {
         items = items.filter(i => parseFloat(i.deal_value) <= parseFloat(filters.basic['deal-max']));
     }
     if (filters.basic.gender) {
-        items = items.filter(i => i.gender === filters.basic.gender);
+        const g = _genderKey(filters.basic.gender);
+        items = items.filter(i => _genderKey(i.gender) === g);
     }
     if (filters.basic.occupation) {
         const q = filters.basic.occupation.toLowerCase();
@@ -1467,7 +1481,9 @@ const performCustomerSearch = async (filters) => {
         if (filters.basic.minggua) baseFilters.ming_gua = filters.basic.minggua;
         if (filters.basic.status)  baseFilters.status = filters.basic.status;
         if (filters.basic.agent)   baseFilters.responsible_agent_id = filters.basic.agent; // == client resp==agent; union over both scope branches stays exact
-        if (filters.basic.gender)  baseFilters.gender = filters.basic.gender;
+        // gender goes through ilike, NOT eq — see _genderIlike.
+        const baseIlike = {};
+        if (filters.basic.gender)  baseIlike.gender = _genderIlike(filters.basic.gender);
         if (filters.basic.income)  baseFilters.income_range = filters.basic.income;
         if (filters.basic.state)   baseFilters.state = filters.basic.state;
         const baseGte = {}, baseLte = {};
@@ -1482,7 +1498,7 @@ const performCustomerSearch = async (filters) => {
         const baseSearchFields = filters.basic.name ? ['full_name', 'nickname'] : null;
         const mkOpts = (scopeField) => {
             const o = { sort: 'id', sortDir: 'asc', countMode: null, limit: FETCH_CAP + 1, offset: 0,
-                filters: { ...baseFilters }, gte: { ...baseGte }, lte: { ...baseLte } };
+                filters: { ...baseFilters }, ilike: { ...baseIlike }, gte: { ...baseGte }, lte: { ...baseLte } };
             if (scopeField) { o.scopeField = scopeField; o.scopeValues = visibleIds; }
             if (baseSearch) { o.search = baseSearch; o.searchFields = baseSearchFields; }
             return o;
@@ -1555,7 +1571,8 @@ const performCustomerSearch = async (filters) => {
         items = items.filter(i => parseFloat(i.lifetime_value) <= parseFloat(filters.basic['ltv-max']));
     }
     if (filters.basic.gender) {
-        items = items.filter(i => i.gender === filters.basic.gender);
+        const g = _genderKey(filters.basic.gender);
+        items = items.filter(i => _genderKey(i.gender) === g);
     }
     if (filters.basic.occupation) {
         const q = filters.basic.occupation.toLowerCase();

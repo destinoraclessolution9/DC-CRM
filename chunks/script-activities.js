@@ -763,6 +763,28 @@
         ['Formula', 'Formula Healthcare'],
         ['代理配套', '代理配套 (Agent Package)'],
     ];
+    // Gender is stored as free text and has accumulated six live spellings of two
+    // values ('Female'/'female'/'F' · 'Male'/'male'/'M'), inherited from CSV imports
+    // that wrote the spreadsheet cell through unchanged. That mattered here more than
+    // anywhere else, because this form is save-the-whole-record: the <select> matched
+    // by strict equality, an unmatched value selected NOTHING, the browser fell back
+    // to option 0 — and collectBasicInfoData wrote that fallback straight back to the
+    // DB. So opening + saving any lowercase-'female' prospect silently stored 'Male',
+    // which then drives Ming Gua and the client life chart. Normalize on the way in,
+    // and lead with a blank option so an unset gender stays unset instead of
+    // defaulting every new prospect to Male. (The blank option also revives the
+    // IC-derived gender autofill in script-cps.js, whose `!genderEl.value` guard
+    // could never fire while the select always reported a truthy 'Male'.)
+    const BASIC_INFO_GENDERS = ['Male', 'Female', 'Other'];
+    const _biGender = (v) => {
+        const s = String(v ?? '').trim();
+        if (!s) return '';
+        const low = s.toLowerCase();
+        if (low === 'other') return 'Other';
+        if (low.startsWith('m') || s === '男') return 'Male';
+        if (low.startsWith('f') || s === '女') return 'Female';
+        return s; // unrecognized — kept verbatim below so a save can't destroy it
+    };
     const BASIC_INFO_MING_GUA = [
         ['MG1','MG1 坎'],['MG2','MG2 坤'],['MG3','MG3 震'],['MG4','MG4 巽'],
         ['MG5','MG5'],['MG6','MG6 乾'],['MG7','MG7 兑'],['MG8','MG8 艮'],['MG9','MG9 离']
@@ -848,7 +870,12 @@
                     <div class="form-group half">
                         <label>Gender</label>
                         <select id="${prefix}-gender" class="form-control" ${disabled}>
-                            ${['Male','Female','Other'].map(v => `<option value="${v}" ${sel(d.gender, v)}>${v}</option>`).join('')}
+                            <option value="">— Select —</option>
+                            ${(() => {
+                                const g = _biGender(d.gender);
+                                const opts = (!g || BASIC_INFO_GENDERS.includes(g)) ? BASIC_INFO_GENDERS : [...BASIC_INFO_GENDERS, g];
+                                return opts.map(v => `<option value="${esc(v)}" ${sel(g, v)}>${esc(v)}</option>`).join('');
+                            })()}
                         </select>
                     </div>
                 </div>
