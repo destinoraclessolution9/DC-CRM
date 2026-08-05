@@ -55,6 +55,17 @@ export function ReportsView({ isTeamLeader = false, currentTimeFilter = 'monthly
                 <div key={i} style={{ fontSize: '11px', color: 'var(--gray-500)', lineHeight: '1.6' }}>{d.bank} · {d.months} months ×{d.count}</div>
             ));
         }
+        // Who brought the CPS sessions — agent vs client referrer head-counts.
+        // The chunk pre-computes the chip strings so this stays presentation-only.
+        // One span per chip (flex-wrap), matching _cpsSplitHtml exactly: the mobile
+        // grid is ~182px per card, and a single text run breaks mid-phrase there.
+        if (c.subType === 'cps') {
+            return (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0 10px', fontSize: '12px', color: 'var(--gray-500)', marginTop: '2px' }}>
+                    {(c.cpsSplitParts || []).map((p, i) => <span key={i}>{p}</span>)}
+                </div>
+            );
+        }
         return null;
     };
 

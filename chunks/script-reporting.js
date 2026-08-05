@@ -73,7 +73,10 @@
     // ==================== PHASE 9: REPORTING & KPI DASHBOARD ====================
 
     const KPI_DEFINITIONS = {
-        cpsCount: "Consultation and Planning Sessions - Count of completed CPS activities",
+        cpsCount: "Consultation and Planning Sessions - Count of completed CPS activities. Underneath: who brought them, split into agent referrers (a consultant recommended the prospect) and client referrers (a prospect/customer did). Those two are HEAD-COUNTS of distinct people, so they do not add up to the session count - one agent who referred 3 people is 3 sessions but 1 head.",
+        cpsAgentReferrers: "Distinct consultants who referred at least one of the period's CPS sessions. Same person counts once no matter how many they brought.",
+        cpsClientReferrers: "Distinct prospects/customers who referred at least one of the period's CPS sessions. Same person counts once no matter how many they brought.",
+        cpsUnattributed: "CPS sessions in the period with no referrer recorded. Should be 0 - the CPS intake form requires a referrer - so a non-zero value means legacy or imported rows.",
         totalSales: "Revenue including EPP but excluding agent packages",
         popCaseCount: "Pre-Owned Plan cases - Count of transactions with payment_method = POP",
         popSales: "Revenue from POP cases - Sum of POP transaction amounts",
@@ -1379,7 +1382,7 @@
         // RPC fast path inside getConversionRate. getActiveAgents uses a rolling
         // 60-day window (ignores from/to) — the RPC replicates that exactly.
         const _ext = await _tryExtendedKpiRPC(from, to);
-        const [activityHeadcount, conversionRate, meetUpExistingCount, cfHeadcount, activeAgents, agentHoursSummary, neaPitching, fengshuiPitching] = await Promise.all([
+        const [activityHeadcount, conversionRate, meetUpExistingCount, cfHeadcount, activeAgents, agentHoursSummary, neaPitching, fengshuiPitching, cpsRef] = await Promise.all([
             _ext ? _ext.activityHeadcount   : getActivityHeadcount(from, to),
             getConversionRate(from, to),
             _ext ? _ext.meetUpExistingCount : getMeetUpExistingCustomerCount(from, to),
@@ -1388,11 +1391,21 @@
             getAgentOperatingHoursSummary(),   // always current week, ignores from/to
             getNeaPitchingHeadcount(from, to),      // P&O "DC 代理配套" ticks, deduped by person
             getFengshuiPitchingHeadcount(from, to), // P&O 灵活/专案 ticks, deduped by person
+            // Who brought the CPS sessions, split agent vs client. Computed
+            // ALONGSIDE the kpi_* RPCs rather than inside them, so the card's two
+            // head-counts appear whether or not those server aggregates exist —
+            // no migration needed to ship this.
+            getCPSReferrerSplit(from, to),
         ]);
+        const cpsSplit = {
+            cpsAgentReferrers:  cpsRef.agents,
+            cpsClientReferrers: cpsRef.clients,
+            cpsUnattributed:    cpsRef.unattributed,
+        };
 
         // Fast path: try server-side aggregates first.
         const fast = await _tryKpiRPCs(from, to);
-        if (fast) return { ...fast, activityHeadcount, conversionRate, meetUpExistingCount, cfHeadcount, activeAgents, neaPitching, fengshuiPitching, agentHours: agentHoursSummary.display, agentHoursPct: agentHoursSummary.pct };
+        if (fast) return { ...fast, ...cpsSplit, activityHeadcount, conversionRate, meetUpExistingCount, cfHeadcount, activeAgents, neaPitching, fengshuiPitching, agentHours: agentHoursSummary.display, agentHoursPct: agentHoursSummary.pct };
 
         // Fallback: original 11-call client-side path.
         const [
@@ -1417,6 +1430,7 @@
             eppCaseCount, eppSales, newAgents, newCustomers,
             totalMeetings, clientMeetings, activityHeadcount, conversionRate, eppDetails,
             meetUpExistingCount, cfHeadcount, activeAgents, neaPitching, fengshuiPitching,
+            ...cpsSplit,
             agentHours: agentHoursSummary.display, agentHoursPct: agentHoursSummary.pct
         };
     };
@@ -1492,7 +1506,80 @@ const getCPSCount = async (from, to) => {
     }
     return count;
 };
-  
+
+// ── CPS referrer split (the two head-counts on the CPS Consultations card) ──
+// Every CPS is by recommendation — the intake form HARD-BLOCKS a save without a
+// referrer ("All appointments must be by recommendation", script-activities.js)
+// and its picker offers exactly two kinds of people: 'Prospect' and 'Consultant'
+// (a user at level >= 3). So `prospects.referred_by_type` IS the agent/client
+// split at source; no extra field, no join to the referrer's own row (which
+// matters — an RLS-scoped agent can read the referrer NAME off their own
+// prospect without being able to read the referrer's record).
+//
+// Case matters: both pickers store 'Prospect'/'Consultant' capitalised, while
+// the referrals table stores lowercase 'prospect'/'user'/'customer'. Always
+// match case-insensitively; never compare the raw string.
+const _CPS_AGENT_REF_TYPE = /^(consultant|user|agent)$/i;
+
+// → { key, isAgent, name } for a CPS's prospect, or null when no referrer is
+// recorded at all. The key is COMPOSITE (type:id) so `user:5` and `prospect:5`
+// stay two different people. A referrer prospect who later converts to a
+// customer keeps the same prospect id here, so no identity merge is needed.
+// Legacy rows carrying only a typed name (no id) key on the normalised name;
+// with no type to go on they land in the client bucket (live probe 2026-08-05:
+// zero such rows — 227/227 CPS carry a linked referrer id).
+const _cpsReferrerOf = (p) => {
+    if (!p) return null;
+    const type = String(p.referred_by_type || '').trim();
+    const isAgent = _CPS_AGENT_REF_TYPE.test(type);
+    const name = String(p.referred_by || '').trim();
+    if (p.referred_by_id != null && p.referred_by_id !== '') {
+        const bucket = isAgent ? 'user' : (type.toLowerCase() || 'prospect');
+        return { key: `${bucket}:${p.referred_by_id}`, isAgent, name };
+    }
+    if (!name) return null;
+    return { key: `name:${name.toLowerCase()}`, isAgent, name };
+};
+
+// Distinct-person head-counts of who brought the period's CPS sessions, split
+// agent vs client. Scope contract is a LINE-FOR-LINE clone of getCPSCount's
+// (date window, _recInMarket, _visibleUserIds on lead_agent_id,
+// _currentRoleFilter) — the three numbers on the card must always describe the
+// same population, or the split would quietly describe a different set of
+// sessions than the headline count sitting right above it.
+//
+// These are head-counts, NOT a partition of cpsCount: one agent who referred
+// three people is 3 sessions but 1 head. The numbers are not expected to sum.
+const getCPSReferrerSplit = async (from, to) => {
+    const needUsers = _currentRoleFilter !== 'All';
+    const [activities, prospects] = await Promise.all([
+        _reportActsInRange(from, to, 'getCPSReferrerSplit'),
+        AppDataStore.getAll('prospects'),
+    ]);
+    const users = needUsers ? await AppDataStore.getAll('users') : [];
+    const userMap = {};
+    users.forEach(u => { userMap[u.id] = u; });
+    const prospMap = {};
+    prospects.forEach(p => { prospMap[String(p.id)] = p; });
+
+    const agents = new Set();
+    const clients = new Set();
+    let unattributed = 0;
+    for (const a of activities) {
+        if (a.activity_type !== 'CPS' || a.activity_date < from || a.activity_date > to) continue;
+        if (!_recInMarket(a)) continue;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(a.lead_agent_id)) continue;
+        if (_currentRoleFilter !== 'All') {
+            const agent = userMap[a.lead_agent_id];
+            if (!agent || agent.role !== _currentRoleFilter) continue;
+        }
+        const ref = _cpsReferrerOf(a.prospect_id ? prospMap[String(a.prospect_id)] : null);
+        if (!ref) { unattributed++; continue; }
+        (ref.isAgent ? agents : clients).add(ref.key);
+    }
+    return { agents: agents.size, clients: clients.size, unattributed };
+};
+
 // Shared helper: which agent is credited with this sale.
 // p.agent_id FIRST — it is the owner frozen at the moment the sale was booked, so
 // reassigning the customer later cannot rewrite historical revenue. Falls back to
@@ -2453,16 +2540,18 @@ const _tryActivityDetails = async (from, to, types, titleLike = null) => {
 };
 
 const buildCPSDetails = async (from, to) => {
-    const _det = await _tryActivityDetails(from, to, ['CPS']);
-    if (_det) {
-        const rows = _det.map(a => [a.activity_date, a.agent_name || 'Unknown', a.entity_name || '—', a.activity_title || 'CPS Session']);
-        return renderDetailTable(['Date', 'Lead Agent', 'Customer / Prospect', 'Title'], rows);
-    }
+    // Always the client scan. report_activity_details returns neither prospect_id
+    // nor the referrer columns (see migrations/report_activity_details_2026-06-14.sql),
+    // and the referrer breakdown is the whole point of this drill-down — it is what
+    // makes the card's two head-count chips auditable. Same intentional RPC bypass
+    // as buildActivityHeadcountDetails.
     return _buildCPSDetailsLegacy(from, to);
 };
 
 const _buildCPSDetailsLegacy = async (from, to) => {
-    const activities = await AppDataStore.getAll('activities');
+    // Date-windowed read (was getAll('activities') — a whole-table scan on every
+    // drill-down click).
+    const activities = await _reportActsInRange(from, to, '_buildCPSDetailsLegacy');
     const [users, customers, prospects] = await Promise.all([
         AppDataStore.getAll('users'),
         AppDataStore.getAll('customers'),
@@ -2472,6 +2561,9 @@ const _buildCPSDetailsLegacy = async (from, to) => {
     const custMap = {}; customers.forEach(c => { custMap[c.id] = c; });
     const prospMap = {}; prospects.forEach(p => { prospMap[p.id] = p; });
     const rows = [];
+    // key → { name, isAgent, sessions }. Keyed exactly as getCPSReferrerSplit
+    // keys its Sets, so the distinct row counts below MUST equal the card chips.
+    const byReferrer = new Map();
     for (const a of activities) {
         if (a.activity_type !== 'CPS' || a.activity_date < from || a.activity_date > to) continue;
         if (!_recInMarket(a)) continue;
@@ -2484,9 +2576,42 @@ const _buildCPSDetailsLegacy = async (from, to) => {
         const cust = a.customer_id ? custMap[a.customer_id] : null;
         const prosp = a.prospect_id ? prospMap[a.prospect_id] : null;
         const entityName = cust?.full_name || prosp?.full_name || a.customer_name || '—';
-        rows.push([a.activity_date, agentName, entityName, a.activity_title || 'CPS Session']);
+        const ref = _cpsReferrerOf(prosp);
+        if (ref) {
+            const seen = byReferrer.get(ref.key);
+            if (seen) seen.sessions++;
+            else byReferrer.set(ref.key, { name: ref.name || '—', isAgent: ref.isAgent, sessions: 1 });
+        }
+        rows.push([
+            a.activity_date, agentName, entityName,
+            ref ? (ref.name || '—') : '—',
+            ref ? (ref.isAgent ? 'Agent' : 'Client') : 'Not recorded',
+            a.activity_title || 'CPS Session'
+        ]);
     }
-    return renderDetailTable(['Date', 'Lead Agent', 'Customer / Prospect', 'Title'], rows);
+
+    const referrers = [...byReferrer.values()].sort((x, y) => y.sessions - x.sessions);
+    const agentHeads = referrers.filter(r => r.isAgent).length;
+    const clientHeads = referrers.length - agentHeads;
+    const unattributed = rows.filter(r => r[4] === 'Not recorded').length;
+
+    const summary = `<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px;">
+        <strong>${rows.length}</strong> CPS session${rows.length === 1 ? '' : 's'}
+        &nbsp;·&nbsp; <strong>${agentHeads}</strong> agent referrer${agentHeads === 1 ? '' : 's'}
+        &nbsp;·&nbsp; <strong>${clientHeads}</strong> client referrer${clientHeads === 1 ? '' : 's'}
+        ${unattributed > 0 ? `&nbsp;·&nbsp; <strong>${unattributed}</strong> with no referrer recorded` : ''}
+        <div style="margin-top:4px;color:var(--gray-500);font-size:11px;">Referrer counts are distinct people — one referrer who brought several prospects still counts once, so they do not add up to the session total.</div>
+    </div>`;
+
+    const byReferrerTable = `<h4 style="font-size:14px;font-weight:600;margin:0 0 8px;">By referrer (${referrers.length})</h4>`
+        + renderDetailTable(['Referrer', 'Type', 'CPS Sessions'],
+            referrers.map(r => [r.name, r.isAgent ? 'Agent' : 'Client', r.sessions]),
+            'No referrers recorded in this period');
+
+    const sessionsTable = `<h4 style="font-size:14px;font-weight:600;margin:18px 0 8px;">Sessions (${rows.length})</h4>`
+        + renderDetailTable(['Date', 'Lead Agent', 'Customer / Prospect', 'Referred By', 'Referrer Type', 'Title'], rows);
+
+    return summary + byReferrerTable + sessionsTable;
 };
 
 const buildTotalSalesDetails = async (from, to) => {
@@ -3403,10 +3528,38 @@ const showKPIDetails = async (key) => {
     // Shared base card definitions — single source of truth for BOTH the legacy
     // HTML grid (renderKPIStats) and the React JSX grid payload (_buildKpiCards),
     // so the two paths can never drift in label/value/order/icon/color.
+    // Chip line under the CPS headline: who brought those sessions. Head-counts,
+    // so they do NOT sum to the headline (one agent bringing 3 people = 3
+    // sessions, 1 head). The 'unattributed' chip renders ONLY when non-zero —
+    // every live CPS row carries a referrer, so it is a legacy-data escape hatch,
+    // not a permanent third number.
+    const _cpsSplitParts = (agents, clients, unattributed) => {
+        const parts = [
+            `👤 ${agents} agent referrer${agents === 1 ? '' : 's'}`,
+            `🤝 ${clients} client referrer${clients === 1 ? '' : 's'}`,
+        ];
+        if (unattributed > 0) parts.push(`${unattributed} unattributed`);
+        return parts;
+    };
+
+    // Flex-wrap, one span per chip — NOT a joined string. The mobile grid is two
+    // columns (~182px per card), narrow enough that a single run of text breaks
+    // mid-phrase ("👤 1 agent / referrer · 🤝 1 client / referrer"). Each chip is
+    // its own flex item, so a narrow card wraps BETWEEN chips and never inside one.
+    const _cpsSplitHtml = (parts) =>
+        `<div style="display:flex;flex-wrap:wrap;gap:0 10px;font-size:12px;color:var(--gray-500);margin-top:2px;">`
+        + parts.map(p => `<span>${escapeHtml(p)}</span>`).join('')
+        + `</div>`;
+
     const _kpiCardDefs = (kpis, prevKpis) => {
         const eppDetails = (kpis.eppDetails || []).map(d => ({ bank: d.bank, months: d.months, count: d.count }));
+        const cpsAgents = kpis.cpsAgentReferrers || 0;
+        const cpsClients = kpis.cpsClientReferrers || 0;
+        const cpsUnattributed = kpis.cpsUnattributed || 0;
         return [
-            { label: 'CPS Consultations', value: kpis.cpsCount, prev: prevKpis.cpsCount, icon: '📞', color: 'blue', key: 'cpsCount' },
+            { label: 'CPS Consultations', value: kpis.cpsCount, prev: prevKpis.cpsCount, icon: '📞', color: 'blue', key: 'cpsCount',
+              subType: 'cps', cpsAgents, cpsClients, cpsUnattributed,
+              subHtml: _cpsSplitHtml(_cpsSplitParts(cpsAgents, cpsClients, cpsUnattributed)) },
             { label: 'Total Sales', value: `RM ${kpis.totalSales.toLocaleString()} `, prev: prevKpis.totalSales, icon: '💰', color: 'green', key: 'totalSales' },
             { label: 'POP Cases', value: kpis.popCaseCount, prev: prevKpis.popCaseCount, icon: '📦', color: 'orange', key: 'popCaseCount',
               subType: 'pop', popTotal: (kpis.popSales || 0).toLocaleString(),
@@ -3464,6 +3617,7 @@ const showKPIDetails = async (key) => {
                 subType: c.subType || null,
                 popTotal: c.popTotal,
                 eppDetails: c.eppDetails || [],
+                cpsSplitParts: c.subType === 'cps' ? _cpsSplitParts(c.cpsAgents, c.cpsClients, c.cpsUnattributed) : [],
             };
         });
 
