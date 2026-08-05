@@ -629,6 +629,20 @@ const _impGender = (v) => {
     return s;
 };
 
+// Honorific, same treatment as gender: canonicalize the four the form offers so
+// the <select> can match them, but pass anything else through untouched —
+// Malaysian titles (Dato', Datuk, Tan Sri) are real values, not typos.
+const _impTitle = (v) => {
+    const s = String(v ?? '').trim();
+    if (!s) return '';
+    const low = s.toLowerCase().replace(/\.$/, '');
+    if (low === 'mr') return 'Mr.';
+    if (low === 'ms') return 'Ms.';
+    if (low === 'mrs') return 'Mrs.';
+    if (low === 'dr') return 'Dr.';
+    return s;
+};
+
 const mapRowToRecord = (row, reverseMap, agentId, importType = 'prospects') => {
     const get = (field) => {
         const idx = reverseMap[field];
@@ -668,7 +682,7 @@ const mapRowToRecord = (row, reverseMap, agentId, importType = 'prospects') => {
     const pipelineStage = get('pipeline_stage') || 'new';
     return {
         full_name: get('full_name'),
-        title: get('title'),
+        title: _impTitle(get('title')),
         gender: _impGender(get('gender')),
         nationality: get('nationality'),
         phone: get('phone'),

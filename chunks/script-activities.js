@@ -775,6 +775,27 @@
     // defaulting every new prospect to Male. (The blank option also revives the
     // IC-derived gender autofill in script-cps.js, whose `!genderEl.value` guard
     // could never fire while the select always reported a truthy 'Male'.)
+    // Title carried the SAME missing-placeholder defect, and it bit harder because
+    // option 0 is 'Mr.': every title-less prospect that got opened and saved was
+    // stamped Mr. regardless of gender. The 2026-08-05 audit found 23 prospects
+    // titled Mr. whose gender was Female — all 22 with a DOB had a ming_gua that
+    // independently confirmed Female, so the title was wrong, not the gender.
+    // NOTE: 'Mrs.' is NOT normalized to 'Ms.'. Both are female and Mrs. carries
+    // marital information the rule "Female → Ms." would destroy. 'Dr.' is
+    // gender-neutral. And Malaysian honorifics (Dato', Datuk, Tan Sri) are real
+    // values, which is why there is deliberately NO CHECK constraint on this
+    // column and why an unrecognized title is preserved verbatim below.
+    const BASIC_INFO_TITLES = ['Mr.', 'Ms.', 'Mrs.', 'Dr.'];
+    const _biTitle = (v) => {
+        const s = String(v ?? '').trim();
+        if (!s) return '';
+        const low = s.toLowerCase().replace(/\.$/, '');
+        if (low === 'mr') return 'Mr.';
+        if (low === 'ms') return 'Ms.';
+        if (low === 'mrs') return 'Mrs.';
+        if (low === 'dr') return 'Dr.';
+        return s;
+    };
     const BASIC_INFO_GENDERS = ['Male', 'Female', 'Other'];
     const _biGender = (v) => {
         const s = String(v ?? '').trim();
@@ -854,7 +875,12 @@
                     <div class="form-group half">
                         <label>Title</label>
                         <select id="${prefix}-title" class="form-control" ${disabled}>
-                            ${['Mr.','Ms.','Mrs.','Dr.'].map(v => `<option value="${v}" ${sel(d.title, v)}>${v}</option>`).join('')}
+                            <option value="">— Select —</option>
+                            ${(() => {
+                                const t = _biTitle(d.title);
+                                const opts = (!t || BASIC_INFO_TITLES.includes(t)) ? BASIC_INFO_TITLES : [...BASIC_INFO_TITLES, t];
+                                return opts.map(v => `<option value="${esc(v)}" ${sel(t, v)}>${esc(v)}</option>`).join('');
+                            })()}
                         </select>
                     </div>
                     <div class="form-group half">
