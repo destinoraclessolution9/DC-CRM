@@ -358,6 +358,18 @@ const approveQueueEntry = async (entryId) => {
                         lifetime_value: 0,
                         customer_since: cr.closing_date || cr.order_date || _localToday,
                         converted_from_prospect_id: entry.prospect_id,
+                        // Carry the referral attribution + approval trail across, same as
+                        // the main approveProspectConversion path. These columns only
+                        // started existing on `customers` with
+                        // migrations/customer_conversion_columns_and_open_prospects_2026-08-05.sql —
+                        // before that the store's schema-error retry stripped them and the
+                        // customer profile's "Referred By" row always read "-".
+                        referred_by: prospect.referred_by || null,
+                        referred_by_id: prospect.referred_by_id || null,
+                        referred_by_type: prospect.referred_by_type || null,
+                        referral_relationship: prospect.referral_relationship || null,
+                        approved_by: _state.cu?.id || null,
+                        approved_at: new Date().toISOString(),
                     });
                 }
                 if (customer) {
@@ -543,6 +555,14 @@ const approveClosingRecord = async (prospectId) => {
                 lifetime_value: 0,
                 customer_since: cr.closing_date || cr.order_date || _localToday,
                 converted_from_prospect_id: prospectId,
+                // Same carry-over as the other two conversion paths — see the note at
+                // the new_sale fallback above.
+                referred_by: prospect.referred_by || null,
+                referred_by_id: prospect.referred_by_id || null,
+                referred_by_type: prospect.referred_by_type || null,
+                referral_relationship: prospect.referral_relationship || null,
+                approved_by: _state.cu?.id || null,
+                approved_at: new Date().toISOString(),
             });
             customer = newCust;
         }
