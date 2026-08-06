@@ -19,7 +19,7 @@
 -- Run this alone first. If it returns no rows, skip straight to step 3.
 --
 --   select year, month, count(*) as copies, array_agg(id order by id) as ids
---     from monthly_targets
+--     from public.monthly_targets
 --    group by year, month
 --   having count(*) > 1
 --    order by year, month;
@@ -33,8 +33,8 @@
 -- id: it holds a human's numbers, and the derived twin can be regenerated from its
 -- quarter at any time. Losing it silently is the one outcome worth guarding.
 --
--- delete from monthly_targets t
---  using monthly_targets keep
+-- delete from public.monthly_targets t
+--  using public.monthly_targets keep
 --  where t.year = keep.year
 --    and t.month = keep.month
 --    and t.id <> keep.id
@@ -43,7 +43,7 @@
 
 -- ---- STEP 3: the constraint -------------------------------------------------
 create unique index if not exists monthly_targets_year_month_uidx
-    on monthly_targets (year, month);
+    on public.monthly_targets (year, month);
 
 
 -- ---- VERIFY -----------------------------------------------------------------

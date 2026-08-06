@@ -76,7 +76,7 @@
 
 
 -- ---- monthly_targets: the 8 missing metrics --------------------------------
-alter table monthly_targets
+alter table public.monthly_targets
     add column if not exists pop_case_count_target      numeric,
     add column if not exists pop_sales_target           numeric,
     add column if not exists epp_case_count_target      numeric,
@@ -90,16 +90,16 @@ alter table monthly_targets
 -- ---- monthly_targets: manual-vs-derived flag -------------------------------
 -- NOT NULL + default false so the read path never has to null-guard it: a row
 -- without the flag is a derived row.
-alter table monthly_targets
+alter table public.monthly_targets
     add column if not exists is_manual boolean not null default false;
 
 
 -- ---- both tables: the two columns the breakdown card already reads ----------
-alter table monthly_targets
+alter table public.monthly_targets
     add column if not exists meetup_existing_target numeric,
     add column if not exists cf_headcount_target    numeric;
 
-alter table quarterly_targets
+alter table public.quarterly_targets
     add column if not exists meetup_existing_target numeric,
     add column if not exists cf_headcount_target    numeric;
 
