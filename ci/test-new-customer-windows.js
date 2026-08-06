@@ -103,6 +103,7 @@ if (!src.includes(ANCHOR)) { console.error('FAIL: register anchor not found — 
 src = src.replace(ANCHOR, `window.__T = {
         getNewCustomers, getNewCustomers365, _newCustomerWindowParts, _windowLineHtml,
         _buildKpiCards, renderKPIStats, _rollingFrom, _NEW_CUSTOMERS_WIDE_DAYS,
+        buildNewCustomersDetails, _newCustomersRowsLegacy,
         setScope: (vis, role) => { _visibleUserIds = vis; _currentRoleFilter = role; },
         setTimeFilter: (f) => { _currentTimeFilter = f; },
         resetWindows: () => { _windowCaches.clear(); },
@@ -278,6 +279,52 @@ reset();
     eq('getNewCustomers(from,to) still requires a purchase in range',
         await T.getNewCustomers(daysAgo(30), TODAY), 1);
     eq('…and an empty window is 0', await T.getNewCustomers(daysAgo(300), daysAgo(200)), 0);
+}
+
+// ── 9. Drill-down lists the 365-day names, not just the period ─────────────
+// The whole point: early in a month the period section is empty while the card
+// advertises a year total right above it. The names must be reachable.
+reset();
+{
+    cust(daysAgo(200), daysAgo(200));  // in the year, not in "this month"
+    cust(daysAgo(150), daysAgo(150));
+    cust(daysAgo(2), daysAgo(2));      // in both
+    const html = await T.buildNewCustomersDetails(daysAgo(1), TODAY);
+
+    ok('both sections render', /Selected period/.test(html) && /Past 365 days/.test(html));
+    ok('the period section is empty', /No records in this period/.test(html));
+    ok('…while the 365-day section still lists people', /C1|C2/.test(html), html.slice(0, 400));
+    eq('the 365 heading carries its own count',
+        (html.match(/Past 365 days <span[^>]*>\((\d+)\)/) || [])[1], '3');
+    eq('the period heading carries its own count',
+        (html.match(/Selected period <span[^>]*>\((\d+)\)/) || [])[1], '0');
+    ok('the 365 section says it ignores the time filter',
+        /rolling, ignores the time filter/.test(html));
+    ok('…and shows the window it used', html.includes(`${T._rollingFrom(365)} → ${TODAY}`));
+}
+
+// ── 10. No near-duplicate table when the period already covers the year ────
+reset();
+{
+    cust(daysAgo(100), daysAgo(100));
+    const wide = await T.buildNewCustomersDetails(daysAgo(500), TODAY);
+    ok('a period covering the rolling year drops the second table',
+        /Selected period/.test(wide) && !/Past 365 days/.test(wide));
+    const narrow = await T.buildNewCustomersDetails(daysAgo(1), TODAY);
+    ok('…but a narrow period keeps it', /Past 365 days/.test(narrow));
+}
+
+// ── 11. The client path keeps card parity and sorts newest-first ───────────
+reset();
+{
+    cust(daysAgo(10), daysAgo(10));
+    cust(daysAgo(5), null);            // joined, never bought → excluded
+    cust(daysAgo(3), daysAgo(3));
+    const rows = await T._newCustomersRowsLegacy(daysAgo(30), TODAY);
+    eq('joined-but-never-bought is excluded, matching the card', rows.length, 2);
+    eq('…newest first', rows.map(r => r[0]), [daysAgo(3), daysAgo(10)]);
+    eq('…and the list length equals the card number',
+        rows.length, await T.getNewCustomers(daysAgo(30), TODAY));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

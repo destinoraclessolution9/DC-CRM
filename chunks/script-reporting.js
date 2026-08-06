@@ -3173,21 +3173,31 @@ const _renderActiveAgentsTeams = (lastActivityDate, users, cutoffStr) => {
     return html || '<p style="color:#6b7280;text-align:center;padding:24px;">No agents found.</p>';
 };
 
-const buildNewCustomersDetails = async (from, to) => {
+// Rows (not HTML) for one window, so the caller can render several windows and show
+// a count per section. RPC first, client fallback — unchanged from before the split.
+//
+// ⚠ KNOWN PARITY GAP, pre-existing: report_new_customers
+// (migrations/report_rpc_scope_clamp_2026-06-19.sql) filters ONLY on customer_since +
+// agent scope. It does NOT require a purchase in the window, which the card's number
+// does (getNewCustomers and kpi_user_summary both do). So whenever the RPC path is
+// live this lists MORE rows than the card counts. The client fallback below gets it
+// right and says so. Fixing it properly means adding the EXISTS(purchase) clause to
+// the RPC — DDL, which is blocked at time of writing. Until then the section headings
+// carry their own row counts so the two numbers are at least both visible.
+const _newCustomersRows = async (from, to) => {
     const _ids = (_visibleUserIds === 'all' || !Array.isArray(_visibleUserIds)) ? null : _visibleUserIds.map(v => Number(v)).filter(n => Number.isFinite(n));
     try {
         if (window.supabase && window.supabase.rpc) {
             const { data, error } = await window.supabase.rpc('report_new_customers', { p_from: from, p_to: to, p_agent_ids: _ids });
             if (!error && Array.isArray(data)) {
-                const rows = data.map(c => [c.customer_since, c.full_name || '—', c.agent_name || '—', c.source || '—']);
-                return renderDetailTable(['Since', 'Name', 'Agent', 'Source'], rows);
+                return data.map(c => [c.customer_since, c.full_name || '—', c.agent_name || '—', c.source || '—']);
             }
         }
     } catch (_) { /* fall through to legacy */ }
-    return _buildNewCustomersDetailsLegacy(from, to);
+    return _newCustomersRowsLegacy(from, to);
 };
 
-const _buildNewCustomersDetailsLegacy = async (from, to) => {
+const _newCustomersRowsLegacy = async (from, to) => {
     const [customers, users, purchases] = await Promise.all([
         AppDataStore.getAll('customers'),
         AppDataStore.getAll('users'),
@@ -3208,7 +3218,41 @@ const _buildNewCustomersDetailsLegacy = async (from, to) => {
             : '—';
         rows.push([c.customer_since, c.full_name || '—', agent, c.source || '—']);
     }
-    return renderDetailTable(['Since', 'Name', 'Agent', 'Source'], rows);
+    // Newest first, matching the RPC's ORDER BY so both paths read the same.
+    return rows.sort((a, b) => String(b[0] || '').localeCompare(String(a[0] || '')));
+};
+
+// Two sections: the selected period, then the rolling 365 days behind the card's
+// "/365d" figure. The period section on its own is unhelpful precisely when it
+// matters — early in a month it says "No records in this period" while the card
+// advertises a year total sitting right above it, with no way to see who they are.
+const buildNewCustomersDetails = async (from, to) => {
+    const today = new Date();
+    const to365 = toLocalDateStr(today);
+    const from365 = _rollingFrom(_NEW_CUSTOMERS_WIDE_DAYS, today);
+
+    // If the chosen period already covers the rolling year (Yearly, or a wide custom
+    // range), the second table would be a near-duplicate — show one.
+    const periodCoversYear = from <= from365 && to >= to365;
+
+    const [periodRows, wideRows] = await Promise.all([
+        _newCustomersRows(from, to),
+        periodCoversYear ? Promise.resolve(null) : _newCustomersRows(from365, to365),
+    ]);
+
+    const HEAD = ['Since', 'Name', 'Agent', 'Source'];
+    const section = (title, sub, rows, empty) => `
+        <h4 style="font-size:14px;font-weight:600;margin:18px 0 8px;">
+            ${escapeHtml(title)} <span style="font-weight:400;color:var(--gray-500);">(${rows.length})</span>
+            <div style="font-weight:400;color:var(--gray-500);font-size:11px;margin-top:2px;">${escapeHtml(sub)}</div>
+        </h4>` + renderDetailTable(HEAD, rows, empty);
+
+    let html = section('Selected period', `${from} → ${to}`, periodRows, 'No records in this period');
+    if (wideRows) {
+        html += section('Past 365 days', `${from365} → ${to365} · rolling, ignores the time filter`,
+            wideRows, 'No new customers in the last 365 days');
+    }
+    return html;
 };
 
 const buildConversionDetails = async (from, to) => {
