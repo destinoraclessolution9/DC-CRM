@@ -73,7 +73,7 @@
     // ==================== PHASE 9: REPORTING & KPI DASHBOARD ====================
 
     const KPI_DEFINITIONS = {
-        cpsCount: "Consultation and Planning Sessions - Count of completed CPS activities. Underneath: who brought them, split into agent referrers (a consultant recommended the prospect) and client referrers (a prospect/customer did). Those two are HEAD-COUNTS of distinct people, so they do not add up to the session count - one agent who referred 3 people is 3 sessions but 1 head.",
+        cpsCount: "Consultation and Planning Sessions - Count of completed CPS activities. ABOVE the number: distinct people who referred someone into a CPS in the last 90 days vs the last 365, shown as 90d/365d for agents and for clients - so '2/8 agent' means eight agents referred someone this year but only two did in the last quarter. Those two windows are ROLLING and do NOT follow the time filter (they do follow the agent, role and market filters). BELOW the number: the same agent/client split for the SELECTED period. All of these are HEAD-COUNTS of distinct people, so they do not add up to the session count - one agent who referred 3 people is 3 sessions but 1 head.",
         cpsAgentReferrers: "Distinct consultants who referred at least one of the period's CPS sessions. Same person counts once no matter how many they brought.",
         cpsClientReferrers: "Distinct prospects/customers who referred at least one of the period's CPS sessions. Same person counts once no matter how many they brought.",
         cpsUnattributed: "CPS sessions in the period with no referrer recorded. Should be 0 - the CPS intake form requires a referrer - so a non-zero value means legacy or imported rows.",
@@ -1392,7 +1392,7 @@
         // RPC fast path inside getConversionRate. getActiveAgents uses a rolling
         // 60-day window (ignores from/to) — the RPC replicates that exactly.
         const _ext = await _tryExtendedKpiRPC(from, to);
-        const [activityHeadcount, conversionRate, meetUpExistingCount, activeAgents, agentHoursSummary, neaPitching, fengshuiPitching, cpsRef] = await Promise.all([
+        const [activityHeadcount, conversionRate, meetUpExistingCount, activeAgents, agentHoursSummary, neaPitching, fengshuiPitching, cpsRef, cpsWin] = await Promise.all([
             _ext ? _ext.activityHeadcount   : getActivityHeadcount(from, to),
             getConversionRate(from, to),
             _ext ? _ext.meetUpExistingCount : getMeetUpExistingCustomerCount(from, to),
@@ -1405,11 +1405,20 @@
             // head-counts appear whether or not those server aggregates exist —
             // no migration needed to ship this.
             getCPSReferrerSplit(from, to),
+            // Rolling 90d/365d referrer head-counts for the momentum line ABOVE the
+            // headline. Ignores from/to by design (see getCPSReferrerWindows) and is
+            // promise-cached, so the parallel current+previous calculateKPIs calls
+            // share one 365-day read rather than racing into two.
+            getCPSReferrerWindows(),
         ]);
         const cpsSplit = {
             cpsAgentReferrers:  cpsRef.agents,
             cpsClientReferrers: cpsRef.clients,
             cpsUnattributed:    cpsRef.unattributed,
+            cpsAgents90:  cpsWin.agents90,
+            cpsAgents365: cpsWin.agents365,
+            cpsClients90:  cpsWin.clients90,
+            cpsClients365: cpsWin.clients365,
         };
         // CF Headcount IS the client-referrer head-count — same number as the CPS
         // card's chip, by construction. Deliberately NOT read from
@@ -1595,6 +1604,121 @@ const getCPSReferrerSplit = async (from, to) => {
         (ref.isAgent ? agents : clients).add(ref.key);
     }
     return { agents: agents.size, clients: clients.size, unattributed };
+};
+
+// ── CPS referrer momentum: rolling 90-day vs 365-day head-counts ─────────────
+// "How many distinct people are still bringing us CPS lately, against how many did
+// all year." 2/8 agents means six of the year's eight agent referrers have gone
+// quiet — which is the actionable read the raw period count can't give.
+//
+// Same distinct-person rule as getCPSReferrerSplit: one agent who referred three
+// people in the window is ONE head, not three.
+//
+// FIXED rolling windows anchored on today's LOCAL date. They deliberately ignore the
+// dashboard's time filter — same contract as getActiveAgents' 60-day window — because
+// the question is "who is active lately", not "who was active in the selected
+// period". The rendered line says "90d / 365d" out loud so a number that sits still
+// while the headline above it changes doesn't read as a bug.
+//
+// They DO honour the agent / role / market scope gates: a line-for-line clone of
+// getCPSReferrerSplit's, so a single-agent view can never show org-wide referrer
+// counts underneath a filtered headline.
+//
+// ONE fetch, two windows. The 90-day set is a strict subset of the 365-day set, so a
+// single 365-day read fills all four buckets; two separate calls would have doubled
+// the cost of the expensive half.
+//
+// Windows are inclusive on BOTH ends, matching getDateRanges: 90 days spans
+// today-89..today (90 distinct dates). today-90 would span 91.
+const _CPS_WINDOW_RECENT_DAYS = 90;
+const _CPS_WINDOW_WIDE_DAYS = 365;
+
+// Scope identity for the cache. Any gate that changes the population must appear
+// here, or a filter switch would serve the previous filter's numbers.
+const _cpsWindowScopeKey = () => [
+    Array.isArray(_visibleUserIds) ? _visibleUserIds.join(',') : String(_visibleUserIds),
+    _currentRoleFilter,
+    window._crmUtils.listCountryScope(),
+].join('|');
+
+// Caches the PROMISE, not the value: refreshKPIDashboard fires calculateKPIs for the
+// current and previous periods in parallel, and both reach this function. A value
+// cache would still let those two race into two 365-day reads; caching the in-flight
+// promise collapses them into one (same pattern as data.js's read dedup). 60s TTL
+// bounds staleness so a CPS logged today shows up without a reload, and keeps a tab
+// left open overnight from serving yesterday's window.
+const _CPS_WINDOW_TTL_MS = 60 * 1000;
+let _cpsWindowsCache = { key: null, ts: 0, p: null };
+
+const getCPSReferrerWindows = () => {
+    const key = _cpsWindowScopeKey();
+    const now = Date.now();
+    if (_cpsWindowsCache.key === key && _cpsWindowsCache.p && (now - _cpsWindowsCache.ts) < _CPS_WINDOW_TTL_MS) {
+        return _cpsWindowsCache.p;
+    }
+
+    const p = (async () => {
+        const today = new Date();
+        const to = toLocalDateStr(today);
+        // n-th day back, inclusive-both-ends (see the window note above).
+        const back = (n) => {
+            const d = new Date(today);
+            d.setDate(d.getDate() - (n - 1));
+            return toLocalDateStr(d);
+        };
+        const from365 = back(_CPS_WINDOW_WIDE_DAYS);
+        const from90 = back(_CPS_WINDOW_RECENT_DAYS);
+
+        const needUsers = _currentRoleFilter !== 'All';
+        const [activities, prospects] = await Promise.all([
+            _reportActsInRange(from365, to, 'getCPSReferrerWindows'),
+            AppDataStore.getAll('prospects'),
+        ]);
+        const users = needUsers ? await AppDataStore.getAll('users') : [];
+        const userMap = {};
+        users.forEach(u => { userMap[u.id] = u; });
+        const prospMap = {};
+        prospects.forEach(p2 => { prospMap[String(p2.id)] = p2; });
+
+        // Maps not Sets — the drill-down lists WHO, and .size is the same head-count.
+        const agents365 = new Map(), clients365 = new Map();
+        const agents90 = new Set(), clients90 = new Set();
+        for (const a of activities) {
+            if (a.activity_type !== 'CPS' || a.activity_date < from365 || a.activity_date > to) continue;
+            if (!_recInMarket(a)) continue;
+            if (_visibleUserIds !== 'all' && !_visibleUserIds.includes(a.lead_agent_id)) continue;
+            if (_currentRoleFilter !== 'All') {
+                const agent = userMap[a.lead_agent_id];
+                if (!agent || agent.role !== _currentRoleFilter) continue;
+            }
+            const ref = _cpsReferrerOf(a.prospect_id ? prospMap[String(a.prospect_id)] : null);
+            if (!ref) continue;
+
+            const wide = ref.isAgent ? agents365 : clients365;
+            const seen = wide.get(ref.key);
+            if (seen) { seen.sessions++; if (a.activity_date > seen.lastDate) seen.lastDate = a.activity_date; }
+            else wide.set(ref.key, { name: ref.name || '—', isAgent: ref.isAgent, sessions: 1, lastDate: a.activity_date });
+
+            if (a.activity_date >= from90) (ref.isAgent ? agents90 : clients90).add(ref.key);
+        }
+
+        return {
+            agents90: agents90.size,   agents365: agents365.size,
+            clients90: clients90.size, clients365: clients365.size,
+            // Rosters for the drill-down: every 365-day referrer, flagged by whether
+            // they are still active in the 90-day window.
+            roster: [...agents365.values(), ...clients365.values()]
+                .map(r => ({ ...r, recent: r.lastDate >= from90 }))
+                .sort((x, y) => (y.recent - x.recent) || (y.sessions - x.sessions)),
+            from90, from365, to,
+        };
+    })();
+
+    _cpsWindowsCache = { key, ts: now, p };
+    // A rejected promise must not stick in the cache for 60s — drop it so the next
+    // render retries instead of re-throwing the same failure.
+    p.catch(() => { if (_cpsWindowsCache.p === p) _cpsWindowsCache = { key: null, ts: 0, p: null }; });
+    return p;
 };
 
 // Shared helper: which agent is credited with this sale.
@@ -2618,7 +2742,13 @@ const _cpsSessionScan = async (from, to) => {
 // CPS drill-down: every session + who referred it, plus the by-referrer rollup
 // that makes the card's two chips auditable.
 const _buildCPSDetailsLegacy = async (from, to) => {
-    const { rows, referrers, unattributed } = await _cpsSessionScan(from, to);
+    const [{ rows, referrers, unattributed }, win] = await Promise.all([
+        _cpsSessionScan(from, to),
+        // Rolling-window roster for the momentum section below. Promise-cached and
+        // already computed for the card, so this costs nothing on a normal click.
+        // Never let it break the drill-down — the period tables are the main event.
+        getCPSReferrerWindows().catch(e => { console.warn('[reports] CPS windows unavailable:', e && e.message); return null; }),
+    ]);
     const agentHeads = referrers.filter(r => r.isAgent).length;
     const clientHeads = referrers.length - agentHeads;
 
@@ -2635,10 +2765,31 @@ const _buildCPSDetailsLegacy = async (from, to) => {
             referrers.map(r => [r.name, r.isAgent ? 'Agent' : 'Client', r.sessions]),
             'No referrers recorded in this period');
 
+    // Who is behind the 90d/365d line on the card — and, more usefully, who ISN'T
+    // any more. Rolling windows, so this section does NOT follow the time filter
+    // (it does follow agent/role/market, same as the card).
+    const windowSection = !win ? '' : (() => {
+        const quiet = win.roster.filter(r => !r.recent).length;
+        return `<h4 style="font-size:14px;font-weight:600;margin:18px 0 8px;">
+                Referrer activity — rolling windows
+                <span style="font-weight:400;color:var(--gray-500);font-size:12px;">
+                    · 90d ${win.from90} → ${win.to} · 365d from ${win.from365}
+                </span>
+            </h4>
+            <div style="font-size:12px;color:var(--gray-500);margin-bottom:8px;">
+                👤 <strong>${win.agents90}/${win.agents365}</strong> agent referrers active in the last 90 days, of those active in the last 365.
+                &nbsp;·&nbsp; 🤝 <strong>${win.clients90}/${win.clients365}</strong> client referrers.
+                ${quiet > 0 ? `<strong>${quiet}</strong> ${quiet === 1 ? 'person has' : 'people have'} referred in the last year but not the last 90 days.` : ''}
+            </div>`
+            + renderDetailTable(['Referrer', 'Type', 'Active last 90d', 'CPS (365d)', 'Last CPS'],
+                win.roster.map(r => [r.name, r.isAgent ? 'Agent' : 'Client', r.recent ? '✅ Yes' : '— No', r.sessions, r.lastDate]),
+                'Nobody has referred a CPS in the last 365 days');
+    })();
+
     const sessionsTable = `<h4 style="font-size:14px;font-weight:600;margin:18px 0 8px;">Sessions (${rows.length})</h4>`
         + renderDetailTable(['Date', 'Lead Agent', 'Customer / Prospect', 'Referred By', 'Referrer Type', 'Title'], rows);
 
-    return summary + byReferrerTable + sessionsTable;
+    return summary + byReferrerTable + windowSection + sessionsTable;
 };
 
 const buildTotalSalesDetails = async (from, to) => {
@@ -3552,14 +3703,41 @@ const showKPIDetails = async (key) => {
         + parts.map(p => `<span>${escapeHtml(p)}</span>`).join('')
         + `</div>`;
 
+    // Momentum line, rendered ABOVE the headline: distinct referrer head-counts over
+    // a rolling 90 days vs a rolling 365. "2/8 agent" = eight agents referred someone
+    // this year, only two of them in the last quarter.
+    //
+    // The window label is NOT decoration. These two windows ignore the dashboard's
+    // time filter (see getCPSReferrerWindows), so without "90d / 365d" on screen the
+    // line looks like a stuck number whenever the filter changes the count below it.
+    const _cpsWindowParts = (a90, a365, c90, c365) => ([
+        'Referrers 90d / 365d',
+        `👤 ${a90}/${a365} agent`,
+        `🤝 ${c90}/${c365} client`,
+    ]);
+
+    // Same flex-wrap-one-span-per-chip treatment as _cpsSplitHtml, for the same
+    // reason (the ~182px mobile card breaks a single text run mid-phrase). Sits above
+    // the value, so it pushes DOWN rather than up.
+    const _cpsWindowHtml = (parts) =>
+        `<div style="display:flex;flex-wrap:wrap;gap:0 8px;font-size:11px;color:var(--gray-500);margin:0 0 4px;">`
+        + parts.map((p, i) => `<span${i === 0 ? ' style="font-weight:600;"' : ''}>${escapeHtml(p)}</span>`).join('')
+        + `</div>`;
+
     const _kpiCardDefs = (kpis, prevKpis) => {
         const eppDetails = (kpis.eppDetails || []).map(d => ({ bank: d.bank, months: d.months, count: d.count }));
         const cpsAgents = kpis.cpsAgentReferrers || 0;
         const cpsClients = kpis.cpsClientReferrers || 0;
         const cpsUnattributed = kpis.cpsUnattributed || 0;
+        const cpsA90 = kpis.cpsAgents90 || 0, cpsA365 = kpis.cpsAgents365 || 0;
+        const cpsC90 = kpis.cpsClients90 || 0, cpsC365 = kpis.cpsClients365 || 0;
         return [
             { label: 'CPS Consultations', value: kpis.cpsCount, prev: prevKpis.cpsCount, icon: '📞', color: 'blue', key: 'cpsCount',
               subType: 'cps', cpsAgents, cpsClients, cpsUnattributed,
+              cpsA90, cpsA365, cpsC90, cpsC365,
+              // preHtml renders BETWEEN the label and the value — the only card that
+              // uses the slot. Every other sub-line sits below the value.
+              preHtml: _cpsWindowHtml(_cpsWindowParts(cpsA90, cpsA365, cpsC90, cpsC365)),
               subHtml: _cpsSplitHtml(_cpsSplitParts(cpsAgents, cpsClients, cpsUnattributed)) },
             { label: 'Total Sales', value: `RM ${kpis.totalSales.toLocaleString()} `, prev: prevKpis.totalSales, icon: '💰', color: 'green', key: 'totalSales' },
             { label: 'POP Cases', value: kpis.popCaseCount, prev: prevKpis.popCaseCount, icon: '📦', color: 'orange', key: 'popCaseCount',
@@ -3619,6 +3797,7 @@ const showKPIDetails = async (key) => {
                 popTotal: c.popTotal,
                 eppDetails: c.eppDetails || [],
                 cpsSplitParts: c.subType === 'cps' ? _cpsSplitParts(c.cpsAgents, c.cpsClients, c.cpsUnattributed) : [],
+                cpsWindowParts: c.subType === 'cps' ? _cpsWindowParts(c.cpsA90, c.cpsA365, c.cpsC90, c.cpsC365) : [],
             };
         });
 
@@ -3647,6 +3826,7 @@ const showKPIDetails = async (key) => {
                                 <span class="tooltip-text">${KPI_DEFINITIONS[c.key] || ''}</span>
                             </div>
                         </h3>
+                        ${c.preHtml || ''}
                         <div class="stat-value">${c.value}</div>
                         ${c.subHtml || ''}
                         ${t.trendHide ? '' : `<div class="stat-trend ${t.trendClass}">

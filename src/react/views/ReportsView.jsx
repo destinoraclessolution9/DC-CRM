@@ -69,6 +69,17 @@ export function ReportsView({ isTeamLeader = false, currentTimeFilter = 'monthly
         return null;
     };
 
+    // Momentum line for the CPS card, rendered ABOVE the value — the only card that
+    // uses this slot. 1:1 with the chunk's _cpsWindowHtml.
+    const renderCardPre = (c) => {
+        if (c.subType !== 'cps' || !(c.cpsWindowParts || []).length) return null;
+        return (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0 8px', fontSize: '11px', color: 'var(--gray-500)', margin: '0 0 4px' }}>
+                {c.cpsWindowParts.map((p, i) => <span key={i} style={i === 0 ? { fontWeight: 600 } : undefined}>{p}</span>)}
+            </div>
+        );
+    };
+
     return (
         <div className="kpi-dashboard">
             <div className="dashboard-header">
@@ -131,6 +142,7 @@ export function ReportsView({ isTeamLeader = false, currentTimeFilter = 'monthly
                                         <span className="tooltip-text">{c.definition}</span>
                                     </div>
                                 </h3>
+                                {renderCardPre(c)}
                                 <div className="stat-value">{c.value}</div>
                                 {renderCardSub(c)}
                                 {!c.trendHide && (
