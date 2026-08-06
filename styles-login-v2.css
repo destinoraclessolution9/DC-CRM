@@ -1664,6 +1664,21 @@
     .mp-list { display:flex; flex-direction:column; gap:10px; }
     .mp-empty { text-align:center; padding:40px 16px; color:var(--mp-ink-soft); font-size:13px; }
     .mp-empty-flower { font-size:32px; display:block; margin-bottom:8px; opacity:0.7; }
+    /* Load-more — replaces the old dead-end "Showing 60 of N" note. Sits as the
+       last child of .mp-list so it inherits the 10px card gap; card-shaped but
+       deliberately lighter than a .mp-card so it doesn't read as a person. */
+    .mp-load-more {
+        width:100%; margin-top:2px; padding:13px 16px;
+        /* Brand-red dashed hairline, not --mp-line: at 7% alpha that border is
+           effectively invisible and the button reads as an orphaned blank card. */
+        background:#fff; border:1px dashed rgba(197,37,43,0.30); border-radius:16px;
+        font-family:inherit; font-size:13.5px; font-weight:700; color:var(--mp-red);
+        display:flex; align-items:center; justify-content:center; gap:8px;
+        cursor:pointer; transition:transform 0.15s, background 0.15s;
+        -webkit-tap-highlight-color:transparent;
+    }
+    .mp-load-more:active { transform:scale(0.985); background:var(--mp-bg, #fdf5f6); }
+    .mp-load-more span { font-weight:600; font-size:12px; color:var(--mp-ink-soft); }
 
     /* Card */
     .mp-card {

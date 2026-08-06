@@ -3798,6 +3798,17 @@
     };
     const _mpHasActiveFilters = () => Object.values(_mpFilters).some(v => v !== '' && v != null);
     const _mpActiveFilterCount = () => Object.values(_mpFilters).filter(v => v !== '' && v != null).length;
+    // Sort order for the card list. Option values mirror the desktop prospects
+    // sort <select> (chunks/script-prospects.js) so the two surfaces can't drift
+    // apart again, and the default matches it too. Deliberately NOT inside
+    // _mpFilters: sorting doesn't narrow the list, so it must not light up the
+    // filter badge. In-memory only (same as _mpFilters) — a non-default sort
+    // that silently survived an app restart would be invisible to the user.
+    const _MP_SORT_DEFAULT = 'score_desc';
+    let _mpSort = _MP_SORT_DEFAULT;
+    // Progressive reveal: how many pages of _MP_PAGE cards are currently shown.
+    // Reset to 1 whenever the underlying query changes (tab, search, filters).
+    let _mpPage = 1;
     const showMobileProspectsView = async (viewport) => {
         if (!viewport) return;
         viewport.classList.add('mprospects-active');
@@ -3808,6 +3819,9 @@
 
         // Pull-to-refresh forces a one-time fresh fetch past the snapshot.
         const _mpForce = _mobileForceFresh; _mobileForceFresh = false;
+        // Every entry to the view starts at page 1 — the snapshot below only
+        // ever holds a page-1 render, so the counter must agree with it.
+        _mpPage = 1;
         // Instant snapshot restore — localStorage persists across app close (30-min TTL).
         // Client lists rarely change between visits, so a fresh snapshot is served
         // as-is with no background refetch; it refreshes only on edit, pull-to-
@@ -3968,6 +3982,22 @@
         // reflects the user's narrowed query. Each filter is opt-in: a blank
         // string means "no filter on this field" so we only narrow when set.
         const F = _mpFilters;
+        // Active-prospect rule — parity with the desktop prospects_page RPC
+        // (`coalesce(status,'') not in ('converted','lost')`) and with
+        // AppDataStore.getActiveProspects. A converted prospect already lives as
+        // a customer row and a lost deal is closed, so neither belongs in the
+        // active Prospects list. Without this the two surfaces disagreed on the
+        // SAME filter — e.g. Ming Gua MG8 read 54 on desktop and 65 here, the
+        // gap being exactly the converted rows (2026-08-06).
+        // Blank/NULL status = never classified → KEPT, same as the RPC's coalesce.
+        // Applied BEFORE the explicit status filter and skipped when one is set,
+        // so choosing Status → Converted still surfaces them on demand.
+        if (_mpTab !== 'customers' && !F.status) {
+            rows = rows.filter(r => {
+                const s = String(r.status || '').toLowerCase();
+                return s !== 'converted' && s !== 'lost';
+            });
+        }
         if (F.status) {
             rows = rows.filter(r => String(r.status || '').toLowerCase() === F.status.toLowerCase());
         }
@@ -3989,12 +4019,31 @@
             rows = rows.filter(r => String(r.pipeline_stage || '').toLowerCase() === F.pipelineStage.toLowerCase());
         }
 
-        // Sort: most recent first
-        rows.sort((a, b) => {
-            const at = new Date(a.updated_at || a.created_at || 0).getTime();
-            const bt = new Date(b.updated_at || b.created_at || 0).getTime();
-            return bt - at;
-        });
+        // Sort — user-selectable via the filter sheet, defaulting to the same
+        // Score (High → Low) the desktop table opens on. Ties break on `id desc`,
+        // the exact final ORDER BY term of the prospects_page RPC, so a list
+        // where every score is 0 still comes out in the same order on both
+        // surfaces instead of the old hardcoded updated_at ordering.
+        // (Desktop's protection_* options are omitted: protection days are
+        // computed in the prospects chunk and aren't shown on these cards.)
+        {
+            const _t = (v) => { const n = v ? new Date(v).getTime() : 0; return isNaN(n) ? 0 : n; };
+            const keys = {
+                score:    (r) => Number(r.score) || 0,
+                name:     (r) => String(r.full_name || '').toLowerCase(),
+                activity: (r) => _t(r.last_activity_date),
+                recent:   (r) => _t(r.updated_at || r.created_at),
+            };
+            const [field, dir] = String(_mpSort || _MP_SORT_DEFAULT).split('_');
+            const keyOf = keys[field] || keys.score;
+            const mul = dir === 'asc' ? 1 : -1;
+            rows.sort((a, b) => {
+                const ka = keyOf(a), kb = keyOf(b);
+                if (ka < kb) return -mul;
+                if (ka > kb) return mul;
+                return (Number(b.id) || 0) - (Number(a.id) || 0);
+            });
+        }
 
         // Bail if a newer render has superseded this one (stale search response).
         if (_seq !== _mpRenderSeq) return;
@@ -4006,12 +4055,15 @@
 
         const isCust = _mpTab === 'customers';
         const palettes = ['red','purple','pink','peach','wood'];
-        // Cap the rendered cards at 60 for scroll performance, but tell the user
-        // when the list is truncated so a record beyond the cap doesn't look
-        // "missing" — they can narrow the set with the search box above.
-        const _mpCap = 60;
+        // Render in pages of 60 for scroll performance. This used to be a HARD
+        // cap: rows 61+ were simply unreachable and the note told the user to
+        // "use search" to find them. Now each Load-more tap reveals another page
+        // from the already-fetched set (no refetch), so every matching record is
+        // reachable while a cold list still paints only 60 cards.
+        const _MP_PAGE = 60;
         const _mpTotal = rows.length;
-        const html = rows.slice(0, _mpCap).map((p, i) => {
+        const _mpShown = Math.min(_mpTotal, _MP_PAGE * _mpPage);
+        const html = rows.slice(0, _mpShown).map((p, i) => {
             const init = _mhomeInitials(p.full_name);
             const pal = palettes[i % palettes.length];
             const phone = UI.escJsAttr(p.phone || '');
@@ -4055,8 +4107,8 @@
             </div>`;
         }).join('');
 
-        const truncNote = _mpTotal > _mpCap
-            ? `<div class="mp-empty" style="padding:14px 8px;font-size:12px;">Showing ${_mpCap} of ${_mpTotal}. Use search above to find older records.</div>`
+        const truncNote = _mpTotal > _mpShown
+            ? `<button type="button" class="mp-load-more" onclick="app.mpLoadMore()">Load more <span>${_mpShown} of ${_mpTotal}</span></button>`
             : '';
 
         listHost.innerHTML = html + truncNote;
@@ -4064,7 +4116,10 @@
         // filters. Caching a filtered list under the canonical key means a
         // page reload would paint that narrowed list while the in-memory
         // filter state is empty — UI says "no filters" but list is narrowed.
-        if (!_mpSearch && !_mpHasActiveFilters()) {
+        // Page 1 only: _mpPage resets to 1 on view entry, so persisting a
+        // multi-page render would restore 180 cards whose Load-more button then
+        // *shrinks* the list back to 120 on the next tap.
+        if (!_mpSearch && !_mpHasActiveFilters() && _mpPage === 1) {
             try { localStorage.setItem(`mp-list-snap-v4-${_mpTab}`, JSON.stringify({ ts: Date.now(), val: html + truncNote })); } catch(_) { /* intentional: snapshot persistence is best-effort */ }
         }
     };
@@ -4081,6 +4136,7 @@
             if (tab === 'customers') _mpFilters.pipelineStage = '';
         }
         _mpTab = tab;
+        _mpPage = 1;
         document.querySelectorAll('.mp-tab').forEach(t => t.classList.remove('active'));
         if (btn) btn.classList.add('active');
         // Update only the filter badge inline rather than re-rendering the
@@ -4114,9 +4170,19 @@
             oldBadge.remove();
         }
     };
+    // Reveal the next page of cards. Re-renders from cache (every source the
+    // list reads is SWR-primed) rather than holding the row array in module
+    // state, so it can't serve rows that a concurrent edit has since changed.
+    // silent:true — the list is already on screen; a "Loading…" flash would
+    // throw away the user's scroll position.
+    const mpLoadMore = async () => {
+        _mpPage += 1;
+        await _mpRenderList(true);
+    };
     let _mpSearchTimer = null;
     const mpSearchInput = (v) => {
         _mpSearch = v || '';
+        _mpPage = 1;
         clearTimeout(_mpSearchTimer);
         _mpSearchTimer = setTimeout(() => { _mpRenderList(); }, 220);
     };
@@ -4195,6 +4261,22 @@
             `<option value="${v}" ${_mpFilters.mingGua === v ? 'selected' : ''}>${l}</option>`
         ).join('');
 
+        // Sort options — same set and same wording as the desktop prospects
+        // sort <select>, minus the two protection_* orders (see _mpRenderList).
+        // 'recent_desc' preserves what this list used to do unconditionally.
+        const sortOpts = [
+            ['score_desc','Score (High → Low)'],
+            ['score_asc','Score (Low → High)'],
+            ['name_asc','Name (A → Z)'],
+            ['name_desc','Name (Z → A)'],
+            ['activity_desc','Recent Activity'],
+            ['activity_asc','Oldest Activity'],
+            ['recent_desc','Recently Updated'],
+        ];
+        const sortHtml = sortOpts.map(([v, l]) =>
+            `<option value="${v}" ${_mpSort === v ? 'selected' : ''}>${_mhomeEsc(l)}</option>`
+        ).join('');
+
         const pipelineOpts = [
             ['new','New'],['contacted','Contacted'],['qualified','Qualified'],
             ['proposal','Proposal'],['negotiation','Negotiation'],
@@ -4206,6 +4288,12 @@
 
         const body = `
             <div class="mp-filter-form">
+                <div class="mp-filter-group">
+                    <label for="mpf-sort">Sort by</label>
+                    <select id="mpf-sort" class="form-control">
+                        ${sortHtml}
+                    </select>
+                </div>
                 <div class="mp-filter-group">
                     <label for="mpf-status">Status</label>
                     <select id="mpf-status" class="form-control">
@@ -4251,7 +4339,7 @@
             { label: 'Clear', type: 'secondary', action: 'app.mpClearFilters()' },
             { label: 'Apply', type: 'primary',   action: 'app.mpApplyFilters()' },
         ];
-        UI.showModal(`Filter ${isCust ? 'Customers' : 'Prospects'}`, body, buttons);
+        UI.showModal(`Sort &amp; Filter ${isCust ? 'Customers' : 'Prospects'}`, body, buttons);
     };
 
     const mpApplyFilters = async () => {
@@ -4264,6 +4352,10 @@
             scoreMax: v('mpf-score-max'),
             pipelineStage: v('mpf-pipeline'),
         };
+        // Sort lives outside _mpFilters (it narrows nothing, so it must not
+        // reach the badge) — read it here and restart paging on any change.
+        _mpSort = v('mpf-sort') || _MP_SORT_DEFAULT;
+        _mpPage = 1;
         UI.hideModal();
         // Drop the snapshot so a stale unfiltered cache doesn't paint over the
         // narrowed list on the next visit. _mpRenderList skips saving while
@@ -4275,6 +4367,8 @@
 
     const mpClearFilters = async () => {
         _mpFilters = { status: '', agentId: '', mingGua: '', scoreMin: '', scoreMax: '', pipelineStage: '' };
+        _mpSort = _MP_SORT_DEFAULT;
+        _mpPage = 1;
         UI.hideModal();
         try { localStorage.removeItem(`mp-list-snap-v4-${_mpTab}`); } catch(_) { /* intentional: snapshot eviction is best-effort */ }
         _mpUpdateFilterBtn();
@@ -4446,6 +4540,7 @@
         showProspectsViewSmart,
         mpSwitchTab,
         mpSearchInput,
+        mpLoadMore,
         mpAdd,
         mpOpenDeliveryListing,
         mpOpenFilters,
