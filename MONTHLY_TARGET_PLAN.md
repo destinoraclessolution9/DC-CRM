@@ -13,19 +13,36 @@ Targets*. It should also have a **monthly** target.
 
 | phase | status |
 |---|---|
-| 0 — migration | **file written, NOT APPLIED** — `migrations/monthly_targets_full_metrics_2026-08-06.sql` |
+| 0 — migration | **NOT APPLIED.** An attempted apply on 2026-08-06 rolled back in full (see below). Now split into two files — run them separately. |
 | 1 — writer fix (`is_manual` guard, exact split, batched writes) | done |
 | 2 — Set Monthly Targets modal | done |
 | 3 — read wiring (chart, breakdown card, target-vs-actual, overview, CSV) | done |
 | 4 — both render sites + build | done |
 | 5 — tests | done — 75 assertions, 8/8 mutants killed |
 
-**The one thing left:** run
-`migrations/monthly_targets_full_metrics_2026-08-06.sql` in the Supabase SQL editor
-(project `remuwhxvzkzjtgbzqjaa`), precheck queries first. It could not be applied from
-this session — the machine's `SUPABASE_ACCESS_TOKEN` belongs to the DNJ account and
-reaches only `sfnrpbsdscikpmbhrzub`, and the Chrome extension (the dashboard-token
-route) is not connected.
+**The one thing left**, in the Supabase SQL editor (project `remuwhxvzkzjtgbzqjaa`),
+**as two separate runs**:
+
+1. `migrations/monthly_targets_full_metrics_2026-08-06.sql` — add-column only, safe as-is.
+2. `migrations/monthly_targets_unique_index_2026-08-06.sql` — dedupe + unique index.
+
+It could not be applied from the session: the machine's `SUPABASE_ACCESS_TOKEN` belongs
+to the DNJ account and reaches only `sfnrpbsdscikpmbhrzub`, and the Chrome extension
+(the dashboard-token route) is not connected.
+
+> **Why two files.** The first attempt ran the combined migration and reported success,
+> but an anon PostgREST probe showed all seventeen columns still `42703` — the schema
+> was byte-identical to before. The Supabase SQL editor runs a submitted script as **one
+> transaction**, so the `create unique index` at the bottom failed on pre-existing
+> duplicate `(year, month)` rows and rolled back every `alter table` above it. The
+> failure reads as "nothing ran" rather than "the last statement failed", which is what
+> makes it worth calling out. Fixed in `ccc6a3d` by splitting the files.
+
+**Verify after running** — `200 []` means the column exists, `400`/`42703` means it does not:
+
+```bash
+K="sb_publishable_XVWyiw5j1lnEErQUTV4XWg_lQcCIAjX"; B="https://remuwhxvzkzjtgbzqjaa.supabase.co/rest/v1"; curl -s -o /dev/null -w "monthly %{http_code}\n" -H "apikey: $K" -H "Authorization: Bearer $K" "$B/monthly_targets?select=pop_case_count_target,pop_sales_target,epp_case_count_target,epp_sales_target,new_agents_target,new_customers_target,total_meetings_target,activity_headcount_target,meetup_existing_target,cf_headcount_target,is_manual&limit=1"; curl -s -o /dev/null -w "quarterly %{http_code}\n" -H "apikey: $K" -H "Authorization: Bearer $K" "$B/quarterly_targets?select=meetup_existing_target,cf_headcount_target&limit=1"
+```
 
 The JS is written to survive that gap rather than depend on it: the modal probes for
 `is_manual` and renders a "migration not applied" banner instead of eating the edits,
