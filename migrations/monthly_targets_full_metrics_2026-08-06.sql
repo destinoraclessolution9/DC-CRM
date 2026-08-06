@@ -115,6 +115,21 @@ alter table public.quarterly_targets
 --
 -- Without this the app cannot read or write anything added above: AppDataStore's
 -- unknown-column retry loop strips every one of them and reports success.
+--
+-- HOW TO TELL THE CACHE IS THE PROBLEM (not the migration): write-probe, don't
+-- read-probe. A stale column on a GET returns a Postgres-shaped 42703 "column does
+-- not exist", which reads as "the DDL never ran". The same column on a POST returns
+-- PGRST204 "Could not find the 'X' column of 'T' in the schema cache" — PostgREST
+-- naming the cache. Control: POST a column it already knows and you get 42501
+-- permission denied, i.e. the request reached Postgres.
+--
+--   curl -s -X POST -H "apikey: $K" -H "Authorization: Bearer $K" --        -H "Content-Type: application/json" --        -d '{"year":1900,"month":1,"is_manual":true}' "$B/monthly_targets"
+--
+-- ⚠ 2026-08-06: this NOTIFY did NOT clear the cache on this project — the probe still
+-- returned PGRST204 afterwards. If that happens, restart the project from the
+-- dashboard (Settings -> General -> Restart project), which rebuilds the cache on
+-- PostgREST start. Expect a ~30s blip; on the NANO instance, do it when the team is
+-- idle rather than mid-day.
 notify pgrst, 'reload schema';
 
 
