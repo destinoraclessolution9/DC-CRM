@@ -123,7 +123,10 @@ alter table public.quarterly_targets
 -- naming the cache. Control: POST a column it already knows and you get 42501
 -- permission denied, i.e. the request reached Postgres.
 --
---   curl -s -X POST -H "apikey: $K" -H "Authorization: Bearer $K" --        -H "Content-Type: application/json" --        -d '{"year":1900,"month":1,"is_manual":true}' "$B/monthly_targets"
+--   curl -s -X POST "$B/monthly_targets"
+--        -H "apikey: $K" -H "Authorization: Bearer $K"
+--        -H "Content-Type: application/json"
+--        -d '{"year":1900,"month":1,"is_manual":true}'
 --
 -- ⚠ 2026-08-06: this NOTIFY did NOT clear the cache on this project — the probe still
 -- returned PGRST204 afterwards. If that happens, restart the project from the
