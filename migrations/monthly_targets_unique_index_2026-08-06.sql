@@ -51,3 +51,9 @@ create unique index if not exists monthly_targets_year_month_uidx
 --     from pg_indexes
 --    where tablename = 'monthly_targets'
 --      and indexname = 'monthly_targets_year_month_uidx';
+
+
+-- ---- make PostgREST see the change ------------------------------------------
+-- See the note in monthly_targets_full_metrics_2026-08-06.sql: this project does
+-- not appear to auto-refresh PostgREST every schema change.
+notify pgrst, 'reload schema';

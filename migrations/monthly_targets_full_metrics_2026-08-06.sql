@@ -104,6 +104,20 @@ alter table public.quarterly_targets
     add column if not exists cf_headcount_target    numeric;
 
 
+-- ---- make PostgREST see the new columns -------------------------------------
+-- NOT optional on this project. Observed 2026-08-06: after the ALTERs above landed
+-- (information_schema confirmed the column in public.monthly_targets), the REST API
+-- still answered 42703 "column does not exist" for it. PostgREST serves reads from a
+-- CACHED schema, and Supabase normally refreshes that via an event trigger on DDL —
+-- on this project that refresh is evidently not firing, so the cache only picks up
+-- new columns when PostgREST happens to restart. Columns from older migrations are
+-- visible purely because a restart happened at some point after they were added.
+--
+-- Without this the app cannot read or write anything added above: AppDataStore's
+-- unknown-column retry loop strips every one of them and reports success.
+notify pgrst, 'reload schema';
+
+
 -- ---- NEXT: run migrations/monthly_targets_unique_index_2026-08-06.sql --------
 -- That file dedupes (year, month) and adds the unique index. Kept separate so a
 -- duplicate row cannot roll back the column additions above.
