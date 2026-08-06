@@ -69,13 +69,15 @@ export function ReportsView({ isTeamLeader = false, currentTimeFilter = 'monthly
         return null;
     };
 
-    // Momentum line for the CPS card, rendered ABOVE the value — the only card that
-    // uses this slot. 1:1 with the chunk's _cpsWindowHtml.
+    // Rolling-window line, rendered ABOVE the value. Generic: any card whose def
+    // supplies windowParts gets one (CPS referrers, New Customers). 1:1 with the
+    // chunk's _windowLineHtml — the strings themselves are built there, so this stays
+    // a pure render and the two paths cannot word things differently.
     const renderCardPre = (c) => {
-        if (c.subType !== 'cps' || !(c.cpsWindowParts || []).length) return null;
+        if (!(c.windowParts || []).length) return null;
         return (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0 8px', fontSize: '11px', color: 'var(--gray-500)', margin: '0 0 4px' }}>
-                {c.cpsWindowParts.map((p, i) => <span key={i} style={i === 0 ? { fontWeight: 600 } : undefined}>{p}</span>)}
+                {c.windowParts.map((p, i) => <span key={i} style={i === 0 ? { fontWeight: 600 } : undefined}>{p}</span>)}
             </div>
         );
     };

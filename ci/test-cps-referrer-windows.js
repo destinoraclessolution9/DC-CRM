@@ -101,10 +101,12 @@ const ANCHOR = "app.register('reporting', {";
 if (!src.includes(ANCHOR)) { console.error('FAIL: register anchor not found — harness needs updating'); process.exit(1); }
 src = src.replace(ANCHOR, `window.__T = {
         getCPSReferrerWindows, getCPSReferrerSplit,
-        _cpsWindowParts, _cpsWindowHtml, _buildKpiCards, renderKPIStats,
+        _cpsWindowParts, _windowLineHtml, _newCustomerWindowParts,
+        _buildKpiCards, renderKPIStats, getNewCustomers365, getNewCustomers,
         _CPS_WINDOW_RECENT_DAYS, _CPS_WINDOW_WIDE_DAYS,
         setScope: (vis, role) => { _visibleUserIds = vis; _currentRoleFilter = role; },
-        resetWindows: () => { _cpsWindowsCache = { key: null, ts: 0, p: null }; },
+        resetWindows: () => { _windowCaches.clear(); },
+        setTimeFilter: (f) => { _currentTimeFilter = f; },
     };
     ${ANCHOR}`);
 try { (0, eval)(src); } catch (e) { console.error('FAIL loading chunk: ' + e.message); process.exit(1); }
@@ -334,17 +336,20 @@ reset();
     const cards = T._buildKpiCards(kpis, { ...kpis });
     const cpsCard = cards.find(c => c.key === 'cpsCount');
     eq('the CPS card carries the window line',
-        cpsCard.cpsWindowParts, ['Referrers 90d / 365d', '👤 2/8 agent', '🤝 9/20 client']);
+        cpsCard.windowParts, ['Referrers 90d / 365d', '👤 2/8 agent', '🤝 9/20 client']);
     eq('…and still carries the period chips underneath',
         cpsCard.cpsSplitParts, ['👤 2 agent referrers', '🤝 1 client referrer']);
-    ok('no other card gets a window line',
-        cards.filter(c => c.key !== 'cpsCount').every(c => (c.cpsWindowParts || []).length === 0));
+    // The slot is generic now, so pin the exact set rather than "only CPS" — a card
+    // silently gaining or losing a window line should fail here.
+    eq('exactly these cards carry a rolling-window line',
+        cards.filter(c => (c.windowParts || []).length).map(c => c.key).sort(),
+        ['cpsCount', 'newCustomers']);
 
     // The window label is load-bearing: these numbers ignore the time filter, so
     // without it on screen they read as a stuck value.
-    ok('the rendered line names its windows', /90d\s*\/\s*365d/.test(T._cpsWindowHtml(cpsCard.cpsWindowParts)));
+    ok('the rendered line names its windows', /90d\s*\/\s*365d/.test(T._windowLineHtml(cpsCard.windowParts)));
     ok('…and one chip per span so a 182px card wraps between chips, not inside one',
-        (T._cpsWindowHtml(cpsCard.cpsWindowParts).match(/<span/g) || []).length === 3);
+        (T._windowLineHtml(cpsCard.windowParts).match(/<span/g) || []).length === 3);
 
     // The LEGACY by-id grid is a separate render site from _buildKpiCards (it is the
     // fallback when the React re-mount fails). Both must carry the line or the

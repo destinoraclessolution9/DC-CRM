@@ -86,7 +86,7 @@
         eppSales: "Revenue from EPP cases - Sum of EPP transaction amounts",
         activeAgents: "Active agents (60-day window) - Agents with any activity log or event attendance in the past 60 days, grouped by team",
         newAgents: "Agent recruits - Count of new agents created",
-        newCustomers: "Customer conversions - Count of prospects converted to customers",
+        newCustomers: "New Customers - customers whose customer_since falls in the selected period AND who made at least one purchase in that SAME period. Someone who joined but has not bought yet does not count until they do, so a short period can legitimately read 0. ABOVE the number: the same metric for the selected period against a rolling 365 days, so '3/240' means three of the year's 240 landed in the current period. The 365-day half is rolling and does NOT follow the time filter; both halves follow the agent and market filters.",
         conversionRate: "Prospect-to-customer conversion rate - New customers as a percentage of prospects in the period",
         totalMeetings: "Agent meetings & training - Events and internal agent meetings only",
         clientMeetings: "Client meetings - CPS, FTF, and FSA meetings with prospects/customers",
@@ -1392,7 +1392,7 @@
         // RPC fast path inside getConversionRate. getActiveAgents uses a rolling
         // 60-day window (ignores from/to) — the RPC replicates that exactly.
         const _ext = await _tryExtendedKpiRPC(from, to);
-        const [activityHeadcount, conversionRate, meetUpExistingCount, activeAgents, agentHoursSummary, neaPitching, fengshuiPitching, cpsRef, cpsWin] = await Promise.all([
+        const [activityHeadcount, conversionRate, meetUpExistingCount, activeAgents, agentHoursSummary, neaPitching, fengshuiPitching, cpsRef, cpsWin, nc365] = await Promise.all([
             _ext ? _ext.activityHeadcount   : getActivityHeadcount(from, to),
             getConversionRate(from, to),
             _ext ? _ext.meetUpExistingCount : getMeetUpExistingCustomerCount(from, to),
@@ -1410,8 +1410,16 @@
             // promise-cached, so the parallel current+previous calculateKPIs calls
             // share one 365-day read rather than racing into two.
             getCPSReferrerWindows(),
+            // Rolling 365-day New Customers for the "this period / 365d" line. Ignores
+            // from/to by design and is promise-cached, so the parallel current+previous
+            // calculateKPIs calls share one computation.
+            getNewCustomers365(),
         ]);
+        // Fields for the cards' rolling-window lines. Spread into BOTH return shapes
+        // below (the RPC fast path and the client fallback) so the lines render
+        // identically whether or not the kpi_* aggregates exist.
         const cpsSplit = {
+            newCustomers365: nc365,
             cpsAgentReferrers:  cpsRef.agents,
             cpsClientReferrers: cpsRef.clients,
             cpsUnattributed:    cpsRef.unattributed,
@@ -1633,41 +1641,51 @@ const getCPSReferrerSplit = async (from, to) => {
 const _CPS_WINDOW_RECENT_DAYS = 90;
 const _CPS_WINDOW_WIDE_DAYS = 365;
 
-// Scope identity for the cache. Any gate that changes the population must appear
-// here, or a filter switch would serve the previous filter's numbers.
-const _cpsWindowScopeKey = () => [
+// Scope identity for the rolling-window caches. Any gate that changes the population
+// must appear here, or a filter switch would serve the previous filter's numbers.
+// Shared by every card that carries a rolling-window line.
+const _windowScopeKey = () => [
     Array.isArray(_visibleUserIds) ? _visibleUserIds.join(',') : String(_visibleUserIds),
     _currentRoleFilter,
     window._crmUtils.listCountryScope(),
 ].join('|');
 
-// Caches the PROMISE, not the value: refreshKPIDashboard fires calculateKPIs for the
-// current and previous periods in parallel, and both reach this function. A value
-// cache would still let those two race into two 365-day reads; caching the in-flight
-// promise collapses them into one (same pattern as data.js's read dedup). 60s TTL
-// bounds staleness so a CPS logged today shows up without a reload, and keeps a tab
-// left open overnight from serving yesterday's window.
-const _CPS_WINDOW_TTL_MS = 60 * 1000;
-let _cpsWindowsCache = { key: null, ts: 0, p: null };
-
-const getCPSReferrerWindows = () => {
-    const key = _cpsWindowScopeKey();
+// Promise cache for a rolling-window figure. Caches the PROMISE, not the value:
+// refreshKPIDashboard runs calculateKPIs for the current and previous periods in
+// PARALLEL and both reach these getters, so a value cache would still let the two
+// race into duplicate work. Keyed on the scope gates + a caller-supplied name; 60s
+// TTL bounds staleness and keeps a tab left open overnight from serving yesterday's
+// window. A rejection evicts itself so the next render retries instead of replaying
+// the same failure for the rest of the TTL.
+const _WINDOW_TTL_MS = 60 * 1000;
+const _windowCaches = new Map(); // name -> { key, ts, p }
+const _cachedWindow = (name, compute) => {
+    const key = _windowScopeKey();
     const now = Date.now();
-    if (_cpsWindowsCache.key === key && _cpsWindowsCache.p && (now - _cpsWindowsCache.ts) < _CPS_WINDOW_TTL_MS) {
-        return _cpsWindowsCache.p;
-    }
+    const hit = _windowCaches.get(name);
+    if (hit && hit.key === key && hit.p && (now - hit.ts) < _WINDOW_TTL_MS) return hit.p;
+    const p = Promise.resolve().then(compute);
+    _windowCaches.set(name, { key, ts: now, p });
+    p.catch(() => { const cur = _windowCaches.get(name); if (cur && cur.p === p) _windowCaches.delete(name); });
+    return p;
+};
 
-    const p = (async () => {
+// n-th day back from today, inclusive-both-ends: rollingFrom(365) is today-364, so
+// the window spans 365 distinct dates. Matches getDateRanges' convention.
+const _rollingFrom = (days, today = new Date()) => {
+    const d = new Date(today);
+    d.setDate(d.getDate() - (days - 1));
+    return toLocalDateStr(d);
+};
+
+// Promise-cached via _cachedWindow — see the note there for why the promise and not
+// the value.
+const getCPSReferrerWindows = () => _cachedWindow('cpsReferrers', async () => {
+    {
         const today = new Date();
         const to = toLocalDateStr(today);
-        // n-th day back, inclusive-both-ends (see the window note above).
-        const back = (n) => {
-            const d = new Date(today);
-            d.setDate(d.getDate() - (n - 1));
-            return toLocalDateStr(d);
-        };
-        const from365 = back(_CPS_WINDOW_WIDE_DAYS);
-        const from90 = back(_CPS_WINDOW_RECENT_DAYS);
+        const from365 = _rollingFrom(_CPS_WINDOW_WIDE_DAYS, today);
+        const from90 = _rollingFrom(_CPS_WINDOW_RECENT_DAYS, today);
 
         const needUsers = _currentRoleFilter !== 'All';
         const [activities, prospects] = await Promise.all([
@@ -1712,14 +1730,8 @@ const getCPSReferrerWindows = () => {
                 .sort((x, y) => (y.recent - x.recent) || (y.sessions - x.sessions)),
             from90, from365, to,
         };
-    })();
-
-    _cpsWindowsCache = { key, ts: now, p };
-    // A rejected promise must not stick in the cache for 60s — drop it so the next
-    // render retries instead of re-throwing the same failure.
-    p.catch(() => { if (_cpsWindowsCache.p === p) _cpsWindowsCache = { key: null, ts: 0, p: null }; });
-    return p;
-};
+    }
+});
 
 // Shared helper: which agent is credited with this sale.
 // p.agent_id FIRST — it is the owner frozen at the moment the sale was booked, so
@@ -2120,6 +2132,26 @@ const getNewCustomers = async (from, to) => {
     }
     return count;
 };
+
+// Rolling 365-day New Customers, for the "this period / 365d" line above the card's
+// headline. The left half of that line is the headline itself (kpis.newCustomers), so
+// this is the ONLY new number — and it comes from getNewCustomers UNCHANGED, just with
+// a wider window.
+//
+// That reuse is the point. New Customers has a non-obvious rule (customer_since in the
+// window AND at least one purchase in the SAME window) implemented twice — here and in
+// the kpi_user_summary RPC, which agree; the market-scope guard in _tryKpiRPCs forces
+// the client path in the one case where they could diverge. Writing a third
+// implementation for the 365-day half is exactly how CF Headcount ended up disagreeing
+// with the card it sat next to for months. Both halves are one metric over two spans.
+//
+// Rolling and inclusive-both-ends, so it does NOT follow the time filter — but it DOES
+// follow the agent/market gates, because getNewCustomers applies them itself.
+const _NEW_CUSTOMERS_WIDE_DAYS = 365;
+const getNewCustomers365 = () => _cachedWindow('newCustomers365', () => {
+    const today = new Date();
+    return getNewCustomers(_rollingFrom(_NEW_CUSTOMERS_WIDE_DAYS, today), toLocalDateStr(today));
+});
 
 const AGENT_MEETING_TYPES = ['EVENT', 'AGENT_MEETING'];
 const CLIENT_MEETING_TYPES = ['FTF', 'FSA'];
@@ -3716,10 +3748,25 @@ const showKPIDetails = async (key) => {
         `🤝 ${c90}/${c365} client`,
     ]);
 
+    // "This period / 365d" line for the New Customers card. The LEFT number is the
+    // headline itself — the card's own filtered value — so the pair reads as a share:
+    // "3 of this year's 240 came in the current period". Nothing new is computed for
+    // it, which is why the two halves can never disagree.
+    //
+    // The left label follows the time filter rather than hardcoding "month", because
+    // the left number does. Note the right half does NOT follow it — it is always a
+    // rolling 365 days — hence the explicit "/ 365d".
+    const _PERIOD_LABELS = { weekly: 'This week', monthly: 'This month', quarterly: 'This quarter', yearly: 'This year' };
+    const _newCustomerWindowParts = (current, wide) => ([
+        `${_PERIOD_LABELS[_currentTimeFilter] || 'Selected range'} / 365d`,
+        `👥 ${current}/${wide}`,
+    ]);
+
     // Same flex-wrap-one-span-per-chip treatment as _cpsSplitHtml, for the same
     // reason (the ~182px mobile card breaks a single text run mid-phrase). Sits above
-    // the value, so it pushes DOWN rather than up.
-    const _cpsWindowHtml = (parts) =>
+    // the value, so it pushes DOWN rather than up. Shared by every card carrying a
+    // rolling-window line.
+    const _windowLineHtml = (parts) =>
         `<div style="display:flex;flex-wrap:wrap;gap:0 8px;font-size:11px;color:var(--gray-500);margin:0 0 4px;">`
         + parts.map((p, i) => `<span${i === 0 ? ' style="font-weight:600;"' : ''}>${escapeHtml(p)}</span>`).join('')
         + `</div>`;
@@ -3735,9 +3782,10 @@ const showKPIDetails = async (key) => {
             { label: 'CPS Consultations', value: kpis.cpsCount, prev: prevKpis.cpsCount, icon: '📞', color: 'blue', key: 'cpsCount',
               subType: 'cps', cpsAgents, cpsClients, cpsUnattributed,
               cpsA90, cpsA365, cpsC90, cpsC365,
-              // preHtml renders BETWEEN the label and the value — the only card that
-              // uses the slot. Every other sub-line sits below the value.
-              preHtml: _cpsWindowHtml(_cpsWindowParts(cpsA90, cpsA365, cpsC90, cpsC365)),
+              // preHtml/windowParts render BETWEEN the label and the value. Every
+              // other sub-line (subHtml) sits below the value.
+              windowParts: _cpsWindowParts(cpsA90, cpsA365, cpsC90, cpsC365),
+              preHtml: _windowLineHtml(_cpsWindowParts(cpsA90, cpsA365, cpsC90, cpsC365)),
               subHtml: _cpsSplitHtml(_cpsSplitParts(cpsAgents, cpsClients, cpsUnattributed)) },
             { label: 'Total Sales', value: `RM ${kpis.totalSales.toLocaleString()} `, prev: prevKpis.totalSales, icon: '💰', color: 'green', key: 'totalSales' },
             { label: 'POP Cases', value: kpis.popCaseCount, prev: prevKpis.popCaseCount, icon: '📦', color: 'orange', key: 'popCaseCount',
@@ -3749,7 +3797,9 @@ const showKPIDetails = async (key) => {
               subType: 'active',
               subHtml: `<div style="font-size:12px;color:var(--gray-500);margin-top:2px;">Past 60 days · click for team breakdown</div>` },
             { label: 'Fengshui Pitching', value: kpis.fengshuiPitching || 0, prev: prevKpis.fengshuiPitching || 0, icon: '🧭', color: 'green', key: 'fengshuiPitching' },
-            { label: 'New Customers', value: kpis.newCustomers, prev: prevKpis.newCustomers, icon: '👥', color: 'green', key: 'newCustomers' },
+            { label: 'New Customers', value: kpis.newCustomers, prev: prevKpis.newCustomers, icon: '👥', color: 'green', key: 'newCustomers',
+              windowParts: _newCustomerWindowParts(kpis.newCustomers, kpis.newCustomers365 || 0),
+              preHtml: _windowLineHtml(_newCustomerWindowParts(kpis.newCustomers, kpis.newCustomers365 || 0)) },
             { label: 'Conversion Rate', value: `${kpis.conversionRate}% `, prev: prevKpis.conversionRate, icon: '📈', color: 'purple', key: 'conversionRate' },
             { label: 'Meetings & Training', value: kpis.totalMeetings, prev: prevKpis.totalMeetings, icon: '📅', color: 'orange', key: 'totalMeetings' },
             { label: 'Client Meetings', value: kpis.clientMeetings, prev: prevKpis.clientMeetings, icon: '🤝', color: 'blue', key: 'clientMeetings' },
@@ -3797,7 +3847,8 @@ const showKPIDetails = async (key) => {
                 popTotal: c.popTotal,
                 eppDetails: c.eppDetails || [],
                 cpsSplitParts: c.subType === 'cps' ? _cpsSplitParts(c.cpsAgents, c.cpsClients, c.cpsUnattributed) : [],
-                cpsWindowParts: c.subType === 'cps' ? _cpsWindowParts(c.cpsA90, c.cpsA365, c.cpsC90, c.cpsC365) : [],
+                // Generic: any card may carry a rolling-window line above its value.
+                windowParts: c.windowParts || [],
             };
         });
 
