@@ -81,6 +81,7 @@ export function ReportsView({ isTeamLeader = false, currentTimeFilter = 'monthly
                         <>
                             <button className="btn primary" onClick={() => call('openKPITargetsModal')}><i className="fas fa-bullseye"></i> Set Yearly Targets</button>
                             <button className="btn primary" onClick={() => call('openQuarterlyTargetsModal')}><i className="fas fa-calendar-alt"></i> Set Quarterly Targets</button>
+                            <button className="btn primary" onClick={() => call('openMonthlyTargetsModal')}><i className="fas fa-calendar-day"></i> Set Monthly Targets</button>
                             <button className="btn secondary" onClick={() => call('openTargetManagementModal')}><i className="fas fa-user-cog"></i> Agent Targets</button>
                         </>
                     ) : null}
@@ -167,7 +168,10 @@ export function ReportsView({ isTeamLeader = false, currentTimeFilter = 'monthly
 
             <div className="kpi-bottom-grid">
                 <div className="performance-card card">
-                    <div className="card-header"><h3>Current Quarter Performance Breakdown</h3></div>
+                    {/* Heading text is set by renderPerformanceTable (it flips to the
+                        month name under the Monthly filter), so neither render site
+                        owns the literal — keep the id, not the string. */}
+                    <div className="card-header"><h3><span id="perf-breakdown-title">Current Quarter Performance Breakdown</span></h3></div>
                     <div id="quarterly-performance-table"></div>
                 </div>
                 <div className="leaderboard-card">

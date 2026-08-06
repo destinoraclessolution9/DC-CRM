@@ -135,6 +135,9 @@
                              <button class="btn primary" onclick="app.openQuarterlyTargetsModal()">
                                 <i class="fas fa-calendar-alt"></i> Set Quarterly Targets
                              </button>
+                             <button class="btn primary" onclick="app.openMonthlyTargetsModal()">
+                                <i class="fas fa-calendar-day"></i> Set Monthly Targets
+                             </button>
                              <button class="btn secondary" onclick="app.openTargetManagementModal()">
                                 <i class="fas fa-user-cog"></i> Agent Targets
                              </button>` : ''
@@ -198,7 +201,7 @@
                 <div class="kpi-bottom-grid">
                     <div class="performance-card card">
                         <div class="card-header">
-                            <h3>Current Quarter Performance Breakdown</h3>
+                            <h3><span id="perf-breakdown-title">Current Quarter Performance Breakdown</span></h3>
                         </div>
                         <div id="quarterly-performance-table">
                             <!-- Performance table loaded by refreshKPIDashboard -->
@@ -1158,16 +1161,21 @@
         if (toEl) toEl.value = ranges.current.to;
         const quarterlyRanges = getDateRanges('quarterly');
         const isQuarterlyView = _currentTimeFilter === 'quarterly';
-        // Compute current, previous, AND quarterly KPIs in one parallel batch.
-        // renderPerformanceTable always uses the quarterly range regardless of
-        // the active time filter, so computing it here (where AppDataStore data
-        // is already being fetched) avoids a sequential 3rd calculateKPIs call.
+        // The breakdown card shows the current QUARTER under every filter except
+        // Monthly, which shows the current month against its own monthly target. In
+        // both of those cases `ranges.current` is already the window the card needs,
+        // so the extra quarterly pass is only required for the other filters.
+        const isMonthlyView = _currentTimeFilter === 'monthly';
+        const perfUsesCurrentRange = isQuarterlyView || isMonthlyView;
+        // Compute current, previous, AND (when needed) quarterly KPIs in one parallel
+        // batch, here where AppDataStore data is already being fetched, rather than as
+        // a sequential 3rd calculateKPIs call.
         const [kpis, prevKpis, quarterlyKpis] = await Promise.all([
             calculateKPIs(ranges.current.from, ranges.current.to),
             calculateKPIs(ranges.previous.from, ranges.previous.to),
-            isQuarterlyView ? Promise.resolve(null) : calculateKPIs(quarterlyRanges.current.from, quarterlyRanges.current.to)
+            perfUsesCurrentRange ? Promise.resolve(null) : calculateKPIs(quarterlyRanges.current.from, quarterlyRanges.current.to)
         ]);
-        const perfKpis = isQuarterlyView ? kpis : quarterlyKpis;
+        const perfKpis = perfUsesCurrentRange ? kpis : quarterlyKpis;
 
         // ── KPI CARD GRID ──────────────────────────────────────────────────
         // React-grid mode: feed the grid through React (fresh opts.data) by
@@ -3657,6 +3665,50 @@ const showKPIDetails = async (key) => {
 // verbatim from renderTargetOverview's container.innerHTML — it reads only the
 // pre-computed `year` and the already-built `rows` array. All async row-building
 // (sales totals, progress math) stays in the orchestrator above.
+// ── Monthly target resolution ────────────────────────────────────────────────
+// A month's target is the stored monthly_targets row when one exists, else its
+// quarter ÷ 3. The fallback matters: before the monthly editor shipped, every
+// target-bearing widget derived months that way, so a dashboard with only quarterly
+// targets configured must keep rendering exactly what it rendered before.
+//
+// The split comes from script-features2.js (published on _crmUtils) so the number
+// shown here is byte-identical to the number the save path writes. The inline copy
+// is only a load-order guard — showKPIDashboard force-loads features2 first.
+const _MONTH_LABELS = ['January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'];
+
+const _splitQuarter = (v) => {
+    const shared = window._crmUtils && window._crmUtils.splitQuarterAcrossMonths;
+    if (typeof shared === 'function') return shared(v);
+    const n = Number(v) || 0;
+    const a = Math.round(n / 3);
+    return [a, a, n - a - a];
+};
+
+// month is 1-12. Returns { row, isStored } where row carries every metric key.
+const _resolveMonthlyTarget = (month, year, mRows, qRows) => {
+    const stored = (mRows || []).find(t => t.month === month && t.year === year);
+    if (stored) return { row: stored, isStored: true };
+    const quarter = Math.floor((month - 1) / 3) + 1;
+    const qRow = (qRows || []).find(t => t.quarter === quarter && t.year === year) || {};
+    const idx = (month - 1) % 3;
+    const row = { month, year, quarter };
+    Object.keys(qRow).forEach(k => {
+        if (/_target$/.test(k)) row[k] = _splitQuarter(qRow[k])[idx];
+    });
+    return { row, isStored: false };
+};
+
+// Fraction of the current month elapsed, for pro-rating a full-month target against
+// a month-to-date actual. Without this, every metric reads as a ~90% miss on the 3rd
+// of the month — the distortion is 3x worse than the quarterly card's because the
+// window is 3x shorter. Clamped to (0,1]; a past/future month pro-rates to 1.
+const _monthElapsedFraction = (year, month, now = new Date()) => {
+    if (now.getFullYear() !== year || (now.getMonth() + 1) !== month) return 1;
+    const daysInMonth = new Date(year, month, 0).getDate();
+    return Math.min(1, Math.max(1 / daysInMonth, now.getDate() / daysInMonth));
+};
+
 const _buildTargetOverviewHtml = (year, rows) => `
         <div class="targets-card">
             <div class="targets-header">
@@ -3714,10 +3766,63 @@ const renderTargetOverview = async () => {
         return { q, target, actualSales };
     }));
 
+    // Month sub-rows, ONLY under the Monthly filter — under every other filter this
+    // stays the quarterly table it has always been. Month actuals come from ONE
+    // _trySalesByDay call for the whole year rather than twelve _trySalesTotal
+    // round-trips, and the client fallback reuses the _purchaseBase the quarter loop
+    // may already have fetched.
+    let monthActuals = null;
+    let mTargets = [];
+    if (_currentTimeFilter === 'monthly') {
+        mTargets = ((await AppDataStore.getAll('monthly_targets')) || []).filter(t => t.year === year);
+        monthActuals = Array(12).fill(0);
+        const byDay = await _trySalesByDay(`${year}-01-01`, `${year}-12-31`);
+        if (byDay) {
+            byDay.forEach(r => {
+                const m = Number(String(r.sale_date).split('-')[1]) || 0;
+                if (m >= 1 && m <= 12) monthActuals[m - 1] += (Number(r.total) || 0);
+            });
+        } else {
+            if (!_purchaseBase) _purchaseBase = await _getPurchaseBase();
+            const { purchases, customerMap, userMap } = _purchaseBase;
+            for (const p of purchases) {
+                // Null-safe: some purchase rows carry a null `date`.
+                if (!p.date || !String(p.date).startsWith(String(year)) || p.is_agent_package) continue;
+                if (!_passesPurchaseFilter(p, _getPurchaseAgentId(p, customerMap), userMap)) continue;
+                const m = Number(String(p.date).split('-')[1]) || 0;
+                if (m >= 1 && m <= 12) monthActuals[m - 1] += (p.amount || 0);
+            }
+        }
+    }
+
+    const _progressColor = (pct) => pct > 90 ? 'green' : (pct > 70 ? 'yellow' : (pct > 0 ? 'red' : 'gray'));
+
     // Build rows in Q1..Q4 order.
     const rows = quarters.map(({ q, target, actualSales }) => {
         const progress = target.total_sales_target ? Math.min(100, (actualSales / target.total_sales_target * 100)) : 0;
-        const statusColor = progress > 90 ? 'green' : (progress > 70 ? 'yellow' : (progress > 0 ? 'red' : 'gray'));
+        const statusColor = _progressColor(progress);
+
+        const monthRows = !monthActuals ? '' : [1, 2, 3].map(i => {
+            const month = (q - 1) * 3 + i;
+            const { row: mt, isStored } = _resolveMonthlyTarget(month, year, mTargets, qTargets);
+            const mSalesTarget = mt.total_sales_target || 0;
+            const mActual = monthActuals[month - 1];
+            const mProgress = mSalesTarget ? Math.min(100, (mActual / mSalesTarget * 100)) : 0;
+            return `
+            <tr style="font-size:12px; color:var(--gray-500);">
+                <td style="padding-left:22px;">↳ ${_MONTH_LABELS[month - 1].slice(0, 3)}${isStored ? '' : ' <span title="auto-split from the quarter" style="opacity:.6;">·auto</span>'}</td>
+                <td>${Math.round(mt.cps_count_target || 0)}</td>
+                <td>RM ${Math.round(mSalesTarget).toLocaleString()}</td>
+                <td>
+                    <div class="target-progress">
+                        <div class="progress-bar-bg">
+                            <div class="progress-bar-fill progress-${_progressColor(mProgress)}" style="width: ${mProgress}%"></div>
+                        </div>
+                        <span style="font-size: 11px; font-weight: 600;">${mProgress > 0 ? mProgress.toFixed(0) + '%' : '0%'}</span>
+                    </div>
+                </td>
+            </tr>`;
+        }).join('');
 
         return `
             <tr>
@@ -3733,6 +3838,7 @@ const renderTargetOverview = async () => {
                     </div>
                 </td>
             </tr>
+            ${monthRows}
         `;
     });
 
@@ -3744,17 +3850,28 @@ const renderTargetOverview = async () => {
     // Extracted verbatim from renderPerformanceTable's container.innerHTML — it
     // reads only the pre-computed `metrics` array (all per-card derived math
     // stays inside the .map()). No awaits / no DOM mutation here.
+    // `m.pace` (optional) is the pro-rated share of the full-period target that
+    // SHOULD be hit by today — set only by the monthly view, where comparing a
+    // month-to-date actual against a whole-month target makes every metric read as a
+    // ~90% miss on the 3rd. When it's absent (quarterly view) the output is
+    // byte-identical to before: same variance-vs-target, same achievement-vs-target.
     const _buildPerformanceTableHtml = (metrics) => `
             <div class="perf-card-list">
                 ${metrics.map(m => {
-                    const variance = m.actual - m.target;
-                    const achievement = m.target > 0 ? (m.actual / m.target * 100) : 0;
+                    const hasPace = typeof m.pace === 'number' && m.target > 0;
+                    const basis = hasPace ? m.pace : m.target;
+                    const variance = m.actual - basis;
+                    const achievement = basis > 0 ? (m.actual / basis * 100) : 0;
                     const statusClass = achievement > 90 ? 'success' : (achievement > 70 ? 'warning' : 'danger');
                     const statusIcon = achievement > 90 ? '🟢' : (achievement > 70 ? '🟡' : '🔴');
                     const prefix = m.isRM ? 'RM ' : '';
+                    // Round ONLY on the pace path — pro-rating produces fractions.
+                    // The no-pace path keeps the original formatting exactly.
+                    const fmt = (v) => Math.round(v).toLocaleString();
+                    const varNum = hasPace ? Math.round(variance) : variance;
                     const varStr = m.isRM
-                        ? (variance >= 0 ? '+RM ' : '-RM ') + Math.abs(variance).toLocaleString()
-                        : (variance >= 0 ? '+' : '') + variance.toLocaleString();
+                        ? (varNum >= 0 ? '+RM ' : '-RM ') + Math.abs(varNum).toLocaleString()
+                        : (varNum >= 0 ? '+' : '') + varNum.toLocaleString();
                     return `
                         <div class="perf-metric-card">
                             <div class="perf-metric-name">${m.name}</div>
@@ -3763,12 +3880,17 @@ const renderTargetOverview = async () => {
                                     <span class="perf-stat-lbl">Target</span>
                                     <span class="perf-stat-val">${prefix}${m.target.toLocaleString()}</span>
                                 </div>
+                                ${hasPace ? `
+                                <div class="perf-stat-pair">
+                                    <span class="perf-stat-lbl" title="Share of the month's target due by today">Pace</span>
+                                    <span class="perf-stat-val">${prefix}${fmt(m.pace)}</span>
+                                </div>` : ''}
                                 <div class="perf-stat-pair">
                                     <span class="perf-stat-lbl">Actual</span>
                                     <span class="perf-stat-val">${prefix}${m.actual.toLocaleString()}</span>
                                 </div>
                                 <div class="perf-stat-pair">
-                                    <span class="perf-stat-lbl">Variance</span>
+                                    <span class="perf-stat-lbl">${hasPace ? 'Vs pace' : 'Variance'}</span>
                                     <span class="perf-stat-val" style="color:${variance >= 0 ? 'var(--success)' : 'var(--error)'}">${varStr}</span>
                                 </div>
                                 <div class="perf-stat-pair">
@@ -3786,26 +3908,59 @@ const renderTargetOverview = async () => {
         const container = document.getElementById('quarterly-performance-table');
         if (!container) return;
 
+        // Monthly view reads the month's own target; every other filter keeps the
+        // long-standing behavior of showing the CURRENT QUARTER regardless of filter.
+        const isMonthly = _currentTimeFilter === 'monthly';
+
         // kpis is pre-computed by refreshKPIDashboard; fall back to computing
         // it here only when this function is called in isolation (e.g. tests).
         if (!kpis) {
-            const ranges = getDateRanges('quarterly');
+            const ranges = getDateRanges(isMonthly ? 'monthly' : 'quarterly');
             kpis = await calculateKPIs(ranges.current.from, ranges.current.to);
         }
-        const year = new Date().getFullYear();
-        const quarter = Math.floor(new Date().getMonth() / 3) + 1;
-        const qTarget = (await AppDataStore.getAll('quarterly_targets')).find(t => t.year === year && t.quarter === quarter) || {};
+        const now = new Date();
+        const year = now.getFullYear();
+        const quarter = Math.floor(now.getMonth() / 3) + 1;
+        const month = now.getMonth() + 1;
+
+        let period;
+        if (isMonthly) {
+            const [mRows, qRows] = await Promise.all([
+                AppDataStore.getAll('monthly_targets'),
+                AppDataStore.getAll('quarterly_targets'),
+            ]);
+            period = _resolveMonthlyTarget(month, year, mRows || [], qRows || []).row;
+        } else {
+            period = (await AppDataStore.getAll('quarterly_targets')).find(t => t.year === year && t.quarter === quarter) || {};
+        }
+
+        // Fraction of the period elapsed — only pro-rate the monthly view (see
+        // _buildPerformanceTableHtml). `null` pace leaves the card exactly as it was.
+        const elapsed = isMonthly ? _monthElapsedFraction(year, month, now) : null;
+        const row = (name, key, actual, isRM) => {
+            const target = period[key] || 0;
+            const m = { name, target, actual, isRM };
+            if (elapsed !== null) m.pace = target * elapsed;
+            return m;
+        };
 
         const metrics = [
-            { name: 'CPS Count', target: qTarget.cps_count_target || 0, actual: kpis.cpsCount },
-            { name: 'Total Sales', target: qTarget.total_sales_target || 0, actual: kpis.totalSales, isRM: true },
-            { name: 'New Agents', target: qTarget.new_agents_target || 0, actual: kpis.newAgents },
-            { name: 'New Customers', target: qTarget.new_customers_target || 0, actual: kpis.newCustomers },
-            { name: 'POP Cases', target: qTarget.pop_case_count_target || 0, actual: kpis.popCaseCount },
-            { name: 'EPP Cases', target: qTarget.epp_case_count_target || 0, actual: kpis.eppCaseCount },
-            { name: 'Meet Up (Existing Customers)', target: qTarget.meetup_existing_target || 0, actual: kpis.meetUpExistingCount || 0 },
-            { name: 'CF Headcount', target: qTarget.cf_headcount_target || 0, actual: kpis.cfHeadcount || 0 }
+            row('CPS Count', 'cps_count_target', kpis.cpsCount),
+            row('Total Sales', 'total_sales_target', kpis.totalSales, true),
+            row('New Agents', 'new_agents_target', kpis.newAgents),
+            row('New Customers', 'new_customers_target', kpis.newCustomers),
+            row('POP Cases', 'pop_case_count_target', kpis.popCaseCount),
+            row('EPP Cases', 'epp_case_count_target', kpis.eppCaseCount),
+            row('Meet Up (Existing Customers)', 'meetup_existing_target', kpis.meetUpExistingCount || 0),
+            row('CF Headcount', 'cf_headcount_target', kpis.cfHeadcount || 0),
         ];
+
+        // The card heading is rendered by BOTH the legacy shell and the React island,
+        // so neither owns the literal — the renderer sets it (see _MONTH_LABELS).
+        const heading = document.getElementById('perf-breakdown-title');
+        if (heading) heading.textContent = isMonthly
+            ? `${_MONTH_LABELS[month - 1]} ${year} Performance Breakdown`
+            : 'Current Quarter Performance Breakdown';
 
         container.innerHTML = _buildPerformanceTableHtml(metrics);
     };
@@ -3943,6 +4098,7 @@ const renderAgentLeaderboard = async () => {
         const year = new Date().getFullYear();
         const yTarget = (await AppDataStore.getAll('yearly_targets')).find(t => t.target_year === year) || {};
         const qTargets = (await AppDataStore.getAll('quarterly_targets')).filter(t => t.year === year);
+        const mTargets = ((await AppDataStore.getAll('monthly_targets')) || []).filter(t => t.year === year);
 
         if (filter === 'weekly') {
             labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -3990,14 +4146,12 @@ const renderAgentLeaderboard = async () => {
                 });
             }
 
-            // Distribute quarterly targets to months
-            qTargets.forEach(qt => {
-                const mBase = (qt.quarter - 1) * 3;
-                const mTarget = (qt.total_sales_target || 0) / 3;
-                targetData[mBase] = mTarget;
-                targetData[mBase + 1] = mTarget;
-                targetData[mBase + 2] = mTarget;
-            });
+            // Per-month target: the stored monthly_targets row when one exists, else
+            // the quarter ÷ 3 fallback (which is what this line used to do for every
+            // month unconditionally, so a quarterly-only setup is unchanged).
+            for (let m = 1; m <= 12; m++) {
+                targetData[m - 1] = _resolveMonthlyTarget(m, year, mTargets, qTargets).row.total_sales_target || 0;
+            }
         } else if (filter === 'quarterly') {
             labels = ['Q1', 'Q2', 'Q3', 'Q4'];
             actualData = Array(4).fill(0);
@@ -4367,6 +4521,30 @@ const exportKPIReport = async (format) => {
             csv += `"${key}","${displayVal}","${KPI_DEFINITIONS[key] || ''}"\n`;
         }
 
+        // The target the dashboard is currently measuring against — the month's own
+        // row under the Monthly filter, the quarter's otherwise — so the export can be
+        // reconciled against the on-screen breakdown card instead of only the chart.
+        const _now = new Date();
+        const _year = _now.getFullYear();
+        const _qtrs = (await AppDataStore.getAll('quarterly_targets')) || [];
+        let _periodLabel, _periodTarget;
+        if (_currentTimeFilter === 'monthly') {
+            const _mon = _now.getMonth() + 1;
+            const _mons = (await AppDataStore.getAll('monthly_targets')) || [];
+            const _resolved = _resolveMonthlyTarget(_mon, _year, _mons, _qtrs);
+            _periodLabel = `${_MONTH_LABELS[_mon - 1]} ${_year}${_resolved.isStored ? '' : ' — auto-split from quarter'}`;
+            _periodTarget = _resolved.row;
+        } else {
+            const _q = Math.floor(_now.getMonth() / 3) + 1;
+            _periodLabel = `Q${_q} ${_year}`;
+            _periodTarget = _qtrs.find(t => t.year === _year && t.quarter === _q) || {};
+        }
+        csv += `\n--- Period Targets (${_periodLabel}) ---\n`;
+        csv += "Metric,Target\n";
+        Object.keys(_periodTarget).filter(k => /_target$/.test(k)).sort().forEach(k => {
+            csv += `"${k}","${_periodTarget[k]}"\n`;
+        });
+
         csv += "\n--- Trend Data ---\n";
         const chartData = _revenueChart ? _revenueChart.data : null;
         if (chartData) {
@@ -4463,7 +4641,52 @@ const exportKPIReport = async (format) => {
             </tr>`;
         };
 
+        // Monthly view gets its own Target vs Actual block ABOVE the quarter block —
+        // the quarter one stays because the month is only meaningful against it.
+        let monthlyBlock = '';
+        if (_currentTimeFilter === 'monthly') {
+            const month = new Date().getMonth() + 1;
+            const [mRows, qRows] = await Promise.all([
+                AppDataStore.getAll('monthly_targets'),
+                AppDataStore.getAll('quarterly_targets'),
+            ]);
+            const { row: mTarget, isStored } = _resolveMonthlyTarget(month, year, mRows || [], qRows || []);
+            const mStart = `${year}-${String(month).padStart(2, '0')}-01`;
+            const mEnd = `${year}-${String(month).padStart(2, '0')}-${new Date(year, month, 0).getDate()}`;
+            const [
+                mCps, mSales, mPopCount, mPopSales, mEppCount,
+                mEppSales, mAgents, mCustomers, mMeetings,
+            ] = await Promise.all([
+                getCPSCount(mStart, mEnd), getTotalSales(mStart, mEnd), getPOPCaseCount(mStart, mEnd),
+                getPOPSales(mStart, mEnd), getEPPCaseCount(mStart, mEnd), getEPPSales(mStart, mEnd),
+                getNewAgents(mStart, mEnd), getNewCustomers(mStart, mEnd), getTotalMeetings(mStart, mEnd),
+            ]);
+            monthlyBlock = `
+            <div class="profile-section" style="margin-top:20px;">
+                <h2><i class="fas fa-calendar-day"></i> ${_MONTH_LABELS[month - 1]} ${year} — Target vs Actual
+                    <span style="font-size:12px; font-weight:400; color:var(--gray-500);">
+                        (${isStored ? 'monthly target' : `auto-split from Q${Math.floor((month - 1) / 3) + 1}`})
+                    </span>
+                </h2>
+                <table class="data-table" style="width:100%;">
+                    <thead><tr><th scope="col">Metric</th><th scope="col" style="text-align:right;">Target</th><th scope="col" style="text-align:right;">Actual</th><th scope="col" style="text-align:right;">Variance</th><th scope="col" style="text-align:right;">%</th></tr></thead>
+                    <tbody>
+                        ${row('CPS Count', mCps, mTarget.cps_count_target || 0)}
+                        ${row('Total Sales', mSales, mTarget.total_sales_target || 0)}
+                        ${row('POP Cases', mPopCount, mTarget.pop_case_count_target || 0)}
+                        ${row('POP Sales', mPopSales, mTarget.pop_sales_target || 0)}
+                        ${row('EPP Cases', mEppCount, mTarget.epp_case_count_target || 0)}
+                        ${row('EPP Sales', mEppSales, mTarget.epp_sales_target || 0)}
+                        ${row('New Agents', mAgents, mTarget.new_agents_target || 0)}
+                        ${row('New Customers', mCustomers, mTarget.new_customers_target || 0)}
+                        ${row('Total Meetings', mMeetings, mTarget.total_meetings_target || 0)}
+                    </tbody>
+                </table>
+            </div>`;
+        }
+
         return `
+            ${monthlyBlock}
             <div class="profile-section" style="margin-top:20px;">
                 <h2><i class="fas fa-bullseye"></i> Q${quarter} ${year} — Target vs Actual</h2>
                 <table class="data-table" style="width:100%;">

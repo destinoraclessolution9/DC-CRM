@@ -195,8 +195,32 @@ alter table purchases
 
 
 -- ---- monthly_targets ----------------------------------------------------
+-- The 8 metric columns saveKPITargets has always written and the schema never
+-- had (only cps_count_target / total_sales_target existed), plus the is_manual
+-- flag that lets a hand-set month survive a yearly re-save. Full rationale in
+-- migrations/monthly_targets_full_metrics_2026-08-06.sql.
 alter table monthly_targets
-    add column if not exists quarter integer;
+    add column if not exists quarter                    integer,
+    add column if not exists pop_case_count_target      numeric,
+    add column if not exists pop_sales_target           numeric,
+    add column if not exists epp_case_count_target      numeric,
+    add column if not exists epp_sales_target           numeric,
+    add column if not exists new_agents_target          numeric,
+    add column if not exists new_customers_target       numeric,
+    add column if not exists total_meetings_target      numeric,
+    add column if not exists activity_headcount_target  numeric,
+    add column if not exists meetup_existing_target     numeric,
+    add column if not exists cf_headcount_target        numeric,
+    add column if not exists is_manual                  boolean not null default false;
+
+
+-- ---- quarterly_targets --------------------------------------------------
+-- renderPerformanceTable (chunks/script-reporting.js) has read these two since
+-- the breakdown card gained the rows, but no column existed and no form wrote
+-- them — both cells rendered Target 0 / 0.0% for everyone.
+alter table quarterly_targets
+    add column if not exists meetup_existing_target numeric,
+    add column if not exists cf_headcount_target    numeric;
 
 
 -- ---- whatsapp_campaigns -------------------------------------------------

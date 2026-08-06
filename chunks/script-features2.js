@@ -677,6 +677,82 @@ const executeBirthdayAction = async (personName, entityId, entityType) => {
 };
 
 // ========== FEATURE: KPI HIERARCHICAL TARGETS ==========
+
+// The ten target metrics, in the order every target form renders them. `key` is the
+// DB column (identical across yearly_targets / quarterly_targets / monthly_targets),
+// `dom` the input-id suffix. Previously duplicated as parallel `metrics` / `qkeys`
+// arrays in saveKPITargets and saveQuarterlyTargets — they must stay in lockstep
+// because the monthly derivation splits the SAME key set, so they're one list now.
+const _TARGET_METRICS = [
+    { key: 'cps_count_target',          dom: 'cps',       label: 'CPS Count' },
+    { key: 'total_sales_target',        dom: 'sales',     label: 'Total Sales (RM)' },
+    { key: 'pop_case_count_target',     dom: 'pop-count', label: 'POP Cases' },
+    { key: 'pop_sales_target',          dom: 'pop-sales', label: 'POP Sales (RM)' },
+    { key: 'epp_case_count_target',     dom: 'epp-count', label: 'EPP Cases' },
+    { key: 'epp_sales_target',          dom: 'epp-sales', label: 'EPP Sales (RM)' },
+    { key: 'new_agents_target',         dom: 'agents',    label: 'New Agents' },
+    { key: 'new_customers_target',      dom: 'customers', label: 'New Customers' },
+    { key: 'total_meetings_target',     dom: 'meetings',  label: 'Total Meetings' },
+    { key: 'activity_headcount_target', dom: 'headcount', label: 'Activity Headcount' },
+];
+const _TARGET_METRIC_KEYS = _TARGET_METRICS.map(m => m.key);
+const _TARGET_METRIC_DOMS = _TARGET_METRICS.map(m => m.dom);
+const _MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// Split one quarter value across its three months so the three ALWAYS sum back to
+// the quarter. Math.round(q/3) applied three times does not: quarter 100 yields
+// 33+33+33 = 99, and the shortfall compounds across ten metrics and four quarters,
+// so the monthly plan silently under-runs the yearly one. Months 1-2 take the
+// rounded third; month 3 absorbs whatever is left.
+const _splitQuarterAcrossMonths = (qValue) => {
+    const v = Number(qValue) || 0;
+    const first = Math.round(v / 3);
+    const second = Math.round(v / 3);
+    return [first, second, v - first - second];
+};
+
+// script-reporting.js needs the SAME split to render the quarter ÷ 3 fallback for a
+// month with no stored row — if the two drifted, the dashboard would show a target
+// the save path never wrote. Publish the pure helper rather than copying it.
+// (script.js:449 creates _crmUtils early precisely so chunks can augment it.)
+window._crmUtils = window._crmUtils || {};
+Object.assign(window._crmUtils, {
+    splitQuarterAcrossMonths: _splitQuarterAcrossMonths,
+    TARGET_METRIC_KEYS: _TARGET_METRIC_KEYS,
+});
+
+// Derive the three month rows for one quarter from that quarter's target values.
+// is_manual:false marks them regenerable — see _upsertDerivedMonths.
+const _deriveMonthlyRows = (year, quarter, qData) => {
+    const rows = [1, 2, 3].map(i => ({
+        month: (quarter - 1) * 3 + i,
+        year: year,
+        quarter: quarter,
+        is_manual: false,
+    }));
+    _TARGET_METRIC_KEYS.forEach(k => {
+        const parts = _splitQuarterAcrossMonths(qData[k]);
+        rows.forEach((r, i) => { r[k] = parts[i]; });
+    });
+    return rows;
+};
+
+// Upsert the derived months for one quarter, SKIPPING any month a human set by hand
+// in the Set Monthly Targets modal. Without the is_manual check every "Save Yearly
+// Targets" (and every quarterly save) silently wipes the entire monthly plan — the
+// monthly editor would be write-only theatre. Returns thunks rather than awaiting so
+// the caller can flush all twelve months as one parallel batch instead of twelve
+// sequential round-trips against the NANO instance.
+const _upsertDerivedMonths = (year, quarter, qData, existingMonths) => {
+    return _deriveMonthlyRows(year, quarter, qData).map(mRow => {
+        const existing = (existingMonths || []).find(t => t.month === mRow.month && t.year === year);
+        if (existing && existing.is_manual) return null; // hand-set — leave it alone
+        return existing
+            ? () => AppDataStore.update('monthly_targets', existing.id, mRow)
+            : () => AppDataStore.create('monthly_targets', mRow);
+    }).filter(Boolean);
+};
+
 const openKPITargetsModal = async () => {
     const currentYear = new Date().getFullYear();
     const existing = (await AppDataStore.getAll('yearly_targets')).find(t => t.target_year === currentYear);
@@ -797,20 +873,20 @@ const saveKPITargets = async (year) => {
     }
 
     // Save quarterly targets — use manual inputs if provided, else auto-calculate from weights
-    const metrics = ['cps_count_target', 'total_sales_target', 'pop_case_count_target', 'pop_sales_target', 'epp_case_count_target', 'epp_sales_target', 'new_agents_target', 'new_customers_target', 'total_meetings_target', 'activity_headcount_target'];
-    const qkeys = ['cps', 'sales', 'pop-count', 'pop-sales', 'epp-count', 'epp-sales', 'agents', 'customers', 'meetings', 'headcount'];
     // Fetch existing target rows ONCE (were getAll inside the q/m loops — 4x + 12x
     // full-table scans). Each iteration handles a distinct quarter/month, so a snapshot
     // taken before the loop is correct.
     const _allQTargets = (await AppDataStore.getAll('quarterly_targets')) || [];
     const _allMTargets = (await AppDataStore.getAll('monthly_targets')) || [];
+    let _keptManualMonths = 0;
+    const _monthOps = [];
     for (let q = 1; q <= 4; q++) {
         const w = effectiveWeights[q - 1] / 100;
         const qData = { quarter: q, year: year };
-        metrics.forEach((m, i) => {
-            const el = document.getElementById(`qt-q${q}-${qkeys[i]}`);
+        _TARGET_METRICS.forEach(({ key, dom }) => {
+            const el = document.getElementById(`qt-q${q}-${dom}`);
             const manual = el ? parseFloat(el.value) : NaN;
-            qData[m] = (!isNaN(manual) && el?.value !== '') ? manual : Math.round(yearlyData[m] * w);
+            qData[key] = (!isNaN(manual) && el?.value !== '') ? manual : Math.round(yearlyData[key] * w);
         });
         const existingQ = _allQTargets.find(t => t.quarter === q && t.year === year);
         if (existingQ) {
@@ -819,22 +895,19 @@ const saveKPITargets = async (year) => {
             await AppDataStore.create('quarterly_targets', qData);
         }
 
-        // Auto-generate monthly targets (3 months per quarter, even split)
-        for (let m = 0; m < 3; m++) {
-            const month = (q - 1) * 3 + m + 1;
-            const mData = { month: month, year: year, quarter: q };
-            metrics.forEach(met => { mData[met] = Math.round(qData[met] / 3); });
-            const existingM = _allMTargets.find(t => t.month === month && t.year === year);
-            if (existingM) {
-                await AppDataStore.update('monthly_targets', existingM.id, mData);
-            } else {
-                await AppDataStore.create('monthly_targets', mData);
-            }
-        }
+        // Re-derive this quarter's three months, skipping any the user set by hand.
+        const ops = _upsertDerivedMonths(year, q, qData, _allMTargets);
+        _keptManualMonths += 3 - ops.length;
+        _monthOps.push(...ops);
     }
+    // Flush all (up to) twelve month writes as ONE parallel batch — they touch
+    // distinct rows, so the previous twelve sequential awaits were pure latency.
+    await Promise.all(_monthOps.map(fn => fn()));
 
     UI.hideModal();
-    UI.toast.success('KPI targets saved — monthly breakdowns auto-generated from quarterly values');
+    UI.toast.success(_keptManualMonths > 0
+        ? `KPI targets saved — monthly breakdowns regenerated (${_keptManualMonths} hand-set month${_keptManualMonths === 1 ? '' : 's'} kept)`
+        : 'KPI targets saved — monthly breakdowns auto-generated from quarterly values');
     if (typeof window.app.refreshKPIDashboard === 'function') await window.app.refreshKPIDashboard();
 };
 
@@ -894,27 +967,311 @@ const saveQuarterlyTargets = async (year) => {
         const n = parseFloat(el.value);
         return isNaN(n) ? null : n;
     };
-    const metrics = ['cps_count_target', 'total_sales_target', 'pop_case_count_target', 'pop_sales_target', 'epp_case_count_target', 'epp_sales_target', 'new_agents_target', 'new_customers_target', 'total_meetings_target', 'activity_headcount_target'];
-    const qkeys = ['cps', 'sales', 'pop-count', 'pop-sales', 'epp-count', 'epp-sales', 'agents', 'customers', 'meetings', 'headcount'];
+    // Snapshot both tables ONCE. quarterly_targets was re-fetched inside the loop on
+    // every iteration; each iteration handles a distinct quarter, so one snapshot is
+    // correct (same fix already applied in saveKPITargets).
+    const _allQTargets = (await AppDataStore.getAll('quarterly_targets')) || [];
+    const _allMTargets = (await AppDataStore.getAll('monthly_targets')) || [];
+    const _monthOps = [];
 
     for (let q = 1; q <= 4; q++) {
         const qData = { quarter: q, year: year };
         let hasValue = false;
-        metrics.forEach((m, i) => {
-            const val = d(`qo-q${q}-${qkeys[i]}`);
-            if (val !== null) { qData[m] = val; hasValue = true; }
-            else { qData[m] = 0; }
+        _TARGET_METRICS.forEach(({ key, dom }) => {
+            const val = d(`qo-q${q}-${dom}`);
+            if (val !== null) { qData[key] = val; hasValue = true; }
+            else { qData[key] = 0; }
         });
-        const existingQ = (await AppDataStore.getAll('quarterly_targets')).find(t => t.quarter === q && t.year === year);
+        const existingQ = _allQTargets.find(t => t.quarter === q && t.year === year);
         if (existingQ) {
             await AppDataStore.update('quarterly_targets', existingQ.id, qData);
         } else if (hasValue) {
             await AppDataStore.create('quarterly_targets', qData);
+        } else {
+            continue; // nothing entered and nothing stored — don't derive months off zeros
         }
+        // Changing a quarter must re-derive its auto months, or the monthly plan keeps
+        // claiming to sum to a quarter total that no longer exists. Hand-set months
+        // (is_manual) are skipped by _upsertDerivedMonths.
+        _monthOps.push(..._upsertDerivedMonths(year, q, qData, _allMTargets));
     }
+    await Promise.all(_monthOps.map(fn => fn()));
 
     UI.hideModal();
     UI.toast.success(`Quarterly targets saved for ${year}`);
+    if (typeof window.app.refreshKPIDashboard === 'function') await window.app.refreshKPIDashboard();
+};
+
+// ========== MONTHLY TARGETS (standalone modal) ==========
+// Lives here, NOT in script-reporting.js: that chunk carries an explicit warning
+// (see its app.register block) that duplicate target-modal registrations caused a
+// load-order-dependent overwrite where "Set Yearly Targets" opened the Agent
+// Targets modal. features2 owns every hierarchical target form.
+
+// Does monthly_targets actually have the columns this form writes? The eight extra
+// metrics and is_manual arrive with
+// migrations/monthly_targets_full_metrics_2026-08-06.sql; until it's applied,
+// AppDataStore's unknown-column retry loop would strip them and report success —
+// the exact silent-loss bug this feature exists to fix. Probe once, cache, and let
+// the modal say so out loud rather than eat the edits.
+let _mtSchemaReady = null;
+const _monthlyTargetsSchemaReady = async () => {
+    if (_mtSchemaReady !== null) return _mtSchemaReady;
+    if (!window.supabase || typeof window.supabase.from !== 'function') {
+        _mtSchemaReady = true; // local/offline mode — nothing to verify against
+        return _mtSchemaReady;
+    }
+    try {
+        const { error } = await window.supabase
+            .from('monthly_targets')
+            .select('is_manual,activity_headcount_target')
+            .limit(1);
+        _mtSchemaReady = !(error && (error.code === '42703' || /does not exist/i.test(error.message || '')));
+    } catch (_) {
+        // A network failure is not a schema verdict — don't block the form on it.
+        _mtSchemaReady = true;
+    }
+    return _mtSchemaReady;
+};
+
+const _mtRound = (v) => Math.round((Number(v) || 0) * 100) / 100;
+
+const openMonthlyTargetsModal = async () => {
+    const year = new Date().getFullYear();
+    const currentQuarter = Math.floor(new Date().getMonth() / 3) + 1;
+
+    const [schemaReady, allQ, allM] = await Promise.all([
+        _monthlyTargetsSchemaReady(),
+        AppDataStore.getAll('quarterly_targets'),
+        AppDataStore.getAll('monthly_targets'),
+    ]);
+    const qRows = (allQ || []).filter(t => t.year === year);
+    const mRows = (allM || []).filter(t => t.year === year);
+
+    // Derived (quarter ÷ 3) value for every month — used as the input PLACEHOLDER so
+    // an auto month shows its number greyed out while its `value` stays empty. That
+    // is what makes "blank = auto, typed = manual" legible without hidden state.
+    const derived = {};
+    for (let q = 1; q <= 4; q++) {
+        const qRow = qRows.find(t => t.quarter === q) || {};
+        _deriveMonthlyRows(year, q, qRow).forEach(r => {
+            derived[r.month] = {};
+            _TARGET_METRIC_KEYS.forEach(k => { derived[r.month][k] = _mtRound(r[k]); });
+        });
+    }
+    // Stash for the save / auto-split / revert helpers so none of them refetch.
+    window._mtCtx = { year, derived, quarterly: qRows, manualMonths: mRows.filter(r => r.is_manual).map(r => r.month) };
+
+    const isManual = (month) => mRows.some(r => r.month === month && r.is_manual);
+    const storedVal = (month, key) => {
+        const row = mRows.find(r => r.month === month);
+        return (row && row.is_manual && row[key] !== null && row[key] !== undefined) ? row[key] : '';
+    };
+
+    const badge = (month) => `<span id="mt-badge-${month}" class="mt-badge" data-manual="${isManual(month) ? '1' : '0'}"
+        style="font-size:10px; font-weight:600; padding:1px 6px; border-radius:8px; white-space:nowrap;
+               background:${isManual(month) ? 'var(--primary-50, #fde8ef)' : 'var(--gray-100)'};
+               color:${isManual(month) ? 'var(--primary, #c2185b)' : 'var(--gray-500)'};">${isManual(month) ? 'Manual' : 'Auto'}</span>`;
+
+    const metricRow = ({ key, dom, label }, q) => `
+        <tr style="border-bottom:1px solid var(--gray-200);">
+            <td style="padding:6px 8px; font-size:12px; white-space:nowrap; font-weight:500;">${label}</td>
+            ${[1, 2, 3].map(i => {
+                const month = (q - 1) * 3 + i;
+                return `<td style="padding:4px;">
+                    <input type="number" id="mt-${month}-${dom}" class="form-control"
+                           style="min-width:90px; font-size:12px; padding:5px 7px;"
+                           placeholder="${derived[month]?.[key] ?? 0}"
+                           value="${storedVal(month, key)}"
+                           oninput="app.mtSyncBadge(${month})">
+                </td>`;
+            }).join('')}
+            <td style="padding:6px 8px; font-size:12px; text-align:right; color:var(--gray-500); white-space:nowrap;">
+                ${_mtRound((qRows.find(t => t.quarter === q) || {})[key])}
+            </td>
+        </tr>`;
+
+    const quarterPanel = (q) => `
+        <div id="mt-tab-${q}" style="display:${q === currentQuarter ? 'block' : 'none'};">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+                <p style="font-size:12px; color:var(--gray-500); margin:0;">
+                    Blank = follows the quarter (shown greyed). Type a value to pin that month.
+                </p>
+                <button type="button" class="btn secondary btn-sm" onclick="app.mtAutoSplitQuarter(${q})"
+                        style="font-size:12px;">Fill all 3 from Q${q} ÷ 3</button>
+            </div>
+            <div style="overflow-x:auto;">
+                <table style="width:100%; border-collapse:collapse; min-width:520px;">
+                    <thead>
+                        <tr style="background:var(--gray-100);">
+                            <th scope="col" style="text-align:left; padding:8px; font-size:12px; font-weight:600;">Metric</th>
+                            ${[1, 2, 3].map(i => {
+                                const month = (q - 1) * 3 + i;
+                                return `<th scope="col" style="text-align:center; padding:6px 8px; font-size:12px; font-weight:600;">
+                                    <div style="display:flex; flex-direction:column; align-items:center; gap:3px;">
+                                        <span>${_MONTH_NAMES[month - 1]}</span>
+                                        ${badge(month)}
+                                        <button type="button" onclick="app.mtRevertMonth(${month})"
+                                                style="background:none; border:none; padding:0; font-size:10px; color:var(--gray-500); text-decoration:underline; cursor:pointer;">
+                                            revert to auto
+                                        </button>
+                                    </div>
+                                </th>`;
+                            }).join('')}
+                            <th scope="col" style="text-align:right; padding:8px; font-size:12px; font-weight:600; white-space:nowrap;">Q${q} total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${_TARGET_METRICS.map(m => metricRow(m, q)).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>`;
+
+    const banner = schemaReady ? '' : `
+        <div style="border:1px solid var(--warning, #f0ad4e); background:var(--warning-50, #fff8e6); border-radius:6px; padding:10px 12px; margin-bottom:12px; font-size:12px; line-height:1.5;">
+            <strong>Database migration not applied.</strong> <code>monthly_targets</code> is still missing the
+            metric columns and the <code>is_manual</code> flag, so edits made here would be silently discarded
+            and wiped by the next yearly save. Run
+            <code>migrations/monthly_targets_full_metrics_2026-08-06.sql</code> in the Supabase SQL editor first.
+        </div>`;
+
+    const content = `
+        <div style="max-height:70vh; overflow-y:auto; padding-right:4px;">
+            ${banner}
+            <div style="display:flex; gap:6px; margin-bottom:12px;">
+                ${[1, 2, 3, 4].map(q => `
+                    <button type="button" id="mt-tabbtn-${q}" onclick="app.mtShowQuarter(${q})"
+                            style="flex:1; padding:7px 4px; font-size:13px; font-weight:600; cursor:pointer; border-radius:6px;
+                                   border:1px solid ${q === currentQuarter ? 'var(--primary, #c2185b)' : 'var(--gray-200)'};
+                                   background:${q === currentQuarter ? 'var(--primary, #c2185b)' : 'transparent'};
+                                   color:${q === currentQuarter ? '#fff' : 'var(--gray-500)'};">Q${q}</button>`).join('')}
+            </div>
+            ${[1, 2, 3, 4].map(quarterPanel).join('')}
+        </div>`;
+
+    UI.showModal(`Set Monthly Targets — ${year}`, content, [
+        { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+        { label: 'Save Monthly Targets', type: 'primary', action: `(async () => { await app.saveMonthlyTargets(${year}); })()` }
+    ]);
+};
+
+const mtShowQuarter = (q) => {
+    for (let i = 1; i <= 4; i++) {
+        const panel = document.getElementById(`mt-tab-${i}`);
+        if (panel) panel.style.display = i === q ? 'block' : 'none';
+        const btn = document.getElementById(`mt-tabbtn-${i}`);
+        if (btn) {
+            const on = i === q;
+            btn.style.background = on ? 'var(--primary, #c2185b)' : 'transparent';
+            btn.style.color = on ? '#fff' : 'var(--gray-500)';
+            btn.style.borderColor = on ? 'var(--primary, #c2185b)' : 'var(--gray-200)';
+        }
+    }
+};
+
+// A month is Manual iff at least one of its ten inputs carries a value. No hidden
+// state to keep in sync — the DOM is the source of truth, and "revert to auto"
+// simply clears the column.
+const _mtIsManualInDom = (month) =>
+    _TARGET_METRIC_DOMS.some(dom => (document.getElementById(`mt-${month}-${dom}`)?.value ?? '') !== '');
+
+const mtSyncBadge = (month) => {
+    const el = document.getElementById(`mt-badge-${month}`);
+    if (!el) return;
+    const manual = _mtIsManualInDom(month);
+    el.dataset.manual = manual ? '1' : '0';
+    el.textContent = manual ? 'Manual' : 'Auto';
+    el.style.background = manual ? 'var(--primary-50, #fde8ef)' : 'var(--gray-100)';
+    el.style.color = manual ? 'var(--primary, #c2185b)' : 'var(--gray-500)';
+};
+
+const mtAutoSplitQuarter = (q) => {
+    const ctx = window._mtCtx || {};
+    for (let i = 1; i <= 3; i++) {
+        const month = (q - 1) * 3 + i;
+        _TARGET_METRICS.forEach(({ key, dom }) => {
+            const el = document.getElementById(`mt-${month}-${dom}`);
+            if (el) el.value = ctx.derived?.[month]?.[key] ?? 0;
+        });
+        mtSyncBadge(month);
+    }
+    UI.toast.success(`Q${q} split into 3 months — these are now pinned; use "revert to auto" to unpin`);
+};
+
+const mtRevertMonth = (month) => {
+    _TARGET_METRIC_DOMS.forEach(dom => {
+        const el = document.getElementById(`mt-${month}-${dom}`);
+        if (el) el.value = '';
+    });
+    mtSyncBadge(month);
+};
+
+const saveMonthlyTargets = async (year) => {
+    if (!(await _monthlyTargetsSchemaReady())) {
+        UI.toast.error('Run migrations/monthly_targets_full_metrics_2026-08-06.sql first — edits cannot be stored yet');
+        return;
+    }
+    const ctx = window._mtCtx || {};
+    const existing = ((await AppDataStore.getAll('monthly_targets')) || []).filter(t => t.year === year);
+
+    const ops = [];
+    let manualCount = 0;
+    let revertedCount = 0;
+
+    for (let month = 1; month <= 12; month++) {
+        const quarter = Math.floor((month - 1) / 3) + 1;
+        const prior = existing.find(t => t.month === month);
+        const manual = _mtIsManualInDom(month);
+
+        if (!manual) {
+            // Auto. Only write when we're demoting a previously-manual row back to
+            // derived — an already-auto month is the yearly/quarterly save's business,
+            // and a month with no row at all reads through the quarter ÷ 3 fallback.
+            if (prior && prior.is_manual) {
+                const row = { month, year, quarter, is_manual: false };
+                _TARGET_METRIC_KEYS.forEach(k => { row[k] = ctx.derived?.[month]?.[k] ?? 0; });
+                ops.push(() => AppDataStore.update('monthly_targets', prior.id, row));
+                revertedCount++;
+            }
+            continue;
+        }
+
+        // Manual. Any field the user left blank falls back to the derived value so the
+        // stored row is complete — a half-filled month must not persist zeros for the
+        // metrics the user simply didn't care to override.
+        const row = { month, year, quarter, is_manual: true };
+        _TARGET_METRIC_KEYS.forEach((k, i) => {
+            const el = document.getElementById(`mt-${month}-${_TARGET_METRIC_DOMS[i]}`);
+            const raw = el?.value ?? '';
+            const n = raw === '' ? NaN : parseFloat(raw);
+            row[k] = isNaN(n) ? (ctx.derived?.[month]?.[k] ?? 0) : n;
+        });
+        ops.push(prior
+            ? () => AppDataStore.update('monthly_targets', prior.id, row)
+            : () => AppDataStore.create('monthly_targets', row));
+        manualCount++;
+    }
+
+    if (!ops.length) {
+        UI.hideModal();
+        UI.toast.success('No monthly overrides to save — all months follow their quarter');
+        return;
+    }
+
+    try {
+        await Promise.all(ops.map(fn => fn()));
+    } catch (e) {
+        console.warn('[targets] saveMonthlyTargets failed:', e && e.message);
+        UI.toast.error('Could not save monthly targets — ' + (e?.message || 'unknown error'));
+        return;
+    }
+
+    UI.hideModal();
+    const parts = [];
+    if (manualCount) parts.push(`${manualCount} month${manualCount === 1 ? '' : 's'} pinned`);
+    if (revertedCount) parts.push(`${revertedCount} reverted to auto`);
+    UI.toast.success(`Monthly targets saved for ${year} — ${parts.join(', ')}`);
     if (typeof window.app.refreshKPIDashboard === 'function') await window.app.refreshKPIDashboard();
 };
 
@@ -1873,6 +2230,12 @@ const resetMilestone = async (userId, milestoneName) => {
         saveKPITargets,
         openQuarterlyTargetsModal,
         saveQuarterlyTargets,
+        openMonthlyTargetsModal,
+        saveMonthlyTargets,
+        mtShowQuarter,
+        mtSyncBadge,
+        mtAutoSplitQuarter,
+        mtRevertMonth,
         _today,
         calculateProgramProgress,
         renderSpecialPrograms,
