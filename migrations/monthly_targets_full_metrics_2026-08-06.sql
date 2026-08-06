@@ -1,6 +1,25 @@
 -- monthly_targets: the 8 metric columns the writer has always written and the
 -- schema never had, plus the is_manual flag that makes a monthly target editable.
 --
+-- ⚠ RUN THIS AGAINST THE PRIMARY, NOT A READ REPLICA.
+-- ----------------------------------------------------------------------------
+-- 2026-08-06: this migration was applied four separate times and never took. Root
+-- cause: the SQL editor was connected to a READ REPLICA (`pg_is_in_recovery()`
+-- returned true). A replica is physically read-only, so the DDL could not commit —
+-- and because the verification query ran in the SAME submission (one transaction) it
+-- read its own uncommitted write and reported success every time.
+--
+-- Check before running:
+--   select pg_is_in_recovery() as on_read_replica;   -- must be FALSE
+--
+-- If it returns true, switch the SQL editor to the primary database (the region /
+-- database selector in the dashboard) and run again.
+--
+-- Verify persistence in a SEPARATE submission from the ALTER, never the same one:
+--   select count(*) from information_schema.columns
+--    where table_schema='public' and table_name='monthly_targets'
+--      and column_name='is_manual';
+--
 -- BACKGROUND
 -- ----------
 -- `monthly_targets` is not a new table. saveKPITargets() (chunks/script-features2.js)

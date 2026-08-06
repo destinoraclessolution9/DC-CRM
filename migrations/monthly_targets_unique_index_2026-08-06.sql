@@ -1,3 +1,8 @@
+-- ⚠ RUN AGAINST THE PRIMARY, NOT A READ REPLICA — check first:
+--     select pg_is_in_recovery() as on_read_replica;   -- must be FALSE
+--   A replica is read-only; DDL reports success and commits nothing. See the header of
+--   monthly_targets_full_metrics_2026-08-06.sql for the full story.
+--
 -- monthly_targets: one row per (year, month).
 --
 -- RUN THIS SECOND, after migrations/monthly_targets_full_metrics_2026-08-06.sql.
