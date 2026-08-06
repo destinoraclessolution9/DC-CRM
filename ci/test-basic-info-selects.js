@@ -1,14 +1,22 @@
-// ci/test-gender-casing.js — prospects.gender / customers.gender casing.
+// ci/test-basic-info-selects.js — the shared prospect/customer basic-info form's
+// <select> controls, and the free-text columns behind them (gender, title).
 //
-// WHY: both columns are free text and held six spellings of two values
-// ('Female'/'female'/'F' · 'Male'/'male'/'M'). Every site that COMPARES the
-// column expected the capitalized pair, so the other four spellings matched
-// nothing. The worst of those was not a render bug but a WRITE: the shared
-// basic-info <select> matched by strict equality, an unmatched value selected
-// no <option>, the browser fell back to option 0 ('Male'), and the
-// save-the-whole-record form wrote that fallback back to the DB — silently
-// flipping a lowercase-'female' prospect to Male, which drives Ming Gua and the
-// client life chart.
+// WHY: buildBasicInfoBlock is save-the-whole-record — collectBasicInfoData
+// re-emits every field from the DOM on save. So a <select> that fails to match
+// its stored value does not merely render wrong, it OVERWRITES the DB with
+// whatever option 0 happens to be. Two columns were hit:
+//
+//   gender — free text holding six spellings of two values ('Female'/'female'/
+//     'F' · 'Male'/'male'/'M'); the select compared by strict equality, so
+//     'female' matched no <option>, the browser fell back to option 0 ('Male'),
+//     and the save wrote Male — which drives Ming Gua and the client life chart.
+//   title  — same defect, and worse, because option 0 is 'Mr.': every
+//     title-less prospect that was opened and saved got stamped Mr. The
+//     2026-08-05 audit found 23 prospects titled Mr. whose gender was Female,
+//     all independently confirmed Female by their ming_gua.
+//
+// The fix in both cases is a blank first <option> plus tolerant matching, so
+// these tests assert on WHAT A BROWSER WOULD SUBMIT, not on how it looks.
 //
 // HARNESS: every function under test is SLICED OUT OF THE REAL SOURCE and
 // eval'd, never copied here — so a drift between the shipped chunk and these
@@ -122,6 +130,67 @@ ok('select leads with a blank placeholder option', /^<select[^>]*>\s*<option val
 // An unrecognized value must be preserved, not silently rewritten on save.
 eq('select preserves an unrecognized value', submittedValue(renderSelect('Lelaki')), 'Lelaki');
 
+// ── 2b. The title <select> — same defect, option 0 is 'Mr.' ────────────────
+const ttlStart = activitiesSrc.indexOf('<select id="${prefix}-title"');
+ok('title <select> found in buildBasicInfoBlock', ttlStart !== -1);
+const ttlTpl = activitiesSrc.slice(ttlStart, activitiesSrc.indexOf('</select>', ttlStart) + '</select>'.length);
+
+const _biTitle = sliceArrow(activitiesSrc, '    const _biTitle = ', '\n    };');
+const BASIC_INFO_TITLES = sliceArrow(activitiesSrc, '    const BASIC_INFO_TITLES = ', '];');
+ok('_biTitle is declared in chunks/script-activities.js', typeof _biTitle === 'function');
+eq('BASIC_INFO_TITLES is the canonical set', (BASIC_INFO_TITLES || []).join('|'), 'Mr.|Ms.|Mrs.|Dr.');
+
+const renderTitle = (storedTitle) => {
+    const prefix = 'prospect';
+    const disabled = '';
+    const d = { title: storedTitle };
+    const sel = (v, opt) => v === opt ? 'selected' : '';
+    const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    return eval('`' + ttlTpl + '`');
+};
+
+for (const [stored, want, label] of [
+    ['Mr.',  'Mr.',  'Mr.'],
+    ['Ms.',  'Ms.',  'Ms.'],
+    ['Mrs.', 'Mrs.', 'Mrs. is NOT collapsed to Ms. — it carries marital info'],
+    ['Dr.',  'Dr.',  'Dr. is gender-neutral, left alone'],
+    ['mr',   'Mr.',  'lowercase, no dot'],
+    ['MS.',  'Ms.',  'shout case'],
+    [' mrs ', 'Mrs.', 'whitespace padded'],
+]) {
+    eq(`title select round-trips ${label}`, submittedValue(renderTitle(stored)), want);
+}
+// The exact 2026-08-05 corruption: a title-less prospect must NOT become Mr.
+eq('title: NULL submits blank, not Mr.',      submittedValue(renderTitle(null)), '');
+eq('title: undefined submits blank, not Mr.', submittedValue(renderTitle(undefined)), '');
+eq('title: empty submits blank, not Mr.',     submittedValue(renderTitle('')), '');
+ok('title select leads with a blank placeholder option', /^<select[^>]*>\s*<option value=""/.test(renderTitle(null)));
+// Malaysian honorifics are real values, not typos — never rewritten, never dropped.
+for (const t of ["Dato'", 'Datuk', 'Tan Sri', 'Puan Sri']) {
+    eq(`title preserves the honorific ${t}`, submittedValue(renderTitle(t)), t);
+}
+
+// ── 2c. Structural guard — the defect that hit gender AND title ────────────
+// Any <select> in this form that reflects a STORED value must lead with a blank
+// option, or an unmatched/absent value silently resolves to option 0 and the
+// save-the-whole-record form persists it. Three controls default on purpose and
+// are exempt: country falls back to cuHomeCountry(), credit defaults to 'me',
+// and assign-agent is populated asynchronously.
+const DELIBERATE_DEFAULTS = new Set(['country', 'credit', 'assign-agent']);
+const formBody = activitiesSrc.slice(
+    activitiesSrc.indexOf('const buildBasicInfoBlock'),
+    activitiesSrc.indexOf('const collectBasicInfoData'));
+const selectRe = /<select id="\$\{prefix\}-([a-z-]+)"[\s\S]{0,700}?<\/select>/g;
+let sm, checked = 0;
+while ((sm = selectRe.exec(formBody))) {
+    const [frag, name] = [sm[0], sm[1]];
+    if (DELIBERATE_DEFAULTS.has(name)) continue;
+    checked++;
+    ok(`<select ${name}> leads with a blank option (no silent option-0 write)`,
+        /<option value=""/.test(frag));
+}
+ok('structural guard actually inspected the value-bearing selects', checked >= 5, `checked ${checked}`);
+
 // ── 3. Search filter — client side + pushed-down predicate ─────────────────
 const _genderKey   = sliceArrow(searchSrc, '    const _genderKey = ', ";");
 const _genderIlike = sliceArrow(searchSrc, '    const _genderIlike = ', '\n    };');
@@ -172,6 +241,18 @@ for (const [input, want] of [['female', 'Female'], ['MALE', 'Male'], ['F', 'Fema
 ok('import normalizes every gender write site',
     (importSrc.match(/gender: _impGender\(get\('gender'\)\)/g) || []).length === 2
     && !/gender: get\('gender'\)/.test(importSrc));
+
+const _impTitle = sliceArrow(importSrc, 'const _impTitle = ', '\n};');
+ok('_impTitle is declared in chunks/script-import.js', typeof _impTitle === 'function');
+for (const [input, want] of [['mr', 'Mr.'], ['MRS.', 'Mrs.'], ['Ms', 'Ms.'], ['dr.', 'Dr.'],
+                             ["Dato'", "Dato'"], ['', ''], [null, '']]) {
+    eq(`_impTitle(${JSON.stringify(input)})`, _impTitle(input), want);
+}
+// Only the PROSPECT title is normalized. The events import also has a `title`
+// field — that one is an event NAME and must never be touched.
+ok('import normalizes the prospect title but not the event title',
+    /title: _impTitle\(get\('title'\)\)/.test(importSrc)
+    && /if \(type === 'events'\) return \{ title: get\('title'\)/.test(importSrc));
 
 // ── 6. Migration ───────────────────────────────────────────────────────────
 const MIG = 'migrations/gender_normalize_2026-08-05.sql';
