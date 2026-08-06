@@ -55,21 +55,24 @@
 -- truncation at the boundary. Run the precheck below and match whatever
 -- quarterly_targets actually uses if it differs.
 --
--- PRECHECK (run first, separately — the unique index at the bottom FAILS if
--- duplicate (year, month) rows already exist, and saveKPITargets CAN produce them:
--- it takes one pre-loop snapshot at script-features2.js:806 and then does
--- find-then-create, so two concurrent saves race):
+-- THIS FILE IS ADD-COLUMN ONLY AND IS SAFE TO RUN AS-IS.
+--
+-- The unique (year, month) index deliberately does NOT live here. It used to, and
+-- that was a trap: the Supabase SQL editor runs a submitted script as ONE
+-- transaction, so if the index failed on pre-existing duplicate rows, every ALTER
+-- above it rolled back too — the script reports an error but the schema comes out
+-- completely unchanged, which reads like "nothing ran" rather than "the last
+-- statement failed". Observed 2026-08-06: a run of the combined file left all
+-- seventeen columns missing. The index now lives in its own file, run it second:
+--
+--   migrations/monthly_targets_unique_index_2026-08-06.sql
+--
+-- Optional sanity check on the existing column types (not required to run this):
 --
 --   select table_name, column_name, data_type
 --     from information_schema.columns
 --    where table_name in ('quarterly_targets','monthly_targets')
 --    order by table_name, column_name;
---
---   select year, month, count(*)
---     from monthly_targets group by 1,2 having count(*) > 1;
---
--- If the second query returns rows, keep the newest id per (year, month) and
--- delete the rest before running the CREATE UNIQUE INDEX at the bottom.
 
 
 -- ---- monthly_targets: the 8 missing metrics --------------------------------
@@ -101,12 +104,9 @@ alter table quarterly_targets
     add column if not exists cf_headcount_target    numeric;
 
 
--- ---- one row per (year, month) ---------------------------------------------
--- Run the duplicate precheck above FIRST. This is what stops the find-then-create
--- race from quietly producing two rows for the same month, one of which the
--- dashboard would read and the other of which the modal would edit.
-create unique index if not exists monthly_targets_year_month_uidx
-    on monthly_targets (year, month);
+-- ---- NEXT: run migrations/monthly_targets_unique_index_2026-08-06.sql --------
+-- That file dedupes (year, month) and adds the unique index. Kept separate so a
+-- duplicate row cannot roll back the column additions above.
 
 
 -- ---- VERIFY (anon PostgREST; 200 [] = present, 400/42703 = still missing) ----
