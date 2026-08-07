@@ -303,7 +303,13 @@
                 </div>
     
                 <div class="admin-modules-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
-                    
+
+                    <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showAccessControl()" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
+                        <i class="fas fa-user-lock" style="font-size: 40px; color: var(--primary-color); margin-bottom: 16px;"></i>
+                        <h3>Access Control</h3>
+                        <p style="color: var(--gray-600); font-size: 14px; margin-top: 8px;">Choose which tabs each person can see — grant extra views or hide defaults, per user.</p>
+                    </div>
+
                     <div class="admin-module-card" style="background: white; padding: 24px; border-radius: 8px; border: 1px solid var(--gray-200); text-align: center; cursor: pointer; transition: transform 0.2s;" onclick="app.showTenantManagement()" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
                         <i class="fas fa-building" style="font-size: 40px; color: var(--primary-color); margin-bottom: 16px;"></i>
                         <h3>Tenant Management</h3>
@@ -735,11 +741,275 @@
             if (window.UI) window.UI.toast.error("SystemLogger not available");
         }
     };
+
+    // ── Access Control — per-user view permissions (2026-08-07) ─────────────
+    // Super Admin picks any user below L1 and ticks the tabs they can see.
+    // Ticked-beyond-default → grants[], unticked-from-default → revokes[],
+    // stored in user_view_overrides (RLS: only L1 can write). Enforcement is
+    // the core resolver in script.js; this screen is just the editor. Locked
+    // ids (admin-band surfaces, _crmUtils.isNavGrantable === false) render
+    // greyed with a lock and can never be ticked on.
+    // Groups mirror the mobile drawer so the boss sees familiar sections.
+    const _AC_CATALOG = [
+        { group: 'Core CRM', items: [
+            { nav: 'calendar',          label: 'Calendar',                 icon: 'fas fa-calendar-alt' },
+            { nav: 'noticeboard',       label: '公告栏 Noticeboard',        icon: 'fas fa-bullhorn' },
+            { nav: 'prospects',         label: 'Prospects & Customers',    icon: 'fas fa-users' },
+            { nav: 'referrals',         label: 'Referral Relationships',   icon: 'fas fa-project-diagram' },
+            { nav: 'pipeline',          label: 'Pipeline',                 icon: 'fas fa-filter' },
+            { nav: 'promotions',        label: 'Monthly Promotion',        icon: 'fas fa-tags' },
+            { nav: 'cases',             label: 'Success Cases',            icon: 'fas fa-book-open' },
+            { nav: 'purchases_history', label: 'Purchases History',        icon: 'fas fa-receipt' },
+            { nav: 'fude',              label: '福运相随',                  icon: 'fas fa-yin-yang' },
+            { nav: 'milestones',        label: 'Milestones 增运九法',       icon: 'fas fa-star' },
+        ] },
+        { group: 'Consultant & Analytics', items: [
+            { nav: 'agents',      label: 'Consultants',              icon: 'fas fa-user-tie' },
+            { nav: 'performance', label: 'Ranking Performance',      icon: 'fas fa-trophy' },
+            { nav: 'reports',     label: 'Reporting KPI',            icon: 'fas fa-chart-bar' },
+            { nav: 'risk',        label: 'Attrition Risk Analysis',  icon: 'fas fa-exclamation-triangle' },
+            { nav: 'org-chart',   label: 'Org Chart Consultant',     icon: 'fas fa-sitemap' },
+        ] },
+        { group: 'Documents & Tools', items: [
+            { nav: 'documents',          label: 'Documents',           icon: 'fas fa-folder-open' },
+            { nav: 'knowledge',          label: 'Knowledge HQ',        icon: 'fas fa-brain' },
+            { nav: 'import',             label: 'Import / Export',     icon: 'fas fa-file-import' },
+            { nav: 'protection',         label: 'Protection Monitoring', icon: 'fas fa-shield-alt' },
+            { nav: 'integrations',       label: 'Integrations',        icon: 'fas fa-plug' },
+            { nav: 'settings',           label: 'Settings',            icon: 'fas fa-cog' },
+            { nav: 'order-form-extract', label: 'Order Form Extract',  icon: 'fas fa-file-invoice' },
+            { nav: 'lead_forms',         label: 'Lead Capture Forms',  icon: 'fas fa-wpforms' },
+            { nav: 'surveys',            label: 'NPS Surveys',         icon: 'fas fa-poll' },
+            { nav: 'contracts',          label: 'Contracts',           icon: 'fas fa-file-contract' },
+            { nav: 'custom_fields',      label: 'Custom Fields',       icon: 'fas fa-list-alt' },
+            { nav: 'booking_settings',   label: 'Booking Scheduler',   icon: 'fas fa-calendar-check' },
+            { nav: 'stock-take',         label: 'Stock Take',          icon: 'fas fa-boxes' },
+        ] },
+        { group: 'Admin Suite (Super Admin only)', items: [
+            { nav: 'admin',                label: 'Admin',                icon: 'fas fa-cogs' },
+            { nav: 'security',             label: 'Security',             icon: 'fas fa-shield-halved' },
+            { nav: 'marketing-automation', label: 'Marketing Automation', icon: 'fas fa-robot' },
+            { nav: 'marketing-lists',      label: 'Marketing Lists',      icon: 'fas fa-list' },
+            { nav: 'workflows',            label: 'Workflow Automation',  icon: 'fas fa-diagram-project' },
+            { nav: 'ai-insights',          label: 'AI Insights',          icon: 'fas fa-lightbulb' },
+            { nav: 'egg-purchasing',       label: 'Egg Purchasing',       icon: 'fas fa-egg' },
+            { nav: 'formula-purchaser',    label: 'Formula Purchaser',    icon: 'fas fa-flask' },
+            { nav: 'boss-report',          label: 'Boss Report',          icon: 'fas fa-briefcase' },
+            { nav: 'quarter-review',       label: 'Quarter Review',       icon: 'fas fa-chart-line' },
+            { nav: 'standard-functions',   label: 'Standard Functions',   icon: 'fas fa-toolbox' },
+        ] },
+    ];
+
+    let _acUsers = [];      // manageable users (level > 1, not deleted)
+    let _acRows = {};       // String(user_id) → { grants: [], revokes: [] }
+    let _acSelected = null; // users.id of the selected user
+    let _acSearch = '';
+
+    const _acLevel = (u) => { try { return _utils.getUserLevel(u); } catch (_) { return 99; } };
+    const _acSelectedUser = () => _acUsers.find((x) => String(x.id) === String(_acSelected)) || null;
+
+    const showAccessControl = async () => {
+        if (!isSystemAdmin()) {
+            if (window.UI) window.UI.toast.error("Access Denied. Super Admins only.");
+            return;
+        }
+        const view = document.getElementById('content-viewport');
+        if (!view) return;
+        view.innerHTML = '<div style="padding:48px;text-align:center;color:var(--gray-500);"><i class="fas fa-spinner fa-spin"></i> Loading users…</div>';
+        try {
+            const users = (await AppDataStore.getAll('users')) || [];
+            _acUsers = users
+                .filter((u) => u && u.status !== 'deleted' && _acLevel(u) > 1)
+                .sort((a, b) => _acLevel(a) - _acLevel(b) || String(a.name || '').localeCompare(String(b.name || '')));
+            _acRows = {};
+            if (window.supabase && window.supabase.from) {
+                const { data, error } = await window.supabase.from('user_view_overrides').select('user_id,grants,revokes');
+                // A failed read must FAIL the screen, not render every user as
+                // pure role defaults — an admin saving over that wrong baseline
+                // would silently erase the overrides they never saw
+                // (supabase-js v2 resolves with {error}, it does not throw).
+                if (error) throw new Error(error.message || 'overrides read failed');
+                (Array.isArray(data) ? data : []).forEach((r) => { _acRows[String(r.user_id)] = { grants: r.grants || [], revokes: r.revokes || [] }; });
+            }
+        } catch (e) {
+            view.innerHTML = '<div style="padding:48px;text-align:center;color:var(--gray-500);">Could not load users (' + esc(String((e && e.message) || e)) + '). <button class="btn" onclick="app.showAccessControl()">Retry</button></div>';
+            return;
+        }
+        if (_acSelected != null && !_acSelectedUser()) _acSelected = null;
+        _acRender();
+    };
+
+    const _acUserListHtml = () => {
+        const q = _acSearch.trim().toLowerCase();
+        const rows = _acUsers.filter((u) => !q
+            || String(u.name || '').toLowerCase().includes(q)
+            || String(u.role || '').toLowerCase().includes(q));
+        if (!rows.length) return '<div style="padding:16px;color:var(--gray-500);font-size:13px;">No users match.</div>';
+        return rows.map((u) => {
+            const sel = String(u.id) === String(_acSelected);
+            const custom = !!_acRows[String(u.id)];
+            return `<div onclick="app.acSelectUser(${Number(u.id)})" style="padding:10px 12px;border-bottom:1px solid var(--gray-100);cursor:pointer;display:flex;align-items:center;gap:8px;${sel ? 'background:var(--gray-100);' : ''}">
+                <div style="flex:1;min-width:0;">
+                    <div style="font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(u.name || u.email || ('#' + u.id))}</div>
+                    <div style="font-size:12px;color:var(--gray-500);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(u.role || '')}</div>
+                </div>
+                ${custom ? '<span title="Has custom access" style="width:8px;height:8px;border-radius:50%;background:var(--warning-color, #f59e0b);flex-shrink:0;"></span>' : ''}
+            </div>`;
+        }).join('');
+    };
+
+    const _acChecklistHtml = (u) => {
+        const roleDefault = _utils.navRoleDefaults(_acLevel(u));
+        const row = _acRows[String(u.id)] || { grants: [], revokes: [] };
+        const effective = new Set(_utils.navOverridesApply(roleDefault, row.grants, row.revokes));
+        const defaults = new Set(roleDefault);
+        let html = '';
+        _AC_CATALOG.forEach((g) => {
+            html += `<div style="margin-bottom:18px;">
+                <div style="font-size:12px;font-weight:700;color:var(--gray-500);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">${esc(g.group)}</div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:6px;">`;
+            g.items.forEach((it) => {
+                const grantable = _utils.isNavGrantable(it.nav);
+                const inDefault = defaults.has(it.nav);
+                const locked = !grantable && !inDefault;   // admin-band surface this level can never have
+                const checked = effective.has(it.nav);
+                const differs = checked !== inDefault;
+                html += `<label title="${locked ? 'Super Admin area — cannot be granted' : (inDefault ? 'In this role’s defaults' : 'Extra view (grant)')}"
+                    style="display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px;${locked ? 'opacity:.45;cursor:not-allowed;background:var(--gray-50, #fafafa);' : 'cursor:pointer;background:white;'}">
+                    <input type="checkbox" data-ac-nav="${esc(it.nav)}" ${checked ? 'checked' : ''} ${locked ? 'disabled' : ''} style="flex-shrink:0;">
+                    <i class="${esc(it.icon)}" style="width:16px;text-align:center;color:var(--gray-500);flex-shrink:0;"></i>
+                    <span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(it.label)}</span>
+                    ${locked ? '<i class="fas fa-lock" style="font-size:11px;color:var(--gray-400);flex-shrink:0;"></i>' : ''}
+                    ${differs ? '<span title="Differs from role default" style="width:7px;height:7px;border-radius:50%;background:var(--warning-color, #f59e0b);flex-shrink:0;"></span>' : ''}
+                </label>`;
+            });
+            html += '</div></div>';
+        });
+        return html;
+    };
+
+    const _acRender = () => {
+        const view = document.getElementById('content-viewport');
+        if (!view) return;
+        const u = _acSelectedUser();
+        let detail;
+        if (!u) {
+            detail = '<div style="padding:60px 24px;text-align:center;color:var(--gray-500);"><i class="fas fa-hand-pointer" style="font-size:32px;opacity:.4;"></i><p style="margin-top:12px;">Select a user on the left to edit which tabs they can see.</p></div>';
+        } else {
+            const roleDefault = _utils.navRoleDefaults(_acLevel(u));
+            const custom = !!_acRows[String(u.id)];
+            detail = `
+                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:4px;">
+                    <div style="flex:1;min-width:200px;">
+                        <div style="font-size:18px;font-weight:700;">${esc(u.name || u.email || ('#' + u.id))}</div>
+                        <div style="font-size:13px;color:var(--gray-500);">${esc(u.role || '')} · role default: ${roleDefault.length} tabs${custom ? ' · <span style="color:var(--warning-color, #f59e0b);font-weight:600;">customised</span>' : ''}</div>
+                    </div>
+                    <button class="btn" onclick="(async () => { await app.acReset(); })()" ${custom ? '' : 'disabled'}><i class="fas fa-rotate-left"></i> Reset to role defaults</button>
+                    <button class="btn primary" onclick="(async () => { await app.acSave(); })()"><i class="fas fa-save"></i> Save</button>
+                </div>
+                <div style="font-size:12px;color:var(--gray-500);margin-bottom:16px;">Changes apply when this user next reloads the app (desktop and mobile). Ticking a tab does not widen what data their role can read.</div>
+                <div id="ac-checklist">${_acChecklistHtml(u)}</div>`;
+        }
+        view.innerHTML = `
+            <div class="access-control fade-in" style="padding: 24px;">
+                <div class="header-actions" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:20px;">
+                    <h2 style="margin:0;"><i class="fas fa-user-lock" style="margin-right:8px;"></i>Access Control</h2>
+                    <button class="btn" onclick="app.showAdminDashboard()"><i class="fas fa-arrow-left"></i> Back to Admin</button>
+                </div>
+                <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;">
+                    <div style="flex:0 1 300px;min-width:260px;max-width:100%;background:white;border:1px solid var(--gray-200);border-radius:8px;overflow:hidden;">
+                        <div style="padding:10px;border-bottom:1px solid var(--gray-200);">
+                            <input type="search" placeholder="Search name or role…" value="${esc(_acSearch)}" oninput="app.acFilter(this.value)"
+                                style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;box-sizing:border-box;">
+                        </div>
+                        <div id="ac-user-list" style="max-height:65vh;overflow-y:auto;">${_acUserListHtml()}</div>
+                    </div>
+                    <div style="flex:1 1 480px;min-width:280px;background:white;border:1px solid var(--gray-200);border-radius:8px;padding:20px;">${detail}</div>
+                </div>
+            </div>`;
+    };
+
+    const acFilter = (v) => {
+        _acSearch = String(v || '');
+        const list = document.getElementById('ac-user-list');
+        if (list) list.innerHTML = _acUserListHtml();
+    };
+
+    const acSelectUser = (id) => {
+        _acSelected = id;
+        _acRender();
+    };
+
+    const acSave = async () => {
+        if (!isSystemAdmin()) { if (window.UI) window.UI.toast.error("Access Denied. Super Admins only."); return; }
+        const u = _acSelectedUser();
+        if (!u) return;
+        const ticked = Array.prototype.slice.call(document.querySelectorAll('input[data-ac-nav]:checked'))
+            .map((el) => el.getAttribute('data-ac-nav'));
+        if (!ticked.length) { UI.toast.error('Keep at least one tab ticked — an empty menu would lock them out of everything.'); return; }
+        // ≥1 tick must be a tab this user can actually LAND on (nav-only ids
+        // like Attrition Risk have no view of their own; admin-band tabs an L2
+        // shows but can't render don't count) — otherwise their app boots to
+        // a blank screen.
+        const lvl = _acLevel(u);
+        if (typeof _utils.navLandable === 'function' && !ticked.some((id) => _utils.navLandable(id, lvl))) {
+            UI.toast.error('Keep at least one real tab ticked (e.g. Calendar or Prospects) — the current selection has no page this user can open.');
+            return;
+        }
+        const roleDefault = _utils.navRoleDefaults(_acLevel(u));
+        const defaults = new Set(roleDefault);
+        const tickedSet = new Set(ticked);
+        const grants = ticked.filter((id) => !defaults.has(id) && _utils.isNavGrantable(id));
+        const revokes = roleDefault.filter((id) => !tickedSet.has(id));
+        try {
+            if (!grants.length && !revokes.length) {
+                const { error } = await window.supabase.from('user_view_overrides').delete().eq('user_id', u.id);
+                if (error) throw error;
+                delete _acRows[String(u.id)];
+                UI.toast.success((u.name || 'User') + ' is back on role defaults.');
+            } else {
+                const payload = {
+                    user_id: u.id, grants, revokes,
+                    updated_by: (_state.cu && _state.cu.id) || null,
+                    updated_at: new Date().toISOString(),
+                };
+                const { error } = await window.supabase.from('user_view_overrides').upsert(payload, { onConflict: 'user_id' });
+                if (error) throw error;
+                _acRows[String(u.id)] = { grants, revokes };
+                UI.toast.success('Saved — applies when ' + (u.name || 'the user') + ' next reloads.');
+            }
+        } catch (e) {
+            UI.toast.error('Save failed: ' + ((e && e.message) || e));
+            return;
+        }
+        _acRender();
+    };
+
+    const acReset = async () => {
+        if (!isSystemAdmin()) { if (window.UI) window.UI.toast.error("Access Denied. Super Admins only."); return; }
+        const u = _acSelectedUser();
+        if (!u) return;
+        try {
+            const { error } = await window.supabase.from('user_view_overrides').delete().eq('user_id', u.id);
+            if (error) throw error;
+            delete _acRows[String(u.id)];
+            UI.toast.success((u.name || 'User') + ' is back on role defaults.');
+        } catch (e) {
+            UI.toast.error('Reset failed: ' + ((e && e.message) || e));
+            return;
+        }
+        _acRender();
+    };
     
     
     // Add new Admin UI Functions to window.app
     app.register('admin', {
         showAdminDashboard,
+        showAccessControl,
+        acSelectUser,
+        acFilter,
+        acSave,
+        acReset,
         showTenantManagement,
         openCreateTenantModal,
         submitNewTenant,

@@ -1920,7 +1920,13 @@ const appLogic = (() => {
         let level = _getUserLevel(user);
         if (level === 99) level = 12;
 
-        const allowed = levelPermissions[level] || levelPermissions[12];
+        // Per-user overrides (Admin → Access Control): hydrate synchronously
+        // from the localStorage mirror so revoked tabs never flash visible,
+        // then refresh from Supabase once per user (re-runs this fn + the
+        // mobile drawer only when the server row differs from the mirror).
+        if (user.id != null) _navOvrHydrate(user.id);
+        _navOvrRefresh(user);
+        const allowed = _applyNavOverrides(levelPermissions[level] || levelPermissions[12]);
         
         // List of all nav item suffixes
         const allNavIds = [
@@ -3951,6 +3957,171 @@ function _wireLoginBtn() {
 
     const _CHUNK_VIEWS = _deriveChunkViews();
 
+    // ── Per-user nav overrides (Admin → Access Control, 2026-08-07) ──────────
+    // A user_view_overrides row (grants[]/revokes[] of NAV ids) applies ON TOP
+    // of the role-level defaults everywhere nav access is decided: desktop
+    // sidebar (updateNavVisibility), deep-link gate (_isViewAllowed), chunk-
+    // load gate (navigateTo), landing bounce (_defaultViewFor) and the mobile
+    // drawer (script-mobile.js consumes _crmUtils.applyNavOverrides — ONE
+    // resolver, never a second derivation). With no row / empty sets every
+    // path is bit-for-bit the pre-feature behavior; ci/test-user-overrides.js
+    // pins that invariant. This block sits AFTER _CHUNK_VIEWS on purpose:
+    // ci/views-derive-check.js Function-evals the slice from _VIEW_NO_NAV to
+    // that line, so nothing stateful (window/localStorage) may live inside it.
+
+    // Pure core (Node-testable): revokes win over grants; grants append at the
+    // END of the nav order; non-grantable ids are ignored even if present in a
+    // (tampered) grants array — defense in depth.
+    const _navOverridesApply = (base, ovr, grantable) => {
+        if (!ovr || (!ovr.grants.size && !ovr.revokes.size)) return base;
+        const out = base.filter((id) => !ovr.revokes.has(id));
+        ovr.grants.forEach((id) => {
+            if (!ovr.revokes.has(id) && !out.includes(id) && grantable.has(id)) out.push(id);
+        });
+        return out;
+    };
+    // Pure: nav ids a grant may add. A view locked to the admin band —
+    // exactLevels ⊆ {1,2} or minLevel ≤ 2 — can NEVER be granted outward
+    // (admin, security, boss-report, egg/formula, marketing suite, …); band
+    // gates already spanning past L2 (reports 1-10, stock-take 1+15) are
+    // widenable. _VIEW_NO_NAV programmatic sub-views are not nav items at all.
+    // Nav ids whose RENDER path hard-gates independently of the VIEWS registry,
+    // so a grant would produce a visible-but-dead tab. stock_take's dispatch
+    // (_VIEW_RENDER.stock_take → canAccessStockTake, L1/L15 only) and the
+    // chunk's _stRequireAdmin both ignore per-user grants — confirmed by the
+    // 2026-08-07 review. Keep this list in sync with any future inline gates.
+    const _NAV_GRANT_DENY = new Set(['stock-take']);
+    const _navGrantableFrom = (views) => {
+        const s = new Set();
+        for (const id in views) {
+            const v = views[id];
+            let nav = v.navLevels;
+            if (typeof nav === 'string' && nav.charAt(0) === '@') nav = views[nav.slice(1)] && views[nav.slice(1)].navLevels;
+            if (nav === _VIEW_NO_NAV) continue;
+            if (_NAV_GRANT_DENY.has(v.navId)) continue;
+            const lockedExact = !!(v.exactLevels && v.exactLevels.every((l) => l <= 2));
+            const lockedMin = v.minLevel != null && v.minLevel <= 2;
+            if (!lockedExact && !lockedMin) s.add(v.navId);
+        }
+        return s;
+    };
+    let _navGrantable = null;
+    const _isNavGrantable = (navId) => {
+        if (!_navGrantable) _navGrantable = _navGrantableFrom(VIEWS);
+        return _navGrantable.has(navId);
+    };
+    // First VIEWS id rendered for a nav item (used to pick a landing view when
+    // the role default is revoked). Skips programmatic _VIEW_NO_NAV entries.
+    const _navIdToViewId = (navId) => {
+        for (const id in VIEWS) {
+            if (VIEWS[id].navId === navId && VIEWS[id].navLevels !== _VIEW_NO_NAV) return id;
+        }
+        return null;
+    };
+
+    // Session state: starts empty (= no-op), hydrates synchronously from the
+    // localStorage mirror (no flash of forbidden tabs on boot), then refreshes
+    // from Supabase once per user id — fire-and-forget out of
+    // updateNavVisibility, re-rendering nav + drawer only when the row differs.
+    const _NAV_OVR_LS = 'crm_nav_overrides_v1';
+    let _navOvr = { grants: new Set(), revokes: new Set() };
+    let _navOvrUid = null;      // user id the current sets belong to
+    let _navOvrFetched = null;  // user id whose server refresh already ran
+    const _navOvrSig = (o) => [...o.grants].sort().join(',') + '|' + [...o.revokes].sort().join(',');
+    const _navOvrHydrate = (uid) => {
+        if (_navOvrUid === uid) return;
+        _navOvrUid = uid;
+        _navOvr = { grants: new Set(), revokes: new Set() };
+        try {
+            const j = JSON.parse(localStorage.getItem(_NAV_OVR_LS) || 'null');
+            if (j && j.uid === uid) _navOvr = { grants: new Set(j.grants || []), revokes: new Set(j.revokes || []) };
+        } catch (_) { /* mirror unreadable → role defaults until the fetch lands */ }
+    };
+    const _navOvrRefresh = (user) => {
+        const uid = user && user.id;
+        if (!uid || String(uid).startsWith('offline-')) return;
+        if (_navOvrFetched === uid) return;
+        _navOvrFetched = uid;
+        (async () => {
+            try {
+                if (!window.supabase || !window.supabase.from) return;
+                const { data, error } = await window.supabase
+                    .from('user_view_overrides').select('grants,revokes')
+                    .eq('user_id', uid).maybeSingle();
+                if (error) return; // failed read must never change access
+                const next = { grants: new Set((data && data.grants) || []), revokes: new Set((data && data.revokes) || []) };
+                // A dead session downgrades reads to anon (RLS → no row, NOT an
+                // error). Don't let that CLEAR a real override set: an empty
+                // result only stands when the session is confirmed live.
+                if (!data && _navOvrSig(_navOvr) !== '|') {
+                    const s = await window.supabase.auth.getSession().catch(() => null);
+                    if (!s || !s.data || !s.data.session) { _navOvrFetched = null; return; }
+                }
+                const changed = _navOvrSig(next) !== _navOvrSig(_navOvr);
+                _navOvr = next; _navOvrUid = uid;
+                try { localStorage.setItem(_NAV_OVR_LS, JSON.stringify({ uid, grants: [...next.grants], revokes: [...next.revokes] })); } catch (_) { /* mirror is best-effort */ }
+                if (changed) {
+                    try { updateNavVisibility(); } catch (_) { /* re-render is best-effort */ }
+                    try { if (window.app && typeof window.app.renderMobileDrawer === 'function') window.app.renderMobileDrawer(); } catch (_) { /* drawer re-render is best-effort */ }
+                    // The fixed 5-button bottom bar is built once at boot from
+                    // the (possibly stale) mirror — rebuild it too, or a
+                    // revoked tab survives in the bar for the whole session.
+                    try { if (window.app && typeof window.app.renderMobileBottomNav === 'function') window.app.renderMobileBottomNav(); } catch (_) { /* bar re-render is best-effort */ }
+                }
+            } catch (_) { /* offline — the mirror stands */ }
+        })();
+    };
+    const _applyNavOverrides = (base) => {
+        if (!_navGrantable) _navGrantable = _navGrantableFrom(VIEWS);
+        return _navOverridesApply(base, _navOvr, _navGrantable);
+    };
+    const _isNavRevoked = (navId) => _navOvr.revokes.has(navId);
+    const _isNavGranted = (navId) => _navOvr.grants.has(navId) && !_navOvr.revokes.has(navId) && _isNavGrantable(navId);
+    const _isViewGranted = (viewId) => {
+        const v = VIEWS[viewId];
+        return !!(v && v.navId && v.navLevels !== _VIEW_NO_NAV && _isNavGranted(v.navId));
+    };
+    // The mobile drawer's per-level base (chunks/script-mobile.js
+    // _getAllowedNavIds perms{}) deliberately diverges from the desktop
+    // derivation in ONE place: the agent band L5-11 gets a 'settings' drawer
+    // item that _AGENT_NAV / the L11 override lack. The Access Control editor
+    // must baseline against the UNION (desktop ∪ mobile) or that tab renders
+    // unticked-yet-visible and an unticked save can never emit the revoke
+    // that hides it (2026-08-07 review). Keep in sync with script-mobile.js.
+    const _NAV_MOBILE_EXTRAS = { 5: ['settings'], 6: ['settings'], 7: ['settings'], 8: ['settings'], 9: ['settings'], 10: ['settings'], 11: ['settings'] };
+
+    // Chunk-facing surface (mobile drawer + Admin → Access Control UI).
+    Object.assign(window._crmUtils, {
+        applyNavOverrides: (list) => _applyNavOverrides(list),
+        isNavGrantable: (navId) => _isNavGrantable(navId),
+        navRoleDefaults: (level) => {
+            const perms = _deriveLevelPermissions();
+            const lvl = (level === 99 || !perms[level]) ? 12 : level;
+            const out = (perms[lvl] || []).slice();
+            (_NAV_MOBILE_EXTRAS[lvl] || []).forEach((id) => { if (!out.includes(id)) out.push(id); });
+            return out;
+        },
+        // Can a ticked nav id actually LAND somewhere for this level? False
+        // for nav-only ids with no VIEWS entry (risk, standard-functions) and
+        // for admin-band views the level can't render and a grant can't widen
+        // (admin/security for an L2). acSave requires ≥1 landable tick so a
+        // save can never strand a user on a blank viewport.
+        navLandable: (navId, level) => {
+            const vid = _navIdToViewId(navId);
+            if (!vid) return false;
+            const v = VIEWS[vid];
+            const bandOk = (!v.exactLevels || v.exactLevels.includes(level))
+                && (v.minLevel == null || level <= v.minLevel);
+            return bandOk || _isNavGrantable(navId);
+        },
+        // Pure form for ARBITRARY users (the Access Control screen previews a
+        // TARGET user's effective set — it must not read the session's state).
+        navOverridesApply: (base, grants, revokes) => {
+            if (!_navGrantable) _navGrantable = _navGrantableFrom(VIEWS);
+            return _navOverridesApply(base, { grants: new Set(grants || []), revokes: new Set(revokes || []) }, _navGrantable);
+        },
+    });
+
     // ── Authoritative per-view access control ────────────────────────────────
     // Resolves a view's authorization contract from the VIEWS registry so that
     // navigateTo can ENFORCE it (not merely hide the sidebar item). Role levels
@@ -3966,12 +4137,22 @@ function _wireLoginBtn() {
     const _isViewAllowed = (viewId, lvl) => {
         const v = VIEWS[viewId];
         if (!v) return true;
-        if (v.exactLevels && !v.exactLevels.includes(lvl)) return false;
-        if (v.minLevel != null && !(lvl <= v.minLevel)) return false;
         let nav = v.navLevels;
-        if (nav === _VIEW_NO_NAV) return true;
         if (typeof nav === 'string' && nav.charAt(0) === '@') nav = VIEWS[nav.slice(1)]?.navLevels;
-        if (Array.isArray(nav) && !nav.includes(lvl)) return false;
+        // Programmatic sub-views (_VIEW_NO_NAV) are not nav items — per-user
+        // overrides never apply to them (pre-feature behavior, checks intact).
+        if (nav === _VIEW_NO_NAV) {
+            if (v.exactLevels && !v.exactLevels.includes(lvl)) return false;
+            if (v.minLevel != null && !(lvl <= v.minLevel)) return false;
+            return true;
+        }
+        // Per-user overrides: a revoke always blocks; a grant widens the level
+        // gates below — but only for grantable nav ids (never the admin band).
+        if (_isNavRevoked(v.navId)) return false;
+        const _granted = _isNavGranted(v.navId);
+        if (v.exactLevels && !v.exactLevels.includes(lvl) && !_granted) return false;
+        if (v.minLevel != null && !(lvl <= v.minLevel) && !_granted) return false;
+        if (Array.isArray(nav) && !nav.includes(lvl) && !_granted) return false;
         return true;
     };
 
@@ -3981,9 +4162,37 @@ function _wireLoginBtn() {
     //   → fude; everyone else → home (mobile) / calendar (desktop).
     const _defaultViewFor = (user) => {
         const lvl = _getUserLevel(user);
-        if (lvl === 15) return 'stock_take';
-        if (lvl >= 12) return 'fude';
-        return isMobile() ? 'home' : 'calendar';
+        let def;
+        if (lvl === 15) def = 'stock_take';
+        else if (lvl >= 12) def = 'fude';
+        else def = isMobile() ? 'home' : 'calendar';
+        if (_isViewAllowed(def, lvl)) return def;
+        // The role default was revoked for this user — land on their first
+        // remaining nav item instead. Never loops: if everything is revoked we
+        // return the role default anyway and navigateTo's viewId===fallback
+        // re-entry check stops the recursion.
+        const perms = _deriveLevelPermissions();
+        const base = perms[lvl === 99 ? 12 : lvl] || perms[12] || [];
+        const list = _applyNavOverrides(base);
+        for (const navId of list) {
+            const vid = _navIdToViewId(navId);
+            if (vid && _isViewAllowed(vid, lvl)) return vid;
+        }
+        // Pathological row (every renderable nav revoked — e.g. only 'risk',
+        // which has no VIEWS entry, left ticked): landing on a blank viewport
+        // is worse than landing on a revoked-but-renderable tab, so ignore
+        // revokes as the last resort and take the first view the LEVEL can
+        // render. acSave blocks writing such rows; this covers hand-written
+        // ones and legacy mirrors.
+        for (const navId of base) {
+            const vid = _navIdToViewId(navId);
+            if (!vid) continue;
+            const v = VIEWS[vid];
+            if (v.exactLevels && !v.exactLevels.includes(lvl)) continue;
+            if (v.minLevel != null && !(lvl <= v.minLevel)) continue;
+            return vid;
+        }
+        return def;
     };
 
     // Declarative refresh map — the single source for refreshCurrentView (replaces
@@ -4466,10 +4675,17 @@ function _wireLoginBtn() {
         // typing its URL hash — not just hidden from the sidebar. Only enforced
         // once authenticated; boot-time / pre-auth navigates pass through.
         if (_currentUser && !_isViewAllowed(viewId, _getUserLevel(_currentUser))) {
-            try { UI.toast.error('You do not have access to that page.'); } catch (_) { /* toast best-effort */ }
             const _fallbackView = _defaultViewFor(_currentUser);
-            if (viewId !== _fallbackView) { await navigateTo(_fallbackView); }
-            return;
+            if (viewId !== _fallbackView) {
+                try { UI.toast.error('You do not have access to that page.'); } catch (_) { /* toast best-effort */ }
+                await navigateTo(_fallbackView);
+                return;
+            }
+            // viewId IS the computed fallback yet still disallowed — only a
+            // pathological all-revoked override row can produce this (the
+            // branch is unreachable with empty overrides, since every role
+            // default passes _isViewAllowed). Rendering the fallback beats a
+            // permanently blank viewport: fall through without blocking.
         }
         // Runtime dead-session guard: if the app still believes a (non-offline)
         // user is active but the live Supabase session has silently expired,
@@ -4480,7 +4696,9 @@ function _wireLoginBtn() {
         const _chunkDef = _CHUNK_VIEWS[viewId];
         if (_chunkDef) {
             const _userLevel = _currentUser ? _getUserLevel(_currentUser) : 99;
-            const _allowed = !_chunkDef.exactLevels || _chunkDef.exactLevels.includes(_userLevel);
+            // _isViewGranted: a per-user grant that widens a band exactLevels
+            // gate must also load the chunk, or the granted view renders blank.
+            const _allowed = !_chunkDef.exactLevels || _chunkDef.exactLevels.includes(_userLevel) || _isViewGranted(viewId);
             if (_allowed) {
                 await _loadChunkOnce(_chunkDef.src);
             }

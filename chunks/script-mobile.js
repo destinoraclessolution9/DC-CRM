@@ -571,7 +571,14 @@
         // perms has no key for an unmatched level (canonical returns 99) → the
         // `|| perms[12]` fallback preserves the previous null/unknown behavior.
         const level = getUserLevel(_state.cu);
-        return new Set(perms[level] || perms[12]);
+        const base = perms[level] || perms[12];
+        // Per-user overrides (Admin → Access Control): same resolver as the
+        // desktop sidebar — never a second derivation here. Falls back to the
+        // raw level set when core hasn't exposed the helper (old cached core).
+        const withOverrides = (_utils && typeof _utils.applyNavOverrides === 'function')
+            ? _utils.applyNavOverrides(base)
+            : base;
+        return new Set(withOverrides);
     };
 
     const renderMobileDrawer = () => {
