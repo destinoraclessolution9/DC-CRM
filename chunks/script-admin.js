@@ -808,11 +808,14 @@
     const _acLevel = (u) => { try { return _utils.getUserLevel(u); } catch (_) { return 99; } };
     const _acSelectedUser = () => _acUsers.find((x) => String(x.id) === String(_acSelected)) || null;
 
-    const showAccessControl = async () => {
+    // Optional selectUserId preselects that user (deep link from the
+    // consultant profile's "Edit access" button).
+    const showAccessControl = async (selectUserId) => {
         if (!isSystemAdmin()) {
             if (window.UI) window.UI.toast.error("Access Denied. Super Admins only.");
             return;
         }
+        if (selectUserId != null) _acSelected = selectUserId;
         const view = document.getElementById('content-viewport');
         if (!view) return;
         view.innerHTML = '<div style="padding:48px;text-align:center;color:var(--gray-500);"><i class="fas fa-spinner fa-spin"></i> Loading users…</div>';

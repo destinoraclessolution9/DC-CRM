@@ -352,6 +352,8 @@ viewport.innerHTML = `
             </div>
         </div>
         <div class="header-actions">
+            ${_getUserLevel(_state.cu) === 1 && String(agentId) !== String(_state.cu?.id) ? `
+            <button class="btn secondary" title="Choose which tabs this user can see" onclick="(async () => { if (typeof app.showAccessControl !== 'function') { await app.navigateTo('admin'); } await app.showAccessControl(${agentId}); })()"><i class="fas fa-user-lock"></i> Edit Access</button>` : ''}
             <button class="btn secondary" onclick="app.resetAgentPassword(${agentId})">Reset Password</button>
             <button class="btn secondary" onclick="app.openAddAgentModal(${agentId})">Edit Profile</button>
             <button class="btn error" onclick="app.deactivateAgent(${agentId})">Deactivate</button>
