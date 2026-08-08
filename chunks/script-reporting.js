@@ -94,7 +94,7 @@
         neaPitching: "NEA Pitching - Distinct people pitched the DC 代理配套 (Agent Package), taken from Post-Meetup Notes → Potential & Opportunities. Same person counts once no matter how many meetings.",
         fengshuiPitching: "Fengshui Pitching - Distinct people pitched a Feng Shui audit (灵活 flexi or 专案 project), taken from Post-Meetup Notes → Potential & Opportunities. Same person counts once even if both were ticked.",
         agentHours: "Agent operating hours this week (Mon–Sun) vs weekly target — Full-time 45h, Part-time 20h. Sums the duration of every calendar item each agent led or attended (any activity type); 1h is assumed when an event has no start/end time. Always the current week, regardless of the date filter above.",
-        highTouchProspects: "High-touch prospects — met more than 5 times in total (each CPS meeting, each FTF meeting and each attended event counts as 1) and still not a customer. These are the highest-potential closings — click for the name list. The window is ALL TIME and does not follow the date filter; the agent, role and market filters apply via the prospect's responsible agent."
+        highTouchProspects: "High-touch prospects — more than 5 touches in total (each CPS meeting, each FTF meeting, each attended event and each referral they made counts as 1) and still not a customer. These are the highest-potential closings — click for the name list. The window is ALL TIME and does not follow the date filter; the agent, role and market filters apply via the prospect's responsible agent."
     };
 
     let _currentTimeFilter = 'monthly';
@@ -2432,6 +2432,12 @@ const getCFHeadcount = async (from, to) => (await getCPSReferrerSplit(from, to))
 //
 // GR / XG / FSA are NOT meets here (owner listed CPS + FTF + attendance only);
 // to widen the definition, extend HIGH_TOUCH_MEET_TYPES.
+//
+// Referrals (owner follow-up 2026-08-08): each referral the prospect MADE also
+// adds 1 — a prospect bringing friends in is the strongest buy-in signal. Read
+// from the referrals table (the same source the referral tree and the mobile
+// chips count), keyed like _referrerKeyOf in script-referrals.js. Referrals do
+// NOT move Last Touch — that column stays "last time we met them".
 const HIGH_TOUCH_MIN = 5; // flag when total touches EXCEED this ("more than 5")
 const HIGH_TOUCH_MEET_TYPES = ['CPS', 'FTF'];
 
@@ -2480,12 +2486,13 @@ const _highTouchActDates = async (ids) => {
 // current+previous calculateKPIs calls and the drill-down share one computation.
 const getHighTouchProspects = () => _cachedWindow('highTouchProspects', async () => {
     const today = toLocalDateStr(new Date());
-    const [meet, attendees, prospects, customers, users] = await Promise.all([
+    const [meet, attendees, prospects, customers, users, referrals] = await Promise.all([
         _highTouchMeetActs(),
         AppDataStore.getAll('event_attendees'),
         AppDataStore.getAll('prospects'),
         AppDataStore.getAll('customers'),
         AppDataStore.getAll('users'),
+        AppDataStore.getAll('referrals'),
     ]);
     const userMap = {}; users.forEach(u => { userMap[String(u.id)] = u; });
     const prospMap = {}; prospects.forEach(p => { prospMap[String(p.id)] = p; });
@@ -2519,10 +2526,10 @@ const getHighTouchProspects = () => _cachedWindow('highTouchProspects', async ()
         return true;
     };
 
-    const agg = new Map(); // prospect_id → { cps, ftf, events, lastDate }
+    const agg = new Map(); // prospect_id → { cps, ftf, events, refs, lastDate }
     const bump = (pid, bucket, date) => {
         let e = agg.get(pid);
-        if (!e) { e = { cps: 0, ftf: 0, events: 0, lastDate: '' }; agg.set(pid, e); }
+        if (!e) { e = { cps: 0, ftf: 0, events: 0, refs: 0, lastDate: '' }; agg.set(pid, e); }
         e[bucket]++;
         if ((date || '') > e.lastDate) e.lastDate = date;
     };
@@ -2562,10 +2569,30 @@ const getHighTouchProspects = () => _cachedWindow('highTouchProspects', async ()
         bump(r.pid, 'events', date);
     }
 
+    // Pass 3 — referrals MADE by the prospect. Same two write shapes as
+    // _referrerKeyOf in script-referrals.js: {referrer_id, referrer_type}
+    // (type missing → prospect) and {referrer_customer_id} (a customer
+    // referrer — not a prospect touch, skipped). Type match is
+    // case-insensitive (the pickers write 'Prospect', the CPS auto-referral
+    // writes 'prospect' — same lesson as _CPS_AGENT_REF_TYPE). Deduped per
+    // referred person so a double-written referral row can't add 2; the date
+    // deliberately does NOT feed lastDate (Last Touch = last time we MET them).
+    const seenRefs = new Set(); // `${referrer_pid}:${referred key}`
+    for (const r of referrals) {
+        if (!r || r.referrer_id == null || r.referrer_id === '') continue;
+        const type = String(r.referrer_type || 'prospect').toLowerCase();
+        if (type !== 'prospect') continue;
+        const pid = String(r.referrer_id);
+        const refKey = `${pid}:${r.referred_prospect_id != null ? 'p' + r.referred_prospect_id : 'row' + r.id}`;
+        if (seenRefs.has(refKey)) continue;
+        seenRefs.add(refKey);
+        bump(pid, 'refs', '');
+    }
+
     // Flag: in scope, not a customer by any marker, total strictly > HIGH_TOUCH_MIN.
     const rows = [];
     for (const [pid, e] of agg) {
-        const total = e.cps + e.ftf + e.events;
+        const total = e.cps + e.ftf + e.events + e.refs;
         if (total <= HIGH_TOUCH_MIN) continue;
         const p = prospMap[pid];
         if (!_prospectInScope(p)) continue;
@@ -2574,7 +2601,7 @@ const getHighTouchProspects = () => _cachedWindow('highTouchProspects', async ()
         rows.push({
             id: p.id, name: p.full_name || '—', phone: p.phone || '',
             agentName: userMap[String(p.responsible_agent_id)]?.full_name || '—',
-            cps: e.cps, ftf: e.ftf, events: e.events, total, lastDate: e.lastDate || '',
+            cps: e.cps, ftf: e.ftf, events: e.events, refs: e.refs, total, lastDate: e.lastDate || '',
         });
     }
     rows.sort((x, y) => y.total - x.total || (y.lastDate || '').localeCompare(x.lastDate || ''));
@@ -3703,7 +3730,7 @@ const buildHighTouchDetails = async () => {
 
     const summary = `<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px;">
         <strong>${count}</strong> prospect${count === 1 ? '' : 's'} met more than ${HIGH_TOUCH_MIN} times without converting — highest closing potential.
-        <div style="margin-top:4px;color:var(--gray-500);font-size:11px;">All time (the date filter above does not apply) · each CPS, FTF and attended event counts as 1 · anyone already a customer is excluded. Click a name to open the profile.</div>
+        <div style="margin-top:4px;color:var(--gray-500);font-size:11px;">All time (the date filter above does not apply) · each CPS, FTF, attended event and referral made counts as 1 · anyone already a customer is excluded. Click a name to open the profile.</div>
     </div>`;
 
     if (!rows.length) return summary + `<div style="padding:32px;text-align:center;color:var(--gray-400);">No prospect has been met more than ${HIGH_TOUCH_MIN} times yet.</div>`;
@@ -3720,6 +3747,7 @@ const buildHighTouchDetails = async () => {
         ${td(r.cps, true)}
         ${td(r.ftf, true)}
         ${td(r.events, true)}
+        ${td(r.refs || 0, true)}
         ${td(`<strong>${r.total}</strong>`, true)}
         ${td(escapeHtml(r.lastDate || '—'))}
     </tr>`).join('');
@@ -3728,7 +3756,7 @@ const buildHighTouchDetails = async () => {
         <div style="max-height:55vh;overflow:auto;border:1px solid var(--border,#e5e0d8);border-radius:6px;">
             <table style="width:100%;border-collapse:collapse;font-size:13px;">
                 <thead style="background:var(--gray-50,#f7f4ed);position:sticky;top:0;z-index:1;">
-                    <tr>${th('Prospect')}${th('Agent')}${th('CPS', true)}${th('FTF', true)}${th('Events', true)}${th('Total', true)}${th('Last Touch')}</tr>
+                    <tr>${th('Prospect')}${th('Agent')}${th('CPS', true)}${th('FTF', true)}${th('Events', true)}${th('Referrals', true)}${th('Total', true)}${th('Last Touch')}</tr>
                 </thead>
                 <tbody>${body}</tbody>
             </table>
@@ -3932,9 +3960,19 @@ const showKPIDetails = async (key) => {
     };
     const title = titles[key] || 'Details';
 
+    // Fixed-window metrics ignore the dashboard date filter, so echoing the
+    // filtered range above their breakdown reads as a contradiction (owner
+    // flagged this on the all-time card). Name the real window instead.
+    const fixedWindow = {
+        highTouchProspects: 'All time (ignores the date filter)',
+        activeAgents: 'Past 60 days, rolling (ignores the date filter)',
+        agentHours: 'This week, Mon–Sun (ignores the date filter)',
+    }[key];
     const filterStrip = `
         <div style="background:var(--gray-50,#f7f4ed);padding:10px 14px;border-radius:6px;margin-bottom:14px;font-size:12px;color:var(--gray-500);">
-            <strong>Date range:</strong> ${from} to ${to}
+            ${fixedWindow
+                ? `<strong>Window:</strong> ${fixedWindow}`
+                : `<strong>Date range:</strong> ${from} to ${to}`}
             &nbsp;·&nbsp; <strong>Role filter:</strong> ${_currentRoleFilter}
             ${_visibleUserIds !== 'all' ? ' &nbsp;·&nbsp; <strong>Scoped to your team</strong>' : ''}
         </div>`;

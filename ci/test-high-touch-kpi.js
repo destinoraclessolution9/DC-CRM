@@ -17,6 +17,10 @@
 //      agent/role scope via the prospect's RESPONSIBLE agent (deliberately not the
 //      per-activity lead — a prospect met 6× by two agents is flagged, not split
 //      into two invisible 3s).
+//   6. REFERRALS MADE ADD 1 EACH (owner follow-up 2026-08-08), read from the
+//      referrals table with the referral tree's key semantics: prospect-type
+//      referrers only (case-insensitive, missing type = prospect), deduped per
+//      referred person, and NEVER moving Last Touch (that stays "last met").
 //
 // HARNESS: loads the REAL chunks/script-reporting.js into a stubbed browser and
 // injects an export hook just before app.register(). No logic duplicated here.
@@ -77,7 +81,7 @@ global.window._crmUtils = {
 };
 
 // ── Data fixtures + fetch counters ──────────────────────────────────────────
-let ACTIVITIES = [], PROSPECTS = [], CUSTOMERS = [], USERS = [], ATTENDEES = [];
+let ACTIVITIES = [], PROSPECTS = [], CUSTOMERS = [], USERS = [], ATTENDEES = [], REFERRALS = [];
 let PAGED_FETCHES = 0;      // queryPaged calls (the getter's lifetime reads)
 let PAGED_TYPE_THROWS = false; // force the type-filtered fetch down the getAll fallback
 global.AppDataStore = {
@@ -86,6 +90,7 @@ global.AppDataStore = {
         : t === 'customers' ? CUSTOMERS
         : t === 'users' ? USERS
         : t === 'event_attendees' ? ATTENDEES
+        : t === 'referrals' ? REFERRALS
         : []),
     getActivitiesInRange: async (from, to) =>
         ACTIVITIES.filter(a => !a.activity_date || (a.activity_date >= from && a.activity_date <= to)),
@@ -110,7 +115,7 @@ let src = fs.readFileSync(chunkPath, 'utf8');
 const ANCHOR = "app.register('reporting', {";
 if (!src.includes(ANCHOR)) { console.error('FAIL: register anchor not found — harness needs updating'); process.exit(1); }
 src = src.replace(ANCHOR, `window.__T = {
-        getHighTouchProspects, buildHighTouchDetails,
+        getHighTouchProspects, buildHighTouchDetails, showKPIDetails,
         HIGH_TOUCH_MIN, HIGH_TOUCH_MEET_TYPES,
         _highTouchWindowParts, _windowLineHtml, _buildKpiCards, renderKPIStats,
         KPI_DEFINITIONS,
@@ -161,9 +166,20 @@ const attended = (pid, opts = {}) => {
     });
 };
 
+let _refId = 0;
+// One referral MADE BY prospect `pid` (referrals-table shape from the CPS
+// intake auto-create; override referrer_type / referred id via opts).
+const referral = (pid, opts = {}) => REFERRALS.push({
+    id: ++_refId,
+    referrer_id: pid,
+    referrer_type: 'referrer_type' in opts ? opts.referrer_type : 'prospect',
+    referred_prospect_id: 'referred' in opts ? opts.referred : 5000 + _refId,
+    referral_source: 'CPS', created_at: new Date().toISOString(),
+});
+
 const reset = () => {
-    ACTIVITIES = []; PROSPECTS = []; CUSTOMERS = []; USERS = []; ATTENDEES = [];
-    PAGED_FETCHES = 0; PAGED_TYPE_THROWS = false; _actId = 0;
+    ACTIVITIES = []; PROSPECTS = []; CUSTOMERS = []; USERS = []; ATTENDEES = []; REFERRALS = [];
+    PAGED_FETCHES = 0; PAGED_TYPE_THROWS = false; _actId = 0; _refId = 0;
     T.setScope('all', 'All'); T.resetWindows();
 };
 
@@ -181,17 +197,81 @@ reset();
     eq('…and the count matches the rows', r.count, 1);
 }
 
-// ── 2. CPS + FTF + attended events SUM to the total ─────────────────────────
+// ── 2. CPS + FTF + attended events + referrals SUM to the total ─────────────
 reset();
 {
     prospect(1, { name: 'Mixed' });
     meets(1, 'CPS', 2);
     meets(1, 'FTF', 2);
-    attended(1); attended(1);
+    attended(1);
+    referral(1);
     const r = await T.getHighTouchProspects();
-    eq('2 CPS + 2 FTF + 2 events = 6 → flagged with the right split',
-        r.rows.map(x => [x.name, x.cps, x.ftf, x.events, x.total]),
-        [['Mixed', 2, 2, 2, 6]]);
+    eq('2 CPS + 2 FTF + 1 event + 1 referral = 6 → flagged with the right split',
+        r.rows.map(x => [x.name, x.cps, x.ftf, x.events, x.refs, x.total]),
+        [['Mixed', 2, 2, 1, 1, 6]]);
+}
+
+// ── 2b. Referral rules: who counts, dedup, and Last Touch ───────────────────
+reset();
+{
+    prospect(1, { name: 'Boundary By Referral' });
+    meets(1, 'CPS', 5, daysAgo(40));
+    const before = await T.getHighTouchProspects();
+    eq('5 meets alone do not flag', before.count, 0);
+    referral(1);
+    T.resetWindows();
+    const after = await T.getHighTouchProspects();
+    eq('…the 6th touch via a referral flags', after.rows.map(x => [x.name, x.refs, x.total]),
+        [['Boundary By Referral', 1, 6]]);
+    eq('…and the referral does NOT move Last Touch (stays the last meet)',
+        after.rows[0].lastDate, daysAgo(40));
+}
+reset();
+{
+    prospect(1, { name: 'Legacy Case' });
+    meets(1, 'CPS', 5);
+    referral(1, { referrer_type: 'Prospect' }); // capitalised legacy row
+    const r = await T.getHighTouchProspects();
+    eq('referrer_type matches case-insensitively', r.rows.map(x => x.refs), [1]);
+}
+reset();
+{
+    prospect(1, { name: 'Untyped' });
+    meets(1, 'CPS', 5);
+    referral(1, { referrer_type: null }); // missing type defaults to prospect (like _referrerKeyOf)
+    const r = await T.getHighTouchProspects();
+    eq('a referral row with no referrer_type counts as a prospect referral', r.rows.map(x => x.refs), [1]);
+}
+reset();
+{
+    prospect(1, { name: 'Not Mine' });
+    meets(1, 'CPS', 5);
+    referral(1, { referrer_type: 'user' });     // an agent with the same id referred someone
+    referral(1, { referrer_type: 'customer' }); // a customer with the same id referred someone
+    const r = await T.getHighTouchProspects();
+    eq('user/customer referrer rows never count toward the prospect', r.count, 0);
+}
+reset();
+{
+    prospect(1, { name: 'Dup Referral' });
+    meets(1, 'CPS', 4);
+    referral(1, { referred: 777 });
+    referral(1, { referred: 777 }); // double-written row for the same referred person
+    const r = await T.getHighTouchProspects();
+    eq('the same referred person counts once (4 meets + 1 deduped referral = 5 → not flagged)', r.count, 0);
+
+    T.resetWindows();
+    referral(1, { referred: 888 }); // a genuinely different person
+    const r2 = await T.getHighTouchProspects();
+    eq('…a second distinct referred person is a real 6th touch', r2.rows.map(x => [x.refs, x.total]), [[2, 6]]);
+}
+reset();
+{
+    prospect(1, { name: 'Referrals Only' });
+    for (let i = 0; i < 6; i++) referral(1);
+    const r = await T.getHighTouchProspects();
+    eq('6 referrals with zero meetings still crosses the threshold (owner arithmetic: it all sums)',
+        r.rows.map(x => [x.name, x.refs, x.total]), [['Referrals Only', 6, 6]]);
 }
 
 // ── 3. Every conversion marker excludes ─────────────────────────────────────
@@ -385,12 +465,15 @@ reset();
     meets(1, 'CPS', 4);
     meets(1, 'FTF', 2);
     attended(1);
+    referral(1);
     const html = await T.buildHighTouchDetails();
     ok('summary carries the count', /<strong>1<\/strong> prospect/.test(html));
     ok('the name renders escaped', html.includes('Tan &lt;Ah&gt; Kow'));
     ok('…as a link into the prospect profile', html.includes('app.showProspectDetail(1)'));
-    ok('the split renders (4 CPS, 2 FTF, 1 event, 7 total)',
-        html.includes('>4</td>') && html.includes('>2</td>') && html.includes('>1</td>') && html.includes('<strong>7</strong>'));
+    ok('the split renders (4 CPS, 2 FTF, 1 event, 1 referral, 8 total)',
+        html.includes('>4</td>') && html.includes('>2</td>') && html.includes('>1</td>') && html.includes('<strong>8</strong>'));
+    ok('the Referrals column exists', html.includes('Referrals'));
+    ok('…and the summary names referrals as a touch', /referral made counts as 1/.test(html));
     ok('the agent column names the responsible agent', html.includes('Agent Seven'));
     ok('the strip says the date filter does not apply', /date filter above does not apply/.test(html));
 }
@@ -398,6 +481,28 @@ reset();
 {
     const html = await T.buildHighTouchDetails();
     ok('empty state says so', /No prospect has been met more than 5 times/.test(html));
+}
+
+// ── 13b. The modal strip names the real window, not the date filter ─────────
+// (owner flagged the "Date range: …" line contradicting an all-time breakdown)
+reset();
+{
+    const MODALS = [];
+    const realShowModal = global.UI.showModal;
+    global.UI.showModal = (t, c) => MODALS.push({ t, c });
+    prospect(1, { name: 'Strip Case' });
+    meets(1, 'CPS', 6);
+    await T.showKPIDetails('highTouchProspects');
+    const finalHt = MODALS[MODALS.length - 1];
+    ok('the high-touch strip says All time', /Window:<\/strong> All time/.test(finalHt.c), finalHt.c.slice(0, 300));
+    ok('…and does NOT echo the filtered date range', !/Date range:/.test(finalHt.c));
+    ok('…while the title carries All Time', /All Time/.test(finalHt.t));
+
+    MODALS.length = 0;
+    await T.showKPIDetails('cpsCount');
+    const finalCps = MODALS[MODALS.length - 1];
+    ok('a period metric still shows its date range', /Date range:/.test(finalCps.c));
+    global.UI.showModal = realShowModal;
 }
 
 // ── 14. Zero state on the getter ────────────────────────────────────────────
