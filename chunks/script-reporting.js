@@ -93,7 +93,8 @@
         activityHeadcount: "Event attendance - Sum of attendees by activity title",
         neaPitching: "NEA Pitching - Distinct people pitched the DC 代理配套 (Agent Package), taken from Post-Meetup Notes → Potential & Opportunities. Same person counts once no matter how many meetings.",
         fengshuiPitching: "Fengshui Pitching - Distinct people pitched a Feng Shui audit (灵活 flexi or 专案 project), taken from Post-Meetup Notes → Potential & Opportunities. Same person counts once even if both were ticked.",
-        agentHours: "Agent operating hours this week (Mon–Sun) vs weekly target — Full-time 45h, Part-time 20h. Sums the duration of every calendar item each agent led or attended (any activity type); 1h is assumed when an event has no start/end time. Always the current week, regardless of the date filter above."
+        agentHours: "Agent operating hours this week (Mon–Sun) vs weekly target — Full-time 45h, Part-time 20h. Sums the duration of every calendar item each agent led or attended (any activity type); 1h is assumed when an event has no start/end time. Always the current week, regardless of the date filter above.",
+        highTouchProspects: "High-touch prospects — met more than 5 times in total (each CPS meeting, each FTF meeting and each attended event counts as 1) and still not a customer. These are the highest-potential closings — click for the name list. The window is ALL TIME and does not follow the date filter; the agent, role and market filters apply via the prospect's responsible agent."
     };
 
     let _currentTimeFilter = 'monthly';
@@ -1392,7 +1393,7 @@
         // RPC fast path inside getConversionRate. getActiveAgents uses a rolling
         // 60-day window (ignores from/to) — the RPC replicates that exactly.
         const _ext = await _tryExtendedKpiRPC(from, to);
-        const [activityHeadcount, conversionRate, meetUpExistingCount, activeAgents, agentHoursSummary, neaPitching, fengshuiPitching, cpsRef, cpsWin, nc365] = await Promise.all([
+        const [activityHeadcount, conversionRate, meetUpExistingCount, activeAgents, agentHoursSummary, neaPitching, fengshuiPitching, cpsRef, cpsWin, nc365, highTouch] = await Promise.all([
             _ext ? _ext.activityHeadcount   : getActivityHeadcount(from, to),
             getConversionRate(from, to),
             _ext ? _ext.meetUpExistingCount : getMeetUpExistingCustomerCount(from, to),
@@ -1414,12 +1415,22 @@
             // from/to by design and is promise-cached, so the parallel current+previous
             // calculateKPIs calls share one computation.
             getNewCustomers365(),
+            // All-time high-touch prospects (met >5×, not yet customer). Ignores
+            // from/to by design; promise-cached like the windows above. Caught HERE
+            // rather than inside the getter so a failure degrades this one card to 0
+            // instead of blanking the dashboard — and the rejection still evicts
+            // itself from _cachedWindow, so the next render retries.
+            getHighTouchProspects().catch(e => { console.warn('[reports] high-touch KPI failed:', e && e.message); return null; }),
         ]);
         // Fields for the cards' rolling-window lines. Spread into BOTH return shapes
         // below (the RPC fast path and the client fallback) so the lines render
         // identically whether or not the kpi_* aggregates exist.
         const cpsSplit = {
             newCustomers365: nc365,
+            // Scalar on purpose: the CSV export walks scalar kpi entries, and the
+            // card needs only the count. The drill-down re-reads the cached getter
+            // for the name rows.
+            highTouchProspects: highTouch ? highTouch.count : 0,
             cpsAgentReferrers:  cpsRef.agents,
             cpsClientReferrers: cpsRef.clients,
             cpsUnattributed:    cpsRef.unattributed,
@@ -2401,6 +2412,174 @@ const renderPeopleMetSection = async () => {
 // while getCPSCount uses a raw `.includes(...)`. Sharing one implementation removes
 // that inconsistency too.
 const getCFHeadcount = async (from, to) => (await getCPSReferrerSplit(from, to)).clients;
+
+// ── High-touch prospects: met >5 times, still not a customer ─────────────────
+// Owner ask (2026-08-08): each CPS meeting = 1, each FTF meeting = 1, each
+// attended event = 1; a prospect whose LIFETIME total exceeds HIGH_TOUCH_MIN and
+// who has still not become a customer is the highest-potential closing — the
+// card counts them, the drill-down names them.
+//
+// ALL TIME by design: "met 6 times" is a property of the whole relationship, so
+// the window deliberately ignores the dashboard date filter (same contract as
+// getActiveAgents' 60-day window — and like it, the card says so on its face).
+// Future-dated (planned) meetings do not count as met.
+//
+// Scope gates run on the PROSPECT's responsible agent, not per-activity lead —
+// a deliberate deviation from the sibling getters. The flag belongs to the
+// prospect: gating each touch by its lead agent would show a prospect met 6×
+// by two different agents as 3 touches under either agent's filter, flagged
+// for nobody.
+//
+// GR / XG / FSA are NOT meets here (owner listed CPS + FTF + attendance only);
+// to widen the definition, extend HIGH_TOUCH_MEET_TYPES.
+const HIGH_TOUCH_MIN = 5; // flag when total touches EXCEED this ("more than 5")
+const HIGH_TOUCH_MEET_TYPES = ['CPS', 'FTF'];
+
+// Lifetime CPS/FTF rows, server-filtered by type so the whole activities table
+// never downloads. Falls back to getAll + client filter on any error (the
+// _reportActsInRange pattern); the fallback also returns a full id→date map so
+// the attendance pass can skip its own date fetch.
+const _highTouchMeetActs = async () => {
+    try {
+        const rows = await AppDataStore.queryPaged('activities', {
+            filters: { activity_type: HIGH_TOUCH_MEET_TYPES },
+            select: 'id,prospect_id,activity_type,activity_date',
+        });
+        return { rows, allDates: null };
+    } catch (e) {
+        console.warn('[reports] high-touch meet fetch fallback:', e && e.message);
+        const all = await AppDataStore.getAll('activities');
+        const allDates = new Map();
+        all.forEach(a => allDates.set(String(a.id), a.activity_date || ''));
+        return { rows: all.filter(a => HIGH_TOUCH_MEET_TYPES.includes(a.activity_type)), allDates };
+    }
+};
+
+// activity_id → activity_date for the attended rows' parent activities, fetched
+// slim in id-batches of 200 (an .in() list rides the request URL — hundreds of
+// ids are fine, thousands are not). Dates only feed the Last-Touch column and
+// the future-date guard, so on error attendance still counts — dates are just
+// unknown for those rows.
+const _highTouchActDates = async (ids) => {
+    const map = new Map();
+    for (let i = 0; i < ids.length; i += 200) {
+        const batch = ids.slice(i, i + 200);
+        try {
+            const rows = await AppDataStore.queryPaged('activities', {
+                filters: { id: batch }, select: 'id,activity_date',
+            });
+            rows.forEach(r => map.set(String(r.id), r.activity_date || ''));
+        } catch (e) {
+            console.warn('[reports] high-touch attendance date fetch failed (batch skipped):', e && e.message);
+        }
+    }
+    return map;
+};
+
+// Promise-cached via _cachedWindow (scope-keyed, 60s TTL): the parallel
+// current+previous calculateKPIs calls and the drill-down share one computation.
+const getHighTouchProspects = () => _cachedWindow('highTouchProspects', async () => {
+    const today = toLocalDateStr(new Date());
+    const [meet, attendees, prospects, customers, users] = await Promise.all([
+        _highTouchMeetActs(),
+        AppDataStore.getAll('event_attendees'),
+        AppDataStore.getAll('prospects'),
+        AppDataStore.getAll('customers'),
+        AppDataStore.getAll('users'),
+    ]);
+    const userMap = {}; users.forEach(u => { userMap[String(u.id)] = u; });
+    const prospMap = {}; prospects.forEach(p => { prospMap[String(p.id)] = p; });
+
+    // "Already a customer" — same triple guard as getPeopleMet (conversion FK,
+    // prospect status, name/phone match to an existing customer row) plus the
+    // approved-conversion flag the prospect detail screens honour.
+    const convertedPids = new Set();
+    customers.forEach(c => { if (c.converted_from_prospect_id != null) convertedPids.add(String(c.converted_from_prospect_id)); });
+    prospects.forEach(p => { if (p.status === 'converted' || p.conversion_status === 'approved') convertedPids.add(String(p.id)); });
+    const _normName = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const _phoneKey = (s) => { const d = String(s || '').replace(/\D/g, ''); return d.length >= 7 ? d.slice(-8) : ''; };
+    const custNameKeys = new Set();
+    const custPhoneKeys = new Set();
+    customers.forEach(c => {
+        const nk = _normName(c.full_name); if (nk) custNameKeys.add(nk);
+        const pk = _phoneKey(c.phone); if (pk) custPhoneKeys.add(pk);
+    });
+
+    // Which prospects are in scope at all (market + agent + role, via the
+    // prospect's responsible agent). String-normalised id compares — see the
+    // audit note in _buildActivityHeadcountDetailsLegacy.
+    const _prospectInScope = (p) => {
+        if (!p) return false;
+        if (!_recInMarket(p)) return false;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(p.responsible_agent_id))) return false;
+        if (_currentRoleFilter !== 'All') {
+            const agent = userMap[String(p.responsible_agent_id)];
+            if (!agent || agent.role !== _currentRoleFilter) return false;
+        }
+        return true;
+    };
+
+    const agg = new Map(); // prospect_id → { cps, ftf, events, lastDate }
+    const bump = (pid, bucket, date) => {
+        let e = agg.get(pid);
+        if (!e) { e = { cps: 0, ftf: 0, events: 0, lastDate: '' }; agg.set(pid, e); }
+        e[bucket]++;
+        if ((date || '') > e.lastDate) e.lastDate = date;
+    };
+
+    // Pass 1 — CPS/FTF meetings held (date <= today keeps planned future
+    // meetings out of "met"). countedMeets guards pass 2 against an attendee
+    // row on the same activity counting the same meeting twice.
+    const countedMeets = new Set(); // `${activity_id}:${prospect_id}`
+    for (const a of meet.rows) {
+        if (a.prospect_id == null) continue;
+        if (!HIGH_TOUCH_MEET_TYPES.includes(a.activity_type)) continue;
+        if ((a.activity_date || '') > today) continue;
+        const pid = String(a.prospect_id);
+        bump(pid, a.activity_type === 'CPS' ? 'cps' : 'ftf', a.activity_date || '');
+        countedMeets.add(`${String(a.id)}:${pid}`);
+    }
+
+    // Pass 2 — event attendance. attendee_type semantics mirror
+    // getActivityHeadcount: 'agent' and 'customer' rows are other people;
+    // everything else is a prospect row keyed by entity_id/attendee_id.
+    const attRows = [];
+    const wantDates = new Set();
+    for (const att of attendees) {
+        if (!att.attended && att.attendance_status !== 'Attended') continue;
+        if (att.attendee_type === 'agent' || att.attendee_type === 'customer') continue;
+        const entityId = att.entity_id || att.attendee_id;
+        if (entityId == null) continue;
+        const pid = String(entityId);
+        if (att.activity_id != null && countedMeets.has(`${String(att.activity_id)}:${pid}`)) continue;
+        attRows.push({ pid, actId: att.activity_id != null ? String(att.activity_id) : null });
+        if (att.activity_id != null && !meet.allDates) wantDates.add(String(att.activity_id));
+    }
+    const actDates = meet.allDates || (wantDates.size ? await _highTouchActDates([...wantDates]) : new Map());
+    for (const r of attRows) {
+        const date = r.actId != null ? (actDates.get(r.actId) || '') : '';
+        if (date && date > today) continue; // future event — not attended yet in any real sense
+        bump(r.pid, 'events', date);
+    }
+
+    // Flag: in scope, not a customer by any marker, total strictly > HIGH_TOUCH_MIN.
+    const rows = [];
+    for (const [pid, e] of agg) {
+        const total = e.cps + e.ftf + e.events;
+        if (total <= HIGH_TOUCH_MIN) continue;
+        const p = prospMap[pid];
+        if (!_prospectInScope(p)) continue;
+        if (convertedPids.has(pid)) continue;
+        if (custNameKeys.has(_normName(p.full_name)) || (_phoneKey(p.phone) && custPhoneKeys.has(_phoneKey(p.phone)))) continue;
+        rows.push({
+            id: p.id, name: p.full_name || '—', phone: p.phone || '',
+            agentName: userMap[String(p.responsible_agent_id)]?.full_name || '—',
+            cps: e.cps, ftf: e.ftf, events: e.events, total, lastDate: e.lastDate || '',
+        });
+    }
+    rows.sort((x, y) => y.total - x.total || (y.lastDate || '').localeCompare(x.lastDate || ''));
+    return { count: rows.length, rows };
+});
 
 const getActivityHeadcount = async (from, to) => {
     const activities = await _reportActsInRange(from, to, 'getActivityHeadcount');
@@ -3515,6 +3694,48 @@ const buildCFHeadcountDetails = async (from, to) => {
         'No client referrals in this period');
 };
 
+// Drill-down for the "Prospect Met >5×" card. All-time by design (the generic
+// date-range strip above the body does not apply — the summary strip says so).
+// Reads the same _cachedWindow-backed getter as the card, so within the TTL the
+// click costs nothing and the list always matches the number clicked.
+const buildHighTouchDetails = async () => {
+    const { count, rows } = await getHighTouchProspects();
+
+    const summary = `<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px;">
+        <strong>${count}</strong> prospect${count === 1 ? '' : 's'} met more than ${HIGH_TOUCH_MIN} times without converting — highest closing potential.
+        <div style="margin-top:4px;color:var(--gray-500);font-size:11px;">All time (the date filter above does not apply) · each CPS, FTF and attended event counts as 1 · anyone already a customer is excluded. Click a name to open the profile.</div>
+    </div>`;
+
+    if (!rows.length) return summary + `<div style="padding:32px;text-align:center;color:var(--gray-400);">No prospect has been met more than ${HIGH_TOUCH_MIN} times yet.</div>`;
+
+    // Local table variant instead of renderDetailTable: that helper escapes every
+    // cell, and this list's whole point is names you can ACT on — the name cell
+    // links through to the prospect profile (showProspectDetail has a self-loading
+    // core stub, so the cross-chunk call is safe from this modal).
+    const th = (label, right) => `<th scope="col" style="padding:10px 12px;text-align:${right ? 'right' : 'left'};font-weight:600;color:var(--gray-500);border-bottom:1px solid var(--border,#e5e0d8);">${label}</th>`;
+    const td = (html, right) => `<td style="padding:10px 12px;${right ? 'text-align:right;' : ''}border-bottom:1px solid var(--gray-100,#f1ede3);">${html}</td>`;
+    const body = rows.map(r => `<tr>
+        ${td(`<a href="javascript:void(0)" onclick="UI.hideModal(); app.showProspectDetail(${Number(r.id)})" style="color:var(--primary,#0D9488);font-weight:600;text-decoration:none;">${escapeHtml(r.name)}</a>`)}
+        ${td(escapeHtml(r.agentName))}
+        ${td(r.cps, true)}
+        ${td(r.ftf, true)}
+        ${td(r.events, true)}
+        ${td(`<strong>${r.total}</strong>`, true)}
+        ${td(escapeHtml(r.lastDate || '—'))}
+    </tr>`).join('');
+
+    return summary + `
+        <div style="max-height:55vh;overflow:auto;border:1px solid var(--border,#e5e0d8);border-radius:6px;">
+            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                <thead style="background:var(--gray-50,#f7f4ed);position:sticky;top:0;z-index:1;">
+                    <tr>${th('Prospect')}${th('Agent')}${th('CPS', true)}${th('FTF', true)}${th('Events', true)}${th('Total', true)}${th('Last Touch')}</tr>
+                </thead>
+                <tbody>${body}</tbody>
+            </table>
+        </div>
+        <div style="text-align:right;margin-top:8px;font-size:12px;color:var(--gray-400);">${rows.length} record${rows.length === 1 ? '' : 's'}</div>`;
+};
+
 const buildActivityHeadcountDetails = async (from, to) => {
     // Always use the client scan. It resolves each attendee's entity, which is
     // what lets us (a) split Customer vs Prospect into separate buckets and
@@ -3706,7 +3927,8 @@ const showKPIDetails = async (key) => {
         activityHeadcount: 'Activity Attendance',
         meetUpExistingCount: 'Meet Up (Existing Customers)',
         cfHeadcount: 'CF Headcount (Client Referrers)',
-        agentHours: 'Agent Operating Hours (This Week)'
+        agentHours: 'Agent Operating Hours (This Week)',
+        highTouchProspects: 'Prospect Met >5× (All Time)'
     };
     const title = titles[key] || 'Details';
 
@@ -3740,6 +3962,7 @@ const showKPIDetails = async (key) => {
         else if (key === 'meetUpExistingCount') body = await buildMeetUpExistingDetails(from, to);
         else if (key === 'cfHeadcount')        body = await buildCFHeadcountDetails(from, to);
         else if (key === 'agentHours')         body = await buildAgentHoursDetails();
+        else if (key === 'highTouchProspects') body = await buildHighTouchDetails(); // all-time — no from/to by design
         else body = '<p>No details available for this metric.</p>';
     } catch (e) {
         console.error('showKPIDetails error', e);
@@ -3806,6 +4029,13 @@ const showKPIDetails = async (key) => {
         `👥 ${current}/${wide}`,
     ]);
 
+    // Fixed-window label for the high-touch card. Two chips (not one string) for
+    // the same ~182px-mobile-card wrap reason as the other window lines.
+    const _highTouchWindowParts = () => ([
+        'All time',
+        `met >${HIGH_TOUCH_MIN}× · not yet customer`,
+    ]);
+
     // Same flex-wrap-one-span-per-chip treatment as _cpsSplitHtml, for the same
     // reason (the ~182px mobile card breaks a single text run mid-phrase). Sits above
     // the value, so it pushes DOWN rather than up. Shared by every card carrying a
@@ -3854,7 +4084,15 @@ const showKPIDetails = async (key) => {
               subType: 'epp', eppDetails,
               subHtml: (kpis.eppDetails || []).length > 0
                 ? (kpis.eppDetails || []).map(d => `<div style="font-size:11px;color:var(--gray-500);line-height:1.6;">${escapeHtml(d.bank)} &middot; ${escapeHtml(d.months)} months &times;${escapeHtml(d.count)}</div>`).join('')
-                : '' }
+                : '' },
+            // All-time flag count, so no meaningful "previous period" exists →
+            // noTrend. The window line above the value is load-bearing: without
+            // "All time" on screen, a number that ignores the date filter reads
+            // as stuck (same rule as the CPS momentum line).
+            { label: 'Prospect Met >5×', value: kpis.highTouchProspects || 0, prev: prevKpis.highTouchProspects || 0,
+              icon: '🔥', color: 'red', key: 'highTouchProspects', noTrend: true,
+              windowParts: _highTouchWindowParts(),
+              preHtml: _windowLineHtml(_highTouchWindowParts()) }
         ];
     };
 
@@ -3864,8 +4102,9 @@ const showKPIDetails = async (key) => {
         // Some cards (e.g. Agent Hours "45 / 90h") carry a display STRING, not a
         // number — a %-trend against it is meaningless (string math → NaN, which
         // the old code silently rendered as a fake "0% ▲ vs last period"). Flag
-        // these so both render paths omit the trend badge entirely.
-        if (typeof cur !== 'number' || !isFinite(cur)) {
+        // these so both render paths omit the trend badge entirely. Cards may
+        // also opt out via noTrend (all-time metrics have no "last period").
+        if (c.noTrend || typeof cur !== 'number' || !isFinite(cur)) {
             return { trendClass: '', trendIcon: '', trendAbs: 0, trendHide: true };
         }
         const diff = c.prev > 0 ? ((cur - prevKpis[c.key]) / prevKpis[c.key] * 100).toFixed(1) : (cur > 0 ? '100' : '0');

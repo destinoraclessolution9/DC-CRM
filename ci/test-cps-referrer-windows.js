@@ -343,7 +343,7 @@ reset();
     // silently gaining or losing a window line should fail here.
     eq('exactly these cards carry a rolling-window line',
         cards.filter(c => (c.windowParts || []).length).map(c => c.key).sort(),
-        ['cpsCount', 'newCustomers']);
+        ['cpsCount', 'highTouchProspects', 'newCustomers']);
 
     // The window label is load-bearing: these numbers ignore the time filter, so
     // without it on screen they read as a stuck value.
