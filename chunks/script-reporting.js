@@ -2661,14 +2661,14 @@ const getHighTouchProspects = () => _cachedWindow('highTouchProspects', async ()
 const NL_TOPICS = {
     recruit: {
         label: '招商 Recruitment', icon: '🤝',
-        keywords: ['招商', 'recruit', 'join team', '加入团队', '做代理', '当代理', '创业', 'business opportunity', '生意机会'],
+        keywords: ['招商', 'recruit', 'join team', '加入团队', '做代理', '当代理', '创业', 'business opportunity', '生意机会', 'extra income', '合作', 'consultant'],
         productKeywords: [],
         categories: ['DC 招商会'],
         actTypes: [],
     },
     fengshui: {
         label: '风水 Fengshui', icon: '🧭',
-        keywords: ['风水', 'fengshui', 'feng shui', '风水方案', '风水审计', 'fengshui audit', '看风水', '阳宅'],
+        keywords: ['风水', 'fengshui', 'feng shui', '风水方案', '风水审计', 'fengshui audit', '看风水', '阳宅', '布局', 'new house'],
         productKeywords: ['风水', 'feng shui', 'fengshui', 'audit'],
         categories: ['个人风水基础课', '环境风水基础课', '风水改命分享会-简易', '风水改命分享会-专案', '汇集-商业', '汇集-灵活', '汇集-简易', '汇聚-专案', '运程讲座', '博物馆'],
         actTypes: ['FSA', 'SITE'],
@@ -2682,7 +2682,7 @@ const NL_TOPICS = {
     },
     caiku: {
         label: '财库 Cai Ku', icon: '🖼️',
-        keywords: ['财库', 'cai ku', 'caiku'],
+        keywords: ['财库', 'cai ku', 'caiku', '催财'],
         productKeywords: ['cai ku', 'caiku', '财库'],
         categories: [],
         actTypes: [],
