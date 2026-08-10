@@ -183,6 +183,13 @@
                     <div style="grid-column:1/-1; text-align:center; padding:32px; color:var(--gray-400);"><i class="fas fa-spinner fa-spin"></i> Loading KPI data...</div>
                 </div>
 
+                <!-- Name List — Who to Focus (owner ask 2026-08-10). Filled by
+                     renderNameListSection; kept as an empty anchor here so the
+                     legacy shell positions it between the KPI grid and the
+                     charts row. The React shell lacks it — renderNameListSection
+                     self-injects after #kpi-stats-grid there (People Met pattern). -->
+                <div id="name-list-section" style="margin-top:24px;"></div>
+
                 <div class="dashboard-charts-row">
                     <div class="chart-container">
                         <div class="chart-header">
@@ -1247,6 +1254,7 @@
             renderHeadcountTable().catch(e => console.warn('renderHeadcountTable failed:', e)),
             renderActivityAttendanceDetails().catch(e => console.warn('renderActivityAttendanceDetails failed:', e)),
             renderPeopleMetSection().catch(e => console.warn('renderPeopleMetSection failed:', e)),
+            renderNameListSection().catch(e => console.warn('renderNameListSection failed:', e)),
             // Hierarchical target comparison runs in the same parallel batch.
             // Wrapped so a render failure doesn't reject the whole Promise.all.
             (async () => {
@@ -2607,6 +2615,844 @@ const getHighTouchProspects = () => _cachedWindow('highTouchProspects', async ()
     rows.sort((x, y) => y.total - x.total || (y.lastDate || '').localeCompare(x.lastDate || ''));
     return { count: rows.length, rows };
 });
+
+// ═════════════════════════════════════════════════════════════════════════════
+// NAME LIST — "Who to Focus" (owner spec locked 2026-08-10)
+//
+// Seven lists between the KPI grid and the Revenue Trend chart. Every table
+// shows its top 5 rows with expand/collapse; everyone with ≥1 qualifying
+// signal is in the data. Data loads only when the section is opened.
+//
+//   1 Top Referral (365d)      — agents board + clients board (P/C tagged),
+//                                head count = unique people referred.
+//   2 Meet-Up Coverage         — month chips + customers met (90d) + customers
+//                                NOT met in 90d (the action list) + prospects
+//                                met (90d, separate — they are not customers).
+//   3-6 Potential lists (365d) — 招商 / 风水 / Power Ring / 财库 via the shared
+//                                mention engine below.
+//   7 Audited customers        — all-time; audit package bought OR FSA logged.
+//
+// MENTION ENGINE. One activity = max 1 mention per topic, classified into ONE
+// bucket by priority: Tick (agent ticked a matching product under Potential &
+// Opportunities, or a matching category under Next Actions — owner: "tick after
+// FTF/GR/CPS = I pitched it in person") → Event (attended a topic event by the
+// event's clicked categories/title; FSA/SITE auto-counts for 风水) → Talk
+// (topic keyword in summary / key points / needs / pain points / solution /
+// title / remarks). A topic hit on the profile (cps_interest, interests,
+// pain_points) adds +1 once (★) and never moves Last Mention.
+// Categories: A = 5+ mentions · B = 2-4 · C = 1 (owner corrected 2026-08-10).
+//
+// TOUCH WEIGHTS (List 2): meeting/class/CPS = 1 · CALL = 0.5 · WHATSAPP = 0.3
+// (owner 2026-08-10); EMAIL counts nothing. "Physical" = meet+class+CPS only —
+// chips, the repeat-frequency breakdown and New-Head-Count use physical touches;
+// the 90-day service rule (✅/not-met) is satisfied by ANY weighted touch.
+// NEW HEAD COUNT = the customer's physical touch comes after 90+ days of zero
+// contact of any kind (never-contacted included) — the relationship restarted.
+//
+// Scope: person-level (prospect/customer responsible agent), same contract as
+// getHighTouchProspects. All getters run through _cachedWindow so filter
+// changes recompute and parallel renders share one computation.
+// ═════════════════════════════════════════════════════════════════════════════
+
+// DC 日 is deliberately NOT a 招商 signal (owner: "consider an event").
+// 运程讲座 and 博物馆 count for BOTH Power Ring and 风水 (owner 2026-08-10).
+// 财库 counts explicit 财库 signals only — generic painting classes do NOT.
+// Keywords are the launch draft — extend freely; matching is lowercase substring.
+const NL_TOPICS = {
+    recruit: {
+        label: '招商 Recruitment', icon: '🤝',
+        keywords: ['招商', 'recruit', 'join team', '加入团队', '做代理', '当代理', '创业', 'business opportunity', '生意机会'],
+        productKeywords: [],
+        categories: ['DC 招商会'],
+        actTypes: [],
+    },
+    fengshui: {
+        label: '风水 Fengshui', icon: '🧭',
+        keywords: ['风水', 'fengshui', 'feng shui', '风水方案', '风水审计', 'fengshui audit', '看风水', '阳宅'],
+        productKeywords: ['风水', 'feng shui', 'fengshui', 'audit'],
+        categories: ['个人风水基础课', '环境风水基础课', '风水改命分享会-简易', '风水改命分享会-专案', '汇集-商业', '汇集-灵活', '汇集-简易', '汇聚-专案', '运程讲座', '博物馆'],
+        actTypes: ['FSA', 'SITE'],
+    },
+    ring: {
+        label: 'Power Ring', icon: '💍',
+        keywords: ['power ring', '改命戒指', '个人改命', '九星', '戒指', 'pr3', 'pr4', 'pr5'],
+        productKeywords: ['power ring', '改命戒指', 'pr3', 'pr4', 'pr5'],
+        categories: ['个人改命分享会', '运程讲座', '博物馆'],
+        actTypes: [],
+    },
+    caiku: {
+        label: '财库 Cai Ku', icon: '🖼️',
+        keywords: ['财库', 'cai ku', 'caiku'],
+        productKeywords: ['cai ku', 'caiku', '财库'],
+        categories: [],
+        actTypes: [],
+    },
+};
+
+const NL_MEET_TYPES = ['FTF', 'GR', 'XG', 'FSA', 'SITE']; // in-person meets (List 2 "Meet" column)
+const NL_PHYS_KINDS = ['meet', 'cls', 'cps'];             // physical touches (chips / gap / repeat breakdown)
+const NL_WEIGHTS = { meet: 1, cls: 1, cps: 1, call: 0.5, wa: 0.3 };
+
+// Ownership matchers against purchases.item (same keyword style as
+// getCaseCountsByProduct). Power Ring: everyone can buy 2 — only 2+ owners
+// drop off the potential list (owner 2026-08-10). Audit tiers: specific
+// tiers listed BEFORE generic fengshui so "Flexi FengShui" never falls into
+// the generic bucket (the option-scan lesson).
+const NL_RING_OWN = ['power ring', '改命戒指', 'pr3', 'pr4', 'pr5'];
+const NL_CAIKU_OWN = ['cai ku', 'caiku', '财库'];
+const NL_AUDIT_TIERS = [
+    ['Flexi FengShui', ['flexi', 'flexible feng shui']],
+    ['Simplified Feng Shui', ['simplified', 'simple feng shui']],
+    ['FengShui', ['feng shui', 'fengshui', '风水']],
+];
+
+// summary / note_needs / note_pain_points are NOT in the activities light
+// select (verified against live PostgREST 2026-08-10) — the engine fetches its
+// own slim window instead of widening every cached read in the app.
+const NL_ACT_SELECT = 'id,activity_type,activity_date,activity_title,prospect_id,customer_id,lead_agent_id,event_id,summary,note_key_points,note_needs,note_pain_points,solution_sold,opportunity_potential,next_action';
+
+// "item1, item2 | Remarks: text" (serializeMultiSelectToText's stored shape,
+// same parse as buildPostMeetupNotesBlock). Remarks feed the Talk text blob;
+// items feed the Tick matcher.
+const _nlParseTicks = (raw) => {
+    const s = String(raw || '');
+    if (!s) return { items: [], remarks: '' };
+    const m = s.match(/ \| Remarks: ([\s\S]*)$/);
+    const itemsPart = m ? s.slice(0, s.lastIndexOf(' | Remarks:')) : s;
+    return { items: itemsPart.split(',').map(x => x.trim()).filter(Boolean), remarks: m ? m[1].trim() : '' };
+};
+
+// events.categories is either a JSON array or a comma list (parseEventCategories
+// contract); events.event_category does NOT exist on the live table — the real
+// columns are categories / category / title (probed 2026-08-10).
+const _nlParseCats = (raw) => {
+    if (Array.isArray(raw)) return raw.filter(Boolean).map(String);
+    const s = String(raw || '').trim();
+    if (!s) return [];
+    try { const j = JSON.parse(s); return Array.isArray(j) ? j.filter(Boolean).map(String) : [s]; }
+    catch (_) { return s.split(',').map(x => x.trim()).filter(Boolean); }
+};
+
+// Matchers return the matched string (evidence label) or null.
+const _nlTextHit = (topic, textLower) => {
+    for (const k of topic.keywords) if (textLower.includes(k)) return k;
+    return null;
+};
+const _nlTickHit = (topic, items) => {
+    for (const it of items) {
+        if (topic.categories.includes(it)) return it;           // Next Actions category tick
+        const l = it.toLowerCase();
+        for (const k of topic.productKeywords) if (l.includes(k)) return it; // product tick
+        for (const k of topic.keywords) if (l.includes(k)) return it;        // custom "Others" tick
+    }
+    return null;
+};
+const _nlCatHit = (topic, cats) => {
+    for (const c of cats) {
+        if (topic.categories.includes(c)) return c;
+        const l = String(c).toLowerCase();
+        for (const k of topic.keywords) if (l.includes(k)) return c;
+    }
+    return null;
+};
+
+const _nlDayDiff = (later, earlier) => Math.round((new Date(later + 'T00:00:00') - new Date(earlier + 'T00:00:00')) / 86400000);
+const _nlFmtW = (n) => { const r = Math.round(n * 10) / 10; return Number.isInteger(r) ? String(r) : r.toFixed(1); };
+
+const _getNameListData = () => _cachedWindow('nameListData', async () => {
+    const today = new Date();
+    const to = toLocalDateStr(today);
+    const from365 = _rollingFrom(365, today);
+    const from90 = _rollingFrom(90, today);
+    const monthStart = toLocalDateStr(new Date(today.getFullYear(), today.getMonth(), 1));
+
+    const actsP = (async () => {
+        try { return { rows: await AppDataStore.getActivitiesInRange(from365, to, { select: NL_ACT_SELECT, max: 50000 }), rich: true }; }
+        catch (e) {
+            console.warn('[namelist] rich window fetch fallback (Talk partially degraded):', e && e.message);
+            const all = await _reportActsInRange(from365, to, 'nameList');
+            return { rows: all.filter(a => (a.activity_date || '') >= from365 && (a.activity_date || '') <= to), rich: false };
+        }
+    })();
+    // All-time FSA rows mark "audited" (List 7 + the 风水-list exclusion) —
+    // slim type-filtered read, null on failure (audited detection then rests
+    // on purchases alone; the section still renders).
+    const fsaP = (async () => {
+        try { return await AppDataStore.queryPaged('activities', { filters: { activity_type: ['FSA'] }, select: 'id,prospect_id,customer_id,activity_date,lead_agent_id' }); }
+        catch (e) { console.warn('[namelist] all-time FSA fetch failed (audited = purchases only):', e && e.message); return null; }
+    })();
+    const [actsRes, fsaAll, attendees, events, prospects, customers, users, referrals, purchases] = await Promise.all([
+        actsP, fsaP,
+        AppDataStore.getAll('event_attendees'),
+        AppDataStore.getAll('events'),
+        AppDataStore.getAll('prospects'),
+        AppDataStore.getAll('customers'),
+        AppDataStore.getAll('users'),
+        AppDataStore.getAll('referrals'),
+        AppDataStore.getAll('purchases'),
+    ]);
+
+    const userMap = {}; users.forEach(u => { userMap[String(u.id)] = u; });
+    const prospMap = {}; prospects.forEach(p => { prospMap[String(p.id)] = p; });
+    const custMap = {}; customers.forEach(c => { custMap[String(c.id)] = c; });
+    const eventMap = {}; events.forEach(e => { eventMap[String(e.id)] = e; });
+
+    // Conversion triple guard (same contract as getPeopleMet / getHighTouchProspects):
+    // a prospect who became a customer is ALWAYS the customer person.
+    const _normName = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const _phoneKey = (s) => { const d = String(s || '').replace(/\D/g, ''); return d.length >= 7 ? d.slice(-8) : ''; };
+    const convertedPids = new Set();
+    const custByProspectId = new Map(); const custByName = new Map(); const custByPhone = new Map();
+    customers.forEach(c => {
+        if (c.converted_from_prospect_id != null) { convertedPids.add(String(c.converted_from_prospect_id)); custByProspectId.set(String(c.converted_from_prospect_id), c); }
+        const nk = _normName(c.full_name); if (nk && !custByName.has(nk)) custByName.set(nk, c);
+        const pk = _phoneKey(c.phone); if (pk && !custByPhone.has(pk)) custByPhone.set(pk, c);
+    });
+    prospects.forEach(p => { if (p.status === 'converted' || p.conversion_status === 'approved') convertedPids.add(String(p.id)); });
+
+    const _custForProspect = (pid, prosp) => {
+        let cust = custByProspectId.get(String(pid)) || null;
+        if (!cust && prosp) cust = (custByName.get(_normName(prosp.full_name)) || (_phoneKey(prosp.phone) && custByPhone.get(_phoneKey(prosp.phone)))) || null;
+        return cust;
+    };
+    const _personOfProspect = (pid) => {
+        const prosp = prospMap[String(pid)];
+        const cust = _custForProspect(pid, prosp);
+        if (cust) return 'c:' + cust.id;
+        if (convertedPids.has(String(pid))) return null; // converted, customer row unresolvable — never double-report
+        return prosp ? 'p:' + pid : null;
+    };
+    const _personOfActivity = (a) => {
+        if (a.customer_id != null && custMap[String(a.customer_id)]) return 'c:' + a.customer_id;
+        if (a.prospect_id != null) return _personOfProspect(a.prospect_id);
+        return null;
+    };
+    const _personRow = (key) => key && (key[0] === 'c' ? custMap[key.slice(2)] : prospMap[key.slice(2)]);
+    const _personInScope = (key) => {
+        const row = _personRow(key);
+        if (!row) return false;
+        if (!_recInMarket(row)) return false;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(row.responsible_agent_id))) return false;
+        if (_currentRoleFilter !== 'All') {
+            const agent = userMap[String(row.responsible_agent_id)];
+            if (!agent || agent.role !== _currentRoleFilter) return false;
+        }
+        return true;
+    };
+    const _agentName = (key) => { const row = _personRow(key); return userMap[String(row?.responsible_agent_id)]?.full_name || '—'; };
+    const _personName = (key) => _personRow(key)?.full_name || '—';
+
+    // ── Ownership / audited (all-time, from purchases + all-time FSA) ────────
+    const ringOwned = new Map(); const caikuOwned = new Set();
+    const auditBuys = new Map(); // personKey → [{label, date}]
+    for (const p of purchases) {
+        if (p.is_agent_package || p.customer_id == null || !custMap[String(p.customer_id)]) continue;
+        const key = 'c:' + p.customer_id;
+        const item = String(p.item || '').toLowerCase();
+        if (NL_RING_OWN.some(k => item.includes(k))) ringOwned.set(key, (ringOwned.get(key) || 0) + 1);
+        if (NL_CAIKU_OWN.some(k => item.includes(k))) caikuOwned.add(key);
+        for (const [label, kws] of NL_AUDIT_TIERS) {
+            if (kws.some(k => item.includes(k))) { if (!auditBuys.has(key)) auditBuys.set(key, []); auditBuys.get(key).push({ label, date: p.date || '' }); break; }
+        }
+    }
+    const fsaLatest = new Map(); // personKey → latest FSA date (all-time)
+    for (const a of (fsaAll || [])) {
+        const key = _personOfActivity(a);
+        if (!key) continue;
+        const d = a.activity_date || '';
+        if (d > (fsaLatest.get(key) || '')) fsaLatest.set(key, d);
+    }
+    const audited = new Set([...auditBuys.keys(), ...fsaLatest.keys()]);
+
+    // ── Activity pass: touches (90d) + topic mentions (365d) ─────────────────
+    const mentions = new Map(); // personKey → topicKey → {tick,event,talk,last,ev:[]}
+    const touches = new Map();  // personKey → [{d, k}]
+    const bumpMention = (key, topicKey, bucket, date, how) => {
+        let byTopic = mentions.get(key);
+        if (!byTopic) { byTopic = {}; mentions.set(key, byTopic); }
+        let m = byTopic[topicKey];
+        if (!m) { m = { tick: 0, event: 0, talk: 0, profile: false, last: '', ev: [] }; byTopic[topicKey] = m; }
+        m[bucket]++;
+        if ((date || '') > m.last) m.last = date;
+        if (m.ev.length < 40) m.ev.push(how);
+    };
+    const bumpTouch = (key, d, k) => {
+        let arr = touches.get(key);
+        if (!arr) { arr = []; touches.set(key, arr); }
+        arr.push({ d, k });
+    };
+    const _touchKindOf = (t) => NL_MEET_TYPES.includes(t) ? 'meet'
+        : t === 'CPS' ? 'cps'
+        : t === 'EVENT' ? 'cls'
+        : t === 'CALL' ? 'call'
+        : t === 'WHATSAPP' ? 'wa'
+        : null;
+
+    const countedActs = new Set(); // `${actId}:${personKey}` — attendee rows never re-count a direct activity
+    const actMap = {}; const actByEventId = {};
+    for (const a of actsRes.rows) { actMap[String(a.id)] = a; if (a.activity_type === 'EVENT' && a.event_id != null) actByEventId[String(a.event_id)] = a; }
+
+    const _eventCatsOf = (eventId) => {
+        const e = eventMap[String(eventId)];
+        if (!e) return [];
+        return [..._nlParseCats(e.categories), ...(e.category ? [String(e.category)] : []), ...(e.title ? [String(e.title)] : [])];
+    };
+
+    for (const a of actsRes.rows) {
+        const d = a.activity_date || '';
+        if (d < from365 || d > to) continue;
+        const key = _personOfActivity(a);
+        if (!key) continue;
+        countedActs.add(String(a.id) + ':' + key);
+
+        // Record touches across the FULL 365d window — the 90-day counting
+        // happens in _agg. Recording only ≥from90 would blind the New-Head-Count
+        // gap check for touches just before the 90-day line (a customer last
+        // contacted 89 days before an early-month meeting must read Repeat).
+        const kind = _touchKindOf(a.activity_type);
+        if (kind) bumpTouch(key, d, kind);
+
+        const opp = _nlParseTicks(a.opportunity_potential);
+        const na = _nlParseTicks(a.next_action);
+        const tickItems = [...opp.items, ...na.items];
+        const blob = [a.summary, a.note_key_points, a.note_needs, a.note_pain_points, a.solution_sold, a.activity_title, opp.remarks, na.remarks]
+            .filter(Boolean).join(' ').toLowerCase();
+        const cats = a.activity_type === 'EVENT' && a.event_id != null ? _eventCatsOf(a.event_id) : [];
+
+        for (const [topicKey, topic] of Object.entries(NL_TOPICS)) {
+            const tickM = tickItems.length ? _nlTickHit(topic, tickItems) : null;
+            if (tickM) { bumpMention(key, topicKey, 'tick', d, { d, t: a.activity_type, how: 'tick', what: tickM }); continue; }
+            const evM = topic.actTypes.includes(a.activity_type) ? a.activity_type : (cats.length ? _nlCatHit(topic, cats) : null);
+            if (evM) { bumpMention(key, topicKey, 'event', d, { d, t: a.activity_type, how: 'event', what: evM }); continue; }
+            const talkM = blob ? _nlTextHit(topic, blob) : null;
+            if (talkM) bumpMention(key, topicKey, 'talk', d, { d, t: a.activity_type, how: 'talk', what: talkM });
+        }
+    }
+
+    // Attendance pass — group events where the person is an attendee row, not
+    // the activity's own prospect/customer. Dates resolve via the parent
+    // activity (event_attendees has NO event_date column — probed 2026-08-10);
+    // rows whose activity fell outside the 365d window are out of window by
+    // construction and skipped.
+    const seenAttendee = new Set();
+    for (const att of attendees) {
+        if (!att.attended && att.attendance_status !== 'Attended') continue;
+        if (att.attendee_type === 'agent') continue;
+        const entityId = att.entity_id ?? att.attendee_id;
+        if (entityId == null) continue;
+        const key = att.attendee_type === 'customer'
+            ? (custMap[String(entityId)] ? 'c:' + entityId : null)
+            : _personOfProspect(entityId);
+        if (!key) continue;
+        const act = (att.activity_id != null && actMap[String(att.activity_id)]) || (att.event_id != null && actByEventId[String(att.event_id)]) || null;
+        if (!act) continue; // outside the 365d window (or orphaned row)
+        if (countedActs.has(String(act.id) + ':' + key)) continue;
+        const dedupKey = String(act.id) + ':' + key;
+        if (seenAttendee.has(dedupKey)) continue;
+        seenAttendee.add(dedupKey);
+        const d = act.activity_date || '';
+        if (!d || d > to) continue;
+        bumpTouch(key, d, 'cls');
+        if (act.event_id == null) continue;
+        const cats = _eventCatsOf(act.event_id);
+        if (!cats.length) continue;
+        for (const [topicKey, topic] of Object.entries(NL_TOPICS)) {
+            const evM = _nlCatHit(topic, cats);
+            if (evM) bumpMention(key, topicKey, 'event', d, { d, t: 'EVENT', how: 'event', what: evM });
+        }
+    }
+
+    // Profile ★ — interest recorded on the prospect profile counts once, never
+    // moves Last Mention, and puts zero-activity people on the list as C.
+    for (const p of prospects) {
+        const key = _personOfProspect(p.id);
+        if (key !== 'p:' + p.id) continue; // converted → the customer's activities speak instead
+        const blob = [p.cps_interest, p.interests, p.pain_points].filter(Boolean).join(' ').toLowerCase();
+        if (!blob) continue;
+        for (const [topicKey, topic] of Object.entries(NL_TOPICS)) {
+            const m = _nlTextHit(topic, blob);
+            if (!m) continue;
+            let byTopic = mentions.get(key);
+            if (!byTopic) { byTopic = {}; mentions.set(key, byTopic); }
+            let entry = byTopic[topicKey];
+            if (!entry) { entry = { tick: 0, event: 0, talk: 0, profile: false, last: '', ev: [] }; byTopic[topicKey] = entry; }
+            if (!entry.profile) { entry.profile = true; if (entry.ev.length < 40) entry.ev.push({ d: '', t: 'PROFILE', how: 'profile', what: m }); }
+        }
+    }
+
+    // ── Topic lists (3-6) ────────────────────────────────────────────────────
+    const hotIds = new Set();
+    try { (await getHighTouchProspects()).rows.forEach(r => hotIds.add('p:' + r.id)); } catch (_) { /* badge only */ }
+
+    const topics = {};
+    for (const [topicKey] of Object.entries(NL_TOPICS)) topics[topicKey] = [];
+    for (const [key, byTopic] of mentions) {
+        if (!_personInScope(key)) continue;
+        const row = _personRow(key);
+        for (const [topicKey, m] of Object.entries(byTopic)) {
+            const total = m.tick + m.event + m.talk + (m.profile ? 1 : 0);
+            if (total < 1) continue;
+            if (topicKey === 'fengshui' && audited.has(key)) continue;   // audited → List 7
+            if (topicKey === 'ring' && (ringOwned.get(key) || 0) >= 2) continue; // owns 2 = complete
+            if (topicKey === 'caiku' && caikuOwned.has(key)) continue;
+            topics[topicKey].push({
+                key, type: key[0], id: row.id, name: row.full_name || '—',
+                cat: total >= 5 ? 'A' : total >= 2 ? 'B' : 'C',
+                total, tick: m.tick, event: m.event, talk: m.talk, profile: m.profile,
+                last: m.last || '', ev: m.ev,
+                grade: key[0] === 'p' ? (row.manual_grade || '') : '',
+                owns: topicKey === 'ring' ? (ringOwned.get(key) || 0) : undefined,
+                agentName: _agentName(key),
+            });
+        }
+    }
+    const catRank = { A: 0, B: 1, C: 2 };
+    for (const list of Object.values(topics)) list.sort((x, y) => catRank[x.cat] - catRank[y.cat] || y.total - x.total || (y.last || '').localeCompare(x.last || ''));
+
+    // ── Meet-up coverage (List 2) ────────────────────────────────────────────
+    const _agg = (key) => {
+        const arr = touches.get(key) || [];
+        const counts = { meet: 0, cls: 0, cps: 0, call: 0, wa: 0 };
+        const physDates = []; const allDates = [];
+        for (const t of arr) {
+            allDates.push(t.d); // 365d history — feeds the gap check + Last Touch
+            if (t.d < from90) continue;
+            counts[t.k]++;
+            if (NL_PHYS_KINDS.includes(t.k)) physDates.push(t.d);
+        }
+        allDates.sort(); physDates.sort();
+        const w = counts.meet + counts.cls + counts.cps + counts.call * NL_WEIGHTS.call + counts.wa * NL_WEIGHTS.wa;
+        return { counts, w, physDates, allDates };
+    };
+    // 90+ days of silence (any contact kind) before physical touch T = restart.
+    const _gapNew = (allDates, T) => {
+        let prev = '';
+        for (const d of allDates) { if (d < T && d > prev) prev = d; }
+        return !prev || _nlDayDiff(T, prev) > 90;
+    };
+
+    const chips = { prospectsMet: 0, newHead: 0, repeat: 0, cpsHead: 0 };
+    const custMet = []; const custNotMet = []; const prospMet = [];
+    const repeatBuckets = { '1': [], '2': [], '3': [], '4+': [] };
+
+    for (const c of customers) {
+        const key = 'c:' + c.id;
+        if (!_personInScope(key)) continue;
+        const { counts, w, physDates, allDates } = _agg(key);
+        const physMonth = physDates.filter(d => d >= monthStart);
+        if (counts.cps > 0 && (touches.get(key) || []).some(t => t.k === 'cps' && t.d >= monthStart)) chips.cpsHead++;
+        let isNew = false;
+        if (physMonth.length) {
+            isNew = _gapNew(allDates, physMonth[0]);
+            if (isNew) chips.newHead++; else { chips.repeat++; const n = physDates.length; repeatBuckets[n >= 4 ? '4+' : String(n)].push({ name: c.full_name || '—', n }); }
+        }
+        if (w > 0) {
+            custMet.push({
+                key, id: c.id, name: c.full_name || '—',
+                tag: physDates.length ? (_gapNew(allDates, physDates[0]) ? 'New' : 'Repeat') : 'Contact only',
+                ...counts, w, last: allDates[allDates.length - 1] || '', agentName: _agentName(key),
+            });
+        } else {
+            // No contact in 90 days. Last-known touch comes from the 365d window
+            // — beyond that we can only say "12+ months".
+            const last = allDates[allDates.length - 1] || '';
+            custNotMet.push({ key, id: c.id, name: c.full_name || '—', agentName: _agentName(key), last, days: last ? _nlDayDiff(to, last) : null });
+        }
+    }
+    custMet.sort((x, y) => y.w - x.w || (y.last || '').localeCompare(x.last || ''));
+    custNotMet.sort((x, y) => (y.days === null) - (x.days === null) || (y.days || 0) - (x.days || 0));
+
+    for (const p of prospects) {
+        const key = 'p:' + p.id;
+        if (_personOfProspect(p.id) !== key) continue; // converted → counted as customer
+        if (!_personInScope(key)) continue;
+        const { counts, w, physDates, allDates } = _agg(key);
+        if (physDates.some(d => d >= monthStart)) chips.prospectsMet++;
+        if (counts.cps > 0 && (touches.get(key) || []).some(t => t.k === 'cps' && t.d >= monthStart)) chips.cpsHead++;
+        if (w <= 0) continue; // hundreds of dormant prospects stay off the list
+        prospMet.push({
+            key, id: p.id, name: p.full_name || '—',
+            hot: hotIds.has(key),
+            firstMet: physDates.length ? _gapNew(allDates, physDates[0]) : false,
+            ...counts, w, last: allDates[allDates.length - 1] || '', agentName: _agentName(key),
+        });
+    }
+    prospMet.sort((x, y) => y.w - x.w || (y.last || '').localeCompare(x.last || ''));
+
+    const coveredCount = custMet.length;
+    const custTotal = custMet.length + custNotMet.length;
+
+    // ── Top referral (List 1, 365d by referral created_at) ───────────────────
+    const refAgg = new Map(); // refKey → {count Set, converted Set, last}
+    for (const r of referrals) {
+        const created = String(r.created_at || '').slice(0, 10);
+        if (!created || created < from365 || created > to) continue;
+        let refKey = null;
+        if (r.referrer_id != null && r.referrer_id !== '') {
+            const type = String(r.referrer_type || 'prospect').toLowerCase();
+            refKey = type === 'user' ? 'u:' + r.referrer_id
+                : type === 'customer' ? (custMap[String(r.referrer_id)] ? 'c:' + r.referrer_id : null)
+                : _personOfProspect(r.referrer_id);
+        } else if (r.referrer_customer_id != null && custMap[String(r.referrer_customer_id)]) {
+            refKey = 'c:' + r.referrer_customer_id;
+        }
+        if (!refKey) continue;
+        const referred = r.referred_prospect_id != null ? 'p' + r.referred_prospect_id : 'row' + r.id;
+        let e = refAgg.get(refKey);
+        if (!e) { e = { heads: new Set(), converted: new Set(), last: '' }; refAgg.set(refKey, e); }
+        e.heads.add(referred);
+        if (r.referred_prospect_id != null && convertedPids.has(String(r.referred_prospect_id))) e.converted.add('p' + r.referred_prospect_id);
+        if (created > e.last) e.last = created;
+    }
+    const refAgents = []; const refClients = [];
+    for (const [refKey, e] of refAgg) {
+        if (refKey[0] === 'u') {
+            const u = userMap[refKey.slice(2)];
+            if (!u) continue;
+            if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(u.id))) continue;
+            if (_currentRoleFilter !== 'All' && u.role !== _currentRoleFilter) continue;
+            refAgents.push({ key: refKey, name: u.full_name || '—', count: e.heads.size, converted: e.converted.size, last: e.last });
+        } else {
+            if (!_personInScope(refKey)) continue;
+            refClients.push({ key: refKey, type: refKey[0], id: _personRow(refKey)?.id, name: _personName(refKey), count: e.heads.size, converted: e.converted.size, last: e.last });
+        }
+    }
+    const refSort = (x, y) => y.count - x.count || y.converted - x.converted || (y.last || '').localeCompare(x.last || '');
+    refAgents.sort(refSort); refClients.sort(refSort);
+
+    // ── Audited customers (List 7, all-time) ─────────────────────────────────
+    const auditedRows = [];
+    for (const key of audited) {
+        if (key[0] !== 'c') continue; // customer listing by definition
+        if (!_personInScope(key)) continue;
+        const row = _personRow(key);
+        const buys = auditBuys.get(key) || [];
+        const labels = [...new Set(buys.map(b => b.label))];
+        const buyLatest = buys.reduce((m, b) => (b.date > m ? b.date : m), '');
+        auditedRows.push({
+            key, id: row.id, name: row.full_name || '—',
+            services: labels.length ? labels.join(' + ') : 'FSA only',
+            date: fsaLatest.get(key) || buyLatest || '',
+            agentName: _agentName(key),
+        });
+    }
+    auditedRows.sort((x, y) => (y.date || '').localeCompare(x.date || ''));
+
+    return {
+        windows: { to, from365, from90, monthStart, rich: actsRes.rich, fsaOk: fsaAll !== null },
+        referral: { agents: refAgents, clients: refClients },
+        coverage: { chips, custMet, custNotMet, prospMet, repeatBuckets, coveredCount, custTotal },
+        topics,
+        audited: auditedRows,
+    };
+});
+
+// ── Name List UI ─────────────────────────────────────────────────────────────
+let _nlOpen = (() => { try { return localStorage.getItem('fs_nl_open') === '1'; } catch (_) { return false; } })();
+let _nlTab = 'referral';
+let _nlLast = null;
+const _nlExpanded = new Set();
+
+const NL_TABS = [
+    ['referral', '🔗', 'Top Referral'],
+    ['coverage', '🤝', 'Meet-Up Coverage'],
+    ['recruit', '🤝', '招商'],
+    ['fengshui', '🧭', '风水'],
+    ['ring', '💍', 'Power Ring'],
+    ['caiku', '🖼️', '财库'],
+    ['audited', '📋', 'Audited'],
+];
+
+const _nlStrip = (text) => `<div style="font-size:12px;color:var(--gray-500);margin:2px 0 12px;">${text}</div>`;
+const _nlChipHtml = (n, label, onclick) => `
+    <div style="flex:1;min-width:150px;background:var(--gray-50,#f7f4ed);border:1px solid var(--border,#e5e0d8);border-radius:8px;padding:12px 14px;${onclick ? 'cursor:pointer;' : ''}" ${onclick ? `onclick="${onclick}"` : ''}>
+        <div style="font-size:26px;font-weight:700;line-height:1;">${n}${onclick ? ' <span style="font-size:12px;color:var(--primary,#0D9488);">🔍</span>' : ''}</div>
+        <div style="font-size:12px;color:var(--gray-500);margin-top:4px;">${label}</div>
+    </div>`;
+const _nlCatBadge = (cat) => {
+    const s = cat === 'A' ? 'background:#fbeaf0;color:#72243e;' : cat === 'B' ? 'background:#faeeda;color:#633806;' : 'background:var(--gray-100,#f1ede3);color:var(--gray-600,#5f5e5a);';
+    return `<span style="${s}font-weight:700;font-size:11px;padding:1px 9px;border-radius:9px;">${cat}</span>`;
+};
+const _nlNameLink = (row) => {
+    const fn = row.key[0] === 'c' ? `app.showCustomerDetail(${JSON.stringify(row.id)})` : `app.showProspectDetail(${JSON.stringify(row.id)})`;
+    return `<a href="javascript:void(0)" onclick='${fn.replace(/'/g, '&#39;')}' style="color:var(--primary,#0D9488);font-weight:600;text-decoration:none;">${escapeHtml(row.name)}</a>`;
+};
+
+// Top-5 collapsed table with expand/collapse (owner: "show top 5 lines, then
+// others u may expend to see more" — applies to every Name List table).
+const _nlTable = (tableKey, headers, rows, empty, rightFrom = 2) => {
+    if (!rows.length) return `<p style="padding:14px;color:var(--gray-400);font-size:13px;">${empty}</p>`;
+    const expanded = _nlExpanded.has(tableKey);
+    const visible = expanded ? rows : rows.slice(0, 5);
+    const th = headers.map((h, i) => `<th scope="col" style="padding:8px 10px;text-align:${i >= rightFrom ? 'right' : 'left'};font-weight:600;color:var(--gray-500);border-bottom:1px solid var(--border,#e5e0d8);white-space:nowrap;">${h}</th>`).join('');
+    const body = visible.map(cells => `<tr>${cells.map((c, i) => `<td style="padding:8px 10px;${i >= rightFrom ? 'text-align:right;' : ''}border-bottom:1px solid var(--gray-100,#f1ede3);white-space:nowrap;">${c}</td>`).join('')}</tr>`).join('');
+    const more = rows.length > 5 ? `<div style="text-align:center;margin-top:6px;">
+        <button class="btn secondary" style="font-size:12px;padding:4px 14px;" onclick="app.nlExpand('${tableKey}')">${expanded ? '▲ Show top 5 only' : `▼ Show all (${rows.length})`}</button>
+    </div>` : '';
+    return `<div style="overflow-x:auto;border:1px solid var(--border,#e5e0d8);border-radius:6px;">
+        <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:520px;"><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>
+    </div>${more}`;
+};
+
+const _nlTabReferral = (d) => {
+    const rows = (list, tag) => list.map(r => [
+        tag ? `${_nlNameLink(r)} <span style="font-size:10px;color:var(--gray-400);">${r.type === 'c' ? 'C' : 'P'}</span>` : escapeHtml(r.name),
+        ...(tag ? [] : []),
+        String(r.count), String(r.converted), r.last || '—',
+    ]);
+    return `
+        ${_nlStrip(`Window: Past 365 days (${escapeHtml(d.windows.from365)} → ${escapeHtml(d.windows.to)}) · head count = unique people referred · everyone with ≥1 referral`)}
+        <h4 style="margin:6px 0;font-size:14px;font-weight:600;">Agent Referrers (${d.referral.agents.length})</h4>
+        ${_nlTable('ref-agents', ['Agent', 'Head Count', 'Converted', 'Last Referral'], rows(d.referral.agents, false), 'No agent referrals in the past 365 days.', 1)}
+        <h4 style="margin:16px 0 6px;font-size:14px;font-weight:600;">Client Referrers (${d.referral.clients.length}) <span style="font-weight:400;font-size:11px;color:var(--gray-400);">P = prospect · C = customer</span></h4>
+        ${_nlTable('ref-clients', ['Client', 'Head Count', 'Converted', 'Last Referral'], rows(d.referral.clients, true), 'No client referrals in the past 365 days.', 1)}`;
+};
+
+const _nlTabCoverage = (d) => {
+    const c = d.coverage;
+    const pct = c.custTotal ? Math.round(c.coveredCount / c.custTotal * 100) : 0;
+    const custRows = c.custMet.map(r => [
+        _nlNameLink(r),
+        r.tag === 'New' ? '<span style="background:#faeeda;color:#633806;font-size:11px;padding:1px 7px;border-radius:8px;">New</span>'
+            : r.tag === 'Repeat' ? '<span style="background:#e1f5ee;color:#085041;font-size:11px;padding:1px 7px;border-radius:8px;">Repeat</span>'
+            : '<span style="background:var(--gray-100,#f1ede3);color:var(--gray-600);font-size:11px;padding:1px 7px;border-radius:8px;">Call/WA only</span>',
+        String(r.meet), String(r.cls), String(r.cps), String(r.call), String(r.wa), `<strong>${_nlFmtW(r.w)}</strong>`, r.last || '—',
+    ]);
+    const notRows = c.custNotMet.map(r => [
+        _nlNameLink(r), escapeHtml(r.agentName),
+        r.last || '—',
+        r.days === null ? '<span style="background:#fcebeb;color:#791f1f;font-size:11px;padding:1px 7px;border-radius:8px;">12+ months</span>'
+            : `<span style="background:#fcebeb;color:#791f1f;font-size:11px;padding:1px 7px;border-radius:8px;">${r.days} d</span>`,
+    ]);
+    const prospRows = c.prospMet.map(r => [
+        _nlNameLink(r),
+        r.hot ? '<span style="background:#fbeaf0;color:#72243e;font-size:11px;padding:1px 7px;border-radius:8px;">Hot ·>5×</span>'
+            : r.firstMet ? '<span style="background:#faeeda;color:#633806;font-size:11px;padding:1px 7px;border-radius:8px;">First met</span>'
+            : '<span style="background:var(--gray-100,#f1ede3);color:var(--gray-600);font-size:11px;padding:1px 7px;border-radius:8px;">Ongoing</span>',
+        String(r.meet), String(r.cls), String(r.cps), String(r.call), String(r.wa), `<strong>${_nlFmtW(r.w)}</strong>`, r.last || '—', escapeHtml(r.agentName),
+    ]);
+    return `
+        ${_nlStrip(`Chips: this month · tables: rolling past 90 days (${escapeHtml(d.windows.from90)} → ${escapeHtml(d.windows.to)}) · touch = meet/class/CPS 1 · call 0.5 · WhatsApp 0.3`)}
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">
+            ${_nlChipHtml(c.chips.prospectsMet, 'Prospects Met (month)')}
+            ${_nlChipHtml(c.chips.newHead, 'New Head Count — met after 90d+ silence')}
+            ${_nlChipHtml(c.chips.repeat, 'Repeat Customers Met', 'app.nlRepeatDetail()')}
+            ${_nlChipHtml(c.chips.cpsHead, 'CPS Done (people)')}
+        </div>
+        <h4 style="margin:6px 0;font-size:14px;font-weight:600;">A · Customers — 90-day service rule</h4>
+        <div style="display:flex;align-items:center;gap:10px;margin:4px 0 10px;">
+            <div style="flex:1;height:8px;background:var(--gray-100,#f1ede3);border-radius:4px;overflow:hidden;"><div style="width:${pct}%;height:100%;background:#1d9e75;"></div></div>
+            <div style="font-size:13px;color:var(--gray-500);white-space:nowrap;">${c.coveredCount} / ${c.custTotal} contacted · <strong style="color:#0f6e56;">${pct}%</strong></div>
+        </div>
+        ${_nlTable('cov-met', ['Customer', 'Type', 'Meet', 'Class', 'CPS', 'Call', 'WA', 'Total', 'Last Touch'], custRows, 'No customers contacted in the past 90 days.')}
+        <h4 style="margin:16px 0 6px;font-size:14px;font-weight:600;color:#a32d2d;">B · ❌ Not contacted in 90 days (${c.custNotMet.length}) — who to focus first</h4>
+        ${_nlTable('cov-not', ['Customer', 'Agent', 'Last Touch', 'Days Since'], notRows, 'Every customer was contacted within 90 days 🎉')}
+        <h4 style="margin:16px 0 6px;font-size:14px;font-weight:600;">C · Prospects met (separate — not customers yet)</h4>
+        ${_nlTable('cov-prosp', ['Prospect', 'Status', 'Meet', 'Class', 'CPS', 'Call', 'WA', 'Total', 'Last Touch', 'Agent'], prospRows, 'No prospects met in the past 90 days.')}`;
+};
+
+const _nlTabTopic = (d, topicKey) => {
+    const topic = NL_TOPICS[topicKey];
+    const list = d.topics[topicKey];
+    const counts = { A: 0, B: 0, C: 0 };
+    list.forEach(r => counts[r.cat]++);
+    const rows = list.map(r => [
+        `${_nlNameLink(r)}${r.profile ? ' <span title="Interest on profile" style="color:#854f0b;font-size:11px;">★</span>' : ''} <span style="font-size:10px;color:var(--gray-400);">${r.type === 'c' ? 'C' : 'P'}</span>${topicKey === 'ring' && r.owns ? ' <span style="background:#e6f1fb;color:#0c447c;font-size:10px;padding:0 6px;border-radius:8px;">Owns 1</span>' : ''}`,
+        _nlCatBadge(r.cat),
+        `<a href="javascript:void(0)" onclick="app.nlWhy('${topicKey}','${String(r.key).replace(/'/g, '')}')" style="color:var(--primary,#0D9488);font-weight:600;text-decoration:none;">${r.total} 🔍</a>`,
+        String(r.tick), String(r.event), String(r.talk),
+        r.last || (r.profile ? 'profile' : '—'),
+        r.grade ? escapeHtml(r.grade) : '—',
+        escapeHtml(r.agentName),
+    ]);
+    const note = {
+        recruit: 'DC 招商会 attendance/ticks + 招商 talk',
+        fengshui: 'audited people are on the Audited tab instead',
+        ring: 'owners of 2+ rings excluded — "Owns 1" can still buy the 2nd',
+        caiku: 'explicit 财库 signals only · buyers of CAI KU Painting excluded — your promo-ready list',
+    }[topicKey] || '';
+    return `
+        ${_nlStrip(`Window: Past 365 days · A = 5+ mentions · B = 2-4 · C = 1 · one activity counts once · ${note}`)}
+        <div style="display:flex;gap:8px;margin-bottom:10px;font-size:12px;">
+            <span>${_nlCatBadge('A')} ${counts.A}</span><span>${_nlCatBadge('B')} ${counts.B}</span><span>${_nlCatBadge('C')} ${counts.C}</span>
+        </div>
+        ${_nlTable('topic-' + topicKey, ['Name', 'Cat', 'Mentions', 'Tick', 'Event', 'Talk', 'Last Mention', 'Grade', 'Agent'], rows, `Nobody has a ${topic.label} signal in the past 365 days.`, 2)}`;
+};
+
+const _nlTabAudited = (d) => {
+    const rows = d.audited.map(r => [_nlNameLink(r), escapeHtml(r.services), r.date || '—', escapeHtml(r.agentName)]);
+    return `
+        ${_nlStrip(`All time · audited = bought an audit package OR FSA logged · audit date = FSA date, else purchase date${d.windows.fsaOk ? '' : ' · ⚠ FSA history unavailable this load — showing purchase-based audits only'}`)}
+        ${_nlTable('audited', ['Customer', 'Type of Audit Service', 'Audit Date', 'Agent'], rows, 'No audited customers yet.', 2)}`;
+};
+
+const _nlBodyHtml = (d) => {
+    const counts = {
+        referral: d.referral.agents.length + d.referral.clients.length,
+        coverage: d.coverage.custNotMet.length,
+        recruit: d.topics.recruit.length,
+        fengshui: d.topics.fengshui.length,
+        ring: d.topics.ring.length,
+        caiku: d.topics.caiku.length,
+        audited: d.audited.length,
+    };
+    const tabs = NL_TABS.map(([key, icon, label]) => `
+        <button onclick="app.nlTab('${key}')" style="border:1px solid ${_nlTab === key ? 'var(--primary,#0D9488)' : 'var(--border,#e5e0d8)'};background:${_nlTab === key ? 'var(--primary,#0D9488)' : 'var(--gray-50,#f7f4ed)'};color:${_nlTab === key ? '#fff' : 'var(--gray-600,#5f5e5a)'};border-radius:16px;padding:5px 12px;font-size:12px;cursor:pointer;white-space:nowrap;">
+            ${icon} ${label} <span style="font-weight:700;">${counts[key]}</span>
+        </button>`).join('');
+    const body = _nlTab === 'referral' ? _nlTabReferral(d)
+        : _nlTab === 'coverage' ? _nlTabCoverage(d)
+        : _nlTab === 'audited' ? _nlTabAudited(d)
+        : _nlTabTopic(d, _nlTab);
+    return `
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 10px;">${tabs}</div>
+        ${body}
+        <div style="text-align:right;margin-top:10px;">
+            <button class="btn secondary" style="font-size:12px;padding:4px 14px;" onclick="app.nlCsv()"><i class="fas fa-file-csv"></i> Export this list</button>
+        </div>`;
+};
+
+const _nlRenderBody = async () => {
+    const body = document.getElementById('nl-body');
+    if (!body) return;
+    body.innerHTML = `<div style="text-align:center;padding:24px;color:var(--gray-400);"><i class="fas fa-spinner fa-spin"></i> Building name lists…</div>`;
+    try {
+        const d = await _getNameListData();
+        _nlLast = d;
+        const el = document.getElementById('nl-body');
+        if (el) el.innerHTML = _nlBodyHtml(d);
+    } catch (e) {
+        console.warn('[namelist] build failed:', e);
+        const el = document.getElementById('nl-body');
+        if (el) el.innerHTML = `<p style="padding:14px;color:var(--gray-400);font-size:13px;">Name lists could not load — please retry. (${escapeHtml(e && e.message || 'unknown error')})</p>`;
+    }
+};
+
+const renderNameListSection = async () => {
+    let container = document.getElementById('name-list-section');
+    if (!container) {
+        // React ReportsView hardcodes its own shell without this container —
+        // self-inject right after the KPI grid so it sits between the cards
+        // and the Revenue Trend chart in BOTH shells (People Met pattern).
+        const grid = document.getElementById('kpi-stats-grid');
+        const root = grid?.parentNode || document.querySelector('.kpi-dashboard');
+        if (!root) return;
+        container = document.createElement('div');
+        container.id = 'name-list-section';
+        container.style.marginTop = '24px';
+        if (grid && grid.nextSibling) root.insertBefore(container, grid.nextSibling);
+        else root.appendChild(container);
+    }
+    container.innerHTML = `
+        <div class="kpi-card">
+            <h3 class="kpi-card-title" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;" onclick="app.nlToggle()">
+                <span>📇 Name List — Who to Focus
+                    <span style="font-weight:400;color:var(--gray-400);font-size:13px;">7 lists · referrals · 90-day coverage · 招商 · 风水 · Power Ring · 财库 · audits</span>
+                </span>
+                <span style="font-size:13px;color:var(--primary,#0D9488);white-space:nowrap;">${_nlOpen ? '▲ Hide' : '▼ Open'}</span>
+            </h3>
+            <div id="nl-body" ${_nlOpen ? '' : 'style="display:none;"'}></div>
+        </div>`;
+    if (_nlOpen) await _nlRenderBody();
+};
+
+const nlToggle = () => {
+    _nlOpen = !_nlOpen;
+    try { localStorage.setItem('fs_nl_open', _nlOpen ? '1' : '0'); } catch (_) { /* private mode */ }
+    renderNameListSection();
+};
+const nlTab = (key) => { _nlTab = key; if (_nlLast) { const el = document.getElementById('nl-body'); if (el) el.innerHTML = _nlBodyHtml(_nlLast); } };
+const nlExpand = (tableKey) => {
+    if (_nlExpanded.has(tableKey)) _nlExpanded.delete(tableKey); else _nlExpanded.add(tableKey);
+    if (_nlLast) { const el = document.getElementById('nl-body'); if (el) el.innerHTML = _nlBodyHtml(_nlLast); }
+};
+
+// Drill-down: why is this person on the list — every counted activity with the
+// signal that matched (tick name / event category / keyword), so a Category A
+// row is always verifiable.
+const nlWhy = (topicKey, personKey) => {
+    if (!_nlLast) return;
+    const row = (_nlLast.topics[topicKey] || []).find(r => r.key === personKey);
+    if (!row) return;
+    const howBadge = (h) => h.how === 'tick' ? '<span style="background:#fbeaf0;color:#72243e;font-size:11px;padding:0 6px;border-radius:8px;">tick</span>'
+        : h.how === 'event' ? '<span style="background:#e6f1fb;color:#0c447c;font-size:11px;padding:0 6px;border-radius:8px;">event</span>'
+        : h.how === 'profile' ? '<span style="background:#faeeda;color:#633806;font-size:11px;padding:0 6px;border-radius:8px;">profile ★</span>'
+        : '<span style="background:var(--gray-100,#f1ede3);color:var(--gray-600);font-size:11px;padding:0 6px;border-radius:8px;">talk</span>';
+    const lines = row.ev.map(h => `<tr>
+        <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100,#f1ede3);white-space:nowrap;color:var(--gray-500);">${h.d || '—'}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100,#f1ede3);white-space:nowrap;">${escapeHtml(h.t)}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100,#f1ede3);">${howBadge(h)} ${escapeHtml(String(h.what || ''))}</td>
+    </tr>`).join('');
+    UI.showModal(`${NL_TOPICS[topicKey].icon} ${escapeHtml(row.name)} — ${row.total} mention${row.total === 1 ? '' : 's'}`, `
+        <div style="font-size:12px;color:var(--gray-500);margin-bottom:8px;">Category ${row.cat} · Tick ${row.tick} · Event ${row.event} · Talk ${row.talk}${row.profile ? ' · Profile ★' : ''} — each activity counts once even if several signals match inside it.</div>
+        <div style="max-height:50vh;overflow:auto;border:1px solid var(--border,#e5e0d8);border-radius:6px;">
+            <table style="width:100%;border-collapse:collapse;font-size:12.5px;">
+                <thead><tr>
+                    <th style="padding:6px 8px;text-align:left;font-weight:600;color:var(--gray-500);border-bottom:1px solid var(--border,#e5e0d8);">Date</th>
+                    <th style="padding:6px 8px;text-align:left;font-weight:600;color:var(--gray-500);border-bottom:1px solid var(--border,#e5e0d8);">Activity</th>
+                    <th style="padding:6px 8px;text-align:left;font-weight:600;color:var(--gray-500);border-bottom:1px solid var(--border,#e5e0d8);">Signal</th>
+                </tr></thead><tbody>${lines}</tbody>
+            </table>
+        </div>`,
+        [{ label: 'Close', type: 'secondary', action: 'UI.hideModal();' }]);
+};
+
+// Repeat chip drill-down (owner 2026-08-10): "10 met twice, 3 met 3x, 5 met 4x"
+// — physical meet-ups only (calls/WhatsApp deliberately excluded).
+const nlRepeatDetail = () => {
+    if (!_nlLast) return;
+    const b = _nlLast.coverage.repeatBuckets;
+    const rows = ['1', '2', '3', '4+'].filter(k => b[k].length).map(k => `
+        <tr>
+            <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100,#f1ede3);font-weight:600;white-space:nowrap;">${k}× met</td>
+            <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100,#f1ede3);text-align:right;font-weight:700;">${b[k].length}</td>
+            <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100,#f1ede3);font-size:12px;color:var(--gray-500);">${b[k].map(x => escapeHtml(x.name)).join(', ')}</td>
+        </tr>`).join('');
+    UI.showModal('🔁 Repeat customers — how many times met (past 90 days)', `
+        <div style="font-size:12px;color:var(--gray-500);margin-bottom:8px;">Physical meet-ups only (meetings + classes + CPS) — calls and WhatsApp are not counted here.</div>
+        <div style="max-height:50vh;overflow:auto;border:1px solid var(--border,#e5e0d8);border-radius:6px;">
+            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                <thead><tr>
+                    <th style="padding:6px 10px;text-align:left;font-weight:600;color:var(--gray-500);border-bottom:1px solid var(--border,#e5e0d8);">Times</th>
+                    <th style="padding:6px 10px;text-align:right;font-weight:600;color:var(--gray-500);border-bottom:1px solid var(--border,#e5e0d8);">Customers</th>
+                    <th style="padding:6px 10px;text-align:left;font-weight:600;color:var(--gray-500);border-bottom:1px solid var(--border,#e5e0d8);">Names</th>
+                </tr></thead><tbody>${rows || '<tr><td colspan="3" style="padding:14px;color:var(--gray-400);">No repeat customers this month.</td></tr>'}</tbody>
+            </table>
+        </div>`,
+        [{ label: 'Close', type: 'secondary', action: 'UI.hideModal();' }]);
+};
+
+// CSV of the ACTIVE tab (plain-text mirror of the table columns).
+const nlCsv = () => {
+    if (!_nlLast) return;
+    const d = _nlLast;
+    const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    let headers = []; let rows = [];
+    if (_nlTab === 'referral') {
+        headers = ['Board', 'Name', 'Head Count', 'Converted', 'Last Referral'];
+        rows = [...d.referral.agents.map(r => ['Agent', r.name, r.count, r.converted, r.last]),
+                ...d.referral.clients.map(r => ['Client (' + (r.type === 'c' ? 'customer' : 'prospect') + ')', r.name, r.count, r.converted, r.last])];
+    } else if (_nlTab === 'coverage') {
+        headers = ['Group', 'Name', 'Tag', 'Meet', 'Class', 'CPS', 'Call', 'WA', 'Total', 'Last Touch', 'Days Since', 'Agent'];
+        rows = [...d.coverage.custMet.map(r => ['Customer contacted', r.name, r.tag, r.meet, r.cls, r.cps, r.call, r.wa, _nlFmtW(r.w), r.last, '', r.agentName]),
+                ...d.coverage.custNotMet.map(r => ['NOT contacted 90d', r.name, '', 0, 0, 0, 0, 0, 0, r.last || '', r.days === null ? '365+' : r.days, r.agentName]),
+                ...d.coverage.prospMet.map(r => ['Prospect met', r.name, r.hot ? 'Hot' : r.firstMet ? 'First met' : 'Ongoing', r.meet, r.cls, r.cps, r.call, r.wa, _nlFmtW(r.w), r.last, '', r.agentName])];
+    } else if (_nlTab === 'audited') {
+        headers = ['Customer', 'Type of Audit Service', 'Audit Date', 'Agent'];
+        rows = d.audited.map(r => [r.name, r.services, r.date, r.agentName]);
+    } else {
+        headers = ['Name', 'P/C', 'Category', 'Mentions', 'Tick', 'Event', 'Talk', 'Profile', 'Last Mention', 'Grade', 'Agent'];
+        rows = (d.topics[_nlTab] || []).map(r => [r.name, r.type === 'c' ? 'Customer' : 'Prospect', r.cat, r.total, r.tick, r.event, r.talk, r.profile ? 'yes' : '', r.last, r.grade, r.agentName]);
+    }
+    // Excel needs a UTF-8 BOM prefix or Chinese names open as mojibake.
+    const csv = String.fromCharCode(0xFEFF) + [headers, ...rows].map(line => line.map(esc).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `name-list-${_nlTab}-${toLocalDateStr(new Date())}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+};
 
 const getActivityHeadcount = async (from, to) => {
     const activities = await _reportActsInRange(from, to, 'getActivityHeadcount');
@@ -5296,5 +6142,12 @@ const exportKPIReport = async (format) => {
         copyWeeklyReport,
         resetWeeklyReport,
         wrFigureInput,
+        // Name List — Who to Focus
+        nlToggle,
+        nlTab,
+        nlExpand,
+        nlWhy,
+        nlRepeatDetail,
+        nlCsv,
     });
 })();
