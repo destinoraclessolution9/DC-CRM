@@ -94,9 +94,13 @@ function Row({ p, meta, selected, onToggle }) {
     const grade = (A.getScoreGrade || (() => 'D'))(p.score);
     const daysLeft = (A.calculateProtectionDays || (() => 0))(p);
     const protStatus = (A.getProtectionStatus || (() => 'normal'))(daysLeft);
-    const protFillClass = daysLeft <= 0 ? 'expired' : protStatus;
-    const daysClass = daysLeft <= 0 ? 'days-expired' : (daysLeft <= 7 ? 'days-critical' : (daysLeft <= 14 ? 'days-warning' : 'days-normal'));
-    const daysLabel = daysLeft <= 0 ? 'Expired' : `${daysLeft}d left`;
+    // Parity with buildProspectRowHtml: closed deals aren't "Expired" (#8) and
+    // an unset deadline isn't "Expired" either — it's "Not set" (#13).
+    const protTerminal = p.status === 'converted' || p.status === 'lost';
+    const noProt = !p.protection_deadline;
+    const protFillClass = (protTerminal || noProt) ? 'normal' : (daysLeft <= 0 ? 'expired' : protStatus);
+    const daysClass = (protTerminal || noProt) ? 'days-normal' : (daysLeft <= 0 ? 'days-expired' : (daysLeft <= 7 ? 'days-critical' : (daysLeft <= 14 ? 'days-warning' : 'days-normal')));
+    const daysLabel = protTerminal ? (p.status === 'converted' ? '✓ Customer' : 'Closed') : (noProt ? 'Not set' : (daysLeft <= 0 ? 'Expired' : `${daysLeft}d left`));
     const fillWidth = Math.min(100, daysLeft <= 0 ? 100 : (daysLeft / 30) * 100);
     const relTime = (A.timeAgo || (() => ''))(p.last_activity_date);
 
