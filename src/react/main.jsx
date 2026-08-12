@@ -52,6 +52,26 @@ const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false } },
 });
 
+// ── Vanilla-write → React Query cache bridge ─────────────────────────────────
+// Chunk-side writes go through AppDataStore (create/update/delete emit
+// 'dataChanged'), which knows nothing about React Query. Without this bridge a
+// just-edited row (e.g. grade set to F on the detail page) keeps rendering from
+// the island's cached page after Back to List until staleTime expires.
+// Invalidate the matching list caches so the next mount refetches.
+const _RQ_TABLE_KEYS = { prospects: ['prospects', 'prospects-infinite'], customers: ['customers'] };
+(function wireStoreInvalidation(retries = 20) {
+    const store = window.AppDataStore;
+    if (!store || typeof store.on !== 'function') {
+        // data.js loads earlier in document order, but guard the race anyway.
+        if (retries > 0) setTimeout(() => wireStoreInvalidation(retries - 1), 500);
+        return;
+    }
+    store.on('dataChanged', (e) => {
+        const keys = _RQ_TABLE_KEYS[(e && e.table) || ''];
+        if (keys) for (const k of keys) queryClient.invalidateQueries({ queryKey: [k] });
+    });
+})();
+
 // ── 4.1 demo probe (kept for the existing end-to-end proof) ──────────────────
 function CustomersProbe() {
     const { data, isLoading, error } = useCustomers({ limit: 5 });

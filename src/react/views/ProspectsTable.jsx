@@ -88,6 +88,9 @@ function ActionsCell({ p, meta }) {
 
 function Row({ p, meta, selected, onToggle }) {
     const A = app();
+    // Grade F = manually dropped — same grey-out treatment as unable_to_serve
+    // (parity with buildProspectRowHtml + card view + mobile list).
+    const dropped = p.unable_to_serve || p.manual_grade === 'F';
     const grade = (A.getScoreGrade || (() => 'D'))(p.score);
     const daysLeft = (A.calculateProtectionDays || (() => 0))(p);
     const protStatus = (A.getProtectionStatus || (() => 'normal'))(daysLeft);
@@ -98,14 +101,15 @@ function Row({ p, meta, selected, onToggle }) {
     const relTime = (A.timeAgo || (() => ''))(p.last_activity_date);
 
     return (
-        <tr onClick={() => A.showProspectDetail && A.showProspectDetail(p.id)} className={p.unable_to_serve ? 'row-unable' : ''} style={{ cursor: 'pointer' }}>
+        <tr onClick={() => A.showProspectDetail && A.showProspectDetail(p.id)} className={dropped ? 'row-unable' : ''} style={{ cursor: 'pointer' }}>
             <td className="prospect-select-cell" onClick={(e) => e.stopPropagation()}>
                 <input type="checkbox" data-pid={p.id} checked={selected} onChange={() => onToggle(p.id)} />
             </td>
             <td data-label="Name">
-                <strong className={p.unable_to_serve ? 'name-unable' : ''}>{p.full_name || '(No Name)'}</strong>
+                <strong className={dropped ? 'name-unable' : ''}>{p.full_name || '(No Name)'}</strong>
                 {p.phone ? <><br /><span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{p.phone}</span></> : null}
                 {p.unable_to_serve ? <><br /><span className="badge-unable">Unable to Serve</span></> : null}
+                {p.manual_grade === 'F' ? <><br /><span className="badge-unable">Dropped (F)</span></> : null}
             </td>
             <AgentCell p={p} meta={meta} />
             <td data-label="Score"><span className={`score-badge score-${grade.replace('+', '-plus')}`}>{p.score || 0} ({grade})</span></td>
