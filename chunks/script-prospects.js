@@ -271,6 +271,14 @@ const showProspectsView = async (container) => {
                         <select id="filter-agent" onchange="app.filterProspects()">
                             <option value="">All Agents</option>
                         </select>
+                        <select id="filter-referral" onchange="app.filterProspects()" title="Filter by how the prospect was referred in. Older records may have a referrer without a type — they show under 'Referred (any)'.">
+                            <option value="">All Referrals</option>
+                            <option value="any">Referred (any)</option>
+                            <option value="Consultant">By Consultant</option>
+                            <option value="Prospect">By Prospect</option>
+                            <option value="Customer">By Customer</option>
+                            <option value="none">Not referred</option>
+                        </select>
                         <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text-secondary);cursor:pointer;user-select:none;" title="By default, prospects inactive for 500+ days are hidden. Type a name/phone in the search box to find them, or check this to load them all.">
                             <input type="checkbox" id="filter-include-dormant" onchange="app.filterProspects()" style="margin:0;">
                             Include dormant (500+ days)
@@ -668,6 +676,7 @@ const renderProspectsTable = async () => {
     const guaFilter = document.getElementById('filter-gua')?.value || '';
     const statusFilter = document.getElementById('filter-status')?.value || '';
     const agentFilter = document.getElementById('filter-agent')?.value || '';
+    const referralFilter = document.getElementById('filter-referral')?.value || '';
     const includeDormantToggle = document.getElementById('filter-include-dormant')?.checked || false;
 
     // ── Instant skeleton paint (cold-load only) ────────────────────────
@@ -721,7 +730,9 @@ const renderProspectsTable = async () => {
     // no-op (agents are always ALL).
     const _mktScope = window._crmUtils.listCountryScope();
     const _mktScoped = _mktScope !== window._crmUtils.ALL_COUNTRIES;
-    const _pUnsupported = !!scoreFilter || !!statusFilter || !_sortColMap[_sortField] || _mktScoped;
+    // referralFilter is client-derived too (referred_by/_type aren't RPC params),
+    // so it routes through the legacy client path like score/status filters.
+    const _pUnsupported = !!scoreFilter || !!statusFilter || !!referralFilter || !_sortColMap[_sortField] || _mktScoped;
 
     // ── Phase 4.3 (#13): React-island render path (opt-in bundle + flag) ───────
     // Server-eligible only — same gate as the BFF/server path: table view, no
@@ -933,6 +944,16 @@ const renderProspectsTable = async () => {
         if (scoreFilter && scoreFilter !== grade) continue;
         if (guaFilter && p.ming_gua !== guaFilter) continue;
         if (agentFilter && String(p.responsible_agent_id) !== agentFilter) continue;
+
+        if (referralFilter) {
+            // 'any'/'none' key on the referrer NAME (318 live rows are legacy
+            // referred-but-untyped); the three type options key on referred_by_type.
+            const _refName = String(p.referred_by || '').trim();
+            if (referralFilter === 'any' && !_refName) continue;
+            if (referralFilter === 'none' && _refName) continue;
+            if (referralFilter !== 'any' && referralFilter !== 'none'
+                && String(p.referred_by_type || '').trim() !== referralFilter) continue;
+        }
 
         const daysLeft = calculateProtectionDays(p);
         const protectionStatus = getProtectionStatus(daysLeft);
@@ -1566,7 +1587,8 @@ const updateProspectFilterBadge = () => {
     const gua    = document.getElementById('filter-gua')?.value || '';
     const status = document.getElementById('filter-status')?.value || '';
     const agent  = document.getElementById('filter-agent')?.value || '';
-    const count  = [score, gua, status, agent].filter(Boolean).length;
+    const referral = document.getElementById('filter-referral')?.value || '';
+    const count  = [score, gua, status, agent, referral].filter(Boolean).length;
     const existing = btn.querySelector('.filter-count-badge');
     if (existing) existing.remove();
     if (count > 0) {

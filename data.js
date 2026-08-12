@@ -197,7 +197,10 @@ class DataStore {
             // cache. ~75% fewer columns than the full prospects select.
             // Detail view always uses getById('prospects', id) which sends
             // select=* and gets every column including those omitted here.
-            prospects_listing: 'id,full_name,nickname,phone,email,ming_gua,score,occupation,company_name,responsible_agent_id,status,conversion_status,last_activity_date,protection_deadline,manual_grade,tags,unable_to_serve',
+            // 2026-08-12: referred_by + referred_by_type added for the list's
+            // Referral filter — the filter reads them from listing rows, so
+            // omitting them here would silently classify everything "not referred".
+            prospects_listing: 'id,full_name,nickname,phone,email,ming_gua,score,occupation,company_name,responsible_agent_id,status,conversion_status,last_activity_date,protection_deadline,manual_grade,tags,unable_to_serve,referred_by,referred_by_type',
             // Lean users select — covers every use-case in list views:
             // hierarchy traversal (reporting_to, team_id), role checks,
             // agent name display, reassign dropdowns. Profile/edit views

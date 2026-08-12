@@ -3802,6 +3802,7 @@
         scoreMin: '',         // numeric
         scoreMax: '',         // numeric
         pipelineStage: '',    // prospects only
+        referral: '',         // prospects only: any | none | Consultant | Prospect | Customer
     };
     const _mpHasActiveFilters = () => Object.values(_mpFilters).some(v => v !== '' && v != null);
     const _mpActiveFilterCount = () => Object.values(_mpFilters).filter(v => v !== '' && v != null).length;
@@ -4025,6 +4026,17 @@
         if (F.pipelineStage && _mpTab !== 'customers') {
             rows = rows.filter(r => String(r.pipeline_stage || '').toLowerCase() === F.pipelineStage.toLowerCase());
         }
+        if (F.referral && _mpTab !== 'customers') {
+            // Same semantics as the desktop Referral filter: any/none key on the
+            // referrer NAME (legacy rows are referred-but-untyped), the three
+            // type options key on referred_by_type (Consultant/Prospect/Customer).
+            rows = rows.filter(r => {
+                const name = String(r.referred_by || '').trim();
+                if (F.referral === 'any') return !!name;
+                if (F.referral === 'none') return !name;
+                return String(r.referred_by_type || '').trim() === F.referral;
+            });
+        }
 
         // Sort — user-selectable via the filter sheet, defaulting to the same
         // Score (High → Low) the desktop table opens on. Ties break on `id desc`,
@@ -4140,7 +4152,7 @@
             const customerStatuses = new Set(['active','inactive']);
             const validStatuses = tab === 'customers' ? customerStatuses : prospectStatuses;
             if (_mpFilters.status && !validStatuses.has(_mpFilters.status)) _mpFilters.status = '';
-            if (tab === 'customers') _mpFilters.pipelineStage = '';
+            if (tab === 'customers') { _mpFilters.pipelineStage = ''; _mpFilters.referral = ''; }
         }
         _mpTab = tab;
         _mpPage = 1;
@@ -4331,6 +4343,13 @@
                 </div>
                 ${!isCust ? `
                 <div class="mp-filter-group">
+                    <label for="mpf-referral">Referral</label>
+                    <select id="mpf-referral" class="form-control">
+                        ${[['', 'All Referrals'], ['any', 'Referred (any)'], ['Consultant', 'By Consultant'], ['Prospect', 'By Prospect'], ['Customer', 'By Customer'], ['none', 'Not referred']]
+                            .map(([v, l]) => `<option value="${v}" ${_mpFilters.referral === v ? 'selected' : ''}>${l}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="mp-filter-group">
                     <label for="mpf-pipeline">Pipeline Stage</label>
                     <select id="mpf-pipeline" class="form-control">
                         <option value="">All Stages</option>
@@ -4358,6 +4377,7 @@
             scoreMin: v('mpf-score-min'),
             scoreMax: v('mpf-score-max'),
             pipelineStage: v('mpf-pipeline'),
+            referral: v('mpf-referral'),
         };
         // Sort lives outside _mpFilters (it narrows nothing, so it must not
         // reach the badge) — read it here and restart paging on any change.
@@ -4373,7 +4393,7 @@
     };
 
     const mpClearFilters = async () => {
-        _mpFilters = { status: '', agentId: '', mingGua: '', scoreMin: '', scoreMax: '', pipelineStage: '' };
+        _mpFilters = { status: '', agentId: '', mingGua: '', scoreMin: '', scoreMax: '', pipelineStage: '', referral: '' };
         _mpSort = _MP_SORT_DEFAULT;
         _mpPage = 1;
         UI.hideModal();
