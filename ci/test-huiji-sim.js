@@ -164,15 +164,22 @@ const _state = windowStub._appState;
   check('matcher: 汇集-灵活', app.huijiIsHuijiCats(['汇集-灵活']));
   check('matcher: 汇集-简易', app.huijiIsHuijiCats(['汇集-简易']));
   check('matcher: custom Others 汇集-新品', app.huijiIsHuijiCats(['个人风水基础课', '汇集-新品']));
-  // Property-type matrix added 2026-08-15 (owner: every track × Condo/Terrace/Semi-D/Bungalow)
-  const HJ_TRACKS = ['专案', '商业', '灵活', '简易'];
-  const HJ_PROPS = ['Condo', 'Terrace', 'Semi-D', 'Bungalow'];
+  // Property-type matrix (owner 2026-08-15): residential tracks × Condo/
+  // Terrace/Semi-D/Bungalow, 商业 × Retail/Factory/Shoplot/Office.
+  const HJ_MATRIX = {
+    '专案': ['Condo', 'Terrace', 'Semi-D', 'Bungalow'],
+    '商业': ['Retail', 'Factory', 'Shoplot', 'Office'],
+    '灵活': ['Condo', 'Terrace', 'Semi-D', 'Bungalow'],
+    '简易': ['Condo', 'Terrace', 'Semi-D', 'Bungalow'],
+  };
   check('matcher: 汇集专案-Condo', app.huijiIsHuijiCats(['汇集专案-Condo']));
-  check('matcher: 汇集商业-Terrace', app.huijiIsHuijiCats(['汇集商业-Terrace']));
+  check('matcher: 汇集商业-Retail', app.huijiIsHuijiCats(['汇集商业-Retail']));
   check('matcher: 汇集灵活-Semi-D', app.huijiIsHuijiCats(['汇集灵活-Semi-D']));
   check('matcher: 汇集简易-Bungalow', app.huijiIsHuijiCats(['汇集简易-Bungalow']));
   check('categories list: full 16-item track×property matrix present',
-    HJ_TRACKS.every(t => HJ_PROPS.every(p => app.EVENT_CATEGORIES.includes(`汇集${t}-${p}`))));
+    Object.entries(HJ_MATRIX).every(([t, props]) => props.every(p => app.EVENT_CATEGORIES.includes(`汇集${t}-${p}`))));
+  check('categories list: 商业 residential variants replaced',
+    ['Condo', 'Terrace', 'Semi-D', 'Bungalow'].every(p => !app.EVENT_CATEGORIES.includes(`汇集商业-${p}`)));
   check('matcher: non-huiji course', app.huijiIsHuijiCats(['个人风水基础课']), false);
   check('matcher: 内含汇集 but not prefix', app.huijiIsHuijiCats(['大汇集晚宴']), false);
   check('matcher: empty', app.huijiIsHuijiCats([]), false);

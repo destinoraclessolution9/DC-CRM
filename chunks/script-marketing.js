@@ -255,10 +255,16 @@
         '汇集-商业',
         '汇集-灵活',
         '汇集-简易',
-        // 汇集 track × property matrix (owner 2026-08-15): every track gets
-        // Condo/Terrace/Semi-D/Bungalow variants. Generated so the four
-        // tracks can't drift; keep in sync with the activities-chunk mirror.
-        ...['专案', '商业', '灵活', '简易'].flatMap(t => ['Condo', 'Terrace', 'Semi-D', 'Bungalow'].map(p => `汇集${t}-${p}`)),
+        // 汇集 track × property matrix (owner 2026-08-15): residential tracks
+        // get Condo/Terrace/Semi-D/Bungalow; 商业 gets commercial property
+        // types. Generated so tracks can't drift; keep in sync with the
+        // activities-chunk mirror.
+        ...Object.entries({
+            '专案': ['Condo', 'Terrace', 'Semi-D', 'Bungalow'],
+            '商业': ['Retail', 'Factory', 'Shoplot', 'Office'],
+            '灵活': ['Condo', 'Terrace', 'Semi-D', 'Bungalow'],
+            '简易': ['Condo', 'Terrace', 'Semi-D', 'Bungalow'],
+        }).flatMap(([t, props]) => props.map(p => `汇集${t}-${p}`)),
         '个人改命分享会',
         '风水改命分享会-简易',
         '风水改命分享会-专案',
