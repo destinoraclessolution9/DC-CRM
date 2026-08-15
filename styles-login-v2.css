@@ -525,6 +525,10 @@
         display: block !important;
         border: none !important;
         background: transparent !important;
+        /* Beat inline min-width (Name List tables carry min-width:520px for
+           desktop scroll) — in card mode the card must fit the viewport. */
+        min-width: 0 !important;
+        width: 100% !important;
     }
     .data-table.auto-card thead,
     table.auto-card thead { display: none !important; }
@@ -547,6 +551,10 @@
         display: flex !important;
         justify-content: space-between !important;
         align-items: center !important;
+        /* Beat inline white-space:nowrap from desktop cells; wrap long values
+           under the label instead of pushing them off-screen. */
+        white-space: normal !important;
+        flex-wrap: wrap;
         gap: 10px !important;
         padding: 6px 0 !important;
         border: none !important;
