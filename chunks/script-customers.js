@@ -811,6 +811,15 @@ const showCustomerDetail = async (customerId) => {
                     <div class="acc-body" id="cust-acc-body-journey-${customer.id}" style="display:none" data-loaded="false"></div>
                 </div>
 
+                <!-- 13 改命后的进步 (Improvement Log) -->
+                <div class="acc-item" id="cust-acc-improvements-${customer.id}">
+                    <div class="acc-hdr" onclick="app.toggleCustomerAccordion('improvements',${customer.id},this.parentElement)">
+                        <span><i class="fas fa-seedling" style="color:#16a34a;"></i> 改命后的进步 <span id="cust-imp-badge-${customer.id}" style="display:none;background:#16a34a;color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;margin-left:6px;vertical-align:middle;"></span></span>
+                        <i class="fas fa-chevron-down acc-chev"></i>
+                    </div>
+                    <div class="acc-body" id="cust-acc-body-improvements-${customer.id}" style="display:none" data-loaded="false"></div>
+                </div>
+
             </div>
         </div>
     `;
@@ -822,6 +831,16 @@ const showCustomerDetail = async (customerId) => {
         const badge = document.getElementById(`cust-jny-badge-${customer.id}`);
         if (badge && overdue > 0) {
             badge.textContent = `${overdue} overdue`;
+            badge.style.display = 'inline';
+        }
+    }).catch(() => {});
+    // Async: populate 改命后的进步 count badge. id-only count — the full rows
+    // (story bodies) are only fetched when the section is actually opened.
+    AppDataStore.queryAdvanced('customer_improvements', { select: 'id', filters: { customer_id: customer.id }, limit: 1, countMode: 'exact' }).then(res => {
+        const n = (res && res.count) || 0;
+        const badge = document.getElementById(`cust-imp-badge-${customer.id}`);
+        if (badge && n > 0) {
+            badge.textContent = n;
             badge.style.display = 'inline';
         }
     }).catch(() => {});
@@ -1102,6 +1121,9 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
     else if (tab === 'journey') {
         await window._loadChunk('chunks/script-journey.min.js');
         await (window.app.renderJourneyTab || (() => {}))('customer', customer.id, container);
+    }
+    else if (tab === 'improvements') {
+        await renderImprovementsTab(customer, container);
     }
 };
 
@@ -1625,6 +1647,196 @@ const saveEditReferral = async (referralId, customerId) => {
     UI.toast.success('Referral updated');
     const customer = await AppDataStore.getById('customers', customerId);
     if (customer) { const cid = `cust-acc-body-referrals-${customerId}`; await renderReferralsTab(customer, document.getElementById(cid) ? cid : 'profile-tab-content'); }
+};
+
+// ========== 改命后的进步 (CUSTOMER IMPROVEMENT LOG) ==========
+// Write access mirrors the cimp_* RLS policies: responsible agent or management (L4+).
+const _canWriteImprovement = (customer) => {
+    const u = _state.cu;
+    if (!u || !customer) return false;
+    return (customer.responsible_agent_id != null && String(customer.responsible_agent_id) === String(u.id))
+        || _getUserLevel(u) <= 4;
+};
+
+const renderImprovementsTab = async (customer, container) => {
+    if (typeof container === 'string') container = document.getElementById(container);
+    if (!container) return;
+    let rows;
+    try {
+        rows = await AppDataStore.query('customer_improvements', { customer_id: customer.id });
+    } catch (e) {
+        container.innerHTML = '<p style="color:var(--gray-400);font-size:13px;">Could not load improvements. Please try again.</p>';
+        return;
+    }
+    rows = (rows || []).slice().sort((a, b) => String(b.improve_date || '').localeCompare(String(a.improve_date || '')));
+    const canWrite = _canWriteImprovement(customer);
+    const btns = `
+        <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+            ${canWrite ? `<button class="btn primary btn-sm" onclick="event.stopPropagation();app.openImprovementModal(${customer.id})"><i class="fas fa-plus"></i> 记录进步</button>` : ''}
+            ${rows.length ? `<button class="btn secondary btn-sm" onclick="event.stopPropagation();app.openImprovementStoryMode(${customer.id})"><i class="fas fa-play"></i> 回顾模式</button>` : ''}
+        </div>`;
+    const timeline = rows.length ? `
+        <div style="border-left:2px solid var(--gray-200);margin-left:5px;padding-left:14px;display:flex;flex-direction:column;gap:14px;">
+            ${rows.map(r => `
+                <div>
+                    <div style="font-size:12px;color:var(--gray-500);display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                        <span>${escapeHtml(r.improve_date || '-')}</span>
+                        ${r.solution ? `<span style="background:#ecfdf5;color:#047857;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:600;">${escapeHtml(r.solution)}</span>` : ''}
+                        ${canWrite ? `
+                            <button class="btn-icon" title="Edit" onclick="event.stopPropagation();app.openImprovementModal(${customer.id}, ${r.id})" style="font-size:12px;"><i class="fas fa-edit"></i></button>
+                            <button class="btn-icon" title="Delete" onclick="event.stopPropagation();app.deleteCustomerImprovement(${customer.id}, ${r.id})" style="font-size:12px;color:var(--danger);"><i class="fas fa-trash"></i></button>` : ''}
+                    </div>
+                    <div style="font-size:14px;color:var(--gray-800);margin-top:2px;white-space:pre-wrap;word-break:break-word;">${escapeHtml(r.story || '')}</div>
+                </div>`).join('')}
+        </div>`
+        : '<p style="color:var(--gray-400);font-size:13px;">还没有记录 — 记录第一个进步吧。</p>';
+    container.innerHTML = btns + timeline;
+    const badge = document.getElementById(`cust-imp-badge-${customer.id}`);
+    if (badge) {
+        if (rows.length > 0) { badge.textContent = rows.length; badge.style.display = 'inline'; }
+        else { badge.style.display = 'none'; }
+    }
+};
+
+const openImprovementModal = async (customerId, improvementId = null) => {
+    const customer = await AppDataStore.getById('customers', customerId);
+    if (!customer) { UI.toast.error('Customer not found'); return; }
+    if (!_canWriteImprovement(customer)) { UI.toast.error('Only the responsible agent or management can record improvements.'); return; }
+    let existing = null;
+    if (improvementId) {
+        existing = await AppDataStore.getById('customer_improvements', improvementId);
+        if (!existing) { UI.toast.error('Record not found'); return; }
+    }
+    // Solution options = what THIS customer actually bought (distinct purchases.item),
+    // so nothing is re-keyed. "Other" keeps a free-text escape hatch.
+    let items = [];
+    try {
+        const purs = await AppDataStore.query('purchases', { customer_id: customerId });
+        items = [...new Set((purs || []).map(p => (p.item || '').trim()).filter(Boolean))];
+    } catch (_) { items = []; }
+    const sel = existing?.solution || '';
+    const selInList = !!sel && items.includes(sel);
+    const today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
+    const content = `
+        <div class="form-group" style="margin-bottom:14px;">
+            <label>日期 Date <span class="required">*</span></label>
+            <input type="date" id="imp-date" class="form-control" value="${escapeHtml(existing?.improve_date || today)}">
+        </div>
+        <div class="form-group" style="margin-bottom:14px;">
+            <label>使用方案 Solution Used</label>
+            <select id="imp-solution" class="form-control" onchange="document.getElementById('imp-solution-other').style.display = this.value === 'Other' ? 'block' : 'none'">
+                <option value="">— Select —</option>
+                ${items.map(n => `<option value="${escapeHtml(n)}" ${n === sel ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}
+                <option value="Other" ${sel && !selInList ? 'selected' : ''}>Other (type below)</option>
+            </select>
+            <input type="text" id="imp-solution-other" class="form-control" placeholder="Solution name…" value="${sel && !selInList ? escapeHtml(sel) : ''}" style="margin-top:8px;display:${sel && !selInList ? 'block' : 'none'};">
+        </div>
+        <div class="form-group">
+            <label>进步故事 Improvement Story <span class="required">*</span></label>
+            <textarea id="imp-story" class="form-control" rows="4" placeholder="e.g. 生意收入增加40%，现金流稳定">${escapeHtml(existing?.story || '')}</textarea>
+        </div>`;
+    UI.showModal(improvementId ? '编辑进步 Edit Improvement' : '记录进步 Record Improvement', content, [
+        { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+        { label: 'Save', type: 'primary', action: `(async () => { await app.saveCustomerImprovement(${customerId}, ${improvementId ?? 'null'}); })()` }
+    ]);
+};
+
+const saveCustomerImprovement = async (customerId, improvementId = null) => {
+    const date = document.getElementById('imp-date')?.value;
+    const selVal = document.getElementById('imp-solution')?.value || '';
+    const other = (document.getElementById('imp-solution-other')?.value || '').trim();
+    const story = (document.getElementById('imp-story')?.value || '').trim();
+    if (!date) { UI.toast.error('Please pick a date'); return; }
+    if (!story) { UI.toast.error('Please write the improvement story'); return; }
+    const solution = selVal === 'Other' ? other : selVal;
+    try {
+        if (improvementId) {
+            await AppDataStore.update('customer_improvements', improvementId, {
+                improve_date: date, solution: solution || null, story
+            });
+        } else {
+            await AppDataStore.create('customer_improvements', {
+                customer_id: customerId,
+                improve_date: date,
+                solution: solution || null,
+                story,
+                created_by: _state.cu?.id ?? null,
+            });
+        }
+    } catch (e) {
+        UI.toast.error('Save failed: ' + (e?.message || e));
+        return;
+    }
+    UI.hideModal();
+    UI.toast.success(improvementId ? 'Improvement updated' : 'Improvement recorded');
+    const customer = await AppDataStore.getById('customers', customerId);
+    const body = document.getElementById(`cust-acc-body-improvements-${customerId}`);
+    if (customer && body) await renderImprovementsTab(customer, body);
+};
+
+const deleteCustomerImprovement = (customerId, improvementId) => {
+    UI.confirm('Delete Improvement?', 'This record will be permanently removed.', async () => {
+        try {
+            await AppDataStore.delete('customer_improvements', improvementId);
+        } catch (e) {
+            UI.toast.error('Delete failed: ' + (e?.message || e));
+            return;
+        }
+        UI.toast.success('Improvement deleted');
+        const customer = await AppDataStore.getById('customers', customerId);
+        const body = document.getElementById(`cust-acc-body-improvements-${customerId}`);
+        if (customer && body) await renderImprovementsTab(customer, body);
+    });
+};
+
+// Full-screen customer-facing review: oldest → newest, grouped by year — the
+// customer reads their story from the first consultation to today.
+const openImprovementStoryMode = async (customerId) => {
+    const customer = await AppDataStore.getById('customers', customerId);
+    if (!customer) { UI.toast.error('Customer not found'); return; }
+    let rows;
+    try { rows = await AppDataStore.query('customer_improvements', { customer_id: customerId }); } catch (_) { rows = []; }
+    rows = (rows || []).slice().sort((a, b) => String(a.improve_date || '').localeCompare(String(b.improve_date || '')));
+    if (!rows.length) { UI.toast.error('No improvements recorded yet'); return; }
+    closeImprovementStoryMode();
+    const years = [...new Set(rows.map(r => String(r.improve_date || '').slice(0, 4)))];
+    const span = years.length > 1 ? `${years[0]} – ${years[years.length - 1]}` : (years[0] || '');
+    let body = '';
+    let lastYear = '';
+    for (const r of rows) {
+        const y = String(r.improve_date || '').slice(0, 4);
+        if (y !== lastYear) {
+            body += `<div style="font-size:14px;font-weight:700;color:#16a34a;letter-spacing:1px;margin:18px 0 2px;">${escapeHtml(y)}</div>`;
+            lastYear = y;
+        }
+        body += `
+            <div style="padding:10px 0;">
+                <div style="font-size:12px;color:#9ca3af;">${escapeHtml(r.improve_date || '')}${r.solution ? ` · <span style="color:#047857;font-weight:600;">${escapeHtml(r.solution)}</span>` : ''}</div>
+                <div style="font-size:17px;color:#1f2937;line-height:1.5;margin-top:2px;white-space:pre-wrap;word-break:break-word;">${escapeHtml(r.story || '')}</div>
+            </div>`;
+    }
+    const overlay = document.createElement('div');
+    overlay.id = 'imp-story-overlay';
+    // safe-area padding: index.html sets viewport-fit=cover, so without it the
+    // close button hides under the iOS notch on the home-screen PWA.
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#fff;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding-top:env(safe-area-inset-top);';
+    overlay.innerHTML = `
+        <div style="max-width:560px;margin:0 auto;padding:20px 20px 60px;">
+            <div style="display:flex;justify-content:flex-end;position:sticky;top:0;background:#fff;padding:8px 0;">
+                <button onclick="app.closeImprovementStoryMode()" style="border:none;background:var(--gray-100);width:36px;height:36px;border-radius:50%;font-size:16px;cursor:pointer;color:var(--gray-600);"><i class="fas fa-times"></i></button>
+            </div>
+            <div style="text-align:center;margin-bottom:8px;">
+                <i class="fas fa-seedling" style="color:#16a34a;font-size:28px;"></i>
+                <div style="font-size:24px;font-weight:700;margin-top:8px;">${escapeHtml(customer.full_name || '')}的改命之路</div>
+                <div style="font-size:13px;color:#6b7280;margin-top:4px;">${escapeHtml(span)} · ${rows.length} 个进步</div>
+            </div>
+            <div style="border-left:3px solid #16a34a;padding-left:18px;margin-left:6px;">${body}</div>
+        </div>`;
+    document.body.appendChild(overlay);
+};
+
+const closeImprovementStoryMode = () => {
+    document.getElementById('imp-story-overlay')?.remove();
 };
 
 const openEditPlatformIdsModal = async (customerId) => {
@@ -2692,6 +2904,12 @@ const saveDeliveryRemarks = async (kind, id, customerId, value) => {
         saveDeliveryRemarks,
         openCustomerReferralModal,
         openEditPlatformIdsModal,
+        openImprovementModal,
+        saveCustomerImprovement,
+        deleteCustomerImprovement,
+        openImprovementStoryMode,
+        closeImprovementStoryMode,
+        renderImprovementsTab,
         openUploadDocumentModal,
         openUploadRedemptionImageModal,
         renderAgentEligibility,
