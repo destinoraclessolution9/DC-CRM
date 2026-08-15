@@ -971,11 +971,18 @@ const openNoticeboardDetail = async (eventId) => {
                 ${e.ticket_price ? `<div><i class="fas fa-tag" style="color:#be185d;width:20px;"></i> RM ${esc(e.ticket_price)}</div>` : ''}
             </div>
             ${e.description ? `<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--gray-200,#e5e7eb);color:var(--gray-700,#374151);font-size:0.95rem;line-height:1.6;white-space:pre-wrap;">${esc(e.description)}</div>` : ''}
+            <div id="huiji-nb-brief-${e.id}" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--gray-200,#e5e7eb);"></div>
         </div>`;
 
     UI.showModal(evTitle, content, [
         { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
     ]);
+
+    // 汇集 briefing (async fill; RLS returns rows only to the event creator +
+    // management L≤5 — noticeboard viewers L12–L14 never get one).
+    if (window.app.huijiIsHuijiEvent && window.app.huijiIsHuijiEvent(e) && window.app.huijiFillBriefing) {
+        window.app.huijiFillBriefing(e.id, `huiji-nb-brief-${e.id}`);
+    }
 };
     // ── Attach public functions to window.app ────────────────────────────
     app.register('performance', {

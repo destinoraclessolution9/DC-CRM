@@ -4891,6 +4891,7 @@
                     ${marketingEvent.target_group ? `<div class="info-row"><span class="info-label">Target Group:</span> <span>${esc(marketingEvent.target_group)}</span></div>` : ''}
                     ${marketingEvent.remarks ? `<div class="info-row"><span class="info-label">Remarks:</span> <span>${esc(marketingEvent.remarks)}</span></div>` : ''}
                 </div>
+                ${window.app.huijiIsHuijiEvent && window.app.huijiIsHuijiEvent(marketingEvent) ? `<div class="detail-section" id="huiji-brief-${activity.event_id}" style="display:none;"></div>` : ''}
                 ` : ''}
 
                 ${isAttendeeType || !_isOwnActivity ? '' : `
@@ -5315,6 +5316,12 @@
         const content = buildActivityDetailsContent(activity, marketingEvent, _isOwnActivity, _canSeeEntity, entityName, _entityIconBtn, _consultantId, _consultantName, _leadAgentName, attendeeHtml, isAttendeeType, entityOrphaned, activityId);
 
         UI.showModal('Activity Details', content, []);
+
+        // 汇集 briefing (async fill; RLS-scoped — the slot stays hidden for
+        // viewers who are neither the event creator nor management L≤5).
+        if (activity.event_id && window.app.huijiFillBriefing) {
+            window.app.huijiFillBriefing(activity.event_id, `huiji-brief-${activity.event_id}`);
+        }
     };
 
     // ========== ORPHAN ACTIVITY REPAIR ==========

@@ -3054,9 +3054,325 @@
         if (fields) fields.style.display = cb?.checked ? 'block' : 'none';
     };
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // 汇集 EVENT BRIEFING — house owner + verified purchased solutions.
+    // A 汇集 event is a visit to an existing customer's house; the briefing
+    // records whose house + which purchased solutions were verified for
+    // showcase. Stored in `event_huiji_details` (RLS: creator + L≤5 read,
+    // creator-only write) — a child table because `events` rows are
+    // world-readable. Canonical home is THIS chunk (init-loaded by script.js);
+    // the marketing chunk calls these via window.app after an ensure-load.
+    // ═══════════════════════════════════════════════════════════════════════
+    const HUIJI_CAT_RE = /^汇[集聚]/; // both spellings live in data: 汇聚-专案 + 汇集-*
+    const huijiIsHuijiCats = (cats) => (cats || []).some(c => HUIJI_CAT_RE.test(String(c || '').trim()));
+    const huijiIsHuijiEvent = (eventRow) => !!eventRow && huijiIsHuijiCats(parseEventCategories(eventRow.categories));
+
+    // Categories currently ticked in the shared event form (checkboxes + Others free-text).
+    const _huijiCatsFromDom = () => {
+        const cats = Array.from(document.querySelectorAll('#mkt-event-categories .mkt-event-category-cb:checked')).map(cb => cb.value);
+        const othersCb = document.getElementById('mkt-event-cat-others-cb');
+        const othersInput = document.getElementById('mkt-event-cat-others-input');
+        if (othersCb?.checked && othersInput?.value.trim()) {
+            othersInput.value.split(',').map(s => s.trim()).filter(Boolean).forEach(c => cats.push(c));
+        }
+        return cats;
+    };
+
+    // solutions jsonb arrives as an array from PostgREST but may be a JSON
+    // string on older snapshots — accept both. Items: {label, date, purchase_id, source}.
+    const huijiNormalizeSolutions = (raw) => {
+        let arr = raw;
+        if (typeof arr === 'string') { try { arr = JSON.parse(arr); } catch (_) { arr = []; } }
+        if (!Array.isArray(arr)) return [];
+        return arr.filter(s => s && String(s.label || '').trim())
+            .map(s => ({ label: String(s.label).trim(), date: s.date || null, purchase_id: s.purchase_id ?? null, source: s.source || 'manual' }));
+    };
+
+    // Merge the two places a customer's buys live: `purchases` rows AND the
+    // conversion sale frozen on the original prospect's closing_record (older
+    // conversions exist ONLY there). Dedupe by label+date; amounts deliberately
+    // never carried — the briefing is price-free.
+    const huijiMergeSolutionSources = (purchases, conversionRecord) => {
+        const out = [];
+        const seen = new Set();
+        (purchases || []).forEach(p => {
+            const label = String(p.item || '').trim();
+            if (!label) return;
+            const key = label.toLowerCase() + '|' + (p.date || '');
+            if (seen.has(key)) return;
+            seen.add(key);
+            out.push({ label, date: p.date || null, purchase_id: p.id ?? null, source: 'purchase', pending: (p.status || 'PENDING') === 'PENDING' });
+        });
+        if (conversionRecord && String(conversionRecord.product || '').trim()) {
+            const label = String(conversionRecord.product).trim();
+            const key = label.toLowerCase() + '|' + (conversionRecord.closing_date || '');
+            if (!seen.has(key)) out.push({ label, date: conversionRecord.closing_date || null, purchase_id: null, source: 'conversion', pending: false });
+        }
+        return out;
+    };
+
+    const huijiPullOwnerPurchases = async (customerId) => {
+        let purchases = [];
+        let cr = null;
+        try { purchases = (await AppDataStore.query('purchases', { customer_id: customerId })) || []; } catch (_) { /* intentional: no purchases readable — manual rows still work */ }
+        try {
+            const cust = await AppDataStore.getById('customers', customerId);
+            if (cust?.converted_from_prospect_id) {
+                const origProspect = await AppDataStore.getById('prospects', cust.converted_from_prospect_id);
+                if (origProspect?.closing_record) {
+                    cr = typeof origProspect.closing_record === 'string'
+                        ? (() => { try { return JSON.parse(origProspect.closing_record); } catch (_) { return null; } })()
+                        : origProspect.closing_record;
+                }
+            }
+        } catch (_) { /* intentional: conversion-sale lookup is best-effort */ }
+        return huijiMergeSolutionSources(purchases, cr);
+    };
+
+    // Called once after any event modal containing #huiji-owner-section is
+    // shown. eventId = existing event being edited (null on create).
+    const huijiInitSection = async (opts = {}) => {
+        const section = document.getElementById('huiji-owner-section');
+        if (!section) return;
+        _state.huiji = { owner: null, pulled: [], existing: null, readOnly: false };
+        if (opts.eventId) {
+            try {
+                const rows = await AppDataStore.query('event_huiji_details', { event_id: opts.eventId });
+                if (rows && rows[0]) {
+                    _state.huiji.existing = rows[0];
+                    _state.huiji.readOnly = !(_state.cu && String(rows[0].created_by) === String(_state.cu.id));
+                    const c = await AppDataStore.getById('customers', rows[0].owner_customer_id).catch(() => null);
+                    _state.huiji.owner = { id: rows[0].owner_customer_id, name: (c && c.full_name) || ('#' + rows[0].owner_customer_id) };
+                }
+            } catch (_) { /* intentional: RLS-hidden or fetch error → treat as fresh */ }
+        }
+        const catBox = document.getElementById('mkt-event-categories');
+        if (catBox && !catBox.dataset.huijiWired) {
+            catBox.dataset.huijiWired = '1';
+            catBox.addEventListener('change', () => huijiToggleSection());
+        }
+        const othersInput = document.getElementById('mkt-event-cat-others-input');
+        if (othersInput && !othersInput.dataset.huijiWired) {
+            othersInput.dataset.huijiWired = '1';
+            othersInput.addEventListener('input', () => huijiToggleSection());
+        }
+        huijiToggleSection();
+    };
+
+    const huijiToggleSection = () => {
+        const section = document.getElementById('huiji-owner-section');
+        if (!section) return;
+        const show = huijiIsHuijiCats(_huijiCatsFromDom());
+        section.style.display = show ? 'block' : 'none';
+        if (show && !section.dataset.rendered) { section.dataset.rendered = '1'; _huijiRenderSection(); }
+    };
+
+    const _huijiRenderSection = () => {
+        const section = document.getElementById('huiji-owner-section');
+        if (!section) return;
+        const h = _state.huiji || {};
+        if (h.readOnly) { _huijiRenderReadOnly(section); return; }
+        section.innerHTML = `
+            <div style="font-weight:700;color:#be185d;margin-bottom:8px;"><i class="fas fa-home"></i> 汇集 · 屋主与方案 <span style="font-weight:400;color:#6b7280;font-size:12px;">(private — creator &amp; managers only)</span></div>
+            <div class="form-group" style="position:relative;margin-bottom:10px;">
+                <label>House Owner 屋主* <span style="color:var(--gray-400);font-weight:normal;">(from Customers)</span></label>
+                <input type="text" id="huiji-owner-search" class="form-control" placeholder="Search customer name / phone…" autocomplete="off" oninput="app.huijiSearchOwner()">
+                <div id="huiji-owner-results" style="display:none;position:absolute;z-index:60;left:0;right:0;background:#fff;border:1px solid #e5e7eb;border-radius:6px;max-height:200px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.08);"></div>
+                <div id="huiji-owner-info" style="margin-top:6px;"></div>
+            </div>
+            <div id="huiji-solutions-block" style="display:none;">
+                <label style="font-weight:600;font-size:13px;">Solutions purchased — tick to verify 已购方案（打勾确认展示）</label>
+                <div id="huiji-solutions-list" style="display:flex;flex-direction:column;gap:4px;margin:6px 0;"></div>
+                <button type="button" class="btn btn-sm secondary" onclick="event.stopPropagation();app.huijiAddManualRow()"><i class="fas fa-plus"></i> Add solution manually</button>
+            </div>
+            <div class="form-group" style="margin-top:10px;margin-bottom:0;">
+                <label>Private notes 备注 <span style="color:var(--gray-400);font-weight:normal;">(e.g. which room, story to tell)</span></label>
+                <textarea id="huiji-notes" class="form-control" rows="2">${escapeHtml(h.existing?.notes || '')}</textarea>
+            </div>`;
+        if (h.owner?.id) {
+            _huijiSetOwnerChip();
+            huijiLoadOwnerSolutions();
+        }
+    };
+
+    // Managers (L≤5) can open the edit modal of someone else's 汇集 event —
+    // they see the briefing read-only (RLS blocks their writes anyway).
+    const _huijiRenderReadOnly = (section) => {
+        const h = _state.huiji || {};
+        const sols = huijiNormalizeSolutions(h.existing?.solutions);
+        section.innerHTML = `
+            <div style="font-weight:700;color:#be185d;margin-bottom:8px;"><i class="fas fa-home"></i> 汇集 · 屋主与方案 <span style="font-weight:400;color:#6b7280;font-size:12px;">(view-only — only the event creator can edit)</span></div>
+            <div style="font-size:13px;margin-bottom:6px;">🏠 <strong>${escapeHtml(h.owner?.name || '-')}</strong></div>
+            ${sols.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;">${sols.map(s => `<span style="background:#ecfdf5;color:#047857;padding:2px 8px;border-radius:10px;font-size:12px;">${escapeHtml(s.label)}${s.date ? ` · ${escapeHtml(s.date)}` : ''}</span>`).join('')}</div>` : ''}
+            ${h.existing?.notes ? `<div style="font-size:12px;color:var(--gray-700);white-space:pre-wrap;">${escapeHtml(h.existing.notes)}</div>` : ''}`;
+    };
+
+    const huijiSearchOwner = async () => {
+        const term = (document.getElementById('huiji-owner-search')?.value || '').trim();
+        const resultsDiv = document.getElementById('huiji-owner-results');
+        if (!resultsDiv) return;
+        if (!term) { resultsDiv.style.display = 'none'; return; }
+        let matches = [];
+        try { matches = await AppDataStore.searchCustomers(term, { limit: 8 }); } catch (_) { matches = []; }
+        resultsDiv.innerHTML = matches.length ? matches.map(c => `
+            <div class="search-result-item" data-name="${escapeHtml(c.full_name || '')}" onclick="app.huijiSelectOwner(${c.id}, this.dataset.name)" style="cursor:pointer;padding:8px 12px;border-bottom:1px solid #f3f4f6;">
+                <strong style="font-size:13px;">${escapeHtml(c.full_name || '')}</strong>
+                <span style="font-size:11px;color:#6b7280;margin-left:6px;">${escapeHtml(c.phone || '')}</span>
+            </div>`).join('') : '<div style="padding:10px 12px;color:#6b7280;font-size:13px;">No customers found</div>';
+        resultsDiv.style.display = 'block';
+    };
+
+    const huijiSelectOwner = (id, name) => {
+        if (!_state.huiji) _state.huiji = { owner: null, pulled: [], existing: null, readOnly: false };
+        _state.huiji.owner = { id, name };
+        const results = document.getElementById('huiji-owner-results');
+        if (results) results.style.display = 'none';
+        const input = document.getElementById('huiji-owner-search');
+        if (input) input.value = '';
+        _huijiSetOwnerChip();
+        huijiLoadOwnerSolutions();
+    };
+
+    const _huijiSetOwnerChip = () => {
+        const info = document.getElementById('huiji-owner-info');
+        if (!info || !_state.huiji?.owner) return;
+        info.innerHTML = `
+            <div class="selected-entity-badge">
+                <span>🏠 <strong>${escapeHtml(_state.huiji.owner.name || ('#' + _state.huiji.owner.id))}</strong></span>
+                <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.huijiClearOwner()">Change</button>
+            </div>`;
+    };
+
+    const huijiClearOwner = () => {
+        if (_state.huiji) { _state.huiji.owner = null; _state.huiji.pulled = []; }
+        const info = document.getElementById('huiji-owner-info');
+        if (info) info.innerHTML = '';
+        const block = document.getElementById('huiji-solutions-block');
+        if (block) block.style.display = 'none';
+    };
+
+    const huijiLoadOwnerSolutions = async () => {
+        const h = _state.huiji;
+        if (!h?.owner?.id) return;
+        const block = document.getElementById('huiji-solutions-block');
+        const list = document.getElementById('huiji-solutions-list');
+        if (!block || !list) return;
+        block.style.display = 'block';
+        list.innerHTML = '<div style="color:#6b7280;font-size:12px;">Loading purchase records…</div>';
+        h.pulled = await huijiPullOwnerPurchases(h.owner.id);
+        const existingSols = huijiNormalizeSolutions(h.existing?.solutions);
+        // A pulled row starts ticked only if it was verified on the saved
+        // briefing — fresh pulls start UNCHECKED (ticking = manual verify).
+        const isVerified = (s) => existingSols.some(e => e.source !== 'manual'
+            && e.label.toLowerCase() === s.label.toLowerCase()
+            && String(e.date || '') === String(s.date || ''));
+        list.innerHTML = h.pulled.length ? h.pulled.map((s, i) => `
+            <label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid var(--gray-200);border-radius:6px;background:#fff;cursor:pointer;font-size:13px;">
+                <input type="checkbox" class="huiji-sol-cb" data-idx="${i}" ${isVerified(s) ? 'checked' : ''}>
+                <span style="flex:1;">${escapeHtml(s.label)}${s.source === 'conversion' ? ' <span style="font-size:10px;color:#9333ea;">(conversion sale)</span>' : ''}${s.source === 'purchase' && s.pending ? ' <span style="font-size:10px;color:#d97706;">(pending)</span>' : ''}</span>
+                <span style="font-size:11px;color:#6b7280;">${escapeHtml(s.date || '')}</span>
+            </label>`).join('') : '<div style="color:#6b7280;font-size:12px;">No purchase records found — add manually below.</div>';
+        existingSols.filter(e => e.source === 'manual').forEach(e => huijiAddManualRow(e.label, e.date || ''));
+    };
+
+    const huijiAddManualRow = (label = '', date = '') => {
+        const list = document.getElementById('huiji-solutions-list');
+        if (!list) return;
+        const div = document.createElement('div');
+        div.className = 'huiji-manual-row';
+        div.style.cssText = 'display:flex;gap:6px;align-items:center;';
+        div.innerHTML = `
+            <input type="text" class="form-control huiji-manual-label" placeholder="Solution name 方案" value="${escapeHtml(typeof label === 'string' ? label : '')}" style="flex:2;">
+            <input type="date" class="form-control huiji-manual-date" value="${escapeHtml(typeof date === 'string' ? date : '')}" style="flex:1;">
+            <button type="button" class="btn-icon" title="Remove" onclick="event.stopPropagation();this.parentElement.remove();"><i class="fas fa-times"></i></button>`;
+        list.appendChild(div);
+    };
+
+    const huijiCollectSolutions = () => {
+        const h = _state.huiji || {};
+        const out = [];
+        document.querySelectorAll('#huiji-solutions-list .huiji-sol-cb').forEach(cb => {
+            if (!cb.checked) return;
+            const s = (h.pulled || [])[parseInt(cb.dataset.idx, 10)];
+            if (s) out.push({ label: s.label, date: s.date || null, purchase_id: s.purchase_id ?? null, source: s.source });
+        });
+        document.querySelectorAll('#huiji-solutions-list .huiji-manual-row').forEach(row => {
+            const label = row.querySelector('.huiji-manual-label')?.value?.trim();
+            const date = row.querySelector('.huiji-manual-date')?.value || null;
+            if (label) out.push({ label, date, purchase_id: null, source: 'manual' });
+        });
+        return out;
+    };
+
+    // Gate BEFORE the event row is written. Owner is REQUIRED when a 汇集
+    // category is ticked (owner decision 2026-08-15) — a huiji without the
+    // house owner defeats the briefing. Escape hatch: untick the 汇集 category.
+    const huijiValidateBeforeSave = () => {
+        if (!huijiIsHuijiCats(_huijiCatsFromDom())) return { ok: true, active: false };
+        const h = _state.huiji || {};
+        if (h.readOnly) return { ok: true, active: false }; // manager editing another creator's event — leave briefing untouched
+        if (!h.owner?.id) return { ok: false, active: true, msg: '汇集 event needs the House Owner 屋主 — search and select the customer whose house it is.' };
+        return { ok: true, active: true };
+    };
+
+    // Persist AFTER the event row saved. Must run while the modal DOM is still
+    // open (reads checkboxes/notes). Failure never rolls back the event save.
+    const huijiSaveForEvent = async (eventId) => {
+        const v = huijiValidateBeforeSave();
+        if (!v.ok || !v.active || !eventId) return;
+        const h = _state.huiji;
+        const payload = {
+            event_id: eventId,
+            owner_customer_id: h.owner.id,
+            solutions: huijiCollectSolutions(),
+            notes: document.getElementById('huiji-notes')?.value?.trim() || null,
+            updated_at: new Date().toISOString(),
+        };
+        try {
+            if (h.existing?.id) {
+                await AppDataStore.update('event_huiji_details', h.existing.id, payload);
+            } else {
+                payload.created_by = _state.cu ? _state.cu.id : null;
+                await AppDataStore.create('event_huiji_details', payload);
+            }
+            AppDataStore.invalidateCache && AppDataStore.invalidateCache('event_huiji_details');
+        } catch (err) {
+            console.error('huiji briefing save failed:', err);
+            UI.toast.error('Event saved, but the 汇集 briefing failed to save: ' + (err.message || 'unknown'));
+        }
+    };
+
+    // Async-fill a briefing slot on an event detail modal (calendar activity
+    // details + noticeboard detail). RLS decides visibility: non-creator,
+    // non-manager viewers get no row → the slot simply stays hidden.
+    const huijiFillBriefing = async (eventId, slotId) => {
+        const slot = document.getElementById(slotId);
+        if (!slot || !eventId) return;
+        let row = null;
+        try {
+            const rows = await AppDataStore.query('event_huiji_details', { event_id: eventId });
+            row = rows && rows[0];
+        } catch (_) { /* intentional: not visible to this viewer */ }
+        if (!row) return;
+        const owner = await AppDataStore.getById('customers', row.owner_customer_id).catch(() => null);
+        const sols = huijiNormalizeSolutions(row.solutions);
+        let stories = [];
+        try { stories = (await AppDataStore.query('customer_improvements', { customer_id: row.owner_customer_id })) || []; } catch (_) { /* intentional: stories are best-effort */ }
+        stories = stories.slice().sort((a, b) => String(b.improve_date || '').localeCompare(String(a.improve_date || ''))).slice(0, 3);
+        const ownerName = (owner && owner.full_name) || ('#' + row.owner_customer_id);
+        slot.style.display = 'block';
+        slot.innerHTML = `
+            <h4>🏠 汇集 Briefing <span style="font-size:11px;color:#9CA3AF;font-weight:400;">private — creator &amp; managers</span></h4>
+            <div class="info-row"><span class="info-label">House Owner:</span> <span><strong>${escapeHtml(ownerName)}</strong></span></div>
+            ${sols.length ? `<div class="info-row" style="flex-direction:column;align-items:flex-start;gap:4px;"><span class="info-label">Verified solutions:</span><div>${sols.map(s => `<span style="display:inline-block;background:#ecfdf5;color:#047857;padding:2px 8px;border-radius:10px;font-size:12px;margin:2px 4px 2px 0;">${escapeHtml(s.label)}${s.date ? ` <span style="color:#6b7280;">· ${escapeHtml(s.date)}</span>` : ''}</span>`).join('')}</div></div>` : ''}
+            ${row.notes ? `<div class="info-row"><span class="info-label">Notes:</span> <span style="white-space:pre-wrap;">${escapeHtml(row.notes)}</span></div>` : ''}
+            ${stories.length ? `<div class="info-row" style="flex-direction:column;align-items:flex-start;gap:4px;"><span class="info-label">🌱 改命后的进步:</span><div style="width:100%;">${stories.map(r => `<div style="font-size:12px;margin:3px 0;"><span style="color:#6b7280;">${escapeHtml(r.improve_date || '')}</span> ${r.solution ? `<span style="background:#ecfdf5;color:#047857;padding:0 6px;border-radius:8px;font-size:11px;">${escapeHtml(r.solution)}</span>` : ''} <span>${escapeHtml(r.story || '')}</span></div>`).join('')}</div></div>` : ''}`;
+    };
+
     const openCpsCreateEventModal = () => {
         const content = `
             ${buildEventCategoriesField([])}
+            <div id="huiji-owner-section" style="display:none;margin:12px 0;padding:12px;border:1px solid #fbcfe8;border-radius:8px;background:#fdf2f8;"></div>
             <div class="form-group"><label>Title*</label><input type="text" id="mkt-title" class="form-control"></div>
             <div class="form-row" style="display:flex;gap:12px;">
                 <div class="form-group" style="flex:1;"><label>Date*</label><input type="date" id="mkt-event-date" class="form-control"></div>
@@ -3090,6 +3406,7 @@
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Save', type: 'primary', action: '(async () => { await app.saveCpsNewEvent(); })()' }
         ]);
+        huijiInitSection({ eventId: null });
     };
 
     const saveCpsNewEvent = async () => {
@@ -3114,6 +3431,10 @@
             });
         }
         if (!selectedCats.length) return UI.toast.error('At least one category is required');
+
+        // 汇集 gate: a huiji event must name its house owner (see huiji block above).
+        const _hv = huijiValidateBeforeSave();
+        if (!_hv.ok) return UI.toast.error(_hv.msg);
 
         const data = {
             // Write BOTH `title` and `event_title` so downstream consumers
@@ -3149,6 +3470,10 @@
 
         try {
             const newEvent = await AppDataStore.create('events', data);
+
+            // Persist the 汇集 briefing while the modal DOM is still open
+            // (huijiSaveForEvent reads the checkboxes/notes; own error toast).
+            await huijiSaveForEvent(newEvent?.id);
 
             // If an image was attached, upload it to storage and patch the
             // event's poster_url — mirrors the marketing chunk's event poster
@@ -5895,6 +6220,23 @@
         clearBasicInfoReferrer,
         EVENT_CATEGORIES,
         parseEventCategories,
+        // 汇集 event briefing (canonical home — marketing/calendar/performance
+        // chunks call these via window.app; this chunk is init-loaded)
+        huijiIsHuijiCats,
+        huijiIsHuijiEvent,
+        huijiMergeSolutionSources,
+        huijiNormalizeSolutions,
+        huijiInitSection,
+        huijiToggleSection,
+        huijiSearchOwner,
+        huijiSelectOwner,
+        huijiClearOwner,
+        huijiAddManualRow,
+        huijiLoadOwnerSolutions,
+        huijiCollectSolutions,
+        huijiValidateBeforeSave,
+        huijiSaveForEvent,
+        huijiFillBriefing,
         buildPostMeetupNotesBlock,
         collectPostMeetupNotesData,
         buildMeetingOutcomeBlock,

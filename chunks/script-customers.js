@@ -820,6 +820,17 @@ const showCustomerDetail = async (customerId) => {
                     <div class="acc-body" id="cust-acc-body-improvements-${customer.id}" style="display:none" data-loaded="false"></div>
                 </div>
 
+                <!-- 14 汇集接待 (Huiji Hosting History) — rows come from
+                     event_huiji_details, whose RLS already scopes to the
+                     viewer's own created events (managers L≤5 see all). -->
+                <div class="acc-item" id="cust-acc-hosting-${customer.id}">
+                    <div class="acc-hdr" onclick="app.toggleCustomerAccordion('hosting',${customer.id},this.parentElement)">
+                        <span><i class="fas fa-home" style="color:#be185d;"></i> 汇集接待 Hosting <span id="cust-host-badge-${customer.id}" style="display:none;background:#be185d;color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;margin-left:6px;vertical-align:middle;"></span></span>
+                        <i class="fas fa-chevron-down acc-chev"></i>
+                    </div>
+                    <div class="acc-body" id="cust-acc-body-hosting-${customer.id}" style="display:none" data-loaded="false"></div>
+                </div>
+
             </div>
         </div>
     `;
@@ -839,6 +850,15 @@ const showCustomerDetail = async (customerId) => {
     AppDataStore.queryAdvanced('customer_improvements', { select: 'id', filters: { customer_id: customer.id }, limit: 1, countMode: 'exact' }).then(res => {
         const n = (res && res.count) || 0;
         const badge = document.getElementById(`cust-imp-badge-${customer.id}`);
+        if (badge && n > 0) {
+            badge.textContent = n;
+            badge.style.display = 'inline';
+        }
+    }).catch(() => {});
+    // Async: populate 汇集接待 hosting count badge (RLS-scoped per viewer).
+    AppDataStore.queryAdvanced('event_huiji_details', { select: 'id', filters: { owner_customer_id: customer.id }, limit: 1, countMode: 'exact' }).then(res => {
+        const n = (res && res.count) || 0;
+        const badge = document.getElementById(`cust-host-badge-${customer.id}`);
         if (badge && n > 0) {
             badge.textContent = n;
             badge.style.display = 'inline';
@@ -1124,6 +1144,9 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
     }
     else if (tab === 'improvements') {
         await renderImprovementsTab(customer, container);
+    }
+    else if (tab === 'hosting') {
+        await renderHuijiHostingTab(customer, container);
     }
 };
 
@@ -1696,6 +1719,41 @@ const renderImprovementsTab = async (customer, container) => {
         if (rows.length > 0) { badge.textContent = rows.length; badge.style.display = 'inline'; }
         else { badge.style.display = 'none'; }
     }
+};
+
+// ========== 汇集接待 (HUIJI HOSTING HISTORY) ==========
+// Events where this customer was the house owner. Rows come from
+// event_huiji_details — RLS already scopes them per viewer (agents see only
+// visits they created; managers L≤5 see all), so no extra gating here.
+const renderHuijiHostingTab = async (customer, container) => {
+    if (typeof container === 'string') container = document.getElementById(container);
+    if (!container) return;
+    let rows;
+    try {
+        rows = (await AppDataStore.query('event_huiji_details', { owner_customer_id: customer.id })) || [];
+    } catch (e) {
+        container.innerHTML = '<p style="color:var(--gray-400);font-size:13px;">Could not load hosting history. Please try again.</p>';
+        return;
+    }
+    if (!rows.length) {
+        container.innerHTML = '<p style="color:var(--gray-400);font-size:13px;">还没有汇集记录 — no visits hosted at this house (that you can see).</p>';
+        return;
+    }
+    const events = await Promise.all(rows.map(r => AppDataStore.getById('events', r.event_id).catch(() => null)));
+    const _sols = (raw) => (window.app.huijiNormalizeSolutions ? window.app.huijiNormalizeSolutions(raw) : []);
+    const items = rows.map((r, i) => ({ r, ev: events[i] }))
+        .sort((a, b) => String(b.ev?.date || b.ev?.event_date || '').localeCompare(String(a.ev?.date || a.ev?.event_date || '')));
+    container.innerHTML = `
+        <div style="display:flex;flex-direction:column;gap:10px;">
+            ${items.map(({ r, ev }) => `
+                <div style="border:1px solid var(--gray-200);border-radius:8px;padding:10px 12px;background:#fff;">
+                    <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+                        <strong style="font-size:13px;">🏠 ${escapeHtml(ev?.event_title || ev?.title || ('Event #' + r.event_id))}</strong>
+                        <span style="font-size:12px;color:var(--gray-500);">${escapeHtml(ev?.date || ev?.event_date || '')}</span>
+                    </div>
+                    ${_sols(r.solutions).length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;">${_sols(r.solutions).map(s => `<span style="background:#ecfdf5;color:#047857;padding:1px 8px;border-radius:10px;font-size:11px;">${escapeHtml(s.label)}</span>`).join('')}</div>` : ''}
+                </div>`).join('')}
+        </div>`;
 };
 
 const openImprovementModal = async (customerId, improvementId = null) => {

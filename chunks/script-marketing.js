@@ -763,6 +763,7 @@
         } else if (type === 'events') {
             content = `
                 ${buildEventCategoriesField([])}
+                <div id="huiji-owner-section" style="display:none;margin:12px 0;padding:12px;border:1px solid #fbcfe8;border-radius:8px;background:#fdf2f8;"></div>
                 <div class="form-group"><label>Title*</label><input type="text" id="mkt-title" class="form-control"></div>
                 <div class="form-group"><label>Market / Country</label><select id="mkt-event-country" class="form-control">${(UI.countries || []).map(c => `<option value="${c.code}" ${c.code === window._crmUtils.cuHomeCountry() ? 'selected' : ''}>${escapeHtml(c.name)} (${escapeHtml(c.symbol)})</option>`).join('')}</select></div>
                 <div class="form-group"><label>Ticket Price</label><input type="number" id="mkt-price" class="form-control" value="0"></div>
@@ -835,6 +836,13 @@
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Save', type: 'primary', action: '(async () => { await app.saveMarketingListItem(); })()' }
         ]);
+        // 汇集 briefing widget lives in the activities chunk (init-loaded by
+        // script.js; ensure-load is a cheap no-op when already present).
+        if (type === 'events') {
+            Promise.resolve(window._loadChunkOnce ? window._loadChunkOnce('chunks/script-activities.min.js') : null)
+                .then(() => window.app.huijiInitSection && window.app.huijiInitSection({ eventId: null }))
+                .catch(() => {});
+        }
     };
 
     const openMarketingListEditModal = async (id) => {
@@ -877,6 +885,7 @@
         } else if (type === 'events') {
             content = `
                 ${buildEventCategoriesField(parseEventCategories(item.categories))}
+                <div id="huiji-owner-section" style="display:none;margin:12px 0;padding:12px;border:1px solid #fbcfe8;border-radius:8px;background:#fdf2f8;"></div>
                 <div class="form-group"><label>Title*</label><input type="text" id="mkt-title" class="form-control" value="${escapeHtml(item.event_title || item.title || '')}"></div>
                 <div class="form-group"><label>Market / Country</label><select id="mkt-event-country" class="form-control">${(UI.countries || []).map(c => `<option value="${c.code}" ${c.code === (item.country || window._crmUtils.cuHomeCountry()) ? 'selected' : ''}>${escapeHtml(c.name)} (${escapeHtml(c.symbol)})</option>`).join('')}</select></div>
                 <div class="form-group"><label>Ticket Price</label><input type="number" id="mkt-price" class="form-control" value="${item.ticket_price || 0}"></div>
@@ -953,6 +962,13 @@
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Save Changes', type: 'primary', action: `(async () => { await app.saveMarketingListItem('${id}'); })()` }
         ]);
+        // 汇集 briefing: creator gets the editable section prefilled; a manager
+        // (L≤5) sees it read-only (RLS returns the row but blocks their writes).
+        if (type === 'events') {
+            Promise.resolve(window._loadChunkOnce ? window._loadChunkOnce('chunks/script-activities.min.js') : null)
+                .then(() => window.app.huijiInitSection && window.app.huijiInitSection({ eventId: id }))
+                .catch(() => {});
+        }
     };
 
     const saveMarketingListItem = async (id = null) => {
@@ -1101,6 +1117,11 @@
             if (!data.title) return UI.toast.error('Title is required');
             if (!selectedCats.length) return UI.toast.error('At least one category is required');
 
+            // 汇集 gate: a huiji event must name its house owner (widget in the
+            // activities chunk; absent widget → guard is a no-op).
+            const _hv = window.app.huijiValidateBeforeSave ? window.app.huijiValidateBeforeSave() : { ok: true };
+            if (!_hv.ok) return UI.toast.error(_hv.msg);
+
             const _posterFile = document.getElementById('mkt-poster')?.files[0];
             try {
                 let _savedId = id;
@@ -1117,6 +1138,9 @@
                     const _newRec = await AppDataStore.create('events', data);
                     _savedId = _newRec?.id;
                 }
+                // Persist the 汇集 briefing while the modal DOM is still open
+                // (reads the widget's checkboxes/notes; shows its own error toast).
+                if (window.app.huijiSaveForEvent) await window.app.huijiSaveForEvent(_savedId);
                 let _posterUploadFailed = false;
                 if (_savedId && _posterFile) {
                     const _sb = window.supabase || window.supabaseClient;

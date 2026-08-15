@@ -190,6 +190,11 @@
                      self-injects after #kpi-stats-grid there (People Met pattern). -->
                 <div id="name-list-section" style="margin-top:24px;"></div>
 
+                <!-- 汇集 → Closing conversion (owner ask 2026-08-15). Filled by
+                     renderHuijiConversionSection; self-injects in the React
+                     shell (Name List pattern). -->
+                <div id="huiji-conversion-section" style="margin-top:24px;"></div>
+
                 <div class="dashboard-charts-row">
                     <div class="chart-container">
                         <div class="chart-header">
@@ -1255,6 +1260,7 @@
             renderActivityAttendanceDetails().catch(e => console.warn('renderActivityAttendanceDetails failed:', e)),
             renderPeopleMetSection().catch(e => console.warn('renderPeopleMetSection failed:', e)),
             renderNameListSection().catch(e => console.warn('renderNameListSection failed:', e)),
+            renderHuijiConversionSection().catch(e => console.warn('renderHuijiConversionSection failed:', e)),
             // Hierarchical target comparison runs in the same parallel batch.
             // Wrapped so a render failure doesn't reject the whole Promise.all.
             (async () => {
@@ -3365,6 +3371,150 @@ const nlTab = (key) => { _nlTab = key; if (_nlLast) { const el = document.getEle
 const nlExpand = (tableKey) => {
     if (_nlExpanded.has(tableKey)) _nlExpanded.delete(tableKey); else _nlExpanded.add(tableKey);
     if (_nlLast) { const el = document.getElementById('nl-body'); if (el) el.innerHTML = _nlBodyHtml(_nlLast); }
+};
+
+// ========== 汇集 → CLOSING CONVERSION (owner ask 2026-08-15) ==========
+// Per huiji event the viewer can see in event_huiji_details (RLS: agents
+// their own created events, managers L≤5 all): attendees vs closings.
+// "Closed" = the attendee row carries closing_activity_id (the attendee-
+// closing flow is the canonical from-this-event signal), OR — fallback for
+// closings recorded outside that flow — the attendee prospect's
+// closing_record.closing_date falls within 90 days after the event date.
+let _hjOpen = false;
+try { _hjOpen = localStorage.getItem('fs_hj_open') === '1'; } catch (_) { /* private mode */ }
+
+const HUIJI_CLOSE_WINDOW_DAYS = 90;
+
+const _hjBuild = async () => {
+    const res = await AppDataStore.queryAdvanced('event_huiji_details', { filters: {}, limit: 200 });
+    const details = (res && res.data) || [];
+    if (!details.length) return [];
+    const events = await Promise.all(details.map(d => AppDataStore.getById('events', d.event_id).catch(() => null)));
+    const out = [];
+    for (let i = 0; i < details.length; i++) {
+        const d = details[i];
+        const ev = events[i];
+        let attendees = [];
+        try {
+            const ares = await AppDataStore.queryAdvanced('event_attendees', { filters: { event_id: d.event_id }, countMode: null, limit: 2000 });
+            attendees = (ares && ares.data) || [];
+        } catch (_) { /* intentional: attendee list is best-effort */ }
+        let closed = attendees.filter(a => a.closing_activity_id != null).length;
+        const evDate = ev?.date || ev?.event_date || null;
+        if (evDate) {
+            const t0 = new Date(evDate).getTime();
+            const t1 = t0 + HUIJI_CLOSE_WINDOW_DAYS * 86400000;
+            const candidates = attendees
+                .filter(a => a.closing_activity_id == null && (a.entity_id || a.attendee_id) && String(a.attendee_type || '').toLowerCase().includes('prospect'))
+                .slice(0, 50); // cap the N+1 — huiji audiences are small
+            const prospects = await Promise.all(candidates.map(a => AppDataStore.getById('prospects', a.entity_id || a.attendee_id).catch(() => null)));
+            prospects.forEach(p => {
+                const cr = typeof p?.closing_record === 'string'
+                    ? (() => { try { return JSON.parse(p.closing_record); } catch (_) { return null; } })()
+                    : p?.closing_record;
+                const cd = cr?.closing_date;
+                if (!cd) return;
+                const t = new Date(cd).getTime();
+                if (Number.isFinite(t) && t >= t0 && t <= t1) closed++;
+            });
+        }
+        let owner = null;
+        try { owner = await AppDataStore.getById('customers', d.owner_customer_id); } catch (_) { /* intentional: name is cosmetic */ }
+        out.push({
+            title: ev?.event_title || ev?.title || ('Event #' + d.event_id),
+            date: evDate || '',
+            owner: (owner && owner.full_name) || ('#' + d.owner_customer_id),
+            attendees: attendees.length,
+            closed,
+        });
+    }
+    out.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    return out;
+};
+
+const _hjBodyHtml = (rows) => {
+    if (!rows.length) return '<p style="padding:14px;color:var(--gray-400);font-size:13px;">No 汇集 events with a briefing yet (that you can see).</p>';
+    const totA = rows.reduce((s, r) => s + r.attendees, 0);
+    const totC = rows.reduce((s, r) => s + r.closed, 0);
+    const pct = (a, c) => a ? Math.round((c / a) * 100) + '%' : '—';
+    return `
+        <div style="overflow-x:auto;">
+        <table class="data-table" style="width:100%;font-size:13px;">
+            <thead><tr>
+                <th scope="col" style="text-align:left;">Event</th>
+                <th scope="col">Date</th>
+                <th scope="col" style="text-align:left;">House Owner</th>
+                <th scope="col">Attendees</th>
+                <th scope="col">Closed ≤${HUIJI_CLOSE_WINDOW_DAYS}d</th>
+                <th scope="col">Conversion</th>
+            </tr></thead>
+            <tbody>
+                ${rows.map(r => `<tr>
+                    <td style="text-align:left;">🏠 ${escapeHtml(r.title)}</td>
+                    <td style="text-align:center;">${escapeHtml(r.date)}</td>
+                    <td style="text-align:left;">${escapeHtml(r.owner)}</td>
+                    <td style="text-align:center;">${r.attendees}</td>
+                    <td style="text-align:center;">${r.closed}</td>
+                    <td style="text-align:center;font-weight:700;color:${r.attendees && (r.closed / r.attendees) >= 0.3 ? '#16a34a' : 'var(--gray-700)'};">${pct(r.attendees, r.closed)}</td>
+                </tr>`).join('')}
+            </tbody>
+            <tfoot><tr style="font-weight:700;background:var(--gray-50,#f9fafb);">
+                <td style="text-align:left;">Total</td><td></td><td></td>
+                <td style="text-align:center;">${totA}</td>
+                <td style="text-align:center;">${totC}</td>
+                <td style="text-align:center;">${pct(totA, totC)}</td>
+            </tr></tfoot>
+        </table>
+        </div>
+        <p style="font-size:11px;color:var(--gray-400);margin:8px 2px 0;">Closed = attendee has a recorded closing from this event, or their closing date falls within ${HUIJI_CLOSE_WINDOW_DAYS} days after it. Scope follows 汇集 briefing visibility (agents: own events · managers: all).</p>`;
+};
+
+const _hjRenderBody = async () => {
+    const el = document.getElementById('hj-body');
+    if (!el) return;
+    el.innerHTML = '<p style="padding:14px;color:var(--gray-400);font-size:13px;"><i class="fas fa-spinner fa-spin"></i> Crunching 汇集 conversions…</p>';
+    try {
+        const rows = await _hjBuild();
+        const el2 = document.getElementById('hj-body');
+        if (el2) el2.innerHTML = _hjBodyHtml(rows);
+    } catch (e) {
+        console.warn('[huiji] conversion build failed:', e);
+        const el2 = document.getElementById('hj-body');
+        if (el2) el2.innerHTML = `<p style="padding:14px;color:var(--gray-400);font-size:13px;">汇集 conversion could not load — please retry. (${escapeHtml(e && e.message || 'unknown error')})</p>`;
+    }
+};
+
+const renderHuijiConversionSection = async () => {
+    let container = document.getElementById('huiji-conversion-section');
+    if (!container) {
+        // Self-inject after the Name List section (or the KPI grid) so the
+        // card exists in BOTH shells (Name List / People Met pattern).
+        const anchor = document.getElementById('name-list-section') || document.getElementById('kpi-stats-grid');
+        const root = anchor?.parentNode || document.querySelector('.kpi-dashboard');
+        if (!root) return;
+        container = document.createElement('div');
+        container.id = 'huiji-conversion-section';
+        container.style.marginTop = '24px';
+        if (anchor && anchor.nextSibling) root.insertBefore(container, anchor.nextSibling);
+        else root.appendChild(container);
+    }
+    container.innerHTML = `
+        <div class="kpi-card">
+            <h3 class="kpi-card-title" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;" onclick="app.hjToggle()">
+                <span>🏠 汇集 → Closing
+                    <span style="font-weight:400;color:var(--gray-400);font-size:13px;">house-visit events · attendees · closings ≤${HUIJI_CLOSE_WINDOW_DAYS}d</span>
+                </span>
+                <span style="font-size:13px;color:var(--primary,#0D9488);white-space:nowrap;">${_hjOpen ? '▲ Hide' : '▼ Open'}</span>
+            </h3>
+            <div id="hj-body" ${_hjOpen ? '' : 'style="display:none;"'}></div>
+        </div>`;
+    if (_hjOpen) await _hjRenderBody();
+};
+
+const hjToggle = () => {
+    _hjOpen = !_hjOpen;
+    try { localStorage.setItem('fs_hj_open', _hjOpen ? '1' : '0'); } catch (_) { /* private mode */ }
+    renderHuijiConversionSection();
 };
 
 // Drill-down: why is this person on the list — every counted activity with the
@@ -6149,5 +6299,8 @@ const exportKPIReport = async (format) => {
         nlWhy,
         nlRepeatDetail,
         nlCsv,
+        // 汇集 → Closing conversion
+        hjToggle,
+        renderHuijiConversionSection,
     });
 })();
