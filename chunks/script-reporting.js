@@ -762,7 +762,7 @@
             fill('wr-ft_n',  () => getEventCategoryHeadcount(from, to, ['个人风水基础课', '环境风水基础课'])),
             fill('wr-ft_kk', () => getEventCategoryHeadcount(from, to, ['老板每月主题课', '运程讲座', '新春活动'])),
             fill('wr-it',    () => getEventCategoryHeadcount(from, to, ['个人改命分享会', '风水改命分享会-简易', '风水改命分享会-专案', '画作分享会', '艺品分享会', '福气分享会'], ['customer'])),
-            fill('wr-hj',    () => getEventCategoryHeadcount(from, to, ['汇聚-专案', '汇集-商业', '汇集-灵活', '汇集-简易', '汇集-Condo', '汇集-Terrace', '汇集-Semi-D', '汇集-Bungalow'])),
+            fill('wr-hj',    () => getEventCategoryHeadcount(from, to, ['汇聚-专案', '汇集-商业', '汇集-灵活', '汇集-简易', '汇集专案-Condo', '汇集专案-Terrace', '汇集专案-Semi-D', '汇集专案-Bungalow'])),
             fill('wr-rs',    () => getEventCategoryHeadcount(from, to, ['代理补习班'])),
             fill('wr-mz',    () => getEventCategoryHeadcount(from, to, ['博物馆'])),
             // NC — prospect→customer conversions (regardless of payment).
@@ -2678,7 +2678,7 @@ const NL_TOPICS = {
         label: '风水 Fengshui', icon: '🧭',
         keywords: ['风水', 'fengshui', 'feng shui', '风水方案', '风水审计', 'fengshui audit', '看风水', '阳宅', '布局', 'new house'],
         productKeywords: ['风水', 'feng shui', 'fengshui', 'audit'],
-        categories: ['个人风水基础课', '环境风水基础课', '风水改命分享会-简易', '风水改命分享会-专案', '汇集-商业', '汇集-灵活', '汇集-简易', '汇聚-专案', '汇集-Condo', '汇集-Terrace', '汇集-Semi-D', '汇集-Bungalow', '运程讲座', '博物馆'],
+        categories: ['个人风水基础课', '环境风水基础课', '风水改命分享会-简易', '风水改命分享会-专案', '汇集-商业', '汇集-灵活', '汇集-简易', '汇聚-专案', '汇集专案-Condo', '汇集专案-Terrace', '汇集专案-Semi-D', '汇集专案-Bungalow', '运程讲座', '博物馆'],
         actTypes: ['FSA', 'SITE'],
     },
     ring: {

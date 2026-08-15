@@ -165,12 +165,12 @@ const _state = windowStub._appState;
   check('matcher: 汇集-简易', app.huijiIsHuijiCats(['汇集-简易']));
   check('matcher: custom Others 汇集-新品', app.huijiIsHuijiCats(['个人风水基础课', '汇集-新品']));
   // Property-type categories added 2026-08-15 (owner: "more specific categories")
-  check('matcher: 汇集-Condo', app.huijiIsHuijiCats(['汇集-Condo']));
-  check('matcher: 汇集-Terrace', app.huijiIsHuijiCats(['汇集-Terrace']));
-  check('matcher: 汇集-Semi-D', app.huijiIsHuijiCats(['汇集-Semi-D']));
-  check('matcher: 汇集-Bungalow', app.huijiIsHuijiCats(['汇集-Bungalow']));
+  check('matcher: 汇集专案-Condo', app.huijiIsHuijiCats(['汇集专案-Condo']));
+  check('matcher: 汇集专案-Terrace', app.huijiIsHuijiCats(['汇集专案-Terrace']));
+  check('matcher: 汇集专案-Semi-D', app.huijiIsHuijiCats(['汇集专案-Semi-D']));
+  check('matcher: 汇集专案-Bungalow', app.huijiIsHuijiCats(['汇集专案-Bungalow']));
   check('categories list: all four property types present',
-    ['汇集-Condo', '汇集-Terrace', '汇集-Semi-D', '汇集-Bungalow'].every(c => app.EVENT_CATEGORIES.includes(c)));
+    ['汇集专案-Condo', '汇集专案-Terrace', '汇集专案-Semi-D', '汇集专案-Bungalow'].every(c => app.EVENT_CATEGORIES.includes(c)));
   check('matcher: non-huiji course', app.huijiIsHuijiCats(['个人风水基础课']), false);
   check('matcher: 内含汇集 but not prefix', app.huijiIsHuijiCats(['大汇集晚宴']), false);
   check('matcher: empty', app.huijiIsHuijiCats([]), false);
