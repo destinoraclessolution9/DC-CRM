@@ -1167,10 +1167,10 @@
         '汇集-商业',
         '汇集-灵活',
         '汇集-简易',
-        '汇集专案-Condo',
-        '汇集专案-Terrace',
-        '汇集专案-Semi-D',
-        '汇集专案-Bungalow',
+        // 汇集 track × property matrix (owner 2026-08-15): every track gets
+        // Condo/Terrace/Semi-D/Bungalow variants. Generated so the four
+        // tracks can't drift; keep in sync with the marketing-chunk canonical.
+        ...['专案', '商业', '灵活', '简易'].flatMap(t => ['Condo', 'Terrace', 'Semi-D', 'Bungalow'].map(p => `汇集${t}-${p}`)),
         '个人改命分享会',
         '风水改命分享会-简易',
         '风水改命分享会-专案',
