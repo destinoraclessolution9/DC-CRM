@@ -25,6 +25,11 @@
 //      separate boards; the 365d window filters on referral created_at.
 //   8. AUDITED = audit package bought OR FSA logged; audit date prefers the
 //      FSA (service actually delivered) over the purchase date.
+//   9. ATTENDED 汇集/汇聚 = 1.5 MENTIONS instead of 1 (owner 2026-08-15). The
+//      weight rides on the ACTIVITY — a tick made during the visit is also
+//      1.5, so "attended + pitched" never scores below "attended alone".
+//      Boundaries stay: a lone 汇集 (1.5) is C; 1 汇集 + 3 events (4.5) is
+//      still B; A remains 5+. Touch weights are untouched.
 //
 // HARNESS: loads the REAL chunks/script-reporting.js into a stubbed browser and
 // injects an export hook just before app.register(). No logic duplicated here.
@@ -116,7 +121,7 @@ const ANCHOR = "app.register('reporting', {";
 if (!src.includes(ANCHOR)) { console.error('FAIL: register anchor not found — harness needs updating'); process.exit(1); }
 src = src.replace(ANCHOR, `window.__T = {
         _getNameListData, _windowCaches, NL_TOPICS,
-        _nlParseTicks, _nlParseCats, _nlTickHit, _nlCatHit, _nlFmtW, _nlTable, _nlExpanded,
+        _nlParseTicks, _nlParseCats, _nlTickHit, _nlCatHit, _nlFmtW, _nlTable, _nlExpanded, _nlIsHuiji,
     };
     ` + ANCHOR);
 // eslint-disable-next-line no-eval
@@ -140,6 +145,9 @@ const fresh = () => { T._windowCaches.clear(); return T._getNameListData(); };
     eq('parseCats: comma list', T._nlParseCats('博物馆, 课程'), ['博物馆', '课程']);
     eq('fmtW: integers stay clean', T._nlFmtW(5), '5');
     eq('fmtW: one decimal', T._nlFmtW(5.8000000001), '5.8');
+    eq('fmtW: halves print clean (mention totals)', T._nlFmtW(1.5), '1.5');
+    ok('isHuiji: matches 汇集-* AND the 汇聚 spelling, nothing else',
+        T._nlIsHuiji(['汇集-商业']) && T._nlIsHuiji(['汇聚-专案']) && !T._nlIsHuiji(['个人风水基础课', '博物馆', 'DC 日']));
     ok('tickHit: DC 日 is NOT a 招商 tick (owner: "consider an event")',
         T._nlTickHit(T.NL_TOPICS.recruit, ['DC 日']) === null);
     ok('tickHit: DC 招商会 IS a 招商 tick', T._nlTickHit(T.NL_TOPICS.recruit, ['DC 招商会']) === 'DC 招商会');
@@ -158,6 +166,12 @@ const fresh = () => { T._windowCaches.clear(); return T._getNameListData(); };
         { id: 13, full_name: 'P Profile Caiku', phone: '0130', responsible_agent_id: 1, cps_interest: '想买财库' },
         { id: 15, full_name: 'P Museum Both', phone: '0150', responsible_agent_id: 1 },
         { id: 16, full_name: 'P Attendee Only', phone: '0160', responsible_agent_id: 1 },
+        { id: 17, full_name: 'P Huiji Only', phone: '0170', responsible_agent_id: 1 },
+        { id: 18, full_name: 'P Huiji Plus Talk', phone: '0180', responsible_agent_id: 1 },
+        { id: 19, full_name: 'P Huiji Tick', phone: '0190', responsible_agent_id: 1 },
+        { id: 20, full_name: 'P Huiji B45', phone: '0200', responsible_agent_id: 1 },
+        { id: 26, full_name: 'P Huiji A55', phone: '0264', responsible_agent_id: 1 },
+        { id: 27, full_name: 'P Huiji Attendee', phone: '0274', responsible_agent_id: 1 },
     ];
     CUSTOMERS = [
         { id: 21, full_name: 'C Audited Flexi', phone: '0210', responsible_agent_id: 1 },
@@ -170,6 +184,8 @@ const fresh = () => { T._windowCaches.clear(); return T._getNameListData(); };
         { id: 101, categories: '["个人风水基础课"]', title: '风水基础 8月班' },
         { id: 102, categories: 'DC 日', title: 'DC Day August' },
         { id: 103, categories: '["博物馆"]', title: 'Museum Trip' },
+        { id: 104, categories: '["汇集-商业"]', title: '汇集 - 王家' },
+        { id: 105, categories: '["汇聚-专案"]', title: '汇聚 - 李家' },
     ];
     ACTIVITIES = [
         // P11 — five fengshui mentions across all buckets, priority pinned:
@@ -196,11 +212,36 @@ const fresh = () => { T._windowCaches.clear(); return T._getNameListData(); };
         { id: 15, activity_type: 'FSA', activity_date: daysAgo(45), customer_id: 25, lead_agent_id: 1 },
         // group event nobody is directly linked to — P16 attends via attendee row:
         { id: 16, activity_type: 'EVENT', activity_date: daysAgo(22), lead_agent_id: 1, event_id: 101 },
+        // ── 汇集 = 1.5 fixtures (owner 2026-08-15) ──
+        // P17 — one 汇聚 visit (the 聚 spelling), duplicated by an attendee row:
+        { id: 40, activity_type: 'EVENT', activity_date: daysAgo(7), prospect_id: 17, lead_agent_id: 1, event_id: 105 },
+        // P18 — 汇集 (1.5) + a fengshui talk (1) = 2.5 → B:
+        { id: 41, activity_type: 'EVENT', activity_date: daysAgo(14), prospect_id: 18, lead_agent_id: 1, event_id: 104 },
+        { id: 42, activity_type: 'FTF', activity_date: daysAgo(6), prospect_id: 18, lead_agent_id: 1, note_key_points: '风水 follow up' },
+        // P19 — ticked the product DURING the 汇集 visit → tick bucket at 1.5:
+        { id: 43, activity_type: 'EVENT', activity_date: daysAgo(11), prospect_id: 19, lead_agent_id: 1, event_id: 104,
+          opportunity_potential: 'FengShui 专案 | Remarks: pitched at the house' },
+        // P20 — 1 汇集 + 3 plain classes = 4.5 → still B (halves never cross into A):
+        { id: 44, activity_type: 'EVENT', activity_date: daysAgo(41), prospect_id: 20, lead_agent_id: 1, event_id: 104 },
+        { id: 45, activity_type: 'EVENT', activity_date: daysAgo(42), prospect_id: 20, lead_agent_id: 1, event_id: 101 },
+        { id: 46, activity_type: 'EVENT', activity_date: daysAgo(43), prospect_id: 20, lead_agent_id: 1, event_id: 101 },
+        { id: 47, activity_type: 'EVENT', activity_date: daysAgo(44), prospect_id: 20, lead_agent_id: 1, event_id: 101 },
+        // P26 — 3 汇集 + 1 plain class = 5.5 → A:
+        { id: 48, activity_type: 'EVENT', activity_date: daysAgo(31), prospect_id: 26, lead_agent_id: 1, event_id: 104 },
+        { id: 49, activity_type: 'EVENT', activity_date: daysAgo(32), prospect_id: 26, lead_agent_id: 1, event_id: 105 },
+        { id: 50, activity_type: 'EVENT', activity_date: daysAgo(33), prospect_id: 26, lead_agent_id: 1, event_id: 104 },
+        { id: 51, activity_type: 'EVENT', activity_date: daysAgo(34), prospect_id: 26, lead_agent_id: 1, event_id: 101 },
+        // group 汇集 P27 only reaches through an attendee row:
+        { id: 52, activity_type: 'EVENT', activity_date: daysAgo(13), lead_agent_id: 1, event_id: 104 },
     ];
     ATTENDEES = [
         { id: 1, attendee_type: 'prospect', entity_id: 16, activity_id: 16, attended: true },
         // duplicate signal for a3 (P11 already the activity's prospect) — must NOT double-count:
         { id: 2, attendee_type: 'prospect', entity_id: 11, activity_id: 3, attendance_status: 'Attended' },
+        // duplicate for a40 (P17 already the activity's prospect) — 1.5 must NOT become 3:
+        { id: 3, attendee_type: 'prospect', entity_id: 17, activity_id: 40, attended: true },
+        // P27's only path to the 汇集 — attendee-row weight must also be 1.5:
+        { id: 4, attendee_type: 'prospect', entity_id: 27, activity_id: 52, attended: true },
     ];
     PURCHASES = [
         { id: 1, customer_id: 21, item: 'Flexi FengShui Package', date: daysAgo(100) },
@@ -233,6 +274,28 @@ const fresh = () => { T._windowCaches.clear(); return T._getNameListData(); };
 
     const p16 = d.topics.fengshui.find(r => r.key === 'p:16');
     ok('P16: attendee-row-only group event still counts (event bucket)', !!p16 && p16.event === 1);
+
+    // ── 汇集 attended = 1.5 mentions (owner 2026-08-15) ─────────────────────
+    const p17 = d.topics.fengshui.find(r => r.key === 'p:17');
+    eq('P17: one attended 汇聚 = 1.5, still C (boundaries stay) — attendee dup did not double',
+        p17 && { event: p17.event, total: p17.total, cat: p17.cat, last: p17.last },
+        { event: 1.5, total: 1.5, cat: 'C', last: daysAgo(7) });
+    ok('P17: drill-down entry carries the ×1.5 weight', !!p17 && p17.ev.length === 1 && p17.ev[0].w === 1.5);
+    const p18 = d.topics.fengshui.find(r => r.key === 'p:18');
+    eq('P18: 汇集 (1.5) + talk (1) = 2.5 → B',
+        p18 && { total: p18.total, cat: p18.cat, event: p18.event, talk: p18.talk },
+        { total: 2.5, cat: 'B', event: 1.5, talk: 1 });
+    const p19 = d.topics.fengshui.find(r => r.key === 'p:19');
+    eq('P19: tick made DURING the 汇集 visit is 1.5 too (attended+pitched never < attended alone)',
+        p19 && { tick: p19.tick, event: p19.event, total: p19.total },
+        { tick: 1.5, event: 0, total: 1.5 });
+    const p20 = d.topics.fengshui.find(r => r.key === 'p:20');
+    eq('P20: 1 汇集 + 3 classes = 4.5 → still B (halves never cross into A)',
+        p20 && { total: p20.total, cat: p20.cat }, { total: 4.5, cat: 'B' });
+    const p26 = d.topics.fengshui.find(r => r.key === 'p:26');
+    eq('P26: 3 汇集 + 1 class = 5.5 → A', p26 && { total: p26.total, cat: p26.cat }, { total: 5.5, cat: 'A' });
+    const p27 = d.topics.fengshui.find(r => r.key === 'p:27');
+    eq('P27: attendee-row-only 汇集 also weighs 1.5', p27 && { event: p27.event, total: p27.total }, { event: 1.5, total: 1.5 });
 
     ok('C21: audited → NOT on the 风水 potential list', !d.topics.fengshui.some(r => r.key === 'c:21'));
     const a21 = d.audited.find(r => r.key === 'c:21');

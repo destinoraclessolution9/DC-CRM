@@ -2647,6 +2647,8 @@ const getHighTouchProspects = () => _cachedWindow('highTouchProspects', async ()
 // title / remarks). A topic hit on the profile (cps_interest, interests,
 // pain_points) adds +1 once (★) and never moves Last Mention.
 // Categories: A = 5+ mentions · B = 2-4 · C = 1 (owner corrected 2026-08-10).
+// Attended 汇集/汇聚 = 1.5 mentions instead of 1 (owner 2026-08-15) — see
+// NL_HUIJI_MENTION_W; boundaries unchanged (a lone 汇集 at 1.5 is still C).
 //
 // TOUCH WEIGHTS (List 2): meeting/class/CPS = 1 · CALL = 0.5 · WHATSAPP = 0.3
 // (owner 2026-08-10); EMAIL counts nothing. "Physical" = meet+class+CPS only —
@@ -2698,6 +2700,15 @@ const NL_TOPICS = {
 const NL_MEET_TYPES = ['FTF', 'GR', 'XG', 'FSA', 'SITE']; // in-person meets (List 2 "Meet" column)
 const NL_PHYS_KINDS = ['meet', 'cls', 'cps'];             // physical touches (chips / gap / repeat breakdown)
 const NL_WEIGHTS = { meet: 1, cls: 1, cps: 1, call: 0.5, wa: 0.3 };
+
+// Attended 汇集/汇聚 house-visit = 1.5 mentions instead of 1 (owner 2026-08-15;
+// boundaries unchanged, so a lone 汇集 is still C). The weight rides on the
+// ACTIVITY, not just the event bucket — a tick made during the visit also
+// counts 1.5, otherwise "attended + got pitched" would score below "attended
+// alone" under the Tick→Event priority. Touch weights are NOT affected.
+// Matcher anchors on the category/title prefix (汇聚-专案 uses 聚, 汇集-* use 集).
+const NL_HUIJI_MENTION_W = 1.5;
+const _nlIsHuiji = (cats) => cats.some(c => /^汇[集聚]/.test(String(c).trim()));
 
 // Ownership matchers against purchases.item (same keyword style as
 // getCaseCountsByProduct). Power Ring: everyone can buy 2 — only 2+ owners
@@ -2873,12 +2884,12 @@ const _getNameListData = () => _cachedWindow('nameListData', async () => {
     // ── Activity pass: touches (90d) + topic mentions (365d) ─────────────────
     const mentions = new Map(); // personKey → topicKey → {tick,event,talk,last,ev:[]}
     const touches = new Map();  // personKey → [{d, k}]
-    const bumpMention = (key, topicKey, bucket, date, how) => {
+    const bumpMention = (key, topicKey, bucket, date, how, w = 1) => {
         let byTopic = mentions.get(key);
         if (!byTopic) { byTopic = {}; mentions.set(key, byTopic); }
         let m = byTopic[topicKey];
         if (!m) { m = { tick: 0, event: 0, talk: 0, profile: false, last: '', ev: [] }; byTopic[topicKey] = m; }
-        m[bucket]++;
+        m[bucket] += w;
         if ((date || '') > m.last) m.last = date;
         if (m.ev.length < 40) m.ev.push(how);
     };
@@ -2924,14 +2935,15 @@ const _getNameListData = () => _cachedWindow('nameListData', async () => {
         const blob = [a.summary, a.note_key_points, a.note_needs, a.note_pain_points, a.solution_sold, a.activity_title, opp.remarks, na.remarks]
             .filter(Boolean).join(' ').toLowerCase();
         const cats = a.activity_type === 'EVENT' && a.event_id != null ? _eventCatsOf(a.event_id) : [];
+        const actW = cats.length && _nlIsHuiji(cats) ? NL_HUIJI_MENTION_W : 1; // attended 汇集 = 1.5
 
         for (const [topicKey, topic] of Object.entries(NL_TOPICS)) {
             const tickM = tickItems.length ? _nlTickHit(topic, tickItems) : null;
-            if (tickM) { bumpMention(key, topicKey, 'tick', d, { d, t: a.activity_type, how: 'tick', what: tickM }); continue; }
+            if (tickM) { bumpMention(key, topicKey, 'tick', d, { d, t: a.activity_type, how: 'tick', what: tickM, w: actW }, actW); continue; }
             const evM = topic.actTypes.includes(a.activity_type) ? a.activity_type : (cats.length ? _nlCatHit(topic, cats) : null);
-            if (evM) { bumpMention(key, topicKey, 'event', d, { d, t: a.activity_type, how: 'event', what: evM }); continue; }
+            if (evM) { bumpMention(key, topicKey, 'event', d, { d, t: a.activity_type, how: 'event', what: evM, w: actW }, actW); continue; }
             const talkM = blob ? _nlTextHit(topic, blob) : null;
-            if (talkM) bumpMention(key, topicKey, 'talk', d, { d, t: a.activity_type, how: 'talk', what: talkM });
+            if (talkM) bumpMention(key, topicKey, 'talk', d, { d, t: a.activity_type, how: 'talk', what: talkM, w: actW }, actW);
         }
     }
 
@@ -2962,9 +2974,10 @@ const _getNameListData = () => _cachedWindow('nameListData', async () => {
         if (act.event_id == null) continue;
         const cats = _eventCatsOf(act.event_id);
         if (!cats.length) continue;
+        const attW = _nlIsHuiji(cats) ? NL_HUIJI_MENTION_W : 1; // attended 汇集 = 1.5
         for (const [topicKey, topic] of Object.entries(NL_TOPICS)) {
             const evM = _nlCatHit(topic, cats);
-            if (evM) bumpMention(key, topicKey, 'event', d, { d, t: 'EVENT', how: 'event', what: evM });
+            if (evM) bumpMention(key, topicKey, 'event', d, { d, t: 'EVENT', how: 'event', what: evM, w: attW }, attW);
         }
     }
 
@@ -3265,8 +3278,8 @@ const _nlTabTopic = (d, topicKey) => {
     const rows = list.map(r => [
         `${_nlNameLink(r)}${r.profile ? ' <span title="Interest on profile" style="color:#854f0b;font-size:11px;">★</span>' : ''} <span style="font-size:10px;color:var(--gray-400);">${r.type === 'c' ? 'C' : 'P'}</span>${topicKey === 'ring' && r.owns ? ' <span style="background:#e6f1fb;color:#0c447c;font-size:10px;padding:0 6px;border-radius:8px;">Owns 1</span>' : ''}`,
         _nlCatBadge(r.cat),
-        `<a href="javascript:void(0)" onclick="app.nlWhy('${topicKey}','${String(r.key).replace(/'/g, '')}')" style="color:var(--primary,#0D9488);font-weight:600;text-decoration:none;">${r.total} 🔍</a>`,
-        String(r.tick), String(r.event), String(r.talk),
+        `<a href="javascript:void(0)" onclick="app.nlWhy('${topicKey}','${String(r.key).replace(/'/g, '')}')" style="color:var(--primary,#0D9488);font-weight:600;text-decoration:none;">${_nlFmtW(r.total)} 🔍</a>`,
+        _nlFmtW(r.tick), _nlFmtW(r.event), _nlFmtW(r.talk),
         r.last || (r.profile ? 'profile' : '—'),
         r.grade ? escapeHtml(r.grade) : '—',
         escapeHtml(r.agentName),
@@ -3278,7 +3291,7 @@ const _nlTabTopic = (d, topicKey) => {
         caiku: 'explicit 财库 signals only · buyers of CAI KU Painting excluded — your promo-ready list',
     }[topicKey] || '';
     return `
-        ${_nlStrip(`Window: Past 365 days · A = 5+ mentions · B = 2-4 · C = 1 · one activity counts once · ${note}`)}
+        ${_nlStrip(`Window: Past 365 days · A = 5+ mentions · B = 2-4 · C = 1 · one activity counts once · 汇集 attended = 1.5 · ${note}`)}
         <div style="display:flex;gap:8px;margin-bottom:10px;font-size:12px;">
             <span>${_nlCatBadge('A')} ${counts.A}</span><span>${_nlCatBadge('B')} ${counts.B}</span><span>${_nlCatBadge('C')} ${counts.C}</span>
         </div>
@@ -3531,10 +3544,10 @@ const nlWhy = (topicKey, personKey) => {
     const lines = row.ev.map(h => `<tr>
         <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100,#f1ede3);white-space:nowrap;color:var(--gray-500);">${h.d || '—'}</td>
         <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100,#f1ede3);white-space:nowrap;">${escapeHtml(h.t)}</td>
-        <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100,#f1ede3);">${howBadge(h)} ${escapeHtml(String(h.what || ''))}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100,#f1ede3);">${howBadge(h)} ${escapeHtml(String(h.what || ''))}${h.w && h.w !== 1 ? ` <span style="background:#fdf0e3;color:#8a4a08;font-size:11px;padding:0 6px;border-radius:8px;font-weight:700;">×${_nlFmtW(h.w)}</span>` : ''}</td>
     </tr>`).join('');
-    UI.showModal(`${NL_TOPICS[topicKey].icon} ${escapeHtml(row.name)} — ${row.total} mention${row.total === 1 ? '' : 's'}`, `
-        <div style="font-size:12px;color:var(--gray-500);margin-bottom:8px;">Category ${row.cat} · Tick ${row.tick} · Event ${row.event} · Talk ${row.talk}${row.profile ? ' · Profile ★' : ''} — each activity counts once even if several signals match inside it.</div>
+    UI.showModal(`${NL_TOPICS[topicKey].icon} ${escapeHtml(row.name)} — ${_nlFmtW(row.total)} mention${row.total === 1 ? '' : 's'}`, `
+        <div style="font-size:12px;color:var(--gray-500);margin-bottom:8px;">Category ${row.cat} · Tick ${_nlFmtW(row.tick)} · Event ${_nlFmtW(row.event)} · Talk ${_nlFmtW(row.talk)}${row.profile ? ' · Profile ★' : ''} — each activity counts once even if several signals match inside it; attended 汇集 counts 1.5.</div>
         <div style="max-height:50vh;overflow:auto;border:1px solid var(--border,#e5e0d8);border-radius:6px;">
             <table style="width:100%;border-collapse:collapse;font-size:12.5px;">
                 <thead><tr>
