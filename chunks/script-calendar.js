@@ -7438,76 +7438,30 @@
         }, 650);
     };
 
-    // Aggregated read-only view of every post-meetup note this prospect has
-    // accumulated. Opens from the profile header button — quicker than
-    // expanding each activity row in turn. Empty or note-less meetings are
-    // still shown (date + type) so the agent sees chronology; visits that
-    // never captured notes are flagged as "— no notes captured —".
+    // Quick "Meet Ups & Events" popup from the profile header clock button.
+    // Since 2026-08-16 it delegates to the SAME merged-timeline renderer as
+    // profile section ③ (switchProspectTab tab==='activity' in the prospects
+    // chunk) — one source of truth, so the popup can never drift from the
+    // section again. The old hand-rolled copy silently excluded note-less
+    // attendance rows and had a NaN id-tiebreak on 'attN' string ids; both are
+    // fixed by construction here. The mu-* styles come from the prospect
+    // detail's injected style block, which is always in the DOM because this
+    // button only renders on the prospect detail page.
     const openMeetupHistoryModal = async (prospectId) => {
         const prospect = await AppDataStore.getById('prospects', prospectId);
         if (!prospect) { UI.toast.error('Prospect not found'); return; }
-        const MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP','EVENT_CLOSING'];
-        // Scale-safe: indexed per-prospect activity fetch (eq prospect_id, has its
-        // own getAll fallback) instead of scanning the WHOLE activities table.
-        const ownActivities = (await AppDataStore.getActivitiesForProspect(prospectId, { limit: 2000 }))
-            .filter(a => MEETUP_TYPES.includes(a.activity_type));
-        const attendeeNotes = await getProspectAttendeeNotes(prospectId);
-        const activities = [...ownActivities, ...attendeeNotes]
-            .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date) || (b.id || 0) - (a.id || 0));
-
-        const fmt = (txt) => txt ? escapeHtml(txt).replace(/\n/g, '<br>') : '';
-        const section = (label, text) => text
-            ? `<div style="margin-top:8px;"><div style="font-size:11px;font-weight:600;color:var(--gray-500);text-transform:uppercase;letter-spacing:.5px;">${label}</div><div style="font-size:13px;color:var(--gray-800);margin-top:2px;">${fmt(text)}</div></div>`
-            : '';
-
-        const body = activities.length === 0
-            ? '<p style="text-align:center;padding:24px;color:var(--gray-400);">No meet-up history recorded yet.</p>'
-            : activities.map(a => {
-                const hasAnyNote = a.note_key_points || a.note_needs || a.note_pain_points || a.opportunity_potential || a.next_action || a.summary;
-                const editHandler = a._isAttendeeNote
-                    ? `UI.hideModal();app.openAttendeePostEventModal(${a._attendeeRowId}, ${a._parentActivityId}, ${prospectId})`
-                    : `UI.hideModal();app.openPostMeetupNotesModal(${a.id}, ${prospectId})`;
-                const sourceTag = a._isAttendeeNote
-                    ? `<span style="font-size:10px;background:var(--gray-100);color:var(--gray-600);padding:1px 6px;border-radius:10px;margin-left:6px;">attended</span>`
-                    : '';
-                const photoCount = Array.isArray(a.photo_urls) ? a.photo_urls.length : 0;
-                const photoHandler = a._isAttendeeNote
-                    ? `app.viewAttendeePhotos(${a._attendeeRowId})`
-                    : `app.viewActivityPhotos(${a.id})`;
-                const photoBtn = photoCount > 0
-                    ? `<button class="btn btn-sm secondary" style="font-size:11px;padding:3px 8px;color:var(--primary);border-color:var(--primary);" title="${photoCount} discussion paper${photoCount > 1 ? 's' : ''}" onclick="event.stopPropagation();${photoHandler}"><i class="fas fa-camera"></i> ${photoCount}</button>`
-                    : '';
-                return `
-                    <div style="border:1px solid var(--gray-200);border-radius:8px;padding:12px 14px;margin-bottom:10px;background:#fff;">
-                        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-                            <div>
-                                <div style="font-weight:600;font-size:14px;"><i class="fas fa-user-friends" style="color:var(--primary);"></i> ${escapeHtml(a.activity_type || 'Meeting')}${a.activity_title ? ' — ' + escapeHtml(a.activity_title) : ''}${sourceTag}</div>
-                                <div style="font-size:12px;color:var(--gray-500);margin-top:2px;">${escapeHtml(a.activity_date || '')}</div>
-                            </div>
-                            <div style="display:flex;gap:6px;flex-shrink:0;">
-                                ${photoBtn}
-                                <button class="btn btn-sm secondary" style="font-size:11px;padding:3px 8px;" onclick="${editHandler}"><i class="fas fa-edit"></i> Edit</button>
-                            </div>
-                        </div>
-                        ${hasAnyNote ? `
-                            ${section('Key Points', a.note_key_points || a.summary)}
-                            ${section('Customer Needs', a.note_needs)}
-                            ${section('Pain Points', a.note_pain_points)}
-                            ${section('Potential & Opportunities', a.opportunity_potential)}
-                            ${section('Next Actions', a.next_action)}
-                        ` : '<div style="margin-top:8px;color:var(--gray-400);font-size:12px;font-style:italic;">— no notes captured —</div>'}
-                    </div>
-                `;
-            }).join('');
-
-        UI.showModal(`📋 Meet-Up History — ${escapeHtml(prospect.full_name)}`, `
+        const renderTab = window.app.switchProspectTab;
+        if (typeof renderTab !== 'function') { UI.toast.error('Could not open Meet Up History. Please reload and try again.'); return; }
+        const bodyId = `muh-modal-body-${prospectId}`;
+        UI.showModal(`📋 Meet Ups & Events — ${escapeHtml(prospect.full_name)}`, `
             <div style="max-height:70vh;overflow-y:auto;padding-right:4px;">
-                <div style="font-size:12px;color:var(--gray-500);margin-bottom:10px;">${activities.length} meet-up${activities.length === 1 ? '' : 's'} · most recent first</div>
-                ${body}
+                <div id="${bodyId}"><div class="acc-loading"><i class="fas fa-spinner fa-spin"></i> Loading…</div></div>
             </div>
         `, [
             { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
         ]);
+        const el = document.getElementById(bodyId);
+        if (el) await renderTab('activity', prospectId, null, el);
     };
 
     const rescheduleActivity = async (activityId) => {
