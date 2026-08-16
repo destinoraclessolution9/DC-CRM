@@ -494,6 +494,9 @@
                 { view: 'pipeline',             label: 'Pipeline Management',          icon: 'fas fa-filter' },
                 { view: 'promotions',           label: 'Monthly Promotion',            icon: 'fas fa-bullhorn' },
                 { view: 'marketing_automation', label: 'Marketing Automation',         icon: 'fas fa-robot' },
+                // Product & Event Manager (L1/L2 via perms; carries the Bujishu
+                // Catalogue price look-up — grant per-user via Access Control).
+                { view: 'marketing_lists',      label: 'Product & Event Manager',      icon: 'fas fa-tags' },
                 { view: 'milestones',           label: '增运九法',                     icon: 'fas fa-star' },
                 { view: 'fude',                 label: '福运相随',                     icon: 'fas fa-yin-yang' },
                 { view: 'cases',                label: 'Success Case Library',         icon: 'fas fa-book-open' },
@@ -537,7 +540,7 @@
     ];
 
     // Map drawer view names → nav ID suffix (only where they differ)
-    const _drawerViewToNavId = { 'marketing_automation': 'marketing-automation', 'egg_purchasing': 'egg-purchasing', 'formula_purchaser': 'formula-purchaser', 'stock_take': 'stock-take', 'boss_report': 'boss-report' };
+    const _drawerViewToNavId = { 'marketing_automation': 'marketing-automation', 'marketing_lists': 'marketing-lists', 'egg_purchasing': 'egg-purchasing', 'formula_purchaser': 'formula-purchaser', 'stock_take': 'stock-take', 'boss_report': 'boss-report' };
 
     // Returns the set of allowed nav IDs for the current user (mirrors updateNavVisibility logic)
     const _getAllowedNavIds = () => {

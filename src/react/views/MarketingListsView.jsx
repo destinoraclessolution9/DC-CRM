@@ -31,6 +31,9 @@ const TABS = [
     { key: 'promotions', label: 'Promotions' },
     { key: 'venues', label: 'Venues' },
     { key: 'bujishu', label: 'Bujishu' },
+    // Read-only supplier catalogue (bujishu_catalog table). Not a master tab:
+    // the chunk pre-renders it and it arrives via legacyHtml (passthrough path).
+    { key: 'bujishu_catalog', label: 'Bujishu Catalogue' },
     { key: 'formula', label: 'Formula' },
     { key: 'special_programs', label: '🏆 Special Programs' },
 ];
@@ -498,7 +501,8 @@ export function MarketingListsView({ tab = 'products', rows = [], isTeamLeader =
     let actionBtn = null;
     if (tab === 'special_programs') {
         if (isTeamLeader) actionBtn = <button className="btn primary" onClick={() => call('openSpecialProgramModal')}><i className="fas fa-plus"></i> New Program</button>;
-    } else if (tab !== 'promotions') {
+    } else if (tab !== 'promotions' && tab !== 'bujishu_catalog') {
+        // bujishu_catalog is a read-only supplier mirror — no "New" button.
         actionBtn = <button className="btn primary" onClick={() => call('openMarketingListAddModal')}><i className="fas fa-plus"></i> New {NEW_LABEL[tab] || tab}</button>;
     }
 
@@ -512,12 +516,13 @@ export function MarketingListsView({ tab = 'products', rows = [], isTeamLeader =
                 <div className="header-actions">{actionBtn}</div>
             </div>
 
-            <div className="tabs-container" style={{ marginBottom: '20px', borderBottom: '1px solid var(--gray-200)', display: 'flex', gap: '20px' }}>
+            {/* overflowX auto + flexShrink 0: 8 tabs now — scroll, don't wrap, on phones */}
+            <div className="tabs-container" style={{ marginBottom: '20px', borderBottom: '1px solid var(--gray-200)', display: 'flex', gap: '20px', overflowX: 'auto' }}>
                 {TABS.map((t) => {
                     const active = tab === t.key;
                     return (
                         <div key={t.key} className={`tab-item ${active ? 'active' : ''}`} onClick={() => call('switchMarketingListTab', t.key)}
-                            style={{ padding: '10px 16px', cursor: 'pointer', borderBottom: `2px solid ${active ? 'var(--primary-600)' : 'transparent'}`, color: active ? 'var(--primary-600)' : 'var(--gray-600)', fontWeight: 500 }}>
+                            style={{ padding: '10px 16px', cursor: 'pointer', borderBottom: `2px solid ${active ? 'var(--primary-600)' : 'transparent'}`, color: active ? 'var(--primary-600)' : 'var(--gray-600)', fontWeight: 500, whiteSpace: 'nowrap', flexShrink: 0 }}>
                             {t.label}
                         </div>
                     );

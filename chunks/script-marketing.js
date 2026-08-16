@@ -360,9 +360,13 @@
                     legacyHtml = await renderMarketingListTable();
                     if (_reactMktPassthroughOn()) {
                         try {
+                            // bujishu_catalog has NO structured payload — rows stays []
+                            // so the island renders the legacy HTML built above.
                             rows = tab === 'promotions'
                                 ? await _buildPromotionsPayload()
-                                : await _buildSpecialProgramsPayload();
+                                : tab === 'special_programs'
+                                    ? await _buildSpecialProgramsPayload()
+                                    : [];
                         } catch (e2) {
                             console.warn('[marketing-lists] passthrough payload build failed, using legacy HTML:', e2 && e2.message);
                             rows = [];
@@ -392,14 +396,14 @@
                             ? (isTeamLeaderOrAbove(_state.cu)
                                 ? `<button class="btn primary" onclick="app.openSpecialProgramModal()"><i class="fas fa-plus"></i> New Program</button>`
                                 : '')
-                            : ((_state.cmlt !== 'promotions') ? `
+                            : ((_state.cmlt !== 'promotions' && _state.cmlt !== 'bujishu_catalog') ? `
                         <button class="btn primary" onclick="app.openMarketingListAddModal()">
                             <i class="fas fa-plus"></i> New ${{ products: 'Product', events: 'Event', venues: 'Venue' }[_state.cmlt] || _state.cmlt}
                         </button>` : '')}
                     </div>
                 </div>
 
-                <div class="tabs-container" style="margin-bottom: 20px; border-bottom: 1px solid var(--gray-200); display: flex; gap: 20px;">
+                <div class="tabs-container" style="margin-bottom: 20px; border-bottom: 1px solid var(--gray-200); display: flex; gap: 20px; overflow-x: auto;">
                     <div class="tab-item ${_state.cmlt === 'products' ? 'active' : ''}" 
                          onclick="app.switchMarketingListTab('products')" 
                          style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_state.cmlt === 'products' ? 'var(--primary-600)' : 'transparent'}; color: ${_state.cmlt === 'products' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
@@ -424,6 +428,11 @@
                          onclick="app.switchMarketingListTab('bujishu')"
                          style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_state.cmlt === 'bujishu' ? 'var(--primary-600)' : 'transparent'}; color: ${_state.cmlt === 'bujishu' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
                         Bujishu
+                    </div>
+                    <div class="tab-item ${_state.cmlt === 'bujishu_catalog' ? 'active' : ''}"
+                         onclick="app.switchMarketingListTab('bujishu_catalog')"
+                         style="padding: 10px 16px; cursor: pointer; border-bottom: 2px solid ${_state.cmlt === 'bujishu_catalog' ? 'var(--primary-600)' : 'transparent'}; color: ${_state.cmlt === 'bujishu_catalog' ? 'var(--primary-600)' : 'var(--gray-600)'}; font-weight: 500;">
+                        Bujishu Catalogue
                     </div>
                     <div class="tab-item ${_state.cmlt === 'formula' ? 'active' : ''}"
                          onclick="app.switchMarketingListTab('formula')"
@@ -462,6 +471,10 @@
         // Special Programs tab uses its own renderer (KPI-style, not master-data style)
         if (_state.cmlt === 'special_programs') {
             return await renderSpecialProgramsTable();
+        }
+        // Bujishu supplier catalogue — read-only look-up with its own renderer
+        if (_state.cmlt === 'bujishu_catalog') {
+            return await renderBujishuCatalogTab();
         }
         let data = await AppDataStore.getAll(_state.cmlt);
         // Deduplicate by name+location for venues (prevents double-write artifacts)
@@ -743,6 +756,191 @@
             return await renderPackagesTab();
         }
     };
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Bujishu supplier CATALOGUE (read-only look-up) — 2026-08-16
+    // Mirror of bujishu.com/shop (508 products, 1,273 per-option prices) held in
+    // `bujishu_catalog` + `bujishu_catalog_options`. Imports run outside the app
+    // (Management API upsert keyed on source_product_id); the app only SELECTs.
+    // Deliberately SEPARATE from `bujishu` (the curated offerings) so the five
+    // consumers of that table (post-meetup checkboxes, pipeline, pillars,
+    // purchase history) never see the 508 supplier SKUs. Photos hot-link to
+    // bujishu.com (public storage) — a dead thumbnail means the supplier moved
+    // the file; fix by re-running the import, the layout falls back to 📷.
+    // ═══════════════════════════════════════════════════════════════════════
+    const _bjc = { q: '', cat: '', page: 0, open: {}, optsByCat: null };
+    const BJC_PAGE = 50;
+
+    const _bjcFmt = (v) => (v == null || v === '' ? null : Number(v).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+    // One price cell: show the range when options change the price, else the flat price.
+    const _bjcPrice = (one, lo, hi) => {
+        if (lo != null && hi != null && Number(lo) !== Number(hi)) return `${_bjcFmt(lo)} – ${_bjcFmt(hi)}`;
+        const f = _bjcFmt(one);
+        return f == null ? '-' : f;
+    };
+
+    // Per-option price rows, grouped by catalog_id. Loaded once per view visit
+    // (1,273 rows — trivial); AppDataStore caching absorbs repeats.
+    const _bjcLoadOpts = async () => {
+        if (_bjc.optsByCat) return _bjc.optsByCat;
+        const all = (await AppDataStore.getAll('bujishu_catalog_options')) || [];
+        const by = {};
+        all.forEach(o => { (by[o.catalog_id] = by[o.catalog_id] || []).push(o); });
+        Object.values(by).forEach(list => list.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)));
+        _bjc.optsByCat = by;
+        return by;
+    };
+
+    const _bjcFiltered = async () => {
+        let rows = (await AppDataStore.getAll('bujishu_catalog')) || [];
+        rows = rows.filter(r => r.is_active !== false);
+        const q = _bjc.q.trim().toLowerCase();
+        if (q) {
+            rows = rows.filter(r =>
+                (r.name || '').toLowerCase().includes(q) ||
+                (r.category || '').toLowerCase().includes(q) ||
+                (r.options_summary || '').toLowerCase().includes(q));
+        }
+        if (_bjc.cat) rows = rows.filter(r => (r.category || '') === _bjc.cat);
+        const collator = new Intl.Collator(['zh', 'en'], { numeric: true, sensitivity: 'base' });
+        rows.sort((a, b) => collator.compare(a.category || '', b.category || '') || collator.compare(a.name || '', b.name || ''));
+        return rows;
+    };
+
+    const _bjcClamp2 = 'display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;';
+
+    const _bjcOptionsTable = (opts) => `
+        <table style="width:100%;border-collapse:collapse;font-size:12px;background:var(--gray-50,#f9fafb);border-radius:6px;">
+            <thead><tr>
+                <th style="text-align:left;padding:6px 10px;color:var(--gray-500);font-weight:600;">Option</th>
+                <th style="text-align:left;padding:6px 10px;color:var(--gray-500);font-weight:600;"></th>
+                <th style="text-align:right;padding:6px 10px;color:var(--gray-500);font-weight:600;">Customer (RM)</th>
+                <th style="text-align:right;padding:6px 10px;color:var(--gray-500);font-weight:600;">Wang Member (RM)</th>
+            </tr></thead>
+            <tbody>
+                ${opts.map(o => `<tr>
+                    <td style="padding:5px 10px;color:var(--gray-500);white-space:nowrap;">${escapeHtml(o.option_type || '')}</td>
+                    <td style="padding:5px 10px;">${escapeHtml(o.option_label || '')}</td>
+                    <td style="padding:5px 10px;text-align:right;font-weight:600;">${_bjcFmt(o.price_customer) || '<span style="color:var(--gray-400);font-weight:400;">—</span>'}</td>
+                    <td style="padding:5px 10px;text-align:right;">${_bjcFmt(o.price_member) || '<span style="color:var(--gray-400);">—</span>'}</td>
+                </tr>`).join('')}
+            </tbody>
+        </table>`;
+
+    const _bjcThumb = (r, size) => r.photo_url
+        ? `<img loading="lazy" decoding="async" src="${escapeHtml(r.photo_url)}" style="width:${size}px;height:${size}px;object-fit:cover;border-radius:6px;cursor:pointer;flex-shrink:0;" onclick="event.stopPropagation();app.viewProductImage('${escapeHtml(r.photo_url)}','Photo')" title="View photo" onerror="this.outerHTML='<span style=&quot;color:var(--gray-300);font-size:18px;&quot;>📷</span>'">`
+        : `<span style="color:var(--gray-300);font-size:18px;" title="No photo">📷</span>`;
+
+    const _bjcResultsHtml = async () => {
+        const rows = await _bjcFiltered();
+        const opts = await _bjcLoadOpts();
+        const total = rows.length;
+        const maxPage = Math.max(0, Math.ceil(total / BJC_PAGE) - 1);
+        if (_bjc.page > maxPage) _bjc.page = maxPage;
+        const start = _bjc.page * BJC_PAGE;
+        const slice = rows.slice(start, start + BJC_PAGE);
+        const pager = total > BJC_PAGE ? `
+            <div style="display:flex;align-items:center;justify-content:flex-end;gap:10px;padding:10px 4px;font-size:13px;color:var(--gray-500);">
+                <span>${total ? start + 1 : 0}–${Math.min(start + BJC_PAGE, total)} of ${total}</span>
+                <button class="btn-icon" onclick="app.bjcPage(-1)" ${_bjc.page === 0 ? 'disabled style="opacity:.35;"' : ''} title="Previous page"><i class="fas fa-chevron-left"></i></button>
+                <button class="btn-icon" onclick="app.bjcPage(1)" ${_bjc.page >= maxPage ? 'disabled style="opacity:.35;"' : ''} title="Next page"><i class="fas fa-chevron-right"></i></button>
+            </div>` : '';
+
+        if (!total) {
+            return `<div style="text-align:center;color:var(--gray-400);padding:40px;">No catalogue items match${_bjc.q ? ` “${escapeHtml(_bjc.q)}”` : ''}.</div>`;
+        }
+
+        // ── Mobile: search-first card list (agents quoting on a phone) ──
+        if (isMobile() || window.innerWidth <= 768) {
+            return slice.map(r => {
+                const o = opts[r.id] || [];
+                const open = !!_bjc.open[r.id];
+                return `
+                <div style="border:1px solid var(--gray-200);border-radius:10px;padding:10px 12px;margin-bottom:10px;background:#fff;">
+                    <div style="display:flex;gap:10px;align-items:flex-start;" onclick="${o.length ? `app.bjcToggle(${r.id})` : ''}">
+                        ${_bjcThumb(r, 52)}
+                        <div style="flex:1;min-width:0;">
+                            <div style="font-weight:600;font-size:14px;line-height:1.3;">${escapeHtml(r.name)}</div>
+                            <div style="font-size:11px;color:var(--gray-500);margin:2px 0 6px;">${escapeHtml(r.category || '')}${r.lead_time ? ` · ⏱ ${escapeHtml(r.lead_time)}` : ''}</div>
+                            <div style="display:flex;gap:14px;font-size:13px;flex-wrap:wrap;">
+                                <span><span style="color:var(--gray-500);font-size:11px;">Customer</span> <strong>RM ${_bjcPrice(r.price_customer, r.price_customer_min, r.price_customer_max)}</strong></span>
+                                <span><span style="color:var(--gray-500);font-size:11px;">Member</span> RM ${_bjcPrice(r.price_member, r.price_member_min, r.price_member_max)}</span>
+                            </div>
+                            ${o.length ? `<div style="font-size:11px;color:var(--primary-600,#b45309);margin-top:5px;">${o.length} options ${open ? '▴' : '▾'}</div>` : ''}
+                        </div>
+                        <a href="${escapeHtml(r.source_url || '#')}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--gray-400);flex-shrink:0;" title="Open on bujishu.com"><i class="fas fa-external-link-alt"></i></a>
+                    </div>
+                    ${open && o.length ? `<div style="margin-top:8px;">${_bjcOptionsTable(o)}</div>` : ''}
+                </div>`;
+            }).join('') + pager;
+        }
+
+        // ── Desktop table ──
+        return `
+            <table class="data-table">
+                <thead><tr>
+                    <th scope="col" style="width:54px;">Photo</th>
+                    <th scope="col">Name</th>
+                    <th scope="col">Category</th>
+                    <th scope="col" style="text-align:right;">Customer (RM)</th>
+                    <th scope="col" style="text-align:right;">Wang Member (RM)</th>
+                    <th scope="col">Lead Time</th>
+                    <th scope="col">Options</th>
+                    <th scope="col" style="width:44px;"></th>
+                </tr></thead>
+                <tbody>
+                    ${slice.map(r => {
+                        const o = opts[r.id] || [];
+                        const open = !!_bjc.open[r.id];
+                        return `
+                        <tr${o.length ? ` style="cursor:pointer;" onclick="app.bjcToggle(${r.id})"` : ''}>
+                            <td style="text-align:center;">${_bjcThumb(r, 40)}</td>
+                            <td><strong>${escapeHtml(r.name)}</strong>${r.options_summary ? `<br><small class="text-muted" style="${_bjcClamp2}max-width:420px;" title="${escapeHtml(r.options_summary)}">${escapeHtml(r.options_summary)}</small>` : ''}</td>
+                            <td style="white-space:nowrap;">${escapeHtml(r.category || '-')}</td>
+                            <td style="text-align:right;font-weight:600;white-space:nowrap;">${_bjcPrice(r.price_customer, r.price_customer_min, r.price_customer_max)}</td>
+                            <td style="text-align:right;white-space:nowrap;">${_bjcPrice(r.price_member, r.price_member_min, r.price_member_max)}</td>
+                            <td style="white-space:nowrap;">${escapeHtml(r.lead_time || '-')}</td>
+                            <td style="white-space:nowrap;">${o.length ? `<span style="color:var(--primary-600,#b45309);font-size:12px;">${o.length} priced ${open ? '▴' : '▾'}</span>` : '<span class="text-muted">-</span>'}</td>
+                            <td onclick="event.stopPropagation()"><a href="${escapeHtml(r.source_url || '#')}" target="_blank" rel="noopener" class="btn-icon" title="Open on bujishu.com"><i class="fas fa-external-link-alt"></i></a></td>
+                        </tr>
+                        ${open && o.length ? `<tr><td colspan="8" style="padding:4px 12px 12px 60px;background:#fff;">${_bjcOptionsTable(o)}</td></tr>` : ''}`;
+                    }).join('')}
+                </tbody>
+            </table>${pager}`;
+    };
+
+    const renderBujishuCatalogTab = async () => {
+        const all = (await AppDataStore.getAll('bujishu_catalog')) || [];
+        const cats = [...new Set(all.map(r => r.category).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+        const latest = all.reduce((m, r) => (r.scraped_at && r.scraped_at > m ? r.scraped_at : m), '');
+        return `
+            <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center;">
+                <div style="position:relative;flex:1;min-width:180px;max-width:420px;">
+                    <i class="fas fa-search" style="position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--gray-400);font-size:13px;"></i>
+                    <input type="text" id="bjc-q" class="form-control" placeholder="Search ${all.length} products…" value="${escapeHtml(_bjc.q)}" style="padding-left:34px;" oninput="app.bjcInput(this.value)">
+                </div>
+                <select id="bjc-cat" class="form-control" style="width:auto;max-width:280px;" onchange="app.bjcCat(this.value)">
+                    <option value="">All Categories</option>
+                    ${cats.map(c => `<option value="${escapeHtml(c)}" ${_bjc.cat === c ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('')}
+                </select>
+                <span style="font-size:12px;color:var(--gray-400);margin-left:auto;">Read-only mirror of bujishu.com${latest ? ` · prices as of ${escapeHtml(latest)}` : ''}</span>
+            </div>
+            <div id="bjc-results">${await _bjcResultsHtml()}</div>`;
+    };
+
+    const _bjcRerender = async () => {
+        const el = document.getElementById('bjc-results');
+        if (el) el.innerHTML = await _bjcResultsHtml();
+    };
+
+    let _bjcDebounce = null;
+    const bjcInput = (v) => {
+        clearTimeout(_bjcDebounce);
+        _bjcDebounce = setTimeout(() => { _bjc.q = v || ''; _bjc.page = 0; _bjcRerender(); }, 220);
+    };
+    const bjcCat = (v) => { _bjc.cat = v || ''; _bjc.page = 0; _bjcRerender(); };
+    const bjcPage = (d) => { _bjc.page = Math.max(0, _bjc.page + d); _bjcRerender(); };
+    const bjcToggle = (id) => { _bjc.open[id] = !_bjc.open[id]; _bjcRerender(); };
 
     const openMarketingListAddModal = async () => {
         let content = '';
@@ -5428,6 +5626,8 @@ const simulateCampaignSending = async (campaignId) => {
         buildEventCategoriesField,
         // script-features2.js reaches this via window.app.renderMarketingListTable.
         renderMarketingListTable,
+        // Bujishu supplier catalogue (read-only look-up)
+        bjcInput, bjcCat, bjcPage, bjcToggle,
         expireOldOverrides,
     });
     // expireOldOverrides is exported on window.app (above); script.js startup calls
