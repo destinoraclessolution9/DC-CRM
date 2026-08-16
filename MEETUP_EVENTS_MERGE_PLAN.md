@@ -1,6 +1,6 @@
 # Meet Ups & Events — One Section (Merge Plan)
 
-**Date:** 2026-08-16 · **Status:** PROPOSAL (plan only, nothing implemented)
+**Date:** 2026-08-16 · **Status:** ✅ SHIPPED LIVE `55ff93e` same day (prospect + customer), content-verified + live UI tested; sim test `ci/test-meetup-merge-sim.js` (56 checks)
 **Goal:** The prospect profile's "Meet Up History" (③) and "Activities and Events" (④) look and behave the same and confuse the user. Merge them into ONE section — compact one-line rows (date · type · title · status), tap a row to expand full details. **Presentation only: every data path, calculation, button, and permission stays exactly as-is.**
 
 Visual mockup: see the "Meet Up Timeline" artifact (interactive collapsed/expanded demo in the CRM's own theme).
