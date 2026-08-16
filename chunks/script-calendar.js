@@ -5881,11 +5881,11 @@
             <div class="form-row">
                 <div class="form-group half">
                     <label>Start Time</label>
-                    <input type="time" id="edit-timing-start" class="form-control" value="${activity.start_time || ''}" onchange="app.autoSetEndTime()">
+                    <input type="text" id="edit-timing-start" class="form-control time24" inputmode="numeric" autocomplete="off" maxlength="5" placeholder="HH:MM" title="24-hour time, e.g. 14:30" value="${window.Time24?.normalize(activity.start_time) ?? (activity.start_time || "").slice(0, 5)}" onchange="app.autoSetEndTime()">
                 </div>
                 <div class="form-group half">
                     <label>End Time</label>
-                    <input type="time" id="edit-timing-end" class="form-control" value="${activity.end_time || ''}" data-manual="false" onchange="this.dataset.manual='true'">
+                    <input type="text" id="edit-timing-end" class="form-control time24" inputmode="numeric" autocomplete="off" maxlength="5" placeholder="HH:MM" title="24-hour time, e.g. 14:30" value="${window.Time24?.normalize(activity.end_time) ?? (activity.end_time || "").slice(0, 5)}" data-manual="false" onchange="this.dataset.manual='true'">
                 </div>
             </div>
             <div class="form-group">

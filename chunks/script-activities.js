@@ -176,13 +176,13 @@
                         </div>
                         <div class="form-group half">
                             <label>Start Time</label>
-                            <input type="time" id="start-time" class="form-control" value="09:00" onchange="app.onStartTimeChange()">
+                            <input type="text" id="start-time" class="form-control time24" inputmode="numeric" autocomplete="off" maxlength="5" placeholder="HH:MM" title="24-hour time, e.g. 14:30" value="09:00" onchange="app.onStartTimeChange()">
                         </div>
                     </div>
                     <div class="form-row">
                         <div class="form-group half">
                             <label>End Time</label>
-                            <input type="time" id="end-time" class="form-control" value="10:00" onchange="app.onEndTimeChange()">
+                            <input type="text" id="end-time" class="form-control time24" inputmode="numeric" autocomplete="off" maxlength="5" placeholder="HH:MM" title="24-hour time, e.g. 14:30" value="10:00" onchange="app.onEndTimeChange()">
                         </div>
                         <div class="form-group half">
                             <label>Duration</label>
@@ -3386,8 +3386,8 @@
             <div class="form-group"><label>Title*</label><input type="text" id="mkt-title" class="form-control"></div>
             <div class="form-row" style="display:flex;gap:12px;">
                 <div class="form-group" style="flex:1;"><label>Date*</label><input type="date" id="mkt-event-date" class="form-control"></div>
-                <div class="form-group" style="flex:1;"><label>Start Time</label><input type="time" id="mkt-start-time" class="form-control"></div>
-                <div class="form-group" style="flex:1;"><label>End Time</label><input type="time" id="mkt-end-time" class="form-control"></div>
+                <div class="form-group" style="flex:1;"><label>Start Time</label><input type="text" id="mkt-start-time" class="form-control time24" inputmode="numeric" autocomplete="off" maxlength="5" placeholder="HH:MM" title="24-hour time, e.g. 14:30"></div>
+                <div class="form-group" style="flex:1;"><label>End Time</label><input type="text" id="mkt-end-time" class="form-control time24" inputmode="numeric" autocomplete="off" maxlength="5" placeholder="HH:MM" title="24-hour time, e.g. 14:30"></div>
             </div>
             <div class="form-group"><label>Market / Country</label><select id="mkt-event-country" class="form-control">${(window.UI.countries || []).map(c => `<option value="${c.code}" ${c.code === window._crmUtils.cuHomeCountry() ? 'selected' : ''}>${window._crmUtils.escapeHtml(c.name)} (${window._crmUtils.escapeHtml(c.symbol)})</option>`).join('')}</select></div>
             <div class="form-group"><label>Ticket Price</label><input type="number" id="mkt-price" class="form-control" value="0"></div>

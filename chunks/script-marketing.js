@@ -4273,10 +4273,13 @@ ALTER TABLE public.promotions
                     <div id="schedule-options" style="display:none;">
                         <div class="form-group">
                             <label>Date & Time</label>
-                            <input type="datetime-local" id="campaign-schedule-time" class="form-control">
+                            <div style="display:flex; gap:10px;">
+                                <input type="date" id="campaign-schedule-date" class="form-control" style="flex:2;">
+                                <input type="text" id="campaign-schedule-clock" class="form-control time24" style="flex:1;" inputmode="numeric" autocomplete="off" maxlength="5" placeholder="HH:MM" title="24-hour time, e.g. 14:30">
+                            </div>
                         </div>
                     </div>
-                    
+
                     <div class="campaign-summary-box" style="background:var(--gray-50); padding:16px; border-radius:8px; margin-top:20px;">
                         <h5>Campaign Summary</h5>
                         <p><strong>Name:</strong> ${escapeHtml(_campaignData.campaign_name)}</p>
@@ -4410,12 +4413,17 @@ ALTER TABLE public.promotions
             _campaignData.status = 'active';
             _campaignData.scheduled_date = new Date().toISOString();
         } else {
-            const time = document.getElementById('campaign-schedule-time')?.value;
-            if (!time) {
-                UI.toast.error('Please select a schedule time');
+            // Split date + 24h time (was one datetime-local, which rendered an
+            // AM/PM clock on en-* browsers). Recombined into the SAME
+            // "YYYY-MM-DDTHH:MM" string the datetime-local produced, so nothing
+            // downstream of scheduled_date changes.
+            const schedDate = document.getElementById('campaign-schedule-date')?.value;
+            const schedClock = document.getElementById('campaign-schedule-clock')?.value;
+            if (!schedDate || !schedClock) {
+                UI.toast.error('Please select a schedule date and time');
                 return;
             }
-            _campaignData.scheduled_date = time;
+            _campaignData.scheduled_date = `${schedDate}T${schedClock}`;
         }
 
         _campaignSaveInFlight = true;

@@ -20,6 +20,10 @@ function fmtDate(d) {
     } catch (_) { return dt.toLocaleDateString(); }
 }
 
+// 24-hour throughout — matches the chunk this island replaced
+// (showNoticeboardView renders `${e.start_time} – ${e.end_time}` raw) and the
+// rest of the app, where AM/PM was dropped because agents misread it. Also
+// trims the seconds Postgres `time` columns come back with (14:30:00 → 14:30).
 function fmtTime(s, e) {
     if (!s && !e) return '';
     const fmt = (t) => {
@@ -27,9 +31,7 @@ function fmtTime(s, e) {
         const [h, m] = String(t).split(':');
         const hr = parseInt(h, 10);
         if (isNaN(hr)) return t;
-        const ampm = hr >= 12 ? 'PM' : 'AM';
-        const h12 = hr % 12 || 12;
-        return `${h12}:${(m || '00').padStart(2, '0')} ${ampm}`;
+        return `${String(hr).padStart(2, '0')}:${(m || '00').slice(0, 2).padStart(2, '0')}`;
     };
     if (s && e) return `${fmt(s)} – ${fmt(e)}`;
     return fmt(s || e);

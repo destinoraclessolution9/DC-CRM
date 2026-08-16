@@ -785,6 +785,40 @@ body {
     box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1);
 }
 
+/* 24-hour time field — see the .time24 controller in script.js. It is a text
+   input rather than <input type="time"> because the native widget's AM/PM vs
+   24-hour rendering comes from the browser/OS locale and cannot be forced.
+   These rules give back the two things the native control provided: the clock
+   affordance and digits that don't reflow while you type. Theming is already
+   inherited, since styles-theme.css styles input[type="text"] alongside
+   .form-control. */
+.time24 {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.5px;
+    padding-right: 32px;
+}
+
+/* The clock glyph needs BOTH compound selectors to survive the cascade:
+   styles-theme.css loads after this file and sets the `background` SHORTHAND on
+   `.form-control` (0,1,0) and `.form-control:focus` (0,2,0), which resets
+   background-image to none. `.form-control.time24` (0,2,0) and
+   `.form-control.time24:focus` (0,3,0) outrank them, while background-COLOR
+   still comes from the theme — so the field stays theme-correct in light/dark
+   and keeps its icon, focused or not. */
+.form-control.time24,
+.form-control.time24:focus {
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 15px 15px;
+    /* Data URI so the glyph survives offline / the service worker. Mid-grey
+       reads correctly on both the light and dark surfaces. */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 7v5l3 2'/%3E%3C/svg%3E");
+}
+
+.time24::placeholder {
+    letter-spacing: normal;
+}
+
 .required {
     color: var(--error);
     margin-left: 4px;

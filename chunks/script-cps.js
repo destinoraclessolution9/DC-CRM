@@ -455,8 +455,8 @@ const openAddSlotModal = () => {
                 </select>
             </div>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-                <div><label style="display:block; font-weight:500; margin-bottom:6px;">Start Time</label><input type="time" id="slot-start" class="form-control" value="09:00"></div>
-                <div><label style="display:block; font-weight:500; margin-bottom:6px;">End Time</label><input type="time" id="slot-end" class="form-control" value="17:00"></div>
+                <div><label style="display:block; font-weight:500; margin-bottom:6px;">Start Time</label><input type="text" id="slot-start" class="form-control time24" inputmode="numeric" autocomplete="off" maxlength="5" placeholder="HH:MM" title="24-hour time, e.g. 14:30" value="09:00"></div>
+                <div><label style="display:block; font-weight:500; margin-bottom:6px;">End Time</label><input type="text" id="slot-end" class="form-control time24" inputmode="numeric" autocomplete="off" maxlength="5" placeholder="HH:MM" title="24-hour time, e.g. 14:30" value="17:00"></div>
             </div>
             <div>
                 <label style="display:block; font-weight:500; margin-bottom:6px;">Duration per Slot (minutes)</label>
@@ -640,11 +640,11 @@ const openShareCpsIntakeLinkModal = async () => {
             <div class="form-row">
                 <div class="form-group half">
                     <label>Start Time <span class="required">*</span></label>
-                    <input type="time" id="intake-start" class="form-control" value="14:00">
+                    <input type="text" id="intake-start" class="form-control time24" inputmode="numeric" autocomplete="off" maxlength="5" placeholder="HH:MM" title="24-hour time, e.g. 14:30" value="14:00">
                 </div>
                 <div class="form-group half">
                     <label>End Time <span class="required">*</span></label>
-                    <input type="time" id="intake-end" class="form-control" value="15:30">
+                    <input type="text" id="intake-end" class="form-control time24" inputmode="numeric" autocomplete="off" maxlength="5" placeholder="HH:MM" title="24-hour time, e.g. 14:30" value="15:30">
                 </div>
             </div>
 

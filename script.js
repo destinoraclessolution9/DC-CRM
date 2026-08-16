@@ -4454,6 +4454,126 @@ function _wireLoginBtn() {
         if (el) _prefetchChunkForView(el.dataset.view);
     }, { passive: true });
 
+    // ─────────────────────────────────────────────────────────────────────
+    // 24-hour time fields (.time24) — replaces <input type="time">
+    //
+    // WHY NOT type="time": the native control renders AM/PM or 24h purely from
+    // the BROWSER/OS locale. It cannot be forced — the `lang` attribute is
+    // ignored by Chromium (verified: intrinsic width reacts to a seconds field
+    // but not to lang), and iOS follows the device "24-Hour Time" switch. On an
+    // en-MY/en-US browser every agent got a 12-hour picker, and picking AM when
+    // they meant PM silently booked meetings 12 hours off.
+    //
+    // So time entry is a plain text field we control end-to-end: it always shows
+    // and stores HH:MM, 00:00–23:59, with no AM/PM anywhere.
+    //
+    // CONTRACT — a drop-in for the native input, so callers need no changes:
+    //   • .value is always "HH:MM" (or "") after a change/blur, exactly like
+    //     type="time", so every existing getElementById(...).value read and every
+    //     Supabase `time` write keeps working untouched.
+    //   • Normalisation runs on a CAPTURE-phase `change` listener, which fires
+    //     before the element's own inline onchange="app.foo()" (target phase) —
+    //     so consumers like onStartTimeChange / autoSetEndTime always read the
+    //     already-normalised value, never a half-typed "9".
+    //
+    // Delegated on document, so it covers every field in every chunk-generated
+    // modal — current and future — with no per-input wiring.
+    // ─────────────────────────────────────────────────────────────────────
+    const _isTime24 = (el) => !!(el && el.classList && el.classList.contains('time24'));
+
+    // "9"→09:00 · "14"→14:00 · "930"→09:30 · "1430"→14:30 · "14:3"→14:03 (the
+    // native minute-field reading of a lone "3"). Out-of-range values clamp
+    // rather than clear, so a fat-fingered "2560" lands on 23:59, not blank.
+    const _t24Normalize = (raw) => {
+        const d = String(raw == null ? '' : raw).replace(/\D/g, '');
+        if (!d) return '';
+        let h, m;
+        if (d.length <= 2) { h = +d; m = 0; }
+        else {
+            h = +d.slice(0, 2);
+            m = +d.slice(2, 4);
+            // 3 digits with an impossible hour is a single-digit hour: "930" = 9:30.
+            if (d.length === 3 && h > 23) { h = +d[0]; m = +d.slice(1, 3); }
+        }
+        if (h > 23) h = 23;
+        if (m > 59) m = 59;
+        return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+    };
+
+    // Light as-you-type mask (does NOT clamp — the user is mid-thought). Inserts
+    // the colon so typing 1-4-3-0 reads "14:30" without ever touching ':'.
+    const _t24Mask = (raw) => {
+        const d = String(raw || '').replace(/\D/g, '').slice(0, 4);
+        if (!d) return '';
+        // A leading 3-9 can only be a single-digit hour, so commit it immediately.
+        if (d.length === 1) return (+d >= 3) ? ('0' + d + ':') : d;
+        let h = d.slice(0, 2), rest = d.slice(2);
+        if (+h > 23) { h = '0' + d[0]; rest = d.slice(1); }
+        rest = rest.slice(0, 2);
+        // Keep the minute in range AS IT IS TYPED, so the field never displays an
+        // impossible 02:60 that silently becomes 02:59 on blur. A lone 6-9 can
+        // only be 06-09, exactly how the native minute field consumed it.
+        if (rest.length === 1 && +rest >= 6) rest = '0' + rest;
+        else if (rest.length === 2 && +rest > 59) rest = '0' + rest[0];
+        return h + ':' + rest;
+    };
+
+    document.addEventListener('input', (e) => {
+        const el = e.target;
+        if (!_isTime24(el)) return;
+        // Only reformat while typing at the end of the field. Mid-string edits
+        // (fixing just the hour) are left alone and tidied up on blur, so the
+        // caret never jumps out from under the user.
+        let atEnd = true;
+        try { atEnd = el.selectionStart === el.value.length; } catch (_) { /* non-text input */ }
+        if (!atEnd) return;
+        const masked = _t24Mask(el.value);
+        if (masked !== el.value) {
+            el.value = masked;
+            try { el.setSelectionRange(masked.length, masked.length); } catch (_) { /* ignore */ }
+        }
+    });
+
+    // Capture phase: beats the element's own inline onchange (see contract above).
+    document.addEventListener('change', (e) => {
+        const el = e.target;
+        if (!_isTime24(el)) return;
+        const v = _t24Normalize(el.value);
+        if (el.value !== v) el.value = v;
+    }, true);
+
+    // Safety net for values set programmatically or left partial without a
+    // `change` (e.g. a chunk writing .value directly, then the user tabbing out).
+    document.addEventListener('focusout', (e) => {
+        const el = e.target;
+        if (!_isTime24(el)) return;
+        const v = _t24Normalize(el.value);
+        if (el.value !== v) {
+            el.value = v;
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+    }, true);
+
+    // ↑/↓ step by 15 minutes (Shift = 1 hour) and wrap, so a whole appointment
+    // slot can be nudged from the keyboard the way the native picker allowed.
+    document.addEventListener('keydown', (e) => {
+        const el = e.target;
+        if (!_isTime24(el)) return;
+        if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+        e.preventDefault();
+        const cur = _t24Normalize(el.value || '00:00');
+        const [h, m] = cur.split(':').map(Number);
+        const stepMin = (e.shiftKey ? 60 : 15) * (e.key === 'ArrowUp' ? 1 : -1);
+        let total = (h * 60 + m + stepMin) % 1440;
+        if (total < 0) total += 1440;
+        el.value = String(Math.floor(total / 60)).padStart(2, '0') + ':' + String(total % 60).padStart(2, '0');
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    // Exposed for chunks that need to sanitise a time outside an input (e.g.
+    // times parsed out of imported files) — one parser, one set of rules.
+    window.Time24 = { normalize: _t24Normalize, mask: _t24Mask };
+
     // (Phase 8) _loadFeatures REMOVED — the legacy script-features.js monolith is
     // retired; all views are owned by their dedicated chunks (see _CHUNK_VIEWS +
     // the eager post-login chunk loader).

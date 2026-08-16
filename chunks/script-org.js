@@ -480,7 +480,7 @@
                 <div class="form-group"><label>Date of Birth *</label>
                     <input type="date" id="org-mem-dob" class="form-control" value="${_orgEscapeHtml(m.dob)}"></div>
                 <div class="form-group"><label>Time (optional)</label>
-                    <input type="time" id="org-mem-dobtime" class="form-control" value="${_orgEscapeHtml(m.dob_time)}"></div>
+                    <input type="text" id="org-mem-dobtime" class="form-control time24" inputmode="numeric" autocomplete="off" maxlength="5" placeholder="HH:MM" title="24-hour time, e.g. 14:30" value="${_orgEscapeHtml(window.Time24?.normalize(m.dob_time) ?? (m.dob_time || "").slice(0, 5))}"></div>
                 <div class="form-group"><label>Gender</label>
                     <select id="org-mem-gender" class="form-control">
                         <option value="">—</option>
