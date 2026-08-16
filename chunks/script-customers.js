@@ -661,6 +661,38 @@ const showCustomerDetail = async (customerId) => {
                 .pv-val{flex:1;color:var(--gray-800);word-break:break-word;}
                 .pv-sub{font-size:12px;font-weight:700;color:var(--gray-400);text-transform:uppercase;letter-spacing:.5px;margin:14px 0 6px;padding-top:12px;border-top:1px solid var(--gray-100);}
                 .pv-sub:first-child{margin-top:0;padding-top:0;border-top:none;}
+                .meet-section{margin-bottom:8px;}
+                .meet-lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--gray-400);margin-bottom:2px;}
+                .meet-txt{font-size:13px;color:var(--gray-700);line-height:1.5;white-space:pre-wrap;word-break:break-word;}
+                .mu-toolbar{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
+                .mu-fchips{display:flex;gap:6px;flex-wrap:wrap;}
+                .mu-fchip{border:1px solid var(--gray-300);background:#fff;color:var(--gray-500);border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;-webkit-tap-highlight-color:transparent;}
+                .mu-wrap[data-muf="all"] .mu-fchip[data-f="all"],.mu-wrap[data-muf="meetup"] .mu-fchip[data-f="meetup"],.mu-wrap[data-muf="event"] .mu-fchip[data-f="event"]{background:var(--primary);border-color:var(--primary);color:#fff;}
+                .mu-wrap[data-muf="meetup"] .mu-item[data-kind="event"]{display:none;}
+                .mu-wrap[data-muf="event"] .mu-item[data-kind="meetup"]{display:none;}
+                .mu-list{display:flex;flex-direction:column;gap:6px;}
+                .mu-item{border:1px solid var(--gray-200);border-radius:10px;background:var(--gray-50);overflow:hidden;}
+                .mu-item.open{background:#fff;border-color:var(--gray-300);}
+                .mu-row{width:100%;display:flex;align-items:center;gap:8px;padding:10px 12px;background:none;border:none;cursor:pointer;font-family:inherit;font-size:inherit;text-align:left;color:var(--gray-800);-webkit-tap-highlight-color:transparent;}
+                .mu-caret{color:var(--gray-400);font-size:11px;width:12px;flex-shrink:0;transition:transform .18s;}
+                .mu-item.open .mu-caret{transform:rotate(90deg);color:var(--primary);}
+                .mu-date{font-size:12px;color:var(--gray-500);font-variant-numeric:tabular-nums;flex-shrink:0;width:78px;}
+                .mu-tchip{font-size:10px;font-weight:800;letter-spacing:.05em;border-radius:6px;padding:3px 7px;background:var(--gray-100);color:var(--primary);flex-shrink:0;}
+                .mu-title{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;}
+                .mu-badges{display:flex;gap:5px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;}
+                .mu-badge{font-size:10.5px;font-weight:700;border-radius:10px;padding:2px 8px;white-space:nowrap;background:var(--gray-100);color:var(--gray-500);}
+                .mu-badge.ok{background:#dcfce7;color:#166534;}
+                .mu-badge.bad{background:#fee2e2;color:#991b1b;}
+                .mu-detail{display:none;padding:2px 14px 14px 32px;}
+                .mu-item.open .mu-detail{display:block;}
+                .mu-close-sub{margin-top:12px;padding-top:10px;border-top:1px dashed var(--gray-300);}
+                @media (max-width:520px){
+                    .mu-row{flex-wrap:wrap;row-gap:5px;}
+                    .mu-date{width:auto;}
+                    .mu-title{flex-basis:100%;order:6;padding-left:20px;box-sizing:border-box;white-space:normal;line-height:1.35;}
+                    .mu-badges{margin-left:auto;}
+                    .mu-detail{padding-left:14px;}
+                }
             </style>
             <div class="pv-back">
                 <button class="btn secondary btn-sm" onclick="app.goBackFromDetail()">
@@ -739,22 +771,16 @@ const showCustomerDetail = async (customerId) => {
                     <div class="acc-body" id="cust-acc-body-referrals-${customer.id}" style="display:none" data-loaded="false"></div>
                 </div>
 
-                <!-- 6 Activity History -->
+                <!-- 6 Meet Ups & Events — merged timeline (absorbed the old
+                     separate "Events Attended" section 2026-08-16). Tab key
+                     stays 'activity': cust-acc-body-activity-* is the id the
+                     post-save refresh in chunks/script-activities.js looks up. -->
                 <div class="acc-item" id="cust-acc-activity-${customer.id}">
                     <div class="acc-hdr" onclick="app.toggleCustomerAccordion('activity',${customer.id},this.parentElement)">
-                        <span><i class="fas fa-history"></i> Activity History</span>
+                        <span><i class="fas fa-user-friends"></i> Meet Ups &amp; Events</span>
                         <i class="fas fa-chevron-down acc-chev"></i>
                     </div>
                     <div class="acc-body" id="cust-acc-body-activity-${customer.id}" style="display:none" data-loaded="false"></div>
-                </div>
-
-                <!-- 7 Events Attended -->
-                <div class="acc-item" id="cust-acc-events-${customer.id}">
-                    <div class="acc-hdr" onclick="app.toggleCustomerAccordion('events',${customer.id},this.parentElement)">
-                        <span><i class="fas fa-calendar-check"></i> Events Attended</span>
-                        <i class="fas fa-chevron-down acc-chev"></i>
-                    </div>
-                    <div class="acc-body" id="cust-acc-body-events-${customer.id}" style="display:none" data-loaded="false"></div>
                 </div>
 
                 <!-- 8 Agent Eligibility -->
@@ -881,8 +907,9 @@ const switchProfileTab = async (btn, tabName, cId) => {
     else if (tabName === 'referrals') await renderReferralsTab(customer);
     else if (tabName === 'contracts') await (window.app.renderCustomerContractsTab || (() => {}))(customer);
     else if (tabName === 'events') {
-        // Same fix as switchCustomerProfileTab('events'): event_attendees is the
-        // row the event modal writes, event_registrations only the Attended-tick
+        // Legacy tab UI only — the accordion profile now shows events inside the
+        // merged renderCustomerActivityTab timeline. event_attendees is the row
+        // the event modal writes, event_registrations only the Attended-tick
         // side-effect. Read both, attendees first, and never list an event twice.
         const [allRegs, allEvents, attendeeRows] = await Promise.all([
             AppDataStore.getAll('event_registrations'),
@@ -1007,68 +1034,6 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
     }
     else if (tab === 'activity') {
         await renderCustomerActivityTab(customer, container.id);
-    }
-    else if (tab === 'events') {
-        // event_attendees is the row the event modal actually writes when a
-        // customer is added to an event; event_registrations is only a
-        // side-effect of the "Attended" tick. Reading registrations alone hid
-        // every attendance that had not been ticked (or whose write-back
-        // failed), so read attendees FIRST and treat registrations as a
-        // supplement for events attendees does not already cover.
-        const [allRegs, allEvents, attendeeRows] = await Promise.all([
-            AppDataStore.getAll('event_registrations'),
-            AppDataStore.getAll('events'),
-            (window.app.getProspectAttendeeNotes || (() => Promise.resolve([])))(
-                customerId, { includeWithoutNotes: true, attendeeType: 'customer' }
-            ),
-        ]);
-        const eventsById = new Map((allEvents || []).map(e => [String(e.id), e]));
-        const coveredEventIds = new Set(
-            (attendeeRows || []).map(a => a.event_id).filter(v => v != null).map(String)
-        );
-        const VALID_REG_STATUSES_C2 = new Set(['Registered', 'Attended', 'No Show']);
-        const registrations = (allRegs || []).filter(
-            r => r.attendee_type === 'customer'
-                && r.attendee_id == customerId
-                && VALID_REG_STATUSES_C2.has(r.attendance_status)
-                && !coveredEventIds.has(String(r.event_id))
-        );
-        const _ts = (d) => { const t = Date.parse(d || ''); return Number.isNaN(t) ? 0 : t; };
-        const sortedAttendees = [...(attendeeRows || [])]
-            .sort((a, b) => _ts(b.activity_date) - _ts(a.activity_date));
-
-        if (registrations.length === 0 && sortedAttendees.length === 0) {
-            container.innerHTML = '<p style="text-align:center;padding:20px;color:var(--gray-400);">No events attended yet.</p>';
-        } else {
-            let totalPts = 0;
-            let rows = '';
-            for (const a of sortedAttendees) {
-                const event = eventsById.get(String(a.event_id));
-                const title = a.activity_title || event?.title || event?.event_title || 'Event';
-                const status = a.attendance_status === 'No Show' ? 'No Show'
-                    : (a.attended || a.attendance_status === 'Attended') ? 'Attended'
-                    : 'Registered';
-                const statusColor = status === 'Attended' ? 'var(--success)'
-                    : status === 'No Show' ? 'var(--danger)' : 'var(--gray-500)';
-                const flags = [a.paid ? 'Paid' : null, a.ticket_created ? 'Ticket' : null]
-                    .filter(Boolean).join(' · ');
-                rows += `<div class="pv-row"><span class="pv-lbl">${escapeHtml(a.activity_date || '-')}</span><span class="pv-val" style="display:flex;justify-content:space-between;gap:8px;">${escapeHtml(title)} <span style="color:${statusColor};font-weight:600;flex-shrink:0;">${status}${flags ? ` <span style="color:var(--gray-500);font-weight:400;">(${escapeHtml(flags)})</span>` : ''}</span></span></div>`;
-            }
-            for (const r of registrations) {
-                const event = eventsById.get(String(r.event_id));
-                const pts = r.points_awarded || 0;
-                totalPts += pts;
-                rows += `<div class="pv-row"><span class="pv-lbl">${escapeHtml(r.event_date || '-')}</span><span class="pv-val" style="display:flex;justify-content:space-between;">${escapeHtml(event?.title || 'Unknown')} <span style="color:var(--success);font-weight:600;flex-shrink:0;">+${pts} pts</span></span></div>`;
-            }
-            const totalEvents = registrations.length + sortedAttendees.length;
-            container.innerHTML = `
-                ${rows}
-                <div style="display:flex;justify-content:space-between;font-weight:700;margin-top:12px;padding-top:12px;border-top:1px solid var(--gray-200);">
-                    <span>Total Events: ${totalEvents}</span>
-                    <span style="color:var(--primary);">${totalPts} Points</span>
-                </div>
-            `;
-        }
     }
     else if (tab === 'eligibility') {
         // Derive status + eligibility from REAL customer data instead of the old
@@ -2073,51 +2038,179 @@ const renderAgentEligibility = async (customer) => {
 
 const renderCustomerActivityTab = async (customer, containerId = 'profile-tab-content') => {
     const container = document.getElementById(containerId);
-    // Combine activities linked to this customer OR original prospect
-    // Indexed dual-query: idx_activities_customer_date + idx_activities_prospect_date.
-    // Previously scanned the full activities table; now bounded to the
-    // customer's own rows plus (if converted) the pre-conversion prospect rows.
-    const [custActs, prospActs] = await Promise.all([
+    // ── Meet Ups & Events — ONE merged timeline (2026-08-16) ─────────────────
+    // Absorbs the old separate "Events Attended" section. Both data pipelines
+    // are preserved verbatim; only the presentation changed to compact
+    // expandable rows (same design as the prospect profile).
+    // Activities: indexed dual-query bounded to the customer's own rows plus
+    // (if converted) the pre-conversion prospect rows, deduped by id.
+    // Events: event_attendees is the row the event modal actually writes when
+    // a customer is added to an event; event_registrations is only a
+    // side-effect of the "Attended" tick, so attendees are primary and
+    // registrations a supplement for events attendees does not already cover.
+    const customerId = customer.id;
+    const [custActs, prospActs, allRegs, allEvents, attendeeRows] = await Promise.all([
         AppDataStore.getActivitiesForCustomer(customer.id, { limit: 500 }),
         customer.converted_from_prospect_id
             ? AppDataStore.getActivitiesForProspect(customer.converted_from_prospect_id, { limit: 500 })
             : Promise.resolve([]),
+        AppDataStore.getAll('event_registrations'),
+        AppDataStore.getAll('events'),
+        (window.app.getProspectAttendeeNotes || (() => Promise.resolve([])))(
+            customerId, { includeWithoutNotes: true, attendeeType: 'customer' }
+        ),
     ]);
     const seenIds = new Set();
     const activities = [...custActs, ...prospActs]
-        .filter(a => { if (seenIds.has(a.id)) return false; seenIds.add(a.id); return true; })
-        .sort((a, b) => new Date(b.activity_date || b.created_at) - new Date(a.activity_date || a.created_at));
+        .filter(a => { if (seenIds.has(a.id)) return false; seenIds.add(a.id); return true; });
+    const eventsById = new Map((allEvents || []).map(e => [String(e.id), e]));
 
-    container.innerHTML = `
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-            <h4 style="font-size:16px; font-weight:600; color:var(--primary); margin:0;">Activity History</h4>
-            <button class="btn primary btn-sm" onclick="app.openActivityModal(null, 'customer', ${customer.id})">+ Log Activity</button>
-        </div>
-        ${activities.length > 0 ? `
-            <div class="activity-timeline">
-                ${activities.map(a => {
+    // Owner-wins dedup: drop attendee rows whose parent activity is already an
+    // own activity row (customer both hosted and attended).
+    const ownIds = new Set(activities.map(a => String(a.id)));
+    const attendees = (attendeeRows || []).filter(a => !ownIds.has(String(a._parentActivityId)));
+
+    // Attended + closed at the SAME event → ONE row, joined only via
+    // closing_activity_id (never date/title). The EVENT_CLOSING child renders
+    // as a sub-block inside the attendee row and is never dropped.
+    const closingById = new Map(activities.filter(a => a.activity_type === 'EVENT_CLOSING').map(a => [String(a.id), a]));
+    const pairedClosingIds = new Set();
+    attendees.forEach(a => {
+        if (a.closing_activity_id != null && closingById.has(String(a.closing_activity_id))) {
+            a._closing = closingById.get(String(a.closing_activity_id));
+            pairedClosingIds.add(String(a.closing_activity_id));
+        }
+    });
+    const rows = [
+        ...activities.filter(a => !pairedClosingIds.has(String(a.id))),
+        ...attendees,
+    ];
+    // NaN-safe date sort (missing date sorts oldest) + NaN-safe id tiebreak
+    // (attendee ids are strings like 'att12').
+    const _ts = (d) => { const t = Date.parse(d || ''); return Number.isNaN(t) ? 0 : t; };
+    const _idNum = (x) => { const n = Number(x); return Number.isNaN(n) ? 0 : n; };
+    rows.sort((a, b) => (_ts(b.activity_date || b.created_at) - _ts(a.activity_date || a.created_at))
+        || (_idNum(b.id) - _idNum(a.id))
+        || String(b.id).localeCompare(String(a.id)));
+
+    // Registrations the attendee rows do not already cover.
+    const coveredEventIds = new Set(
+        rows.map(a => a.event_id).filter(v => v != null).map(String)
+    );
+    const VALID_REG_STATUSES_C2 = new Set(['Registered', 'Attended', 'No Show']);
+    const registrations = (allRegs || []).filter(
+        r => r.attendee_type === 'customer'
+            && r.attendee_id == customerId
+            && VALID_REG_STATUSES_C2.has(r.attendance_status)
+            && !coveredEventIds.has(String(r.event_id))
+    );
+
+    const EVENT_TYPES_C = ['EVENT','AGENT_MEETING','AGENT_TRAINING','SITE'];
+    const typeLabelC = { EVENT: 'Event', AGENT_MEETING: 'Agent Meeting', AGENT_TRAINING: 'Training', SITE: 'Site Visit' };
+    const _kind = (a) => (a._isAttendeeNote || EVENT_TYPES_C.includes(a.activity_type)) ? 'event' : 'meetup';
+    const _chip = (a) => {
+        const t = a.activity_type || a.type;
+        if (t === 'EVENT_CLOSING') return 'CLOSING';
+        if (t === 'AGENT_MEETING') return 'MEETING';
+        if (t === 'AGENT_TRAINING') return 'TRAINING';
+        return t || 'NOTE';
+    };
+    const _attChip = (on, label) =>
+        `<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:${on ? '#dcfce7' : 'var(--gray-100)'};color:${on ? '#166534' : 'var(--gray-500)'};">${on ? '✓' : '—'} ${label}</span>`;
+    const _sec = (lbl, val, extra) => val ? `<div class="meet-section"><div class="meet-lbl">${lbl}</div><div class="meet-txt"${extra || ''}>${escapeHtml(val)}</div></div>` : '';
+    const _noteFieldsHtml = (a) => `
+        ${_sec('Key Points', a.note_key_points)}
+        ${_sec('Needs', a.note_needs)}
+        ${_sec('Pain Points', a.note_pain_points)}
+        ${_sec('Opportunity / Potential', a.opportunity_potential)}
+        ${_sec('Next Action', a.next_action, ' style="color:var(--primary);font-weight:500;"')}`;
+
+    const _rowHtml = (a) => {
         const _atype = a.activity_type || a.type;
-        const icon = _atype === 'FTF' ? 'users' : (_atype === 'CALL' ? 'phone' : (_atype === 'EVENT' ? 'calendar-alt' : 'sticky-note'));
-        const date = a.activity_date || a.date || (a.created_at ? a.created_at.split('T')[0] : 'N/A');
+        const date = a.activity_date || a.date || (a.created_at ? String(a.created_at).split('T')[0] : '');
+        const event = a.event_id != null ? eventsById.get(String(a.event_id)) : null;
+        const label = _atype === 'EVENT_CLOSING' ? 'Event Closing' : (typeLabelC[_atype] || _atype || 'Note');
+        const title = a.activity_title || (event ? (event.title || event.event_title) : '') || label;
+        const badges = [];
+        if (a._isAttendeeNote) {
+            const st = a.attendance_status === 'No Show' ? 'no show'
+                : (a.attended || a.attendance_status === 'Attended') ? 'attended'
+                : 'registered';
+            badges.push(`<span class="mu-badge ${st === 'attended' ? 'ok' : st === 'no show' ? 'bad' : ''}">${st === 'attended' ? '✓ ' : ''}${st}</span>`);
+        }
+        if (a.is_closed || (a._closing && a._closing.is_closed)) badges.push(`<span class="mu-badge ok"><i class="fas fa-handshake"></i> Sale Closed</span>`);
+        if (a.outcome) badges.push(`<span class="mu-badge ok">${escapeHtml(a.outcome)}</span>`);
+
+        let detail;
+        if (a._isAttendeeNote) {
+            detail = `
+                <div class="meet-section"><div class="meet-lbl">Attendance</div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:2px;">
+                        ${_attChip(a.paid, 'Paid')}
+                        ${_attChip(a.ticket_created, 'Ticket')}
+                        ${_attChip(a.attended || a.attendance_status === 'Attended', 'Attended')}
+                        ${a.added_by_name ? `<span style="font-size:11px;color:var(--gray-500);">Added by ${escapeHtml(a.added_by_name)}</span>` : ''}
+                    </div>
+                </div>
+                ${_sec('Summary', a.summary)}
+                ${_noteFieldsHtml(a)}
+                ${a._closing ? `<div class="mu-close-sub"><div class="meet-lbl" style="color:var(--primary);"><i class="fas fa-handshake"></i> Event Closing${a._closing.is_closed ? ' — Sale Closed' : ''}</div>${_sec('Notes', a._closing.summary || a._closing.note_key_points)}</div>` : ''}`;
+        } else {
+            detail = `
+                ${_sec('Notes', a.notes || '') || '<div class="meet-txt" style="color:var(--gray-400);font-style:italic;">No details provided.</div>'}
+                ${_noteFieldsHtml(a)}`;
+        }
         return `
-                        <div class="timeline-item" style="display:flex; gap:16px; margin-bottom:20px; position:relative;">
-                            <div class="timeline-icon" style="flex-shrink:0; width:32px; height:32px; border-radius:50%; background:var(--gray-100); display:flex; align-items:center; justify-content:center; color:var(--primary); font-size:14px; z-index:1;">
-                                <i class="fas fa-${icon}"></i>
-                            </div>
-                            <div class="timeline-content" style="flex:1; background:var(--gray-50); padding:12px; border-radius:8px; border:1px solid var(--gray-200);">
-                                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-                                    <strong style="font-size:14px;">${escapeHtml(a.activity_title || _atype)}</strong>
-                                    <span style="font-size:12px; color:var(--gray-500);">${escapeHtml(date)}</span>
-                                </div>
-                                <div style="font-size:13px; color:var(--gray-700);">${a.notes ? escapeHtml(a.notes) : 'No details provided.'}</div>
-                                ${a.outcome ? `<div style="font-size:12px; margin-top:8px;"><span class="score-badge" style="background:var(--success-bg); color:var(--success); border:none;">${escapeHtml(a.outcome)}</span></div>` : ''}
-                            </div>
-                        </div>
-                    `;
-    }).join('')}
+            <div class="mu-item" data-kind="${_kind(a)}">
+                <button type="button" class="mu-row" aria-expanded="false" onclick="this.closest('.mu-item').classList.toggle('open');this.setAttribute('aria-expanded',this.closest('.mu-item').classList.contains('open'))">
+                    <i class="fas fa-chevron-right mu-caret"></i>
+                    <span class="mu-date">${escapeHtml(date || '—')}</span>
+                    <span class="mu-tchip">${escapeHtml(_chip(a))}</span>
+                    <span class="mu-title">${escapeHtml(title)}</span>
+                    <span class="mu-badges">${badges.join('')}</span>
+                </button>
+                <div class="mu-detail">${detail}</div>
+            </div>`;
+    };
+
+    // Points footer — same formula as the old Events Attended section:
+    // count = attendee rows + supplemental registrations; points come from
+    // registrations only.
+    let totalPts = 0;
+    registrations.forEach(r => { totalPts += (r.points_awarded || 0); });
+    const totalEvents = (attendeeRows || []).length + registrations.length;
+
+    const nMeet = rows.filter(a => _kind(a) === 'meetup').length;
+    const nEvent = rows.length - nMeet;
+    let html = `
+        <div class="mu-wrap" data-muf="all">
+            <div class="mu-toolbar">
+                <div class="mu-fchips" role="group" aria-label="Filter meet ups and events">
+                    <button type="button" class="mu-fchip" data-f="all" onclick="this.closest('.mu-wrap').dataset.muf='all'">All (${rows.length})</button>
+                    <button type="button" class="mu-fchip" data-f="meetup" onclick="this.closest('.mu-wrap').dataset.muf='meetup'">Meet Ups (${nMeet})</button>
+                    <button type="button" class="mu-fchip" data-f="event" onclick="this.closest('.mu-wrap').dataset.muf='event'">Events (${nEvent})</button>
+                </div>
+                <button class="btn primary btn-sm" onclick="app.openActivityModal(null, 'customer', ${customer.id})">+ Log Activity</button>
             </div>
-        ` : '<p style="color:var(--gray-400); font-size:13px;">No activity history found.</p>'}
-    `;
+            ${rows.length > 0
+                ? `<div class="mu-list">${rows.map(_rowHtml).join('')}</div>`
+                : '<p style="color:var(--gray-400); font-size:13px;">No meet ups or events recorded yet.</p>'}
+        </div>`;
+    if (registrations.length > 0) {
+        html += `<div class="pv-sub" style="margin-top:12px;">Event Registrations</div>`;
+        for (const r of registrations) {
+            const event = eventsById.get(String(r.event_id));
+            html += `<div class="pv-row"><span class="pv-lbl">${escapeHtml(r.event_date || '-')}</span><span class="pv-val" style="display:flex;justify-content:space-between;">${escapeHtml(event?.title || 'Unknown')} <span style="color:var(--success);font-weight:600;flex-shrink:0;">+${r.points_awarded || 0} pts</span></span></div>`;
+        }
+    }
+    if (totalEvents > 0) {
+        html += `
+            <div style="display:flex;justify-content:space-between;font-weight:700;margin-top:12px;padding-top:12px;border-top:1px solid var(--gray-200);">
+                <span>Total Events: ${totalEvents}</span>
+                <span style="color:var(--primary);">${totalPts} Points</span>
+            </div>`;
+    }
+    container.innerHTML = html;
 };
 
 const renderCustomerTags = async (customer) => {

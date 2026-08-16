@@ -2003,6 +2003,35 @@ const buildProspectDetailHeaderHtml = (prospect, cpsPhoto) => {
                 .msf-txt{margin:0;font-size:13px;line-height:1.6;color:var(--gray-700);white-space:pre-wrap;word-break:break-word;}
                 .msf-txt.action{color:var(--primary);font-weight:500;}
                 .msf-empty{font-size:12.5px;color:var(--gray-400);font-style:italic;text-align:center;padding:4px 0 10px;}
+                .mu-toolbar{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
+                .mu-fchips{display:flex;gap:6px;flex-wrap:wrap;}
+                .mu-fchip{border:1px solid var(--gray-300);background:#fff;color:var(--gray-500);border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;-webkit-tap-highlight-color:transparent;}
+                .mu-wrap[data-muf="all"] .mu-fchip[data-f="all"],.mu-wrap[data-muf="meetup"] .mu-fchip[data-f="meetup"],.mu-wrap[data-muf="event"] .mu-fchip[data-f="event"]{background:var(--primary);border-color:var(--primary);color:#fff;}
+                .mu-wrap[data-muf="meetup"] .mu-item[data-kind="event"]{display:none;}
+                .mu-wrap[data-muf="event"] .mu-item[data-kind="meetup"]{display:none;}
+                .mu-list{display:flex;flex-direction:column;gap:6px;}
+                .mu-item{border:1px solid var(--gray-200);border-radius:10px;background:var(--gray-50);overflow:hidden;}
+                .mu-item.open{background:#fff;border-color:var(--gray-300);}
+                .mu-row{width:100%;display:flex;align-items:center;gap:8px;padding:10px 12px;background:none;border:none;cursor:pointer;font-family:inherit;font-size:inherit;text-align:left;color:var(--gray-800);-webkit-tap-highlight-color:transparent;}
+                .mu-caret{color:var(--gray-400);font-size:11px;width:12px;flex-shrink:0;transition:transform .18s;}
+                .mu-item.open .mu-caret{transform:rotate(90deg);color:var(--primary);}
+                .mu-date{font-size:12px;color:var(--gray-500);font-variant-numeric:tabular-nums;flex-shrink:0;width:78px;}
+                .mu-tchip{font-size:10px;font-weight:800;letter-spacing:.05em;border-radius:6px;padding:3px 7px;background:var(--gray-100);color:var(--primary);flex-shrink:0;}
+                .mu-title{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;}
+                .mu-badges{display:flex;gap:5px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;}
+                .mu-badge{font-size:10.5px;font-weight:700;border-radius:10px;padding:2px 8px;white-space:nowrap;background:var(--gray-100);color:var(--gray-500);}
+                .mu-badge.ok{background:#dcfce7;color:#166534;}
+                .mu-badge.bad{background:#fee2e2;color:#991b1b;}
+                .mu-detail{display:none;padding:2px 14px 14px 32px;}
+                .mu-item.open .mu-detail{display:block;}
+                .mu-close-sub{margin-top:12px;padding-top:10px;border-top:1px dashed var(--gray-300);}
+                @media (max-width:520px){
+                    .mu-row{flex-wrap:wrap;row-gap:5px;}
+                    .mu-date{width:auto;}
+                    .mu-title{flex-basis:100%;order:6;padding-left:20px;box-sizing:border-box;white-space:normal;line-height:1.35;}
+                    .mu-badges{margin-left:auto;}
+                    .mu-detail{padding-left:14px;}
+                }
                 .na-item{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--gray-100);}
                 .na-item:last-child{border-bottom:none;}
                 .na-item input[type=checkbox]{width:18px;height:18px;margin-top:1px;flex-shrink:0;accent-color:var(--primary);cursor:pointer;}
@@ -2075,22 +2104,16 @@ const buildProspectDetailTabsHtml = (prospect) => {
                         <div class="acc-body" id="acc-body-personal-${prospect.id}" style="display:none" data-loaded="false"></div>
                     </div>
 
-                    <!-- ③ Meet Up History -->
+                    <!-- ③ Meet Ups & Events — merged timeline (absorbed the old
+                         separate "Activities and Events" section 2026-08-16).
+                         Tab key stays 'activity': acc-body-activity-* is the id
+                         several post-save refresh sites look up. -->
                     <div class="acc-item" id="acc-activity-${prospect.id}">
                         <div class="acc-hdr" onclick="app.toggleAccordion('activity',${prospect.id},this.parentElement)">
-                            <span><i class="fas fa-user-friends"></i> Meet Up History</span>
+                            <span><i class="fas fa-user-friends"></i> Meet Ups &amp; Events</span>
                             <i class="fas fa-chevron-down acc-chev"></i>
                         </div>
                         <div class="acc-body" id="acc-body-activity-${prospect.id}" style="display:none" data-loaded="false"></div>
-                    </div>
-
-                    <!-- ④ Activities and Events -->
-                    <div class="acc-item" id="acc-events-${prospect.id}">
-                        <div class="acc-hdr" onclick="app.toggleAccordion('events',${prospect.id},this.parentElement)">
-                            <span><i class="fas fa-calendar-alt"></i> Activities and Events</span>
-                            <i class="fas fa-chevron-down acc-chev"></i>
-                        </div>
-                        <div class="acc-body" id="acc-body-events-${prospect.id}" style="display:none" data-loaded="false"></div>
                     </div>
 
                     <!-- ⑤ Potential & Opportunities -->
@@ -2543,77 +2566,250 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         `;
     }
     else if (tab === 'activity') {
-        // EVENT_CLOSING is the per-attendee closing child (see
-        // openAttendeeClosingModal in chunks/script-calendar.js) — it carries a
-        // real sale for this prospect, so it belongs in Meet Up History where the
-        // "Sale Closed" badge / Close Sale button already live.
+        // ── Meet Ups & Events — ONE merged timeline (2026-08-16) ─────────────
+        // Absorbs the old separate "Activities and Events" section. Both data
+        // pipelines are preserved verbatim; only the presentation changed to
+        // compact expandable rows. EVENT_CLOSING is the per-attendee closing
+        // child (see openAttendeeClosingModal in chunks/script-calendar.js) —
+        // it carries a real sale for this prospect. MEETUP_TYPES and
+        // EVENT_TYPES are disjoint, so the merged list can never double-count.
         const MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP','EVENT_CLOSING'];
-        const _prospectActs = await AppDataStore.getActivitiesForProspect(prospectId, { limit: 500 });
-        const activities = _prospectActs.filter(a => MEETUP_TYPES.includes(a.activity_type));
+        const EVENT_TYPES = ['EVENT','AGENT_MEETING','AGENT_TRAINING','SITE'];
+        const [_prospectActs, allEvents, allRegs, _attendeeNotes] = await Promise.all([
+            AppDataStore.getActivitiesForProspect(prospectId, { limit: 500 }),
+            AppDataStore.getAll('events'),
+            AppDataStore.getAll('event_registrations'),
+            // includeWithoutNotes: attendance is a fact this section exists to
+            // show — a prospect who paid, got a ticket and turned up must
+            // appear even before anyone types post-event notes.
+            (window.app.getProspectAttendeeNotes || (() => Promise.resolve([])))(prospectId, { includeWithoutNotes: true }),
+        ]);
+        const meetups = _prospectActs.filter(a => MEETUP_TYPES.includes(a.activity_type));
+        const eventsById = new Map((allEvents || []).map(e => [String(e.id), e]));
+        const validEventIds = new Set(eventsById.keys());
+        const ownEvents = _prospectActs.filter(
+            a => EVENT_TYPES.includes(a.activity_type)
+                && (a.activity_type !== 'EVENT' || !a.event_id || validEventIds.has(String(a.event_id)))
+        );
 
         // Always fetch fresh photo_urls directly — the SWR localStorage cache
         // serves stale activity rows (without photo_urls) so we can't rely on
         // getAll() here. This is a tiny 2-column query filtered to one prospect.
+        // String(id) keys: attendee rows use 'att'-prefixed STRING ids and get
+        // their photo_urls from event_attendees, so they can never collide.
         const _sb = window.supabase || window.supabaseClient;
         const photoMap = {};
         if (_sb) {
             try {
                 const { data: _pd } = await _sb.from('activities').select('id,photo_urls').eq('prospect_id', prospectId);
-                if (_pd) _pd.forEach(r => { if (r.photo_urls?.length) photoMap[r.id] = r.photo_urls; });
+                if (_pd) _pd.forEach(r => { if (r.photo_urls?.length) photoMap[String(r.id)] = r.photo_urls; });
             } catch (_) { /* intentional: optional photo_urls enrichment — activities still render without it */ }
         }
-        activities.forEach(a => { if (photoMap[a.id]) a.photo_urls = photoMap[a.id]; });
+        meetups.forEach(a => { if (photoMap[String(a.id)]) a.photo_urls = photoMap[String(a.id)]; });
+        ownEvents.forEach(a => { if (photoMap[String(a.id)]) a.photo_urls = photoMap[String(a.id)]; });
 
-        const sorted = activities.sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date) || b.id - a.id);
-        container.innerHTML = `
-            <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px;">
-                <button class="btn secondary btn-sm" onclick="app.openPastRecordModal(${prospect.id})" title="Log a historical meet up for an old customer"><i class="fas fa-history"></i> Past Record</button>
-                <button class="btn primary btn-sm" onclick="app.openActivityModal('', ${prospect.id})"><i class="fas fa-plus"></i> Add Meet Up</button>
-            </div>
-            ${sorted.length > 0 ? sorted.map(a => `
-                <div class="meet-card">
-                    <div class="meet-card-hdr">
-                        <div>
-                            <span class="meet-type"><i class="fas ${a.activity_type === 'EVENT_CLOSING' ? 'fa-handshake' : 'fa-user-friends'}"></i> ${a.activity_type === 'EVENT_CLOSING' ? 'Event Closing' : (a.activity_type || 'Meeting')}${a.activity_title ? ' — ' + escapeHtml(a.activity_title) : ''}</span>
-                            ${a.co_agents && a.co_agents.length > 0 ? `<span style="font-size:11px;color:var(--gray-500);margin-top:2px;display:block;"><i class="fas fa-user-plus"></i> ${escapeHtml(a.co_agents.map(c => c.name || c.full_name).join(', '))}</span>` : ''}
-                            ${a.consultants && a.consultants.length > 0 ? `<span style="font-size:11px;color:var(--gray-500);margin-top:2px;display:block;">${a.consultants.map(c => {
-                                const icon = c.status === 'accepted' ? '✅' : c.status === 'rejected' ? '❌' : '⏳';
-                                return `${icon} ${escapeHtml(c.name || '')}`;
-                            }).join(' &nbsp; ')}</span>` : ''}
-                            <span class="meet-date">${escapeHtml(a.activity_date || '')}</span>
-                        </div>
-                        <div style="display:flex;align-items:center;gap:6px;">
-                            ${(a.photo_urls && a.photo_urls.length > 0) ? `<button class="btn btn-sm secondary" style="font-size:12px;padding:4px 8px;color:var(--primary);border-color:var(--primary);" title="${a.photo_urls.length} discussion photo${a.photo_urls.length > 1 ? 's' : ''}" onclick="event.stopPropagation();app.viewActivityPhotos(${a.id})"><i class="fas fa-camera"></i> ${a.photo_urls.length}</button>` : ''}
-                            <button class="btn btn-sm secondary" style="font-size:12px;padding:4px 8px;" onclick="event.stopPropagation();app.viewActivityDetails(${a.id})">Details</button>
+        // Owner-wins dedup: drop attendee rows whose parent activity already
+        // renders as an own row (the prospect both hosted and attended).
+        const ownActivityIds = new Set([...meetups, ...ownEvents].map(a => String(a.id)));
+        const attendeeEvents = _attendeeNotes.filter(a => !ownActivityIds.has(String(a._parentActivityId)));
+
+        // Attended + closed at the SAME event: the attendee row and its
+        // EVENT_CLOSING child describe one moment — join them into ONE row via
+        // closing_activity_id (the only correct key; never date/title). The
+        // closing child is NEVER dropped: it renders as a sub-block inside the
+        // attendee row with its own Minutes / Close Sale controls (money path).
+        const closingById = new Map(meetups.filter(a => a.activity_type === 'EVENT_CLOSING').map(a => [String(a.id), a]));
+        const pairedClosingIds = new Set();
+        attendeeEvents.forEach(a => {
+            if (a.closing_activity_id != null && closingById.has(String(a.closing_activity_id))) {
+                a._closing = closingById.get(String(a.closing_activity_id));
+                pairedClosingIds.add(String(a.closing_activity_id));
+            }
+        });
+
+        const rows = [
+            ...meetups.filter(a => !pairedClosingIds.has(String(a.id))),
+            ...ownEvents,
+            ...attendeeEvents,
+        ];
+        // Deterministic order: NaN-safe date (missing date sorts oldest), then
+        // a NaN-safe id tiebreak — attendee ids are strings like 'att12', so a
+        // plain numeric subtraction would return NaN and break the comparator.
+        const _ts = (d) => { const t = Date.parse(d || ''); return Number.isNaN(t) ? 0 : t; };
+        const _idNum = (x) => { const n = Number(x); return Number.isNaN(n) ? 0 : n; };
+        rows.sort((a, b) => (_ts(b.activity_date) - _ts(a.activity_date))
+            || (_idNum(b.id) - _idNum(a.id))
+            || String(b.id).localeCompare(String(a.id)));
+
+        // Registrations are a weaker side-effect record of the same fact —
+        // only show ones no activity/attendance row already covers.
+        const coveredEventIds = new Set(rows.map(a => a.event_id).filter(v => v != null).map(String));
+        const VALID_REG_STATUSES = new Set(['Registered', 'Attended', 'No Show']);
+        const registrations = (allRegs || []).filter(
+            r => r.attendee_type === 'prospect'
+                && r.attendee_id == prospectId
+                && VALID_REG_STATUSES.has(r.attendance_status)
+                && !coveredEventIds.has(String(r.event_id))
+        );
+
+        // ── row helpers (presentation only — every handler is unchanged) ────
+        const _esc = s => s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '';
+        const typeLabel = { EVENT: 'Event', AGENT_MEETING: 'Agent Meeting', AGENT_TRAINING: 'Training', SITE: 'Site Visit' };
+        const _chip = (a) => {
+            if (a.activity_type === 'EVENT_CLOSING') return 'CLOSING';
+            if (a.activity_type === 'AGENT_MEETING') return 'MEETING';
+            if (a.activity_type === 'AGENT_TRAINING') return 'TRAINING';
+            return a.activity_type || 'MEETUP';
+        };
+        const _kind = (a) => (a._isAttendeeNote || EVENT_TYPES.includes(a.activity_type)) ? 'event' : 'meetup';
+        const _attStatus = (a) => a.attendance_status === 'No Show' ? 'no show'
+            : (a.attended || a.attendance_status === 'Attended') ? 'attended'
+            : 'registered';
+        const _fieldsHtml = (a) => {
+            const fields = [
+                { lbl: 'Core Problem',            val: a.core_problem || a.summary },
+                { lbl: 'Key Points Discussed',    val: a.note_key_points },
+                { lbl: 'Customer Needs',          val: a.note_needs },
+                { lbl: 'Pain Points',             val: a.note_pain_points },
+                { lbl: 'Opportunity / Potential', val: a.opportunity_potential },
+                { lbl: 'Next Steps',              val: a.note_next_steps,  action: true },
+                { lbl: 'Next Action',             val: a.next_action,      action: true },
+                { lbl: 'Outcome',                 val: a.note_outcome },
+            ].filter(f => f.val);
+            if (!fields.length) return '';
+            return `<div class="meet-summary">
+                <div class="meet-summary-hdr"><i class="fas fa-file-alt"></i>&nbsp; Discussion Notes</div>
+                ${fields.map(f => `<div class="msf"><span class="msf-lbl">${f.lbl}</span><p class="msf-txt${f.action ? ' action' : ''}">${_esc(f.val)}</p></div>`).join('')}
+            </div>`;
+        };
+        const _peopleHtml = (a) => `
+            ${a.co_agents && a.co_agents.length > 0 ? `<div class="meet-section"><div class="meet-lbl">Co-Agents</div><div class="meet-txt"><i class="fas fa-user-plus"></i> ${escapeHtml(a.co_agents.map(c => c.name || c.full_name).join(', '))}</div></div>` : ''}
+            ${a.consultants && a.consultants.length > 0 ? `<div class="meet-section"><div class="meet-lbl">Consultants</div><div class="meet-txt">${a.consultants.map(c => {
+                const icon = c.status === 'accepted' ? '✅' : c.status === 'rejected' ? '❌' : '⏳';
+                return `${icon} ${escapeHtml(c.name || '')}`;
+            }).join(' &nbsp; ')}</div></div>` : ''}`;
+        const _eventFieldsHtml = (a) => `
+            ${a.summary || a.note_key_points ? `<div class="meet-section"><div class="meet-lbl">Key Points</div><div class="meet-txt">${escapeHtml(a.summary || a.note_key_points)}</div></div>` : ''}
+            ${a.note_needs ? `<div class="meet-section"><div class="meet-lbl">Needs</div><div class="meet-txt">${escapeHtml(a.note_needs)}</div></div>` : ''}
+            ${a.note_pain_points ? `<div class="meet-section"><div class="meet-lbl">Pain Points</div><div class="meet-txt">${escapeHtml(a.note_pain_points)}</div></div>` : ''}
+            ${a.opportunity_potential ? `<div class="meet-section"><div class="meet-lbl">Opportunity / Potential</div><div class="meet-txt">${escapeHtml(a.opportunity_potential)}</div></div>` : ''}
+            ${a.next_action ? `<div class="meet-section"><div class="meet-lbl">Next Action</div><div class="meet-txt" style="color:var(--primary);font-weight:500;">${escapeHtml(a.next_action)}</div></div>` : ''}
+            ${a.location_address ? `<div class="meet-section"><div class="meet-lbl">Location</div><div class="meet-txt">${escapeHtml(a.location_address)}</div></div>` : ''}`;
+        const _attChip = (on, label) =>
+            `<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:${on ? '#dcfce7' : 'var(--gray-100)'};color:${on ? '#166534' : 'var(--gray-500)'};">${on ? '✓' : '—'} ${label}</span>`;
+        // Closing sub-block for a paired attendee row — the EVENT_CLOSING
+        // child's own notes + controls, acting on the CLOSING child id.
+        const _closingSub = (c) => `
+            <div class="mu-close-sub">
+                <div class="meet-lbl" style="color:var(--primary);"><i class="fas fa-handshake"></i> Event Closing</div>
+                ${_fieldsHtml(c)}
+                <div class="meet-actions">
+                    ${(c.photo_urls && c.photo_urls.length > 0) ? `<button class="btn btn-sm secondary" onclick="event.stopPropagation();app.viewActivityPhotos(${c.id})"><i class="fas fa-images"></i> Photos (${c.photo_urls.length})</button>` : `<button class="btn btn-sm secondary" onclick="event.stopPropagation();app.attachActivityPhoto(${c.id})"><i class="fas fa-camera"></i> Attach Photo</button>`}
+                    <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.openPostMeetupNotesModal(${c.id}, ${prospect.id})"><i class="fas fa-sticky-note"></i> Minutes</button>
+                    ${c.is_closed ? `<span class="badge success" style="align-self:center;font-size:12px;"><i class="fas fa-handshake"></i> Sale Closed</span>` : `<button class="btn btn-sm primary" onclick="event.stopPropagation();app.openMeetingOutcomeModal(${c.id})"><i class="fas fa-handshake"></i> Close Sale</button>`}
+                    <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.viewActivityDetails(${c.id})">Details</button>
+                </div>
+            </div>`;
+
+        const _rowHtml = (a) => {
+            const kind = _kind(a);
+            const photoCount = Array.isArray(a.photo_urls) ? a.photo_urls.length : 0;
+            const label = a.activity_type === 'EVENT_CLOSING' ? 'Event Closing' : (typeLabel[a.activity_type] || a.activity_type || 'Meeting');
+            const title = a.activity_title ? escapeHtml(a.activity_title) : escapeHtml(label);
+            const badges = [];
+            if (a._isAttendeeNote) {
+                const st = _attStatus(a);
+                badges.push(`<span class="mu-badge ${st === 'attended' ? 'ok' : st === 'no show' ? 'bad' : ''}">${st === 'attended' ? '✓ ' : ''}${st}</span>`);
+            }
+            const closedHere = a.is_closed || (a._closing && a._closing.is_closed);
+            if (closedHere) badges.push(`<span class="mu-badge ok"><i class="fas fa-handshake"></i> Sale Closed</span>`);
+            if (photoCount > 0) badges.push(`<span class="mu-badge"><i class="fas fa-camera"></i> ${photoCount}</span>`);
+            if (a.score_value) badges.push(`<span class="mu-badge ok">+${a.score_value} pts</span>`);
+
+            let detail = '';
+            if (a._isAttendeeNote) {
+                // Attendee row — attendance chips ARE the record even when no
+                // notes were typed (Paid / Ticket / Added-by).
+                detail = `
+                    <div class="meet-section"><div class="meet-lbl">Attendance</div>
+                        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:2px;">
+                            ${_attChip(a.paid, 'Paid')}
+                            ${_attChip(a.ticket_created, 'Ticket')}
+                            ${_attChip(a.attended || a.attendance_status === 'Attended', 'Attended')}
+                            ${a.added_by_name ? `<span style="font-size:11px;color:var(--gray-500);">Added by ${escapeHtml(a.added_by_name)}</span>` : ''}
                         </div>
                     </div>
-                    ${(() => {
-                        const _esc = s => s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '';
-                        const fields = [
-                            { lbl: 'Core Problem',            val: a.core_problem || a.summary },
-                            { lbl: 'Key Points Discussed',    val: a.note_key_points },
-                            { lbl: 'Customer Needs',          val: a.note_needs },
-                            { lbl: 'Pain Points',             val: a.note_pain_points },
-                            { lbl: 'Opportunity / Potential', val: a.opportunity_potential },
-                            { lbl: 'Next Steps',              val: a.note_next_steps,  action: true },
-                            { lbl: 'Next Action',             val: a.next_action,      action: true },
-                            { lbl: 'Outcome',                 val: a.note_outcome },
-                        ].filter(f => f.val);
-                        if (!fields.length) return `<div class="meet-summary"><div class="msf-empty">No discussion notes yet — tap <b>Minutes</b> to add.</div></div>`;
-                        return `<div class="meet-summary">
-                            <div class="meet-summary-hdr"><i class="fas fa-file-alt"></i>&nbsp; Discussion Notes</div>
-                            ${fields.map(f => `<div class="msf"><span class="msf-lbl">${f.lbl}</span><p class="msf-txt${f.action ? ' action' : ''}">${_esc(f.val)}</p></div>`).join('')}
-                        </div>`;
-                    })()}
-                    ${a.score_value ? `<div style="margin-bottom:6px;"><span class="badge success" style="font-size:11px;">+${a.score_value} pts</span></div>` : ''}
+                    ${_eventFieldsHtml(a)}
                     <div class="meet-actions">
-                        ${(a.photo_urls && a.photo_urls.length > 0) ? `<button class="btn btn-sm secondary" onclick="event.stopPropagation();app.viewActivityPhotos(${a.id})"><i class="fas fa-images"></i> Photos (${a.photo_urls.length})</button>` : `<button class="btn btn-sm secondary" onclick="event.stopPropagation();app.attachActivityPhoto(${a.id})"><i class="fas fa-camera"></i> Attach Photo</button>`}
+                        <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.openAttendeePostEventModal(${a._attendeeRowId}, ${a._parentActivityId}, ${prospect.id})"><i class="fas fa-sticky-note"></i> Post Event Notes</button>
+                        ${photoCount > 0 ? `<button class="btn btn-sm secondary" style="color:var(--primary);border-color:var(--primary);" onclick="event.stopPropagation();app.viewAttendeePhotos(${a._attendeeRowId})"><i class="fas fa-images"></i> Photos (${photoCount})</button>` : ''}
+                        <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.viewActivityDetails(${a._parentActivityId})">Details</button>
+                    </div>
+                    ${a._closing ? _closingSub(a._closing) : ''}`;
+            } else if (EVENT_TYPES.includes(a.activity_type)) {
+                // Own event/meeting/training/site row.
+                detail = `
+                    ${_eventFieldsHtml(a)}
+                    <div class="meet-actions">
+                        <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.openPostMeetupNotesModal(${a.id}, ${prospect.id})"><i class="fas fa-sticky-note"></i> Post Event Notes</button>
+                        ${photoCount > 0 ? `<button class="btn btn-sm secondary" style="color:var(--primary);border-color:var(--primary);" onclick="event.stopPropagation();app.viewActivityPhotos(${a.id})"><i class="fas fa-images"></i> Photos (${photoCount})</button>` : ''}
+                        <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.viewActivityDetails(${a.id})">Details</button>
+                    </div>`;
+            } else {
+                // Meet-up row (CPS/FTF/CALL/… and standalone EVENT_CLOSING).
+                const fieldsBlock = _fieldsHtml(a) || `<div class="meet-summary"><div class="msf-empty">No discussion notes yet — tap <b>Minutes</b> to add.</div></div>`;
+                detail = `
+                    ${_peopleHtml(a)}
+                    ${fieldsBlock}
+                    <div class="meet-actions">
+                        ${photoCount > 0 ? `<button class="btn btn-sm secondary" onclick="event.stopPropagation();app.viewActivityPhotos(${a.id})"><i class="fas fa-images"></i> Photos (${photoCount})</button>` : `<button class="btn btn-sm secondary" onclick="event.stopPropagation();app.attachActivityPhoto(${a.id})"><i class="fas fa-camera"></i> Attach Photo</button>`}
                         <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.openPostMeetupNotesModal(${a.id}, ${prospect.id})"><i class="fas fa-sticky-note"></i> Minutes</button>
                         ${a.is_closed ? `<span class="badge success" style="align-self:center;font-size:12px;"><i class="fas fa-handshake"></i> Sale Closed</span>` : `<button class="btn btn-sm primary" onclick="event.stopPropagation();app.openMeetingOutcomeModal(${a.id})"><i class="fas fa-handshake"></i> Close Sale</button>`}
+                        <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.viewActivityDetails(${a.id})">Details</button>
+                    </div>`;
+            }
+            return `
+                <div class="mu-item" data-kind="${kind}">
+                    <button type="button" class="mu-row" aria-expanded="false" onclick="this.closest('.mu-item').classList.toggle('open');this.setAttribute('aria-expanded',this.closest('.mu-item').classList.contains('open'))">
+                        <i class="fas fa-chevron-right mu-caret"></i>
+                        <span class="mu-date">${escapeHtml(a.activity_date || '—')}</span>
+                        <span class="mu-tchip">${escapeHtml(_chip(a))}</span>
+                        <span class="mu-title">${title}</span>
+                        <span class="mu-badges">${badges.join('')}</span>
+                    </button>
+                    <div class="mu-detail">${detail}</div>
+                </div>`;
+        };
+
+        const nMeet = rows.filter(a => _kind(a) === 'meetup').length;
+        const nEvent = rows.length - nMeet;
+        let html = `
+            <div class="mu-wrap" data-muf="all">
+                <div class="mu-toolbar">
+                    <div class="mu-fchips" role="group" aria-label="Filter meet ups and events">
+                        <button type="button" class="mu-fchip" data-f="all" onclick="this.closest('.mu-wrap').dataset.muf='all'">All (${rows.length})</button>
+                        <button type="button" class="mu-fchip" data-f="meetup" onclick="this.closest('.mu-wrap').dataset.muf='meetup'">Meet Ups (${nMeet})</button>
+                        <button type="button" class="mu-fchip" data-f="event" onclick="this.closest('.mu-wrap').dataset.muf='event'">Events (${nEvent})</button>
+                    </div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                        <button class="btn secondary btn-sm" onclick="app.openPastRecordModal(${prospect.id})" title="Log a historical meet up for an old customer"><i class="fas fa-history"></i> Past Record</button>
+                        <button class="btn primary btn-sm" onclick="app.openActivityModal('', ${prospect.id})"><i class="fas fa-plus"></i> Add</button>
                     </div>
                 </div>
-            `).join('') : '<p style="text-align:center;padding:20px;color:var(--gray-400);">No meet up history recorded yet.</p>'}
-        `;
+                ${rows.length > 0
+                    ? `<div class="mu-list">${rows.map(_rowHtml).join('')}</div>`
+                    : '<p style="text-align:center;padding:20px;color:var(--gray-400);">No meet ups or events recorded yet.</p>'}
+            </div>`;
+        if (registrations.length > 0) {
+            html += `<div class="pv-sub" style="margin-top:12px;">Event Registrations</div>`;
+            html += '<div style="overflow-x:auto;"><table class="events-table" style="width:100%;"><thead><tr><th scope="col">Event</th><th scope="col">Date</th><th scope="col">Status</th><th scope="col">Pts</th></tr></thead><tbody>';
+            for (const r of registrations) {
+                const ev = eventsById.get(String(r.event_id));
+                html += `<tr><td>${escapeHtml(ev?.event_title || ev?.title || 'Unknown')}</td><td>${escapeHtml(r.event_date || '-')}</td><td>${escapeHtml(r.attendance_status || '')}</td><td>${r.points_awarded || 0}</td></tr>`;
+            }
+            html += '</tbody></table></div>';
+        }
+        container.innerHTML = html;
     }
     else if (tab === 'notes') {
         const notes = await AppDataStore.query('notes', { prospect_id: prospectId });
@@ -2644,135 +2840,6 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 <p style="text-align:center;padding:16px;color:var(--gray-400);">No documents uploaded.</p>
             </div>
         `;
-    }
-    else if (tab === 'events') {
-        const EVENT_TYPES = ['EVENT','AGENT_MEETING','AGENT_TRAINING','SITE'];
-        // Fetch events + registrations + per-prospect activities + attendee notes in parallel
-        const [allEvents, allRegs, _eventActs, _attendeeNotes] = await Promise.all([
-            AppDataStore.getAll('events'),
-            AppDataStore.getAll('event_registrations'),
-            AppDataStore.getActivitiesForProspect(prospectId, { limit: 500 }),
-            // includeWithoutNotes: attendance is the fact this tab exists to show.
-            // Without it a prospect who paid, got a ticket and turned up stayed
-            // invisible here until someone typed post-event notes.
-            (window.app.getProspectAttendeeNotes || (() => Promise.resolve([])))(prospectId, { includeWithoutNotes: true }),
-        ]);
-        const eventsById = new Map((allEvents || []).map(e => [String(e.id), e]));
-        const validEventIds = new Set(eventsById.keys());
-        const ownEvents = _eventActs.filter(
-            a => EVENT_TYPES.includes(a.activity_type)
-                && (a.activity_type !== 'EVENT' || !a.event_id || validEventIds.has(String(a.event_id)))
-        );
-        // Drop attendee-notes whose parent activity is already in ownEvents
-        // (the prospect both hosted and attended) — the owner row wins.
-        const ownActivityIds = new Set(ownEvents.map(a => String(a.id)));
-        const attendeeEvents = _attendeeNotes.filter(a => !ownActivityIds.has(String(a._parentActivityId)));
-        // Attendance rows can carry no date at all when their parent activity is
-        // unreadable — treat a missing date as oldest instead of letting NaN make
-        // the comparator non-deterministic.
-        const _ts = (d) => { const t = Date.parse(d || ''); return Number.isNaN(t) ? 0 : t; };
-        const activityEvents = [...ownEvents, ...attendeeEvents]
-            .sort((a, b) => _ts(b.activity_date) - _ts(a.activity_date));
-
-        // Every event already represented by an attendance card above. The
-        // registrations table is a second, weaker record of the same fact (it is
-        // only written as a side-effect of the Attended tick), so showing both
-        // lists the same event twice.
-        const coveredEventIds = new Set(
-            activityEvents.map(a => a.event_id).filter(v => v != null).map(String)
-        );
-        const VALID_REG_STATUSES = new Set(['Registered', 'Attended', 'No Show']);
-        const registrations = (allRegs || []).filter(
-            r => r.attendee_type === 'prospect'
-                && r.attendee_id == prospectId
-                && VALID_REG_STATUSES.has(r.attendance_status)
-                && !coveredEventIds.has(String(r.event_id))
-        );
-
-        const typeIcon = { EVENT: 'fa-calendar-star', AGENT_MEETING: 'fa-handshake', AGENT_TRAINING: 'fa-graduation-cap', SITE: 'fa-map-marker-alt' };
-        const typeLabel = { EVENT: 'Event', AGENT_MEETING: 'Agent Meeting', AGENT_TRAINING: 'Training', SITE: 'Site Visit' };
-
-        if (activityEvents.length === 0 && registrations.length === 0) {
-            container.innerHTML = '<p style="text-align:center;padding:20px;color:var(--gray-400);">No activities or events recorded yet.</p>';
-        } else {
-            let html = `<div style="display:flex;justify-content:flex-end;margin-bottom:12px;"><button class="btn primary btn-sm" onclick="app.openActivityModal('', ${prospect.id})"><i class="fas fa-plus"></i> Add Activity</button></div>`;
-            for (const a of activityEvents) {
-                const icon = typeIcon[a.activity_type] || 'fa-calendar';
-                const label = typeLabel[a.activity_type] || a.activity_type;
-                const detailsId = a._isAttendeeNote ? a._parentActivityId : a.id;
-                const notesBtn = a._isAttendeeNote
-                    ? `<button class="btn btn-sm secondary" onclick="event.stopPropagation();app.openAttendeePostEventModal(${a._attendeeRowId}, ${a._parentActivityId}, ${prospect.id})"><i class="fas fa-sticky-note"></i> Post Event Notes</button>`
-                    : `<button class="btn btn-sm secondary" onclick="event.stopPropagation();app.openPostMeetupNotesModal(${a.id}, ${prospect.id})"><i class="fas fa-sticky-note"></i> Post Event Notes</button>`;
-                // Discussion-paper photos: attendee notes live on event_attendees
-                // (own-event notes live on activities.photo_urls) — route each to
-                // its matching viewer so uploaded papers are findable here too.
-                const photoCount = Array.isArray(a.photo_urls) ? a.photo_urls.length : 0;
-                const photosBtn = photoCount > 0
-                    ? (a._isAttendeeNote
-                        ? `<button class="btn btn-sm secondary" style="color:var(--primary);border-color:var(--primary);" onclick="event.stopPropagation();app.viewAttendeePhotos(${a._attendeeRowId})"><i class="fas fa-images"></i> Photos (${photoCount})</button>`
-                        : `<button class="btn btn-sm secondary" style="color:var(--primary);border-color:var(--primary);" onclick="event.stopPropagation();app.viewActivityPhotos(${a.id})"><i class="fas fa-images"></i> Photos (${photoCount})</button>`)
-                    : '';
-                // Source/status tag reflects what actually happened, not just
-                // "this row came from event_attendees".
-                const _statusLabel = a.attendance_status === 'No Show' ? 'no show'
-                    : (a.attended || a.attendance_status === 'Attended') ? 'attended'
-                    : 'registered';
-                const _statusBg = _statusLabel === 'attended' ? '#dcfce7'
-                    : _statusLabel === 'no show' ? '#fee2e2' : 'var(--gray-100)';
-                const _statusFg = _statusLabel === 'attended' ? '#166534'
-                    : _statusLabel === 'no show' ? '#991b1b' : 'var(--gray-600)';
-                const sourceTag = a._isAttendeeNote
-                    ? `<span style="font-size:10px;background:${_statusBg};color:${_statusFg};padding:1px 6px;border-radius:10px;margin-left:6px;">${_statusLabel}</span>`
-                    : '';
-                // Attendance detail line — the whole point of surfacing note-less
-                // rows is that Paid / Ticket / Added-by are themselves the record.
-                const chip = (on, label) =>
-                    `<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:${on ? '#dcfce7' : 'var(--gray-100)'};color:${on ? '#166534' : 'var(--gray-500)'};">${on ? '✓' : '—'} ${label}</span>`;
-                const attendanceRow = a._isAttendeeNote
-                    ? `<div class="meet-section"><div class="meet-lbl">Attendance</div>
-                           <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:2px;">
-                               ${chip(a.paid, 'Paid')}
-                               ${chip(a.ticket_created, 'Ticket')}
-                               ${chip(a.attended || a.attendance_status === 'Attended', 'Attended')}
-                               ${a.added_by_name ? `<span style="font-size:11px;color:var(--gray-500);">Added by ${escapeHtml(a.added_by_name)}</span>` : ''}
-                           </div>
-                       </div>`
-                    : '';
-                html += `
-                    <div class="meet-card" style="margin-bottom:10px;">
-                        <div class="meet-card-hdr">
-                            <div>
-                                <span class="meet-type"><i class="fas ${icon}"></i> ${escapeHtml(label)}${a.activity_title ? ' — ' + escapeHtml(a.activity_title) : ''}${sourceTag}</span>
-                                <span class="meet-date">${escapeHtml(a.activity_date || '')}</span>
-                            </div>
-                            <button class="btn btn-sm secondary" style="font-size:12px;padding:4px 8px;" onclick="event.stopPropagation();app.viewActivityDetails(${detailsId})">Details</button>
-                        </div>
-                        ${attendanceRow}
-                        ${a.summary || a.note_key_points ? `<div class="meet-section"><div class="meet-lbl">Key Points</div><div class="meet-txt">${escapeHtml(a.summary || a.note_key_points)}</div></div>` : ''}
-                        ${a.note_needs ? `<div class="meet-section"><div class="meet-lbl">Needs</div><div class="meet-txt">${escapeHtml(a.note_needs)}</div></div>` : ''}
-                        ${a.note_pain_points ? `<div class="meet-section"><div class="meet-lbl">Pain Points</div><div class="meet-txt">${escapeHtml(a.note_pain_points)}</div></div>` : ''}
-                        ${a.opportunity_potential ? `<div class="meet-section"><div class="meet-lbl">Opportunity / Potential</div><div class="meet-txt">${escapeHtml(a.opportunity_potential)}</div></div>` : ''}
-                        ${a.next_action ? `<div class="meet-section"><div class="meet-lbl">Next Action</div><div class="meet-txt" style="color:var(--primary);font-weight:500;">${escapeHtml(a.next_action)}</div></div>` : ''}
-                        ${a.location_address ? `<div class="meet-section"><div class="meet-lbl">Location</div><div class="meet-txt">${escapeHtml(a.location_address)}</div></div>` : ''}
-                        ${a.score_value ? `<div style="margin-bottom:6px;"><span class="badge success" style="font-size:11px;">+${a.score_value} pts</span></div>` : ''}
-                        <div class="meet-actions">
-                            ${notesBtn}
-                            ${photosBtn}
-                        </div>
-                    </div>
-                `;
-            }
-            if (registrations.length > 0) {
-                html += `<div class="pv-sub" style="margin-top:8px;">Event Registrations</div>`;
-                html += '<div style="overflow-x:auto;"><table class="events-table" style="width:100%;"><thead><tr><th scope="col">Event</th><th scope="col">Date</th><th scope="col">Status</th><th scope="col">Pts</th></tr></thead><tbody>';
-                for (const r of registrations) {
-                    const ev = eventsById.get(String(r.event_id));
-                    html += `<tr><td>${escapeHtml(ev?.event_title || ev?.title || 'Unknown')}</td><td>${escapeHtml(r.event_date || '-')}</td><td>${escapeHtml(r.attendance_status || '')}</td><td>${r.points_awarded || 0}</td></tr>`;
-                }
-                html += '</tbody></table></div>';
-            }
-            container.innerHTML = html;
-        }
     }
     else if (tab === 'protection') {
         const daysLeft = calculateProtectionDays(prospect);
