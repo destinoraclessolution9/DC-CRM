@@ -787,7 +787,9 @@
         const by = {};
         all.forEach(o => { (by[o.catalog_id] = by[o.catalog_id] || []).push(o); });
         Object.values(by).forEach(list => list.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)));
-        _bjc.optsByCat = by;
+        // Never memoize an empty read — a dead/booting session returns [] (RLS
+        // downgrade) and would poison the memo for the rest of the chunk's life.
+        if (all.length) _bjc.optsByCat = by;
         return by;
     };
 
@@ -802,7 +804,8 @@
         all.forEach(p => { (by[p.catalog_id] = by[p.catalog_id] || []).push(p); });
         Object.values(by).forEach(list => list.sort((a, b) =>
             (b.is_default === true) - (a.is_default === true) || (a.sort_order || 0) - (b.sort_order || 0)));
-        _bjc.photosByCat = by;
+        // Never memoize an empty read (see _bjcLoadOpts) — retry next render.
+        if (all.length) _bjc.photosByCat = by;
         return by;
     };
 
