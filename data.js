@@ -52,7 +52,7 @@ class DataStore {
             // Marketing list sub-catalogs
             'bujishu', 'formula',
             // Bujishu supplier catalogue (read-only mirror of bujishu.com, 2026-08-16)
-            'bujishu_catalog', 'bujishu_catalog_options',
+            'bujishu_catalog', 'bujishu_catalog_options', 'bujishu_catalog_photos',
             // Formula Healthcare refill reminder system
             'refill_reminders',
             // Automation config singleton (admin-managed birthday posters, etc.)

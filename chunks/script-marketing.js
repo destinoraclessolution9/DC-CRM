@@ -791,6 +791,26 @@
         return by;
     };
 
+    // Photo gallery rows (mirrored into the public bujishu-catalog bucket,
+    // 2026-08-17 — no longer hot-linked from the supplier). Default first.
+    const _bjcLoadPhotos = async () => {
+        if (_bjc.photosByCat) return _bjc.photosByCat;
+        let all = [];
+        try { all = (await AppDataStore.getAll('bujishu_catalog_photos')) || []; }
+        catch (e) { all = []; /* pre-migration clients: gallery quietly absent */ }
+        const by = {};
+        all.forEach(p => { (by[p.catalog_id] = by[p.catalog_id] || []).push(p); });
+        Object.values(by).forEach(list => list.sort((a, b) =>
+            (b.is_default === true) - (a.is_default === true) || (a.sort_order || 0) - (b.sort_order || 0)));
+        _bjc.photosByCat = by;
+        return by;
+    };
+
+    const _bjcPhotoStrip = (ph) => `
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+            ${ph.map(p => `<img loading="lazy" decoding="async" src="${escapeHtml(p.url)}" style="width:64px;height:64px;object-fit:cover;border-radius:6px;cursor:pointer;border:1px solid var(--gray-200);" onclick="event.stopPropagation();app.viewProductImage('${escapeHtml(p.url)}','Photo')" title="View photo">`).join('')}
+        </div>`;
+
     const _bjcFiltered = async () => {
         let rows = (await AppDataStore.getAll('bujishu_catalog')) || [];
         rows = rows.filter(r => r.is_active !== false);
@@ -834,6 +854,7 @@
     const _bjcResultsHtml = async () => {
         const rows = await _bjcFiltered();
         const opts = await _bjcLoadOpts();
+        const photos = await _bjcLoadPhotos();
         const total = rows.length;
         const maxPage = Math.max(0, Math.ceil(total / BJC_PAGE) - 1);
         if (_bjc.page > maxPage) _bjc.page = maxPage;
@@ -854,10 +875,16 @@
         if (isMobile() || window.innerWidth <= 768) {
             return slice.map(r => {
                 const o = opts[r.id] || [];
+                const ph = photos[r.id] || [];
+                const expandable = o.length || ph.length > 1;
                 const open = !!_bjc.open[r.id];
+                const chips = [
+                    o.length ? `${o.length} options` : '',
+                    ph.length > 1 ? `${ph.length} photos` : '',
+                ].filter(Boolean).join(' · ');
                 return `
                 <div style="border:1px solid var(--gray-200);border-radius:10px;padding:10px 12px;margin-bottom:10px;background:#fff;">
-                    <div style="display:flex;gap:10px;align-items:flex-start;" onclick="${o.length ? `app.bjcToggle(${r.id})` : ''}">
+                    <div style="display:flex;gap:10px;align-items:flex-start;" onclick="${expandable ? `app.bjcToggle(${r.id})` : ''}">
                         ${_bjcThumb(r, 52)}
                         <div style="flex:1;min-width:0;">
                             <div style="font-weight:600;font-size:14px;line-height:1.3;">${escapeHtml(r.name)}</div>
@@ -866,11 +893,11 @@
                                 <span><span style="color:var(--gray-500);font-size:11px;">Customer</span> <strong>RM ${_bjcPrice(r.price_customer, r.price_customer_min, r.price_customer_max)}</strong></span>
                                 <span><span style="color:var(--gray-500);font-size:11px;">Member</span> RM ${_bjcPrice(r.price_member, r.price_member_min, r.price_member_max)}</span>
                             </div>
-                            ${o.length ? `<div style="font-size:11px;color:var(--primary-600,#b45309);margin-top:5px;">${o.length} options ${open ? '▴' : '▾'}</div>` : ''}
+                            ${expandable ? `<div style="font-size:11px;color:var(--primary-600,#b45309);margin-top:5px;">${chips} ${open ? '▴' : '▾'}</div>` : ''}
                         </div>
                         <a href="${escapeHtml(r.source_url || '#')}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--gray-400);flex-shrink:0;" title="Open on bujishu.com"><i class="fas fa-external-link-alt"></i></a>
                     </div>
-                    ${open && o.length ? `<div style="margin-top:8px;">${_bjcOptionsTable(o)}</div>` : ''}
+                    ${open && expandable ? `<div style="margin-top:8px;">${ph.length > 1 ? _bjcPhotoStrip(ph) : ''}${o.length ? _bjcOptionsTable(o) : ''}</div>` : ''}
                 </div>`;
             }).join('') + pager;
         }
@@ -891,19 +918,25 @@
                 <tbody>
                     ${slice.map(r => {
                         const o = opts[r.id] || [];
+                        const ph = photos[r.id] || [];
+                        const expandable = o.length || ph.length > 1;
                         const open = !!_bjc.open[r.id];
+                        const chip = [
+                            o.length ? `${o.length} priced` : '',
+                            ph.length > 1 ? `${ph.length} photos` : '',
+                        ].filter(Boolean).join(' · ');
                         return `
-                        <tr${o.length ? ` style="cursor:pointer;" onclick="app.bjcToggle(${r.id})"` : ''}>
+                        <tr${expandable ? ` style="cursor:pointer;" onclick="app.bjcToggle(${r.id})"` : ''}>
                             <td style="text-align:center;">${_bjcThumb(r, 40)}</td>
                             <td><strong>${escapeHtml(r.name)}</strong>${r.options_summary ? `<br><small class="text-muted" style="${_bjcClamp2}max-width:420px;" title="${escapeHtml(r.options_summary)}">${escapeHtml(r.options_summary)}</small>` : ''}</td>
                             <td style="white-space:nowrap;">${escapeHtml(r.category || '-')}</td>
                             <td style="text-align:right;font-weight:600;white-space:nowrap;">${_bjcPrice(r.price_customer, r.price_customer_min, r.price_customer_max)}</td>
                             <td style="text-align:right;white-space:nowrap;">${_bjcPrice(r.price_member, r.price_member_min, r.price_member_max)}</td>
                             <td style="white-space:nowrap;">${escapeHtml(r.lead_time || '-')}</td>
-                            <td style="white-space:nowrap;">${o.length ? `<span style="color:var(--primary-600,#b45309);font-size:12px;">${o.length} priced ${open ? '▴' : '▾'}</span>` : '<span class="text-muted">-</span>'}</td>
+                            <td style="white-space:nowrap;">${expandable ? `<span style="color:var(--primary-600,#b45309);font-size:12px;">${chip} ${open ? '▴' : '▾'}</span>` : '<span class="text-muted">-</span>'}</td>
                             <td onclick="event.stopPropagation()"><a href="${escapeHtml(r.source_url || '#')}" target="_blank" rel="noopener" class="btn-icon" title="Open on bujishu.com"><i class="fas fa-external-link-alt"></i></a></td>
                         </tr>
-                        ${open && o.length ? `<tr><td colspan="8" style="padding:4px 12px 12px 60px;background:#fff;">${_bjcOptionsTable(o)}</td></tr>` : ''}`;
+                        ${open && expandable ? `<tr><td colspan="8" style="padding:4px 12px 12px 60px;background:#fff;">${ph.length > 1 ? _bjcPhotoStrip(ph) : ''}${o.length ? _bjcOptionsTable(o) : ''}</td></tr>` : ''}`;
                     }).join('')}
                 </tbody>
             </table>${pager}`;
