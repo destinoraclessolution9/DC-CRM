@@ -2421,12 +2421,24 @@
                     scanned_at: new Date().toISOString(),
                 };
                 if (conf != null) base.scan_confidence = conf;
+                // Insert via the RAW client with NO id — prospect_attachments.id is a
+                // GENERATED-ALWAYS identity, so AppDataStore.create (which stamps a
+                // client-side id) was rejected with 428C9 and the row only "saved
+                // locally": from 2026-06-28 no order-form photo reached the DB.
+                // Mirrors the appraisal / APU upload paths.
+                const _ins = async (row) => {
+                    const { data, error } = await sb.from('prospect_attachments').insert(row).select().single();
+                    if (error) throw error;
+                    try { if (AppDataStore.invalidateCache) AppDataStore.invalidateCache('prospect_attachments'); } catch (_) {}
+                    return data;
+                };
                 try {
-                    return await AppDataStore.create('prospect_attachments', base);
+                    return await _ins(base);
                 } catch (e) {
                     console.warn('[order-form] metadata insert failed, retrying without:', e?.message || e);
-                    return await AppDataStore.create('prospect_attachments', {
+                    return await _ins({
                         prospect_id: prospectId, attachment_type: 'order_form', file_url: photoUrl, filename: safeName,
+                        metadata: { activity_id: activityId || null },
                     }).catch(err2 => { console.error('[order-form] basic insert failed too:', err2); return null; });
                 }
             };
