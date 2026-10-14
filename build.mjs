@@ -120,12 +120,24 @@ function fmt(n) {
   return n + ' B';
 }
 
+// Files whose minified output must be wrapped in its own function scope.
+// keepNames puts tiny helpers (`var k=Object.defineProperty;…`) at the TOP LEVEL
+// of every classic script, under arbitrary short names. Classic scripts share one
+// global scope, so a helper landing on a name another script declares with
+// let/const/class (data.min.js has `const k=class k…`) throws "Identifier 'k'
+// has already been declared" and the whole file never runs (hit 2026-10-15:
+// push-notifications broke → no phone sign-ups, no Settings test). Only list
+// files that publish their API via window.* — never ones relying on top-level
+// globals (data.js AppDataStore, script.js, …).
+const IIFE_WRAP = new Set(['push-notifications.js']);
+
 async function minifyJs(file) {
   const src = path.join(ROOT, file);
   const out = src.replace(/\.js$/, '.min.js');
   await build({
     entryPoints: [src],
     outfile: out,
+    ...(IIFE_WRAP.has(file) ? { format: 'iife' } : {}),
     minify: true,
     keepNames: true,
     target: ['es2020'],
