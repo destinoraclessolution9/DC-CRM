@@ -333,10 +333,11 @@
         {
             grand: { k: 'tto', label: 'TTO' },
             rows: [
-                { k: 'pd_do',      label: 'PD (DO)' },
-                { k: 'pd_po',      label: '(PO)', sub: true },
-                { k: 'sr_do',      label: 'SR (DO)' },
-                { k: 'sr_po',      label: '(PO)', sub: true },
+                // PD/SR are item lists ("PR6x1, 圣智x2"), not numbers — `text` rows.
+                { k: 'pd_do',      label: 'PD (DO)', text: true },
+                { k: 'pd_po',      label: '(PO)', sub: true, text: true },
+                { k: 'sr_do',      label: 'SR (DO)', text: true },
+                { k: 'sr_po',      label: '(PO)', sub: true, text: true },
                 { k: '_gap1',      gap: true },
                 { k: 'por',        label: 'POR' },
                 { k: 'nc',         label: 'NC' },
@@ -369,7 +370,10 @@
         _WR_SECTIONS.forEach((sec) => {
             sec.rows.forEach((r) => {
                 if (r.gap) { out.push(''); return; }
-                out.push((r.sub ? sub(r.label) : lbl(r.label)) + _wrFmt(g(r.k)));
+                const v = r.text
+                    ? (((document.getElementById('wr-' + r.k) || {}).value || '').trim() || '0')
+                    : _wrFmt(g(r.k));
+                out.push((r.sub ? sub(r.label) : lbl(r.label)) + v);
             });
             if (sec.grand || sec.sumKey) {
                 out.push(div);
@@ -480,6 +484,12 @@
     // Builds one figure row (editable). Sub rows are indented + dimmed.
     const _wrRow = (r) => {
         if (r.gap) return `<div class="wr-gap"></div>`;
+        if (r.text) return `
+            <div class="wr-row${r.sub ? ' wr-sub' : ''}">
+                <label class="wr-lbl" for="wr-${r.k}">${escapeHtml(r.label)}</label>
+                <input type="text" id="wr-${r.k}" class="wr-input wr-text"
+                       value="" placeholder="0" oninput="app.wrFigureInput(this)">
+            </div>`;
         return `
             <div class="wr-row${r.sub ? ' wr-sub' : ''}">
                 <label class="wr-lbl" for="wr-${r.k}">${escapeHtml(r.label)}</label>
@@ -509,7 +519,9 @@
                                value="" placeholder="0" oninput="app.wrFigureInput(this)">
                     </div>`;
             }
-            return `<div class="wr-section">${rows}${footer}</div>`;
+            // Section 3 lists purchases the PD/SR auto-fill couldn't place (filled async).
+            const note = sec.grand ? `<div class="wr-pdsr-note" id="wr-pdsr-note" hidden></div>` : '';
+            return `<div class="wr-section">${rows}${footer}${note}</div>`;
         }).join('');
 
         return `
@@ -529,6 +541,9 @@
         .weekly-report-card .wr-lbl{font-size:13px;font-weight:600;color:var(--gray-700,#374151);white-space:nowrap;}
         .weekly-report-card .wr-input{width:78px;text-align:right;font:600 13px/1 inherit;border:1px solid var(--gray-300,#d1d5db);border-radius:7px;padding:6px 8px;color:var(--gray-900,#111827);background:var(--white,#fff);}
         .weekly-report-card .wr-input:focus{outline:none;border-color:var(--primary,#0D9488);box-shadow:0 0 0 3px rgba(13,148,136,.15);}
+        .weekly-report-card .wr-text{flex:1;min-width:0;width:auto;max-width:170px;text-align:left;}
+        .weekly-report-card .wr-form,.weekly-report-card .wr-section,.weekly-report-card .wr-preview-wrap{min-width:0;}
+        .weekly-report-card .wr-pdsr-note{margin-top:8px;font-size:11.5px;line-height:1.4;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:7px;padding:6px 8px;}
         .weekly-report-card .wr-gap{height:10px;}
         .weekly-report-card .wr-divider{border-top:1px dashed var(--gray-300,#d1d5db);margin:7px 0;}
         .weekly-report-card .wr-total-row .wr-lbl,.weekly-report-card .wr-grand-row .wr-lbl{font-weight:700;color:var(--gray-900,#111827);}
@@ -670,6 +685,8 @@
     //   PORT(DP)    → sum(npo_sales.first_payment) this week — filled ONLY when the
     //                 npo_sales table exists; otherwise MANUAL (see below).
     //   PORT(TOTAL) → getPOPSales + sum(npo_sales.cart_total)  (PO total RM + NPO RM)
+    //   PD/SR (DO/PO) → getPDSRBreakdown — "<name>x<qty>" lists; PD = rings + 画作,
+    //                 SR = 风水方案; DO = full payment/EPP, PO = POP/NPO installment.
     //   TTO         → RMT + PORT(TOTAL-from-purchases) (owner's PENDING formula — left
     //                 exactly as-is; NPO is NOT folded into TTO by owner instruction).
     //
@@ -685,8 +702,7 @@
     //   PORT(DP) — only auto-filled from NPO first_payment; the legacy PO down-payment
     //     (pop_down_payment) lives on the closing record, not the aggregable purchases
     //     row, so when npo_sales is absent PORT(DP) stays MANUAL.
-    //   PD(DO/PO), SR(DO/PO) — per-item × quantity by product GROUP (画作/power ring vs
-    //     风水方案/咨询), but `item` is free-text with no reliable group field. MANUAL.
+    //   (PD(DO/PO), SR(DO/PO) are now AUTO-filled as item lists — see getPDSRBreakdown.)
     //   NOTE: legacy PO is treated as POP only — the sole deposit/pre-order payment
     //     method in the purchases schema. NPO (a separate table) is now added on top;
     //     if 预购/PCP deals are ever recorded under OTHER purchase methods, POR/PORT
@@ -728,7 +744,8 @@
                 const before = document.getElementById(id);
                 if (!before || before.dataset.wrManual === '1') return; // user owns this cell
                 const val = await withTimeout(getter);
-                if (!Number.isFinite(val)) return; // getter errored/timed-out/non-finite → leave as-is
+                // Numbers must be finite; text cells (PD/SR item lists) take any string.
+                if (!Number.isFinite(val) && typeof val !== 'string') return; // getter errored/timed-out/non-finite → leave as-is
                 const live = document.getElementById(id);
                 if (!live || live.dataset.wrManual === '1') return; // typed-into mid-flight / torn-down
                 live.value = String(val);
@@ -745,6 +762,10 @@
         // Owner: NPO counts under PORT (the PO bucket), NEVER under RMT.
         const _npo = await withTimeout(() => _getNPOWeekAgg(from, to)); // null/undefined = no NPO add
         const npo = _npo || null;
+        const pdsr = withTimeout(() => getPDSRBreakdown(from, to)).catch((e) => {
+            console.warn('weekly-report PD/SR breakdown failed:', e);
+            return undefined;
+        });
         // All fills run CONCURRENTLY (each independent, different cell): one slow or hung
         // getter can no longer block the others, and per-fill recalc keeps the preview
         // live as results stream in. fill() never rejects, so Promise.all always settles.
@@ -779,6 +800,21 @@
                 return po + (npo ? npo.count : 0);
             }),
             fill('wr-rmt', () => getDOSales(from, to)), // DO (full-payment) sales RM — NPO never lands here
+            // PD / SR item lists — ONE purchases read shared by the four cells. Items the
+            // classifier can't place are listed under the section, never dropped silently.
+            ...['pd_do', 'pd_po', 'sr_do', 'sr_po'].map(k => fill('wr-' + k, async () => {
+                const r = await pdsr;
+                return r ? r[k] : undefined;
+            })),
+            (async () => {
+                const r = await pdsr;
+                const note = document.getElementById('wr-pdsr-note');
+                if (!note || !r) return;
+                note.hidden = !r.unplaced.length;
+                note.innerHTML = r.unplaced.length
+                    ? `<i class="fas fa-circle-info"></i> Not in PD/SR (type by hand if needed): ${r.unplaced.map(escapeHtml).join(', ')}`
+                    : '';
+            })(),
             // PORT(TOTAL) = PO total sales RM + sum(cart_total) of this week's NPO orders.
             fill('wr-port_total', async () => {
                 const po = await getPOPSales(from, to);
@@ -796,8 +832,7 @@
                 return doSales + poSales;
             }),
         ]);
-        // Still MANUAL (no reliable source): TX (no book sales) and PD(DO/PO)+SR(DO/PO)
-        // (item→product-group split is free-text, not classifiable). Final re-sum in
+        // Still MANUAL (no reliable source): TX (no book sales). Final re-sum in
         // case the very last fill's recalc raced an earlier one.
         if (_touched) recalcWeeklyReport();
     };
@@ -1870,6 +1905,108 @@ const getDOSales = async (from, to) => {
         total += p.amount || 0;
     }
     return total;
+};
+
+// ── Weekly report PD / SR item lists ─────────────────────────────────────────
+// Owner rules (2026-10-15):
+//   PD = products — power rings, calligraphy (画作); SR = 风水方案 (fengshui plans).
+//   DO = full payment (Cash / Bank Transfer / Credit Card / Cheque / EPP);
+//   PO = installment (POP / NPO).
+//   Each cell lists what was sold as "<name>x<qty>", e.g. a full-payment Power
+//   Ring 6 → PD (DO) "PR6x1"; a calligraphy → "圣智x1".
+// Group comes from the product catalog (`products.category`) — approved closings
+// write the exact catalog name into purchases.item. Older/imported rows carry free
+// text ("PR 6", "Calligraphy: 謙卑而光", "SUPPORT POWER RING + WISDOM POWER RING"),
+// so each `+`/comma-separated part falls back to keyword rules. Anything that is
+// neither PD nor SR (consultations, agent packages' items, unrecognised text) is
+// returned in `unplaced` so the report can show it instead of silently dropping it.
+const _PDSR_CATEGORY = { 'Power Ring': 'PD', '画作': 'PD', '风水方案': 'SR' };
+const _PDSR_RING_RE = /power\s*ring|\bPR\s*\d|指环|指環|班指/i;
+const _PDSR_ART_RE = /calligraph|画作|畫作|书法|書法/i;
+const _PDSR_SR_RE = /feng\s*shui|fengshui|风水|風水|专案|灵活|简易|商业|project\s*plan|flexi|simplified/i;
+const _isInstallmentMethod = (m) => /\b(POP|NPO)\b/i.test(String(m || ''));
+// Older invoices mix traditional and simplified characters (謙卑而光 vs catalog
+// 谦卑而光), so both sides fold the common ones to simplified before comparing.
+const _PDSR_T2S = { '貞': '贞', '謙': '谦', '龍': '龙', '財': '财', '環': '环', '畫': '画', '風': '风',
+    '寶': '宝', '運': '运', '決': '决', '書': '书', '護': '护', '權': '权', '聖': '圣', '興': '兴',
+    '雲': '云', '萬': '万', '豐': '丰', '長': '长', '勝': '胜', '曰': '日', '號': '号', '極': '极' };
+const _pdsrNorm = (s) => String(s || '').toLowerCase()
+    .replace(/[\s\-—_/·.,，:：()（）]+/g, '')
+    .replace(/[㐀-鿿]/g, ch => _PDSR_T2S[ch] || ch);
+
+const getPDSRBreakdown = async (from, to) => {
+    const [{ purchases, customerMap, userMap }, products] = await Promise.all([
+        _getPurchaseBase(),
+        AppDataStore.getAll('products'),
+    ]);
+    // Catalog keys: the full name, its Chinese head ("圣智") and its English tail
+    // ("Sheng Zhi Wen Chang Tu 5"), longest first so the most specific one wins.
+    const keys = [];
+    for (const pr of products || []) {
+        const grp = _PDSR_CATEGORY[(pr.category || '').trim()];
+        const name = String(pr.name || '').trim();
+        if (!name) continue;
+        const m = name.match(/^([^A-Za-z]+?)\s+([A-Za-z].*)$/);
+        const zh = m ? m[1].trim() : name;
+        const label = zh || name;
+        // Also each hyphen part of the Chinese name, so "经传录" finds "上贵文昌-经传录".
+        const zhParts = zh.split(/[-—（(]/).map(x => x.replace(/[）)]/g, '').trim()).filter(Boolean);
+        [name, zh, m && m[2], ...(zhParts.length > 1 ? zhParts : [])].forEach((k) => {
+            const n = _pdsrNorm(k);
+            // 2-char Chinese names (圣智) are fine; 2-letter Latin keys ("dc") are noise.
+            if (n.length >= 3 || (n.length === 2 && /[^\x00-\x7f]/.test(n))) keys.push({ n, grp: grp || null, label });
+        });
+    }
+    keys.sort((a, b) => b.n.length - a.n.length);
+
+    const classify = (part) => {
+        // Quantity: a trailing "x 3" / "×2" — but not "LAUNCH PROMO X3", which is a
+        // promo name, not a count.
+        // A letter right before the x ("TZX 3") means it's part of a name.
+        let qty = 1;
+        const qm = part.match(/[x×]\s*(\d{1,3})\s*$/i);
+        const head = qm ? part.slice(0, qm.index) : '';
+        if (qm && !/[a-z]$/i.test(head) && !/promo\s*$/i.test(head)) {
+            qty = parseInt(qm[1], 10) || 1;
+            part = head.trim();
+        }
+        const pr = part.match(/(?:power\s*ring|\bPR)\s*(\d+)/i);
+        if (pr) return { grp: 'PD', label: 'PR' + pr[1], qty };
+        const n = _pdsrNorm(part);
+        const hit = n ? keys.find(k => n.includes(k.n)) : null;
+        if (hit) return { grp: hit.grp, label: hit.label, qty };
+        const text = part
+            .replace(/^(others|calligraphy(\s*series)?|feng\s*shui(\s*product)?)\s*[:：]\s*/i, '')
+            .replace(/\s*[\/(（]?\s*(ring\s*)?size\b.*$/i, '') // drop "(size 23)" / "/ RINGSIZE 22"
+            .trim();
+        if (_PDSR_RING_RE.test(part) || _PDSR_ART_RE.test(part)) return { grp: 'PD', label: text, qty };
+        if (_PDSR_SR_RE.test(part)) return { grp: 'SR', label: text, qty };
+        return { grp: null, label: text, qty };
+    };
+
+    const cells = { pd_do: new Map(), pd_po: new Map(), sr_do: new Map(), sr_po: new Map() };
+    const unplaced = [];
+    for (const p of purchases) {
+        if (!p.date || p.date < from || p.date > to || p.is_agent_package) continue;
+        if (!_passesPurchaseFilter(p, _getPurchaseAgentId(p, customerMap), userMap)) continue;
+        const item = String(p.item || '').trim();
+        if (!item) { unplaced.push('(no item)'); continue; }
+        const bucket = _isInstallmentMethod(p.payment_method) ? 'po' : 'do';
+        const parts = item.split(/\s*\+\s*|\s*[,，、]\s*/).filter(Boolean);
+        for (const part of parts) {
+            if (/^(ring\s*)?size\b|^order\s*ref/i.test(part)) continue; // "Size 16.5" is a note, not an item
+            const c = classify(part);
+            if (!c.grp || !c.label) { unplaced.push(part); continue; }
+            const cell = cells[c.grp.toLowerCase() + '_' + bucket];
+            cell.set(c.label, (cell.get(c.label) || 0) + c.qty);
+        }
+    }
+    const fmt = (m) => [...m].map(([label, q]) => `${label}x${q}`).join(', ');
+    return {
+        pd_do: fmt(cells.pd_do), pd_po: fmt(cells.pd_po),
+        sr_do: fmt(cells.sr_do), sr_po: fmt(cells.sr_po),
+        unplaced,
+    };
 };
 
 const getEPPDetails = async (from, to) => {
