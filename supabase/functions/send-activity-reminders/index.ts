@@ -30,6 +30,8 @@ const WINDOW_MIN = 3;
 // Reminders: send on the first run after the activity is within its lead time,
 // or up to this many minutes later if a run was slow/missed (dedupe log stops repeats).
 const REMINDER_CATCHUP_MIN = 10;
+// Calendar "event" activity types (mirror of notify-on-activity EVENT_TYPES).
+const EVENT_TYPES = new Set(["EVENT", "AGENT_MEETING", "AGENT_TRAINING"]);
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -268,65 +270,100 @@ Deno.serve(async (req: Request) => {
         prefMap.set(Number(p.user_id), mins.length ? mins : DEFAULT_REMINDER_MINUTES);
       }
       const windowsFor = (uid: number) => prefMap.get(uid) ?? DEFAULT_REMINDER_MINUTES;
-      let maxWindow = Math.max(...DEFAULT_REMINDER_MINUTES);
+      // Per-activity override (activities.reminder_minutes, set in the activity
+      // form) wins over each person's own setting.
+      const actWindows = (act: any): number[] | null => {
+        const m = Array.isArray(act.reminder_minutes) ? act.reminder_minutes.map(Number).filter((n: number) => n > 0) : [];
+        return m.length ? m : null;
+      };
+      // Widest lead time anyone could use: personal prefs, or up to 1 day when
+      // an activity carries its own reminder times.
+      let maxWindow = Math.max(1440, ...DEFAULT_REMINDER_MINUTES);
       for (const mins of prefMap.values()) maxWindow = Math.max(maxWindow, ...mins);
 
       // Bounded to the dates a reminder could fall in (no unbounded scan, no
       // silent 1000-row truncation). activity_date/start_time are MYT wall-clock.
       const toDate = mytDateOf(nowMs + (maxWindow + WINDOW_MIN + 1) * 60_000);
       const activities: any[] = await pgSelectAll("activities",
-        "select=id,activity_title,activity_type,activity_date,start_time,lead_agent_id,co_agents,venue,location_address,prospect_id,customer_id" +
+        "select=id,activity_title,activity_type,activity_date,start_time,lead_agent_id,co_agents,venue,location_address,prospect_id,customer_id,event_id,reminder_minutes" +
         `&activity_date=gte.${todayMYT}&activity_date=lte.${toDate}` +
         "&start_time=not.is.null" +
         "&or=(status.is.null,status.not.in.(completed,cancelled,Completed,Cancelled))");
+
+      // Event registrants: agents attending (attendee_type 'agent') and agents
+      // who registered a guest (added_by_agent_id). Open events are NOT
+      // reminded to all staff — they see them in the morning summary.
+      const isEventRow = (act: any) => act.event_id != null && EVENT_TYPES.has(String(act.activity_type || "").toUpperCase());
+      const eventIds = [...new Set(activities.filter(isEventRow).map((a) => a.event_id))];
+      const registrants = new Map<string, Set<number>>();
+      if (eventIds.length) {
+        const att: any[] = await pgSelectAll("event_attendees",
+          `select=id,event_id,attendee_type,attendee_id,added_by_agent_id&event_id=in.(${eventIds.join(",")})`);
+        for (const r of att) {
+          const k = String(r.event_id);
+          if (!registrants.has(k)) registrants.set(k, new Set());
+          if (r.attendee_type === "agent" && r.attendee_id != null) registrants.get(k)!.add(Number(r.attendee_id));
+          if (r.added_by_agent_id != null) registrants.get(k)!.add(Number(r.added_by_agent_id));
+        }
+      }
 
       // A reminder is due once the activity is within its lead time, with a
       // catch-up tail so a slow/missed 5-min run still sends it. (A "±3 min of
       // the target" test left gaps: cron starts a hair after the minute, so an
       // activity at hh:02/hh:07/… was 62 then 56.99 min away on consecutive runs
-      // and NEVER matched a 60-min reminder.) One push per (activity, user) even
-      // if several lead times are due at once; the others are queued as 'merged'
-      // so they never fire later. dedupe_key makes every run idempotent.
-      const due: { act: any; userId: number; windows: number[]; minutesUntil: number }[] = [];
+      // and NEVER matched a 60-min reminder.) One push per (subject, user) even
+      // if several lead times are due at once — subject = the event for event
+      // rows (an agent bringing 3 guests has 3 rows, gets 1 reminder), else the
+      // activity. Other due lead times are queued as 'merged' so they never
+      // fire later; dedupe_key makes every run idempotent.
+      const due = new Map<string, { act: any; subject: string; userId: number; windows: number[]; minutesUntil: number }>();
       for (const act of activities) {
         const actMs = new Date(`${act.activity_date}T${act.start_time}+08:00`).getTime();
         if (isNaN(actMs)) continue;
         const minutesUntil = (actMs - nowMs) / 60_000;
         if (minutesUntil < 0 || minutesUntil > maxWindow + WINDOW_MIN) continue;
-        for (const userId of attendeeIds(act)) {
+        const subject = isEventRow(act) ? `ev:${act.event_id}` : String(act.id);
+        const people = new Set<number>(attendeeIds(act));
+        if (isEventRow(act)) for (const u of registrants.get(String(act.event_id)) || []) people.add(u);
+        const override = actWindows(act);
+        for (const userId of people) {
           if (!canReceive(userId)) continue;
-          const windows = windowsFor(userId).filter((w) =>
+          const key = `${subject}:${userId}`;
+          if (due.has(key)) continue;
+          const windows = (override ?? windowsFor(userId)).filter((w) =>
             minutesUntil <= w + 0.5 && minutesUntil > w - REMINDER_CATCHUP_MIN);
-          if (windows.length) due.push({ act, userId, windows, minutesUntil });
+          if (windows.length) due.set(key, { act, subject, userId, windows, minutesUntil });
         }
       }
 
-      if (due.length > 0) {
-        const names = await contactNames(due.map((d) => d.act));
-        for (const { act, userId, windows, minutesUntil } of due) {
+      if (due.size > 0) {
+        const names = await contactNames([...due.values()].map((d) => d.act));
+        for (const { act, subject, userId, windows, minutesUntil } of due.values()) {
           const windowMin = Math.min(...windows);
           let label = `${Math.max(1, Math.round(minutesUntil))} min`;
           if (windowMin === 60) label = "1 hour";
           if (windowMin === 1440) label = "1 day";
           const type = typeLabel(act.activity_type);
-          const who = contactOf(act, names);
+          // Event rows are per guest — name the event, not one agent's guest.
+          const who = subject.startsWith("ev:") ? "" : contactOf(act, names);
           const whenWhere = [`${dayLabel(act.activity_date, nowMs)} ${fmtTime12(act.start_time)}`.trim(), type, venueOf(act)]
             .filter(Boolean).join(" · ");
           const title = String(act.activity_title || "").trim();
           const extra = !who && title && title !== act.activity_type ? title : "";
+          // Start date+time in the key: a rescheduled activity gets fresh
+          // reminders instead of being blocked by the old time's key.
+          const keyOf = (w: number) => `reminder:${subject}:${act.activity_date}T${String(act.start_time).slice(0, 5)}:${w}`;
           const row = {
             user_id: userId, kind: "activity_reminder", priority: "normal",
             title: `⏰ ${type} in ${label}${who ? ` — ${who}` : ""}`,
             body: extra ? `${whenWhere}\n${extra}` : whenWhere,
             url: "./index.html#calendar", activity_id: act.id,
-            // Start date+time in the key: a rescheduled activity gets fresh
-            // reminders instead of being blocked by the old time's key.
-            dedupe_key: `reminder:${act.id}:${act.activity_date}T${String(act.start_time).slice(0, 5)}:${windowMin}`, status: "pending",
+            dedupe_key: keyOf(windowMin), status: "pending",
           };
           if (dryRun) { stats.preview.push({ kind: "reminder", userId, payload: row }); continue; }
           queue.push(row);
           for (const w of windows) {
-            if (w !== windowMin) queue.push({ ...row, status: "merged", dedupe_key: `reminder:${act.id}:${act.activity_date}T${String(act.start_time).slice(0, 5)}:${w}` });
+            if (w !== windowMin) queue.push({ ...row, status: "merged", dedupe_key: keyOf(w) });
           }
         }
       }
