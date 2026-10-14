@@ -104,6 +104,36 @@
 
     // ========== PHASE 2: ACTIVITY MODAL FUNCTIONS ==========
 
+    // Reminder times for THIS activity (activities.reminder_minutes, read by the
+    // send-activity-reminders edge function). None ticked = NULL = every
+    // participant's own Settings → Reminder Timing (default 30 min).
+    const _ACT_REMINDER_OPTS = [[1440, '1 day'], [60, '1 hour'], [30, '30 min'], [15, '15 min'], [10, '10 min']];
+    const _activityReminderHtml = () => `
+                    <div class="form-group" id="activity-reminders" data-known="0">
+                        <label>🔔 Remind everyone before</label>
+                        <div style="display:flex;flex-wrap:wrap;gap:6px 14px;">
+                            ${_ACT_REMINDER_OPTS.map(([m, l]) => `
+                            <label style="display:inline-flex;align-items:center;gap:6px;font-weight:400;cursor:pointer;">
+                                <input type="checkbox" class="act-reminder-opt" value="${m}" onchange="document.getElementById('activity-reminders').dataset.known='1'"> ${l}
+                            </label>`).join('')}
+                        </div>
+                        <small style="color:var(--gray-500);">Leave all unticked to use each person's own reminder setting.</small>
+                    </div>`;
+    const _readActivityReminders = () => {
+        const picked = [...document.querySelectorAll('#activity-reminders .act-reminder-opt:checked')]
+            .map(el => Number(el.value)).filter(n => n > 0).sort((a, b) => b - a);
+        return picked.length ? picked : null;
+    };
+    const _setActivityReminders = (activity) => {
+        const box = document.getElementById('activity-reminders');
+        if (!box) return;
+        // Only a row that actually carries the column may be written back on
+        // update — a stale cached copy without it must not wipe a saved setting.
+        if (activity && Object.prototype.hasOwnProperty.call(activity, 'reminder_minutes')) box.dataset.known = '1';
+        const set = new Set((activity && Array.isArray(activity.reminder_minutes) ? activity.reminder_minutes : []).map(Number));
+        box.querySelectorAll('.act-reminder-opt').forEach(el => { el.checked = set.has(Number(el.value)); });
+    };
+
     // Venue picker: a listed venue, or "Others (type your own)" → free text.
     const _readActivityVenue = () => {
         const sel = document.getElementById('activity-venue');
@@ -185,6 +215,7 @@
                         </select>
                         <input type="text" id="activity-venue-other" class="form-control" placeholder="Type the venue..." style="display:none;margin-top:6px;">
                     </div>
+                    ${_activityReminderHtml()}
                 </div>
 
                 <div class="form-section">
@@ -625,6 +656,9 @@
                 break;
         }
 
+        // 6b. Reminder times for this activity
+        _setActivityReminders(activity);
+
         // 7. Co-agents
         _state.sca = activity.co_agents || [];
         if (typeof renderCoAgents === 'function') renderCoAgents();
@@ -724,6 +758,10 @@
     // Save the venue dropdown value when it exists in the form
     if (document.getElementById('activity-venue')) {
         updatedData.venue = venueVal || '';
+    }
+    // Reminder times — only when the form loaded them or the user changed them.
+    if (document.getElementById('activity-reminders')?.dataset.known === '1') {
+        updatedData.reminder_minutes = _readActivityReminders();
     }
     // Persist event visibility on edit. Previously updateActivity never read the
     // radio, so { ...activity, ...updatedData } just re-saved the stored value —
@@ -5896,6 +5934,7 @@ My raw notes:
             // hard-coded id 5 (that silently credited an arbitrary agent's KPI).
             lead_agent_id: _state.cu ? _state.cu.id : null,
             venue: venueVal,
+            reminder_minutes: _readActivityReminders(),
             // Mirror venue to location_address so it persists server-side (the `venue` column
             // may be missing from the Supabase schema and silently stripped on save). For
             // FSA/SITE the type-specific block below will override this with the site address.
