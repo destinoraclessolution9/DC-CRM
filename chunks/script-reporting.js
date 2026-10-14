@@ -1909,7 +1909,11 @@ const getDOSales = async (from, to) => {
 
 // ── Weekly report PD / SR item lists ─────────────────────────────────────────
 // Owner rules (2026-10-15):
-//   PD = products — power rings, calligraphy (画作); SR = 风水方案 (fengshui plans).
+//   PD = products — power rings, calligraphy (画作); SR = 风水方案 (fengshui plans)
+//   and 咨询类型 consultations (星卦解运, 测名, 生命蓝图 …). D1 = recruitment — not
+//   a PD/SR sale, so it is skipped entirely (not even listed as unplaced).
+//   Rings are written as their short code: 六曜指环 → PR6 (number = the Chinese
+//   numeral the ring's name starts with; _PDSR_RING_CODE covers the rest).
 //   DO = full payment (Cash / Bank Transfer / Credit Card / Cheque / EPP);
 //   PO = installment (POP / NPO).
 //   Each cell lists what was sold as "<name>x<qty>", e.g. a full-payment Power
@@ -1920,10 +1924,22 @@ const getDOSales = async (from, to) => {
 // so each `+`/comma-separated part falls back to keyword rules. Anything that is
 // neither PD nor SR (consultations, agent packages' items, unrecognised text) is
 // returned in `unplaced` so the report can show it instead of silently dropping it.
-const _PDSR_CATEGORY = { 'Power Ring': 'PD', '画作': 'PD', '风水方案': 'SR' };
+const _PDSR_CATEGORY = { 'Power Ring': 'PD', '画作': 'PD', '风水方案': 'SR', '咨询类型': 'SR' };
+// Rings whose name carries no numeral. Keyed by the Chinese name head.
+const _PDSR_RING_CODE = {};
+const _PDSR_CN_NUM = { '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 };
+const _PDSR_EN_NUM = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+const _pdsrRingCode = (zh, en) => {
+    if (_PDSR_RING_CODE[zh]) return _PDSR_RING_CODE[zh];
+    const c = zh.match(/^[一二两三四五六七八九十]/);
+    if (c) return 'PR' + _PDSR_CN_NUM[c[0]];
+    const e = String(en || '').match(/\b(one|two|three|four|five|six|seven|eight|nine|ten)\b/i);
+    return e ? 'PR' + _PDSR_EN_NUM[e[1].toLowerCase()] : null;
+};
+const _PDSR_RECRUIT_RE = /\bD1\b|代理/i;
 const _PDSR_RING_RE = /power\s*ring|\bPR\s*\d|指环|指環|班指/i;
 const _PDSR_ART_RE = /calligraph|画作|畫作|书法|書法/i;
-const _PDSR_SR_RE = /feng\s*shui|fengshui|风水|風水|专案|灵活|简易|商业|project\s*plan|flexi|simplified/i;
+const _PDSR_SR_RE = /feng\s*shui|fengshui|风水|風水|专案|灵活|简易|商业|project\s*plan|flexi|simplified|排屋|terrace|condo|semi-?d|bungalow|double\s*stor|xing\s*gua|星卦|alter\s*name|测名|測名|取名|生命蓝图|sheng\s*ming\s*lan\s*tu|命卦|ming\s*gua|consult|咨询|谘询|諮詢/i;
 const _isInstallmentMethod = (m) => /\b(POP|NPO)\b/i.test(String(m || ''));
 // Older invoices mix traditional and simplified characters (謙卑而光 vs catalog
 // 谦卑而光), so both sides fold the common ones to simplified before comparing.
@@ -1948,7 +1964,7 @@ const getPDSRBreakdown = async (from, to) => {
         if (!name) continue;
         const m = name.match(/^([^A-Za-z]+?)\s+([A-Za-z].*)$/);
         const zh = m ? m[1].trim() : name;
-        const label = zh || name;
+        const label = ((pr.category || '').trim() === 'Power Ring' && _pdsrRingCode(zh, m && m[2])) || zh || name;
         // Also each hyphen part of the Chinese name, so "经传录" finds "上贵文昌-经传录".
         const zhParts = zh.split(/[-—（(]/).map(x => x.replace(/[）)]/g, '').trim()).filter(Boolean);
         [name, zh, m && m[2], ...(zhParts.length > 1 ? zhParts : [])].forEach((k) => {
@@ -1994,6 +2010,7 @@ const getPDSRBreakdown = async (from, to) => {
         const bucket = _isInstallmentMethod(p.payment_method) ? 'po' : 'do';
         const parts = item.split(/\s*\+\s*|\s*[,，、]\s*/).filter(Boolean);
         for (const part of parts) {
+            if (_PDSR_RECRUIT_RE.test(part)) continue; // D1 = recruitment, not a PD/SR sale
             if (/^(ring\s*)?size\b|^order\s*ref/i.test(part)) continue; // "Size 16.5" is a note, not an item
             const c = classify(part);
             if (!c.grp || !c.label) { unplaced.push(part); continue; }
