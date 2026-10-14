@@ -801,6 +801,10 @@
     }
 
     await AppDataStore.update('activities', activityId, { ...activity, ...updatedData });
+    // Write the edit into the calendar's pinned / hot copies too. Without this,
+    // reopening the same activity in this tab showed the PRE-edit values (every
+    // field), and saving again silently reverted the first edit.
+    try { window.app._patchActivityPin?.(activityId, updatedData); } catch (_) { /* best-effort cache patch */ }
     UI.hideModal();
     UI.toast.success('Activity updated');
 
