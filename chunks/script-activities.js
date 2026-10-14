@@ -104,6 +104,29 @@
 
     // ========== PHASE 2: ACTIVITY MODAL FUNCTIONS ==========
 
+    // Venue picker: a listed venue, or "Others (type your own)" → free text.
+    const _readActivityVenue = () => {
+        const sel = document.getElementById('activity-venue');
+        if (!sel) return '';
+        if (sel.value === '__other__') return (document.getElementById('activity-venue-other')?.value || '').trim();
+        return sel.value || '';
+    };
+    // Restore a saved venue. One that is not in the list (typed via Others, or a
+    // venue since removed) reopens as Others + its text — without this the select
+    // showed blank and the next save wiped the venue.
+    const _setActivityVenue = (val) => {
+        const sel = document.getElementById('activity-venue');
+        const other = document.getElementById('activity-venue-other');
+        if (!sel) return;
+        const v = String(val || '').trim();
+        const listed = !!v && [...sel.options].some(o => o.value === v && o.value !== '__other__');
+        sel.value = listed ? v : (v ? '__other__' : '');
+        if (other) {
+            other.value = listed ? '' : v;
+            other.style.display = sel.value === '__other__' ? 'block' : 'none';
+        }
+    };
+
     const buildActivityModalContent = (prefillDate, today, _venueOptions, _productOptions) => {
         return `
             <div class="activity-modal-form">
@@ -132,7 +155,40 @@
                 </div>
                 
                 <div class="form-section">
-                    <h4>🧑‍💼 Appointment's Consultant</h4>
+                    <h4>📅 Date & Time</h4>
+                    <div class="form-row">
+                        <div class="form-group half">
+                            <label>Date</label>
+                            <input type="date" id="activity-date" class="form-control" value="${prefillDate || today}">
+                        </div>
+                        <div class="form-group half">
+                            <label>Start Time</label>
+                            <input type="text" id="start-time" class="form-control time24" inputmode="numeric" autocomplete="off" maxlength="5" placeholder="HH:MM" title="24-hour time, e.g. 14:30" value="09:00" onchange="app.onStartTimeChange()">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group half">
+                            <label>End Time</label>
+                            <input type="text" id="end-time" class="form-control time24" inputmode="numeric" autocomplete="off" maxlength="5" placeholder="HH:MM" title="24-hour time, e.g. 14:30" value="10:00" onchange="app.onEndTimeChange()">
+                        </div>
+                        <div class="form-group half">
+                            <label>Duration</label>
+                            <input type="text" id="duration" class="form-control" readonly value="60 min">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Venue <span id="venue-required-star" class="required" style="display:none;">*</span></label>
+                        <select id="activity-venue" class="form-control" onchange="document.getElementById('activity-venue-other').style.display = this.value === '__other__' ? 'block' : 'none'">
+                            <option value="">-- Select Venue --</option>
+                            ${_venueOptions}
+                            <option value="__other__">Others (type your own)</option>
+                        </select>
+                        <input type="text" id="activity-venue-other" class="form-control" placeholder="Type the venue..." style="display:none;margin-top:6px;">
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <h4>🧑‍💼 <span id="consultant-section-title">Appointment's Consultant</span></h4>
                     <div class="form-group">
                         <div class="search-with-results" style="position:relative;">
                             <input type="text" id="consultant-search-input" class="form-control" placeholder="Search consultant..." oninput="app.debounceCall('consultant-search', () => app.searchConsultants(), 250)">
@@ -167,49 +223,46 @@
                     <p class="help-text">Maximum 5 co-agents. They will receive calendar invitations.</p>
                 </div>
                 
-                <div class="form-section">
-                    <h4>📅 Date & Time</h4>
-                    <div class="form-row">
-                        <div class="form-group half">
-                            <label>Date</label>
-                            <input type="date" id="activity-date" class="form-control" value="${prefillDate || today}">
-                        </div>
-                        <div class="form-group half">
-                            <label>Start Time</label>
-                            <input type="text" id="start-time" class="form-control time24" inputmode="numeric" autocomplete="off" maxlength="5" placeholder="HH:MM" title="24-hour time, e.g. 14:30" value="09:00" onchange="app.onStartTimeChange()">
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group half">
-                            <label>End Time</label>
-                            <input type="text" id="end-time" class="form-control time24" inputmode="numeric" autocomplete="off" maxlength="5" placeholder="HH:MM" title="24-hour time, e.g. 14:30" value="10:00" onchange="app.onEndTimeChange()">
-                        </div>
-                        <div class="form-group half">
-                            <label>Duration</label>
-                            <input type="text" id="duration" class="form-control" readonly value="60 min">
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label>Venue <span id="venue-required-star" class="required" style="display:none;">*</span></label>
-                        <select id="activity-venue" class="form-control">
-                            <option value="">-- Select Venue --</option>
-                            ${_venueOptions}
-                        </select>
-                    </div>
-                </div>
-
-                <div class="form-section">
-                    <h4>📝 Remarks</h4>
-                    <div class="form-group">
-                        <textarea id="activity-remarks" class="form-control" rows="3" placeholder="Add any notes or remarks..."></textarea>
-                    </div>
-                </div>
-
                 <div id="cps-summary-section" class="form-section" style="display:none">
                     <h4>📝 Summary</h4>
                     <div class="form-group">
                         <label>Summary</label>
                         <textarea id="cps-summary" class="form-control" rows="3" placeholder="Why is the customer interested to do the CPS? What is the reason they want to come?"></textarea>
+                    </div>
+                </div>
+
+                <!-- CPS Invitation Method — CPS only (shown with the Summary by
+                     updateActivityForm). Moved out of the CPS dynamic block 2026-10-14
+                     so it sits after Summary; ids unchanged. -->
+                <div id="cps-invitation-section" class="form-section" style="display:none">
+                    <h4>📢 CPS Invitation Method (Optional)</h4>
+                    <div class="form-group">
+                        <label>Invitation Method</label>
+                        <select id="cps-invitation-method" class="form-control" onchange="document.getElementById('cps-invitation-other-div').style.display = this.value === 'Other' ? 'block' : 'none'">
+                            <option value="">-- Select Method --</option>
+                            <option value="Face to Face in Person">Face to Face in Person</option>
+                            <option value="Call">Call</option>
+                            <option value="WhatsApp">WhatsApp</option>
+                            <option value="Event">Event</option>
+                            <option value="Referral">Referral</option>
+                            <option value="Walk-in">Walk-in</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
+                    <div id="cps-invitation-other-div" class="form-group" style="display:none; margin-top: 10px;">
+                        <label>Please specify method</label>
+                        <input type="text" id="cps-invitation-other" class="form-control" placeholder="Specify method...">
+                    </div>
+                    <div class="form-group">
+                        <label>Details</label>
+                        <textarea id="cps-invitation-details" class="form-control" rows="2" placeholder="How was the customer convinced to attend?"></textarea>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <h4>📝 Special Remarks</h4>
+                    <div class="form-group">
+                        <textarea id="activity-remarks" class="form-control" rows="3" placeholder="Add any notes or remarks..."></textarea>
                     </div>
                 </div>
 
@@ -509,7 +562,7 @@
         // Restore venue dropdown selection — fall back to location_address since we mirror
         // venue there for cross-device persistence (the `venue` column may be missing from
         // the Supabase schema).
-        setField('activity-venue', activity.venue || activity.location_address);
+        _setActivityVenue(activity.venue || activity.location_address);
 
         // 4. Restore selected entity (store in module variable).
         // CRITICAL: seed _state.se from the RAW activity FK first, BEFORE the
@@ -644,7 +697,7 @@
     const activity = await (window.app._lookupActivityRobust || AppDataStore.getById.bind(AppDataStore, 'activities'))(activityId);
     if (!activity) { UI.toast.error('Activity not found'); return; }
 
-    const venueVal = document.getElementById('activity-venue')?.value;
+    const venueVal = _readActivityVenue();
     const locationAddressEl = document.getElementById('location-address');
     const updatedData = {
         activity_type: document.getElementById('modal-activity-type')?.value,
@@ -808,16 +861,24 @@
     // gender-neutral. And Malaysian honorifics (Dato', Datuk, Tan Sri) are real
     // values, which is why there is deliberately NO CHECK constraint on this
     // column and why an unrecognized title is preserved verbatim below.
-    const BASIC_INFO_TITLES = ['Mr.', 'Ms.', 'Mrs.', 'Dr.'];
+    // Grouped title picker (2026-10-14). Each item is [savedValue, label?]. Mr/Mrs/
+    // Ms/Dr keep their historical dotted VALUES ('Mr.') — hundreds of rows and the
+    // title-vs-gender audit use them — and only display without the dot. Anything
+    // outside the list (e.g. "Dato' Haji") goes through "Other (type your own)".
+    const BASIC_INFO_TITLE_GROUPS = [
+        ['Common', [['Mr.', 'Mr'], ['Mrs.', 'Mrs'], ['Miss'], ['Ms.', 'Ms'], ['Sir'], ['Madam'], ['Dr.', 'Dr']]],
+        ['Malaysian Honours', [['Tun'], ['Toh Puan'], ['Tan Sri'], ['Puan Sri'], ['Datuk'], ["Dato'"], ['Datin'], ["Dato' Sri"], ['Datin Sri']]],
+        ['Heritage / Religious', [['Tuan'], ['Haji'], ['Hajjah'], ['Syed'], ['Sharifah']]],
+        ['Government', [['YB'], ['YAB']]],
+    ];
+    const BASIC_INFO_TITLES = BASIC_INFO_TITLE_GROUPS.flatMap(([, items]) => items.map(([v]) => v));
+    // Case/dot-insensitive lookup: 'mr' / 'MR.' → 'Mr.', "dato'" → "Dato'".
+    const _BI_TITLE_KEY = (x) => String(x).toLowerCase().replace(/\.$/, '').replace(/[’`]/g, "'").trim();
+    const _BI_TITLE_MAP = new Map(BASIC_INFO_TITLES.map(v => [_BI_TITLE_KEY(v), v]));
     const _biTitle = (v) => {
         const s = String(v ?? '').trim();
         if (!s) return '';
-        const low = s.toLowerCase().replace(/\.$/, '');
-        if (low === 'mr') return 'Mr.';
-        if (low === 'ms') return 'Ms.';
-        if (low === 'mrs') return 'Mrs.';
-        if (low === 'dr') return 'Dr.';
-        return s;
+        return _BI_TITLE_MAP.get(_BI_TITLE_KEY(s)) || s;
     };
     const BASIC_INFO_GENDERS = ['Male', 'Female', 'Other'];
     const _biGender = (v) => {
@@ -897,14 +958,16 @@
                 <div class="form-row">
                     <div class="form-group half">
                         <label>Title</label>
-                        <select id="${prefix}-title" class="form-control" ${disabled}>
+                        ${(() => {
+                            const t = _biTitle(d.title);
+                            const tOther = !!t && !BASIC_INFO_TITLES.includes(t);
+                            return `<select id="${prefix}-title" class="form-control" onchange="document.getElementById('${prefix}-title-other').style.display = this.value === '__other__' ? 'block' : 'none'" ${disabled}>
                             <option value="">— Select —</option>
-                            ${(() => {
-                                const t = _biTitle(d.title);
-                                const opts = (!t || BASIC_INFO_TITLES.includes(t)) ? BASIC_INFO_TITLES : [...BASIC_INFO_TITLES, t];
-                                return opts.map(v => `<option value="${esc(v)}" ${sel(t, v)}>${esc(v)}</option>`).join('');
-                            })()}
+                            ${BASIC_INFO_TITLE_GROUPS.map(([group, items]) => `<optgroup label="${esc(group)}">${items.map(([v, label]) => `<option value="${esc(v)}" ${sel(t, v)}>${esc(label || v)}</option>`).join('')}</optgroup>`).join('')}
+                            <option value="__other__" ${tOther ? 'selected' : ''}>Other (type your own)</option>
                         </select>
+                        <input type="text" id="${prefix}-title-other" class="form-control" placeholder="e.g., Dato' Haji" value="${tOther ? esc(t) : ''}" style="display:${tOther ? 'block' : 'none'};margin-top:6px;" ${disabled}>`;
+                        })()}
                     </div>
                     <div class="form-group half">
                         <label>Full Name <span class="required">*</span></label>
@@ -1010,10 +1073,18 @@
                     ${readOnly
                         ? `<div style="padding:6px 0;color:var(--text-primary);">${d.marital_status || '—'}</div>`
                         : `<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
-                        ${['Single','Married','Others'].map(opt => `
+                        ${(() => {
+                            // Single/Married/Divorced/Widowed (2026-10-14). A saved value
+                            // outside those (legacy 'Others', or another spelling) gets its
+                            // own box on THAT record only, so saving never wipes it.
+                            const base = ['Single', 'Married', 'Divorced', 'Widowed'];
+                            const ms = String(d.marital_status || '').trim();
+                            const hit = base.find(o => o.toLowerCase() === ms.toLowerCase());
+                            return ms && !hit ? [...base, ms] : base;
+                        })().map(opt => `
                             <label style="display:flex;align-items:center;gap:6px;font-weight:normal;margin:0;cursor:pointer;">
-                                <input type="checkbox" class="${prefix}-marital-cb" value="${opt}" ${chk(d.marital_status === opt)} onchange="document.querySelectorAll('.${prefix}-marital-cb').forEach(cb=>{if(cb!==this)cb.checked=false;});">
-                                ${opt}
+                                <input type="checkbox" class="${prefix}-marital-cb" value="${esc(opt)}" ${chk(String(d.marital_status || '').trim().toLowerCase() === opt.toLowerCase())} onchange="document.querySelectorAll('.${prefix}-marital-cb').forEach(cb=>{if(cb!==this)cb.checked=false;});">
+                                ${esc(opt)}
                             </label>
                         `).join('')}
                     </div>`}
@@ -1077,7 +1148,7 @@
         const rel = d(`${prefix}-relationship`);
         const relOther = d(`${prefix}-relationship-other`);
         return {
-            title: d(`${prefix}-title`) || null,
+            title: (d(`${prefix}-title`) === '__other__' ? d(`${prefix}-title-other`) : d(`${prefix}-title`)) || null,
             full_name: d(`${prefix}-name`),
             nickname: d(`${prefix}-nickname`) || null,
             gender: d(`${prefix}-gender`) || null,
@@ -2822,6 +2893,10 @@
         if (cpsSummarySection) {
             cpsSummarySection.style.display = type === 'CPS' ? 'block' : 'none';
         }
+        const cpsInvitationSection = document.getElementById('cps-invitation-section');
+        if (cpsInvitationSection) cpsInvitationSection.style.display = type === 'CPS' ? 'block' : 'none';
+        const consultantTitle = document.getElementById('consultant-section-title');
+        if (consultantTitle) consultantTitle.textContent = type === 'CPS' ? "CPS's Consultant" : "Appointment's Consultant";
 
         let html = '';
 
@@ -2832,31 +2907,6 @@
                         <h4>👤 New Customer Information</h4>
                         ${buildBasicInfoBlock('cps')}
                         <p class="help-text">Minimum required: Name, Phone Number, and Relation. Tap <strong>📷 Take Photo</strong> above to auto-fill from a paper form — the photo is also saved to the prospect record.</p>
-                    </div>
-
-                    <div class="form-section">
-                        <h4>📢 CPS Invitation Method (Optional)</h4>
-                        <div class="form-group">
-                            <label>Invitation Method</label>
-                            <select id="cps-invitation-method" class="form-control" onchange="document.getElementById('cps-invitation-other-div').style.display = this.value === 'Other' ? 'block' : 'none'">
-                                <option value="">-- Select Method --</option>
-                                <option value="Face to Face in Person">Face to Face in Person</option>
-                                <option value="Call">Call</option>
-                                <option value="WhatsApp">WhatsApp</option>
-                                <option value="Event">Event</option>
-                                <option value="Referral">Referral</option>
-                                <option value="Walk-in">Walk-in</option>
-                                <option value="Other">Other</option>
-                            </select>
-                        </div>
-                        <div id="cps-invitation-other-div" class="form-group" style="display:none; margin-top: 10px;">
-                            <label>Please specify method</label>
-                            <input type="text" id="cps-invitation-other" class="form-control" placeholder="Specify method...">
-                        </div>
-                        <div class="form-group">
-                            <label>Details</label>
-                            <textarea id="cps-invitation-details" class="form-control" rows="2" placeholder="How was the customer convinced to attend?"></textarea>
-                        </div>
                     </div>
                 `;
                 break;
@@ -5256,7 +5306,7 @@
             return;
         }
 
-        const venueVal = document.getElementById('activity-venue')?.value || '';
+        const venueVal = _readActivityVenue();
         const activity = {
             activity_type: type,
             activity_date: date,
