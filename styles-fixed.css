@@ -11610,3 +11610,14 @@ html, body {
 @media (max-width: 640px) {
     .form-compact input[type="date"] { -webkit-appearance: none; appearance: none; display: block; width: 100%; text-align: left; }
 }
+
+/* Segmented choice (event Visibility, Select Existing / Create New) — real
+   radios kept for the existing readers, styled as side-by-side buttons. */
+.form-compact .form-group .seg { display: flex; gap: 6px; }
+.form-compact .form-group .seg label {
+    flex: 1 1 0; position: relative; display: flex; align-items: center; justify-content: center; gap: 4px;
+    margin: 0; padding: 7px 6px; border: 1px solid var(--gray-300); border-radius: 8px; background: #fff;
+    font-size: 13px; color: var(--gray-700); white-space: nowrap; cursor: pointer;
+}
+.form-compact .form-group .seg input { position: absolute; opacity: 0; pointer-events: none; }
+.form-compact .form-group .seg label:has(input:checked) { background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 600; }

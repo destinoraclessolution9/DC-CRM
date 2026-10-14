@@ -133,15 +133,15 @@
                 <div class="form-group">
                     <label>Activity Type <span class="required">*</span></label>
                     <select id="modal-activity-type" class="form-control" onchange="(async()=>{ try{ await app.updateActivityForm(); }catch(e){ console.error(e); } })()">
-                        <option value="CPS">🟢 CPS - Consultation/Planning Session</option>
-                        <option value="FTF">🔵 FTF - Face to Face Meeting</option>
-                        <option value="FSA">🟠 FSA - Feng Shui Analysis</option>
+                        <option value="CPS">🟢 CPS · Consultation</option>
+                        <option value="FTF">🔵 FTF · Face to Face</option>
+                        <option value="FSA">🟠 FSA · Feng Shui Analysis</option>
                         <option value="GR">🟣 Golden Road</option>
                         <option value="EVENT">🔴 Event</option>
                         <option value="AGENT_MEETING">📅 Agent Weekly Meeting</option>
                         <option value="AGENT_TRAINING">🎓 Agent Training</option>
                         <option value="SITE">🟤 Site Visit</option>
-                        <option value="XG">🟤 XG - Xin Gua</option>
+                        <option value="XG">🟤 XG · Xin Gua</option>
                         <option value="CALL">📞 Call</option>
                         <option value="EMAIL">📧 Email</option>
                         <option value="WHATSAPP">💬 WhatsApp</option>
@@ -640,7 +640,11 @@
             const _vis = activity.visibility;
             const _radioVal = (_vis === 'open' || _vis === 'public') ? 'open' : (_vis === 'team' ? 'team' : 'closed');
             const _visRadio = document.querySelector(`input[name="event-visibility"][value="${_radioVal}"]`);
-            if (_visRadio) _visRadio.checked = true;
+            if (_visRadio) {
+                _visRadio.checked = true;
+                const _hint = document.getElementById('event-visibility-hint');
+                if (_hint && _visRadio.dataset.hint) _hint.textContent = _visRadio.dataset.hint;
+            }
         }
 
         // 8. If this is a CPS activity, poll for CPS-specific fields
@@ -2926,6 +2930,10 @@
         `;
     };
 
+    // "<Type>'s Consultant" heading; plain "Consultant" where the possessive reads oddly.
+    const _CONSULTANT_TYPE_NAMES = { CPS: 'CPS', FTF: 'FTF', FSA: 'FSA', GR: 'Golden Road', XG: 'XG', SITE: 'Site Visit', EVENT: 'Event', AGENT_MEETING: 'Agent Meeting', AGENT_TRAINING: 'Agent Training' };
+    const _consultantHeading = (type) => _CONSULTANT_TYPE_NAMES[type] ? `${_CONSULTANT_TYPE_NAMES[type]}'s Consultant` : 'Consultant';
+
     const updateActivityForm = async () => {
         const type = document.getElementById('modal-activity-type')?.value;
         const container = document.getElementById('dynamic-form-fields');
@@ -2945,7 +2953,7 @@
         const cpsInvitationSection = document.getElementById('cps-invitation-section');
         if (cpsInvitationSection) cpsInvitationSection.style.display = type === 'CPS' ? 'block' : 'none';
         const consultantTitle = document.getElementById('consultant-section-title');
-        if (consultantTitle) consultantTitle.textContent = type === 'CPS' ? "CPS's Consultant" : "Appointment's Consultant";
+        if (consultantTitle) consultantTitle.textContent = _consultantHeading(type);
 
         let html = '';
 
@@ -2968,7 +2976,7 @@
             case 'WHATSAPP':
                 html = `
                     <div class="form-section">
-                        <h4>🔍 Select ${type === 'CALL' || type === 'WHATSAPP' || type === 'EMAIL' ? 'Prospect' : 'Existing Prospect'}</h4>
+                        <h4>🔍 Select Prospect</h4>
                         <div class="form-group">
                             <div class="search-with-results">
                                 <input type="text" id="entity-search" class="form-control" placeholder="Type name, phone, or email..." oninput="app.searchEntities()">
@@ -2977,7 +2985,7 @@
                         </div>
                         <div id="selected-entity-info" class="selected-entity-info"></div>
                         <div class="form-group">
-                            <label>Meeting Title/Purpose</label>
+                            <label>Title / Purpose</label>
                             <input type="text" id="meeting-title" class="form-control" placeholder="e.g., Career discussion, PR4 follow-up">
                         </div>
                     </div>
@@ -2988,7 +2996,7 @@
             case 'OTHERS':
                 html = `
                     <div class="form-section">
-                        <h4>🔍 Link to Prospect (Optional)</h4>
+                        <h4>🔗 Link to Prospect (Optional)</h4>
                         <div class="form-group">
                             <div class="search-with-results">
                                 <input type="text" id="entity-search" class="form-control" placeholder="Type name, phone, or email..." oninput="app.searchEntities()">
@@ -2997,7 +3005,7 @@
                         </div>
                         <div id="selected-entity-info" class="selected-entity-info"></div>
                         <div class="form-group">
-                            <label>Title/Purpose</label>
+                            <label>Title / Purpose</label>
                             <input type="text" id="meeting-title" class="form-control" placeholder="e.g., Personal errand, Other activity">
                         </div>
                     </div>
@@ -3008,7 +3016,7 @@
             case 'SITE':
                 html = `
                     <div class="form-section">
-                        <h4>🔍 Select Existing Prospect</h4>
+                        <h4>🔍 Select Prospect</h4>
                         <div class="form-group">
                             <div class="search-with-results">
                                 <input type="text" id="entity-search" class="form-control" placeholder="Type name, phone, or email..." oninput="app.searchEntities()">
@@ -3016,7 +3024,9 @@
                             </div>
                         </div>
                         <div id="selected-entity-info" class="selected-entity-info"></div>
-                        
+                    </div>
+                    <div class="form-section">
+                        <h4>📍 Site Address</h4>
                         <div class="form-group">
                             <label>Address <span class="required">*</span></label>
                             <textarea id="location-address" class="form-control" rows="2" placeholder="Full address required" required></textarea>
@@ -3036,24 +3046,22 @@
             case 'AGENT_TRAINING':
                 html = `
                     <div class="form-section">
-                        <h4>🎪 ${type.replace('_', ' ')} Settings</h4>
+                        <h4>${type === 'AGENT_TRAINING' ? '🎓 Agent Training' : type === 'AGENT_MEETING' ? '📅 Agent Weekly Meeting' : '🎪 Event'} Settings</h4>
                         <div class="form-group">
                             <label>Visibility</label>
-                            <div class="radio-group" style="display:flex; gap:16px; flex-wrap:wrap;">
-                                <label><input type="radio" name="event-visibility" value="closed"> Closed Event (Private)</label>
-                                <label><input type="radio" name="event-visibility" value="team"> Own Team</label>
-                                <label><input type="radio" name="event-visibility" value="open" checked> Open Event (Public)</label>
+                            <div class="seg">
+                                <label><input type="radio" name="event-visibility" value="closed" data-hint="Only the agents involved can see it." onchange="document.getElementById('event-visibility-hint').textContent=this.dataset.hint"> 🔒 Closed</label>
+                                <label><input type="radio" name="event-visibility" value="team" data-hint="Everyone in your own team can see it." onchange="document.getElementById('event-visibility-hint').textContent=this.dataset.hint"> 👥 Own Team</label>
+                                <label><input type="radio" name="event-visibility" value="open" checked data-hint="All agents can see it." onchange="document.getElementById('event-visibility-hint').textContent=this.dataset.hint"> 🌐 Open</label>
                             </div>
-                            <small class="help-text">Open = visible to all agents. Own Team = everyone in your team only (e.g. Team A). Closed = only involved agents.</small>
+                            <small id="event-visibility-hint" class="help-text" style="display:block;margin-top:4px;">All agents can see it.</small>
                         </div>
 
                         <div class="form-group">
-                            <label class="radio-label">
-                                <input type="radio" name="event-selection" value="existing" checked onchange="app.toggleEventForm()"> Select Existing
-                            </label>
-                            <label class="radio-label">
-                                <input type="radio" name="event-selection" value="new" onchange="app.toggleEventForm()"> Create New
-                            </label>
+                            <div class="seg">
+                                <label><input type="radio" name="event-selection" value="existing" checked onchange="app.toggleEventForm()"> Select Existing</label>
+                                <label><input type="radio" name="event-selection" value="new" onchange="app.toggleEventForm()"> Create New</label>
+                            </div>
                         </div>
                         
                         <div id="existing-event-section">
@@ -3076,8 +3084,8 @@
 
                         ${type === 'EVENT' ? `
                         <!-- 📢 Noticeboard publishing — applies to whichever event (existing or new) is attached. -->
-                        <div class="form-group" style="margin-top: 15px; padding: 12px; background: #fdf2f8; border: 1px solid #fce7f3; border-radius: 8px;">
-                            <label style="font-weight:600; color:#be185d; display:flex; align-items:center; gap:8px; cursor:pointer;">
+                        <div class="form-group" style="padding: 10px 12px; background: #fdf2f8; border: 1px solid #fce7f3; border-radius: 8px;">
+                            <label style="font-weight:600; color:#be185d; display:flex; align-items:center; flex-wrap:wrap; gap:6px; cursor:pointer; white-space:normal; font-size:13.5px;">
                                 <input type="checkbox" id="activity-publish-noticeboard" checked onchange="app.toggleActivityNoticeboardFields()">
                                 📢 Publish to Noticeboard
                                 <span style="color:#6b7280; font-weight:normal; font-size:0.85rem;">(visible to L12/13/14 — untick to keep private)</span>
@@ -3091,7 +3099,7 @@
                         </div>
                         ` : ''}
 
-                        <div class="form-group" style="margin-top: 15px;">
+                        <div class="form-group">
                             <label>Add Attendees (${type.includes('AGENT') ? 'Agents' : 'Clients/Agents'})</label>
                             <div class="search-with-results">
                                 <input type="text" id="attendee-search" class="form-control" placeholder="Search to add..." oninput="app.searchAttendees()">
@@ -3106,7 +3114,8 @@
 
         container.innerHTML = html;
         // CPS entry uses the compact form layout (.form-compact in styles-fixed.css).
-        container.closest('.activity-modal-form')?.classList.toggle('form-compact', type === 'CPS');
+        // Every activity type uses the compact form layout (.form-compact in styles-fixed.css).
+        container.closest('.activity-modal-form')?.classList.add('form-compact');
         calculateDuration();
         if (type === 'CPS') populateAssignAgentPicker('cps');
     };
