@@ -3727,8 +3727,8 @@
         if (!writeOk) {
             UI.toast.error('Failed to save life chart type — please try again');
             // Re-render to revert the checkbox to its actual persisted state
-            const bodyEl = document.getElementById(`acc-body-personal-${prospectId}`);
-            if (bodyEl) await switchProspectTab('personal', prospectId, null, bodyEl);
+            const bodyEl = document.getElementById(`acc-body-info-${prospectId}`);
+            if (bodyEl) await switchProspectTab('info', prospectId, null, bodyEl);
             return;
         }
 
@@ -3738,7 +3738,7 @@
         // silently reverts to its old state ("tick doesn't stick").
         AppDataStore.invalidateCache('prospects');
         UI.toast.success('Life chart type updated');
-        const bodyEl = document.getElementById(`acc-body-personal-${prospectId}`);
+        const bodyEl = document.getElementById(`acc-body-info-${prospectId}`);
         if (bodyEl) {
             bodyEl.querySelectorAll('input[type="checkbox"]').forEach(chk => {
                 const oc = chk.getAttribute('onchange') || '';
@@ -4607,15 +4607,19 @@
         if (infoDiv) infoDiv.innerHTML = '';
     };
 
-    const addProspectChildRow = (age = '', gender = '') => {
+    // Children are saved as { name, birth_year, gender } (2026-10-14). Older rows
+    // hold { age, gender }; prefill turns that age into an estimated birth year
+    // (from the prospect's created_at year) so the next save upgrades the row.
+    const addProspectChildRow = (name = '', birthYear = '', gender = '') => {
         const list = document.getElementById('prospect-children-list');
         if (!list) return;
         const row = document.createElement('div');
         row.className = 'prospect-child-row';
         row.style.cssText = 'display:flex;gap:8px;align-items:center;';
         row.innerHTML = `
-            <input type="number" min="0" class="form-control prospect-child-age" placeholder="Age" style="max-width:90px;" value="${age}">
-            <select class="form-control prospect-child-gender" style="max-width:130px;">
+            <input type="text" class="form-control prospect-child-name" placeholder="Name" style="flex:1;min-width:0;">
+            <input type="number" min="1900" max="2100" class="form-control prospect-child-year" placeholder="Born Year" style="max-width:110px;">
+            <select class="form-control prospect-child-gender" style="max-width:110px;">
                 <option value="">Gender</option>
                 <option value="Male" ${gender === 'Male' ? 'selected' : ''}>Male</option>
                 <option value="Female" ${gender === 'Female' ? 'selected' : ''}>Female</option>
@@ -4623,25 +4627,39 @@
             </select>
             <button type="button" class="btn-icon text-danger" onclick="this.closest('.prospect-child-row').remove()"><i class="fas fa-trash-alt"></i></button>
         `;
+        // Set values as properties — the name is free text, never interpolate it into HTML.
+        row.querySelector('.prospect-child-name').value = name || '';
+        row.querySelector('.prospect-child-year').value = birthYear || '';
         list.appendChild(row);
     };
 
-    const prefillProspectChildren = (kidsData) => {
+    const prefillProspectChildren = (kidsData, createdAt) => {
         const list = document.getElementById('prospect-children-list');
         if (!list) return;
         list.innerHTML = '';
         let kids = [];
         try { kids = Array.isArray(kidsData) ? kidsData : (kidsData ? JSON.parse(kidsData) : []); } catch(e) { /* intentional: malformed children JSON — start with empty list */ kids = []; }
-        kids.forEach(k => addProspectChildRow(k.age || '', k.gender || ''));
+        if (!Array.isArray(kids)) kids = [];
+        const baseYear = createdAt ? new Date(createdAt).getFullYear() : new Date().getFullYear();
+        kids.forEach(k => {
+            k = k || {};
+            let year = k.birth_year || '';
+            if (!year && k.age != null && k.age !== '') {
+                const est = baseYear - parseInt(k.age, 10);
+                if (Number.isFinite(est)) year = est;
+            }
+            addProspectChildRow(k.name || '', year, k.gender || '');
+        });
     };
 
     const collectProspectChildren = () => {
         const rows = document.querySelectorAll('#prospect-children-list .prospect-child-row');
         const out = [];
         rows.forEach(r => {
-            const age = r.querySelector('.prospect-child-age')?.value?.trim();
+            const name = r.querySelector('.prospect-child-name')?.value?.trim() || '';
+            const year = r.querySelector('.prospect-child-year')?.value?.trim();
             const gender = r.querySelector('.prospect-child-gender')?.value || '';
-            if (age || gender) out.push({ age: age ? parseInt(age, 10) : null, gender });
+            if (name || year || gender) out.push({ name, birth_year: year ? parseInt(year, 10) : null, gender });
         });
         return out;
     };

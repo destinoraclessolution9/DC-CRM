@@ -661,6 +661,12 @@ const showCustomerDetail = async (customerId) => {
                 .pv-val{flex:1;color:var(--gray-800);word-break:break-word;}
                 .pv-sub{font-size:12px;font-weight:700;color:var(--gray-400);text-transform:uppercase;letter-spacing:.5px;margin:14px 0 6px;padding-top:12px;border-top:1px solid var(--gray-100);}
                 .pv-sub:first-child{margin-top:0;padding-top:0;border-top:none;}
+                .pv-compact{padding:10px 14px;}
+                .pv-compact .pv-row{padding:3px 0;border-bottom:none;font-size:13.5px;line-height:1.4;}
+                .pv-compact .pv-lbl{min-width:108px;}
+                .pv-compact .pv-val{font-weight:500;color:var(--gray-900);}
+                .pv-compact .pv-sub{font-size:11px;margin:8px 0 2px;padding-top:0;border-top:none;color:var(--primary);}
+                .pv-compact .pv-sub:first-child{margin-top:0;}
                 .meet-section{margin-bottom:8px;}
                 .meet-lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--gray-400);margin-bottom:2px;}
                 .meet-txt{font-size:13px;color:var(--gray-700);line-height:1.5;white-space:pre-wrap;word-break:break-word;}
@@ -739,7 +745,7 @@ const showCustomerDetail = async (customerId) => {
                         <span><i class="fas fa-info-circle"></i> Basic Information</span>
                         <i class="fas fa-chevron-down acc-chev"></i>
                     </div>
-                    <div class="acc-body" id="cust-acc-body-info-${customer.id}">
+                    <div class="acc-body pv-compact" id="cust-acc-body-info-${customer.id}">
                         <div class="acc-loading"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
                     </div>
                 </div>

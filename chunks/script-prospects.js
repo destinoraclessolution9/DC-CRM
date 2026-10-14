@@ -1664,7 +1664,7 @@ const openProspectModal = async (prospectId = null) => {
     // Pre-populate children rows after modal mounts; reveal the assign-on-behalf
     // picker (leader keying for an agent) — both owned by the activities chunk.
     setTimeout(() => {
-        (window.app.prefillProspectChildren || (() => {}))(prospect?.children);
+        (window.app.prefillProspectChildren || (() => {}))(prospect?.children, prospect?.created_at);
         (window.app.populateAssignAgentPicker || (() => {}))('prospect');
     }, 0);
 };
@@ -1986,6 +1986,12 @@ const buildProspectDetailHeaderHtml = (prospect, cpsPhoto) => {
                 .pv-val{flex:1;color:var(--gray-800);word-break:break-word;}
                 .pv-sub{font-size:12px;font-weight:700;color:var(--gray-400);text-transform:uppercase;letter-spacing:.5px;margin:14px 0 6px;padding-top:12px;border-top:1px solid var(--gray-100);}
                 .pv-sub:first-child{margin-top:0;padding-top:0;border-top:none;}
+                .pv-compact{padding:10px 14px;}
+                .pv-compact .pv-row{padding:3px 0;border-bottom:none;font-size:13.5px;line-height:1.4;}
+                .pv-compact .pv-lbl{min-width:108px;}
+                .pv-compact .pv-val{font-weight:500;color:var(--gray-900);}
+                .pv-compact .pv-sub{font-size:11px;margin:8px 0 2px;padding-top:0;border-top:none;color:var(--primary);}
+                .pv-compact .pv-sub:first-child{margin-top:0;}
                 .meet-card{background:var(--gray-50);border-radius:8px;padding:12px;margin-bottom:10px;border:1px solid var(--gray-100);}
                 .meet-card-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
                 .meet-type{font-weight:600;font-size:13px;color:var(--primary);margin-right:6px;}
@@ -2086,22 +2092,16 @@ const buildProspectDetailTabsHtml = (prospect) => {
     return `
                 <div class="acc-container" id="acc-container-${prospect.id}" ${prospect.unable_to_serve ? 'style="opacity:0.6;pointer-events:none;"' : ''}>
 
-                    <!-- ① Basic Information — collapsed by default -->
-                    <div class="acc-item" id="acc-info-${prospect.id}">
+                    <!-- ① Basic Information — open by default. Absorbed the old
+                         separate "Personal Details" section 2026-10-14; tab key
+                         stays 'info' (the life-chart tick refresh looks up
+                         acc-body-info-*). Loaded right after render. -->
+                    <div class="acc-item open" id="acc-info-${prospect.id}">
                         <div class="acc-hdr" onclick="app.toggleAccordion('info',${prospect.id},this.parentElement)">
-                            <span><i class="fas fa-info-circle"></i> Basic Information</span>
+                            <span><i class="fas fa-user"></i> Basic Information</span>
                             <i class="fas fa-chevron-down acc-chev"></i>
                         </div>
-                        <div class="acc-body" id="acc-body-info-${prospect.id}" style="display:none" data-loaded="false"></div>
-                    </div>
-
-                    <!-- ② Personal Details -->
-                    <div class="acc-item" id="acc-personal-${prospect.id}">
-                        <div class="acc-hdr" onclick="app.toggleAccordion('personal',${prospect.id},this.parentElement)">
-                            <span><i class="fas fa-user"></i> Personal Details</span>
-                            <i class="fas fa-chevron-down acc-chev"></i>
-                        </div>
-                        <div class="acc-body" id="acc-body-personal-${prospect.id}" style="display:none" data-loaded="false"></div>
+                        <div class="acc-body pv-compact" id="acc-body-info-${prospect.id}" data-loaded="true"><div class="acc-loading"><i class="fas fa-spinner fa-spin"></i> Loading…</div></div>
                     </div>
 
                     <!-- ③ Meet Ups & Events — merged timeline (absorbed the old
@@ -2302,7 +2302,9 @@ const showProspectDetail = async (prospectId) => {
     }, 100);
 
     container.innerHTML = buildProspectDetailHeaderHtml(prospect, cpsPhoto) + buildProspectDetailTabsHtml(prospect);
-    // All accordions start collapsed — no pre-load needed
+    // Basic Information starts open — fill it now; every other accordion is collapsed.
+    const _infoBody = document.getElementById(`acc-body-info-${prospect.id}`);
+    if (_infoBody) switchProspectTab('info', prospect.id, null, _infoBody).catch(() => {});
     // Async: populate journey overdue badge if touchpoints exist
     AppDataStore.getJourneyTouchpoints('prospect', prospect.id).then(tps => {
         const overdue = tps.filter(t => t.status === 'overdue').length;
@@ -2313,6 +2315,25 @@ const showProspectDetail = async (prospectId) => {
         }
     }).catch(() => {});
 };
+
+// One child as a profile line: "Name · b. 2012 · Male". Children are saved as
+// { name, birth_year, gender } (2026-10-14). Older rows hold { age, gender } — an
+// age typed when the record was made — so the birth year is estimated from the
+// prospect's created_at year and marked "~".
+const _childSummary = (c, createdAt) => {
+    c = c || {};
+    const parts = [];
+    if (c.name) parts.push(String(c.name));
+    if (c.birth_year) parts.push(`b. ${c.birth_year}`);
+    else if (c.age != null && c.age !== '') {
+        const baseYear = createdAt ? new Date(createdAt).getFullYear() : new Date().getFullYear();
+        const est = baseYear - parseInt(c.age, 10);
+        if (Number.isFinite(est)) parts.push(`b. ~${est}`);
+    }
+    if (c.gender) parts.push(String(c.gender));
+    return parts.length ? parts.join(' · ') : '-';
+};
+
 
 const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
     // Legacy tab-button styling (harmless no-op in accordion mode)
@@ -2335,6 +2356,8 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
     if (!container || !prospect) return;
 
     if (tab === 'info') {
+        // Basic Information — the old "Basic Information" + "Personal Details"
+        // sections merged 2026-10-14 into one compact view (.pv-compact).
         const cpsUrl = prospect.cps_form_url || '';
         const isImage = cpsUrl && /\.(jpe?g|png|gif|webp|heic|heif)(\?|$)/i.test(cpsUrl);
         const cpsHtml = cpsUrl ? `
@@ -2352,22 +2375,12 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 </div>
             `}
         ` : '';
-        container.innerHTML = `
-            <div class="pv-sub">Contact</div>
-            <div class="pv-row"><span class="pv-lbl">Phone</span><span class="pv-val">${escapeHtml(prospect.phone || '-')}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Email</span><span class="pv-val">${escapeHtml(prospect.email || '-')}</span></div>
-            <div class="pv-sub">Identity</div>
-            <div class="pv-row"><span class="pv-lbl">Title</span><span class="pv-val">${escapeHtml(prospect.title || '-')}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Gender</span><span class="pv-val">${escapeHtml(prospect.gender || '-')}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Nationality</span><span class="pv-val">${escapeHtml(prospect.nationality || '-')}</span></div>
-            <div class="pv-sub">Registration</div>
-            <div class="pv-row"><span class="pv-lbl">Referrer</span><span class="pv-val">${escapeHtml(prospect.referred_by || '-')}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Relation</span><span class="pv-val">${escapeHtml(prospect.referral_relationship || '-')}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Created</span><span class="pv-val">${prospect.created_at ? new Date(prospect.created_at).toLocaleDateString() : '-'}</span></div>
-            ${cpsHtml}
-        `;
-    }
-    else if (tab === 'personal') {
+        // Responsible agent — same lookup the Protection panel uses.
+        let agentName = 'Unassigned';
+        if (prospect.responsible_agent_id) {
+            const agentRec = await AppDataStore.getById('users', prospect.responsible_agent_id).catch(() => null);
+            agentName = agentRec?.full_name || 'Unassigned';
+        }
         // Solar and lunar are independent flags, so life_chart_type can be 'both'
         // — that is what the intake form (buildBasicInfoBlock) writes when an agent
         // ticks both "Use for life chart" boxes. Matching its ['solar','both'] test
@@ -2384,30 +2397,34 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         // basic-info form (buildBasicInfoBlock + collectBasicInfoData) AND the columns
         // in data.js _lightSelects.prospects — otherwise they go blank again.
         container.innerHTML = `
-            <div class="pv-sub">Birth &amp; Identity</div>
+            <div class="pv-sub">Contact</div>
+            <div class="pv-row"><span class="pv-lbl">Phone</span><span class="pv-val">${escapeHtml(prospect.phone || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Email</span><span class="pv-val">${escapeHtml(prospect.email || '-')}</span></div>
+            <div class="pv-sub">Identity</div>
+            <div class="pv-row"><span class="pv-lbl">Title</span><span class="pv-val">${escapeHtml(prospect.title || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Gender</span><span class="pv-val">${escapeHtml(prospect.gender || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Nationality</span><span class="pv-val">${escapeHtml(prospect.nationality || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">IC Number</span><span class="pv-val">${escapeHtml(prospect.ic_number || '-')}</span></div>
+            <div class="pv-sub">Birth</div>
             <div class="pv-row"><span class="pv-lbl" style="${lctSolar ? lctHi : ''}">Date of Birth</span><span class="pv-val" style="display:flex;align-items:center;gap:8px;${lctSolar ? lctHi : ''}"><input type="checkbox" ${lctSolar ? 'checked' : ''} onchange="event.stopPropagation();app.toggleLifeChartType(${prospect.id},'solar',this.checked)" title="Use for life chart">${escapeHtml(prospect.date_of_birth || '-')}</span></div>
             <div class="pv-row"><span class="pv-lbl" style="${lctLunar ? lctHi : ''}">Lunar Birth</span><span class="pv-val" style="display:flex;align-items:center;gap:8px;${lctLunar ? lctHi : ''}"><input type="checkbox" ${lctLunar ? 'checked' : ''} onchange="event.stopPropagation();app.toggleLifeChartType(${prospect.id},'lunar',this.checked)" title="Use for life chart">${escapeHtml(prospect.lunar_birth || '-')}</span></div>
-            <div class="pv-row"><span class="pv-lbl">IC Number</span><span class="pv-val">${escapeHtml(prospect.ic_number || '-')}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Ming Gua</span><span class="pv-val"><span class="badge info">${prospect.ming_gua || '—'}</span></span></div>
+            <div class="pv-row"><span class="pv-lbl">Ming Gua</span><span class="pv-val"><span class="badge info">${escapeHtml(prospect.ming_gua || '—')}</span></span></div>
             <div class="pv-sub">Family</div>
             <div class="pv-row"><span class="pv-lbl">Marital Status</span><span class="pv-val">${escapeHtml(prospect.marital_status || '-')}</span></div>
             ${(() => {
                 let kids = [];
                 try { kids = Array.isArray(prospect.children) ? prospect.children : (prospect.children ? JSON.parse(prospect.children) : []); } catch(e) { kids = []; }
-                const count = kids.length;
-                let html = `<div class="pv-row"><span class="pv-lbl">Children</span><span class="pv-val">${count}</span></div>`;
+                if (!Array.isArray(kids)) kids = [];
+                let html = `<div class="pv-row"><span class="pv-lbl">Children</span><span class="pv-val">${kids.length}</span></div>`;
                 kids.forEach((c, i) => {
-                    const age = c.age || '-';
-                    const gender = c.gender || '-';
-                    html += `<div class="pv-row"><span class="pv-lbl">Child ${i + 1}</span><span class="pv-val">${escapeHtml(String(age))} y/o · ${escapeHtml(String(gender))}</span></div>`;
+                    html += `<div class="pv-row"><span class="pv-lbl">Child ${i + 1}</span><span class="pv-val">${escapeHtml(_childSummary(c, prospect.created_at))}</span></div>`;
                 });
                 return html;
             })()}
-            <div class="pv-sub">Employment</div>
+            <div class="pv-sub">Work</div>
             <div class="pv-row"><span class="pv-lbl">Occupation</span><span class="pv-val">${escapeHtml(prospect.occupation || '-')}</span></div>
             <div class="pv-row"><span class="pv-lbl">Company</span><span class="pv-val">${escapeHtml(prospect.company_name || '-')}</span></div>
             <div class="pv-row"><span class="pv-lbl">Income Range</span><span class="pv-val">${escapeHtml(prospect.income_range || '-')}</span></div>
-            <div class="pv-sub">Own Business</div>
             <div class="pv-row"><span class="pv-lbl">Own Business?</span><span class="pv-val">${prospect.is_own_business ? '✅ Yes' : (prospect.is_own_business === false ? 'No' : '-')}</span></div>
             ${prospect.is_own_business ? `
             <div class="pv-row"><span class="pv-lbl">Business Name</span><span class="pv-val">${escapeHtml(prospect.business_name || '-')}</span></div>
@@ -2422,6 +2439,12 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             <div class="pv-row"><span class="pv-lbl">City</span><span class="pv-val">${escapeHtml(prospect.city || '-')}</span></div>
             <div class="pv-row"><span class="pv-lbl">State</span><span class="pv-val">${escapeHtml(prospect.state || '-')}</span></div>
             <div class="pv-row"><span class="pv-lbl">Postal Code</span><span class="pv-val">${escapeHtml(prospect.postal_code || '-')}</span></div>
+            <div class="pv-sub">Registration</div>
+            <div class="pv-row"><span class="pv-lbl">Agent</span><span class="pv-val">${escapeHtml(agentName)}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Referrer</span><span class="pv-val">${escapeHtml(prospect.referred_by || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Relation</span><span class="pv-val">${escapeHtml(prospect.referral_relationship || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Created</span><span class="pv-val">${prospect.created_at ? new Date(prospect.created_at).toLocaleDateString() : '-'}</span></div>
+            ${cpsHtml}
         `;
     }
     else if (tab === 'forms') {
