@@ -2411,6 +2411,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             <div class="pv-row"><span class="pv-lbl">Ming Gua</span><span class="pv-val"><span class="badge info">${escapeHtml(prospect.ming_gua || '—')}</span></span></div>
             <div class="pv-sub">Family</div>
             <div class="pv-row"><span class="pv-lbl">Marital Status</span><span class="pv-val">${escapeHtml(prospect.marital_status || '-')}</span></div>
+            ${(prospect.spouse_name || (prospect.marital_status && String(prospect.marital_status).toLowerCase() !== 'single')) ? `<div class="pv-row"><span class="pv-lbl">Spouse</span><span class="pv-val">${escapeHtml(prospect.spouse_name || '-')}</span></div>` : ''}
             ${(() => {
                 let kids = [];
                 try { kids = Array.isArray(prospect.children) ? prospect.children : (prospect.children ? JSON.parse(prospect.children) : []); } catch(e) { kids = []; }

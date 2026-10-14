@@ -980,6 +980,21 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
             <div class="pv-row"><span class="pv-lbl">Date of Birth</span><span class="pv-val">${escapeHtml(customer.date_of_birth || '-')}${customer.date_of_birth ? ` (Age ${Math.floor((Date.now() - new Date(customer.date_of_birth).getTime()) / 31557600000)})` : ''}</span></div>
             <div class="pv-row"><span class="pv-lbl">Ming Gua</span><span class="pv-val"><span style="color:#6b21a8;font-weight:600;">${escapeHtml(customer.ming_gua || '-')}${customer.element ? ' (' + escapeHtml(customer.element) + ')' : ''}</span></span></div>
             <div class="pv-row"><span class="pv-lbl">Gender</span><span class="pv-val">${escapeHtml(customer.gender || '-')}</span></div>
+            <div class="pv-sub">Family</div>
+            <div class="pv-row"><span class="pv-lbl">Marital Status</span><span class="pv-val">${escapeHtml(customer.marital_status || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Spouse</span><span class="pv-val">${escapeHtml(customer.spouse_name || '-')}</span></div>
+            ${(() => {
+                // children: JSON [{ name, birth_year, gender }] (older rows: { age, gender }),
+                // copied from the prospect on conversion.
+                let kids = [];
+                try { kids = Array.isArray(customer.children) ? customer.children : (customer.children ? JSON.parse(customer.children) : []); } catch (_) { kids = []; }
+                if (!Array.isArray(kids)) kids = [];
+                return `<div class="pv-row"><span class="pv-lbl">Children</span><span class="pv-val">${kids.length}</span></div>` + kids.map((c, i) => {
+                    c = c || {};
+                    const parts = [c.name, c.birth_year ? `b. ${c.birth_year}` : (c.age != null && c.age !== '' ? `age ${c.age}` : ''), c.gender].filter(Boolean);
+                    return `<div class="pv-row"><span class="pv-lbl">Child ${i + 1}</span><span class="pv-val">${escapeHtml(parts.join(' · ') || '-')}</span></div>`;
+                }).join('');
+            })()}
             <div class="pv-sub">Employment</div>
             <div class="pv-row"><span class="pv-lbl">Occupation</span><span class="pv-val">${escapeHtml(customer.occupation || '-')}</span></div>
             <div class="pv-row"><span class="pv-lbl">Company</span><span class="pv-val">${escapeHtml(customer.company_name || '-')}</span></div>

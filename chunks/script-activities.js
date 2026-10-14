@@ -895,6 +895,26 @@
         ['MG5','MG5'],['MG6','MG6 乾'],['MG7','MG7 兑'],['MG8','MG8 艮'],['MG9','MG9 离']
     ];
 
+    const _biSpouseLabel = (status) => {
+        const v = String(status || '').trim().toLowerCase();
+        if (v === 'divorced') return 'Ex-spouse Name';
+        if (v === 'widowed') return 'Late Spouse Name';
+        return 'Spouse Name';
+    };
+    // Show/hide Spouse + Children as the marital status changes (see the
+    // family-wrap note in buildBasicInfoBlock).
+    const syncBasicInfoFamily = (prefix) => {
+        const wrap = document.getElementById(`${prefix}-family-wrap`);
+        if (!wrap) return;
+        const v = (document.querySelector(`.${prefix}-marital-cb:checked`)?.value || '').trim();
+        const hasData = !!(document.getElementById(`${prefix}-spouse`)?.value || '').trim()
+            || !!wrap.querySelector('.prospect-child-row');
+        const show = (v && v.toLowerCase() !== 'single') || (!v && hasData);
+        wrap.style.display = show ? 'block' : 'none';
+        const lbl = document.getElementById(`${prefix}-spouse-label`);
+        if (lbl) lbl.textContent = _biSpouseLabel(v);
+    };
+
     const buildBasicInfoBlock = (prefix, data = null) => {
         const d = data || {};
         const sel = (v, opt) => v === opt ? 'selected' : '';
@@ -1009,7 +1029,7 @@
                         </select>
                     </div>
                 </div>
-                <div class="form-row">
+                <div class="form-row bi-birth-row">
                     <div class="form-group half">
                         <div style="display:flex;align-items:center;gap:8px;">
                             <label style="margin-bottom:0;">Date of Birth</label>
@@ -1083,17 +1103,34 @@
                             return ms && !hit ? [...base, ms] : base;
                         })().map(opt => `
                             <label style="display:flex;align-items:center;gap:6px;font-weight:normal;margin:0;cursor:pointer;">
-                                <input type="checkbox" class="${prefix}-marital-cb" value="${esc(opt)}" ${chk(String(d.marital_status || '').trim().toLowerCase() === opt.toLowerCase())} onchange="document.querySelectorAll('.${prefix}-marital-cb').forEach(cb=>{if(cb!==this)cb.checked=false;});">
+                                <input type="checkbox" class="${prefix}-marital-cb" value="${esc(opt)}" ${chk(String(d.marital_status || '').trim().toLowerCase() === opt.toLowerCase())} onchange="document.querySelectorAll('.${prefix}-marital-cb').forEach(cb=>{if(cb!==this)cb.checked=false;}); app.syncBasicInfoFamily('${prefix}');">
                                 ${esc(opt)}
                             </label>
                         `).join('')}
                     </div>`}
                 </div>
+                ${(() => {
+                    // Spouse + Children only make sense when not Single (2026-10-14).
+                    // A record that already holds a spouse/children stays visible even
+                    // with a blank status, and switching to Single only HIDES the
+                    // fields — collectBasicInfoData still saves what is typed there.
+                    const ms = String(d.marital_status || '').trim().toLowerCase();
+                    let kids = [];
+                    try { kids = Array.isArray(d.children) ? d.children : (d.children ? JSON.parse(d.children) : []); } catch (_) { kids = []; }
+                    const hasData = !!String(d.spouse_name || '').trim() || (Array.isArray(kids) && kids.length > 0);
+                    const show = (ms && ms !== 'single') || (!ms && hasData);
+                    return `<div id="${prefix}-family-wrap" style="display:${show ? 'block' : 'none'};">
+                <div class="form-group">
+                    <label id="${prefix}-spouse-label">${_biSpouseLabel(d.marital_status)}</label>
+                    <input type="text" id="${prefix}-spouse" class="form-control" value="${esc(d.spouse_name)}" placeholder="e.g., Lim Mei Ling" ${disabled}>
+                </div>
                 <div class="form-group">
                     <label>Children</label>
-                    <div id="prospect-children-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+                    <div id="prospect-children-list" style="display:flex;flex-direction:column;gap:6px;"></div>
                     <button type="button" class="btn secondary btn-sm" style="margin-top:8px;" onclick="app.addProspectChildRow()" ${disabled}><i class="fas fa-plus"></i> Add Child</button>
                 </div>
+                </div>`;
+                })()}
                 <div class="form-group">
                     <label>Address</label>
                     <textarea id="${prefix}-address" class="form-control" rows="2" placeholder="Street address" ${disabled}>${esc(d.address)}</textarea>
@@ -1170,6 +1207,7 @@
             cps_interest: d(`${prefix}-interest`) || null,
             manual_grade: document.getElementById(`${prefix}-grade`)?.value || null, // grade is now set AFTER the meeting (in the Minutes modal); born ungraded — null ≡ C in the cadence engine
             marital_status: document.querySelector(`.${prefix}-marital-cb:checked`)?.value || null,
+            spouse_name: d(`${prefix}-spouse`) || null,
             children: JSON.stringify(collectProspectChildren()),
             referral_relationship: rel === 'Other' ? (relOther || 'Other') : rel,
             life_chart_type: lifeChartType,
@@ -4692,17 +4730,19 @@
         if (!list) return;
         const row = document.createElement('div');
         row.className = 'prospect-child-row';
-        row.style.cssText = 'display:flex;gap:8px;align-items:center;';
+        row.style.cssText = 'display:flex;gap:6px;align-items:center;';
+        // Name gets the room; year + gender are narrow (gender shows M/F but still
+        // saves 'Male'/'Female').
         row.innerHTML = `
-            <input type="text" class="form-control prospect-child-name" placeholder="Name" style="flex:1;min-width:0;">
-            <input type="number" min="1900" max="2100" class="form-control prospect-child-year" placeholder="Born Year" style="max-width:110px;">
-            <select class="form-control prospect-child-gender" style="max-width:110px;">
-                <option value="">Gender</option>
-                <option value="Male" ${gender === 'Male' ? 'selected' : ''}>Male</option>
-                <option value="Female" ${gender === 'Female' ? 'selected' : ''}>Female</option>
-                <option value="Other" ${gender === 'Other' ? 'selected' : ''}>Other</option>
+            <input type="text" class="form-control prospect-child-name" placeholder="Child's name" style="flex:1 1 auto;min-width:0;">
+            <input type="number" min="1900" max="2100" inputmode="numeric" class="form-control prospect-child-year" placeholder="Year" style="flex:0 0 72px;width:72px;padding-left:6px;padding-right:6px;">
+            <select class="form-control prospect-child-gender" title="Gender" style="flex:0 0 58px;width:58px;padding-left:6px;padding-right:2px;">
+                <option value="">–</option>
+                <option value="Male" ${gender === 'Male' ? 'selected' : ''}>M</option>
+                <option value="Female" ${gender === 'Female' ? 'selected' : ''}>F</option>
+                <option value="Other" ${gender === 'Other' ? 'selected' : ''}>O</option>
             </select>
-            <button type="button" class="btn-icon text-danger" onclick="this.closest('.prospect-child-row').remove()"><i class="fas fa-trash-alt"></i></button>
+            <button type="button" class="btn-icon text-danger" title="Remove child" style="flex:0 0 auto;padding:4px;" onclick="this.closest('.prospect-child-row').remove()"><i class="fas fa-trash-alt"></i></button>
         `;
         // Set values as properties — the name is free text, never interpolate it into HTML.
         row.querySelector('.prospect-child-name').value = name || '';
@@ -6319,6 +6359,7 @@
         BASIC_INFO_MING_GUA,
         buildBasicInfoBlock,
         collectBasicInfoData,
+        syncBasicInfoFamily,
         populateAssignAgentPicker,
         searchBasicInfoReferrers,
         clearBasicInfoReferrer,

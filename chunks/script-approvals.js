@@ -183,7 +183,7 @@ const showApprovalDetail = async (entryId) => {
     } else if (entry.approval_type === 'info_update') {
         const before = entry.snapshot_before || {};
         const after = entry.snapshot_after || {};
-        const fields = ['full_name','nickname','phone','email','ic_number','date_of_birth','lunar_birth','ming_gua','occupation','company_name','income_range','address','city','state','postal_code','title','gender','nationality','referred_by','referral_relationship'];
+        const fields = ['full_name','nickname','phone','email','ic_number','date_of_birth','lunar_birth','ming_gua','occupation','company_name','income_range','address','city','state','postal_code','title','gender','nationality','referred_by','referral_relationship','spouse_name'];
         // Audit logic fix: treat an absent (undefined) before/after value as empty so a
         // field newly populated by the agent (undefined before, set after) still shows
         // in the Before/After diff. The old `before[f] !== undefined && after[f] !== undefined`
@@ -292,7 +292,7 @@ const approveQueueEntry = async (entryId) => {
             // back with a null/RLS-trimmed snapshot_after, and indexing it in the loop
             // below would throw and silently abort the approval.
             if (customer && entry.snapshot_after) {
-                const syncable = ['title','full_name','nickname','gender','nationality','phone','email','ic_number','date_of_birth','lunar_birth','ming_gua','occupation','company_name','income_range','address','city','state','postal_code','referred_by','referred_by_id','referred_by_type','referral_relationship'];
+                const syncable = ['title','full_name','nickname','gender','nationality','phone','email','ic_number','date_of_birth','lunar_birth','ming_gua','occupation','company_name','income_range','address','city','state','postal_code','referred_by','referred_by_id','referred_by_type','referral_relationship','spouse_name'];
                 const syncFields = {};
                 for (const field of syncable) {
                     if (entry.snapshot_after[field] !== undefined) {
@@ -368,6 +368,9 @@ const approveQueueEntry = async (entryId) => {
                         referred_by_id: prospect.referred_by_id || null,
                         referred_by_type: prospect.referred_by_type || null,
                         referral_relationship: prospect.referral_relationship || null,
+                        marital_status: prospect.marital_status || null,
+                        children: prospect.children || null,
+                        spouse_name: prospect.spouse_name || null,
                         approved_by: _state.cu?.id || null,
                         approved_at: new Date().toISOString(),
                     });
@@ -561,6 +564,9 @@ const approveClosingRecord = async (prospectId) => {
                 referred_by_id: prospect.referred_by_id || null,
                 referred_by_type: prospect.referred_by_type || null,
                 referral_relationship: prospect.referral_relationship || null,
+                marital_status: prospect.marital_status || null,
+                children: prospect.children || null,
+                spouse_name: prospect.spouse_name || null,
                 approved_by: _state.cu?.id || null,
                 approved_at: new Date().toISOString(),
             });
@@ -768,6 +774,10 @@ const approveProspectConversion = async (prospectId) => {
         city: prospect.city || '',
         state: prospect.state || '',
         postal_code: prospect.postal_code || '',
+        // Family block (2026-10-14) — customers carries the same columns.
+        marital_status: prospect.marital_status || null,
+        children: prospect.children || null,
+        spouse_name: prospect.spouse_name || null,
         referred_by: prospect.referred_by || '',
         referred_by_id: prospect.referred_by_id || null,
         referred_by_type: prospect.referred_by_type || '',
