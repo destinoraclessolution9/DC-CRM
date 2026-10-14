@@ -4781,6 +4781,19 @@
             if (oldest !== undefined) _recentActivities.delete(oldest);
         }
     };
+    // Writes never went back into the pin-board / hot cache, so the next open
+    // of the same row in this tab showed (and re-saved) the pre-write copy.
+    // Every Minutes/photo write patches the cached copies in place.
+    const _patchActivityPin = (id, patch) => {
+        if (id == null || !patch) return;
+        const clean = {};
+        Object.keys(patch).forEach(k => { if (patch[k] !== undefined) clean[k] = patch[k]; });
+        const key = String(id);
+        for (const m of [_recentActivities, _state.hac, _calGridIndex]) {
+            const row = m && typeof m.get === 'function' ? m.get(key) : null;
+            if (row && typeof row === 'object') Object.assign(row, clean);
+        }
+    };
 
     // _calGridIndex — every activity row that was DRAWN on a calendar grid this
     // session (month / week / day). It exists to close a gap that surfaced as
@@ -6747,7 +6760,13 @@
 
     const openPostMeetupNotesModal = async (activityId, prospectId) => {
         await _ensureActivitiesChunk();
-        const activity = (await _lookupActivityRobust(activityId)) || {};
+        let activity = (await _lookupActivityRobust(activityId)) || {};
+        // The robust lookup returns this tab's PINNED copy, captured the first
+        // time the row was opened and never refreshed by later saves — reopening
+        // Minutes showed pre-save notes/photos (and Save wrote them back). Read
+        // the live row; keep the pinned copy only when RLS hides the row.
+        const _fresh = await AppDataStore.getByIdFull('activities', activityId);
+        if (_fresh) { activity = { ...activity, ..._fresh }; _patchActivityPin(activityId, _fresh); }
 
         // Fetch product/event data for the multi-select checkbox groups.
         const [products, bujishu, formula, events] = await Promise.all([
@@ -6773,6 +6792,9 @@
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Save', type: 'primary', action: `(async () => { await app.savePostMeetupNotes(${activityId}, ${prospectId}); })()` }
         ]);
+        // Existing discussion-paper thumbs live in the modal (outside the
+        // #content-viewport observer) → resolve their signed URLs explicitly.
+        try { window._resolveAttachmentImages && setTimeout(() => window._resolveAttachmentImages(), 0); } catch (_) { /* best-effort */ }
     };
 
     const savePostMeetupNotes = async (activityId, prospectId) => {
@@ -6786,22 +6808,19 @@
         const sb = window.supabase || window.supabaseClient;
 
         // ── Discussion paper photos ────────────────────────────────────────
-        // Upload any files selected in the Minutes photo picker before saving
-        // the text fields, then merge URLs into photo_urls on the same row.
-        const photoInput = document.getElementById('pmn-photo-files');
-        const photoFiles = photoInput?.files?.length ? Array.from(photoInput.files) : [];
+        // Upload every queued photo, then APPEND the URLs to the live row in
+        // one statement (AppDataStore.appendActivityPhotos). The old path wrote
+        // [photos-as-rendered + new] — and "as rendered" came from a stale
+        // pinned copy, so a second upload dropped the first.
+        const photoFiles = (window.app.getMinutesPendingPhotos || (() => {
+            const i = document.getElementById('pmn-photo-files');
+            return i?.files?.length ? Array.from(i.files) : [];
+        }))('pmn');
+        let _photoUrlsNow = null;
         if (photoFiles.length > 0) {
             if (sb && sb.storage) {
                 const _compress = window.app.compressImageFile || (f => Promise.resolve(f));
-                // Read existing photo_urls from the data attribute embedded in the
-                // modal DOM when it was rendered — avoids any cache/network dependency.
-                let existingUrls = [];
-                try {
-                    const section = document.getElementById('pmn-photo-section');
-                    existingUrls = JSON.parse(section?.dataset?.existing || '[]');
-                } catch (_) { /* intentional: malformed dataset → start from empty list */ existingUrls = []; }
-
-                UI.toast.success('Uploading photo(s)…');
+                UI.toast.success(`Uploading ${photoFiles.length} photo(s)…`);
                 const newUrls = [];
                 let uploadFailed = false;
                 for (const file of photoFiles) {
@@ -6823,13 +6842,20 @@
                         uploadFailed = true;
                     }
                 }
-                if (newUrls.length > 0) {
-                    updates.photo_urls = [...existingUrls, ...newUrls];
-                } else if (uploadFailed) {
-                    // Re-enable the Save button so the user can retry
+                if (uploadFailed && newUrls.length === 0) {
                     if (_saveBtn) { _saveBtn.disabled = false; _saveBtn.textContent = 'Save'; }
                     UI.toast.error('Photo upload failed — check your connection and try again. Notes were NOT saved.');
                     return;
+                }
+                if (uploadFailed) UI.toast.error(`${photoFiles.length - newUrls.length} photo(s) could not upload — the other ${newUrls.length} are saved. Add the missing ones again.`);
+                if (newUrls.length > 0) {
+                    const res = await AppDataStore.appendActivityPhotos(activityId, newUrls);
+                    if (!res.ok) {
+                        if (_saveBtn) { _saveBtn.disabled = false; _saveBtn.textContent = 'Save'; }
+                        UI.toast.error('Photos uploaded but could not be attached to this meet up — notes were NOT saved. Please try again.');
+                        return;
+                    }
+                    _photoUrlsNow = res.photo_urls;
                 }
             } else {
                 UI.toast.error('Supabase storage not available — photos not uploaded');
@@ -6840,9 +6866,16 @@
         // Use the authenticated Supabase client so RLS applies and errors
         // surface instead of silently falling back to localStorage.
         let writeOk = false;
+        let _minutesColMissing = false;
         if (sb) {
             try {
-                const { error } = await sb.from('activities').update(updates).eq('id', activityId);
+                let { error } = await sb.from('activities').update(updates).eq('id', activityId);
+                // meeting_minutes column not migrated yet → save everything else.
+                if (error && 'meeting_minutes' in updates && /meeting_minutes/.test(`${error.message || ''} ${error.details || ''}`)) {
+                    _minutesColMissing = true;
+                    delete updates.meeting_minutes;
+                    ({ error } = await sb.from('activities').update(updates).eq('id', activityId));
+                }
                 if (error) {
                     console.warn('savePostMeetupNotes update failed:', error);
                 } else {
@@ -6873,8 +6906,11 @@
             return;
         }
 
-        // Invalidate the activities cache so the accordion re-reads fresh data
+        // Invalidate the activities cache so the accordion re-reads fresh data,
+        // and refresh this tab's pinned copy so a reopen shows what was saved.
         AppDataStore.invalidateCache('activities');
+        _patchActivityPin(activityId, { ...updates, ...(_photoUrlsNow ? { photo_urls: _photoUrlsNow } : {}) });
+        if (_minutesColMissing) UI.toast.error('Background / Advisor / Reaction not saved yet — database update pending. Everything else was saved.');
 
         // ── Grade (set after the meeting) → prospect ───────────────────────
         // The grade picker writes prospects.manual_grade, NOT activities, so it's
@@ -6948,7 +6984,10 @@
     // prospect profile can surface it.
     const openAttendeePostEventModal = async (attendeeId, activityId, prospectId) => {
         await _ensureActivitiesChunk();
-        const attendee = await AppDataStore.getById('event_attendees', attendeeId);
+        // Live row first (cached copies can predate the last save → stale
+        // notes/photos re-saved over newer ones); cache only as a fallback.
+        const attendee = (await AppDataStore.getByIdFull('event_attendees', attendeeId))
+            || (await AppDataStore.getById('event_attendees', attendeeId));
         if (!attendee) { UI.toast.error('Attendee not found'); return; }
         const activity = (await _lookupActivityRobust(activityId)) || {};
 
@@ -6975,6 +7014,8 @@
             // photo-section's data-existing attribute is populated — otherwise a
             // re-save would wipe previously uploaded papers.
             photo_urls: Array.isArray(attendee.photo_urls) ? attendee.photo_urls : [],
+            // Per-person minutes — never inherit the parent event's.
+            meeting_minutes: attendee.meeting_minutes || null,
         };
 
         const attendeeName = attendee.entity_name || 'Attendee';
@@ -6983,6 +7024,7 @@
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Save', type: 'primary', action: `(async () => { await app.saveAttendeePostEventNotes(${attendeeId}, ${activityId}, ${prospectId}); })()` }
         ]);
+        try { window._resolveAttachmentImages && setTimeout(() => window._resolveAttachmentImages(), 0); } catch (_) { /* best-effort */ }
     };
 
     const saveAttendeePostEventNotes = async (attendeeId, activityId, prospectId) => {
@@ -7002,6 +7044,7 @@
             post_event_updated_at: new Date().toISOString(),
             post_event_updated_by: _state.cu?.id || null,
         };
+        if (fields.meeting_minutes !== undefined) updates.meeting_minutes = fields.meeting_minutes;
 
         const sb = window.supabase || window.supabaseClient;
 
@@ -7010,20 +7053,25 @@
         // these photos belong to THIS attendee — storing them on the shared
         // activity row would leak/overwrite across every attendee. Upload here
         // and merge into event_attendees.photo_urls. Mirrors savePostMeetupNotes.
-        const photoInput = document.getElementById('pmn-photo-files');
-        const photoFiles = photoInput?.files?.length ? Array.from(photoInput.files) : [];
+        const photoFiles = (window.app.getMinutesPendingPhotos || (() => {
+            const i = document.getElementById('pmn-photo-files');
+            return i?.files?.length ? Array.from(i.files) : [];
+        }))('pmn');
         if (photoFiles.length > 0) {
             if (sb && sb.storage) {
                 const _compress = window.app.compressImageFile || (f => Promise.resolve(f));
-                // Read existing photo_urls from the data attribute embedded in the
-                // modal DOM when it was rendered — avoids any cache/network dependency.
+                // Merge onto the LIVE row's photos (read right before the write),
+                // not the list rendered into the modal — that one can be stale.
                 let existingUrls = [];
                 try {
-                    const sec = document.getElementById('pmn-photo-section');
-                    existingUrls = JSON.parse(sec?.dataset?.existing || '[]');
-                } catch (_) { /* intentional: malformed dataset → start from empty list */ existingUrls = []; }
+                    const { data: _cur } = await sb.from('event_attendees').select('photo_urls').eq('id', attendeeId).maybeSingle();
+                    if (_cur && Array.isArray(_cur.photo_urls)) existingUrls = _cur.photo_urls;
+                    else existingUrls = JSON.parse(document.getElementById('pmn-photo-section')?.dataset?.existing || '[]');
+                } catch (_) { /* intentional: read failed → fall back to the rendered list */
+                    try { existingUrls = JSON.parse(document.getElementById('pmn-photo-section')?.dataset?.existing || '[]'); } catch (_e) { existingUrls = []; }
+                }
 
-                UI.toast.success('Uploading photo(s)…');
+                UI.toast.success(`Uploading ${photoFiles.length} photo(s)…`);
                 const newUrls = [];
                 let uploadFailed = false;
                 for (const file of photoFiles) {
@@ -7061,7 +7109,11 @@
         let writeOk = false;
         if (sb) {
             try {
-                const { error } = await sb.from('event_attendees').update(updates).eq('id', attendeeId);
+                let { error } = await sb.from('event_attendees').update(updates).eq('id', attendeeId);
+                if (error && 'meeting_minutes' in updates && /meeting_minutes/.test(`${error.message || ''} ${error.details || ''}`)) {
+                    delete updates.meeting_minutes; // column not migrated yet → save the rest
+                    ({ error } = await sb.from('event_attendees').update(updates).eq('id', attendeeId));
+                }
                 if (error) console.warn('saveAttendeePostEventNotes update failed:', error);
                 else writeOk = true;
             } catch (e) {
@@ -7275,7 +7327,8 @@
         const includeWithoutNotes = opts.includeWithoutNotes === true;
         const wantType = opts.attendeeType || 'prospect';
         const _hasNotes = (a) => !!(a.note_key_points || a.note_needs || a.note_pain_points ||
-            a.opportunity_potential || a.next_action || a.summary);
+            a.opportunity_potential || a.next_action || a.summary ||
+            (a.meeting_minutes && (a.meeting_minutes.background || a.meeting_minutes.advisor || a.meeting_minutes.reaction)));
         const _matchesProspect = (a) =>
             String(a.entity_id || a.attendee_id) === String(prospectId) &&
             (a.attendee_type || 'prospect') === wantType &&
@@ -7348,6 +7401,7 @@
                 // Per-attendee discussion papers — surfaced so Meet Up History
                 // and the events tab can render a photo button for this note.
                 photo_urls: Array.isArray(att.photo_urls) ? att.photo_urls : [],
+                meeting_minutes: att.meeting_minutes || null,
             };
         });
     };
@@ -7763,6 +7817,7 @@
         serializeEventSelectToText,
         openPostMeetupNotesModal,
         _lookupActivityRobust,
+        _patchActivityPin,
         savePostMeetupNotes,
         openAttendeePostEventModal,
         saveAttendeePostEventNotes,

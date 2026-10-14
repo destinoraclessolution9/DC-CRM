@@ -2612,16 +2612,28 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         // getAll() here. This is a tiny 2-column query filtered to one prospect.
         // String(id) keys: attendee rows use 'att'-prefixed STRING ids and get
         // their photo_urls from event_attendees, so they can never collide.
+        // Same fresh read also carries the minutes (meeting_minutes + the note
+        // columns) so the "Before you meet" brief never shows a stale copy.
+        // Falls back to the 2-column read until the meeting_minutes column exists.
         const _sb = window.supabase || window.supabaseClient;
-        const photoMap = {};
+        const freshMap = {};
         if (_sb) {
+            const _cols = 'id,photo_urls,meeting_minutes,note_key_points,note_needs,note_pain_points,next_action,opportunity_potential,outcome';
             try {
-                const { data: _pd } = await _sb.from('activities').select('id,photo_urls').eq('prospect_id', prospectId);
-                if (_pd) _pd.forEach(r => { if (r.photo_urls?.length) photoMap[String(r.id)] = r.photo_urls; });
-            } catch (_) { /* intentional: optional photo_urls enrichment — activities still render without it */ }
+                let { data: _pd, error: _pe } = await _sb.from('activities').select(_cols).eq('prospect_id', prospectId);
+                if (_pe) ({ data: _pd } = await _sb.from('activities').select('id,photo_urls').eq('prospect_id', prospectId));
+                if (_pd) _pd.forEach(r => { freshMap[String(r.id)] = r; });
+            } catch (_) { /* intentional: optional enrichment — activities still render without it */ }
         }
-        meetups.forEach(a => { if (photoMap[String(a.id)]) a.photo_urls = photoMap[String(a.id)]; });
-        ownEvents.forEach(a => { if (photoMap[String(a.id)]) a.photo_urls = photoMap[String(a.id)]; });
+        const _enrich = (a) => {
+            const r = freshMap[String(a.id)];
+            if (!r) return;
+            if (r.photo_urls?.length) a.photo_urls = r.photo_urls;
+            ['meeting_minutes', 'note_key_points', 'note_needs', 'note_pain_points', 'next_action', 'opportunity_potential', 'outcome']
+                .forEach(k => { if (r[k] != null && r[k] !== '') a[k] = r[k]; });
+        };
+        meetups.forEach(_enrich);
+        ownEvents.forEach(_enrich);
 
         // Owner-wins dedup: drop attendee rows whose parent activity already
         // renders as an own row (the prospect both hosted and attended).
@@ -2680,21 +2692,39 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         const _attStatus = (a) => a.attendance_status === 'No Show' ? 'no show'
             : (a.attended || a.attendance_status === 'Attended') ? 'attended'
             : 'registered';
+        const _mm = (a) => (a && a.meeting_minutes && typeof a.meeting_minutes === 'object') ? a.meeting_minutes : {};
+        const _muid = (a) => `mu-${String(a.id).replace(/[^a-zA-Z0-9]/g, '')}`;
+        const _OUTCOME_LBL = { positive: '👍 Positive — moving forward', neutral: '😐 Neutral', negative: '👎 Negative — cooled off', not_interested: '🚫 Not interested' };
+        // Discussion-paper thumbnails inline, so the papers can be read before
+        // the next meeting without opening the gallery.
+        const _photoStrip = (a, viewCall) => {
+            const urls = Array.isArray(a.photo_urls) ? a.photo_urls : [];
+            if (!urls.length) return '';
+            return `<div style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 8px;">${urls.map(u => `<img loading="lazy" data-attach-src="${escapeHtml(String(u))}" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" alt="Discussion paper" style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-200);cursor:zoom-in;background:var(--gray-100);" onclick="event.stopPropagation();window._openAttachment && window._openAttachment('${UI.escJsAttr(String(u))}')">`).join('')}
+                ${viewCall ? `<button type="button" class="btn btn-sm secondary" style="align-self:center;" onclick="event.stopPropagation();${viewCall}"><i class="fas fa-images"></i> All (${urls.length})</button>` : ''}</div>`;
+        };
         const _fieldsHtml = (a) => {
+            const m = _mm(a);
             const fields = [
+                { lbl: 'Meeting Result',          val: _OUTCOME_LBL[a.outcome] || '' },
+                { lbl: 'Customer Background',     val: m.background },
                 { lbl: 'Core Problem',            val: a.core_problem || a.summary },
                 { lbl: 'Key Points Discussed',    val: a.note_key_points },
                 { lbl: 'Customer Needs',          val: a.note_needs },
                 { lbl: 'Pain Points',             val: a.note_pain_points },
+                { lbl: 'Advisor Observations',    val: m.advisor },
+                { lbl: 'Customer Reaction',       val: m.reaction },
                 { lbl: 'Opportunity / Potential', val: a.opportunity_potential },
                 { lbl: 'Next Steps',              val: a.note_next_steps,  action: true },
                 { lbl: 'Next Action',             val: a.next_action,      action: true },
                 { lbl: 'Outcome',                 val: a.note_outcome },
             ].filter(f => f.val);
-            if (!fields.length) return '';
+            // Core Problem mirrors Key Points (summary = key points) — skip the duplicate.
+            const dedup = fields.filter(f => !(f.lbl === 'Core Problem' && f.val === a.note_key_points));
+            if (!dedup.length) return '';
             return `<div class="meet-summary">
                 <div class="meet-summary-hdr"><i class="fas fa-file-alt"></i>&nbsp; Discussion Notes</div>
-                ${fields.map(f => `<div class="msf"><span class="msf-lbl">${f.lbl}</span><p class="msf-txt${f.action ? ' action' : ''}">${_esc(f.val)}</p></div>`).join('')}
+                ${dedup.map(f => `<div class="msf"><span class="msf-lbl">${f.lbl}</span><p class="msf-txt${f.action ? ' action' : ''}">${_esc(f.val)}</p></div>`).join('')}
             </div>`;
         };
         const _peopleHtml = (a) => `
@@ -2704,7 +2734,10 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 return `${icon} ${escapeHtml(c.name || '')}`;
             }).join(' &nbsp; ')}</div></div>` : ''}`;
         const _eventFieldsHtml = (a) => `
+            ${_mm(a).background ? `<div class="meet-section"><div class="meet-lbl">Customer Background</div><div class="meet-txt" style="white-space:pre-wrap;">${escapeHtml(_mm(a).background)}</div></div>` : ''}
             ${a.summary || a.note_key_points ? `<div class="meet-section"><div class="meet-lbl">Key Points</div><div class="meet-txt">${escapeHtml(a.summary || a.note_key_points)}</div></div>` : ''}
+            ${_mm(a).advisor ? `<div class="meet-section"><div class="meet-lbl">Advisor Observations</div><div class="meet-txt" style="white-space:pre-wrap;">${escapeHtml(_mm(a).advisor)}</div></div>` : ''}
+            ${_mm(a).reaction ? `<div class="meet-section"><div class="meet-lbl">Customer Reaction</div><div class="meet-txt" style="white-space:pre-wrap;">${escapeHtml(_mm(a).reaction)}</div></div>` : ''}
             ${a.note_needs ? `<div class="meet-section"><div class="meet-lbl">Needs</div><div class="meet-txt">${escapeHtml(a.note_needs)}</div></div>` : ''}
             ${a.note_pain_points ? `<div class="meet-section"><div class="meet-lbl">Pain Points</div><div class="meet-txt">${escapeHtml(a.note_pain_points)}</div></div>` : ''}
             ${a.opportunity_potential ? `<div class="meet-section"><div class="meet-lbl">Opportunity / Potential</div><div class="meet-txt">${escapeHtml(a.opportunity_potential)}</div></div>` : ''}
@@ -2718,6 +2751,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             <div class="mu-close-sub">
                 <div class="meet-lbl" style="color:var(--primary);"><i class="fas fa-handshake"></i> Event Closing</div>
                 ${_fieldsHtml(c)}
+                ${_photoStrip(c, `app.viewActivityPhotos(${c.id})`)}
                 <div class="meet-actions">
                     ${(c.photo_urls && c.photo_urls.length > 0) ? `<button class="btn btn-sm secondary" onclick="event.stopPropagation();app.viewActivityPhotos(${c.id})"><i class="fas fa-images"></i> Photos (${c.photo_urls.length})</button>` : `<button class="btn btn-sm secondary" onclick="event.stopPropagation();app.attachActivityPhoto(${c.id})"><i class="fas fa-camera"></i> Attach Photo</button>`}
                     <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.openPostMeetupNotesModal(${c.id}, ${prospect.id})"><i class="fas fa-sticky-note"></i> Minutes</button>
@@ -2755,6 +2789,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                         </div>
                     </div>
                     ${_eventFieldsHtml(a)}
+                    ${_photoStrip(a, `app.viewAttendeePhotos(${a._attendeeRowId})`)}
                     <div class="meet-actions">
                         <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.openAttendeePostEventModal(${a._attendeeRowId}, ${a._parentActivityId}, ${prospect.id})"><i class="fas fa-sticky-note"></i> Post Event Notes</button>
                         ${photoCount > 0 ? `<button class="btn btn-sm secondary" style="color:var(--primary);border-color:var(--primary);" onclick="event.stopPropagation();app.viewAttendeePhotos(${a._attendeeRowId})"><i class="fas fa-images"></i> Photos (${photoCount})</button>` : ''}
@@ -2765,6 +2800,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 // Own event/meeting/training/site row.
                 detail = `
                     ${_eventFieldsHtml(a)}
+                    ${_photoStrip(a, `app.viewActivityPhotos(${a.id})`)}
                     <div class="meet-actions">
                         <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.openPostMeetupNotesModal(${a.id}, ${prospect.id})"><i class="fas fa-sticky-note"></i> Post Event Notes</button>
                         ${photoCount > 0 ? `<button class="btn btn-sm secondary" style="color:var(--primary);border-color:var(--primary);" onclick="event.stopPropagation();app.viewActivityPhotos(${a.id})"><i class="fas fa-images"></i> Photos (${photoCount})</button>` : ''}
@@ -2776,6 +2812,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 detail = `
                     ${_peopleHtml(a)}
                     ${fieldsBlock}
+                    ${_photoStrip(a, `app.viewActivityPhotos(${a.id})`)}
                     <div class="meet-actions">
                         ${photoCount > 0 ? `<button class="btn btn-sm secondary" onclick="event.stopPropagation();app.viewActivityPhotos(${a.id})"><i class="fas fa-images"></i> Photos (${photoCount})</button>` : `<button class="btn btn-sm secondary" onclick="event.stopPropagation();app.attachActivityPhoto(${a.id})"><i class="fas fa-camera"></i> Attach Photo</button>`}
                         <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.openPostMeetupNotesModal(${a.id}, ${prospect.id})"><i class="fas fa-sticky-note"></i> Minutes</button>
@@ -2784,7 +2821,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                     </div>`;
             }
             return `
-                <div class="mu-item" data-kind="${kind}">
+                <div class="mu-item" data-kind="${kind}" data-muid="${_muid(a)}">
                     <button type="button" class="mu-row" aria-expanded="false" onclick="this.closest('.mu-item').classList.toggle('open');this.setAttribute('aria-expanded',this.closest('.mu-item').classList.contains('open'))">
                         <i class="fas fa-chevron-right mu-caret"></i>
                         <span class="mu-date">${escapeHtml(a.activity_date || '—')}</span>
@@ -2794,6 +2831,44 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                     </button>
                     <div class="mu-detail">${detail}</div>
                 </div>`;
+        };
+
+        // ── "Before you meet" brief ─────────────────────────────────────────
+        // The latest meeting that has minutes/notes/photos, plus the most recent
+        // customer background (it rarely changes between meetings) — so an agent
+        // can read what was discussed right before the next meet up.
+        const _hasContent = (a) => {
+            const m = _mm(a);
+            return !!(m.background || m.advisor || m.reaction || a.note_key_points || a.note_needs ||
+                a.note_pain_points || a.next_action || (Array.isArray(a.photo_urls) && a.photo_urls.length));
+        };
+        const _briefHtml = () => {
+            const last = rows.find(_hasContent);
+            if (!last) return '';
+            const bgRow = rows.find(a => _mm(a).background);
+            const m = _mm(last);
+            const lastLabel = last.activity_type === 'EVENT_CLOSING' ? 'Event Closing' : (typeLabel[last.activity_type] || last.activity_type || 'Meet up');
+            const item = (lbl, val, action) => val ? `<div class="msf"><span class="msf-lbl">${lbl}</span><p class="msf-txt${action ? ' action' : ''}">${_esc(val)}</p></div>` : '';
+            const viewCall = last._isAttendeeNote ? `app.viewAttendeePhotos(${last._attendeeRowId})` : `app.viewActivityPhotos(${last.id})`;
+            return `
+                <details class="mu-brief" open style="border:1px solid var(--gray-200);border-left:3px solid var(--primary);border-radius:10px;background:var(--gray-50);padding:8px 12px;margin-bottom:10px;">
+                    <summary style="cursor:pointer;font-weight:700;font-size:13px;color:var(--gray-800);list-style:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                        <i class="fas fa-book-open" style="color:var(--primary);"></i> Before you meet · 见面前回顾
+                        <span style="font-weight:500;font-size:11.5px;color:var(--gray-500);">last: ${escapeHtml(last.activity_date || '—')} · ${escapeHtml(lastLabel)}${last.activity_title ? ` · ${escapeHtml(last.activity_title)}` : ''}</span>
+                    </summary>
+                    <div style="margin-top:8px;">
+                        ${bgRow ? item(`Customer Background${bgRow !== last ? ` <span style="text-transform:none;color:var(--gray-400);font-weight:500;">(from ${escapeHtml(bgRow.activity_date || '')})</span>` : ''}`, _mm(bgRow).background) : ''}
+                        ${item('Meeting Result', _OUTCOME_LBL[last.outcome] || '')}
+                        ${item('Key Points', last.note_key_points)}
+                        ${item('Customer Needs', last.note_needs)}
+                        ${item('Pain Points', last.note_pain_points)}
+                        ${item('Advisor Observations', m.advisor)}
+                        ${item('Customer Reaction', m.reaction)}
+                        ${item('Next Action', last.next_action, true)}
+                        ${_photoStrip(last, viewCall)}
+                        <button type="button" class="btn btn-sm secondary" onclick="(function(b){var w=b.closest('.mu-wrap');if(!w)return;w.dataset.muf='all';var it=w.querySelector('.mu-item[data-muid=&quot;${_muid(last)}&quot;]');if(it){it.classList.add('open');it.scrollIntoView({behavior:'smooth',block:'nearest'});}})(this)"><i class="fas fa-arrow-down"></i> Open this meet up</button>
+                    </div>
+                </details>`;
         };
 
         const nMeet = rows.filter(a => _kind(a) === 'meetup').length;
@@ -2811,6 +2886,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                         <button class="btn primary btn-sm" onclick="app.openActivityModal('', ${prospect.id})"><i class="fas fa-plus"></i> Add</button>
                     </div>
                 </div>
+                ${_briefHtml()}
                 ${rows.length > 0
                     ? `<div class="mu-list">${rows.map(_rowHtml).join('')}</div>`
                     : '<p style="text-align:center;padding:20px;color:var(--gray-400);">No meet ups or events recorded yet.</p>'}
@@ -2825,6 +2901,9 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             html += '</tbody></table></div>';
         }
         container.innerHTML = html;
+        // Inline discussion-paper thumbs → signed URLs (also when this renders
+        // inside the Meet-Up History modal, outside #content-viewport).
+        try { window._resolveAttachmentImages && setTimeout(() => window._resolveAttachmentImages(), 0); } catch (_) { /* best-effort */ }
     }
     else if (tab === 'notes') {
         const notes = await AppDataStore.query('notes', { prospect_id: prospectId });
@@ -4163,7 +4242,10 @@ const attachActivityPhoto = async (activityId) => {
     const columnOk = await checkPhotoUrlsColumn();
     if (!columnOk) { showPhotoUrlsMigrationModal(); return; }
 
-    const existing = Array.isArray(activity.photo_urls) ? activity.photo_urls : [];
+    // Live list — the robust lookup can return this tab's stale pinned copy.
+    const _fresh = await AppDataStore.getByIdFull('activities', activityId);
+    const existing = Array.isArray(_fresh?.photo_urls) ? _fresh.photo_urls
+        : (Array.isArray(activity.photo_urls) ? activity.photo_urls : []);
     const content = `
         <div class="form-group">
             <label>Select one or more photos</label>
@@ -4259,7 +4341,6 @@ const saveActivityPhoto = async (activityId) => {
 
     const activity = await _lookupActivityRobust(activityId);
     if (!activity) { UI.toast.error('Meet up record not found'); return; }
-    const existing = Array.isArray(activity.photo_urls) ? activity.photo_urls : [];
     const newUrls = [];
 
     const sb = window.supabase || window.supabaseClient;
@@ -4284,8 +4365,10 @@ const saveActivityPhoto = async (activityId) => {
 
         if (newUrls.length === 0) { UI.toast.error('No photos were uploaded'); return; }
 
-        const updated = [...existing, ...newUrls];
-        await AppDataStore.update('activities', activityId, { photo_urls: updated });
+        // Atomic append onto the live row — `[...cachedExisting, ...new]` dropped
+        // earlier uploads whenever the cached copy predated them.
+        const res = await AppDataStore.appendActivityPhotos(activityId, newUrls);
+        if (!res.ok) throw (res.error || new Error('Could not attach the photos to this meet up'));
 
         UI.hideModal();
         UI.toast.success(`${newUrls.length} photo(s) uploaded`);
@@ -4337,7 +4420,10 @@ const removeActivityPhoto = async (activityId, photoTarget, source) => {
         // sees via the hot RPC but can't SELECT directly under RLS.
         const activity = await _lookupActivityRobust(activityId);
         if (!activity) return { updated: [], skipped: true };
-        const existing = Array.isArray(activity.photo_urls) ? activity.photo_urls : [];
+        // Live list (the robust copy can be a stale pin from earlier this session).
+        const _fresh = await AppDataStore.getByIdFull('activities', activityId);
+        const existing = Array.isArray(_fresh?.photo_urls) ? _fresh.photo_urls
+            : (Array.isArray(activity.photo_urls) ? activity.photo_urls : []);
 
         // Resolve target → URL string regardless of how the caller addressed
         // the photo. Legacy numeric callers use the freshly-fetched array,
@@ -4350,12 +4436,15 @@ const removeActivityPhoto = async (activityId, photoTarget, source) => {
             targetUrl = String(photoTarget);
         }
 
-        const updated = existing.filter(u => u !== targetUrl);
+        let updated = existing.filter(u => u !== targetUrl);
         // If the URL is already gone (an earlier serialized remove won the
         // race), skip the DB round-trip — nothing to update.
         if (updated.length !== existing.length) {
-            await AppDataStore.update('activities', activityId, { photo_urls: updated });
-            AppDataStore.invalidateCache('activities');
+            // Server-side removal of just this URL — never writes back a list
+            // that could be missing photos another device added meanwhile.
+            const res = await AppDataStore.removeActivityPhotoUrl(activityId, targetUrl);
+            if (!res.ok) { UI.toast.error('Could not remove the photo — please try again'); return { updated: existing, skipped: true }; }
+            updated = Array.isArray(res.photo_urls) ? res.photo_urls : updated;
         }
         return { activity, updated, skipped: false };
     });

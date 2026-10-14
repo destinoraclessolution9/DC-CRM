@@ -2271,6 +2271,55 @@ class DataStore {
         }
     }
 
+    // ── Meet-up photos (activities.photo_urls) — never read-modify-write a
+    // cached copy. The UI's per-tab pinned activity rows are not refreshed after
+    // a write, so `[...cachedPhotos, ...new]` silently dropped the earlier
+    // upload on the second save. These go through the append/remove RPCs
+    // (one UPDATE against the live row — migrations/meeting_minutes_and_photo_
+    // append_2026-10-14.sql); if the RPC isn't deployed yet they fall back to a
+    // FRESH select right before the write. Returns { ok, photo_urls, error }.
+    async appendActivityPhotos(activityId, urls) {
+        const add = (urls || []).filter(Boolean);
+        if (!add.length) return { ok: true, photo_urls: null };
+        return this._activityPhotoWrite(activityId, 'append_activity_photos', { p_activity_id: Number(activityId), p_urls: add },
+            (cur) => [...cur, ...add.filter(u => !cur.includes(u))]);
+    }
+
+    async removeActivityPhotoUrl(activityId, url) {
+        return this._activityPhotoWrite(activityId, 'remove_activity_photo', { p_activity_id: Number(activityId), p_url: String(url) },
+            (cur) => cur.filter(u => u !== String(url)));
+    }
+
+    async _activityPhotoWrite(activityId, rpcName, rpcArgs, transform) {
+        const sb = this._readClient();
+        let photos = null;
+        try {
+            const { data, error } = await sb.rpc(rpcName, rpcArgs);
+            if (error) throw error;
+            if (!Array.isArray(data)) return { ok: false, error: new Error('Meet up record not found or not editable') };
+            photos = data;
+        } catch (e) {
+            const missing = e && (e.code === 'PGRST202' || e.code === '42883' || /could not find the function|does not exist/i.test(e.message || ''));
+            if (!missing) { console.warn(`[${rpcName}] failed`, e); return { ok: false, error: e }; }
+            try {
+                const { data: row, error: rErr } = await sb.from('activities').select('photo_urls').eq('id', activityId).maybeSingle();
+                if (rErr) throw rErr;
+                if (!row) return { ok: false, error: new Error('Meet up record not found or not editable') };
+                const next = transform(Array.isArray(row.photo_urls) ? row.photo_urls : []);
+                const { data: upd, error: uErr } = await sb.from('activities').update({ photo_urls: next }).eq('id', activityId).select('photo_urls');
+                if (uErr) throw uErr;
+                if (!upd || !upd.length) return { ok: false, error: new Error('Meet up record not editable') };
+                photos = upd[0].photo_urls || next;
+            } catch (e2) {
+                console.warn(`[${rpcName}] fallback failed`, e2);
+                return { ok: false, error: e2 };
+            }
+        }
+        try { this.invalidateCache('activities'); } catch (_) { /* best-effort */ }
+        try { window.app && window.app._patchActivityPin && window.app._patchActivityPin(activityId, { photo_urls: photos }); } catch (_) { /* best-effort */ }
+        return { ok: true, photo_urls: photos };
+    }
+
     _extractUnknownCol(e) { return window._dataHelpers.extractUnknownCol(e); }
 
     _isSchemaError(e) { return window._dataHelpers.isSchemaError(e); }

@@ -215,7 +215,166 @@
         return { countsFor };
     }
 
-    const api = { classifyQueueError, extractUnknownCol, isSchemaError, isAbortError, snapshotsDiffer, buildReferralCounts };
+    // ── Meeting minutes (ChatGPT paste) ─────────────────────────────────────
+    // Agents write their minutes in ChatGPT with a fixed 8-section prompt and
+    // paste the result into the Minutes form. parseMeetingMinutes splits it by
+    // section header; matchMinutesItems maps free-text bullets onto the form's
+    // checkbox lists. Both are pure — the DOM side lives in the activities chunk.
+    // Tolerant of: `1.` / `1、` / `###` / `**bold**` headers, `Header: value` on
+    // one line, `-` `*` `•` bullets, Chinese/English/mixed, missing sections,
+    // and the template's own placeholder lines ("[Action 1]").
+    const MINUTES_SECTIONS = [
+        { key: 'outcome',       list: false, kw: ['会面结果', '会议结果', '见面结果', 'meeting result', 'meeting outcome', 'outcome', 'result'] },
+        { key: 'background',    list: false, kw: ['客户背景', 'customer background', 'client background', 'background'] },
+        { key: 'keyPoints',     list: false, kw: ['会面重点', '会议重点', '见面重点', 'meeting key points', 'key points discussed', 'key points'] },
+        { key: 'advisor',       list: false, kw: ['顾问观察与建议', '顾问观察', '顾问建议', 'advisor observations & suggestions', 'advisor observations and suggestions', 'advisor observations', 'advisor observation', 'advisor suggestions', 'advisor'] },
+        { key: 'reaction',      list: false, kw: ['客户反应与dc记录', '客户反应', 'dc记录', 'customer reaction & dc records', 'customer reaction and dc records', 'customer reaction', 'dc records', 'reaction'] },
+        { key: 'nextActions',   list: true,  kw: ['后续跟进与下一步行动', '后续跟进', '下一步行动', '下一步', 'next actions', 'next action', 'next steps', 'follow up', 'follow-up'] },
+        { key: 'opportunities', list: true,  kw: ['潜在机会与产品', '潜在机会', 'potential & opportunities', 'potential and opportunities', 'potential & opportunity', 'opportunities', 'opportunity', 'products'] },
+        { key: 'grade',         list: false, kw: ['客户评级', '评级', '等级', 'grade'] },
+    ];
+    const _HDR_DECOR = /^\s*(?:#{1,6}\s*|\*\*|【|(?:\d{1,2}|[一二三四五六七八九十])\s*[.、)）]\s*)/;
+    const _BULLET = /^\s*(?:[-•·▪●◦]|\*(?!\*))\s*/;
+    const _PLACEHOLDER = /^\s*(?:\[[^\]]*\]|(?:action|product|item)\s*\d+|-{3,}.*|.*output format (?:start|end).*)\s*$/i;
+    const _stripDecor = (s) => String(s)
+        .replace(/^\s*#{1,6}\s*/, '').replace(/\*\*/g, '').replace(/[【】]/g, '')
+        .replace(/^\s*(?:\d{1,2}|[一二三四五六七八九十])\s*[.、)）]\s*/, '')
+        .trim();
+
+    // Returns { key, rest } when the line is a section header, else null.
+    function _minutesHeader(line, seen) {
+        if (_BULLET.test(line) && !/^\s*\*\*/.test(line)) return null;
+        const decorated = _HDR_DECOR.test(line);
+        const body = _stripDecor(line);
+        if (!body) return null;
+        const ci = body.search(/[:：]/);
+        const head = (ci >= 0 ? body.slice(0, ci) : body).trim();
+        const rest = ci >= 0 ? body.slice(ci + 1).trim() : '';
+        if (!head || head.length > 70) return null;
+        const lower = head.toLowerCase();
+        for (const sec of MINUTES_SECTIONS) {
+            const kws = sec.kw.slice().sort((a, b) => b.length - a.length);
+            const hit = kws.find(k => lower.includes(k));
+            if (!hit) continue;
+            // Residue = what's left after removing the section's own words and the
+            // bilingual "(English name)" — a real header is (almost) nothing else.
+            let residue = lower.replace(/[(（][^)）]*[)）]/g, '');
+            for (const k of kws) residue = residue.split(k).join('');
+            residue = residue.replace(/[\s与和及&/,，、.。:：\-–—]|and/g, '');
+            if (!decorated && !lower.startsWith(hit) && !lower.replace(/[(（][^)）]*[)）]/g, '').trim().endsWith(hit)) return null;
+            if (residue.length > (decorated ? 6 : 1)) return null;
+            if (seen.has(sec.key)) return null; // second "header" of a seen section = content
+            return { key: sec.key, rest };
+        }
+        return null;
+    }
+
+    function _minutesGrade(text) {
+        const s = String(text || '').trim();
+        const up = s.match(/(?:^|[^A-Za-z])([ABCDF])(?![A-Za-z])/);
+        if (up) return up[1];
+        const lone = s.match(/^[\s\-•*]*([abcdf])[\s.。]*$/);
+        return lone ? lone[1].toUpperCase() : null;
+    }
+
+    // Order matters: "not interested" contains "interested"; 没兴趣 before 兴趣.
+    const _OUTCOME_SYNONYMS = [
+        ['not_interested', /not[\s_-]*interested|没兴趣|没有兴趣|不感兴趣|无兴趣|不想要|拒绝|停止|🚫/i],
+        ['negative', /negative|cooled?|负面|消极|冷淡|不好|👎/i],
+        ['neutral', /neutral|中立|中性|一般|普通|还好|😐/i],
+        ['positive', /positive|moving forward|正面|积极|良好|顺利|很好|有兴趣|感兴趣|👍/i],
+    ];
+    function _minutesOutcome(text) {
+        const s = String(text || '');
+        for (const [val, re] of _OUTCOME_SYNONYMS) if (re.test(s)) return val;
+        return null;
+    }
+
+    function parseMeetingMinutes(text) {
+        const out = { sections: {}, found: [], grade: null, outcome: null, recognized: false };
+        const lines = String(text || '').replace(/\r\n?/g, '\n').split('\n');
+        const seen = new Set();
+        const buf = {};
+        let cur = null;
+        for (const raw of lines) {
+            if (!raw.trim()) continue;
+            const hdr = _minutesHeader(raw, seen);
+            if (hdr) {
+                cur = hdr.key;
+                seen.add(cur);
+                buf[cur] = [];
+                if (hdr.rest && !_PLACEHOLDER.test(hdr.rest)) buf[cur].push({ text: hdr.rest, bullet: false });
+                continue;
+            }
+            if (!cur) continue; // preamble before the first header
+            if (_PLACEHOLDER.test(raw.replace(_BULLET, ''))) continue;
+            const bullet = _BULLET.test(raw) || /^\s*\d{1,2}[.)、]\s+/.test(raw);
+            const t = raw.replace(_BULLET, '').replace(/^\s*\d{1,2}[.)、]\s+/, '').replace(/\*\*/g, '').trim();
+            if (!t || _PLACEHOLDER.test(t)) continue;
+            buf[cur].push({ text: t, bullet });
+        }
+        for (const sec of MINUTES_SECTIONS) {
+            const items = buf[sec.key];
+            if (!items) continue;
+            out.recognized = true;
+            if (!items.length) continue;
+            if (sec.list) {
+                out.sections[sec.key] = items.map(i => i.text);
+            } else {
+                const multi = items.length > 1;
+                out.sections[sec.key] = items.map(i => (multi && i.bullet ? '• ' : '') + i.text).join('\n');
+            }
+            out.found.push(sec.key);
+        }
+        if (out.sections.grade) out.grade = _minutesGrade(out.sections.grade);
+        if (out.sections.outcome) out.outcome = _minutesOutcome(out.sections.outcome);
+        return out;
+    }
+
+    // Map free-text bullets onto a checkbox list (product names / next-action
+    // categories). Exact containment first (longest name wins, so 汇集简易-Condo
+    // beats 汇集-简易), then a unique distinctive-run match (CJK ≥2 chars or a
+    // Latin phrase ≥5 chars), else the bullet is a leftover for the remarks box.
+    // A matched bullet that carries extra detail (a date, a reason) is ALSO
+    // returned in `extra` so the detail is kept in remarks, never lost.
+    const _mNorm = (s) => String(s || '').normalize('NFKC').toLowerCase()
+        .replace(/[\s\-–—_·•.,，。、:：;；!?！？()（）[\]【】'"“”‘’/\\|+*#~]/g, '');
+    const _mRuns = (s) => {
+        const runs = [];
+        const str = String(s || '').normalize('NFKC').toLowerCase();
+        (str.match(/[㐀-鿿]{2,}/g) || []).forEach(r => runs.push(r));
+        (str.match(/[a-z0-9][a-z0-9 &]*[a-z0-9]/g) || []).forEach(r => { const n = _mNorm(r); if (n.length >= 5) runs.push(n); });
+        return runs;
+    };
+    function matchMinutesItems(items, candidates) {
+        const cands = Array.from(new Set((candidates || []).filter(Boolean).map(String)))
+            .map(name => ({ name, n: _mNorm(name), runs: _mRuns(name) }))
+            .filter(c => c.n.length >= 2);
+        const matched = [];
+        const leftovers = [];
+        const extra = [];
+        for (const item of (items || [])) {
+            const n = _mNorm(item);
+            if (!n) continue;
+            let hits = cands.filter(c => n.includes(c.n));
+            if (hits.length > 1) hits = hits.filter(h => !hits.some(o => o !== h && o.n.includes(h.n)));
+            if (!hits.length && n.length >= 2) {
+                const rev = cands.filter(c => c.n.includes(n));
+                if (rev.length === 1) hits = rev;
+            }
+            if (!hits.length) {
+                const byRun = cands.filter(c => c.runs.some(r => n.includes(r)));
+                if (byRun.length === 1) hits = byRun;
+            }
+            if (!hits.length) { leftovers.push(item); continue; }
+            hits.forEach(h => { if (!matched.includes(h.name)) matched.push(h.name); });
+            const longest = Math.max(...hits.map(h => h.n.length));
+            if (n.length - longest >= 2) extra.push(item);
+        }
+        return { matched, leftovers, extra };
+    }
+
+    const api = { classifyQueueError, extractUnknownCol, isSchemaError, isAbortError, snapshotsDiffer, buildReferralCounts, parseMeetingMinutes, matchMinutesItems };
     // Browser global (loaded before data.js). Also export for Node tests.
     if (typeof window !== 'undefined') window._dataHelpers = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

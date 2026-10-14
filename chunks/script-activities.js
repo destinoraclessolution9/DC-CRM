@@ -1347,6 +1347,269 @@
     };
 
     // ═══════════════════════════════════════════════════════════════════════
+    // MINUTES PASTE (ChatGPT → form) + multi-photo queue for the notes block.
+    // Agents write minutes in ChatGPT with MINUTES_PROMPT, paste the answer,
+    // and applyPastedMinutes routes each section to its field. Owner rule:
+    // text already in a field is never overwritten silently — the result panel
+    // offers "Add below" / "Replace". Checkbox lists only ever ADD ticks.
+    // ═══════════════════════════════════════════════════════════════════════
+    const _minutesCtx = new Map();            // prefix → { existing, pending }
+    const _minutesPendingPhotos = new Map();  // prefix → File[] (queued until Save)
+    const _minutesThumbUrls = new Map();      // prefix → objectURLs to revoke
+
+    const MINUTES_PROMPT = `You are the DC Team's Meeting Minutes Assistant. I will give you messy raw meeting notes (Chinese, English or mixed). Organise them into the standard "DC Meeting Minutes".
+
+Rules:
+1. Fix speech-to-text errors and organise the logic, but DO NOT change the meaning.
+2. DO NOT invent information, analyse fortune, or add conclusions that are not in my notes.
+3. If a section is not mentioned, keep its header and leave it empty (do not write "No data").
+4. Keep customer facts, advisor observations and next actions separate.
+5. Next Actions and Products: ONE item per line, using the exact class / event / product name (e.g. 个人风水基础课, 博物馆, 简易 Simple Plan).
+6. Grade: exactly one letter — A (closing soon), B (has potential, needs time), C (50/50), D (far), F (give up).
+7. Meeting Result: exactly one of — Positive / Neutral / Negative / Not interested.
+8. Output EXACTLY the format below. No text before or after it.
+
+1. 客户背景 (Customer Background)
+-
+2. 会面重点 (Meeting Key Points)
+-
+3. 顾问观察与建议 (Advisor Observations & Suggestions)
+-
+4. 客户反应与DC记录 (Customer Reaction & DC Records)
+-
+5. 后续跟进与下一步行动 (Next Actions)
+-
+6. 潜在机会与产品 (Potential & Opportunities)
+-
+7. 客户评级 (Grade)
+-
+8. 会面结果 (Meeting Result)
+-
+
+My raw notes:
+`;
+
+    const copyMinutesPrompt = async () => {
+        try {
+            await navigator.clipboard.writeText(MINUTES_PROMPT);
+        } catch (_) {
+            // Older iOS / insecure context: execCommand fallback (no modal — the
+            // notes modal is open and UI.showModal would replace it).
+            const t = document.createElement('textarea');
+            t.value = MINUTES_PROMPT; t.setAttribute('readonly', ''); t.style.position = 'fixed'; t.style.opacity = '0';
+            document.body.appendChild(t); t.select();
+            try { document.execCommand('copy'); } catch (_e) { /* best-effort */ }
+            t.remove();
+        }
+        UI.toast.success('ChatGPT prompt copied — paste it into ChatGPT, add your notes at the end');
+    };
+
+    const _MINUTES_OUTCOME_LABEL = { positive: '👍 Positive', neutral: '😐 Neutral', negative: '👎 Negative', not_interested: '🚫 Not interested' };
+    const _MINUTES_TEXT_FIELDS = [
+        ['background', 'background', 'Customer Background'],
+        ['keyPoints',  'key-points', 'Key Points'],
+        ['advisor',    'advisor',    'Advisor Observations'],
+        ['reaction',   'reaction',   'Customer Reaction'],
+    ];
+
+    const _flashField = (el) => {
+        if (!el) return;
+        el.style.transition = 'box-shadow .2s';
+        el.style.boxShadow = '0 0 0 3px rgba(236,72,153,.45)';
+        setTimeout(() => { el.style.boxShadow = ''; }, 1600);
+    };
+
+    const locateMinutesField = (id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) { el.scrollIntoView(); }
+        _flashField(el);
+    };
+
+    // Add lines to a textarea, skipping any line it already contains.
+    const _appendLines = (id, lines) => {
+        const el = document.getElementById(id);
+        if (!el || !lines || !lines.length) return 0;
+        const cur = el.value || '';
+        const add = lines.map(s => String(s).trim()).filter(s => s && !cur.includes(s));
+        if (!add.length) return 0;
+        el.value = cur.trim() ? `${cur.replace(/\s+$/, '')}\n${add.join('\n')}` : add.join('\n');
+        return add.length;
+    };
+
+    const applyPastedMinutes = (prefix) => {
+        const text = document.getElementById(`${prefix}-minutes-paste`)?.value || '';
+        const resEl = document.getElementById(`${prefix}-minutes-result`);
+        if (!resEl) return;
+        const H = window._dataHelpers;
+        if (!text.trim()) { resEl.innerHTML = `<p style="font-size:12px;color:var(--gray-500);margin:8px 0 0;">Paste the ChatGPT minutes first.</p>`; return; }
+        if (!H || typeof H.parseMeetingMinutes !== 'function') { UI.toast.error('Please reload the page and try again'); return; }
+        const ctx = _minutesCtx.get(prefix) || { existing: null, pending: {} };
+        ctx.pending = {};
+        _minutesCtx.set(prefix, ctx);
+        const p = H.parseMeetingMinutes(text);
+        const rows = [];
+        const row = (key, icon, label, msg, target, actions = '') => rows.push({ key, icon, label, msg, target, actions });
+        const act = (key, mode, label) => `<button type="button" class="btn secondary btn-sm" style="padding:2px 8px;font-size:11px;" onclick="app.minutesFieldAction('${prefix}','${key}','${mode}')">${label}</button>`;
+
+        if (!p.recognized) {
+            ctx.pending.__all = text.trim();
+            resEl.innerHTML = `
+                <div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:#fef3c7;color:#92400e;font-size:12.5px;">
+                    <i class="fas fa-triangle-exclamation"></i> Couldn't find the minutes sections (客户背景, 会面重点 …). Use <b>Copy ChatGPT prompt</b> so ChatGPT answers in the right format — or
+                    ${act('__all', 'append', 'Put everything into Key Points')}
+                </div>`;
+            return;
+        }
+
+        // Meeting Result — pipeline-affecting, so it is pre-selected only when
+        // empty and always flagged for the agent to check.
+        const oEl = document.getElementById(`${prefix}-outcome-type`);
+        if (oEl) {
+            const id = `${prefix}-outcome-type`;
+            if (p.outcome) {
+                if (!oEl.value) { oEl.value = p.outcome; _flashField(oEl); row('outcome', '✓', 'Meeting Result', `${_MINUTES_OUTCOME_LABEL[p.outcome]} — please check`, id); }
+                else if (oEl.value === p.outcome) row('outcome', '✓', 'Meeting Result', 'already set', id);
+                else { ctx.pending.outcome = p.outcome; row('outcome', '⚠', 'Meeting Result', `Kept ${_MINUTES_OUTCOME_LABEL[oEl.value] || oEl.value} — minutes say ${_MINUTES_OUTCOME_LABEL[p.outcome]}`, id, act('outcome', 'replace', 'Use minutes')); }
+            } else if (!oEl.value) {
+                row('outcome', '⚠', 'Meeting Result', p.sections.outcome ? `Couldn't read "${escapeHtml(String(p.sections.outcome).slice(0, 40))}" — please pick one` : 'Not in minutes — please pick one', id);
+            }
+        }
+
+        for (const [key, field, label] of _MINUTES_TEXT_FIELDS) {
+            const id = `${prefix}-${field}`;
+            const el = document.getElementById(id);
+            const val = p.sections[key];
+            if (!el) continue;
+            if (!val) { row(key, '–', label, 'not in minutes', id); continue; }
+            const cur = el.value.trim();
+            if (!cur) { el.value = val; _flashField(el); row(key, '✓', label, 'filled', id); }
+            else if (cur.includes(val.trim())) row(key, '✓', label, 'already there', id);
+            else { ctx.pending[key] = val; row(key, '⚠', label, 'Kept existing text', id, `${act(key, 'append', 'Add below')} ${act(key, 'replace', 'Replace')}`); }
+        }
+
+        const tickList = (sectionKey, label, name, boxId, remarksId) => {
+            const items = p.sections[sectionKey];
+            if (!items || !items.length) { row(sectionKey, '–', label, 'not in minutes', boxId); return; }
+            const boxes = Array.from(document.querySelectorAll(`input[name="${name}"]`));
+            const r = H.matchMinutesItems(items, boxes.map(b => b.value));
+            let ticked = 0;
+            boxes.forEach(b => { if (r.matched.includes(b.value) && !b.checked) { b.checked = true; ticked++; } });
+            const toRemarks = _appendLines(remarksId, [...r.leftovers, ...r.extra]);
+            const parts = [];
+            if (r.matched.length) parts.push(`${r.matched.length} ticked${ticked < r.matched.length ? ` (${r.matched.length - ticked} already)` : ''}: ${escapeHtml(r.matched.slice(0, 3).join(', '))}${r.matched.length > 3 ? '…' : ''}`);
+            if (toRemarks) parts.push(`${toRemarks} line(s) → remarks`);
+            if (!parts.length) parts.push('already there');
+            const firstTicked = boxes.find(b => r.matched.includes(b.value));
+            if (firstTicked) { try { firstTicked.closest('label').scrollIntoView({ block: 'nearest' }); } catch (_) {} }
+            _flashField(document.getElementById(boxId));
+            row(sectionKey, r.leftovers.length && !r.matched.length ? '⚠' : '✓', label, parts.join(' · '), r.matched.length ? boxId : remarksId);
+        };
+        tickList('nextActions', 'Next Actions', `${prefix}-na-items`, `${prefix}-na-box`, `${prefix}-next-action-remarks`);
+        tickList('opportunities', 'Potential & Opportunities', `${prefix}-opp-items`, `${prefix}-opp-box`, `${prefix}-opportunity-remarks`);
+
+        const gEl = document.getElementById(`${prefix}-grade`);
+        const gid = `${prefix}-grade`;
+        if (p.grade) {
+            if (!gEl) row('grade', '–', 'Grade', `Minutes say ${p.grade} — grade applies to prospects only`, '');
+            else if (!gEl.value) { gEl.value = p.grade; _flashField(gEl); row('grade', '✓', 'Grade', `${p.grade} — sets the follow-up pace`, gid); }
+            else if (gEl.value === p.grade) row('grade', '✓', 'Grade', `${p.grade} (already set)`, gid);
+            else { ctx.pending.grade = p.grade; row('grade', '⚠', 'Grade', `Kept ${escapeHtml(gEl.value)} — minutes say ${p.grade}`, gid, act('grade', 'replace', `Use ${p.grade}`)); }
+        } else if (p.sections.grade) {
+            row('grade', '⚠', 'Grade', `Couldn't read "${escapeHtml(String(p.sections.grade).slice(0, 30))}"`, gEl ? gid : '');
+        }
+
+        const filled = rows.filter(r => r.icon === '✓').length;
+        const color = { '✓': '#16a34a', '⚠': '#d97706', '–': 'var(--gray-400)' };
+        resEl.innerHTML = `
+            <div style="margin-top:8px;border-radius:8px;background:#fff;border:1px solid var(--gray-200);padding:6px 10px;">
+                <div style="font-size:12.5px;font-weight:700;padding:2px 0 4px;color:var(--gray-800);">${filled} section(s) captured — check the form, then Save.</div>
+                ${rows.map(r => `
+                <div id="${prefix}-mrow-${r.key}" style="display:flex;align-items:center;gap:6px;padding:4px 0;border-top:1px solid var(--gray-100);font-size:12px;line-height:1.35;">
+                    <span style="width:14px;flex-shrink:0;font-weight:700;color:${color[r.icon] || 'inherit'};">${r.icon}</span>
+                    <span style="flex:1;min-width:0;"><b style="font-weight:600;color:var(--gray-800);">${escapeHtml(r.label)}</b> · <span class="mrow-msg" style="color:var(--gray-500);">${r.msg}</span></span>
+                    ${r.actions ? `<span style="display:flex;gap:4px;flex-shrink:0;">${r.actions}</span>` : ''}
+                    ${r.target ? `<button type="button" class="btn-icon" style="color:var(--primary);font-size:12px;" title="Show me this field" onclick="app.locateMinutesField('${r.target}')"><i class="fas fa-location-crosshairs"></i></button>` : ''}
+                </div>`).join('')}
+            </div>`;
+    };
+
+    // "Add below" / "Replace" / "Use minutes" buttons in the result panel.
+    const minutesFieldAction = (prefix, key, mode) => {
+        const ctx = _minutesCtx.get(prefix);
+        const val = ctx && ctx.pending ? ctx.pending[key] : undefined;
+        if (val == null) return;
+        let id;
+        if (key === 'outcome' || key === 'grade') {
+            id = key === 'outcome' ? `${prefix}-outcome-type` : `${prefix}-grade`;
+            const el = document.getElementById(id);
+            if (el) el.value = val;
+        } else {
+            const field = key === '__all' ? 'key-points' : (_MINUTES_TEXT_FIELDS.find(f => f[0] === key) || [])[1];
+            if (!field) return;
+            id = `${prefix}-${field}`;
+            const el = document.getElementById(id);
+            if (!el) return;
+            const cur = el.value.replace(/\s+$/, '');
+            el.value = (mode === 'replace' || !cur) ? val : `${cur}\n${val}`;
+        }
+        delete ctx.pending[key];
+        const msg = document.querySelector(`#${prefix}-mrow-${key} .mrow-msg`);
+        if (msg) {
+            msg.textContent = key === 'outcome' || key === 'grade' ? 'Changed to minutes' : (mode === 'replace' ? 'Replaced with minutes' : 'Added below existing text');
+            const rowEl = msg.closest('div');
+            rowEl.querySelectorAll('button.btn').forEach(b => b.remove());
+            const icon = rowEl.firstElementChild;
+            if (icon) { icon.textContent = '✓'; icon.style.color = '#16a34a'; }
+        }
+        locateMinutesField(id);
+    };
+
+    // ── Photo queue: every pick ADDS to the list (a file input on its own
+    // replaces its selection, which is how a second pick lost the first).
+    const _renderMinutesPending = (prefix) => {
+        const box = document.getElementById(`${prefix}-photo-pending`);
+        if (!box) return;
+        (_minutesThumbUrls.get(prefix) || []).forEach(u => { try { URL.revokeObjectURL(u); } catch (_) {} });
+        const files = _minutesPendingPhotos.get(prefix) || [];
+        const urls = files.map(f => { try { return URL.createObjectURL(f); } catch (_) { return ''; } });
+        _minutesThumbUrls.set(prefix, urls);
+        box.innerHTML = files.length ? `
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">
+                ${files.map((f, i) => `
+                <div style="position:relative;flex-shrink:0;">
+                    <img src="${urls[i]}" alt="${escapeHtml(f.name)}" style="height:64px;width:64px;object-fit:cover;border-radius:6px;border:2px solid var(--primary);">
+                    <button type="button" title="Remove" onclick="event.stopPropagation();app.removeMinutesPendingPhoto('${prefix}', ${i})" style="position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;border:none;background:var(--error, #ef4444);color:#fff;font-size:10px;padding:0;cursor:pointer;"><i class="fas fa-times"></i></button>
+                </div>`).join('')}
+            </div>
+            <div style="font-size:11px;color:var(--primary);margin-top:4px;font-weight:600;">${files.length} new photo(s) will upload when you Save</div>` : '';
+    };
+    const addMinutesPhotos = (prefix, input) => {
+        const list = _minutesPendingPhotos.get(prefix) || [];
+        Array.from((input && input.files) || []).forEach(f => {
+            if (!f.type || !f.type.startsWith('image/')) return;
+            if (list.some(x => x.name === f.name && x.size === f.size && x.lastModified === f.lastModified)) return;
+            list.push(f);
+        });
+        _minutesPendingPhotos.set(prefix, list);
+        if (input) input.value = '';
+        _renderMinutesPending(prefix);
+    };
+    const removeMinutesPendingPhoto = (prefix, idx) => {
+        const list = _minutesPendingPhotos.get(prefix) || [];
+        list.splice(idx, 1);
+        _renderMinutesPending(prefix);
+    };
+    // Save paths read the queue; falls back to the raw input for any form that
+    // was rendered without the onchange hook.
+    const getMinutesPendingPhotos = (prefix) => {
+        const q = (_minutesPendingPhotos.get(prefix) || []).slice();
+        if (q.length) return q;
+        const input = document.getElementById(`${prefix}-photo-files`);
+        return input && input.files ? Array.from(input.files) : [];
+    };
+
+    // ═══════════════════════════════════════════════════════════════════════
     // STANDARD FUNCTION — Post-Meetup Notes Block
     // Single source of truth for the Post-Meetup Notes form.
     // Used in:
@@ -1358,6 +1621,20 @@
         const a = activity || {};
         const readOnly = prefix === 'preview';
         const disabled = readOnly ? 'disabled' : '';
+        // Fresh form → fresh paste state + empty photo queue for this prefix.
+        const mm = (a.meeting_minutes && typeof a.meeting_minutes === 'object') ? a.meeting_minutes : null;
+        if (!readOnly) {
+            _minutesCtx.set(prefix, { existing: mm, pending: {} });
+            _minutesPendingPhotos.set(prefix, []);
+        }
+        const mmTextarea = (key, label, placeholder) => `
+                <div class="form-group">
+                    <label>${label}</label>
+                    <div style="display:flex;gap:8px;">
+                        <textarea id="${prefix}-${key}" class="form-control" rows="2" placeholder="${placeholder}" ${disabled}>${escapeHtml((mm && mm[key]) || '')}</textarea>
+                        ${readOnly ? '' : `<button class="btn-icon" onclick="app.openVoiceRecorder('${prefix}-${key}', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>`}
+                    </div>
+                </div>`;
         const products = opts.products || [];
         const bujishuItems = opts.bujishu || [];
         const formulaItems = opts.formula || [];
@@ -1401,6 +1678,19 @@
 
         return `
             <div class="post-meetup-notes-block" data-prefix="${prefix}">
+                ${readOnly ? '' : `
+                <div style="border:1.5px dashed var(--primary);border-radius:10px;padding:10px 12px;margin-bottom:14px;background:var(--gray-50);">
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+                        <label for="${prefix}-minutes-paste" style="margin:0;font-weight:700;"><i class="fas fa-paste" style="color:var(--primary);"></i> Paste ChatGPT minutes · 粘贴会议记录</label>
+                        <button type="button" class="btn secondary btn-sm" onclick="app.copyMinutesPrompt()" title="Copy the prompt agents paste into ChatGPT"><i class="fas fa-copy"></i> Copy ChatGPT prompt</button>
+                    </div>
+                    <textarea id="${prefix}-minutes-paste" class="form-control" rows="3" placeholder="Paste the whole ChatGPT minutes here — the form below fills itself." onpaste="setTimeout(function(){app.applyPastedMinutes('${prefix}')},0)"></textarea>
+                    <div style="display:flex;gap:8px;margin-top:6px;align-items:center;flex-wrap:wrap;">
+                        <button type="button" class="btn primary btn-sm" onclick="app.applyPastedMinutes('${prefix}')"><i class="fas fa-wand-magic-sparkles"></i> Fill form</button>
+                        <span style="font-size:11px;color:var(--gray-400);">Text already in a field is kept — you choose to add or replace.</span>
+                    </div>
+                    <div id="${prefix}-minutes-result"></div>
+                </div>`}
                 <div class="form-group">
                     <label>Meeting Result:</label>
                     <select id="${prefix}-outcome-type" class="form-control" ${disabled}>
@@ -1412,6 +1702,7 @@
                     </select>
                     <div style="font-size:11px;color:var(--gray-400);margin-top:3px;"><i class="fas fa-link"></i> Feeds the pipeline: negative results subtract score; "Not interested" pauses the prospect for the cool-off period.</div>
                 </div>
+                ${mmTextarea('background', 'Customer Background · 客户背景:', 'Family, career, background…')}
                 <div class="form-group">
                     <label>Key Points Discussed:</label>
                     <div style="display:flex;gap:8px;">
@@ -1433,9 +1724,11 @@
                         ${voiceBtn(`${prefix}-pain-points`)}
                     </div>
                 </div>
+                ${mmTextarea('advisor', 'Advisor Observations &amp; Suggestions · 顾问观察与建议:', 'Advice given, reasons, timeline…')}
+                ${mmTextarea('reaction', 'Customer Reaction &amp; DC Records · 客户反应与DC记录:', 'How they reacted, classes/events joined…')}
                 <div class="form-group">
                     <label>Potential &amp; Opportunities:</label>
-                    <div style="border:1px solid var(--gray-300);border-radius:6px;padding:10px;max-height:180px;overflow-y:auto;background:#fafafa;">
+                    <div id="${prefix}-opp-box" style="border:1px solid var(--gray-300);border-radius:6px;padding:10px;max-height:180px;overflow-y:auto;background:#fafafa;">
                         ${oppCheckboxes.length > 0 ? oppCheckboxes.join('') : '<p style="color:var(--gray-400);font-size:12px;margin:0;">No products/items available.</p>'}
                     </div>
                     <div style="display:flex;gap:8px;margin-top:6px;">
@@ -1446,7 +1739,7 @@
                 </div>
                 <div class="form-group">
                     <label>Next Actions:</label>
-                    <div style="border:1px solid var(--gray-300);border-radius:6px;padding:10px;max-height:180px;overflow-y:auto;background:#fafafa;">
+                    <div id="${prefix}-na-box" style="border:1px solid var(--gray-300);border-radius:6px;padding:10px;max-height:180px;overflow-y:auto;background:#fafafa;">
                         ${naCheckboxes.join('')}
                         <label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;cursor:${readOnly ? 'default' : 'pointer'};font-size:13px;padding:3px 8px;border-radius:4px;" ${!readOnly ? `onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background=''"` : ''}>
                             <input type="checkbox" id="${prefix}-na-others-cb" ${hasNaOthers ? 'checked' : ''} ${disabled} ${!readOnly ? `onchange="(function(el){var b=document.getElementById('${prefix}-na-others-box');b.style.display=el.checked?'block':'none';if(el.checked)document.getElementById('${prefix}-na-others-input').focus();})(this)"` : ''}>
@@ -1489,8 +1782,9 @@
                         ${thumbs}
                     </div>` : ''}
                     ${!readOnly ? `
-                    <input type="file" id="${prefix}-photo-files" class="form-control" accept="image/*" multiple style="font-size:13px;">
-                    <p style="color:var(--gray-400);font-size:11px;margin-top:4px;"><i class="fas fa-info-circle"></i> Photos are saved with this meet up record and visible in Meet Up History.</p>
+                    <input type="file" id="${prefix}-photo-files" class="form-control" accept="image/*" multiple style="font-size:13px;" onchange="app.addMinutesPhotos('${prefix}', this)">
+                    <div id="${prefix}-photo-pending"></div>
+                    <p style="color:var(--gray-400);font-size:11px;margin-top:4px;"><i class="fas fa-info-circle"></i> Add as many photos as you need — pick again to add more. Every photo is kept on this meet up and shown on the prospect profile.</p>
                     ` : (existingPhotos.length === 0 ? '<p style="color:var(--gray-400);font-size:13px;">No discussion photos attached.</p>' : '')}
                 </div>`;
                 })()}
@@ -1525,6 +1819,24 @@
                 if (remarks) result += (result ? ' | ' : '') + 'Remarks: ' + remarks;
                 return result;
             })(),
+            meeting_minutes: _collectMeetingMinutes(prefix),
+        };
+    };
+
+    // meeting_minutes JSON for the row being saved. undefined = key dropped
+    // (old form without the fields → never clobber); null = agent cleared it.
+    const _collectMeetingMinutes = (prefix) => {
+        if (!document.getElementById(`${prefix}-background`)) return undefined;
+        const g = (id) => (document.getElementById(`${prefix}-${id}`)?.value || '').trim();
+        const prev = (_minutesCtx.get(prefix) || {}).existing || null;
+        const background = g('background'), advisor = g('advisor'), reaction = g('reaction');
+        const pasted = g('minutes-paste');
+        const raw = pasted || (prev && prev.raw) || '';
+        if (!background && !advisor && !reaction && !raw) return prev ? null : undefined;
+        return {
+            v: 1, raw, background, advisor, reaction,
+            source: pasted ? 'paste' : ((prev && prev.source) || 'manual'),
+            updated_at: new Date().toISOString(),
         };
     };
 
@@ -6612,6 +6924,13 @@
         huijiFillBriefing,
         buildPostMeetupNotesBlock,
         collectPostMeetupNotesData,
+        applyPastedMinutes,
+        minutesFieldAction,
+        locateMinutesField,
+        copyMinutesPrompt,
+        addMinutesPhotos,
+        removeMinutesPendingPhoto,
+        getMinutesPendingPhotos,
         buildMeetingOutcomeBlock,
         collectMeetingOutcomeData,
         gatherContactPrefill,

@@ -258,6 +258,44 @@ function makeSandbox(store, attendeeRows, expectedAttendeeType, supabaseStub) {
     check('P: attendance chips rendered', html.includes('✓ Paid') && html.includes('✓ Ticket'));
   }
 
+  // ═══ PROSPECT side — ChatGPT minutes + "Before you meet" brief (2026-10-14) ═
+  {
+    const MM = { v: 1, background: '已婚，两个孩子 <script>x</script>', advisor: '建议先上个人风水基础课', reaction: '反应积极' };
+    const supabaseStub = { from: () => ({ select: () => ({ eq: async () => ({ data: [
+      { id: 10, photo_urls: ['p1.jpg', 'p2.jpg'], meeting_minutes: MM, note_key_points: '想了解家里风水', outcome: 'positive', next_action: '博物馆' },
+      { id: 14, photo_urls: [], meeting_minutes: { v: 1, background: 'older background' } },
+    ] }) }) }) };
+    const { sandbox, windowStub } = makeSandbox(makeStore('prospect'), ATTENDEE_ROWS_P, 'prospect', supabaseStub);
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'chunks', 'script-prospects.js'), 'utf8'), sandbox, { filename: 'script-prospects.js' });
+    const body = makeEl('acc-body-activity-55');
+    await windowStub.app.switchProspectTab('activity', 55, null, body);
+    const html = body.innerHTML;
+    const brief = html.slice(html.indexOf('mu-brief'), html.indexOf('</details>'));
+    check('M: brief rendered', html.includes('Before you meet'));
+    check('M: brief is the latest meet up (08-15 CPS)', brief.includes('last: 2026-08-15') && brief.includes('CPS With Koid'));
+    check('M: brief shows newest background, escaped', brief.includes('已婚，两个孩子 &lt;script&gt;') && !html.includes('<script>x'));
+    check('M: brief not using the older background', !brief.includes('older background'));
+    check('M: brief advisor + reaction + key points', brief.includes('建议先上个人风水基础课') && brief.includes('反应积极') && brief.includes('想了解家里风水'));
+    check('M: brief meeting result label', brief.includes('👍 Positive'));
+    check('M: brief next action', brief.includes('博物馆'));
+    check('M: brief photo thumbs (data-attach-src)', brief.includes('data-attach-src="p1.jpg"') && brief.includes('data-attach-src="p2.jpg"'));
+    check('M: brief jump targets the row', brief.includes('mu-10') && html.includes('data-muid="mu-10"'));
+    check('M: row detail shows minutes sections', html.includes('Advisor Observations') && html.includes('Customer Reaction') && html.includes('Customer Background'));
+    check('M: row photo strip + gallery button', html.includes('Photos (2)') && html.includes('All (2)'));
+    check('M: attendee photo strip routes to attendee viewer', html.includes('data-attach-src="e1.jpg"'));
+  }
+  // Fallback: meeting_minutes column not migrated yet → photos still enriched.
+  {
+    const supabaseStub = { from: () => ({ select: (cols) => ({ eq: async () => (String(cols).includes('meeting_minutes')
+      ? { data: null, error: { message: 'column activities.meeting_minutes does not exist' } }
+      : { data: [{ id: 10, photo_urls: ['p1.jpg'] }] }) }) }) };
+    const { sandbox, windowStub } = makeSandbox(makeStore('prospect'), ATTENDEE_ROWS_P, 'prospect', supabaseStub);
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'chunks', 'script-prospects.js'), 'utf8'), sandbox, { filename: 'script-prospects.js' });
+    const body = makeEl('acc-body-activity-55');
+    await windowStub.app.switchProspectTab('activity', 55, null, body);
+    check('M-fallback: photos still enriched without the column', body.innerHTML.includes('app.viewActivityPhotos(10)') && body.innerHTML.includes('Photos (1)'));
+  }
+
   // ═══ CUSTOMER side ════════════════════════════════════════════════════════
   {
     const { sandbox, windowStub } = makeSandbox(makeStore('customer'), ATTENDEE_ROWS_C, 'customer');
