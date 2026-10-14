@@ -3351,6 +3351,7 @@
             const actionRow = owned
                 ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:7px;">
                         ${_pill('edit', 'fa-pen', 'Edit', '#FEF3C7', '#B45309')}
+                        ${_entityId ? _pill('brief', 'fa-book-open', 'Brief', '#FCE7F3', '#BE185D') : ''}
                         ${_isMeetup ? _pill('minutes', 'fa-sticky-note', 'Minutes', '#E0E7FF', '#4338CA') : ''}
                         ${_isMeetup ? _pill('closing', 'fa-clipboard-check', 'Closing', '#D1FAE5', '#047857') : ''}
                    </div>`
@@ -3392,6 +3393,8 @@
             const a = window.app;
             if (kind === 'edit') await a.editActivityTiming(activityId);
             else if (kind === 'minutes') await a.openPostMeetupNotesModal(activityId, entityId);
+            // Brief = last meeting's minutes + discussion papers, read before meeting.
+            else if (kind === 'brief') await a.openMeetupHistoryModal(entityId);
             else if (kind === 'closing') await a.openMeetingOutcomeModal(activityId);
         } catch (e) {
             try {

@@ -2070,6 +2070,12 @@ const renderCustomerActivityTab = async (customer, containerId = 'profile-tab-co
     // side-effect of the "Attended" tick, so attendees are primary and
     // registrations a supplement for events attendees does not already cover.
     const customerId = customer.id;
+    // Minutes / photo / "Before you meet" renderers are shared with the
+    // prospect timeline (script-prospects.js) — load it if this is the first
+    // profile opened this session. Rendering still works without it.
+    if (!window.app.meetupBriefHtml && typeof window._loadChunk === 'function') {
+        try { await window._loadChunk('chunks/script-prospects.min.js'); } catch (_) { /* intentional: brief is optional */ }
+    }
     const [custActs, prospActs, allRegs, allEvents, attendeeRows] = await Promise.all([
         AppDataStore.getActivitiesForCustomer(customer.id, { limit: 500 }),
         customer.converted_from_prospect_id
@@ -2085,6 +2091,26 @@ const renderCustomerActivityTab = async (customer, containerId = 'profile-tab-co
     const activities = [...custActs, ...prospActs]
         .filter(a => { if (seenIds.has(a.id)) return false; seenIds.add(a.id); return true; });
     const eventsById = new Map((allEvents || []).map(e => [String(e.id), e]));
+
+    // Fresh minutes + photos for the customer's own rows (the activity list
+    // caches a light select without meeting_minutes / photo_urls). Falls back
+    // to photos-only when the meeting_minutes column is not there.
+    const _sb = window.supabase || window.supabaseClient;
+    const _ownIdsNum = activities.map(a => a.id).filter(id => id != null && !Number.isNaN(Number(id)));
+    if (_sb && _ownIdsNum.length) {
+        try {
+            const _cols = 'id,photo_urls,meeting_minutes,note_key_points,note_needs,note_pain_points,next_action,opportunity_potential,outcome';
+            let { data: _fd, error: _fe } = await _sb.from('activities').select(_cols).in('id', _ownIdsNum);
+            if (_fe) ({ data: _fd } = await _sb.from('activities').select('id,photo_urls').in('id', _ownIdsNum));
+            const _fm = new Map((_fd || []).map(r => [String(r.id), r]));
+            activities.forEach(a => {
+                const r = _fm.get(String(a.id));
+                if (!r) return;
+                ['photo_urls', 'meeting_minutes', 'note_key_points', 'note_needs', 'note_pain_points', 'next_action', 'opportunity_potential', 'outcome']
+                    .forEach(k => { if (r[k] != null && r[k] !== '' && !(Array.isArray(r[k]) && !r[k].length)) a[k] = r[k]; });
+            });
+        } catch (_) { /* intentional: optional enrichment — rows still render */ }
+    }
 
     // Owner-wins dedup: drop attendee rows whose parent activity is already an
     // own activity row (customer both hosted and attended).
@@ -2139,10 +2165,17 @@ const renderCustomerActivityTab = async (customer, containerId = 'profile-tab-co
     const _attChip = (on, label) =>
         `<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:${on ? '#dcfce7' : 'var(--gray-100)'};color:${on ? '#166534' : 'var(--gray-500)'};">${on ? '✓' : '—'} ${label}</span>`;
     const _sec = (lbl, val, extra) => val ? `<div class="meet-section"><div class="meet-lbl">${lbl}</div><div class="meet-txt"${extra || ''}>${escapeHtml(val)}</div></div>` : '';
+    const _mmC = (a) => (window.app.meetupMinutesOf || (() => ({})))(a);
+    const _photosC = (a, viewCall) => (window.app.meetupPhotoStripHtml || (() => ''))(a, viewCall);
+    const _OUTCOME_C = { positive: '👍 Positive', neutral: '😐 Neutral', negative: '👎 Negative', not_interested: '🚫 Not interested' };
+    const _pre = ' style="white-space:pre-wrap;"';
     const _noteFieldsHtml = (a) => `
+        ${_sec('Customer Background', _mmC(a).background, _pre)}
         ${_sec('Key Points', a.note_key_points)}
         ${_sec('Needs', a.note_needs)}
         ${_sec('Pain Points', a.note_pain_points)}
+        ${_sec('Advisor Observations', _mmC(a).advisor, _pre)}
+        ${_sec('Customer Reaction', _mmC(a).reaction, _pre)}
         ${_sec('Opportunity / Potential', a.opportunity_potential)}
         ${_sec('Next Action', a.next_action, ' style="color:var(--primary);font-weight:500;"')}`;
 
@@ -2160,7 +2193,9 @@ const renderCustomerActivityTab = async (customer, containerId = 'profile-tab-co
             badges.push(`<span class="mu-badge ${st === 'attended' ? 'ok' : st === 'no show' ? 'bad' : ''}">${st === 'attended' ? '✓ ' : ''}${st}</span>`);
         }
         if (a.is_closed || (a._closing && a._closing.is_closed)) badges.push(`<span class="mu-badge ok"><i class="fas fa-handshake"></i> Sale Closed</span>`);
-        if (a.outcome) badges.push(`<span class="mu-badge ok">${escapeHtml(a.outcome)}</span>`);
+        if (a.outcome) badges.push(`<span class="mu-badge ok">${escapeHtml(_OUTCOME_C[a.outcome] || a.outcome)}</span>`);
+        const _nPhotos = Array.isArray(a.photo_urls) ? a.photo_urls.length : 0;
+        if (_nPhotos) badges.push(`<span class="mu-badge"><i class="fas fa-camera"></i> ${_nPhotos}</span>`);
 
         let detail;
         if (a._isAttendeeNote) {
@@ -2175,14 +2210,23 @@ const renderCustomerActivityTab = async (customer, containerId = 'profile-tab-co
                 </div>
                 ${_sec('Summary', a.summary)}
                 ${_noteFieldsHtml(a)}
+                ${_photosC(a, `app.viewAttendeePhotos(${Number(a._attendeeRowId)})`)}
+                <div class="meet-actions">
+                    <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.openAttendeePostEventModal(${Number(a._attendeeRowId)}, ${Number(a._parentActivityId)}, ${Number(customer.id)})"><i class="fas fa-sticky-note"></i> Post Event Notes</button>
+                </div>
                 ${a._closing ? `<div class="mu-close-sub"><div class="meet-lbl" style="color:var(--primary);"><i class="fas fa-handshake"></i> Event Closing${a._closing.is_closed ? ' — Sale Closed' : ''}</div>${_sec('Notes', a._closing.summary || a._closing.note_key_points)}</div>` : ''}`;
         } else {
             detail = `
                 ${_sec('Notes', a.notes || '') || '<div class="meet-txt" style="color:var(--gray-400);font-style:italic;">No details provided.</div>'}
-                ${_noteFieldsHtml(a)}`;
+                ${_noteFieldsHtml(a)}
+                ${_photosC(a, `app.viewActivityPhotos(${Number(a.id)})`)}
+                ${a.id != null && !Number.isNaN(Number(a.id)) ? `<div class="meet-actions">
+                    <button class="btn btn-sm secondary" onclick="event.stopPropagation();app.openPostMeetupNotesModal(${Number(a.id)}, ${Number(customer.id)})"><i class="fas fa-sticky-note"></i> Minutes</button>
+                    ${_nPhotos ? '' : `<button class="btn btn-sm secondary" onclick="event.stopPropagation();app.attachActivityPhoto(${Number(a.id)})"><i class="fas fa-camera"></i> Attach Photo</button>`}
+                </div>` : ''}`;
         }
         return `
-            <div class="mu-item" data-kind="${_kind(a)}">
+            <div class="mu-item" data-kind="${_kind(a)}" data-muid="${(window.app.meetupRowId || (() => ''))(a)}">
                 <button type="button" class="mu-row" aria-expanded="false" onclick="this.closest('.mu-item').classList.toggle('open');this.setAttribute('aria-expanded',this.closest('.mu-item').classList.contains('open'))">
                     <i class="fas fa-chevron-right mu-caret"></i>
                     <span class="mu-date">${escapeHtml(date || '—')}</span>
@@ -2213,6 +2257,7 @@ const renderCustomerActivityTab = async (customer, containerId = 'profile-tab-co
                 </div>
                 <button class="btn primary btn-sm" onclick="app.openActivityModal(null, 'customer', ${customer.id})">+ Log Activity</button>
             </div>
+            ${(window.app.meetupBriefHtml || (() => ''))(rows, { typeLabel: typeLabelC })}
             ${rows.length > 0
                 ? `<div class="mu-list">${rows.map(_rowHtml).join('')}</div>`
                 : '<p style="color:var(--gray-400); font-size:13px;">No meet ups or events recorded yet.</p>'}
@@ -2232,6 +2277,8 @@ const renderCustomerActivityTab = async (customer, containerId = 'profile-tab-co
             </div>`;
     }
     container.innerHTML = html;
+    // Inline discussion-paper thumbs → signed URLs (also inside modals).
+    try { window._resolveAttachmentImages && setTimeout(() => window._resolveAttachmentImages(), 0); } catch (_) { /* best-effort */ }
 };
 
 const renderCustomerTags = async (customer) => {

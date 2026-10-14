@@ -5006,6 +5006,10 @@
                             const _notesBtn = (_isMeetup && _entityId)
                                 ? `<button class="act-action-btn act-btn-notes" onclick="(async () => { await app.openPostMeetupNotesModal(${activityId}, ${_entityId}); })()"><span class="act-icon"><i class="fas fa-sticky-note"></i></span><span class="act-label">Minutes</span></button>`
                                 : '';
+                            // Brief: read last meeting's minutes + papers right before this one.
+                            const _briefBtn = _entityId
+                                ? `<button class="act-action-btn act-btn-profile" onclick="(async () => { UI.hideModal(); await app.openMeetupHistoryModal(${_entityId}); })()"><span class="act-icon"><i class="fas fa-book-open"></i></span><span class="act-label">Brief</span></button>`
+                                : '';
                             const _liveBtn = (_isMeetup || activity.activity_type === 'AGENT_TRAINING')
                                 ? `<button class="act-action-btn act-btn-edit" onclick="(async()=>{ UI.hideModal(); await app.openMeetingCapture(${activityId}); })()"><span class="act-icon"><i class="fas fa-microphone-alt"></i></span><span class="act-label">Live Notes</span></button>`
                                 : '';
@@ -5013,6 +5017,7 @@
                             ${_profileBtn}
                             ${_cpsBtns}
                             <button class="act-action-btn act-btn-edit" onclick="app.editActivityTiming(${activityId})"><span class="act-icon"><i class="fas fa-pen"></i></span><span class="act-label">Edit</span></button>
+                            ${_briefBtn}
                             ${_outcomeBtn}
                             ${_notesBtn}
                             ${_liveBtn}
@@ -7547,7 +7552,26 @@
     // button only renders on the prospect detail page.
     const openMeetupHistoryModal = async (prospectId) => {
         const prospect = await AppDataStore.getById('prospects', prospectId);
-        if (!prospect) { UI.toast.error('Prospect not found'); return; }
+        if (!prospect) {
+            // Customer appointment → same modal, rendered by the customer timeline.
+            const customer = await AppDataStore.getById('customers', prospectId);
+            if (!customer) { UI.toast.error('Prospect / customer not found'); return; }
+            if (!window.app.renderCustomerActivityTab && typeof window._loadChunk === 'function') {
+                try { await window._loadChunk('chunks/script-customers.min.js'); } catch (_) { /* handled below */ }
+            }
+            const renderCust = window.app.renderCustomerActivityTab;
+            if (typeof renderCust !== 'function') { UI.toast.error('Could not open Meet Up History. Please reload and try again.'); return; }
+            const cBodyId = `muh-modal-body-c${customer.id}`;
+            UI.showModal(`📋 Meet Ups & Events — ${escapeHtml(customer.full_name || '')}`, `
+                <div style="max-height:70vh;overflow-y:auto;padding-right:4px;">
+                    <div id="${cBodyId}"><div class="acc-loading"><i class="fas fa-spinner fa-spin"></i> Loading…</div></div>
+                </div>
+            `, [
+                { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
+            ]);
+            await renderCust(customer, cBodyId);
+            return;
+        }
         const renderTab = window.app.switchProspectTab;
         if (typeof renderTab !== 'function') { UI.toast.error('Could not open Meet Up History. Please reload and try again.'); return; }
         const bodyId = `muh-modal-body-${prospectId}`;

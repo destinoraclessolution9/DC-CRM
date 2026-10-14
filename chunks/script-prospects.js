@@ -2326,6 +2326,63 @@ const _childSummary = (c, createdAt) => {
 };
 
 
+// ── Meet-up minutes display — shared by the prospect AND customer profile
+// timelines (customers chunk calls these via window.app) and the Brief modal.
+// Inline styles only, so the card renders the same in any container (profile
+// accordion, Meet-Up History modal, customer profile) whatever CSS is loaded.
+const MEETUP_OUTCOME_LABEL = { positive: '👍 Positive — moving forward', neutral: '😐 Neutral', negative: '👎 Negative — cooled off', not_interested: '🚫 Not interested' };
+const meetupMinutesOf = (a) => (a && a.meeting_minutes && typeof a.meeting_minutes === 'object') ? a.meeting_minutes : {};
+const meetupRowId = (a) => `mu-${String(a && a.id).replace(/[^a-zA-Z0-9]/g, '')}`;
+// Discussion-paper thumbnails inline, so the papers can be read before the
+// next meeting without opening the gallery.
+const meetupPhotoStripHtml = (a, viewCall) => {
+    const urls = Array.isArray(a && a.photo_urls) ? a.photo_urls : [];
+    if (!urls.length) return '';
+    return `<div style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 8px;">${urls.map(u => `<img loading="lazy" data-attach-src="${escapeHtml(String(u))}" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" alt="Discussion paper" style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-200);cursor:zoom-in;background:var(--gray-100);" onclick="event.stopPropagation();window._openAttachment && window._openAttachment('${UI.escJsAttr(String(u))}')">`).join('')}
+        ${viewCall ? `<button type="button" class="btn btn-sm secondary" style="align-self:center;" onclick="event.stopPropagation();${viewCall}"><i class="fas fa-images"></i> All (${urls.length})</button>` : ''}</div>`;
+};
+// "Before you meet" brief: the latest meet up that has minutes/notes/photos,
+// plus the most recent customer background (it rarely changes between
+// meetings) — what the agent reads right before the next meet up.
+// rows: newest first. opts.typeLabel: activity_type → label.
+const meetupBriefHtml = (rows, opts = {}) => {
+    const mm = meetupMinutesOf;
+    const hasContent = (a) => {
+        const m = mm(a);
+        return !!(m.background || m.advisor || m.reaction || a.note_key_points || a.note_needs ||
+            a.note_pain_points || a.next_action || (Array.isArray(a.photo_urls) && a.photo_urls.length));
+    };
+    const list = Array.isArray(rows) ? rows : [];
+    const last = list.find(hasContent);
+    if (!last) return '';
+    const bgRow = list.find(a => mm(a).background);
+    const m = mm(last);
+    const typeLabel = opts.typeLabel || {};
+    const lastLabel = last.activity_type === 'EVENT_CLOSING' ? 'Event Closing' : (typeLabel[last.activity_type] || last.activity_type || 'Meet up');
+    const item = (lbl, val, action) => val ? `<div style="margin-bottom:9px;"><span style="display:block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--primary);margin-bottom:2px;">${lbl}</span><p style="margin:0;font-size:13px;line-height:1.55;white-space:pre-wrap;word-break:break-word;color:${action ? 'var(--primary)' : 'var(--gray-700)'};${action ? 'font-weight:500;' : ''}">${escapeHtml(String(val))}</p></div>` : '';
+    const viewCall = last._isAttendeeNote ? `app.viewAttendeePhotos(${Number(last._attendeeRowId)})` : `app.viewActivityPhotos(${Number(last.id)})`;
+    const jump = opts.noJump ? '' : `<button type="button" class="btn btn-sm secondary" onclick="(function(b){var w=b.closest('.mu-wrap');if(!w)return;w.dataset.muf='all';var it=w.querySelector('.mu-item[data-muid=&quot;${meetupRowId(last)}&quot;]');if(it){it.classList.add('open');it.scrollIntoView({behavior:'smooth',block:'nearest'});}})(this)"><i class="fas fa-arrow-down"></i> Open this meet up</button>`;
+    return `
+        <details class="mu-brief" open style="border:1px solid var(--gray-200);border-left:3px solid var(--primary);border-radius:10px;background:var(--gray-50);padding:8px 12px;margin-bottom:10px;">
+            <summary style="cursor:pointer;font-weight:700;font-size:13px;color:var(--gray-800);list-style:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <i class="fas fa-book-open" style="color:var(--primary);"></i> Before you meet · 见面前回顾
+                <span style="font-weight:500;font-size:11.5px;color:var(--gray-500);">last: ${escapeHtml(last.activity_date || '—')} · ${escapeHtml(lastLabel)}${last.activity_title ? ` · ${escapeHtml(last.activity_title)}` : ''}</span>
+            </summary>
+            <div style="margin-top:8px;">
+                ${bgRow ? item(`Customer Background${bgRow !== last ? ` <span style="text-transform:none;color:var(--gray-400);font-weight:500;">(from ${escapeHtml(bgRow.activity_date || '')})</span>` : ''}`, mm(bgRow).background) : ''}
+                ${item('Meeting Result', MEETUP_OUTCOME_LABEL[last.outcome] || '')}
+                ${item('Key Points', last.note_key_points)}
+                ${item('Customer Needs', last.note_needs)}
+                ${item('Pain Points', last.note_pain_points)}
+                ${item('Advisor Observations', m.advisor)}
+                ${item('Customer Reaction', m.reaction)}
+                ${item('Next Action', last.next_action, true)}
+                ${meetupPhotoStripHtml(last, viewCall)}
+                ${jump}
+            </div>
+        </details>`;
+};
+
 const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
     // Legacy tab-button styling (harmless no-op in accordion mode)
     document.querySelectorAll('.profile-tab').forEach(t => {
@@ -2692,17 +2749,10 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         const _attStatus = (a) => a.attendance_status === 'No Show' ? 'no show'
             : (a.attended || a.attendance_status === 'Attended') ? 'attended'
             : 'registered';
-        const _mm = (a) => (a && a.meeting_minutes && typeof a.meeting_minutes === 'object') ? a.meeting_minutes : {};
-        const _muid = (a) => `mu-${String(a.id).replace(/[^a-zA-Z0-9]/g, '')}`;
-        const _OUTCOME_LBL = { positive: '👍 Positive — moving forward', neutral: '😐 Neutral', negative: '👎 Negative — cooled off', not_interested: '🚫 Not interested' };
-        // Discussion-paper thumbnails inline, so the papers can be read before
-        // the next meeting without opening the gallery.
-        const _photoStrip = (a, viewCall) => {
-            const urls = Array.isArray(a.photo_urls) ? a.photo_urls : [];
-            if (!urls.length) return '';
-            return `<div style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 8px;">${urls.map(u => `<img loading="lazy" data-attach-src="${escapeHtml(String(u))}" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" alt="Discussion paper" style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-200);cursor:zoom-in;background:var(--gray-100);" onclick="event.stopPropagation();window._openAttachment && window._openAttachment('${UI.escJsAttr(String(u))}')">`).join('')}
-                ${viewCall ? `<button type="button" class="btn btn-sm secondary" style="align-self:center;" onclick="event.stopPropagation();${viewCall}"><i class="fas fa-images"></i> All (${urls.length})</button>` : ''}</div>`;
-        };
+        const _mm = meetupMinutesOf;
+        const _muid = meetupRowId;
+        const _OUTCOME_LBL = MEETUP_OUTCOME_LABEL;
+        const _photoStrip = meetupPhotoStripHtml;
         const _fieldsHtml = (a) => {
             const m = _mm(a);
             const fields = [
@@ -2833,43 +2883,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 </div>`;
         };
 
-        // ── "Before you meet" brief ─────────────────────────────────────────
-        // The latest meeting that has minutes/notes/photos, plus the most recent
-        // customer background (it rarely changes between meetings) — so an agent
-        // can read what was discussed right before the next meet up.
-        const _hasContent = (a) => {
-            const m = _mm(a);
-            return !!(m.background || m.advisor || m.reaction || a.note_key_points || a.note_needs ||
-                a.note_pain_points || a.next_action || (Array.isArray(a.photo_urls) && a.photo_urls.length));
-        };
-        const _briefHtml = () => {
-            const last = rows.find(_hasContent);
-            if (!last) return '';
-            const bgRow = rows.find(a => _mm(a).background);
-            const m = _mm(last);
-            const lastLabel = last.activity_type === 'EVENT_CLOSING' ? 'Event Closing' : (typeLabel[last.activity_type] || last.activity_type || 'Meet up');
-            const item = (lbl, val, action) => val ? `<div class="msf"><span class="msf-lbl">${lbl}</span><p class="msf-txt${action ? ' action' : ''}">${_esc(val)}</p></div>` : '';
-            const viewCall = last._isAttendeeNote ? `app.viewAttendeePhotos(${last._attendeeRowId})` : `app.viewActivityPhotos(${last.id})`;
-            return `
-                <details class="mu-brief" open style="border:1px solid var(--gray-200);border-left:3px solid var(--primary);border-radius:10px;background:var(--gray-50);padding:8px 12px;margin-bottom:10px;">
-                    <summary style="cursor:pointer;font-weight:700;font-size:13px;color:var(--gray-800);list-style:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                        <i class="fas fa-book-open" style="color:var(--primary);"></i> Before you meet · 见面前回顾
-                        <span style="font-weight:500;font-size:11.5px;color:var(--gray-500);">last: ${escapeHtml(last.activity_date || '—')} · ${escapeHtml(lastLabel)}${last.activity_title ? ` · ${escapeHtml(last.activity_title)}` : ''}</span>
-                    </summary>
-                    <div style="margin-top:8px;">
-                        ${bgRow ? item(`Customer Background${bgRow !== last ? ` <span style="text-transform:none;color:var(--gray-400);font-weight:500;">(from ${escapeHtml(bgRow.activity_date || '')})</span>` : ''}`, _mm(bgRow).background) : ''}
-                        ${item('Meeting Result', _OUTCOME_LBL[last.outcome] || '')}
-                        ${item('Key Points', last.note_key_points)}
-                        ${item('Customer Needs', last.note_needs)}
-                        ${item('Pain Points', last.note_pain_points)}
-                        ${item('Advisor Observations', m.advisor)}
-                        ${item('Customer Reaction', m.reaction)}
-                        ${item('Next Action', last.next_action, true)}
-                        ${_photoStrip(last, viewCall)}
-                        <button type="button" class="btn btn-sm secondary" onclick="(function(b){var w=b.closest('.mu-wrap');if(!w)return;w.dataset.muf='all';var it=w.querySelector('.mu-item[data-muid=&quot;${_muid(last)}&quot;]');if(it){it.classList.add('open');it.scrollIntoView({behavior:'smooth',block:'nearest'});}})(this)"><i class="fas fa-arrow-down"></i> Open this meet up</button>
-                    </div>
-                </details>`;
-        };
+        const _briefHtml = () => meetupBriefHtml(rows, { typeLabel });
 
         const nMeet = rows.filter(a => _kind(a) === 'meetup').length;
         const nEvent = rows.length - nMeet;
@@ -7264,6 +7278,10 @@ const openPastRecordModal = async (...args) => {
         addTagToEntity,
         archiveAndNewClosingRecord,
         attachActivityPhoto,
+        meetupBriefHtml,
+        meetupPhotoStripHtml,
+        meetupMinutesOf,
+        meetupRowId,
         attachAppraisalForm,
         bulkDeleteProspects,
         bulkReassignProspects,

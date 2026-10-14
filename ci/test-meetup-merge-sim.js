@@ -338,6 +338,35 @@ function makeSandbox(store, attendeeRows, expectedAttendeeType, supabaseStub) {
     check('C: Events count', html.includes('Events (2)'));
   }
 
+  // ═══ CUSTOMER side — minutes, photos, Minutes button, brief (2026-10-14) ══
+  {
+    const inCalls = [];
+    const supabaseStub = { from: () => ({ select: () => ({ in: async (col, ids) => { inCalls.push(ids.map(String)); return { data: [
+      { id: 20, photo_urls: ['c1.jpg'], meeting_minutes: { v: 1, background: '退休夫妇 <b>x</b>', advisor: '调整大门', reaction: '很满意' }, note_key_points: '想换房', outcome: 'positive', next_action: '博物馆' },
+    ] }; } }) }) };
+    const { sandbox, windowStub } = makeSandbox(makeStore('customer'), ATTENDEE_ROWS_C, 'customer', supabaseStub);
+    // App order: prospects chunk (shared renderers) is present, then customers.
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'chunks', 'script-prospects.js'), 'utf8'), sandbox, { filename: 'script-prospects.js' });
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'chunks', 'script-customers.js'), 'utf8'), sandbox, { filename: 'script-customers.js' });
+    const body = makeEl('cust-acc-body-activity-77');
+    await windowStub.app.renderCustomerActivityTab(CUSTOMER, 'cust-acc-body-activity-77');
+    const html = body.innerHTML;
+    const brief = html.slice(html.indexOf('mu-brief'), html.indexOf('</details>'));
+    check('CM: enrichment queried own activity ids only (no att ids)', JSON.stringify(inCalls[0] || []), JSON.stringify(['20', '25', '22']));
+    check('CM: brief rendered on customer profile', html.includes('Before you meet'));
+    check('CM: brief = latest row with content (CALL 08-10)', brief.includes('last: 2026-08-10') && brief.includes('Called her'));
+    check('CM: brief background escaped', brief.includes('退休夫妇 &lt;b&gt;x&lt;/b&gt;') && !html.includes('<b>x</b>'));
+    check('CM: brief advisor/reaction/key points', brief.includes('调整大门') && brief.includes('很满意') && brief.includes('想换房'));
+    check('CM: brief photo thumb', brief.includes('data-attach-src="c1.jpg"'));
+    check('CM: row minutes sections', html.includes('Advisor Observations') && html.includes('Customer Reaction') && html.includes('Customer Background'));
+    check('CM: Minutes button routes back to the customer', html.includes('app.openPostMeetupNotesModal(20, 77)'));
+    check('CM: Attach Photo on photo-less own row', html.includes('app.attachActivityPhoto(22)'));
+    check('CM: no Attach Photo when photos exist', !html.includes('app.attachActivityPhoto(20)'), true);
+    check('CM: attendee Post Event Notes on customer', html.includes('app.openAttendeePostEventModal(5, 997, 77)'));
+    check('CM: typed outcome shown as label', html.includes('👍 Positive'));
+    check('CM: row ids for the brief jump', html.includes('data-muid="mu-20"'));
+  }
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error('CRASH', e); process.exit(1); });
