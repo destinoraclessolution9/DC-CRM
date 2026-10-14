@@ -401,8 +401,6 @@
             : { label: 'Save Activity', type: 'primary', action: '(async () => { await app.saveActivity(); })()' };
 
         UI.showModal('Quick Add Activity', modalContent, [
-            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
-            { label: 'Save & Add Another', type: 'secondary', action: '(async () => { await app.saveAndAddAnother(); })()' },
             primaryBtn
         ]);
 
