@@ -215,6 +215,28 @@ Deno.serve(async (req: Request) => {
   const nowMs = Date.now();
   const todayMYT = mytDateOf(nowMs);
 
+  // ===== 0. DISPATCH-ONLY (every-minute cron "notification-dispatch") =====
+  // Delivers held change alerts and retries. One indexed lookup; the sender is
+  // only woken when a row is actually due.
+  if (mode === "dispatch") {
+    try {
+      const staleIso = new Date(nowMs - 5 * 60_000).toISOString();
+      const dueRows: any[] = await pgSelect("notification_outbox",
+        `select=id&due_at=lte.${new Date(nowMs).toISOString()}&attempts=lt.3` +
+        `&created_at=gte.${new Date(nowMs - 86_400_000).toISOString()}` +
+        `&or=(status.in.(pending,failed),and(status.eq.sending,claimed_at.lt.${staleIso}))&limit=1`);
+      const dispatch = dueRows.length ? await dispatchDue() : null;
+      return new Response(JSON.stringify({ ok: true, mode, due: dueRows.length, dispatch }), {
+        status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      });
+    } catch (e: any) {
+      console.error("[reminders] dispatch:", e?.message || e);
+      return new Response(JSON.stringify({ ok: false, mode, error: String(e?.message || e) }), {
+        status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      });
+    }
+  }
+
   const stats = { reminders_queued: 0, daily_queued: 0, dispatch: null as any, errors: [] as string[], preview: [] as any[] };
   const queue: any[] = [];
 
@@ -297,12 +319,14 @@ Deno.serve(async (req: Request) => {
             title: `⏰ ${type} in ${label}${who ? ` — ${who}` : ""}`,
             body: extra ? `${whenWhere}\n${extra}` : whenWhere,
             url: "./index.html#calendar", activity_id: act.id,
-            dedupe_key: `reminder:${act.id}:${windowMin}`, status: "pending",
+            // Start date+time in the key: a rescheduled activity gets fresh
+            // reminders instead of being blocked by the old time's key.
+            dedupe_key: `reminder:${act.id}:${act.activity_date}T${String(act.start_time).slice(0, 5)}:${windowMin}`, status: "pending",
           };
           if (dryRun) { stats.preview.push({ kind: "reminder", userId, payload: row }); continue; }
           queue.push(row);
           for (const w of windows) {
-            if (w !== windowMin) queue.push({ ...row, status: "merged", dedupe_key: `reminder:${act.id}:${w}` });
+            if (w !== windowMin) queue.push({ ...row, status: "merged", dedupe_key: `reminder:${act.id}:${act.activity_date}T${String(act.start_time).slice(0, 5)}:${w}` });
           }
         }
       }

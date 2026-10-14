@@ -130,6 +130,174 @@ function sameTeam(a: unknown, b: unknown): boolean {
 // CALL, FTF, …) is an ordinary personal activity.
 const EVENT_TYPES = new Set(["EVENT", "AGENT_MEETING", "AGENT_TRAINING"]);
 
+// ---------- Outbox writes (change / cancel alerts) ----------
+async function pgWrite(method: string, path: string, body: unknown, prefer: string): Promise<any> {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    method,
+    headers: {
+      "apikey": SERVICE_ROLE,
+      "Authorization": `Bearer ${SERVICE_ROLE}`,
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+      "Prefer": prefer,
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`pg_${method.toLowerCase()} ${path.split("?")[0]} ${res.status}: ${await res.text()}`);
+  return prefer.includes("representation") ? await res.json() : null;
+}
+
+async function contactNameOf(r: any): Promise<string> {
+  try {
+    if (r?.prospect_id != null) {
+      const x = await pgSelect("prospects", { select: "full_name", id: `eq.${r.prospect_id}` });
+      return x?.[0]?.full_name || "";
+    }
+    if (r?.customer_id != null) {
+      const x = await pgSelect("customers", { select: "full_name", id: `eq.${r.customer_id}` });
+      return x?.[0]?.full_name || "";
+    }
+  } catch (_) { /* name is optional */ }
+  return "";
+}
+
+const venueOf = (r: any) => String(r?.venue || r?.location_address || "").trim().slice(0, 80);
+const whenWhereOf = (r: any) => [
+  `${dayLabel(String(r?.activity_date || ""), Date.now())} ${fmtTime12(r?.start_time)}`.trim(),
+  typeLabel(r?.activity_type),
+  venueOf(r),
+].filter(Boolean).join(" · ");
+
+// The fields a change alert reports on. Times compared at minute precision.
+const changeFields = (r: any) => ({
+  date: r?.activity_date ? String(r.activity_date).slice(0, 10) : null,
+  time: r?.start_time ? String(r.start_time).slice(0, 5) : null,
+  venue: venueOf(r) || null,
+  title: String(r?.activity_title || "").trim().slice(0, 80) || null,
+});
+type Fields = ReturnType<typeof changeFields>;
+function diffLines(from: Fields, to: Fields): { lines: string[]; urgent: boolean } {
+  const lines: string[] = [];
+  const now = Date.now();
+  if (from.date !== to.date) lines.push(`📅 Date: ${from.date ? dayLabel(from.date, now) : "—"} → ${to.date ? dayLabel(to.date, now) : "—"}`);
+  if (from.time !== to.time) lines.push(`🕒 Time: ${fmtTime12(from.time) || "—"} → ${fmtTime12(to.time) || "—"}`);
+  if (from.venue !== to.venue) lines.push(`📍 Venue: ${from.venue || "—"} → ${to.venue || "—"}`);
+  const urgent = lines.length > 0; // date / time / place changes are urgent
+  if (from.title !== to.title) lines.push(`📝 Title: ${from.title || "—"} → ${to.title || "—"}`);
+  return { lines, urgent };
+}
+
+// Hold an edit this long so a burst of edits becomes ONE alert with the net
+// change (first "from" → latest "to"). The every-minute dispatcher sends it.
+const CHANGE_HOLD_MS = 2 * 60_000;
+
+async function dispatchIds(ids: number[]): Promise<any> {
+  if (!ids.length) return { rows: 0 };
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/send-activity-push`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${SERVICE_ROLE}` },
+    body: JSON.stringify({ dispatch: true, ids }),
+  });
+  return await res.json().catch(() => ({}));
+}
+
+// UPDATE (date/time/venue/title changed, or status → cancelled) and DELETE.
+// Audience = the same people the "new activity" alert would reach, minus the
+// person who made the change. Event attendee rows share one alert per event
+// (subject ev:<event_id>), so deleting/moving an event with 30 attendee rows
+// sends each person one alert, not thirty.
+async function handleChange(
+  op: string, record: any, oldRecord: any, targets: string[],
+  userMap: Map<string, any>, editorId: string | null,
+): Promise<any> {
+  const isCancel = op === "DELETE" || String(record?.status || "").toLowerCase() === "cancelled";
+  const isEvent = record?.event_id != null && EVENT_TYPES.has(String(record?.activity_type ?? "").toUpperCase());
+  const subject = isEvent ? `ev:${record.event_id}` : `act:${record.id}`;
+  const editor = editorId ? userMap.get(editorId) : null;
+  const by = editor ? `\nBy ${editor.full_name || editor.email || "a colleague"}` : "";
+  const contact = await contactNameOf(record);
+  const type = typeLabel(record?.activity_type);
+  const who = contact ? ` — ${contact}` : "";
+  const nowIso = new Date().toISOString();
+  const recipients = targets.map(Number).filter((n) => Number.isFinite(n));
+
+  if (isCancel) {
+    // The cancel supersedes any edit alert still waiting for this subject.
+    await pgWrite("PATCH",
+      `notification_outbox?status=eq.pending&kind=eq.activity_changed&meta->>subject=eq.${encodeURIComponent(subject)}`,
+      { status: "merged" }, "return=minimal");
+    if (!recipients.length) return { ok: true, op, cancelled: 0, reason: "no_targets" };
+    const was = op === "DELETE" ? record : (oldRecord || record);
+    const rows = recipients.map((uid) => ({
+      user_id: uid, kind: "activity_cancelled", priority: "urgent",
+      title: `🚫 Cancelled: ${type}${who}`,
+      body: `Was ${whenWhereOf(was)}${by}`,
+      url: "./index.html#calendar",
+      // A deleted activity can't be opened any more — the tap goes to the calendar.
+      activity_id: op === "DELETE" ? null : record.id,
+      dedupe_key: `cancelled:${subject}`,
+      status: "pending", due_at: nowIso, meta: { subject },
+    }));
+    const inserted = await pgWrite("POST",
+      "notification_outbox?on_conflict=user_id,dedupe_key&select=id",
+      rows, "resolution=ignore-duplicates,return=representation");
+    const d = await dispatchIds((inserted || []).map((r: any) => r.id));
+    return { ok: true, op, subject, cancelled: (inserted || []).length, dispatch: d };
+  }
+
+  // UPDATE → merge into a pending alert per recipient (or start one).
+  if (!recipients.length) return { ok: true, op, changed: 0, reason: "no_targets" };
+  const to = changeFields(record);
+  const existing: any[] = await pgSelect("notification_outbox", {
+    select: "id,user_id,meta",
+    status: "eq.pending",
+    kind: "eq.activity_changed",
+    "meta->>subject": `eq.${subject}`,
+    user_id: `in.(${recipients.join(",")})`,
+  });
+  const byUser = new Map<number, any>(existing.map((e) => [Number(e.user_id), e]));
+  const dueIso = new Date(Date.now() + CHANGE_HOLD_MS).toISOString();
+  const sig = [to.date, to.time, to.venue, to.title].join("|");
+  const bucket = Math.floor(Date.now() / 600_000); // 10-min bucket: absorbs concurrent duplicate calls
+  const inserts: any[] = [];
+  let merged = 0, dropped = 0;
+  for (const uid of recipients) {
+    const prev = byUser.get(uid);
+    const from: Fields = prev?.meta?.from ?? changeFields(oldRecord);
+    const { lines, urgent } = diffLines(from, to);
+    if (!lines.length) {
+      // Edited back to how it was — nothing to announce.
+      if (prev) { await pgWrite("PATCH", `notification_outbox?id=eq.${prev.id}&status=eq.pending`, { status: "merged" }, "return=minimal"); dropped++; }
+      continue;
+    }
+    const row = {
+      title: `✏️ ${type} updated${who}`,
+      body: `${lines.join("\n")}\nNow: ${whenWhereOf(record)}${by}`,
+      priority: urgent ? "urgent" : "normal",
+      due_at: dueIso,
+      meta: { subject, from },
+    };
+    if (prev) {
+      await pgWrite("PATCH", `notification_outbox?id=eq.${prev.id}&status=eq.pending`, row, "return=minimal");
+      merged++;
+    } else {
+      inserts.push({
+        ...row, user_id: uid, kind: "activity_changed", url: "./index.html#calendar",
+        activity_id: record.id, status: "pending",
+        dedupe_key: `changed:${subject}:${bucket}:${sig}`.slice(0, 200),
+      });
+    }
+  }
+  let queued = 0;
+  if (inserts.length) {
+    const ins = await pgWrite("POST", "notification_outbox?on_conflict=user_id,dedupe_key&select=id",
+      inserts, "resolution=ignore-duplicates,return=representation");
+    queued = (ins || []).length;
+  }
+  return { ok: true, op, subject, queued, merged, dropped, due_at: dueIso };
+}
+
+
 // Walk the reporting_to chain upward from startUserId.
 // Returns IDs of all managers in the chain (not including startUserId itself).
 // Caps at 10 hops to avoid infinite loops from bad data.
@@ -173,7 +341,13 @@ Deno.serve(async (req: Request) => {
     const payload = await req.json();
 
     // Accept both DB trigger format {type, record} and a raw activity object.
-    const record = payload.record ?? payload.activity ?? payload;
+    // type: INSERT (on_activity_insert) | UPDATE / DELETE (on_activity_change /
+    // on_activity_delete — phase 2 change & cancel alerts; DELETE carries only
+    // old_record). editor_id = users.id of whoever made the change.
+    const op = String(payload.type || "INSERT").toUpperCase();
+    const oldRecord = payload.old_record ?? null;
+    const editorId = payload.editor_id != null ? String(payload.editor_id) : null;
+    const record = op === "DELETE" ? oldRecord : (payload.record ?? payload.activity ?? payload);
     const dryRun = payload.dry_run === true;
     if (!record || !record.id) {
       return new Response(JSON.stringify({ ok: false, reason: "no_record" }), {
@@ -186,7 +360,8 @@ Deno.serve(async (req: Request) => {
     // activity_date is a Postgres DATE ("YYYY-MM-DD"), which new Date() parses
     // as UTC midnight — Math.floor makes the age a whole-day count so the
     // exactly-14-days boundary doesn't flip with the org's (UTC+8) wall clock.
-    if (record.activity_date) {
+    // (UPDATE/DELETE: the trigger already skips past-dated rows.)
+    if (op === "INSERT" && record.activity_date) {
       const d = new Date(String(record.activity_date));
       const ageDays = isNaN(d.getTime()) ? 0 : Math.floor((Date.now() - d.getTime()) / 86400000);
       if (ageDays > 14) {
@@ -305,6 +480,8 @@ Deno.serve(async (req: Request) => {
     for (const id of targets) {
       if (!isActiveUser(userMap.get(id))) targets.delete(id);
     }
+    // Never alert people about their own edit / delete.
+    if (op !== "INSERT" && editorId) targets.delete(editorId);
 
     const targetList = Array.from(targets);
     if (dryRun) {
@@ -314,6 +491,13 @@ Deno.serve(async (req: Request) => {
     }
     if (targetList.length === 0) {
       return new Response(JSON.stringify({ ok: true, sent: 0, reason: "no_targets", audience }), {
+        headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      });
+    }
+
+    if (op === "UPDATE" || op === "DELETE") {
+      const res = await handleChange(op, record, oldRecord, targetList, userMap, editorId);
+      return new Response(JSON.stringify({ audience, ...res }), {
         headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
       });
     }

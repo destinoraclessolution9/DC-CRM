@@ -332,6 +332,26 @@ async function pgInsertReturning(table: string, rows: any[], onConflict?: string
   return await res.json();
 }
 
+// PATCH ... RETURNING: used to CLAIM rows atomically. Row locks serialize
+// concurrent dispatchers, and the status filter is re-checked after the lock,
+// so a row is claimed (and pushed) by exactly one of them.
+async function pgPatchReturning(table: string, params: Record<string, string>, patch: any): Promise<any[]> {
+  const qs = new URLSearchParams(params).toString();
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${qs}`, {
+    method: "PATCH",
+    headers: {
+      "apikey": SERVICE_ROLE,
+      "Authorization": `Bearer ${SERVICE_ROLE}`,
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+      "Prefer": "return=representation",
+    },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(`pg_patch ${table} ${res.status}: ${await res.text()}`);
+  return await res.json();
+}
+
 async function pgPatch(table: string, params: Record<string, string>, patch: any): Promise<void> {
   const qs = new URLSearchParams(params).toString();
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${qs}`, {
@@ -351,7 +371,7 @@ const OUTBOX_COLS = "id,user_id,kind,priority,title,body,url,activity_id,attempt
 const MAX_ATTEMPTS = 3;
 const KINDS = new Set([
   "activity_created", "activity_reminder", "daily_summary", "coagent_invite",
-  "coagent_response", "highlight", "test", "push",
+  "coagent_response", "highlight", "test", "push", "activity_changed", "activity_cancelled",
 ]);
 const PRIORITIES = new Set(["low", "normal", "high", "urgent"]);
 
@@ -469,21 +489,26 @@ serve(async (req: Request) => {
 
     // ── Dispatch mode (server only): deliver already-queued rows. ──
     // { dispatch: true, ids?: number[] } — ids = rows a producer just queued;
-    // without ids, (re)try every due pending/failed row from the last day.
+    // without ids, (re)try every due pending/failed row from the last day, plus
+    // rows stuck in 'sending' (a dispatcher that died mid-send) for 5+ minutes.
+    // Rows are CLAIMED (status → sending) before any push goes out, so the
+    // every-minute and every-5-minute runs can never both send the same row.
     if (reqBody?.dispatch === true) {
       if (_role !== "service_role") return json({ error: "forbidden" }, 403);
       const ids = Array.isArray(reqBody.ids) ? reqBody.ids.map(Number).filter((n: number) => Number.isFinite(n)) : [];
-      const params: Record<string, string> = { select: OUTBOX_COLS, order: "id.asc", limit: "300" };
+      const nowIso = new Date().toISOString();
+      const params: Record<string, string> = { select: OUTBOX_COLS };
       if (ids.length) {
         params.id = `in.(${ids.join(",")})`;
         params.status = "eq.pending";
       } else {
-        params.status = "in.(pending,failed)";
-        params.due_at = `lte.${new Date().toISOString()}`;
+        const staleIso = new Date(Date.now() - 5 * 60_000).toISOString();
+        params.or = `(status.in.(pending,failed),and(status.eq.sending,claimed_at.lt.${staleIso}))`;
+        params.due_at = `lte.${nowIso}`;
         params.created_at = `gte.${new Date(Date.now() - 86_400_000).toISOString()}`;
         params.attempts = `lt.${MAX_ATTEMPTS}`;
       }
-      const rows = await pgSelect("notification_outbox", params);
+      const rows = await pgPatchReturning("notification_outbox", params, { status: "sending", claimed_at: nowIso });
       const r = await deliverRows(rows);
       return json({ ok: true, rows: rows.length, ...r });
     }
@@ -541,6 +566,9 @@ serve(async (req: Request) => {
     const queued = await pgInsertReturning("notification_outbox", recipients.map((uid) => ({
       user_id: uid, kind, priority, title: rowTitle, body: rowBody, url: rowUrl,
       activity_id: activityId, dedupe_key: dedupeKey,
+      // Delivered right below, so insert already claimed — the every-minute
+      // dispatcher must not pick it up in between.
+      status: "sending", claimed_at: new Date().toISOString(),
     })), dedupeKey ? "user_id,dedupe_key" : undefined);
 
     const r = await deliverRows(queued.map((q: any) => ({ ...q, attempts: 0 })));

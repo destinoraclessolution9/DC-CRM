@@ -81,6 +81,7 @@ const NOTIF_INBOX_LIMIT = 30;
 const _NOTIF_KIND_ICON = {
     activity_created: '📅', activity_reminder: '⏰', daily_summary: '🌅',
     coagent_invite: '🤝', coagent_response: '✅', highlight: '🌟', test: '🔔',
+    activity_changed: '✏️', activity_cancelled: '🚫',
 };
 const _inboxSince = () => new Date(Date.now() - 30 * 86400000).toISOString();
 
