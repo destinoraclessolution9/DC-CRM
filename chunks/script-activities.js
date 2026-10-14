@@ -1632,7 +1632,8 @@
             </div>` : '';
 
         const customerInfoSection = hasProspect ? `
-            <div style="font-weight:600;color:var(--gray-700);margin:8px 0 6px;">Customer Information</div>
+            <div class="form-section">
+            <h4>👤 Customer Information</h4>
             <div class="form-group">
                 <label>Full Name</label>
                 <input id="${prefix}-full-name" class="form-control" value="${escapeHtml(v.full_name)}" placeholder="Full name" ${disabled}>
@@ -1661,24 +1662,31 @@
                 <label>Address</label>
                 <textarea id="${prefix}-address" class="form-control" rows="2" placeholder="Full address" ${disabled}>${escapeHtml(v.address)}</textarea>
             </div>
-            <div style="font-weight:600;color:var(--gray-700);margin:14px 0 6px;">Meeting Outcome</div>
+            </div>
         ` : '';
 
         const remarksAndUploadSection = hasProspect ? `
+            <div class="form-section">
+            <h4>📎 Invoice &amp; Special Remarks</h4>
             <div class="form-group">
-                <label>Remarks</label>
+                <label>Special Remarks</label>
                 <textarea id="${prefix}-remarks" class="form-control" rows="2" placeholder="e.g. Ring Size, Special Request..." ${disabled}>${escapeHtml(v.closing_remarks)}</textarea>
             </div>
             <div class="form-group">
-                <label>Upload Purchased Invoice <span style="font-size:11px;color:var(--gray-400);font-weight:normal;">(AI auto-fill on upload)</span></label>
-                <input id="${prefix}-invoice-file" type="file" class="form-control" accept="image/png,image/jpeg,application/pdf" ${disabled} onchange="if(!this.disabled)(async()=>{ try{ await app.scanInvoiceWithAI(this,'${prefix}','mo'); }catch(e){ console.error(e); } })()">
+                <label>Purchased Invoice <span style="font-size:11px;color:var(--gray-400);font-weight:normal;">(AI auto-fill on upload)</span></label>
+                <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+                    <label for="${prefix}-invoice-file" class="btn secondary btn-sm" style="margin:0;white-space:nowrap;cursor:pointer;${readOnly ? 'opacity:.5;pointer-events:none;' : ''}"><i class="fas fa-paperclip"></i> Upload Invoice</label>
+                    <span id="${prefix}-invoice-file-name" style="font-size:12px;color:var(--gray-500);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;"></span>
+                </div>
+                <input id="${prefix}-invoice-file" type="file" style="display:none;" accept="image/png,image/jpeg,application/pdf" ${disabled} onchange="var n=document.getElementById('${prefix}-invoice-file-name'); if(n) n.textContent=(this.files&&this.files[0]&&this.files[0].name)||''; if(!this.disabled)(async()=>{ try{ await app.scanInvoiceWithAI(this,'${prefix}','mo'); }catch(e){ console.error(e); } })()">
                 ${v.invoice_file ? `<div style="margin-top:6px;font-size:11px;color:var(--gray-500);"><i class="fas fa-paperclip"></i> Current: <a href="#" onclick="event.preventDefault();window._openAttachment&&window._openAttachment('${UI.escJsAttr(String(v.invoice_file))}')" style="color:var(--primary);cursor:pointer;">${escapeHtml(v.invoice_file_name || 'View invoice')}</a> <span style="color:var(--gray-400);">(choosing a new file will replace it)</span></div>` : ''}
+            </div>
             </div>
         ` : '';
 
         const caseStudySection = hasProspect ? `
-            <div style="margin-top:16px;border-top:1px solid #eee;padding-top:12px;">
-                <div style="font-weight:600;color:var(--gray-700);margin-bottom:8px;">📁 Case Study (Optional)</div>
+            <details class="form-section mo-case" ${(v.sales_idea || v.plan_details || v.success_story) ? 'open' : ''}>
+                <summary>📁 Case Study (Optional)</summary>
                 <div class="form-group">
                     <label>Sales Idea</label>
                     <textarea id="${prefix}-sales-idea" class="form-control" rows="2" placeholder="Describe the sales idea..." ${disabled}>${escapeHtml(v.sales_idea)}</textarea>
@@ -1691,31 +1699,42 @@
                     <label>Success Story</label>
                     <textarea id="${prefix}-success-story" class="form-control" rows="2" placeholder="What made this a success?" ${disabled}>${escapeHtml(v.success_story)}</textarea>
                 </div>
-            </div>
+            </details>
         ` : '';
 
         const paymentOptions = ['Cash','Bank Transfer','Credit Card','Cheque','EPP','POP','NPO']
             .map(m => `<option value="${m}" ${paymentMethod === m ? 'selected' : ''}>${m}</option>`).join('');
 
         return `
-            <div class="meeting-outcome-block" data-prefix="${prefix}">
+            <div class="meeting-outcome-block form-compact" data-prefix="${prefix}">
                 ${linkBadge}
                 ${lockedNotice}
-                <div class="form-group">
+                <div class="form-section">
+                <h4>✅ Outcome</h4>
+                <div class="form-group" style="margin-bottom:4px;">
                     <label class="checkbox-label">
                         <input type="checkbox" id="${prefix}-is-closing" onchange="document.getElementById('${prefix}-closing-fields').style.display = this.checked ? 'block' : 'none'" ${isClosingChecked ? 'checked' : ''} ${disabled}> Case Closed Well Done!
                     </label>
                 </div>
-                <div id="${prefix}-closing-fields" style="display:${isClosingChecked ? 'block' : 'none'};padding-left:20px;">
+                <div class="form-group" style="margin-bottom:4px;">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="${prefix}-unable-to-serve" onchange="document.getElementById('${prefix}-unable-fields').style.display = this.checked ? 'block' : 'none'" ${a.unable_to_serve ? 'checked' : ''} ${disabled}> Unable to Serve
+                    </label>
+                </div>
+                <div id="${prefix}-unable-fields" style="display:${a.unable_to_serve ? 'block' : 'none'};">
+                    <div class="form-group">
+                        <label>Reason</label>
+                        <textarea id="${prefix}-unable-reason" class="form-control" rows="2" ${disabled}>${escapeHtml(a.unable_reason || '')}</textarea>
+                    </div>
+                </div>
+                </div>
+                <div id="${prefix}-closing-fields" style="display:${isClosingChecked ? 'block' : 'none'};">
                     ${!readOnly && a.prospect_id ? `
-                    <div style="margin:0 0 14px;padding:14px;background:linear-gradient(135deg,#fef3c7 0%,#fde68a 100%);border:2px dashed #f59e0b;border-radius:10px;">
-                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-                            <i class="fas fa-camera" style="color:#b45309;font-size:18px;"></i>
+                    <div style="margin:0 0 10px;padding:10px 12px;background:linear-gradient(135deg,#fef3c7 0%,#fde68a 100%);border:2px dashed #f59e0b;border-radius:10px;">
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px;">
                             <strong style="color:#92400e;">📸 Order Form Photo <span style="color:#dc2626;" title="Required">*</span></strong>
                         </div>
-                        <p style="margin:0 0 10px;font-size:12px;color:#78350f;line-height:1.4;">
-                            Take a photo of the signed order form (any of the 3 templates — PRN Installment, PRN Receipt, or Old Paper Form). AI will auto-fill product, amount, payment, and customer details.
-                        </p>
+                        <p style="margin:0 0 8px;font-size:12px;color:#78350f;line-height:1.35;">Snap the signed order form — AI fills the details below.</p>
                         <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
                             <button type="button" class="btn primary btn-sm" onclick="document.getElementById('${prefix}-order-form-camera').click()" ${disabled}>
                                 <i class="fas fa-camera"></i> Take Photo
@@ -1739,6 +1758,8 @@
                     </div>
                     ` : ''}
                     ${customerInfoSection}
+                    <div class="form-section">
+                    <h4>💰 Sale Details</h4>
                     <div class="form-row">
                         <div class="form-group half">
                             <label>Product/Service Sold</label>
@@ -1847,19 +1868,9 @@
                             <input type="date" id="${prefix}-collection-date" class="form-control" value="${escapeHtml(v.closing_date)}" ${disabled}>
                         </div>
                     </div>
+                    </div>
                     ${remarksAndUploadSection}
                     ${caseStudySection}
-                </div>
-                <div class="form-group" style="margin-top:12px;">
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="${prefix}-unable-to-serve" onchange="document.getElementById('${prefix}-unable-fields').style.display = this.checked ? 'block' : 'none'" ${a.unable_to_serve ? 'checked' : ''} ${disabled}> Unable to Serve
-                    </label>
-                </div>
-                <div id="${prefix}-unable-fields" style="display:${a.unable_to_serve ? 'block' : 'none'};padding-left:20px;">
-                    <div class="form-group">
-                        <label>Reason</label>
-                        <textarea id="${prefix}-unable-reason" class="form-control" rows="2" ${disabled}>${escapeHtml(a.unable_reason || '')}</textarea>
-                    </div>
                 </div>
             </div>
         `;

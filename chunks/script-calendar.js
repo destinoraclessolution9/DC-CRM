@@ -6095,10 +6095,10 @@
         }
 
         const content = (window.app.buildMeetingOutcomeBlock || (() => ''))('mo', activity, { products, prospect, closingRecord });
+        // No Cancel button (the ✕ closes it); full screen on phones like Quick Add Activity.
         UI.showModal('📝 Meeting Outcome', content, [
-            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Save', type: 'primary', action: `(async () => { await app.saveMeetingOutcome(${activityId}); })()` }
-        ]);
+        ], window.matchMedia('(max-width: 768px)').matches ? 'fullscreen' : '');
 
         // C2: the modal renders outside #content-viewport, so resolve any
         // data-attach-src photo thumbnails in it (post-meetup papers) to signed URLs.
@@ -7537,7 +7537,6 @@
         `;
 
         UI.showModal('Meeting Outcome', content, [
-            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Save Outcome', type: 'primary', action: `(async () => { await app.saveAttendeeNote(${attendeeId}, '${attendeeType}', ${activityId}, 'outcome'); })()` }
         ]);
     };

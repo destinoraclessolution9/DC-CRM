@@ -11598,3 +11598,15 @@ html, body {
         text-align: left;
     }
 }
+
+/* Meeting Outcome (buildMeetingOutcomeBlock, .form-compact): outcome tick
+   boxes keep normal-size dark text, and the optional Case Study collapses. */
+.form-compact .form-group label.checkbox-label { font-size: 14px; color: var(--gray-800); white-space: normal; margin-bottom: 0; }
+.form-compact details.mo-case > summary { cursor: pointer; font-size: 14px; font-weight: 600; color: var(--primary); list-style: none; display: flex; align-items: center; gap: 6px; }
+.form-compact details.mo-case > summary::-webkit-details-marker { display: none; }
+.form-compact details.mo-case > summary::after { content: "\25B8"; margin-left: auto; color: var(--gray-400); transition: transform .15s; }
+.form-compact details.mo-case[open] > summary { margin-bottom: 8px; }
+.form-compact details.mo-case[open] > summary::after { transform: rotate(90deg); }
+@media (max-width: 640px) {
+    .form-compact input[type="date"] { -webkit-appearance: none; appearance: none; display: block; width: 100%; text-align: left; }
+}
