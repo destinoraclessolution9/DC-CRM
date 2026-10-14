@@ -1671,20 +1671,15 @@
 
         const remarksAndUploadSection = hasProspect ? `
             <div class="form-section">
-            <h4>📎 Invoice &amp; Special Remarks</h4>
+            <h4>📎 Special Remarks</h4>
             <div class="form-group">
                 <label>Special Remarks</label>
                 <textarea id="${prefix}-remarks" class="form-control" rows="2" placeholder="e.g. Ring Size, Special Request..." ${disabled}>${escapeHtml(v.closing_remarks)}</textarea>
             </div>
-            <div class="form-group">
-                <label>Purchased Invoice <span style="font-size:11px;color:var(--gray-400);font-weight:normal;">(AI auto-fill on upload)</span></label>
-                <div style="display:flex;align-items:center;gap:8px;min-width:0;">
-                    <label for="${prefix}-invoice-file" class="btn secondary btn-sm" style="margin:0;white-space:nowrap;cursor:pointer;${readOnly ? 'opacity:.5;pointer-events:none;' : ''}"><i class="fas fa-paperclip"></i> Upload Invoice</label>
-                    <span id="${prefix}-invoice-file-name" style="font-size:12px;color:var(--gray-500);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;"></span>
-                </div>
-                <input id="${prefix}-invoice-file" type="file" style="display:none;" accept="image/png,image/jpeg,application/pdf" ${disabled} onchange="var n=document.getElementById('${prefix}-invoice-file-name'); if(n) n.textContent=(this.files&&this.files[0]&&this.files[0].name)||''; if(!this.disabled)(async()=>{ try{ await app.scanInvoiceWithAI(this,'${prefix}','mo'); }catch(e){ console.error(e); } })()">
-                ${v.invoice_file ? `<div style="margin-top:6px;font-size:11px;color:var(--gray-500);"><i class="fas fa-paperclip"></i> Current: <a href="#" onclick="event.preventDefault();window._openAttachment&&window._openAttachment('${UI.escJsAttr(String(v.invoice_file))}')" style="color:var(--primary);cursor:pointer;">${escapeHtml(v.invoice_file_name || 'View invoice')}</a> <span style="color:var(--gray-400);">(choosing a new file will replace it)</span></div>` : ''}
-            </div>
+            <!-- The 📸 Order Form Photo above is the ONLY upload here: on save it becomes
+                 the closing record's invoice (saveMeetingOutcome). A separate invoice
+                 can still be attached later from the DC Closing Record edit form. -->
+            ${v.invoice_file ? `<div style="font-size:11px;color:var(--gray-500);"><i class="fas fa-paperclip"></i> Invoice on file: <a href="#" onclick="event.preventDefault();window._openAttachment&&window._openAttachment('${UI.escJsAttr(String(v.invoice_file))}')" style="color:var(--primary);cursor:pointer;">${escapeHtml(v.invoice_file_name || 'View invoice')}</a></div>` : ''}
             </div>
         ` : '';
 

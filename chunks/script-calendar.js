@@ -6278,7 +6278,6 @@
                 // Don't abort the whole save — text fields should still persist.
             }
         }
-
         const updates = {
             is_closing: isClosed,
             unable_to_serve: mo.unable_to_serve,
@@ -6339,6 +6338,23 @@
             if (activity?.prospect_id) {
                 const prospect = await AppDataStore.getById('prospects', activity.prospect_id);
                 const existingCR = prospect?.closing_record || null;
+                // One photo does everything: the Meeting Outcome form has no separate invoice
+                // upload any more, so THIS appointment's first order-form photo becomes the
+                // closing record's invoice. Matched on metadata.activity_id so another sale's
+                // photo for the same prospect can never be picked up.
+                let _ofFile = null, _ofName = null;
+                if (!invoice_file) {
+                    try {
+                        const _ofs = await _dbRace(AppDataStore.query('prospect_attachments', { prospect_id: activity.prospect_id, attachment_type: 'order_form' }), 10000, 'order-form lookup');
+                        const _mine = (Array.isArray(_ofs) ? _ofs : [])
+                            .filter(r => r && r.file_url && String(r.metadata?.activity_id ?? '') === String(activityId))
+                            .sort((x, y) => String(x.scanned_at || x.created_at || '').localeCompare(String(y.scanned_at || y.created_at || '')) || (Number(x.id) - Number(y.id)));
+                        if (_mine.length) {
+                            _ofFile = _mine[0].file_url;
+                            _ofName = _mine[0].filename || 'Order form photo';
+                        }
+                    } catch (e) { console.warn('saveMeetingOutcome: order-form photo lookup failed:', e); }
+                }
                 const existingStatus = existingCR?.status || 'draft';
                 // M7 (audit): a prospect already converted to a customer must not be
                 // re-flipped to pending_approval nor file a duplicate new_customer
@@ -6379,8 +6395,14 @@
                         cc_installment: (paymentMethod === 'POP' || paymentMethod === 'NPO') ? !!mo.cc_installment : false,
                         cc_expiry:      (paymentMethod === 'POP' || paymentMethod === 'NPO') && mo.cc_installment ? (mo.cc_expiry || '') : '',
                         invoice_number:  mo.invoice_number || '',
-                        invoice_file:    invoice_file || existingCR?.invoice_file || '',
-                        invoice_file_name: invoice_file_name || existingCR?.invoice_file_name || '',
+                        // Precedence: a freshly uploaded file > an invoice already on the
+                        // record (DC Closing Record fallback upload) > this appointment's
+                        // order-form photo.
+                        invoice_file:    invoice_file || existingCR?.invoice_file || _ofFile || '',
+                        invoice_file_name: invoice_file ? invoice_file_name : (existingCR?.invoice_file ? (existingCR?.invoice_file_name || '') : (_ofName || '')),
+                        // Which appointment this closing came from — links the sale to its
+                        // order-form photos (prospect_attachments.metadata.activity_id).
+                        closing_activity_id: activityId,
                         closing_date:    mo.collection_date || '',
                         order_date:      mo.order_date || '',
                         closing_remarks: mo.closing_remarks ?? existingCR?.closing_remarks ?? '',

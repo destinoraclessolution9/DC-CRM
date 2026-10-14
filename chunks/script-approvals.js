@@ -389,7 +389,9 @@ const approveQueueEntry = async (entryId) => {
                         amount: amt,
                         currency: UI.currencyForCountry(prospect.country),
                         status: 'COMPLETED',
-                        payment_method: cr.payment_method || 'Cash'
+                        payment_method: cr.payment_method || 'Cash',
+                        // Closing's invoice / order-form photo → the row's proof.
+                        proof: cr.invoice_file || ''
                     }, { label: 'new_sale approval', supersedePipelineFor: entry.prospect_id });
                     if (_res && _res.booked === false) {
                         try { UI.toast.info('This sale was already recorded — approving without adding a duplicate purchase.'); } catch (_) {}
@@ -584,7 +586,8 @@ const approveClosingRecord = async (prospectId) => {
                 amount: saleAmount,
                 currency: UI.currencyForCountry(prospect.country),
                 status: 'COMPLETED',
-                payment_method: cr.payment_method || 'Cash'
+                payment_method: cr.payment_method || 'Cash',
+                proof: cr.invoice_file || ''
             }, { label: 'additional sale approval', supersedePipelineFor: prospectId });
             if (_res && _res.booked === false) {
                 try { UI.toast.info('This sale was already recorded — approving without adding a duplicate purchase.'); } catch (_) {}
@@ -814,7 +817,8 @@ const approveProspectConversion = async (prospectId) => {
                 amount: saleAmount,
                 currency: UI.currencyForCountry(prospect.country),
                 status: 'COMPLETED',
-                payment_method: cr?.payment_method || 'Cash'
+                payment_method: cr?.payment_method || 'Cash',
+                proof: cr?.invoice_file || ''
             }, { label: 'first-conversion sale', supersedePipelineFor: prospectId });
         } catch (saleErr) {
             console.error('[approveProspectConversion] sale booking failed', saleErr);

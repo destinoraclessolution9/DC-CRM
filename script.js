@@ -763,7 +763,7 @@ const appLogic = (() => {
                 if (!sb) throw new Error('supabase client unavailable');
                 const { data, error } = await sb
                     .from('purchases')
-                    .select('id,invoice,date,amount,item,agent_id')
+                    .select('id,invoice,date,amount,item,agent_id,proof')
                     .eq('customer_id', customerId);
                 if (error) throw error;
                 rows = data || [];
@@ -781,6 +781,12 @@ const appLogic = (() => {
                     console.warn(`[bookPurchaseOnce] skipped duplicate ${label} for customer ${customerId}`, {
                         existingPurchaseId: existing.id, invoice: purchase?.invoice, amount: purchase?.amount,
                     });
+                    // Already booked (e.g. a re-approval) — still carry the closing's
+                    // invoice / order-form photo onto the row if it has no proof yet.
+                    if (purchase?.proof && !existing.proof) {
+                        try { await AppDataStore.update('purchases', existing.id, { proof: purchase.proof }); }
+                        catch (e) { console.warn(`[bookPurchaseOnce] proof backfill failed for ${label}`, e); }
+                    }
                     return { booked: false, reason: 'duplicate', existing };
                 }
 

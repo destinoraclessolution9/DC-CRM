@@ -2161,15 +2161,6 @@ const buildProspectDetailTabsHtml = (prospect) => {
                         <div class="acc-body" id="acc-body-formula-${prospect.id}" style="display:none" data-loaded="false"></div>
                     </div>
 
-                    <!-- ⑦c Sales Orders (Destiny Code) -->
-                    <div class="acc-item" id="acc-orders-${prospect.id}">
-                        <div class="acc-hdr" onclick="app.toggleAccordion('orders',${prospect.id},this.parentElement)">
-                            <span><i class="fas fa-shopping-cart"></i> Sales Orders (Destiny Code)</span>
-                            <i class="fas fa-chevron-down acc-chev"></i>
-                        </div>
-                        <div class="acc-body" id="acc-body-orders-${prospect.id}" style="display:none" data-loaded="false"></div>
-                    </div>
-
                     <!-- ⑦d Feng Shui Audit -->
                     <div class="acc-item" id="acc-fengshui-${prospect.id}">
                         <div class="acc-hdr" onclick="app.toggleAccordion('fengshui',${prospect.id},this.parentElement)">
@@ -3131,68 +3122,10 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
 
         const isConverted = prospect.status === 'converted' || prospect.conversion_status === 'approved';
 
-        // Closing history (archived approved records)
-        const crHistory = Array.isArray(prospect.closing_records_history) ? prospect.closing_records_history : [];
-        const _crStatusBadge = (h) => {
-            if (h.case_completed) return `<span style="background:#dcfce7;color:#166534;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;"><i class="fas fa-check-circle"></i> Completed</span>`;
-            const s = h.delivery_status || 'pending';
-            if (s === 'delivered') return `<span style="background:#dbeafe;color:#1e40af;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;"><i class="fas fa-truck"></i> Delivered</span>`;
-            return `<span style="background:#fef9c3;color:#854d0e;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;"><i class="fas fa-clock"></i> Pending</span>`;
-        };
-        const historyHtml = crHistory.length ? `
-            <div style="margin-bottom:16px;border:1px solid #e5e7eb;border-radius:8px;">
-                <div style="background:#f0fdf4;padding:8px 12px;font-weight:600;font-size:13px;border-bottom:1px solid #e5e7eb;color:#166534;border-radius:8px 8px 0 0;">
-                    <i class="fas fa-history"></i> Closing History (${crHistory.length} record${crHistory.length>1?'s':''})
-                </div>
-                ${crHistory.map((h, hi) => `
-                    <details style="border-bottom:1px solid #f3f4f6;">
-                        <summary style="padding:8px 12px;cursor:pointer;font-size:13px;font-weight:600;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:8px;">
-                            <span style="flex:1;">#${hi+1} — ${escapeHtml(h.product||'N/A')} · ${UI.formatCurrency(parseFloat(h.sale_amount) || 0, { currency: window._crmUtils.recordCurrency(typeof customer !== 'undefined' ? customer : (typeof prospect !== 'undefined' ? prospect : null)) })}</span>
-                            ${_crStatusBadge(h)}
-                            <span style="font-size:11px;color:var(--gray-400);font-weight:400;">${h.closing_date || (h.approved_at ? h.approved_at.split('T')[0] : '')}</span>
-                        </summary>
-                        <div style="padding:10px 12px;background:#fafafa;font-size:12px;border-top:1px solid #f3f4f6;">
-                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;margin-bottom:10px;">
-                                <div><span style="color:var(--gray-400);">Payment:</span> ${escapeHtml(h.payment_method||'-')}</div>
-                                <div><span style="color:var(--gray-400);">Invoice:</span> ${escapeHtml(h.invoice_number||'-')}</div>
-                                <div style="grid-column:1/-1;">
-                                    ${h.invoice_file
-                                        ? invoiceLink(h.invoice_file, `<i class="fas fa-paperclip"></i> ${escapeHtml(h.invoice_file_name||'View invoice')}`)
-                                        : `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px;background:#fffbeb;border:1px dashed #f59e0b;border-radius:6px;padding:6px 8px;">
-                                            <span style="color:#92400e;"><i class="fas fa-exclamation-triangle"></i> No invoice attached.</span>
-                                            <input type="file" id="crh-inv-${pid}-${hi}" accept="image/*,application/pdf" style="font-size:11px;flex:1;min-width:140px;">
-                                            <button class="btn secondary btn-sm" style="padding:2px 8px;font-size:11px;height:24px;" onclick="event.stopPropagation();app.uploadHistoryInvoice(${pid},${hi})"><i class="fas fa-upload"></i> Upload</button>
-                                          </div>`}
-                                </div>
-                                ${h.closing_remarks ? `<div style="grid-column:1/-1;"><span style="color:var(--gray-400);">Sale Remarks:</span> ${escapeHtml(h.closing_remarks)}</div>` : ''}
-                            </div>
-                            <div style="border-top:1px solid #e5e7eb;padding-top:10px;">
-                                <div style="font-size:11px;font-weight:700;color:var(--gray-500);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">📦 Delivery Tracking</div>
-                                <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
-                                    <select id="crh-status-${pid}-${hi}" class="form-control" style="flex:1;min-width:120px;font-size:12px;">
-                                        <option value="pending" ${(!h.delivery_status||h.delivery_status==='pending')?'selected':''}>Pending Delivery</option>
-                                        <option value="delivered" ${h.delivery_status==='delivered'?'selected':''}>Delivered</option>
-                                        <option value="completed" ${h.delivery_status==='completed'?'selected':''}>Completed</option>
-                                    </select>
-                                    <label style="display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap;font-weight:600;color:${h.case_completed?'#166534':'var(--gray-600)'};">
-                                        <input type="checkbox" id="crh-completed-${pid}-${hi}" ${h.case_completed?'checked':''} style="width:15px;height:15px;cursor:pointer;">
-                                        Case Completed
-                                    </label>
-                                </div>
-                                <div style="margin-bottom:8px;">
-                                    <label style="font-size:11px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Delivery Proof Attachment</label>
-                                    ${h.delivery_proof ? `<div style="margin-bottom:4px;"><a href="${safeUrl(h.delivery_proof)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> ${escapeHtml(h.delivery_proof_name||'View proof')}</a> <span style="color:var(--gray-400);font-size:11px;">(upload new to replace)</span></div>` : ''}
-                                    <input type="file" id="crh-proof-${pid}-${hi}" accept="image/*,application/pdf" style="font-size:11px;width:100%;" onchange="(function(el){var f=el.files[0];if(!f)return;var r=new FileReader();r.onload=function(e){el.dataset.b64=e.target.result;el.dataset.fname=f.name;};r.readAsDataURL(f);})(this)">
-                                </div>
-                                <div style="margin-bottom:8px;">
-                                    <label style="font-size:11px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Remarks</label>
-                                    <textarea id="crh-remarks-${pid}-${hi}" class="form-control" rows="2" style="font-size:12px;" placeholder="Post-sale notes, delivery details...">${escapeHtml(h.delivery_remarks||'')}</textarea>
-                                </div>
-                                <button class="btn primary btn-sm" style="width:100%;height:30px;" onclick="event.stopPropagation();app.saveClosingHistoryEntry(${pid},${hi})"><i class="fas fa-save"></i> Save</button>
-                            </div>
-                        </div>
-                    </details>`).join('')}
-            </div>` : '';
+        // Sales ledger — closing history merged with the purchases booked on approval
+        // (replaces the old Closing History list + the separate "Sales Orders (Destiny
+        // Code)" section). Shared with the customer's DC Closing Record.
+        const ledgerHtml = await buildClosingSalesLedger({ prospect });
 
         if (!cr || status === 'draft') {
             const d = cr || {};
@@ -3202,7 +3135,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             const isNPO = d.payment_method === 'NPO';
             const npoPlanId = d.npo_plan_id || '';
             const npoPlanName = d.npo_plan_name || '';
-            container.innerHTML = pre2025Html + historyHtml + `
+            container.innerHTML = `
                 <div class="cr-status draft" style="margin-bottom:14px;padding:8px 12px;border-radius:8px;background:#fff8e1;border:1px solid #ffc107;color:#856404;font-size:13px;font-weight:600;">
                     <i class="fas fa-edit"></i> Draft — Fill in details and submit for manager approval
                 </div>
@@ -3301,7 +3234,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                     <button class="btn danger btn-sm" style="flex:1;" onclick="event.stopPropagation();app.rejectClosingRecord(${prospect.id})"><i class="fas fa-times"></i> Reject</button>
                 </div>
             ` : `<p style="text-align:center;color:var(--gray-400);font-size:13px;margin-top:12px;"><i class="fas fa-clock"></i> Awaiting manager review.</p>`;
-            container.innerHTML = pre2025Html + historyHtml + `
+            container.innerHTML = `
                 <div class="cr-status submitted" style="margin-bottom:14px;padding:8px 12px;border-radius:8px;background:#e3f2fd;border:1px solid #2196f3;color:#1565c0;font-size:13px;font-weight:600;">
                     <i class="fas fa-clock"></i> Submitted — Pending manager approval
                 </div>
@@ -3340,7 +3273,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             // Legacy: closing_record still has status='approved' (not yet archived).
             // Show the record and allow starting a new closing.
             const d = cr || {};
-            container.innerHTML = pre2025Html + historyHtml + `
+            container.innerHTML = `
                 <div class="cr-status approved" style="margin-bottom:14px;padding:8px 12px;border-radius:8px;background:#e8f5e9;border:1px solid #4caf50;color:#2e7d32;font-size:13px;font-weight:600;display:flex;justify-content:space-between;align-items:center;">
                     <span><i class="fas fa-check-circle"></i> Approved — Converted to Customer Profile</span>
                     <button class="btn secondary btn-sm" style="font-size:11px;" onclick="event.stopPropagation();app.archiveAndNewClosingRecord(${prospect.id})"><i class="fas fa-plus"></i> New Closing</button>
@@ -3393,6 +3326,10 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 </div>
             `;
         }
+        // Current closing (draft form / pending / approved) on top, then the sales
+        // list, then the Before 2025 record.
+        container.insertAdjacentHTML('beforeend', ledgerHtml + pre2025Html);
+        _resolveLedgerThumbs(container);
     }
     else if (tab === 'bujishu' || tab === 'formula') {
         const cfg = tab === 'bujishu'
@@ -3507,70 +3444,6 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 </div>
             </div>
         `;
-    }
-    else if (tab === 'orders') {
-        let orders = [];
-        try {
-            // purchases rows are keyed by customer_id (no code path ever writes
-            // purchases.prospect_id), so resolve the linked customer first via
-            // converted_from_prospect_id, then query by that customer_id. Without
-            // this the Sales Orders tab was always empty.
-            const linkedCustomers = await AppDataStore.query('customers', { converted_from_prospect_id: prospect.id }).catch(() => []);
-            if (linkedCustomers && linkedCustomers.length) {
-                const orderLists = await Promise.all(
-                    linkedCustomers.map(c => AppDataStore.query('purchases', { customer_id: c.id }).catch(() => []))
-                );
-                orders = orderLists.flat();
-            }
-            orders.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-        } catch (err) {
-            // Surface the failure rather than silently degrading to the empty state.
-            console.warn('[orders tab] purchases fetch failed:', err);
-            UI.toast.error('Could not load sales orders');
-        }
-        if (!orders.length) {
-            container.innerHTML = `<div style="padding:16px;color:var(--gray-400);font-size:13px;text-align:center;">No sales orders on record.</div>`;
-            return;
-        }
-        const dsBadge = (ds) => {
-            const s = ds || 'Pending Delivery';
-            const map = {
-                'Delivered':       ['#DCFCE7','#166534'],
-                'Cancelled':       ['#FFE4E6','#9F1239'],
-                'Doubtful':        ['#FEF3C7','#92400E'],
-                'Partial Delivery':['#E0F2FE','#0369A1'],
-            };
-            const [bg, fg] = map[s] || ['#EFF6FF','#1e40af'];
-            return `<span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:600;background:${bg};color:${fg};">${s}</span>`;
-        };
-        const fmtAmt = (v) => v ? 'RM ' + Number(v).toLocaleString('en-MY', {minimumFractionDigits:0,maximumFractionDigits:0}) : '-';
-        const rows = orders.map(o => `<tr style="border-bottom:1px solid var(--border);">
-            <td style="padding:7px 8px;font-size:11px;color:var(--gray-500);white-space:nowrap;">${escapeHtml(o.date || '-')}</td>
-            <td style="padding:7px 8px;font-size:11px;color:var(--gray-400);white-space:nowrap;">${escapeHtml(o.invoice || '-')}</td>
-            <td style="padding:7px 8px;font-size:12px;font-weight:500;color:var(--gray-800);">${escapeHtml(o.item || '-')}</td>
-            <td style="padding:7px 8px;font-size:12px;font-weight:600;color:var(--primary);white-space:nowrap;">${fmtAmt(o.amount)}</td>
-            <td style="padding:7px 8px;font-size:11px;color:var(--gray-500);">${escapeHtml(o.payment_method || '-')}</td>
-            <td style="padding:7px 8px;">${dsBadge(o.delivery_status)}</td>
-        </tr>`).join('');
-        const total = orders.reduce((s, o) => s + (parseFloat(o.amount) || 0), 0);
-        container.innerHTML = `<div style="padding:8px 12px;overflow-x:auto;">
-            <table style="width:100%;border-collapse:collapse;font-size:12px;">
-                <thead><tr style="border-bottom:2px solid var(--border);background:var(--gray-50);">
-                    <th style="padding:7px 8px;text-align:left;font-size:11px;color:var(--gray-500);font-weight:600;">Date</th>
-                    <th style="padding:7px 8px;text-align:left;font-size:11px;color:var(--gray-500);font-weight:600;">PRN</th>
-                    <th style="padding:7px 8px;text-align:left;font-size:11px;color:var(--gray-500);font-weight:600;">Product</th>
-                    <th style="padding:7px 8px;text-align:left;font-size:11px;color:var(--gray-500);font-weight:600;">Amount</th>
-                    <th style="padding:7px 8px;text-align:left;font-size:11px;color:var(--gray-500);font-weight:600;">Payment</th>
-                    <th style="padding:7px 8px;text-align:left;font-size:11px;color:var(--gray-500);font-weight:600;">Delivery</th>
-                </tr></thead>
-                <tbody>${rows}</tbody>
-                <tfoot><tr style="border-top:2px solid var(--border);background:var(--gray-50);">
-                    <td colspan="3" style="padding:8px;font-weight:700;font-size:12px;color:var(--gray-700);">TOTAL &middot; ${orders.length} order${orders.length > 1 ? 's' : ''}</td>
-                    <td style="padding:8px;font-weight:700;font-size:13px;color:var(--primary);">${fmtAmt(total)}</td>
-                    <td colspan="2"></td>
-                </tr></tfoot>
-            </table>
-        </div>`;
     }
     else if (tab === 'fengshui') {
         // ── ⑦d Feng Shui Audit — sequence per audit event: layout plan file, audit report file,
@@ -3736,103 +3609,232 @@ const _refreshCustClosingAfterProspectSave = async (prospectId) => {
     }
 };
 
+// ── Shared DC Closing Record sales ledger ─────────────────────────────────────
+// ONE list of sales for both the prospect profile and the customer profile, so
+// the two always show the same thing. An approved closing lives in two stores:
+// the prospect's closing_records_history entry (delivery tracking, invoice) and
+// the purchases row booked on approval (the ledger LTV/reports read). Each
+// history entry is matched to its purchase row — invoice/PRN first, then
+// date + amount — so a sale shows ONCE. Order-form photos (prospect_attachments)
+// attach to their sale by closing_activity_id or PRN; any left over show in an
+// "unlinked" strip so nothing is hidden. Customer-only actions (Add Purchase,
+// Upload proof, Delete pending) render only when opts.customerMode is set.
+const _ORDER_FORM_THUMB_PX = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
+const buildClosingSalesLedger = async ({ prospect = null, customer = null, customerMode = false } = {}) => {
+    const _n = (v) => String(v == null ? '' : v).trim().toLowerCase();
+    const _m = (v) => Math.round((parseFloat(v) || 0) * 100);
+    const pid = prospect?.id ?? null;
+    const _cur = window._crmUtils.recordCurrency(customer || prospect);
+
+    // Purchases: the customer's own, or every customer converted from this prospect.
+    let purchases = [];
+    try {
+        if (customer?.id != null) {
+            purchases = await AppDataStore.query('purchases', { customer_id: customer.id });
+        } else if (pid != null) {
+            const linked = await AppDataStore.query('customers', { converted_from_prospect_id: pid }).catch(() => []);
+            const lists = await Promise.all((linked || []).map(c => AppDataStore.query('purchases', { customer_id: c.id }).catch(() => [])));
+            purchases = lists.flat();
+        }
+    } catch (e) { console.warn('[closing ledger] purchases fetch failed:', e); }
+    purchases = Array.isArray(purchases) ? purchases : [];
+
+    let orderForms = [];
+    if (pid != null) {
+        try { orderForms = await AppDataStore.query('prospect_attachments', { prospect_id: pid, attachment_type: 'order_form' }); }
+        catch (e) { console.warn('[closing ledger] order-form fetch failed:', e); }
+    }
+    orderForms = (Array.isArray(orderForms) ? orderForms : []).filter(a => a && a.file_url);
+    const _meta = (a) => {
+        let m = a.metadata;
+        if (typeof m === 'string') { try { m = JSON.parse(m); } catch (_) { m = {}; } }
+        return m || {};
+    };
+
+    // History entries keep their ORIGINAL index — saveClosingHistoryEntry /
+    // uploadHistoryInvoice address them by it.
+    const history = (Array.isArray(prospect?.closing_records_history) ? prospect.closing_records_history : [])
+        .map((h, hi) => ({ h, hi }));
+    // A non-null closing_record that is already 'approved' (legacy rows) is a sale too.
+    const cr0 = prospect?.closing_record;
+    if (cr0 && cr0.status === 'approved') history.push({ h: cr0, hi: null });
+
+    const used = new Set();
+    const rows = [];
+    const _take = (pred) => {
+        const p = purchases.find(x => !used.has(x.id) && pred(x));
+        if (p) used.add(p.id);
+        return p || null;
+    };
+    const matched = history.map(e => ({ ...e, p: null }));
+    // Pass 1: invoice / PRN number.
+    matched.forEach(e => {
+        const inv = _n(e.h.invoice_number);
+        if (inv) e.p = _take(x => _n(x.invoice) === inv);
+    });
+    // Pass 2: date + amount for entries with no number match.
+    matched.forEach(e => {
+        if (e.p) return;
+        const d = _n(e.h.closing_date || e.h.order_date);
+        if (d) e.p = _take(x => _n(x.date) === d && _m(x.amount) === _m(e.h.sale_amount));
+    });
+    matched.forEach(e => rows.push(e));
+    purchases.filter(x => !used.has(x.id)).forEach(p => rows.push({ h: null, hi: null, p }));
+
+    // Photos per row: the sale's own invoice/proof, plus this sale's order-form photos.
+    const usedPhotos = new Set();
+    rows.forEach(r => {
+        const files = [];
+        const add = (path, label) => { if (path && !files.some(f => f.path === path)) files.push({ path, label }); };
+        add(r.h?.invoice_file, r.h?.invoice_file_name || 'Invoice');
+        add(r.p?.proof, 'Proof');
+        const inv = _n(r.p?.invoice || r.h?.invoice_number);
+        const actId = r.h?.closing_activity_id;
+        orderForms.forEach(a => {
+            const m = _meta(a);
+            const prn = _n(m.prn_number || m.fields?.prn_number);
+            const mine = (actId != null && String(m.activity_id ?? '') === String(actId))
+                || (inv && prn && prn === inv)
+                || files.some(f => f.path === a.file_url);
+            if (mine) { add(a.file_url, a.filename || 'Order form'); usedPhotos.add(a.id); }
+        });
+        files.forEach(f => orderForms.forEach(a => { if (a.file_url === f.path) usedPhotos.add(a.id); }));
+        r.files = files;
+        r.date = r.p?.date || r.h?.closing_date || r.h?.order_date || (r.h?.approved_at ? String(r.h.approved_at).split('T')[0] : '');
+    });
+    rows.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+    const unlinked = orderForms.filter(a => !usedPhotos.has(a.id));
+
+    const _isPdf = (p) => /\.pdf(\?|$)/i.test(String(p)) || /^data:application\/pdf/i.test(String(p));
+    const thumb = (f, size = 40) => _isPdf(f.path)
+        ? `<a href="#" title="${escapeHtml(f.label)}" onclick="event.preventDefault();event.stopPropagation();window._openAttachment&&window._openAttachment('${UI.escJsAttr(String(f.path))}')" style="display:inline-flex;align-items:center;justify-content:center;width:${size}px;height:${size}px;border-radius:6px;border:1px solid #e5e7eb;background:#fef2f2;color:#b91c1c;font-size:${Math.round(size/2.4)}px;flex-shrink:0;"><i class="fas fa-file-pdf"></i></a>`
+        : `<img data-attach-src="${escapeHtml(String(f.path))}" src="${_ORDER_FORM_THUMB_PX}" alt="${escapeHtml(f.label)}" title="${escapeHtml(f.label)}" onclick="event.preventDefault();event.stopPropagation();window._openAttachment&&window._openAttachment('${UI.escJsAttr(String(f.path))}')" style="width:${size}px;height:${size}px;border-radius:6px;object-fit:cover;cursor:pointer;border:1px solid #e5e7eb;background:#f9fafb;flex-shrink:0;">`;
+
+    const _pill = (bg, fg, html) => `<span style="background:${bg};color:${fg};border-radius:4px;padding:1px 7px;font-size:10px;font-weight:600;white-space:nowrap;">${html}</span>`;
+    const deliveryBadge = (r) => {
+        if (r.h?.case_completed) return _pill('#dcfce7', '#166534', '<i class="fas fa-check-circle"></i> Completed');
+        if (r.p) {
+            const ds = r.p.delivery_status || 'Pending Delivery';
+            const map = { 'Delivered': ['#dcfce7', '#166534'], 'Dispatched': ['#dbeafe', '#1e40af'], 'Cancelled': ['#ffe4e6', '#9f1239'], 'Doubtful': ['#fef3c7', '#92400e'], 'Partial Delivery': ['#e0f2fe', '#0369a1'] };
+            const [bg, fg] = map[ds] || ['#fef3c7', '#92400e'];
+            return _pill(bg, fg, escapeHtml(ds));
+        }
+        const s = r.h?.delivery_status || 'pending';
+        if (s === 'delivered' || s === 'completed') return _pill('#dbeafe', '#1e40af', '<i class="fas fa-truck"></i> Delivered');
+        return _pill('#fef9c3', '#854d0e', '<i class="fas fa-clock"></i> Pending');
+    };
+
+    // History detail panel (invoice fallback upload + delivery tracking) — unchanged
+    // behaviour, now shown inside the merged row.
+    const historyPanel = (h, hi) => `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;margin-bottom:10px;">
+            ${h.invoice_file ? '' : `<div style="grid-column:1/-1;display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px;background:#fffbeb;border:1px dashed #f59e0b;border-radius:6px;padding:6px 8px;">
+                <span style="color:#92400e;"><i class="fas fa-exclamation-triangle"></i> No invoice attached.</span>
+                <input type="file" id="crh-inv-${pid}-${hi}" accept="image/*,application/pdf" style="font-size:11px;flex:1;min-width:140px;">
+                <button class="btn secondary btn-sm" style="padding:2px 8px;font-size:11px;height:24px;" onclick="event.stopPropagation();app.uploadHistoryInvoice(${pid},${hi})"><i class="fas fa-upload"></i> Upload</button>
+            </div>`}
+            ${h.closing_remarks ? `<div style="grid-column:1/-1;"><span style="color:var(--gray-400);">Sale Remarks:</span> ${escapeHtml(h.closing_remarks)}</div>` : ''}
+        </div>
+        <div style="border-top:1px solid #e5e7eb;padding-top:10px;">
+            <div style="font-size:11px;font-weight:700;color:var(--gray-500);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">📦 Delivery Tracking</div>
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+                <select id="crh-status-${pid}-${hi}" class="form-control" style="flex:1;min-width:120px;font-size:12px;">
+                    <option value="pending" ${(!h.delivery_status||h.delivery_status==='pending')?'selected':''}>Pending Delivery</option>
+                    <option value="delivered" ${h.delivery_status==='delivered'?'selected':''}>Delivered</option>
+                    <option value="completed" ${h.delivery_status==='completed'?'selected':''}>Completed</option>
+                </select>
+                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap;font-weight:600;color:${h.case_completed?'#166534':'var(--gray-600)'};">
+                    <input type="checkbox" id="crh-completed-${pid}-${hi}" ${h.case_completed?'checked':''} style="width:15px;height:15px;cursor:pointer;">
+                    Case Completed
+                </label>
+            </div>
+            <div style="margin-bottom:8px;">
+                <label style="font-size:11px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Delivery Proof Attachment</label>
+                ${h.delivery_proof ? `<div style="margin-bottom:4px;"><a href="${safeUrl(h.delivery_proof)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> ${escapeHtml(h.delivery_proof_name||'View proof')}</a> <span style="color:var(--gray-400);font-size:11px;">(upload new to replace)</span></div>` : ''}
+                <input type="file" id="crh-proof-${pid}-${hi}" accept="image/*,application/pdf" style="font-size:11px;width:100%;" onchange="(function(el){var f=el.files[0];if(!f)return;var r=new FileReader();r.onload=function(e){el.dataset.b64=e.target.result;el.dataset.fname=f.name;};r.readAsDataURL(f);})(this)">
+            </div>
+            <div style="margin-bottom:8px;">
+                <label style="font-size:11px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Remarks</label>
+                <textarea id="crh-remarks-${pid}-${hi}" class="form-control" rows="2" style="font-size:12px;" placeholder="Post-sale notes, delivery details...">${escapeHtml(h.delivery_remarks||'')}</textarea>
+            </div>
+            <button class="btn primary btn-sm" style="width:100%;height:30px;" onclick="event.stopPropagation();app.saveClosingHistoryEntry(${pid},${hi})"><i class="fas fa-save"></i> Save</button>
+        </div>`;
+
+    let total = 0;
+    const rowHtml = rows.map(r => {
+        const amt = parseFloat(r.p ? r.p.amount : r.h?.sale_amount) || 0;
+        total += amt;
+        const product = r.p?.item || r.h?.product || '-';
+        const prn = r.p?.invoice || r.h?.invoice_number || '';
+        const pay = r.p?.payment_method || r.h?.payment_method || '';
+        const notBooked = !r.p ? _pill('#f3f4f6', '#6b7280', 'Not booked') : '';
+        const pending = r.p?.status === 'PENDING' ? _pill('#fef9c3', '#854d0e', 'PENDING') : '';
+        const custActions = (customerMode && r.p && customer) ? `
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:${r.h && r.hi != null ? '10px' : '0'};">
+                ${r.p.proof ? '' : `<button class="btn secondary btn-sm" style="font-size:11px;padding:2px 8px;" onclick="event.stopPropagation();app.uploadPaymentProof(${r.p.id},${customer.id})"><i class="fas fa-upload"></i> Upload proof</button>`}
+                ${r.p.status === 'PENDING' ? `<button class="btn secondary btn-sm" style="font-size:11px;padding:2px 8px;color:var(--error);" onclick="event.stopPropagation();app.deletePurchase(${r.p.id},${customer.id})"><i class="fas fa-trash"></i> Delete</button>` : ''}
+            </div>` : '';
+        const panel = (r.h && r.hi != null) ? historyPanel(r.h, r.hi) : '';
+        const body = custActions + panel;
+        const summary = `
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+                <div style="min-width:0;flex:1;">
+                    <div style="font-size:13px;font-weight:600;color:var(--gray-800);">${escapeHtml(product)}</div>
+                    <div style="font-size:11px;color:var(--gray-500);margin-top:2px;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;">
+                        <span>${escapeHtml(r.date || '-')}</span>
+                        ${prn ? `<span>PRN ${escapeHtml(prn)}</span>` : ''}
+                        ${pay ? `<span>${escapeHtml(pay)}</span>` : ''}
+                        ${deliveryBadge(r)} ${pending} ${notBooked}
+                    </div>
+                </div>
+                <div style="font-size:13px;font-weight:700;color:var(--primary);white-space:nowrap;">${UI.formatCurrency(amt, { currency: r.p?.currency || _cur })}</div>
+            </div>
+            ${r.files.length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">${r.files.map(f => thumb(f)).join('')}</div>` : ''}`;
+        return body
+            ? `<details style="border-bottom:1px solid #f3f4f6;">
+                    <summary style="padding:8px 12px;cursor:pointer;list-style:none;">${summary}</summary>
+                    <div style="padding:10px 12px;background:#fafafa;font-size:12px;border-top:1px solid #f3f4f6;">${body}</div>
+               </details>`
+            : `<div style="padding:8px 12px;border-bottom:1px solid #f3f4f6;">${summary}</div>`;
+    }).join('');
+
+    const unlinkedHtml = unlinked.length ? `
+        <div style="padding:8px 12px;border-top:1px solid #e5e7eb;background:#fffbeb;">
+            <div style="font-size:11px;font-weight:600;color:#92400e;margin-bottom:6px;"><i class="fas fa-camera"></i> Unlinked order-form photos (${unlinked.length})</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">${unlinked.map(a => thumb({ path: a.file_url, label: a.filename || 'Order form' })).join('')}</div>
+        </div>` : '';
+
+    return `
+        <div style="margin-bottom:16px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+            <div style="background:#f0fdf4;padding:8px 12px;font-weight:600;font-size:13px;border-bottom:1px solid #e5e7eb;color:#166534;display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                <span><i class="fas fa-receipt"></i> Sales (${rows.length})</span>
+                ${customerMode && customer ? `<button class="btn primary btn-sm" style="font-size:12px;" onclick="event.stopPropagation();app.openAddPurchaseModal(${customer.id})"><i class="fas fa-plus"></i> Add Purchase</button>` : ''}
+            </div>
+            ${rowHtml || `<div style="padding:14px;text-align:center;color:var(--gray-400);font-size:12px;font-style:italic;">No sales recorded yet.</div>`}
+            ${rows.length ? `<div style="padding:8px 12px;display:flex;justify-content:space-between;font-size:12px;background:#fafafa;border-top:1px solid #e5e7eb;"><span style="font-weight:600;color:var(--gray-600);">Total · ${rows.length} sale${rows.length > 1 ? 's' : ''}</span><strong style="color:var(--primary);">${UI.formatCurrency(total, { currency: _cur })}</strong></div>` : ''}
+            ${unlinkedHtml}
+        </div>`;
+};
+// Resolve the private-bucket thumbnails after the ledger HTML is in the DOM.
+const _resolveLedgerThumbs = (container) => {
+    try { window._resolveAttachmentImages && window._resolveAttachmentImages(container); } catch (_) { /* best-effort thumbnails */ }
+};
+
 const renderCustomerClosingTab = async (customer, container) => {
     if (!container) return;
 
-    // ── Section 1: Purchases table (merged from former Purchase History tab) ──
-    const purchases = await AppDataStore.query('purchases', { customer_id: customer.id }).catch(() => []);
-    let totalPaid = 0, totalPending = 0;
-    // Render every amount in this customer's market currency (rows may carry their own).
-    const _cur = UI.currencyForCountry(customer.country);
-
-    // Pull the original conversion sale from the linked prospect closing_record.
-    // IMPORTANT: every approval path NULLs closing_record on conversion and pushes
-    // the approved CR into closing_records_history. So a non-null closing_record here
-    // is a NEW, subsequent draft/submission (status 'draft'|'submitted') — NOT the
-    // approved conversion sale. Only count/render it as PAID when it is approved,
-    // otherwise it inflates totalPaid with an unapproved draft.
-    let conversionRow = '';
-    if (customer.converted_from_prospect_id) {
-        const origP = await AppDataStore.getById('prospects', customer.converted_from_prospect_id);
-        if (origP?.closing_record && origP.closing_record.status === 'approved') {
-            const cr0 = origP.closing_record;
-            const amt0 = parseFloat(cr0.sale_amount) || 0;
-            totalPaid += amt0;
-            conversionRow = `
-                <tr style="background:#f0fdf4;">
-                    <td style="padding:6px 10px;">${escapeHtml(cr0.closing_date || customer.customer_since || '-')}</td>
-                    <td style="padding:6px 10px;">${escapeHtml(cr0.invoice_number || '-')}</td>
-                    <td style="padding:6px 10px;"><strong>${escapeHtml(cr0.product || '-')}</strong> <span style="font-size:11px;color:var(--gray-400);">(Conversion)</span></td>
-                    <td style="padding:6px 10px;">${UI.formatCurrency(amt0, { currency: _cur, dp: 2 })}</td>
-                    <td style="padding:6px 10px;"><span style="background:#dcfce7;color:#166534;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;">PAID</span></td>
-                    <td style="padding:6px 10px;">${(()=>{ const ds=cr0.delivery_status||'Pending Delivery'; const dc={'Pending Delivery':'background:#fef3c7;color:#92400e','Dispatched':'background:#dbeafe;color:#1e40af','Delivered':'background:#dcfce7;color:#166534'}; return `<span style="${dc[ds]||dc['Pending Delivery']};border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;cursor:pointer;" onclick="app.updateConversionDelivery(${origP.id},${customer.id})" title="Click to update">${ds} ✎</span>`; })()}</td>
-                    <td style="padding:6px 10px;">${cr0.invoice_file ? invoiceLink(cr0.invoice_file, `<i class="fas fa-paperclip"></i> View`, 'color:var(--primary);font-size:12px;') : '-'}</td>
-                    <td style="padding:6px 10px;font-size:11px;color:var(--gray-400);">Locked</td>
-                </tr>`;
-        }
-    }
-
-    const purchaseRows = purchases.map(p => {
-        const amt = parseFloat(p.amount) || 0;
-        if (p.status !== 'PENDING') totalPaid += amt; else totalPending += amt;
-        const statusColor = p.status === 'PAID' ? '#dcfce7;color:#166534' : p.status === 'PENDING' ? '#fef9c3;color:#854d0e' : '#e0e7ff;color:#3730a3';
-        return `
-            <tr>
-                <td style="padding:6px 10px;">${escapeHtml(p.date || '-')}</td>
-                <td style="padding:6px 10px;">${escapeHtml(p.invoice || '-')}</td>
-                <td style="padding:6px 10px;">${escapeHtml(p.item || '-')}</td>
-                <td style="padding:6px 10px;">${UI.formatCurrency(amt, { currency: p.currency || _cur, dp: 2 })}</td>
-                <td style="padding:6px 10px;"><span style="background:${statusColor};border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;">${p.status}</span></td>
-                <td style="padding:6px 10px;">${(()=>{ const ds=p.delivery_status||'Pending Delivery'; const dc={'Pending Delivery':'background:#fef3c7;color:#92400e','Dispatched':'background:#dbeafe;color:#1e40af','Delivered':'background:#dcfce7;color:#166534'}; return `<span style="${dc[ds]||dc['Pending Delivery']};border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;cursor:pointer;" onclick="app.updatePurchaseDelivery(${p.id},${customer.id})" title="Click to update">${ds} ✎</span>`; })()}</td>
-                <td style="padding:6px 10px;">${p.proof
-                    ? `<a href="#" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> ${p.proof.endsWith('.pdf') ? 'Report' : 'Image'}</a>`
-                    : `<button class="btn secondary btn-sm" style="font-size:11px;padding:2px 8px;" onclick="app.uploadPaymentProof(${p.id},${customer.id})">Upload</button>`}</td>
-                <td style="padding:6px 10px;">
-                    ${p.status === 'PENDING' ? `<button class="btn-icon" title="Delete" onclick="app.deletePurchase(${p.id},${customer.id})"><i class="fas fa-trash" style="color:var(--error);font-size:12px;"></i></button>` : ''}
-                </td>
-            </tr>`;
-    }).join('');
-
-    const purchasesHtml = `
-        <div style="margin-bottom:16px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
-            <div style="background:#f8fafc;padding:8px 12px;font-weight:600;font-size:13px;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;">
-                <span><i class="fas fa-shopping-cart" style="color:var(--primary);margin-right:6px;"></i>Purchase Records</span>
-                <button class="btn primary btn-sm" style="font-size:12px;" onclick="app.openAddPurchaseModal(${customer.id})"><i class="fas fa-plus"></i> Add Purchase</button>
-            </div>
-            <div style="overflow-x:auto;">
-                <table style="width:100%;border-collapse:collapse;font-size:13px;">
-                    <thead><tr style="background:#fafafa;border-bottom:1px solid #e5e7eb;">
-                        <th style="padding:6px 10px;text-align:left;font-weight:600;">Date</th>
-                        <th style="padding:6px 10px;text-align:left;font-weight:600;">Invoice #</th>
-                        <th style="padding:6px 10px;text-align:left;font-weight:600;">Item / Product</th>
-                        <th style="padding:6px 10px;text-align:left;font-weight:600;">Amount</th>
-                        <th style="padding:6px 10px;text-align:left;font-weight:600;">Payment</th>
-                        <th style="padding:6px 10px;text-align:left;font-weight:600;">Delivery</th>
-                        <th style="padding:6px 10px;text-align:left;font-weight:600;">Proof</th>
-                        <th style="padding:4px;width:32px;"></th>
-                    </tr></thead>
-                    <tbody style="border-bottom:1px solid #e5e7eb;">
-                        ${conversionRow}${purchaseRows}
-                        ${!conversionRow && !purchaseRows ? `<tr><td colspan="8" style="padding:14px;text-align:center;color:var(--gray-400);font-size:12px;font-style:italic;">No purchase records yet.</td></tr>` : ''}
-                    </tbody>
-                </table>
-            </div>
-            <div style="padding:10px 12px;display:flex;gap:16px;font-size:13px;flex-wrap:wrap;background:#fafafa;">
-                <span>Paid: <strong style="color:#166534;">${UI.formatCurrency(totalPaid, { currency: _cur, dp: 2 })}</strong></span>
-                <span>Pending: <strong style="color:#854d0e;">${UI.formatCurrency(totalPending, { currency: _cur, dp: 2 })}</strong></span>
-                <span style="margin-left:auto;">Lifetime Total: <strong style="color:var(--primary);">${UI.formatCurrency(totalPaid+totalPending, { currency: _cur, dp: 2 })}</strong></span>
-            </div>
-        </div>`;
-
     const prospectId = customer.converted_from_prospect_id;
     if (!prospectId) {
-        container.innerHTML = purchasesHtml;
+        container.innerHTML = await buildClosingSalesLedger({ customer, customerMode: true });
+        _resolveLedgerThumbs(container);
         return;
     }
     container.dataset.prospectId = prospectId;
     const prospect = await AppDataStore.getByIdFull('prospects', prospectId);
     if (!prospect) {
-        container.innerHTML = '<p style="text-align:center;padding:20px;color:var(--gray-400);">Linked prospect not found.</p>';
+        // Linked prospect unreadable — still show this customer's own purchases.
+        container.innerHTML = await buildClosingSalesLedger({ customer, customerMode: true });
+        _resolveLedgerThumbs(container);
         return;
     }
 
@@ -3889,68 +3891,8 @@ const renderCustomerClosingTab = async (customer, container) => {
             </div>
         </div>`;
 
-    // Closing History
-    const crHistory = Array.isArray(prospect.closing_records_history) ? prospect.closing_records_history : [];
-    const _crBadge = (h) => {
-        if (h.case_completed) return `<span style="background:#dcfce7;color:#166534;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;"><i class="fas fa-check-circle"></i> Completed</span>`;
-        const s = h.delivery_status || 'pending';
-        if (s === 'delivered') return `<span style="background:#dbeafe;color:#1e40af;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;"><i class="fas fa-truck"></i> Delivered</span>`;
-        return `<span style="background:#fef9c3;color:#854d0e;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;"><i class="fas fa-clock"></i> Pending</span>`;
-    };
-    const historyHtml = crHistory.length ? `
-        <div style="margin-bottom:16px;border:1px solid #e5e7eb;border-radius:8px;">
-            <div style="background:#f0fdf4;padding:8px 12px;font-weight:600;font-size:13px;border-bottom:1px solid #e5e7eb;color:#166534;border-radius:8px 8px 0 0;">
-                <i class="fas fa-history"></i> Closing History (${crHistory.length} record${crHistory.length>1?'s':''})
-            </div>
-            ${crHistory.map((h, hi) => `
-                <details style="border-bottom:1px solid #f3f4f6;">
-                    <summary style="padding:8px 12px;cursor:pointer;font-size:13px;font-weight:600;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:8px;">
-                        <span style="flex:1;">#${hi+1} — ${escapeHtml(h.product||'N/A')} · ${UI.formatCurrency(parseFloat(h.sale_amount) || 0, { currency: window._crmUtils.recordCurrency(typeof customer !== 'undefined' ? customer : (typeof prospect !== 'undefined' ? prospect : null)) })}</span>
-                        ${_crBadge(h)}
-                        <span style="font-size:11px;color:var(--gray-400);font-weight:400;">${h.closing_date || (h.approved_at ? h.approved_at.split('T')[0] : '')}</span>
-                    </summary>
-                    <div style="padding:10px 12px;background:#fafafa;font-size:12px;border-top:1px solid #f3f4f6;">
-                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;margin-bottom:10px;">
-                            <div><span style="color:var(--gray-400);">Payment:</span> ${escapeHtml(h.payment_method||'-')}</div>
-                            <div><span style="color:var(--gray-400);">Invoice:</span> ${escapeHtml(h.invoice_number||'-')}</div>
-                            <div style="grid-column:1/-1;">
-                                ${h.invoice_file
-                                    ? invoiceLink(h.invoice_file, `<i class="fas fa-paperclip"></i> ${escapeHtml(h.invoice_file_name||'View invoice')}`)
-                                    : `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px;background:#fffbeb;border:1px dashed #f59e0b;border-radius:6px;padding:6px 8px;">
-                                        <span style="color:#92400e;"><i class="fas fa-exclamation-triangle"></i> No invoice attached.</span>
-                                        <input type="file" id="crh-inv-${pid}-${hi}" accept="image/*,application/pdf" style="font-size:11px;flex:1;min-width:140px;">
-                                        <button class="btn secondary btn-sm" style="padding:2px 8px;font-size:11px;height:24px;" onclick="event.stopPropagation();app.uploadHistoryInvoice(${pid},${hi})"><i class="fas fa-upload"></i> Upload</button>
-                                      </div>`}
-                            </div>
-                            ${h.closing_remarks ? `<div style="grid-column:1/-1;"><span style="color:var(--gray-400);">Sale Remarks:</span> ${escapeHtml(h.closing_remarks)}</div>` : ''}
-                        </div>
-                        <div style="border-top:1px solid #e5e7eb;padding-top:10px;">
-                            <div style="font-size:11px;font-weight:700;color:var(--gray-500);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">📦 Delivery Tracking</div>
-                            <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
-                                <select id="crh-status-${pid}-${hi}" class="form-control" style="flex:1;min-width:120px;font-size:12px;">
-                                    <option value="pending" ${(!h.delivery_status||h.delivery_status==='pending')?'selected':''}>Pending Delivery</option>
-                                    <option value="delivered" ${h.delivery_status==='delivered'?'selected':''}>Delivered</option>
-                                    <option value="completed" ${h.delivery_status==='completed'?'selected':''}>Completed</option>
-                                </select>
-                                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap;font-weight:600;color:${h.case_completed?'#166534':'var(--gray-600)'};">
-                                    <input type="checkbox" id="crh-completed-${pid}-${hi}" ${h.case_completed?'checked':''} style="width:15px;height:15px;cursor:pointer;">
-                                    Case Completed
-                                </label>
-                            </div>
-                            <div style="margin-bottom:8px;">
-                                <label style="font-size:11px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Delivery Proof Attachment</label>
-                                ${h.delivery_proof ? `<div style="margin-bottom:4px;"><a href="${safeUrl(h.delivery_proof)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> ${escapeHtml(h.delivery_proof_name||'View proof')}</a> <span style="color:var(--gray-400);font-size:11px;">(upload new to replace)</span></div>` : ''}
-                                <input type="file" id="crh-proof-${pid}-${hi}" accept="image/*,application/pdf" style="font-size:11px;width:100%;" onchange="(function(el){var f=el.files[0];if(!f)return;var r=new FileReader();r.onload=function(e){el.dataset.b64=e.target.result;el.dataset.fname=f.name;};r.readAsDataURL(f);})(this)">
-                            </div>
-                            <div style="margin-bottom:8px;">
-                                <label style="font-size:11px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Remarks</label>
-                                <textarea id="crh-remarks-${pid}-${hi}" class="form-control" rows="2" style="font-size:12px;" placeholder="Post-sale notes, delivery details...">${escapeHtml(h.delivery_remarks||'')}</textarea>
-                            </div>
-                            <button class="btn primary btn-sm" style="width:100%;height:30px;" onclick="event.stopPropagation();app.saveClosingHistoryEntry(${pid},${hi})"><i class="fas fa-save"></i> Save</button>
-                        </div>
-                    </div>
-                </details>`).join('')}
-        </div>` : '';
+    // Sales ledger — shared with the prospect's DC Closing Record (one list, same data).
+    const ledgerHtml = await buildClosingSalesLedger({ prospect, customer, customerMode: true });
 
     // Active closing record (submitted, awaiting approval)
     let activeHtml = '';
@@ -3983,9 +3925,8 @@ const renderCustomerClosingTab = async (customer, container) => {
     // pre2025Html is always a non-empty table string, so `... || fallback` never
     // reached the fallback (+ binds tighter than ||). Decide on the actual closing
     // content — history + active submission — and append the message when both are empty.
-    const _closingBody = historyHtml + activeHtml ||
-        '<p style="text-align:center;padding:16px;color:var(--gray-400);font-size:13px;">No closing records yet.</p>';
-    container.innerHTML = pre2025Html + _closingBody;
+    container.innerHTML = activeHtml + ledgerHtml + pre2025Html;
+    _resolveLedgerThumbs(container);
 };
 
 // Accordion toggle — expand/collapse a prospect profile section.
