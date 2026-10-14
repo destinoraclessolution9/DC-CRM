@@ -3341,6 +3341,20 @@
             const _cArg = (owned && a.customer_id) ? a.customer_id : 'null';
             const venue = a.venue_name || a.venue || a.location_address || '';
             const color = _mcalColorForType(type);
+            // Edit / Minutes / Closing — same gating as the desktop Actions panel
+            // (script-calendar viewActivityDetails), shown only to the owner or
+            // their leader (_mcalOwned covers co-agents + the visible downline).
+            const _entityId = a.prospect_id || a.customer_id;
+            const _isMeetup = _MCAL_MEETUP_TYPES.includes(type) && !!_entityId;
+            const _pill = (kind, icon, label, bg, fg) =>
+                `<button onclick="event.stopPropagation();app.mcalActivityAction('${kind}', ${Number(a.id)}, ${_entityId ? Number(_entityId) : 'null'})" style="display:inline-flex;align-items:center;gap:4px;height:26px;padding:0 10px;border:none;border-radius:13px;background:${bg};color:${fg};font-size:11px;font-weight:600;cursor:pointer;"><i class="fas ${icon}" style="font-size:10px;"></i>${label}</button>`;
+            const actionRow = owned
+                ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:7px;">
+                        ${_pill('edit', 'fa-pen', 'Edit', '#FEF3C7', '#B45309')}
+                        ${_isMeetup ? _pill('minutes', 'fa-sticky-note', 'Minutes', '#E0E7FF', '#4338CA') : ''}
+                        ${_isMeetup ? _pill('closing', 'fa-clipboard-check', 'Closing', '#D1FAE5', '#047857') : ''}
+                   </div>`
+                : '';
             return `
                 <div style="display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--gray-100);cursor:pointer;" onclick="app.mcalOpenEvent('${a.id}', ${_pArg}, ${_cArg});">
                     <div style="min-width:42px;font-size:13px;font-weight:600;color:var(--gray-700);">${_mhomeEsc(time)}</div>
@@ -3348,6 +3362,7 @@
                     <div style="flex:1;min-width:0;">
                         <div style="font-size:14px;font-weight:500;color:var(--gray-800);">${_mhomeEsc(name)}</div>
                         ${venue ? `<div style="font-size:12px;color:var(--gray-500);margin-top:2px;"><i class="fas fa-map-marker-alt" style="font-size:10px;margin-right:3px;"></i>${_mhomeEsc(venue)}</div>` : ''}
+                        ${actionRow}
                     </div>
                     <i class="fas fa-chevron-right" style="color:var(--gray-300);font-size:12px;flex-shrink:0;"></i>
                 </div>`;
@@ -3362,8 +3377,32 @@
             </div>
         `, [
             { label: '+ Add Meet Up', type: 'primary', action: `(async()=>{try{app.mcalAddMeetUp && await app.mcalAddMeetUp('${dateStr}');}catch(e){console.error(e);}})()` },
-            { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
         ]);
+    };
+    // Meet-up types that get Minutes / Closing — mirrors _MEETUP_TYPES in the
+    // desktop Actions panel (script-calendar viewActivityDetails).
+    const _MCAL_MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP','EVENT_CLOSING'];
+    // Day-sheet action pills. The three handlers live in the calendar chunk,
+    // which the mobile calendar never loads on its own (and editActivityTiming
+    // has no lazy stub), so load it first. Never-dead-tap contract as mcalOpenEvent.
+    const mcalActivityAction = async (kind, activityId, entityId) => {
+        try { UI.hideModal(); } catch (_) { /* intentional: best-effort modal cleanup */ }
+        try {
+            if (typeof window._loadChunk === 'function') await window._loadChunk('chunks/script-calendar.min.js');
+            const a = window.app;
+            if (kind === 'edit') await a.editActivityTiming(activityId);
+            else if (kind === 'minutes') await a.openPostMeetupNotesModal(activityId, entityId);
+            else if (kind === 'closing') await a.openMeetingOutcomeModal(activityId);
+        } catch (e) {
+            try {
+                localStorage.setItem('mcal-last-error', JSON.stringify({
+                    ts: new Date().toISOString(), where: 'mcalActivityAction:' + kind,
+                    msg: (e && e.message) || String(e), stack: String((e && e.stack) || '').slice(0, 600),
+                }));
+            } catch (_) { /* best-effort breadcrumb */ }
+            console.error('[mcal] activity action failed:', e);
+            try { UI.toast.error('Could not open: ' + ((e && e.message) || 'unknown error')); } catch (_) { /* toast best-effort */ }
+        }
     };
     // ── Week / Day / Agenda views ────────────────────────────
     // These three renderers reuse the SAME data path the Month grid uses:
@@ -4556,6 +4595,7 @@
         mcalRefreshActiveView,
         mcalDayClick,
         mcalOpenEvent,
+        mcalActivityAction,
         mcalBirthdayWa,
         mcalTeamBirthdayWa,
         mcalOpenPerson,
