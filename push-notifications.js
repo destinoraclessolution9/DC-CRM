@@ -202,6 +202,11 @@
                         title: opts.title,
                         body: opts.body,
                         url: opts.url,
+                        // Outbox metadata (notification_outbox): bell icon/grouping,
+                        // delivery urgency, and never-twice key. All optional.
+                        kind: opts.kind,
+                        priority: opts.priority,
+                        dedupe_key: opts.dedupe_key,
                     }),
                 }
             );

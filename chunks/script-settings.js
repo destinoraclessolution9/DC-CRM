@@ -733,12 +733,13 @@ const sendTestPushNotification = async () => {
                 title: 'Feng Shui CRM — Test',
                 body: 'If you can read this on your phone, notifications are working.',
                 url: './index.html#calendar',
+                kind: 'test',
             }
         );
         if (res && res.ok && (res.sent > 0)) {
-            UI.toast.success(`Test sent to ${res.sent} device(s)`);
+            UI.toast.success('Test sent — check your phone and the 🔔 bell');
         } else if (res && res.reason === 'no_subscriptions') {
-            UI.toast.error('No subscribed device found — enable notifications first');
+            UI.toast.error('No phone signed up — the test is in your 🔔 bell only. Enable notifications on your phone first.');
         } else {
             UI.toast.error('Test failed: ' + JSON.stringify(res));
         }

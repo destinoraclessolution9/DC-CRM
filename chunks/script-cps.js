@@ -72,11 +72,119 @@ const _isVisibleBirthdayPerson = (p, visibleIds, vStrs) => {
     return !!agentId && vStrs.includes(String(agentId));
 };
 
+// ── Notification inbox (notification_outbox) ──────────────────────────────
+// Every push the server sends (new activity, reminder, morning summary,
+// co-agent invite/reply, highlight, test) is also a row here, one per
+// recipient — RLS returns only the viewer's own rows. Users with no phone
+// signed up still get them in the bell (the agreed fallback channel).
+const NOTIF_INBOX_LIMIT = 30;
+const _NOTIF_KIND_ICON = {
+    activity_created: '📅', activity_reminder: '⏰', daily_summary: '🌅',
+    coagent_invite: '🤝', coagent_response: '✅', highlight: '🌟', test: '🔔',
+};
+const _inboxSince = () => new Date(Date.now() - 30 * 86400000).toISOString();
+
+const _inboxUnreadCount = async () => {
+    try {
+        if (!window.supabase || !_state.cu?.id) return 0;
+        const { count, error } = await window.supabase
+            .from('notification_outbox')
+            .select('id', { count: 'exact', head: true })
+            .eq('user_id', _state.cu.id)
+            .is('read_at', null)
+            .neq('status', 'merged')
+            .gte('created_at', _inboxSince());
+        return error ? 0 : (count || 0);
+    } catch (_) { return 0; }
+};
+
+const _inboxFetch = async () => {
+    if (!window.supabase || !_state.cu?.id) return [];
+    const { data, error } = await window.supabase
+        .from('notification_outbox')
+        .select('id,kind,title,body,url,activity_id,read_at,created_at')
+        .eq('user_id', _state.cu.id)
+        .neq('status', 'merged')
+        .gte('created_at', _inboxSince())
+        .order('created_at', { ascending: false })
+        .limit(NOTIF_INBOX_LIMIT);
+    if (error) throw error;
+    return data || [];
+};
+
+const _notifAgo = (iso) => {
+    const t = new Date(iso).getTime();
+    if (!t) return '';
+    const mins = Math.round((Date.now() - t) / 60000);
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins} min ago`;
+    const d = new Date(t);
+    const time = d.toLocaleTimeString('en-MY', { hour: 'numeric', minute: '2-digit', hour12: true });
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const day = new Date(t); day.setHours(0, 0, 0, 0);
+    const days = Math.round((today - day) / 86400000);
+    if (days === 0) return time;
+    if (days === 1) return `Yesterday ${time}`;
+    return `${d.toLocaleDateString('en-MY', { day: 'numeric', month: 'short' })} ${time}`;
+};
+
+// Tap a bell notification: open the exact activity when there is one,
+// otherwise the view named in its url hash (e.g. #fude, #calendar).
+const openNotifItem = async (activityId, hash) => {
+    try {
+        document.querySelector('.notif-panel')?.remove();
+        if (activityId) {
+            await (window.app.navigateTo || (async () => {}))('calendar');
+            for (let i = 0; i < 20 && typeof window.app.viewActivityDetails !== 'function'; i++) {
+                await new Promise(r => setTimeout(r, 150));
+            }
+            if (typeof window.app.viewActivityDetails === 'function') {
+                await window.app.viewActivityDetails(activityId);
+                return;
+            }
+        }
+        if (hash) await (window.app.navigateTo || (async () => {}))(hash);
+    } catch (e) { console.warn('[notif] open item failed:', e); }
+};
+
+const _inboxSectionHtml = (rows) => {
+    if (!rows.length) return '';
+    const item = (n) => {
+        const hash = String(n.url || '').split('#')[1] || '';
+        const unread = !n.read_at;
+        const aid = n.activity_id != null && /^\d+$/.test(String(n.activity_id)) ? String(n.activity_id) : 'null';
+        const safeHash = /^[a-z0-9_-]*$/i.test(hash) ? hash : '';
+        return `
+            <div class="notif-item${unread ? ' notif-unread' : ''}" onclick="app.openNotifItem(${aid}, '${safeHash}')" style="cursor:pointer;${unread ? 'background:var(--bg-elevated);' : ''}">
+                <div class="notif-item-icon">${_NOTIF_KIND_ICON[n.kind] || '🔔'}</div>
+                <div class="notif-item-body">
+                    <div class="notif-item-title">${unread ? '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--primary,#2563eb);margin-right:6px;vertical-align:middle;"></span>' : ''}${esc(n.title || '')}</div>
+                    ${n.body ? `<div class="notif-item-sub" style="white-space:pre-line;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;">${esc(n.body)}</div>` : ''}
+                    <div class="notif-item-sub" style="font-size:11px;opacity:.75;margin-top:4px;">${esc(_notifAgo(n.created_at))}</div>
+                </div>
+            </div>`;
+    };
+    return rows.map(item).join('');
+};
+
+// Mobile home bell shows a red dot — hide it when nothing is unread/pending.
+// (Injected once so both the chunk-rendered and React-rendered home pick it up.)
+const _ensureNotifDotStyle = () => {
+    if (document.getElementById('notif-dot-style')) return;
+    const st = document.createElement('style');
+    st.id = 'notif-dot-style';
+    st.textContent = 'body[data-notif-zero="1"] .mhome-bell .dot{display:none}';
+    document.head.appendChild(st);
+};
+
 const _refreshNotifBadge = async () => {
     const badge = document.querySelector('.notif-bell .badget');
     if (!badge) return;
     let count = 0;
     try {
+        // Unread bell notifications (server-sent pushes, also kept as an inbox).
+        count += await _inboxUnreadCount();
+
         // Pending CPS intakes
         const visibleIds = await getVisibleUserIds(_state.cu);
         let intakes = [];
@@ -155,6 +263,7 @@ const _refreshNotifBadge = async () => {
     badge.textContent = count > 99 ? '99+' : String(count);
     badge.setAttribute('data-zero', count === 0 ? '1' : '0');
     badge.setAttribute('data-count', count);
+    try { document.body.setAttribute('data-notif-zero', count === 0 ? '1' : '0'); } catch (_) { /* best-effort mobile dot */ }
 };
 
 const _buildNotifPanel = async () => {
@@ -258,11 +367,18 @@ const _buildNotifPanel = async () => {
         }
     } catch (_) {}
 
-    if (!items.length) {
+    let inbox = [];
+    try { inbox = await _inboxFetch(); } catch (e) { console.warn('[notif] inbox load failed:', e); }
+    const unreadN = inbox.filter(n => !n.read_at).length;
+
+    if (!items.length && !inbox.length) {
         return `<div class="notif-panel-header"><i class="fas fa-bell"></i> Notifications</div>
                 <div class="notif-panel-empty">🎉 All caught up! No pending items.</div>`;
     }
-    return `<div class="notif-panel-header"><i class="fas fa-bell"></i> Notifications <span style="margin-left:auto;font-size:12px;font-weight:500;color:var(--text-secondary);">${items.length} item${items.length===1?'':'s'}</span></div>` +
+    const _sectionHdr = (label) => `<div style="padding:8px 16px 4px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-secondary);">${label}</div>`;
+    return `<div class="notif-panel-header"><i class="fas fa-bell"></i> Notifications <span style="margin-left:auto;font-size:12px;font-weight:500;color:var(--text-secondary);">${unreadN ? `${unreadN} new` : `${items.length} to do`}</span></div>` +
+        (inbox.length ? _inboxSectionHtml(inbox) : '') +
+        (items.length ? _sectionHdr('To do') : '') +
         items.map(it => `
             <div class="notif-item" ${it.action ? `onclick="${it.action}; document.querySelector('.notif-panel')?.remove()" style="cursor:pointer;"` : ''}>
                 <div class="notif-item-icon">${it.icon}</div>
@@ -292,6 +408,13 @@ const toggleNotifPanel = async () => {
         }, 10);
         try {
             panel.innerHTML = await _buildNotifPanel();
+            // Seen = read. Unread rows stay highlighted in this open panel; the
+            // badge / mobile dot clear now.
+            if (panel.querySelector('.notif-unread') && window.supabase) {
+                window.supabase.rpc('mark_notifications_read', { p_ids: null })
+                    .then(() => _refreshNotifBadge())
+                    .catch(() => {});
+            }
         } catch (e) {
             panel.innerHTML = '<div class="notif-panel-empty">Failed to load notifications.</div>';
         }
@@ -313,6 +436,7 @@ const _initNotifBell = () => {
     const bell = document.querySelector('.notif-bell');
     if (!bell || bell._notifWired) return;
     bell._notifWired = true;
+    _ensureNotifDotStyle();
 
     const refreshIfVisible = () => { if (!document.hidden) _refreshNotifBadge(); };
     // Initial load
@@ -334,6 +458,10 @@ const _initNotifBell = () => {
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'cps_intake_requests' }, onRealtimeEvent)
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'refill_reminders' }, onRealtimeEvent)
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'activities' }, onRealtimeEvent)
+                // RLS already limits rows to the viewer; the filter just trims traffic.
+                .on('postgres_changes', _state.cu?.id
+                    ? { event: 'INSERT', schema: 'public', table: 'notification_outbox', filter: `user_id=eq.${_state.cu.id}` }
+                    : { event: 'INSERT', schema: 'public', table: 'notification_outbox' }, onRealtimeEvent)
                 .subscribe();
             window._notifChannel = ch;
         }
@@ -1452,6 +1580,7 @@ const applyCpsScanSelection = async () => {
         _refreshNotifBadge,
         _buildNotifPanel,
         toggleNotifPanel,
+        openNotifItem,
         _initNotifBell,
         getViewPhase,
         calculateCustomerHealthScore,

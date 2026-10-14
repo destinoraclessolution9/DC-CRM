@@ -360,6 +360,11 @@ Deno.serve(async (req: Request) => {
         title: `New ${type} — ${agentName}`,
         body: who ? `${whenWhere}\n${who}` : whenWhere,
         url: "./index.html#calendar",
+        // Outbox metadata: member-created activity → leader alert is High
+        // priority; the dedupe key makes a re-fired trigger a no-op.
+        kind: "activity_created",
+        priority: "high",
+        dedupe_key: `created:${record.id}`,
       }),
     });
 

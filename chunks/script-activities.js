@@ -6671,6 +6671,8 @@ My raw notes:
                     title: `You've been invited to a ${typeLabel}`,
                     body: `${whoLabel} added you as co-agent${dateLabel ? ` on ${dateLabel}${timeLabel ? ` at ${timeLabel}` : ''}` : ''}. Tap to accept or reject.`,
                     url: `./index.html#calendar`,
+                    kind: 'coagent_invite',
+                    priority: 'high',
                 }
             );
         } catch (e) {
@@ -6699,6 +6701,8 @@ My raw notes:
                     title: `Co-agent ${verb} your ${typeLabel}`,
                     body: `${coAgent.name || 'Co-agent'} ${verb} the invitation${dateLabel ? ` on ${dateLabel}${timeLabel ? ` at ${timeLabel}` : ''}` : ''}.`,
                     url: `./index.html#calendar`,
+                    kind: 'coagent_response',
+                    priority: 'low',
                 }
             );
         } catch (e) {
@@ -6766,6 +6770,7 @@ My raw notes:
                     title: isNew ? `福运相随: New ${typeLabel}` : `福运相随: ${typeLabel} Updated`,
                     body: highlight.title || '',
                     url: './index.html#fude',
+                    kind: 'highlight',
                 }
             );
         } catch (e) {
