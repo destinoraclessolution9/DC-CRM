@@ -1539,6 +1539,194 @@
     // Approval/queue/conversion logic stays in saveMeetingOutcome — this block
     // covers form UI + field collection only.
     // ═══════════════════════════════════════════════════════════════════════
+    // ── Contact auto-fill for the closing forms ──────────────────────────────
+    // Minimum typing: the six Customer Information fields are filled from every
+    // place the CRM already knows them, first match wins —
+    //   this closing → prospect profile → linked customer → last approved closing
+    //   → earlier order-form photos (AI-read) → DOB worked out from the IC.
+    // Each field remembers its source (data-src) so the form can tag it and the
+    // save can offer to copy genuinely NEW info back to the profile (the agent
+    // confirms every change — offerProfileUpdate below).
+    const _CONTACT_KEYS = ['full_name', 'phone', 'email', 'ic_number', 'date_of_birth', 'address'];
+    const _CONTACT_LABEL = { full_name: 'Full Name', phone: 'Phone', email: 'Email', ic_number: 'IC Number', date_of_birth: 'Date of Birth', address: 'Address' };
+    const _CONTACT_SRC_LABEL = { profile: 'from profile', customer: 'from customer record', last_closing: 'from last closing', order_form: 'from order form', ic: 'from IC — check', photo: 'from photo' };
+    const _joinAddr = (r) => r ? [r.address, r.city, r.state, r.postal_code].filter(x => x != null && String(x).trim()).join(', ') : '';
+    // DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY or YYYY-MM-DD → YYYY-MM-DD ('' if not a real date).
+    const _toIsoDate = (val) => {
+        const s = String(val == null ? '' : val).trim();
+        let y, m, d, mt;
+        if ((mt = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))) { y = +mt[1]; m = +mt[2]; d = +mt[3]; }
+        else if ((mt = s.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/))) { d = +mt[1]; m = +mt[2]; y = +mt[3]; }
+        else return '';
+        const dt = new Date(Date.UTC(y, m - 1, d));
+        if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return '';
+        return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    };
+    // Malaysian NRIC YYMMDD-PB-###G → birth date. A 2-digit year above the current
+    // one is 19xx. Not every IC is right (DOB vs IC audit 2026-07-30: ~92%), so a
+    // derived DOB is always tagged "from IC — check" and confirmed before saving.
+    const icToDob = (ic) => {
+        const s = String(ic || '').replace(/[\s-]/g, '');
+        if (!/^\d{12}$/.test(s)) return '';
+        const yy = +s.slice(0, 2);
+        const yyyy = (yy > new Date().getFullYear() % 100 ? 1900 : 2000) + yy;
+        return _toIsoDate(`${yyyy}-${s.slice(2, 4)}-${s.slice(4, 6)}`);
+    };
+    const gatherContactPrefill = async ({ prospect = null, closingRecord = null } = {}) => {
+        const fields = {}, src = {};
+        const offer = (key, val, from) => {
+            if (fields[key]) return;
+            let v = val == null ? '' : String(val).trim();
+            if (key === 'date_of_birth') v = _toIsoDate(v);
+            if (!v) return;
+            fields[key] = v; src[key] = from;
+        };
+        const fromRow = (r, from, addr) => {
+            if (!r) return;
+            for (const k of _CONTACT_KEYS) offer(k, k === 'address' && addr ? addr(r) : r[k], from);
+        };
+        fromRow(closingRecord, 'closing');
+        fromRow(prospect, 'profile', _joinAddr);
+        const pid = prospect?.id;
+        const missing = () => _CONTACT_KEYS.some(k => !fields[k]);
+        if (pid != null && missing()) {
+            try {
+                const custs = await AppDataStore.query('customers', { converted_from_prospect_id: pid });
+                (custs || []).forEach(c => fromRow(c, 'customer', _joinAddr));
+            } catch (_) { /* best-effort source */ }
+        }
+        if (pid != null && missing()) {
+            const hist = Array.isArray(prospect.closing_records_history) ? prospect.closing_records_history : [];
+            for (let i = hist.length - 1; i >= 0; i--) fromRow(hist[i], 'last_closing');
+        }
+        if (pid != null && missing()) {
+            try {
+                const ofs = await AppDataStore.query('prospect_attachments', { prospect_id: pid, attachment_type: 'order_form' });
+                (ofs || []).slice().sort((x, y) => String(y.scanned_at || y.created_at || '').localeCompare(String(x.scanned_at || x.created_at || '')))
+                    .forEach(a => {
+                        let m = a.metadata;
+                        if (typeof m === 'string') { try { m = JSON.parse(m); } catch (_) { m = null; } }
+                        const f = m?.fields || {};
+                        offer('full_name', f.customer_name, 'order_form');
+                        offer('phone', f.customer_phone, 'order_form');
+                        offer('email', f.customer_email, 'order_form');
+                        offer('ic_number', f.customer_nric, 'order_form');
+                        offer('address', f.customer_address, 'order_form');
+                        offer('date_of_birth', f.product_solar_bd, 'order_form');
+                    });
+            } catch (_) { /* best-effort source */ }
+        }
+        if (!fields.date_of_birth && fields.ic_number) {
+            const d = icToDob(fields.ic_number);
+            if (d) { fields.date_of_birth = d; src.date_of_birth = 'ic'; }
+        }
+        return { fields, src };
+    };
+    // Small grey "from …" chip next to a field label.
+    const _contactSrcTag = (from) => _CONTACT_SRC_LABEL[from]
+        ? `<span class="contact-src-tag" style="margin-left:6px;font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px;background:${from === 'ic' ? '#fef3c7' : '#ecfdf5'};color:${from === 'ic' ? '#92400e' : '#047857'};">${_CONTACT_SRC_LABEL[from]}</span>`
+        : '';
+    // Read the current source of each contact input (`${prefix}-full-name` etc.).
+    const _CONTACT_SUFFIX = { full_name: 'full-name', phone: 'phone', email: 'email', ic_number: 'ic', date_of_birth: 'dob', address: 'address' };
+    const readContactSources = (prefix) => {
+        const out = {};
+        for (const k of _CONTACT_KEYS) {
+            const el = document.getElementById(`${prefix}-${_CONTACT_SUFFIX[k]}`);
+            if (el?.dataset?.src) out[k] = el.dataset.src;
+        }
+        return out;
+    };
+
+    // Agent typed / changed the IC → fill an EMPTY Date of Birth from it (tagged).
+    const moIcChanged = (prefix) => {
+        const ic = document.getElementById(`${prefix}-ic`);
+        const dob = document.getElementById(`${prefix}-dob`);
+        if (!ic || !dob || dob.value) return;
+        const d = icToDob(ic.value);
+        if (!d) return;
+        dob.value = d;
+        dob.dataset.src = 'ic';
+        UI.toast.info('Date of Birth filled from the IC — please check it.');
+    };
+
+    // After a closing is saved: anything in the closing that is NEW versus the
+    // prospect profile (an empty profile field, or a different value) is listed
+    // for the agent to confirm before it is written to the prospect profile —
+    // and to the linked customer profile when the prospect is already a customer.
+    let _pendingProfileUpdate = null;
+    const offerProfileUpdate = async (prospectId, contact, srcMap = {}) => {
+        if (!prospectId || !contact) return;
+        const p = await AppDataStore.getByIdFull('prospects', prospectId).catch(() => null);
+        if (!p) return;
+        const custs = await AppDataStore.query('customers', { converted_from_prospect_id: prospectId }).catch(() => []);
+        const cur = { full_name: p.full_name, phone: p.phone, email: p.email, ic_number: p.ic_number, date_of_birth: p.date_of_birth, address: _joinAddr(p) };
+        const norm = (k, v) => {
+            const s = String(v == null ? '' : v).trim();
+            if (k === 'phone' || k === 'ic_number') return s.replace(/[\s\-+()]/g, '');
+            if (k === 'date_of_birth') return _toIsoDate(s);
+            return s.toLowerCase().replace(/\s+/g, ' ');
+        };
+        const rows = _CONTACT_KEYS.map(k => {
+            let nv = String(contact[k] == null ? '' : contact[k]).trim();
+            if (k === 'date_of_birth') nv = _toIsoDate(nv);
+            if (!nv) return null;
+            const ov = String(cur[k] == null ? '' : cur[k]).trim();
+            if (norm(k, nv) === norm(k, ov)) return null;
+            return { k, nv, ov, from: srcMap[k] || '' };
+        }).filter(Boolean);
+        if (!rows.length) return;
+        _pendingProfileUpdate = { prospectId, rows, customerIds: (custs || []).map(c => c.id), prospect: p };
+        const where = custs?.length ? 'prospect + customer profile' : 'prospect profile';
+        const html = `
+            <p style="font-size:13px;color:var(--gray-600);margin:0 0 10px;">This closing has newer details than the ${where}. Tick what to update — nothing changes without your OK.</p>
+            ${rows.map((r, i) => `
+                <label style="display:flex;gap:10px;align-items:flex-start;padding:9px 10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:6px;cursor:pointer;">
+                    <input type="checkbox" class="pu-pick" data-idx="${i}" checked style="margin-top:3px;width:16px;height:16px;flex-shrink:0;">
+                    <div style="min-width:0;flex:1;">
+                        <div style="font-size:12px;font-weight:700;color:var(--gray-700);">${_CONTACT_LABEL[r.k]} ${_contactSrcTag(r.from)}</div>
+                        ${r.ov ? `<div style="font-size:12px;color:var(--gray-400);text-decoration:line-through;word-break:break-word;">${escapeHtml(r.ov)}</div>` : `<div style="font-size:11px;color:var(--gray-400);">(empty on profile)</div>`}
+                        <div style="font-size:13px;color:var(--gray-800);font-weight:600;word-break:break-word;">${escapeHtml(r.nv)}</div>
+                    </div>
+                </label>`).join('')}`;
+        UI.showModal('Update profile?', html, [
+            { label: 'Not now', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Update Profile', type: 'primary', action: '(async () => { await app.applyProfileUpdate(); })()' },
+        ]);
+    };
+    const applyProfileUpdate = async () => {
+        const pend = _pendingProfileUpdate;
+        if (!pend) { UI.hideModal(); return; }
+        const picked = Array.from(document.querySelectorAll('.pu-pick:checked')).map(cb => pend.rows[+cb.dataset.idx]).filter(Boolean);
+        UI.hideModal();
+        _pendingProfileUpdate = null;
+        if (!picked.length) return;
+        const p = pend.prospect;
+        const patch = {};
+        for (const r of picked) {
+            if (r.k !== 'address') { patch[r.k] = r.nv; continue; }
+            patch.address = r.nv;
+            // The closing keeps ONE address line. When it already carries the
+            // profile's state / postcode, clear the split parts so the joined
+            // profile address doesn't repeat them.
+            const lc = r.nv.toLowerCase();
+            if ((p.postal_code && lc.includes(String(p.postal_code).toLowerCase())) || (p.state && lc.includes(String(p.state).toLowerCase()))) {
+                patch.city = ''; patch.state = ''; patch.postal_code = '';
+            }
+        }
+        try {
+            await AppDataStore.update('prospects', pend.prospectId, patch);
+        } catch (e) {
+            const msg = String(e?.message || e);
+            UI.toast.error(/duplicate|unique/i.test(msg) ? 'Profile not updated — that phone/email already belongs to another prospect.' : 'Profile update failed: ' + msg);
+            return;
+        }
+        for (const cid of pend.customerIds) {
+            try { await AppDataStore.update('customers', cid, patch); }
+            catch (e) { console.warn('[profile update] customer write failed', cid, e); }
+        }
+        UI.toast.success(`Profile updated (${picked.length} field${picked.length > 1 ? 's' : ''})`);
+    };
+
     const buildMeetingOutcomeBlock = (prefix, activity = {}, opts = {}) => {
         const a = activity || {};
         const readOnly = prefix === 'preview';
@@ -1599,13 +1787,17 @@
         }).join('') : '<p style="color:var(--gray-500);font-size:12px;margin:0;">No products in the catalog.</p>';
         const isClosingChecked = !!(a.is_closing || cr.product || cr.sale_amount || cr.invoice_number);
 
+        // opts.prefill (gatherContactPrefill) carries every known source; without it
+        // fall back to closing → prospect as before.
+        const pf = opts.prefill?.fields || null;
+        const pfSrc = opts.prefill?.src || {};
         const v = {
-            full_name:       cr.full_name       || prospect?.full_name     || '',
-            phone:           cr.phone           || prospect?.phone         || '',
-            email:           cr.email           || prospect?.email         || '',
-            ic_number:       cr.ic_number       || prospect?.ic_number     || '',
-            date_of_birth:   cr.date_of_birth   || prospect?.date_of_birth || '',
-            address:         cr.address         || [prospect?.address, prospect?.city, prospect?.state, prospect?.postal_code].filter(Boolean).join(', ') || '',
+            full_name:       pf ? (pf.full_name     || '') : (cr.full_name       || prospect?.full_name     || ''),
+            phone:           pf ? (pf.phone         || '') : (cr.phone           || prospect?.phone         || ''),
+            email:           pf ? (pf.email         || '') : (cr.email           || prospect?.email         || ''),
+            ic_number:       pf ? (pf.ic_number     || '') : (cr.ic_number       || prospect?.ic_number     || ''),
+            date_of_birth:   pf ? (pf.date_of_birth || '') : (cr.date_of_birth   || prospect?.date_of_birth || ''),
+            address:         pf ? (pf.address       || '') : (cr.address         || [prospect?.address, prospect?.city, prospect?.state, prospect?.postal_code].filter(Boolean).join(', ') || ''),
             sale_amount:     cr.sale_amount     || a.amount_closed  || a.closing_amount || '',
             pop_monthly:     cr.pop_monthly     || a.pop_monthly_amount || '',
             pop_tenure:      cr.pop_tenure      || a.pop_tenure        || '',
@@ -1635,36 +1827,41 @@
                 <i class="fas fa-lock"></i> Closing record is <strong>${escapeHtml(crStatus)}</strong> — activity fields will be saved, but the locked closing record won't be overwritten.
             </div>` : '';
 
+        // Customer Information — every field pre-filled from the best known source
+        // (tagged "from profile" / "from last closing" / …). When all six are known
+        // the section collapses to ONE summary line with an Edit link; missing
+        // fields stay open and are marked "needed".
+        const _ci = (k, suffix, label, input) => {
+            const from = pfSrc[k] || '';
+            const needed = pf && !readOnly && !v[k];
+            return `<div class="form-group${k === 'phone' || k === 'email' || k === 'ic_number' || k === 'date_of_birth' ? ' half' : ''}">
+                    <label>${label}${_contactSrcTag(from)}${needed ? '<span style="margin-left:6px;font-size:10px;font-weight:600;color:#b45309;">needed</span>' : ''}</label>
+                    ${input(`id="${prefix}-${suffix}" data-src="${escapeHtml(from)}" oninput="this.dataset.src=''" ${needed ? 'style="border-color:#f59e0b;background:#fffbeb;"' : ''}`)}
+                </div>`;
+        };
+        const _allKnown = !!pf && _CONTACT_KEYS.every(k => v[k]);
+        const _maskIc = (ic) => { const s = String(ic || ''); return s.length > 4 ? '••••' + s.slice(-4) : s; };
+        const _summary = _allKnown ? `
+            <div id="${prefix}-ci-summary" style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;font-size:12px;color:#166534;">
+                <i class="fas fa-check-circle"></i>
+                <span style="flex:1;min-width:0;">${escapeHtml(v.full_name)} · ${escapeHtml(v.phone)} · IC ${escapeHtml(_maskIc(v.ic_number))} · DOB ${escapeHtml(v.date_of_birth)} · Address ✓</span>
+                <a href="#" onclick="event.preventDefault();document.getElementById('${prefix}-ci-fields').style.display='block';document.getElementById('${prefix}-ci-summary').style.display='none';" style="font-weight:600;color:var(--primary);white-space:nowrap;">Edit</a>
+            </div>` : '';
         const customerInfoSection = hasProspect ? `
             <div class="form-section">
             <h4>👤 Customer Information</h4>
-            <div class="form-group">
-                <label>Full Name</label>
-                <input id="${prefix}-full-name" class="form-control" value="${escapeHtml(v.full_name)}" placeholder="Full name" ${disabled}>
+            ${_summary}
+            <div id="${prefix}-ci-fields" style="display:${_allKnown && !readOnly ? 'none' : 'block'};">
+            ${_ci('full_name', 'full-name', 'Full Name', (attrs) => `<input ${attrs} class="form-control" value="${escapeHtml(v.full_name)}" placeholder="Full name" ${disabled}>`)}
+            <div class="form-row">
+                ${_ci('phone', 'phone', 'Phone', (attrs) => `<input ${attrs} class="form-control" value="${escapeHtml(v.phone)}" placeholder="Phone" ${disabled}>`)}
+                ${_ci('email', 'email', 'Email', (attrs) => `<input ${attrs} class="form-control" value="${escapeHtml(v.email)}" placeholder="Email" ${disabled}>`)}
             </div>
             <div class="form-row">
-                <div class="form-group half">
-                    <label>Phone</label>
-                    <input id="${prefix}-phone" class="form-control" value="${escapeHtml(v.phone)}" placeholder="Phone" ${disabled}>
-                </div>
-                <div class="form-group half">
-                    <label>Email</label>
-                    <input id="${prefix}-email" class="form-control" value="${escapeHtml(v.email)}" placeholder="Email" ${disabled}>
-                </div>
+                ${_ci('ic_number', 'ic', 'IC Number', (attrs) => `<input ${attrs} class="form-control" value="${escapeHtml(v.ic_number)}" placeholder="NRIC/Passport" ${disabled} onchange="app.moIcChanged && app.moIcChanged('${prefix}')">`)}
+                ${_ci('date_of_birth', 'dob', 'Date of Birth', (attrs) => `<input ${attrs} type="date" class="form-control" value="${escapeHtml(v.date_of_birth)}" ${disabled}>`)}
             </div>
-            <div class="form-row">
-                <div class="form-group half">
-                    <label>IC Number</label>
-                    <input id="${prefix}-ic" class="form-control" value="${escapeHtml(v.ic_number)}" placeholder="NRIC/Passport" ${disabled}>
-                </div>
-                <div class="form-group half">
-                    <label>Date of Birth</label>
-                    <input id="${prefix}-dob" type="date" class="form-control" value="${escapeHtml(v.date_of_birth)}" ${disabled}>
-                </div>
-            </div>
-            <div class="form-group">
-                <label>Address</label>
-                <textarea id="${prefix}-address" class="form-control" rows="2" placeholder="Full address" ${disabled}>${escapeHtml(v.address)}</textarea>
+            ${_ci('address', 'address', 'Address', (attrs) => `<textarea ${attrs} class="form-control" rows="2" placeholder="Full address" ${disabled}>${escapeHtml(v.address)}</textarea>`)}
             </div>
             </div>
         ` : '';
@@ -1762,7 +1959,7 @@
                     <div class="form-row">
                         <div class="form-group half">
                             <label>Product/Service Sold</label>
-                            <select id="${prefix}-solution-sold" class="form-control" ${disabled}>${productOptions}</select>
+                            <select id="${prefix}-solution-sold" class="form-control" ${selectedProduct ? '' : 'data-pristine="1"'} onchange="if(event.isTrusted)this.removeAttribute('data-pristine')" ${disabled}>${productOptions}</select>
                         </div>
                         <div class="form-group half">
                             <label>Order Date</label>
@@ -1777,7 +1974,7 @@
                         </div>
                         <div class="form-group half">
                             <label>Payment Method</label>
-                            <select id="${prefix}-payment-method" class="form-control" onchange="app.moPaymentMethodChanged('${prefix}', this.value)" ${disabled}>
+                            <select id="${prefix}-payment-method" class="form-control" ${(cr.payment_method || a.payment_method) ? '' : 'data-pristine="1"'} onchange="if(event.isTrusted)this.removeAttribute('data-pristine');app.moPaymentMethodChanged('${prefix}', this.value)" ${disabled}>
                                 ${paymentOptions}
                             </select>
                         </div>
@@ -2332,22 +2529,28 @@
         return out;
     };
 
-    const _fuzzyMatchProduct = (selectId, scannedName) => {
-        const sel = document.getElementById(selectId);
-        if (!sel || !scannedName) return false;
-        const target = scannedName.toLowerCase().trim();
+    // Best product option for a scanned name (no side effects) — null when none fits.
+    const _bestProductOption = (sel, scannedName) => {
+        if (!sel || !scannedName) return null;
+        const target = String(scannedName).toLowerCase().trim();
         let best = null, bestScore = 0;
         for (const opt of sel.options) {
             const raw = (opt.textContent || opt.value || '').toLowerCase().trim();
             if (!raw) continue;
-            if (raw === target) { sel.value = opt.value; sel.dispatchEvent(new Event('change')); return true; }
+            if (raw === target) return opt.value;
             let score = 0;
             if (target.includes(raw) && raw.length >= 4) score = raw.length;               // option is a specific substring of the scan
             else if (raw.includes(target) && target.length >= 4) score = target.length * 0.5; // scan is a substring of a longer option (weaker)
             if (score > bestScore) { bestScore = score; best = opt.value; }
         }
-        if (best) { sel.value = best; sel.dispatchEvent(new Event('change')); return true; }
-        return false;
+        return best;
+    };
+    const _fuzzyMatchProduct = (selectId, scannedName) => {
+        const sel = document.getElementById(selectId);
+        const best = _bestProductOption(sel, scannedName);
+        if (best == null) return false;
+        sel.value = best; sel.dispatchEvent(new Event('change'));
+        return true;
     };
 
     // Race a storage/OCR call against a timeout so a slow mobile connection can't
@@ -2549,12 +2752,27 @@
             if (key === 'amount_total_due' && !scn) scn = norm(_cleanScannedValue('amount_unit_price', fields.amount_unit_price));
             const conf = confidence[key] || null;
             const curEl = document.getElementById(`${prefix}-${suffix}`);
-            const cur = curEl ? norm(curEl.value || curEl.textContent) : '';
+            // A dropdown still on its rendered default (never touched by the agent,
+            // no saved value) counts as EMPTY — otherwise the default product /
+            // "Cash" made every scan a conflict and the review screen always showed.
+            const cur = (curEl && curEl.dataset && curEl.dataset.pristine === '1') ? '' : (curEl ? norm(curEl.value || curEl.textContent) : '');
+            // Same value written differently (case/spacing/punctuation, date format,
+            // RM 2,500 vs 2500, product name vs its option, payment wording) is not a conflict.
+            const _alnum = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, '');
+            const _sameVal = () => {
+                if (_alnum(cur) === _alnum(scn)) return true;
+                if (strategy === 'fuzzy_select') return _bestProductOption(curEl, scn) === curEl?.value;
+                if (strategy === 'map_payment') return _mapPaymentToClosingValue(fields.payment_type, fields.payment_method) === cur;
+                if (curEl && curEl.type === 'date') return !!_toIsoDate(scn) && _toIsoDate(scn) === _toIsoDate(cur);
+                if (_ORDER_FORM_AMOUNT_KEYS.has(key)) return Math.abs((parseFloat(cur) || 0) - (parseFloat(scn) || 0)) < 0.005;
+                if (key === 'customer_name' || key === 'customer_address') { const a = _alnum(cur), b = _alnum(scn); return a.length >= 4 && b.length >= 4 && (a.includes(b) || b.includes(a)); }
+                return false;
+            };
 
             let status, defaultChecked;
             if (!scn) { status = 'no-scan'; defaultChecked = false; }
             else if (!cur) { status = 'fill-empty'; defaultChecked = true; }
-            else if (cur.toLowerCase() === scn.toLowerCase()) { status = 'same'; defaultChecked = false; }
+            else if (_sameVal()) { status = 'same'; defaultChecked = false; }
             // M5 (audit): a CONFLICT (agent already typed a different value) is never
             // pre-ticked — the scan must not silently overwrite a hand-corrected
             // Amount/Order Date. The agent ticks it explicitly to apply.
@@ -2562,6 +2780,14 @@
 
             return { idx, key, suffix, label, strategy, scn, cur, conf, status, defaultChecked };
         });
+
+        // No conflicts → nothing for the agent to decide: fill the empty fields
+        // straight away and skip the review screen. The review only appears when the
+        // photo DISAGREES with something already filled (never overwritten silently).
+        if (!rows.some(r => r.status === 'conflict')) {
+            applyOrderFormScanSelection(rows.filter(r => r.defaultChecked).map(r => r.idx));
+            return;
+        }
 
         // Read-only meta rows (PRN, agent code, card details — stored on attachment only)
         const metaRows = [
@@ -2683,11 +2909,14 @@
         _orderFormScanCache = null;
     };
 
-    const applyOrderFormScanSelection = async () => {
+    // pickedIdx: ORDER_FORM_FIELD_MAP indexes to apply (auto-fill path); omitted →
+    // read the ticked rows from the review screen.
+    const applyOrderFormScanSelection = async (pickedIdx) => {
         if (!_orderFormScanCache) { UI.hideModal(); return; }
         const { prefix, fields } = _orderFormScanCache;
+        const _auto = Array.isArray(pickedIdx);
 
-        const picked = Array.from(document.querySelectorAll('.order-form-pick:checked'))
+        const picked = _auto ? pickedIdx : Array.from(document.querySelectorAll('.order-form-pick:checked'))
             .map(cb => parseInt(cb.dataset.idx, 10))
             .filter(n => !isNaN(n));
 
@@ -2729,9 +2958,15 @@
                 }
                 el.value = val; applied++; editedFields.push(key);
             } else {
+                // A date input silently rejects anything but YYYY-MM-DD.
+                if (el.type === 'date') { val = _toIsoDate(val); if (!val) continue; }
                 el.value = val; applied++; editedFields.push(key);
             }
+            // Tag the contact fields so the save knows this value came off the photo.
+            if (el.dataset && Object.values(_CONTACT_SUFFIX).includes(suffix)) el.dataset.src = 'photo';
         }
+        // A DOB still empty after the photo → derive it from the (possibly new) IC.
+        moIcChanged(prefix);
 
         // Persist agent edits for audit
         if (_orderFormScanCache.attachmentId) {
@@ -2757,7 +2992,12 @@
         _orderFormScanCache = null;
 
         if (applied > 0) {
-            UI.toast.success(`Applied ${applied} field${applied === 1 ? '' : 's'} from order form. Please review before saving.`);
+            // Re-open the collapsed Customer Information so the new values are visible.
+            const _ciF = document.getElementById(`${prefix}-ci-fields`), _ciS = document.getElementById(`${prefix}-ci-summary`);
+            if (_ciF && _ciF.style.display === 'none') { _ciF.style.display = 'block'; if (_ciS) _ciS.style.display = 'none'; }
+            UI.toast.success(_auto
+                ? `Filled ${applied} field${applied === 1 ? '' : 's'} from the order form ✓`
+                : `Applied ${applied} field${applied === 1 ? '' : 's'} from order form. Please review before saving.`);
         } else {
             UI.toast.info('No fields applied — photo is still saved.');
         }
@@ -6374,6 +6614,13 @@
         collectPostMeetupNotesData,
         buildMeetingOutcomeBlock,
         collectMeetingOutcomeData,
+        gatherContactPrefill,
+        readContactSources,
+        offerProfileUpdate,
+        applyProfileUpdate,
+        moIcChanged,
+        icToDob,
+        contactSrcTag: _contactSrcTag,
         moPaymentMethodChanged,
         npoFillClosingPlans,
         npoClosingPlanPicked,

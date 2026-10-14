@@ -764,18 +764,21 @@ const approveProspectConversion = async (prospectId) => {
         nickname: prospect.nickname || '',
         gender: prospect.gender || '',
         nationality: prospect.nationality || '',
-        phone: prospect.phone,
-        email: prospect.email || '',
-        ic_number: prospect.ic_number || '',
+        // Contact details: the prospect profile first, then what the closing
+        // captured (order-form photo / IC / typed at closing) for anything the
+        // profile is missing — so details taken at the sale reach the customer.
+        phone: prospect.phone || cr?.phone || null,
+        email: prospect.email || cr?.email || '',
+        ic_number: prospect.ic_number || cr?.ic_number || '',
         // NULL, not '' — customers.date_of_birth is a DATE column and Postgres rejects
         // an empty string, which failed EVERY conversion of a prospect with no DOB.
-        date_of_birth: prospect.date_of_birth || null,
+        date_of_birth: prospect.date_of_birth || (/^\d{4}-\d{2}-\d{2}$/.test(cr?.date_of_birth || '') ? cr.date_of_birth : null),
         lunar_birth: prospect.lunar_birth || '',
         ming_gua: prospect.ming_gua || '',
         occupation: prospect.occupation || '',
         company_name: prospect.company_name || '',
         income_range: prospect.income_range || '',
-        address: prospect.address || '',
+        address: prospect.address || ((prospect.city || prospect.state || prospect.postal_code) ? '' : (cr?.address || '')),
         city: prospect.city || '',
         state: prospect.state || '',
         postal_code: prospect.postal_code || '',

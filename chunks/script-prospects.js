@@ -3135,21 +3135,32 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             const isNPO = d.payment_method === 'NPO';
             const npoPlanId = d.npo_plan_id || '';
             const npoPlanName = d.npo_plan_name || '';
+            // Customer Information auto-fill from every known source (shared with the
+            // Meeting Outcome form — gatherContactPrefill lives in the activities chunk).
+            let _pf = null;
+            try {
+                if (!window.app.gatherContactPrefill && typeof window._loadChunk === 'function') await window._loadChunk('chunks/script-activities.min.js');
+                if (window.app.gatherContactPrefill) _pf = await window.app.gatherContactPrefill({ prospect, closingRecord: cr });
+            } catch (e) { console.warn('[closing record] contact prefill failed:', e); }
+            const _pfv = (k, fallback) => (_pf ? (_pf.fields[k] || '') : fallback) || '';
+            const _pfs = (k) => escapeHtml((_pf && _pf.src[k]) || '');
+            const _pft = (k) => (window.app.contactSrcTag || (() => ''))(_pf && _pf.src[k]);
+            const _lbl = 'font-size:12px;font-weight:600;display:block;margin-bottom:4px;';
             container.innerHTML = `
                 <div class="cr-status draft" style="margin-bottom:14px;padding:8px 12px;border-radius:8px;background:#fff8e1;border:1px solid #ffc107;color:#856404;font-size:13px;font-weight:600;">
                     <i class="fas fa-edit"></i> Draft — Fill in details and submit for manager approval
                 </div>
                 <div class="pv-sub">Customer Information</div>
-                <div class="form-group" style="margin-bottom:10px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Full Name</label><input id="cr-full-name" class="form-control" value="${escapeHtml(d.full_name || prospect.full_name || '')}" placeholder="Full name"></div>
+                <div class="form-group" style="margin-bottom:10px;"><label style="${_lbl}">Full Name${_pft('full_name')}</label><input id="cr-full-name" data-src="${_pfs('full_name')}" oninput="this.dataset.src=''" class="form-control" value="${escapeHtml(_pfv('full_name', d.full_name || prospect.full_name))}" placeholder="Full name"></div>
                 <div class="form-row" style="display:flex;gap:8px;margin-bottom:10px;">
-                    <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Phone</label><input id="cr-phone" class="form-control" value="${escapeHtml(d.phone || prospect.phone || '')}" placeholder="Phone"></div>
-                    <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Email</label><input id="cr-email" class="form-control" value="${escapeHtml(d.email || prospect.email || '')}" placeholder="Email"></div>
+                    <div class="form-group" style="flex:1;"><label style="${_lbl}">Phone${_pft('phone')}</label><input id="cr-phone" data-src="${_pfs('phone')}" oninput="this.dataset.src=''" class="form-control" value="${escapeHtml(_pfv('phone', d.phone || prospect.phone))}" placeholder="Phone"></div>
+                    <div class="form-group" style="flex:1;"><label style="${_lbl}">Email${_pft('email')}</label><input id="cr-email" data-src="${_pfs('email')}" oninput="this.dataset.src=''" class="form-control" value="${escapeHtml(_pfv('email', d.email || prospect.email))}" placeholder="Email"></div>
                 </div>
                 <div class="form-row" style="display:flex;gap:8px;margin-bottom:10px;">
-                    <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">IC Number</label><input id="cr-ic" class="form-control" value="${escapeHtml(d.ic_number || prospect.ic_number || '')}" placeholder="NRIC/Passport"></div>
-                    <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Date of Birth</label><input id="cr-dob" type="date" class="form-control" value="${d.date_of_birth || prospect.date_of_birth || ''}"></div>
+                    <div class="form-group" style="flex:1;"><label style="${_lbl}">IC Number${_pft('ic_number')}</label><input id="cr-ic" data-src="${_pfs('ic_number')}" oninput="this.dataset.src=''" onchange="app.moIcChanged && app.moIcChanged('cr')" class="form-control" value="${escapeHtml(_pfv('ic_number', d.ic_number || prospect.ic_number))}" placeholder="NRIC/Passport"></div>
+                    <div class="form-group" style="flex:1;"><label style="${_lbl}">Date of Birth${_pft('date_of_birth')}</label><input id="cr-dob" data-src="${_pfs('date_of_birth')}" oninput="this.dataset.src=''" type="date" class="form-control" value="${escapeHtml(_pfv('date_of_birth', d.date_of_birth || prospect.date_of_birth))}"></div>
                 </div>
-                <div class="form-group" style="margin-bottom:14px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Address</label><textarea id="cr-address" class="form-control" rows="2" placeholder="Full address">${escapeHtml(d.address || [prospect.address, prospect.city, prospect.state, prospect.postal_code].filter(Boolean).join(', ') || '')}</textarea></div>
+                <div class="form-group" style="margin-bottom:14px;"><label style="${_lbl}">Address${_pft('address')}</label><textarea id="cr-address" data-src="${_pfs('address')}" oninput="this.dataset.src=''" class="form-control" rows="2" placeholder="Full address">${escapeHtml(_pfv('address', d.address || [prospect.address, prospect.city, prospect.state, prospect.postal_code].filter(Boolean).join(', ')))}</textarea></div>
 
                 <div class="pv-sub">📝 Meeting Outcome</div>
                 <div class="form-row" style="display:flex;gap:8px;margin-bottom:10px;">
@@ -6080,6 +6091,18 @@ const _mirrorCrToActivity = async (prospectId, cr) => {
     catch (e) { console.warn('mirror closing_record → activity failed:', e); }
 };
 
+// After the DC Closing Record form is saved/submitted: let the agent confirm any
+// NEWER customer details before they are copied to the prospect / customer profile.
+const _offerCrProfileUpdate = async (prospectId, data, src) => {
+    try {
+        if (!window.app.offerProfileUpdate) return;
+        await window.app.offerProfileUpdate(prospectId, {
+            full_name: data.full_name, phone: data.phone, email: data.email,
+            ic_number: data.ic_number, date_of_birth: data.date_of_birth, address: data.address,
+        }, src || {});
+    } catch (e) { console.warn('[closing record] profile-update offer failed:', e); }
+};
+
 const saveClosingRecord = async (prospectId) => {
     const prospect = await AppDataStore.getById('prospects', prospectId);
     const existingCr = prospect?.closing_record || {};
@@ -6116,8 +6139,10 @@ const saveClosingRecord = async (prospectId) => {
         } catch (e) { console.warn('card-expiry reminder scheduling failed:', e); }
     }
     UI.toast.success('Draft saved');
+    const _crSrc = (window.app.readContactSources || (() => ({})))('cr');
     const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
     if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
+    await _offerCrProfileUpdate(prospectId, data, _crSrc);
 };
 
 const submitClosingRecord = async (prospectId) => {
@@ -6275,8 +6300,10 @@ const submitClosingRecord = async (prospectId) => {
     } else {
         UI.toast.success('Closing record submitted for approval');
     }
+    const _crSrc = (window.app.readContactSources || (() => ({})))('cr');
     const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
     if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
+    await _offerCrProfileUpdate(prospectId, data, _crSrc);
 };
 
 // Attach an invoice file to an archived history record. Used by the

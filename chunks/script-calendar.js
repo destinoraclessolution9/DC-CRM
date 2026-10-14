@@ -6094,7 +6094,14 @@
             closingRecord = prospect?.closing_record || {};
         }
 
-        const content = (window.app.buildMeetingOutcomeBlock || (() => ''))('mo', activity, { products, prospect, closingRecord });
+        // Customer Information auto-fill from every known source (profile, customer
+        // record, last closing, earlier order-form photos, DOB from IC).
+        let prefill = null;
+        if (prospect && window.app.gatherContactPrefill) {
+            try { prefill = await window.app.gatherContactPrefill({ prospect, closingRecord }); }
+            catch (e) { console.warn('[meeting outcome] contact prefill failed:', e); }
+        }
+        const content = (window.app.buildMeetingOutcomeBlock || (() => ''))('mo', activity, { products, prospect, closingRecord, prefill });
         // No Cancel button (the ✕ closes it); full screen on phones like Quick Add Activity.
         UI.showModal('📝 Meeting Outcome', content, [
             { label: 'Save', type: 'primary', action: `(async () => { await app.saveMeetingOutcome(${activityId}); })()` }
@@ -6153,6 +6160,10 @@
         // All DOM reads go through the shared collector so CPS/Prospect/
         // Standard Functions all see the same field set.
         const mo = (window.app.collectMeetingOutcomeData || (() => ({})))('mo');
+        // Where each Customer Information value came from (profile / photo / IC …) —
+        // read now, while the form is still in the DOM, for the profile-update offer.
+        const _moSrc = (window.app.readContactSources || (() => ({})))('mo');
+        let _wbProspectId = null;
         const isClosed = mo.is_closing;
 
         if (isClosed && (!mo.amount_closed || parseFloat(mo.amount_closed) <= 0)) {
@@ -6336,6 +6347,7 @@
         if (isClosed) {
             const activity = await AppDataStore.getById('activities', activityId);
             if (activity?.prospect_id) {
+                _wbProspectId = activity.prospect_id;
                 const prospect = await AppDataStore.getById('prospects', activity.prospect_id);
                 const existingCR = prospect?.closing_record || null;
                 // One photo does everything: the Meeting Outcome form has no separate invoice
@@ -6667,6 +6679,16 @@
         else if (crSyncStatus === 'failed')               UI.toast.error('Activity saved but closing record sync failed — retry from the prospect profile');
         else                                              UI.toast.success('Meeting outcome saved');
         if (document.querySelector('.calendar-view-container')) { await renderCalendar(); await renderTodayActivities(); }
+        // Newer customer details in this closing (from the photo, IC, typing …)?
+        // Ask the agent before copying them to the prospect / customer profile.
+        if (_wbProspectId && crSyncStatus !== 'failed' && window.app.offerProfileUpdate) {
+            try {
+                await window.app.offerProfileUpdate(_wbProspectId, {
+                    full_name: mo.full_name, phone: mo.phone, email: mo.email,
+                    ic_number: mo.ic_number, date_of_birth: mo.date_of_birth, address: mo.address,
+                }, _moSrc);
+            } catch (e) { console.warn('[meeting outcome] profile-update offer failed:', e); }
+        }
         } finally { clearTimeout(_moWatchdog); _moSaving = false; }
     };
 
