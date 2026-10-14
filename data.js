@@ -3283,6 +3283,18 @@ class DataStore {
         return { data: (row && row.rows) || [], count: Number(row && row.total) || 0 };
     }
 
+    // ── Referrer picker search (search_referrers RPC) ─────────────────────
+    // Customers + all prospects + staff, across team scope, for the "Referred
+    // By" picker. SECURITY DEFINER server-side; returns only
+    // { kind, id, full_name, phone_last4, extra }. Throws on no session / RPC
+    // error so the caller can fall back to the old RLS-scoped search.
+    async searchReferrers(term, limit = 8) {
+        if (!this.hasLiveSession()) throw new Error('no live auth session — searchReferrers fallback');
+        const { data, error } = await this._readClient().rpc('search_referrers', { p_term: term, p_limit: limit });
+        if (error) throw error;
+        return Array.isArray(data) ? data : [];
+    }
+
     // ── Import duplicate-preview existence check ──────────────────────────
     // Returns only the existing rows whose normalized phone/email/ic matches a
     // key present in the import file — instead of getAll(table) downloading the

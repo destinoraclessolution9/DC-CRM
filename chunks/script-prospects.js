@@ -2442,7 +2442,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             <div class="pv-row"><span class="pv-lbl">Postal Code</span><span class="pv-val">${escapeHtml(prospect.postal_code || '-')}</span></div>
             <div class="pv-sub">Registration</div>
             <div class="pv-row"><span class="pv-lbl">Agent</span><span class="pv-val">${escapeHtml(agentName)}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Referrer</span><span class="pv-val">${escapeHtml(prospect.referred_by || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Referrer</span><span class="pv-val">${escapeHtml(prospect.referred_by || '-')}${(prospect.referred_by && prospect.referred_by_id == null) ? ' <span title="Typed by hand — not linked to a record" style="font-size:11px;font-weight:400;color:var(--gray-400);">(not linked)</span>' : ''}</span></div>
             <div class="pv-row"><span class="pv-lbl">Relation</span><span class="pv-val">${escapeHtml(prospect.referral_relationship || '-')}</span></div>
             <div class="pv-row"><span class="pv-lbl">Created</span><span class="pv-val">${prospect.created_at ? new Date(prospect.created_at).toLocaleDateString() : '-'}</span></div>
             ${cpsHtml}

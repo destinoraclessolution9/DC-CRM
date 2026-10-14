@@ -1146,15 +1146,15 @@
                 <div class="form-group">
                     <input type="text" id="${prefix}-postal" class="form-control" placeholder="Postal Code" value="${esc(d.postal_code)}" ${disabled}>
                 </div>
-                <div class="form-row">
-                    <div class="form-group half">
+                <div class="form-group">
                         <label>Referred By <span class="required">*</span></label>
                         <div style="position:relative;">
-                            <input type="text" id="${prefix}-referrer" class="form-control" placeholder="Search prospect or consultant..." ${searchHandler} ${disabled}>
-                            <div id="${prefix}-referrer-results" class="search-results-dropdown" style="display:none;position:absolute;z-index:1000;background:white;border:1px solid #ddd;border-radius:4px;width:100%;max-height:180px;overflow-y:auto;box-shadow:0 4px 8px rgba(0,0,0,0.1);"></div>
+                            <input type="text" id="${prefix}-referrer" class="form-control" placeholder="Search customer, prospect or consultant (name / phone)..." ${searchHandler} ${disabled}>
+                            <div id="${prefix}-referrer-results" class="search-results-dropdown" style="display:none;position:absolute;z-index:1000;background:white;border:1px solid #ddd;border-radius:4px;width:100%;max-height:280px;overflow-y:auto;box-shadow:0 4px 8px rgba(0,0,0,0.1);"></div>
                         </div>
                         <div id="${prefix}-referrer-info" style="margin-top:6px;">${d.referred_by ? `<div class="selected-entity-badge"><span><strong>${esc(d.referred_by)}</strong></span><button class="btn btn-sm secondary" ${clearHandler}>Clear</button></div>` : ''}</div>
-                    </div>
+                </div>
+                <div class="form-row">
                     <div class="form-group half">
                         <label>Relationship <span class="required">*</span></label>
                         <select id="${prefix}-relationship" class="form-control" onchange="document.getElementById('${prefix}-relationship-other-div').style.display = this.value === 'Other' ? 'block' : 'none'" ${disabled}>
@@ -4496,82 +4496,81 @@
         }
     };
 
-    const searchReferrers = async () => {
+    // ── Referrer picker (shared by CPS entry 'cps' and Add/Edit Prospect 'prospect') ──
+    // Searches customers + ALL prospects + consultants via the search_referrers RPC
+    // (team scope does not apply; only name / kind / last-4 phone come back). The
+    // old path — active prospects + staff through RLS — missed every customer,
+    // every converted prospect and anyone outside the agent's team. It is kept only
+    // as a fallback when the RPC is unreachable. The last row is always
+    // "Use '<typed>' as referrer (not in system)" so an agent is never stuck.
+    const _REF_KIND_ORDER = ['Customer', 'Prospect', 'Consultant'];
+    let _refSearchSeq = 0;
+    const _runReferrerSearch = async (prefix, selectFn) => {
+        const input = document.getElementById(`${prefix}-referrer`);
+        const resultsDiv = document.getElementById(`${prefix}-referrer-results`);
+        if (!resultsDiv) return;
+        const raw = (input?.value || '').trim();
+        if (raw.length < 2) { resultsDiv.style.display = 'none'; return; }
+        const seq = ++_refSearchSeq;
+        resultsDiv.innerHTML = '<div style="padding:10px 12px;color:#6b7280;font-size:13px;"><i class="fas fa-spinner fa-spin"></i> Searching…</div>';
+        resultsDiv.style.display = 'block';
+
+        let rows = [];
         try {
-            const term = (document.getElementById('cps-referrer')?.value || "").toLowerCase();
-            const resultsDiv = document.getElementById('cps-referrer-results');
-
-            if (!term || term.length < 1) {
-                if (resultsDiv) resultsDiv.style.display = 'none';
-                return;
-            }
-
-            // Indexed server-side prospect search (trigram GIN). users table
-            // is small (~dozens of rows) so a cached getAll + client filter
-            // is still the right call there.
-            const [matchedProspectsRaw, allUsers] = await Promise.all([
-                AppDataStore.searchProspects(term, { includeDormant: true, limit: 15 }),
-                AppDataStore.getAll('users'),
-            ]);
-            // Respect the original "active only" rule for prospects in this UI.
-            const matchedProspects = matchedProspectsRaw
-                .filter(p => !p.status || p.status === 'active')
-                .slice(0, 5);
-            const matchedConsultants = allUsers
-                .filter(u => {
-                    const lvl = getUserLevel(u);
-                    return lvl >= 3 && u.full_name && u.full_name.toLowerCase().includes(term);
-                })
-                .slice(0, 5);
-
-            if (resultsDiv) {
-                let html = '';
-
-                if (matchedProspects.length > 0) {
-                    html += `<div style="padding:4px 10px; font-size:11px; font-weight:600; color:#6b7280; background:#f9fafb; border-bottom:1px solid #e5e7eb; text-transform:uppercase; letter-spacing:0.05em;">Prospects</div>`;
-                    html += matchedProspects.map(p => `
-                        <div class="search-result-item" data-name="${escapeHtml(p.full_name || '')}" onclick="app.selectReferrer(${p.id}, this.dataset.name, 'Prospect')"
-                             style="cursor:pointer; padding:8px 12px; border-bottom:1px solid #f3f4f6; display:flex; flex-direction:column;">
-                            <strong style="font-size:13px;">${escapeHtml(p.full_name || '')}</strong>
-                            <span style="font-size:11px; color:#6b7280;">${escapeHtml(p.phone || p.ic_number || '')}</span>
-                        </div>
-                    `).join('');
-                }
-
-                if (matchedConsultants.length > 0) {
-                    html += `<div style="padding:4px 10px; font-size:11px; font-weight:600; color:#6b7280; background:#f9fafb; border-bottom:1px solid #e5e7eb; text-transform:uppercase; letter-spacing:0.05em;">Consultants</div>`;
-                    html += matchedConsultants.map(u => `
-                        <div class="search-result-item" data-name="${escapeHtml(u.full_name || '')}" onclick="app.selectReferrer(${u.id}, this.dataset.name, 'Consultant')"
-                             style="cursor:pointer; padding:8px 12px; border-bottom:1px solid #f3f4f6; display:flex; flex-direction:column;">
-                            <strong style="font-size:13px;">${escapeHtml(u.full_name || '')}</strong>
-                            <span style="font-size:11px; color:#6b7280;">${escapeHtml(u.agent_code || u.role || '')}</span>
-                        </div>
-                    `).join('');
-                }
-
-                if (!html) {
-                    html = '<div style="padding:10px 12px; color:#6b7280; font-size:13px;">No results found</div>';
-                }
-
-                resultsDiv.innerHTML = html;
-                resultsDiv.style.display = 'block';
-            }
-        } catch (error) {
-            console.error('Error in searchReferrers:', error);
+            rows = await AppDataStore.searchReferrers(raw, 8);
+        } catch (e) {
+            console.warn('search_referrers unavailable — RLS-scoped fallback', e);
+            const term = raw.toLowerCase();
+            try {
+                const [pr, users] = await Promise.all([
+                    AppDataStore.searchProspects(term, { includeDormant: true, limit: 30 }).catch(() => []),
+                    AppDataStore.getAll('users').catch(() => []),
+                ]);
+                rows = [
+                    ...(pr || []).slice(0, 8).map(p => ({ kind: 'Prospect', id: p.id, full_name: p.full_name, phone_last4: String(p.phone || '').replace(/\D/g, '').slice(-4) })),
+                    ...(users || []).filter(u => getUserLevel(u) >= 3 && u.full_name?.toLowerCase().includes(term)).slice(0, 8)
+                        .map(u => ({ kind: 'Consultant', id: u.id, full_name: u.full_name, extra: u.agent_code || '' })),
+                ];
+            } catch (_) { rows = []; }
         }
+        if (seq !== _refSearchSeq) return; // a newer keystroke owns the dropdown
+
+        const head = (label) => `<div style="padding:4px 10px;font-size:11px;font-weight:600;color:#6b7280;background:#f9fafb;border-bottom:1px solid #e5e7eb;text-transform:uppercase;letter-spacing:0.05em;">${label}</div>`;
+        let html = '';
+        _REF_KIND_ORDER.forEach(kind => {
+            const list = rows.filter(r => r.kind === kind);
+            if (!list.length) return;
+            html += head(kind === 'Customer' ? 'Customers' : kind === 'Prospect' ? 'Prospects' : 'Consultants');
+            html += list.map(r => {
+                const sub = kind === 'Consultant' ? (r.extra || 'Consultant') : (r.phone_last4 ? `•••• ${r.phone_last4}` : '');
+                return `<div class="search-result-item" data-name="${escapeHtml(r.full_name || '')}" onmousedown="event.preventDefault();app.${selectFn}(${Number(r.id)}, this.dataset.name, '${kind}')"
+                     style="cursor:pointer;padding:8px 12px;border-bottom:1px solid #f3f4f6;display:flex;flex-direction:column;">
+                    <strong style="font-size:13px;">${escapeHtml(r.full_name || '')}</strong>
+                    ${sub ? `<span style="font-size:11px;color:#6b7280;">${escapeHtml(sub)}</span>` : ''}
+                </div>`;
+            }).join('');
+        });
+        if (!html) html = '<div style="padding:10px 12px;color:#6b7280;font-size:13px;">No match found in the system.</div>';
+        html += `<div class="search-result-item" data-name="${escapeHtml(raw)}" onmousedown="event.preventDefault();app.${selectFn}(null, this.dataset.name, '')"
+                     style="cursor:pointer;padding:9px 12px;background:#fdf2f8;color:var(--primary);font-size:13px;font-weight:600;">
+                    <i class="fas fa-plus"></i> Use “${escapeHtml(raw)}” as referrer <span style="font-weight:400;color:#6b7280;">(not in system)</span>
+                </div>`;
+        resultsDiv.innerHTML = html;
+        resultsDiv.style.display = 'block';
     };
+    const _referrerBadge = (type, name, clearFn) => `
+                <div class="selected-entity-badge">
+                    <span>${type ? escapeHtml(type) : 'Not in system'}: <strong>${escapeHtml(name)}</strong></span>
+                    <button class="btn btn-sm secondary" onclick="app.${clearFn}()">Clear</button>
+                </div>`;
+
+    const searchReferrers = () => _runReferrerSearch('cps', 'selectReferrer');
 
     const selectReferrer = (id, name, type) => {
-        _state.sr = { id, name, type };
+        // id/type are null/'' for a typed "not in system" referrer.
+        _state.sr = { id: id ?? null, name, type: type || null };
         const infoDiv = document.getElementById('cps-referrer-info');
-        if (infoDiv) {
-            infoDiv.innerHTML = `
-                <div class="selected-entity-badge">
-                    <span>${escapeHtml(type)}: <strong>${escapeHtml(name)}</strong></span>
-                    <button class="btn btn-sm secondary" onclick="app.clearSelectedReferrer()">Clear</button>
-                </div>
-            `;
-        }
+        if (infoDiv) infoDiv.innerHTML = _referrerBadge(type, name, 'clearSelectedReferrer');
         const results = document.getElementById('cps-referrer-results');
         if (results) results.style.display = 'none';
         const input = document.getElementById('cps-referrer');
@@ -4674,53 +4673,13 @@
         await app.viewActivityDetails(activityId);
     };
 
-    const searchProspectReferrers = async () => {
-        try {
-            const term = (document.getElementById('prospect-referrer')?.value || "").toLowerCase();
-            const resultsDiv = document.getElementById('prospect-referrer-results');
-            if (!term || term.length < 1) { if (resultsDiv) resultsDiv.style.display = 'none'; return; }
-
-            // Scale-safe: server-side trigram/ilike search for matching prospects
-            // (full_name/nickname/phone/email) instead of downloading the WHOLE
-            // prospects table on every keystroke. Reapply the EXACT original client
-            // filters (active status + name/nickname contains) so the result set is
-            // identical, then take 5. Falls back to the whole-table scan on error.
-            let matchedProspects;
-            try {
-                const sr = await AppDataStore.searchProspects(term, { includeDormant: true, limit: 100 });
-                const rows = Array.isArray(sr) ? sr : ((sr && sr.data) || []);
-                matchedProspects = rows
-                    .filter(p => (!p.status || p.status === 'active') &&
-                                 (p.full_name?.toLowerCase().includes(term) || p.nickname?.toLowerCase().includes(term)))
-                    .slice(0, 5);
-            } catch (e) {
-                console.warn('searchProspectReferrers: server search unavailable — whole-table fallback', e);
-                const allProspects = (await AppDataStore.getAll('prospects')).filter(p => !p.status || p.status === 'active');
-                matchedProspects = allProspects.filter(p => p.full_name?.toLowerCase().includes(term) || p.nickname?.toLowerCase().includes(term)).slice(0, 5);
-            }
-            const allUsers = (await AppDataStore.getAll('users')).filter(u => getUserLevel(u) >= 3);
-            const matchedConsultants = allUsers.filter(u => u.full_name?.toLowerCase().includes(term)).slice(0, 5);
-
-            let html = '';
-            if (matchedProspects.length) {
-                html += `<div style="padding:4px 10px;font-size:11px;font-weight:600;color:#6b7280;background:#f9fafb;border-bottom:1px solid #e5e7eb;text-transform:uppercase;letter-spacing:0.05em;">Prospects</div>`;
-                html += matchedProspects.map(p => `<div style="cursor:pointer;padding:8px 12px;border-bottom:1px solid #f3f4f6;" data-name="${escapeHtml(p.full_name||'')}" onmousedown="app.selectProspectReferrer(${p.id}, this.dataset.name, 'Prospect')"><strong>${escapeHtml(p.full_name||'')}</strong><br><small style="color:#6b7280;">${escapeHtml(p.phone||'')}</small></div>`).join('');
-            }
-            if (matchedConsultants.length) {
-                html += `<div style="padding:4px 10px;font-size:11px;font-weight:600;color:#6b7280;background:#f9fafb;border-bottom:1px solid #e5e7eb;text-transform:uppercase;letter-spacing:0.05em;">Consultants</div>`;
-                html += matchedConsultants.map(u => `<div style="cursor:pointer;padding:8px 12px;border-bottom:1px solid #f3f4f6;" data-name="${escapeHtml(u.full_name||'')}" onmousedown="app.selectProspectReferrer(${u.id}, this.dataset.name, 'Consultant')"><strong>${escapeHtml(u.full_name||'')}</strong><br><small style="color:#6b7280;">${escapeHtml(u.agent_code||u.role||'')}</small></div>`).join('');
-            }
-            if (!html) html = '<div style="padding:10px 12px;color:#6b7280;font-size:13px;">No results found</div>';
-
-            if (resultsDiv) { resultsDiv.innerHTML = html; resultsDiv.style.display = 'block'; }
-        } catch (e) { console.error('searchProspectReferrers:', e); }
-    };
+    const searchProspectReferrers = () => _runReferrerSearch('prospect', 'selectProspectReferrer');
 
     const selectProspectReferrer = (id, name, type) => {
-        _state.sprr = { id, name, type };
+        _state.sprr = { id: id ?? null, name, type: type || null };
         const infoDiv = document.getElementById('prospect-referrer-info');
-        // SECURITY: escape user-controlled name/type to prevent XSS (e.g. "<img loading="lazy" decoding="async" onerror=...>")
-        if (infoDiv) infoDiv.innerHTML = `<div class="selected-entity-badge"><span>${escapeHtml(type)}: <strong>${escapeHtml(name)}</strong></span><button class="btn btn-sm secondary" onclick="app.clearProspectReferrer()">Clear</button></div>`;
+        // _referrerBadge escapes the user-controlled name/type (XSS).
+        if (infoDiv) infoDiv.innerHTML = _referrerBadge(type, name, 'clearProspectReferrer');
         const results = document.getElementById('prospect-referrer-results');
         if (results) results.style.display = 'none';
         const input = document.getElementById('prospect-referrer');
@@ -5602,8 +5561,10 @@
             // Auto-create referral record from CPS activity. Skipped on the recovery
             // path — the orphan's referral was already created by the prior attempt, so
             // re-creating it (with a fresh Date.now() id) would duplicate it.
-            const _refType = (_state.sr?.type || '').toLowerCase() === 'consultant' ? 'user' : 'prospect';
-            if (!_recoveredProspect) {
+            const _srType = (_state.sr?.type || '').toLowerCase();
+            const _refType = _srType === 'consultant' ? 'user' : _srType === 'customer' ? 'customer' : 'prospect';
+            // A typed "not in system" referrer has no id — there is nothing to link.
+            if (!_recoveredProspect && _state.sr?.id != null) {
                 try {
                     await AppDataStore.create('referrals', {
                         id: Date.now(),

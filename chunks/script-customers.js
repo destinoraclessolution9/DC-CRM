@@ -1002,7 +1002,7 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
             <div class="pv-sub">Address</div>
             <div class="pv-row"><span class="pv-lbl">Address</span><span class="pv-val">${escapeHtml([customer.address, customer.city, customer.state, customer.postal_code].filter(Boolean).join(', ') || '-')}</span></div>
             <div class="pv-sub">Referral Information</div>
-            <div class="pv-row"><span class="pv-lbl">Referred By</span><span class="pv-val">${escapeHtml(customer.referred_by || '-')}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Referred By</span><span class="pv-val">${escapeHtml(customer.referred_by || '-')}${(customer.referred_by && customer.referred_by_id == null) ? ' <span title="Typed by hand — not linked to a record" style="font-size:11px;font-weight:400;color:var(--gray-400);">(not linked)</span>' : ''}</span></div>
             <div class="pv-row"><span class="pv-lbl">Relationship</span><span class="pv-val">${escapeHtml(customer.referral_relationship || '-')}</span></div>
         `;
         const cfDisplay = await (window.app.renderCustomFieldDisplay || (() => ''))('customer', customer.id);
