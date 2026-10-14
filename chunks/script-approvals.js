@@ -801,7 +801,28 @@ const approveProspectConversion = async (prospectId) => {
         created_at: now
     };
 
-    const createdCustomer = await AppDataStore.create('customers', customer);
+    // The converted flag was written FIRST (above) so a retry can never mint a second
+    // customer. But if the customer row itself fails to save, that flag would strand
+    // the prospect: "converted", no customer, and every retry blocked by the layer-2
+    // guard (this is how no-DOB conversions got stuck). So on a failed create, put the
+    // prospect back exactly as it was — the manager can then simply retry.
+    let createdCustomer = null;
+    try {
+        createdCustomer = await AppDataStore.create('customers', customer);
+        if (createdCustomer?.id == null) throw new Error('customer record was not saved');
+    } catch (createErr) {
+        try {
+            await AppDataStore.update('prospects', prospectId, {
+                status: prospect.status ?? null,
+                conversion_status: prospect.conversion_status ?? null,
+                closing_record: prospect.closing_record ?? null,
+                closing_records_history: Array.isArray(prospect.closing_records_history) ? prospect.closing_records_history : [],
+            });
+        } catch (rbErr) {
+            console.error('[approveProspectConversion] rollback of the converted flag failed', rbErr);
+        }
+        throw createErr;
+    }
     const newCustomerId = createdCustomer?.id;
 
     // Audit #9 fix: book the first sale as a real purchases row + atomic LTV bump,
