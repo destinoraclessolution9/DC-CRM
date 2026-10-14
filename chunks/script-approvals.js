@@ -767,7 +767,9 @@ const approveProspectConversion = async (prospectId) => {
         phone: prospect.phone,
         email: prospect.email || '',
         ic_number: prospect.ic_number || '',
-        date_of_birth: prospect.date_of_birth || '',
+        // NULL, not '' — customers.date_of_birth is a DATE column and Postgres rejects
+        // an empty string, which failed EVERY conversion of a prospect with no DOB.
+        date_of_birth: prospect.date_of_birth || null,
         lunar_birth: prospect.lunar_birth || '',
         ming_gua: prospect.ming_gua || '',
         occupation: prospect.occupation || '',
