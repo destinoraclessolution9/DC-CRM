@@ -925,14 +925,14 @@
                     <div class="form-group half">
                         <div style="display:flex;align-items:center;gap:8px;">
                             <label style="margin-bottom:0;">Date of Birth</label>
-                            ${readOnly ? '' : `<input type="checkbox" id="${prefix}-use-dob" ${chk(useDob)} title="Use for life chart"><small style="color:var(--gray-400);font-size:11px;">Use for life chart</small>`}
+                            ${readOnly ? '' : `<label class="bi-chart-tick" title="Use for life chart"><input type="checkbox" id="${prefix}-use-dob" ${chk(useDob)}>Chart</label>`}
                         </div>
                         <input type="date" id="${prefix}-dob" class="form-control" value="${esc(d.date_of_birth)}" onchange="app.updateLunarBirth('${prefix}-dob','${prefix}-lunar')" ${disabled}>
                     </div>
                     <div class="form-group half">
                         <div style="display:flex;align-items:center;gap:8px;">
                             <label style="margin-bottom:0;">Lunar Birth</label>
-                            ${readOnly ? '' : `<input type="checkbox" id="${prefix}-use-lunar" ${chk(useLunar)} title="Use for life chart"><small style="color:var(--gray-400);font-size:11px;">Use for life chart</small>`}
+                            ${readOnly ? '' : `<label class="bi-chart-tick" title="Use for life chart"><input type="checkbox" id="${prefix}-use-lunar" ${chk(useLunar)}>Chart</label>`}
                         </div>
                         <input type="text" id="${prefix}-lunar" class="form-control" value="${esc(d.lunar_birth)}" placeholder="Lunar date" ${disabled}>
                     </div>
@@ -2981,6 +2981,8 @@
         }
 
         container.innerHTML = html;
+        // CPS entry uses the compact form layout (.form-compact in styles-fixed.css).
+        container.closest('.activity-modal-form')?.classList.toggle('form-compact', type === 'CPS');
         calculateDuration();
         if (type === 'CPS') populateAssignAgentPicker('cps');
     };

@@ -1647,7 +1647,7 @@ const openProspectModal = async (prospectId = null) => {
     const isEdit = !!prospect;
 
     const content = `
-        <div class="prospect-form">
+        <div class="prospect-form form-compact">
             <input type="hidden" id="edit-prospect-id" value="${prospectId || ''}">
             <div class="form-section">
                 <h4>Basic Information</h4>

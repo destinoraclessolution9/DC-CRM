@@ -11554,3 +11554,23 @@ html, body {
 }
 .skel-cell-row.short { width: 50%; }
 /* ── End Phase N ─────────────────────────────────────────────────────── */
+
+/* Compact form — CPS entry in Quick Add Activity (toggled by updateActivityForm)
+   and the Add / Edit Prospect modal. Tighter rows, quieter labels; inputs keep
+   16px text on phones (styles-mobile.css) so iOS does not auto-zoom on focus. */
+.form-compact .form-section { padding: 10px 12px; margin-bottom: 10px; }
+.form-compact .form-section h4 { margin-bottom: 8px; }
+.form-compact .form-section .form-section { padding: 0; margin-bottom: 0; background: none; border: none; }
+.form-compact .form-row { gap: 10px; }
+.form-compact .form-group { margin-bottom: 8px; }
+.form-compact .form-group label { font-size: 12.5px; margin-bottom: 2px; color: var(--gray-500); white-space: nowrap; }
+.form-compact .form-control { padding: 6px 10px; }
+.form-compact textarea.form-control { padding: 8px 10px; }
+.form-compact .cps-scan-toolbar { margin-bottom: 8px !important; padding: 8px 10px !important; }
+.form-compact .help-text { margin: 2px 0 0; }
+.form-compact .form-group .bi-chart-tick { display: inline-flex; margin-bottom: 0; align-items: center; gap: 3px; margin-left: auto; font-size: 11px; color: var(--gray-400); white-space: nowrap; cursor: pointer; }
+@media (max-width: 768px) {
+    .form-compact input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+    .form-compact select { min-height: 38px; }
+    .form-compact textarea { min-height: 64px !important; }
+}
