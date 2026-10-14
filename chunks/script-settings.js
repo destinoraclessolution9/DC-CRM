@@ -253,6 +253,10 @@ const showSettingsView = (container) => {
                         <span>1 hour before</span>
                     </label>
                     <label style="display:flex; align-items:center; gap:8px; font-size:14px; cursor:pointer;">
+                        <input type="checkbox" id="reminder-30" value="30" onchange="app.onReminderCheckboxChange()">
+                        <span>30 minutes before</span>
+                    </label>
+                    <label style="display:flex; align-items:center; gap:8px; font-size:14px; cursor:pointer;">
                         <input type="checkbox" id="reminder-15" value="15" onchange="app.onReminderCheckboxChange()">
                         <span>15 minutes before</span>
                     </label>
@@ -263,7 +267,7 @@ const showSettingsView = (container) => {
                 </div>
                 <label style="display:flex; align-items:center; gap:8px; font-size:14px; cursor:pointer; margin-bottom:14px;">
                     <input type="checkbox" id="reminder-daily-summary" onchange="app.onReminderCheckboxChange()">
-                    <span>Daily summary at 10:00 AM (today's events)</span>
+                    <span>Morning summary at 8:30 AM (today's activities, events &amp; birthdays)</span>
                 </label>
                 <button id="notif-prefs-save-btn" class="btn primary" style="display:none;" onclick="(async()=>{ await app.saveNotificationPreferences(); })()">
                     <i class="fas fa-save"></i> Save Reminder Preferences
@@ -752,9 +756,10 @@ const loadNotificationPreferences = async () => {
             .select('reminder_minutes,daily_summary')
             .eq('user_id', _state.cu.id)
             .maybeSingle();
-        const minutes = (data && data.reminder_minutes) ? data.reminder_minutes : [15];
+        // No saved row = server defaults (send-activity-reminders DEFAULT_REMINDER_MINUTES).
+        const minutes = (data && data.reminder_minutes) ? data.reminder_minutes : [30];
         const dailySummary = data ? !!data.daily_summary : true;
-        [1440, 60, 15, 10].forEach(m => {
+        [1440, 60, 30, 15, 10].forEach(m => {
             const el = document.getElementById(`reminder-${m}`);
             if (el) el.checked = minutes.includes(m);
         });
@@ -767,7 +772,7 @@ const loadNotificationPreferences = async () => {
 
 const saveNotificationPreferences = async () => {
     if (!_state.cu?.id) { UI.toast.error('Log in first'); return; }
-    const minutes = [1440, 60, 15, 10].filter(m => {
+    const minutes = [1440, 60, 30, 15, 10].filter(m => {
         const el = document.getElementById(`reminder-${m}`);
         return el && el.checked;
     });

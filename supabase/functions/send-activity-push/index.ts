@@ -55,7 +55,18 @@ function callerRole(req: Request): string | null {
   const h = req.headers.get("authorization") || "";
   const t = h.replace(/^Bearer\s+/i, "");
   if (!t) return null;
-  try { return (JSON.parse(atob(t.split(".")[1] || "")).role) || null; } catch { return null; }
+  // Server-to-server: notify-on-activity forwards with THIS project's
+  // SUPABASE_SERVICE_ROLE_KEY env value. That value is not guaranteed to be a
+  // JWT carrying role=service_role (new-format sb_secret_ keys are opaque), so
+  // decoding it returned null and every new-activity push 401'd
+  // ("unauthorized", seen live 2026-10-14). Exact match is the authoritative check.
+  if (SERVICE_ROLE && t === SERVICE_ROLE) return "service_role";
+  // JWT payloads are base64URL without padding — plain atob() throws on '-'/'_'.
+  try {
+    let p = (t.split(".")[1] || "").replace(/-/g, "+").replace(/_/g, "/");
+    while (p.length % 4) p += "=";
+    return (JSON.parse(atob(p)).role) || null;
+  } catch { return null; }
 }
 
 // @ts-ignore
@@ -276,6 +287,9 @@ async function sendWebPush(
         "Content-Encoding": "aes128gcm",
         "Content-Length": String(body.length),
         "TTL": "86400",
+        // High urgency: Android (FCM) otherwise holds "normal" pushes while the
+        // phone dozes; APNs honours it too. Calendar alerts are time-sensitive.
+        "Urgency": "high",
         "Authorization": `vapid t=${jwt}, k=${VAPID_PUBLIC}`,
       },
       body,

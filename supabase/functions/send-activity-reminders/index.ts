@@ -2,7 +2,9 @@
 // Cron-triggered Edge Function (every 5 min via pg_cron + pg_net).
 // Sends reminder push notifications for upcoming activities and a daily summary.
 //
-// Request body (optional): { mode?: "reminder" | "daily_summary" }
+// Request body (optional): { mode?: "reminder" | "daily_summary",
+//   dry_run?: boolean      -- compute + return payloads, send/log nothing
+//   only_user_id?: number  -- restrict recipients to one user (manual testing) }
 // When called without a body (or mode="reminder"), it checks both reminders
 // and daily summary (based on time-of-day).
 
@@ -19,6 +21,12 @@ const SERVICE_ROLE  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
 // MYT = UTC+8 (Malaysia timezone for daily summary hour check)
 const MYT_OFFSET_HOURS = 8;
+
+// Users who never saved Settings -> Reminder Timing get these. Keep in sync with
+// the Settings checkbox default in chunks/script-settings.js (loadNotificationPreferences).
+const DEFAULT_REMINDER_MINUTES = [30];
+// Morning summary time (MYT). The Settings label in script-settings.js says the same.
+const DAILY_SUMMARY_MINUTE_OF_DAY = 8 * 60 + 30; // 08:30 MYT = 00:30 UTC
 
 // How many minutes before/after a target window we still fire (window = ±WINDOW_MIN)
 // Edge function runs every 5 min, window = 3 min gives safe overlap without double-fire.
@@ -171,6 +179,7 @@ async function sendWebPush(sub: { endpoint: string; p256dh: string; auth: string
         "Content-Encoding": "aes128gcm",
         "Content-Length": String(body.length),
         "TTL": "86400",
+        "Urgency": "high", // Android holds "normal" pushes while the phone dozes
         "Authorization": `vapid t=${jwt}, k=${VAPID_PUBLIC}`,
       },
       body,
@@ -204,14 +213,100 @@ async function fanOut(userIds: (string | number)[], payload: object): Promise<[n
   return [sent, toDelete];
 }
 
-// ---------- Format a friendly time string (MYT) ----------
-function formatTime(activityDate: string, startTime: string): string {
-  try {
-    const iso = `${activityDate}T${startTime}+08:00`;
-    return new Date(iso).toLocaleTimeString("en-MY", { hour: "2-digit", minute: "2-digit", hour12: true });
-  } catch {
-    return startTime || "";
+// ---------- Paged select (PostgREST caps a response at 1000 rows) ----------
+async function pgSelectAll(table: string, qs: string): Promise<any[]> {
+  const PAGE = 1000;
+  const out: any[] = [];
+  for (let offset = 0; offset < 50_000; offset += PAGE) {
+    const rows = await pgSelect(table, `${qs}&order=id.asc&limit=${PAGE}&offset=${offset}`);
+    out.push(...rows);
+    if (rows.length < PAGE) break;
   }
+  return out;
+}
+
+// ---------- Role level (mirror of notify-on-activity levelOf / script.js _getUserLevel) ----------
+function levelOf(u: any): number {
+  const role = u?.role;
+  if (!role) return 99;
+  const m = String(role).match(/Level\s+(\d+)\b/i);
+  if (m) return parseInt(m[1], 10);
+  const r = String(role).toLowerCase();
+  if (r === "super_admin" || r === "admin") return 1;
+  if (r === "marketing_manager") return 2;
+  if (r === "manager") return 4;
+  if (r === "team_leader") return 5;
+  if (r === "consultant") return 7;
+  if (r === "agent") return 10;
+  if (r === "stock_take_staff" || r === "stock_take") return 15;
+  if (r === "customer") return 13;
+  if (r === "referrer") return 14;
+  const raw = String(role).trim();
+  if (raw === "传福大使") return 12;
+  if (raw === "改命客户") return 13;
+  if (raw === "准传福大使") return 14;
+  return 99;
+}
+const isActiveUser = (u: any) => !!u && u.status !== "deleted" && u.status !== "inactive";
+const isRealTeam = (t: unknown) => { const v = String(t ?? "").trim().toLowerCase(); return v !== "" && v !== "unassigned"; };
+
+// ---------- Message formatting: "Today 3:00 PM · CPS · Menara Bangkok Bank" ----------
+function mytDateOf(ms: number): string {
+  return new Date(ms + MYT_OFFSET_HOURS * 3600_000).toISOString().slice(0, 10);
+}
+function fmtTime12(t: string | null | undefined): string {
+  if (!t) return "";
+  const [h, m] = String(t).split(":").map(Number);
+  if (!Number.isFinite(h)) return "";
+  return `${h % 12 || 12}:${String(Number.isFinite(m) ? m : 0).padStart(2, "0")} ${h >= 12 ? "PM" : "AM"}`;
+}
+function dayLabel(dateStr: string, nowMs: number): string {
+  if (dateStr === mytDateOf(nowMs)) return "Today";
+  if (dateStr === mytDateOf(nowMs + 86_400_000)) return "Tomorrow";
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  if (isNaN(d.getTime())) return dateStr || "";
+  return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
+}
+function typeLabel(t: unknown): string {
+  const s = String(t || "Activity");
+  if (/^[A-Z]{2,4}$/.test(s)) return s; // CPS, FTF, CALL
+  return s.toLowerCase().split(/[_\s]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
+}
+function venueOf(a: any): string {
+  return String(a?.venue || a?.location_address || "").trim().slice(0, 80);
+}
+// Who an activity is for: the lead agent + co-agents who accepted (or legacy
+// co-agents with no status, added before the invite flow existed).
+function attendeeIds(a: any): number[] {
+  const ids = new Set<number>();
+  if (a.lead_agent_id != null) ids.add(Number(a.lead_agent_id));
+  let co: any = a.co_agents;
+  if (typeof co === "string") { try { co = JSON.parse(co); } catch { co = null; } }
+  if (Array.isArray(co)) {
+    for (const c of co) {
+      if (c?.id == null) continue;
+      const st = c.status == null ? "" : String(c.status).toLowerCase();
+      if (st === "" || st === "accepted") ids.add(Number(c.id));
+    }
+  }
+  return [...ids].filter((n) => Number.isFinite(n));
+}
+// Prospect / customer display names for a set of activities, keyed "p:<id>" / "c:<id>".
+async function contactNames(acts: any[]): Promise<Map<string, string>> {
+  const names = new Map<string, string>();
+  const pIds = [...new Set(acts.map((a) => a.prospect_id).filter((x) => x != null))];
+  const cIds = [...new Set(acts.map((a) => a.customer_id).filter((x) => x != null))];
+  const [ps, cs] = await Promise.all([
+    pIds.length ? pgSelect("prospects", `select=id,full_name&id=in.(${pIds.join(",")})`) : Promise.resolve([]),
+    cIds.length ? pgSelect("customers", `select=id,full_name&id=in.(${cIds.join(",")})`) : Promise.resolve([]),
+  ]);
+  for (const p of ps) if (p.full_name) names.set(`p:${p.id}`, p.full_name);
+  for (const c of cs) if (c.full_name) names.set(`c:${c.id}`, c.full_name);
+  return names;
+}
+function contactOf(a: any, names: Map<string, string>): string {
+  return (a.prospect_id != null && names.get(`p:${a.prospect_id}`)) ||
+         (a.customer_id != null && names.get(`c:${a.customer_id}`)) || "";
 }
 
 // ---------- Main handler ----------
@@ -222,15 +317,11 @@ Deno.serve(async (req: Request) => {
   // Shared-secret guard: only an authorized cron caller may trigger the fan-out.
   // Accept EITHER of two secret-gated paths so the documented pg_cron jobs work:
   //   1. a matching x-reminder-secret header (REMINDER_SECRET), or
-  //   2. Authorization: Bearer <SERVICE_ROLE_KEY> — the header the pg_cron jobs
-  //      in migrations/add_notification_preferences.sql actually send.
+  //   2. Authorization: Bearer <SERVICE_ROLE_KEY>.
   // Both are secrets, so we still fail closed (401) for unauthenticated callers.
-  // Without (2) the as-documented cron sent only the Bearer header and every
-  // invocation 401'd, so reminders/daily summaries never fired.
   const _secret = Deno.env.get("REMINDER_SECRET") || "";
   const _authHeader = req.headers.get("authorization") || "";
   const _secretOk = !!_secret && req.headers.get("x-reminder-secret") === _secret;
-  // Constant-string compare against the service-role bearer the cron sends.
   const _serviceOk = !!SERVICE_ROLE && _authHeader === `Bearer ${SERVICE_ROLE}`;
   if (!_secretOk && !_serviceOk) {
     return new Response(JSON.stringify({ error: "unauthorized" }), {
@@ -245,92 +336,109 @@ Deno.serve(async (req: Request) => {
   }
 
   let mode = "auto";
+  let dryRun = false;
+  let onlyUserId: number | null = null;
   try {
     const body = await req.json().catch(() => ({}));
     if (body.mode) mode = body.mode;
+    dryRun = body.dry_run === true;
+    if (body.only_user_id != null && Number.isFinite(Number(body.only_user_id))) onlyUserId = Number(body.only_user_id);
   } catch { /**/ }
 
-  const now = new Date();
-  const nowMYT = new Date(now.getTime() + MYT_OFFSET_HOURS * 3600_000);
-  const nowMinutes = now.getTime() / 60_000; // current time in fractional minutes (UTC)
+  const nowMs = Date.now();
+  const todayMYT = mytDateOf(nowMs);
 
-  const stats = { reminders_sent: 0, daily_sent: 0, errors: [] as string[] };
+  const stats = { reminders_sent: 0, daily_sent: 0, errors: [] as string[], preview: [] as any[] };
+
+  // Only users with a live device can receive anything — skip everyone else.
+  let devices = new Set<number>();
+  try {
+    const subRows: any[] = await pgSelect("push_subscriptions", "select=user_id&enabled=eq.true");
+    devices = new Set(subRows.map((r) => Number(r.user_id)).filter((n) => Number.isFinite(n)));
+    if (onlyUserId != null) devices = new Set(devices.has(onlyUserId) ? [onlyUserId] : []);
+  } catch (e: any) {
+    stats.errors.push(`devices: ${e?.message || e}`);
+  }
 
   // ===== 1. ACTIVITY REMINDERS =====
-  if (mode === "auto" || mode === "reminder") {
+  // Previously filtered status=eq.scheduled, but activities.status is NULL on
+  // ~all rows (no default) → zero matches → no reminder was ever sent. Also only
+  // users who had saved Settings got any, and only the lead agent was reminded.
+  if ((mode === "auto" || mode === "reminder") && devices.size > 0) {
     try {
-      // Fetch all unique reminder_minutes values across all users
-      const allPrefs: any[] = await pgSelect("notification_preferences",
-        `select=user_id,reminder_minutes`);
+      const allPrefs: any[] = await pgSelect("notification_preferences", "select=user_id,reminder_minutes");
+      const prefMap = new Map<number, number[]>();
+      for (const p of allPrefs) {
+        const mins = Array.isArray(p.reminder_minutes) ? p.reminder_minutes.map(Number).filter((n: number) => n > 0) : [];
+        prefMap.set(Number(p.user_id), mins.length ? mins : DEFAULT_REMINDER_MINUTES);
+      }
+      const windowsFor = (uid: number) => prefMap.get(uid) ?? DEFAULT_REMINDER_MINUTES;
+      let maxWindow = Math.max(...DEFAULT_REMINDER_MINUTES);
+      for (const uid of devices) maxWindow = Math.max(maxWindow, ...windowsFor(uid));
 
-      // Collect all distinct reminder window values in use
-      const allWindows = new Set<number>();
-      for (const pref of allPrefs) {
-        for (const m of (pref.reminder_minutes || [15])) allWindows.add(Number(m));
+      // Bounded to the dates a reminder could fall in (no unbounded scan, no
+      // silent 1000-row truncation). activity_date/start_time are MYT wall-clock.
+      const toDate = mytDateOf(nowMs + (maxWindow + WINDOW_MIN + 1) * 60_000);
+      const activities: any[] = await pgSelectAll("activities",
+        "select=id,activity_title,activity_type,activity_date,start_time,lead_agent_id,co_agents,venue,location_address,prospect_id,customer_id" +
+        `&activity_date=gte.${todayMYT}&activity_date=lte.${toDate}` +
+        "&start_time=not.is.null" +
+        "&or=(status.is.null,status.not.in.(completed,cancelled,Completed,Cancelled))");
+
+      // Collect every (activity, user, window) that is due right now.
+      const due: { act: any; userId: number; windowMin: number }[] = [];
+      for (const act of activities) {
+        const actMs = new Date(`${act.activity_date}T${act.start_time}+08:00`).getTime();
+        if (isNaN(actMs)) continue;
+        const minutesUntil = (actMs - nowMs) / 60_000;
+        if (minutesUntil < 0 || minutesUntil > maxWindow + WINDOW_MIN) continue;
+        for (const userId of attendeeIds(act)) {
+          if (!devices.has(userId)) continue;
+          for (const windowMin of windowsFor(userId)) {
+            if (Math.abs(minutesUntil - windowMin) <= WINDOW_MIN) due.push({ act, userId, windowMin });
+          }
+        }
       }
 
-      if (allWindows.size > 0) {
-        // Find activities scheduled within the next 1441 minutes (max window = 1 day + 1 min buffer)
-        // status='scheduled', date+time in the future up to 1441 minutes away
-        const activities: any[] = await pgSelect("activities",
-          `select=id,activity_title,activity_type,activity_date,start_time,lead_agent_id` +
-          `&status=eq.scheduled` +
-          `&activity_date=gte.${now.toISOString().slice(0, 10)}` // today or future
-        );
+      if (due.length > 0) {
+        // One query for the dedupe log instead of one per candidate.
+        const actIds = [...new Set(due.map((d) => d.act.id))];
+        const logged: any[] = await pgSelect("notification_reminder_log",
+          `select=activity_id,user_id,reminder_minutes&activity_id=in.(${actIds.join(",")})`);
+        const sentKeys = new Set(logged.map((l) => `${l.activity_id}:${l.user_id}:${l.reminder_minutes}`));
+        const names = await contactNames(due.map((d) => d.act));
 
-        // Build map: user_id -> reminder_minutes[]
-        const prefMap = new Map<number, number[]>();
-        for (const p of allPrefs) prefMap.set(Number(p.user_id), p.reminder_minutes || [15]);
+        for (const { act, userId, windowMin } of due) {
+          if (sentKeys.has(`${act.id}:${userId}:${windowMin}`)) continue; // already sent
 
-        // For each activity, calculate minutes until it starts
-        for (const act of activities) {
-          if (!act.activity_date || !act.start_time || !act.lead_agent_id) continue;
+          let label = `${windowMin} min`;
+          if (windowMin === 60) label = "1 hour";
+          if (windowMin === 1440) label = "1 day";
+          const type = typeLabel(act.activity_type);
+          const who = contactOf(act, names);
+          const whenWhere = [`${dayLabel(act.activity_date, nowMs)} ${fmtTime12(act.start_time)}`.trim(), type, venueOf(act)]
+            .filter(Boolean).join(" · ");
+          const title = String(act.activity_title || "").trim();
+          const extra = !who && title && title !== act.activity_type ? title : "";
+          const payload = {
+            title: `⏰ ${type} in ${label}${who ? ` — ${who}` : ""}`,
+            body: extra ? `${whenWhere}\n${extra}` : whenWhere,
+            icon: "icons/icon-192x192.png",
+            badge: "icons/icon-72x72.png",
+            tag: `reminder_${act.id}_${windowMin}`,
+            data: { type: "activity_reminder", activityId: act.id, url: "./index.html#calendar" },
+          };
 
-          // Parse activity datetime in MYT (UTC+8) -> compare to now (UTC)
-          let actDatetimeMs: number;
-          try {
-            actDatetimeMs = new Date(`${act.activity_date}T${act.start_time}+08:00`).getTime();
-          } catch {
-            continue;
-          }
-          const minutesUntil = (actDatetimeMs - now.getTime()) / 60_000;
-          if (minutesUntil < 0 || minutesUntil > 1441) continue; // past or too far
-
-          const userId = Number(act.lead_agent_id);
-          const userWindows = prefMap.get(userId) || [];
-
-          for (const windowMin of userWindows) {
-            // Fire if minutesUntil is within ±WINDOW_MIN of the target
-            if (Math.abs(minutesUntil - windowMin) > WINDOW_MIN) continue;
-
-            // Deduplicate: check reminder_log
-            const existing: any[] = await pgSelect("notification_reminder_log",
-              `select=id&activity_id=eq.${act.id}&user_id=eq.${userId}&reminder_minutes=eq.${windowMin}&limit=1`);
-            if (existing.length > 0) continue; // already sent
-
-            // Build human-friendly label
-            let label = `${windowMin} min`;
-            if (windowMin === 60)  label = "1 hour";
-            if (windowMin === 1440) label = "1 day";
-
-            const timeStr = formatTime(act.activity_date, act.start_time);
-            const payload = {
-              title: `Reminder: ${act.activity_title || act.activity_type || "Activity"}`,
-              body: `Starts in ${label} — ${timeStr}`,
-              icon: "icons/icon-192x192.png",
-              badge: "icons/icon-72x72.png",
-              tag: `reminder_${act.id}_${windowMin}`,
-              data: { type: "activity_reminder", activityId: act.id, url: "./index.html#calendar" },
-            };
-
-            const [sent] = await fanOut([userId], payload);
-            if (sent > 0) {
-              // Log so we don't resend
-              await pgUpsert("notification_reminder_log",
-                [{ activity_id: act.id, user_id: userId, reminder_minutes: windowMin }],
-                "activity_id,user_id,reminder_minutes");
-              stats.reminders_sent++;
-            }
+          if (dryRun) { stats.preview.push({ kind: "reminder", userId, payload }); continue; }
+          const [sent] = await fanOut([userId], payload);
+          if (sent > 0) {
+            // Logged only after a successful send, so a failed send retries on
+            // the next 5-min run while still inside the ±WINDOW_MIN window.
+            await pgUpsert("notification_reminder_log",
+              [{ activity_id: act.id, user_id: userId, reminder_minutes: windowMin }],
+              "activity_id,user_id,reminder_minutes");
+            sentKeys.add(`${act.id}:${userId}:${windowMin}`);
+            stats.reminders_sent++;
           }
         }
       }
@@ -339,52 +447,50 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // ===== 2. DAILY SUMMARY (10:00 AM MYT = 02:00 UTC) =====
-  // We check within a ±WINDOW_MIN window of 10:00 AM MYT regardless of cron schedule.
-  const mytHour   = nowMYT.getUTCHours();
-  const mytMinute = nowMYT.getUTCMinutes();
-  const mytMinuteOfDay = mytHour * 60 + mytMinute;
-  const targetMinuteOfDay = 10 * 60; // 10:00 AM
-  const isDailySummaryWindow = Math.abs(mytMinuteOfDay - targetMinuteOfDay) <= WINDOW_MIN;
+  // ===== 2. MORNING SUMMARY (08:30 MYT) =====
+  const nowMYT = new Date(nowMs + MYT_OFFSET_HOURS * 3600_000);
+  const mytMinuteOfDay = nowMYT.getUTCHours() * 60 + nowMYT.getUTCMinutes();
+  const isDailySummaryWindow = Math.abs(mytMinuteOfDay - DAILY_SUMMARY_MINUTE_OF_DAY) <= WINDOW_MIN;
 
-  if ((mode === "auto" && isDailySummaryWindow) || mode === "daily_summary") {
+  if (((mode === "auto" && isDailySummaryWindow) || mode === "daily_summary") && devices.size > 0) {
     try {
-      const todayMYT = nowMYT.toISOString().slice(0, 10); // YYYY-MM-DD in MYT
       const todayMMDD = todayMYT.slice(5); // MM-DD for birthday matching
 
-      // Users who want daily summary
-      const prefs: any[] = await pgSelect("notification_preferences",
-        `select=user_id&daily_summary=eq.true`);
+      // Recipients: active staff (L1–L12) with a device, unless they switched
+      // the summary off. No saved preference row = on (the Settings default).
+      const [users, optOut]: [any[], any[]] = await Promise.all([
+        pgSelect("users", "select=id,full_name,role,status,team,date_of_birth"),
+        pgSelect("notification_preferences", "select=user_id&daily_summary=eq.false"),
+      ]);
+      const userMap = new Map<number, any>(users.map((u: any) => [Number(u.id), u]));
+      const off = new Set(optOut.map((p: any) => Number(p.user_id)));
+      const recipients = [...devices].filter((id) => {
+        const u = userMap.get(id);
+        return isActiveUser(u) && levelOf(u) <= 12 && !off.has(id);
+      });
 
-      // --- Shared data fetched once for all users ---
-
-      // Today's activities with customer/prospect names (denormalised customer_name field)
-      const allTodayActs: any[] = await pgSelect("activities",
-        `select=id,activity_title,activity_type,start_time,lead_agent_id,customer_name,co_agents` +
+      // Today's activities. (The old select asked for customer_name, a column
+      // that never existed → 400 → no summary. Names come from prospect/customer ids.)
+      const allTodayActs: any[] = await pgSelectAll("activities",
+        "select=id,activity_title,activity_type,start_time,lead_agent_id,co_agents,venue,location_address,prospect_id,customer_id" +
         `&activity_date=eq.${todayMYT}` +
-        `&activity_type=neq.EVENT`);
+        "&activity_type=neq.EVENT" +
+        "&or=(status.is.null,status.not.in.(cancelled,Cancelled))");
 
-      // Today's events (shared across all users — open/public visibility)
+      // Today's company-wide events (open/public only — visible to everyone).
       const allTodayEvents: any[] = await pgSelect("activities",
-        `select=id,activity_title,activity_type,start_time,event_id` +
+        `select=id,activity_title,activity_type,start_time,event_id,venue,location_address` +
         `&activity_date=eq.${todayMYT}` +
         `&activity_type=eq.EVENT` +
         `&visibility=in.(open,public)` +
-        `&order=start_time.asc&limit=5`);
-
-      // Fetch event titles for today's public events
-      let eventTitles: Map<number, string> = new Map();
-      if (allTodayEvents.length > 0) {
-        const eventIds = [...new Set(allTodayEvents.map((e: any) => e.event_id).filter(Boolean))];
-        if (eventIds.length > 0) {
-          const evRows: any[] = await pgSelect("events",
-            `select=id,event_title,title&id=in.(${eventIds.join(",")})`);
-          for (const ev of evRows) {
-            eventTitles.set(Number(ev.id), ev.event_title || ev.title || "Event");
-          }
-        }
+        `&order=start_time.asc&limit=50`);
+      const eventTitles = new Map<number, string>();
+      const eventIds = [...new Set(allTodayEvents.map((e: any) => e.event_id).filter(Boolean))];
+      if (eventIds.length > 0) {
+        const evRows: any[] = await pgSelect("events", `select=id,event_title,title&id=in.(${eventIds.join(",")})`);
+        for (const ev of evRows) eventTitles.set(Number(ev.id), ev.event_title || ev.title || "Event");
       }
-      // Deduplicate public events by event_id (one pill per event, not per attendee row)
+      // One line per event, not per attendee row.
       const seenEventIds = new Set<number>();
       const dedupedEvents: any[] = [];
       for (const e of allTodayEvents) {
@@ -392,94 +498,60 @@ Deno.serve(async (req: Request) => {
         if (!seenEventIds.has(eid)) { seenEventIds.add(eid); dedupedEvents.push(e); }
       }
 
-      // Today's birthdays from prospects, customers, and agents
-      const [bdayProspects, bdayCustomers, bdayAgents]: [any[], any[], any[]] = await Promise.all([
-        pgSelect("prospects", `select=full_name&date_of_birth=like.*-${todayMMDD}&status=neq.inactive`),
-        pgSelect("customers", `select=full_name&date_of_birth=like.*-${todayMMDD}`),
-        pgSelect("users", `select=full_name&date_of_birth=like.*-${todayMMDD}&status=eq.active`),
+      // Birthdays. date_of_birth is a DATE column, so PostgREST `like` errored
+      // (42883) and took the whole summary down — match MM-DD here instead.
+      // Scoped per recipient: own prospects/customers (responsible agent) and
+      // same-team colleagues only — never another team's people.
+      const isToday = (dob: unknown) => typeof dob === "string" && dob.slice(5, 10) === todayMMDD;
+      const [bdayProspects, bdayCustomers] = await Promise.all([
+        pgSelectAll("prospects", "select=id,full_name,date_of_birth,responsible_agent_id&date_of_birth=not.is.null&or=(status.is.null,status.neq.inactive)"),
+        pgSelectAll("customers", "select=id,full_name,date_of_birth,responsible_agent_id&date_of_birth=not.is.null"),
       ]);
-      const birthdayNames = [
-        ...bdayProspects.map((p: any) => p.full_name),
-        ...bdayCustomers.map((c: any) => c.full_name),
-        ...bdayAgents.map((u: any) => u.full_name ? `${u.full_name} (Agent)` : null),
-      ].filter(Boolean);
+      const bdayContacts = [...bdayProspects, ...bdayCustomers].filter((x: any) => isToday(x.date_of_birth) && x.full_name);
+      const bdayAgents = users.filter((u: any) => isActiveUser(u) && levelOf(u) <= 12 && isToday(u.date_of_birth) && u.full_name);
 
-      // --- Per-user notification ---
-      for (const pref of prefs) {
-        const userId = Number(pref.user_id);
+      const names = await contactNames(allTodayActs);
 
-        // This user's today activities (lead agent OR listed as co-agent)
-        const myActs = allTodayActs.filter((a: any) => {
-          if (Number(a.lead_agent_id) === userId) return true;
-          if (Array.isArray(a.co_agents)) {
-            return a.co_agents.some((ca: any) => Number(ca.id) === userId);
-          }
-          return false;
-        });
+      for (const userId of recipients) {
+        const me = userMap.get(userId);
+        const myActs = allTodayActs.filter((a: any) => attendeeIds(a).includes(userId));
+        const myBirthdays = [
+          ...bdayContacts.filter((x: any) => Number(x.responsible_agent_id) === userId).map((x: any) => x.full_name),
+          ...bdayAgents
+            .filter((u: any) => Number(u.id) !== userId && isRealTeam(me?.team) && String(u.team ?? "") === String(me?.team ?? ""))
+            .map((u: any) => `${u.full_name} (Agent)`),
+        ];
 
-        const hasAnything = myActs.length > 0 || dedupedEvents.length > 0 || birthdayNames.length > 0;
-        if (!hasAnything) continue;
-
-        // Server-side dedupe: the daily summary can satisfy the ±WINDOW_MIN
-        // window on two consecutive 5-min cron runs (e.g. 09:58 and 10:03 MYT),
-        // and a separate mode=daily_summary cron can also fire. The notification
-        // `tag` only coalesces on-device, not server resends. Guard on
-        // daily_summary_log keyed by (user_id, summary_date) so each user gets
-        // at most one digest per day. Check-then-mark-before-send so concurrent
-        // runs can't both pass the check; ignore-duplicates upsert is atomic.
-        // Gracefully degrade if daily_summary_log is absent (send WITHOUT the dedup
-        // guarantee rather than 500-ing the whole reminder run) — the table is created
-        // by migrations/daily_summary_log_2026-06-20.sql.
-        try {
-          const sentToday: any[] = await pgSelect("daily_summary_log",
-            `select=user_id&user_id=eq.${userId}&summary_date=eq.${todayMYT}&limit=1`);
-          if (sentToday.length > 0) continue; // already sent today
-          await pgUpsert("daily_summary_log",
-            [{ user_id: userId, summary_date: todayMYT }],
-            "user_id,summary_date");
-        } catch (dedupErr) {
-          console.warn("[reminders] daily_summary_log dedupe unavailable — sending without dedup:", (dedupErr as any)?.message);
-        }
+        if (myActs.length === 0 && dedupedEvents.length === 0 && myBirthdays.length === 0) continue;
 
         const bodyLines: string[] = [];
-
-        // Section: Today's activities
         if (myActs.length > 0) {
-          const sortedActs = myActs.sort((a: any, b: any) =>
-            (a.start_time || "").localeCompare(b.start_time || ""));
-          bodyLines.push("📋 Your Activities:");
+          const sortedActs = myActs.sort((a: any, b: any) => (a.start_time || "").localeCompare(b.start_time || ""));
+          bodyLines.push("📋 Your activities:");
           for (const a of sortedActs.slice(0, 4)) {
-            const t = a.start_time ? a.start_time.slice(0, 5) : "--:--";
-            const type = a.activity_type || "Activity";
-            const name = a.customer_name || a.activity_title || "";
-            bodyLines.push(`  ${t} [${type}]${name ? ` – ${name}` : ""}`);
+            const line = [fmtTime12(a.start_time) || "Anytime", typeLabel(a.activity_type), venueOf(a), contactOf(a, names)]
+              .filter(Boolean).join(" · ");
+            bodyLines.push(`  ${line}`);
           }
           if (myActs.length > 4) bodyLines.push(`  …+${myActs.length - 4} more`);
         }
-
-        // Section: Events
         if (dedupedEvents.length > 0) {
-          bodyLines.push("📅 Events Today:");
+          bodyLines.push("📅 Events today:");
           for (const e of dedupedEvents.slice(0, 3)) {
-            const t = e.start_time ? e.start_time.slice(0, 5) : "";
             const title = eventTitles.get(Number(e.event_id)) || e.activity_title || "Event";
-            bodyLines.push(`  ${t ? t + " " : ""}${title}`);
+            bodyLines.push(`  ${[fmtTime12(e.start_time), title, venueOf(e)].filter(Boolean).join(" · ")}`);
           }
           if (dedupedEvents.length > 3) bodyLines.push(`  …+${dedupedEvents.length - 3} more`);
         }
-
-        // Section: Birthdays
-        if (birthdayNames.length > 0) {
-          bodyLines.push("🎂 Birthdays Today:");
-          const shown = birthdayNames.slice(0, 4);
-          bodyLines.push(`  ${shown.join(", ")}${birthdayNames.length > 4 ? ` +${birthdayNames.length - 4} more` : ""}`);
+        if (myBirthdays.length > 0) {
+          bodyLines.push("🎂 Birthdays today:");
+          bodyLines.push(`  ${myBirthdays.slice(0, 4).join(", ")}${myBirthdays.length > 4 ? ` +${myBirthdays.length - 4} more` : ""}`);
         }
 
-        const actCount = myActs.length;
         const titleParts: string[] = [];
-        if (actCount > 0) titleParts.push(`${actCount} activit${actCount > 1 ? "ies" : "y"}`);
+        if (myActs.length > 0) titleParts.push(`${myActs.length} activit${myActs.length > 1 ? "ies" : "y"}`);
         if (dedupedEvents.length > 0) titleParts.push(`${dedupedEvents.length} event${dedupedEvents.length > 1 ? "s" : ""}`);
-        if (birthdayNames.length > 0) titleParts.push(`${birthdayNames.length} birthday${birthdayNames.length > 1 ? "s" : ""}`);
+        if (myBirthdays.length > 0) titleParts.push(`${myBirthdays.length} birthday${myBirthdays.length > 1 ? "s" : ""}`);
 
         const payload = {
           title: `Good morning! Today: ${titleParts.join(", ")} 🌅`,
@@ -489,6 +561,20 @@ Deno.serve(async (req: Request) => {
           tag: `daily_${todayMYT}_${userId}`,
           data: { type: "daily_summary", url: "./index.html#calendar" },
         };
+        if (dryRun) { stats.preview.push({ kind: "daily_summary", userId, payload }); continue; }
+
+        // Server-side dedupe: the ±WINDOW_MIN window can match two consecutive
+        // 5-min runs. Mark-before-send on (user_id, summary_date) so each user
+        // gets at most one summary a day. Degrade (send without dedupe) if the
+        // daily_summary_log table is absent.
+        try {
+          const sentToday: any[] = await pgSelect("daily_summary_log",
+            `select=user_id&user_id=eq.${userId}&summary_date=eq.${todayMYT}&limit=1`);
+          if (sentToday.length > 0) continue;
+          await pgUpsert("daily_summary_log", [{ user_id: userId, summary_date: todayMYT }], "user_id,summary_date");
+        } catch (dedupErr) {
+          console.warn("[reminders] daily_summary_log dedupe unavailable — sending without dedup:", (dedupErr as any)?.message);
+        }
 
         const [sent] = await fanOut([userId], payload);
         if (sent > 0) stats.daily_sent++;
@@ -498,7 +584,9 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  return new Response(JSON.stringify({ ok: true, ...stats }), {
+  if (stats.errors.length) console.error("[reminders] errors:", stats.errors);
+  const { preview, ...rest } = stats;
+  return new Response(JSON.stringify({ ok: true, ...rest, ...(dryRun ? { preview } : {}) }), {
     status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
   });
 });

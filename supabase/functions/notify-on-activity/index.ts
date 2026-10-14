@@ -39,7 +39,40 @@ function callerRole(req: Request): string | null {
   const h = req.headers.get("authorization") || "";
   const t = h.replace(/^Bearer\s+/i, "");
   if (!t) return null;
-  try { return (JSON.parse(atob(t.split(".")[1] || "")).role) || null; } catch { return null; }
+  // Exact match on this project's service key first: it is not guaranteed to be
+  // a JWT carrying role=service_role (new-format sb_secret_ keys are opaque).
+  if (SERVICE_ROLE && t === SERVICE_ROLE) return "service_role";
+  // JWT payloads are base64URL without padding; plain atob() throws on '-'/'_'.
+  try {
+    let p = (t.split(".")[1] || "").replace(/-/g, "+").replace(/_/g, "/");
+    while (p.length % 4) p += "=";
+    return (JSON.parse(atob(p)).role) || null;
+  } catch { return null; }
+}
+
+// ---------- Message formatting: "Today 3:00 PM · CPS · Menara Bangkok Bank" ----------
+// Same helpers as send-activity-reminders (keep the wording identical).
+function mytDateOf(ms: number): string {
+  return new Date(ms + 8 * 3600_000).toISOString().slice(0, 10);
+}
+function fmtTime12(t: string | null | undefined): string {
+  if (!t) return "";
+  const [h, m] = String(t).split(":").map(Number);
+  if (!Number.isFinite(h)) return "";
+  return `${h % 12 || 12}:${String(Number.isFinite(m) ? m : 0).padStart(2, "0")} ${h >= 12 ? "PM" : "AM"}`;
+}
+function dayLabel(dateStr: string, nowMs: number): string {
+  if (!dateStr) return "";
+  if (dateStr === mytDateOf(nowMs)) return "Today";
+  if (dateStr === mytDateOf(nowMs + 86_400_000)) return "Tomorrow";
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  if (isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
+}
+function typeLabel(t: unknown): string {
+  const s = String(t || "Activity");
+  if (/^[A-Z]{2,4}$/.test(s)) return s; // CPS, FTF, CALL
+  return s.toLowerCase().split(/[_\s]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
 }
 
 async function pgSelect(table: string, params: Record<string, string>): Promise<any[]> {
@@ -293,9 +326,26 @@ Deno.serve(async (req: Request) => {
       ? (leadUser.full_name || leadUser.name || leadUser.email || "Someone")
       : "Someone";
 
-    const typeLabel = record.activity_type || "Activity";
-    const titleLabel = record.activity_title || record.title || "";
-    const dateLabel = record.activity_date || "";
+    const type = typeLabel(record.activity_type);
+    // Prospect / customer name for the second line (best-effort).
+    let contact = "";
+    try {
+      if (record.prospect_id != null) {
+        const r = await pgSelect("prospects", { select: "full_name", id: `eq.${record.prospect_id}` });
+        contact = r?.[0]?.full_name || "";
+      } else if (record.customer_id != null) {
+        const r = await pgSelect("customers", { select: "full_name", id: `eq.${record.customer_id}` });
+        contact = r?.[0]?.full_name || "";
+      }
+    } catch (_) { /* name is optional */ }
+    const titleText = String(record.activity_title || record.title || "").trim();
+    const venue = String(record.venue || record.location_address || "").trim().slice(0, 80);
+    const whenWhere = [
+      `${dayLabel(String(record.activity_date || ""), Date.now())} ${fmtTime12(record.start_time)}`.trim(),
+      type,
+      venue,
+    ].filter(Boolean).join(" · ");
+    const who = contact || (titleText && titleText !== record.activity_type ? titleText : "");
 
     // Delegate push delivery to the existing send-activity-push function.
     const pushRes = await fetch(`${SUPABASE_URL}/functions/v1/send-activity-push`, {
@@ -307,8 +357,8 @@ Deno.serve(async (req: Request) => {
       body: JSON.stringify({
         activity: record,
         targetUserIds: targetList,
-        title: `New ${typeLabel} scheduled`,
-        body: `${agentName}: ${titleLabel}${dateLabel ? ` (${dateLabel})` : ""}`,
+        title: `New ${type} — ${agentName}`,
+        body: who ? `${whenWhere}\n${who}` : whenWhere,
         url: "./index.html#calendar",
       }),
     });
