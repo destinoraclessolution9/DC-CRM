@@ -400,9 +400,10 @@
             ? { label: 'Update Activity', type: 'primary', action: `(async () => { await app.updateActivity(${JSON.stringify(activity.id)}); })()` }
             : { label: 'Save Activity', type: 'primary', action: '(async () => { await app.saveActivity(); })()' };
 
+        // Phones get the full-screen layout so more of the form is visible at once.
         UI.showModal('Quick Add Activity', modalContent, [
             primaryBtn
-        ]);
+        ], window.matchMedia('(max-width: 768px)').matches ? 'fullscreen' : '');
 
         await updateActivityForm();
 
@@ -752,7 +753,31 @@
         ['RM12-20k', 'RM 12,001 – RM 20,000'],
         ['> RM20k', 'Above RM 20,000'],
     ];
-    const BASIC_INFO_RELATIONS = ['Friend','Family','Spouse','Siblings','Cousin','Colleague','Ex Colleague','Ex Classmate','Business Partner','Customer'];
+    // Relation / Relationship picker, grouped. Each item is [savedValue, label?].
+    // The 10 original values (Friend, Family, Spouse, Siblings, Cousin, Colleague,
+    // Ex Colleague, Ex Classmate, Business Partner, Customer) are stored on existing
+    // prospects + names and drive the referral reports — keep those VALUE strings
+    // exactly; only their labels may be widened. "Other" (free text) is appended by
+    // each picker, not listed here. Shared by: this form, the Name List modal
+    // (script.js) and the Share Booking Link modal (script-cps.js).
+    const BASIC_INFO_RELATION_GROUPS = [
+        ['Friends', [['Friend'], ['Best Friend'], ['Childhood Friend'], ['Neighbour'], ['Roommate'], ['Online Friend'], ['Acquaintance']]],
+        ['Partner', [['Spouse', 'Spouse (Husband / Wife)'], ['Boyfriend / Girlfriend'], ['Fiancé / Fiancée'], ['Ex-Spouse / Ex-Partner']]],
+        ['Family', [['Family', 'Family (General)'], ['Parent', 'Parent (Mother / Father)'], ['Parent-in-law'], ['Step-parent'], ['Child', 'Child (Son / Daughter)'], ['Son / Daughter-in-law'], ['Siblings', 'Siblings (Brother / Sister)'], ['Half / Step-sibling'], ['Brother / Sister-in-law'], ['Grandparent'], ['Grandchild'], ['Aunt / Uncle'], ['Niece / Nephew'], ['Cousin'], ['Godparent / Godchild'], ['Relative (Extended Family)']]],
+        ['Work & Mentorship', [['Colleague', 'Colleague / Coworker'], ['Ex Colleague', 'Ex Colleague / Coworker'], ['Boss / Employee'], ['Business Partner'], ['Customer'], ['Supplier / Vendor'], ['Mentor / Mentee'], ['Teacher / Student'], ['Teammate']]],
+        ['School', [['Classmate'], ['Ex Classmate'], ['Schoolmate / Alumni']]],
+        ['Community', [['Temple / Church Friend'], ['Club / Association Member']]],
+    ];
+    const BASIC_INFO_RELATIONS = BASIC_INFO_RELATION_GROUPS.flatMap(([, items]) => items.map(([v]) => v));
+    // <optgroup> markup for a relation <select>; callers add their own blank and
+    // "Other" options around it.
+    const buildRelationOptions = (selected) => {
+        const esc = (s) => window._crmUtils.escapeHtml(s);
+        return BASIC_INFO_RELATION_GROUPS.map(([group, items]) =>
+            `<optgroup label="${esc(group)}">${items.map(([v, label]) =>
+                `<option value="${esc(v)}" ${selected === v ? 'selected' : ''}>${esc(label || v)}</option>`).join('')}</optgroup>`
+        ).join('');
+    };
     const BASIC_INFO_INTERESTS = [
         ['个人改命', '个人改命 (Personal Destiny Change)'],
         ['风水', '风水 (Feng Shui)'],
@@ -862,7 +887,7 @@
                         <option value="both">Both — I lead, agent added as co-agent</option>
                     </select>
                 </div>
-                <div style="font-size:11px;color:#0369a1;margin-top:6px;">You're keying this in for another agent — they own the prospect &amp; all future follow-ups. Leave it on <em>(me)</em> to keep it yourself.</div>
+                <div style="font-size:11px;color:#0369a1;margin-top:6px;">They'll own this prospect &amp; its follow-ups. Keep <em>(me)</em> to own it yourself.</div>
             </div>`;
 
         return `
@@ -1026,8 +1051,8 @@
                         <label>Relationship <span class="required">*</span></label>
                         <select id="${prefix}-relationship" class="form-control" onchange="document.getElementById('${prefix}-relationship-other-div').style.display = this.value === 'Other' ? 'block' : 'none'" ${disabled}>
                             <option value="">-- Select --</option>
-                            ${BASIC_INFO_RELATIONS.map(v => `<option value="${v}" ${sel(d.referral_relationship, v)}>${v}</option>`).join('')}
-                            <option value="Other" ${d.referral_relationship === 'Other' || relOther ? 'selected' : ''}>Other</option>
+                            ${buildRelationOptions(d.referral_relationship)}
+                            <option value="Other" ${d.referral_relationship === 'Other' || relOther ? 'selected' : ''}>Other (type your own)</option>
                         </select>
                     </div>
                 </div>
@@ -6239,6 +6264,7 @@
         _autoSubscribePush,
         BASIC_INFO_INCOME_RANGES,
         BASIC_INFO_RELATIONS,
+        buildRelationOptions,
         BASIC_INFO_INTERESTS,
         BASIC_INFO_MING_GUA,
         buildBasicInfoBlock,

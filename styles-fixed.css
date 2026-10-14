@@ -342,6 +342,7 @@ body {
 .modal-box.fullscreen {
     width: 100vw !important;
     height: 100vh !important;
+    height: 100dvh !important; /* iOS Safari: 100vh runs under the toolbar and hides the footer */
     max-width: none !important;
     max-height: none !important;
     border-radius: 0 !important;
@@ -370,8 +371,15 @@ body {
     border-top: 1px solid var(--border, #E5E7EB);
     background: var(--bg-elevated, white);
 }
+/* The activity form caps itself at 60vh with its own scrollbar for the
+   centred popup; in full screen the modal body already scrolls. */
+.modal-box.fullscreen .activity-modal-form { max-height: none; overflow-y: visible; padding-right: 0; }
 @media (max-width: 640px) {
-    .modal-box.fullscreen { padding: 8px 12px !important; }
+    .modal-box.fullscreen { padding: calc(4px + env(safe-area-inset-top)) 12px 0 !important; }
+    .modal-box.fullscreen .modal-header { padding: 4px 2px 6px !important; }
+    .modal-box.fullscreen .modal-header h3 { font-size: 16px; }
+    .modal-box.fullscreen .modal-content { padding: 8px 0 !important; margin: 0 !important; }
+    .modal-box.fullscreen .modal-footer { padding: 8px 0 calc(8px + env(safe-area-inset-bottom)) !important; margin: 0 !important; }
 }
 
 .modal-content {

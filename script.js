@@ -3538,11 +3538,17 @@ function _wireLoginBtn() {
         const isEdit = !!nameData;
 
         // Relation options mirror the referral "Relationship" dropdown
-        // (BASIC_INFO_RELATIONS in chunks/script-activities.js) so both pickers stay
-        // in lockstep. Read the exported constant when the activities chunk is loaded;
-        // fall back to a literal copy since this modal can open before that chunk does.
+        // (BASIC_INFO_RELATION_GROUPS in chunks/script-activities.js) so both pickers
+        // stay in lockstep. Warm that chunk first — this modal can open before it
+        // loads; the literal list is only a last-resort fallback if the load fails.
+        if (typeof window._loadChunk === 'function') {
+            try { await window._loadChunk('chunks/script-activities.min.js'); } catch (_) { /* intentional: fall back to the literal list */ }
+        }
         const RELATIONS = (window.app && window.app.BASIC_INFO_RELATIONS) ||
             ['Friend', 'Family', 'Spouse', 'Siblings', 'Cousin', 'Colleague', 'Ex Colleague', 'Ex Classmate', 'Business Partner', 'Customer'];
+        const relOptionsHtml = (sel) => (window.app && typeof window.app.buildRelationOptions === 'function')
+            ? window.app.buildRelationOptions(sel)
+            : RELATIONS.map(v => `<option value="${escapeHtml(v)}" ${sel === v ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('');
         const rel = nameData?.relation || '';
         // A saved relation that isn't a preset (and isn't the literal 'Other') is a
         // custom "Other → specify" value — reselect Other and prefill the text field.
@@ -3555,8 +3561,8 @@ function _wireLoginBtn() {
                 <div class="form-group">
                     <label>Relation</label>
                     <select id="name-relation" class="form-control" onchange="document.getElementById('name-relation-other-div').style.display = this.value === 'Other' ? 'block' : 'none'">
-                        ${RELATIONS.map(v => `<option value="${escapeHtml(v)}" ${rel === v ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('')}
-                        <option value="Other" ${rel === 'Other' || relIsOther ? 'selected' : ''}>Other</option>
+                        ${relOptionsHtml(rel)}
+                        <option value="Other" ${rel === 'Other' || relIsOther ? 'selected' : ''}>Other (type your own)</option>
                     </select>
                 </div>
                 <div id="name-relation-other-div" class="form-group" style="display:${relIsOther ? 'block' : 'none'};">

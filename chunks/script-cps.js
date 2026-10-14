@@ -517,7 +517,15 @@ const copyBookingLink = () => {
     navigator.clipboard.writeText(url).then(() => UI.toast.success('Booking link copied!')).catch(() => UI.toast.info(`Link: ${url}`));
 };
 
-const openShareBookingLinkModal = () => {
+const openShareBookingLinkModal = async () => {
+    // The relation list lives in the activities chunk (buildRelationOptions) —
+    // warm it so this picker matches the prospect form.
+    if (typeof window._loadChunk === 'function') {
+        try { await window._loadChunk('chunks/script-activities.min.js'); } catch (_) { /* intentional: fall back to the literal list below */ }
+    }
+    const relOptions = typeof window.app.buildRelationOptions === 'function'
+        ? window.app.buildRelationOptions('')
+        : ['Friend','Family','Spouse','Siblings','Cousin','Colleague','Ex Colleague','Ex Classmate','Business Partner','Customer'].map(v => `<option value="${v}">${v}</option>`).join('');
     const baseUrl = `${window.location.origin}/booking.html?agent=${_state.cu?.id}`;
     UI.showModal('Share Booking Link', `
         <div style="display:flex; flex-direction:column; gap:16px;">
@@ -531,20 +539,12 @@ const openShareBookingLinkModal = () => {
             </div>
             <div>
                 <label style="display:block; font-weight:500; margin-bottom:6px;">Relation to Referrer</label>
-                <select id="share-relation" class="form-control" onchange="app.updateShareLinkPreview()">
+                <select id="share-relation" class="form-control" onchange="document.getElementById('share-relation-other').style.display = this.value === 'Other' ? 'block' : 'none'; app.updateShareLinkPreview()">
                     <option value="">-- Select Relation --</option>
-                    <option value="Friend">Friend</option>
-                    <option value="Family">Family</option>
-                    <option value="Spouse">Spouse</option>
-                    <option value="Siblings">Siblings</option>
-                    <option value="Cousin">Cousin</option>
-                    <option value="Colleague">Colleague</option>
-                    <option value="Ex Colleague">Ex Colleague</option>
-                    <option value="Ex Classmate">Ex Classmate</option>
-                    <option value="Business Partner">Business Partner</option>
-                    <option value="Customer">Customer</option>
-                    <option value="Other">Other</option>
+                    ${relOptions}
+                    <option value="Other">Other (type your own)</option>
                 </select>
+                <input type="text" id="share-relation-other" class="form-control" placeholder="Type the relation..." style="display:none; margin-top:8px;" oninput="app.updateShareLinkPreview()">
             </div>
             <div>
                 <label style="display:block; font-weight:500; margin-bottom:6px;">Generated Link</label>
@@ -561,7 +561,8 @@ const openShareBookingLinkModal = () => {
 const updateShareLinkPreview = () => {
     const baseUrl = `${window.location.origin}/booking.html?agent=${_state.cu?.id}`;
     const ref = document.getElementById('share-referrer')?.value.trim();
-    const rel = document.getElementById('share-relation')?.value;
+    let rel = document.getElementById('share-relation')?.value;
+    if (rel === 'Other') rel = document.getElementById('share-relation-other')?.value.trim() || 'Other';
     let url = baseUrl;
     if (ref) url += `&ref=${encodeURIComponent(ref)}`;
     if (rel) url += `&rel=${encodeURIComponent(rel)}`;

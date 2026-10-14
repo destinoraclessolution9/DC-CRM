@@ -1659,7 +1659,7 @@ const openProspectModal = async (prospectId = null) => {
     UI.showModal(isEdit ? 'Edit Prospect' : 'Add New Prospect', content, [
         { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
         { label: isEdit ? 'Update Prospect' : 'Create Prospect', type: 'primary', action: '(async () => { await app.saveProspect(); })()' }
-    ]);
+    ], window.matchMedia('(max-width: 768px)').matches ? 'fullscreen' : ''); // full screen on phones
 
     // Pre-populate children rows after modal mounts; reveal the assign-on-behalf
     // picker (leader keying for an agent) — both owned by the activities chunk.
