@@ -269,6 +269,36 @@ const showSettingsView = (container) => {
                     <input type="checkbox" id="reminder-daily-summary" onchange="app.onReminderCheckboxChange()">
                     <span>Morning summary at 8:30 AM (today's activities, events &amp; birthdays)</span>
                 </label>
+                <h5 style="margin:16px 0 4px; font-size:14px; font-weight:600;">Send to my phone</h5>
+                <p style="color:var(--gray-500); font-size:12px; margin:0 0 10px;">
+                    Unticked types still show in the 🔔 bell — they just don't buzz your phone.
+                </p>
+                <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px;">
+                    ${_NOTIF_CATEGORIES.map(c => `
+                    <label style="display:flex; align-items:center; gap:8px; font-size:14px; cursor:pointer;">
+                        <input type="checkbox" class="notif-cat" data-kinds="${c.kinds.join(',')}" onchange="app.onReminderCheckboxChange()">
+                        <span>${c.label}</span>
+                    </label>`).join('')}
+                </div>
+
+                <h5 style="margin:16px 0 4px; font-size:14px; font-weight:600;">Quiet hours</h5>
+                <label style="display:flex; align-items:center; gap:8px; font-size:14px; cursor:pointer; margin-bottom:8px;">
+                    <input type="checkbox" id="notif-quiet-on" onchange="document.getElementById('notif-quiet-times').style.display = this.checked ? 'flex' : 'none'; app.onReminderCheckboxChange()">
+                    <span>Don't buzz my phone during these hours (urgent changes &amp; cancellations still come through)</span>
+                </label>
+                <div id="notif-quiet-times" style="display:none; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:12px;">
+                    <span style="font-size:13px;">From</span>
+                    <input type="text" id="notif-quiet-start" class="form-control time24" inputmode="numeric" autocomplete="off" maxlength="5" placeholder="HH:MM" value="23:00" style="width:90px;" onchange="app.onReminderCheckboxChange()">
+                    <span style="font-size:13px;">to</span>
+                    <input type="text" id="notif-quiet-end" class="form-control time24" inputmode="numeric" autocomplete="off" maxlength="5" placeholder="HH:MM" value="07:00" style="width:90px;" onchange="app.onReminderCheckboxChange()">
+                </div>
+
+                ${(() => { const L = getUserLevel(_state.cu); return L >= 3 && L <= 5; })() ? `
+                <h5 style="margin:16px 0 4px; font-size:14px; font-weight:600;">Team leader</h5>
+                <label style="display:flex; align-items:center; gap:8px; font-size:14px; cursor:pointer; margin-bottom:14px;">
+                    <input type="checkbox" id="notif-leader-rsvp" onchange="app.onReminderCheckboxChange()">
+                    <span>Tell me when someone in my team accepts or rejects a co-agent invite</span>
+                </label>` : ''}
                 <button id="notif-prefs-save-btn" class="btn primary" style="display:none;" onclick="(async()=>{ await app.saveNotificationPreferences(); })()">
                     <i class="fas fa-save"></i> Save Reminder Preferences
                 </button>
@@ -749,12 +779,22 @@ const sendTestPushNotification = async () => {
 };
 
 // ========== Notification reminder preferences ==========
+// Push categories → notification_outbox kinds. Unticked = those kinds go to the
+// bell only (notification_preferences.muted_kinds, applied by send-activity-push).
+const _NOTIF_CATEGORIES = [
+    { label: 'New activities in my team', kinds: ['activity_created'] },
+    { label: 'Changes &amp; cancellations', kinds: ['activity_changed', 'activity_cancelled'] },
+    { label: 'Reminders before my activities', kinds: ['activity_reminder'] },
+    { label: 'Co-agent invites &amp; replies', kinds: ['coagent_invite', 'coagent_response'] },
+    { label: '福运相随 highlights', kinds: ['highlight'] },
+];
+const _hhmm = (t) => (t ? String(t).slice(0, 5) : '');
 const loadNotificationPreferences = async () => {
     if (!_state.cu?.id) return;
     try {
         const { data } = await window.supabase
             .from('notification_preferences')
-            .select('reminder_minutes,daily_summary')
+            .select('reminder_minutes,daily_summary,muted_kinds,quiet_start,quiet_end,leader_rsvp_alerts')
             .eq('user_id', _state.cu.id)
             .maybeSingle();
         // No saved row = server defaults (send-activity-reminders DEFAULT_REMINDER_MINUTES).
@@ -766,6 +806,21 @@ const loadNotificationPreferences = async () => {
         });
         const dsel = document.getElementById('reminder-daily-summary');
         if (dsel) dsel.checked = dailySummary;
+        const muted = new Set((data && Array.isArray(data.muted_kinds)) ? data.muted_kinds : []);
+        document.querySelectorAll('.notif-cat').forEach(el => {
+            el.checked = !String(el.dataset.kinds || '').split(',').some(k => muted.has(k));
+        });
+        const quietOn = !!(data && data.quiet_start && data.quiet_end);
+        const qOn = document.getElementById('notif-quiet-on');
+        if (qOn) qOn.checked = quietOn;
+        const qBox = document.getElementById('notif-quiet-times');
+        if (qBox) qBox.style.display = quietOn ? 'flex' : 'none';
+        if (quietOn) {
+            const qs = document.getElementById('notif-quiet-start'); if (qs) qs.value = _hhmm(data.quiet_start);
+            const qe = document.getElementById('notif-quiet-end');   if (qe) qe.value = _hhmm(data.quiet_end);
+        }
+        const lr = document.getElementById('notif-leader-rsvp');
+        if (lr) lr.checked = !!(data && data.leader_rsvp_alerts);
     } catch (e) {
         console.warn('[Prefs] load failed:', e);
     }
@@ -779,10 +834,29 @@ const saveNotificationPreferences = async () => {
     });
     if (minutes.length === 0) { UI.toast.error('Please select at least one reminder time'); return; }
     const dailySummary = !!(document.getElementById('reminder-daily-summary')?.checked);
+    const mutedKinds = [];
+    document.querySelectorAll('.notif-cat').forEach(el => {
+        if (!el.checked) mutedKinds.push(...String(el.dataset.kinds || '').split(',').filter(Boolean));
+    });
+    const quietOn = !!document.getElementById('notif-quiet-on')?.checked;
+    const _t = (id) => {
+        const v = (document.getElementById(id)?.value || '').trim();
+        return /^([01]\d|2[0-3]):[0-5]\d$/.test(v) ? v : null;
+    };
+    const quietStart = quietOn ? _t('notif-quiet-start') : null;
+    const quietEnd = quietOn ? _t('notif-quiet-end') : null;
+    if (quietOn && (!quietStart || !quietEnd || quietStart === quietEnd)) {
+        UI.toast.error('Quiet hours: enter two different times as HH:MM (e.g. 23:00 and 07:00)');
+        return;
+    }
+    const row = { user_id: _state.cu.id, reminder_minutes: minutes, daily_summary: dailySummary,
+        muted_kinds: mutedKinds, quiet_start: quietStart, quiet_end: quietEnd, updated_at: new Date().toISOString() };
+    const lr = document.getElementById('notif-leader-rsvp');
+    if (lr) row.leader_rsvp_alerts = !!lr.checked;
     try {
         const { error } = await window.supabase
             .from('notification_preferences')
-            .upsert({ user_id: _state.cu.id, reminder_minutes: minutes, daily_summary: dailySummary, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+            .upsert(row, { onConflict: 'user_id' });
         if (error) throw error;
         const saveBtn = document.getElementById('notif-prefs-save-btn');
         const savedMsg = document.getElementById('notif-prefs-saved');

@@ -359,6 +359,9 @@ Deno.serve(async (req: Request) => {
             body: extra ? `${whenWhere}\n${extra}` : whenWhere,
             url: "./index.html#calendar", activity_id: act.id,
             dedupe_key: keyOf(windowMin), status: "pending",
+            // Start time lets the sender skip a reminder that quiet hours would
+            // delay past the start (bell only instead).
+            meta: { starts_at: new Date(`${act.activity_date}T${act.start_time}+08:00`).toISOString() },
           };
           if (dryRun) { stats.preview.push({ kind: "reminder", userId, payload: row }); continue; }
           queue.push(row);
@@ -429,6 +432,29 @@ Deno.serve(async (req: Request) => {
 
       const names = await contactNames(allTodayActs);
 
+      // Admin digest (L1–L2): yesterday's company-wide totals, one line.
+      const ydayMYT = mytDateOf(nowMs - 86_400_000);
+      const ydayStart = new Date(`${ydayMYT}T00:00:00+08:00`).toISOString();
+      const todayStart = new Date(`${todayMYT}T00:00:00+08:00`).toISOString();
+      let adminLine: string | null = null;
+      if (recipients.some((id) => levelOf(userMap.get(id)) <= 2)) {
+        try {
+          const [made, changed, cancelled] = await Promise.all([
+            pgSelectAll("activities", `select=id,activity_type&created_at=gte.${ydayStart}&created_at=lt.${todayStart}`),
+            pgSelectAll("notification_outbox", `select=id,activity_id&kind=eq.activity_changed&status=in.(sent,no_device,muted)&created_at=gte.${ydayStart}&created_at=lt.${todayStart}`),
+            pgSelectAll("notification_outbox", `select=id,meta&kind=eq.activity_cancelled&created_at=gte.${ydayStart}&created_at=lt.${todayStart}`),
+          ]);
+          const byType = new Map<string, number>();
+          for (const a of made) byType.set(typeLabel(a.activity_type), (byType.get(typeLabel(a.activity_type)) || 0) + 1);
+          const top = [...byType.entries()].sort((x, y) => y[1] - x[1]).slice(0, 4).map(([t, n]) => `${n} ${t}`).join(", ");
+          const nChanged = new Set(changed.map((c: any) => c.activity_id)).size;
+          const nCancelled = new Set(cancelled.map((c: any) => c.meta?.subject)).size;
+          adminLine = `  ${made.length} new${top ? ` (${top})` : ""} · ${nChanged} changed · ${nCancelled} cancelled`;
+        } catch (e: any) {
+          stats.errors.push(`admin_digest: ${e?.message || e}`);
+        }
+      }
+
       for (const userId of recipients) {
         const me = userMap.get(userId);
         const myActs = allTodayActs.filter((a: any) => attendeeIds(a).includes(userId));
@@ -439,7 +465,8 @@ Deno.serve(async (req: Request) => {
             .map((u: any) => `${u.full_name} (Agent)`),
         ];
 
-        if (myActs.length === 0 && dedupedEvents.length === 0 && myBirthdays.length === 0) continue;
+        const myAdminLine = levelOf(me) <= 2 ? adminLine : null;
+        if (myActs.length === 0 && dedupedEvents.length === 0 && myBirthdays.length === 0 && !myAdminLine) continue;
 
         const bodyLines: string[] = [];
         if (myActs.length > 0) {
@@ -460,6 +487,10 @@ Deno.serve(async (req: Request) => {
           }
           if (dedupedEvents.length > 3) bodyLines.push(`  …+${dedupedEvents.length - 3} more`);
         }
+        if (myAdminLine) {
+          bodyLines.push("📊 Yesterday (company):");
+          bodyLines.push(myAdminLine);
+        }
         if (myBirthdays.length > 0) {
           bodyLines.push("🎂 Birthdays today:");
           bodyLines.push(`  ${myBirthdays.slice(0, 4).join(", ")}${myBirthdays.length > 4 ? ` +${myBirthdays.length - 4} more` : ""}`);
@@ -472,10 +503,10 @@ Deno.serve(async (req: Request) => {
 
         const row = {
           user_id: userId, kind: "daily_summary", priority: "normal",
-          title: `Good morning! Today: ${titleParts.join(", ")} 🌅`,
+          title: titleParts.length ? `Good morning! Today: ${titleParts.join(", ")} 🌅` : "Good morning! Yesterday's numbers 📊",
           body: bodyLines.join("\n").slice(0, 1000),
           url: "./index.html#calendar",
-          activity_id: null,
+          activity_id: null, meta: null,
           // One summary per user per day, however many runs match the window.
           dedupe_key: `daily:${todayMYT}`, status: "pending",
         };

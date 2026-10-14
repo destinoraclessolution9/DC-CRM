@@ -220,6 +220,15 @@ async function handleChange(
   const who = contact ? ` — ${contact}` : "";
   const nowIso = new Date().toISOString();
   const recipients = targets.map(Number).filter((n) => Number.isFinite(n));
+  // Super Admins (L1) hear about every event being moved or cancelled,
+  // company-wide — events affect many people. Ordinary CPS/FTF changes are
+  // not pushed to them (they get yesterday's totals in the morning summary).
+  if (isEvent) {
+    for (const [id, u] of userMap) {
+      const n = Number(id);
+      if (levelOf(u) === 1 && u.status !== "deleted" && u.status !== "inactive" && id !== editorId && !recipients.includes(n)) recipients.push(n);
+    }
+  }
 
   if (isCancel) {
     // The cancel supersedes any edit alert still waiting for this subject.

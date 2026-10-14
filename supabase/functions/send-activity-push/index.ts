@@ -367,7 +367,7 @@ async function pgPatch(table: string, params: Record<string, string>, patch: any
   if (!res.ok) console.warn(`pg_patch ${table} ${res.status}: ${await res.text().catch(() => "")}`);
 }
 
-const OUTBOX_COLS = "id,user_id,kind,priority,title,body,url,activity_id,attempts";
+const OUTBOX_COLS = "id,user_id,kind,priority,title,body,url,activity_id,attempts,meta";
 const MAX_ATTEMPTS = 3;
 const KINDS = new Set([
   "activity_created", "activity_reminder", "daily_summary", "coagent_invite",
@@ -375,10 +375,72 @@ const KINDS = new Set([
 ]);
 const PRIORITIES = new Set(["low", "normal", "high", "urgent"]);
 
+
+// ---------- Per-person delivery preferences (notification_preferences) ----------
+// quiet_start/quiet_end (MYT wall clock) and muted_kinds. Applied at delivery
+// time, so every producer (triggers, reminders, client) is covered.
+const MYT_MS = 8 * 3600_000;
+const toMinuteOfDay = (t: unknown): number | null => {
+  if (!t) return null;
+  const [h, m] = String(t).split(":").map(Number);
+  return Number.isFinite(h) ? h * 60 + (Number.isFinite(m) ? m : 0) : null;
+};
+// If `nowMs` falls inside the person's quiet hours, the epoch ms they end; else null.
+function quietEndsAt(pref: any, nowMs: number): number | null {
+  const s = toMinuteOfDay(pref?.quiet_start), e = toMinuteOfDay(pref?.quiet_end);
+  if (s == null || e == null || s === e) return null;
+  const d = new Date(nowMs + MYT_MS);
+  const m = d.getUTCHours() * 60 + d.getUTCMinutes();
+  const inQuiet = s < e ? (m >= s && m < e) : (m >= s || m < e);
+  if (!inQuiet) return null;
+  const startOfMinute = nowMs - (d.getUTCSeconds() * 1000 + d.getUTCMilliseconds());
+  return startOfMinute + (((e - m) + 1440) % 1440) * 60_000;
+}
+// 'push' | mute (bell only) | hold until quiet hours end.
+function deliveryPlan(row: any, pref: any, nowMs: number): { act: "push" } | { act: "mute" } | { act: "hold"; until: number } {
+  if (row.kind === "test") return { act: "push" }; // Settings → Send Test always tests the phone
+  const muted: string[] = Array.isArray(pref?.muted_kinds) ? pref.muted_kinds : [];
+  if (muted.includes(row.kind)) return { act: "mute" };
+  if (row.priority === "urgent") return { act: "push" }; // urgent overrides quiet hours
+  const until = quietEndsAt(pref, nowMs);
+  if (until == null) return { act: "push" };
+  // A reminder that would only arrive after the activity started is useless — bell only.
+  const startsAt = row.meta?.starts_at ? Date.parse(row.meta.starts_at) : NaN;
+  if (row.kind === "activity_reminder" && Number.isFinite(startsAt) && startsAt <= until) return { act: "mute" };
+  return { act: "hold", until };
+}
+
 // Deliver queued rows: one push per row to each of the recipient's devices,
 // then record the outcome on the row. Dead endpoints (404/410) are pruned.
-async function deliverRows(rows: any[]): Promise<{ sent: number; noDevice: number; failed: number; pruned: number; devices: number }> {
-  const out = { sent: 0, noDevice: 0, failed: 0, pruned: 0, devices: 0 };
+async function deliverRows(allRows: any[]): Promise<{ sent: number; noDevice: number; failed: number; pruned: number; devices: number; muted: number; held: number }> {
+  const out = { sent: 0, noDevice: 0, failed: 0, pruned: 0, devices: 0, muted: 0, held: 0 };
+  if (!allRows.length) return out;
+
+  // Preferences first: muted kinds stay in the bell only; non-urgent rows inside
+  // quiet hours go back to 'pending' until the quiet hours end.
+  const prefRows: any[] = await pgSelect("notification_preferences", {
+    select: "user_id,quiet_start,quiet_end,muted_kinds",
+    user_id: `in.(${[...new Set(allRows.map((r) => Number(r.user_id)))].join(",")})`,
+  }).catch(() => []);
+  const prefOf = new Map<string, any>(prefRows.map((p) => [String(p.user_id), p]));
+  const nowMs = Date.now();
+  const rows: any[] = [];
+  const muteIds: number[] = [];
+  const holds = new Map<number, number[]>();
+  for (const r of allRows) {
+    const plan = deliveryPlan(r, prefOf.get(String(r.user_id)), nowMs);
+    if (plan.act === "push") rows.push(r);
+    else if (plan.act === "mute") muteIds.push(r.id);
+    else { if (!holds.has(plan.until)) holds.set(plan.until, []); holds.get(plan.until)!.push(r.id); }
+  }
+  if (muteIds.length) {
+    await pgPatch("notification_outbox", { id: `in.(${muteIds.join(",")})` }, { status: "muted", sent_at: new Date(nowMs).toISOString() });
+    out.muted = muteIds.length;
+  }
+  for (const [until, ids] of holds) {
+    await pgPatch("notification_outbox", { id: `in.(${ids.join(",")})` }, { status: "pending", due_at: new Date(until).toISOString(), claimed_at: null });
+    out.held += ids.length;
+  }
   if (!rows.length) return out;
 
   const userIds = [...new Set(rows.map((r) => String(r.user_id)))];
@@ -456,6 +518,29 @@ async function deliverRows(rows: any[]): Promise<{ sent: number; noDevice: numbe
     await pgPatch("notification_outbox", { id: `in.(${ids.join(",")})` }, patch);
   }
   return out;
+}
+
+// Co-agent accepted/rejected → also the lead agent's team leaders (L3–L5 on
+// the reporting_to chain) who opted in via Settings (leader_rsvp_alerts).
+async function withRsvpLeaders(recipients: number[]): Promise<number[]> {
+  const optIn: any[] = await pgSelect("notification_preferences", { select: "user_id", leader_rsvp_alerts: "eq.true" }).catch(() => []);
+  if (!optIn.length) return recipients;
+  const wants = new Set(optIn.map((p) => Number(p.user_id)));
+  const users: any[] = await pgSelect("users", { select: "id,role,status,reporting_to" });
+  const byId = new Map<number, any>(users.map((u) => [Number(u.id), u]));
+  const level = (u: any) => { const m = String(u?.role || "").match(/Level\s+(\d+)\b/i); return m ? parseInt(m[1], 10) : 99; };
+  const out = new Set(recipients);
+  for (const uid of recipients) {
+    let cur = byId.get(uid);
+    for (let hops = 0; cur && cur.reporting_to != null && hops < 10; hops++) {
+      const boss = byId.get(Number(cur.reporting_to));
+      if (!boss) break; // dangling reporting_to
+      const L = level(boss);
+      if (L >= 3 && L <= 5 && wants.has(Number(boss.id)) && boss.status !== "inactive" && boss.status !== "deleted") out.add(Number(boss.id));
+      cur = boss;
+    }
+  }
+  return [...out];
 }
 
 // ---------- HTTP handler ----------
@@ -560,7 +645,8 @@ serve(async (req: Request) => {
       : "");
     const rowUrl = safeInAppUrl(url);
 
-    const recipients = [...new Set(targetUserIds.map((u: unknown) => Number(u)).filter((n: number) => Number.isFinite(n)))];
+    let recipients = [...new Set(targetUserIds.map((u: unknown) => Number(u)).filter((n: number) => Number.isFinite(n)))];
+    if (kind === "coagent_response") recipients = await withRsvpLeaders(recipients);
     if (recipients.length === 0) return json({ ok: true, sent: 0, reason: "no_targets" });
 
     const queued = await pgInsertReturning("notification_outbox", recipients.map((uid) => ({
