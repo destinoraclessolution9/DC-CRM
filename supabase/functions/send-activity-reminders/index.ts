@@ -31,6 +31,9 @@ const DAILY_SUMMARY_MINUTE_OF_DAY = 8 * 60 + 30; // 08:30 MYT = 00:30 UTC
 // How many minutes before/after a target window we still fire (window = ±WINDOW_MIN)
 // Edge function runs every 5 min, window = 3 min gives safe overlap without double-fire.
 const WINDOW_MIN = 3;
+// Reminders: send on the first run after the activity is within its lead time,
+// or up to this many minutes later if a run was slow/missed (dedupe log stops repeats).
+const REMINDER_CATCHUP_MIN = 10;
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -385,8 +388,14 @@ Deno.serve(async (req: Request) => {
         "&start_time=not.is.null" +
         "&or=(status.is.null,status.not.in.(completed,cancelled,Completed,Cancelled))");
 
-      // Collect every (activity, user, window) that is due right now.
-      const due: { act: any; userId: number; windowMin: number }[] = [];
+      // A reminder is due once the activity is within its lead time, with a
+      // catch-up tail so a slow/missed 5-min run still sends it. (The old
+      // "±3 min of the target" test left gaps: cron starts a hair after the
+      // minute, so an activity at hh:02/hh:07/… was 62 then 56.99 min away on
+      // consecutive runs and NEVER matched a 60-min reminder.)
+      // Grouped per (activity, user): only one push even if several lead
+      // times are due at once (e.g. a CPS created 8 min before it starts).
+      const due = new Map<string, { act: any; userId: number; windows: number[]; minutesUntil: number }>();
       for (const act of activities) {
         const actMs = new Date(`${act.activity_date}T${act.start_time}+08:00`).getTime();
         if (isNaN(actMs)) continue;
@@ -394,24 +403,26 @@ Deno.serve(async (req: Request) => {
         if (minutesUntil < 0 || minutesUntil > maxWindow + WINDOW_MIN) continue;
         for (const userId of attendeeIds(act)) {
           if (!devices.has(userId)) continue;
-          for (const windowMin of windowsFor(userId)) {
-            if (Math.abs(minutesUntil - windowMin) <= WINDOW_MIN) due.push({ act, userId, windowMin });
-          }
+          const windows = windowsFor(userId).filter((w) =>
+            minutesUntil <= w + 0.5 && minutesUntil > w - REMINDER_CATCHUP_MIN);
+          if (windows.length) due.set(`${act.id}:${userId}`, { act, userId, windows, minutesUntil });
         }
       }
 
-      if (due.length > 0) {
+      if (due.size > 0) {
         // One query for the dedupe log instead of one per candidate.
-        const actIds = [...new Set(due.map((d) => d.act.id))];
+        const actIds = [...new Set([...due.values()].map((d) => d.act.id))];
         const logged: any[] = await pgSelect("notification_reminder_log",
           `select=activity_id,user_id,reminder_minutes&activity_id=in.(${actIds.join(",")})`);
         const sentKeys = new Set(logged.map((l) => `${l.activity_id}:${l.user_id}:${l.reminder_minutes}`));
-        const names = await contactNames(due.map((d) => d.act));
+        const names = await contactNames([...due.values()].map((d) => d.act));
 
-        for (const { act, userId, windowMin } of due) {
-          if (sentKeys.has(`${act.id}:${userId}:${windowMin}`)) continue; // already sent
+        for (const { act, userId, windows, minutesUntil } of due.values()) {
+          const pending = windows.filter((w) => !sentKeys.has(`${act.id}:${userId}:${w}`));
+          if (pending.length === 0) continue; // already sent
+          const windowMin = Math.min(...pending);
 
-          let label = `${windowMin} min`;
+          let label = `${Math.max(1, Math.round(minutesUntil))} min`;
           if (windowMin === 60) label = "1 hour";
           if (windowMin === 1440) label = "1 day";
           const type = typeLabel(act.activity_type);
@@ -433,11 +444,12 @@ Deno.serve(async (req: Request) => {
           const [sent] = await fanOut([userId], payload);
           if (sent > 0) {
             // Logged only after a successful send, so a failed send retries on
-            // the next 5-min run while still inside the ±WINDOW_MIN window.
+            // the next run while still inside the catch-up tail. Log every lead
+            // time that was due so the larger one doesn't fire again next run.
             await pgUpsert("notification_reminder_log",
-              [{ activity_id: act.id, user_id: userId, reminder_minutes: windowMin }],
+              pending.map((w) => ({ activity_id: act.id, user_id: userId, reminder_minutes: w })),
               "activity_id,user_id,reminder_minutes");
-            sentKeys.add(`${act.id}:${userId}:${windowMin}`);
+            pending.forEach((w) => sentKeys.add(`${act.id}:${userId}:${w}`));
             stats.reminders_sent++;
           }
         }
