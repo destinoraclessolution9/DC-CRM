@@ -408,8 +408,15 @@ Deno.serve(async (req: Request) => {
       const eventTitles = new Map<number, string>();
       const eventIds = [...new Set(allTodayEvents.map((e: any) => e.event_id).filter(Boolean))];
       if (eventIds.length > 0) {
-        const evRows: any[] = await pgSelect("events", `select=id,event_title,title&id=in.(${eventIds.join(",")})`);
-        for (const ev of evRows) eventTitles.set(Number(ev.id), ev.event_title || ev.title || "Event");
+        // events has `title` (no event_title column — asking for it 400'd and
+        // took down the whole summary on any day with an open event). Titles
+        // are optional: a failed lookup falls back to the activity title.
+        try {
+          const evRows: any[] = await pgSelect("events", `select=id,title&id=in.(${eventIds.join(",")})`);
+          for (const ev of evRows) eventTitles.set(Number(ev.id), ev.title || "Event");
+        } catch (e: any) {
+          stats.errors.push(`event_titles: ${e?.message || e}`);
+        }
       }
       // One line per event, not per attendee row.
       const seenEventIds = new Set<number>();
