@@ -5282,6 +5282,7 @@
             // see the event may assign (owner decision) — except the two 报到负责人
             // check-in slots, which only the session's 主要负责人 / admin may set.
             let rolesSection = '';
+            let mediaSection = '';
             if (activity.activity_type === 'EVENT' && activity.event_id && activity.activity_date) {
                 const _EVENT_ROLE_DEFS = [
                     { key: 'main_organizer',    label: '主要负责人' },
@@ -5324,9 +5325,21 @@
                     <h4>活动负责人 <span style="font-size:11px;color:#9CA3AF;font-weight:400;">Event Roles · ${esc(_sessDate)}</span></h4>
                     ${_roleRows}
                 </div>`;
+                // Section 4: Event Photos & Video — shared by every activity row for
+                // this (event, date), like the roles above. Body is filled async
+                // after the modal opens (_esmFill) so it never delays the modal.
+                _esmCtx.eventId = activity.event_id;
+                _esmCtx.date = _sessDate;
+                _esmCtx.roleIds = Object.values(_sessionRoles).filter(v => v && v.id != null).map(v => String(v.id));
+                _esmCtx.photoCount = 0;
+                mediaSection = `
+                <div class="detail-section">
+                    <h4>活动照片 · Event Photos &amp; Video <span style="font-size:11px;color:#9CA3AF;font-weight:400;">${esc(_sessDate)}</span></h4>
+                    <div id="esm-body" data-key="${esc(String(activity.event_id) + '|' + _sessDate)}" style="color:var(--gray-400);font-size:13px;">Loading…</div>
+                </div>`;
             }
 
-            attendeeHtml = prospectSection + agentSection + rolesSection;
+            attendeeHtml = prospectSection + agentSection + rolesSection + mediaSection;
         }
 
         // Resolve consultant + lead agent names in parallel before we build
@@ -5375,6 +5388,7 @@
         const content = buildActivityDetailsContent(activity, marketingEvent, _isOwnActivity, _canSeeEntity, entityName, _entityIconBtn, _consultantId, _consultantName, _leadAgentName, attendeeHtml, isAttendeeType, entityOrphaned, activityId);
 
         UI.showModal('Activity Details', content, []);
+        if (document.getElementById('esm-body')) _esmFill();
 
         // 汇集 briefing (async fill; RLS-scoped — the slot stays hidden for
         // viewers who are neither the event creator nor management L≤5).
@@ -7454,6 +7468,188 @@
         });
     };
 
+    // ──────────────────────────────────────────────────────────────────────
+    // EVENT PHOTOS & VIDEO (活动照片) — per session (event_id + date)
+    //
+    // Rows live in event_session_media (migrations/event_session_media_2026-10-15.sql).
+    // Writes go through RPCs that enforce the caps (10 photos, 1 video link per
+    // session) and who may remove: the uploader, any 活动负责人 role holder for
+    // that date, or an admin / marketing manager. Videos are links (Google Drive /
+    // YouTube) — the attachments bucket only takes images/PDF up to 5 MB.
+    // Add/remove re-render just #esm-body, never the whole modal.
+    const _ESM_MAX_PHOTOS = 10;
+    const _esmCtx = { eventId: null, date: null, roleIds: [], photoCount: 0 };
+    const _ESM_VIDEO_HOSTS = ['youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be', 'drive.google.com'];
+
+    const _esmCanRemove = (row) => {
+        const me = String(_state.cu?.id || '');
+        if (!me) return false;
+        return String(row.uploaded_by) === me
+            || isSystemAdmin(_state.cu) || isMarketingManager(_state.cu)
+            || _esmCtx.roleIds.includes(me);
+    };
+
+    const _esmFill = async () => {
+        const body = document.getElementById('esm-body');
+        if (!body) return;
+        const { eventId, date } = _esmCtx;
+        const key = `${eventId}|${date}`;
+        const sb = window.supabase || window.supabaseClient;
+        let rows = [];
+        try {
+            if (!sb) throw new Error('offline');
+            const { data, error } = await sb.from('event_session_media').select('*')
+                .eq('event_id', eventId).eq('session_date', date).order('created_at', { ascending: true });
+            if (error) throw error;
+            rows = data || [];
+        } catch (e) {
+            console.warn('event media load failed:', e);
+            if (body.dataset.key === key) body.innerHTML = '<p style="color:var(--gray-400);font-size:13px;margin:0;">Could not load event photos — check your connection.</p>';
+            return;
+        }
+        // The modal may have moved to another event while this was loading.
+        const cur = document.getElementById('esm-body');
+        if (!cur || cur.dataset.key !== key) return;
+
+        const photos = rows.filter(r => r.kind === 'photo');
+        const video = rows.find(r => r.kind === 'video_link') || null;
+        _esmCtx.photoCount = photos.length;
+        const _gif = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
+        const _x = (r) => _esmCanRemove(r)
+            ? `<button type="button" title="Remove" onclick="event.stopPropagation();app.eventMediaRemove(${Number(r.id)})" style="position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;border:none;background:var(--error, #ef4444);color:#fff;font-size:11px;padding:0;cursor:pointer;"><i class="fas fa-times"></i></button>`
+            : '';
+        const _by = (r) => escapeHtml(r.uploaded_by_name || '');
+
+        const photoTiles = photos.map(r => `
+            <div style="position:relative;width:84px;">
+                <img loading="lazy" decoding="async" data-attach-src="${escapeHtml(String(r.url))}" src="${_gif}" alt="Event photo" style="width:84px;height:84px;object-fit:cover;border-radius:8px;border:1px solid var(--gray-200);cursor:zoom-in;" onclick="window._openAttachment && window._openAttachment('${UI.escJsAttr(String(r.url))}')">
+                ${_x(r)}
+                <div style="font-size:10px;color:var(--gray-500);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;">${_by(r)}</div>
+            </div>`).join('');
+        const full = photos.length >= _ESM_MAX_PHOTOS;
+        const addPhotos = full
+            ? `<div style="font-size:12px;color:var(--gray-500);">已满 10 张 · 10 of 10 photos — remove one to add another.</div>`
+            : `<label class="btn btn-sm secondary" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;margin:0;"><i class="fas fa-camera"></i> + Add Photos<input type="file" accept="image/*" multiple style="display:none;" onchange="app.eventMediaAddPhotos(this)"></label>`;
+
+        let videoHtml;
+        if (video) {
+            videoHtml = `
+                <div style="position:relative;display:inline-flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;max-width:100%;">
+                    <a href="${escapeHtml(String(video.url))}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:8px;color:var(--primary);font-weight:600;text-decoration:none;"><i class="fas fa-play-circle" style="font-size:22px;"></i> 播放视频 · Watch video</a>
+                    <span style="font-size:11px;color:var(--gray-500);">${_by(video)}</span>
+                    ${_x(video)}
+                </div>`;
+        } else {
+            videoHtml = `
+                <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                    <input type="url" id="esm-video-url" class="form-control" placeholder="Paste Google Drive / YouTube link" style="flex:1 1 220px;min-width:0;">
+                    <button type="button" class="btn btn-sm secondary" onclick="app.eventMediaAddVideo()"><i class="fas fa-link"></i> Save Link</button>
+                </div>
+                <p style="color:var(--gray-400);font-size:11px;margin:4px 0 0;"><i class="fas fa-info-circle"></i> 视频限 1 分钟内 · Keep the video under 1 minute. Upload it to Google Drive (share: "Anyone with the link") or YouTube (Unlisted), then paste the link here.</p>`;
+        }
+
+        cur.style.color = '';
+        cur.innerHTML = `
+            <div style="font-size:12px;font-weight:600;color:var(--gray-600);margin-bottom:6px;">照片 Photos (${photos.length}/${_ESM_MAX_PHOTOS})</div>
+            ${photos.length ? `<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:8px;">${photoTiles}</div>` : '<p style="color:var(--gray-400);font-size:13px;margin:0 0 8px;">No photos yet.</p>'}
+            ${addPhotos}
+            <div id="esm-status" style="font-size:12px;color:var(--primary);margin-top:4px;"></div>
+            <div style="font-size:12px;font-weight:600;color:var(--gray-600);margin:14px 0 6px;">视频 Video (${video ? 1 : 0}/1)</div>
+            ${videoHtml}`;
+        try { window._resolveAttachmentImages && setTimeout(() => window._resolveAttachmentImages(), 0); } catch (_) { /* best-effort */ }
+    };
+
+    const _esmErrText = (error) => String(error?.message || error || 'unknown error');
+
+    const eventMediaAddPhotos = async (input) => {
+        const picked = Array.from((input && input.files) || []).filter(f => f.type && f.type.startsWith('image/'));
+        if (input) input.value = '';
+        if (!picked.length) return;
+        const { eventId, date } = _esmCtx;
+        const sb = window.supabase || window.supabaseClient;
+        if (!sb || !sb.storage) { UI.toast.error('Offline — cannot upload photos right now'); return; }
+        const left = _ESM_MAX_PHOTOS - _esmCtx.photoCount;
+        if (left <= 0) { UI.toast.error('最多 10 张照片 · Max 10 photos per event date'); return; }
+        const batch = picked.slice(0, left);
+        if (picked.length > left) UI.toast.error(`Only ${left} more photo(s) allowed — max 10 per event date`);
+
+        // compressImageFile lives in the prospects chunk; phone photos are often
+        // over the bucket's 5 MB limit, so make sure it's loaded.
+        if (!window.app.compressImageFile && typeof window._loadChunk === 'function') {
+            try { await window._loadChunk('chunks/script-prospects.min.js'); } catch (_) { /* fall back to raw file */ }
+        }
+        const compress = window.app.compressImageFile || (f => Promise.resolve(f));
+        const status = document.getElementById('esm-status');
+        let added = 0;
+        let lastErr = null;
+        for (let i = 0; i < batch.length; i++) {
+            if (status) status.textContent = `Uploading ${i + 1}/${batch.length}…`;
+            let path = null;
+            try {
+                const c = await compress(batch[i]);
+                const safeName = c.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+                const target = `event_media/${eventId}/${date}/${Date.now()}_${i}_${safeName}`;
+                const { error: upErr } = await sb.storage.from('attachments').upload(target, c, { upsert: false, contentType: c.type || 'image/jpeg' });
+                if (upErr) throw upErr;
+                path = target;
+                const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
+                const { error } = await sb.rpc('add_event_session_media', {
+                    p_event_id: Number(eventId), p_session_date: date, p_kind: 'photo', p_url: urlData.publicUrl,
+                });
+                if (error) throw error;
+                added++;
+            } catch (e) {
+                console.warn('event photo upload failed:', e);
+                lastErr = e;
+                // Don't leave an orphan file if the row insert was refused.
+                if (path) { try { await sb.storage.from('attachments').remove([path]); } catch (_) { /* best-effort */ } }
+                if (e?.code === '23514') break; // cap reached — the rest would fail too
+            }
+        }
+        if (added) UI.toast.success(`${added} photo(s) added`);
+        if (lastErr) UI.toast.error('Some photos were not added: ' + _esmErrText(lastErr));
+        await _esmFill();
+    };
+
+    const eventMediaAddVideo = async () => {
+        const el = document.getElementById('esm-video-url');
+        const raw = String(el?.value || '').trim();
+        if (!raw) { UI.toast.error('Paste the Google Drive or YouTube link first'); return; }
+        let u;
+        try { u = new URL(raw); } catch (_) { UI.toast.error('That is not a valid link'); return; }
+        if (u.protocol !== 'https:' || !_ESM_VIDEO_HOSTS.includes(u.hostname.toLowerCase())) {
+            UI.toast.error('Please use a Google Drive or YouTube link');
+            return;
+        }
+        const sb = window.supabase || window.supabaseClient;
+        if (!sb || typeof sb.rpc !== 'function') { UI.toast.error('Offline — cannot save right now'); return; }
+        const { eventId, date } = _esmCtx;
+        const { error } = await sb.rpc('add_event_session_media', {
+            p_event_id: Number(eventId), p_session_date: date, p_kind: 'video_link', p_url: u.toString(),
+        });
+        if (error) { UI.toast.error('Video link not saved: ' + _esmErrText(error)); await _esmFill(); return; }
+        UI.toast.success('Video link saved');
+        await _esmFill();
+    };
+
+    const eventMediaRemove = async (mediaId) => {
+        if (!confirm('Remove this from the event?')) return;
+        const sb = window.supabase || window.supabaseClient;
+        if (!sb || typeof sb.rpc !== 'function') { UI.toast.error('Offline — cannot remove right now'); return; }
+        const { data, error } = await sb.rpc('delete_event_session_media', { p_id: Number(mediaId) });
+        if (error) { UI.toast.error('Not removed: ' + _esmErrText(error)); return; }
+        // Free the storage file for photos (best-effort; the row is already gone).
+        if (data && data.kind === 'photo' && typeof data.url === 'string') {
+            const marker = '/object/public/attachments/';
+            const at = data.url.indexOf(marker);
+            if (at !== -1) {
+                try { await sb.storage.from('attachments').remove([decodeURIComponent(data.url.slice(at + marker.length))]); } catch (_) { /* best-effort */ }
+            }
+        }
+        UI.toast.success('Removed');
+        await _esmFill();
+    };
+
     // Gallery viewer for a single attendee's discussion-paper photos. The
     // prospect "Post-Meetup" path stores photos on activities.photo_urls and
     // uses viewActivityPhotos; the per-attendee path stores them on the
@@ -7904,6 +8100,9 @@
         getProspectAttendeeNotes,
         viewAttendeePhotos,
         removeAttendeePhoto,
+        eventMediaAddPhotos,
+        eventMediaAddVideo,
+        eventMediaRemove,
         editActivity,
         deleteActivity,
         confirmDeleteActivity,
