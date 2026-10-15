@@ -187,6 +187,51 @@ function diffLines(from: Fields, to: Fields): { lines: string[]; urgent: boolean
   return { lines, urgent };
 }
 
+// ---------- Notification templates (owner-approved 2026-10-15) ----------
+//   line 1: "Tomorrow 2pm CPS"  /  events: "Fri 16 Oct 10am 特训班"
+//   line 2: "Agent | Customer"  (events: agent only)
+// One small icon marks the kind (none = new, ⏰ ✏️ 🚫 🤝 ✅). No venue.
+// Keep identical to send-activity-reminders + the client co-agent pushes.
+function fmtShortTime(t: unknown): string {
+  if (!t) return "";
+  const [h, m] = String(t).split(":").map(Number);
+  if (!Number.isFinite(h)) return "";
+  const mm = Number.isFinite(m) && m > 0 ? `:${String(m).padStart(2, "0")}` : "";
+  return `${h % 12 || 12}${mm}${h >= 12 ? "pm" : "am"}`;
+}
+const isEventRow = (r: any) => EVENT_TYPES.has(String(r?.activity_type ?? "").toUpperCase());
+function headlineOf(r: any): string {
+  const title = String(r?.activity_title || "").trim();
+  const what = isEventRow(r) && title ? title : typeLabel(r?.activity_type);
+  return [dayLabel(String(r?.activity_date || ""), Date.now()), fmtShortTime(r?.start_time), what]
+    .filter(Boolean).join(" ").slice(0, 120);
+}
+// Customer shown on line 2: the prospect/customer, else a meaningful title.
+// Events show no customer (the event name is already on line 1).
+function customerOf(r: any, contact: string): string {
+  if (isEventRow(r)) return "";
+  if (contact) return contact;
+  const title = String(r?.activity_title || "").trim();
+  return title && title.toUpperCase() !== String(r?.activity_type || "").toUpperCase() ? title : "";
+}
+const peopleLine = (...parts: (string | null | undefined)[]) => parts.filter(Boolean).join(" | ").slice(0, 200);
+const agentNameOf = (r: any, userMap: Map<string, any>) => {
+  const u = r?.lead_agent_id != null ? userMap.get(String(r.lead_agent_id)) : null;
+  return u ? (u.full_name || u.name || u.email || "") : "";
+};
+// "was 10am" / "was Thu" / "was Thu 10am" / "was Menara…" — the one thing that changed.
+function wasPart(from: any, to: any): string {
+  const now = Date.now();
+  const d = from.date !== to.date, t = from.time !== to.time;
+  if (d || t) {
+    return "was " + [d && from.date ? dayLabel(from.date, now) : "", t ? (fmtShortTime(from.time) || "no time") : ""]
+      .filter(Boolean).join(" ");
+  }
+  if (from.venue !== to.venue) return `was ${from.venue || "no venue"}`;
+  if (from.title !== to.title) return `was ${from.title || "untitled"}`;
+  return "";
+}
+
 // Hold an edit this long so a burst of edits becomes ONE alert with the net
 // change (first "from" → latest "to"). The every-minute dispatcher sends it.
 const CHANGE_HOLD_MS = 2 * 60_000;
@@ -213,11 +258,9 @@ async function handleChange(
   const isCancel = op === "DELETE" || String(record?.status || "").toLowerCase() === "cancelled";
   const isEvent = record?.event_id != null && EVENT_TYPES.has(String(record?.activity_type ?? "").toUpperCase());
   const subject = isEvent ? `ev:${record.event_id}` : `act:${record.id}`;
-  const editor = editorId ? userMap.get(editorId) : null;
-  const by = editor ? `\nBy ${editor.full_name || editor.email || "a colleague"}` : "";
   const contact = await contactNameOf(record);
-  const type = typeLabel(record?.activity_type);
-  const who = contact ? ` — ${contact}` : "";
+  const agent = agentNameOf(record, userMap);
+  const customer = customerOf(record, contact);
   const nowIso = new Date().toISOString();
   const recipients = targets.map(Number).filter((n) => Number.isFinite(n));
   // Super Admins (L1) hear about every event being moved or cancelled,
@@ -239,8 +282,8 @@ async function handleChange(
     const was = op === "DELETE" ? record : (oldRecord || record);
     const rows = recipients.map((uid) => ({
       user_id: uid, kind: "activity_cancelled", priority: "urgent",
-      title: `🚫 Cancelled: ${type}${who}`,
-      body: `Was ${whenWhereOf(was)}${by}`,
+      title: `🚫 ${headlineOf(was)}`,
+      body: peopleLine(agent, customer),
       url: "./index.html#calendar",
       // A deleted activity can't be opened any more — the tap goes to the calendar.
       activity_id: op === "DELETE" ? null : record.id,
@@ -280,8 +323,8 @@ async function handleChange(
       continue;
     }
     const row = {
-      title: `✏️ ${type} updated${who}`,
-      body: `${lines.join("\n")}\nNow: ${whenWhereOf(record)}${by}`,
+      title: `✏️ ${headlineOf(record)}`,
+      body: peopleLine(agent, customer, wasPart(from, to)),
       priority: urgent ? "urgent" : "normal",
       due_at: dueIso,
       meta: { subject, from },
@@ -519,26 +562,8 @@ Deno.serve(async (req: Request) => {
       ? (leadUser.full_name || leadUser.name || leadUser.email || "Someone")
       : "Someone";
 
-    const type = typeLabel(record.activity_type);
-    // Prospect / customer name for the second line (best-effort).
-    let contact = "";
-    try {
-      if (record.prospect_id != null) {
-        const r = await pgSelect("prospects", { select: "full_name", id: `eq.${record.prospect_id}` });
-        contact = r?.[0]?.full_name || "";
-      } else if (record.customer_id != null) {
-        const r = await pgSelect("customers", { select: "full_name", id: `eq.${record.customer_id}` });
-        contact = r?.[0]?.full_name || "";
-      }
-    } catch (_) { /* name is optional */ }
-    const titleText = String(record.activity_title || record.title || "").trim();
-    const venue = String(record.venue || record.location_address || "").trim().slice(0, 80);
-    const whenWhere = [
-      `${dayLabel(String(record.activity_date || ""), Date.now())} ${fmtTime12(record.start_time)}`.trim(),
-      type,
-      venue,
-    ].filter(Boolean).join(" · ");
-    const who = contact || (titleText && titleText !== record.activity_type ? titleText : "");
+    // Prospect / customer name for line 2 (best-effort).
+    const contact = await contactNameOf(record);
 
     // Delegate push delivery to the existing send-activity-push function.
     const pushRes = await fetch(`${SUPABASE_URL}/functions/v1/send-activity-push`, {
@@ -550,8 +575,8 @@ Deno.serve(async (req: Request) => {
       body: JSON.stringify({
         activity: record,
         targetUserIds: targetList,
-        title: `New ${type} — ${agentName}`,
-        body: who ? `${whenWhere}\n${who}` : whenWhere,
+        title: headlineOf(record),
+        body: peopleLine(leadUser ? agentName : "", customerOf(record, contact)),
         url: "./index.html#calendar",
         // Outbox metadata: member-created activity → leader alert is High
         // priority; the dedupe key makes a re-fired trigger a no-op.

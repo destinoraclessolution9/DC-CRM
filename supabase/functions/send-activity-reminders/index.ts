@@ -184,6 +184,30 @@ function contactOf(a: any, names: Map<string, string>): string {
          (a.customer_id != null && names.get(`c:${a.customer_id}`)) || "";
 }
 
+// ---------- Notification templates (owner-approved 2026-10-15) ----------
+//   line 1: "Today 3pm CPS"  /  events: "Today 10pm 特训班"
+//   line 2: "Agent | Customer"  (events: agent only). No venue.
+// Keep identical to notify-on-activity + the client co-agent pushes.
+function fmtShortTime(t: unknown): string {
+  if (!t) return "";
+  const [h, m] = String(t).split(":").map(Number);
+  if (!Number.isFinite(h)) return "";
+  const mm = Number.isFinite(m) && m > 0 ? `:${String(m).padStart(2, "0")}` : "";
+  return `${h % 12 || 12}${mm}${h >= 12 ? "pm" : "am"}`;
+}
+const isEventType = (r: any) => EVENT_TYPES.has(String(r?.activity_type ?? "").toUpperCase());
+const whatOf = (r: any, eventTitle?: string) => {
+  const title = String(eventTitle || r?.activity_title || "").trim();
+  return isEventType(r) && title ? title : typeLabel(r?.activity_type);
+};
+function customerOf(r: any, contact: string): string {
+  if (isEventType(r)) return "";
+  if (contact) return contact;
+  const title = String(r?.activity_title || "").trim();
+  return title && title.toUpperCase() !== String(r?.activity_type || "").toUpperCase() ? title : "";
+}
+const peopleLine = (...parts: (string | null | undefined)[]) => parts.filter(Boolean).join(" | ").slice(0, 200);
+
 // ---------- Main handler ----------
 // @ts-ignore
 Deno.serve(async (req: Request) => {
@@ -340,23 +364,17 @@ Deno.serve(async (req: Request) => {
         const names = await contactNames([...due.values()].map((d) => d.act));
         for (const { act, subject, userId, windows, minutesUntil } of due.values()) {
           const windowMin = Math.min(...windows);
-          let label = `${Math.max(1, Math.round(minutesUntil))} min`;
-          if (windowMin === 60) label = "1 hour";
-          if (windowMin === 1440) label = "1 day";
-          const type = typeLabel(act.activity_type);
           // Event rows are per guest — name the event, not one agent's guest.
-          const who = subject.startsWith("ev:") ? "" : contactOf(act, names);
-          const whenWhere = [`${dayLabel(act.activity_date, nowMs)} ${fmtTime12(act.start_time)}`.trim(), type, venueOf(act)]
-            .filter(Boolean).join(" · ");
-          const title = String(act.activity_title || "").trim();
-          const extra = !who && title && title !== act.activity_type ? title : "";
+          const customer = subject.startsWith("ev:") ? "" : customerOf(act, contactOf(act, names));
+          const lead = userMap.get(Number(act.lead_agent_id));
+          const headline = [dayLabel(act.activity_date, nowMs), fmtShortTime(act.start_time), whatOf(act)].filter(Boolean).join(" ");
           // Start date+time in the key: a rescheduled activity gets fresh
           // reminders instead of being blocked by the old time's key.
           const keyOf = (w: number) => `reminder:${subject}:${act.activity_date}T${String(act.start_time).slice(0, 5)}:${w}`;
           const row = {
             user_id: userId, kind: "activity_reminder", priority: "normal",
-            title: `⏰ ${type} in ${label}${who ? ` — ${who}` : ""}`,
-            body: extra ? `${whenWhere}\n${extra}` : whenWhere,
+            title: `⏰ ${headline}`,
+            body: peopleLine(lead?.full_name, customer),
             url: "./index.html#calendar", activity_id: act.id,
             dedupe_key: keyOf(windowMin), status: "pending",
             // Start time lets the sender skip a reminder that quiet hours would
@@ -478,29 +496,24 @@ Deno.serve(async (req: Request) => {
         const bodyLines: string[] = [];
         if (myActs.length > 0) {
           const sortedActs = myActs.sort((a: any, b: any) => (a.start_time || "").localeCompare(b.start_time || ""));
-          bodyLines.push("📋 Your activities:");
           for (const a of sortedActs.slice(0, 4)) {
-            const line = [fmtTime12(a.start_time) || "Anytime", typeLabel(a.activity_type), venueOf(a), contactOf(a, names)]
-              .filter(Boolean).join(" · ");
-            bodyLines.push(`  ${line}`);
+            const head = [fmtShortTime(a.start_time) || "Anytime", whatOf(a)].join(" ");
+            bodyLines.push(peopleLine(head, customerOf(a, contactOf(a, names))));
           }
-          if (myActs.length > 4) bodyLines.push(`  …+${myActs.length - 4} more`);
+          if (myActs.length > 4) bodyLines.push(`+${myActs.length - 4} more`);
         }
         if (dedupedEvents.length > 0) {
-          bodyLines.push("📅 Events today:");
           for (const e of dedupedEvents.slice(0, 3)) {
             const title = eventTitles.get(Number(e.event_id)) || e.activity_title || "Event";
-            bodyLines.push(`  ${[fmtTime12(e.start_time), title, venueOf(e)].filter(Boolean).join(" · ")}`);
+            bodyLines.push([fmtShortTime(e.start_time), title].filter(Boolean).join(" "));
           }
-          if (dedupedEvents.length > 3) bodyLines.push(`  …+${dedupedEvents.length - 3} more`);
+          if (dedupedEvents.length > 3) bodyLines.push(`+${dedupedEvents.length - 3} more events`);
         }
         if (myAdminLine) {
-          bodyLines.push("📊 Yesterday (company):");
-          bodyLines.push(myAdminLine);
+          bodyLines.push(`📊 Yesterday: ${myAdminLine.trim()}`);
         }
         if (myBirthdays.length > 0) {
-          bodyLines.push("🎂 Birthdays today:");
-          bodyLines.push(`  ${myBirthdays.slice(0, 4).join(", ")}${myBirthdays.length > 4 ? ` +${myBirthdays.length - 4} more` : ""}`);
+          bodyLines.push(`🎂 ${myBirthdays.slice(0, 4).join(", ")}${myBirthdays.length > 4 ? ` +${myBirthdays.length - 4} more` : ""}`);
         }
 
         const titleParts: string[] = [];
@@ -510,7 +523,7 @@ Deno.serve(async (req: Request) => {
 
         const row = {
           user_id: userId, kind: "daily_summary", priority: "normal",
-          title: titleParts.length ? `Good morning! Today: ${titleParts.join(", ")} 🌅` : "Good morning! Yesterday's numbers 📊",
+          title: titleParts.length ? `Today: ${titleParts.join(", ")}` : "Yesterday's numbers",
           body: bodyLines.join("\n").slice(0, 1000),
           url: "./index.html#calendar",
           activity_id: null, meta: null,

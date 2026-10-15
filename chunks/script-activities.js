@@ -6687,6 +6687,35 @@ My raw notes:
     // cover UPDATE flows the insert trigger can't see (co-agent invite on
     // edit, invite responses) plus 福运相随 highlights.
 
+    // Push templates (owner-approved 2026-10-15; same as the server alerts):
+    //   line 1 "Tomorrow 2pm CPS" (events: the event name), line 2 "Who | Customer".
+    const _PUSH_EVENT_TYPES = ['EVENT', 'AGENT_MEETING', 'AGENT_TRAINING'];
+    const _pushHeadline = (a) => {
+        const d = String(a?.activity_date || '').slice(0, 10);
+        const ymd = (x) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+        const now = new Date(); const tom = new Date(now); tom.setDate(now.getDate() + 1);
+        let day = '';
+        if (d === ymd(now)) day = 'Today';
+        else if (d === ymd(tom)) day = 'Tomorrow';
+        else if (d) { const x = new Date(d + 'T00:00:00'); day = isNaN(x) ? d : x.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }); }
+        let time = '';
+        const [h, m] = String(a?.start_time || '').split(':').map(Number);
+        if (Number.isFinite(h)) time = `${h % 12 || 12}${m > 0 ? ':' + String(m).padStart(2, '0') : ''}${h >= 12 ? 'pm' : 'am'}`;
+        const type = String(a?.activity_type || 'Activity');
+        const typeLbl = /^[A-Z]{2,4}$/.test(type) ? type : type.toLowerCase().split(/[_\s]+/).filter(Boolean).map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
+        const title = String(a?.activity_title || '').trim();
+        const what = _PUSH_EVENT_TYPES.includes(type.toUpperCase()) && title ? title : typeLbl;
+        return [day, time, what].filter(Boolean).join(' ');
+    };
+    const _pushCustomer = async (a) => {
+        if (!a || _PUSH_EVENT_TYPES.includes(String(a.activity_type || '').toUpperCase())) return '';
+        try {
+            if (a.prospect_id) return (await AppDataStore.getById('prospects', a.prospect_id))?.full_name || '';
+            if (a.customer_id) return (await AppDataStore.getById('customers', a.customer_id))?.full_name || '';
+        } catch (_) { /* name is optional */ }
+        return '';
+    };
+
     // Notify only specific co-agents (delta case: someone was added to an existing activity).
     // Uses the same send-activity-push Edge Function as the server-side fan-out so push infra is shared.
     const _notifyCoAgentAdded = async (savedActivity, newCoAgentIds) => {
@@ -6702,16 +6731,14 @@ My raw notes:
             const whoLabel = _state.cu
                 ? (_state.cu.full_name || _state.cu.name || _state.cu.email || 'Someone')
                 : 'Someone';
-            const typeLabel = savedActivity.activity_type || 'Activity';
-            const dateLabel = savedActivity.activity_date || '';
-            const timeLabel = savedActivity.start_time || '';
+            const customer = await _pushCustomer(savedActivity);
 
             await window.PushNotif.sendActivityPush(
                 savedActivity,
                 targets,
                 {
-                    title: `You've been invited to a ${typeLabel}`,
-                    body: `${whoLabel} added you as co-agent${dateLabel ? ` on ${dateLabel}${timeLabel ? ` at ${timeLabel}` : ''}` : ''}. Tap to accept or reject.`,
+                    title: `🤝 ${_pushHeadline(savedActivity)}`,
+                    body: [`${whoLabel} invited you`, customer].filter(Boolean).join(' | '),
                     url: `./index.html#calendar`,
                     kind: 'coagent_invite',
                     priority: 'high',
@@ -6731,17 +6758,15 @@ My raw notes:
             // Don't self-notify — e.g. lead agent responding to an invite on their own activity.
             if (_state.cu && String(_state.cu.id) === String(leadId)) return;
 
-            const typeLabel = savedActivity.activity_type || 'Activity';
-            const dateLabel = savedActivity.activity_date || '';
-            const timeLabel = savedActivity.start_time || '';
             const verb = response === 'accepted' ? 'accepted' : 'rejected';
+            const customer = await _pushCustomer(savedActivity);
 
             await window.PushNotif.sendActivityPush(
                 savedActivity,
                 [String(leadId)],
                 {
-                    title: `Co-agent ${verb} your ${typeLabel}`,
-                    body: `${coAgent.name || 'Co-agent'} ${verb} the invitation${dateLabel ? ` on ${dateLabel}${timeLabel ? ` at ${timeLabel}` : ''}` : ''}.`,
+                    title: `${verb === 'accepted' ? '✅' : '❌'} ${_pushHeadline(savedActivity)}`,
+                    body: [`${coAgent.name || 'Co-agent'} ${verb}`, customer].filter(Boolean).join(' | '),
                     url: `./index.html#calendar`,
                     kind: 'coagent_response',
                     priority: 'low',
