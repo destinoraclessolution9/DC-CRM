@@ -759,6 +759,12 @@
         // cell then falls back to PO-only (POR/PORT(TOTAL)) / MANUAL (PORT(DP)), so a
         // missing table never writes a wrong/zero NPO number to a boss-facing field.
         // Owner: NPO counts under PORT (the PO bucket), NEVER under RMT.
+        // Boss-facing figures: force ONE fresh purchases read first. getAll() serves the
+        // local snapshot and revalidates in the background — a revalidation cut short
+        // by navigating away left the report on a stale snapshot (audit 2026-10-15:
+        // 7 new sales missing until a fresh read). Every purchase getter below then
+        // reuses this fresh in-memory copy.
+        await withTimeout(() => AppDataStore.getAll('purchases', { fresh: true }).catch(() => null));
         const _npo = await withTimeout(() => _getNPOWeekAgg(from, to)); // null/undefined = no NPO add
         const npo = _npo || null;
         const pdsr = withTimeout(() => getPDSRBreakdown(from, to)).catch((e) => {
