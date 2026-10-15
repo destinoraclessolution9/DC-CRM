@@ -300,6 +300,55 @@
         return `W${wk} ${month} ${m.getFullYear()}`;
     };
 
+    // ── Report date range (owner 2026-10-15) ──────────────────────────────────
+    // The report used to be locked to last week. It now covers any From → To range;
+    // on open it defaults to the last full week (Mon–Sun). Every getter already takes
+    // (from, to), so only the window source changed. _wrGen bumps on each range
+    // change so a slow getter from the PREVIOUS range can never write into the new one.
+    const _wrDefaultRange = () => {
+        const { monday, sunday } = _wrReportWeekRange();
+        return { from: toLocalDateStr(monday), to: toLocalDateStr(sunday) };
+    };
+    let _wrRange = null; // { from, to } YYYY-MM-DD — set on first render
+    let _wrGen = 0;
+    const _wrCurRange = () => _wrRange || _wrDefaultRange();
+    const _wrParseDate = (s) => { const [y, m, d] = String(s).split('-').map(Number); return new Date(y, m - 1, d); };
+    // Label follows the dates: an exact Mon–Sun week keeps "W1 October 2026", a whole
+    // calendar month reads "October 2026", anything else "5 Oct – 18 Oct 2026".
+    const _wrLabelFor = (from, to) => {
+        const a = _wrParseDate(from), b = _wrParseDate(to);
+        const longMon = (d) => d.toLocaleString('en-US', { month: 'long' });
+        const short = (d) => `${d.getDate()} ${d.toLocaleString('en-US', { month: 'short' })}`;
+        const days = Math.round((b - a) / 86400000);
+        if (a.getDay() === 1 && days === 6) return `W${Math.ceil(a.getDate() / 7)} ${longMon(a)} ${a.getFullYear()}`;
+        const lastDay = new Date(a.getFullYear(), a.getMonth() + 1, 0).getDate();
+        if (a.getDate() === 1 && b.getFullYear() === a.getFullYear() && b.getMonth() === a.getMonth() && b.getDate() === lastDay) {
+            return `${longMon(a)} ${a.getFullYear()}`;
+        }
+        if (from === to) return `${short(a)} ${a.getFullYear()}`;
+        return a.getFullYear() === b.getFullYear()
+            ? `${short(a)} – ${short(b)} ${b.getFullYear()}`
+            : `${short(a)} ${a.getFullYear()} – ${short(b)} ${b.getFullYear()}`;
+    };
+    const _WR_PRESETS = [
+        ['last_week', 'Last week (Mon–Sun)'], ['this_week', 'This week'], ['last_7', 'Last 7 days'],
+        ['this_month', 'This month'], ['last_month', 'Last month'], ['dashboard', 'Same as dashboard filter'],
+    ];
+    const _wrPresetRange = (key) => {
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        const add = (x, n) => { const y = new Date(x); y.setDate(y.getDate() + n); return y; };
+        const thisMon = add(today, -((today.getDay() + 6) % 7));
+        switch (key) {
+            case 'last_week':  return _wrDefaultRange();
+            case 'this_week':  return { from: toLocalDateStr(thisMon), to: toLocalDateStr(add(thisMon, 6)) };
+            case 'last_7':     return { from: toLocalDateStr(add(today, -6)), to: toLocalDateStr(today) };
+            case 'this_month': return { from: toLocalDateStr(new Date(today.getFullYear(), today.getMonth(), 1)), to: toLocalDateStr(new Date(today.getFullYear(), today.getMonth() + 1, 0)) };
+            case 'last_month': return { from: toLocalDateStr(new Date(today.getFullYear(), today.getMonth() - 1, 1)), to: toLocalDateStr(new Date(today.getFullYear(), today.getMonth(), 0)) };
+            case 'dashboard':  return getDateRanges(_currentTimeFilter, _customDateFrom, _customDateTo).current;
+            default: return null;
+        }
+    };
+
     // Field spec — single source of truth for the form, totals and copy-text so
     // they never drift. type: 'in' editable figure, 'sub' indented sub-figure,
     // 'gap' blank spacer. Section 1 & 2 carry a computed `total`; section 3 a
@@ -365,7 +414,8 @@
         const div = '—'.repeat(12);
         const g = _wrGet;
         const out = [];
-        const week = (document.getElementById('wr-week-label') || {}).value || _weeklyReportLabel();
+        const _r = _wrCurRange();
+        const week = (document.getElementById('wr-week-label') || {}).value || _wrLabelFor(_r.from, _r.to);
         out.push(week, '');
         _WR_SECTIONS.forEach((sec) => {
             sec.rows.forEach((r) => {
@@ -391,7 +441,9 @@
         return out.join('\n');
     };
 
-    const _wrDraftKey = () => `weekly-rpt-draft-${(_state.cu && _state.cu.id) || 'anon'}`;
+    // One draft per date range, so going back to a range brings back what was typed.
+    const _wrUserKey = () => `weekly-rpt-draft-${(_state.cu && _state.cu.id) || 'anon'}`;
+    const _wrDraftKey = (r = _wrCurRange()) => `${_wrUserKey()}-${r.from}_${r.to}`;
     const _saveWeeklyReportDraft = () => {
         try {
             const vals = {};
@@ -401,16 +453,32 @@
                 if (i.dataset.wrManual === '1') manual.push(i.id);
             });
             const labelEl = document.getElementById('wr-week-label');
-            localStorage.setItem(_wrDraftKey(), JSON.stringify({ label: labelEl ? labelEl.value : '', vals, manual }));
+            localStorage.setItem(_wrDraftKey(), JSON.stringify({
+                label: labelEl ? labelEl.value : '',
+                labelManual: !!(labelEl && labelEl.dataset.wrLabelManual === '1'),
+                vals, manual,
+            }));
         } catch (_) { /* localStorage may be unavailable */ }
     };
     const _restoreWeeklyReportDraft = () => {
         try {
-            const raw = localStorage.getItem(_wrDraftKey());
-            if (!raw) return;
+            let raw = localStorage.getItem(_wrDraftKey());
+            if (!raw) {
+                // Pre-date-range drafts were one per user, keyed by week label — reuse
+                // it only for the default week it was written for.
+                const r = _wrCurRange(), d = _wrDefaultRange();
+                const legacy = (r.from === d.from && r.to === d.to) ? localStorage.getItem(_wrUserKey()) : null;
+                if (!legacy) return;
+                const old = JSON.parse(legacy);
+                if (!old || old.label !== _wrLabelFor(d.from, d.to)) return;
+                raw = legacy;
+            }
             const saved = JSON.parse(raw);
-            // A new week → start with a blank report (don't carry last week's figures).
-            if (saved.label && saved.label !== _weeklyReportLabel()) return;
+            const labelEl = document.getElementById('wr-week-label');
+            if (labelEl && saved.labelManual && saved.label) {
+                labelEl.value = saved.label;
+                labelEl.dataset.wrLabelManual = '1';
+            }
             const manualSet = new Set(Array.isArray(saved.manual) ? saved.manual : []);
             if (saved.vals) Object.keys(saved.vals).forEach((id) => {
                 const e = document.getElementById(id);
@@ -477,8 +545,83 @@
             delete i.dataset.wrManual; // wipe BOTH tags so every cell re-auto-fills cleanly
             delete i.dataset.wrAuto;
         });
+        const labelEl = document.getElementById('wr-week-label');
+        if (labelEl) { const r = _wrCurRange(); labelEl.value = _wrLabelFor(r.from, r.to); delete labelEl.dataset.wrLabelManual; }
         recalcWeeklyReport();
         _wrAutoFill(); // immediately repopulate from the live getters
+    };
+
+    // Switch the report to a new range. Saves the old range's draft, clears the
+    // cells, restores the NEW range's own draft (if any), then re-fills.
+    // `carry` = { id: value } of hand-typed cells to keep on the new range.
+    const _wrSwitchRange = (range, carry) => {
+        _saveWeeklyReportDraft();
+        _wrRange = { from: range.from, to: range.to };
+        _wrGen++;
+        const f = document.getElementById('wr-from'), t = document.getElementById('wr-to');
+        if (f) f.value = range.from;
+        if (t) t.value = range.to;
+        document.querySelectorAll('#weekly-monday-report input.wr-input').forEach((i) => {
+            i.value = '';
+            delete i.dataset.wrManual;
+            delete i.dataset.wrAuto;
+        });
+        const labelEl = document.getElementById('wr-week-label');
+        if (labelEl) { labelEl.value = _wrLabelFor(range.from, range.to); delete labelEl.dataset.wrLabelManual; }
+        _restoreWeeklyReportDraft();
+        if (carry) Object.keys(carry).forEach((id) => {
+            const e = document.getElementById(id);
+            if (!e) return;
+            e.value = carry[id];
+            e.dataset.wrManual = '1';
+            delete e.dataset.wrAuto;
+        });
+        recalcWeeklyReport();
+        _wrAutoFill();
+    };
+    let _wrPendingRange = null;
+    // From/To changed. If figures were typed by hand, ask before clearing them
+    // (owner 2026-10-15); otherwise switch straight away.
+    const wrSetRange = (from, to) => {
+        if (!from || !to) return;
+        if (from > to) [from, to] = [to, from];
+        const cur = _wrCurRange();
+        if (from === cur.from && to === cur.to) {
+            const f = document.getElementById('wr-from'), t = document.getElementById('wr-to');
+            if (f) f.value = from;
+            if (t) t.value = to;
+            return;
+        }
+        const typed = {};
+        document.querySelectorAll('#weekly-monday-report input.wr-input').forEach((i) => {
+            if (i.dataset.wrManual === '1' && i.value !== '') typed[i.id] = i.value;
+        });
+        if (!Object.keys(typed).length) { _wrSwitchRange({ from, to }, null); return; }
+        // Hold the inputs on the current range until the owner decides.
+        const f = document.getElementById('wr-from'), t = document.getElementById('wr-to');
+        if (f) f.value = cur.from;
+        if (t) t.value = cur.to;
+        _wrPendingRange = { from, to, typed };
+        UI.showModal('Change report dates?',
+            `<p style="margin:0 0 8px;line-height:1.6;">You typed ${Object.keys(typed).length} figure(s) by hand for <strong>${escapeHtml(_wrLabelFor(cur.from, cur.to))}</strong>.</p>
+             <p style="margin:0;line-height:1.6;">Clear them for <strong>${escapeHtml(_wrLabelFor(from, to))}</strong>? (They stay saved under the old dates.)</p>`,
+            [
+                { label: 'Clear typed figures', type: 'primary', action: 'UI.hideModal();app.wrConfirmRange(true)' },
+                { label: 'Keep them', type: 'secondary', action: 'UI.hideModal();app.wrConfirmRange(false)' },
+                { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            ]);
+    };
+    const wrConfirmRange = (clearTyped) => {
+        const p = _wrPendingRange;
+        _wrPendingRange = null;
+        if (!p) return;
+        _wrSwitchRange({ from: p.from, to: p.to }, clearTyped ? null : p.typed);
+    };
+    const wrApplyPreset = (key) => {
+        const r = _wrPresetRange(key);
+        const sel = document.getElementById('wr-preset');
+        if (sel) sel.value = '';
+        if (r) wrSetRange(r.from, r.to);
     };
 
     // Builds one figure row (editable). Sub rows are indented + dimmed.
@@ -499,7 +642,8 @@
     };
 
     const _buildWeeklyReportSection = () => {
-        const week = escapeHtml(_weeklyReportLabel());
+        const _r = _wrCurRange();
+        const week = escapeHtml(_wrLabelFor(_r.from, _r.to));
         const sectionsHtml = _WR_SECTIONS.map((sec) => {
             const rows = sec.rows.map(_wrRow).join('');
             let footer = '';
@@ -531,6 +675,11 @@
         .weekly-report-card .wr-title{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:700;color:var(--gray-900,#111827);margin:0;}
         .weekly-report-card .wr-title i{color:var(--primary,#0D9488);}
         .weekly-report-card .wr-week{font:600 14px/1.2 inherit;border:1px solid var(--gray-300,#d1d5db);border-radius:8px;padding:7px 10px;color:var(--gray-900,#111827);background:var(--gray-50,#f9fafb);min-width:160px;}
+        .weekly-report-card .wr-range{display:flex;flex-wrap:wrap;align-items:center;gap:8px;}
+        .weekly-report-card .wr-range label{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;color:var(--gray-600,#4b5563);}
+        .weekly-report-card .wr-date{font:600 13px/1.2 inherit;border:1px solid var(--gray-300,#d1d5db);border-radius:8px;padding:6px 8px;color:var(--gray-900,#111827);background:var(--white,#fff);}
+        .weekly-report-card .wr-labelrow{display:flex;align-items:center;gap:8px;margin:2px 0 6px;font-size:12.5px;font-weight:600;color:var(--gray-600,#4b5563);}
+        @media (max-width:640px){.weekly-report-card .wr-range{width:100%;}.weekly-report-card .wr-range label{flex:1 1 45%;}.weekly-report-card .wr-range label .wr-date{flex:1;min-width:0;}.weekly-report-card #wr-preset{flex:1 1 100%;}.weekly-report-card .wr-labelrow .wr-week{flex:1;min-width:0;}}
         .weekly-report-card .wr-note{font-size:12.5px;color:var(--gray-500,#6b7280);margin:0 0 16px;}
         .weekly-report-card .wr-body{display:grid;grid-template-columns:minmax(280px,1fr) minmax(260px,0.9fr);gap:22px;align-items:start;}
         .weekly-report-card .wr-form{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;}
@@ -556,11 +705,22 @@
         </style>
         <div class="weekly-report-card kpi-card">
             <div class="wr-head">
-                <h3 class="wr-title"><i class="fas fa-calendar-day"></i> Weekly Report — Monday</h3>
-                <input type="text" id="wr-week-label" class="wr-week" value="${week}"
-                       aria-label="Report week" oninput="app.recalcWeeklyReport()">
+                <h3 class="wr-title"><i class="fas fa-calendar-day"></i> Weekly Report</h3>
+                <div class="wr-range">
+                    <label>From <input type="date" id="wr-from" class="wr-date" value="${_r.from}" onchange="app.wrSetRange(this.value, document.getElementById('wr-to').value)"></label>
+                    <label>To <input type="date" id="wr-to" class="wr-date" value="${_r.to}" onchange="app.wrSetRange(document.getElementById('wr-from').value, this.value)"></label>
+                    <select id="wr-preset" class="wr-date" aria-label="Quick date range" onchange="app.wrApplyPreset(this.value)">
+                        <option value="">Quick pick…</option>
+                        ${_WR_PRESETS.map(([k, l]) => `<option value="${k}">${escapeHtml(l)}</option>`).join('')}
+                    </select>
+                </div>
             </div>
-            <p class="wr-note">Auto-generated every Monday. Fill in the week's figures, then <strong>Copy report</strong> to send it out. The week label and the two section <em>Totals</em> update automatically; your draft is saved until the next Monday.</p>
+            <div class="wr-labelrow">
+                <label for="wr-week-label">Label</label>
+                <input type="text" id="wr-week-label" class="wr-week" value="${week}"
+                       aria-label="Report label" oninput="this.dataset.wrLabelManual='1';app.recalcWeeklyReport()">
+            </div>
+            <p class="wr-note">Pick the dates (opens on last week, Mon–Sun). Every figure fills in automatically for that range — type over any cell, then <strong>Copy report</strong>. The label follows the dates unless you edit it, the two section <em>Totals</em> add up live, and each date range keeps its own draft.</p>
             <div class="wr-body">
                 <div class="wr-form">${sectionsHtml}</div>
                 <div class="wr-preview-wrap">
@@ -718,9 +878,8 @@
     // the auto label — NOT the dashboard's active time filter. Scope globals
     // (_visibleUserIds / _currentRoleFilter) are already set by refreshKPIDashboard.
     const _wrAutoFill = async () => {
-        const { monday, sunday } = _wrReportWeekRange();
-        const from = toLocalDateStr(monday);
-        const to = toLocalDateStr(sunday);
+        const { from, to } = _wrCurRange();
+        const gen = _wrGen; // a later range change makes every result below stale
         let _touched = false;
         // Race a getter against a timeout. A hung/never-resolving query (stalled fetch
         // or a missing RPC the client keeps retrying) would otherwise stall the whole
@@ -745,6 +904,7 @@
                 const val = await withTimeout(getter);
                 // Numbers must be finite; text cells (PD/SR item lists) take any string.
                 if (!Number.isFinite(val) && typeof val !== 'string') return; // getter errored/timed-out/non-finite → leave as-is
+                if (gen !== _wrGen) return; // the owner switched dates while this was loading
                 const live = document.getElementById(id);
                 if (!live || live.dataset.wrManual === '1') return; // typed-into mid-flight / torn-down
                 live.value = String(val);
@@ -815,7 +975,7 @@
             (async () => {
                 const r = await pdsr;
                 const note = document.getElementById('wr-pdsr-note');
-                if (!note || !r) return;
+                if (!note || !r || gen !== _wrGen) return;
                 note.hidden = !r.unplaced.length;
                 note.innerHTML = r.unplaced.length
                     ? `<i class="fas fa-circle-info"></i> Not in PD/SR (type by hand if needed): ${r.unplaced.map(escapeHtml).join(', ')}`
@@ -855,6 +1015,8 @@
     const renderWeeklyReport = () => {
         const el = document.getElementById('weekly-monday-report');
         if (!el || el.dataset.built === '1') return;
+        _wrRange = _wrDefaultRange(); // default on open: last full week (owner 2026-10-15)
+        _wrGen++;
         el.innerHTML = _buildWeeklyReportSection();
         el.dataset.built = '1';
         _restoreWeeklyReportDraft();
@@ -6543,6 +6705,9 @@ const exportKPIReport = async (format) => {
         recalcWeeklyReport,
         copyWeeklyReport,
         resetWeeklyReport,
+        wrSetRange,
+        wrConfirmRange,
+        wrApplyPreset,
         wrFigureInput,
         // Name List — Who to Focus
         nlToggle,
