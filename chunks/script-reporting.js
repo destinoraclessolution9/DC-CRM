@@ -698,7 +698,7 @@
     //
     // LEFT MANUAL (no definite, code-grounded source — auto-filling would risk a
     // wrong number to the boss):
-    //   TX  — books sold; the CRM has no book-sales source at all. MANUAL.
+    //   (TX is now AUTO-filled: books sold = products in a 书籍/Book category.)
     //   PORT(DP) — only auto-filled from NPO first_payment; the legacy PO down-payment
     //     (pop_down_payment) lives on the closing record, not the aggregable purchases
     //     row, so when npo_sales is absent PORT(DP) stays MANUAL.
@@ -802,7 +802,8 @@
             fill('wr-rmt', () => getDOSales(from, to)), // DO (full-payment) sales RM — NPO never lands here
             // PD / SR item lists — ONE purchases read shared by the four cells. Items the
             // classifier can't place are listed under the section, never dropped silently.
-            ...['pd_do', 'pd_po', 'sr_do', 'sr_po'].map(k => fill('wr-' + k, async () => {
+            // TX = number of books sold (same purchases read; books = 书籍/Book category).
+            ...['pd_do', 'pd_po', 'sr_do', 'sr_po', 'tx'].map(k => fill('wr-' + k, async () => {
                 const r = await pdsr;
                 return r ? r[k] : undefined;
             })),
@@ -832,7 +833,7 @@
                 return doSales + poSales;
             }),
         ]);
-        // Still MANUAL (no reliable source): TX (no book sales). Final re-sum in
+        // Final re-sum in
         // case the very last fill's recalc raced an earlier one.
         if (_touched) recalcWeeklyReport();
     };
@@ -1915,7 +1916,8 @@ const getDOSales = async (from, to) => {
 //   Rings are written as their short code: 六曜指环 → PR6 (number = the Chinese
 //   numeral the ring's name starts with; _PDSR_RING_CODE covers the rest).
 //   DO = full payment (Cash / Bank Transfer / Credit Card / Cheque / EPP);
-//   PO = installment (POP / NPO).
+//   PO = installment (POP / PCP / PON / NPO).
+//   TX = number of BOOKS sold — products whose category is 书籍 / Book.
 //   Each cell lists what was sold as "<name>x<qty>", e.g. a full-payment Power
 //   Ring 6 → PD (DO) "PR6x1"; a calligraphy → "圣智x1".
 // Group comes from the product catalog (`products.category`) — approved closings
@@ -1940,7 +1942,9 @@ const _PDSR_RECRUIT_RE = /\bD1\b|代理/i;
 const _PDSR_RING_RE = /power\s*ring|\bPR\s*\d|指环|指環|班指/i;
 const _PDSR_ART_RE = /calligraph|画作|畫作|书法|書法/i;
 const _PDSR_SR_RE = /feng\s*shui|fengshui|风水|風水|专案|灵活|简易|商业|project\s*plan|flexi|simplified|排屋|terrace|condo|semi-?d|bungalow|double\s*stor|xing\s*gua|星卦|alter\s*name|测名|測名|取名|生命蓝图|sheng\s*ming\s*lan\s*tu|命卦|ming\s*gua|consult|咨询|谘询|諮詢/i;
-const _isInstallmentMethod = (m) => /\b(POP|NPO)\b/i.test(String(m || ''));
+const _isInstallmentMethod = (m) => /\b(POP|PCP|PON|NPO)\b/i.test(String(m || ''));
+const _PDSR_BOOK_CAT_RE = /书|書|book/i;
+const _PDSR_BOOK_RE = /\bbooks?\b|书籍|書籍/i;
 // Older invoices mix traditional and simplified characters (謙卑而光 vs catalog
 // 谦卑而光), so both sides fold the common ones to simplified before comparing.
 const _PDSR_T2S = { '貞': '贞', '謙': '谦', '龍': '龙', '財': '财', '環': '环', '畫': '画', '風': '风',
@@ -1959,7 +1963,8 @@ const getPDSRBreakdown = async (from, to) => {
     // ("Sheng Zhi Wen Chang Tu 5"), longest first so the most specific one wins.
     const keys = [];
     for (const pr of products || []) {
-        const grp = _PDSR_CATEGORY[(pr.category || '').trim()];
+        const cat = (pr.category || '').trim();
+        const grp = _PDSR_CATEGORY[cat] || (_PDSR_BOOK_CAT_RE.test(cat) ? 'TX' : null);
         const name = String(pr.name || '').trim();
         if (!name) continue;
         const m = name.match(/^([^A-Za-z]+?)\s+([A-Za-z].*)$/);
@@ -1992,6 +1997,7 @@ const getPDSRBreakdown = async (from, to) => {
         const n = _pdsrNorm(part);
         const hit = n ? keys.find(k => n.includes(k.n)) : null;
         if (hit) return { grp: hit.grp, label: hit.label, qty };
+        if (_PDSR_BOOK_RE.test(part)) return { grp: 'TX', label: part, qty };
         const text = part
             .replace(/^(others|calligraphy(\s*series)?|feng\s*shui(\s*product)?)\s*[:：]\s*/i, '')
             .replace(/\s*[\/(（]?\s*(ring\s*)?size\b.*$/i, '') // drop "(size 23)" / "/ RINGSIZE 22"
@@ -2003,6 +2009,7 @@ const getPDSRBreakdown = async (from, to) => {
 
     const cells = { pd_do: new Map(), pd_po: new Map(), sr_do: new Map(), sr_po: new Map() };
     const unplaced = [];
+    let tx = 0;
     for (const p of purchases) {
         if (!p.date || p.date < from || p.date > to || p.is_agent_package) continue;
         if (!_passesPurchaseFilter(p, _getPurchaseAgentId(p, customerMap), userMap)) continue;
@@ -2015,6 +2022,7 @@ const getPDSRBreakdown = async (from, to) => {
             if (/^(ring\s*)?size\b|^order\s*ref/i.test(part)) continue; // "Size 16.5" is a note, not an item
             const c = classify(part);
             if (!c.grp || !c.label) { unplaced.push(part); continue; }
+            if (c.grp === 'TX') { tx += c.qty; continue; } // books: TX is a count, not a list
             const cell = cells[c.grp.toLowerCase() + '_' + bucket];
             cell.set(c.label, (cell.get(c.label) || 0) + c.qty);
         }
@@ -2023,6 +2031,7 @@ const getPDSRBreakdown = async (from, to) => {
     return {
         pd_do: fmt(cells.pd_do), pd_po: fmt(cells.pd_po),
         sr_do: fmt(cells.sr_do), sr_po: fmt(cells.sr_po),
+        tx,
         unplaced,
     };
 };
