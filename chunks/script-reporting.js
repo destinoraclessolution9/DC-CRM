@@ -1926,7 +1926,7 @@ const getDOSales = async (from, to) => {
 // returned in `unplaced` so the report can show it instead of silently dropping it.
 const _PDSR_CATEGORY = { 'Power Ring': 'PD', '画作': 'PD', '风水方案': 'SR', '咨询类型': 'SR' };
 // Rings whose name carries no numeral. Keyed by the Chinese name head.
-const _PDSR_RING_CODE = {};
+const _PDSR_RING_CODE = { '文昌指环': 'PR4', '健康指环': 'PRH', '掌权班指': 'PR2' };
 const _PDSR_CN_NUM = { '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 };
 const _PDSR_EN_NUM = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
 const _pdsrRingCode = (zh, en) => {
@@ -1988,6 +1988,7 @@ const getPDSRBreakdown = async (from, to) => {
         }
         const pr = part.match(/(?:power\s*ring|\bPR)\s*(\d+)/i);
         if (pr) return { grp: 'PD', label: 'PR' + pr[1], qty };
+        if (_PDSR_RING_RE.test(part) && /heal|健康/i.test(part)) return { grp: 'PD', label: 'PRH', qty };
         const n = _pdsrNorm(part);
         const hit = n ? keys.find(k => n.includes(k.n)) : null;
         if (hit) return { grp: hit.grp, label: hit.label, qty };
