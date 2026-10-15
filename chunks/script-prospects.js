@@ -3271,16 +3271,11 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                     <div class="form-group" style="flex:1;">
                         <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Payment Method</label>
                         <select id="cr-payment-method" class="form-control" onchange="app.crPaymentMethodChanged(this.value)">
-                            <option value="Cash" ${d.payment_method==='Cash'?'selected':''}>Cash</option>
-                            <option value="Bank Transfer" ${d.payment_method==='Bank Transfer'?'selected':''}>Bank Transfer</option>
-                            <option value="Credit Card" ${d.payment_method==='Credit Card'?'selected':''}>Credit Card</option>
-                            <option value="Cheque" ${d.payment_method==='Cheque'?'selected':''}>Cheque</option>
-                            <option value="EPP" ${d.payment_method==='EPP'?'selected':''}>EPP</option>
-                            <option value="POP" ${d.payment_method==='POP'?'selected':''}>POP</option>
-                            <option value="NPO" ${d.payment_method==='NPO'?'selected':''}>NPO</option>
+                            ${UI.paymentMethodOptionsHtml(d.payment_method || 'Cash')}
                         </select>
                     </div>
                 </div>
+                ${UI.eppFieldsHtml('cr', { bank: d.epp_bank, months: d.epp_months, show: d.payment_method === 'EPP' })}
                 <div id="cr-pop-fields" style="display:${isPOP?'block':'none'};background:var(--gray-50);padding:12px;border-radius:6px;margin-bottom:10px;">
                     <div class="form-row" style="display:flex;gap:8px;margin-bottom:8px;">
                         <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Monthly Amount (RM)</label><input id="cr-pop-monthly" type="number" class="form-control" value="${d.pop_monthly || ''}" placeholder="0.00"></div>
@@ -3353,7 +3348,8 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 <div class="pv-row"><span class="pv-lbl">Product/Service</span><span class="pv-val">${escapeHtml(d.product || '-')}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Order Date</span><span class="pv-val">${escapeHtml(d.order_date || '-')}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Amount Closed</span><span class="pv-val">${d.sale_amount ? UI.formatCurrency(parseFloat(d.sale_amount), { currency: window._crmUtils.recordCurrency(typeof customer !== 'undefined' ? customer : (typeof prospect !== 'undefined' ? prospect : null)) }) : '-'}</span></div>
-                <div class="pv-row"><span class="pv-lbl">Payment Method</span><span class="pv-val">${escapeHtml(d.payment_method || '-')}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Payment Method</span><span class="pv-val">${escapeHtml(UI.paymentMethodLabel(d.payment_method) || '-')}</span></div>
+                ${d.payment_method === 'EPP' && (d.epp_bank || d.epp_months) ? `<div class="pv-row"><span class="pv-lbl">EPP</span><span class="pv-val">${escapeHtml([d.epp_bank, d.epp_months ? d.epp_months + ' months' : ''].filter(Boolean).join(' · '))}</span></div>` : ''}
                 ${d.payment_method === 'POP' ? `
                 <div class="pv-row"><span class="pv-lbl">Monthly (RM)</span><span class="pv-val">${d.pop_monthly || '-'}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Tenure</span><span class="pv-val">${d.pop_tenure ? d.pop_tenure + ' months' : '-'}</span></div>
@@ -3386,7 +3382,8 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 <div class="pv-row"><span class="pv-lbl">Product/Service</span><span class="pv-val">${escapeHtml(d.product || '-')}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Order Date</span><span class="pv-val">${escapeHtml(d.order_date || '-')}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Amount Closed</span><span class="pv-val">${d.sale_amount ? UI.formatCurrency(parseFloat(d.sale_amount), { currency: window._crmUtils.recordCurrency(typeof customer !== 'undefined' ? customer : (typeof prospect !== 'undefined' ? prospect : null)) }) : '-'}</span></div>
-                <div class="pv-row"><span class="pv-lbl">Payment Method</span><span class="pv-val">${escapeHtml(d.payment_method || '-')}</span></div>
+                <div class="pv-row"><span class="pv-lbl">Payment Method</span><span class="pv-val">${escapeHtml(UI.paymentMethodLabel(d.payment_method) || '-')}</span></div>
+                ${d.payment_method === 'EPP' && (d.epp_bank || d.epp_months) ? `<div class="pv-row"><span class="pv-lbl">EPP</span><span class="pv-val">${escapeHtml([d.epp_bank, d.epp_months ? d.epp_months + ' months' : ''].filter(Boolean).join(' · '))}</span></div>` : ''}
                 ${d.payment_method === 'POP' ? `
                 <div class="pv-row"><span class="pv-lbl">Monthly (RM)</span><span class="pv-val">${d.pop_monthly || '-'}</span></div>
                 <div class="pv-row"><span class="pv-lbl">Tenure</span><span class="pv-val">${d.pop_tenure ? d.pop_tenure + ' months' : '-'}</span></div>
@@ -5339,6 +5336,8 @@ const gatherClosingFormData = async (existingCr = {}) => {
         pop_monthly: paymentMethod === 'POP' ? (document.getElementById('cr-pop-monthly')?.value || '') : '',
         pop_tenure: paymentMethod === 'POP' ? (document.getElementById('cr-pop-tenure')?.value || '') : '',
         pop_down_payment: paymentMethod === 'POP' ? (document.getElementById('cr-pop-down')?.value || '') : '',
+        epp_bank: paymentMethod === 'EPP' ? (document.getElementById('cr-epp-bank')?.value || '') : '',
+        epp_months: paymentMethod === 'EPP' ? (document.getElementById('cr-epp-months')?.value || '') : '',
         npo_plan_id: paymentMethod === 'NPO' ? (document.getElementById('cr-npo-plan')?.value || '') : '',
         npo_plan_name: paymentMethod === 'NPO' ? (() => { const s = document.getElementById('cr-npo-plan'); const o = s && s.options[s.selectedIndex]; return o && o.value ? (o.getAttribute('data-name') || (o.textContent || '').trim()) : ''; })() : '',
         // Credit-card installment (POP/NPO): flag + expiry (YYYY-MM). Expiry only — no PAN/CVV.
@@ -5361,6 +5360,7 @@ const gatherClosingFormData = async (existingCr = {}) => {
 // activities chunk) so the picker works even if that chunk isn't loaded. NPO
 // config stays L1-only; any closer can pick an active package here.
 const crPaymentMethodChanged = (val) => {
+    UI.toggleEppFields('cr', val);
     const pop = document.getElementById('cr-pop-fields');
     if (pop) pop.style.display = val === 'POP' ? 'block' : 'none';
     const npo = document.getElementById('cr-npo-fields');

@@ -2436,7 +2436,7 @@ const _INSTALLMENT_METHODS = new Set(['POP', 'PCP', 'PON', 'NPO']);
 const _isInstallmentMethod = (m) => _INSTALLMENT_METHODS.has(String(m || '').toUpperCase());
 // Inline-tenure plans (keyed on the purchase modal). NPO has its own order flow
 // with a real npo_installments schedule, so it's excluded here.
-const _TENURE_METHODS = ['POP', 'PCP', 'PON'];
+const _TENURE_METHODS = ['POP']; // PCP / PON retired 2026-10-15 (never used)
 // Power Ring detection: explicit "Power Ring" wording or the PR# SKU line.
 const _isPowerRingName = (name) => /power\s*ring/i.test(name || '') || /^\s*PR\d/i.test(name || '');
 // purchase date (YYYY-MM-DD) + N months → maturity date string. Parse and shift
@@ -2479,8 +2479,7 @@ const _onPurchaseProductChange = (sel) => {
 // Payment method change: toggle EPP fields, installment (tenure+advance) fields,
 // and launch the NPO order flow when NPO is picked.
 const _onPurchaseMethodChange = (val, customerId) => {
-    const epp = document.getElementById('epp-fields');
-    if (epp) epp.style.display = val === 'EPP' ? 'block' : 'none';
+    UI.toggleEppFields('pur', val);
     const inst = document.getElementById('installment-fields');
     if (inst) inst.style.display = _TENURE_METHODS.includes(val) ? 'block' : 'none';
     if (val === 'NPO') window.app.npoLaunchFromPurchase(customerId);
@@ -2521,26 +2520,17 @@ const openAddPurchaseModal = async (customerId) => {
                     <div class="form-group half">
                         <label>Payment Method</label>
                         <select id="pur-method" class="form-control" onchange="app._onPurchaseMethodChange(this.value, ${customerId})">
-                            <option value="Cash">Cash</option>
-                            <option value="Credit Card">Credit Card</option>
-                            <option value="Bank Transfer">Bank Transfer</option>
-                            <option value="EPP">EPP (Easy Payment Plan)</option>
-                            <option value="POP">POP (Installment)</option>
-                            <option value="PCP">PCP (Installment)</option>
-                            <option value="PON">PON (Installment)</option>
-                            <option value="NPO">NPO (Installment Package)</option>
+                            ${UI.paymentMethodOptionsHtml('Cash')}
                         </select>
                     </div>
                 </div>
-                <div id="epp-fields" style="display:none; margin-bottom:16px;">
-                    <div class="form-row">
-                        <div class="form-group half"><label>Months</label><select id="epp-months" class="form-control"><option>6</option><option>12</option><option>18</option><option>24</option><option>36</option></select></div>
-                        <div class="form-group half"><label>Bank</label><input type="text" id="epp-bank" class="form-control" placeholder="Bank name"></div>
-                    </div>
-                </div>
+                ${UI.eppFieldsHtml('pur', { show: false })}
                 <div id="installment-fields" style="display:none; margin-bottom:16px;">
                     <div class="form-row">
                         <div class="form-group half"><label>Tenure (months) <span class="required">*</span></label><input type="number" id="pur-tenure" class="form-control" min="1" placeholder="e.g. 12"></div>
+                        <div class="form-group half"><label>Down Payment (RM)</label><input type="number" id="pur-down" class="form-control" min="0" step="0.01" placeholder="0.00"></div>
+                    </div>
+                    <div class="form-row">
                         <div class="form-group half" style="display:flex; align-items:flex-end;">
                             <label class="checkbox-label" style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="pur-advance"> Deliver in advance (special package)</label>
                         </div>
@@ -2626,13 +2616,14 @@ const savePurchase = async (customerId) => {
         // the Supabase insert fails with "invalid input syntax for type integer" (22P02),
         // the purchase gets written to localStorage only, and subsequent query() calls
         // read from Supabase and show RM 0.
-        const eppMonthsRaw = purMethod === 'EPP' ? document.getElementById('epp-months')?.value : '';
+        const eppMonthsRaw = purMethod === 'EPP' ? document.getElementById('pur-epp-months')?.value : '';
         const eppMonthsInt = parseInt(eppMonthsRaw, 10);
-        const eppBankRaw = purMethod === 'EPP' ? document.getElementById('epp-bank')?.value?.trim() : '';
+        const eppBankRaw = purMethod === 'EPP' ? document.getElementById('pur-epp-bank')?.value?.trim() : '';
+        const popDownRaw = parseFloat(document.getElementById('pur-down')?.value);
         // Persist the explicit "Is Agent Package?" selection (is_agent_package is a real
         // boolean column on purchases — reporting RPCs exclude these from sales totals).
         const isAgentPkg = !!document.getElementById('is-agent-pkg')?.checked;
-        // ── Company-financed installment (POP/PCP/PON): tenure (months) drives the
+        // ── Company-financed installment (POP): tenure (months) drives the
         // maturity date the delivery board uses to gate production queueing. Required. ──
         const isInstMethod = _TENURE_METHODS.includes(purMethod);
         const tenureInt = parseInt(document.getElementById('pur-tenure')?.value, 10);
@@ -2685,8 +2676,10 @@ const savePurchase = async (customerId) => {
             payment_method: purMethod,
             epp_months: Number.isFinite(eppMonthsInt) ? eppMonthsInt : null,
             epp_bank: eppBankRaw || null,
+            // Down payment collected on a Normal Installment Plan (weekly PORT).
+            pop_down_payment: purMethod === 'POP' && Number.isFinite(popDownRaw) ? popDownRaw : null,
             is_agent_package: isAgentPkg,
-            // Installment tenure (months) for POP/PCP/PON — null for full-payment / NPO.
+            // Installment tenure (months) for POP — null for full-payment / NPO.
             installment_tenure: isInstMethod && tenureInt > 0 ? tenureInt : null,
             is_advance_package: isAdvancePkg,
             ring_size: ringSize || null,

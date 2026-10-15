@@ -794,13 +794,7 @@ const renderTransactionFilters = () => {
             <div class="filter-group">
                 <label>Payment Method</label>
                 <select id="filter-transaction-payment" class="form-control">
-                    <option value="">All</option>
-                    <option value="Cash">Cash</option>
-                    <option value="Credit Card">Credit Card</option>
-                    <option value="Bank Transfer">Bank Transfer</option>
-                    <option value="EPP">EPP</option>
-                    <option value="POP">POP</option>
-                    <option value="NPO">NPO</option>
+                    ${UI.paymentMethodOptionsHtml('', { placeholder: 'All' })}
                 </select>
             </div>
             <div class="filter-group">

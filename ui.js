@@ -668,6 +668,68 @@ window.UI = (() => {
             .join('') + orphan;
     };
 
+    // ── Payment method picker (2026-10-15) ──
+    // One list for every sales form, grouped the way the business talks about it:
+    //   Full Payment → Cash / Bank Transfer / Credit Card / Cheque / EPP
+    //   Installment  → Normal Installment Plan (stored 'POP') /
+    //                  Special Package Installment Plan (stored 'NPO')
+    // Only the LABELS changed — stored values stay POP / NPO / EPP …, so reports,
+    // KPI RPCs and old sales keep working unchanged.
+    const PAYMENT_FULL = ['Cash', 'Bank Transfer', 'Credit Card', 'Cheque', 'EPP'];
+    const PAYMENT_INSTALLMENT = ['POP', 'NPO'];
+    const PAYMENT_LABELS = {
+        EPP: 'EPP (Easy Payment Plan)',
+        POP: 'Normal Installment Plan',
+        NPO: 'Special Package Installment Plan',
+    };
+    const paymentMethodLabel = (v) => PAYMENT_LABELS[v] || v || '';
+    const isInstallmentMethod = (v) => PAYMENT_INSTALLMENT.includes(String(v || '').trim().toUpperCase());
+    const paymentMethodOptionsHtml = (selected, opts = {}) => {
+        const sel = selected == null ? '' : String(selected);
+        const opt = (v) => `<option value="${escapeHtml(v)}"${v === sel ? ' selected' : ''}>${escapeHtml(paymentMethodLabel(v))}</option>`;
+        const known = PAYMENT_FULL.includes(sel) || PAYMENT_INSTALLMENT.includes(sel);
+        // An old record's retired / free-text method (e.g. 'PCP', 'Visa (POP)') still shows.
+        const legacy = (sel && !known) ? `<option value="${escapeHtml(sel)}" selected>${escapeHtml(sel)}</option>` : '';
+        return (opts.placeholder ? `<option value="">${escapeHtml(opts.placeholder)}</option>` : '')
+            + `<optgroup label="Full Payment">${PAYMENT_FULL.map(opt).join('')}</optgroup>`
+            + `<optgroup label="Installment">${PAYMENT_INSTALLMENT.map(opt).join('')}</optgroup>`
+            + legacy;
+    };
+    const EPP_BANKS = ['Maybank', 'CIMB Bank', 'Public Bank', 'RHB Bank', 'Hong Leong Bank', 'AmBank',
+        'UOB', 'OCBC Bank', 'HSBC', 'Standard Chartered', 'Alliance Bank', 'Affin Bank', 'Bank Islam',
+        'Bank Rakyat', 'Citibank', 'Other'];
+    const EPP_MONTHS = [6, 12, 18, 24, 36, 48, 60];
+    // EPP sub-fields: `${prefix}-epp-fields` wrapper, `${prefix}-epp-bank`, `${prefix}-epp-months`.
+    const eppFieldsHtml = (prefix, o = {}) => {
+        const bank = o.bank == null ? '' : String(o.bank);
+        const months = o.months == null ? '' : String(o.months);
+        const dis = o.disabled ? ' disabled' : '';
+        const banks = EPP_BANKS.includes(bank) || !bank ? EPP_BANKS : [bank, ...EPP_BANKS];
+        const monthList = EPP_MONTHS.map(String).includes(months) || !months ? EPP_MONTHS.map(String) : [months, ...EPP_MONTHS.map(String)];
+        return `
+            <div id="${prefix}-epp-fields" class="epp-fields" style="display:${o.show ? 'flex' : 'none'};gap:10px;flex-wrap:wrap;background:#f5f3ff;border:1px solid #ddd6fe;padding:10px 12px;border-radius:6px;margin-bottom:12px;">
+                <div style="flex:1;min-width:150px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">EPP Bank Name</label>
+                    <select id="${prefix}-epp-bank" class="form-control"${dis}><option value="">— Select bank —</option>${banks.map(b => `<option value="${escapeHtml(b)}"${b === bank ? ' selected' : ''}>${escapeHtml(b)}</option>`).join('')}</select></div>
+                <div style="flex:1;min-width:120px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">EPP Months</label>
+                    <select id="${prefix}-epp-months" class="form-control"${dis}><option value="">— Months —</option>${monthList.map(m => `<option value="${m}"${m === months ? ' selected' : ''}>${m} months</option>`).join('')}</select></div>
+            </div>`;
+    };
+    // Payment terms a closing record carries onto its `purchases` row at approval:
+    // EPP bank/months (EPP Details KPI) and the POP down payment (weekly PORT).
+    // NPO terms live in npo_sales, so nothing extra is copied for NPO.
+    const purchasePaymentTerms = (cr) => {
+        const c = cr || {};
+        const int = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : null; };
+        const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
+        if (c.payment_method === 'EPP') return { epp_bank: c.epp_bank || null, epp_months: int(c.epp_months) };
+        if (c.payment_method === 'POP') return { pop_down_payment: num(c.pop_down_payment) };
+        return {};
+    };
+    const toggleEppFields = (prefix, method) => {
+        const el = document.getElementById(`${prefix}-epp-fields`);
+        if (el) el.style.display = method === 'EPP' ? 'flex' : 'none';
+    };
+
     return {
         toast,
         showModal,
@@ -684,6 +746,13 @@ window.UI = (() => {
         countryByCode,
         productOptionsHtml,
         groupProducts,
+        paymentMethodOptionsHtml,
+        paymentMethodLabel,
+        isInstallmentMethod,
+        eppFieldsHtml,
+        toggleEppFields,
+        purchasePaymentTerms,
+        EPP_BANKS,
         currencyForCountry,
         money,
         moneyCompact,

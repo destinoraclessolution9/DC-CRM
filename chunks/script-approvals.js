@@ -390,6 +390,8 @@ const approveQueueEntry = async (entryId) => {
                         currency: UI.currencyForCountry(prospect.country),
                         status: 'COMPLETED',
                         payment_method: cr.payment_method || 'Cash',
+                        // EPP bank/months + installment down payment/tenure.
+                        ...UI.purchasePaymentTerms(cr),
                         // Closing's invoice / order-form photo → the row's proof.
                         proof: cr.invoice_file || ''
                     }, { label: 'new_sale approval', supersedePipelineFor: entry.prospect_id });
@@ -587,6 +589,7 @@ const approveClosingRecord = async (prospectId) => {
                 currency: UI.currencyForCountry(prospect.country),
                 status: 'COMPLETED',
                 payment_method: cr.payment_method || 'Cash',
+                ...UI.purchasePaymentTerms(cr),
                 proof: cr.invoice_file || ''
             }, { label: 'additional sale approval', supersedePipelineFor: prospectId });
             if (_res && _res.booked === false) {
@@ -844,6 +847,7 @@ const approveProspectConversion = async (prospectId) => {
                 currency: UI.currencyForCountry(prospect.country),
                 status: 'COMPLETED',
                 payment_method: cr?.payment_method || 'Cash',
+                ...UI.purchasePaymentTerms(cr),
                 proof: cr?.invoice_file || ''
             }, { label: 'first-conversion sale', supersedePipelineFor: prospectId });
         } catch (saleErr) {

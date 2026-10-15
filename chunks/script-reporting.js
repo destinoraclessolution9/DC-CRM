@@ -80,8 +80,8 @@
         cfHeadcount: "CF Headcount - distinct NON-AGENT people (prospects/customers) who referred someone into a CPS this period. One referrer who brought 3 prospects counts once. Identical to the 'client referrers' figure on the CPS Consultations card - same computation, so they can never disagree.",
         meetUpExistingCount: "Meet-ups with existing customers - FTF/FSA activities plus any activity titled 'Golden Road'.",
         totalSales: "Revenue including EPP but excluding agent packages",
-        popCaseCount: "Pre-Owned Plan cases - Count of transactions with payment_method = POP",
-        popSales: "Revenue from POP cases - Sum of POP transaction amounts",
+        popCaseCount: "Installment cases - Normal Installment Plan (POP) sales + Special Package Installment Plan (NPO) orders",
+        popSales: "Installment value - POP sale amounts + NPO order totals",
         eppCaseCount: "Easy Payment Plan cases - Count of transactions with payment_method = EPP",
         eppSales: "Revenue from EPP cases - Sum of EPP transaction amounts",
         activeAgents: "Active agents (60-day window) - Agents with any activity log or event attendance in the past 60 days, grouped by team",
@@ -610,7 +610,7 @@
             toNext.setDate(toNext.getDate() + 1);
 
             let q = sb.from('npo_sales')
-                .select('first_payment, cart_total, responsible_agent_id')
+                .select('first_payment, cart_total, responsible_agent_id, status')
                 .gte('created_at', fromStart.toISOString())
                 .lt('created_at', toNext.toISOString());
 
@@ -632,6 +632,7 @@
 
             let count = 0, dp = 0, total = 0;
             for (const r of data) {
+                if (String(r.status || '').toLowerCase() === 'cancelled') continue;
                 count++;
                 const fp = parseFloat(r.first_payment);
                 const ct = parseFloat(r.cart_total);
@@ -699,9 +700,7 @@
     // LEFT MANUAL (no definite, code-grounded source — auto-filling would risk a
     // wrong number to the boss):
     //   (TX is now AUTO-filled: books sold = products in a 书籍/Book category.)
-    //   PORT(DP) — only auto-filled from NPO first_payment; the legacy PO down-payment
-    //     (pop_down_payment) lives on the closing record, not the aggregable purchases
-    //     row, so when npo_sales is absent PORT(DP) stays MANUAL.
+    //   (PORT(DP) is AUTO-filled: POP purchases.pop_down_payment + NPO first_payment.)
     //   (PD(DO/PO), SR(DO/PO) are now AUTO-filled as item lists — see getPDSRBreakdown.)
     //   NOTE: legacy PO is treated as POP only — the sole deposit/pre-order payment
     //     method in the purchases schema. NPO (a separate table) is now added on top;
@@ -825,12 +824,17 @@
             // PORT(DP) = down-payment collected this week. The purchases row has no
             // aggregable PO down-payment (it lives on the closing record), so the ONLY
             // confident source is NPO's first_payment — fill ONLY when NPO data exists.
-            ...(npo ? [fill('wr-port_dp', async () => npo.dp)] : []),
-            // TTO = PORT(TOTAL) + RMT (owner's formula) — sum the SAME two PURCHASE
-            // values. NPO is NOT folded into TTO here, by owner instruction.
+            // PORT(DP) = down payment collected: POP down payments + NPO first payments.
+            fill('wr-port_dp', async () => {
+                const dp = await getPOPDownPayment(from, to);
+                if (!Number.isFinite(dp)) return dp;
+                return dp + (npo ? npo.dp : 0);
+            }),
+            // TTO = RMT + PORT(TOTAL): full payments + both installment types (owner
+            // 2026-10-15: both Normal and Special Package count as installment).
             fill('wr-tto', async () => {
                 const [doSales, poSales] = await Promise.all([getDOSales(from, to), getPOPSales(from, to)]);
-                return doSales + poSales;
+                return doSales + poSales + (npo ? npo.total : 0);
             }),
         ]);
         // Final re-sum in
@@ -1498,9 +1502,16 @@
         // already computed above, so this costs nothing.
         const cfHeadcount = cpsRef.clients;
 
+        // Installment Cases card = Normal Installment Plan (POP purchases, from the
+        // RPC / client getters) + Special Package Installment Plan orders (npo_sales —
+        // the NPO order flow never writes a purchases row). Same sources as the
+        // weekly report's POR / PORT, so the two always agree.
+        const _npoAgg = await _getNPOWeekAgg(from, to).catch(() => null);
+        const _addNpo = (k) => _npoAgg ? { ...k, popCaseCount: (k.popCaseCount || 0) + _npoAgg.count, popSales: (k.popSales || 0) + _npoAgg.total } : k;
+
         // Fast path: try server-side aggregates first.
         const fast = await _tryKpiRPCs(from, to);
-        if (fast) return { ...fast, ...cpsSplit, activityHeadcount, conversionRate, meetUpExistingCount, cfHeadcount, activeAgents, neaPitching, fengshuiPitching, agentHours: agentHoursSummary.display, agentHoursPct: agentHoursSummary.pct };
+        if (fast) return { ..._addNpo(fast), ...cpsSplit, activityHeadcount, conversionRate, meetUpExistingCount, cfHeadcount, activeAgents, neaPitching, fengshuiPitching, agentHours: agentHoursSummary.display, agentHoursPct: agentHoursSummary.pct };
 
         // Fallback: original 11-call client-side path.
         const [
@@ -1521,7 +1532,7 @@
             getEPPDetails(from, to),
         ]);
         return {
-            cpsCount, totalSales, popCaseCount, popSales,
+            cpsCount, totalSales, ..._addNpo({ popCaseCount, popSales }),
             eppCaseCount, eppSales, newAgents, newCustomers,
             totalMeetings, clientMeetings, activityHeadcount, conversionRate, eppDetails,
             meetUpExistingCount, cfHeadcount, activeAgents, neaPitching, fengshuiPitching,
@@ -1867,6 +1878,19 @@ const getPOPSales = async (from, to) => {
     return total;
 };
 
+// Down payment collected on Normal Installment Plan (POP) sales — weekly PORT(DP).
+// purchases.pop_down_payment is carried over from the closing record at approval.
+const getPOPDownPayment = async (from, to) => {
+    const { purchases, customerMap, userMap } = await _getPurchaseBase();
+    let total = 0;
+    for (const p of purchases) {
+        if (p.payment_method !== 'POP' || !p.date || p.date < from || p.date > to) continue;
+        if (!_passesPurchaseFilter(p, _getPurchaseAgentId(p, customerMap), userMap)) continue;
+        total += parseFloat(p.pop_down_payment) || 0;
+    }
+    return total;
+};
+
 const getEPPCaseCount = async (from, to) => {
     const { purchases, customerMap, userMap } = await _getPurchaseBase();
     let count = 0;
@@ -1916,7 +1940,7 @@ const getDOSales = async (from, to) => {
 //   Rings are written as their short code: 六曜指环 → PR6 (number = the Chinese
 //   numeral the ring's name starts with; _PDSR_RING_CODE covers the rest).
 //   DO = full payment (Cash / Bank Transfer / Credit Card / Cheque / EPP);
-//   PO = installment (POP / PCP / PON / NPO).
+//   PO = installment: Normal Installment Plan (POP) / Special Package Installment Plan (NPO).
 //   TX = number of BOOKS sold — products whose category is 书籍 / Book.
 //   Each cell lists what was sold as "<name>x<qty>", e.g. a full-payment Power
 //   Ring 6 → PD (DO) "PR6x1"; a calligraphy → "圣智x1".
@@ -1942,7 +1966,7 @@ const _PDSR_RECRUIT_RE = /\bD1\b|代理/i;
 const _PDSR_RING_RE = /power\s*ring|\bPR\s*\d|指环|指環|班指/i;
 const _PDSR_ART_RE = /calligraph|画作|畫作|书法|書法/i;
 const _PDSR_SR_RE = /feng\s*shui|fengshui|风水|風水|专案|灵活|简易|商业|project\s*plan|flexi|simplified|排屋|terrace|condo|semi-?d|bungalow|double\s*stor|xing\s*gua|星卦|alter\s*name|测名|測名|取名|生命蓝图|sheng\s*ming\s*lan\s*tu|命卦|ming\s*gua|consult|咨询|谘询|諮詢/i;
-const _isInstallmentMethod = (m) => /\b(POP|PCP|PON|NPO)\b/i.test(String(m || ''));
+const _isInstallmentMethod = (m) => /^(POP|NPO)$/i.test(String(m || '').trim());
 const _PDSR_BOOK_CAT_RE = /书|書|book/i;
 const _PDSR_BOOK_RE = /\bbooks?\b|书籍|書籍/i;
 // Older invoices mix traditional and simplified characters (謙卑而光 vs catalog
@@ -4256,7 +4280,7 @@ const buildTotalSalesDetails = async (from, to) => {
     return summary + renderDetailTable(['Date', 'Agent', 'Customer', 'Amount', 'Method', 'Item'], rows);
 };
 
-const buildPOPDetails = async (from, to) => {
+const _buildPOPPurchaseDetails = async (from, to) => {
     const _det = await _tryPurchaseDetails(from, to);
     if (_det) {
         const rows = [];
@@ -4301,6 +4325,44 @@ const buildPOPDetails = async (from, to) => {
     }
     const summary = `<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px;">Total: <strong>RM ${total.toLocaleString()}</strong> across ${rows.length} POP case${rows.length===1?'':'s'}</div>`;
     return summary + renderDetailTable(['Date', 'Agent', 'Customer', 'Amount', 'Tenure', 'Item'], rows);
+};
+
+// Installment Cases drill-down = Normal Installment Plan (POP purchases) +
+// Special Package Installment Plan (npo_sales orders, which never write a
+// purchases row) — the same two sources the card counts.
+const _npoOrderRows = async (from, to) => {
+    const sb = window.supabase || window.supabaseClient || null;
+    if (!sb || typeof sb.from !== 'function') return [];
+    try {
+        const fromStart = new Date(from + 'T00:00:00');
+        const toNext = new Date(to + 'T00:00:00'); toNext.setDate(toNext.getDate() + 1);
+        let q = sb.from('npo_sales')
+            .select('created_at, customer_name, cart_total, first_payment, tenure_months, responsible_agent_id, status')
+            .gte('created_at', fromStart.toISOString()).lt('created_at', toNext.toISOString());
+        if (_visibleUserIds !== 'all' && Array.isArray(_visibleUserIds)) {
+            const ids = _visibleUserIds.map(Number).filter(Number.isFinite);
+            if (!ids.length) return [];
+            q = q.in('responsible_agent_id', ids);
+        }
+        const { data, error } = await q;
+        if (error || !Array.isArray(data)) return [];
+        return data.filter(r => String(r.status || '').toLowerCase() !== 'cancelled');
+    } catch (_) { return []; }
+};
+
+const buildPOPDetails = async (from, to) => {
+    const [popHtml, npo] = await Promise.all([_buildPOPPurchaseDetails(from, to), _npoOrderRows(from, to)]);
+    const users = npo.length ? await AppDataStore.getAll('users').catch(() => []) : [];
+    const uName = (id) => (users.find(u => String(u.id) === String(id)) || {}).full_name || '—';
+    const npoTotal = npo.reduce((a, r) => a + (parseFloat(r.cart_total) || 0), 0);
+    const npoRows = npo.map(r => [String(r.created_at || '').slice(0, 10), uName(r.responsible_agent_id), r.customer_name || '—',
+        `RM ${(parseFloat(r.cart_total) || 0).toLocaleString()}`, `RM ${(parseFloat(r.first_payment) || 0).toLocaleString()}`,
+        r.tenure_months ? `${r.tenure_months} mo` : '—']);
+    const h = (t) => `<div style="font-weight:700;margin:4px 0 8px;">${t}</div>`;
+    return h('Normal Installment Plan (POP)') + popHtml
+        + `<div style="height:14px;"></div>` + h('Special Package Installment Plan (NPO orders)')
+        + `<div style="background:#ecfeff;border:1px solid #a5f3fc;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px;">Total: <strong>RM ${npoTotal.toLocaleString()}</strong> · ${npo.length} order${npo.length === 1 ? '' : 's'}</div>`
+        + renderDetailTable(['Date', 'Agent', 'Customer', 'Package Total', 'First Payment', 'Tenure'], npoRows);
 };
 
 const buildEPPCasesDetails = async (from, to) => {
@@ -5122,7 +5184,7 @@ const showKPIDetails = async (key) => {
     const titles = {
         cpsCount: 'CPS Consultations',
         totalSales: 'Total Sales',
-        popCaseCount: 'POP Cases',
+        popCaseCount: 'Installment Cases',
         eppCaseCount: 'EPP Cases',
         activeAgents: 'Active Agents (60-day)',
         newAgents: 'New Agents',
@@ -5280,7 +5342,7 @@ const showKPIDetails = async (key) => {
               preHtml: _windowLineHtml(_cpsWindowParts(cpsA90, cpsA365, cpsC90, cpsC365)),
               subHtml: _cpsSplitHtml(_cpsSplitParts(cpsAgents, cpsClients, cpsUnattributed)) },
             { label: 'Total Sales', value: `RM ${kpis.totalSales.toLocaleString()} `, prev: prevKpis.totalSales, icon: '💰', color: 'green', key: 'totalSales' },
-            { label: 'POP Cases', value: kpis.popCaseCount, prev: prevKpis.popCaseCount, icon: '📦', color: 'orange', key: 'popCaseCount',
+            { label: 'Installment Cases', value: kpis.popCaseCount, prev: prevKpis.popCaseCount, icon: '📦', color: 'orange', key: 'popCaseCount',
               subType: 'pop', popTotal: (kpis.popSales || 0).toLocaleString(),
               subHtml: `<div style="font-size:12px;color:var(--gray-500);margin-top:2px;">RM ${(kpis.popSales || 0).toLocaleString()} total</div>` },
             { label: 'NEA Pitching', value: kpis.neaPitching || 0, prev: prevKpis.neaPitching || 0, icon: '🧧', color: 'orange', key: 'neaPitching' },

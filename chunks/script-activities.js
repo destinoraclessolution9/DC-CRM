@@ -320,11 +320,7 @@
                             <div class="form-group half">
                                 <label>Payment Method</label>
                                 <select id="payment-method" class="form-control" onchange="document.getElementById('pop-fields').style.display = this.value === 'POP' ? 'block' : 'none'">
-                                    <option value="Cash">Cash</option>
-                                    <option value="Bank Transfer">Bank Transfer</option>
-                                    <option value="Credit Card">Credit Card</option>
-                                    <option value="Cheque">Cheque</option>
-                                    <option value="POP">POP</option>
+                                    ${UI.paymentMethodOptionsHtml('Cash')}
                                 </select>
                             </div>
                         </div>
@@ -2153,6 +2149,8 @@ My raw notes:
             pop_monthly:     cr.pop_monthly     || a.pop_monthly_amount || '',
             pop_tenure:      cr.pop_tenure      || a.pop_tenure        || '',
             pop_down:        cr.pop_down_payment || a.pop_down_payment || '',
+            epp_bank:        cr.epp_bank   || '',
+            epp_months:      cr.epp_months || '',
             invoice_no:      cr.invoice_number  || a.invoice_number    || '',
             // Invoice file URL lives on the prospect's closing_record JSONB
             // (the activities schema has no invoice_file column). When the
@@ -2249,8 +2247,8 @@ My raw notes:
             </details>
         ` : '';
 
-        const paymentOptions = ['Cash','Bank Transfer','Credit Card','Cheque','EPP','POP','NPO']
-            .map(m => `<option value="${m}" ${paymentMethod === m ? 'selected' : ''}>${m}</option>`).join('');
+        // Grouped Full Payment / Installment picker (UI.paymentMethodOptionsHtml).
+        const paymentOptions = UI.paymentMethodOptionsHtml(paymentMethod);
 
         return `
             <div class="meeting-outcome-block form-compact" data-prefix="${prefix}">
@@ -2330,6 +2328,7 @@ My raw notes:
                             </select>
                         </div>
                     </div>
+                    ${UI.eppFieldsHtml(prefix, { bank: v.epp_bank, months: v.epp_months, show: paymentMethod === 'EPP', disabled: !!disabled })}
                     <div id="${prefix}-pop-fields" style="display:${isPOP ? 'block' : 'none'};background:var(--gray-50);padding:12px;border-radius:6px;margin-bottom:12px;">
                         <div class="form-row">
                             <div class="form-group half">
@@ -2468,6 +2467,8 @@ My raw notes:
             pop_monthly: read(`${prefix}-pop-monthly`),
             pop_tenure: read(`${prefix}-pop-tenure`),
             pop_down: read(`${prefix}-pop-down`),
+            epp_bank: read(`${prefix}-epp-bank`),
+            epp_months: read(`${prefix}-epp-months`),
             // Credit-card installment (POP/NPO): flag + expiry (YYYY-MM). Expiry only — no PAN/CVV.
             cc_installment: readBool(`${prefix}-cc-installment`),
             cc_expiry: read(`${prefix}-cc-expiry`),
@@ -2487,6 +2488,7 @@ My raw notes:
     // load needed — it's a plain table read). NPO config stays L1-only; any
     // closer can pick an already-configured active package here.
     const moPaymentMethodChanged = (prefix, val) => {
+        UI.toggleEppFields(prefix, val);
         const pop = document.getElementById(`${prefix}-pop-fields`);
         if (pop) pop.style.display = val === 'POP' ? 'block' : 'none';
         const npo = document.getElementById(`${prefix}-npo-fields`);
