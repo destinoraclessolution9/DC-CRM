@@ -182,13 +182,20 @@
                 const products = await window.AppDataStore.getAll('products').catch(() => []);
                 if (!products || !products.length) return;
 
+                // Compare without spaces/punctuation ("灵活风水 双层排屋" vs catalogue
+                // "灵活风水-双层排屋 …"), and prefer active products — an inactive one
+                // (e.g. a retired generic "… Audit") wins only on an exact name match.
+                const norm = (s) => String(s || '').toLowerCase().replace(/[\s\-—_/·.,，:：()（）]+/g, '');
+                const sn = norm(scanned);
                 let best = null;
                 let bestScore = 0;
                 for (const p of products) {
-                    const pn = (p.name || '').toLowerCase();
-                    if (pn === scanned) { best = p; break; }
-                    if (pn.includes(scanned) || scanned.includes(pn)) {
-                        const score = Math.min(pn.length, scanned.length) / Math.max(pn.length, scanned.length);
+                    const pn = norm(p.name);
+                    if (!pn) continue;
+                    if (pn === sn) { best = p; break; }
+                    if (p.is_active === false) continue;
+                    if (pn.includes(sn) || sn.includes(pn)) {
+                        const score = Math.min(pn.length, sn.length) / Math.max(pn.length, sn.length);
                         if (score > bestScore) { best = p; bestScore = score; }
                     }
                 }

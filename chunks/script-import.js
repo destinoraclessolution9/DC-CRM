@@ -440,6 +440,8 @@ const getCRMFieldsForType = (type) => {
     if (type === 'agents') return [...common, { value: 'agent_code', label: 'Agent Code', required: true }];
     if (type === 'products') return [
         { value: 'name', label: 'Name', required: true },
+        { value: 'category', label: 'Category', required: false },
+        { value: 'subcategory', label: 'Sub-group', required: false },
         { value: 'price', label: 'Price (RM)', required: false },
         { value: 'remarks', label: 'Remarks', required: false },
         { value: 'delivery_lead_time', label: 'Delivery Lead Time', required: false },
@@ -714,7 +716,7 @@ const mapRowToRecord = (row, reverseMap, agentId, importType = 'prospects') => {
 const mapRowToMarketingRecord = (row, reverseMap, type) => {
     const get = (field) => { const idx = reverseMap[field]; return idx !== undefined ? (row[idx] || '').toString().trim() : ''; };
     const parseActive = (val) => { if (!val) return true; return !['false','no','0','inactive','n'].includes(val.toLowerCase()); };
-    if (type === 'products') return { name: get('name'), price: _parseAmount(get('price')), remarks: get('remarks') || null, delivery_lead_time: get('delivery_lead_time') || null, is_active: parseActive(get('is_active')) };
+    if (type === 'products') return { name: get('name'), category: get('category') || null, subcategory: get('subcategory') || null, price: _parseAmount(get('price')), remarks: get('remarks') || null, delivery_lead_time: get('delivery_lead_time') || null, is_active: parseActive(get('is_active')) };
     if (type === 'events') return { title: get('title'), ticket_price: _parseAmount(get('ticket_price')), duration: get('duration') || null, target_group: get('target_group') || null, description: get('description') || null, is_active: parseActive(get('is_active')) };
     // promotions
     return { package_name: get('package_name'), price: _parseAmount(get('price')), details: get('details') || null, requirement: get('requirement') || null, remarks: get('remarks') || null, delivery_lead_time: get('delivery_lead_time') || null, is_active: parseActive(get('is_active')) };
@@ -1379,8 +1381,8 @@ const exportMarketingList = async (format) => {
     if (!data.length) { UI.toast.error('No data to export'); return; }
     let cols, rows;
     if (type === 'products') {
-        cols = ['Name','Price (RM)','Remarks','Delivery Lead Time','Is Active'];
-        rows = data.map(d => [d.name || '', d.price || 0, d.remarks || '', d.delivery_lead_time || '', d.is_active ? 'Yes' : 'No']);
+        cols = ['Name','Category','Sub-group','Price (RM)','Remarks','Delivery Lead Time','Is Active'];
+        rows = data.map(d => [d.name || '', d.category || '', d.subcategory || '', d.price == null ? '' : d.price, d.remarks || '', d.delivery_lead_time || '', d.is_active ? 'Yes' : 'No']);
     } else if (type === 'events') {
         cols = ['Title','Ticket Price (RM)','Duration','Target Group','Description','Is Active'];
         rows = data.map(d => [d.title || '', d.ticket_price || 0, d.duration || '', d.target_group || '', d.description || '', d.is_active ? 'Yes' : 'No']);

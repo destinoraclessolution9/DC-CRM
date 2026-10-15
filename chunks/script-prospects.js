@@ -5770,7 +5770,7 @@ const openFengShuiAuditModal = async (prospectId, auditId) => {
 
     // Same data sources as Post-Meetup Notes → Potential & Opportunities
     const [products, bujishuItems, formulaItems] = await Promise.all([
-        AppDataStore.getAll('products').then(r => r.filter(p => p.is_active !== false)),
+        AppDataStore.getAll('products').then(r => r || []),
         AppDataStore.getAll('bujishu').then(r => r.filter(b => b.is_active !== false)),
         AppDataStore.getAll('formula').then(r => r.filter(f => f.is_active !== false)),
     ]);
@@ -5783,8 +5783,9 @@ const openFengShuiAuditModal = async (prospectId, auditId) => {
         </label>`;
     };
     const productCheckboxes = [
-        ...(products.length ? [`<div style="font-weight:600;font-size:12px;color:var(--primary);margin-bottom:4px;border-bottom:1px solid var(--gray-200);padding-bottom:3px;">Products</div>`] : []),
-        ...products.map(p => makeCheckbox(p.name, 'Products')),
+        // Products grouped by sub-group; an inactive one stays only if already ticked.
+        ...UI.groupProducts(products, { keep: p => parsedProducts.selected.includes(p.name) })
+            .flatMap(({ group, items }) => [`<div style="font-weight:600;font-size:12px;color:var(--primary);margin:8px 0 4px;border-bottom:1px solid var(--gray-200);padding-bottom:3px;">${escapeHtml(group)}</div>`, ...items.map(p => makeCheckbox(p.name, 'Products'))]),
         ...(bujishuItems.length ? [`<div style="font-weight:600;font-size:12px;color:var(--primary);margin:8px 0 4px;border-bottom:1px solid var(--gray-200);padding-bottom:3px;">Bujishu</div>`] : []),
         ...bujishuItems.map(b => makeCheckbox(b.name, 'Bujishu')),
         ...(formulaItems.length ? [`<div style="font-weight:600;font-size:12px;color:var(--primary);margin:8px 0 4px;border-bottom:1px solid var(--gray-200);padding-bottom:3px;">Formula</div>`] : []),

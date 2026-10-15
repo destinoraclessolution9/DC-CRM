@@ -604,14 +604,14 @@ const renderProspectCustomerFilters = async (isCustomer = false) => {
                 <label>Has Purchased</label>
                 <select id="filter-prospect-has-purchased" class="form-control">
                     <option value="">Select Product</option>
-                    ${products.map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join('')}
+                    ${UI.productOptionsHtml(products)}
                 </select>
             </div>
             <div class="filter-group">
                 <label>Has Not Purchased</label>
                 <select id="filter-prospect-not-purchased" class="form-control">
                     <option value="">Select Product</option>
-                    ${products.map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join('')}
+                    ${UI.productOptionsHtml(products)}
                 </select>
             </div>
         </div>
@@ -1842,7 +1842,8 @@ const performProductSearch = async (filters) => {
     }
     if (filters.basic.category) {
         const q = filters.basic.category.toLowerCase();
-        items = items.filter(i => i.category && i.category.toLowerCase().includes(q));
+        // Category box also matches the sub-group (e.g. "Flexi", "Calligraphy Adornment").
+        items = items.filter(i => [i.category, i.subcategory].some(v => v && v.toLowerCase().includes(q)));
     }
     if (filters.basic['price-min']) {
         items = items.filter(i => parseFloat(i.price) >= parseFloat(filters.basic['price-min']));
@@ -2037,7 +2038,11 @@ const buildSearchResultsTable = (pageItems, _searchUserMap) => {
 
         const nameCol = item.full_name || item.activity_title || item.event_title || item.item || item.name || 'N/A';
         const identifierCol = (() => {
-            if (['products','bujishu','formula'].includes(_currentSearchEntity)) return item.category ? `${item.category} — RM${item.price || '-'}` : `RM${item.price || '-'}`;
+            if (['products','bujishu','formula'].includes(_currentSearchEntity)) {
+                const grp = item.subcategory || item.category;
+                const price = item.price == null || item.price === '' ? 'Quote' : `RM${item.price}`;
+                return grp ? `${grp} — ${price}` : price;
+            }
             return item.phone || item.agent_code || item.invoice || item.location || 'N/A';
         })();
 

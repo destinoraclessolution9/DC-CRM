@@ -636,30 +636,35 @@ window.UI = (() => {
         // Fengshui Audit types (category stays '风水方案' — follow-up triggers key on it).
         'Fengshui Audit · 简易 Simplified', 'Fengshui Audit · 灵活 Flexi', 'Fengshui Audit · 专案 Direct On',
         'Fengshui Audit · 商业 Commercial', 'Huan Tian Xin', 'Books', 'Recruitment', 'Others'];
-    const productOptionsHtml = (products, opts = {}) => {
-        const selected = opts.selected || '';
-        const render = opts.renderOption || ((p, sel) =>
-            `<option value="${escapeHtml(p.name || '')}"${sel ? ' selected' : ''}>${escapeHtml(p.name || '')}</option>`);
+    // Ordered [{ group, items }] for any product list (dropdowns, checkbox lists).
+    // `keep(p)` → true keeps an inactive product (e.g. one already linked to the
+    // record being edited); every other inactive product is left out.
+    const groupProducts = (products, opts = {}) => {
+        const keep = opts.keep || (() => false);
         const collator = new Intl.Collator(['zh', 'en'], { numeric: true, sensitivity: 'base' });
         const groups = new Map();
         (products || []).forEach(p => {
             if (!p || !p.name) return;
-            if (p.is_active === false && p.name !== selected) return;
+            if (p.is_active === false && !keep(p)) return;
             const g = String(p.subcategory || p.category || '').trim() || 'Others';
             if (!groups.has(g)) groups.set(g, []);
             groups.get(g).push(p);
         });
+        const rank = (g) => { const i = PRODUCT_GROUP_ORDER.indexOf(g); return i === -1 ? 999 : i; };
+        return [...groups.keys()]
+            .sort((a, b) => rank(a) - rank(b) || collator.compare(a, b))
+            .map(g => ({ group: g, items: groups.get(g).sort((a, b) => collator.compare(a.name, b.name)) }));
+    };
+    const productOptionsHtml = (products, opts = {}) => {
+        const selected = opts.selected || '';
+        const render = opts.renderOption || ((p, sel) =>
+            `<option value="${escapeHtml(p.name || '')}"${sel ? ' selected' : ''}>${escapeHtml(p.name || '')}</option>`);
         // A record whose product was renamed/removed (e.g. "灵活 Flexible Plan" → "灵活 Flexi
         // Audit") still shows its own value, so re-saving it never blanks the product.
         const known = (products || []).some(p => p && p.name === selected);
         const orphan = (selected && !known) ? `<option value="${escapeHtml(selected)}" selected>${escapeHtml(selected)}</option>` : '';
-        if (!groups.size) return orphan;
-        const rank = (g) => { const i = PRODUCT_GROUP_ORDER.indexOf(g); return i === -1 ? 999 : i; };
-        return [...groups.keys()]
-            .sort((a, b) => rank(a) - rank(b) || collator.compare(a, b))
-            .map(g => `<optgroup label="${escapeHtml(g)}">${groups.get(g)
-                .sort((a, b) => collator.compare(a.name, b.name))
-                .map(p => render(p, p.name === selected)).join('')}</optgroup>`)
+        return groupProducts(products, { keep: p => p.name === selected })
+            .map(({ group, items }) => `<optgroup label="${escapeHtml(group)}">${items.map(p => render(p, p.name === selected)).join('')}</optgroup>`)
             .join('') + orphan;
     };
 
@@ -678,6 +683,7 @@ window.UI = (() => {
         defaultCountry: DEFAULT_COUNTRY,
         countryByCode,
         productOptionsHtml,
+        groupProducts,
         currencyForCountry,
         money,
         moneyCompact,

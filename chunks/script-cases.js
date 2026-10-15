@@ -77,7 +77,7 @@
                         <label>Product</label>
                         <select id="case-product-filter" onchange="app.handleCaseFilterChange()">
                             <option value="all">All Products</option>
-                            ${products.map(p => `<option value="${escapeHtml(p.name)}" ${_caseFilters.product === p.name ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}
+                            ${UI.productOptionsHtml(products, { selected: _caseFilters.product === 'all' ? '' : _caseFilters.product })}
                         </select>
                     </div>
                     <div class="adv-field">
@@ -791,7 +791,7 @@
                             <label>Product</label>
                             <select id="case-product" class="form-control">
                                 <option value="">Select Product...</option>
-                                ${((await AppDataStore.getAll('products')) || []).map(p => `<option value="${escapeHtml(p.name)}" ${c && c.product === p.name ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}
+                                ${UI.productOptionsHtml((await AppDataStore.getAll('products')) || [], { selected: (c && c.product) || '' })}
                             </select>
                         </div>
                     </div>

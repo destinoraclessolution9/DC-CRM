@@ -2679,44 +2679,17 @@
     };
 
     // ========== PRODUCTS TAB ==========
+    // Products are managed in ONE place — Product & Event Manager (price, sub-group,
+    // photos, grouped table). This tab used to be a second, thinner editor whose
+    // products landed with no price and no sub-group.
     const renderProductsTab = async () => {
-        const products = await AppDataStore.getAll('products');
+        const products = (await AppDataStore.getAll('products')) || [];
         return `
             <div class="products-layout" style="padding: 24px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                    <h3>Product & Service Directory</h3>
-                    <button class="btn primary" onclick="app.openAddProductModal()">+ Add New Product</button>
-                </div>
-                <table class="data-table" style="width: 100%; border-collapse: collapse;">
-                    <thead>
-                        <tr style="background: var(--gray-100); text-align: left;">
-                            <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Name</th>
-                            <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Category</th>
-                            <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Status</th>
-                            <th scope="col" style="padding: 12px; border-bottom: 1px solid var(--gray-200);">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${products.map(p => `
-                            <tr>
-                                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);"><strong>${escapeHtml(p.name)}</strong></td>
-                                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">${escapeHtml(p.category || 'N/A')}</td>
-                                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
-                                    <span class="status-badge ${p.is_active !== false ? 'status-active' : 'status-inactive'}">${p.is_active !== false ? 'Active' : 'Inactive'}</span>
-                                </td>
-                                <td style="padding: 12px; border-bottom: 1px solid var(--gray-200);">
-                                    <button class="btn btn-sm secondary" onclick="app.openAddProductModal(${p.id})">Edit</button>
-                                    <button class="btn btn-sm ${p.is_active !== false ? 'danger' : 'primary'}" onclick="app.toggleProductStatus(${p.id}, ${p.is_active !== false})">
-                                        ${p.is_active !== false ? 'Deactivate' : 'Activate'}
-                                    </button>
-                                </td>
-                            </tr>
-                        `).join('')}
-                        ${products.length === 0 ? '<tr><td colspan="4" style="padding: 12px; text-align: center;">No products found.</td></tr>' : ''}
-                    </tbody>
-                </table>
-            </div>
-    `;
+                <h3>Product &amp; Service Directory</h3>
+                <p style="color:var(--gray-600);margin:8px 0 16px;">${products.length} products. Products, prices and groups are managed in <strong>Product &amp; Event Manager</strong>.</p>
+                <button class="btn primary" onclick="app.navigateTo('marketing_lists')"><i class="fas fa-box" style="margin-right:6px;"></i>Open Product &amp; Event Manager</button>
+            </div>`;
     };
 
     const openAddProductModal = async (id = null) => {
@@ -3532,7 +3505,8 @@
             visible_to: []
         };
 
-        const allProducts = (await AppDataStore.getAll('products')).filter(p => p.is_active !== false);
+        const allProducts = (await AppDataStore.getAll('products')) || [];
+        const _pkgGroups = UI.groupProducts(allProducts, { keep: p => (pkg.product_ids || []).includes(p.id) });
         const paymentOptions = ['Cash', 'Credit Card', 'Bank Transfer', 'EPP', 'POP', 'Cheque'];
 
         const content = `
@@ -3550,12 +3524,12 @@
             <div class="form-group">
                 <label>Product / Service <span class="required">*</span></label>
                 <div class="multi-select-container" style="border:1px solid var(--gray-300);border-radius:4px;padding:10px;max-height:140px;overflow-y:auto;">
-                    ${allProducts.map(p => `
+                    ${_pkgGroups.map(({ group, items }) => `<div style="font-weight:600;font-size:12px;color:var(--primary);margin:8px 0 4px;border-bottom:1px solid var(--gray-200);padding-bottom:3px;">${escapeHtml(group)}</div>` + items.map(p => `
                         <label style="display:block;margin-bottom:5px;cursor:pointer;font-size:13px;">
                             <input type="checkbox" name="pkg-products" value="${p.id}" ${(pkg.product_ids||[]).includes(p.id) ? 'checked' : ''}> ${escapeHtml(p.name)}
                         </label>
-                    `).join('')}
-                    ${allProducts.length === 0 ? '<p class="text-muted">No active products found.</p>' : ''}
+                    `).join('')).join('')}
+                    ${_pkgGroups.length === 0 ? '<p class="text-muted">No active products found.</p>' : ''}
                 </div>
             </div>
 

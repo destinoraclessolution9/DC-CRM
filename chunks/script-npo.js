@@ -376,7 +376,9 @@
                 </td>
             </tr>`).join('') : `<tr><td colspan="6" style="padding:14px;text-align:center;color:var(--gray-500);">No tiers yet.</td></tr>`;
 
-        const eligibleProductsHtml = allProducts.length ? allProducts.map(p => {
+        // Grouped by product sub-group; an inactive product shows only if this plan already links it.
+        const eligibleProductsHtml = allProducts.length ? UI.groupProducts(allProducts, { keep: p => planProducts.some(pp => pp.product_id === p.id) })
+            .map(({ group, items }) => `<div style="font-weight:600;font-size:12px;color:var(--primary);margin:8px 0 4px;border-bottom:1px solid var(--gray-200);padding-bottom:3px;">${escapeHtml(group)}</div>` + items.map(p => {
             const link = planProducts.find(pp => pp.product_id === p.id);
             const checked = !!link;
             return `
@@ -389,7 +391,7 @@
                         id="npo-redeem-${p.id}" value="${link && link.default_redeem_after_months != null ? link.default_redeem_after_months : ''}"
                         style="width:150px;padding:4px 6px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;">
                 </div>`;
-        }).join('') : '<p style="color:var(--gray-500);font-size:13px;">No products in the catalog.</p>';
+        }).join('')).join('') : '<p style="color:var(--gray-500);font-size:13px;">No products in the catalog.</p>';
 
         container.innerHTML = `
             <div style="padding:24px;max-width:1000px;margin:0 auto;">

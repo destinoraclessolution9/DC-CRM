@@ -543,41 +543,18 @@ function AnalyticsTab({ analytics, canExport }) {
 
 // ── Products tab (JSX mirror of renderProductsTab) ──────────────────────────
 function ProductsTab({ rows }) {
+    // Products are managed in ONE place — Product & Event Manager (price, sub-group,
+    // photos, grouped table). This tab used to be a second, thinner editor whose
+    // products landed with no price and no sub-group.
     return (
         <div className="products-layout" style={{ padding: '24px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                <h3>Product & Service Directory</h3>
-                <button className="btn primary" onClick={() => call('openAddProductModal')}>+ Add New Product</button>
-            </div>
-            <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                    <tr style={{ background: 'var(--gray-100)', textAlign: 'left' }}>
-                        <th scope="col" style={{ padding: '12px', borderBottom: '1px solid var(--gray-200)' }}>Name</th>
-                        <th scope="col" style={{ padding: '12px', borderBottom: '1px solid var(--gray-200)' }}>Category</th>
-                        <th scope="col" style={{ padding: '12px', borderBottom: '1px solid var(--gray-200)' }}>Status</th>
-                        <th scope="col" style={{ padding: '12px', borderBottom: '1px solid var(--gray-200)' }}>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {rows.length === 0 ? (
-                        <tr><td colSpan="4" style={{ padding: '12px', textAlign: 'center' }}>No products found.</td></tr>
-                    ) : rows.map((p) => (
-                        <tr key={p.id}>
-                            <td style={{ padding: '12px', borderBottom: '1px solid var(--gray-200)' }}><strong>{p.name}</strong></td>
-                            <td style={{ padding: '12px', borderBottom: '1px solid var(--gray-200)' }}>{p.category || 'N/A'}</td>
-                            <td style={{ padding: '12px', borderBottom: '1px solid var(--gray-200)' }}>
-                                <span className={`status-badge ${p.is_active ? 'status-active' : 'status-inactive'}`}>{p.is_active ? 'Active' : 'Inactive'}</span>
-                            </td>
-                            <td style={{ padding: '12px', borderBottom: '1px solid var(--gray-200)' }}>
-                                <button className="btn btn-sm secondary" onClick={() => call('openAddProductModal', p.id)}>Edit</button>
-                                <button className={`btn btn-sm ${p.is_active ? 'danger' : 'primary'}`} onClick={() => call('toggleProductStatus', p.id, p.is_active)}>
-                                    {p.is_active ? 'Deactivate' : 'Activate'}
-                                </button>
-                            </td>
-                        </tr>
-                    ))}
-                </tbody>
-            </table>
+            <h3>Product &amp; Service Directory</h3>
+            <p style={{ color: 'var(--gray-600)', margin: '8px 0 16px' }}>
+                {rows.length} products. Products, prices and groups are managed in <strong>Product &amp; Event Manager</strong>.
+            </p>
+            <button className="btn primary" onClick={() => call('navigateTo', 'marketing_lists')}>
+                <i className="fas fa-box" style={{ marginRight: '6px' }}></i>Open Product &amp; Event Manager
+            </button>
         </div>
     );
 }

@@ -1404,7 +1404,7 @@ Rules:
 2. DO NOT invent information, analyse fortune, or add conclusions that are not in my notes.
 3. If a section is not mentioned, keep its header and leave it empty (do not write "No data").
 4. Keep customer facts, advisor observations and next actions separate.
-5. Next Actions and Products: ONE item per line, using the exact class / event / product name (e.g. 个人风水基础课, 博物馆, 简易 Simple Plan).
+5. Next Actions and Products: ONE item per line, using the exact class / event / product name (e.g. 个人风水基础课, 博物馆, 简易风水-排屋 Simplified Fengshui Terrace House).
 6. Grade: exactly one letter — A (closing soon), B (has potential, needs time), C (50/50), D (far), F (give up).
 7. Meeting Result: exactly one of — Positive / Neutral / Negative / Not interested.
 8. Output EXACTLY the format below. No text before or after it.

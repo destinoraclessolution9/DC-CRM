@@ -864,7 +864,9 @@
     // "implied category" OR'd into the event-invite solCatOk — so cps_interest='个人改命' (a ring)
     // is invited to Power-Ring classes, and a proposed 'Office Audit' to 风水方案 classes.
     const _INTEREST_SOLCAT = { '个人改命': 'power ring', '风水': '风水方案', '画作': '画作', '满堂系列': 'bujishu', 'formula': 'formula' };
-    const _SOLUTION_SOLCAT = { 'office audit': '风水方案', 'home audit': '风水方案', '风水审计': '风水方案', 'pr3 ring': 'power ring', 'pr5 ring': 'power ring' };
+    const _SOLUTION_SOLCAT = { 'office audit': '风水方案', 'home audit': '风水方案', '风水审计': '风水方案', 'pr3 ring': 'power ring', 'pr5 ring': 'power ring',
+        // Pre-2026-10-15 names of the fengshui audit products (renamed "… Plan" → "… Audit").
+        '专案 project plan': '风水方案', '灵活 flexible plan': '风水方案', '简易 simple plan': '风水方案', '商业 commercial plan': '风水方案' };
     const _impliedSolCats = (cpsInterest, solNames) => {
         const out = [];
         const it = (cpsInterest || '').trim().toLowerCase();
