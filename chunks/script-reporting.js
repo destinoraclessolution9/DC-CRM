@@ -6795,7 +6795,7 @@ const _qrDashboardSheet = async (wb, { P, P0, D, cur, prev, agents, get, sumOf, 
         ws.getCell(4, c).value = t.label; ws.getCell(4, c).font = { color: { argb: 'FF6B7280' }, size: 10 };
         ws.getCell(5, c).value = t.v; ws.getCell(5, c).numFmt = t.rm ? RM : '0'; ws.getCell(5, c).font = { bold: true, size: 20 };
         const d = t.p ? (t.v - t.p) / t.p : null;
-        ws.getCell(6, c).value = d == null ? (t.v ? 'new vs prev' : '—') : `${d >= 0 ? '▲' : '▼'} ${Math.abs(Math.round(d * 100))}% vs ${P.prev[0].label}`;
+        ws.getCell(6, c).value = d == null ? (t.v ? 'new vs prev' : '—') : Math.round(d * 100) === 0 ? `same as ${P.prev[0].label}` : `${d > 0 ? '▲' : '▼'} ${Math.abs(Math.round(d * 100))}% vs ${P.prev[0].label}`;
         ws.getCell(6, c).font = { size: 10, color: { argb: d == null ? 'FF6B7280' : d >= 0 ? 'FF15803D' : 'FFB91C1C' } };
         ws.getCell(7, c).value = t.t ? `${Math.round(t.v / t.t * 100)}% of target ${t.rm ? rmK(t.t) : t.t}` : (t.sub || '');
         ws.getCell(7, c).font = { size: 10, color: { argb: 'FF6B7280' } };
@@ -6809,9 +6809,13 @@ const _qrDashboardSheet = async (wb, { P, P0, D, cur, prev, agents, get, sumOf, 
     const ranked = agents.map(u => ({ n: name(u), c: get(cur, u.id).sales, p: get(prev[0], u.id).sales, cps: get(cur, u.id).cps }))
         .filter(x => x.c || x.p).sort((a, b) => b.c - a.c || b.p - a.p).slice(0, 10);
     const scatter = agents.map(u => ({ n: name(u), x: get(cur, u.id).cps, y: get(cur, u.id).sales })).filter(p => p.x || p.y);
+    // Short label = first name, unless two plotted agents share it ("Oo" / "Oo -SG").
+    const firstTok = (n) => String(n).trim().split(/\s+/)[0];
+    const tokCount = scatter.reduce((m, p) => m.set(firstTok(p.n), (m.get(firstTok(p.n)) || 0) + 1), new Map());
+    scatter.forEach(p => { p.short = tokCount.get(firstTok(p.n)) > 1 ? String(p.n).trim() : firstTok(p.n); });
     const nameLabels = { id: 'qrNames', afterDatasetsDraw: (c) => {
         const x = c.ctx; x.save(); x.font = '11px sans-serif'; x.fillStyle = '#374151';
-        c.getDatasetMeta(0).data.forEach((pt, i) => { const r = scatter[i]; if (r) x.fillText(r.n.split(/\s+/)[0], pt.x + 8, pt.y + 4); });
+        c.getDatasetMeta(0).data.forEach((pt, i) => { const r = scatter[i]; if (r) x.fillText(r.short, pt.x + 8, pt.y + 4); });
         x.restore();
     } };
     const axis = (fmt) => ({ grid: { color: '#e5e7eb' }, ticks: fmt ? { callback: fmt } : {} });
