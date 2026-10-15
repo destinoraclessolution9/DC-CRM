@@ -5,6 +5,7 @@
 --     manager (level <= 2) may assign or clear either check-in slot. The holder
 --     sees every attendee's name for that session and runs the attendance ticks.
 --   * The other four roles stay ungated (owner decision, unchanged).
+--   * Bumps events.updated_at so other devices' delta-sync picks the change up.
 -- Idempotent: CREATE OR REPLACE with the same signature + grants.
 
 CREATE OR REPLACE FUNCTION public.set_event_session_role(p_event_id bigint, p_session_date text, p_role_key text, p_user_id bigint DEFAULT NULL::bigint)
@@ -55,7 +56,8 @@ BEGIN
            || jsonb_build_object(
                 p_session_date,
                 COALESCE(event_roles -> p_session_date, '{}'::jsonb) || jsonb_build_object(p_role_key, v_val)
-              )
+              ),
+           updated_at = now()
      WHERE id = p_event_id
      RETURNING event_roles -> p_session_date INTO v_session;
 

@@ -5031,6 +5031,26 @@
         `;
     };
 
+    // The EVENT modal reads events.event_roles (报到负责人 check-in access, role
+    // dropdowns). Another user's assignment never reaches this device's cached
+    // events row on its own, so a newly assigned check-in lead would still see
+    // "(private)" rows. Fetch the row fresh; fall back to the cache when the
+    // network is slow (>4s) or the read fails, so the modal never hangs.
+    const _freshEventRow = async (eventId) => {
+        const cached = () => AppDataStore.getById('events', eventId);
+        try {
+            const fresh = await Promise.race([
+                AppDataStore.getByIdFull('events', eventId),
+                new Promise(r => setTimeout(() => r(null), 4000)),
+            ]);
+            if (fresh) {
+                try { AppDataStore.primeRows('events', [fresh]); } catch (_) { /* intentional: cache refresh is best-effort */ }
+                return fresh;
+            }
+        } catch (_) { /* intentional: fall back to the cached row */ }
+        return cached();
+    };
+
     const viewActivityDetails = async (activityId) => {
         // Hot cache hit: activity is in the yesterday→today+7 window pre-warmed by
         // the last renderCalendar(). Skip the network round-trip entirely so the
@@ -5049,7 +5069,7 @@
             activity.prospect_id ? AppDataStore.getById('prospects', activity.prospect_id) : null,
             activity.customer_id ? AppDataStore.getById('customers', activity.customer_id) : null,
             (activity.activity_type === 'EVENT' && activity.event_id)
-                ? AppDataStore.getById('events', activity.event_id)
+                ? _freshEventRow(activity.event_id)
                 : null,
         ]);
         // Orphan detection: activity carries a prospect_id / customer_id but the
