@@ -2396,10 +2396,13 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         btn.style.fontWeight = '600';
     }
 
-    // CPS form file now lives in Storage (cps_form_url). Both tabs can
-    // therefore use the lean cached getById — no need to ship the heavy
-    // base64 column over the wire just to render an <img src="...">.
-    const prospect = await AppDataStore.getById('prospects', prospectId);
+    // CPS form file now lives in Storage (cps_form_url), so most tabs use the
+    // lean cached getById. Basic Information reads the LIVE row first: it is the
+    // screen people check right after editing, and a cached snapshot could still
+    // hold the pre-edit values (children / spouse showed stale). Falls back to
+    // the cache when offline.
+    const prospect = (tab === 'info' ? await AppDataStore.getByIdFull('prospects', prospectId) : null)
+        || await AppDataStore.getById('prospects', prospectId);
     const container = containerOverride || document.getElementById('prospect-tab-content');
     if (!container || !prospect) return;
 

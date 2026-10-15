@@ -997,6 +997,19 @@ class DataStore {
         }
     }
 
+    // Replace one row inside the Cache API snapshot (if the table lives there).
+    async _cacheApiPatchRow(tableName, row) {
+        try {
+            if (!row || row.id == null) return;
+            const rows = await this._cacheApiGet(tableName);
+            if (!rows) return;
+            const idx = rows.findIndex(r => String(r.id) === String(row.id));
+            if (idx < 0) return;
+            rows[idx] = { ...rows[idx], ...row };
+            await this._cacheApiSet(tableName, rows);
+        } catch (_) { /* intentional: best-effort; the next revalidation reconciles */ }
+    }
+
     async _cacheApiSet(tableName, rows) {
         try {
             if (typeof caches === 'undefined') return;
@@ -2699,6 +2712,12 @@ class DataStore {
                     const full = { ...updates, ...data };
                     if (idx >= 0) { all[idx] = full; localStorage.setItem(key, JSON.stringify(this._sanitizeForStorage(tableName, all))); _mirrorUpdated = true; }
                 } catch (_) { /* intentional: local mirror is best-effort; server update already succeeded */ }
+                // Large tables (prospects/customers/activities) keep their snapshot in
+                // the Cache API overflow tier, not localStorage — so the patch above
+                // misses them and getById's Tier 2.5 kept serving the PRE-edit row
+                // (e.g. children saved but the profile still showed 0). Patch that
+                // tier's copy too. Best-effort, async.
+                if (!_mirrorUpdated) this._cacheApiPatchRow(tableName, { ...updates, ...data });
                 this._writeAudit('update', tableName, id, _auditOldData, data);
                 // Keep the fs_crm_<table> mirror (with the updated row spliced in) +
                 // its delta cursor when we successfully patched it in place — deleting

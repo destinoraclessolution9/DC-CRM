@@ -966,7 +966,10 @@ const switchProfileTab = async (btn, tabName, cId) => {
 };
 
 const switchCustomerProfileTab = async (tab, customerId, container) => {
-    const customer = await AppDataStore.getById('customers', customerId);
+    // Basic Information reads the live row first (a cached snapshot can lag an
+    // edit); other tabs use the cached copy. Offline → cache.
+    const customer = (tab === 'info' ? await AppDataStore.getByIdFull('customers', customerId) : null)
+        || await AppDataStore.getById('customers', customerId);
     if (!container || !customer) return;
 
     if (tab === 'info') {
