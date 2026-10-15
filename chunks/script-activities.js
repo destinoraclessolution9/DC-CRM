@@ -4743,9 +4743,11 @@ My raw notes:
     // events.event_roles keyed by session date ({ "<date>": { role: {id,name} } }) so
     // every agent's activity row for that (event, date) shares the same roles, and the
     // stored id enables per-agent credit later. Ungated (any agent may assign — owner
-    // decision). The set_event_session_role RPC derives the name from users (rejects a
-    // forged id) and merges atomically.
-    const _EVENT_ROLE_KEYS = ['main_organizer', 'venue_lead', 'registration_lead', 'speaker', 'emcee'];
+    // decision) EXCEPT the two 报到负责人 slots (registration_lead / _2): only the
+    // session's 主要负责人 or level <= 2 — the RPC rejects anyone else (42501). The
+    // set_event_session_role RPC derives the name from users (rejects a forged id)
+    // and merges atomically.
+    const _EVENT_ROLE_KEYS = ['main_organizer', 'venue_lead', 'registration_lead', 'registration_lead_2', 'speaker', 'emcee'];
     const saveEventRole = async (eventId, sessionDate, roleKey, userId) => {
         if (!_EVENT_ROLE_KEYS.includes(roleKey)) { UI.toast.error('Unknown event role'); return; }
         if (eventId == null || eventId === '' || String(eventId) === 'null') { UI.toast.error('Event not linked'); return; }

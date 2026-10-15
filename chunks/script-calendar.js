@@ -5134,6 +5134,18 @@
             const _visibleAgentIds = await getVisibleUserIds(_viewer).catch(() => null);
             const _orgWide = isSystemAdmin(_viewer) || isMarketingManager(_viewer) || _visibleAgentIds === 'all';
             const _userById = new Map(users.map(u => [String(u.id), u]));
+            // 报到负责人 (check-in lead, two slots) for THIS session date: runs the
+            // door check-in, so they see every attendee's name and get the
+            // attendance ticks — but not Post Event / Closing / the profile link
+            // for clients that aren't otherwise theirs. Only the session's
+            // 主要负责人 (or admin) may assign it (enforced in set_event_session_role).
+            const _sessRolesForView = (() => {
+                const all = (marketingEvent && marketingEvent.event_roles && typeof marketingEvent.event_roles === 'object') ? marketingEvent.event_roles : {};
+                const r = all[String(activity.activity_date || '')];
+                return (r && typeof r === 'object') ? r : {};
+            })();
+            const _isCheckInLead = !!_viewer && ['registration_lead', 'registration_lead_2']
+                .some(k => _sessRolesForView[k] && String(_sessRolesForView[k].id) === String(_viewer.id));
             const _canSeeAttendeeName = (att) => {
                 if (_orgWide || _isOwnActivity) return true;
                 const adderId = att.added_by_agent_id != null ? String(att.added_by_agent_id) : null;
@@ -5148,7 +5160,8 @@
             const renderProspectRow = async (att) => {
                 // Names are private to the adder, their team, their upline, and the
                 // activity owner — everyone else sees an anonymized placeholder.
-                if (!_canSeeAttendeeName(att)) {
+                const _ownView = _canSeeAttendeeName(att);
+                if (!_ownView && !_isCheckInLead) {
                     return `<div class="info-row" style="color:var(--gray-400);font-size:12px;font-style:italic;">— Attendee (private) —</div>`;
                 }
                 const entityId = att.entity_id || att.attendee_id;
@@ -5166,7 +5179,9 @@
                 return `
                     <div class="info-row att-row">
                         <div class="att-head">
-                            <strong class="att-name att-link" onclick="event.stopPropagation();app.showAttendeeDetails(${entityId},'${UI.escJsAttr(String(att.attendee_type||'prospect'))}')">${esc(name)}</strong>
+                            ${_ownView
+                                ? `<strong class="att-name att-link" onclick="event.stopPropagation();app.showAttendeeDetails(${entityId},'${UI.escJsAttr(String(att.attendee_type||'prospect'))}')">${esc(name)}</strong>`
+                                : `<strong class="att-name">${esc(name)}</strong>`}
                             <span class="att-chip">${esc(att.attendee_type || 'prospect')}</span>
                             <span class="att-by">by ${esc(agentName)}</span>
                         </div>
@@ -5177,7 +5192,7 @@
                             <label><input type="checkbox" ${unattendedChecked} data-att-kind="unattended" onchange="app.toggleAttendeeUnattended(${att.id}, this.checked, ${entityId}, '${UI.escJsAttr(String(att.attendee_type||'prospect'))}', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}', ${activity.id}, this)">Unattended</label>
                             <label><input type="checkbox" ${lateChecked} data-att-kind="late" onchange="app.toggleAttendeeLate(${att.id}, this.checked, ${entityId}, '${UI.escJsAttr(String(att.attendee_type||'prospect'))}', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}', ${activity.id}, this)">Late</label>
                         </div>
-                        ${entityId ? `<div class="att-actions">
+                        ${entityId && _ownView ? `<div class="att-actions">
                             <button class="btn btn-sm secondary" onclick="(async()=>{ await app.openAttendeePostEventModal(${att.id}, ${activityId}, ${entityId}); })()">Post Event</button>
                             <button class="btn btn-sm secondary att-btn-closing" title="Record a sale for this attendee" onclick="(async()=>{ await app.openAttendeeClosingModal(${att.id}, ${activityId}); })()"><i class="fas fa-clipboard-check"></i> Closing</button>
                         </div>` : ''}
@@ -5244,13 +5259,15 @@
             // keyed by this occurrence's date on events.event_roles
             // ({ "<date>": { role: {id,name} } }), so every activity row for the same
             // (event, date) shares the same session roles. Ungated — any agent who can
-            // see the event may assign (owner decision).
+            // see the event may assign (owner decision) — except the two 报到负责人
+            // check-in slots, which only the session's 主要负责人 / admin may set.
             let rolesSection = '';
             if (activity.activity_type === 'EVENT' && activity.event_id && activity.activity_date) {
                 const _EVENT_ROLE_DEFS = [
                     { key: 'main_organizer',    label: '主要负责人' },
                     { key: 'venue_lead',        label: '场地负责人' },
-                    { key: 'registration_lead', label: '报到负责人' },
+                    { key: 'registration_lead',   label: '报到负责人 1', checkIn: true },
+                    { key: 'registration_lead_2', label: '报到负责人 2', checkIn: true },
                     { key: 'speaker',           label: '主讲老师' },
                     { key: 'emcee',             label: '活动司仪' },
                 ];
@@ -5258,6 +5275,10 @@
                 const _allRoles = (marketingEvent && marketingEvent.event_roles && typeof marketingEvent.event_roles === 'object')
                     ? marketingEvent.event_roles : {};
                 const _sessionRoles = (_allRoles[_sessDate] && typeof _allRoles[_sessDate] === 'object') ? _allRoles[_sessDate] : {};
+                // Check-in slots: only this session's 主要负责人 or admin / marketing
+                // manager may change them (the RPC enforces the same rule).
+                const _canAssignCheckIn = isSystemAdmin(_viewer) || isMarketingManager(_viewer)
+                    || (!!_viewer && !!_sessionRoles.main_organizer && String(_sessionRoles.main_organizer.id) === String(_viewer.id));
                 const _roleRoster = users
                     .filter(u => isAgent(u) && u.status !== 'inactive')
                     .sort((a, b) => String(a.full_name || '').localeCompare(String(b.full_name || '')));
@@ -5274,7 +5295,9 @@
                     const opts = ['<option value="">— 未指派 · Unassigned —</option>']
                         .concat(optionUsers.map(u => `<option value="${u.id}" ${String(u.id) === curId ? 'selected' : ''}>${esc(u.full_name || '')}</option>`))
                         .join('');
-                    return `<div class="info-row"><span class="info-label">${rd.label}:</span> <select class="form-control" style="max-width:240px;flex:0 1 240px;" onchange="app.saveEventRole(${activity.event_id}, '${esc(_sessDate)}', '${rd.key}', this.value)">${opts}</select></div>`;
+                    const _locked = rd.checkIn && !_canAssignCheckIn;
+                    const _hint = _locked ? `<div style="font-size:11px;color:#9CA3AF;margin-top:2px;">由主要负责人指派 · Assigned by main organiser</div>` : '';
+                    return `<div class="info-row"><span class="info-label">${rd.label}:</span> <div style="flex:0 1 240px;max-width:240px;"><select class="form-control" ${_locked ? 'disabled' : ''} onchange="app.saveEventRole(${activity.event_id}, '${esc(_sessDate)}', '${rd.key}', this.value)">${opts}</select>${_hint}</div></div>`;
                 }).join('');
                 rolesSection = `
                 <div class="detail-section">
