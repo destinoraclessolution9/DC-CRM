@@ -5176,13 +5176,13 @@
                                 <input type="checkbox" ${ticketChecked} onchange="app.toggleAttendeeTicket(${att.id}, this.checked)"> Ticket Created
                             </label>
                             <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
-                                <input type="checkbox" ${attendedChecked} onchange="app.toggleAttendeeAttended(${att.id}, this.checked, ${entityId}, '${UI.escJsAttr(String(att.attendee_type||'prospect'))}', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}')"> Attended
+                                <input type="checkbox" ${attendedChecked} onchange="app.toggleAttendeeAttended(${att.id}, this.checked, ${entityId}, '${UI.escJsAttr(String(att.attendee_type||'prospect'))}', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}', ${activity.id})"> Attended
                             </label>
                             <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
-                                <input type="checkbox" ${unattendedChecked} onchange="app.toggleAttendeeUnattended(${att.id}, this.checked, ${entityId}, '${UI.escJsAttr(String(att.attendee_type||'prospect'))}', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}')"> Unattended
+                                <input type="checkbox" ${unattendedChecked} onchange="app.toggleAttendeeUnattended(${att.id}, this.checked, ${entityId}, '${UI.escJsAttr(String(att.attendee_type||'prospect'))}', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}', ${activity.id})"> Unattended
                             </label>
                             <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
-                                <input type="checkbox" ${lateChecked} onchange="app.toggleAttendeeLate(${att.id}, this.checked, ${entityId}, '${UI.escJsAttr(String(att.attendee_type||'prospect'))}', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}')"> Late
+                                <input type="checkbox" ${lateChecked} onchange="app.toggleAttendeeLate(${att.id}, this.checked, ${entityId}, '${UI.escJsAttr(String(att.attendee_type||'prospect'))}', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}', ${activity.id})"> Late
                             </label>
                             ${entityId ? `<button class="btn btn-sm secondary" onclick="(async()=>{ await app.openAttendeePostEventModal(${att.id}, ${activityId}, ${entityId}); })()">Post Event</button>` : ''}
                             ${entityId ? `<button class="btn btn-sm secondary" style="color:#065f46;border-color:#065f46;" title="Record a sale for this attendee" onclick="(async()=>{ await app.openAttendeeClosingModal(${att.id}, ${activityId}); })()"><i class="fas fa-clipboard-check"></i> Closing</button>` : ''}
@@ -5211,13 +5211,13 @@
                         </div>
                         <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
                             <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
-                                <input type="checkbox" ${attendedChecked} onchange="app.toggleAttendeeAttended(${att.id}, this.checked, ${entityId}, 'agent', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}')"> Attended
+                                <input type="checkbox" ${attendedChecked} onchange="app.toggleAttendeeAttended(${att.id}, this.checked, ${entityId}, 'agent', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}', ${activity.id})"> Attended
                             </label>
                             <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
-                                <input type="checkbox" ${unattendedChecked} onchange="app.toggleAttendeeUnattended(${att.id}, this.checked, ${entityId}, 'agent', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}')"> Unattended
+                                <input type="checkbox" ${unattendedChecked} onchange="app.toggleAttendeeUnattended(${att.id}, this.checked, ${entityId}, 'agent', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}', ${activity.id})"> Unattended
                             </label>
                             <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
-                                <input type="checkbox" ${lateChecked} onchange="app.toggleAttendeeLate(${att.id}, this.checked, ${entityId}, 'agent', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}')"> Late
+                                <input type="checkbox" ${lateChecked} onchange="app.toggleAttendeeLate(${att.id}, this.checked, ${entityId}, 'agent', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}', ${activity.id})"> Late
                             </label>
                             <button class="btn btn-sm" style="background:#FEE2E2;color:#991B1B;border:none;padding:3px 8px;border-radius:4px;" onclick="event.stopPropagation();app.removeAgentAttendee(${att.id}, ${activityId})" title="Remove"><i class="fas fa-times"></i></button>
                         </div>

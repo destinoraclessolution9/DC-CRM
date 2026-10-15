@@ -4313,59 +4313,76 @@ My raw notes:
         await AppDataStore.update('event_attendees', attendeeId, { ticket_created: checked });
     };
 
-    const toggleAttendeeAttended = async (attendeeId, checked, entityId, entityType, eventId, activityDate) => {
-        const status = checked ? 'Attended' : 'Registered';
-        await AppDataStore.update('event_attendees', attendeeId, { attended: checked, attendance_status: status });
-        // This update IS the record of attendance — the profile reads
-        // event_attendees directly now — so confirm it here rather than inside
-        // the event_registrations try below. Previously a failed mirror-write
-        // swallowed the toast entirely and the tick looked like it did nothing.
-        UI.toast.success(checked ? 'Marked as Attended' : 'Attendance removed');
-
-        // Mirror into event_registrations (points ledger + legacy readers). Best
-        // effort: the profile no longer depends on it, so a failure here must not
-        // contradict the confirmation above.
-        if (entityId && eventId) {
-            try {
-                // Scale-safe: scoped query by event_id+attendee_id instead of a whole-table
-                // getAll().find() that grows O(table) with every event attendance org-wide.
-                const existing = (await AppDataStore.query('event_registrations', { event_id: eventId, attendee_id: entityId }))[0];
-                if (existing) {
-                    await AppDataStore.update('event_registrations', existing.id, { attendance_status: status });
-                } else {
-                    await AppDataStore.create('event_registrations', {
-                        event_id: eventId,
-                        attendee_id: entityId,
-                        attendee_type: entityType || 'prospect',
-                        attendance_status: status,
-                        event_date: activityDate || (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
-                        points_awarded: 0,
-                        created_at: new Date().toISOString()
-                    });
-                }
-                // Trigger follow-up: event attendance triggers (data-driven)
-                if (checked && entityId && eventId) {
-                    dispatchOnEventAttendanceTriggers(entityId, entityType || 'prospect', eventId, activityDate).catch(e => console.warn('Event attendance follow-up failed:', e));
-                }
-            } catch (err) {
-                console.error('toggleAttendeeAttended write-back error:', err);
-            }
-        }
-        // Refresh the modal so the opposite 'Unattended' checkbox unticks (mutual exclusion).
-        // Mirror toggleAttendeeUnattended's scale-safe scoped refresh.
+    // Re-render the activity modal after an attendance toggle so the mutually
+    // exclusive checkboxes refresh. Reopen the EXACT activity the user was on —
+    // an EVENT_CLOSING record can share the same event_id + activity_date, and
+    // picking acts[0] of that query used to jump the modal to the closing record.
+    // The event+date lookup stays only as a fallback for callers without an id.
+    const _reopenAttendeeActivity = async (activityId, eventId, activityDate, label) => {
+        if (activityId != null && activityId !== '') { await app.viewActivityDetails(activityId); return; }
         let acts;
         try {
             if (eventId == null) throw new Error('no eventId — using full scan');
             const rows = await AppDataStore.query('activities', { event_id: eventId, activity_date: activityDate });
             acts = (rows || []).filter(a => a.event_id == eventId && a.activity_date == activityDate);
         } catch (e) {
-            console.warn('toggleAttendeeAttended: scoped refresh query failed — full-table fallback', e);
+            console.warn(label + ': scoped refresh query failed — full-table fallback', e);
             acts = (await AppDataStore.getAll('activities')).filter(a => a.event_id == eventId && a.activity_date == activityDate);
         }
         if (acts.length > 0) await app.viewActivityDetails(acts[0].id);
     };
 
-    const toggleAttendeeUnattended = async (attendeeId, checked, entityId, entityType, eventId, activityDate) => {
+    // Mirror an attendance tick into event_registrations (points ledger + legacy
+    // readers). The live table has NO attendance_status / event_date columns —
+    // writing them stripped down to an empty update that threw on every existing
+    // row — so the mirror maps onto the real checked_in / checked_in_at pair.
+    // Best effort: event_attendees is the record of attendance, so a failure
+    // here is logged and never contradicts the toast the caller already showed.
+    const _mirrorRegistrationCheckIn = async (entityId, entityType, eventId, checkedIn, label) => {
+        if (!entityId || !eventId) return;
+        const checkIn = { checked_in: checkedIn, checked_in_at: checkedIn ? new Date().toISOString() : null };
+        try {
+            // Scale-safe: scoped query by event_id+attendee_id instead of a whole-table
+            // getAll().find() that grows O(table) with every event attendance org-wide.
+            const existing = (await AppDataStore.query('event_registrations', { event_id: eventId, attendee_id: entityId }))[0];
+            if (existing) {
+                await AppDataStore.update('event_registrations', existing.id, checkIn);
+            } else {
+                await AppDataStore.create('event_registrations', {
+                    event_id: eventId,
+                    attendee_id: entityId,
+                    attendee_type: entityType || 'prospect',
+                    ...checkIn,
+                    points_awarded: 0,
+                    created_at: new Date().toISOString()
+                });
+            }
+        } catch (err) {
+            console.error(label + ' write-back error:', err);
+        }
+    };
+
+    const toggleAttendeeAttended = async (attendeeId, checked, entityId, entityType, eventId, activityDate, activityId) => {
+        const status = checked ? 'Attended' : 'Registered';
+        await AppDataStore.update('event_attendees', attendeeId, { attended: checked, attendance_status: status });
+        // This update IS the record of attendance — the profile reads
+        // event_attendees directly now — so confirm it here rather than inside
+        // the event_registrations mirror. Previously a failed mirror-write
+        // swallowed the toast entirely and the tick looked like it did nothing.
+        UI.toast.success(checked ? 'Marked as Attended' : 'Attendance removed');
+
+        // Trigger follow-up: event attendance triggers (data-driven). Keyed off the
+        // event_attendees write above, not the registrations mirror, so a mirror
+        // failure can no longer silently skip the on_event_attendance templates.
+        if (checked && entityId && eventId) {
+            dispatchOnEventAttendanceTriggers(entityId, entityType || 'prospect', eventId, activityDate).catch(e => console.warn('Event attendance follow-up failed:', e));
+        }
+        await _mirrorRegistrationCheckIn(entityId, entityType, eventId, checked, 'toggleAttendeeAttended');
+        // Refresh the modal so the opposite 'Unattended' checkbox unticks (mutual exclusion).
+        await _reopenAttendeeActivity(activityId, eventId, activityDate, 'toggleAttendeeAttended');
+    };
+
+    const toggleAttendeeUnattended = async (attendeeId, checked, entityId, entityType, eventId, activityDate, activityId) => {
         // Mutually exclusive with Attended — checking Unattended marks as No Show, unchecking
         // returns to plain Registered.
         const status = checked ? 'No Show' : 'Registered';
@@ -4374,88 +4391,28 @@ My raw notes:
         // registrations mirror below is best-effort and must not own the toast.
         UI.toast.success(checked ? 'Marked as Unattended (No Show)' : 'Unattended cleared');
 
-        if (entityId && eventId) {
-            try {
-                // Scale-safe: scoped query instead of a whole-table getAll().find().
-                const existing = (await AppDataStore.query('event_registrations', { event_id: eventId, attendee_id: entityId }))[0];
-                if (existing) {
-                    await AppDataStore.update('event_registrations', existing.id, { attendance_status: status });
-                } else {
-                    await AppDataStore.create('event_registrations', {
-                        event_id: eventId,
-                        attendee_id: entityId,
-                        attendee_type: entityType || 'prospect',
-                        attendance_status: status,
-                        event_date: activityDate || (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
-                        points_awarded: 0,
-                        created_at: new Date().toISOString()
-                    });
-                }
-            } catch (err) {
-                console.error('toggleAttendeeUnattended write-back error:', err);
-            }
-        }
+        // Not attended either way (No Show, or back to plain Registered).
+        await _mirrorRegistrationCheckIn(entityId, entityType, eventId, false, 'toggleAttendeeUnattended');
         // Refresh the modal so the Attended checkbox unticks if it was on
-        // Scale-safe: fetch only the activities for this event+date (eq event_id +
-        // activity_date) instead of the whole activities table; reapply the exact
-        // client filter for parity. Any error / missing eventId → full-table scan.
-        let acts;
-        try {
-            if (eventId == null) throw new Error('no eventId — using full scan');
-            const rows = await AppDataStore.query('activities', { event_id: eventId, activity_date: activityDate });
-            acts = (rows || []).filter(a => a.event_id == eventId && a.activity_date == activityDate);
-        } catch (e) {
-            console.warn('toggleAttendeeUnattended: scoped refresh query failed — full-table fallback', e);
-            acts = (await AppDataStore.getAll('activities')).filter(a => a.event_id == eventId && a.activity_date == activityDate);
-        }
-        if (acts.length > 0) await app.viewActivityDetails(acts[0].id);
+        await _reopenAttendeeActivity(activityId, eventId, activityDate, 'toggleAttendeeUnattended');
     };
 
-    const toggleAttendeeLate = async (attendeeId, checked, entityId, entityType, eventId, activityDate) => {
+    const toggleAttendeeLate = async (attendeeId, checked, entityId, entityType, eventId, activityDate, activityId) => {
         // Late = attended, but arrived late. Mutually exclusive with Attended /
         // Unattended in the UI. attended=true keeps every attendance count
         // (reports, KPIs, RPCs all read `attended || status==='Attended'`), and
-        // the event_registrations mirror stays 'Attended' so the points ledger
-        // and registration-based reports keep counting them too.
+        // the event_registrations mirror records them as checked in so the
+        // points ledger keeps counting them too.
         const status = checked ? 'Late' : 'Registered';
         await AppDataStore.update('event_attendees', attendeeId, { attended: checked, attendance_status: status });
         UI.toast.success(checked ? 'Marked as Late' : 'Late cleared');
 
-        if (entityId && eventId) {
-            const regStatus = checked ? 'Attended' : 'Registered';
-            try {
-                const existing = (await AppDataStore.query('event_registrations', { event_id: eventId, attendee_id: entityId }))[0];
-                if (existing) {
-                    await AppDataStore.update('event_registrations', existing.id, { attendance_status: regStatus });
-                } else {
-                    await AppDataStore.create('event_registrations', {
-                        event_id: eventId,
-                        attendee_id: entityId,
-                        attendee_type: entityType || 'prospect',
-                        attendance_status: regStatus,
-                        event_date: activityDate || (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
-                        points_awarded: 0,
-                        created_at: new Date().toISOString()
-                    });
-                }
-                if (checked) {
-                    dispatchOnEventAttendanceTriggers(entityId, entityType || 'prospect', eventId, activityDate).catch(e => console.warn('Event attendance follow-up failed:', e));
-                }
-            } catch (err) {
-                console.error('toggleAttendeeLate write-back error:', err);
-            }
+        if (checked && entityId && eventId) {
+            dispatchOnEventAttendanceTriggers(entityId, entityType || 'prospect', eventId, activityDate).catch(e => console.warn('Event attendance follow-up failed:', e));
         }
+        await _mirrorRegistrationCheckIn(entityId, entityType, eventId, checked, 'toggleAttendeeLate');
         // Refresh the modal so the Attended / Unattended checkboxes untick.
-        let acts;
-        try {
-            if (eventId == null) throw new Error('no eventId — using full scan');
-            const rows = await AppDataStore.query('activities', { event_id: eventId, activity_date: activityDate });
-            acts = (rows || []).filter(a => a.event_id == eventId && a.activity_date == activityDate);
-        } catch (e) {
-            console.warn('toggleAttendeeLate: scoped refresh query failed — full-table fallback', e);
-            acts = (await AppDataStore.getAll('activities')).filter(a => a.event_id == eventId && a.activity_date == activityDate);
-        }
-        if (acts.length > 0) await app.viewActivityDetails(acts[0].id);
+        await _reopenAttendeeActivity(activityId, eventId, activityDate, 'toggleAttendeeLate');
     };
 
     const toggleLifeChartType = async (prospectId, dateType, checked) => {
