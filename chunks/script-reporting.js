@@ -6529,7 +6529,7 @@ const _qrMonths = (from, to) => {
 // two comparison periods, which would otherwise be ~20 round trips per metric.
 const _qrLoad = async (earliest, latest) => {
     const sb = window.supabase;
-    const [users, purchases, customers, prospects, events, attendees, allActs, npo] = await Promise.all([
+    const [users, purchases, customers, prospects, events, attendees, allActs, npo, joinDates] = await Promise.all([
         AppDataStore.getAll('users', { fresh: true }),
         AppDataStore.getAll('purchases', { fresh: true }),
         AppDataStore.getAll('customers'),
@@ -6551,7 +6551,17 @@ const _qrLoad = async (earliest, latest) => {
                 return (!error && Array.isArray(data)) ? data : [];
             } catch (_) { return []; }
         })(),
+        // join_date is NOT in AppDataStore's light users select, so getAll('users')
+        // rows never carry it — NEA would always read 0. Read it directly.
+        (async () => {
+            if (!sb || typeof sb.from !== 'function') return [];
+            try {
+                const { data, error } = await sb.from('users').select('id, join_date');
+                return (!error && Array.isArray(data)) ? data : [];
+            } catch (_) { return []; }
+        })(),
     ]);
+    const joinDateById = new Map(joinDates.map(r => [String(r.id), r.join_date]));
     const userMap = {}; users.forEach(u => { userMap[String(u.id)] = u; });
     const customerMap = {}; customers.forEach(c => { customerMap[c.id] = c; });
     const prospMap = {}; prospects.forEach(p => { prospMap[String(p.id)] = p; });
@@ -6669,7 +6679,8 @@ const _qrLoad = async (earliest, latest) => {
             }
         }
         for (const u of users) {
-            const jd = u.join_date == null ? '' : String(u.join_date).slice(0, 10);
+            const rawJd = u.join_date != null ? u.join_date : joinDateById.get(String(u.id));
+            const jd = rawJd == null ? '' : String(rawJd).slice(0, 10);
             if (!jd || jd < from || jd > to || !isAgent(u) || !_recInMarket(u)) continue;
             if (u.reporting_to != null && inScope(u.reporting_to)) row(u.reporting_to).nea++;
         }

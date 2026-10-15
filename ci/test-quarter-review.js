@@ -56,7 +56,8 @@ global.AppDataStore = {
     getActivitiesInRange: async (from, to) => (DB.activities || []).filter(a => a.activity_date >= from && a.activity_date <= to),
     getById: async () => null, query: async () => [],
 };
-global.supabase = { from: () => { const q = { select: () => q, gte: () => q, lt: () => q, then: (r) => r({ data: DB.npo_sales || [], error: null }) }; return q; } };
+global.supabase = { from: (table) => { const q = { select: () => q, gte: () => q, lt: () => q,
+    then: (r) => r({ data: table === 'users' ? (DB.users_join || []) : (DB.npo_sales || []), error: null }) }; return q; } };
 
 let EXCEL = null;
 if (process.env.EXCELJS_PATH) { EXCEL = require(process.env.EXCELJS_PATH); global.ExcelJS = EXCEL; }
@@ -96,7 +97,8 @@ async function main() {
             { id: 7, full_name: 'Oo', role: 'Level 5 Team Leader', agent_code: 'EA7' },
             { id: 8, full_name: 'Lau', role: 'Level 3 Agent', agent_code: 'EA8' },
             { id: 9, full_name: 'Boss', role: 'Level 1 Super Admin' },
-            { id: 10, full_name: 'Newbie', role: 'Level 12 Agent', join_date: '2026-08-03', reporting_to: 7 },
+            // join_date deliberately absent here: the live light select drops it.
+            { id: 10, full_name: 'Newbie', role: 'Level 12 Agent', reporting_to: 7 },
         ],
         prospects: [
             { id: 1, responsible_agent_id: 7, referred_by_id: 50, referred_by_type: 'Prospect', referred_by: 'Ambassador A' },
@@ -145,6 +147,7 @@ async function main() {
             { cart_total: 30000, responsible_agent_id: 8, status: 'active', created_at: '2026-08-01T04:00:00Z' },
             { cart_total: 99999, responsible_agent_id: 8, status: 'cancelled', created_at: '2026-08-01T04:00:00Z' },
         ],
+        users_join: [{ id: 10, join_date: '2026-08-03' }],
         events: [{ id: 'e1', categories: '["老板每月主题课"]', date: '2026-08-02' }, { id: 'e2', categories: '["汇集灵活-Condo","博物馆"]', date: '2026-09-03' }],
         event_attendees: [
             { event_id: 'e1', activity_id: 900, attended: true, attendance_status: 'Attended', attendee_type: 'prospect', entity_id: 1 },
