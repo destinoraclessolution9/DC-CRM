@@ -947,6 +947,7 @@ const switchProfileTab = async (btn, tabName, cId) => {
                 const event = eventsById.get(String(a.event_id));
                 const title = a.activity_title || event?.title || event?.event_title || 'Event';
                 const status = a.attendance_status === 'No Show' ? 'No Show'
+                    : a.attendance_status === 'Late' ? 'Late'
                     : (a.attended || a.attendance_status === 'Attended') ? 'Attended'
                     : 'Registered';
                 const flags = [a.paid ? 'Paid' : null, a.ticket_created ? 'Ticket' : null]
@@ -2191,9 +2192,10 @@ const renderCustomerActivityTab = async (customer, containerId = 'profile-tab-co
         const badges = [];
         if (a._isAttendeeNote) {
             const st = a.attendance_status === 'No Show' ? 'no show'
+                : a.attendance_status === 'Late' ? 'late'
                 : (a.attended || a.attendance_status === 'Attended') ? 'attended'
                 : 'registered';
-            badges.push(`<span class="mu-badge ${st === 'attended' ? 'ok' : st === 'no show' ? 'bad' : ''}">${st === 'attended' ? '✓ ' : ''}${st}</span>`);
+            badges.push(`<span class="mu-badge ${st === 'attended' || st === 'late' ? 'ok' : st === 'no show' ? 'bad' : ''}">${st === 'attended' ? '✓ ' : st === 'late' ? '⏰ ' : ''}${st}</span>`);
         }
         if (a.is_closed || (a._closing && a._closing.is_closed)) badges.push(`<span class="mu-badge ok"><i class="fas fa-handshake"></i> Sale Closed</span>`);
         if (a.outcome) badges.push(`<span class="mu-badge ok">${escapeHtml(_OUTCOME_C[a.outcome] || a.outcome)}</span>`);

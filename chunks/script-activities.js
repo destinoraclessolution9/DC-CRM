@@ -4411,6 +4411,53 @@ My raw notes:
         if (acts.length > 0) await app.viewActivityDetails(acts[0].id);
     };
 
+    const toggleAttendeeLate = async (attendeeId, checked, entityId, entityType, eventId, activityDate) => {
+        // Late = attended, but arrived late. Mutually exclusive with Attended /
+        // Unattended in the UI. attended=true keeps every attendance count
+        // (reports, KPIs, RPCs all read `attended || status==='Attended'`), and
+        // the event_registrations mirror stays 'Attended' so the points ledger
+        // and registration-based reports keep counting them too.
+        const status = checked ? 'Late' : 'Registered';
+        await AppDataStore.update('event_attendees', attendeeId, { attended: checked, attendance_status: status });
+        UI.toast.success(checked ? 'Marked as Late' : 'Late cleared');
+
+        if (entityId && eventId) {
+            const regStatus = checked ? 'Attended' : 'Registered';
+            try {
+                const existing = (await AppDataStore.query('event_registrations', { event_id: eventId, attendee_id: entityId }))[0];
+                if (existing) {
+                    await AppDataStore.update('event_registrations', existing.id, { attendance_status: regStatus });
+                } else {
+                    await AppDataStore.create('event_registrations', {
+                        event_id: eventId,
+                        attendee_id: entityId,
+                        attendee_type: entityType || 'prospect',
+                        attendance_status: regStatus,
+                        event_date: activityDate || (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
+                        points_awarded: 0,
+                        created_at: new Date().toISOString()
+                    });
+                }
+                if (checked) {
+                    dispatchOnEventAttendanceTriggers(entityId, entityType || 'prospect', eventId, activityDate).catch(e => console.warn('Event attendance follow-up failed:', e));
+                }
+            } catch (err) {
+                console.error('toggleAttendeeLate write-back error:', err);
+            }
+        }
+        // Refresh the modal so the Attended / Unattended checkboxes untick.
+        let acts;
+        try {
+            if (eventId == null) throw new Error('no eventId — using full scan');
+            const rows = await AppDataStore.query('activities', { event_id: eventId, activity_date: activityDate });
+            acts = (rows || []).filter(a => a.event_id == eventId && a.activity_date == activityDate);
+        } catch (e) {
+            console.warn('toggleAttendeeLate: scoped refresh query failed — full-table fallback', e);
+            acts = (await AppDataStore.getAll('activities')).filter(a => a.event_id == eventId && a.activity_date == activityDate);
+        }
+        if (acts.length > 0) await app.viewActivityDetails(acts[0].id);
+    };
+
     const toggleLifeChartType = async (prospectId, dateType, checked) => {
         // Read the FRESHEST state (bypass cache) so concurrent toggles on both
         // solar and lunar don't race and overwrite each other. getByIdFull sends
@@ -7041,6 +7088,7 @@ My raw notes:
         toggleAttendeeTicket,
         toggleAttendeeAttended,
         toggleAttendeeUnattended,
+        toggleAttendeeLate,
         toggleLifeChartType,
         showAttendeeDetails,
         goToProspectEventNotes,

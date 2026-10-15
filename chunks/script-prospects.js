@@ -2750,6 +2750,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         };
         const _kind = (a) => (a._isAttendeeNote || EVENT_TYPES.includes(a.activity_type)) ? 'event' : 'meetup';
         const _attStatus = (a) => a.attendance_status === 'No Show' ? 'no show'
+            : a.attendance_status === 'Late' ? 'late'
             : (a.attended || a.attendance_status === 'Attended') ? 'attended'
             : 'registered';
         const _mm = meetupMinutesOf;
@@ -2821,7 +2822,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             const badges = [];
             if (a._isAttendeeNote) {
                 const st = _attStatus(a);
-                badges.push(`<span class="mu-badge ${st === 'attended' ? 'ok' : st === 'no show' ? 'bad' : ''}">${st === 'attended' ? '✓ ' : ''}${st}</span>`);
+                badges.push(`<span class="mu-badge ${st === 'attended' || st === 'late' ? 'ok' : st === 'no show' ? 'bad' : ''}">${st === 'attended' ? '✓ ' : st === 'late' ? '⏰ ' : ''}${st}</span>`);
             }
             const closedHere = a.is_closed || (a._closing && a._closing.is_closed);
             if (closedHere) badges.push(`<span class="mu-badge ok"><i class="fas fa-handshake"></i> Sale Closed</span>`);

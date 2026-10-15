@@ -6682,7 +6682,7 @@ Object.assign(window.app, {
     [
         'respondCoAgentInvite', 'respondConsultantInvite',
         'toggleAttendeePaid', 'toggleAttendeeTicket', 'toggleAttendeeAttended',
-        'toggleAttendeeUnattended', 'removeAgentAttendee', 'showAttendeeDetails',
+        'toggleAttendeeUnattended', 'toggleAttendeeLate', 'removeAgentAttendee', 'showAttendeeDetails',
         'toggleCoAgentSection', 'searchAgents', 'openCpsCreateEventModal',
         '_notifyHighlightSaved',
     ].forEach(n => S(n, A));
