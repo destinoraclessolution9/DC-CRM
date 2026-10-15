@@ -61,6 +61,7 @@ global.supabase = { from: () => { const q = { select: () => q, gte: () => q, lt:
 let EXCEL = null;
 if (process.env.EXCELJS_PATH) { EXCEL = require(process.env.EXCELJS_PATH); global.ExcelJS = EXCEL; }
 global.window._ensureExcelJs = async () => {};
+global.window._ensureChartJs = async () => {}; // no Chart global → charts degrade to a text placeholder
 
 const chunkPath = path.join(__dirname, '..', 'chunks', 'script-reporting.js');
 let src = fs.readFileSync(chunkPath, 'utf8');
@@ -123,6 +124,10 @@ async function main() {
             { id: 6, activity_type: 'FSA', activity_date: '2026-08-15', customer_id: 101, lead_agent_id: 7 },
             // FTF with the converted prospect record of the old customer → existing customer meeting.
             { id: 7, activity_type: 'FTF', activity_date: '2026-09-01', prospect_id: 60, lead_agent_id: 7 },
+            // Closing logged on a meeting, client never got a purchase → data check.
+            { id: 901, activity_type: 'SITE', activity_date: '2026-08-20', prospect_id: 4, lead_agent_id: 7, closing_amount: 12000 },
+            // Closing that DID become a purchase (customer 100 bought in Q3) → not flagged.
+            { id: 902, activity_type: 'OTHERS', activity_date: '2026-08-21', customer_id: 100, lead_agent_id: 7, closing_amount: 19990 },
             { id: 900, activity_type: 'EVENT', activity_date: '2026-08-02', event_id: 'e1', lead_agent_id: 9 },
             // Q2 activity for the comparison sheet.
             { id: 8, activity_type: 'CPS', activity_date: '2026-05-05', prospect_id: 3, lead_agent_id: 8 },
@@ -134,6 +139,7 @@ async function main() {
             { id: 3, customer_id: 101, date: '2026-09-05', amount: 5000, payment_method: 'Cash', agent_id: 8, item: 'Books x 2' },
             { id: 4, customer_id: 102, date: '2026-07-05', amount: 9999, payment_method: 'Cash', is_agent_package: true, item: 'DC 代理配套' },
             { id: 5, customer_id: 102, date: '2026-05-01', amount: 1000, payment_method: 'Cash', item: 'x' },
+            { id: 6, customer_id: 101, date: '2027-10-01', amount: 21980, payment_method: 'Cash', item: 'typo date' },
         ],
         npo_sales: [
             { cart_total: 30000, responsible_agent_id: 8, status: 'active', created_at: '2026-08-01T04:00:00Z' },
@@ -169,6 +175,10 @@ async function main() {
     eq('CPS# from 傳福大使', o.cpsFromCf, 3);
     eq('agent referrer is never a 傳福大使', l.cfAll.size, 0);
     eq('NEA via reporting_to', o.nea, 1);
+    eq('funnel: client meetings and closings', [o.meet, o.orders, l.orders], [2, 2, 2]);
+    const dc = D.dataCheck('2026-07-01', '2026-09-30');
+    eq('data check: closing without a sale', dc.pending.map(x => x.amount), [12000]);
+    eq('data check: impossible purchase date', dc.oddDates.map(x => x.date), ['2027-10-01']);
     eq('events: attended non-agents only, bucketed', [o.laoban, l.hj, l.mz, o.hj], [1, 1, 1, 0]);
 
     const q2 = D.agg('2026-04-01', '2026-06-30');
@@ -188,7 +198,14 @@ async function main() {
     if (EXCEL) {
         T.setRange('custom', '2026-07-01', '2026-09-30');
         const { wb } = await T._qrBuildWorkbook();
-        eq('sheet names', wb.worksheets.map(w => w.name), ['Summary', '2026 Q3', 'Comparison', 'Sales Details', 'Notes']);
+        eq('sheet names', wb.worksheets.map(w => w.name), ['Dashboard', 'Summary', '2026 Q3', 'Comparison', 'Sales Details', 'Notes']);
+        const s0 = wb.getWorksheet('Dashboard');
+        eq('dashboard tiles: sales / CPS / NC', [s0.getCell('A5').value, s0.getCell('C5').value, s0.getCell('E5').value], [50970, 4, 2]);
+        eq('dashboard tile delta vs Q2', s0.getCell('A6').value, '▲ 4997% vs 2026 Q2');
+        const txt = [];
+        s0.eachRow(r => r.eachCell(c => { if (typeof c.value === 'string') txt.push(c.value); }));
+        ok('observation names the high-effort-no-sale agent rule', txt.some(t => t.startsWith('• ')), txt.join(' | '));
+        ok('data check lists the 2027 typo-style future date', txt.some(t => t.includes('missing or impossible date')), txt.join(' | '));
         const s1 = wb.getWorksheet('Summary');
         eq('summary CPS / NC / SALES', [s1.getCell('F6').value, s1.getCell('H6').value, s1.getCell('I6').value], [4, 2, 50970]);
         eq('summary total is a formula', s1.getCell('I7').value, { formula: 'SUM(I6:I6)' });

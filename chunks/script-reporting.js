@@ -6611,6 +6611,7 @@ const _qrLoad = async (earliest, latest) => {
             if (a.activity_type === 'FSA') row(a.lead_agent_id).fsa++;
             const isMeet = CLIENT_MEETING_TYPES.includes(a.activity_type) || a.activity_type === 'GR' || (a.activity_title || '').toLowerCase().includes('golden road');
             if (isMeet) {
+                row(a.lead_agent_id).meet++;
                 const c = existingCustomerOf(a);
                 if (c) { const r = row(a.lead_agent_id); r.meetOld++; r.oldMet.add(String(c.id)); }
             }
@@ -6633,7 +6634,7 @@ const _qrLoad = async (earliest, latest) => {
             if (agentId == null || !_passesPurchaseFilter(p, agentId, userMap)) continue;
             const r = row(agentId);
             const amt = Number(p.amount) || 0;
-            r.sales += amt;
+            r.sales += amt; r.orders++;
             if (p.payment_method === 'POP') { r.pop++; r.popRm += amt; }
             else if (p.payment_method !== 'NPO') r.doSales += amt;
             const cust = customerMap[p.customer_id];
@@ -6653,7 +6654,7 @@ const _qrLoad = async (earliest, latest) => {
             const d = n.created_at ? toLocalDateStr(new Date(n.created_at)) : '';
             if (!d || d < from || d > to || !inScope(n.responsible_agent_id)) continue;
             const r = row(n.responsible_agent_id);
-            r.pop++; r.popRm += Number(n.cart_total) || 0;
+            r.pop++; r.popRm += Number(n.cart_total) || 0; r.orders++;
         }
         for (const r of m.values()) {
             for (const cid of r.oldMet) if (boughtBy.has(cid)) { r.oldBought.add(cid); r.oldOrders += boughtBy.get(cid); }
@@ -6696,21 +6697,196 @@ const _qrLoad = async (earliest, latest) => {
     const custCount = new Map();
     customers.forEach(c => { if (c.responsible_agent_id != null && _recInMarket(c)) custCount.set(String(c.responsible_agent_id), (custCount.get(String(c.responsible_agent_id)) || 0) + 1); });
     const agents = users.filter(u => isAgent(u) && _recInMarket(u) && inScope(u.id));
-    return { agg, agents, custCount, userMap, customerMap };
+
+    // Data check for the dashboard: things that make the sheet disagree with what
+    // the team believes happened. (1) Closings logged on a meeting (closing_amount)
+    // whose client has no purchase in the window — usually a closing record still
+    // waiting for approval. (2) Purchases with a missing or implausible date.
+    const dataCheck = (from, to) => {
+        const boughtCust = new Set(purchases.filter(p => p.date && p.date >= from && p.date <= to).map(p => String(p.customer_id)));
+        const pending = [];
+        for (const a of acts) {
+            if (a.activity_date < from || a.activity_date > to || !inScope(a.lead_agent_id)) continue;
+            const amt = Number(a.closing_amount) || Number(a.amount_closed) || 0;
+            if (amt <= 0) continue;
+            const c = a.customer_id ? customerMap[a.customer_id] : (a.prospect_id ? custByProspect.get(String(a.prospect_id)) : null);
+            if (c && boughtCust.has(String(c.id))) continue;
+            pending.push({ date: a.activity_date, agent: (userMap[String(a.lead_agent_id)] || {}).full_name || '', amount: amt, title: a.activity_title || a.activity_type || '' });
+        }
+        const today = toLocalDateStr(new Date());
+        const oddDates = purchases.filter(p => !p.is_agent_package && inScope(_getPurchaseAgentId(p, customerMap)) && (!p.date || p.date > today || p.date < '2015-01-01'))
+            .map(p => ({ date: p.date || '(none)', agent: (userMap[String(_getPurchaseAgentId(p, customerMap))] || {}).full_name || '', amount: Number(p.amount) || 0, title: p.item || '' }));
+        return { pending, oddDates };
+    };
+    return { agg, agents, custCount, userMap, customerMap, dataCheck };
 };
 
 const _qrBlankRow = () => ({
     cps: 0, fsa: 0, nc: 0, sales: 0, doSales: 0, pop: 0, popRm: 0, pr: 0, flexi: 0, art: 0,
-    meetOld: 0, oldMet: new Set(), oldBought: new Set(), oldOrders: 0,
+    meet: 0, orders: 0, meetOld: 0, oldMet: new Set(), oldBought: new Set(), oldOrders: 0,
     cfAll: new Set(), cfActive: new Set(), cfNew: new Set(), cpsFromCf: 0, nea: 0,
     zhishi: 0, laoban: 0, fenxiang: 0, mz: 0, hj: 0, salesRows: [],
 });
+
+// Draw a Chart.js config onto a detached canvas and return it as a PNG data URL.
+// ExcelJS can't write native Excel charts, so the dashboard embeds pictures.
+// Returns null when Chart.js can't load (offline / test harness) so the
+// workbook still builds — just without that picture.
+const _qrChartPng = async (config, w, h) => {
+    try {
+        await window._ensureChartJs();
+        if (typeof Chart === 'undefined' || typeof document === 'undefined' || !document.createElement) return null;
+        const canvas = document.createElement('canvas');
+        if (!canvas || typeof canvas.getContext !== 'function') return null;
+        canvas.width = w; canvas.height = h;
+        const whiteBg = { id: 'qrWhiteBg', beforeDraw: (c) => { const x = c.ctx; x.save(); x.fillStyle = '#ffffff'; x.fillRect(0, 0, c.width, c.height); x.restore(); } };
+        const chart = new Chart(canvas, {
+            ...config,
+            plugins: [whiteBg, ...(config.plugins || [])],
+            options: { responsive: false, animation: false, devicePixelRatio: 2, ...config.options,
+                plugins: { legend: { display: false }, ...((config.options || {}).plugins || {}),
+                    title: { display: true, text: config.title, align: 'start', color: '#111827', font: { size: 15, weight: 'bold' }, padding: { bottom: 12 } } } },
+        });
+        const url = chart.toBase64Image('image/png');
+        chart.destroy();
+        return url;
+    } catch (e) {
+        console.warn('[quarterReview] chart render failed:', e && e.message);
+        return null;
+    }
+};
+
+const _qrDashboardSheet = async (wb, { P, P0, D, cur, prev, agents, get, sumOf, trendMonths, name, styleHead, box, RM, GOLD, TOT }) => {
+    const ws = wb.addWorksheet('Dashboard', { views: [{ showGridLines: false }] });
+    for (let c = 1; c <= 12; c++) ws.getColumn(c).width = 11.5;
+    ws.getCell('A1').value = `${P0} QUARTER REVIEW — DASHBOARD`;
+    ws.getCell('A1').font = { bold: true, size: 16 };
+    ws.getCell('A2').value = `Period ${P.current.from} → ${P.current.to} · compared with ${P.prev[0].label} · detail tables on the next sheets`;
+    ws.getCell('A2').font = { italic: true, color: { argb: 'FF6B7280' } };
+
+    const S = (map, k) => sumOf(map, k);
+    const BLUE = '#2a78d6', GREY = '#B4B2A9', RED = '#e34948', GREEN = '#1baf7a', AMBER = '#eda100';
+    const rmK = (v) => 'RM' + Math.round(v / 1000) + 'k';
+
+    // ── Targets (only when the range is a calendar quarter) ──
+    let target = null;
+    if (/Q\d/.test(P0)) {
+        try {
+            const f = new Date(P.current.from + 'T00:00:00');
+            const rows = (await AppDataStore.getAll('quarterly_targets')) || [];
+            target = rows.find(t => Number(t.year) === f.getFullYear() && Number(t.quarter) === Math.floor(f.getMonth() / 3) + 1) || null;
+        } catch (_) { target = null; }
+    }
+
+    // ── Headline tiles: value, change vs previous period, % of target ──
+    const tiles = [
+        { label: 'Sales RM', v: S(cur, 'sales'), p: S(prev[0], 'sales'), t: target && target.total_sales_target, rm: true },
+        { label: 'CPS', v: S(cur, 'cps'), p: S(prev[0], 'cps'), t: target && target.cps_count_target },
+        { label: 'New customers', v: S(cur, 'nc'), p: S(prev[0], 'nc'), t: target && target.new_customers_target },
+        { label: 'POP / NPO cases', v: S(cur, 'pop'), p: S(prev[0], 'pop'), t: target && target.pop_case_count_target },
+        { label: '傳福大使 active', v: S(cur, 'cfActive'), p: S(prev[0], 'cfActive'), sub: `of ${S(cur, 'cfAll')} total` },
+        { label: 'Event headcount', v: ['zhishi', 'laoban', 'fenxiang', 'mz', 'hj'].reduce((s, k) => s + S(cur, k), 0), p: ['zhishi', 'laoban', 'fenxiang', 'mz', 'hj'].reduce((s, k) => s + S(prev[0], k), 0) },
+    ];
+    tiles.forEach((t, i) => {
+        const c = 1 + i * 2;
+        ws.mergeCells(4, c, 4, c + 1); ws.mergeCells(5, c, 5, c + 1); ws.mergeCells(6, c, 6, c + 1); ws.mergeCells(7, c, 7, c + 1);
+        const fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF7F4ED' } };
+        for (let r = 4; r <= 7; r++) for (let cc = c; cc <= c + 1; cc++) { ws.getCell(r, cc).fill = fill; ws.getCell(r, cc).alignment = { horizontal: 'center', vertical: 'middle' }; }
+        ws.getCell(4, c).value = t.label; ws.getCell(4, c).font = { color: { argb: 'FF6B7280' }, size: 10 };
+        ws.getCell(5, c).value = t.v; ws.getCell(5, c).numFmt = t.rm ? RM : '0'; ws.getCell(5, c).font = { bold: true, size: 20 };
+        const d = t.p ? (t.v - t.p) / t.p : null;
+        ws.getCell(6, c).value = d == null ? (t.v ? 'new vs prev' : '—') : `${d >= 0 ? '▲' : '▼'} ${Math.abs(Math.round(d * 100))}% vs ${P.prev[0].label}`;
+        ws.getCell(6, c).font = { size: 10, color: { argb: d == null ? 'FF6B7280' : d >= 0 ? 'FF15803D' : 'FFB91C1C' } };
+        ws.getCell(7, c).value = t.t ? `${Math.round(t.v / t.t * 100)}% of target ${t.rm ? rmK(t.t) : t.t}` : (t.sub || '');
+        ws.getCell(7, c).font = { size: 10, color: { argb: 'FF6B7280' } };
+    });
+    ws.getRow(5).height = 30;
+
+    // ── Charts ──
+    const W = 640, H = 300;
+    const trendSales = trendMonths.map(mo => S(D.agg(mo.from, mo.to), 'sales'));
+    const inCur = trendMonths.map(mo => mo.to >= P.current.from);
+    const ranked = agents.map(u => ({ n: name(u), c: get(cur, u.id).sales, p: get(prev[0], u.id).sales, cps: get(cur, u.id).cps }))
+        .filter(x => x.c || x.p).sort((a, b) => b.c - a.c || b.p - a.p).slice(0, 10);
+    const scatter = agents.map(u => ({ n: name(u), x: get(cur, u.id).cps, y: get(cur, u.id).sales })).filter(p => p.x || p.y);
+    const nameLabels = { id: 'qrNames', afterDatasetsDraw: (c) => {
+        const x = c.ctx; x.save(); x.font = '11px sans-serif'; x.fillStyle = '#374151';
+        c.getDatasetMeta(0).data.forEach((pt, i) => { const r = scatter[i]; if (r) x.fillText(r.n.split(/\s+/)[0], pt.x + 8, pt.y + 4); });
+        x.restore();
+    } };
+    const axis = (fmt) => ({ grid: { color: '#e5e7eb' }, ticks: fmt ? { callback: fmt } : {} });
+    const cfAll = S(cur, 'cfAll'), cfAct = S(cur, 'cfActive'), cfNew = S(cur, 'cfNew');
+    const charts = [
+        { title: 'Sales by month (last 6 months)', config: { type: 'bar', data: { labels: trendMonths.map(m => m.label), datasets: [{ data: trendSales, backgroundColor: inCur.map(b => b ? BLUE : GREY), borderRadius: 4, maxBarThickness: 40 }] }, options: { scales: { y: axis(rmK), x: { grid: { display: false } } } } } },
+        { title: `Sales by agent — ${P0} vs ${P.prev[0].label}`, config: { type: 'bar', data: { labels: ranked.map(r => r.n), datasets: [{ label: P0, data: ranked.map(r => r.c), backgroundColor: BLUE, borderRadius: 3, maxBarThickness: 14 }, { label: P.prev[0].label, data: ranked.map(r => r.p), backgroundColor: GREY, borderRadius: 3, maxBarThickness: 14 }] }, options: { indexAxis: 'y', plugins: { legend: { display: true, position: 'bottom' } }, scales: { x: axis(rmK), y: { grid: { display: false } } } } } },
+        { title: 'Effort vs result — CPS vs sales per agent (red = 3+ CPS, no sale)', config: { type: 'scatter', data: { datasets: [{ data: scatter.map(p => ({ x: p.x, y: p.y })), backgroundColor: scatter.map(p => (p.x >= 3 && !p.y) ? RED : BLUE), pointRadius: 6 }] }, plugins: [nameLabels], options: { layout: { padding: { right: 40, top: 6 } }, scales: { x: { ...axis(), title: { display: true, text: 'CPS' }, suggestedMin: 0 }, y: { ...axis(rmK), suggestedMin: 0 } } } } },
+        { title: 'Funnel — CPS → client meetings → closings → new customers', config: { type: 'bar', data: { labels: ['CPS', 'Client meetings', 'Closings', 'New customers'], datasets: [{ data: [S(cur, 'cps'), S(cur, 'meet'), S(cur, 'orders'), S(cur, 'nc')], backgroundColor: [BLUE, BLUE, GREEN, GREEN], borderRadius: 4, maxBarThickness: 26 }] }, options: { indexAxis: 'y', scales: { x: axis(), y: { grid: { display: false } } } } } },
+        { title: `傳福大使 health — ${cfAct} of ${cfAll} referred this period`, config: { type: 'bar', data: { labels: ['Total (to date)', 'Active this period', 'Quiet', 'New this period'], datasets: [{ data: [cfAll, cfAct, cfAll - cfAct, cfNew], backgroundColor: [GREY, GREEN, AMBER, BLUE], borderRadius: 4, maxBarThickness: 40 }] }, options: { scales: { y: axis(), x: { grid: { display: false } } } } } },
+        { title: 'Event headcount by type (prospects & customers)', config: { type: 'bar', data: { labels: ['知识讲座', '老板讲座', '分享会', 'MZ', 'HJ'], datasets: [{ data: ['zhishi', 'laoban', 'fenxiang', 'mz', 'hj'].map(k => S(cur, k)), backgroundColor: BLUE, borderRadius: 4, maxBarThickness: 40 }] }, options: { scales: { y: axis(), x: { grid: { display: false } } } } } },
+    ];
+    let images = 0;
+    for (let i = 0; i < charts.length; i++) {
+        const png = await _qrChartPng({ ...charts[i].config, title: charts[i].title }, W, H);
+        const row = 8 + Math.floor(i / 2) * 16, col = (i % 2) * 6;
+        if (png) {
+            const id = wb.addImage({ base64: png, extension: 'png' });
+            ws.addImage(id, { tl: { col, row }, ext: { width: 500, height: 234 } });
+            images++;
+        } else {
+            ws.getCell(row + 1, col + 1).value = charts[i].title + ' (chart unavailable)';
+        }
+    }
+
+    // ── Observations, generated from the numbers ──
+    let r = 8 + 3 * 16 + 1;
+    ws.getCell(r, 1).value = 'Key observations'; ws.getCell(r, 1).font = { bold: true, size: 13 };
+    const obs = [];
+    const sv = S(cur, 'sales'), sp = S(prev[0], 'sales');
+    if (sp) obs.push(`Sales ${sv >= sp ? 'up' : 'down'} ${Math.abs(Math.round((sv - sp) / sp * 100))}% vs ${P.prev[0].label} (${rmK(sv)} vs ${rmK(sp)}).`);
+    const top = ranked[0]; if (top && sv) obs.push(`${top.n} brought ${Math.round(top.c / sv * 100)}% of sales; ${ranked.filter(x => x.c).length} agent(s) closed a sale.`);
+    const stuck = scatter.filter(p => p.x >= 3 && !p.y).sort((a, b) => b.x - a.x);
+    if (stuck.length) obs.push(`High effort, no sale yet: ${stuck.map(p => `${p.n} (${p.x} CPS)`).join(', ')} — review their pipeline.`);
+    const cps = S(cur, 'cps'), nc = S(cur, 'nc');
+    if (cps) obs.push(`CPS → new customer conversion ${Math.round(nc / cps * 100)}% (${nc} of ${cps}).`);
+    if (cfAll) obs.push(`${cfAll - cfAct} of ${cfAll} 傳福大使 (${Math.round((cfAll - cfAct) / cfAll * 100)}%) referred nobody this period; ${cfNew} new joined.`);
+    const quiet = agents.filter(u => { const x = get(cur, u.id); return !x.cps && !x.sales && !x.meet; }).length;
+    if (quiet) obs.push(`${quiet} of ${agents.length} agents had no CPS, meeting or sale this period.`);
+    obs.forEach((t, i) => { ws.mergeCells(r + 1 + i, 1, r + 1 + i, 12); ws.getCell(r + 1 + i, 1).value = '• ' + t; ws.getCell(r + 1 + i, 1).alignment = { wrapText: true }; });
+    r += obs.length + 3;
+
+    // ── Data check ──
+    const dc = D.dataCheck(P.current.from, P.current.to);
+    ws.getCell(r, 1).value = 'Data check — fix these before the meeting'; ws.getCell(r, 1).font = { bold: true, size: 13 };
+    const pendSum = dc.pending.reduce((s, x) => s + x.amount, 0);
+    ws.getCell(r + 1, 1).value = dc.pending.length
+        ? `${dc.pending.length} closing(s) worth RM${Math.round(pendSum).toLocaleString()} were logged on a meeting but have no matching sale — most likely closing records not yet approved. They are NOT in SALES RM.`
+        : 'Every closing logged on a meeting has a matching sale.';
+    ws.mergeCells(r + 1, 1, r + 1, 12); ws.getCell(r + 1, 1).alignment = { wrapText: true }; ws.getRow(r + 1).height = 30;
+    const tableAt = (startRow, rows, heading) => {
+        if (!rows.length) return startRow;
+        ws.getCell(startRow, 1).value = heading; ws.getCell(startRow, 1).font = { bold: true };
+        ['Date', 'Agent', 'Amount (RM)', 'Item / activity'].forEach((h, i) => { const c = ws.getCell(startRow + 1, [1, 3, 6, 8][i]); c.value = h; styleHead(c); });
+        rows.slice(0, 20).forEach((x, i) => {
+            const rr = startRow + 2 + i;
+            ws.getCell(rr, 1).value = x.date; ws.getCell(rr, 3).value = x.agent;
+            ws.getCell(rr, 6).value = x.amount; ws.getCell(rr, 6).numFmt = RM; ws.getCell(rr, 8).value = String(x.title).slice(0, 80);
+        });
+        return startRow + 3 + Math.min(rows.length, 20);
+    };
+    let nr = tableAt(r + 3, dc.pending.sort((a, b) => String(a.date).localeCompare(String(b.date))), 'Closings without a sale');
+    nr = tableAt(nr, dc.oddDates, 'Sales with a missing or impossible date');
+    return { images, pending: dc.pending.length, oddDates: dc.oddDates.length };
+};
 
 const _qrBuildWorkbook = async () => {
     const ranges = getDateRanges(_currentTimeFilter, _customDateFrom, _customDateTo);
     const P = _qrPeriods(ranges.current.from, ranges.current.to);
     const months = _qrMonths(P.current.from, P.current.to);
-    const D = await _qrLoad(P.prev[1].from, P.current.to);
+    // Six calendar months ending with the period's last month, for the trend chart.
+    const _toD = new Date(P.current.to + 'T00:00:00');
+    const trendMonths = _qrMonths(toLocalDateStr(new Date(_toD.getFullYear(), _toD.getMonth() - 5, 1)), P.current.to);
+    const earliest = trendMonths[0].from < P.prev[1].from ? trendMonths[0].from : P.prev[1].from;
+    const D = await _qrLoad(earliest, P.current.to);
     const cur = D.agg(P.current.from, P.current.to);
     const byMonth = months.map(mo => D.agg(mo.from, mo.to));
     const prev = P.prev.map(p => D.agg(p.from, p.to));
@@ -6777,6 +6953,9 @@ const _qrBuildWorkbook = async () => {
     const sumOf = (map, k) => agents.reduce((s, u) => { const v = get(map, u.id)[k]; return s + (typeof v === 'number' ? v : v.size); }, 0);
     const sum = (k) => sumOf(cur, k);
     const P0 = P.current.label;
+
+    // ── Sheet 0: Dashboard (charts first, tables behind) ────────────────────
+    await _qrDashboardSheet(wb, { P, P0, D, cur, prev, agents, get, sumOf, trendMonths, name, styleHead, box, RM, GOLD, TOT });
 
     // ── Sheet 1: Summary ────────────────────────────────────────────────────
     const s1 = wb.addWorksheet('Summary', { views: [{ state: 'frozen', xSplit: 2 }] });
