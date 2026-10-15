@@ -313,7 +313,15 @@
         return 'UNKNOWN';
     };
 
-    const eggClassifyChannel = (groupName, config) => {
+    const eggClassifyChannel = (groupName, config, productCode) => {
+        // Product code prefix is authoritative: FM… and AGENT… are ONLINE
+        // codes, FW… are WHOLESALE codes. Grouping by agent group alone
+        // misfiled online codes sold by agents whose group is not in the list
+        // below (e.g. group "Tiffany" buying FMLENX068 landed in Wholesale).
+        const code = String(productCode || '').trim().toUpperCase();
+        if (code.startsWith('AGENT') || code.startsWith('FM')) return 'Online';
+        if (code.startsWith('FW')) return 'Wholesale';
+        // Unknown / blank code → legacy group-name rule.
         // Rows that match a name in `wholesale_groups` are actually the agent-
         // managed ONLINE orders (the config name is historical — the list holds
         // agent/group identifiers that sell via the online channel). Everything
@@ -381,7 +389,7 @@
             // If date is unparseable, include it (don't drop) — better to show than hide
             if (od && od > todayEnd) { droppedFutureDated++; continue; }
 
-            const channel = eggClassifyChannel(r.group_name, config);
+            const channel = eggClassifyChannel(r.group_name, config, r.product_code);
             const normalized = {
                 ...r,
                 product,
