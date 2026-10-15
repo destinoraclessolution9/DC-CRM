@@ -4313,6 +4313,33 @@ My raw notes:
         await AppDataStore.update('event_attendees', attendeeId, { ticket_created: checked });
     };
 
+    // In-place refresh after an attendance tick: Attended / Unattended / Late
+    // are mutually exclusive, so a tick just unticks its siblings in the same
+    // attendee row. No modal re-render — re-opening the activity after every
+    // tick closed and reopened the popup and lost the scroll position, which
+    // made taking attendance down a long list painful. Returns false when the
+    // checkbox element isn't available so the caller can fall back to reopening.
+    const _syncAttendanceSiblings = (el, checked) => {
+        const row = el && el.closest ? el.closest('.info-row') : null;
+        if (!row) return false;
+        if (checked) row.querySelectorAll('input[data-att-kind]').forEach(cb => { if (cb !== el) cb.checked = false; });
+        return true;
+    };
+
+    // Save the event_attendees row for a tick; on failure undo the tick and
+    // tell the user, so the checkbox never shows a state that wasn't saved.
+    const _saveAttendanceTick = async (el, checked, attendeeId, patch) => {
+        try {
+            await AppDataStore.update('event_attendees', attendeeId, patch);
+            return true;
+        } catch (err) {
+            console.error('Attendance save failed:', err);
+            if (el) el.checked = !checked;
+            UI.toast.error('Could not save attendance — please try again');
+            return false;
+        }
+    };
+
     // Re-render the activity modal after an attendance toggle so the mutually
     // exclusive checkboxes refresh. Reopen the EXACT activity the user was on —
     // an EVENT_CLOSING record can share the same event_id + activity_date, and
@@ -4362,14 +4389,17 @@ My raw notes:
         }
     };
 
-    const toggleAttendeeAttended = async (attendeeId, checked, entityId, entityType, eventId, activityDate, activityId) => {
+    const toggleAttendeeAttended = async (attendeeId, checked, entityId, entityType, eventId, activityDate, activityId, el) => {
         const status = checked ? 'Attended' : 'Registered';
-        await AppDataStore.update('event_attendees', attendeeId, { attended: checked, attendance_status: status });
+        if (!await _saveAttendanceTick(el, checked, attendeeId, { attended: checked, attendance_status: status })) return;
         // This update IS the record of attendance — the profile reads
         // event_attendees directly now — so confirm it here rather than inside
         // the event_registrations mirror. Previously a failed mirror-write
         // swallowed the toast entirely and the tick looked like it did nothing.
         UI.toast.success(checked ? 'Marked as Attended' : 'Attendance removed');
+        // Untick the sibling Attended / Unattended / Late boxes in place; only
+        // without the checkbox element fall back to reopening the activity.
+        if (!_syncAttendanceSiblings(el, checked)) await _reopenAttendeeActivity(activityId, eventId, activityDate, 'toggleAttendeeAttended');
 
         // Trigger follow-up: event attendance triggers (data-driven). Keyed off the
         // event_attendees write above, not the registrations mirror, so a mirror
@@ -4378,41 +4408,41 @@ My raw notes:
             dispatchOnEventAttendanceTriggers(entityId, entityType || 'prospect', eventId, activityDate).catch(e => console.warn('Event attendance follow-up failed:', e));
         }
         await _mirrorRegistrationCheckIn(entityId, entityType, eventId, checked, 'toggleAttendeeAttended');
-        // Refresh the modal so the opposite 'Unattended' checkbox unticks (mutual exclusion).
-        await _reopenAttendeeActivity(activityId, eventId, activityDate, 'toggleAttendeeAttended');
     };
 
-    const toggleAttendeeUnattended = async (attendeeId, checked, entityId, entityType, eventId, activityDate, activityId) => {
+    const toggleAttendeeUnattended = async (attendeeId, checked, entityId, entityType, eventId, activityDate, activityId, el) => {
         // Mutually exclusive with Attended — checking Unattended marks as No Show, unchecking
         // returns to plain Registered.
         const status = checked ? 'No Show' : 'Registered';
-        await AppDataStore.update('event_attendees', attendeeId, { attended: false, attendance_status: status });
+        if (!await _saveAttendanceTick(el, checked, attendeeId, { attended: false, attendance_status: status })) return;
         // Confirm off the attendee write (see toggleAttendeeAttended) — the
         // registrations mirror below is best-effort and must not own the toast.
         UI.toast.success(checked ? 'Marked as Unattended (No Show)' : 'Unattended cleared');
+        // Untick the sibling Attended / Unattended / Late boxes in place; only
+        // without the checkbox element fall back to reopening the activity.
+        if (!_syncAttendanceSiblings(el, checked)) await _reopenAttendeeActivity(activityId, eventId, activityDate, 'toggleAttendeeUnattended');
 
         // Not attended either way (No Show, or back to plain Registered).
         await _mirrorRegistrationCheckIn(entityId, entityType, eventId, false, 'toggleAttendeeUnattended');
-        // Refresh the modal so the Attended checkbox unticks if it was on
-        await _reopenAttendeeActivity(activityId, eventId, activityDate, 'toggleAttendeeUnattended');
     };
 
-    const toggleAttendeeLate = async (attendeeId, checked, entityId, entityType, eventId, activityDate, activityId) => {
+    const toggleAttendeeLate = async (attendeeId, checked, entityId, entityType, eventId, activityDate, activityId, el) => {
         // Late = attended, but arrived late. Mutually exclusive with Attended /
         // Unattended in the UI. attended=true keeps every attendance count
         // (reports, KPIs, RPCs all read `attended || status==='Attended'`), and
         // the event_registrations mirror records them as checked in so the
         // points ledger keeps counting them too.
         const status = checked ? 'Late' : 'Registered';
-        await AppDataStore.update('event_attendees', attendeeId, { attended: checked, attendance_status: status });
+        if (!await _saveAttendanceTick(el, checked, attendeeId, { attended: checked, attendance_status: status })) return;
         UI.toast.success(checked ? 'Marked as Late' : 'Late cleared');
+        // Untick the sibling Attended / Unattended / Late boxes in place; only
+        // without the checkbox element fall back to reopening the activity.
+        if (!_syncAttendanceSiblings(el, checked)) await _reopenAttendeeActivity(activityId, eventId, activityDate, 'toggleAttendeeLate');
 
         if (checked && entityId && eventId) {
             dispatchOnEventAttendanceTriggers(entityId, entityType || 'prospect', eventId, activityDate).catch(e => console.warn('Event attendance follow-up failed:', e));
         }
         await _mirrorRegistrationCheckIn(entityId, entityType, eventId, checked, 'toggleAttendeeLate');
-        // Refresh the modal so the Attended / Unattended checkboxes untick.
-        await _reopenAttendeeActivity(activityId, eventId, activityDate, 'toggleAttendeeLate');
     };
 
     const toggleLifeChartType = async (prospectId, dateType, checked) => {
