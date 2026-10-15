@@ -125,6 +125,13 @@ const switchCustomerTab = async (tabName) => {
 };
 
 const showCustomersView = async (container) => {
+    // Management (L<=4) as before, plus anyone the Super Admin granted "approve
+    // sales" (can_approve_sales RPC — the same check the database enforces).
+    let _showApprovalQueue = _getUserLevel(_state.cu) <= 4;
+    if (!_showApprovalQueue && window.supabase?.rpc) {
+        try { const { data, error } = await window.supabase.rpc('can_approve_sales'); _showApprovalQueue = !error && data === true; }
+        catch (_) { _showApprovalQueue = false; }
+    }
     container.innerHTML = `
         <div class="customers-view">
             <div class="prospects-header">
@@ -147,7 +154,7 @@ const showCustomersView = async (container) => {
                 <span>⚠️ DELETE IS NOT AVAILABLE - Customer records are permanent and cannot be deleted under any circumstances.</span>
             </div>
 
-            ${(_getUserLevel(_state.cu) <= 4) ? `
+            ${_showApprovalQueue ? `
             <div id="approval-queue-section" style="margin-bottom:24px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
                     <h2 style="font-size:18px; font-weight:600; display:flex; align-items:center; gap:8px; margin:0;">

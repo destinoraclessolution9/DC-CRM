@@ -74,6 +74,28 @@
     // same sale (purchases row + adjustCustomerLtv) more than once.
     const _queueInFlight = window._queueInFlight || (window._queueInFlight = new Set());
 
+    // Who may approve: management (L<=4, as before) OR a user the Super Admin
+    // granted "approve_sales" (Admin → user_view_overrides.functions). The grant
+    // lives server-side; can_approve_sales() is the same check the approval_queue
+    // RLS and the prospects guard use, so the button and the database agree.
+    // Cached per signed-in user for the session.
+    let _approverCache = { uid: null, p: null };
+    const _canApprove = async () => {
+        if (isManagement(_state.cu)) return true;
+        const uid = _state.cu?.id;
+        if (!uid || !window.supabase?.rpc) return false;
+        if (_approverCache.uid !== uid) {
+            _approverCache = { uid, p: (async () => {
+                try { const { data, error } = await window.supabase.rpc('can_approve_sales'); return !error && data === true; }
+                catch (_) { return false; }
+            })() };
+        }
+        return _approverCache.p;
+    };
+    // A granted approver (not management) handles sale + conversion requests only.
+    const _APPROVER_TYPES = new Set(['new_sale', 'new_customer']);
+    const _isGrantedApproverOnly = () => !isManagement(_state.cu);
+
 const renderApprovalQueue = async () => {
     const tbody = document.getElementById('approval-queue-body');
     if (!tbody) return;
@@ -101,6 +123,7 @@ const renderApprovalQueue = async () => {
     const pending = allEntries
         .filter(e => e.status === 'pending')
         .filter(e => e.approval_type !== 'info_update' || convertedIds.has(String(e.prospect_id)))
+        .filter(e => !_isGrantedApproverOnly() || _APPROVER_TYPES.has(e.approval_type))
         .sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at));
 
     const countEl = document.getElementById('approval-queue-count');
@@ -247,7 +270,7 @@ const approveQueueEntry = async (entryId) => {
     // submitting agent already owns (so RLS does not stop a self-approval). Re-check
     // the caller's level here so an agent can't book their own commission-bearing
     // sale by calling app.approveQueueEntry(id) from the console / a crafted onclick.
-    if (!isManagement(_state.cu)) return UI.toast.error('Not permitted');
+    if (!(await _canApprove())) return UI.toast.error('Not permitted');
     const entry = await AppDataStore.getById('approval_queue', entryId);
     if (!entry || entry.status !== 'pending') return UI.toast.error('Entry not found or already processed.');
 
@@ -272,7 +295,7 @@ const approveQueueEntry = async (entryId) => {
         // when the conversion actually failed (which would silently lose the request).
         await approveProspectConversion(entry.prospect_id);
         await renderApprovalQueue();
-        await window.app.renderCustomersTable();
+        await (window.app.renderCustomersTable || (async () => {}))();
         return;
     } else if (entry.approval_type === 'info_update') {
         const prospect = await AppDataStore.getById('prospects', entry.prospect_id);
@@ -312,7 +335,31 @@ const approveQueueEntry = async (entryId) => {
             }
         }
     } else if (entry.approval_type === 'new_sale') {
-        const prospect = await AppDataStore.getById('prospects', entry.prospect_id);
+        let prospect = await AppDataStore.getById('prospects', entry.prospect_id);
+        // First sale of a prospect who is not a customer yet: the sale is booked by
+        // the paired conversion. Approving this row on its own used to archive the
+        // closing record WITHOUT booking it — if the conversion was approved after
+        // that, it found no closing record and the sale was lost. So approve the
+        // conversion here (it books the sale and archives the record), then close
+        // this row.
+        if (prospect && prospect.status !== 'converted' && prospect.conversion_status !== 'approved') {
+            let pendingConv = null;
+            try {
+                const rows = await AppDataStore.query('approval_queue', { prospect_id: entry.prospect_id });
+                pendingConv = (rows || []).find(e => e.approval_type === 'new_customer' && e.status === 'pending') || null;
+            } catch (_) { pendingConv = null; }
+            if (pendingConv) {
+                await approveProspectConversion(entry.prospect_id);
+                prospect = await AppDataStore.getById('prospects', entry.prospect_id);
+                if (prospect?.status !== 'converted') return; // conversion failed — it already showed the error
+                await AppDataStore.update('approval_queue', entryId, { status: 'approved', reviewed_by: _state.cu?.id, reviewed_at: now });
+                UI.hideModal();
+                UI.toast.success('Approved — customer created and sale recorded.');
+                await renderApprovalQueue();
+                await (window.app.renderCustomersTable || (async () => {}))();
+                return;
+            }
+        }
         if (prospect?.status === 'converted') {
             // Scale-safe: fetch only the customer linked to this prospect (eq
             // converted_from_prospect_id) instead of the whole customers table.
@@ -426,7 +473,7 @@ const approveQueueEntry = async (entryId) => {
     UI.hideModal();
     UI.toast.success('Approved successfully!');
     await renderApprovalQueue();
-    await window.app.renderCustomersTable();
+    await (window.app.renderCustomersTable || (async () => {}))();
     } finally {
         _queueInFlight.delete(_queueKey);
     }
@@ -434,7 +481,7 @@ const approveQueueEntry = async (entryId) => {
 
 const rejectQueueEntry = async (entryId) => {
     // Authz (audit security-authz): manager-only — same rationale as approveQueueEntry.
-    if (!isManagement(_state.cu)) return UI.toast.error('Not permitted');
+    if (!(await _canApprove())) return UI.toast.error('Not permitted');
     const entry = await AppDataStore.getById('approval_queue', entryId);
     if (!entry || entry.status !== 'pending') return UI.toast.error('Entry not found or already processed.');
 
@@ -459,7 +506,7 @@ const confirmRejectQueueEntry = async (entryId) => {
     // Authz (audit security-authz): this is the function that actually persists the
     // rejection (reverts prospect fields + marks the queue row rejected), so re-gate
     // it too — rejectQueueEntry only opens the modal.
-    if (!isManagement(_state.cu)) return UI.toast.error('Not permitted');
+    if (!(await _canApprove())) return UI.toast.error('Not permitted');
     const reason = document.getElementById('reject-reason')?.value?.trim() || '';
     const entry = await AppDataStore.getById('approval_queue', entryId);
     if (!entry) return;
@@ -513,7 +560,7 @@ const approveClosingRecord = async (prospectId) => {
     // converts prospects to customers and adjusts lifetime_value — an agent must
     // not be able to self-approve their own sale by calling app.approveClosingRecord
     // directly. The UI only renders the approve control at L<=4.
-    if (!isManagement(_state.cu)) return UI.toast.error('Not permitted');
+    if (!(await _canApprove())) return UI.toast.error('Not permitted');
     const prospect = await AppDataStore.getById('prospects', prospectId);
     if (!prospect?.closing_record) return UI.toast.error('No closing record found');
     const isAlreadyConverted = prospect.status === 'converted' || prospect.conversion_status === 'approved';
@@ -620,7 +667,7 @@ const rejectClosingRecord = async (prospectId) => {
     // mutates a teammate's prospect (closing_record back to 'draft' + rejected_at), and
     // the handler lives on window.app where RLS does not stop a same-team write, so an
     // L5 team leader (never shown reject controls) could bounce a sale from the console.
-    if (!isManagement(_state.cu)) return UI.toast.error('Not permitted');
+    if (!(await _canApprove())) return UI.toast.error('Not permitted');
     const prospect = await AppDataStore.getById('prospects', prospectId);
     if (!prospect?.closing_record) return UI.toast.error('No closing record found');
     const cr = prospect.closing_record;
@@ -660,7 +707,7 @@ const requestProspectConversion = async (prospectId) => {
 
     UI.hideModal();
     UI.toast.success('Conversion request submitted. A manager will review and approve shortly.');
-    await window.app.renderProspectsTable();
+    await (window.app.renderProspectsTable || (async () => {}))();
 };
 
 const showConversionApprovalModal = async (prospectId) => {
@@ -711,6 +758,7 @@ const showConversionApprovalModal = async (prospectId) => {
 };
 
 const approveProspectConversion = async (prospectId) => {
+    if (!(await _canApprove())) return UI.toast.error('Not permitted');
     // Bug #7 layer 1: synchronous in-flight guard. Set BEFORE the first await so a
     // rapid second invocation (double-click / queue+modal race) is dropped instead
     // of racing to create a duplicate customer.
@@ -875,6 +923,17 @@ const approveProspectConversion = async (prospectId) => {
                 reviewed_at: now
             });
         }
+        // The paired new_sale row: its sale was just booked above (from the same
+        // closing record), so close it too instead of leaving a dead entry that
+        // re-approving would do nothing with.
+        const pairedSale = (queueRows || []).find(e => e.prospect_id == prospectId && e.approval_type === 'new_sale' && e.status === 'pending');
+        if (pairedSale && saleAmount > 0) {
+            await AppDataStore.update('approval_queue', pairedSale.id, {
+                status: 'approved',
+                reviewed_by: _state.cu?.id,
+                reviewed_at: now
+            });
+        }
     } catch (e) {
         console.warn('[approval_queue] status->approved update failed', e);
         try { if (window.UI && UI.toast) (UI.toast.warning || UI.toast.error)('Approved, but the queue entry status could not be updated.'); } catch (_) {}
@@ -902,7 +961,7 @@ const rejectProspectConversion = async (prospectId) => {
     // confirmRejectQueueEntry. Marks a teammate's pending conversion 'rejected' and stamps
     // conversion_rejected_by; the handler is on window.app and RLS permits the same-team
     // write, so gate it here to stop a non-management role tampering from the console.
-    if (!isManagement(_state.cu)) return UI.toast.error('Not permitted');
+    if (!(await _canApprove())) return UI.toast.error('Not permitted');
     const now = new Date().toISOString();
     await AppDataStore.update('prospects', prospectId, {
         conversion_status: 'rejected',
@@ -936,11 +995,69 @@ const rejectProspectConversion = async (prospectId) => {
 
     UI.hideModal();
     UI.toast.info('Conversion rejected. Agent can resubmit after reviewing.');
-    await window.app.renderProspectsTable();
+    await (window.app.renderProspectsTable || (async () => {}))();
 };
 
 
+// Sales-to-approve pop-up. The Manager Approval Queue table lives on the desktop
+// Customers page only; the phone app has no such screen. This modal works on
+// both and is what the "Sale to approve" bell notification opens.
+const openSaleApprovals = async () => {
+    if (!(await _canApprove())) return UI.toast.error('Not permitted');
+    let rows = [], users = [];
+    try {
+        [rows, users] = await Promise.all([
+            AppDataStore.getAll('approval_queue', { fresh: true }),
+            AppDataStore.getAll('users'),
+        ]);
+    } catch (e) {
+        return UI.toast.error('Could not load approvals — please retry.');
+    }
+    const userMap = new Map((users || []).map(u => [String(u.id), u]));
+    const pending = (rows || [])
+        .filter(e => e.status === 'pending' && _APPROVER_TYPES.has(e.approval_type))
+        .sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at));
+    // A sale and its paired conversion are one decision — show the sale, hide the
+    // conversion row when its sale row is also pending (approving either books it).
+    const saleProspects = new Set(pending.filter(e => e.approval_type === 'new_sale').map(e => String(e.prospect_id)));
+    const shown = pending.filter(e => e.approval_type === 'new_sale' || !saleProspects.has(String(e.prospect_id)));
+    const card = (e) => {
+        const snap = e.snapshot_after || {};
+        const amt = parseFloat(e.approval_type === 'new_sale' ? snap.sale_amount : snap.closing_record?.sale_amount) || 0;
+        const client = snap.prospect_name || snap.full_name || '-';
+        const agent = userMap.get(String(e.submitted_by))?.full_name || 'Unknown';
+        const when = e.submitted_at ? new Date(e.submitted_at).toLocaleDateString('en-MY', { day: 'numeric', month: 'short' }) : '';
+        const label = e.approval_type === 'new_sale' ? 'Sale' : 'New customer';
+        return `
+            <div style="border:1px solid var(--gray-200,#e5e7eb); border-radius:10px; padding:12px; margin-bottom:10px;">
+                <div style="display:flex; justify-content:space-between; gap:8px; align-items:baseline;">
+                    <strong style="font-size:15px;">${escapeHtml(client)}</strong>
+                    <strong style="color:#166534; white-space:nowrap;">${amt ? 'RM ' + amt.toLocaleString() : ''}</strong>
+                </div>
+                <div style="font-size:12px; color:var(--gray-500,#6b7280); margin:4px 0 10px;">${escapeHtml(label)} · ${escapeHtml(agent)} · ${escapeHtml(when)}${snap.product ? ' · ' + escapeHtml(snap.product) : ''}</div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <button class="btn secondary" style="flex:1; min-width:84px;" onclick="event.stopPropagation(); app.showApprovalDetail(${e.id})"><i class="fas fa-eye"></i> Details</button>
+                    <button class="btn secondary" style="flex:1; min-width:84px; color:#dc2626;" onclick="event.stopPropagation(); app.rejectQueueEntry(${e.id})"><i class="fas fa-times-circle"></i> Reject</button>
+                    <button class="btn primary" style="flex:1; min-width:84px;" onclick="event.stopPropagation(); (async () => { await app.approveFromSalePanel(${e.id}); })()"><i class="fas fa-check-circle"></i> Approve</button>
+                </div>
+            </div>`;
+    };
+    UI.showModal(`Sales to approve (${shown.length})`, shown.length
+        ? `<div style="max-height:65vh; overflow:auto;">${shown.map(card).join('')}</div>`
+        : '<div style="text-align:center; padding:24px; color:var(--gray-400);"><i class="fas fa-check-circle" style="margin-right:6px;"></i>Nothing waiting for approval</div>',
+        [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }]);
+};
+
+// Approve from the pop-up, then reopen it on the remaining items.
+const approveFromSalePanel = async (entryId) => {
+    await approveQueueEntry(entryId);
+    await openSaleApprovals();
+};
+
     app.register('approvals', {
+        approveFromSalePanel,
+        canApproveSales: _canApprove,
+        openSaleApprovals,
         approveClosingRecord,
         approveProspectConversion,
         approveQueueEntry,

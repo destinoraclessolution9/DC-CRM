@@ -81,7 +81,7 @@ const NOTIF_INBOX_LIMIT = 30;
 const _NOTIF_KIND_ICON = {
     activity_created: '📅', activity_reminder: '⏰', daily_summary: '🌅',
     coagent_invite: '🤝', coagent_response: '✅', highlight: '🌟', test: '🔔',
-    activity_changed: '✏️', activity_cancelled: '🚫',
+    activity_changed: '✏️', activity_cancelled: '🚫', sale_approval: '💰',
 };
 const _inboxSince = () => new Date(Date.now() - 30 * 86400000).toISOString();
 
@@ -148,6 +148,19 @@ const openNotifItem = async (activityId, hash) => {
     } catch (e) { console.warn('[notif] open item failed:', e); }
 };
 
+// "Sale to approve" → the approvals pop-up (works on phone and desktop). The
+// approvals chunk loads on demand, like the Daily Wisdom one below.
+const openSaleApprovalsFromBell = async () => {
+    try {
+        document.querySelector('.notif-panel')?.remove();
+        if (typeof window.app.openSaleApprovals !== 'function' && window._loadChunk) {
+            await window._loadChunk('chunks/script-approvals.min.js');
+        }
+        if (typeof window.app.openSaleApprovals === 'function') await window.app.openSaleApprovals();
+        else await (window.app.navigateTo || (async () => {}))('customers');
+    } catch (e) { console.warn('[notif] open sale approvals failed:', e); }
+};
+
 // Open today's 每天一智 · Daily Wisdom popup (lazy chunk), even if already seen today.
 const openDailyWisdom = async () => {
     try {
@@ -167,7 +180,9 @@ const _inboxSectionHtml = (rows) => {
         const aid = n.activity_id != null && /^\d+$/.test(String(n.activity_id)) ? String(n.activity_id) : 'null';
         const safeHash = /^[a-z0-9_-]*$/i.test(hash) ? hash : '';
         // Morning summary carries today's Daily Wisdom — tapping opens the popup.
-        const click = n.kind === 'daily_summary' ? 'app.openDailyWisdom()' : `app.openNotifItem(${aid}, '${safeHash}')`;
+        const click = n.kind === 'daily_summary' ? 'app.openDailyWisdom()'
+            : n.kind === 'sale_approval' ? 'app.openSaleApprovalsFromBell()'
+            : `app.openNotifItem(${aid}, '${safeHash}')`;
         return `
             <div class="notif-item${unread ? ' notif-unread' : ''}" onclick="${click}" style="cursor:pointer;${unread ? 'background:var(--bg-elevated);' : ''}">
                 <div class="notif-item-icon">${_NOTIF_KIND_ICON[n.kind] || '🔔'}</div>
@@ -451,6 +466,18 @@ const _initNotifBell = () => {
     if (!bell || bell._notifWired) return;
     bell._notifWired = true;
     _ensureNotifDotStyle();
+
+    // Tapping a "Sale to approve" push opens ./index.html?approve=1 — open the
+    // approvals pop-up once, then drop the flag so a refresh doesn't reopen it.
+    try {
+        const q = new URLSearchParams(location.search);
+        if (q.get('approve') === '1') {
+            q.delete('approve');
+            const rest = q.toString();
+            history.replaceState(null, '', location.pathname + (rest ? '?' + rest : '') + location.hash);
+            setTimeout(() => { openSaleApprovalsFromBell(); }, 600);
+        }
+    } catch (_) { /* best-effort deep link */ }
 
     const refreshIfVisible = () => { if (!document.hidden) _refreshNotifBadge(); };
     // Initial load
@@ -1596,6 +1623,7 @@ const applyCpsScanSelection = async () => {
         toggleNotifPanel,
         openNotifItem,
         openDailyWisdom,
+        openSaleApprovalsFromBell,
         _initNotifBell,
         getViewPhase,
         calculateCustomerHealthScore,
