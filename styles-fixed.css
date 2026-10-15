@@ -11621,3 +11621,44 @@ html, body {
 }
 .form-compact .form-group .seg input { position: absolute; opacity: 0; pointer-events: none; }
 .form-compact .form-group .seg label:has(input:checked) { background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 600; }
+
+/* ── Activity Details: compact attendee rows (Attendees + Agent Attendance) ──
+   Name · chip · "by" on one line, all ticks on the next, small buttons last.
+   !important + extra specificity beat the mobile touch-target rules
+   (.btn / .btn-sm min-height !important in styles-mobile.css). */
+.info-row.att-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 3px 12px;
+    margin: 0;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--gray-100, #eee);
+    font-size: 13px;
+    line-height: 1.35;
+}
+.att-row .att-head { flex: 1 1 220px; min-width: 0; }
+.att-row .att-name { font-weight: 600; }
+.att-row .att-link { cursor: pointer; color: var(--primary); text-decoration: underline; }
+.att-row .att-chip { font-size: 10px; margin-left: 5px; padding: 1px 6px; border-radius: 10px; background: var(--gray-100); white-space: nowrap; }
+.att-row .att-chip-role { background: #E0F2FE; color: #075985; }
+.att-row .att-by { font-size: 11px; color: var(--gray-500); margin-left: 4px; white-space: nowrap; }
+.att-row .att-checks { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; }
+.att-row .att-checks label {
+    display: inline-flex; align-items: center; gap: 3px;
+    margin: 0; font-size: 12px; font-weight: 400; cursor: pointer; white-space: nowrap;
+}
+.att-row .att-checks input[type="checkbox"] { width: 14px; height: 14px; margin: 0; flex: none; }
+.att-row .att-actions { display: flex; gap: 6px; }
+.att-row .att-actions .btn,
+.att-row .att-checks .att-x {
+    min-height: 0 !important; height: auto !important;
+    padding: 2px 8px !important; font-size: 11px !important; line-height: 1.5 !important;
+    border-radius: 6px;
+}
+.att-row .att-btn-closing { color: #065f46; border-color: #065f46; }
+.att-row .att-checks .att-x { background: #FEE2E2; color: #991B1B; border: none; margin-left: auto; }
+@media (max-width: 768px) {
+    .att-row .att-head, .att-row .att-checks { flex-basis: 100%; }
+    .att-row .att-checks { gap: 2px 8px; }
+}

@@ -5161,32 +5161,26 @@
                 const unattendedChecked = att.attendance_status === 'No Show' ? 'checked' : '';
                 const paidChecked = att.paid ? 'checked' : '';
                 const ticketChecked = att.ticket_created ? 'checked' : '';
+                // Compact 3-line row (name · checks · small buttons) — styled by
+                // .att-row in styles-fixed.css so a long attendance list fits on a phone.
                 return `
-                    <div class="info-row" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:8px; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
-                        <div>
-                            <strong style="cursor:pointer;color:var(--primary);text-decoration:underline;" onclick="event.stopPropagation();app.showAttendeeDetails(${entityId},'${UI.escJsAttr(String(att.attendee_type||'prospect'))}')">${esc(name)}</strong>
-                            <span style="font-size:10px; margin-left:5px; background:var(--gray-100); padding:1px 6px; border-radius:10px;">${att.attendee_type || 'prospect'}</span>
-                            <div style="font-size:11px; color:gray;">Added by: ${esc(agentName)}</div>
+                    <div class="info-row att-row">
+                        <div class="att-head">
+                            <strong class="att-name att-link" onclick="event.stopPropagation();app.showAttendeeDetails(${entityId},'${UI.escJsAttr(String(att.attendee_type||'prospect'))}')">${esc(name)}</strong>
+                            <span class="att-chip">${esc(att.attendee_type || 'prospect')}</span>
+                            <span class="att-by">by ${esc(agentName)}</span>
                         </div>
-                        <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
-                            <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
-                                <input type="checkbox" ${paidChecked} onchange="app.toggleAttendeePaid(${att.id}, this.checked)"> Paid
-                            </label>
-                            <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
-                                <input type="checkbox" ${ticketChecked} onchange="app.toggleAttendeeTicket(${att.id}, this.checked)"> Ticket Created
-                            </label>
-                            <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
-                                <input type="checkbox" ${attendedChecked} data-att-kind="attended" onchange="app.toggleAttendeeAttended(${att.id}, this.checked, ${entityId}, '${UI.escJsAttr(String(att.attendee_type||'prospect'))}', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}', ${activity.id}, this)"> Attended
-                            </label>
-                            <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
-                                <input type="checkbox" ${unattendedChecked} data-att-kind="unattended" onchange="app.toggleAttendeeUnattended(${att.id}, this.checked, ${entityId}, '${UI.escJsAttr(String(att.attendee_type||'prospect'))}', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}', ${activity.id}, this)"> Unattended
-                            </label>
-                            <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
-                                <input type="checkbox" ${lateChecked} data-att-kind="late" onchange="app.toggleAttendeeLate(${att.id}, this.checked, ${entityId}, '${UI.escJsAttr(String(att.attendee_type||'prospect'))}', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}', ${activity.id}, this)"> Late
-                            </label>
-                            ${entityId ? `<button class="btn btn-sm secondary" onclick="(async()=>{ await app.openAttendeePostEventModal(${att.id}, ${activityId}, ${entityId}); })()">Post Event</button>` : ''}
-                            ${entityId ? `<button class="btn btn-sm secondary" style="color:#065f46;border-color:#065f46;" title="Record a sale for this attendee" onclick="(async()=>{ await app.openAttendeeClosingModal(${att.id}, ${activityId}); })()"><i class="fas fa-clipboard-check"></i> Closing</button>` : ''}
+                        <div class="att-checks">
+                            <label><input type="checkbox" ${paidChecked} onchange="app.toggleAttendeePaid(${att.id}, this.checked)">Paid</label>
+                            <label><input type="checkbox" ${ticketChecked} onchange="app.toggleAttendeeTicket(${att.id}, this.checked)">Ticket</label>
+                            <label><input type="checkbox" ${attendedChecked} data-att-kind="attended" onchange="app.toggleAttendeeAttended(${att.id}, this.checked, ${entityId}, '${UI.escJsAttr(String(att.attendee_type||'prospect'))}', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}', ${activity.id}, this)">Attended</label>
+                            <label><input type="checkbox" ${unattendedChecked} data-att-kind="unattended" onchange="app.toggleAttendeeUnattended(${att.id}, this.checked, ${entityId}, '${UI.escJsAttr(String(att.attendee_type||'prospect'))}', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}', ${activity.id}, this)">Unattended</label>
+                            <label><input type="checkbox" ${lateChecked} data-att-kind="late" onchange="app.toggleAttendeeLate(${att.id}, this.checked, ${entityId}, '${UI.escJsAttr(String(att.attendee_type||'prospect'))}', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}', ${activity.id}, this)">Late</label>
                         </div>
+                        ${entityId ? `<div class="att-actions">
+                            <button class="btn btn-sm secondary" onclick="(async()=>{ await app.openAttendeePostEventModal(${att.id}, ${activityId}, ${entityId}); })()">Post Event</button>
+                            <button class="btn btn-sm secondary att-btn-closing" title="Record a sale for this attendee" onclick="(async()=>{ await app.openAttendeeClosingModal(${att.id}, ${activityId}); })()"><i class="fas fa-clipboard-check"></i> Closing</button>
+                        </div>` : ''}
                     </div>
                 `;
             };
@@ -5203,23 +5197,17 @@
                 const nameDisplay = `<strong>${esc(name)}</strong>`;
                 const roleLabel = person?.role || 'consultant';
                 return `
-                    <div class="info-row" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:8px; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
-                        <div>
+                    <div class="info-row att-row">
+                        <div class="att-head">
                             ${nameDisplay}
-                            <span style="font-size:10px; margin-left:5px; background:#E0F2FE; color:#075985; padding:1px 6px; border-radius:10px;">${escapeHtml(roleLabel)}</span>
-                            <div style="font-size:11px; color:gray;">Added by: ${esc(addedByName)}</div>
+                            <span class="att-chip att-chip-role">${escapeHtml(roleLabel)}</span>
+                            <span class="att-by">by ${esc(addedByName)}</span>
                         </div>
-                        <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
-                            <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
-                                <input type="checkbox" ${attendedChecked} data-att-kind="attended" onchange="app.toggleAttendeeAttended(${att.id}, this.checked, ${entityId}, 'agent', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}', ${activity.id}, this)"> Attended
-                            </label>
-                            <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
-                                <input type="checkbox" ${unattendedChecked} data-att-kind="unattended" onchange="app.toggleAttendeeUnattended(${att.id}, this.checked, ${entityId}, 'agent', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}', ${activity.id}, this)"> Unattended
-                            </label>
-                            <label style="display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer;">
-                                <input type="checkbox" ${lateChecked} data-att-kind="late" onchange="app.toggleAttendeeLate(${att.id}, this.checked, ${entityId}, 'agent', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}', ${activity.id}, this)"> Late
-                            </label>
-                            <button class="btn btn-sm" style="background:#FEE2E2;color:#991B1B;border:none;padding:3px 8px;border-radius:4px;" onclick="event.stopPropagation();app.removeAgentAttendee(${att.id}, ${activityId})" title="Remove"><i class="fas fa-times"></i></button>
+                        <div class="att-checks">
+                            <label><input type="checkbox" ${attendedChecked} data-att-kind="attended" onchange="app.toggleAttendeeAttended(${att.id}, this.checked, ${entityId}, 'agent', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}', ${activity.id}, this)">Attended</label>
+                            <label><input type="checkbox" ${unattendedChecked} data-att-kind="unattended" onchange="app.toggleAttendeeUnattended(${att.id}, this.checked, ${entityId}, 'agent', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}', ${activity.id}, this)">Unattended</label>
+                            <label><input type="checkbox" ${lateChecked} data-att-kind="late" onchange="app.toggleAttendeeLate(${att.id}, this.checked, ${entityId}, 'agent', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}', ${activity.id}, this)">Late</label>
+                            <button class="btn btn-sm att-x" onclick="event.stopPropagation();app.removeAgentAttendee(${att.id}, ${activityId})" title="Remove"><i class="fas fa-times"></i></button>
                         </div>
                     </div>
                 `;
