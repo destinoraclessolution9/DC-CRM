@@ -2177,6 +2177,14 @@ const getPDSRBreakdown = async (from, to) => {
     for (let i = keys.length - 1; i >= 0; i--) {
         if (keys[i].part && labelsByKey.get(keys[i].n).size > 1) keys.splice(i, 1);
     }
+    // The four Fengshui Audit types as built-in names: their generic products are
+    // inactive (and hidden from non-admin reads), but older sales still say
+    // "灵活 Flexible Plan" / "专案 Project Plan" — those must shorten to the type.
+    // Added AFTER the ambiguity drop (a shared "专案" part is removed above). Short
+    // keys, so any longer catalogue name still wins.
+    ['专案', '灵活', '简易', '商业'].forEach((t) => {
+        if (!keys.some(k => k.n === t)) keys.push({ n: t, grp: 'SR', label: t, part: false });
+    });
     keys.sort((a, b) => b.n.length - a.n.length);
 
     const classify = (part) => {
