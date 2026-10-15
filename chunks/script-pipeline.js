@@ -91,7 +91,7 @@ const DEFAULT_PIPELINE_CONFIG = {
     updated_by: null,
     categories: [
         { id: 'powerring',     name: 'Power Ring (九星助命)',      products: 'PR4 Power Ring — premium feng shui ring',       default_amount: 2500 },
-        { id: 'fengshui',      name: '风水方案 (Fengshui Solution)', products: 'Residential audit, office audit, landform',   default_amount: 5000 },
+        { id: 'fengshui',      name: '风水审计 (Fengshui Audit)', products: 'Residential audit, office audit, landform',   default_amount: 5000 },
         { id: 'calligraphy',   name: '画作 (Calligraphy)',           products: 'Wealth / health / blessing calligraphy pieces', default_amount: 2800 },
         { id: 'agent_package', name: '代理配套 (Agent Package)',    products: 'DC agent recruitment package',                  default_amount: null },
         { id: 'bujishu',       name: 'Bujishu (满堂系列)',           products: 'Bed set, curtains, sofa, furniture package',    default_amount: 8500 },
