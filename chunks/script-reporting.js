@@ -144,7 +144,7 @@
                              </button>` : ''
             }
                         <button class="btn secondary" onclick="app.exportKPIReport('csv')">
-                            <i class="fas fa-file-csv"></i> Export CSV
+                            <i class="fas fa-file-excel"></i> Quarter Review (Excel)
                         </button>
                         <button class="btn secondary" onclick="app.printDashboard()">
                             <i class="fas fa-print"></i> Print
@@ -6470,11 +6470,483 @@ if (typeof KPI_DEFINITIONS === 'undefined') {
 }
 
 
+// ── Quarter Review workbook (owner ask 2026-10-15) ──────────────────────────
+// The old CSV dumped internal metric keys for the whole org. The quarter review
+// meeting uses a per-agent PRSB table (Summary / by-agent with monthly split /
+// quarter comparison), so the export now builds that workbook for the selected
+// date range. Every metric reuses the dashboard's own counting rule and the same
+// agent / role / market scope gates, so the sheet and the screen never disagree.
+// Columns the CRM has no data for (大玄, 小玄, 有富田, JY, CLA, PJA, 财库/托, 课程,
+// the whole BJS block) are left blank for manual entry — owner decision.
+const _QR_EVENT_CATS = {
+    zhishi:  ['运程讲座', '个人风水基础课', '环境风水基础课', '新春活动'],
+    laoban:  ['老板每月主题课'],
+    fenxiang: ['个人改命分享会', '风水改命分享会-简易', '风水改命分享会-专案', '画作分享会', '艺品分享会', '福气分享会'],
+    mz:      ['博物馆'],
+    hj:      ['汇聚-专案', '汇集-商业', '汇集-灵活', '汇集-简易', ...Object.entries({ '专案': ['Condo', 'Terrace', 'Semi-D', 'Bungalow'], '商业': ['Retail', 'Factory', 'Shoplot', 'Office'], '灵活': ['Condo', 'Terrace', 'Semi-D', 'Bungalow'], '简易': ['Condo', 'Terrace', 'Semi-D', 'Bungalow'] }).flatMap(([t, props]) => props.map(p => `汇集${t}-${p}`))],
+};
+const _QR_FLEXI_RE = /灵活|靈活|flexi/i;
+
+const _qrAddDays = (s, n) => { const d = new Date(s + 'T00:00:00'); d.setDate(d.getDate() + n); return toLocalDateStr(d); };
+const _qrMonthLabel = (y, m) => `${['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'][m]} ${y}`;
+
+// Label + comparison periods for a range. A range that starts on a calendar
+// quarter and ends inside it (a quarter in progress counts — Q4 to date) compares
+// against the previous two calendar quarters, like the meeting table; anything
+// else compares against the two preceding windows of the same length.
+const _qrPeriods = (from, to) => {
+    const f = new Date(from + 'T00:00:00');
+    const y = f.getFullYear(), m = f.getMonth();
+    const isQStart = f.getDate() === 1 && m % 3 === 0;
+    const qEnd = toLocalDateStr(new Date(y, m + 3, 0));
+    if (isQStart && to <= qEnd && to >= from) {
+        const qs = (k) => { const d = new Date(y, m - 3 * k, 1); return { from: toLocalDateStr(d), to: toLocalDateStr(new Date(d.getFullYear(), d.getMonth() + 3, 0)), label: `${d.getFullYear()} Q${Math.floor(d.getMonth() / 3) + 1}` }; };
+        return { current: { from, to, label: `${y} Q${Math.floor(m / 3) + 1}` + (to < qEnd ? ` (to ${to})` : '') }, prev: [qs(1), qs(2)] };
+    }
+    const days = Math.round((new Date(to + 'T00:00:00') - f) / 86400000) + 1;
+    const p1to = _qrAddDays(from, -1), p1from = _qrAddDays(p1to, -(days - 1));
+    const p2to = _qrAddDays(p1from, -1), p2from = _qrAddDays(p2to, -(days - 1));
+    return {
+        current: { from, to, label: `${from} → ${to}` },
+        prev: [{ from: p1from, to: p1to, label: `${p1from} → ${p1to}` }, { from: p2from, to: p2to, label: `${p2from} → ${p2to}` }],
+    };
+};
+
+// Calendar months the range touches, each clipped to the range.
+const _qrMonths = (from, to) => {
+    const out = [];
+    let d = new Date(from + 'T00:00:00'); d = new Date(d.getFullYear(), d.getMonth(), 1);
+    while (toLocalDateStr(d) <= to && out.length < 12) {
+        const mFrom = toLocalDateStr(d), mTo = toLocalDateStr(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+        out.push({ from: mFrom < from ? from : mFrom, to: mTo > to ? to : mTo, label: _qrMonthLabel(d.getFullYear(), d.getMonth()) });
+        d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+    }
+    return out;
+};
+
+// Reads every table ONCE, then `agg(from, to)` computes all per-agent metrics for
+// any window in memory — the export needs the current period, each month and the
+// two comparison periods, which would otherwise be ~20 round trips per metric.
+const _qrLoad = async (earliest, latest) => {
+    const sb = window.supabase;
+    const [users, purchases, customers, prospects, events, attendees, allActs, npo] = await Promise.all([
+        AppDataStore.getAll('users', { fresh: true }),
+        AppDataStore.getAll('purchases', { fresh: true }),
+        AppDataStore.getAll('customers'),
+        AppDataStore.getAll('prospects'),
+        AppDataStore.getAll('events'),
+        // event_attendees, not event_registrations — the latter has no attendance
+        // column on the live schema (checked 2026-10-15), so it always counts 0.
+        AppDataStore.getAll('event_attendees'),
+        // All-time activities up to the end: 传福大使 "new this period" needs each
+        // referrer's FIRST-ever CPS, so the window can't start at `earliest`.
+        _reportActsInRange('2000-01-01', latest, 'quarterReview'),
+        (async () => {
+            if (!sb || typeof sb.from !== 'function') return [];
+            try {
+                const { data, error } = await sb.from('npo_sales')
+                    .select('cart_total, responsible_agent_id, status, created_at')
+                    .gte('created_at', new Date(earliest + 'T00:00:00').toISOString())
+                    .lt('created_at', new Date(_qrAddDays(latest, 1) + 'T00:00:00').toISOString());
+                return (!error && Array.isArray(data)) ? data : [];
+            } catch (_) { return []; }
+        })(),
+    ]);
+    const userMap = {}; users.forEach(u => { userMap[String(u.id)] = u; });
+    const customerMap = {}; customers.forEach(c => { customerMap[c.id] = c; });
+    const prospMap = {}; prospects.forEach(p => { prospMap[String(p.id)] = p; });
+    const custByProspect = new Map();
+    customers.forEach(c => { if (c.converted_from_prospect_id != null) custByProspect.set(String(c.converted_from_prospect_id), c); });
+
+    // Scope gates — same contract as getCPSCount / _passesPurchaseFilter.
+    const inScope = (agentId) => {
+        if (agentId == null || agentId === '') return false;
+        if (_visibleUserIds !== 'all' && !_visibleUserIds.map(String).includes(String(agentId))) return false;
+        if (_currentRoleFilter !== 'All') { const u = userMap[String(agentId)]; if (!u || u.role !== _currentRoleFilter) return false; }
+        return true;
+    };
+    const acts = allActs.filter(a => a.activity_date && _recInMarket(a));
+    const actById = new Map(allActs.map(a => [String(a.id), a]));
+
+    // 传福大使 = a non-agent person (prospect/customer) who referred someone into a
+    // CPS. Credited to the agent who LED that CPS (same attribution as the CPS card).
+    // firstRef: referrer key → date of their first-ever referral (for "new").
+    const firstRef = new Map();
+    const cpsRefs = []; // { date, agent, key }
+    for (const a of acts) {
+        if (a.activity_type !== 'CPS') continue;
+        const ref = _cpsReferrerOf(a.prospect_id ? prospMap[String(a.prospect_id)] : null);
+        if (!ref || ref.isAgent) continue;
+        cpsRefs.push({ date: a.activity_date, agent: String(a.lead_agent_id), key: ref.key });
+        const seen = firstRef.get(ref.key);
+        if (!seen || a.activity_date < seen) firstRef.set(ref.key, a.activity_date);
+    }
+
+    const eventCatOf = new Map(); // String(event id) → Set(category bucket)
+    for (const ev of events) {
+        if (!_recInMarket(ev)) continue;
+        const cats = _wrParseEventCategories(ev.categories);
+        const buckets = new Set(Object.keys(_QR_EVENT_CATS).filter(b => cats.some(c => _QR_EVENT_CATS[b].includes(c))));
+        if (buckets.size) eventCatOf.set(String(ev.id), buckets);
+    }
+    const eventDate = new Map(events.map(ev => [String(ev.id), ev.date ? String(ev.date).slice(0, 10) : '']));
+
+    // Is this activity a meeting with someone who was ALREADY a customer that day?
+    const existingCustomerOf = (a) => {
+        if (a.customer_id) return customerMap[a.customer_id] || { id: a.customer_id };
+        const c = a.prospect_id ? custByProspect.get(String(a.prospect_id)) : null;
+        return (c && c.customer_since && c.customer_since <= a.activity_date) ? c : null;
+    };
+
+    const agg = (from, to) => {
+        const m = new Map();
+        const row = (id) => {
+            const k = String(id);
+            if (!m.has(k)) m.set(k, _qrBlankRow());
+            return m.get(k);
+        };
+        for (const a of acts) {
+            if (a.activity_date < from || a.activity_date > to || !inScope(a.lead_agent_id)) continue;
+            if (a.activity_type === 'CPS') row(a.lead_agent_id).cps++;
+            if (a.activity_type === 'FSA') row(a.lead_agent_id).fsa++;
+            const isMeet = CLIENT_MEETING_TYPES.includes(a.activity_type) || a.activity_type === 'GR' || (a.activity_title || '').toLowerCase().includes('golden road');
+            if (isMeet) {
+                const c = existingCustomerOf(a);
+                if (c) { const r = row(a.lead_agent_id); r.meetOld++; r.oldMet.add(String(c.id)); }
+            }
+        }
+        // NC = the dashboard's New Customers rule: customer_since in the window AND a
+        // purchase in the same window. customer_since alone is polluted by bulk
+        // imports (37 rows share 2026-07-24), which would read as 37 new customers.
+        const boughtInWindow = new Set(purchases.filter(p => p.date && p.date >= from && p.date <= to).map(p => String(p.customer_id)));
+        for (const c of customers) {
+            if (!c.customer_since || c.customer_since < from || c.customer_since > to) continue;
+            if (!_recInMarket(c) || !inScope(c.responsible_agent_id) || !boughtInWindow.has(String(c.id))) continue;
+            row(c.responsible_agent_id).nc++;
+        }
+        // Purchases: a sale by a customer who was already a customer before this
+        // window counts toward "有成交的舊客" for whichever agent met them.
+        const boughtBy = new Map(); // customer id → order count in window
+        for (const p of purchases) {
+            if (!p.date || p.date < from || p.date > to || p.is_agent_package) continue;
+            const agentId = _getPurchaseAgentId(p, customerMap);
+            if (agentId == null || !_passesPurchaseFilter(p, agentId, userMap)) continue;
+            const r = row(agentId);
+            const amt = Number(p.amount) || 0;
+            r.sales += amt;
+            if (p.payment_method === 'POP') { r.pop++; r.popRm += amt; }
+            else if (p.payment_method !== 'NPO') r.doSales += amt;
+            const cust = customerMap[p.customer_id];
+            if (cust && cust.customer_since && cust.customer_since < from) boughtBy.set(String(cust.id), (boughtBy.get(String(cust.id)) || 0) + 1);
+            r.salesRows.push(p);
+            for (const part of String(p.item || '').split(/\s*\+\s*|\s*[,，、]\s*/).filter(Boolean)) {
+                if (_PDSR_RECRUIT_RE.test(part)) continue;
+                const qm = part.match(/[x×]\s*(\d{1,3})\s*$/i);
+                const qty = qm && !/[a-z]$/i.test(part.slice(0, qm.index)) ? (parseInt(qm[1], 10) || 1) : 1;
+                if (_PDSR_RING_RE.test(part)) r.pr += qty;
+                else if (_PDSR_ART_RE.test(part)) r.art += qty;
+                if (_QR_FLEXI_RE.test(part)) r.flexi += qty;
+            }
+        }
+        for (const n of npo) {
+            if (String(n.status || '').toLowerCase() === 'cancelled') continue;
+            const d = n.created_at ? toLocalDateStr(new Date(n.created_at)) : '';
+            if (!d || d < from || d > to || !inScope(n.responsible_agent_id)) continue;
+            const r = row(n.responsible_agent_id);
+            r.pop++; r.popRm += Number(n.cart_total) || 0;
+        }
+        for (const r of m.values()) {
+            for (const cid of r.oldMet) if (boughtBy.has(cid)) { r.oldBought.add(cid); r.oldOrders += boughtBy.get(cid); }
+        }
+        for (const x of cpsRefs) {
+            if (x.date > to || !inScope(x.agent)) continue;
+            const r = row(x.agent);
+            r.cfAll.add(x.key);
+            if (x.date >= from) {
+                r.cfActive.add(x.key); r.cpsFromCf++;
+                if (firstRef.get(x.key) >= from) r.cfNew.add(x.key);
+            }
+        }
+        for (const u of users) {
+            const jd = u.join_date == null ? '' : String(u.join_date).slice(0, 10);
+            if (!jd || jd < from || jd > to || !isAgent(u) || !_recInMarket(u)) continue;
+            if (u.reporting_to != null && inScope(u.reporting_to)) row(u.reporting_to).nea++;
+        }
+        for (const att of attendees) {
+            if (!att.attended && att.attendance_status !== 'Attended') continue;
+            if (att.attendee_type === 'agent') continue;
+            const act = att.activity_id != null ? actById.get(String(att.activity_id)) : null;
+            const eventId = att.event_id != null ? att.event_id : act && act.event_id;
+            const date = (act && act.activity_date) || eventDate.get(String(eventId)) || '';
+            if (!date || date < from || date > to) continue;
+            const buckets = eventCatOf.get(String(eventId));
+            if (!buckets) continue;
+            const pid = att.entity_id || att.attendee_id;
+            const owner = att.attendee_type === 'customer' ? customerMap[pid] : prospMap[String(pid)];
+            const agentId = owner && owner.responsible_agent_id;
+            if (!inScope(agentId)) continue;
+            const r = row(agentId);
+            buckets.forEach(b => { r[b]++; });
+        }
+        return m;
+    };
+
+    // Agents shown: everyone in the agent band within scope (inactive ones only
+    // when they still have numbers — filtered later). 客户# = whole customer book.
+    const custCount = new Map();
+    customers.forEach(c => { if (c.responsible_agent_id != null && _recInMarket(c)) custCount.set(String(c.responsible_agent_id), (custCount.get(String(c.responsible_agent_id)) || 0) + 1); });
+    const agents = users.filter(u => isAgent(u) && _recInMarket(u) && inScope(u.id));
+    return { agg, agents, custCount, userMap, customerMap };
+};
+
+const _qrBlankRow = () => ({
+    cps: 0, fsa: 0, nc: 0, sales: 0, doSales: 0, pop: 0, popRm: 0, pr: 0, flexi: 0, art: 0,
+    meetOld: 0, oldMet: new Set(), oldBought: new Set(), oldOrders: 0,
+    cfAll: new Set(), cfActive: new Set(), cfNew: new Set(), cpsFromCf: 0, nea: 0,
+    zhishi: 0, laoban: 0, fenxiang: 0, mz: 0, hj: 0, salesRows: [],
+});
+
+const _qrBuildWorkbook = async () => {
+    const ranges = getDateRanges(_currentTimeFilter, _customDateFrom, _customDateTo);
+    const P = _qrPeriods(ranges.current.from, ranges.current.to);
+    const months = _qrMonths(P.current.from, P.current.to);
+    const D = await _qrLoad(P.prev[1].from, P.current.to);
+    const cur = D.agg(P.current.from, P.current.to);
+    const byMonth = months.map(mo => D.agg(mo.from, mo.to));
+    const prev = P.prev.map(p => D.agg(p.from, p.to));
+    const prevBoth = D.agg(P.prev[1].from, P.prev[0].to);
+    const get = (map, id) => map.get(String(id)) || _qrBlankRow();
+    const hasAny = (r) => r.cps || r.nc || r.sales || r.pop || r.meetOld || r.cfAll.size || r.nea || r.fsa;
+
+    const inactive = (u) => /inactive|resign|terminat/i.test(String(u.status || '')) || u.is_active === false;
+    const agents = D.agents
+        .filter(u => !inactive(u) || hasAny(get(cur, u.id)) || prev.some(p => hasAny(get(p, u.id))))
+        .sort((a, b) => (get(cur, b.id).sales - get(cur, a.id).sales) || (get(cur, b.id).cps - get(cur, a.id).cps) || String(a.full_name || '').localeCompare(String(b.full_name || '')));
+    const name = (u) => u.full_name || u.name || u.username || `#${u.id}`;
+
+    await window._ensureExcelJs();
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'DestinOracles CRM';
+    const GOLD = 'FFF3E3B5', HEAD = 'FFFCE9C4', TOT = 'FFFFF4D6', GREY = 'FF9CA3AF';
+    const thin = { style: 'thin', color: { argb: 'FFBFB6A0' } };
+    const box = { top: thin, left: thin, bottom: thin, right: thin };
+    const styleHead = (cell, fill = HEAD) => { cell.font = { bold: true }; cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fill } }; cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; cell.border = box; };
+    const RM = '#,##0';
+    const colL = (n) => { let s = ''; while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); } return s; };
+    const title = (ws, text, sub) => {
+        ws.getCell('A1').value = text; ws.getCell('A1').font = { bold: true, size: 14 };
+        if (sub) { ws.getCell('A2').value = sub; ws.getCell('A2').font = { italic: true, color: { argb: 'FF6B7280' } }; }
+    };
+    // Two-tier header: group label merged across its columns, then the column names.
+    const header2 = (ws, r, startCol, groups) => {
+        let c = startCol;
+        for (const g of groups) {
+            const end = c + g.cols.length - 1;
+            if (g.cols.length > 1) ws.mergeCells(r, c, r, end);
+            const gc = ws.getCell(r, c); gc.value = g.label; styleHead(gc, GOLD);
+            for (let i = c; i <= end; i++) styleHead(ws.getCell(r, i), GOLD);
+            g.cols.forEach((h, i) => { const hc = ws.getCell(r + 1, c + i); hc.value = h; styleHead(hc); });
+            c = end + 1;
+        }
+        return c;
+    };
+    const fixedHead = (ws, r, labels) => labels.forEach((l, i) => {
+        ws.getCell(r, i + 1).value = l; ws.mergeCells(r, i + 1, r + 1, i + 1); styleHead(ws.getCell(r, i + 1), GOLD);
+    });
+    // numFmt keys are 0-based column indexes into each row array.
+    const writeRows = (ws, r0, rows, numFmt = {}) => {
+        rows.forEach((vals, i) => vals.forEach((v, j) => {
+            const cell = ws.getCell(r0 + i, j + 1);
+            cell.value = v; cell.border = box;
+            if (numFmt[j]) cell.numFmt = numFmt[j];
+        }));
+    };
+    // TOTAL row as live SUM formulas so manual edits before the meeting re-total.
+    const totalRow = (ws, r, firstRow, lastRow, fromCol, toCol, label = 'TOTAL', labelCol = 2, skip = new Set()) => {
+        ws.getCell(r, labelCol).value = label;
+        for (let c = fromCol; c <= toCol; c++) {
+            if (!skip.has(c) && lastRow >= firstRow) ws.getCell(r, c).value = { formula: `SUM(${colL(c)}${firstRow}:${colL(c)}${lastRow})` };
+        }
+        for (let c = 1; c <= toCol; c++) { const cell = ws.getCell(r, c); cell.font = { bold: true }; cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TOT } }; cell.border = box; }
+    };
+
+    const scopeLabel = (() => {
+        if (_visibleUserIds !== 'all' && Array.isArray(_visibleUserIds) && _visibleUserIds.length === 1) return name(D.userMap[String(_visibleUserIds[0])] || {});
+        return (_state.cu && (_state.cu.full_name || _state.cu.name)) || 'Team';
+    })();
+    const sumOf = (map, k) => agents.reduce((s, u) => { const v = get(map, u.id)[k]; return s + (typeof v === 'number' ? v : v.size); }, 0);
+    const sum = (k) => sumOf(cur, k);
+    const P0 = P.current.label;
+
+    // ── Sheet 1: Summary ────────────────────────────────────────────────────
+    const s1 = wb.addWorksheet('Summary', { views: [{ state: 'frozen', xSplit: 2 }] });
+    title(s1, `${P0} SCO PRSB REPORT`, `Period ${P.current.from} → ${P.current.to} · exported ${new Date().toLocaleString()} · blank cells = manual entry`);
+    fixedHead(s1, 4, ['NO', 'NAME']);
+    const s1End = header2(s1, 4, 3, [
+        { label: '总数', cols: ['EA#', '客户#', '传福大使'] },
+        { label: `${P0} PRSB REPORT`, cols: ['CPS', 'NEA', 'NC', 'SALES RM', 'POP', 'POP RM', '大玄', '小玄', '有富田', 'PR', 'JY', 'FLEXI', 'FSA', '财库/托', 'CLA', '艺作', '课程', 'DO+PORM', '面談舊客 #', '有成交的舊客 #', '有多少傳福大使开始傳福', 'CPS# 来自傳福大使', '知识讲座', '老板讲座', '分享会', 'MZ', 'HJ'] },
+    ]) - 1;
+    const totalCust = agents.reduce((s, u) => s + (D.custCount.get(String(u.id)) || 0), 0);
+    writeRows(s1, 6, [[1, scopeLabel, agents.length, totalCust, sum('cfAll'),
+        sum('cps'), sum('nea'), sum('nc'), sum('sales'), sum('pop'), sum('popRm'), null, null, null, sum('pr'), null, sum('flexi'), sum('fsa'), null, null, sum('art'), null,
+        sum('doSales') + sum('popRm'), sum('meetOld'), sum('oldBought'), sum('cfActive'), sum('cpsFromCf'),
+        sum('zhishi'), sum('laoban'), sum('fenxiang'), sum('mz'), sum('hj')]], { 8: RM, 10: RM, 22: RM });
+    totalRow(s1, 7, 6, 6, 3, s1End);
+    [9, 11, 23].forEach(c => { s1.getCell(7, c).numFmt = RM; });
+
+    // BJS block — no Bujishu sales in the CRM; layout only, for manual entry.
+    fixedHead(s1, 9, ['NO', 'NAME']);
+    const bjsEnd = header2(s1, 9, 3, [
+        { label: '目前总数', cols: ['代理#', '客户#'] },
+        { label: `${P0} BJS REPORT (manual)`, cols: ['SALES RM', 'NC', '好多多1', '好多多2', '床褥', '满堂', '櫥櫃', '沙發', '窗簾', '豐展廳 邀約人次', '富展廳 邀約人次', 'BJS Premier 邀約人次'] },
+    ]) - 1;
+    writeRows(s1, 11, [[1, scopeLabel, agents.length, totalCust]]);
+    for (let c = 5; c <= bjsEnd; c++) s1.getCell(11, c).border = box;
+    totalRow(s1, 12, 11, 11, 3, bjsEnd);
+
+    // 傳福大使 report — current period vs the two previous periods combined.
+    s1.getCell(14, 1).value = `${P0} SCO 傳福大使報告`; s1.getCell(14, 1).font = { bold: true, size: 13 };
+    fixedHead(s1, 16, ['NO', 'NAME']);
+    const cfEnd = header2(s1, 16, 3, [
+        { label: P0, cols: ['傳福大使總數', '活躍的傳福大使', '不活躍的傳福大使', '增加多少位傳福大使', 'CPS# 来自傳福大使'] },
+        { label: `${P.prev[1].label} + ${P.prev[0].label}`, cols: ['面談舊客 #', '舊客在期内成交 #', '成交的单数 # (DC)', '成交的单数 # (BJS)'] },
+        { label: P0, cols: ['面談舊客 #', '舊客在期内成交 #', '成交的单数 # (DC)', '成交的单数 # (BJS)'] },
+    ]) - 1;
+    const cfAll = sum('cfAll'), cfAct = sum('cfActive');
+    writeRows(s1, 18, [[1, scopeLabel, cfAll, cfAct, cfAll - cfAct, sum('cfNew'), sum('cpsFromCf'),
+        sumOf(prevBoth, 'oldMet'), sumOf(prevBoth, 'oldBought'), sumOf(prevBoth, 'oldOrders'), null,
+        sum('oldMet'), sum('oldBought'), sum('oldOrders'), null]]);
+    totalRow(s1, 19, 18, 18, 3, cfEnd);
+    s1.getColumn(1).width = 5; s1.getColumn(2).width = 22;
+    for (let c = 3; c <= s1End; c++) s1.getColumn(c).width = 11;
+    s1.getRow(5).height = 42; s1.getRow(10).height = 32; s1.getRow(17).height = 42;
+
+    // ── Sheet 2: by agent with monthly split ────────────────────────────────
+    const AG_COLS = ['CPS', 'NC', 'Sales', '傳福大使', 'PJA', 'NEA'];
+    const agVals = (r) => [r.cps, r.nc, r.sales, r.cfNew.size, null, r.nea];
+    const s2 = wb.addWorksheet(P0.replace(/[\\/?*[\]:]/g, '-').slice(0, 31), { views: [{ state: 'frozen', xSplit: 3, ySplit: 5 }] });
+    title(s2, `${P0} REVIEW (PRSB) — 代理績效`, '傳福大使 = NEW ambassadors in the period · PJA manual · sorted by sales');
+    fixedHead(s2, 4, ['NO', 'EA Name', 'EA#']);
+    const s2End = header2(s2, 4, 4, [
+        { label: P0, cols: AG_COLS },
+        ...months.map(mo => ({ label: mo.label, cols: AG_COLS })),
+        { label: 'Insight', cols: ['客户#', 'CPS→NC %', 'RM per CPS'] },
+    ]) - 1;
+    const salesCols = [6, ...months.map((_, i) => 6 + 6 * (i + 1))];
+    const rows2 = agents.map((u, i) => {
+        const r = get(cur, u.id);
+        return [i + 1, name(u), u.agent_code || '', ...agVals(r), ...byMonth.flatMap(mm => agVals(get(mm, u.id))),
+            D.custCount.get(String(u.id)) || 0, r.cps ? Math.round(r.nc / r.cps * 100) / 100 : null, r.cps ? Math.round(r.sales / r.cps) : null];
+    });
+    const fmt2 = {}; salesCols.forEach(c => { fmt2[c - 1] = RM; }); fmt2[s2End - 2] = '0%'; fmt2[s2End - 1] = RM;
+    writeRows(s2, 6, rows2, fmt2);
+    agents.forEach((u, i) => { if (!hasAny(get(cur, u.id))) for (let c = 1; c <= s2End; c++) s2.getCell(6 + i, c).font = { color: { argb: GREY } }; });
+    const t2 = 6 + rows2.length;
+    totalRow(s2, t2, 6, t2 - 1, 4, s2End, 'TOTAL', 2, new Set([s2End - 1, s2End]));
+    salesCols.forEach(c => { s2.getCell(t2, c).numFmt = RM; });
+    s2.getColumn(1).width = 5; s2.getColumn(2).width = 26; s2.getColumn(3).width = 11;
+    for (let c = 4; c <= s2End; c++) s2.getColumn(c).width = 10;
+    salesCols.forEach(c => { s2.getColumn(c).width = 12; });
+
+    // ── Sheet 3: comparison by period ───────────────────────────────────────
+    const s3 = wb.addWorksheet('Comparison', { views: [{ state: 'frozen', xSplit: 2, ySplit: 5 }] });
+    title(s3, 'Comparison by Period', `${P0} vs ${P.prev[0].label} vs ${P.prev[1].label} · Δ = current vs previous`);
+    fixedHead(s3, 4, ['NO', 'EA Name']);
+    const CMP = ['CPS', 'NC', 'Sales', '傳福大使', 'NEA'];
+    const cmpVals = (r) => [r.cps, r.nc, r.sales, r.cfNew.size, r.nea];
+    const s3End = header2(s3, 4, 3, [
+        { label: P0, cols: CMP }, { label: P.prev[0].label, cols: CMP }, { label: P.prev[1].label, cols: CMP },
+        { label: `Δ vs ${P.prev[0].label}`, cols: ['CPS Δ', 'Sales Δ', 'Sales Δ%'] },
+    ]) - 1;
+    const rows3 = agents.map((u, i) => {
+        const a = get(cur, u.id), b = get(prev[0], u.id), c = get(prev[1], u.id);
+        return [i + 1, name(u), ...cmpVals(a), ...cmpVals(b), ...cmpVals(c), a.cps - b.cps, a.sales - b.sales, b.sales ? (a.sales - b.sales) / b.sales : null];
+    });
+    writeRows(s3, 6, rows3, { 4: RM, 9: RM, 14: RM, 18: RM, 19: '0%' });
+    // Highlight the 3 biggest sales gains (green) and drops (red).
+    const order = rows3.map((r, i) => ({ i, d: r[18] })).filter(x => x.d).sort((x, y) => y.d - x.d);
+    order.slice(0, 3).filter(x => x.d > 0).forEach(x => { s3.getCell(6 + x.i, 19).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } }; });
+    order.slice(-3).filter(x => x.d < 0).forEach(x => { s3.getCell(6 + x.i, 19).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } }; });
+    const t3 = 6 + rows3.length;
+    totalRow(s3, t3, 6, t3 - 1, 3, s3End, 'TOTAL', 2, new Set([s3End]));
+    [5, 10, 15, 19].forEach(c => { s3.getCell(t3, c).numFmt = RM; });
+    s3.getColumn(1).width = 5; s3.getColumn(2).width = 26;
+    for (let c = 3; c <= s3End; c++) s3.getColumn(c).width = 11;
+
+    // ── Sheet 4: the purchases behind SALES RM ──────────────────────────────
+    const s4 = wb.addWorksheet('Sales Details', { views: [{ state: 'frozen', ySplit: 4 }] });
+    title(s4, `Sales in ${P0}`, 'Every purchase counted in SALES RM (agent packages excluded)');
+    ['Date', 'Agent', 'Customer', 'Item', 'Payment', 'Amount (RM)'].forEach((h, i) => styleHead(Object.assign(s4.getCell(4, i + 1), { value: h })));
+    const det = [];
+    agents.forEach(u => get(cur, u.id).salesRows.forEach(p => {
+        const cu = D.customerMap[p.customer_id];
+        det.push([p.date, name(u), (cu && (cu.full_name || cu.name)) || '', p.item || '', p.payment_method || '', Number(p.amount) || 0]);
+    }));
+    det.sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+    writeRows(s4, 5, det, { 5: RM });
+    if (det.length) { totalRow(s4, 5 + det.length, 5, 4 + det.length, 6, 6, 'TOTAL', 1); s4.getCell(5 + det.length, 6).numFmt = RM; }
+    [12, 24, 28, 40, 14, 14].forEach((w, i) => { s4.getColumn(i + 1).width = w; });
+
+    // ── Sheet 5: how each column is counted ─────────────────────────────────
+    const s5 = wb.addWorksheet('Notes');
+    s5.getColumn(1).width = 26; s5.getColumn(2).width = 110;
+    [
+        ['Period', `${P.current.from} → ${P.current.to}; comparison ${P.prev[0].label}, ${P.prev[1].label}. Agent / role / market filters from the dashboard apply.`],
+        ['EA#', 'Summary: number of agents in this report. By-agent sheet: the agent code.'],
+        ['客户#', "Agent's whole customer book (all customers they are responsible for), not just this period."],
+        ['CPS / FSA', 'CPS / FSA activities in the period, credited to the lead agent.'],
+        ['NC', 'New customers: became a customer in the period AND bought in the same period (same rule as the dashboard New Customers card).'],
+        ['SALES RM', 'All purchases in the period except agent packages, credited to the agent recorded on the sale. A closing only appears here once it is approved into a purchase.'],
+        ['POP / POP RM', 'Normal Installment Plan (POP) purchases + Special Package (NPO) orders.'],
+        ['DO+PORM', 'Full-payment sales + installment RM (POP + NPO).'],
+        ['PR / 艺作 / FLEXI', 'Counted from the purchase item text: power rings, calligraphy/画作, and 灵活/Flexi audits. Check against invoices.'],
+        ['NEA', 'New agents who joined in the period, credited to the agent they report to.'],
+        ['傳福大使', 'A prospect/customer (not an agent) who referred someone into a CPS. Credited to the agent who led that CPS. Total = everyone up to the period end; Active = referred in the period; New = first-ever referral in the period (by-agent sheet shows New).'],
+        ['CPS# 来自傳福大使', 'CPS sessions in the period whose referrer is a 傳福大使.'],
+        ['面談舊客 #', 'Summary: FTF / FSA / Golden Road meetings with someone already a customer. 傳福大使 block: distinct customers met.'],
+        ['有成交的舊客 #', 'Existing customers (customer before the period) who were met AND bought in the period; 成交的单数 = their orders.'],
+        ['Event columns', '知识讲座 = 运程讲座/个人风水基础课/环境风水基础课/新春活动 · 老板讲座 = 老板每月主题课 · 分享会 = 改命/画作/艺品/福气分享会 · MZ = 博物馆 · HJ = 汇集. Attended prospects/customers (event attendance list), credited to their agent.'],
+        ['Manual columns', '大玄, 小玄, 有富田, JY, CLA, PJA, 财库/托, 课程 and the BJS block are blank on purpose — fill in by hand.'],
+        ['Grey rows', 'Agents with no activity in the period.'],
+    ].forEach((n, i) => {
+        s5.getCell(i + 1, 1).value = n[0]; s5.getCell(i + 1, 1).font = { bold: true };
+        s5.getCell(i + 1, 2).value = n[1]; s5.getCell(i + 1, 2).alignment = { wrapText: true, vertical: 'top' };
+    });
+
+    return { wb, label: P.current.label, from: P.current.from, to: P.current.to };
+};
+
+const exportQuarterReview = async () => {
+    try {
+        UI.toast.success('Building Quarter Review…');
+        const { wb, from, to } = await _qrBuildWorkbook();
+        const buf = await wb.xlsx.writeBuffer();
+        const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.setAttribute('hidden', '');
+        a.href = url;
+        a.download = `Quarter_Review_${from}_to_${to}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => window.URL.revokeObjectURL(url), 2000);
+        UI.toast.success('Quarter Review exported.');
+    } catch (e) {
+        console.error('[quarterReview] export failed:', e);
+        UI.toast.error('Quarter Review export failed: ' + ((e && e.message) || e));
+    }
+};
+
 const exportKPIReport = async (format) => {
+    // The dashboard's export button (legacy shell + React island both pass 'csv')
+    // now produces the Quarter Review workbook; the old metric dump stays
+    // reachable as 'csv-raw'.
+    if (format !== 'csv-raw') return exportQuarterReview();
     const ranges = getDateRanges(_currentTimeFilter, _customDateFrom, _customDateTo);
     const kpis = await calculateKPIs(ranges.current.from, ranges.current.to);
 
-    if (format === 'csv') {
+    {
         let csv = "\uFEFF"; // BOM for Excel
         csv += `KPI Report: ${ranges.current.from} to ${ranges.current.to} (${_currentTimeFilter})\n`;
         csv += `Exported at: ${new Date().toLocaleString()}\n\n`;
