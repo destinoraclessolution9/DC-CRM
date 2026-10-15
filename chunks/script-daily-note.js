@@ -5615,6 +5615,12 @@
     try {
       var key = 'daily_note_last_shown';
       var today = todayKey();
+      // Opened from the 8:30 morning-summary push (link carries ?wisdom=1):
+      // always show, then drop the flag so a reload doesn't re-open it.
+      if (/[?&]wisdom=1(&|$)/.test(location.search)) {
+        force = true;
+        try { var _u = new URL(location.href); _u.searchParams.delete('wisdom'); history.replaceState(history.state, '', _u.pathname + _u.search + _u.hash); } catch (e) {}
+      }
       if (!force && localStorage.getItem(key) === today) return;
       var note = window.app.getDailyNote();
       if (!note) return;

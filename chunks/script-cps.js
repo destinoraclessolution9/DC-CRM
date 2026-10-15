@@ -148,6 +148,17 @@ const openNotifItem = async (activityId, hash) => {
     } catch (e) { console.warn('[notif] open item failed:', e); }
 };
 
+// Open today's 每天一智 · Daily Wisdom popup (lazy chunk), even if already seen today.
+const openDailyWisdom = async () => {
+    try {
+        document.querySelector('.notif-panel')?.remove();
+        if (typeof window.app.maybeShowDailyNote !== 'function' && window._loadChunk) {
+            await window._loadChunk('chunks/script-daily-note.min.js');
+        }
+        window.app.maybeShowDailyNote && window.app.maybeShowDailyNote(true);
+    } catch (e) { console.warn('[notif] open daily wisdom failed:', e); }
+};
+
 const _inboxSectionHtml = (rows) => {
     if (!rows.length) return '';
     const item = (n) => {
@@ -155,8 +166,10 @@ const _inboxSectionHtml = (rows) => {
         const unread = !n.read_at;
         const aid = n.activity_id != null && /^\d+$/.test(String(n.activity_id)) ? String(n.activity_id) : 'null';
         const safeHash = /^[a-z0-9_-]*$/i.test(hash) ? hash : '';
+        // Morning summary carries today's Daily Wisdom — tapping opens the popup.
+        const click = n.kind === 'daily_summary' ? 'app.openDailyWisdom()' : `app.openNotifItem(${aid}, '${safeHash}')`;
         return `
-            <div class="notif-item${unread ? ' notif-unread' : ''}" onclick="app.openNotifItem(${aid}, '${safeHash}')" style="cursor:pointer;${unread ? 'background:var(--bg-elevated);' : ''}">
+            <div class="notif-item${unread ? ' notif-unread' : ''}" onclick="${click}" style="cursor:pointer;${unread ? 'background:var(--bg-elevated);' : ''}">
                 <div class="notif-item-icon">${_NOTIF_KIND_ICON[n.kind] || '🔔'}</div>
                 <div class="notif-item-body">
                     <div class="notif-item-title">${unread ? '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--primary,#2563eb);margin-right:6px;vertical-align:middle;"></span>' : ''}${esc(n.title || '')}</div>
@@ -1582,6 +1595,7 @@ const applyCpsScanSelection = async () => {
         _buildNotifPanel,
         toggleNotifPanel,
         openNotifItem,
+        openDailyWisdom,
         _initNotifBell,
         getViewPhase,
         calculateCustomerHealthScore,

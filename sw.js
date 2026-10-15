@@ -356,7 +356,9 @@ self.addEventListener('notificationclick', (event) => {
                         const cu = new URL(client.url);
                         const tu = new URL(absTarget);
                         if (cu.origin === tu.origin && normPath(cu.pathname) === normPath(tu.pathname) && 'focus' in client) {
-                            if ('navigate' in client && cu.hash !== tu.hash) {
+                            // Reload when the hash OR query differs (?wisdom=1 → the
+                            // app opens the Daily Wisdom popup on load).
+                            if ('navigate' in client && (cu.hash !== tu.hash || cu.search !== tu.search)) {
                                 return client.navigate(absTarget).then((c) => (c || client).focus());
                             }
                             return client.focus();
