@@ -1972,11 +1972,18 @@ const getPDSRBreakdown = async (from, to) => {
         const label = ((pr.category || '').trim() === 'Power Ring' && _pdsrRingCode(zh, m && m[2])) || zh || name;
         // Also each hyphen part of the Chinese name, so "经传录" finds "上贵文昌-经传录".
         const zhParts = zh.split(/[-—（(]/).map(x => x.replace(/[）)]/g, '').trim()).filter(Boolean);
-        [name, zh, m && m[2], ...(zhParts.length > 1 ? zhParts : [])].forEach((k) => {
+        [name, zh, m && m[2], ...(zhParts.length > 1 ? zhParts : [])].forEach((k, i) => {
             const n = _pdsrNorm(k);
             // 2-char Chinese names (圣智) are fine; 2-letter Latin keys ("dc") are noise.
-            if (n.length >= 3 || (n.length === 2 && /[^\x00-\x7f]/.test(n))) keys.push({ n, grp: grp || null, label });
+            if (n.length >= 3 || (n.length === 2 && /[^\x00-\x7f]/.test(n))) keys.push({ n, grp: grp || null, label, part: i >= 3 });
         });
+    }
+    // A hyphen part shared by several products ("简易风水" in 简易风水-排屋 / -公寓 …)
+    // can't say which one was sold — drop it rather than pick one arbitrarily.
+    const labelsByKey = new Map();
+    keys.forEach(k => { if (!labelsByKey.has(k.n)) labelsByKey.set(k.n, new Set()); labelsByKey.get(k.n).add(k.label); });
+    for (let i = keys.length - 1; i >= 0; i--) {
+        if (keys[i].part && labelsByKey.get(keys[i].n).size > 1) keys.splice(i, 1);
     }
     keys.sort((a, b) => b.n.length - a.n.length);
 

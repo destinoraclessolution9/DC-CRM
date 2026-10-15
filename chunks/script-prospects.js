@@ -3159,10 +3159,10 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         const cr = prospect.closing_record || null;
         const status = cr?.status || 'draft';
         const isManager = isSystemAdmin(_state.cu) || isMarketingManager(_state.cu);
-        const products = (await AppDataStore.getAll('products')).filter(p => p.is_active !== false);
-        const productOptions = products.length
-            ? products.map(p => `<option value="${escapeHtml(p.name)}" ${(cr?.product === p.name) ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')
-            : '<option value="">No products available</option>';
+        // Grouped by sub-group; inactive products drop out except this closing's own product.
+        const products = await AppDataStore.getAll('products');
+        const productOptions = UI.productOptionsHtml(products, { selected: cr?.product || '' })
+            || '<option value="">No products available</option>';
 
         // ── Before 2025 Purchase Record (stored inside closing_record to reuse existing JSONB column) ──
         const pid = prospect.id;

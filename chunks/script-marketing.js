@@ -350,6 +350,8 @@
                         data = data.map(it => ({ ...it, _cats: parseEventCategories(it.categories) }));
                     }
                     rows = data;
+                    // Products render as grouped/collapsible HTML (one builder for both paths).
+                    if (tab === 'products') legacyHtml = _buildProductsTableHtml(data);
                 } else {
                     // Passthrough tabs (promotions / special_programs). Always build
                     // the legacy HTML string as the by-id fallback (UNCHANGED). When
@@ -467,6 +469,153 @@
         await showMarketingListsView(viewport);
     };
 
+    // ── Products table: collapsible groups + search (2026-10-15) ────────────────
+    // 110+ products in one flat 12-column table was unusable. Products now sit in
+    // collapsible groups by `subcategory` (the app catalogue's groups — Power Ring,
+    // Calligraphy Adornment, Artistic Masterpieces …), falling back to `category`.
+    // `category` itself is untouched: follow-up triggers, the 4-pillar milestones
+    // and the weekly report PD/SR/TX all key on it. Inactive products collect in
+    // their own group at the bottom. One HTML builder serves BOTH the React island
+    // (passed as legacyHtml) and the legacy path, so there is a single source.
+    const _PRODUCT_GROUP_ORDER = ['Power Ring', 'Calligraphy Adornment', 'Artistic Masterpieces',
+        'Royal Woodwork Series', 'Consultation Service', 'Simplified Feng Shui', 'Flexi Feng Shui',
+        'Direct On', 'Huan Tian Xin', 'Books', 'Recruitment', 'Others'];
+    // Promo versions sit right under their main product: "上龙柄（推介特价） … Promo 3.0"
+    // shares the base "上龙柄" with "上龙柄 Shang Long Bing".
+    const _productBaseKey = (name) => String(name || '')
+        .replace(/[（(][^）)]*(推介|特价|特惠|promo)[^）)]*[）)]/gi, '')
+        .replace(/\s+[A-Za-z].*$/, '')
+        .trim();
+    const _productPriceText = (p) => (p.price == null || p.price === '')
+        ? '<span class="pt-quote">Quote</span>'
+        : `RM ${Number(p.price).toLocaleString('en-MY')}`;
+
+    const _buildProductsTableHtml = (data) => {
+        const collator = new Intl.Collator(['zh', 'en'], { numeric: true, sensitivity: 'base' });
+        const groups = new Map();
+        const inactive = [];
+        for (const p of data || []) {
+            if (p.is_active === false) { inactive.push(p); continue; }
+            const g = String(p.subcategory || p.category || '').trim() || 'No group';
+            if (!groups.has(g)) groups.set(g, []);
+            groups.get(g).push(p);
+        }
+        // Highest price first; a promo follows its main product; quote-only last.
+        const sortGroup = (list) => {
+            const fams = new Map();
+            list.forEach(p => {
+                const k = _productBaseKey(p.name) || p.name;
+                if (!fams.has(k)) fams.set(k, []);
+                fams.get(k).push(p);
+            });
+            const price = (p) => (p.price == null || p.price === '') ? -1 : Number(p.price);
+            const famList = [...fams.values()].map(f => f.sort((a, b) => price(b) - price(a) || collator.compare(a.name || '', b.name || '')));
+            famList.sort((a, b) => price(b[0]) - price(a[0]) || collator.compare(a[0].name || '', b[0].name || ''));
+            return famList.flat();
+        };
+        const names = [...groups.keys()].sort((a, b) => {
+            if (a === 'No group' || b === 'No group') return a === 'No group' ? 1 : -1;
+            const ia = _PRODUCT_GROUP_ORDER.indexOf(a), ib = _PRODUCT_GROUP_ORDER.indexOf(b);
+            if (ia !== -1 || ib !== -1) return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+            return collator.compare(a, b);
+        });
+        const row = (p) => {
+            const search = [p.name, p.category, p.subcategory, p.price, p.remarks].filter(v => v != null).join(' ').toLowerCase();
+            const sid = escapeHtml(String(p.id));
+            return `
+                <tr class="pt-row" data-search="${escapeHtml(search)}">
+                    <td class="pt-photo">${p.photo_url
+                        ? `<img loading="lazy" decoding="async" src="${escapeHtml(p.photo_url)}" crossorigin="anonymous" onclick="app.viewProductImage('${escapeHtml(p.photo_url)}','Photo')" title="View photo">`
+                        : `<span title="No photo">📷</span>`}</td>
+                    <td class="pt-name"><strong>${escapeHtml(p.name || '')}</strong>${p.remarks ? `<small>${escapeHtml(p.remarks)}</small>` : ''}</td>
+                    <td class="pt-price">${_productPriceText(p)}<button class="btn-icon" onclick="event.stopPropagation();app.showProductPriceHistory(${Number(p.id)})" title="Price history"><i class="fas fa-history"></i></button></td>
+                    <td class="pt-actions">
+                        <button class="btn-icon" onclick="event.stopPropagation();app.openMarketingListEditModal('${sid}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
+                        <button class="btn-icon text-danger" onclick="event.stopPropagation();app.deleteMarketingListItem('${sid}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
+                    </td>
+                </tr>`;
+        };
+        const section = (title, sub, list, extraCls = '') => `
+            <details class="pt-group ${extraCls}">
+                <summary><span class="pt-title">${escapeHtml(title)}</span>${sub ? `<span class="pt-sub">${escapeHtml(sub)}</span>` : ''}<span class="pt-count">${list.length}</span></summary>
+                <table class="data-table pt-table"><tbody>${list.map(row).join('')}</tbody></table>
+            </details>`;
+        const catOf = (list) => [...new Set(list.map(p => (p.category || '').trim()).filter(Boolean))].join(' / ');
+        const total = (data || []).length;
+        return `
+            <style>
+            .pt-wrap{display:flex;flex-direction:column;gap:10px;}
+            .pt-toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+            .pt-search{flex:1;min-width:200px;max-width:420px;}
+            .pt-meta{font-size:12.5px;color:var(--gray-500);}
+            .pt-group{border:1px solid var(--gray-200);border-radius:10px;background:var(--white,#fff);overflow:hidden;}
+            .pt-group>summary{display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer;list-style:none;font-weight:600;user-select:none;}
+            .pt-group>summary::-webkit-details-marker{display:none;}
+            .pt-group>summary::before{content:'\\25B8';color:var(--gray-400);transition:transform .15s;}
+            .pt-group[open]>summary::before{transform:rotate(90deg);}
+            .pt-group[open]>summary{border-bottom:1px solid var(--gray-200);background:var(--gray-50);}
+            .pt-sub{font-weight:400;font-size:12px;color:var(--gray-500);}
+            .pt-count{margin-left:auto;font-size:12px;font-weight:600;background:var(--gray-100);color:var(--gray-600);border-radius:999px;padding:2px 9px;}
+            .pt-inactive>summary .pt-title{color:var(--gray-500);}
+            .pt-inactive .pt-row{opacity:.6;}
+            .pt-table{margin:0;width:100%;}
+            .pt-table td{vertical-align:middle;}
+            .pt-photo{width:52px;text-align:center;}
+            .pt-photo img{width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer;}
+            .pt-photo span{color:var(--gray-300);font-size:18px;}
+            .pt-name small{display:block;color:var(--gray-500);}
+            .pt-price{white-space:nowrap;font-weight:600;width:1%;}
+            .pt-quote{color:#b45309;font-weight:600;}
+            .pt-actions{white-space:nowrap;width:1%;}
+            .pt-empty{padding:24px;text-align:center;color:var(--gray-500);}
+            .pt-group,.pt-wrap{min-width:0;max-width:100%;}
+            @media (max-width:640px){
+                .pt-table,.pt-table tbody{display:block;min-width:0 !important;width:100%;}
+                .pt-table tr.pt-row{display:grid;grid-template-columns:40px 1fr auto;grid-template-areas:"ph nm nm" "ph pr ac";gap:2px 10px;align-items:center;padding:9px 12px;border-bottom:1px solid var(--gray-100);}
+                .pt-table tr.pt-row[hidden]{display:none;}
+                .pt-table td{display:block;padding:0 !important;border:0 !important;width:auto !important;}
+                .pt-photo{grid-area:ph;}.pt-photo img{width:36px;height:36px;}
+                .pt-name{grid-area:nm;font-size:13px;}
+                .pt-price{grid-area:pr;}
+                .pt-actions{grid-area:ac;}
+            }
+            </style>
+            <div class="pt-wrap" id="pt-wrap">
+                <div class="pt-toolbar">
+                    <input type="search" class="form-control pt-search" id="pt-search" placeholder="Search name, 中文, group or price…" oninput="app.filterProductGroups(this.value)">
+                    <span class="pt-meta">${total} products · ${names.length + (inactive.length ? 1 : 0)} groups</span>
+                </div>
+                ${names.map(g => { const c = catOf(groups.get(g)); return section(g, c === g ? '' : c, sortGroup(groups.get(g))); }).join('')}
+                ${inactive.length ? section('Inactive', 'hidden from pickers', sortGroup(inactive), 'pt-inactive') : ''}
+                <div class="pt-empty" id="pt-empty" hidden>No product matches your search.</div>
+            </div>`;
+    };
+
+    // Search: hide non-matching rows, open the groups that still have matches,
+    // hide the empty ones; clearing the box restores the collapsed overview.
+    const filterProductGroups = (q) => {
+        const wrap = document.getElementById('pt-wrap');
+        if (!wrap) return;
+        const terms = String(q || '').toLowerCase().trim().split(/\s+/).filter(Boolean);
+        let shown = 0;
+        wrap.querySelectorAll('details.pt-group').forEach(d => {
+            const rows = d.querySelectorAll('tr.pt-row');
+            let n = 0;
+            rows.forEach(tr => {
+                const hit = !terms.length || terms.every(t => (tr.dataset.search || '').includes(t));
+                tr.hidden = !hit;
+                if (hit) n++;
+            });
+            d.hidden = terms.length > 0 && n === 0;
+            d.open = terms.length > 0 && n > 0;
+            const c = d.querySelector('.pt-count');
+            if (c) c.textContent = terms.length ? `${n} / ${rows.length}` : String(rows.length);
+            shown += n;
+        });
+        const empty = document.getElementById('pt-empty');
+        if (empty) empty.hidden = shown > 0;
+    };
+
     const renderMarketingListTable = async () => {
         // Special Programs tab uses its own renderer (KPI-style, not master-data style)
         if (_state.cmlt === 'special_programs') {
@@ -490,91 +639,7 @@
         }
 
         if (_state.cmlt === 'products') {
-            // Sort so the same categories sit together, then the same product group/series
-            // (e.g. "一星指环/二星指环/三星指环", "Bao Wang Xiang 1/2/3") clusters within each
-            // category, ordered strictly by variant number. There is no stored group column, so
-            // the series + variant are inferred from the name: Chinese numerals (一二三…), English
-            // number words (One/Two/…) and Arabic digits are all normalised to a number, then a
-            // numeric-aware collator keeps variants in true order (一→二→三, 2 before 10).
-            const _cnDigit = { '〇': 0, '零': 0, '一': 1, '壹': 1, '二': 2, '贰': 2, '两': 2, '三': 3, '叁': 3, '四': 4, '肆': 4, '五': 5, '伍': 5, '六': 6, '陆': 6, '七': 7, '柒': 7, '八': 8, '捌': 8, '九': 9, '玖': 9, '十': 10 };
-            const _cnRun = /[〇零一壹二贰两三叁四肆五伍六陆七柒八捌九玖十]+/g;
-            const _cnToInt = (s) => {
-                if (s.length === 1 && _cnDigit[s] != null) return _cnDigit[s];
-                // simple 十-forms up to 99: 十=10, 十X=10+X, X十=X*10, X十Y=X*10+Y
-                const m = s.match(/^([一壹二贰两三叁四肆五伍六陆七柒八捌九玖])?十([一壹二贰两三叁四肆五伍六陆七柒八捌九玖])?$/);
-                if (m) { const t = m[1] ? _cnDigit[m[1]] : 1; const o = m[2] ? _cnDigit[m[2]] : 0; return t * 10 + o; }
-                return null; // contains 百/千 etc. — leave as-is rather than mis-parse
-            };
-            const _enWords = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
-            const _normName = (raw) => String(raw || '')
-                .replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/gi, (w) => String(_enWords[w.toLowerCase()]))
-                .replace(_cnRun, (run) => { const n = _cnToInt(run); return n == null ? run : String(n); });
-            const _prodCollator = new Intl.Collator(['zh', 'en'], { numeric: true, sensitivity: 'base' });
-            data = data.slice().sort((a, b) => {
-                const ca = (a.category || '').trim();
-                const cb = (b.category || '').trim();
-                if (!ca && cb) return 1;          // products without a category go last
-                if (ca && !cb) return -1;
-                const catCmp = _prodCollator.compare(ca, cb);
-                if (catCmp !== 0) return catCmp;
-                return _prodCollator.compare(_normName(a.name), _normName(b.name));
-            });
-            return `
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th scope="col" style="width:54px;">Photo</th>
-                            <th scope="col" style="width:54px;">Poster</th>
-                            <th scope="col">Name</th>
-                            <th scope="col">Category</th>
-                            <th scope="col">Functions Description</th>
-                            <th scope="col">Product Description</th>
-                            <th scope="col">Price (RM)</th>
-                            <th scope="col">Lead Time</th>
-                            <th scope="col">Dimension</th>
-                            <th scope="col">Weight</th>
-                            <th scope="col">Status</th>
-                            <th scope="col">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${data.map(item => `
-                            <tr style="${!item.is_active ? 'opacity: 0.6; background: #f9fafb;' : ''}">
-                                <td style="text-align:center;">
-                                    ${item.photo_url
-                                        ? `<img loading="lazy" decoding="async" src="${item.photo_url}" crossorigin="anonymous" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer;" onclick="app.viewProductImage('${item.photo_url}','Photo')" title="View photo">`
-                                        : `<span style="color:var(--gray-300);font-size:18px;" title="No photo">📷</span>`}
-                                </td>
-                                <td style="text-align:center;">
-                                    ${item.poster_url
-                                        ? `<img loading="lazy" decoding="async" src="${item.poster_url}" crossorigin="anonymous" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer;" onclick="app.viewProductImage('${item.poster_url}','Poster')" title="View poster">`
-                                        : `<span style="color:var(--gray-300);font-size:18px;" title="No poster">🖼️</span>`}
-                                </td>
-                                <td><strong>${escapeHtml(item.name)}</strong><br><small class="text-muted">${escapeHtml(item.remarks || '')}</small></td>
-                                <td>${escapeHtml(item.category || '-')}</td>
-                                <td>${escapeHtml(item.functions_description || '-')}</td>
-                                <td>${escapeHtml(item.description || '-')}</td>
-                                <td>
-                                    <span style="font-weight:600;">RM ${item.price || 0}</span>
-                                    <button class="btn-icon" style="margin-left:4px;opacity:0.6;" onclick="app.showProductPriceHistory(${item.id})" title="Price history"><i class="fas fa-history"></i></button>
-                                </td>
-                                <td>${escapeHtml(item.delivery_lead_time || '-')}</td>
-                                <td>${escapeHtml(item.product_dimension || '-')}</td>
-                                <td>${escapeHtml(item.product_weight || '-')}</td>
-                                <td>
-                                    <span class="status-badge ${item.is_active ? 'status-active' : 'status-inactive'}">
-                                        ${item.is_active ? 'Active' : 'Inactive'}
-                                    </span>
-                                </td>
-                                <td>
-                                    <button class="btn-icon" onclick="app.openMarketingListEditModal('${item.id}')" title="Edit"><i class="fas fa-pencil-alt"></i></button>
-                                    <button class="btn-icon text-danger" onclick="app.deleteMarketingListItem('${item.id}')" title="Delete"><i class="fas fa-trash-alt"></i></button>
-                                </td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            `;
+            return _buildProductsTableHtml(data);
         } else if (_state.cmlt === 'events') {
             return `
                 <table class="data-table">
@@ -978,6 +1043,16 @@
     const bjcPage = (d) => { _bjc.page = Math.max(0, _bjc.page + d); _bjcRerender(); };
     const bjcToggle = (id) => { _bjc.open[id] = !_bjc.open[id]; _bjcRerender(); };
 
+    // Suggest the existing categories / sub-groups so new products land in a group
+    // that already exists instead of a near-duplicate spelling.
+    const _productGroupDatalists = async () => {
+        let all = [];
+        try { all = (await AppDataStore.getAll('products')) || []; } catch (_) { /* offline: no suggestions */ }
+        const opts = (key) => [...new Set(all.map(p => String(p[key] || '').trim()).filter(Boolean))]
+            .sort().map(v => `<option value="${escapeHtml(v)}"></option>`).join('');
+        return `<datalist id="mkt-category-list">${opts('category')}</datalist><datalist id="mkt-subcategory-list">${opts('subcategory')}</datalist>`;
+    };
+
     const openMarketingListAddModal = async () => {
         let content = '';
         const type = _state.cmlt;
@@ -986,11 +1061,13 @@
             const _today = new Date().toISOString().split('T')[0];
             content = `
                 <div class="form-group"><label>Name*</label><input type="text" id="mkt-name" class="form-control"></div>
-                <div class="form-group"><label>Category</label><input type="text" id="mkt-category" class="form-control" placeholder="e.g. Power Ring, 画作, 风水方案"></div>
+                <div class="form-group"><label>Category</label><input type="text" id="mkt-category" class="form-control" list="mkt-category-list" placeholder="e.g. Power Ring, 画作, 风水方案"></div>
+                <div class="form-group"><label>Sub-group</label><input type="text" id="mkt-subcategory" class="form-control" list="mkt-subcategory-list" placeholder="e.g. Calligraphy Adornment, Flexi Feng Shui"></div>
+                ${await _productGroupDatalists()}
                 <div class="form-group"><label>Functions Description</label><textarea id="mkt-functions-desc" class="form-control" placeholder="Describe functions..."></textarea></div>
                 <div class="form-group"><label>Product Description</label><textarea id="mkt-desc" class="form-control" placeholder="Describe the product..."></textarea></div>
                 <div class="form-row">
-                    <div class="form-group half"><label>Price (RM) — Malaysia</label><input type="number" id="mkt-price" class="form-control" value="0"></div>
+                    <div class="form-group half"><label>Price (RM) — Malaysia</label><input type="number" id="mkt-price" class="form-control" value="" placeholder="Blank = quote"></div>
                     <div class="form-group half"><label>Price Effective Date</label><input type="date" id="mkt-price-date" class="form-control" value="${_today}"></div>
                 </div>
                 <div class="form-row">
@@ -1100,11 +1177,13 @@
             const _today = new Date().toISOString().split('T')[0];
             content = `
                 <div class="form-group"><label>Name*</label><input type="text" id="mkt-name" class="form-control" value="${escapeHtml(item.name || '')}"></div>
-                <div class="form-group"><label>Category</label><input type="text" id="mkt-category" class="form-control" value="${escapeHtml(item.category || '')}" placeholder="e.g. Power Ring, 画作, 风水方案"></div>
+                <div class="form-group"><label>Category</label><input type="text" id="mkt-category" class="form-control" list="mkt-category-list" value="${escapeHtml(item.category || '')}" placeholder="e.g. Power Ring, 画作, 风水方案"></div>
+                <div class="form-group"><label>Sub-group</label><input type="text" id="mkt-subcategory" class="form-control" list="mkt-subcategory-list" value="${escapeHtml(item.subcategory || '')}" placeholder="e.g. Calligraphy Adornment, Flexi Feng Shui"></div>
+                ${await _productGroupDatalists()}
                 <div class="form-group"><label>Functions Description</label><textarea id="mkt-functions-desc" class="form-control" placeholder="Describe functions...">${escapeHtml(item.functions_description || '')}</textarea></div>
                 <div class="form-group"><label>Product Description</label><textarea id="mkt-desc" class="form-control" placeholder="Describe the product...">${escapeHtml(item.description || '')}</textarea></div>
                 <div class="form-row">
-                    <div class="form-group half"><label>Price (RM) — Malaysia</label><input type="number" id="mkt-price" class="form-control" value="${item.price || 0}"></div>
+                    <div class="form-group half"><label>Price (RM) — Malaysia</label><input type="number" id="mkt-price" class="form-control" value="${item.price == null ? '' : item.price}" placeholder="Blank = quote"></div>
                     <div class="form-group half"><label>Price Effective Date</label><input type="date" id="mkt-price-date" class="form-control" value="${_today}"></div>
                 </div>
                 <div class="form-row">
@@ -1233,14 +1312,17 @@
         } else if (type === 'products') {
             data.name = document.getElementById('mkt-name').value.trim();
             data.category = document.getElementById('mkt-category').value.trim();
+            data.subcategory = (document.getElementById('mkt-subcategory')?.value || '').trim() || null;
             data.functions_description = document.getElementById('mkt-functions-desc').value;
             data.description = document.getElementById('mkt-desc')?.value || '';
-            data.price = parseFloat(document.getElementById('mkt-price').value) || 0;
+            // Blank price = "quote" (fengshui audits vary by site) — stored as NULL, not 0.
+            const _priceRaw = (document.getElementById('mkt-price').value || '').trim();
+            data.price = _priceRaw === '' ? null : (parseFloat(_priceRaw) || 0);
             // Per-country absolute price map (NOT FX conversion). Default market (MY)
             // mirrors the base `price`; other markets read their own input, omitted if blank.
             data.prices = {};
             (UI.countries || []).forEach(c => {
-                if (c.code === UI.defaultCountry) { data.prices[c.code] = data.price; return; }
+                if (c.code === UI.defaultCountry) { if (data.price != null) data.prices[c.code] = data.price; return; }
                 const v = parseFloat(document.getElementById('mkt-price-' + c.code)?.value);
                 if (Number.isFinite(v) && v > 0) data.prices[c.code] = v;
             });
@@ -1258,7 +1340,7 @@
                 let _savedId = id;
                 if (id) {
                     const _existing = await AppDataStore.getById('products', id);
-                    if (_existing && parseFloat(_existing.price) !== data.price) {
+                    if (_existing && data.price != null && parseFloat(_existing.price) !== data.price) {
                         await AppDataStore.create('product_price_history', { product_id: parseInt(id), price: data.price, effective_date: _priceDate });
                     }
                     const result = await AppDataStore.update('products', id, data);
@@ -5658,6 +5740,7 @@ const simulateCampaignSending = async (campaignId) => {
         saveDailyMustDo,
         showMarketingAutomationView,
         showMarketingListsView,
+        filterProductGroups,
         showMonthlyPromotionView,
         buildEventCategoriesField,
         // script-features2.js reaches this via window.app.renderMarketingListTable.

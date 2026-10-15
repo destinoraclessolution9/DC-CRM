@@ -543,7 +543,9 @@ export function MarketingListsView({ tab = 'products', rows = [], isTeamLeader =
                 kill-switch is off / the payload build threw, `rows` is the empty
                 array and we fall back to the chunk's pre-rendered legacy HTML via
                 dangerouslySetInnerHTML — byte-for-byte today's behavior. */}
-            {isMaster
+            {/* Products: the chunk sends grouped/collapsible HTML (search + groups by
+                sub-group) as legacyHtml — one builder shared with the legacy path. */}
+            {isMaster && !(tab === 'products' && legacyHtml)
                 ? <div id="marketing-list-content"><MasterTable tab={tab} rows={rows} /></div>
                 : passthrough
                     ? <div id="marketing-list-content">

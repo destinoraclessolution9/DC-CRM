@@ -2494,12 +2494,13 @@ const openAddPurchaseModal = async (customerId) => {
     const _cur = UI.currencyForCountry(customer.country);
     const _sym = UI.countryByCode(customer.country).symbol;
     const _products = await AppDataStore.getAll('products').catch(() => []);
-    const _prodOptions = (_products && _products.length)
-        ? _products.map(p => {
-            const price = _productPriceFor(p, customer.country);
-            return `<option value="${escapeHtml(p.name)}" data-price="${price != null ? price : ''}">${escapeHtml(p.name)}${price != null ? ` (${UI.formatCurrency(price, { currency: _cur })})` : ''}</option>`;
-          }).join('')
-        : ['PR4 Power Ring', 'PR3 Ring', 'Office Audit', 'Harmony Painting'].map(n => `<option value="${n}">${n}</option>`).join('');
+    const _prodOptions = UI.productOptionsHtml(_products, {
+            renderOption: (p) => {
+                const price = _productPriceFor(p, customer.country);
+                return `<option value="${escapeHtml(p.name)}" data-price="${price != null ? price : ''}">${escapeHtml(p.name)}${price != null ? ` (${UI.formatCurrency(price, { currency: _cur })})` : ''}</option>`;
+            },
+        })
+        || ['PR4 Power Ring', 'PR3 Ring', 'Office Audit', 'Harmony Painting'].map(n => `<option value="${n}">${n}</option>`).join('');
     const content = `
 <div class="form-section">
                 <div class="form-group">

@@ -467,11 +467,9 @@
             // the option value attribute and its text content).
             .map(v => `<option value="${escapeHtml((v.name || '') + ' | ' + (v.location || ''))}">${escapeHtml((v.name || '') + ' | ' + (v.location || ''))}</option>`)
             .join('');
-        const _productOptions = (await _getProductsCached())
-            .filter(p => p.is_active !== false)
-            // Escape DB-sourced product name (stored XSS) — matches buildMeetingOutcomeBlock.
-            .map(p => `<option value="${escapeHtml(p.name || '')}">${escapeHtml(p.name || '')}</option>`)
-            .join('') || '<option value="">No products available</option>';
+        // Grouped by product sub-group; UI.productOptionsHtml escapes names (stored XSS).
+        const _productOptions = UI.productOptionsHtml(await _getProductsCached())
+            || '<option value="">No products available</option>';
 
         const modalContent = buildActivityModalContent(prefillDate, today, _venueOptions, _productOptions);
 
@@ -2093,9 +2091,8 @@ My raw notes:
         const hasProspect = !!a.prospect_id || !!prospect || readOnly;
 
         const selectedProduct = cr.product || a.solution_sold || '';
-        const productOptions = products.length
-            ? products.map(p => `<option value="${escapeHtml(p.name)}" ${selectedProduct === p.name ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')
-            : '<option value="">No products available</option>';
+        const productOptions = UI.productOptionsHtml(products, { selected: selectedProduct })
+            || '<option value="">No products available</option>';
 
         const paymentMethod = cr.payment_method || a.payment_method || 'Cash';
         const isPOP = paymentMethod === 'POP';

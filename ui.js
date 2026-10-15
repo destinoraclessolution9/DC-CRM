@@ -624,6 +624,39 @@ window.UI = (() => {
         }
     };
 
+    // ── Product picker <option>s grouped by sub-group (2026-10-15) ──
+    // Every product dropdown (closing record, meeting outcome, activity, Add
+    // Purchase) used to be one flat 100+ item list. Groups follow the product
+    // catalogue's `subcategory` (falling back to `category`) in the same order as
+    // Product & Event Manager. Inactive products are left out — EXCEPT the one
+    // already selected, so editing an old closing never silently drops its product.
+    // `renderOption(p, selected)` lets a caller add data-* attrs / price labels.
+    const PRODUCT_GROUP_ORDER = ['Power Ring', 'Calligraphy Adornment', 'Artistic Masterpieces',
+        'Royal Woodwork Series', 'Consultation Service', 'Simplified Feng Shui', 'Flexi Feng Shui',
+        'Direct On', 'Huan Tian Xin', 'Books', 'Recruitment', 'Others'];
+    const productOptionsHtml = (products, opts = {}) => {
+        const selected = opts.selected || '';
+        const render = opts.renderOption || ((p, sel) =>
+            `<option value="${escapeHtml(p.name || '')}"${sel ? ' selected' : ''}>${escapeHtml(p.name || '')}</option>`);
+        const collator = new Intl.Collator(['zh', 'en'], { numeric: true, sensitivity: 'base' });
+        const groups = new Map();
+        (products || []).forEach(p => {
+            if (!p || !p.name) return;
+            if (p.is_active === false && p.name !== selected) return;
+            const g = String(p.subcategory || p.category || '').trim() || 'Others';
+            if (!groups.has(g)) groups.set(g, []);
+            groups.get(g).push(p);
+        });
+        if (!groups.size) return '';
+        const rank = (g) => { const i = PRODUCT_GROUP_ORDER.indexOf(g); return i === -1 ? 999 : i; };
+        return [...groups.keys()]
+            .sort((a, b) => rank(a) - rank(b) || collator.compare(a, b))
+            .map(g => `<optgroup label="${escapeHtml(g)}">${groups.get(g)
+                .sort((a, b) => collator.compare(a.name, b.name))
+                .map(p => render(p, p.name === selected)).join('')}</optgroup>`)
+            .join('');
+    };
+
     return {
         toast,
         showModal,
@@ -638,6 +671,7 @@ window.UI = (() => {
         countries: COUNTRIES,
         defaultCountry: DEFAULT_COUNTRY,
         countryByCode,
+        productOptionsHtml,
         currencyForCountry,
         money,
         moneyCompact,
