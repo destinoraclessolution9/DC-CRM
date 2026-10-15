@@ -48,17 +48,17 @@
         pr_decision:         '💍 改命戒指 — 决策阶段',
 
         // ── Feng Shui Audit (fs_) ────────────────────────────────────────────
-        fs_post_cps:         '🏠 风水方案 — CPS后',
-        fs_invited_diy:      '🏠 风水方案 — DIY受邀',
-        fs_post_diy:         '🏠 风水方案 — DIY后',
-        fs_invited_sharing:  '🏠 风水方案 — 分享会受邀',
-        fs_post_sharing:     '🏠 风水方案 — 分享会后',
-        fs_invited_museum:   '🏠 风水方案 — 博物馆受邀',
-        fs_post_museum:      '🏠 风水方案 — 博物馆后',
-        fs_invited_huiji:    '🏠 风水方案 — 汇集受邀',
-        fs_post_huiji:       '🏠 风水方案 — 汇集后',
-        fs_fsa_scheduled:    '🏠 风水方案 — 1对1 FSA',
-        fs_decision:         '🏠 风水方案 — 决策阶段',
+        fs_post_cps:         '🏠 风水审计 — CPS后',
+        fs_invited_diy:      '🏠 风水审计 — DIY受邀',
+        fs_post_diy:         '🏠 风水审计 — DIY后',
+        fs_invited_sharing:  '🏠 风水审计 — 分享会受邀',
+        fs_post_sharing:     '🏠 风水审计 — 分享会后',
+        fs_invited_museum:   '🏠 风水审计 — 博物馆受邀',
+        fs_post_museum:      '🏠 风水审计 — 博物馆后',
+        fs_invited_huiji:    '🏠 风水审计 — 汇集受邀',
+        fs_post_huiji:       '🏠 风水审计 — 汇集后',
+        fs_fsa_scheduled:    '🏠 风水审计 — 1对1 FSA',
+        fs_decision:         '🏠 风水审计 — 决策阶段',
 
         // ── Calligraphy (cal_) ───────────────────────────────────────────────
         cal_post_cps:        '🖌️ 画作 — CPS后',
@@ -1168,7 +1168,7 @@
         // Group stages by track for the selector
         const trackGroups = {
             '💍 改命戒指': STAGE_ORDER_BY_TRACK.pr,
-            '🏠 风水方案': STAGE_ORDER_BY_TRACK.fs,
+            '🏠 风水审计': STAGE_ORDER_BY_TRACK.fs,
             '🖌️ 画作': STAGE_ORDER_BY_TRACK.cal,
             '🛏️ 旺床': STAGE_ORDER_BY_TRACK.bed,
             '🛋️ 旺沙发': STAGE_ORDER_BY_TRACK.sofa,
