@@ -632,8 +632,10 @@ window.UI = (() => {
     // already selected, so editing an old closing never silently drops its product.
     // `renderOption(p, selected)` lets a caller add data-* attrs / price labels.
     const PRODUCT_GROUP_ORDER = ['Power Ring', 'Calligraphy Adornment', 'Artistic Masterpieces',
-        'Royal Woodwork Series', 'Consultation Service', 'Simplified Feng Shui', 'Flexi Feng Shui',
-        'Direct On', 'Huan Tian Xin', 'Books', 'Recruitment', 'Others'];
+        'Royal Woodwork Series', 'Consultation Service',
+        // Fengshui Audit types (category stays '风水方案' — follow-up triggers key on it).
+        'Fengshui Audit · 简易 Simplified', 'Fengshui Audit · 灵活 Flexi', 'Fengshui Audit · 专案 Direct On',
+        'Fengshui Audit · 商业 Commercial', 'Huan Tian Xin', 'Books', 'Recruitment', 'Others'];
     const productOptionsHtml = (products, opts = {}) => {
         const selected = opts.selected || '';
         const render = opts.renderOption || ((p, sel) =>
@@ -647,14 +649,18 @@ window.UI = (() => {
             if (!groups.has(g)) groups.set(g, []);
             groups.get(g).push(p);
         });
-        if (!groups.size) return '';
+        // A record whose product was renamed/removed (e.g. "灵活 Flexible Plan" → "灵活 Flexi
+        // Audit") still shows its own value, so re-saving it never blanks the product.
+        const known = (products || []).some(p => p && p.name === selected);
+        const orphan = (selected && !known) ? `<option value="${escapeHtml(selected)}" selected>${escapeHtml(selected)}</option>` : '';
+        if (!groups.size) return orphan;
         const rank = (g) => { const i = PRODUCT_GROUP_ORDER.indexOf(g); return i === -1 ? 999 : i; };
         return [...groups.keys()]
             .sort((a, b) => rank(a) - rank(b) || collator.compare(a, b))
             .map(g => `<optgroup label="${escapeHtml(g)}">${groups.get(g)
                 .sort((a, b) => collator.compare(a.name, b.name))
                 .map(p => render(p, p.name === selected)).join('')}</optgroup>`)
-            .join('');
+            .join('') + orphan;
     };
 
     return {

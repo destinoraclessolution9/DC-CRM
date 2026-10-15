@@ -478,8 +478,10 @@
     // their own group at the bottom. One HTML builder serves BOTH the React island
     // (passed as legacyHtml) and the legacy path, so there is a single source.
     const _PRODUCT_GROUP_ORDER = ['Power Ring', 'Calligraphy Adornment', 'Artistic Masterpieces',
-        'Royal Woodwork Series', 'Consultation Service', 'Simplified Feng Shui', 'Flexi Feng Shui',
-        'Direct On', 'Huan Tian Xin', 'Books', 'Recruitment', 'Others'];
+        'Royal Woodwork Series', 'Consultation Service',
+        // Fengshui Audit types (category stays '风水方案' — follow-up triggers key on it).
+        'Fengshui Audit · 简易 Simplified', 'Fengshui Audit · 灵活 Flexi', 'Fengshui Audit · 专案 Direct On',
+        'Fengshui Audit · 商业 Commercial', 'Huan Tian Xin', 'Books', 'Recruitment', 'Others'];
     // Promo versions sit right under their main product: "上龙柄（推介特价） … Promo 3.0"
     // shares the base "上龙柄" with "上龙柄 Shang Long Bing".
     const _productBaseKey = (name) => String(name || '')
@@ -540,7 +542,9 @@
                 <summary><span class="pt-title">${escapeHtml(title)}</span>${sub ? `<span class="pt-sub">${escapeHtml(sub)}</span>` : ''}<span class="pt-count">${list.length}</span></summary>
                 <table class="data-table pt-table"><tbody>${list.map(row).join('')}</tbody></table>
             </details>`;
-        const catOf = (list) => [...new Set(list.map(p => (p.category || '').trim()).filter(Boolean))].join(' / ');
+        // Category hint beside the group title. 风水方案 is an internal key ("plan") — the
+        // group title already says Fengshui Audit, so it isn't shown.
+        const catOf = (list) => [...new Set(list.map(p => (p.category || '').trim()).filter(c => c && c !== '风水方案'))].join(' / ');
         const total = (data || []).length;
         return `
             <style>
