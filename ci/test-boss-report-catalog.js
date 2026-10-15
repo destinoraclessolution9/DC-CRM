@@ -399,7 +399,7 @@ const run = async () => {
     A.brLoadSkus({ files: [{ name: 'skus.xlsx', _rows: wbRows }], value: '' });
     await new Promise(r => setTimeout(r, 10));
     const body = el('br-cat-body').innerHTML;
-    eq('I1 import preview opened', opened, 'Product Catalog');
+    eq('I1 import preview opened', opened, 'Boss Report Setup');
     ok('I1 flags the blank Quantities row', body.includes('FMLNEW002') && /blank &quot;Quantities&quot;|blank "Quantities"/.test(body), body.slice(0, 400));
     ok('I1 flags the row with no Group as skipped', body.includes('FMLNEW004'));
     ok('I1 announces the new product line', body.includes('Brand New Line'));

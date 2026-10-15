@@ -80,13 +80,16 @@ export function BossReportView({ runs = [], bals = {}, tgts = {}, monthLabel = '
 
     return (
         <div style={{ padding: '24px', maxWidth: '860px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', gap: '10px', flexWrap: 'wrap' }}>
                 <div>
                     <h1 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
                         <i className="fas fa-chart-bar" style={{ color: '#8b5cf6' }}></i> Boss Report
                     </h1>
                     <div style={{ color: 'var(--gray-500)', fontSize: '13px', marginTop: '4px' }}>Weekly boss summary generator • Super Admin only</div>
                 </div>
+                <button className="btn secondary" style={{ fontSize: '12px' }} onClick={() => { const f = app().brManageCatalog; if (f) f('report'); }}>
+                    <i className="fas fa-list-ol"></i> Report Format
+                </button>
             </div>
 
             {/* 1. Egg Run */}
@@ -150,6 +153,19 @@ export function BossReportView({ runs = [], bals = {}, tgts = {}, monthLabel = '
                 <div id="br-tgt-rows">
                     {tgtRows.map((g) => <NumRow key={g.key} idPrefix="br-tgt" g={g} value={tgts[g.key]} labelWidth="260px" />)}
                 </div>
+            </div>
+
+            {/* 4. Manual-entry sections from Report Format. Hidden until the chunk
+                fills #br-manual-rows (mount-once host, same contract as br-bal-rows). */}
+            <div id="br-manual-card" style={{ ...card, display: 'none', marginBottom: '20px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px', gap: '8px', flexWrap: 'wrap' }}>
+                    <h3 style={{ margin: 0 }}>4. This Week's Extra Info</h3>
+                    <button className="btn secondary" style={{ fontSize: '12px' }} onClick={() => { const f = app().brManageCatalog; if (f) f('report'); }}>
+                        <i className="fas fa-list-ol"></i> Report Format
+                    </button>
+                </div>
+                <p style={{ color: 'var(--gray-500)', fontSize: '13px', margin: '0 0 14px' }}>Fields added in <strong>Report Format</strong>. Blank fields are left out of the report.</p>
+                <div id="br-manual-rows"></div>
             </div>
 
             <button className="btn primary" style={{ width: '100%', padding: '14px', fontSize: '15px', marginBottom: '20px' }}

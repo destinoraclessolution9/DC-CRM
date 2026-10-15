@@ -345,7 +345,10 @@ function mountCasesGrid(container, opts) {
 // logic stays in the chunk handlers via stable ids + app.*). ──────────────────
 function mountBossReport(container, opts) {
     const o = opts || {};
-    _mountSimple(container, <BossReportView runs={o.runs || []} bals={o.bals || {}} tgts={o.tgts || {}} monthLabel={o.monthLabel || ''} skusLabel={o.skusLabel || 'Not loaded'} />);
+    // balGroups / tgtGroups are the catalog-driven balance + target rows; they
+    // were not forwarded before, so the island always showed its built-in 4 lines.
+    _mountSimple(container, <BossReportView runs={o.runs || []} bals={o.bals || {}} tgts={o.tgts || {}} monthLabel={o.monthLabel || ''} skusLabel={o.skusLabel || 'Not loaded'}
+        balGroups={o.balGroups} tgtGroups={o.tgtGroups} />);
     window.__REACT_BOSSREPORT_MOUNTED = true;
 }
 

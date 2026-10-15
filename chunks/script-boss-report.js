@@ -52,6 +52,8 @@
         reportText: null,
         unmapped: null,     // { code: unitsSold }  — codes with no catalog row
         wsUnassigned: null, // { by_group key: cartons } — keys under no wholesale group
+        runId: null,        // egg run of the report in the box (saved with Save Final)
+        fromHistory: null,  // report_date when the box holds a re-opened saved report
     };
 
     const _brGetSkus   = () => { try { const r = localStorage.getItem('br_skus');          return r ? JSON.parse(r) : null; } catch { return null; } };
@@ -94,6 +96,10 @@
     // A source key is free text, and a typo silently reports 0, so offering the
     // real keys as checkboxes is the difference between "wrong" and "impossible".
     let _brObservedWsKeys = [];
+    // Region + egg-product keys seen in the runs (Eggs section pick-lists), and
+    // the runs themselves (the Report Format preview renders the newest one).
+    let _brObservedEgg = { regions: [], products: [] };
+    let _brRuns = [];
     // 'db' once br_wholesale_group has been read successfully; tracked separately
     // from the product catalog's source because the two migrations are separate.
     let _brWsSource = null;
@@ -272,6 +278,216 @@
             : `${n} codes • ${lines} lines (local — catalog table not found)`;
     };
 
+    // ── REPORT FORMAT (Report Builder) ──────────────────────────────────
+    // The report is a list of sections, in order, from br_report_section
+    // (migrations/boss_report_builder_2026-10-16.sql). Each one renders a block
+    // of text; consecutive blocks are joined by the divider line when the later
+    // one has divider_before, otherwise by a blank line. Before the migration —
+    // or offline with no cached copy — the built-in layout below is used, and it
+    // reproduces the pre-builder report byte for byte.
+    const _BR_SECTION_TYPES = {
+        text:      'Text',
+        eggs:      'Eggs (egg run)',
+        wholesale: 'Wholesales',
+        balance:   'Product Balance',
+        manual:    'Manual entry (typed each week)',
+    };
+    const _BR_FALLBACK_SECTIONS = [
+        { key:'_settings', type:'settings', title:'Settings', sort_order:0, active:true,
+          config:{ divider:'________________________________________' } },
+        { key:'greeting', type:'text', title:'Greeting', sort_order:10, active:true,
+          config:{ divider_before:false, text:'老板好，' } },
+        { key:'eggs', type:'eggs', title:'Eggs', sort_order:20, active:true,
+          config:{ divider_before:false, show_date:true,
+                   regions:[{ key:'KL', label:'KL' }, { key:'PG', label:'PG' }, { key:'JB', label:'JB' }],
+                   products:[{ key:'KING', line:'KINGEGGS 高鮮帝王蛋- {n} carton', total_line:'Kin-{n}' },
+                             { key:'GOLD', line:'GOLD FRESH HEALTH PLUS EGG 高鮮蛋 - {n} cartons', total_line:'Gold-{n}' }],
+                   show_total:true, total_title:'Total -' } },
+        { key:'wholesale', type:'wholesale', title:'Wholesales', sort_order:30, active:true,
+          config:{ divider_before:true, title:'Wholesales Week/ Month/ Target ({month})',
+                   line:'{label} - {week} / {mtd} / {target}', no_target:'N/A' } },
+        { key:'balance', type:'balance', title:'Product Balance', sort_order:40, active:true,
+          config:{ divider_before:true, title:'Product Balance', show_date:true,
+                   block:'{label}\nKL-{kl}\nPG-{pg}\nBalance - {balance}' } },
+    ];
+    const _BR_DEFAULT_BALANCE_BLOCK = '{label}\nKL-{kl}\nPG-{pg}\nBalance - {balance}';
+
+    // { list:[…sorted], source:'db'|'local'|'default' }
+    let _brSections = null;
+    let _brSecTableOk = false; // br_report_section was readable (possibly empty)
+
+    const _brSortSections = (rows) => (rows || [])
+        .map(s => ({ ...s, config: (s.config && typeof s.config === 'object') ? s.config : {} }))
+        .sort((a,b) => (Number(a.sort_order)||0) - (Number(b.sort_order)||0) || String(a.key).localeCompare(String(b.key)));
+
+    const _brLoadSections = async (force = false) => {
+        if (_brSections && !force) return _brSections;
+        _brSecTableOk = false;
+        const sb = _brSb();
+        if (sb) {
+            try {
+                const { data, error } = await sb.from('br_report_section').select('*').order('sort_order', { ascending: true });
+                _brSecTableOk = !error && Array.isArray(data);
+                // Only rows with a known type count — a malformed row must not
+                // blank its block (or the whole report) without a word.
+                const valid = (!error && Array.isArray(data)) ? data.filter(r => r && r.key && (r.type === 'settings' || _BR_SECTION_TYPES[r.type])) : [];
+                // An empty table is treated as unseeded (fall back), never as
+                // "the admin deleted every section" — the settings row is always
+                // present once seeded, so a real layout is never empty.
+                if (valid.length) {
+                    _brSections = { list: _brSortSections(valid), source: 'db' };
+                    try { localStorage.setItem('br_sections_cache', JSON.stringify(valid)); } catch (_) { /* best-effort */ }
+                    return _brSections;
+                }
+                if (error) console.warn('[boss-report] report sections read failed, using fallback:', error.message);
+            } catch (e) {
+                console.warn('[boss-report] report sections read threw, using fallback:', e && e.message);
+            }
+        }
+        try {
+            const raw = localStorage.getItem('br_sections_cache');
+            const c = raw ? JSON.parse(raw) : null;
+            if (Array.isArray(c) && c.length) { _brSections = { list: _brSortSections(c), source: 'local' }; return _brSections; }
+        } catch (_) { /* fall through */ }
+        _brSections = { list: _brSortSections(_BR_FALLBACK_SECTIONS.map(s => JSON.parse(JSON.stringify(s)))), source: 'default' };
+        return _brSections;
+    };
+
+    const _brSettings = (list) => ((list || _brSections?.list || []).find(s => s.type === 'settings') || {}).config || {};
+    const _brReportSections = (list) => (list || _brSections?.list || []).filter(s => s.type !== 'settings' && s.active !== false);
+    const _brBalanceCfg = (list) => ((list || _brSections?.list || []).find(s => s.type === 'balance' && s.active !== false) || {}).config || {};
+
+    // Replace {token} placeholders; an unknown token is left as typed so a typo
+    // is visible in the output instead of silently vanishing.
+    const _brFill = (tpl, vars) => String(tpl ?? '').replace(/\{(\w+)\}/g, (m, k) =>
+        (vars && vars[k] !== undefined && vars[k] !== null) ? String(vars[k]) : m);
+
+    // Render one section to text. `data` is assembled by brGenerate (or the
+    // editor preview) — this function does no I/O, so the preview and the real
+    // report can never disagree about formatting.
+    const _brRenderSection = (s, data) => {
+        const c = s.config || {};
+        const tokens = { today: data.today, run_date: data.runDate, month: data.monthLabel };
+        if (s.type === 'text') return _brFill(c.text, tokens);
+        if (s.type === 'eggs') {
+            const totals = data.totals || {};
+            const regions  = (c.regions  || []).filter(r => r && r.key);
+            const products = (c.products || []).filter(p => p && p.key);
+            const blocks = regions.map(r => [r.label ?? r.key]
+                .concat(products.map(p => _brFill(p.line, { ...tokens, n: Number(totals[r.key]?.[p.key]) || 0 })))
+                .join('\n'));
+            let out = (c.show_date === false ? '' : `${data.runDate}\n`) + blocks.join('\n\n');
+            if (c.show_total !== false && products.length) {
+                const tl = products.map(p => _brFill(p.total_line, {
+                    ...tokens, n: regions.reduce((sum, r) => sum + (Number(totals[r.key]?.[p.key]) || 0), 0),
+                }));
+                out += `\n\n${c.total_title ?? 'Total -'}\n${tl.join('\n')}`;
+            }
+            return out;
+        }
+        if (s.type === 'wholesale') {
+            const lines = (data.ws || []).map(w => _brFill(c.line, {
+                ...tokens, label: w.label, week: w.week, mtd: w.mtd,
+                target: w.target ? w.target : (c.no_target ?? 'N/A'),
+            }));
+            return [_brFill(c.title, tokens)].concat(lines).join('\n');
+        }
+        if (s.type === 'balance') {
+            const title = _brFill(c.title, tokens);
+            const b = data.balance || {};
+            if (b.state === 'noskus')  return `${title}\n[Add product codes in Manage Catalog (or import the SKUs mapping file) to enable this section]`;
+            if (b.state === 'nofiles') return `${title}\n[Upload FORMULA Sales and/or Order Tracking files to enable this section]`;
+            let out = c.show_date === false ? title : `${title}\n${data.today}`;
+            for (const r of (b.rows || [])) {
+                out += `\n${_brFill(c.block || _BR_DEFAULT_BALANCE_BLOCK, { ...tokens, label: r.label, kl: r.kl, pg: r.pg, balance: r.balance })}\n`;
+            }
+            return out;
+        }
+        if (s.type === 'manual') {
+            const vals = (data.manual || {})[s.key] || {};
+            const lines = [];
+            for (const f of (c.fields || [])) {
+                const v = vals[f.key];
+                const empty = v === undefined || v === null || String(v).trim() === '';
+                if (empty && c.skip_empty !== false) continue;
+                lines.push(_brFill(c.line || '{label} - {value}', { ...tokens, label: f.label, value: empty ? '' : String(v).trim() }));
+            }
+            if (!lines.length) return '';
+            const title = _brFill(c.title || '', tokens);
+            return (title ? [title] : []).concat(lines).join('\n');
+        }
+        return '';
+    };
+
+    const _brComposeReport = (list, data) => {
+        const divider = _brSettings(list).divider ?? '________________________________________';
+        let out = '';
+        let first = true;
+        for (const s of _brReportSections(list)) {
+            const text = _brRenderSection(s, data);
+            // A manual section with nothing typed this week prints nothing — skip
+            // it entirely so it does not leave a stray divider behind.
+            if (s.type === 'manual' && !text) continue;
+            // Product Balance blocks end in '\n' (kept: it is the report's last
+            // line today); drop it before joining so a section placed after it
+            // does not get an extra blank line.
+            if (!first) out = out.replace(/\n$/, '') + (s.config?.divider_before ? `\n${divider}\n` : '\n\n');
+            out += text;
+            first = false;
+        }
+        return out;
+    };
+
+    // Stable key for a manual field / new section from its label.
+    const _brNewKey = (label, taken, fallback) => {
+        let base = _brSlugKey(label);
+        if (base === 'group') base = fallback || 'item';
+        let key = base, n = 2;
+        while (taken.has(key)) key = `${base}${n++}`;
+        return key;
+    };
+
+    // ── Saved reports + carry-forward (br_report_history) ──
+    // Closing balances used to live only in this browser's localStorage. The
+    // newest of {local, DB} wins, so a save on the phone pre-fills the desktop.
+    const _brGetBalsAt = () => { try { return localStorage.getItem('br_balances_at') || ''; } catch { return ''; } };
+    let _brLastHistory = null; // newest br_report_history row, or null
+
+    const _brLoadLastHistory = async () => {
+        const sb = _brSb();
+        if (!sb) return null;
+        try {
+            const q = sb.from('br_report_history').select('id,report_date,run_id,balances,manual,saved_at').order('saved_at', { ascending: false });
+            const { data, error } = await (typeof q.limit === 'function' ? q.limit(1) : q);
+            if (error || !Array.isArray(data) || !data.length) return null;
+            return data[0];
+        } catch (_) { return null; }
+    };
+
+    const _brLoadOpening = async () => {
+        const local = _brGetBals();
+        _brLastHistory = await _brLoadLastHistory();
+        const h = _brLastHistory;
+        // Compare as instants: Supabase returns '…+00:00', the browser stores '…Z'.
+        const tRemote = Date.parse(h && h.saved_at) || 0;
+        const tLocal  = Date.parse(_brGetBalsAt()) || 0;
+        if (h && h.balances && typeof h.balances === 'object' && tRemote > tLocal) {
+            const merged = { ...local, ...h.balances };
+            try {
+                localStorage.setItem('br_balances', JSON.stringify(merged));
+                localStorage.setItem('br_balances_at', String(h.saved_at));
+            } catch (_) { /* mirror is best-effort */ }
+            return merged;
+        }
+        return local;
+    };
+
+    // Last typed value per manual field, for fields marked "carry forward".
+    const _brManualLast = () => {
+        if (_brLastHistory && _brLastHistory.manual && typeof _brLastHistory.manual === 'object') return _brLastHistory.manual;
+        try { const r = localStorage.getItem('br_manual_last'); return r ? JSON.parse(r) : {}; } catch { return {}; }
+    };
+
     const _brMonthKey  = () => { const n=new Date(); return `${n.getFullYear()}_${String(n.getMonth()+1).padStart(2,'0')}`; };
     const _brMonthBounds = () => {
         const n = new Date();
@@ -408,13 +624,14 @@
 
     const _brBuildScaffoldHtml = (runsLength, runOpts, balInputs, tgtInputs, monthLabel, catalogLabel) => `
         <div style="padding:24px;max-width:860px;">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;gap:10px;flex-wrap:wrap;">
                 <div>
                     <h1 style="margin:0;display:flex;align-items:center;gap:10px;">
                         <i class="fas fa-chart-bar" style="color:#8b5cf6;"></i> Boss Report
                     </h1>
                     <div style="color:var(--gray-500);font-size:13px;margin-top:4px;">Weekly boss summary generator • Super Admin only</div>
                 </div>
+                <button class="btn secondary" style="font-size:12px;" onclick="app.brManageCatalog('report')"><i class="fas fa-list-ol"></i> Report Format</button>
             </div>
 
             <!-- 1. Egg Run -->
@@ -477,6 +694,16 @@
                 <div id="br-tgt-rows">${tgtInputs}</div>
             </div>
 
+            <!-- 4. Manual-entry sections (Report Format) — filled by _brSyncManualRows -->
+            <div id="br-manual-card" style="display:none;background:white;padding:20px;border-radius:12px;border:1px solid var(--gray-200);margin-bottom:20px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;gap:8px;flex-wrap:wrap;">
+                    <h3 style="margin:0;">4. This Week's Extra Info</h3>
+                    <button class="btn secondary" style="font-size:12px;" onclick="app.brManageCatalog('report')"><i class="fas fa-list-ol"></i> Report Format</button>
+                </div>
+                <p style="color:var(--gray-500);font-size:13px;margin:0 0 14px;">Fields added in <strong>Report Format</strong>. Blank fields are left out of the report.</p>
+                <div id="br-manual-rows"></div>
+            </div>
+
             <button class="btn primary" style="width:100%;padding:14px;font-size:15px;margin-bottom:20px;" onclick="app.brGenerate()">
                 <i class="fas fa-magic"></i> Generate Boss Report
             </button>
@@ -505,7 +732,9 @@
         const runs = (await AppDataStore.query('egg_run_history', {})||[])
             .sort((a,b) => new Date(b.run_at)-new Date(a.run_at));
 
-        const bals = _brGetBals();
+        // Opening balances: the newest of this browser's copy and the last
+        // shared Save Final (br_report_history), so another device's save counts.
+        const bals = await _brLoadOpening();
         const mk   = _brMonthKey();
         const now  = new Date();
         const monthLabel = now.toLocaleString('default', { month:'long', year:'numeric' });
@@ -523,6 +752,17 @@
         const seenKeys = new Set();
         for (const r of runs) for (const k of Object.keys(r.totals?.by_group || {})) seenKeys.add(k);
         _brObservedWsKeys = [...seenKeys].sort();
+        // Region / egg-product keys seen in the runs — the pick-lists for the
+        // Eggs section in Report Format (same "impossible to mistype" idea).
+        const rk = new Set(), pk = new Set();
+        for (const r of runs) for (const [k, v] of Object.entries(r.totals || {})) {
+            if (k === 'by_group' || !v || typeof v !== 'object') continue;
+            rk.add(k);
+            for (const p of Object.keys(v)) pk.add(p);
+        }
+        _brObservedEgg = { regions: [...rk].sort(), products: [...pk].sort() };
+        _brRuns = runs;
+        await _brLoadSections(true);
 
         // Reset the per-week upload buffers on every view visit so the in-memory
         // state matches the freshly-rendered (empty) upload labels. Otherwise a
@@ -534,6 +774,8 @@
         _brState.salesFile = null; _brState.salesFileName = null; _brState.salesLoading = false;
         _brState.trackingFile = null; _brState.trackingFileName = null; _brState.trackingLoading = false;
         _brState.unmapped = null;
+        // Nothing generated or opened yet on this visit.
+        _brState.runId = null; _brState.fromHistory = null;
 
         // React island — render-once scaffold (same ids + app.* handlers).
         if (_reactBossReportOn()) {
@@ -551,6 +793,9 @@
                     balGroups: _brBalGroups(catalog).map(g => ({ key: g.key, label: g.label })),
                     tgtGroups: _brWsGroups(catalog).map(w => ({ key: w.key, label: w.label })),
                 });
+                // root.render() commits asynchronously: card 4's host is not in the
+                // DOM yet, so fill it once it appears (bounded wait).
+                _brWhenPresent('br-manual-rows', _brSyncManualRows);
                 return;
             } catch (e) {
                 console.warn('[boss-report] island mount failed, falling back to legacy:', e && e.message);
@@ -582,6 +827,7 @@
             </div>`).join('');
 
         container.innerHTML = _brBuildScaffoldHtml(runs.length, runOpts, balInputs, tgtInputs, monthLabel, catalogLabel);
+        _brSyncManualRows();
     };
 
     const brLoadSales = (input) => {
@@ -703,12 +949,39 @@
         // regex-escaped below, so a line named 'Eye+' or 'D3 (K2)' still matches.
         const groups = _brBalGroups();
         const bals = {};
+        // The block layout is editable (Report Format), so the header prefix and
+        // the balance line are derived from the configured block template rather
+        // than assumed. Default template: '{label}\nKL-{kl}\nPG-{pg}\nBalance - {balance}'.
+        const tpl = String(_brBalanceCfg().block || _BR_DEFAULT_BALANCE_BLOCK);
+        const labelLine = tpl.split('\n').find(l => l.includes('{label}')) || '{label}';
+        const labelPrefix = labelLine.slice(0, labelLine.indexOf('{label}'));
+        const balLine = tpl.split('\n').find(l => l.includes('{balance}')) || 'Balance - {balance}';
+        // Words before {balance} ("Balance"), with any spacing / - / : between
+        // them and the number. A hand edit like "Balance 2422" or "Balance: 2422"
+        // still carries forward; previously only "Balance - 2422" did, and a
+        // missing dash silently kept last week's number as next week's opening.
+        const balWords = (balLine.slice(0, balLine.indexOf('{balance}')).replace(/\{\w+\}/g, ' ')
+            .match(/[^\s\-:：]+/g) || []).map(_brEscapeRegExp);
+        // Same-line only ([ \t], not \s): "Product Balance\n12/10/26" must never
+        // read as a balance of 12.
+        const balRe = balWords.length
+            ? new RegExp(balWords.join('[ \\t\\-:：]*') + '[ \\t\\-:：]*(\\d+)')
+            : /(\d+)[ \t]*$/m;
+        // Only look below the Product Balance heading, so a line elsewhere that
+        // starts with a product name (e.g. a manual field "Probiotic - 5") is
+        // never taken for that product's block. No heading found (hand-edited
+        // away) → whole text, as before.
+        const balTitle = String(_brBalanceCfg().title ?? 'Product Balance').replace(/\{\w+\}/g, '\u0000').split('\u0000')[0].trim();
+        if (balTitle) {
+            const tm = new RegExp('^' + _brEscapeRegExp(balTitle), 'm').exec(text);
+            if (tm) text = text.slice(tm.index);
+        }
         // 1) Locate each product-block header. The label is anchored to the START of a
         //    line (m flag) so an earlier free-text mention of the same words isn't taken
         //    as the header; escape it (e.g. 'Eye+') so metachars match literally.
         const headers = [];
         for (const g of groups) {
-            const hm = new RegExp('^' + _brEscapeRegExp(g.label), 'm').exec(text);
+            const hm = new RegExp('^' + _brEscapeRegExp(labelPrefix) + _brEscapeRegExp(g.label), 'm').exec(text);
             if (hm) headers.push({ key: g.key, start: hm.index });
         }
         if (!headers.length) return bals;
@@ -722,94 +995,65 @@
         for (let i = 0; i < headers.length; i++) {
             const blockEnd = (i + 1 < headers.length) ? headers[i + 1].start : text.length;
             const block = text.slice(headers[i].start, blockEnd);
-            const bm = block.match(/Balance\s*-\s*(\d+)/);
+            const bm = block.match(balRe);
             if (bm) bals[headers[i].key] = Number(bm[1]);
         }
         return bals;
     };
 
-    const brSaveFinal = () => {
+    const brSaveFinal = async () => {
         // Defense in depth: Super Admin only (mirrors the view gate).
         if (!isSystemAdmin(_state.cu)) { UI.toast.error('Access denied'); return; }
         const ta = document.getElementById('br-text');
         const text = ta ? ta.value : (_brState.reportText || '');
         if (!text.trim()) { UI.toast.error('Nothing to save'); return; }
+        // A report re-opened from Saved Reports carries THAT week's closing
+        // balances; saving it makes them next week's opening balances again.
+        if (_brState.fromHistory && !window.confirm(
+            `This is the saved report from ${_brState.fromHistory}. Saving it makes its balances next week's opening balances. Continue?`)) return;
         _brState.reportText = text;
         localStorage.setItem('br_final_report', text);
         const bals = _brParseFinalBalances(text);
+        const merged = { ..._brGetBals(), ...bals };
+        const now = new Date();
+        const savedAt = now.toISOString();
+        // Local calendar date (a 7am MYT save is still "today", not UTC yesterday).
+        const reportDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
         if (Object.keys(bals).length > 0) {
-            const existing = _brGetBals();
-            localStorage.setItem('br_balances', JSON.stringify({ ...existing, ...bals }));
+            localStorage.setItem('br_balances', JSON.stringify(merged));
+            localStorage.setItem('br_balances_at', savedAt);
         }
-        UI.toast.success('Final report saved — balances updated for next week');
+        // A product line that prints but whose balance could not be read keeps
+        // LAST week's opening — say so instead of letting it pass silently.
+        const missed = _brBalGroups().filter(g => text.includes(g.label) && bals[g.key] === undefined).map(g => g.label);
+        const manual = _brReadManual();
+        try { localStorage.setItem('br_manual_last', JSON.stringify(manual)); } catch (_) { /* best-effort */ }
+        // Shared history: the report, its closing balances and the manual values,
+        // so next week's opening balances pre-fill on any device.
+        let shared = false;
+        const sb = _brSb();
+        if (sb) {
+            try {
+                const { error } = await sb.from('br_report_history').insert({
+                    report_date: reportDate, run_id: _brState.runId ?? null,
+                    report_text: text, balances: merged, manual, saved_at: savedAt, saved_by: _state.cu?.id ?? null,
+                });
+                if (!error) shared = true;
+                else console.warn('[boss-report] history save failed:', error.message);
+            } catch (e) { console.warn('[boss-report] history save threw:', e && e.message); }
+        }
+        if (missed.length) {
+            UI.toast.warning(`Saved, but no balance number was found for: ${missed.join(', ')} — check those lines`);
+        } else {
+            UI.toast.success(shared
+                ? 'Final report saved — balances updated for next week'
+                : 'Final report saved to this browser — balances updated for next week');
+        }
     };
 
-    const brGenerate = async () => {
-        // Defense in depth: Super Admin only (mirrors the view gate).
-        if (!isSystemAdmin(_state.cu)) { UI.toast.error('Access denied'); return; }
-        // Race guard: refuse to run while a selected file is still being read by
-        // FileReader, otherwise we would read a null/half-loaded file and silently
-        // generate with the wrong (or zero) sold quantities.
-        if (_brState.salesLoading || _brState.trackingLoading) {
-            UI.toast.error('A file is still loading — please wait a moment and try again');
-            return;
-        }
-        const runId = Number(document.getElementById('br-run-select')?.value);
-        if (!runId) { UI.toast.error('Select an egg run first'); return; }
-
-        let runRows;
-        try {
-            runRows = await AppDataStore.query('egg_run_history', { id: runId });
-        } catch (e) {
-            UI.toast.error('Failed to load run: ' + (e?.message || e));
-            return;
-        }
-        const run = runRows?.[0];
-        if (!run) { UI.toast.error('Run not found'); return; }
-        const totals = run.totals || {};
-
-        const fmtDate = (iso) => {
-            const d = new Date(iso); const dd=String(d.getDate()).padStart(2,'0'); const mm=String(d.getMonth()+1).padStart(2,'0'); const yy=String(d.getFullYear()).slice(2);
-            return `${dd}/${mm}/${yy}`;
-        };
-        // Eggs date = run_at (actual purchase commit date)
-        const weekDate = run.run_at ? fmtDate(run.run_at) : (run.week_start_date ? fmtDate(run.week_start_date) : '??/??/??');
-        const balDate = fmtDate(new Date());
-
-        // ── SECTION 1: EGGS (read directly from stored totals) ──
-        const klKing=totals.KL?.KING||0, klGold=totals.KL?.GOLD||0;
-        const pgKing=totals.PG?.KING||0, pgGold=totals.PG?.GOLD||0;
-        const jbKing=totals.JB?.KING||0, jbGold=totals.JB?.GOLD||0;
-        const totKin=klKing+pgKing+jbKing, totGold=klGold+pgGold+jbGold;
-
-        const eggSection =
-`老板好，
-
-${weekDate}
-KL
-KINGEGGS 高鮮帝王蛋- ${klKing} carton
-GOLD FRESH HEALTH PLUS EGG 高鮮蛋 - ${klGold} cartons
-
-PG
-KINGEGGS 高鮮帝王蛋- ${pgKing} carton
-GOLD FRESH HEALTH PLUS EGG 高鮮蛋 - ${pgGold} cartons
-
-JB
-KINGEGGS 高鮮帝王蛋- ${jbKing} carton
-GOLD FRESH HEALTH PLUS EGG 高鮮蛋 - ${jbGold} cartons
-
-Total -
-Kin-${totKin}
-Gold-${totGold}`;
-
-        // ── SECTION 2: WHOLESALES (read from by_group in stored totals) ──
-        const mk = _brMonthKey();
-        const now2 = new Date();
-        const monthLabel = now2.toLocaleString('default', { month:'long', year:'numeric' });
-        const tgts = await _brLoadTargets(mk);
-        const byGroup = totals.by_group || {};
-
-        // Month totals: sum latest run per week_start_date where run_at is within current month
+    // Month-to-date cartons per by_group key: the latest run per week_start_date
+    // whose run_at falls in month `mk`. Shared by brGenerate and the format preview.
+    const _brMonthByGroup = async (run, mk) => {
         let monthByGroup = {};
         try {
             const allRuns = (await AppDataStore.query('egg_run_history', {})||[]);
@@ -838,19 +1082,83 @@ Gold-${totGold}`;
             for (const r of Object.values(latestPerWeek)) {
                 for (const [g, q] of Object.entries(r.totals?.by_group||{})) monthByGroup[g]=(monthByGroup[g]||0)+q;
             }
-        } catch(e) { monthByGroup = { ...byGroup }; }
+        } catch(e) { monthByGroup = { ...(run.totals?.by_group || {}) }; }
+        return monthByGroup;
+    };
+
+    const _brWsData = (wsGroups, byGroup, monthByGroup, tgts) => wsGroups.map(g => {
+        const src = g.source_keys || [];
+        return {
+            label:  g.label,
+            week:   src.reduce((s,k)=>s+(byGroup[k]||0),0),
+            mtd:    src.reduce((s,k)=>s+(monthByGroup[k]||0),0),
+            target: tgts[g.key]||0,
+        };
+    });
+
+    const _brFmtDate = (iso) => {
+        const d = new Date(iso); const dd=String(d.getDate()).padStart(2,'0'); const mm=String(d.getMonth()+1).padStart(2,'0'); const yy=String(d.getFullYear()).slice(2);
+        return `${dd}/${mm}/${yy}`;
+    };
+
+    // Values typed into the manual-entry fields: { sectionKey: { fieldKey: value } }.
+    const _brReadManual = () => {
+        const out = {};
+        for (const s of _brReportSections().filter(x => x.type === 'manual')) {
+            const vals = {};
+            for (const f of (s.config?.fields || [])) {
+                const el = document.getElementById(`br-man-${s.key}-${f.key}`);
+                if (el) vals[f.key] = el.value;
+            }
+            out[s.key] = vals;
+        }
+        return out;
+    };
+
+    const brGenerate = async () => {
+        // Defense in depth: Super Admin only (mirrors the view gate).
+        if (!isSystemAdmin(_state.cu)) { UI.toast.error('Access denied'); return; }
+        // Race guard: refuse to run while a selected file is still being read by
+        // FileReader, otherwise we would read a null/half-loaded file and silently
+        // generate with the wrong (or zero) sold quantities.
+        if (_brState.salesLoading || _brState.trackingLoading) {
+            UI.toast.error('A file is still loading — please wait a moment and try again');
+            return;
+        }
+        const runId = Number(document.getElementById('br-run-select')?.value);
+        if (!runId) { UI.toast.error('Select an egg run first'); return; }
+
+        let runRows;
+        try {
+            runRows = await AppDataStore.query('egg_run_history', { id: runId });
+        } catch (e) {
+            UI.toast.error('Failed to load run: ' + (e?.message || e));
+            return;
+        }
+        const run = runRows?.[0];
+        if (!run) { UI.toast.error('Run not found'); return; }
+        const totals = run.totals || {};
+
+        const fmtDate = _brFmtDate;
+        // Eggs date = run_at (actual purchase commit date)
+        const weekDate = run.run_at ? fmtDate(run.run_at) : (run.week_start_date ? fmtDate(run.week_start_date) : '??/??/??');
+        const balDate = fmtDate(new Date());
+
+        // Egg totals are read per region × product straight out of the run by the
+        // eggs section; which ones print is configured in Report Format.
+        const sectionsState = await _brLoadSections();
+
+        // ── WHOLESALES (read from by_group in stored totals) ──
+        const mk = _brMonthKey();
+        const now2 = new Date();
+        const monthLabel = now2.toLocaleString('default', { month:'long', year:'numeric' });
+        const tgts = await _brLoadTargets(mk);
+        const byGroup = totals.by_group || {};
+        const monthByGroup = await _brMonthByGroup(run, mk);
 
         // Wholesale lines come from the catalog (was a 4th hardcoded copy, and the
         // only one carrying the source_keys mapping).
-        const wsGroups = _brWsGroups(await _brLoadCatalog());
-        const wsLines = wsGroups.map(g => {
-            const src = g.source_keys || [];
-            const wk = src.reduce((s,k)=>s+(byGroup[k]||0),0);
-            const mo = src.reduce((s,k)=>s+(monthByGroup[k]||0),0);
-            const tg = tgts[g.key]||0;
-            return `${g.label} - ${wk} / ${mo} / ${tg||'N/A'}`;
-        }).join('\n');
-        const wsSection = `Wholesales Week/ Month/ Target (${monthLabel})\n${wsLines}`;
+        const wsData = _brWsData(_brWsGroups(await _brLoadCatalog()), byGroup, monthByGroup, tgts);
 
         // A by_group key in the committed run that belongs to NO wholesale group
         // was silently omitted from the report — the same class of quiet loss as an
@@ -870,11 +1178,11 @@ Gold-${totGold}`;
         const hasSkus   = Object.keys(catalog?.skus || {}).length > 0;
         const unmapped  = {};
 
-        let balSection = '';
+        let balance = null;
         if (!hasSkus) {
-            balSection = 'Product Balance\n[Add product codes in Manage Catalog (or import the SKUs mapping file) to enable this section]';
+            balance = { state: 'noskus' };
         } else if (!_brState.salesFile && !_brState.trackingFile) {
-            balSection = 'Product Balance\n[Upload FORMULA Sales and/or Order Tracking files to enable this section]';
+            balance = { state: 'nofiles' };
         } else {
             const sold = { KL:{}, PG:{} };
 
@@ -908,25 +1216,29 @@ Gold-${totGold}`;
                 const el = document.getElementById(`br-bal-${g.key}`);
                 prevBals[g.key] = Number(el?.value)||0;
             }
-            let balLines = `Product Balance\n${balDate}`;
+            const rows = [];
             for (const g of balGroups) {
                 const klSold = Math.round(sold.KL[g.key]||0);
                 const pgSold = Math.round(sold.PG[g.key]||0);
                 const prev   = prevBals[g.key]||0;
                 const bal    = Math.max(0, prev - klSold - pgSold);
-                balLines += `\n${g.label}\nKL-${klSold}\nPG-${pgSold}\nBalance - ${bal}\n`;
+                rows.push({ key: g.key, label: g.label, kl: klSold, pg: pgSold, balance: bal });
             }
             // HIGH: do NOT persist br_balances here. Generate must be non-destructive
             // to the carry-forward baseline (br_balances is read back as the OPENING
             // balance on view load via _brGetBals). Re-generating would otherwise
             // double-deduct 'sold' from an already-deducted prev. The baseline is
             // persisted only by brSaveFinal, after the admin reviews/edits the text.
-            balSection = balLines;
+            balance = { state: 'ok', rows };
         }
 
-        const sep = '\n________________________________________\n';
-        const report = [eggSection, wsSection, balSection].join(sep);
+        const report = _brComposeReport(sectionsState.list, {
+            runDate: weekDate, today: balDate, monthLabel,
+            totals, ws: wsData, balance, manual: _brReadManual(),
+        });
         _brState.reportText = report;
+        _brState.runId = run.id;
+        _brState.fromHistory = null;
 
         // Surface codes that were sold but have no catalog row. Without this the
         // parsers just `continue` past them: the units are never deducted and the
@@ -1006,7 +1318,8 @@ Gold-${totGold}`;
     // Writes go straight to Supabase when the catalog tables exist; otherwise
     // they persist to this browser only and the modal says so plainly.
 
-    let _brCatUI = { tab:'products', q:'', editSku:null, editGroup:null, editWs:null, pending:[], import:null };
+    let _brCatUI = { tab:'products', q:'', editSku:null, editGroup:null, editWs:null, pending:[], import:null,
+                    editSection:null, secDraft:null, secKeys:{ regions:[], products:[] }, previewData:null, history:undefined };
 
     // Escape for interpolation into a single-quoted JS string inside a
     // double-quoted HTML attribute (onclick="app.x('…')").
@@ -1185,12 +1498,29 @@ Gold-${totGold}`;
             _brCatUI.editSku = _brCatUI.pending[0] || null;
             _brCatUI.q = '';
         }
-        UI.showModal('Product Catalog', '<div id="br-cat-body"></div>',
+        UI.showModal('Boss Report Setup', '<div id="br-cat-body"></div>',
             [{ label: 'Close', action: 'UI.hideModal()' }], 'fullscreen');
+        _brCatUI.secDraft = null; _brCatUI.editSection = null;
         _brCatRender();
+        _brCatTabLoad(_brCatUI.tab);
     };
 
-    const brCatTab = (tab) => { _brCatUI.tab = tab; _brCatUI.import = (tab === 'import') ? _brCatUI.import : null; _brCatRender(); };
+    // Tabs whose content needs an async read once opened.
+    const _brCatTabLoad = (tab) => {
+        if (tab === 'report') {
+            _brLoadSections(true).then(() => { if (_brCatUI.tab === 'report' && !_brCatUI.secDraft) _brCatRender(); return _brEnsurePreview(); });
+        } else if (tab === 'history') {
+            _brCatUI.history = undefined;
+            _brLoadHistoryList().then(h => { _brCatUI.history = h; if (_brCatUI.tab === 'history') _brCatRender(); });
+        }
+    };
+
+    const brCatTab = (tab) => {
+        _brCatUI.tab = tab; _brCatUI.import = (tab === 'import') ? _brCatUI.import : null;
+        if (tab !== 'report') { _brCatUI.secDraft = null; _brCatUI.editSection = null; }
+        _brCatRender();
+        _brCatTabLoad(tab);
+    };
     const brCatSearch = (v) => { _brCatUI.q = String(v||''); _brCatRender(true); };
     const brCatEditSku = (code) => { _brCatUI.editSku = code || null; _brCatUI.tab = 'products'; _brCatRender(); };
     const brCatEditGroup = (key) => { _brCatUI.editGroup = key || null; _brCatUI.tab = 'lines'; _brCatRender(); };
@@ -1211,6 +1541,8 @@ Gold-${totGold}`;
             </div>`;
         const tabBtn = (id, label) => `<button class="btn ${_brCatUI.tab===id?'primary':'secondary'}" style="font-size:12px;" onclick="app.brCatTab('${id}')">${label}</button>`;
         const body = _brCatUI.tab === 'lines'     ? _brCatLinesHtml(cat)
+                   : _brCatUI.tab === 'report'    ? _brCatReportHtml()
+                   : _brCatUI.tab === 'history'   ? _brCatHistoryHtml()
                    : _brCatUI.tab === 'wholesale' ? _brCatWholesaleHtml(cat)
                    : _brCatUI.tab === 'import'    ? _brCatImportHtml()
                    : _brCatProductsHtml(cat);
@@ -1221,9 +1553,9 @@ Gold-${totGold}`;
                 run <code>migrations/boss_report_wholesale_groups_2026-08-04.sql</code> in Supabase.
             </div>` : '';
         host.innerHTML = `
-            ${_brCatUI.tab === 'wholesale' ? wsWarn : warn}
+            ${_brCatUI.tab === 'wholesale' ? wsWarn : (_brCatUI.tab === 'report' || _brCatUI.tab === 'history') ? '' : warn}
             <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
-                ${tabBtn('products','Products')}${tabBtn('lines','Product Lines')}${tabBtn('wholesale','Wholesale Groups')}
+                ${tabBtn('report','Report Format')}${tabBtn('products','Products')}${tabBtn('lines','Product Lines')}${tabBtn('wholesale','Wholesale Groups')}${tabBtn('history','Saved Reports')}
                 ${_brCatUI.import ? tabBtn('import','Import Preview') : ''}
             </div>
             ${body}`;
@@ -1597,6 +1929,505 @@ Gold-${totGold}`;
         if (await _brApply({ deleteGroup: key })) { _brCatRender(); UI.toast.success('Product line deleted'); }
     };
 
+    // ==================== REPORT FORMAT EDITOR ====================
+    // Add / reorder / rename / switch off report sections, change the divider,
+    // and define manual-entry fields — the "boss wants new information" path
+    // that previously needed a code change. Same write model as the catalog:
+    // Supabase when br_report_section exists, this browser otherwise.
+
+    const _brSecDefaults = (type) => {
+        const base = _BR_FALLBACK_SECTIONS.find(s => s.type === type);
+        if (base) return JSON.parse(JSON.stringify(base.config));
+        if (type === 'manual') return { divider_before: true, title: '', line: '{label} - {value}', skip_empty: true,
+                                        fields: [{ key: '', label: '', type: 'number', carry: false }] };
+        return { divider_before: true, text: '' };
+    };
+
+    // Run fn once element #id exists (React islands render asynchronously).
+    const _brWhenPresent = (id, fn, tries = 60) => {
+        if (document.getElementById(id)) { fn(); return; }
+        if (tries <= 0) return;
+        setTimeout(() => _brWhenPresent(id, fn, tries - 1), 50);
+    };
+
+    // Manual-entry inputs on the main page (card 4). Keeps typed values across a
+    // re-render; otherwise pre-fills carry-forward fields from the last save.
+    const _brSyncManualRows = () => {
+        const card = document.getElementById('br-manual-card');
+        const host = document.getElementById('br-manual-rows');
+        if (!card || !host) return;
+        const secs = _brReportSections().filter(s => s.type === 'manual' && (s.config?.fields || []).length);
+        if (!secs.length) { card.style.display = 'none'; host.innerHTML = ''; return; }
+        const cur = {};
+        host.querySelectorAll('[id^="br-man-"]').forEach(el => { cur[el.id] = el.value; });
+        const last = _brManualLast();
+        host.innerHTML = secs.map(s => `
+            <div style="margin-bottom:14px;">
+                <div style="font-weight:600;font-size:13px;margin-bottom:8px;">${escapeHtml(s.config.title || s.title || 'Extra info')}</div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;">
+                    ${s.config.fields.map(f => {
+                        const id = `br-man-${s.key}-${f.key}`;
+                        const v = cur[id] !== undefined ? cur[id] : (f.carry ? (last?.[s.key]?.[f.key] ?? '') : '');
+                        return `<div><label style="font-size:11px;color:var(--gray-500);">${escapeHtml(f.label)}${f.carry ? ' <span title="Pre-filled from last saved report">↻</span>' : ''}</label>
+                            <input id="${escapeHtml(id)}" type="${f.type === 'text' ? 'text' : 'number'}" class="form-control" value="${escapeHtml(String(v))}"></div>`;
+                    }).join('')}
+                </div>
+            </div>`).join('');
+        card.style.display = '';
+    };
+
+    const _brApplySections = async (list, deleteKey) => {
+        if (!isSystemAdmin(_state.cu)) { UI.toast.error('Access denied'); return false; }
+        const rows = _brSortSections(list);
+        const sb = _brSb();
+        try {
+            if (sb && _brSecTableOk) {
+                // The whole layout is upserted (it is a handful of rows): the first
+                // edit against an unseeded table must persist the built-in layout
+                // too, or the report would shrink to the one edited section.
+                const stamped = rows.map(r => ({
+                    key: r.key, type: r.type, title: r.title || '', sort_order: Number(r.sort_order) || 0,
+                    active: r.active !== false, config: r.config || {},
+                    updated_at: new Date().toISOString(), updated_by: _state.cu?.id ?? null,
+                }));
+                const { error } = await sb.from('br_report_section').upsert(stamped, { onConflict: 'key' });
+                if (error) throw new Error(error.message);
+                if (deleteKey) {
+                    const { error: de } = await sb.from('br_report_section').delete().eq('key', deleteKey);
+                    if (de) throw new Error(de.message);
+                }
+                await _brLoadSections(true);
+            } else {
+                _brSections = { list: rows, source: 'local' };
+                try { localStorage.setItem('br_sections_cache', JSON.stringify(rows)); } catch (_) { /* best-effort */ }
+            }
+        } catch (e) {
+            UI.toast.error('Save failed: ' + (e?.message || e));
+            return false;
+        }
+        _brSyncManualRows();
+        return true;
+    };
+
+    // Data the preview renders: the newest egg run, this month's targets, the
+    // balance boxes as typed with nothing sold, and typed manual values (or a
+    // ‹value› placeholder so an empty field still shows its line format).
+    const _brPreviewData = async () => {
+        const run = (_brRuns && _brRuns[0]) || { totals: {}, run_at: new Date().toISOString() };
+        const mk = _brMonthKey();
+        const catalog = await _brLoadCatalog();
+        const tgts = await _brLoadTargets(mk);
+        const monthByGroup = await _brMonthByGroup(run, mk);
+        const hasSkus = Object.keys(catalog?.skus || {}).length > 0;
+        const opening = _brGetBals();
+        const rows = _brBalGroups(catalog).map(g => {
+            const el = document.getElementById(`br-bal-${g.key}`);
+            const prev = el && el.value !== '' ? Number(el.value) || 0 : (Number(opening[g.key]) || 0);
+            return { key: g.key, label: g.label, kl: 0, pg: 0, balance: prev };
+        });
+        return {
+            runDate: run.run_at ? _brFmtDate(run.run_at) : '??/??/??',
+            today: _brFmtDate(new Date()),
+            monthLabel: new Date().toLocaleString('default', { month: 'long', year: 'numeric' }),
+            totals: run.totals || {},
+            ws: _brWsData(_brWsGroups(catalog), run.totals?.by_group || {}, monthByGroup, tgts),
+            balance: hasSkus ? { state: 'ok', rows } : { state: 'noskus' },
+            manual: null, // filled per render from the live inputs
+        };
+    };
+
+    const _brPreviewText = (list) => {
+        const d = _brCatUI.previewData;
+        if (!d) return 'Loading preview…';
+        const typed = _brReadManual();
+        const manual = {};
+        for (const s of (list || []).filter(x => x.type === 'manual')) {
+            manual[s.key] = {};
+            for (const f of (s.config?.fields || [])) {
+                const v = typed[s.key]?.[f.key];
+                manual[s.key][f.key] = (v !== undefined && String(v).trim() !== '') ? v : '‹value›';
+            }
+        }
+        return _brComposeReport(list, { ...d, manual });
+    };
+
+    const _brEnsurePreview = async () => {
+        try { _brCatUI.previewData = await _brPreviewData(); }
+        catch (e) { console.warn('[boss-report] preview data failed:', e && e.message); _brCatUI.previewData = null; }
+        if (_brCatUI.tab === 'report') {
+            const pre = document.getElementById('br-sec-preview');
+            if (pre) pre.textContent = _brPreviewText(_brDraftList());
+        }
+    };
+
+    // The section list with the in-progress edit applied (for the live preview).
+    const _brDraftList = () => {
+        const list = (_brSections?.list || []).slice();
+        const d = _brCatUI.secDraft;
+        if (!d) return list;
+        const i = list.findIndex(s => s.key === d.key);
+        if (i >= 0) list[i] = d; else list.push(d);
+        return _brSortSections(list);
+    };
+
+    const _brTokHelp = (t) => `<div style="font-size:11px;color:var(--gray-500);margin-top:4px;">${t}</div>`;
+    const _brChk = (id, on, label) => `<label style="display:flex;align-items:center;gap:6px;font-size:12px;"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}> ${label}</label>`;
+    const _brInp = (id, v, ph) => `<input id="${id}" class="form-control" value="${escapeHtml(v ?? '')}" placeholder="${escapeHtml(ph || '')}">`;
+
+    const _brSecFormHtml = (d) => {
+        const c = d.config || {};
+        let body = '';
+        if (d.type === 'text') {
+            body = `<label style="font-size:11px;color:var(--gray-500);">Text (printed as typed)</label>
+                <textarea id="br-sec-text" class="form-control" rows="3" style="width:100%;">${escapeHtml(c.text || '')}</textarea>
+                ${_brTokHelp('Optional: <code>{today}</code> today\'s date · <code>{run_date}</code> egg run date · <code>{month}</code> this month')}`;
+        } else if (d.type === 'eggs') {
+            const ks = _brCatUI.secKeys;
+            const regBy = {}; for (const r of (c.regions || [])) regBy[r.key] = r;
+            const prodBy = {}; for (const p of (c.products || [])) prodBy[p.key] = p;
+            body = `
+                ${_brChk('br-sec-showdate', c.show_date !== false, 'Print the egg run date first')}
+                <div style="font-weight:600;font-size:12px;margin:12px 0 6px;">Regions (in this order)</div>
+                ${ks.regions.map((k, i) => `<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+                    <input type="checkbox" id="br-sec-reg-on-${i}" ${regBy[k] ? 'checked' : ''}>
+                    <span style="font-family:monospace;font-size:12px;width:44px;">${escapeHtml(k)}</span>
+                    ${_brInp(`br-sec-reg-label-${i}`, regBy[k]?.label ?? k, 'Printed as')}</div>`).join('') || '<div style="font-size:12px;color:var(--gray-500);">No egg runs loaded.</div>'}
+                <div style="font-weight:600;font-size:12px;margin:12px 0 6px;">Egg products</div>
+                ${ks.products.map((k, i) => `<div style="border:1px solid var(--gray-200);border-radius:6px;padding:8px;margin-bottom:6px;">
+                    <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:6px;"><input type="checkbox" id="br-sec-prod-on-${i}" ${prodBy[k] ? 'checked' : ''}> <span style="font-family:monospace;">${escapeHtml(k)}</span></label>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:6px;">
+                        <div><label style="font-size:11px;color:var(--gray-500);">Region line</label>${_brInp(`br-sec-prod-line-${i}`, prodBy[k]?.line ?? `${k} - {n} cartons`)}</div>
+                        <div><label style="font-size:11px;color:var(--gray-500);">Total line</label>${_brInp(`br-sec-prod-total-${i}`, prodBy[k]?.total_line ?? `${k}-{n}`)}</div>
+                    </div></div>`).join('')}
+                ${_brTokHelp('<code>{n}</code> = number of cartons')}
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;margin-top:10px;align-items:end;">
+                    <div>${_brChk('br-sec-showtotal', c.show_total !== false, 'Print the Total block')}</div>
+                    <div><label style="font-size:11px;color:var(--gray-500);">Total heading</label>${_brInp('br-sec-totaltitle', c.total_title ?? 'Total -')}</div>
+                </div>`;
+        } else if (d.type === 'wholesale') {
+            body = `
+                <label style="font-size:11px;color:var(--gray-500);">Heading</label>${_brInp('br-sec-wtitle', c.title)}
+                <label style="font-size:11px;color:var(--gray-500);margin-top:8px;display:block;">Each line</label>${_brInp('br-sec-wline', c.line)}
+                <label style="font-size:11px;color:var(--gray-500);margin-top:8px;display:block;">When no target is set, print</label>${_brInp('br-sec-wnone', c.no_target ?? 'N/A')}
+                ${_brTokHelp('<code>{month}</code> month name · <code>{label}</code> group · <code>{week}</code> this week · <code>{mtd}</code> month to date · <code>{target}</code> target. The lines themselves are the <strong>Wholesale Groups</strong> tab.')}`;
+        } else if (d.type === 'balance') {
+            body = `
+                <label style="font-size:11px;color:var(--gray-500);">Heading</label>${_brInp('br-sec-btitle', c.title)}
+                <div style="margin-top:8px;">${_brChk('br-sec-showdate', c.show_date !== false, 'Print today\'s date under the heading')}</div>
+                <label style="font-size:11px;color:var(--gray-500);margin-top:8px;display:block;">Each product line (one block per line, blank line between)</label>
+                <textarea id="br-sec-block" class="form-control" rows="4" style="width:100%;font-family:monospace;">${escapeHtml(c.block || _BR_DEFAULT_BALANCE_BLOCK)}</textarea>
+                ${_brTokHelp('<code>{label}</code> product line · <code>{kl}</code> KL sold · <code>{pg}</code> PG sold · <code>{balance}</code> balance. Keep <code>{label}</code> and <code>{balance}</code> — Save Final reads next week\'s opening balance from them. The product lines are the <strong>Product Lines</strong> tab.')}`;
+        } else if (d.type === 'manual') {
+            const fields = c.fields || [];
+            body = `
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;">
+                    <div><label style="font-size:11px;color:var(--gray-500);">Heading printed in the report (optional)</label>${_brInp('br-sec-mtitle', c.title, 'e.g. Cash collected')}</div>
+                    <div><label style="font-size:11px;color:var(--gray-500);">Each line</label>${_brInp('br-sec-mline', c.line || '{label} - {value}')}</div>
+                </div>
+                ${_brTokHelp('<code>{label}</code> field name · <code>{value}</code> what you type that week')}
+                <div style="margin-top:8px;">${_brChk('br-sec-skip', c.skip_empty !== false, 'Leave out fields left blank')}</div>
+                <div style="font-weight:600;font-size:12px;margin:12px 0 6px;">Fields</div>
+                ${fields.map((f, i) => `<div style="display:grid;grid-template-columns:minmax(0,1fr) 102px auto auto;gap:6px;align-items:center;margin-bottom:6px;">
+                    ${_brInp(`br-sec-f-label-${i}`, f.label, 'Field name, e.g. KL cash')}
+                    <select id="br-sec-f-type-${i}" class="form-control"><option value="number"${f.type !== 'text' ? ' selected' : ''}>Number</option><option value="text"${f.type === 'text' ? ' selected' : ''}>Text</option></select>
+                    <label style="font-size:11px;display:flex;align-items:center;gap:4px;white-space:nowrap;" title="Pre-fill with last week's value"><input type="checkbox" id="br-sec-f-carry-${i}" ${f.carry ? 'checked' : ''}> Carry</label>
+                    <button class="btn small" style="color:#dc2626;" title="Remove field" aria-label="Remove field" onclick="app.brSecRemoveField(${i})"><i class="fas fa-times"></i></button>
+                </div>`).join('')}
+                <button class="btn secondary" style="font-size:12px;" onclick="app.brSecAddField()"><i class="fas fa-plus"></i> Add field</button>`;
+        }
+        return `
+            <div style="background:var(--gray-50,#f9fafb);border:1px solid var(--gray-200);border-radius:8px;padding:14px;margin-bottom:16px;" oninput="app.brSecPreview()" onchange="app.brSecPreview()">
+                <div style="font-weight:600;font-size:13px;margin-bottom:10px;">${_brCatUI.editSection === '__new__' ? 'New' : 'Edit'} section — ${escapeHtml(_BR_SECTION_TYPES[d.type] || d.type)}</div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;align-items:end;margin-bottom:10px;">
+                    <div><label style="font-size:11px;color:var(--gray-500);">Section name (for you, not printed)</label>${_brInp('br-sec-title', d.title)}</div>
+                    <div>${_brChk('br-sec-divbefore', !!c.divider_before, 'Divider line above this section')}</div>
+                </div>
+                ${body}
+                <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;">
+                    <button class="btn primary" onclick="(async () => { await app.brSecSave(); })()"><i class="fas fa-save"></i> Save section</button>
+                    <button class="btn secondary" onclick="app.brSecEdit('')">Cancel</button>
+                </div>
+            </div>`;
+    };
+
+    // Read the edit form back into the draft (so add/remove field and the live
+    // preview never lose what has been typed).
+    const _brSecCollect = () => {
+        const d = _brCatUI.secDraft;
+        if (!d) return null;
+        const v = (id) => document.getElementById(id)?.value;
+        const on = (id) => !!document.getElementById(id)?.checked;
+        const c = { ...(d.config || {}) };
+        if (document.getElementById('br-sec-title')) d.title = v('br-sec-title');
+        if (document.getElementById('br-sec-divbefore')) c.divider_before = on('br-sec-divbefore');
+        if (d.type === 'text' && document.getElementById('br-sec-text')) c.text = v('br-sec-text');
+        if (d.type === 'eggs' && document.getElementById('br-sec-showtotal')) {
+            c.show_date = on('br-sec-showdate');
+            c.regions = _brCatUI.secKeys.regions.map((k, i) => on(`br-sec-reg-on-${i}`) ? { key: k, label: String(v(`br-sec-reg-label-${i}`) ?? '').trim() || k } : null).filter(Boolean);
+            c.products = _brCatUI.secKeys.products.map((k, i) => on(`br-sec-prod-on-${i}`)
+                ? { key: k, line: v(`br-sec-prod-line-${i}`) || '', total_line: v(`br-sec-prod-total-${i}`) || '' } : null).filter(Boolean);
+            c.show_total = on('br-sec-showtotal');
+            c.total_title = v('br-sec-totaltitle') ?? '';
+        }
+        if (d.type === 'wholesale' && document.getElementById('br-sec-wline')) {
+            c.title = v('br-sec-wtitle'); c.line = v('br-sec-wline'); c.no_target = v('br-sec-wnone');
+        }
+        if (d.type === 'balance' && document.getElementById('br-sec-block')) {
+            c.title = v('br-sec-btitle'); c.show_date = on('br-sec-showdate'); c.block = v('br-sec-block');
+        }
+        if (d.type === 'manual' && document.getElementById('br-sec-mline')) {
+            c.title = v('br-sec-mtitle'); c.line = v('br-sec-mline'); c.skip_empty = on('br-sec-skip');
+            c.fields = (c.fields || []).map((f, i) => ({
+                ...f,
+                label: v(`br-sec-f-label-${i}`) ?? f.label,
+                type: v(`br-sec-f-type-${i}`) || f.type || 'number',
+                carry: on(`br-sec-f-carry-${i}`),
+            }));
+        }
+        d.config = c;
+        return d;
+    };
+
+    const _brCatReportHtml = () => {
+        const list = _brSections?.list || [];
+        const writableWarn = _brSecTableOk ? '' : `
+            <div style="background:#fffbeb;border:1px solid #fbbf24;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:#92400e;">
+                <strong>Saving to this browser only.</strong> The shared report-format table was not found —
+                run <code>migrations/boss_report_builder_2026-10-16.sql</code> in Supabase.
+            </div>`;
+        const preview = `
+            <div style="font-weight:600;font-size:13px;margin:4px 0 6px;">Preview</div>
+            <div style="font-size:11px;color:var(--gray-500);margin-bottom:6px;">Newest egg run, this month's targets, the balance boxes with nothing sold, and ‹value› for blank manual fields.</div>
+            <pre id="br-sec-preview" style="white-space:pre-wrap;word-break:break-word;background:#fff;border:1px solid var(--gray-200);border-radius:8px;padding:12px;font-size:12px;max-height:50vh;overflow:auto;margin:0;">${escapeHtml(_brPreviewText(_brDraftList()))}</pre>`;
+        if (_brCatUI.secDraft) return writableWarn + _brSecFormHtml(_brCatUI.secDraft) + preview;
+        const secs = list.filter(s => s.type !== 'settings');
+        const settings = _brSettings(list);
+        return `
+            ${writableWarn}
+            <div style="border:1px solid var(--gray-200);border-radius:8px;overflow:auto;margin-bottom:14px;">
+                <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                    <thead><tr style="background:var(--gray-50,#f9fafb);">
+                        <th style="text-align:left;padding:8px;">Order</th>
+                        <th style="text-align:left;padding:8px;">Section</th>
+                        <th style="text-align:left;padding:8px;">Type</th>
+                        <th style="text-align:right;padding:8px;">&nbsp;</th>
+                    </tr></thead>
+                    <tbody>
+                        ${secs.length ? secs.map((s, i) => {
+                            const off = s.active === false;
+                            return `<tr style="border-top:1px solid var(--gray-200);${off ? 'opacity:.5;' : ''}">
+                                <td style="padding:6px 8px;white-space:nowrap;">
+                                    <button class="btn small secondary" title="Move up" aria-label="Move up" ${i === 0 ? 'disabled' : ''} onclick="(async () => { await app.brSecMove('${_brAttr(s.key)}', -1); })()"><i class="fas fa-arrow-up"></i></button>
+                                    <button class="btn small secondary" title="Move down" aria-label="Move down" ${i === secs.length - 1 ? 'disabled' : ''} onclick="(async () => { await app.brSecMove('${_brAttr(s.key)}', 1); })()"><i class="fas fa-arrow-down"></i></button>
+                                </td>
+                                <td style="padding:6px 8px;">${escapeHtml(s.title || s.key)}${s.config?.divider_before ? ' <span style="font-size:10px;color:var(--gray-500);">(divider above)</span>' : ''}</td>
+                                <td style="padding:6px 8px;">${escapeHtml(_BR_SECTION_TYPES[s.type] || s.type)}</td>
+                                <td style="padding:6px 8px;text-align:right;white-space:nowrap;">
+                                    <button class="btn small secondary" title="Edit" aria-label="Edit section" onclick="app.brSecEdit('${_brAttr(s.key)}')"><i class="fas fa-pen"></i></button>
+                                    <button class="btn small secondary" onclick="(async () => { await app.brSecToggle('${_brAttr(s.key)}'); })()">${off ? 'Show' : 'Hide'}</button>
+                                    <button class="btn small" style="color:#dc2626;" title="Delete" aria-label="Delete section" onclick="(async () => { await app.brSecDelete('${_brAttr(s.key)}'); })()"><i class="fas fa-trash"></i></button>
+                                </td></tr>`;
+                        }).join('') : `<tr><td colspan="4" style="padding:16px;text-align:center;color:var(--gray-500);">No sections — add one below.</td></tr>`}
+                    </tbody>
+                </table>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:16px;">
+                <div style="border:1px solid var(--gray-200);border-radius:8px;padding:12px;">
+                    <div style="font-weight:600;font-size:13px;margin-bottom:8px;">Add a section</div>
+                    <div style="display:flex;gap:8px;">
+                        <select id="br-sec-newtype" class="form-control">
+                            ${Object.entries(_BR_SECTION_TYPES).map(([k, l]) => `<option value="${k}"${k === 'manual' ? ' selected' : ''}>${escapeHtml(l)}</option>`).join('')}
+                        </select>
+                        <button class="btn primary" style="white-space:nowrap;" onclick="app.brSecAdd()"><i class="fas fa-plus"></i> Add</button>
+                    </div>
+                    ${_brTokHelp('New information for the boss → <strong>Manual entry</strong>: name the fields, then type the values each week above the Generate button.')}
+                </div>
+                <div style="border:1px solid var(--gray-200);border-radius:8px;padding:12px;">
+                    <div style="font-weight:600;font-size:13px;margin-bottom:8px;">Divider line</div>
+                    <div style="display:flex;gap:8px;">
+                        ${_brInp('br-sec-divider', settings.divider ?? '')}
+                        <button class="btn secondary" title="Save divider" aria-label="Save divider" onclick="(async () => { await app.brSecSaveDivider(); })()"><i class="fas fa-save"></i></button>
+                    </div>
+                    ${_brTokHelp('Printed between sections marked "divider above".')}
+                </div>
+            </div>
+            ${preview}`;
+    };
+
+    const _brSecRefresh = () => {
+        _brCatRender();
+        const pre = document.getElementById('br-sec-preview');
+        if (pre) pre.textContent = _brPreviewText(_brDraftList());
+    };
+
+    const brSecPreview = () => {
+        _brSecCollect();
+        const pre = document.getElementById('br-sec-preview');
+        if (pre) pre.textContent = _brPreviewText(_brDraftList());
+    };
+
+    const brSecEdit = (key) => {
+        if (!key) { _brCatUI.secDraft = null; _brCatUI.editSection = null; _brSecRefresh(); return; }
+        const s = (_brSections?.list || []).find(x => x.key === key);
+        if (!s) return;
+        _brCatUI.editSection = key;
+        _brCatUI.secDraft = JSON.parse(JSON.stringify(s));
+        _brPrepEggKeys(_brCatUI.secDraft);
+        _brSecRefresh();
+    };
+
+    // Candidate region/product keys for the Eggs form: the configured ones first
+    // (in their order), then any other key seen in the egg runs.
+    const _brPrepEggKeys = (d) => {
+        const c = d.config || {};
+        const regs = (c.regions || []).map(r => r.key);
+        const prods = (c.products || []).map(p => p.key);
+        _brCatUI.secKeys = {
+            regions:  [...new Set([...regs, ..._brObservedEgg.regions])],
+            products: [...new Set([...prods, ..._brObservedEgg.products])],
+        };
+    };
+
+    const brSecAdd = () => {
+        const type = document.getElementById('br-sec-newtype')?.value || 'manual';
+        const list = _brSections?.list || [];
+        // Eggs / Wholesales / Product Balance read the week's data once; a second
+        // copy would print it twice (and Save Final would read the first one).
+        if (['eggs', 'wholesale', 'balance'].includes(type) && list.some(x => x.type === type)) {
+            UI.toast.error(`${_BR_SECTION_TYPES[type]} is already in the report — edit it, or press Show if it is hidden`);
+            return;
+        }
+        const taken = new Set(list.map(s => s.key));
+        const title = _BR_SECTION_TYPES[type] ? _BR_SECTION_TYPES[type].replace(/ \(.*\)$/, '') : 'Section';
+        _brCatUI.editSection = '__new__';
+        _brCatUI.secDraft = {
+            key: _brNewKey(title, taken, 'section'), type, title,
+            sort_order: list.reduce((m, s) => Math.max(m, Number(s.sort_order) || 0), 0) + 10,
+            active: true, config: _brSecDefaults(type),
+        };
+        _brPrepEggKeys(_brCatUI.secDraft);
+        _brSecRefresh();
+    };
+
+    const brSecAddField = () => {
+        const d = _brSecCollect();
+        if (!d) return;
+        d.config.fields = (d.config.fields || []).concat([{ key: '', label: '', type: 'number', carry: false }]);
+        _brSecRefresh();
+    };
+
+    const brSecRemoveField = (i) => {
+        const d = _brSecCollect();
+        if (!d) return;
+        d.config.fields = (d.config.fields || []).filter((_, j) => j !== i);
+        _brSecRefresh();
+    };
+
+    const brSecSave = async () => {
+        const d = _brSecCollect();
+        if (!d) return;
+        d.title = String(d.title || '').trim() || (_BR_SECTION_TYPES[d.type] || 'Section');
+        const c = d.config;
+        if (d.type === 'balance' && !(/\{label\}/.test(c.block || '') && /\{balance\}/.test(c.block || ''))) {
+            UI.toast.error('The product line block must keep {label} and {balance} — next week\'s opening balance is read from them');
+            return;
+        }
+        if (d.type === 'eggs' && !(c.regions || []).length) { UI.toast.error('Tick at least one region'); return; }
+        if (d.type === 'manual') {
+            const fields = (c.fields || []).filter(f => String(f.label || '').trim());
+            if (!fields.length) { UI.toast.error('Add at least one field with a name'); return; }
+            // Keys are kept once assigned: saved weekly values are stored by them,
+            // so a rename must not orphan last week's carried value.
+            const taken = new Set(fields.filter(f => f.key).map(f => f.key));
+            c.fields = fields.map(f => {
+                const label = String(f.label).trim();
+                if (f.key) return { ...f, label };
+                const key = _brNewKey(label, taken, 'field');
+                taken.add(key);
+                return { ...f, key, label };
+            });
+        }
+        const list = (_brSections?.list || []).filter(s => s.key !== d.key).concat([d]);
+        if (!await _brApplySections(list)) return;
+        _brCatUI.secDraft = null; _brCatUI.editSection = null;
+        _brSecRefresh();
+        UI.toast.success('Report format saved');
+    };
+
+    const brSecMove = async (key, dir) => {
+        const secs = (_brSections?.list || []).filter(s => s.type !== 'settings');
+        const i = secs.findIndex(s => s.key === key), j = i + dir;
+        if (i < 0 || j < 0 || j >= secs.length) return;
+        [secs[i], secs[j]] = [secs[j], secs[i]];
+        // Renumber so the order survives even when two rows shared a sort_order.
+        const renum = secs.map((s, n) => ({ ...s, sort_order: (n + 1) * 10 }));
+        const settings = (_brSections?.list || []).filter(s => s.type === 'settings');
+        if (await _brApplySections(settings.concat(renum))) _brSecRefresh();
+    };
+
+    const brSecToggle = async (key) => {
+        const list = (_brSections?.list || []).map(s => s.key === key ? { ...s, active: s.active === false } : s);
+        if (await _brApplySections(list)) _brSecRefresh();
+    };
+
+    const brSecDelete = async (key) => {
+        const s = (_brSections?.list || []).find(x => x.key === key);
+        if (!s) return;
+        if (!window.confirm(`Delete the "${s.title || key}" section? It stops printing in the report. (Hide keeps it for later.)`)) return;
+        const list = (_brSections?.list || []).filter(x => x.key !== key);
+        if (await _brApplySections(list, key)) { _brSecRefresh(); UI.toast.success('Section deleted'); }
+    };
+
+    const brSecSaveDivider = async () => {
+        const div = document.getElementById('br-sec-divider')?.value ?? '';
+        const list = (_brSections?.list || []).slice();
+        const i = list.findIndex(s => s.type === 'settings');
+        if (i >= 0) list[i] = { ...list[i], config: { ...list[i].config, divider: div } };
+        else list.push({ key: '_settings', type: 'settings', title: 'Settings', sort_order: 0, active: true, config: { divider: div } });
+        if (await _brApplySections(list)) { _brSecRefresh(); UI.toast.success('Divider saved'); }
+    };
+
+    // ── Saved reports (br_report_history) ──
+    const _brLoadHistoryList = async () => {
+        const sb = _brSb();
+        if (!sb) return null;
+        try {
+            const q = sb.from('br_report_history').select('id,report_date,run_id,report_text,saved_at').order('saved_at', { ascending: false });
+            const { data, error } = await (typeof q.limit === 'function' ? q.limit(30) : q);
+            return error ? null : (data || []);
+        } catch (_) { return null; }
+    };
+
+    const _brCatHistoryHtml = () => {
+        const h = _brCatUI.history;
+        if (h === undefined) return '<p style="font-size:13px;color:var(--gray-500);">Loading…</p>';
+        if (h === null) return `<p style="font-size:13px;color:var(--gray-500);">Saved reports are not available yet — run <code>migrations/boss_report_builder_2026-10-16.sql</code> in Supabase. Until then only the last report is kept, in this browser.</p>`;
+        if (!h.length) return '<p style="font-size:13px;color:var(--gray-500);">No saved reports yet. Each <strong>Save Final</strong> is kept here.</p>';
+        return h.map(r => `
+            <details style="border:1px solid var(--gray-200);border-radius:8px;padding:10px 12px;margin-bottom:8px;">
+                <summary style="cursor:pointer;font-size:13px;font-weight:600;">${escapeHtml(r.report_date || '')}
+                    <span style="font-weight:400;color:var(--gray-500);font-size:11px;">saved ${escapeHtml(r.saved_at ? new Date(r.saved_at).toLocaleString() : '')}</span></summary>
+                <div style="margin:8px 0;display:flex;gap:8px;">
+                    <button class="btn small secondary" onclick="app.brHistoryUse(${Number(r.id)})"><i class="fas fa-file-import"></i> Open in report box</button>
+                </div>
+                <pre style="white-space:pre-wrap;word-break:break-word;font-size:12px;margin:0;">${escapeHtml(r.report_text || '')}</pre>
+            </details>`).join('');
+    };
+
+    const brHistoryUse = (id) => {
+        const r = (_brCatUI.history || []).find(x => Number(x.id) === Number(id));
+        if (!r) return;
+        const outEl = document.getElementById('br-output');
+        const txtEl = document.getElementById('br-text');
+        if (outEl) outEl.style.display = '';
+        if (txtEl) txtEl.value = r.report_text || '';
+        _brState.runId = r.run_id ?? null;
+        _brState.fromHistory = r.report_date || 'an earlier week';
+        UI.hideModal();
+        outEl?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        UI.toast.success(`Opened the ${r.report_date} report — Copy it, or edit and Save Final`);
+    };
+
     // ==================== /BOSS REPORT ====================
     // ── Register public surface on window.app ────────────────────────────
     // 1:1 with the names that were in script.js's return statement before
@@ -1629,5 +2460,17 @@ Gold-${totGold}`;
         brCatSaveWs,
         brCatToggleWs,
         brCatDeleteWs,
+        // Report Format (Report Builder) + saved reports
+        brSecEdit,
+        brSecAdd,
+        brSecSave,
+        brSecMove,
+        brSecToggle,
+        brSecDelete,
+        brSecSaveDivider,
+        brSecAddField,
+        brSecRemoveField,
+        brSecPreview,
+        brHistoryUse,
     });
 })();
