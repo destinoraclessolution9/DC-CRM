@@ -4112,8 +4112,38 @@
         // Bail if a newer render has superseded this one (stale search response).
         if (_seq !== _mpRenderSeq) return;
 
+        // Prospects search also lists matching CUSTOMERS (2026-10-17): a converted
+        // prospect is hidden from this list, so without this a search for them
+        // found nothing. Tapping opens the customer profile; RLS scopes who shows.
+        let custMatchHtml = '';
+        if (_mpTab !== 'customers' && searchTerm.length >= 2) {
+            const custRows = await AppDataStore.searchCustomers(searchTerm, { limit: 10 }).catch(() => []);
+            if (_seq !== _mpRenderSeq) return;
+            if (custRows.length) {
+                custMatchHtml = `<div style="font-size:12px;font-weight:700;color:#be185d;text-transform:uppercase;letter-spacing:.04em;margin:4px 4px 6px;"><i class="fas fa-user-check"></i> Already customers (${custRows.length})</div>`
+                    + custRows.map(c => {
+                        const agentName = c.responsible_agent_id ? (_mpAgentMap?.get(String(c.responsible_agent_id))?.name || '') : '';
+                        return `
+            <div class="mp-card pal-pink" onclick="app.showCustomerDetail(${Number(c.id)})" role="button" tabindex="0">
+                <div class="mp-card-avatar">${_mhomeEsc(_mhomeInitials(c.full_name))}</div>
+                <div class="mp-card-text">
+                    <div class="mp-card-name-row">
+                        <div class="mp-card-name">${_mhomeEsc(c.full_name || 'Unknown')}</div>
+                    </div>
+                    <div class="mp-card-meta">
+                        <span class="mp-chip" style="background:#ec4899;color:#fff;font-weight:700;">Customer</span>
+                        ${agentName ? `<span class="mp-chip agent">${_mhomeEsc(agentName)}</span>` : ''}
+                    </div>
+                </div>
+                <div class="mp-card-actions"><i class="fas fa-chevron-right mp-card-chev"></i></div>
+            </div>`;
+                    }).join('')
+                    + (rows.length ? `<div style="font-size:12px;font-weight:700;color:var(--gray-500);text-transform:uppercase;letter-spacing:.04em;margin:12px 4px 6px;">Prospects</div>` : '');
+            }
+        }
+
         if (!rows.length) {
-            listHost.innerHTML = `<div class="mp-empty"><span class="mp-empty-flower">🌸</span> No ${_mhomeEsc(_mpTab)} yet. Tap + to add the first one.</div>`;
+            listHost.innerHTML = custMatchHtml || `<div class="mp-empty"><span class="mp-empty-flower">🌸</span> No ${_mhomeEsc(_mpTab)} yet. Tap + to add the first one.</div>`;
             return;
         }
 
@@ -4175,7 +4205,7 @@
             ? `<button type="button" class="mp-load-more" onclick="app.mpLoadMore()">Load more <span>${_mpShown} of ${_mpTotal}</span></button>`
             : '';
 
-        listHost.innerHTML = html + truncNote;
+        listHost.innerHTML = custMatchHtml + html + truncNote;
         // Only cache the snapshot when there's no active search AND no active
         // filters. Caching a filtered list under the canonical key means a
         // page reload would paint that narrowed list while the in-memory

@@ -299,6 +299,10 @@ const showProspectsView = async (container) => {
             <!-- Phase 4.3 (#13): React island mount target. renderProspectsTable
                  swaps visibility between this and the legacy table below when the
                  opt-in React prospects path is active (server-eligible only). -->
+            <!-- Customers matching the search (2026-10-17): converted people are
+                 hidden from the prospect list, so surface them here. -->
+            <div id="prospect-customer-matches"></div>
+
             <div id="prospects-react-root" style="display:none;"></div>
 
             <div class="prospects-table-container" id="prospects-table-view">
@@ -657,9 +661,49 @@ const buildProspectsStatsHtml = (prospects, totalCount) => {
         `;
 };
 
+// A converted prospect drops out of the Prospects list (it lives on as a
+// customer), so a search here would miss them. Show the matching CUSTOMERS above
+// the prospect results; a click opens the customer profile. Customer RLS scopes
+// who appears, same as the Customers tab.
+let _custMatchSeq = 0;
+const _renderProspectSearchCustomerMatches = async (term) => {
+    const host = document.getElementById('prospect-customer-matches');
+    if (!host) return;
+    const seq = ++_custMatchSeq;
+    if (!term || term.length < 2) { host.innerHTML = ''; return; }
+    let rows = [];
+    try {
+        rows = await AppDataStore.searchCustomers(term, { limit: 10 });
+    } catch (e) {
+        console.warn('[prospects] customer search failed', e?.message || e);
+    }
+    if (seq !== _custMatchSeq) return; // a newer search already rendered
+    if (!rows.length) { host.innerHTML = ''; return; }
+    const users = await AppDataStore.getAll('users').catch(() => []);
+    if (seq !== _custMatchSeq) return;
+    const userById = new Map((users || []).map(u => [String(u.id), u]));
+    host.innerHTML = `
+        <div style="background:#fdf2f8;border:1px solid #fbcfe8;border-radius:10px;padding:10px 12px;margin-bottom:12px;">
+            <div style="font-size:12px;font-weight:700;color:#be185d;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">
+                <i class="fas fa-user-check"></i> Already customers (${rows.length})
+            </div>
+            ${rows.map(c => {
+                const agent = userById.get(String(c.responsible_agent_id));
+                return `<div onclick="app.showCustomerDetail(${Number(c.id)})" style="display:flex;align-items:center;gap:10px;padding:8px 6px;border-top:1px solid #fce7f3;cursor:pointer;" onmouseover="this.style.background='#fce7f3'" onmouseout="this.style.background=''">
+                    <span style="background:#ec4899;color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;">Customer</span>
+                    <strong style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(c.full_name || '-')}</strong>
+                    <span style="color:var(--gray-500);font-size:13px;">${escapeHtml(c.phone || '')}</span>
+                    <span style="color:var(--gray-500);font-size:13px;min-width:120px;text-align:right;">${escapeHtml(agent ? agent.full_name : '')}</span>
+                    <i class="fas fa-chevron-right" style="color:#be185d;"></i>
+                </div>`;
+            }).join('')}
+        </div>`;
+};
+
 const renderProspectsTable = async () => {
     const tbody = document.getElementById('prospects-table-body');
     if (!tbody) return;
+    _renderProspectSearchCustomerMatches(document.getElementById('prospect-search')?.value?.trim() || '').catch(() => {});
 
     // ── Perf timing (temp diagnostic) ──────────────────────────────────
     // Logs wall-clock for each phase to the console so we can see where
