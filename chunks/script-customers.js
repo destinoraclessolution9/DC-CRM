@@ -2426,9 +2426,10 @@ const zoomCpsPhoto = (url) => {
 // ── Edit customer profile (2026-10-16) ───────────────────────────────────────
 // After conversion the customer is the ONE editable record (the prospect's
 // profile is frozen). Same edit policy as prospects: L1-2 anything, L3-10 their
-// team's records, L11+ their own. Managers (L1-2) save straight through; anyone
-// else files an Info Update for approval — the same gate a converted prospect's
-// edit went through before, so customer data stays manager-approved.
+// team's records, L11+ their own. L1-5 (admin, marketing manager, management,
+// team leaders) save straight through; L6+ files an Info Update for approval.
+const _customerEditSavesDirect = () => !!_state.cu && _getUserLevel(_state.cu) <= 5;
+
 const _canEditCustomer = async (customer) => {
     const user = _state.cu;
     if (!user || !customer) return false;
@@ -2467,7 +2468,7 @@ const openCustomerEditModal = async (customerId) => {
     // The form's referrer search/clear handlers are keyed to the 'prospect' prefix
     // and keep the pick in _state.sprr — same as Edit Prospect.
     _state.sprr = customer.referred_by ? { name: customer.referred_by, id: customer.referred_by_id || null, type: customer.referred_by_type || null } : null;
-    const isManager = isSystemAdmin(_state.cu) || isMarketingManager(_state.cu);
+    const isManager = _customerEditSavesDirect();
     const c = customer;
     const content = `
         <div class="prospect-form form-compact">
@@ -2547,7 +2548,7 @@ const saveCustomerProfile = async (customerId) => {
         Object.keys(data).forEach(k => { if (!_same(data[k], before[k])) changed[k] = data[k]; });
         if (Object.keys(changed).length === 0) { UI.hideModal(); UI.toast.info('No changes to save.'); return; }
 
-        const isManager = isSystemAdmin(_state.cu) || isMarketingManager(_state.cu);
+        const isManager = _customerEditSavesDirect();
         if (isManager) {
             try {
                 await AppDataStore.update('customers', customerId, changed);
