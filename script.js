@@ -4222,7 +4222,20 @@ function _wireLoginBtn() {
         month:                (vp) => isMobile() ? (window.app.mcalRefreshActiveView || (() => {}))() : (window.app.renderCalendar || (() => {}))(),
         week:                 (vp) => isMobile() ? (window.app.mcalRefreshActiveView || (() => {}))() : (window.app.renderWeekView || (() => {}))(),
         day:                  (vp) => isMobile() ? (window.app.mcalRefreshActiveView || (() => {}))() : (window.app.renderTodayActivities || (() => {}))(),
-        prospects:            (vp) => { if (_currentDetailView) return; return (window.app.showProspectsViewSmart || (() => {}))(vp); },
+        // The Customers sub-tab lives inside the prospects view: rebuilding the
+        // view would snap back to the Prospects sub-tab (e.g. after an approval),
+        // so refresh the customers tab in place while it is the one showing.
+        prospects:            (vp) => {
+            if (_currentDetailView) return;
+            const cTab = document.getElementById('customers-tab-content');
+            if (cTab && cTab.style.display !== 'none') {
+                return Promise.all([
+                    (window.app.renderApprovalQueue || (async () => {}))(),
+                    (window.app.renderCustomersTable || (async () => {}))(),
+                ]);
+            }
+            return (window.app.showProspectsViewSmart || (() => {}))(vp);
+        },
         pipeline:             (vp) => window.app.showPipelineView && window.app.showPipelineView(vp),
         reports:              (vp) => (typeof window.app.refreshKPIDashboard === 'function') && window.app.refreshKPIDashboard(),
         protection:           (vp) => window.app.showProtectionMonitoringView && window.app.showProtectionMonitoringView(vp),

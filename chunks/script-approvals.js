@@ -912,7 +912,13 @@ const approveProspectConversion = async (prospectId) => {
     UI.hideModal();
     UI.toast.success(`${prospect.full_name} is now a Customer!`);
     const viewport = document.getElementById('content-viewport');
-    if (viewport && _state.cv === 'prospects') await (window.app.showProspectsViewSmart || (() => {}))(viewport);
+    // Approved from the Customers sub-tab → stay there (rebuilding the prospects
+    // view would snap back to the Prospects sub-tab).
+    const _custTab = document.getElementById('customers-tab-content');
+    if (_custTab && _custTab.style.display !== 'none') {
+        await renderApprovalQueue();
+        await (window.app.renderCustomersTable || (async () => {}))();
+    } else if (viewport && _state.cv === 'prospects') await (window.app.showProspectsViewSmart || (() => {}))(viewport);
     } catch (e) {
         // Audit data-integrity fix: surface the failure instead of letting it become a
         // silent unhandled rejection. Leave the modal OPEN so the manager sees the error
