@@ -3786,6 +3786,8 @@ const _ORDER_FORM_THUMB_PX = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEA
 const buildClosingSalesLedger = async ({ prospect = null, customer = null, customerMode = false } = {}) => {
     const _n = (v) => String(v == null ? '' : v).trim().toLowerCase();
     const _m = (v) => Math.round((parseFloat(v) || 0) * 100);
+    // Invoice / PRN key: imported rows store "1935531" where closings typed "PR1935531".
+    const _inv = (v) => _n(v).replace(/^(prn?|inv)[\s#:-]*/, '');
     const pid = prospect?.id ?? null;
     const _cur = window._crmUtils.recordCurrency(customer || prospect);
 
@@ -3832,8 +3834,8 @@ const buildClosingSalesLedger = async ({ prospect = null, customer = null, custo
     const matched = history.map(e => ({ ...e, p: null }));
     // Pass 1: invoice / PRN number.
     matched.forEach(e => {
-        const inv = _n(e.h.invoice_number);
-        if (inv) e.p = _take(x => _n(x.invoice) === inv);
+        const inv = _inv(e.h.invoice_number);
+        if (inv) e.p = _take(x => _inv(x.invoice) === inv);
     });
     // Pass 2: date + amount for entries with no number match.
     matched.forEach(e => {
@@ -3851,11 +3853,11 @@ const buildClosingSalesLedger = async ({ prospect = null, customer = null, custo
         const add = (path, label) => { if (path && !files.some(f => f.path === path)) files.push({ path, label }); };
         add(r.h?.invoice_file, r.h?.invoice_file_name || 'Invoice');
         add(r.p?.proof, 'Proof');
-        const inv = _n(r.p?.invoice || r.h?.invoice_number);
+        const inv = _inv(r.p?.invoice || r.h?.invoice_number);
         const actId = r.h?.closing_activity_id;
         orderForms.forEach(a => {
             const m = _meta(a);
-            const prn = _n(m.prn_number || m.fields?.prn_number);
+            const prn = _inv(m.prn_number || m.fields?.prn_number);
             const mine = (actId != null && String(m.activity_id ?? '') === String(actId))
                 || (inv && prn && prn === inv)
                 || files.some(f => f.path === a.file_url);
