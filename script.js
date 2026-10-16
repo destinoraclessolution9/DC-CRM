@@ -5296,6 +5296,8 @@ function _wireLoginBtn() {
     const renderPurchaseHistoryTab = async (...a) => { const _r = window.app.renderPurchaseHistoryTab; if (_r && _r !== renderPurchaseHistoryTab) return _r(...a); };
     const renderReferralsTab = async (...a) => { const _r = window.app.renderReferralsTab; if (_r && _r !== renderReferralsTab) return _r(...a); };
     const openCustomerReferralModal = async (...a) => { const _r = window.app.openCustomerReferralModal; if (_r && _r !== openCustomerReferralModal) return _r(...a); };
+    const openCustomerEditModal = _lazyStub('chunks/script-customers.min.js', 'openCustomerEditModal');
+    const saveCustomerProfile = _lazyStub('chunks/script-customers.min.js', 'saveCustomerProfile');
     const saveCustomerReferral = async (...a) => { const _r = window.app.saveCustomerReferral; if (_r && _r !== saveCustomerReferral) return _r(...a); };
     const viewReferralDetail = async (...a) => { const _r = window.app.viewReferralDetail; if (_r && _r !== viewReferralDetail) return _r(...a); };
     const editReferral = async (...a) => { const _r = window.app.editReferral; if (_r && _r !== editReferral) return _r(...a); };
@@ -5784,6 +5786,8 @@ function _wireLoginBtn() {
         renderPurchaseHistoryTab,
         renderReferralsTab,
         openCustomerReferralModal,
+        openCustomerEditModal,
+        saveCustomerProfile,
         saveCustomerReferral,
         viewReferralDetail,
         editReferral,

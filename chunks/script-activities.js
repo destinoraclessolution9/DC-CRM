@@ -2007,7 +2007,9 @@ My raw notes:
         const p = await AppDataStore.getByIdFull('prospects', prospectId).catch(() => null);
         if (!p) return;
         const custs = await AppDataStore.query('customers', { converted_from_prospect_id: prospectId }).catch(() => []);
-        const cur = { full_name: p.full_name, phone: p.phone, email: p.email, ic_number: p.ic_number, date_of_birth: p.date_of_birth, address: _joinAddr(p) };
+        // A converted person's live profile is the customer — compare against it.
+        const base = (p.status === 'converted' && custs && custs[0]) ? custs[0] : p;
+        const cur = { full_name: base.full_name, phone: base.phone, email: base.email, ic_number: base.ic_number, date_of_birth: base.date_of_birth, address: _joinAddr(base) };
         const norm = (k, v) => {
             const s = String(v == null ? '' : v).trim();
             if (k === 'phone' || k === 'ic_number') return s.replace(/[\s\-+()]/g, '');
@@ -2061,16 +2063,25 @@ My raw notes:
                 patch.city = ''; patch.state = ''; patch.postal_code = '';
             }
         }
-        try {
-            await AppDataStore.update('prospects', pend.prospectId, patch);
-        } catch (e) {
-            const msg = String(e?.message || e);
-            UI.toast.error(/duplicate|unique/i.test(msg) ? 'Profile not updated — that phone/email already belongs to another prospect.' : 'Profile update failed: ' + msg);
-            return;
+        // Once converted, the customer is the one editable record and the prospect
+        // profile is frozen (DB guard prospects_freeze_converted_profile) — so the
+        // update goes to the customer only.
+        const _frozen = p?.status === 'converted' && pend.customerIds.length > 0;
+        if (!_frozen) {
+            try {
+                await AppDataStore.update('prospects', pend.prospectId, patch);
+            } catch (e) {
+                const msg = String(e?.message || e);
+                UI.toast.error(/duplicate|unique/i.test(msg) ? 'Profile not updated — that phone/email already belongs to another prospect.' : 'Profile update failed: ' + msg);
+                return;
+            }
         }
         for (const cid of pend.customerIds) {
             try { await AppDataStore.update('customers', cid, patch); }
-            catch (e) { console.warn('[profile update] customer write failed', cid, e); }
+            catch (e) {
+                console.warn('[profile update] customer write failed', cid, e);
+                if (_frozen) { UI.toast.error('Profile update failed: ' + String(e?.message || e)); return; }
+            }
         }
         UI.toast.success(`Profile updated (${picked.length} field${picked.length > 1 ? 's' : ''})`);
     };

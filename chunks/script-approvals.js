@@ -74,6 +74,14 @@
     // same sale (purchases row + adjustCustomerLtv) more than once.
     const _queueInFlight = window._queueInFlight || (window._queueInFlight = new Set());
 
+    // The FULL prospect row (select=*) for the prospect→customer profile copy. The
+    // cached getById row is projected to the light select, so copying from it
+    // would silently drop the columns it omits. Falls back to the row in hand.
+    const _fullProspectRow = async (prospect) => {
+        if (!prospect || prospect.id == null || !AppDataStore.getByIdFull) return prospect;
+        return (await AppDataStore.getByIdFull('prospects', prospect.id).catch(() => null)) || prospect;
+    };
+
     // Who may approve: management (L<=4, as before) OR a user the Super Admin
     // granted "approve_sales" (Admin → user_view_overrides.functions). The grant
     // lives server-side; can_approve_sales() is the same check the approval_queue
@@ -122,7 +130,8 @@ const renderApprovalQueue = async () => {
     const userMap = new Map((allUsers || []).map(u => [String(u.id), u]));
     const pending = allEntries
         .filter(e => e.status === 'pending')
-        .filter(e => e.approval_type !== 'info_update' || convertedIds.has(String(e.prospect_id)))
+        // Customer-profile edits (customer_id set, 2026-10-16) are always real.
+        .filter(e => e.approval_type !== 'info_update' || e.customer_id != null || convertedIds.has(String(e.prospect_id)))
         .filter(e => !_isGrantedApproverOnly() || _APPROVER_TYPES.has(e.approval_type))
         .sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at));
 
@@ -206,7 +215,9 @@ const showApprovalDetail = async (entryId) => {
     } else if (entry.approval_type === 'info_update') {
         const before = entry.snapshot_before || {};
         const after = entry.snapshot_after || {};
-        const fields = ['full_name','nickname','phone','email','ic_number','date_of_birth','lunar_birth','ming_gua','occupation','company_name','income_range','address','city','state','postal_code','title','gender','nationality','referred_by','referral_relationship','spouse_name'];
+        const fields = ['full_name','nickname','phone','email','ic_number','date_of_birth','lunar_birth','ming_gua','occupation','company_name','income_range','address','city','state','postal_code','title','gender','nationality','referred_by','referral_relationship','spouse_name',
+            // customer-profile edits (2026-10-16) can also change these
+            'marital_status','children','life_chart_type','country','cps_interest','is_own_business','business_name','business_industry','business_area','business_title_role','business_started','company_size','source','interests','pain_points','budget_range','decision_maker','notes'];
         // Audit logic fix: treat an absent (undefined) before/after value as empty so a
         // field newly populated by the agent (undefined before, set after) still shows
         // in the Before/After diff. The old `before[f] !== undefined && after[f] !== undefined`
@@ -297,6 +308,19 @@ const approveQueueEntry = async (entryId) => {
         await renderApprovalQueue();
         await (window.app.renderCustomersTable || (async () => {}))();
         return;
+    } else if (entry.approval_type === 'info_update' && entry.customer_id != null) {
+        // Customer-profile edit by a non-manager (2026-10-16): nothing was written
+        // yet — apply it now. Only the fields the agent actually changed, so an edit
+        // made to OTHER fields since the request was filed is not rolled back.
+        const before = entry.snapshot_before || {};
+        const after = entry.snapshot_after || {};
+        const allowed = new Set([...(window._dataHelpers?.PROSPECT_PROFILE_FIELDS || []), 'country']);
+        allowed.delete('responsible_agent_id');
+        const patch = {};
+        for (const f of Object.keys(after)) {
+            if (allowed.has(f) && JSON.stringify(after[f] ?? null) !== JSON.stringify(before[f] ?? null)) patch[f] = after[f];
+        }
+        if (Object.keys(patch).length > 0) await AppDataStore.update('customers', entry.customer_id, patch);
     } else if (entry.approval_type === 'info_update') {
         const prospect = await AppDataStore.getById('prospects', entry.prospect_id);
         if (prospect?.status === 'converted') {
@@ -393,31 +417,15 @@ const approveQueueEntry = async (entryId) => {
                 // marked 'approved' with a success toast (revenue loss).
                 if (!customer) {
                     customer = await AppDataStore.create('customers', {
+                        // All person-profile fields (shared list, data-helpers.js) — these
+                        // fallbacks used to copy only name/contact/referral/family.
+                        ...window._dataHelpers.customerFieldsFromProspect(await _fullProspectRow(prospect), cr),
                         id: window.AppDataStore._generateId(),
-                        full_name: prospect.full_name,
-                        phone: prospect.phone,
-                        email: prospect.email,
-                        ic_number: prospect.ic_number,
-                        date_of_birth: prospect.date_of_birth,
-                        responsible_agent_id: prospect.responsible_agent_id,
                         country: UI.countryByCode(prospect.country).code,
                         status: 'active',
                         lifetime_value: 0,
                         customer_since: cr.closing_date || cr.order_date || _localToday,
                         converted_from_prospect_id: entry.prospect_id,
-                        // Carry the referral attribution + approval trail across, same as
-                        // the main approveProspectConversion path. These columns only
-                        // started existing on `customers` with
-                        // migrations/customer_conversion_columns_and_open_prospects_2026-08-05.sql —
-                        // before that the store's schema-error retry stripped them and the
-                        // customer profile's "Referred By" row always read "-".
-                        referred_by: prospect.referred_by || null,
-                        referred_by_id: prospect.referred_by_id || null,
-                        referred_by_type: prospect.referred_by_type || null,
-                        referral_relationship: prospect.referral_relationship || null,
-                        marital_status: prospect.marital_status || null,
-                        children: prospect.children || null,
-                        spouse_name: prospect.spouse_name || null,
                         approved_by: _state.cu?.id || null,
                         approved_at: new Date().toISOString(),
                     });
@@ -514,7 +522,8 @@ const confirmRejectQueueEntry = async (entryId) => {
     // Audit null-deref fix: also require snapshot_after — a row with snapshot_before
     // set but snapshot_after null (partial insert / aborted edit / RLS-trimmed JSONB)
     // would otherwise throw `Object.keys(null)`, aborting the whole rejection silently.
-    if (entry.approval_type === 'info_update' && entry.snapshot_before && entry.snapshot_after) {
+    // A customer-profile edit (customer_id set) was never applied — nothing to revert.
+    if (entry.approval_type === 'info_update' && entry.customer_id == null && entry.snapshot_before && entry.snapshot_after) {
         const revertFields = {};
         for (const key of Object.keys(entry.snapshot_after)) {
             if (entry.snapshot_before[key] !== undefined) {
@@ -597,27 +606,15 @@ const approveClosingRecord = async (prospectId) => {
         if (!customer) {
             // Prospect was marked converted but no customer record exists — create one now
             const newCust = await AppDataStore.create('customers', {
+                // All person-profile fields (shared list, data-helpers.js) — these
+                // fallbacks used to copy only name/contact/referral/family.
+                ...window._dataHelpers.customerFieldsFromProspect(await _fullProspectRow(prospect), cr),
                 id: window.AppDataStore._generateId(),
-                full_name: prospect.full_name,
-                phone: prospect.phone,
-                email: prospect.email,
-                ic_number: prospect.ic_number,
-                date_of_birth: prospect.date_of_birth,
-                responsible_agent_id: prospect.responsible_agent_id,
                 country: UI.countryByCode(prospect.country).code,
                 status: 'active',
                 lifetime_value: 0,
                 customer_since: cr.closing_date || cr.order_date || _localToday,
                 converted_from_prospect_id: prospectId,
-                // Same carry-over as the other two conversion paths — see the note at
-                // the new_sale fallback above.
-                referred_by: prospect.referred_by || null,
-                referred_by_id: prospect.referred_by_id || null,
-                referred_by_type: prospect.referred_by_type || null,
-                referral_relationship: prospect.referral_relationship || null,
-                marital_status: prospect.marital_status || null,
-                children: prospect.children || null,
-                spouse_name: prospect.spouse_name || null,
                 approved_by: _state.cu?.id || null,
                 approved_at: new Date().toISOString(),
             });
@@ -660,6 +657,7 @@ const approveClosingRecord = async (prospectId) => {
     _state.phc = null;
     const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
     if (bodyEl) await window.app.switchProspectTab('closing', prospectId, null, bodyEl);
+    await (window.app._refreshCustClosingAfterProspectSave || (async () => {}))(prospectId);
 };
 
 const rejectClosingRecord = async (prospectId) => {
@@ -677,6 +675,7 @@ const rejectClosingRecord = async (prospectId) => {
     UI.toast.success('Record sent back to agent for revision');
     const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
     if (bodyEl) await window.app.switchProspectTab('closing', prospectId, null, bodyEl);
+    await (window.app._refreshCustClosingAfterProspectSave || (async () => {}))(prospectId);
 };
 
 const requestProspectConversion = async (prospectId) => {
@@ -809,39 +808,10 @@ const approveProspectConversion = async (prospectId) => {
     // purchases row + adjustCustomerLtv below. Setting lifetime_value directly with no
     // purchases row + total_purchases:0 re-creates the leaderboard<->LTV divergence the
     // ltv_purchase_backfill migration was written to cure.
+    // Every person-profile field the prospect has (one shared list — see
+    // customerFieldsFromProspect in data-helpers.js), read from the FULL row.
     const customer = {
-        title: prospect.title || '',
-        full_name: prospect.full_name,
-        nickname: prospect.nickname || '',
-        gender: prospect.gender || '',
-        nationality: prospect.nationality || '',
-        // Contact details: the prospect profile first, then what the closing
-        // captured (order-form photo / IC / typed at closing) for anything the
-        // profile is missing — so details taken at the sale reach the customer.
-        phone: prospect.phone || cr?.phone || null,
-        email: prospect.email || cr?.email || '',
-        ic_number: prospect.ic_number || cr?.ic_number || '',
-        // NULL, not '' — customers.date_of_birth is a DATE column and Postgres rejects
-        // an empty string, which failed EVERY conversion of a prospect with no DOB.
-        date_of_birth: prospect.date_of_birth || (/^\d{4}-\d{2}-\d{2}$/.test(cr?.date_of_birth || '') ? cr.date_of_birth : null),
-        lunar_birth: prospect.lunar_birth || '',
-        ming_gua: prospect.ming_gua || '',
-        occupation: prospect.occupation || '',
-        company_name: prospect.company_name || '',
-        income_range: prospect.income_range || '',
-        address: prospect.address || ((prospect.city || prospect.state || prospect.postal_code) ? '' : (cr?.address || '')),
-        city: prospect.city || '',
-        state: prospect.state || '',
-        postal_code: prospect.postal_code || '',
-        // Family block (2026-10-14) — customers carries the same columns.
-        marital_status: prospect.marital_status || null,
-        children: prospect.children || null,
-        spouse_name: prospect.spouse_name || null,
-        referred_by: prospect.referred_by || '',
-        referred_by_id: prospect.referred_by_id || null,
-        referred_by_type: prospect.referred_by_type || '',
-        referral_relationship: prospect.referral_relationship || '',
-        responsible_agent_id: prospect.responsible_agent_id || null,
+        ...window._dataHelpers.customerFieldsFromProspect(await _fullProspectRow(prospect), cr),
         country: UI.countryByCode(prospect.country).code,
         lifetime_value: 0,
         status: 'active',

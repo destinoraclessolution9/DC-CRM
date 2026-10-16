@@ -1633,6 +1633,16 @@ const openProspectModal = async (prospectId = null) => {
             UI.toast.error('Prospect not found.');
             return;
         }
+        // A converted prospect's profile is frozen — edit the customer instead.
+        if (_isConvertedProspect(prospect)) {
+            const custId = await _linkedCustomerId(prospect.id);
+            if (custId != null && typeof window.app.openCustomerEditModal === 'function') {
+                await window.app.openCustomerEditModal(custId);
+            } else {
+                UI.toast.info(`${prospect.full_name || 'This person'} is now a customer — edit the customer profile.`);
+            }
+            return;
+        }
         // Use the documented edit policy (canEditProspect) that saveProspect
         // enforces at save time — L1-2 anything, L3-10 team/subordinate records,
         // L11+ own only. The previous lvl<=5-or-owner gate was stricter than the
@@ -1839,6 +1849,11 @@ const saveProspect = async () => {
     if (editId) {
         snapshotBefore = await AppDataStore.getById('prospects', parseInt(editId));
         if (!snapshotBefore) { UI.toast.error('Prospect not found'); return; }
+        // Frozen after conversion (a modal opened before the conversion landed).
+        if (_isConvertedProspect(snapshotBefore)) {
+            UI.toast.error('This person is now a customer — edit the customer profile instead.');
+            return;
+        }
         // Enforce the documented edit policy (canEditProspect): view-scope (L3-11
         // upline) is broader than edit-scope (L11+ = own records only), so re-check
         // here — canViewProspect upstream is NOT a sufficient edit gate.
@@ -2229,6 +2244,25 @@ const buildProspectDetailTabsHtml = (prospect) => {
     `;
 };
 
+// ── Converted prospects are frozen (2026-10-16) ───────────────────────────────
+// After conversion the customer row is the one editable record; the prospect's
+// profile fields are locked (UI here + DB trigger prospects_freeze_converted_profile).
+// Sales/history stores keyed to the prospect (closing records, feng shui audits,
+// forms, name list) stay writable — the customer profile drives them.
+const _isConvertedProspect = (p) => !!p && (p.status === 'converted' || p.conversion_status === 'approved');
+// Linked customer id — only when this viewer may open that customer (otherwise
+// the caller falls back to the frozen prospect page rather than a permission error).
+const _linkedCustomerId = async (prospectId) => {
+    try {
+        const rows = await AppDataStore.query('customers', { converted_from_prospect_id: prospectId });
+        const c = rows && rows[0];
+        if (!c || c.id == null) return null;
+        const canView = window._crmUtils && window._crmUtils.canViewCustomer;
+        if (canView && !(await canView(c))) return null;
+        return c.id;
+    } catch (_) { return null; }
+};
+
 const showProspectDetail = async (prospectId) => {
     // Snapshot originating view BEFORE any await — a concurrent navigateTo during
     // the async gap would overwrite _state.cv, corrupting the back-destination.
@@ -2250,6 +2284,17 @@ const showProspectDetail = async (prospectId) => {
         UI.toast.error('You do not have permission to view this prospect.');
         await navigateTo('prospects');
         return;
+    }
+    // Once converted, the CUSTOMER profile is the person's one live profile — every
+    // link to the old prospect (search, referral tree, calendar, notifications, the
+    // Converted filter) lands there instead. Falls through to the frozen prospect
+    // page only for a legacy conversion with no linked customer row.
+    if (_isConvertedProspect(prospect)) {
+        const custId = await _linkedCustomerId(prospect.id);
+        if (custId != null && typeof window.app.showCustomerDetail === 'function') {
+            await window.app.showCustomerDetail(custId);
+            return;
+        }
     }
     _state.pvd = _fromView;
     _state.cdv = { type: 'prospect', id: prospectId };
@@ -2293,6 +2338,11 @@ const showProspectDetail = async (prospectId) => {
     }, 100);
 
     container.innerHTML = buildProspectDetailHeaderHtml(prospect, cpsPhoto) + buildProspectDetailTabsHtml(prospect);
+    // Only reached for a converted prospect when no viewable customer is linked
+    // (legacy import / another agent's customer): say why it is read-only.
+    if (_isConvertedProspect(prospect)) {
+        container.insertAdjacentHTML('afterbegin', `<div style="margin:0 0 10px;padding:10px 14px;border-radius:10px;background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;font-size:13px;font-weight:600;"><i class="fas fa-lock"></i> Converted to a customer — this prospect profile is frozen. Edits are made on the customer profile.</div>`);
+    }
     // Basic Information starts open — fill it now; every other accordion is collapsed.
     const _infoBody = document.getElementById(`acc-body-info-${prospect.id}`);
     if (_infoBody) switchProspectTab('info', prospect.id, null, _infoBody).catch(() => {});
@@ -2381,6 +2431,116 @@ const meetupBriefHtml = (rows, opts = {}) => {
                 ${jump}
             </div>
         </details>`;
+};
+
+// The DC Closing Record draft form (shared by the prospect profile and, for a
+// repeat sale, the customer profile — 2026-10-16). Field ids are the cr-* ones
+// saveClosingRecord / submitClosingRecord read; both buttons address the
+// prospect id, where the sales store (closing_record) lives.
+const _closingDraftFormHtml = async (prospect, cr, productOptions) => {
+    const d = cr || {};
+    const isPOP = d.payment_method === 'POP';
+    // NPO (agent-sellable installment package) — config stays L1-only, but
+    // any closer can tag this closing to an active NPO package. Filled async.
+    const isNPO = d.payment_method === 'NPO';
+    const npoPlanId = d.npo_plan_id || '';
+    const npoPlanName = d.npo_plan_name || '';
+    // Customer Information auto-fill from every known source (shared with the
+    // Meeting Outcome form — gatherContactPrefill lives in the activities chunk).
+    let _pf = null;
+    try {
+        if (!window.app.gatherContactPrefill && typeof window._loadChunk === 'function') await window._loadChunk('chunks/script-activities.min.js');
+        if (window.app.gatherContactPrefill) _pf = await window.app.gatherContactPrefill({ prospect, closingRecord: cr });
+    } catch (e) { console.warn('[closing record] contact prefill failed:', e); }
+    const _pfv = (k, fallback) => (_pf ? (_pf.fields[k] || '') : fallback) || '';
+    const _pfs = (k) => escapeHtml((_pf && _pf.src[k]) || '');
+    const _pft = (k) => (window.app.contactSrcTag || (() => ''))(_pf && _pf.src[k]);
+    const _lbl = 'font-size:12px;font-weight:600;display:block;margin-bottom:4px;';
+    return `
+        <div class="cr-status draft" style="margin-bottom:14px;padding:8px 12px;border-radius:8px;background:#fff8e1;border:1px solid #ffc107;color:#856404;font-size:13px;font-weight:600;">
+            <i class="fas fa-edit"></i> Draft — Fill in details and submit for manager approval
+        </div>
+        <div class="pv-sub">Customer Information</div>
+        <div class="form-group" style="margin-bottom:10px;"><label style="${_lbl}">Full Name${_pft('full_name')}</label><input id="cr-full-name" data-src="${_pfs('full_name')}" oninput="this.dataset.src=''" class="form-control" value="${escapeHtml(_pfv('full_name', d.full_name || prospect.full_name))}" placeholder="Full name"></div>
+        <div class="form-row" style="display:flex;gap:8px;margin-bottom:10px;">
+            <div class="form-group" style="flex:1;"><label style="${_lbl}">Phone${_pft('phone')}</label><input id="cr-phone" data-src="${_pfs('phone')}" oninput="this.dataset.src=''" class="form-control" value="${escapeHtml(_pfv('phone', d.phone || prospect.phone))}" placeholder="Phone"></div>
+            <div class="form-group" style="flex:1;"><label style="${_lbl}">Email${_pft('email')}</label><input id="cr-email" data-src="${_pfs('email')}" oninput="this.dataset.src=''" class="form-control" value="${escapeHtml(_pfv('email', d.email || prospect.email))}" placeholder="Email"></div>
+        </div>
+        <div class="form-row" style="display:flex;gap:8px;margin-bottom:10px;">
+            <div class="form-group" style="flex:1;"><label style="${_lbl}">IC Number${_pft('ic_number')}</label><input id="cr-ic" data-src="${_pfs('ic_number')}" oninput="this.dataset.src=''" onchange="app.moIcChanged && app.moIcChanged('cr')" class="form-control" value="${escapeHtml(_pfv('ic_number', d.ic_number || prospect.ic_number))}" placeholder="NRIC/Passport"></div>
+            <div class="form-group" style="flex:1;"><label style="${_lbl}">Date of Birth${_pft('date_of_birth')}</label><input id="cr-dob" data-src="${_pfs('date_of_birth')}" oninput="this.dataset.src=''" type="date" class="form-control" value="${escapeHtml(_pfv('date_of_birth', d.date_of_birth || prospect.date_of_birth))}"></div>
+        </div>
+        <div class="form-group" style="margin-bottom:14px;"><label style="${_lbl}">Address${_pft('address')}</label><textarea id="cr-address" data-src="${_pfs('address')}" oninput="this.dataset.src=''" class="form-control" rows="2" placeholder="Full address">${escapeHtml(_pfv('address', d.address || [prospect.address, prospect.city, prospect.state, prospect.postal_code].filter(Boolean).join(', ')))}</textarea></div>
+
+        <div class="pv-sub">📝 Meeting Outcome</div>
+        <div class="form-row" style="display:flex;gap:8px;margin-bottom:10px;">
+            <div class="form-group" style="flex:1;">
+                <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Product/Service Sold</label>
+                <select id="cr-product" class="form-control">${productOptions}</select>
+            </div>
+            <div class="form-group" style="flex:1;">
+                <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Order Date</label>
+                <input id="cr-order-date" type="date" class="form-control" value="${d.order_date || ''}">
+            </div>
+        </div>
+        <div class="form-row" style="display:flex;gap:8px;margin-bottom:10px;">
+            <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Amount Closed (RM)</label><input id="cr-amount" type="number" class="form-control" value="${d.sale_amount || ''}" placeholder="0.00"></div>
+            <div class="form-group" style="flex:1;">
+                <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Payment Method</label>
+                <select id="cr-payment-method" class="form-control" onchange="app.crPaymentMethodChanged(this.value)">
+                    ${UI.paymentMethodOptionsHtml(d.payment_method || 'Cash')}
+                </select>
+            </div>
+        </div>
+        ${UI.eppFieldsHtml('cr', { bank: d.epp_bank, months: d.epp_months, show: d.payment_method === 'EPP' })}
+        <div id="cr-pop-fields" style="display:${isPOP?'block':'none'};background:var(--gray-50);padding:12px;border-radius:6px;margin-bottom:10px;">
+            <div class="form-row" style="display:flex;gap:8px;margin-bottom:8px;">
+                <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Monthly Amount (RM)</label><input id="cr-pop-monthly" type="number" class="form-control" value="${d.pop_monthly || ''}" placeholder="0.00"></div>
+                <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Tenure (months)</label><input id="cr-pop-tenure" type="number" class="form-control" value="${d.pop_tenure || ''}" placeholder="12"></div>
+            </div>
+            <div class="form-group"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Down Payment (RM)</label><input id="cr-pop-down" type="number" class="form-control" value="${d.pop_down_payment || ''}" placeholder="0.00"></div>
+        </div>
+        <div id="cr-npo-fields" style="display:${isNPO?'block':'none'};background:#ecfeff;border:1px solid #a5f3fc;padding:12px;border-radius:6px;margin-bottom:10px;">
+            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;"><i class="fas fa-file-invoice-dollar" style="color:#0e7490;"></i> NPO Package <span style="color:#ef4444;font-weight:700;" title="Required for NPO">*</span></label>
+            <select id="cr-npo-plan" class="form-control" onchange="app.crNpoPlanPicked()" data-selected="${escapeHtml(String(npoPlanId))}">
+                <option value="">${isNPO ? 'Loading packages…' : '— Select package —'}</option>
+            </select>
+            <div id="cr-npo-selected" style="font-size:12px;color:#0e7490;margin-top:6px;">${npoPlanName ? 'Selected package: <strong>' + escapeHtml(npoPlanName) + '</strong>' : ''}</div>
+            ${isNPO ? `<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="" style="display:none;" onload="window.app && app.crNpoFillPlans && app.crNpoFillPlans('${escapeHtml(String(npoPlanId))}')">` : ''}
+        </div>
+        <div id="cr-cc-fields" style="display:${(isPOP||isNPO)?'block':'none'};background:#fff7ed;border:1px solid #fed7aa;padding:12px;border-radius:6px;margin-bottom:10px;">
+            <label class="checkbox-label" style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:#9a3412;margin:0;cursor:pointer;">
+                <input type="checkbox" id="cr-cc-installment" ${d.cc_installment ? 'checked' : ''}
+                    onchange="var w=document.getElementById('cr-cc-expiry-wrap'); if(w) w.style.display=this.checked?'block':'none';">
+                <span><i class="fas fa-credit-card"></i> Installment charged to a credit card</span>
+            </label>
+            <div id="cr-cc-expiry-wrap" style="display:${d.cc_installment ? 'block' : 'none'};margin-top:10px;max-width:220px;">
+                <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Credit Card Expiry <span style="color:#ef4444;font-weight:700;" title="Required">*</span></label>
+                <input type="month" id="cr-cc-expiry" class="form-control" value="${escapeHtml(d.cc_expiry || '')}">
+                <span style="font-size:11px;color:var(--gray-500);display:block;margin-top:4px;">A reminder surfaces ~1 month before expiry to collect updated card details. Store the expiry only — never the full card number.</span>
+            </div>
+        </div>
+        <div class="form-row" style="display:flex;gap:8px;margin-bottom:10px;">
+            <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Invoice Number</label><input id="cr-invoice" class="form-control" value="${escapeHtml(d.invoice_number || '')}" placeholder="INV-2026-001"></div>
+            <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Collection Date</label><input id="cr-close-date" type="date" class="form-control" value="${d.closing_date || ''}"></div>
+        </div>
+        <div class="form-group" style="margin-bottom:10px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Remarks</label><textarea id="cr-remarks" class="form-control" rows="2" placeholder="e.g. Ring Size, Special Request...">${escapeHtml(d.closing_remarks || '')}</textarea></div>
+        <div class="form-group" style="margin-bottom:14px;">
+            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Upload Purchased Invoice <span style="font-size:11px;color:var(--gray-400);font-weight:normal;">(AI auto-fill on upload)</span></label>
+            <input id="cr-invoice-file" type="file" class="form-control" accept="image/png,image/jpeg,application/pdf" onchange="app.scanInvoiceWithAI(this,'cr','cr')">
+            ${d.invoice_file ? `<div style="margin-top:6px;font-size:11px;color:var(--gray-500);"><i class="fas fa-paperclip"></i> Current: ${invoiceLink(d.invoice_file, escapeHtml(d.invoice_file_name || 'view'))} <span style="color:var(--gray-400);">(choosing a new file will replace it)</span></div>` : ''}
+        </div>
+
+        <div class="pv-sub">📁 Case Study (Optional)</div>
+        <div class="form-group" style="margin-bottom:10px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Sales Idea</label><textarea id="cr-sales-idea" class="form-control" rows="2" placeholder="Describe the sales idea...">${escapeHtml(d.sales_idea || '')}</textarea></div>
+        <div class="form-group" style="margin-bottom:10px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Plan Details</label><textarea id="cr-plan-details" class="form-control" rows="2" placeholder="Details of the plan proposed...">${escapeHtml(d.plan_details || '')}</textarea></div>
+        <div class="form-group" style="margin-bottom:14px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Success Story</label><textarea id="cr-success-story" class="form-control" rows="2" placeholder="What made this a success?">${escapeHtml(d.success_story || '')}</textarea></div>
+
+        <div style="display:flex;gap:8px;">
+            <button class="btn secondary btn-sm" style="flex:1;" onclick="event.stopPropagation();app.saveClosingRecord(${prospect.id})"><i class="fas fa-save"></i> Save Draft</button>
+            <button class="btn primary btn-sm" style="flex:1;" onclick="event.stopPropagation();app.submitClosingRecord(${prospect.id})"><i class="fas fa-paper-plane"></i> Submit for Approval</button>
+        </div>
+    `;
 };
 
 const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
@@ -3225,109 +3385,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         const ledgerHtml = await buildClosingSalesLedger({ prospect });
 
         if (!cr || status === 'draft') {
-            const d = cr || {};
-            const isPOP = d.payment_method === 'POP';
-            // NPO (agent-sellable installment package) — config stays L1-only, but
-            // any closer can tag this closing to an active NPO package. Filled async.
-            const isNPO = d.payment_method === 'NPO';
-            const npoPlanId = d.npo_plan_id || '';
-            const npoPlanName = d.npo_plan_name || '';
-            // Customer Information auto-fill from every known source (shared with the
-            // Meeting Outcome form — gatherContactPrefill lives in the activities chunk).
-            let _pf = null;
-            try {
-                if (!window.app.gatherContactPrefill && typeof window._loadChunk === 'function') await window._loadChunk('chunks/script-activities.min.js');
-                if (window.app.gatherContactPrefill) _pf = await window.app.gatherContactPrefill({ prospect, closingRecord: cr });
-            } catch (e) { console.warn('[closing record] contact prefill failed:', e); }
-            const _pfv = (k, fallback) => (_pf ? (_pf.fields[k] || '') : fallback) || '';
-            const _pfs = (k) => escapeHtml((_pf && _pf.src[k]) || '');
-            const _pft = (k) => (window.app.contactSrcTag || (() => ''))(_pf && _pf.src[k]);
-            const _lbl = 'font-size:12px;font-weight:600;display:block;margin-bottom:4px;';
-            container.innerHTML = `
-                <div class="cr-status draft" style="margin-bottom:14px;padding:8px 12px;border-radius:8px;background:#fff8e1;border:1px solid #ffc107;color:#856404;font-size:13px;font-weight:600;">
-                    <i class="fas fa-edit"></i> Draft — Fill in details and submit for manager approval
-                </div>
-                <div class="pv-sub">Customer Information</div>
-                <div class="form-group" style="margin-bottom:10px;"><label style="${_lbl}">Full Name${_pft('full_name')}</label><input id="cr-full-name" data-src="${_pfs('full_name')}" oninput="this.dataset.src=''" class="form-control" value="${escapeHtml(_pfv('full_name', d.full_name || prospect.full_name))}" placeholder="Full name"></div>
-                <div class="form-row" style="display:flex;gap:8px;margin-bottom:10px;">
-                    <div class="form-group" style="flex:1;"><label style="${_lbl}">Phone${_pft('phone')}</label><input id="cr-phone" data-src="${_pfs('phone')}" oninput="this.dataset.src=''" class="form-control" value="${escapeHtml(_pfv('phone', d.phone || prospect.phone))}" placeholder="Phone"></div>
-                    <div class="form-group" style="flex:1;"><label style="${_lbl}">Email${_pft('email')}</label><input id="cr-email" data-src="${_pfs('email')}" oninput="this.dataset.src=''" class="form-control" value="${escapeHtml(_pfv('email', d.email || prospect.email))}" placeholder="Email"></div>
-                </div>
-                <div class="form-row" style="display:flex;gap:8px;margin-bottom:10px;">
-                    <div class="form-group" style="flex:1;"><label style="${_lbl}">IC Number${_pft('ic_number')}</label><input id="cr-ic" data-src="${_pfs('ic_number')}" oninput="this.dataset.src=''" onchange="app.moIcChanged && app.moIcChanged('cr')" class="form-control" value="${escapeHtml(_pfv('ic_number', d.ic_number || prospect.ic_number))}" placeholder="NRIC/Passport"></div>
-                    <div class="form-group" style="flex:1;"><label style="${_lbl}">Date of Birth${_pft('date_of_birth')}</label><input id="cr-dob" data-src="${_pfs('date_of_birth')}" oninput="this.dataset.src=''" type="date" class="form-control" value="${escapeHtml(_pfv('date_of_birth', d.date_of_birth || prospect.date_of_birth))}"></div>
-                </div>
-                <div class="form-group" style="margin-bottom:14px;"><label style="${_lbl}">Address${_pft('address')}</label><textarea id="cr-address" data-src="${_pfs('address')}" oninput="this.dataset.src=''" class="form-control" rows="2" placeholder="Full address">${escapeHtml(_pfv('address', d.address || [prospect.address, prospect.city, prospect.state, prospect.postal_code].filter(Boolean).join(', ')))}</textarea></div>
-
-                <div class="pv-sub">📝 Meeting Outcome</div>
-                <div class="form-row" style="display:flex;gap:8px;margin-bottom:10px;">
-                    <div class="form-group" style="flex:1;">
-                        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Product/Service Sold</label>
-                        <select id="cr-product" class="form-control">${productOptions}</select>
-                    </div>
-                    <div class="form-group" style="flex:1;">
-                        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Order Date</label>
-                        <input id="cr-order-date" type="date" class="form-control" value="${d.order_date || ''}">
-                    </div>
-                </div>
-                <div class="form-row" style="display:flex;gap:8px;margin-bottom:10px;">
-                    <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Amount Closed (RM)</label><input id="cr-amount" type="number" class="form-control" value="${d.sale_amount || ''}" placeholder="0.00"></div>
-                    <div class="form-group" style="flex:1;">
-                        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Payment Method</label>
-                        <select id="cr-payment-method" class="form-control" onchange="app.crPaymentMethodChanged(this.value)">
-                            ${UI.paymentMethodOptionsHtml(d.payment_method || 'Cash')}
-                        </select>
-                    </div>
-                </div>
-                ${UI.eppFieldsHtml('cr', { bank: d.epp_bank, months: d.epp_months, show: d.payment_method === 'EPP' })}
-                <div id="cr-pop-fields" style="display:${isPOP?'block':'none'};background:var(--gray-50);padding:12px;border-radius:6px;margin-bottom:10px;">
-                    <div class="form-row" style="display:flex;gap:8px;margin-bottom:8px;">
-                        <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Monthly Amount (RM)</label><input id="cr-pop-monthly" type="number" class="form-control" value="${d.pop_monthly || ''}" placeholder="0.00"></div>
-                        <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Tenure (months)</label><input id="cr-pop-tenure" type="number" class="form-control" value="${d.pop_tenure || ''}" placeholder="12"></div>
-                    </div>
-                    <div class="form-group"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Down Payment (RM)</label><input id="cr-pop-down" type="number" class="form-control" value="${d.pop_down_payment || ''}" placeholder="0.00"></div>
-                </div>
-                <div id="cr-npo-fields" style="display:${isNPO?'block':'none'};background:#ecfeff;border:1px solid #a5f3fc;padding:12px;border-radius:6px;margin-bottom:10px;">
-                    <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;"><i class="fas fa-file-invoice-dollar" style="color:#0e7490;"></i> NPO Package <span style="color:#ef4444;font-weight:700;" title="Required for NPO">*</span></label>
-                    <select id="cr-npo-plan" class="form-control" onchange="app.crNpoPlanPicked()" data-selected="${escapeHtml(String(npoPlanId))}">
-                        <option value="">${isNPO ? 'Loading packages…' : '— Select package —'}</option>
-                    </select>
-                    <div id="cr-npo-selected" style="font-size:12px;color:#0e7490;margin-top:6px;">${npoPlanName ? 'Selected package: <strong>' + escapeHtml(npoPlanName) + '</strong>' : ''}</div>
-                    ${isNPO ? `<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="" style="display:none;" onload="window.app && app.crNpoFillPlans && app.crNpoFillPlans('${escapeHtml(String(npoPlanId))}')">` : ''}
-                </div>
-                <div id="cr-cc-fields" style="display:${(isPOP||isNPO)?'block':'none'};background:#fff7ed;border:1px solid #fed7aa;padding:12px;border-radius:6px;margin-bottom:10px;">
-                    <label class="checkbox-label" style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:#9a3412;margin:0;cursor:pointer;">
-                        <input type="checkbox" id="cr-cc-installment" ${d.cc_installment ? 'checked' : ''}
-                            onchange="var w=document.getElementById('cr-cc-expiry-wrap'); if(w) w.style.display=this.checked?'block':'none';">
-                        <span><i class="fas fa-credit-card"></i> Installment charged to a credit card</span>
-                    </label>
-                    <div id="cr-cc-expiry-wrap" style="display:${d.cc_installment ? 'block' : 'none'};margin-top:10px;max-width:220px;">
-                        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Credit Card Expiry <span style="color:#ef4444;font-weight:700;" title="Required">*</span></label>
-                        <input type="month" id="cr-cc-expiry" class="form-control" value="${escapeHtml(d.cc_expiry || '')}">
-                        <span style="font-size:11px;color:var(--gray-500);display:block;margin-top:4px;">A reminder surfaces ~1 month before expiry to collect updated card details. Store the expiry only — never the full card number.</span>
-                    </div>
-                </div>
-                <div class="form-row" style="display:flex;gap:8px;margin-bottom:10px;">
-                    <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Invoice Number</label><input id="cr-invoice" class="form-control" value="${escapeHtml(d.invoice_number || '')}" placeholder="INV-2026-001"></div>
-                    <div class="form-group" style="flex:1;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Collection Date</label><input id="cr-close-date" type="date" class="form-control" value="${d.closing_date || ''}"></div>
-                </div>
-                <div class="form-group" style="margin-bottom:10px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Remarks</label><textarea id="cr-remarks" class="form-control" rows="2" placeholder="e.g. Ring Size, Special Request...">${escapeHtml(d.closing_remarks || '')}</textarea></div>
-                <div class="form-group" style="margin-bottom:14px;">
-                    <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Upload Purchased Invoice <span style="font-size:11px;color:var(--gray-400);font-weight:normal;">(AI auto-fill on upload)</span></label>
-                    <input id="cr-invoice-file" type="file" class="form-control" accept="image/png,image/jpeg,application/pdf" onchange="app.scanInvoiceWithAI(this,'cr','cr')">
-                    ${d.invoice_file ? `<div style="margin-top:6px;font-size:11px;color:var(--gray-500);"><i class="fas fa-paperclip"></i> Current: ${invoiceLink(d.invoice_file, escapeHtml(d.invoice_file_name || 'view'))} <span style="color:var(--gray-400);">(choosing a new file will replace it)</span></div>` : ''}
-                </div>
-
-                <div class="pv-sub">📁 Case Study (Optional)</div>
-                <div class="form-group" style="margin-bottom:10px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Sales Idea</label><textarea id="cr-sales-idea" class="form-control" rows="2" placeholder="Describe the sales idea...">${escapeHtml(d.sales_idea || '')}</textarea></div>
-                <div class="form-group" style="margin-bottom:10px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Plan Details</label><textarea id="cr-plan-details" class="form-control" rows="2" placeholder="Details of the plan proposed...">${escapeHtml(d.plan_details || '')}</textarea></div>
-                <div class="form-group" style="margin-bottom:14px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Success Story</label><textarea id="cr-success-story" class="form-control" rows="2" placeholder="What made this a success?">${escapeHtml(d.success_story || '')}</textarea></div>
-
-                <div style="display:flex;gap:8px;">
-                    <button class="btn secondary btn-sm" style="flex:1;" onclick="event.stopPropagation();app.saveClosingRecord(${prospect.id})"><i class="fas fa-save"></i> Save Draft</button>
-                    <button class="btn primary btn-sm" style="flex:1;" onclick="event.stopPropagation();app.submitClosingRecord(${prospect.id})"><i class="fas fa-paper-plane"></i> Submit for Approval</button>
-                </div>
-            `;
+            container.innerHTML = await _closingDraftFormHtml(prospect, cr, productOptions);
         } else if (status === 'submitted') {
             const d = cr;
             const approveLabel = isConverted ? 'Approve Sale' : 'Approve & Create Customer';
@@ -4027,10 +4085,27 @@ const renderCustomerClosingTab = async (customer, container) => {
         }
     }
 
+    // Repeat sale, recorded from the customer profile (2026-10-16) — the same DC
+    // Closing Record form the prospect profile had, so a converted person never
+    // has to be opened as a prospect again. Saved/submitted into the sales store
+    // on the linked prospect (closing_record), which the approval flow books from.
+    let newSaleHtml = '';
+    if (!cr || status === 'draft') {
+        const products = await AppDataStore.getAll('products');
+        const productOptions = UI.productOptionsHtml(products, { selected: cr?.product || '' })
+            || '<option value="">No products available</option>';
+        const formHtml = await _closingDraftFormHtml(prospect, cr, productOptions);
+        newSaleHtml = `
+            <details id="cust-new-sale-${pid}" ${cr ? 'open' : ''} style="margin-bottom:14px;border:1px solid #c7d2fe;border-radius:8px;overflow:hidden;">
+                <summary style="padding:9px 12px;cursor:pointer;font-weight:600;font-size:13px;color:#3730a3;background:#eef2ff;list-style:none;"><i class="fas fa-plus-circle"></i> ${cr ? 'Continue the draft sale' : 'Record a New Sale'}</summary>
+                <div style="padding:12px;">${formHtml}</div>
+            </details>`;
+    }
+
     // pre2025Html is always a non-empty table string, so `... || fallback` never
     // reached the fallback (+ binds tighter than ||). Decide on the actual closing
     // content — history + active submission — and append the message when both are empty.
-    container.innerHTML = activeHtml + ledgerHtml + pre2025Html;
+    container.innerHTML = newSaleHtml + activeHtml + ledgerHtml + pre2025Html;
     _resolveLedgerThumbs(container);
 };
 
@@ -6250,6 +6325,7 @@ const saveClosingRecord = async (prospectId) => {
     const _crSrc = (window.app.readContactSources || (() => ({})))('cr');
     const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
     if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
+    await _refreshCustClosingAfterProspectSave(prospectId); // repeat sale on the customer profile
     await _offerCrProfileUpdate(prospectId, data, _crSrc);
 };
 
@@ -6411,6 +6487,7 @@ const submitClosingRecord = async (prospectId) => {
     const _crSrc = (window.app.readContactSources || (() => ({})))('cr');
     const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
     if (bodyEl) await switchProspectTab('closing', prospectId, null, bodyEl);
+    await _refreshCustClosingAfterProspectSave(prospectId); // repeat sale on the customer profile
     await _offerCrProfileUpdate(prospectId, data, _crSrc);
 };
 

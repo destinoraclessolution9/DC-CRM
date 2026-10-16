@@ -374,7 +374,67 @@
         return { matched, leftovers, extra };
     }
 
-    const api = { classifyQueueError, extractUnknownCol, isSchemaError, isAbortError, snapshotsDiffer, buildReferralCounts, parseMeetingMinutes, matchMinutesItems };
+    // ── Prospect → customer profile copy (2026-10-16) ─────────────────────────
+    // After conversion the CUSTOMER is the one editable record, so it must carry
+    // every person-profile field the prospect had. The conversion paths used to
+    // hand-pick ~25 fields each (and differently), which silently dropped e.g.
+    // life_chart_type on 89 of 154 customers and ming_gua on 42. One list, used
+    // by every customer-creating path. Sales-pipeline fields (pipeline_stage,
+    // protection_deadline, deal_value, manual_grade, closing_record, ...) are NOT
+    // here: they stay on the prospect as frozen history. `country` is left to the
+    // caller (it needs UI.countryByCode normalization).
+    const PROSPECT_PROFILE_FIELDS = [
+        'title', 'full_name', 'nickname', 'gender', 'nationality', 'phone', 'email',
+        'ic_number', 'date_of_birth', 'lunar_birth', 'life_chart_type', 'ming_gua', 'element',
+        'occupation', 'company_name', 'income_range',
+        'address', 'city', 'state', 'postal_code',
+        'marital_status', 'children', 'spouse_name',
+        'referred_by', 'referred_by_id', 'referred_by_type', 'referral_relationship',
+        'responsible_agent_id',
+        // customers columns added by migrations/customer_profile_columns_2026-10-16.sql
+        'is_own_business', 'business_name', 'business_industry', 'business_area',
+        'business_title_role', 'business_started', 'company_size',
+        'source', 'original_source', 'cps_interest',
+        'cps_form_url', 'cps_form_name', 'cps_form_date', 'cps_attachment',
+        'notes', 'interests', 'pain_points', 'budget_range', 'decision_maker', 'tags',
+    ];
+    const _isBlankVal = (v) => v == null
+        || (typeof v === 'string' && v.trim() === '')
+        || (Array.isArray(v) && v.length === 0)
+        || (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0);
+
+    // Customer fields copied from a prospect. Blank prospect values become null —
+    // never '' (DATE columns reject an empty string, which used to fail every
+    // conversion of a prospect with no DOB). `closingRecord` fills the contact
+    // details captured at the sale (order-form photo / IC) that the profile lacks.
+    function customerFieldsFromProspect(prospect, closingRecord) {
+        const p = prospect || {};
+        const cr = closingRecord || {};
+        const out = {};
+        PROSPECT_PROFILE_FIELDS.forEach(f => { out[f] = _isBlankVal(p[f]) ? null : p[f]; });
+        ['phone', 'email', 'ic_number'].forEach(f => {
+            if (out[f] == null && !_isBlankVal(cr[f])) out[f] = cr[f];
+        });
+        if (out.date_of_birth == null && /^\d{4}-\d{2}-\d{2}$/.test(String(cr.date_of_birth || ''))) out.date_of_birth = cr.date_of_birth;
+        // A structured address (city/state/postcode) wins over the closing's one-line address.
+        if (out.address == null && out.city == null && out.state == null && out.postal_code == null && !_isBlankVal(cr.address)) out.address = cr.address;
+        return out;
+    }
+
+    // Patch that fills the customer's BLANK profile fields from its prospect —
+    // never overwrites a value the customer already has (it may be newer).
+    function customerBackfillPatch(customer, prospect) {
+        const c = customer || {};
+        const src = customerFieldsFromProspect(prospect);
+        const patch = {};
+        PROSPECT_PROFILE_FIELDS.forEach(f => {
+            if (f === 'responsible_agent_id') return; // ownership is managed on the customer
+            if (_isBlankVal(c[f]) && src[f] != null) patch[f] = src[f];
+        });
+        return patch;
+    }
+
+    const api = { classifyQueueError, extractUnknownCol, isSchemaError, isAbortError, snapshotsDiffer, buildReferralCounts, parseMeetingMinutes, matchMinutesItems, PROSPECT_PROFILE_FIELDS, customerFieldsFromProspect, customerBackfillPatch };
     // Browser global (loaded before data.js). Also export for Node tests.
     if (typeof window !== 'undefined') window._dataHelpers = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

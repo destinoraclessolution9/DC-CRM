@@ -4026,26 +4026,16 @@ const closeDealWon = async (prospectId) => {
     // via the shared adjuster below (with a matching purchases row), mirroring the
     // canonical approveQueueEntry/savePurchase path so the leaderboard / LTV-vs-
     // purchases reconciliation stays intact (audit #9 / L2770(b)).
+    // Full row (select=*): the closing-record guard below needs the network copy,
+    // and the profile copy needs every column, not the light-select projection.
+    const _freshProspect = await AppDataStore.getByIdFull('prospects', prospectId).catch(() => null);
     const customer = {
-        full_name: prospect.full_name,
-        phone: prospect.phone,
-        email: prospect.email,
-        ic_number: prospect.ic_number,
-        date_of_birth: prospect.date_of_birth,
-        ming_gua: prospect.ming_gua,
-        element: prospect.element,
-        gender: prospect.gender,
-        occupation: prospect.occupation,
-        company_name: prospect.company_name,
-        address: prospect.address,
-        marital_status: prospect.marital_status || null,
-        children: prospect.children || null,
-        spouse_name: prospect.spouse_name || null,
+        // Every person-profile field (shared list — data-helpers.js).
+        ...window._dataHelpers.customerFieldsFromProspect(_freshProspect || prospect),
         lifetime_value: 0,
         total_purchases: 0,
         status: 'active',
         customer_since: closeDate,
-        responsible_agent_id: prospect.responsible_agent_id,
         country: UI.countryByCode(prospect.country).code,
         converted_from_prospect_id: prospect.id,
         conversion_amount: amount,
@@ -4071,7 +4061,6 @@ const closeDealWon = async (prospectId) => {
     // before the closing was filed would report closing_record = null and we'd book a
     // duplicate. getByIdFull always issues select=*; fall back to the cached row only
     // if that read fails, which preserves today's behaviour offline.
-    const _freshProspect = await AppDataStore.getByIdFull('prospects', prospectId).catch(() => null);
     const _cr = (_freshProspect || prospect).closing_record;
     const _crStatus = _cr?.status || '';
     const _saleAwaitingApproval = !!_cr
