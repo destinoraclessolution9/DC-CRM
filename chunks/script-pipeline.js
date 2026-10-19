@@ -1979,6 +1979,7 @@ const showPipelineView = async (container) => {
             // those React-owned nodes (torn DOM). Skip the whole by-id fill on the JSX
             // path (also avoids the redundant second data load). The scaffold path
             // (_plData undefined) falls through and fills the skeleton exactly as today.
+            AppDataStore.getAll('users').then(u => _plMountGoalSections(u)).catch(() => {});
             return;
         }
     } else {
@@ -2083,6 +2084,8 @@ const showPipelineView = async (container) => {
     if (_plActionPlan) {
         _plActionPlan.outerHTML = buildPipelineActionPlanHtml(_apMonthLabel, _activePlan, _apItems, _apChecks);
     }
+    // v8 Goal Bar + Deals — mounted above the Action Plan; fills itself async.
+    _plMountGoalSections(allUsers);
 
     // ── STEP 5: Build focus list (medium speed) ───────────────────────────
     let focusList;
@@ -2160,6 +2163,7 @@ const showPipelineView = async (container) => {
     // BEFORE the v7.1 view filters (mirrors the JSX path exactly).
     try { _maybeSnapshotPipeline(enriched); } catch (_) { /* intentional: best-effort */ }
     _lastEnriched = enriched;
+    try { _plRenderDealSuggest(); } catch (_) { /* intentional: suggestions are best-effort */ }
 
     // v7.1 — Target/Band filters (Auto-Generated table only; shared predicate
     // with the JSX path so the two render modes can never disagree).
@@ -2386,6 +2390,7 @@ const renderSystemRow = async (prospect, probBadge, prefetched) => {
             <td style="padding:14px 12px;font-size:13px;line-height:1.5;max-width:260px;">${entry.latestNextAction ? escapeHtml(entry.latestNextAction) : entry.action}</td>
             <td style="padding:14px 12px;">
                 <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                    <button class="btn primary btn-sm" style="padding:4px 10px;font-size:11px;" onclick="event.stopPropagation();app.openDealModal(null, ${prospect.id})" title="Create a deal with product, amount and close date"><i class="fas fa-briefcase"></i> Deal</button>
                     <button class="btn secondary btn-sm" style="padding:4px 10px;font-size:11px;" onclick="app.addToFocusList(${prospect.id})"><i class="fas fa-plus"></i> Add to Focus</button>
                     <button class="btn-icon" onclick="event.stopPropagation();app.showProspectMenu(${prospect.id})" title="View"><i class="fas fa-eye"></i></button>
                     <button class="btn-icon" onclick="event.stopPropagation();app.showComments(${prospect.id})" style="position:relative;" title="Comments">
@@ -4797,7 +4802,764 @@ const viewJustification = async (overrideId) => {
 
 
 
+// ===== PIPELINE v8 — GOAL BAR + DEALS (2026-10-20) =====
+//
+// Turns the pipeline from a probability ranking into a money plan:
+//  • Goal Bar — monthly RM goal vs WON (real sales by sale date, frozen
+//    purchases.agent_id credit), open pipeline closing this month, weighted
+//    forecast, coverage (open ÷ gap, healthy ≥3×) and the reverse funnel
+//    ("gap ÷ average sale = N more sales").
+//  • Goals — agent band RM100k personal, team leaders (L3-L5) RM500k for their
+//    whole reporting tree (leader's own sales included). Overrides live in
+//    pipeline_goals (user_id, month, scope); a missing row = the default.
+//  • Deals — pipeline_deals rows: prospect + product + RM + expected close +
+//    stage + source + next step. Many per prospect. A DB trigger on purchases
+//    INSERT marks the matching open deal WON (migrations/2026-10-20_pipeline_goals_deals.sql).
+// Tables use GENERATED ALWAYS ids, so all IO goes through the raw supabase
+// client (AppDataStore.add stamps client ids and would be rejected).
+
+const PL_GOAL_DEFAULT_AGENT = 100000;
+const PL_GOAL_DEFAULT_TEAM = 500000;
+const PL_COVERAGE_TARGET = 3;
+const PL_DEAL_ROT_DAYS = 14;
+const PL_DEAL_STAGES = [
+    { id: 'interested', label: 'Interested',      prob: 20, color: '#6B7280', bg: '#F3F4F6' },
+    { id: 'proposal',   label: 'Proposal given',  prob: 50, color: '#B45309', bg: '#FEF3C7' },
+    { id: 'closing',    label: 'Closing',         prob: 80, color: '#B91C1C', bg: '#FEE2E2' },
+    { id: 'won',        label: 'Won',             prob: 100, color: '#047857', bg: '#D1FAE5' },
+    { id: 'lost',       label: 'Lost',            prob: 0,  color: '#4B5563', bg: '#E5E7EB' },
+];
+const PL_DEAL_OPEN = new Set(['interested', 'proposal', 'closing']);
+const PL_DEAL_SOURCES = [
+    { id: 'customer_referral', label: 'Customer referral' },
+    { id: 'agent_referral',    label: 'Agent / consultant referral' },
+    { id: 'prospect_referral', label: 'Prospect referral' },
+    { id: 'event',             label: 'Event (汇集 / 分享会 / course)' },
+    { id: 'repeat_customer',   label: 'Existing customer (repeat)' },
+    { id: 'cps_walkin',        label: 'CPS / walk-in' },
+    { id: 'social',            label: 'Social media / online' },
+    { id: 'other',             label: 'Other' },
+];
+const _plStage = (id) => PL_DEAL_STAGES.find(s => s.id === id) || PL_DEAL_STAGES[0];
+const _plSourceLabel = (id) => (PL_DEAL_SOURCES.find(s => s.id === id) || {}).label || '';
+const _plSb = () => window.supabase || window.supabaseClient;
+const _plRM = (n) => 'RM ' + Math.round(Number(n) || 0).toLocaleString();
+const _plYmd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const _plCurMonth = () => _plYmd(new Date()).slice(0, 7);
+const _plMonthEnd = (m) => { const [y, mo] = m.split('-').map(Number); return _plYmd(new Date(y, mo, 0)); };
+const _plMonthLabel = (m) => { const [y, mo] = m.split('-').map(Number); return new Date(y, mo - 1, 1).toLocaleString('en-GB', { month: 'long', year: 'numeric' }); };
+const _plShiftMonth = (m, delta) => { const [y, mo] = m.split('-').map(Number); return _plYmd(new Date(y, mo - 1 + delta, 1)).slice(0, 7); };
+const _plUserActive = (u) => u && !/inactive|deleted|resign|terminat/i.test(String(u.status || ''));
+const _plIsLeader = (u) => { const l = _getUserLevel(u); return l >= 3 && l <= 5; };
+const _plIsAgentBand = (u) => { const l = _getUserLevel(u); return l >= 6 && l <= 12; };
+
+let _plGoalMonth = null;          // 'YYYY-MM' being viewed (null → current)
+let _plDealAgentFilter = 'all';   // member filter for the deals board
+let _plDealView = 'month';        // 'month' | 'open' | 'all'
+let _plGoalCtx = null;            // last computed context (for modals / re-render)
+
+// All descendants of userId via users.reporting_to (self included).
+const _plTreeIds = (allUsers, userId) => {
+    const kids = new Map();
+    for (const u of allUsers) {
+        if (u.reporting_to == null) continue;
+        const k = String(u.reporting_to);
+        if (!kids.has(k)) kids.set(k, []);
+        kids.get(k).push(u);
+    }
+    const out = new Set([String(userId)]);
+    const stack = [String(userId)];
+    while (stack.length) {
+        const cur = stack.pop();
+        for (const c of (kids.get(cur) || [])) {
+            const id = String(c.id);
+            if (!out.has(id)) { out.add(id); stack.push(id); }
+        }
+    }
+    return out;
+};
+
+// Sale "won" credit in a month: purchases dated in the month, frozen agent_id.
+const _plWonIn = (purchases, ids, month) => {
+    let rm = 0, n = 0;
+    for (const p of purchases) {
+        if (!p || p.agent_id == null || !ids.has(String(p.agent_id))) continue;
+        if (String(p.date || '').slice(0, 7) !== month) continue;
+        if (/cancel|refund|void/i.test(String(p.status || ''))) continue;
+        const a = Number(p.amount) || 0;
+        if (a <= 0) continue;
+        rm += a; n++;
+    }
+    return { rm, n };
+};
+
+// Average real sale over the last 12 months (imports excluded); RM20k fallback.
+const _plAvgSale = (purchases) => {
+    const cutoff = _plYmd(new Date(Date.now() - 365 * 864e5));
+    let sum = 0, n = 0;
+    for (const p of purchases) {
+        const a = Number(p && p.amount) || 0;
+        if (a <= 0 || String(p.date || '') < cutoff) continue;
+        if (/imported|pre-system/i.test(String(p.item || ''))) continue;
+        sum += a; n++;
+    }
+    return n >= 3 ? sum / n : 20000;
+};
+
+// Open deals counted for a month: open AND expected to close by month end
+// (overdue open deals still count — they are this month's work).
+const _plDealsForMonth = (deals, ids, month) => {
+    const end = _plMonthEnd(month);
+    return deals.filter(d => ids.has(String(d.agent_id)) && PL_DEAL_OPEN.has(d.stage) && String(d.expected_close_date || '') <= end);
+};
+const _plPipeStats = (deals) => {
+    let open = 0, weighted = 0;
+    for (const d of deals) { const a = Number(d.amount) || 0; open += a; weighted += a * _plStage(d.stage).prob / 100; }
+    return { open, weighted, n: deals.length };
+};
+const _plCoverage = (open, gap) => gap <= 0 ? null : open / gap;
+const _plCovColor = (c) => c == null ? '#047857' : c >= PL_COVERAGE_TARGET ? '#047857' : c >= 1.5 ? '#B45309' : '#B91C1C';
+
+// Load everything the Goal Bar + Deals board need for the viewed month.
+const _plLoadGoalCtx = async (allUsers) => {
+    const me = _state.cu || {};
+    const myLvl = _getUserLevel(me);
+    const month = _plGoalMonth || _plCurMonth();
+    const users = (allUsers && allUsers.length ? allUsers : await AppDataStore.getAll('users').catch(() => [])) || [];
+    const sb = _plSb();
+    let goals = [], deals = [];
+    if (sb) {
+        const [g, d] = await Promise.all([
+            sb.from('pipeline_goals').select('*').eq('month', month),
+            sb.from('pipeline_deals').select('*').order('expected_close_date', { ascending: true }).limit(2000),
+        ]);
+        if (!g.error) goals = g.data || [];
+        if (!d.error) deals = d.data || [];
+        if (d.error) console.warn('[pipeline-goals] deals load failed', d.error.message);
+    }
+    const purchases = await AppDataStore.getAll('purchases').catch(() => []) || [];
+    const goalRow = (uid, scope) => goals.find(r => String(r.user_id) === String(uid) && r.scope === scope);
+    const goalFor = (u, scope) => {
+        const r = goalRow(u.id, scope);
+        if (r) return { amount: Number(r.target_amount) || 0, custom: true };
+        if (scope === 'team') return { amount: PL_GOAL_DEFAULT_TEAM, custom: false };
+        return _plIsAgentBand(u) ? { amount: PL_GOAL_DEFAULT_AGENT, custom: false } : null;
+    };
+    const activeUsers = users.filter(_plUserActive);
+
+    let mode, title, goal, scopeIds, members = [], unassigned = null, canEditGoals = false;
+    if (myLvl <= 2) {
+        mode = 'company';
+        const leaders = activeUsers.filter(_plIsLeader);
+        // Top-level teams only (a leader under another leader is inside that tree).
+        const leaderIds = new Set(leaders.map(l => String(l.id)));
+        const byId = new Map(users.map(u => [String(u.id), u]));
+        const underLeader = (u) => { let cur = byId.get(String(u.reporting_to)); let guard = 0; while (cur && guard++ < 20) { if (leaderIds.has(String(cur.id))) return true; cur = byId.get(String(cur.reporting_to)); } return false; };
+        const tops = leaders.filter(l => !underLeader(l));
+        goal = tops.reduce((s, l) => s + goalFor(l, 'team').amount, 0);
+        // Company = every sale/deal, including agents no longer in the user list.
+        scopeIds = new Set([...users.map(u => u.id), ...purchases.map(p => p && p.agent_id), ...deals.map(d => d.agent_id)]
+            .filter(x => x != null).map(String));
+        members = leaders.map(l => {
+            const ids = _plTreeIds(users, l.id);
+            return { user: l, ids, goal: goalFor(l, 'team'), scope: 'team', label: (l.full_name || l.username) + ' — team', size: ids.size - 1, nested: !tops.includes(l) };
+        });
+        title = 'Company — all teams';
+        canEditGoals = true;
+    } else if (_plIsLeader(me)) {
+        mode = 'team';
+        scopeIds = _plTreeIds(users, me.id);
+        goal = goalFor(me, 'team').amount;
+        const tree = activeUsers.filter(u => scopeIds.has(String(u.id)));
+        members = tree.map(u => ({ user: u, ids: new Set([String(u.id)]), goal: String(u.id) === String(me.id) ? goalFor(u, 'personal') : goalFor(u, 'personal'), scope: 'personal', label: (u.full_name || u.username) + (String(u.id) === String(me.id) ? ' (you)' : ''), self: String(u.id) === String(me.id) }));
+        const assigned = members.reduce((s, m) => s + (m.goal ? m.goal.amount : 0), 0);
+        unassigned = goal - assigned;
+        title = 'My team';
+        canEditGoals = true; // own reports only (RLS enforces)
+    } else {
+        mode = 'personal';
+        scopeIds = new Set([String(me.id)]);
+        const g = goalFor(me, 'personal');
+        goal = g ? g.amount : PL_GOAL_DEFAULT_AGENT;
+        title = 'My goal';
+    }
+
+    const won = _plWonIn(purchases, scopeIds, month);
+    const monthDeals = _plDealsForMonth(deals, scopeIds, month);
+    const pipe = _plPipeStats(monthDeals);
+    const gap = Math.max(0, goal - won.rm);
+    const avgSale = _plAvgSale(purchases);
+    for (const m of members) {
+        m.won = _plWonIn(purchases, m.ids, month);
+        m.pipe = _plPipeStats(_plDealsForMonth(deals, m.ids, month));
+        const g = m.goal ? m.goal.amount : 0;
+        m.gap = Math.max(0, g - m.won.rm);
+        m.coverage = m.goal ? _plCoverage(m.pipe.open, m.gap) : null;
+    }
+    const today = _plYmd(new Date());
+    const end = _plMonthEnd(month);
+    const daysLeft = month === _plCurMonth() ? Math.max(0, Math.round((new Date(end) - new Date(today)) / 864e5) + 1) : (end < today ? 0 : null);
+    _plGoalCtx = { me, myLvl, month, users, goals, deals, purchases, mode, title, goal, scopeIds, members, unassigned, canEditGoals, won, pipe, gap, avgSale, daysLeft };
+    return _plGoalCtx;
+};
+
+const _plGoalBarHtml = (c) => {
+    const pctWon = c.goal > 0 ? Math.min(100, c.won.rm / c.goal * 100) : 0;
+    const pctFc = c.goal > 0 ? Math.min(100 - pctWon, c.pipe.weighted / c.goal * 100) : 0;
+    const cov = _plCoverage(c.pipe.open, c.gap);
+    const covTxt = cov == null ? 'Goal met 🎉' : `${cov.toFixed(1)}×`;
+    const salesNeeded = c.gap > 0 ? Math.ceil(c.gap / c.avgSale) : 0;
+    const neededOpen = c.gap * PL_COVERAGE_TARGET;
+    const forecast = c.won.rm + c.pipe.weighted;
+    const tile = (label, value, sub, color) => `
+        <div class="plg-tile">
+            <div class="plg-tile-label">${label}</div>
+            <div class="plg-tile-value" style="color:${color || '#111827'};">${value}</div>
+            ${sub ? `<div class="plg-tile-sub">${sub}</div>` : ''}
+        </div>`;
+    let advice;
+    if (c.gap <= 0) advice = `✅ Goal reached. Everything closed from here is extra.`;
+    else if (c.pipe.n === 0) advice = `⚠️ No deals closing in ${_plMonthLabel(c.month)} yet. Add at least <strong>${_plRM(neededOpen)}</strong> of deals (${PL_COVERAGE_TARGET}× the gap) to be safe.`;
+    else if (cov < PL_COVERAGE_TARGET) advice = `⚠️ Pipeline too thin: you need about <strong>${_plRM(neededOpen - c.pipe.open)}</strong> more in deals closing this month to reach ${PL_COVERAGE_TARGET}× coverage.`;
+    else advice = `👍 Coverage is healthy. Focus on moving <strong>Proposal → Closing</strong>.`;
+    const monthNav = `
+        <div class="plg-monthnav">
+            <button class="btn-icon" onclick="app.plGoalShiftMonth(-1)" title="Previous month"><i class="fas fa-chevron-left"></i></button>
+            <strong>${esc(_plMonthLabel(c.month))}</strong>
+            <button class="btn-icon" onclick="app.plGoalShiftMonth(1)" title="Next month"><i class="fas fa-chevron-right"></i></button>
+        </div>`;
+    let teamHtml = '';
+    if (c.members.length) {
+        const rows = c.members.map(m => {
+            const g = m.goal ? m.goal.amount : 0;
+            const covC = m.goal ? _plCovColor(m.coverage) : '#9CA3AF';
+            const covT = !m.goal ? '—' : m.coverage == null ? '✓' : `${m.coverage.toFixed(1)}×`;
+            const dot = !m.goal ? '⚪' : m.coverage == null || m.coverage >= PL_COVERAGE_TARGET ? '🟢' : m.coverage >= 1.5 ? '🟠' : '🔴';
+            const filterId = c.mode === 'company' ? 'team:' + m.user.id : String(m.user.id);
+            return `
+            <tr class="plg-mrow${_plDealAgentFilter === filterId ? ' active' : ''}" onclick="app.plSetDealAgentFilter('${filterId}')" title="Show this ${c.mode === 'company' ? 'team' : 'person'}'s deals">
+                <td>${dot} <strong>${m.nested ? '↳ ' : ''}${esc(m.label)}</strong>${c.mode === 'company' ? ` <span class="plg-muted">${m.size} members</span>` : ''}</td>
+                <td>${m.goal ? _plRM(g) + (m.goal.custom ? '' : ' <span class="plg-muted">default</span>') : '<span class="plg-muted">no personal goal</span>'}</td>
+                <td>${_plRM(m.won.rm)} <span class="plg-muted">${m.won.n} sale${m.won.n === 1 ? '' : 's'}</span></td>
+                <td>${_plRM(m.pipe.open)} <span class="plg-muted">${m.pipe.n} deal${m.pipe.n === 1 ? '' : 's'}</span></td>
+                <td style="color:${covC};font-weight:700;">${covT}</td>
+            </tr>`;
+        }).join('');
+        teamHtml = `
+        <div class="plg-team">
+            <div class="plg-team-head">
+                <strong>${c.mode === 'company' ? 'Teams' : 'Team members'}</strong>
+                ${c.mode === 'team' && c.unassigned > 0 ? `<span class="plg-warn">⚠️ ${_plRM(c.unassigned)} of the team goal is not assigned to any agent — covered by you or new recruits.</span>` : ''}
+            </div>
+            <div style="overflow-x:auto;">
+                <table class="plg-table">
+                    <thead><tr><th>${c.mode === 'company' ? 'Team' : 'Member'}</th><th>Goal</th><th>Won</th><th>Pipeline this month</th><th>Coverage</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+            <div class="plg-muted" style="margin-top:6px;">Tap a row to see their deals below. Coverage = pipeline ÷ remaining gap (healthy ≥ ${PL_COVERAGE_TARGET}×).</div>
+        </div>`;
+    }
+    return `
+    <div class="plg-card">
+        <div class="plg-head">
+            <div>
+                <h2 class="plg-title">🎯 ${esc(c.title)} — ${_plRM(c.goal)}</h2>
+                <div class="plg-muted">${c.daysLeft != null ? `${c.daysLeft} day${c.daysLeft === 1 ? '' : 's'} left · ` : ''}Won counts real sales by sale date</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                ${monthNav}
+                ${c.canEditGoals ? `<button class="btn secondary btn-sm" onclick="app.openGoalEditModal()"><i class="fas fa-bullseye"></i> Edit goals</button>` : ''}
+            </div>
+        </div>
+        <div class="plg-bar" title="Green = won · light green = weighted forecast">
+            <div style="width:${pctWon.toFixed(1)}%;background:#10B981;"></div>
+            <div style="width:${pctFc.toFixed(1)}%;background:#A7F3D0;"></div>
+        </div>
+        <div class="plg-bar-legend"><span>Won ${pctWon.toFixed(0)}%</span><span>Forecast ${_plRM(forecast)} (${c.goal > 0 ? Math.round(forecast / c.goal * 100) : 0}%)</span></div>
+        <div class="plg-tiles">
+            ${tile('Won', _plRM(c.won.rm), `${c.won.n} sale${c.won.n === 1 ? '' : 's'}`, '#047857')}
+            ${tile('Gap', _plRM(c.gap), c.gap > 0 ? `≈ ${salesNeeded} more sale${salesNeeded === 1 ? '' : 's'} at avg ${_plRM(c.avgSale)}` : 'goal met', c.gap > 0 ? '#B91C1C' : '#047857')}
+            ${tile('Pipeline this month', _plRM(c.pipe.open), `${c.pipe.n} open deal${c.pipe.n === 1 ? '' : 's'} · weighted ${_plRM(c.pipe.weighted)}`)}
+            ${tile('Coverage', covTxt, `need ${PL_COVERAGE_TARGET}× the gap`, _plCovColor(cov))}
+        </div>
+        <div class="plg-advice">${advice}</div>
+        ${teamHtml}
+    </div>`;
+};
+
+const _plDealCardHtml = (d, names, users) => {
+    const st = _plStage(d.stage);
+    const today = _plYmd(new Date());
+    const p = names.get(String(d.prospect_id));
+    const pName = p ? (p.full_name || p.name || '') : `Prospect #${d.prospect_id}`;
+    const owner = users.find(u => String(u.id) === String(d.agent_id));
+    const isOpen = PL_DEAL_OPEN.has(d.stage);
+    const overdue = isOpen && d.expected_close_date && d.expected_close_date < today;
+    const lastTouch = [d.updated_at, p && p.last_activity_date].filter(Boolean).map(x => new Date(x).getTime()).reduce((a, b) => Math.max(a, b), 0);
+    const idleDays = lastTouch ? Math.floor((Date.now() - lastTouch) / 864e5) : null;
+    const rotting = isOpen && idleDays != null && idleDays >= PL_DEAL_ROT_DAYS;
+    const stepOverdue = isOpen && d.next_step_date && d.next_step_date < today;
+    const stageOpts = PL_DEAL_STAGES.map(s => `<option value="${s.id}" ${s.id === d.stage ? 'selected' : ''}>${s.label}</option>`).join('');
+    return `
+    <div class="pld-card${rotting ? ' rot' : ''}">
+        <div class="pld-card-top">
+            <span class="pld-name" onclick="event.stopPropagation();app.showProspectMenu(${Number(d.prospect_id)})">${esc(pName)}</span>
+            <span class="pld-amt">${_plRM(d.amount)}</span>
+        </div>
+        <div class="pld-prod">${esc(d.product || '')}</div>
+        <div class="pld-chips">
+            <span class="pld-chip" style="${overdue ? 'background:#FEE2E2;color:#B91C1C;' : ''}">📅 ${esc(d.expected_close_date || '—')}${overdue ? ' overdue' : ''}</span>
+            ${d.source ? `<span class="pld-chip" style="background:#EDE9FE;color:#5B21B6;">↪ ${esc(_plSourceLabel(d.source))}${d.source_detail ? ': ' + esc(d.source_detail) : ''}</span>` : '<span class="pld-chip" style="background:#FEF3C7;color:#92400E;">source?</span>'}
+            ${rotting ? `<span class="pld-chip" style="background:#FEE2E2;color:#B91C1C;">⏳ idle ${idleDays}d</span>` : ''}
+            ${owner && _plGoalCtx && _plGoalCtx.mode !== 'personal' ? `<span class="pld-chip">👤 ${esc(owner.full_name || owner.username || '')}</span>` : ''}
+        </div>
+        ${d.next_step ? `<div class="pld-next" style="${stepOverdue ? 'color:#B91C1C;' : ''}">➜ ${esc(d.next_step)}${d.next_step_date ? ` <span class="plg-muted">(${esc(d.next_step_date)})</span>` : ''}</div>` : (isOpen ? '<div class="pld-next" style="color:#B45309;">➜ No next step set</div>' : '')}
+        ${d.stage === 'lost' && d.lost_reason ? `<div class="pld-next plg-muted">Lost: ${esc(d.lost_reason)}</div>` : ''}
+        <div class="pld-actions">
+            <select class="pld-stage" style="color:${st.color};background:${st.bg};" onclick="event.stopPropagation()" onchange="event.stopPropagation();app.setDealStage(${d.id}, this.value)">${stageOpts}</select>
+            <button class="btn-icon" onclick="event.stopPropagation();app.openDealModal(${d.id})" title="Edit deal"><i class="fas fa-pen"></i></button>
+            <button class="btn-icon text-danger" onclick="event.stopPropagation();app.deleteDeal(${d.id})" title="Delete deal"><i class="fas fa-trash-alt"></i></button>
+        </div>
+    </div>`;
+};
+
+const _plDealsBoardHtml = async (c) => {
+    let ids = c.scopeIds;
+    if (_plDealAgentFilter !== 'all') {
+        ids = _plDealAgentFilter.startsWith('team:')
+            ? _plTreeIds(c.users, _plDealAgentFilter.slice(5))
+            : new Set([_plDealAgentFilter]);
+    }
+    const end = _plMonthEnd(c.month);
+    const start = c.month + '-01';
+    let deals = c.deals.filter(d => ids.has(String(d.agent_id)));
+    if (_plDealView === 'month') {
+        deals = deals.filter(d => PL_DEAL_OPEN.has(d.stage)
+            ? String(d.expected_close_date || '') <= end
+            : (String(d.won_at || d.updated_at || '').slice(0, 7) === c.month));
+    } else if (_plDealView === 'open') {
+        deals = deals.filter(d => PL_DEAL_OPEN.has(d.stage));
+    }
+    let prospects = [];
+    try { prospects = await getVisibleProspects() || []; } catch (_) { /* names fall back to #id */ }
+    const names = new Map(prospects.map(p => [String(p.id), p]));
+    const missing = [...new Set(deals.map(d => String(d.prospect_id)).filter(id => !names.has(id)))].slice(0, 30);
+    await Promise.all(missing.map(async id => { try { const p = await AppDataStore.getById('prospects', id); if (p) names.set(id, p); } catch (_) { /* keep #id */ } }));
+
+    const cols = PL_DEAL_STAGES.map(s => {
+        const list = deals.filter(d => d.stage === s.id);
+        const sum = list.reduce((a, d) => a + (Number(d.amount) || 0), 0);
+        return `
+        <div class="pld-col">
+            <div class="pld-col-head" style="border-top:3px solid ${s.color};">
+                <span>${s.label}${PL_DEAL_OPEN.has(s.id) ? ` <span class="plg-muted">${s.prob}%</span>` : ''}</span>
+                <span class="plg-muted">${list.length} · ${_plRM(sum)}</span>
+            </div>
+            ${list.length ? list.map(d => _plDealCardHtml(d, names, c.users)).join('') : '<div class="pld-empty">—</div>'}
+        </div>`;
+    }).join('');
+
+    const filterLabel = _plDealAgentFilter === 'all' ? '' : (() => {
+        const raw = _plDealAgentFilter.startsWith('team:') ? _plDealAgentFilter.slice(5) : _plDealAgentFilter;
+        const u = c.users.find(x => String(x.id) === raw);
+        return `<span class="pld-chip" style="background:#DBEAFE;color:#1E40AF;">${_plDealAgentFilter.startsWith('team:') ? 'Team ' : ''}${esc(u ? (u.full_name || u.username) : raw)} <a href="javascript:void(0)" onclick="app.plSetDealAgentFilter('all')" style="margin-left:4px;">✕</a></span>`;
+    })();
+    const viewBtn = (id, label) => `<button class="btn btn-sm ${_plDealView === id ? 'primary' : 'secondary'}" onclick="app.plSetDealView('${id}')">${label}</button>`;
+    return `
+    <div class="plg-card">
+        <div class="plg-head">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <h2 class="plg-title">💼 Deals</h2>
+                ${filterLabel}
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                ${viewBtn('month', 'Closing by ' + esc(_plMonthLabel(c.month).split(' ')[0]))}
+                ${viewBtn('open', 'All open')}
+                ${viewBtn('all', 'All')}
+                <button class="btn primary btn-sm" onclick="app.openDealModal()"><i class="fas fa-plus"></i> Add Deal</button>
+            </div>
+        </div>
+        <div id="pl-deal-suggest"></div>
+        <div class="pld-board">${cols}</div>
+        <div class="plg-muted" style="margin-top:8px;">Deals turn <strong>Won</strong> automatically when the sale is recorded for that prospect. ⏳ = no activity for ${PL_DEAL_ROT_DAYS}+ days.</div>
+    </div>`;
+};
+
+const _PL_GOAL_CSS = `
+.plg-card{background:white;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.1);margin-bottom:24px;}
+.plg-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:14px;}
+.plg-title{font-size:18px;font-weight:700;margin:0;}
+.plg-muted{font-size:11px;color:#9CA3AF;font-weight:400;}
+.plg-monthnav{display:flex;align-items:center;gap:6px;font-size:13px;}
+.plg-bar{display:flex;height:14px;background:#F3F4F6;border-radius:8px;overflow:hidden;}
+.plg-bar-legend{display:flex;justify-content:space-between;font-size:11px;color:#6B7280;margin:4px 0 14px;}
+.plg-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;}
+.plg-tile{background:#F9FAFB;border-radius:10px;padding:12px;min-width:0;}
+.plg-tile-label{font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.03em;}
+.plg-tile-value{font-size:20px;font-weight:700;margin-top:2px;overflow-wrap:anywhere;}
+.plg-tile-sub{font-size:11px;color:#6B7280;margin-top:2px;}
+.plg-advice{margin-top:12px;padding:10px 12px;background:#FFFBEB;border-radius:8px;font-size:13px;color:#92400E;}
+.plg-team{margin-top:16px;border-top:1px solid #E5E7EB;padding-top:12px;}
+.plg-team-head{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;}
+.plg-warn{font-size:12px;color:#B45309;background:#FEF3C7;padding:3px 8px;border-radius:6px;}
+.plg-table{width:100%;border-collapse:collapse;font-size:13px;min-width:560px;}
+.plg-table th{text-align:left;font-size:11px;color:#6B7280;padding:6px 8px;border-bottom:2px solid #E5E7EB;}
+.plg-table td{padding:8px;border-bottom:1px solid #F3F4F6;}
+.plg-mrow{cursor:pointer;}.plg-mrow:hover,.plg-mrow.active{background:#EFF6FF;}
+.pld-board{display:grid;grid-template-columns:repeat(5,minmax(200px,1fr));gap:10px;overflow-x:auto;padding-bottom:4px;}
+.pld-col{background:#F9FAFB;border-radius:10px;padding:8px;min-width:200px;}
+.pld-col-head{display:flex;justify-content:space-between;gap:6px;font-size:12px;font-weight:700;padding:6px 4px 8px;flex-wrap:wrap;}
+.pld-card{background:white;border-radius:8px;padding:10px;margin-bottom:8px;box-shadow:0 1px 2px rgba(0,0,0,.08);border-left:3px solid transparent;}
+.pld-card.rot{border-left-color:#EF4444;}
+.pld-card-top{display:flex;justify-content:space-between;gap:6px;align-items:baseline;}
+.pld-name{font-weight:600;color:#2563EB;cursor:pointer;text-decoration:underline;overflow-wrap:anywhere;}
+.pld-amt{font-weight:700;color:#059669;white-space:nowrap;font-size:13px;}
+.pld-prod{font-size:12px;color:#1E40AF;margin-top:2px;}
+.pld-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;}
+.pld-chip{font-size:10px;background:#F3F4F6;color:#374151;padding:2px 6px;border-radius:4px;}
+.pld-next{font-size:12px;color:#374151;margin-top:6px;}
+.pld-actions{display:flex;gap:4px;align-items:center;margin-top:8px;}
+.pld-stage{flex:1;font-size:11px;font-weight:600;border:1px solid #E5E7EB;border-radius:6px;padding:4px;min-width:0;}
+.pld-empty{text-align:center;color:#D1D5DB;padding:12px;font-size:12px;}
+.pld-sug{display:flex;gap:6px;flex-wrap:wrap;align-items:center;background:#F0FDF4;border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12px;}
+.pld-sug button{font-size:11px;padding:3px 8px;}
+@media (max-width:768px){
+  .plg-card{padding:14px;}
+  .plg-tile-value{font-size:17px;}
+  .pld-board{grid-template-columns:1fr;overflow-x:visible;}
+  .pld-col{min-width:0;}
+}`;
+
+const _plEnsureGoalCss = () => {
+    if (document.getElementById('pl-goal-css')) return;
+    const st = document.createElement('style');
+    st.id = 'pl-goal-css';
+    st.textContent = _PL_GOAL_CSS;
+    document.head.appendChild(st);
+};
+
+// Insert (idempotently) the two roots above the Action Plan and fill them.
+const _plMountGoalSections = (allUsers) => {
+    try {
+        _plEnsureGoalCss();
+        const anchor = document.getElementById('pl-action-plan');
+        if (!anchor) return;
+        document.getElementById('pl-goal-root')?.remove();
+        document.getElementById('pl-deals-root')?.remove();
+        anchor.insertAdjacentHTML('beforebegin',
+            '<div id="pl-goal-root"><div class="plg-card"><div class="skeleton" style="height:120px;border-radius:8px;"></div></div></div>' +
+            '<div id="pl-deals-root"><div class="plg-card"><div class="skeleton" style="height:160px;border-radius:8px;"></div></div></div>');
+        _plRenderGoalSections(allUsers);
+    } catch (e) { console.warn('[pipeline-goals] mount failed', e && e.message); }
+};
+
+const _plRenderGoalSections = async (allUsers) => {
+    const g = document.getElementById('pl-goal-root');
+    const d = document.getElementById('pl-deals-root');
+    if (!g || !d) return;
+    try {
+        const c = await _plLoadGoalCtx(allUsers || (_plGoalCtx && _plGoalCtx.users));
+        g.innerHTML = _plGoalBarHtml(c);
+        d.innerHTML = await _plDealsBoardHtml(c);
+        _plRenderDealSuggest();
+    } catch (e) {
+        console.warn('[pipeline-goals] render failed', e && e.message);
+        g.innerHTML = `<div class="plg-card"><div class="plg-muted">Goal section could not load. <a href="javascript:void(0)" onclick="app.refreshPipeline()">Retry</a></div></div>`;
+        d.innerHTML = '';
+    }
+};
+
+// Hot prospects from the scoring engine that have no open deal yet.
+const _plRenderDealSuggest = () => {
+    const box = document.getElementById('pl-deal-suggest');
+    if (!box || !_lastEnriched || !_plGoalCtx) return;
+    const withDeal = new Set(_plGoalCtx.deals.filter(d => PL_DEAL_OPEN.has(d.stage)).map(d => String(d.prospect_id)));
+    const sug = _lastEnriched
+        .filter(p => p._pipeline && p._pipeline.probability >= 50 && !withDeal.has(String(p.id)))
+        .slice(0, 6);
+    if (!sug.length) { box.innerHTML = ''; return; }
+    box.innerHTML = `<div class="pld-sug"><strong>💡 Warm prospects with no deal yet:</strong>${sug.map(p =>
+        `<button class="btn secondary btn-sm" onclick="app.openDealModal(null, ${Number(p.id)})">＋ ${esc(p.full_name || p.name || '')} <span class="plg-muted">${p._pipeline.probability}%</span></button>`).join('')}</div>`;
+};
+
+const plGoalShiftMonth = (delta) => { _plGoalMonth = _plShiftMonth(_plGoalMonth || _plCurMonth(), delta); _plRenderGoalSections(); };
+const plSetDealAgentFilter = (id) => { _plDealAgentFilter = (_plDealAgentFilter === id ? 'all' : id); _plRenderGoalSections(); };
+const plSetDealView = (v) => { _plDealView = v; _plRenderGoalSections(); };
+
+// ── Deal modal ───────────────────────────────────────────────────────────
+const _plAutoSource = (p) => {
+    if (!p) return { source: '', detail: '' };
+    const t = String(p.referred_by_type || '').toLowerCase();
+    const detail = p.referred_by || '';
+    if (p.status === 'converted') return { source: 'repeat_customer', detail: '' };
+    if (t === 'customer') return { source: 'customer_referral', detail };
+    if (t === 'consultant' || t === 'agent') return { source: 'agent_referral', detail };
+    if (t === 'prospect') return { source: 'prospect_referral', detail };
+    return { source: '', detail };
+};
+
+let _plDealModalProspect = null;
+
+const openDealModal = async (dealId = null, prospectId = null) => {
+    const sb = _plSb();
+    if (!sb) { UI.toast.error('Offline — deals need a connection.'); return; }
+    let deal = null;
+    if (dealId) {
+        const { data, error } = await sb.from('pipeline_deals').select('*').eq('id', dealId).maybeSingle();
+        if (error || !data) { UI.toast.error('Deal not found.'); return; }
+        deal = data;
+        prospectId = data.prospect_id;
+    }
+    let prospect = null;
+    if (prospectId) { try { prospect = await AppDataStore.getById('prospects', prospectId); } catch (_) { /* name-less */ } }
+    _plDealModalProspect = prospect ? { id: prospect.id, name: prospect.full_name || prospect.name || '', agent: prospect.responsible_agent_id } : (prospectId ? { id: prospectId, name: '#' + prospectId } : null);
+
+    let products = [];
+    try { products = (await AppDataStore.getAll('products') || []).filter(p => p.is_active !== false && p.name); } catch (_) { /* free text only */ }
+    const groups = new Map();
+    for (const p of products) {
+        const g = String(p.subcategory || p.category || 'Other').trim() || 'Other';
+        if (!groups.has(g)) groups.set(g, []);
+        groups.get(g).push(p);
+    }
+    const curProduct = deal ? deal.product : '';
+    const inCatalog = products.some(p => p.name === curProduct);
+    const prodOpts = [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([g, list]) =>
+        `<optgroup label="${esc(g)}">${list.sort((a, b) => a.name.localeCompare(b.name)).map(p =>
+            `<option value="${esc(p.name)}" data-price="${Number(p.price) || ''}" data-pid="${p.id}" ${p.name === curProduct ? 'selected' : ''}>${esc(p.name)}${p.price ? ' — RM ' + Number(p.price).toLocaleString() : ''}</option>`).join('')}</optgroup>`).join('');
+    const auto = _plAutoSource(prospect);
+    const src = deal ? (deal.source || '') : auto.source;
+    const srcDetail = deal ? (deal.source_detail || '') : auto.detail;
+    const close = deal ? deal.expected_close_date : _plMonthEnd(_plGoalMonth || _plCurMonth());
+    const stage = deal ? deal.stage : 'interested';
+    const fld = 'class="form-control" style="width:100%;"';
+
+    const content = `
+    <div style="display:grid;gap:12px;">
+        <div class="form-group">
+            <label>Prospect *</label>
+            ${_plDealModalProspect && dealId ? `<div style="font-weight:600;">${esc(_plDealModalProspect.name)}</div>` : `
+            <div id="pld-prospect-picked" style="font-weight:600;margin-bottom:4px;">${_plDealModalProspect ? esc(_plDealModalProspect.name) : '<span class="plg-muted">None selected</span>'}</div>
+            <input type="text" id="pld-prospect-search" ${fld} placeholder="Search name or phone…" oninput="app.plDealSearchProspect(this.value)">
+            <div id="pld-prospect-results" style="max-height:160px;overflow:auto;"></div>`}
+        </div>
+        <div class="form-group">
+            <label>Product *</label>
+            <select id="pld-product" ${fld} onchange="app.plDealProductChanged()">
+                <option value="">— pick from catalogue —</option>
+                ${prodOpts}
+                <option value="__other" ${curProduct && !inCatalog ? 'selected' : ''}>Other (type below)</option>
+            </select>
+            <input type="text" id="pld-product-other" ${fld} placeholder="Product / service name" value="${curProduct && !inCatalog ? esc(curProduct) : ''}" style="width:100%;margin-top:6px;${curProduct && !inCatalog ? '' : 'display:none;'}">
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;">
+            <div class="form-group"><label>Amount (RM) *</label><input type="number" min="0" step="1" id="pld-amount" ${fld} value="${deal ? Number(deal.amount) : ''}"></div>
+            <div class="form-group"><label>Expected close date *</label><input type="date" id="pld-close" ${fld} value="${esc(close || '')}"></div>
+            <div class="form-group"><label>Stage</label><select id="pld-stage" ${fld}>${PL_DEAL_STAGES.map(s => `<option value="${s.id}" ${s.id === stage ? 'selected' : ''}>${s.label}${PL_DEAL_OPEN.has(s.id) ? ` (${s.prob}%)` : ''}</option>`).join('')}</select></div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;">
+            <div class="form-group"><label>Where did this come from? *</label><select id="pld-source" ${fld}><option value="">— source —</option>${PL_DEAL_SOURCES.map(s => `<option value="${s.id}" ${s.id === src ? 'selected' : ''}>${s.label}</option>`).join('')}</select></div>
+            <div class="form-group"><label>Source detail</label><input type="text" id="pld-source-detail" ${fld} placeholder="Referrer name / event name" value="${esc(srcDetail)}"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;">
+            <div class="form-group"><label>Next step *</label><input type="text" id="pld-next" ${fld} placeholder="e.g. Send quotation, site visit" value="${esc(deal ? deal.next_step || '' : '')}"></div>
+            <div class="form-group"><label>Next step date</label><input type="date" id="pld-next-date" ${fld} value="${esc(deal ? deal.next_step_date || '' : '')}"></div>
+        </div>
+        ${deal && deal.stage === 'lost' ? `<div class="form-group"><label>Lost reason</label><input type="text" id="pld-lost" ${fld} value="${esc(deal.lost_reason || '')}"></div>` : ''}
+    </div>`;
+    UI.showModal(dealId ? 'Edit Deal' : 'Add Deal', content, [
+        { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+        { label: dealId ? 'Save' : 'Add Deal', type: 'primary', action: `(async () => { await app.saveDeal(${dealId ? Number(dealId) : 'null'}); })()` },
+    ]);
+};
+
+const plDealProductChanged = () => {
+    const sel = document.getElementById('pld-product');
+    const other = document.getElementById('pld-product-other');
+    const amt = document.getElementById('pld-amount');
+    if (!sel) return;
+    if (other) other.style.display = sel.value === '__other' ? '' : 'none';
+    const opt = sel.options[sel.selectedIndex];
+    const price = opt && opt.dataset ? Number(opt.dataset.price) : 0;
+    if (amt && price > 0) amt.value = price;
+};
+
+let _plDealSearchTimer = null;
+const plDealSearchProspect = (term) => {
+    clearTimeout(_plDealSearchTimer);
+    _plDealSearchTimer = setTimeout(async () => {
+        const box = document.getElementById('pld-prospect-results');
+        if (!box) return;
+        const t = String(term || '').trim();
+        if (t.length < 2) { box.innerHTML = ''; return; }
+        let rows = [];
+        try { rows = await AppDataStore.searchProspects(t, { limit: 15 }) || []; } catch (_) { /* no results */ }
+        rows = rows.filter(p => p && p.status !== 'lost').slice(0, 15);
+        box.innerHTML = rows.length ? rows.map(p =>
+            `<div style="padding:6px 8px;border-bottom:1px solid #F3F4F6;cursor:pointer;" onclick="app.plDealPickProspect(${Number(p.id)})">${esc(p.full_name || p.name || '')}${p.status === 'converted' ? ' <span class="plg-muted">customer</span>' : ''}</div>`).join('')
+            : '<div class="plg-muted" style="padding:6px;">No match</div>';
+    }, 250);
+};
+
+const plDealPickProspect = async (id) => {
+    let p = null;
+    try { p = await AppDataStore.getById('prospects', id); } catch (_) { /* keep id only */ }
+    _plDealModalProspect = { id, name: p ? (p.full_name || p.name || '') : '#' + id, agent: p ? p.responsible_agent_id : null };
+    const picked = document.getElementById('pld-prospect-picked');
+    if (picked) picked.textContent = _plDealModalProspect.name;
+    const box = document.getElementById('pld-prospect-results');
+    if (box) box.innerHTML = '';
+    const auto = _plAutoSource(p);
+    const srcSel = document.getElementById('pld-source');
+    const srcDet = document.getElementById('pld-source-detail');
+    if (srcSel && !srcSel.value && auto.source) srcSel.value = auto.source;
+    if (srcDet && !srcDet.value && auto.detail) srcDet.value = auto.detail;
+};
+
+const saveDeal = async (dealId = null) => {
+    const sb = _plSb();
+    const v = (id) => (document.getElementById(id)?.value || '').trim();
+    const pSel = v('pld-product');
+    const product = pSel === '__other' ? v('pld-product-other') : pSel;
+    const amount = Number(v('pld-amount'));
+    const close = v('pld-close');
+    const source = v('pld-source');
+    const nextStep = v('pld-next');
+    const pros = _plDealModalProspect;
+    if (!pros || !pros.id) { UI.toast.error('Pick a prospect.'); return; }
+    if (!product) { UI.toast.error('Pick a product.'); return; }
+    if (!(amount > 0)) { UI.toast.error('Enter the deal amount.'); return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(close)) { UI.toast.error('Enter the expected close date.'); return; }
+    if (!source) { UI.toast.error('Pick where this deal came from.'); return; }
+    if (!nextStep && PL_DEAL_OPEN.has(v('pld-stage'))) { UI.toast.error('Add the next step.'); return; }
+    const opt = document.getElementById('pld-product');
+    const pid = opt && opt.options[opt.selectedIndex] ? Number(opt.options[opt.selectedIndex].dataset.pid) || null : null;
+    const stage = v('pld-stage') || 'interested';
+    const row = {
+        product, product_id: pSel === '__other' ? null : pid, amount, expected_close_date: close, stage, source,
+        source_detail: v('pld-source-detail') || null, next_step: nextStep || null, next_step_date: v('pld-next-date') || null,
+        updated_at: new Date().toISOString(),
+    };
+    if (document.getElementById('pld-lost')) row.lost_reason = v('pld-lost') || null;
+    if (stage === 'won') row.won_at = new Date().toISOString();
+    try {
+        let res;
+        if (dealId) {
+            res = await sb.from('pipeline_deals').update(row).eq('id', dealId).select().maybeSingle();
+        } else {
+            const me = _state.cu || {};
+            const vis = await getVisibleUserIds(me);
+            const owner = pros.agent != null && (vis === 'all' || (Array.isArray(vis) && vis.some(x => String(x) === String(pros.agent)))) ? pros.agent : me.id;
+            res = await sb.from('pipeline_deals').insert({ ...row, prospect_id: pros.id, agent_id: owner, created_by: me.id }).select().maybeSingle();
+        }
+        if (res.error) throw res.error;
+        if (!res.data) throw new Error('Not saved — no permission for this deal.');
+        UI.hideModal();
+        UI.toast.success(dealId ? 'Deal updated' : 'Deal added');
+        _plRenderGoalSections();
+    } catch (e) {
+        UI.toast.error('Could not save deal: ' + (e && e.message ? e.message : e));
+    }
+};
+
+const setDealStage = async (dealId, stage) => {
+    const sb = _plSb();
+    const row = { stage, updated_at: new Date().toISOString() };
+    if (stage === 'lost') {
+        const r = window.prompt('Why was this deal lost? (optional)');
+        if (r === null) { _plRenderGoalSections(); return; }
+        row.lost_reason = r.trim() || null;
+    }
+    if (stage === 'won') row.won_at = new Date().toISOString();
+    try {
+        const { data, error } = await sb.from('pipeline_deals').update(row).eq('id', dealId).select().maybeSingle();
+        if (error) throw error;
+        if (!data) throw new Error('no permission');
+        UI.toast.success(stage === 'won' ? 'Marked Won — it counts toward the goal once the sale is recorded.' : 'Stage updated');
+    } catch (e) { UI.toast.error('Could not update stage: ' + (e && e.message ? e.message : e)); }
+    _plRenderGoalSections();
+};
+
+const deleteDeal = async (dealId) => {
+    if (!window.confirm('Delete this deal?')) return;
+    try {
+        const { error } = await _plSb().from('pipeline_deals').delete().eq('id', dealId);
+        if (error) throw error;
+        UI.toast.success('Deal deleted');
+    } catch (e) { UI.toast.error('Could not delete deal: ' + (e && e.message ? e.message : e)); }
+    _plRenderGoalSections();
+};
+
+// ── Goal edit modal ─────────────────────────────────────────────────────
+const openGoalEditModal = async () => {
+    const c = _plGoalCtx;
+    if (!c || !c.canEditGoals) return;
+    const rows = [];
+    if (c.mode === 'company') {
+        for (const u of c.users.filter(_plUserActive).filter(u => _plIsLeader(u) || _plIsAgentBand(u))
+            .sort((a, b) => _getUserLevel(a) - _getUserLevel(b) || String(a.full_name || '').localeCompare(String(b.full_name || '')))) {
+            const scope = _plIsLeader(u) ? 'team' : 'personal';
+            rows.push({ u, scope });
+        }
+    } else {
+        for (const m of c.members) if (!m.self) rows.push({ u: m.user, scope: 'personal' });
+    }
+    const valFor = (u, scope) => {
+        const r = c.goals.find(g => String(g.user_id) === String(u.id) && g.scope === scope);
+        return r ? Number(r.target_amount) : (scope === 'team' ? PL_GOAL_DEFAULT_TEAM : PL_GOAL_DEFAULT_AGENT);
+    };
+    const content = `
+    <p class="plg-muted" style="font-size:12px;">Goals for <strong>${esc(_plMonthLabel(c.month))}</strong>. Defaults: team leader RM${PL_GOAL_DEFAULT_TEAM.toLocaleString()} (whole team), agent RM${PL_GOAL_DEFAULT_AGENT.toLocaleString()}.</p>
+    <div style="max-height:55vh;overflow:auto;">
+    <table class="plg-table" style="min-width:0;">
+        <thead><tr><th>Person</th><th>Type</th><th>Goal (RM)</th></tr></thead>
+        <tbody>${rows.map(({ u, scope }) => `
+            <tr><td>${esc(u.full_name || u.username || '')}</td><td class="plg-muted">${scope === 'team' ? 'Team' : 'Personal'}</td>
+            <td><input type="number" min="0" step="1000" class="form-control pl-goal-input" data-uid="${u.id}" data-scope="${scope}" data-orig="${valFor(u, scope)}" value="${valFor(u, scope)}" style="width:130px;"></td></tr>`).join('')}
+        </tbody>
+    </table></div>`;
+    UI.showModal('Edit Goals', content, [
+        { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+        { label: 'Save Goals', type: 'primary', action: '(async () => { await app.saveGoals(); })()' },
+    ]);
+};
+
+const saveGoals = async () => {
+    const c = _plGoalCtx;
+    const inputs = [...document.querySelectorAll('.pl-goal-input')];
+    const me = _state.cu || {};
+    const changed = inputs.filter(i => String(Number(i.value)) !== String(Number(i.dataset.orig)) || c.goals.some(g => String(g.user_id) === i.dataset.uid && g.scope === i.dataset.scope))
+        .map(i => ({ user_id: Number(i.dataset.uid), month: c.month, scope: i.dataset.scope, target_amount: Math.max(0, Number(i.value) || 0), updated_by: me.id, updated_at: new Date().toISOString() }));
+    if (!changed.length) { UI.hideModal(); return; }
+    try {
+        const { error } = await _plSb().from('pipeline_goals').upsert(changed, { onConflict: 'user_id,month,scope' });
+        if (error) throw error;
+        UI.hideModal();
+        UI.toast.success('Goals saved');
+        _plRenderGoalSections();
+    } catch (e) { UI.toast.error('Could not save goals: ' + (e && e.message ? e.message : e)); }
+};
+// ===== END PIPELINE v8 =====
+
     app.register('pipeline', {
+        openDealModal,
+        saveDeal,
+        setDealStage,
+        deleteDeal,
+        plDealProductChanged,
+        plDealSearchProspect,
+        plDealPickProspect,
+        openGoalEditModal,
+        saveGoals,
+        plGoalShiftMonth,
+        plSetDealAgentFilter,
+        plSetDealView,
+        _plLoadGoalCtx,
+        _plGoalBarHtml,
+        _plDealsBoardHtml,
+        _plAutoSource,
+        _plSetGoalMonthForTest: (m) => { _plGoalMonth = m; },
         loadPipelineConfig,
         savePipelineConfigJson,
         _pipelineDecayFactor,
