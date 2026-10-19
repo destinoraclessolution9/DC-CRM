@@ -38,7 +38,7 @@ const booked = [];
 global.window._crmUtils = {
     escapeHtml: (s) => String(s ?? ''), getUserLevel: levelOf,
     isManagement: (u) => levelOf(u) <= 4, isSystemAdmin: (u) => levelOf(u) === 1,
-    bookPurchaseOnce: async (customerId, purchase) => { booked.push({ customerId, amount: purchase.amount }); return { booked: true }; },
+    bookPurchaseOnce: async (customerId, purchase) => { booked.push({ customerId, amount: purchase.amount, date: purchase.date }); return { booked: true }; },
 };
 global.app = { register: (_n, obj) => Object.assign(global.app, obj) };
 
@@ -57,6 +57,8 @@ global.AppDataStore = {
 let rpcResult = false;
 global.supabase = { rpc: async (name) => ({ data: name === 'can_approve_sales' ? rpcResult : null, error: null }) };
 
+// Real pure helpers (customerFieldsFromProspect) — the approval chunk reads window._dataHelpers.
+require(path.join(__dirname, '..', 'data-helpers.js'));
 const src = fs.readFileSync(path.join(__dirname, '..', 'chunks', 'script-approvals.js'), 'utf8');
 try { (0, eval)(src); } catch (e) { console.error('FAIL loading chunk: ' + e.message); process.exit(1); }
 
@@ -70,16 +72,16 @@ const fresh = () => {
         prospects: [
             // not a customer yet; submitted closing record RM21,990
             { id: 100, full_name: 'New Client', status: 'active', responsible_agent_id: 8,
-              closing_record: { status: 'submitted', sale_amount: 21990, product: 'Power Ring', closing_date: '2026-10-05' } },
+              closing_record: { status: 'submitted', sale_amount: 21990, product: 'Power Ring', order_date: '2026-09-13', closing_date: '2027-04-01' } },
             // already a customer; additional sale RM5,000
             { id: 101, full_name: 'Old Client', status: 'converted', responsible_agent_id: 8,
-              closing_record: { status: 'submitted', sale_amount: 5000, product: 'Book', closing_date: '2026-10-06' } },
+              closing_record: { status: 'submitted', sale_amount: 5000, product: 'Book', order_date: '2026-09-26', closing_date: '' } },
         ],
         customers: [{ id: 501, full_name: 'Old Client', converted_from_prospect_id: 101, responsible_agent_id: 8 }],
         approval_queue: [
-            { id: 1, approval_type: 'new_sale', status: 'pending', prospect_id: 100, submitted_by: 8, submitted_at: '2026-10-15T01:00:00Z', snapshot_after: { sale_amount: 21990, prospect_name: 'New Client' } },
+            { id: 1, approval_type: 'new_sale', status: 'pending', prospect_id: 100, submitted_by: 8, submitted_at: '2026-10-15T01:00:00Z', snapshot_after: { sale_amount: 21990, prospect_name: 'New Client', order_date: '2026-09-13', closing_date: '2027-04-01' } },
             { id: 2, approval_type: 'new_customer', status: 'pending', prospect_id: 100, submitted_by: 8, submitted_at: '2026-10-15T01:00:01Z', snapshot_after: { full_name: 'New Client', closing_record: { sale_amount: 21990 } } },
-            { id: 3, approval_type: 'new_sale', status: 'pending', prospect_id: 101, submitted_by: 8, submitted_at: '2026-10-15T02:00:00Z', snapshot_after: { sale_amount: 5000, prospect_name: 'Old Client' } },
+            { id: 3, approval_type: 'new_sale', status: 'pending', prospect_id: 101, submitted_by: 8, submitted_at: '2026-10-15T02:00:00Z', snapshot_after: { sale_amount: 5000, prospect_name: 'Old Client', order_date: '2026-09-26', closing_date: '' } },
             { id: 4, approval_type: 'info_update', status: 'pending', prospect_id: 101, submitted_by: 8, submitted_at: '2026-10-15T03:00:00Z', snapshot_after: {} },
         ],
     };
@@ -105,6 +107,8 @@ async function main() {
     eq('both paired rows approved', [q(1), q(2)], ['approved', 'approved']);
     eq('closing record archived as approved', DB.prospects[0].closing_records_history.map(c => c.status), ['approved']);
     eq('customer created from the prospect', DB.customers.filter(c => c.converted_from_prospect_id === 100).length, 1);
+    eq('sale booked on the ORDER date, not collection date / today', booked.map(b => b.date), ['2026-09-13']);
+    eq('customer_since = order date', DB.customers.find(c => c.converted_from_prospect_id === 100).customer_since, '2026-09-13');
 
     // Approving the conversion row first also closes the paired sale row (no dead entry).
     fresh(); window._appState.cu = OO; rpcResult = true;
@@ -117,6 +121,25 @@ async function main() {
     fresh(); window._appState.cu = OO; rpcResult = true;
     await app.approveQueueEntry(3);
     eq('additional sale on existing customer', [booked.map(b => [b.customerId, b.amount]), q(3)], [[[501, 5000]], 'approved']);
+    eq('blank collection date: still booked on the order date', booked.map(b => b.date), ['2026-09-26']);
+
+    // ── 2b. Order Date gate: no order date → approval stops and asks for it ──
+    fresh(); window._appState.cu = OO; rpcResult = true;
+    delete DB.approval_queue[2].snapshot_after.order_date;
+    delete DB.prospects[1].closing_record.order_date;
+    eq('missing order date: approval returns needs-order-date', await app.approveQueueEntry(3), 'needs-order-date');
+    eq('missing order date: nothing booked, still pending', [booked.length, q(3)], [0, 'pending']);
+    eq('missing order date: prompt shown', lastModal && lastModal.title, 'Order Date needed');
+    global.document = { getElementById: (id) => (id === 'apr-order-date' ? { value: '2026-09-20' } : null) };
+    await app.saveOrderDateAndApprove('queue', '3');
+    eq('approver enters order date → booked on it', [booked.map(b => b.date), q(3)], [['2026-09-20'], 'approved']);
+    eq('order date written back to the closing record', DB.prospects[1].closing_record?.order_date || (DB.prospects[1].closing_records_history || []).slice(-1)[0]?.order_date, '2026-09-20');
+    global.document = { getElementById: () => null };
+
+    fresh(); window._appState.cu = OO; rpcResult = true;
+    delete DB.prospects[0].closing_record.order_date;
+    await app.approveProspectConversion(100);
+    eq('conversion without order date: blocked, prospect not converted', [booked.length, DB.prospects[0].status, lastModal && lastModal.title], [0, 'active', 'Order Date needed']);
 
     // ── 3. Pop-up list ──
     fresh(); window._appState.cu = OO; rpcResult = true;

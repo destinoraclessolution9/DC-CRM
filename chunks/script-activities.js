@@ -2440,7 +2440,7 @@ My raw notes:
                             <select id="${prefix}-solution-sold" class="form-control" ${selectedProduct ? '' : 'data-pristine="1"'} onchange="if(event.isTrusted)this.removeAttribute('data-pristine')" ${disabled}>${productOptions}</select>
                         </div>
                         <div class="form-group half">
-                            <label>Order Date</label>
+                            <label>Order Date <span class="required">*</span></label>
                             <input type="date" id="${prefix}-order-date" class="form-control" value="${escapeHtml(v.order_date)}" ${disabled}>
                         </div>
                     </div>

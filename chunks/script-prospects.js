@@ -2523,7 +2523,7 @@ const _closingDraftFormHtml = async (prospect, cr, productOptions) => {
                 <select id="cr-product" class="form-control">${productOptions}</select>
             </div>
             <div class="form-group" style="flex:1;">
-                <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Order Date</label>
+                <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Order Date <span class="required">*</span></label>
                 <input id="cr-order-date" type="date" class="form-control" value="${d.order_date || ''}">
             </div>
         </div>
@@ -6389,6 +6389,12 @@ const submitClosingRecord = async (prospectId) => {
     if (!data.product) return UI.toast.error('Product/service is required');
     if (!data.sale_amount) return UI.toast.error('Amount closed is required');
     if (!data.invoice_number) return UI.toast.error('Invoice number is required');
+    // Order Date = the sale (invoice) date every report counts by. Collection Date is
+    // only when the item is picked up, so a sale can't be submitted without it.
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(data.order_date || '')) {
+        document.getElementById('cr-order-date')?.focus();
+        return UI.toast.error('Order Date is required — it is the sale date the reports count by.');
+    }
     if (!data.invoice_file) {
         // M2 (owner: YES — a signed order-form PHOTO counts as the invoice/proof of
         // purchase). Only block if there is ALSO no order-form photo on file.

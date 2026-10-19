@@ -104,6 +104,60 @@
     const _APPROVER_TYPES = new Set(['new_sale', 'new_customer']);
     const _isGrantedApproverOnly = () => !isManagement(_state.cu);
 
+    // ── Order Date gate (owner 2026-10-19) ──────────────────────────────────
+    // A sale is booked (purchases.date / customer_since) on its ORDER date — the
+    // invoice date every report counts by. The closing form's other date is the
+    // Collection Date (pick-up, often months later), and "today" is the approval
+    // day: both put a backdated sale in the wrong week. So approval stops until an
+    // order date is on the record, and lets the approver enter it right there.
+    const _ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+    const _needsOrderDate = (cr) => !!cr && (parseFloat(cr.sale_amount ?? cr.amount) || 0) > 0 && !_ISO_DAY.test(String(cr.order_date || ''));
+    const _askOrderDate = (kind, id, cr) => {
+        const today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
+        UI.showModal('Order Date needed', `
+            <p style="margin:0 0 10px;line-height:1.6;">This sale has no <strong>Order Date</strong>. Reports count a sale on its order (invoice) date — not the collection date and not today — so it can't be approved without one.</p>
+            <p style="margin:0 0 12px;color:var(--gray-500);font-size:13px;">${escapeHtml(cr.product || '')}${cr.invoice_number ? ' · Invoice ' + escapeHtml(cr.invoice_number) : ''}${cr.closing_date ? ' · Collection ' + escapeHtml(cr.closing_date) : ''}</p>
+            <div class="form-group"><label>Order Date <span class="required">*</span></label><input type="date" id="apr-order-date" class="form-control" max="${today}"></div>`, [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Save Order Date & Approve', type: 'primary', action: `(async () => { await app.saveOrderDateAndApprove('${kind}', '${String(id).replace(/[^0-9]/g, '')}'); })()` },
+        ]);
+    };
+    // Write the order date onto every copy the approval paths read (the prospect's
+    // live closing_record + its pending sale/conversion queue snapshots), then retry.
+    const saveOrderDateAndApprove = async (kind, id) => {
+        if (!(await _canApprove())) return UI.toast.error('Not permitted');
+        const od = document.getElementById('apr-order-date')?.value || '';
+        if (!_ISO_DAY.test(od)) return UI.toast.error('Please pick the Order Date');
+        try {
+            let prospectId = id;
+            if (kind === 'queue') {
+                const entry = await AppDataStore.getById('approval_queue', id);
+                if (!entry) return UI.toast.error('Entry not found');
+                prospectId = entry.prospect_id;
+                await AppDataStore.update('approval_queue', id, { snapshot_after: { ...(entry.snapshot_after || {}), order_date: od } });
+            }
+            if (prospectId != null) {
+                const prospect = await AppDataStore.getById('prospects', prospectId);
+                if (prospect?.closing_record && typeof prospect.closing_record === 'object') {
+                    await AppDataStore.update('prospects', prospectId, { closing_record: { ...prospect.closing_record, order_date: od } });
+                }
+                const pend = (await AppDataStore.query('approval_queue', { prospect_id: prospectId }).catch(() => [])) || [];
+                for (const q of pend) {
+                    if (q.status !== 'pending' || !_APPROVER_TYPES.has(q.approval_type) || String(q.id) === String(id)) continue;
+                    if (q.snapshot_after && typeof q.snapshot_after === 'object') {
+                        await AppDataStore.update('approval_queue', q.id, { snapshot_after: { ...q.snapshot_after, order_date: od } });
+                    }
+                }
+            }
+        } catch (e) {
+            return UI.toast.error('Could not save the Order Date: ' + (e?.message || e));
+        }
+        UI.hideModal();
+        if (kind === 'queue') await approveQueueEntry(id);
+        else if (kind === 'closing') await approveClosingRecord(id);
+        else if (kind === 'conversion') await approveProspectConversion(id);
+    };
+
 const renderApprovalQueue = async () => {
     const tbody = document.getElementById('approval-queue-body');
     if (!tbody) return;
@@ -284,6 +338,7 @@ const approveQueueEntry = async (entryId) => {
     if (!(await _canApprove())) return UI.toast.error('Not permitted');
     const entry = await AppDataStore.getById('approval_queue', entryId);
     if (!entry || entry.status !== 'pending') return UI.toast.error('Entry not found or already processed.');
+    if (entry.approval_type === 'new_sale' && _needsOrderDate(entry.snapshot_after)) { _askOrderDate('queue', entryId, entry.snapshot_after); return 'needs-order-date'; }
 
     // Audit data-integrity fix (in-flight guard): after the pending check, take a
     // per-entry lock so a concurrent second invocation (double-click) is dropped
@@ -575,6 +630,7 @@ const approveClosingRecord = async (prospectId) => {
     if (!(await _canApprove())) return UI.toast.error('Not permitted');
     const prospect = await AppDataStore.getById('prospects', prospectId);
     if (!prospect?.closing_record) return UI.toast.error('No closing record found');
+    if (_needsOrderDate(prospect.closing_record)) return _askOrderDate('closing', prospectId, prospect.closing_record);
     const isAlreadyConverted = prospect.status === 'converted' || prospect.conversion_status === 'approved';
     if (isAlreadyConverted) {
         // In-flight guard (audit data-integrity): this additional-sale branch creates a
@@ -764,6 +820,13 @@ const approveProspectConversion = async (prospectId) => {
     // Bug #7 layer 1: synchronous in-flight guard. Set BEFORE the first await so a
     // rapid second invocation (double-click / queue+modal race) is dropped instead
     // of racing to create a duplicate customer.
+    // Order Date gate first — before the in-flight lock, so the approver can fix it and retry.
+    {
+        const _p0 = await AppDataStore.getById('prospects', prospectId);
+        if (_p0 && _p0.status !== 'converted' && _p0.conversion_status !== 'approved' && _needsOrderDate(_p0.closing_record)) {
+            return _askOrderDate('conversion', prospectId, _p0.closing_record);
+        }
+    }
     const _convKey = String(prospectId);
     if (_convInFlight.has(_convKey)) return;
     _convInFlight.add(_convKey);
@@ -1029,11 +1092,13 @@ const openSaleApprovals = async () => {
 
 // Approve from the pop-up, then reopen it on the remaining items.
 const approveFromSalePanel = async (entryId) => {
-    await approveQueueEntry(entryId);
+    // Order Date prompt is showing — don't reopen the panel over it.
+    if (await approveQueueEntry(entryId) === 'needs-order-date') return;
     await openSaleApprovals();
 };
 
     app.register('approvals', {
+        saveOrderDateAndApprove,
         approveFromSalePanel,
         canApproveSales: _canApprove,
         openSaleApprovals,

@@ -6244,6 +6244,12 @@
             document.getElementById('mo-amount-closed')?.focus();
             return;
         }
+        // Order Date = the sale date the reports count by (Collection Date is pick-up).
+        if (isClosed && !/^\d{4}-\d{2}-\d{2}$/.test(mo.order_date || '')) {
+            UI.toast.error('Please enter the Order Date — it is the sale date the reports count by.');
+            document.getElementById('mo-order-date')?.focus();
+            return;
+        }
 
         // NPO closings REQUIRE the installment terms (owner: this is what creates the
         // npo_sales order that feeds the PORT KPI). Unlike the old silent guard, we
