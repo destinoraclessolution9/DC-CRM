@@ -536,6 +536,7 @@
                             setF('cps-postal', prospect.postal_code);
                             setF('cps-referrer', prospect.referred_by);
                             setF('cps-relationship', prospect.referral_relationship);
+                            try { biAutoFill('cps', 'ic'); } catch (e) {}
                             clearInterval(cpsInterval);
                         } else if (++attempts >= 12) {
                             clearInterval(cpsInterval);
@@ -707,6 +708,7 @@
                         setField('cps-postal', prospect.postal_code);
                         setField('cps-summary', activity.summary);
                         setField('cps-interest', prospect.cps_interest);
+                        try { biAutoFill('cps', 'ic'); } catch (e) {}
                         clearInterval(cpsInterval);
                     } else if (++attempts >= 12) {
                         console.warn('CPS fields did not appear after polling');
@@ -1041,7 +1043,7 @@
                     </div>
                     <div class="form-group half">
                         <label>Gender</label>
-                        <select id="${prefix}-gender" class="form-control" ${disabled}>
+                        <select id="${prefix}-gender" class="form-control" ${readOnly ? '' : `onchange="app.biAutoFill('${prefix}','gender')"`} ${disabled}>
                             <option value="">— Select —</option>
                             ${(() => {
                                 const g = _biGender(d.gender);
@@ -1075,7 +1077,7 @@
                             <label style="margin-bottom:0;">Date of Birth</label>
                             ${readOnly ? '' : `<label class="bi-chart-tick" title="Use for life chart"><input type="checkbox" id="${prefix}-use-dob" ${chk(useDob)}>Chart</label>`}
                         </div>
-                        <input type="date" id="${prefix}-dob" class="form-control" value="${esc(d.date_of_birth)}" onchange="app.updateLunarBirth('${prefix}-dob','${prefix}-lunar')" ${disabled}>
+                        <input type="date" id="${prefix}-dob" class="form-control" value="${esc(d.date_of_birth)}" onchange="app.updateLunarBirth('${prefix}-dob','${prefix}-lunar');app.biAutoFill('${prefix}','dob')" ${disabled}>
                     </div>
                     <div class="form-group half">
                         <div style="display:flex;align-items:center;gap:8px;">
@@ -1088,14 +1090,14 @@
                 <div class="form-row">
                     <div class="form-group half">
                         <label>Ming Gua</label>
-                        <select id="${prefix}-minggua" class="form-control" ${disabled}>
+                        <select id="${prefix}-minggua" class="form-control" ${readOnly ? '' : `onchange="app.biAutoFill('${prefix}','mg')"`} ${disabled}>
                             <option value="">-- Select --</option>
                             ${BASIC_INFO_MING_GUA.map(([v,l]) => `<option value="${v}" ${sel(d.ming_gua, v)}>${l}</option>`).join('')}
                         </select>
                     </div>
                     <div class="form-group half">
                         <label>IC Number</label>
-                        <input type="text" id="${prefix}-ic" class="form-control" value="${esc(d.ic_number)}" placeholder="e.g., 901212-10-1234" ${disabled}>
+                        <input type="text" id="${prefix}-ic" class="form-control" value="${esc(d.ic_number)}" placeholder="e.g., 901212-10-1234" ${readOnly ? '' : `oninput="app.biAutoFill('${prefix}','ic')"`} ${disabled}>
                     </div>
                 </div>
                 <div class="form-row">
@@ -1224,18 +1226,28 @@
         else if (useLunar) lifeChartType = 'lunar';
         const rel = d(`${prefix}-relationship`);
         const relOther = d(`${prefix}-relationship-other`);
+        // Save-time fallback for the IC → DOB / gender / lunar → Ming Gua auto-fill
+        // (the live version runs in biAutoFill): fills only what is still empty.
+        const icv = d(`${prefix}-ic`);
+        const dobv = d(`${prefix}-dob`) || icToDob(icv);
+        const genv = d(`${prefix}-gender`) || icToGender(icv);
+        let lunarv = d(`${prefix}-lunar`);
+        if (!lunarv && dobv && !d(`${prefix}-dob`)) {
+            const l = convertSolarToLunar(dobv);
+            if (l && l !== 'Conversion failed') lunarv = l;
+        }
         return {
             title: (d(`${prefix}-title`) === '__other__' ? d(`${prefix}-title-other`) : d(`${prefix}-title`)) || null,
             full_name: d(`${prefix}-name`),
             nickname: d(`${prefix}-nickname`) || null,
-            gender: d(`${prefix}-gender`) || null,
+            gender: genv || null,
             nationality: d(`${prefix}-nationality`) || null,
             country: window.UI.countryByCode(d(`${prefix}-country`)).code,
             phone: d(`${prefix}-phone`),
             email: d(`${prefix}-email`) || null,
             ic_number: d(`${prefix}-ic`) || null,
-            date_of_birth: d(`${prefix}-dob`) || null,
-            lunar_birth: d(`${prefix}-lunar`) || null,
+            date_of_birth: dobv || null,
+            lunar_birth: lunarv || null,
             occupation: d(`${prefix}-occupation`) || null,
             company_name: d(`${prefix}-company`) || null,
             income_range: d(`${prefix}-income`) || null,
@@ -1243,7 +1255,7 @@
             city: d(`${prefix}-city`) || null,
             state: d(`${prefix}-state`) || null,
             postal_code: d(`${prefix}-postal`) || null,
-            ming_gua: d(`${prefix}-minggua`) || null,
+            ming_gua: d(`${prefix}-minggua`) || mingGuaFor(dobv, genv) || null,
             cps_interest: d(`${prefix}-interest`) || null,
             manual_grade: document.getElementById(`${prefix}-grade`)?.value || null, // grade is now set AFTER the meeting (in the Minutes modal); born ungraded — null ≡ C in the cadence engine
             marital_status: document.querySelector(`.${prefix}-marital-cb:checked`)?.value || null,
@@ -1919,6 +1931,112 @@ My raw notes:
         const yy = +s.slice(0, 2);
         const yyyy = (yy > new Date().getFullYear() % 100 ? 1900 : 2000) + yy;
         return _toIsoDate(`${yyyy}-${s.slice(2, 4)}-${s.slice(4, 6)}`);
+    };
+    // IC → gender: the last digit of a Malaysian IC is odd for male, even for female.
+    const icToGender = (ic) => {
+        const s = String(ic || '').replace(/[\s-]/g, '');
+        if (!icToDob(s)) return '';
+        return (+s.slice(-1)) % 2 ? 'Male' : 'Female';
+    };
+
+    // ── Ming Gua auto-fill (2026-10-19) ─────────────────────────────────────
+    // Ming Gua = birth YEAR + gender, where the year turns at Li Chun (立春, the
+    // solar start of spring, Feb 3–5) — NOT at Chinese New Year. Li Chun dates
+    // come from the house table, which covers 1950–2100 only; outside it the
+    // calculation is skipped and the agent picks by hand.
+    // House table: Feb 4 every year, except Feb 5 every 4th year 1952–1984 and
+    // Feb 3 every 4th year 2017–2097.
+    const liChunDay = (y) => {
+        if (!(y >= 1950 && y <= 2100)) return 0;
+        if (y >= 1952 && y <= 1984 && (y - 1952) % 4 === 0) return 5;
+        if (y >= 2017 && y <= 2097 && (y - 2017) % 4 === 0) return 3;
+        return 4;
+    };
+    // House cycle (MG5 is kept as MG5 — no 5→2/8 substitution in this system):
+    // male 2008 = 1 counting UP as the year goes DOWN; female 1941 = 1 counting up
+    // with the year. Both give MG3 for 1988.
+    const mingGuaFor = (dob, gender) => {
+        const iso = _toIsoDate(dob);
+        const g = _biGender(gender);
+        if (!iso || (g !== 'Male' && g !== 'Female')) return '';
+        let [y, m, d] = iso.split('-').map(Number);
+        const lc = liChunDay(y);
+        if (!lc) return '';
+        if (m === 1 || (m === 2 && d < lc)) y -= 1;
+        const n = g === 'Male' ? (((2008 - y) % 9) + 9) % 9 + 1 : (((y - 1941) % 9) + 9) % 9 + 1;
+        return `MG${n}`;
+    };
+    // Effective inputs for the basic-info form: what the agent entered wins; the IC
+    // only fills what is empty.
+    const _biMgInputs = (prefix) => {
+        const val = (s) => (document.getElementById(`${prefix}-${s}`)?.value || '').trim();
+        const ic = val('ic');
+        const dob = _toIsoDate(val('dob')) || icToDob(ic);
+        const gender = _biGender(val('gender')) || icToGender(ic);
+        return { dob, gender };
+    };
+    const _biMgNote = (prefix, html, warn) => {
+        const sel = document.getElementById(`${prefix}-minggua`);
+        if (!sel) return;
+        let note = document.getElementById(`${prefix}-minggua-note`);
+        if (!note) {
+            note = document.createElement('div');
+            note.id = `${prefix}-minggua-note`;
+            note.style.cssText = 'font-size:12px;margin-top:4px;';
+            sel.insertAdjacentElement('afterend', note);
+        }
+        note.style.color = warn ? '#b45309' : '#6b7280';
+        note.innerHTML = html;
+    };
+    // Called from the basic-info form's IC / DOB / Gender / Ming Gua inputs.
+    // source: 'ic' | 'dob' | 'gender' | 'mg'. Never overwrites a value the agent
+    // entered — a disagreement only shows a warning; the agent has the last word.
+    const biAutoFill = (prefix, source) => {
+        const $ = (s) => document.getElementById(`${prefix}-${s}`);
+        const icEl = $('ic'), dobEl = $('dob'), genEl = $('gender'), mgEl = $('minggua');
+        if (!mgEl) return;
+        const esc = (s) => window._crmUtils.escapeHtml(s);
+        if (source === 'ic' && icEl) {
+            const digits = icEl.value.replace(/[\s-]/g, '');
+            const icDob = icToDob(digits), icGen = icToGender(digits);
+            if (icDob && icEl.dataset.mgLastIc !== digits) {
+                icEl.dataset.mgLastIc = digits;
+                const filled = [];
+                if (dobEl && !dobEl.value) {
+                    dobEl.value = icDob;
+                    dobEl.dataset.src = 'ic';
+                    updateLunarBirth(`${prefix}-dob`, `${prefix}-lunar`);
+                    filled.push('Date of Birth');
+                } else if (dobEl && _toIsoDate(dobEl.value) !== icDob) {
+                    UI.toast.warning(`IC says born ${icDob}, but Date of Birth is ${dobEl.value} — please check which is right.`);
+                }
+                if (genEl && !genEl.value) {
+                    genEl.value = icGen;
+                    filled.push('Gender');
+                } else if (genEl && _biGender(genEl.value) !== icGen) {
+                    UI.toast.warning(`IC last digit means ${icGen}, but Gender is ${genEl.value} — please check.`);
+                }
+                if (filled.length) UI.toast.info(`${filled.join(' + ')} filled from the IC — please check.`);
+            }
+        }
+        if (source === 'mg') mgEl.dataset.auto = '0';
+        const { dob, gender } = _biMgInputs(prefix);
+        const calc = mingGuaFor(dob, gender);
+        if (!calc) {
+            if (mgEl.dataset.auto === '1') { mgEl.value = ''; mgEl.dataset.auto = ''; }
+            _biMgNote(prefix, '', false);
+            return;
+        }
+        const basis = `${esc(dob)} · ${esc(gender)} · Li Chun Feb ${liChunDay(+dob.slice(0, 4))}`;
+        if (!mgEl.value || mgEl.dataset.auto === '1') {
+            mgEl.value = calc;
+            mgEl.dataset.auto = '1';
+            _biMgNote(prefix, `<i class="fas fa-magic"></i> Auto-filled ${calc} from ${basis} — you can change it.`, false);
+        } else if (mgEl.value !== calc) {
+            _biMgNote(prefix, `<i class="fas fa-exclamation-triangle"></i> Calculated ${calc} from ${basis}, but ${esc(mgEl.value)} is selected — please double-check.`, true);
+        } else {
+            _biMgNote(prefix, '', false);
+        }
     };
     const gatherContactPrefill = async ({ prospect = null, closingRecord = null } = {}) => {
         const fields = {}, src = {};
@@ -7058,6 +7176,7 @@ My raw notes:
         applyProfileUpdate,
         moIcChanged,
         icToDob,
+        biAutoFill,
         contactSrcTag: _contactSrcTag,
         moPaymentMethodChanged,
         npoFillClosingPlans,

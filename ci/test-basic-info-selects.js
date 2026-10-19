@@ -93,6 +93,7 @@ eq('BASIC_INFO_GENDERS is the canonical set', BASIC_INFO_GENDERS.join('|'), 'Mal
 const renderSelect = (storedGender) => {
     const prefix = 'prospect';
     const disabled = '';
+    const readOnly = false;
     const d = { gender: storedGender };
     const sel = (v, opt) => v === opt ? 'selected' : '';
     const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));

@@ -1149,6 +1149,10 @@ const _writeCpsField = (prefix, suffix, value) => {
     if (suffix === 'dob' && typeof app !== 'undefined' && app.updateLunarBirth) {
         try { app.updateLunarBirth(`${prefix}-dob`, `${prefix}-lunar`); } catch (e) {}
     }
+    // Re-run the Ming Gua auto-fill when a scan/paste writes its inputs.
+    if (['dob', 'gender', 'ic'].includes(suffix) && typeof app !== 'undefined' && app.biAutoFill) {
+        try { app.biAutoFill(prefix, suffix === 'ic' ? 'ic' : 'dob'); } catch (e) {}
+    }
 };
 
 // Stash scan result so the review modal callbacks can read it.
@@ -1277,10 +1281,10 @@ const _parseMalaysianIc = (ic) => {
     const mm = parseInt(clean.slice(2, 4), 10);
     const dd = parseInt(clean.slice(4, 6), 10);
     if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
-    // Century window: anything within ~5 years of "future" maps to 20YY,
-    // older years map to 19YY. Works for both elderly customers and babies.
+    // Century window: a 2-digit year above the current one is 19YY (same rule as
+    // icToDob in script-activities.js — a 1930 IC must not read as 2030).
     const nowYY = new Date().getFullYear() % 100;
-    const century = (yy <= nowYY + 5) ? 2000 : 1900;
+    const century = (yy > nowYY) ? 1900 : 2000;
     const dob = `${century + yy}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
     const last = parseInt(clean.slice(-1), 10);
     const gender = (last % 2 === 0) ? 'Female' : 'Male';
@@ -1350,6 +1354,7 @@ const parseCpsPastedText = (prefix = 'cps') => {
                 genderEl.value = parsed.gender;
                 derived++;
             }
+            if (app.biAutoFill) { try { app.biAutoFill(prefix, 'gender'); } catch (e) {} }
         }
     }
 
