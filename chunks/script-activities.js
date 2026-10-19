@@ -3985,8 +3985,7 @@ My raw notes:
                             <div class="form-group">
                                 <label>Choose ${type.includes('AGENT') ? 'Meeting/Training' : 'Event'}</label>
                                 <select id="existing-event" class="form-control" onchange="(async()=>{ try{ await app.showSelectedEventDetails(this.value); }catch(e){ console.error(e); } })()">
-                                    <option value="">-- Select --</option>
-                                    ${(await AppDataStore.getAll('events')).filter(e => e.is_active !== false && e.status !== 'inactive').map(e => `<option value="${escapeHtml(e.id)}">${escapeHtml(e.event_title || e.title || 'Untitled Event')}</option>`).join('')}
+                                    ${eventPickerOptionsHtml(await AppDataStore.getAll('events'))}
                                 </select>
                                 <div id="event-details-preview"></div>
                             </div>
@@ -4567,10 +4566,7 @@ My raw notes:
             // Refresh existing events dropdown and auto-select the new event
             const dropdown = document.getElementById('existing-event');
             if (dropdown) {
-                const allEvents = await AppDataStore.getAll('events');
-                const activeEvents = allEvents.filter(e => e.is_active !== false && e.status !== 'inactive');
-                dropdown.innerHTML = '<option value="">-- Select --</option>' +
-                    activeEvents.map(e => `<option value="${e.id}" ${e.id === newEvent.id ? 'selected' : ''}>${escapeHtml(e.event_title || e.title || 'Untitled Event')}</option>`).join('');
+                dropdown.innerHTML = eventPickerOptionsHtml(await AppDataStore.getAll('events'), newEvent?.id);
                 showSelectedEventDetails(newEvent.id);
             }
 
@@ -4584,6 +4580,34 @@ My raw notes:
             console.error('saveCpsNewEvent error:', err);
             UI.toast.error('Save failed: ' + (err.message || err));
         }
+    };
+
+    // "Choose Event" options. Recurring events (代理会议 every week) are one row
+    // per date, so the label carries the date, and dates more than
+    // EVENT_PICKER_PAST_DAYS back are dropped (still loggable a while after).
+    // Soonest first; undated rows last; the just-created event always stays.
+    const EVENT_PICKER_PAST_DAYS = 14;
+    const eventPickerOptionsHtml = (events, selectedId = null) => {
+        const d = new Date();
+        d.setDate(d.getDate() - EVENT_PICKER_PAST_DAYS);
+        const cutoff = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        const dateOf = (e) => String(e.event_date || e.date || '').slice(0, 10);
+        const rows = (events || [])
+            .filter(e => e.is_active !== false && e.status !== 'inactive')
+            .filter(e => String(e.id) === String(selectedId) || !dateOf(e) || dateOf(e) >= cutoff)
+            .sort((a, b) => (dateOf(a) || '9999').localeCompare(dateOf(b) || '9999')
+                || String(a.start_time || '').localeCompare(String(b.start_time || '')));
+        const label = (e) => {
+            const title = e.event_title || e.title || 'Untitled Event';
+            const ymd = dateOf(e);
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return title;
+            const [y, m, dd] = ymd.split('-').map(Number);
+            const when = new Date(y, m - 1, dd).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+            const time = String(e.start_time || '').slice(0, 5);
+            return `${title} · ${when}${time ? ' ' + time : ''}`;
+        };
+        return '<option value="">-- Select --</option>' + rows.map(e =>
+            `<option value="${escapeHtml(e.id)}"${String(e.id) === String(selectedId) ? ' selected' : ''}>${escapeHtml(label(e))}</option>`).join('');
     };
 
     const showSelectedEventDetails = async (eventId) => {
