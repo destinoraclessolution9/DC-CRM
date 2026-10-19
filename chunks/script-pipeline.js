@@ -1979,7 +1979,12 @@ const showPipelineView = async (container) => {
             // those React-owned nodes (torn DOM). Skip the whole by-id fill on the JSX
             // path (also avoids the redundant second data load). The scaffold path
             // (_plData undefined) falls through and fills the skeleton exactly as today.
-            AppDataStore.getAll('users').then(u => _plMountGoalSections(u)).catch(() => {});
+            // The 4s guard can release the gate before React commits, so wait
+            // for the JSX #pl-action-plan anchor before mounting the Goal Bar.
+            (async () => {
+                for (let i = 0; i < 100 && !document.getElementById('pl-action-plan'); i++) await new Promise(r => setTimeout(r, 100));
+                _plMountGoalSections(await AppDataStore.getAll('users').catch(() => null));
+            })();
             return;
         }
     } else {
