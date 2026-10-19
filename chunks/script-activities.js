@@ -4433,20 +4433,15 @@ My raw notes:
         const content = `
             ${buildEventCategoriesField([])}
             <div id="huiji-owner-section" style="display:none;margin:12px 0;padding:12px;border:1px solid #fbcfe8;border-radius:8px;background:#fdf2f8;"></div>
-            <div class="form-group"><label>Title*</label><input type="text" id="mkt-title" class="form-control"></div>
-            <div class="form-row" style="display:flex;gap:12px;">
-                <div class="form-group" style="flex:1;"><label>Date*</label><input type="date" id="mkt-event-date" class="form-control"></div>
-                <div class="form-group" style="flex:1;"><label>Start Time</label><input type="text" id="mkt-start-time" class="form-control time24" inputmode="numeric" autocomplete="off" maxlength="5" placeholder="HH:MM" title="24-hour time, e.g. 14:30"></div>
-                <div class="form-group" style="flex:1;"><label>End Time</label><input type="text" id="mkt-end-time" class="form-control time24" inputmode="numeric" autocomplete="off" maxlength="5" placeholder="HH:MM" title="24-hour time, e.g. 14:30"></div>
-            </div>
+            <div class="form-group"><label>Title*</label><input type="text" id="mkt-title" class="form-control" onblur="app.cpsCheckDuplicateEvent()"></div>
+            <div id="mkt-dup-warn" style="display:none;margin:-4px 0 12px;padding:10px 12px;border:1px solid #fcd34d;border-radius:8px;background:#fffbeb;font-size:13px;"></div>
+            <small style="display:block;margin:-4px 0 12px;color:#6b7280;">This saves the topic only — the date, time, venue and speaker are set on each calendar session.</small>
             <div class="form-group"><label>Market / Country</label><select id="mkt-event-country" class="form-control">${(window.UI.countries || []).map(c => `<option value="${c.code}" ${c.code === window._crmUtils.cuHomeCountry() ? 'selected' : ''}>${window._crmUtils.escapeHtml(c.name)} (${window._crmUtils.escapeHtml(c.symbol)})</option>`).join('')}</select></div>
             <div class="form-group"><label>Ticket Price</label><input type="number" id="mkt-price" class="form-control" value="0"></div>
             <div class="form-group"><label>Early Bird Price (RM)</label><input type="text" id="mkt-early-bird-price" class="form-control" placeholder="e.g. 199"></div>
             <div class="form-group"><label>Group Purchase Price (RM)</label><input type="text" id="mkt-group-price" class="form-control" placeholder="e.g. 299 (min 5 pax)"></div>
             <div class="form-group"><label>Duration (text fallback)</label><input type="text" id="mkt-duration" class="form-control" placeholder="e.g. 2 hours"></div>
             <div class="form-group"><label>Target Group</label><input type="text" id="mkt-target" class="form-control"></div>
-            <div class="form-group"><label>Location / Venue</label><input type="text" id="mkt-location" class="form-control" placeholder="e.g. KL, Online"></div>
-            <div class="form-group"><label>Speaker</label><input type="text" id="mkt-speaker" class="form-control" placeholder="e.g. Master Tan"></div>
             <div class="form-group"><label>Description</label><textarea id="mkt-desc" class="form-control"></textarea></div>
             <div class="form-group">
                 <label>Event Poster <span style="color:var(--gray-400);font-weight:normal;">(shown on Noticeboard)</span></label>
@@ -4469,17 +4464,49 @@ My raw notes:
         huijiInitSection({ eventId: null });
     };
 
+    // Create New on a title that already exists: show a warning with "Use
+    // existing" (selects it in Choose Event) or "Create anyway" (one more
+    // click saves a separate topic). Returns true when saving may go ahead.
+    const cpsCheckDuplicateEvent = async ({ onSave = false } = {}) => {
+        const box = document.getElementById('mkt-dup-warn');
+        const titleEl = document.getElementById('mkt-title');
+        if (!box || !titleEl) return true;
+        const key = eventTopicKey({ title: titleEl.value });
+        if (box.dataset.allowKey && box.dataset.allowKey === key) return true;
+        let match = null;
+        if (key) {
+            try { match = eventTopics(await AppDataStore.getAll('events')).find(e => eventTopicKey(e) === key) || null; }
+            catch (_) { /* intentional: duplicate check is best-effort — never block a save on it */ }
+        }
+        if (!match) { box.style.display = 'none'; box.innerHTML = ''; return true; }
+        box.style.display = 'block';
+        box.innerHTML = `⚠️ <strong>${escapeHtml(match.event_title || match.title)}</strong> already exists — 这个活动已存在. Use it instead?
+            <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+                <button type="button" class="btn primary" onclick="app.cpsUseExistingEvent('${escapeHtml(match.id)}')">Use existing</button>
+                <button type="button" class="btn secondary" data-key="${escapeHtml(key)}" onclick="document.getElementById('mkt-dup-warn').dataset.allowKey = this.dataset.key; (async () => { await app.saveCpsNewEvent(); })()">Create anyway</button>
+            </div>`;
+        if (onSave) box.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        return false;
+    };
+
+    const cpsUseExistingEvent = async (eventId) => {
+        UI.hideModal();
+        const dropdown = document.getElementById('existing-event');
+        if (dropdown) {
+            dropdown.innerHTML = eventPickerOptionsHtml(await AppDataStore.getAll('events'), eventId);
+            await showSelectedEventDetails(eventId);
+        }
+        const existingRadio = document.querySelector('input[name="event-selection"][value="existing"]');
+        if (existingRadio) { existingRadio.checked = true; toggleEventForm(); }
+    };
+
     const saveCpsNewEvent = async () => {
         const title = document.getElementById('mkt-title')?.value?.trim();
         if (!title) return UI.toast.error('Title is required');
 
-        // Date is required so the event has a valid timeline (otherwise the
-        // noticeboard would skip it and the calendar wouldn't know where to
-        // pin it). Earlier this field was missing entirely — events created
-        // here landed in the DB with no date and rendered as "Invalid Date"
-        // on the noticeboard.
-        const eventDate = document.getElementById('mkt-event-date')?.value;
-        if (!eventDate) return UI.toast.error('Event date is required');
+        // Topic only: the date / time / venue / speaker belong to each calendar
+        // session. A title that already exists asks first (see cpsCheckDuplicateEvent).
+        if (!(await cpsCheckDuplicateEvent({ onSave: true }))) return;
 
         const catCheckboxes = document.querySelectorAll('#mkt-event-categories .mkt-event-category-cb:checked');
         const selectedCats = Array.from(catCheckboxes).map(cb => cb.value);
@@ -4502,18 +4529,18 @@ My raw notes:
             // regardless of which column they prefer.
             title: title,
             event_title: title,
-            date: document.getElementById('mkt-event-date')?.value || null,
-            event_date: document.getElementById('mkt-event-date')?.value || null,
+            date: null,
+            event_date: null,
             country: window.UI.countryByCode(document.getElementById('mkt-event-country')?.value).code,
-            start_time: document.getElementById('mkt-start-time')?.value || null,
-            end_time:   document.getElementById('mkt-end-time')?.value || null,
+            start_time: null,
+            end_time:   null,
             ticket_price: parseFloat(document.getElementById('mkt-price')?.value) || 0,
             early_bird_price: document.getElementById('mkt-early-bird-price')?.value || '',
             group_purchase_price: document.getElementById('mkt-group-price')?.value || '',
             duration: document.getElementById('mkt-duration')?.value || '',
             target_group: document.getElementById('mkt-target')?.value || '',
-            location: document.getElementById('mkt-location')?.value || '',
-            speaker: document.getElementById('mkt-speaker')?.value || '',
+            location: '',
+            speaker: '',
             description: document.getElementById('mkt-desc')?.value || '',
             poster_url: document.getElementById('mkt-poster-url')?.value?.trim() || null,
             published_to_noticeboard: document.getElementById('mkt-publish-noticeboard')?.checked || false,
@@ -4582,32 +4609,45 @@ My raw notes:
         }
     };
 
-    // "Choose Event" options. Recurring events (代理会议 every week) are one row
-    // per date, so the label carries the date, and dates more than
-    // EVENT_PICKER_PAST_DAYS back are dropped (still loggable a while after).
-    // Soonest first; undated rows last; the just-created event always stays.
-    const EVENT_PICKER_PAST_DAYS = 14;
+    // "Choose Event" is a list of TOPICS: an event row holds the topic (title,
+    // content, price), and each calendar activity is one session of it — the
+    // session's date, venue, speaker (主讲老师 role) and attendance live on the
+    // activity / per-date event fields. Older data has one row per session
+    // (代理会议 every week), so rows are grouped by title and each topic shows
+    // once, represented by its most recently edited row.
+    const eventTopicKey = (e) => String((e && (e.event_title || e.title)) || '').trim().replace(/\s+/g, ' ').toLowerCase();
+    const eventDateOf = (e) => String((e && (e.date || e.event_date)) || '').slice(0, 10);
+    const _eventIsActive = (e) => e && e.is_active !== false && e.status !== 'inactive';
+    const _eventEditedAt = (e) => String(e.updated_at || e.created_at || '');
+    const eventTopics = (events) => {
+        const byKey = new Map();
+        for (const e of (events || [])) {
+            if (!_eventIsActive(e)) continue;
+            const k = eventTopicKey(e);
+            if (!k) continue;
+            const cur = byKey.get(k);
+            if (!cur || _eventEditedAt(e) > _eventEditedAt(cur)
+                || (_eventEditedAt(e) === _eventEditedAt(cur) && Number(e.id) > Number(cur.id))) byKey.set(k, e);
+        }
+        return [...byKey.values()].sort((a, b) =>
+            String(a.event_title || a.title).localeCompare(String(b.event_title || b.title), 'zh'));
+    };
     const eventPickerOptionsHtml = (events, selectedId = null) => {
-        const d = new Date();
-        d.setDate(d.getDate() - EVENT_PICKER_PAST_DAYS);
-        const cutoff = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-        const dateOf = (e) => String(e.event_date || e.date || '').slice(0, 10);
-        const rows = (events || [])
-            .filter(e => e.is_active !== false && e.status !== 'inactive')
-            .filter(e => String(e.id) === String(selectedId) || !dateOf(e) || dateOf(e) >= cutoff)
-            .sort((a, b) => (dateOf(a) || '9999').localeCompare(dateOf(b) || '9999')
-                || String(a.start_time || '').localeCompare(String(b.start_time || '')));
-        const label = (e) => {
-            const title = e.event_title || e.title || 'Untitled Event';
-            const ymd = dateOf(e);
-            if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return title;
-            const [y, m, dd] = ymd.split('-').map(Number);
-            const when = new Date(y, m - 1, dd).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-            const time = String(e.start_time || '').slice(0, 5);
-            return `${title} · ${when}${time ? ' ' + time : ''}`;
-        };
+        const topics = eventTopics(events);
+        // The just-created event always represents its topic, so it is the one selected.
+        const sel = selectedId == null ? null : (events || []).find(e => String(e.id) === String(selectedId));
+        const rows = sel ? topics.map(t => eventTopicKey(t) === eventTopicKey(sel) ? sel : t) : topics;
         return '<option value="">-- Select --</option>' + rows.map(e =>
-            `<option value="${escapeHtml(e.id)}"${String(e.id) === String(selectedId) ? ' selected' : ''}>${escapeHtml(label(e))}</option>`).join('');
+            `<option value="${escapeHtml(e.id)}"${sel && String(e.id) === String(sel.id) ? ' selected' : ''}>${escapeHtml(e.event_title || e.title || 'Untitled Event')}</option>`).join('');
+    };
+    // Saving a session: if the topic still has an old per-session row dated on
+    // the activity's own date, link to that row so its registrations stay with it.
+    const resolveEventForSession = (events, pickedId, sessionDate) => {
+        const picked = (events || []).find(e => String(e.id) === String(pickedId));
+        if (!picked || !sessionDate) return pickedId;
+        const k = eventTopicKey(picked);
+        const sameDay = (events || []).find(e => _eventIsActive(e) && eventTopicKey(e) === k && eventDateOf(e) === sessionDate);
+        return sameDay ? sameDay.id : pickedId;
     };
 
     const showSelectedEventDetails = async (eventId) => {
@@ -4634,9 +4674,7 @@ My raw notes:
                 <div style="display:grid; grid-template-columns:110px 1fr; gap:4px 8px;">
                     <span style="color:var(--gray-400);">Type:</span><span>${escapeHtml(ev.event_type || '-')}</span>
                     <span style="color:var(--gray-400);">Title:</span><span><strong>${escapeHtml(ev.event_title || ev.title || '-')}</strong></span>
-                    <span style="color:var(--gray-400);">Speaker:</span><span>${escapeHtml(ev.speaker || '-')}</span>
                     <span style="color:var(--gray-400);">Duration:</span><span>${escapeHtml(ev.duration || '-')}</span>
-                    <span style="color:var(--gray-400);">Venue:</span><span>${escapeHtml(ev.location || ev.venue || '-')}</span>
                     <span style="color:var(--gray-400);">Ticket Price:</span><span>${ev.ticket_price ? 'RM ' + escapeHtml(ev.ticket_price) : '-'}</span>
                     <span style="color:var(--gray-400);">Early Bird:</span><span>${escapeHtml(ev.early_bird_price || '-')}</span>
                     <span style="color:var(--gray-400);">Group Price:</span><span>${escapeHtml(ev.group_purchase_price || '-')}</span>
@@ -6631,11 +6669,12 @@ My raw notes:
             }
         } else if (type === 'EVENT' || type === 'AGENT_MEETING' || type === 'AGENT_TRAINING') {
             const visibility = document.querySelector('input[name="event-visibility"]:checked')?.value || 'closed';
-            const eventId = document.getElementById('existing-event')?.value;
-            if (!eventId) {
+            const pickedEventId = document.getElementById('existing-event')?.value;
+            if (!pickedEventId) {
                 UI.toast.error('Please select an event. Use "Create New" to add one first.');
                 return;
             }
+            const eventId = String(resolveEventForSession(await AppDataStore.getAll('events'), pickedEventId, date));
             const ev = await AppDataStore.getById('events', eventId);
             activity.activity_title = ev ? (ev.event_title || ev.title) : 'Event';
             activity.event_id = parseInt(eventId);
@@ -7436,6 +7475,8 @@ My raw notes:
         toggleActivityNoticeboardFields,
         openCpsCreateEventModal,
         saveCpsNewEvent,
+        cpsCheckDuplicateEvent,
+        cpsUseExistingEvent,
         showSelectedEventDetails,
         toggleAttendeePaid,
         toggleAttendeeTicket,
