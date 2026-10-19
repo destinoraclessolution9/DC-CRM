@@ -30,6 +30,13 @@ const _normLink = eval('(' + slice('    const _normLink = ', ';\n').replace(/;$/
 const _normText = eval('(' + slice('    const _normText = ', ';\n').replace(/;$/, '') + ')');
 const matchVenue = eval('(' + slice('    const matchVenue = ') + ')');
 const autoTitle = eval('(' + slice('    const autoTitle = ') + ')');
+const _googleMapLinks = eval('(' + slice('    const _googleMapLinks = ', ';\n').replace(/;$/, '') + ')');
+const nearestVenue = eval('(' + slice('    const nearestVenue = ') + ')');
+const resolveVenueFromLink = eval('(' + slice('    const resolveVenueFromLink = ') + ')');
+// Edge Function pure helpers (supabase/functions/resolve-map-link/index.ts).
+const fnSrc = fs.readFileSync(path.join(ROOT, 'supabase/functions/resolve-map-link/index.ts'), 'utf8');
+const fnPure = fnSrc.slice(fnSrc.indexOf('const isAllowedMapsUrl'), fnSrc.indexOf('// ── END PURE HELPERS'));
+const { isAllowedMapsUrl, parseMapsUrl } = new Function(fnPure + '\nreturn { isAllowedMapsUrl, parseMapsUrl };')();
 
 const SHARON = `请填妥基本资料 Basic information
 
@@ -106,6 +113,52 @@ eq('unknown link → none', vid('https://maps.app.goo.gl/zzzzzzzzzzzzzzzz'), nul
 eq('"mbbs" is not MBB', vid('my son studies mbbs'), null);
 eq('nothing', vid('hello'), null);
 
+// ── Fresh Google link → resolver (2026-10-19) ───────────────────────────────
+// Real 302 targets of two MBB share links (captured 2026-10-19).
+const MBB_A = 'https://www.google.com/maps/place/Menara+Bangkok+Bank+%7C+Berjaya+Central+Park,+105,+Jln+Ampang,+Kuala+Lumpur,+50450+Kuala+Lumpur,+Federal+Territory+of+Kuala+Lumpur/data=!4m2!3m1!1s0x31cc4829f50a843f:0xe32015f7aba67491?utm_source=mstt_1&entry=gps';
+const MBB_B = 'https://www.google.com/maps/place/Menara+Bangkok+Bank+Berjaya+Central+Park,+1-23-5,+Jln+Ampang,+Kuala+Lumpur,+50450+Kuala+Lumpur,+Wilayah+Persekutuan+Kuala+Lumpur/@3.1562235,101.7029444,17z/data=!3m1!4b1!4m6!3m5!1s0x31cc482a1fc6b1d1:0xa108b84c1d73d2ff!8m2!3d3.1562181!4d101.7055193!16s%2Fg%2F11vm4pktpx?entry=tts';
+const pa = parseMapsUrl(MBB_A), pb = parseMapsUrl(MBB_B);
+eq('parse A name', pa.name, 'Menara Bangkok Bank | Berjaya Central Park');
+eq('parse A address starts', (pa.address || '').slice(0, 14), '105, Jln Ampan');
+eq('parse A no position', pa.lat, null);
+eq('parse B name', pb.name, 'Menara Bangkok Bank Berjaya Central Park');
+eq('parse B pin lat (not viewport)', pb.lat, 3.1562181);
+eq('parse B pin lng', pb.lng, 101.7055193);
+eq('parse ?q=lat,lng', JSON.stringify(parseMapsUrl('https://maps.google.com/maps?q=3.15,101.70')), JSON.stringify({ name: null, address: null, lat: 3.15, lng: 101.7 }));
+eq('parse ?q=name', parseMapsUrl('https://maps.google.com/?q=Far+Coffee,+Bukit+Jalil').name, 'Far Coffee');
+eq('parse junk', parseMapsUrl('not a url').name, null);
+// SSRF guard: only https Google Maps hosts.
+eq('allow maps.app.goo.gl', isAllowedMapsUrl('https://maps.app.goo.gl/abc'), true);
+eq('allow goo.gl/maps', isAllowedMapsUrl('https://goo.gl/maps/abc'), true);
+eq('allow google.com/maps', isAllowedMapsUrl(MBB_A), true);
+eq('deny goo.gl non-maps', isAllowedMapsUrl('https://goo.gl/abc'), false);
+eq('deny http', isAllowedMapsUrl('http://maps.app.goo.gl/abc'), false);
+eq('deny other host', isAllowedMapsUrl('https://evil.com/maps/place/x'), false);
+eq('deny lookalike host', isAllowedMapsUrl('https://maps.app.goo.gl.evil.com/x'), false);
+eq('deny userinfo trick', isAllowedMapsUrl('https://maps.app.goo.gl@169.254.169.254/'), false);
+eq('deny port', isAllowedMapsUrl('https://maps.app.goo.gl:8443/x'), false);
+eq('deny google.com non-maps', isAllowedMapsUrl('https://www.google.com/url?q=http://x'), false);
+// Client: which links go to the resolver.
+eq('links: google only', JSON.stringify(_googleMapLinks('a https://maps.app.goo.gl/NEW1). b https://waze.com/ul/x c https://goo.gl/maps/OLD2')), JSON.stringify(['https://maps.app.goo.gl/NEW1', 'https://goo.gl/maps/OLD2']));
+// Nearest venue within 150 m.
+const VP = [{ id: 1, lat: 3.1562181, lng: 101.7055193 }, { id: 2, lat: 3.0500, lng: 101.6900 }, { id: 3, lat: null, lng: null }];
+eq('nearest: same spot', (nearestVenue(3.1562181, 101.7055193, VP) || {}).id, 1);
+eq('nearest: ~100 m away', (nearestVenue(3.1571, 101.7055193, VP) || {}).id, 1);
+eq('nearest: ~300 m away → none', nearestVenue(3.1589, 101.7055193, VP), null);
+eq('nearest: no position', nearestVenue(null, null, VP), null);
+eq('nearest: two venues in the same building → none', nearestVenue(3.05173, 101.6712, [{ id: 2, lat: 3.051735, lng: 101.67142 }, { id: 4, lat: 3.0517322, lng: 101.6710291 }]), null);
+eq('nearest: null lat venue ignored', nearestVenue(0, 0, [{ id: 9, lat: null, lng: null }]), null);
+// resolveVenueFromLink with a stubbed Edge Function (asserts the link it was given).
+const stub = (res, want) => async (u) => { if (u !== want) throw new Error('wrong link ' + u); return res; };
+const FRESH = 'https://maps.app.goo.gl/FreshShareLink123';
+(async () => {
+    eq('fresh MBB link → MBB by name', ((await resolveVenueFromLink(FRESH, V, stub({ ok: true, ...pa }, FRESH))) || { venue: {} }).venue.id, 1);
+    eq('fresh link → venue by position', ((await resolveVenueFromLink(FRESH, [{ id: 7, name: 'Somewhere', lat: 3.1562, lng: 101.7055 }], stub({ ok: true, name: 'Unknown Tower', address: null, lat: 3.1562181, lng: 101.7055193 }, FRESH))) || { venue: {} }).venue.id, 7);
+    eq('fresh link to unknown place → none (never Others)', await resolveVenueFromLink(FRESH, V, stub({ ok: true, name: 'Pavilion KL', address: 'Bukit Bintang', lat: 3.149, lng: 101.713 }, FRESH)), null);
+    eq('resolver error → none', await resolveVenueFromLink(FRESH, V, stub({ ok: false, error: 'unresolved' }, FRESH)), null);
+    eq('resolver throws → none', await resolveVenueFromLink(FRESH, V, async () => { throw new Error('offline'); }), null);
+})().then(() => {
+
 // ── Title ───────────────────────────────────────────────────────────────────
 eq('Male → Mr.', autoTitle('Male', ''), 'Mr.');
 eq('male married → Mr.', autoTitle('male', 'Married'), 'Mr.');
@@ -117,3 +170,4 @@ eq('no gender → none', autoTitle('', 'Married'), '');
 
 console.log(`test-paste-appointment: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
+});

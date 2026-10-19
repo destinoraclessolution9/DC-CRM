@@ -2143,6 +2143,40 @@ My raw notes:
         }
         return tie ? null : best;
     };
+    // Google Maps share links in the text (maps.app.goo.gl / goo.gl/maps).
+    const _googleMapLinks = (text) => (String(text || '').match(/https?:\/\/[^\s<>"']+/gi) || [])
+        .map(u => u.replace(/[)\].,;]+$/, ''))
+        .filter(u => /^https?:\/\/(maps\.app\.goo\.gl\/|goo\.gl\/maps\/)/i.test(u));
+    // The one venue whose saved position is within maxM metres of (lat, lng);
+    // two venues that close (same building) → no match, the agent picks.
+    const nearestVenue = (lat, lng, venues, maxM = 150) => {
+        if (lat == null || lng == null || !isFinite(lat) || !isFinite(lng)) return null;
+        const R = 6371000, rad = (d) => d * Math.PI / 180;
+        const near = [];
+        for (const v of venues || []) {
+            if (v.lat == null || v.lng == null) continue;
+            const la = parseFloat(v.lat), ln = parseFloat(v.lng);
+            if (!isFinite(la) || !isFinite(ln)) continue;
+            const a = Math.sin(rad(la - lat) / 2) ** 2 + Math.cos(rad(lat)) * Math.cos(rad(la)) * Math.sin(rad(ln - lng) / 2) ** 2;
+            const m = 2 * R * Math.asin(Math.sqrt(a));
+            if (m <= maxM) near.push(v);
+        }
+        return near.length === 1 ? near[0] : null;
+    };
+    // A fresh Google share link matches no saved link: ask the resolve-map-link
+    // Edge Function where it points, then match by that place's name + address,
+    // else by the nearest venue within 150 m. Returns { venue, place } or null.
+    const resolveVenueFromLink = async (link, venues, invoke) => {
+        let res = null;
+        try {
+            const call = invoke || ((u) => window.supabase.functions.invoke('resolve-map-link', { body: { url: u } }).then(r => r.data));
+            res = await Promise.race([call(link), new Promise(r => setTimeout(() => r(null), 8000))]);
+        } catch (_) { res = null; }
+        if (!res || !res.ok) return null;
+        const venue = matchVenue([res.name, res.address].filter(Boolean).join(', '), venues)
+            || nearestVenue(res.lat, res.lng, venues);
+        return venue ? { venue, place: res } : null;
+    };
     const _venueValue = (v) => (v.name || '') + ' | ' + (v.location || '');
     // Called by the CPS "Paste Info" box (script-cps.js) after the basic fields.
     // Fills the activity's date / time / venue when the activity form is open.
@@ -2173,11 +2207,20 @@ My raw notes:
         }
         const sel = document.getElementById('activity-venue');
         if (sel && !sel.value) {
-            const v = matchVenue(text, await _getVenuesCached());
+            const venues = await _getVenuesCached();
+            let v = matchVenue(text, venues), learned = null;
+            const link = !v && _googleMapLinks(text)[0];
+            if (link && window.supabase?.functions) {
+                const hit = await resolveVenueFromLink(link, venues);
+                if (hit) { v = hit.venue; learned = { id: v.id, link: link.replace(/[?#].*$/, ''), lat: hit.place.lat ?? null, lng: hit.place.lng ?? null }; }
+            }
             const val = v ? _venueValue(v) : '';
+            delete sel.dataset.learnLink;
             if (v && [...sel.options].some(o => o.value === val)) {
                 sel.value = val;
                 sel.dataset.auto = '1';
+                // Saved onto the venue once the agent confirms it (see the save pop-up).
+                if (learned) sel.dataset.learnLink = JSON.stringify(learned);
                 filled.push('Venue');
             }
         }
@@ -6411,7 +6454,17 @@ My raw notes:
                     const when = [document.getElementById('activity-date')?.value, document.getElementById('start-time')?.value].filter(Boolean).join(' ');
                     if (!window.confirm(`The appointment is at:\n\n${vSel.value}\n${when}\n\nIs that correct?`)) return;
                     vSel.dataset.auto = '0';
+                    // Confirmed venue found through a new Google link → save the
+                    // link on the venue so the next paste matches it instantly.
+                    if (vSel.dataset.learnLink) {
+                        try {
+                            const L = JSON.parse(vSel.dataset.learnLink);
+                            window.supabase?.rpc('venue_add_map_link', { p_venue_id: L.id, p_link: L.link, p_lat: L.lat, p_lng: L.lng })
+                                .then(({ error }) => { if (error) console.warn('venue_add_map_link', error); else _state.vc = null; });
+                        } catch (e) { console.warn('learn venue link', e); }
+                    }
                 }
+                if (vSel) delete vSel.dataset.learnLink;
             }
 
             // All Basic Info fields pulled via the shared collector — keeps
