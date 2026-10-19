@@ -56,7 +56,7 @@ global.AppDataStore = {
     getActivitiesInRange: async (from, to) => (DB.activities || []).filter(a => a.activity_date >= from && a.activity_date <= to),
     getById: async () => null, query: async () => [],
 };
-global.supabase = { from: (table) => { const q = { select: () => q, gte: () => q, lt: () => q,
+global.supabase = { from: (table) => { const q = { select: () => q, gte: () => q, lt: () => q, lte: () => q,
     then: (r) => r({ data: table === 'users' ? (DB.users_join || []) : (DB.npo_sales || []), error: null }) }; return q; } };
 
 let EXCEL = null;
@@ -144,8 +144,8 @@ async function main() {
             { id: 6, customer_id: 101, date: '2027-10-01', amount: 21980, payment_method: 'Cash', item: 'typo date' },
         ],
         npo_sales: [
-            { cart_total: 30000, responsible_agent_id: 8, status: 'active', created_at: '2026-08-01T04:00:00Z' },
-            { cart_total: 99999, responsible_agent_id: 8, status: 'cancelled', created_at: '2026-08-01T04:00:00Z' },
+            { cart_total: 30000, responsible_agent_id: 8, status: 'active', start_date: '2026-08-01' },
+            { cart_total: 99999, responsible_agent_id: 8, status: 'cancelled', start_date: '2026-08-01' },
         ],
         users_join: [{ id: 10, join_date: '2026-08-03' }],
         events: [{ id: 'e1', categories: '["老板每月主题课"]', date: '2026-08-02' }, { id: 'e2', categories: '["汇集灵活-Condo","博物馆"]', date: '2026-09-03' }],

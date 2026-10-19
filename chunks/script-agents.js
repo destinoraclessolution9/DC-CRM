@@ -930,6 +930,11 @@ const openAddAgentModal = async (agentId = null) => {
                         <input type="date" id="agent-dob" class="form-control" value="${isEdit ? String(agent.date_of_birth || '').slice(0,10) : ''}">
                         <small style="color:var(--gray-500); margin-top:4px; display:block;">Powers the calendar's Team Birthdays reminder.</small>
                     </div>
+                    <div class="form-group half">
+                        <label>Join Date</label>
+                        <input type="date" id="agent-join-date" class="form-control" value="${isEdit ? String(agent.join_date || '').slice(0,10) : (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })()}">
+                        <small style="color:var(--gray-500); margin-top:4px; display:block;">The day they actually joined — new-agent reports (PJA / NEA) count by this date.</small>
+                    </div>
                 </div>
             </div>
 
@@ -1104,8 +1109,13 @@ const saveAgent = async () => {
         country: (UI.countryByCode(document.getElementById('agent-country')?.value).code) || UI.defaultCountry,
     };
 
+    // Join date the admin picked (keyed in late → still the real joining day).
+    const joinDateVal = document.getElementById('agent-join-date')?.value || '';
+    if (joinDateVal && !/^\d{4}-\d{2}-\d{2}$/.test(joinDateVal)) return UI.toast.error('Join Date is not a valid date');
+
     if (editId) {
-        await AppDataStore.update('users', editId, fields);
+        // Only write join_date when set — blanking the field never wipes a stored one.
+        await AppDataStore.update('users', editId, joinDateVal ? { ...fields, join_date: joinDateVal } : fields);
         UI.hideModal();
         UI.toast.success('Agent updated successfully');
     } else {
@@ -1130,7 +1140,7 @@ const saveAgent = async () => {
         const _jd = new Date();
         const newAgent = {
             username: usernameVal,
-            join_date: `${_jd.getFullYear()}-${String(_jd.getMonth() + 1).padStart(2, '0')}-${String(_jd.getDate()).padStart(2, '0')}`,
+            join_date: joinDateVal || `${_jd.getFullYear()}-${String(_jd.getMonth() + 1).padStart(2, '0')}-${String(_jd.getDate()).padStart(2, '0')}`,
             ...fields
         };
         await AppDataStore.create('users', newAgent);

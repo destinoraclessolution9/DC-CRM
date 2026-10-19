@@ -2590,6 +2590,9 @@ const saveCustomerProfile = async (customerId) => {
     }
 };
 
+// Local (MYT) calendar day as YYYY-MM-DD — a UTC date would be yesterday before 08:00.
+const _custLocalDay = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
+
 const openAddCustomerModal = async () => {
     const content = `
 <div class="warning-banner" style="background:#fff3cd; border:1px solid #ffc107; color:#856404; padding:12px; border-radius:8px; margin-bottom:16px;">
@@ -2609,6 +2612,9 @@ const openAddCustomerModal = async () => {
     <div class="form-row">
         <div class="form-group half"><label>Previous Prospect ID</label><input type="text" id="cust-prev-id" class="form-control"></div>
         <div class="form-group half"><label>Initial Purchase Amt</label><input type="number" id="cust-init-amt" class="form-control"></div>
+    </div>
+    <div class="form-row">
+        <div class="form-group half"><label>Customer Since</label><input type="date" id="cust-since" class="form-control" value="${_custLocalDay()}" max="${_custLocalDay()}"></div>
     </div>
     <div class="form-row">
         <div class="form-group half"><label>Market / Country</label>
@@ -2645,7 +2651,8 @@ const saveCustomer = async () => {
         date_of_birth: document.getElementById('cust-dob')?.value,
         lifetime_value: parseFloat(document.getElementById('cust-init-amt')?.value) || 0,
         status: 'active',
-        customer_since: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
+        // The real date they became a customer (NC in the weekly report), not the key-in day.
+        customer_since: document.getElementById('cust-since')?.value || _custLocalDay(),
         responsible_agent_id: _state.cu?.id || null,
         country: UI.countryByCode(document.getElementById('cust-country')?.value).code,
     };
@@ -2804,7 +2811,10 @@ const openAddPurchaseModal = async (customerId) => {
                     <div style="font-size:12px; color:var(--gray-500);">Installment items queue for production only after full payment, unless "deliver in advance" is set. Maturity = purchase date + tenure.</div>
                 </div>
                 <div class="form-row">
+                    <div class="form-group half"><label>Invoice Date <span class="required">*</span></label><input type="date" id="pur-date" class="form-control" value="${_custLocalDay()}" max="${_custLocalDay()}"></div>
                     <div class="form-group half"><label>Invoice No. <span class="required">*</span></label><input type="text" id="pur-inv" class="form-control" placeholder="Enter invoice number"></div>
+                </div>
+                <div class="form-row">
                     <div class="form-group half"><label>Payment Status</label>
                         <select id="pur-status" class="form-control">
                             <option value="PENDING">Pending</option>
@@ -2855,6 +2865,11 @@ const savePurchase = async (customerId) => {
     if (!(amt > 0)) return UI.toast.error('Amount must be a positive number');
     const invoiceNo = document.getElementById('pur-inv')?.value?.trim();
     if (!invoiceNo) return UI.toast.error('Invoice No. is required');
+    // Reports bucket a sale by its INVOICE date, so a backdated entry lands in the
+    // week it was actually sold — never the day it was keyed in.
+    const invoiceDate = document.getElementById('pur-date')?.value || _custLocalDay();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(invoiceDate)) return UI.toast.error('Invoice Date is required');
+    if (invoiceDate > _custLocalDay()) return UI.toast.error('Invoice Date cannot be in the future');
 
     // ── Double-submit guard (synchronous, set before any await) ──
     const _key = String(customerId);
@@ -2925,10 +2940,9 @@ const savePurchase = async (customerId) => {
             // customer cannot restate historical revenue. This is the OWNER now, not
             // the closer — owner attribution is deliberate.
             agent_id: customer?.responsible_agent_id ?? null,
-            // Local calendar day (MYT is UTC+8): a UTC date would stamp early-morning
-            // sales with YESTERDAY, mis-bucketing them in monthly/quarterly reports
-            // and the delivery-board maturity math (audit #5/#11).
-            date: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(),
+            // The invoice date the agent picked (defaults to today, local MYT day).
+            // Reports, maturity math and the delivery board all key off this.
+            date: invoiceDate,
             invoice: invoiceNo,
             item: item,
             amount: amt,

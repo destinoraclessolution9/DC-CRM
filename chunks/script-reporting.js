@@ -752,27 +752,21 @@
     //   existing PO getters set them (and PORT(DP) stays MANUAL), never writing a
     //   wrong/zero NPO figure to a boss-facing report.
     //
-    // Window: `from`/`to` are YYYY-MM-DD (Mon→Sun). created_at is a timestamp, so we
-    //   bound created_at >= from(00:00) AND < (Sunday + 1 day)(00:00) to include the
-    //   whole final day regardless of time-of-day.
+    // Window: `from`/`to` are YYYY-MM-DD (Mon→Sun), matched inclusively against
+    //   start_date (the order date) — NOT created_at, the day it was keyed in.
     const _getNPOWeekAgg = async (from, to) => {
         const sb = window.supabase || window.supabaseClient || null;
         if (!sb || typeof sb.from !== 'function') return null;
         try {
-            // created_at is a UTC timestamptz, but from/to are LOCAL YYYY-MM-DD. Build
-            // local-midnight Date objects and bound with their UTC-instant ISO strings
-            // so the window is the calendar Mon..Sun in the viewer's timezone (not a
-            // UTC-midnight window shifted 8h earlier). Lower bound = local 00:00 of `from`;
-            // inclusive upper bound = local 00:00 of the day AFTER `to`.
-            const fromStart = new Date(from + 'T00:00:00');
-            const toNext = new Date(to + 'T00:00:00');
-            if (!Number.isFinite(fromStart.getTime()) || !Number.isFinite(toNext.getTime())) return null;
-            toNext.setDate(toNext.getDate() + 1);
+            // Window on start_date — the ORDER date the agent picked on the form (a
+            // plain local `date`). Never created_at: a backdated order keyed in late
+            // must land in the week it was sold, not the week it was typed in.
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(String(from)) || !/^\d{4}-\d{2}-\d{2}$/.test(String(to))) return null;
 
             let q = sb.from('npo_sales')
                 .select('first_payment, cart_total, responsible_agent_id, status')
-                .gte('created_at', fromStart.toISOString())
-                .lt('created_at', toNext.toISOString());
+                .gte('start_date', from)
+                .lte('start_date', to);
 
             // Scope to the viewer's visible agents (responsible_agent_id). For an
             // agent _visibleUserIds is already clamped to [their own id] upstream.
@@ -853,7 +847,7 @@
     //
     // NPO (installment-package deals) are read from the `npo_sales` Phase-2 table via
     //   _getNPOWeekAgg — scoped to the viewer (responsible_agent_id) and the report's
-    //   own week (created_at in [Mon, Sun]). If that table isn't applied yet OR the
+    //   own week (start_date = order date in [Mon, Sun]). If that table isn't applied yet OR the
     //   query errors, _getNPOWeekAgg returns null and the PORT cells fall back to
     //   PO-only (POR/PORT(TOTAL)) / MANUAL (PORT(DP)) — never a wrong/zero NPO number.
     //
@@ -867,9 +861,9 @@
     //     if 预购/PCP deals are ever recorded under OTHER purchase methods, POR/PORT
     //     would still undercount those — revisit if the payment taxonomy is expanded.
     //
-    // Event-category headcounts (MT/CR/FT/IT/HJ/RS/MZ) reuse the SAME table+filter
-    // as the live "Headcount by Event Type" card (event_registrations,
-    // attendance_status==='Attended', r.event_date) — see getEventCategoryHeadcount.
+    // Event-category headcounts (MT/CR/FT/IT/HJ/RS/MZ) count event_attendees rows
+    // ticked Attended/Late, dated by the event activity's activity_date (the event
+    // day, not the key-in day) — see getEventCategoryHeadcount.
     // The category strings are copied verbatim from the canonical EVENT_CATEGORIES
     // list in script-activities.js / script-marketing.js (note 汇聚-专案 uses 聚 while
     // the 汇集-* siblings use 集 — both stored exactly as written here).
@@ -1291,39 +1285,48 @@
 
     const getHeadcountByEventType = async (from, to) => {
         const eventTypes = ['Monthly Talk', 'Weekly Talk', 'Huiji', 'Museum', 'Study Group', 'Customer Interaction'];
-        const [events, registrations] = await Promise.all([
+        // event_attendees (Attended / Late ticks) dated by the event activity's
+        // activity_date — the event day, not the day attendance was keyed in. The
+        // old event_registrations source has no attendance_status / event_date
+        // columns on the live table, so this card always read 0.
+        const [events, activities, attendees] = await Promise.all([
             AppDataStore.getAll('events'),
-            AppDataStore.getAll('event_registrations'),
+            _reportActsInRange(from, to, 'getHeadcountByEventType'),
+            AppDataStore.getAll('event_attendees'),
         ]);
-        // De-quad: bucket registrations by event_id ONCE (O(n), source insertion
-        // order preserved) so the per-event lookup is O(1) instead of a full-array
-        // .filter scan per event (was O(events × registrations)). RAW key + strict
-        // === parity with the old `r.event_id === ev.id` comparison.
-        const regsByEvent = new Map();
-        for (const r of registrations) {
-            const k = r.event_id; // RAW key
-            let bucket = regsByEvent.get(k);
-            if (!bucket) { bucket = []; regsByEvent.set(k, bucket); }
-            bucket.push(r);
+        const actMap = new Map();
+        const actByEvent = new Map(); // legacy rows with only event_id: unique activity per event
+        for (const a of activities) {
+            if (!a || a.event_id == null || a.activity_type === 'EVENT_CLOSING') continue;
+            if (!a.activity_date || a.activity_date < from || a.activity_date > to) continue;
+            actMap.set(String(a.id), a);
+            const ek = String(a.event_id);
+            actByEvent.set(ek, actByEvent.has(ek) ? null : a);
         }
         // Market scope: when a boss/mgmt user has drilled into a specific market
         // (header switcher), headcount counts only that market's events. ALL (and
         // every agent, who is single-market) → unchanged combined count.
         const _scope = window._crmUtils.listCountryScope();
         const _scoped = _scope !== window._crmUtils.ALL_COUNTRIES;
-        const result = {};
-        for (const type of eventTypes) result[type] = { prospects: 0, agents: 0, total: 0 };
+        const typeByEvent = new Map();
         for (const ev of events) {
             if (_scoped && window._crmUtils.recordCountry(ev) !== _scope) continue;
-            const matchedType = eventTypes.find(t => ev.title.toLowerCase().includes(t.toLowerCase()) || ev.category === t);
+            const title = String(ev.title || '').toLowerCase();
+            const matchedType = eventTypes.find(t => title.includes(t.toLowerCase()) || ev.category === t);
+            if (matchedType) typeByEvent.set(String(ev.id), matchedType);
+        }
+        const result = {};
+        for (const type of eventTypes) result[type] = { prospects: 0, agents: 0, total: 0 };
+        for (const att of attendees) {
+            if (!att.attended && att.attendance_status !== 'Attended') continue;
+            const act = att.activity_id != null
+                ? actMap.get(String(att.activity_id))
+                : (att.event_id != null ? actByEvent.get(String(att.event_id)) : null);
+            if (!act) continue;
+            const matchedType = typeByEvent.get(String(att.event_id ?? act.event_id));
             if (!matchedType) continue;
-            const regs = (regsByEvent.get(ev.id) || []).filter(r =>
-                r.event_date >= from && r.event_date <= to && r.attendance_status === 'Attended'
-            );
-            for (const r of regs) {
-                if (r.attendee_type === 'prospect' || r.attendee_type === 'customer') { result[matchedType].prospects++; result[matchedType].total++; }
-                else if (r.attendee_type === 'agent') { result[matchedType].agents++; result[matchedType].total++; }
-            }
+            if (att.attendee_type === 'prospect' || att.attendee_type === 'customer') { result[matchedType].prospects++; result[matchedType].total++; }
+            else if (att.attendee_type === 'agent') { result[matchedType].agents++; result[matchedType].total++; }
         }
         return result;
     };
@@ -2258,8 +2261,24 @@ const getEPPDetails = async (from, to) => {
     return Object.values(map);
 };
 
-const getNewAgents = async (from, to) => {
+// AppDataStore's light users select omits join_date, so getAll('users') rows never
+// carry it and every new-agent count read 0. Read id + join_date straight from
+// Supabase and merge it on (same fix as the Quarter Review NEA, b080e37). A failed
+// read leaves the rows as they were — never a guessed date like created_at.
+const _usersWithJoinDate = async () => {
     const users = await AppDataStore.getAll('users');
+    const sb = window.supabase || window.supabaseClient || null;
+    if (!sb || typeof sb.from !== 'function') return users;
+    try {
+        const { data, error } = await sb.from('users').select('id, join_date');
+        if (error || !Array.isArray(data)) return users;
+        const jd = new Map(data.map(r => [String(r.id), r.join_date]));
+        return users.map(u => (u.join_date == null && jd.has(String(u.id)) ? { ...u, join_date: jd.get(String(u.id)) } : u));
+    } catch (_) { return users; }
+};
+
+const getNewAgents = async (from, to) => {
+    const users = await _usersWithJoinDate();
     let count = 0;
     for (const u of users) {
         // Normalise join_date to a YYYY-MM-DD string. A null/blank/undated user can't
@@ -4155,53 +4174,71 @@ const _wrParseEventCategories = (raw) => {
 };
 
 // Attended-headcount of events whose `categories` array intersects categoryList,
-// with the registration's event_date in [from,to]. Reuses the SAME table + filter
-// the live "Headcount by Event Type" dashboard card uses (getHeadcountByEventType):
-//   table  = event_registrations  (the mirror written on attendance toggle)
-//   filter = attendance_status === 'Attended'
-//   date   = r.event_date (inclusive)
-// joined to events by event_id to read `categories`. Optional attendeeTypes
-// (e.g. ['customer']) restricts which attendee rows count; default counts any
-// attendee. Scoping: resolves each attendee's responsible agent (agent rows by
-// entity, customer/prospect rows via responsible_agent_id) and keeps it only if
-// in _visibleUserIds — same resolution as getActivityHeadcount. When scope is
-// 'all' no per-row resolution is needed (matches the dashboard card's behaviour).
+// counted on the EVENT's own date. Source of truth = event_attendees (the row the
+// Attended / Late ticks write); the date comes from the parent event activity's
+// activity_date — never from when the tick was keyed in. A late update to last
+// week's attendance therefore still lands in last week.
+//   (event_registrations was the old source: its attendance_status / event_date
+//   columns don't exist on the live table, so every cell read 0.)
+// attended = att.attended || status 'Attended' (Late sets attended=true), the same
+// gate every other attendance report uses. Categories are read off the event
+// (att.event_id, falling back to the activity's event_id). Optional attendeeTypes
+// (e.g. ['customer']) restricts which attendee rows count. Scoping: each
+// attendee's responsible agent (agent rows by entity, customer/prospect rows via
+// responsible_agent_id) must be in _visibleUserIds — same as getActivityHeadcount.
 const getEventCategoryHeadcount = async (from, to, categoryList, attendeeTypes) => {
     const wanted = new Set(categoryList || []);
     const typeFilter = (attendeeTypes && attendeeTypes.length) ? new Set(attendeeTypes) : null;
     const scoped = _visibleUserIds !== 'all';
-    const [events, registrations, prospects, customers] = await Promise.all([
+    const [events, activities, attendees, prospects, customers] = await Promise.all([
         AppDataStore.getAll('events'),
-        AppDataStore.getAll('event_registrations'),
+        _reportActsInRange(from, to, 'getEventCategoryHeadcount'),
+        AppDataStore.getAll('event_attendees'),
         scoped ? AppDataStore.getAll('prospects') : Promise.resolve([]),
         scoped ? AppDataStore.getAll('customers') : Promise.resolve([]),
     ]);
-    // Events whose categories intersect the wanted set (RAW id key, parity with
-    // getHeadcountByEventType's regsByEvent.get(ev.id)).
     const matchedEventIds = new Set();
     for (const ev of events) {
         if (!_recInMarket(ev)) continue;
         const cats = _wrParseEventCategories(ev.categories);
-        if (cats.some(c => wanted.has(c))) matchedEventIds.add(ev.id);
+        if (cats.some(c => wanted.has(c))) matchedEventIds.add(String(ev.id));
     }
     if (matchedEventIds.size === 0) return 0;
+    // Event activities dated inside the window (activity_date = the event day).
+    const actMap = new Map();
+    const actByEvent = new Map();
+    for (const a of activities) {
+        if (!a || a.event_id == null) continue;
+        if (a.activity_type === 'EVENT_CLOSING') continue; // a sale record, not the event itself
+        if (!a.activity_date || a.activity_date < from || a.activity_date > to) continue;
+        actMap.set(String(a.id), a);
+        // Older attendee rows carry only event_id — resolve those through the event's
+        // activity, but only when the event has exactly ONE dated activity in range.
+        const ek = String(a.event_id);
+        actByEvent.set(ek, actByEvent.has(ek) ? null : a);
+    }
     const prospMap = {}; prospects.forEach(p => { prospMap[p.id] = p; });
     const custMap = {}; customers.forEach(c => { custMap[c.id] = c; });
+    const seen = new Set();
     let count = 0;
-    for (const r of registrations) {
-        if (!matchedEventIds.has(r.event_id)) continue;
-        if (r.attendance_status !== 'Attended') continue;
-        if (r.event_date < from || r.event_date > to) continue;
-        if (typeFilter && !typeFilter.has(r.attendee_type)) continue;
+    for (const att of attendees) {
+        if (!att.attended && att.attendance_status !== 'Attended') continue;
+        const act = att.activity_id != null
+            ? actMap.get(String(att.activity_id))
+            : (att.event_id != null ? actByEvent.get(String(att.event_id)) : null);
+        if (!act) continue; // event day outside the window (or orphaned row)
+        const evId = String(att.event_id ?? act.event_id);
+        if (!matchedEventIds.has(evId)) continue;
+        if (typeFilter && !typeFilter.has(att.attendee_type)) continue;
+        const entityId = att.entity_id ?? att.attendee_id;
+        const key = act.id + ':' + att.attendee_type + ':' + entityId;
+        if (seen.has(key)) continue; // a duplicate row for the same person + day
+        seen.add(key);
         if (scoped) {
             let agentId;
-            if (r.attendee_type === 'agent') {
-                agentId = r.attendee_id;
-            } else if (r.attendee_type === 'customer') {
-                agentId = custMap[r.attendee_id] && custMap[r.attendee_id].responsible_agent_id;
-            } else {
-                agentId = prospMap[r.attendee_id] && prospMap[r.attendee_id].responsible_agent_id;
-            }
+            if (att.attendee_type === 'agent') agentId = entityId;
+            else if (att.attendee_type === 'customer') agentId = custMap[entityId] && custMap[entityId].responsible_agent_id;
+            else agentId = prospMap[entityId] && prospMap[entityId].responsible_agent_id;
             if (!_visibleUserIds.includes(agentId)) continue;
         }
         count++;
@@ -4510,11 +4547,10 @@ const _npoOrderRows = async (from, to) => {
     const sb = window.supabase || window.supabaseClient || null;
     if (!sb || typeof sb.from !== 'function') return [];
     try {
-        const fromStart = new Date(from + 'T00:00:00');
-        const toNext = new Date(to + 'T00:00:00'); toNext.setDate(toNext.getDate() + 1);
+        // start_date = the order date picked on the form, not the key-in day.
         let q = sb.from('npo_sales')
-            .select('created_at, customer_name, cart_total, first_payment, tenure_months, responsible_agent_id, status')
-            .gte('created_at', fromStart.toISOString()).lt('created_at', toNext.toISOString());
+            .select('start_date, customer_name, cart_total, first_payment, tenure_months, responsible_agent_id, status')
+            .gte('start_date', from).lte('start_date', to);
         if (_visibleUserIds !== 'all' && Array.isArray(_visibleUserIds)) {
             const ids = _visibleUserIds.map(Number).filter(Number.isFinite);
             if (!ids.length) return [];
@@ -4531,7 +4567,7 @@ const buildPOPDetails = async (from, to) => {
     const users = npo.length ? await AppDataStore.getAll('users').catch(() => []) : [];
     const uName = (id) => (users.find(u => String(u.id) === String(id)) || {}).full_name || '—';
     const npoTotal = npo.reduce((a, r) => a + (parseFloat(r.cart_total) || 0), 0);
-    const npoRows = npo.map(r => [String(r.created_at || '').slice(0, 10), uName(r.responsible_agent_id), r.customer_name || '—',
+    const npoRows = npo.map(r => [String(r.start_date || '').slice(0, 10), uName(r.responsible_agent_id), r.customer_name || '—',
         `RM ${(parseFloat(r.cart_total) || 0).toLocaleString()}`, `RM ${(parseFloat(r.first_payment) || 0).toLocaleString()}`,
         r.tenure_months ? `${r.tenure_months} mo` : '—']);
     const h = (t) => `<div style="font-weight:700;margin:4px 0 8px;">${t}</div>`;
@@ -4648,7 +4684,7 @@ const _trySalesByDay = async (from, to) => {
 };
 
 const buildNewAgentsDetails = async (from, to) => {
-    const users = await AppDataStore.getAll('users');
+    const users = await _usersWithJoinDate();
     const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
     const rows = [];
     for (const u of users) {
@@ -6544,10 +6580,11 @@ const _qrLoad = async (earliest, latest) => {
         (async () => {
             if (!sb || typeof sb.from !== 'function') return [];
             try {
+                // start_date = order date (not created_at, the key-in day).
                 const { data, error } = await sb.from('npo_sales')
-                    .select('cart_total, responsible_agent_id, status, created_at')
-                    .gte('created_at', new Date(earliest + 'T00:00:00').toISOString())
-                    .lt('created_at', new Date(_qrAddDays(latest, 1) + 'T00:00:00').toISOString());
+                    .select('cart_total, responsible_agent_id, status, start_date')
+                    .gte('start_date', earliest)
+                    .lte('start_date', latest);
                 return (!error && Array.isArray(data)) ? data : [];
             } catch (_) { return []; }
         })(),
@@ -6661,7 +6698,7 @@ const _qrLoad = async (earliest, latest) => {
         }
         for (const n of npo) {
             if (String(n.status || '').toLowerCase() === 'cancelled') continue;
-            const d = n.created_at ? toLocalDateStr(new Date(n.created_at)) : '';
+            const d = String(n.start_date || '').slice(0, 10);
             if (!d || d < from || d > to || !inScope(n.responsible_agent_id)) continue;
             const r = row(n.responsible_agent_id);
             r.pop++; r.popRm += Number(n.cart_total) || 0; r.orders++;

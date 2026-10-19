@@ -3944,7 +3944,7 @@ const handleStageDrop = async (e, stageId) => {
              </div>
              <div class="form-group">
                  <label>Close Date</label>
-                 <input type="date" id="close-date" class="form-control" value="${new Date().toISOString().split('T')[0]}">
+                 <input type="date" id="close-date" class="form-control" value="${(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })()}">
              </div>`,
             [
                 { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
@@ -4018,7 +4018,7 @@ const closeDealWon = async (prospectId) => {
         return;
     }
     const amount = parseFloat(document.getElementById('deal-amount')?.value || prospect.deal_value || 5000) || 0;
-    const closeDate = document.getElementById('close-date')?.value || new Date().toISOString().split('T')[0];
+    const closeDate = document.getElementById('close-date')?.value || (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(); // local MYT day, not UTC
 
     // Create customer record. Do NOT assign id:Date.now() — let Supabase generate the
     // PK (a client Date.now() can collide with an imported customer id or another
