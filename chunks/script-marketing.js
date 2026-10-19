@@ -1109,6 +1109,8 @@
                 <div class="form-group"><label>Location*</label><input type="text" id="mkt-vlocation" class="form-control" placeholder="e.g. KL, JB, SG"></div>
                 <div class="form-group"><label>Address</label><input type="text" id="mkt-vaddress" class="form-control" placeholder="e.g. No. 5, Jalan Bukit Jalil, 57000 KL"></div>
                 <div class="form-group"><label>Waze Link</label><input type="url" id="mkt-vwaze" class="form-control" placeholder="https://waze.com/ul/..."></div>
+                <div class="form-group"><label>Google Maps Link(s)</label><textarea id="mkt-vmaps" class="form-control" rows="2" placeholder="https://maps.app.goo.gl/... (one per line — add every link agents send for this place)"></textarea></div>
+                <div class="form-group"><label>Other names</label><input type="text" id="mkt-valiases" class="form-control" placeholder="e.g. MBB, Bangkok Bank (comma separated)"><div style="font-size:11px;color:#6b7280;margin-top:4px;">Used to recognise this venue when an agent pastes an appointment message.</div></div>
 `;
             UI.showModal('Add New Venue', content, [
                 { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
@@ -1237,6 +1239,8 @@
                 <div class="form-group"><label>Location*</label><input type="text" id="mkt-vlocation" class="form-control" value="${escapeHtml(item.location || '')}"></div>
                 <div class="form-group"><label>Address</label><input type="text" id="mkt-vaddress" class="form-control" value="${escapeHtml(item.address || '')}" placeholder="e.g. No. 5, Jalan Bukit Jalil, 57000 KL"></div>
                 <div class="form-group"><label>Waze Link</label><input type="url" id="mkt-vwaze" class="form-control" value="${escapeHtml(item.waze_link || '')}" placeholder="https://waze.com/ul/..."></div>
+                <div class="form-group"><label>Google Maps Link(s)</label><textarea id="mkt-vmaps" class="form-control" rows="2" placeholder="https://maps.app.goo.gl/... (one per line — add every link agents send for this place)">${escapeHtml(String(item.map_links || '').split(/\s+/).filter(Boolean).join('\n'))}</textarea></div>
+                <div class="form-group"><label>Other names</label><input type="text" id="mkt-valiases" class="form-control" value="${escapeHtml(item.aliases || '')}" placeholder="e.g. MBB, Bangkok Bank (comma separated)"><div style="font-size:11px;color:#6b7280;margin-top:4px;">Used to recognise this venue when an agent pastes an appointment message.</div></div>
             `;
             UI.showModal('Edit Venue', content, [
                 { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
@@ -1573,16 +1577,18 @@
         const location = (document.getElementById('mkt-vlocation')?.value || '').trim();
         const address = (document.getElementById('mkt-vaddress')?.value || '').trim();
         const waze_link = (document.getElementById('mkt-vwaze')?.value || '').trim();
+        const map_links = (document.getElementById('mkt-vmaps')?.value || '').split(/[\s,]+/).filter(Boolean).join(' ') || null;
+        const aliases = (document.getElementById('mkt-valiases')?.value || '').split(',').map(x => x.trim()).filter(Boolean).join(', ') || null;
         if (!name) return UI.toast.error('Venue Name is required');
         if (!location) return UI.toast.error('Location is required');
 
         try {
             if (id) {
-                await AppDataStore.update('venues', id, { name, location, address, waze_link, updated_at: new Date().toISOString() });
+                await AppDataStore.update('venues', id, { name, location, address, waze_link, map_links, aliases, updated_at: new Date().toISOString() });
             } else {
                 const allVenues = await AppDataStore.getAll('venues');
                 const maxSeq = allVenues.reduce((max, v) => Math.max(max, v.sequence || 0), 0);
-                await AppDataStore.create('venues', { name, location, address, waze_link, sequence: maxSeq + 1, created_at: new Date().toISOString() });
+                await AppDataStore.create('venues', { name, location, address, waze_link, map_links, aliases, sequence: maxSeq + 1, created_at: new Date().toISOString() });
             }
         } catch (err) {
             UI.toast.error('Save failed: ' + (err.message || err));

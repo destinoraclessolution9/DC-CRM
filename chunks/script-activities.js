@@ -208,7 +208,7 @@
                     </div>
                     <div class="form-group">
                         <label>Venue <span id="venue-required-star" class="required" style="display:none;">*</span></label>
-                        <select id="activity-venue" class="form-control" onchange="document.getElementById('activity-venue-other').style.display = this.value === '__other__' ? 'block' : 'none'">
+                        <select id="activity-venue" class="form-control" onchange="this.dataset.auto = '0'; document.getElementById('activity-venue-other').style.display = this.value === '__other__' ? 'block' : 'none'">
                             <option value="">-- Select Venue --</option>
                             ${_venueOptions}
                             <option value="__other__">Others (type your own)</option>
@@ -1023,7 +1023,7 @@
                         ${(() => {
                             const t = _biTitle(d.title);
                             const tOther = !!t && !BASIC_INFO_TITLES.includes(t);
-                            return `<select id="${prefix}-title" class="form-control" onchange="document.getElementById('${prefix}-title-other').style.display = this.value === '__other__' ? 'block' : 'none'" ${disabled}>
+                            return `<select id="${prefix}-title" class="form-control" onchange="document.getElementById('${prefix}-title-other').style.display = this.value === '__other__' ? 'block' : 'none'; app.biAutoFill && app.biAutoFill('${prefix}','title')" ${disabled}>
                             <option value="">— Select —</option>
                             ${BASIC_INFO_TITLE_GROUPS.map(([group, items]) => `<optgroup label="${esc(group)}">${items.map(([v, label]) => `<option value="${esc(v)}" ${sel(t, v)}>${esc(label || v)}</option>`).join('')}</optgroup>`).join('')}
                             <option value="__other__" ${tOther ? 'selected' : ''}>Other (type your own)</option>
@@ -1145,7 +1145,7 @@
                             return ms && !hit ? [...base, ms] : base;
                         })().map(opt => `
                             <label style="display:flex;align-items:center;gap:6px;font-weight:normal;margin:0;cursor:pointer;">
-                                <input type="checkbox" class="${prefix}-marital-cb" value="${esc(opt)}" ${chk(String(d.marital_status || '').trim().toLowerCase() === opt.toLowerCase())} onchange="document.querySelectorAll('.${prefix}-marital-cb').forEach(cb=>{if(cb!==this)cb.checked=false;}); app.syncBasicInfoFamily('${prefix}');">
+                                <input type="checkbox" class="${prefix}-marital-cb" value="${esc(opt)}" ${chk(String(d.marital_status || '').trim().toLowerCase() === opt.toLowerCase())} onchange="document.querySelectorAll('.${prefix}-marital-cb').forEach(cb=>{if(cb!==this)cb.checked=false;}); app.syncBasicInfoFamily('${prefix}'); app.biAutoFill && app.biAutoFill('${prefix}','marital');">
                                 ${esc(opt)}
                             </label>
                         `).join('')}
@@ -1237,7 +1237,8 @@
             if (l && l !== 'Conversion failed') lunarv = l;
         }
         return {
-            title: (d(`${prefix}-title`) === '__other__' ? d(`${prefix}-title-other`) : d(`${prefix}-title`)) || null,
+            title: (d(`${prefix}-title`) === '__other__' ? d(`${prefix}-title-other`) : d(`${prefix}-title`))
+                || autoTitle(genv, document.querySelector(`.${prefix}-marital-cb:checked`)?.value) || null,
             full_name: d(`${prefix}-name`),
             nickname: d(`${prefix}-nickname`) || null,
             gender: genv || null,
@@ -1988,13 +1989,39 @@ My raw notes:
         note.style.color = warn ? '#b45309' : '#6b7280';
         note.innerHTML = html;
     };
+    // Title from gender + marital status (2026-10-19). Mrs. = married woman,
+    // Miss = single, Ms. = any woman (the safe default when marital is unknown).
+    const autoTitle = (gender, marital) => {
+        const g = _biGender(gender);
+        if (g === 'Male') return 'Mr.';
+        if (g !== 'Female') return '';
+        const m = String(marital || '').trim().toLowerCase();
+        if (m === 'married') return 'Mrs.';
+        if (m === 'single') return 'Miss';
+        return 'Ms.';
+    };
+    // Fills an empty Title, and keeps re-filling it while it is still the
+    // auto-filled one (gender / marital changed). A title the agent picked stays.
+    const _biAutoTitle = (prefix, source) => {
+        const t = document.getElementById(`${prefix}-title`);
+        if (!t) return;
+        if (source === 'title') { t.dataset.auto = '0'; return; }
+        if (t.value && t.dataset.auto !== '1') return;
+        const marital = document.querySelector(`.${prefix}-marital-cb:checked`)?.value || '';
+        const want = autoTitle(_biMgInputs(prefix).gender, marital);
+        if (!want) return;
+        t.value = want;
+        t.dataset.auto = '1';
+        const other = document.getElementById(`${prefix}-title-other`);
+        if (other) other.style.display = 'none';
+    };
     // Called from the basic-info form's IC / DOB / Gender / Ming Gua inputs.
     // source: 'ic' | 'dob' | 'gender' | 'mg'. Never overwrites a value the agent
     // entered — a disagreement only shows a warning; the agent has the last word.
     const biAutoFill = (prefix, source) => {
         const $ = (s) => document.getElementById(`${prefix}-${s}`);
         const icEl = $('ic'), dobEl = $('dob'), genEl = $('gender'), mgEl = $('minggua');
-        if (!mgEl) return;
+        if (!mgEl) { _biAutoTitle(prefix, source); return; }
         const esc = (s) => window._crmUtils.escapeHtml(s);
         if (source === 'ic' && icEl) {
             const digits = icEl.value.replace(/[\s-]/g, '');
@@ -2019,6 +2046,7 @@ My raw notes:
                 if (filled.length) UI.toast.info(`${filled.join(' + ')} filled from the IC — please check.`);
             }
         }
+        _biAutoTitle(prefix, source);
         if (source === 'mg') mgEl.dataset.auto = '0';
         const { dob, gender } = _biMgInputs(prefix);
         const calc = mingGuaFor(dob, gender);
@@ -2037,6 +2065,123 @@ My raw notes:
         } else {
             _biMgNote(prefix, '', false);
         }
+    };
+    // ── Paste Info: appointment date / time / venue (2026-10-19) ─────────────
+    const _MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
+    const _ymd = (y, m, d) => {
+        const dt = new Date(Date.UTC(y, m - 1, d));
+        if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return '';
+        return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    };
+    // "Wednesday, 21 Oct" / "21 October 2026" / "Oct 21" / "21/10" / "21/10/2026" /
+    // "2026-10-21" / "10月21日". The weekday is ignored (open 24/7). No year → this
+    // year, unless that is more than 6 months back (a December message about
+    // January) → next year. A past date is returned as-is; the caller asks.
+    const parseApptDate = (text, today = new Date()) => {
+        const s = String(text || '');
+        const nowY = today.getFullYear();
+        const pick = (y, m, d) => {
+            if (y) return _ymd(+y < 100 ? 2000 + +y : +y, m, d);
+            let iso = _ymd(nowY, m, d);
+            if (!iso) return '';
+            const sixMonthsAgo = new Date(today.getTime() - 183 * 864e5).toISOString().slice(0, 10);
+            if (iso < sixMonthsAgo) iso = _ymd(nowY + 1, m, d);
+            return iso;
+        };
+        let mt;
+        if ((mt = s.match(/\b(20\d\d)-(\d{1,2})-(\d{1,2})\b/))) return _ymd(+mt[1], +mt[2], +mt[3]);
+        if ((mt = s.match(/(?:(20\d\d)\s*年\s*)?(\d{1,2})\s*月\s*(\d{1,2})\s*[日号號]?/))) return pick(mt[1], +mt[2], +mt[3]);
+        const mon = '(jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\\.?';
+        if ((mt = s.match(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+${mon}(?:,?\\s+(\\d{4}))?`, 'i')))) return pick(mt[3], _MONTHS[mt[2].toLowerCase()], +mt[1]);
+        if ((mt = s.match(new RegExp(`\\b${mon}\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(\\d{4}))?`, 'i')))) return pick(mt[3], _MONTHS[mt[1].toLowerCase()], +mt[2]);
+        if ((mt = s.match(/(?:^|[^\d\/])(\d{1,2})\/(\d{1,2})(?:\/(\d{2}|\d{4}))?(?![\d\/])/))) return pick(mt[3], +mt[2], +mt[1]);
+        return '';
+    };
+    // "10am" / "10.30 am" / "2:30pm" / "14:30" / "下午3点半" / "上午10点" → "HH:MM".
+    const parseApptTime = (text) => {
+        const s = String(text || '');
+        const hm = (h, m) => (h >= 0 && h < 24 && m >= 0 && m < 60) ? `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}` : '';
+        let mt;
+        if ((mt = s.match(/\b(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)/i))) {
+            let h = +mt[1] % 12;
+            if (/^p/i.test(mt[3])) h += 12;
+            return hm(h, +(mt[2] || 0));
+        }
+        if ((mt = s.match(/(早上|上午|中午|下午|晚上|傍晚)?\s*(\d{1,2})\s*[点點时時](?:\s*(半|(\d{1,2})\s*分?))?/))) {
+            let h = +mt[2];
+            if (/下午|晚上|傍晚/.test(mt[1] || '') && h < 12) h += 12;
+            if (mt[1] === '中午' && h < 11) h += 12;
+            return hm(h, mt[3] === '半' ? 30 : +(mt[4] || 0));
+        }
+        if ((mt = s.match(/(?:^|[^\d:])([01]?\d|2[0-3]):([0-5]\d)(?![\d:])/))) return hm(+mt[1], +mt[2]);
+        return '';
+    };
+    // Venue from a pasted message: (1) a link equal to one saved on the venue
+    // (Google Maps links or Waze), else (2) the venue's name / other names appear
+    // in the text — the longest match wins; a tie between venues → no match.
+    const _normLink = (u) => String(u || '').trim().replace(/[)\].,;]+$/, '').replace(/^https?:\/\//i, '').replace(/^www\./i, '').replace(/[?#].*$/, '').replace(/\/+$/, '').toLowerCase();
+    const _normText = (t) => ' ' + String(t || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim() + ' ';
+    const matchVenue = (text, venues) => {
+        const list = venues || [];
+        const links = (String(text || '').match(/https?:\/\/[^\s<>"']+/gi) || []).map(_normLink);
+        if (links.length) {
+            const hits = list.filter(v => String(v.map_links || '').concat(' ', v.waze_link || '')
+                .split(/[\s,]+/).filter(Boolean).map(_normLink).some(l => links.includes(l)));
+            if (hits.length === 1) return hits[0];
+        }
+        const body = _normText(String(text || '').replace(/https?:\/\/\S+/gi, ' '));
+        let best = null, bestLen = 0, tie = false;
+        for (const v of list) {
+            const terms = [v.name, ...String(v.aliases || '').split(',')].map(x => _normText(x).trim()).filter(x => x.length >= 3);
+            for (const term of terms) {
+                const cjk = /[㐀-鿿]/.test(term);
+                const found = cjk ? body.includes(term) : body.includes(` ${term} `);
+                if (!found) continue;
+                if (term.length > bestLen) { best = v; bestLen = term.length; tie = false; }
+                else if (term.length === bestLen && best && best.id !== v.id) tie = true;
+            }
+        }
+        return tie ? null : best;
+    };
+    const _venueValue = (v) => (v.name || '') + ' | ' + (v.location || '');
+    // Called by the CPS "Paste Info" box (script-cps.js) after the basic fields.
+    // Fills the activity's date / time / venue when the activity form is open.
+    // Returns the list of what it filled, for the toast.
+    const applyPastedAppointment = async (text) => {
+        const filled = [];
+        const dateEl = document.getElementById('activity-date');
+        if (!dateEl) return filled;
+        const iso = parseApptDate(text);
+        if (iso) {
+            const prev = dateEl.value;
+            dateEl.value = iso;
+            const todayIso = new Date().toLocaleDateString('en-CA');
+            if (iso < todayIso && !window.confirm(`${iso} is before today — is this a backdated appointment?\n\nOK = keep ${iso}\nCancel = leave the date as ${prev}`)) {
+                dateEl.value = prev;
+            } else {
+                filled.push('Date');
+            }
+        }
+        const hhmm = parseApptTime(text);
+        const startEl = document.getElementById('start-time');
+        if (hhmm && startEl) {
+            startEl.value = hhmm;
+            const endEl = document.getElementById('end-time');
+            if (endEl) delete endEl.dataset.userModified;
+            try { onStartTimeChange(); } catch (e) {}
+            filled.push('Time');
+        }
+        const sel = document.getElementById('activity-venue');
+        if (sel && !sel.value) {
+            const v = matchVenue(text, await _getVenuesCached());
+            const val = v ? _venueValue(v) : '';
+            if (v && [...sel.options].some(o => o.value === val)) {
+                sel.value = val;
+                sel.dataset.auto = '1';
+                filled.push('Venue');
+            }
+        }
+        return filled;
     };
     const gatherContactPrefill = async ({ prospect = null, closingRecord = null } = {}) => {
         const fields = {}, src = {};
@@ -6259,6 +6404,16 @@ My raw notes:
             }
             window._cpsDuplicateConfirmed = false; // reset flag
 
+            // A venue auto-filled from Paste Info is confirmed once before saving.
+            {
+                const vSel = document.getElementById('activity-venue');
+                if (vSel && vSel.value && vSel.dataset.auto === '1') {
+                    const when = [document.getElementById('activity-date')?.value, document.getElementById('start-time')?.value].filter(Boolean).join(' ');
+                    if (!window.confirm(`The appointment is at:\n\n${vSel.value}\n${when}\n\nIs that correct?`)) return;
+                    vSel.dataset.auto = '0';
+                }
+            }
+
             // All Basic Info fields pulled via the shared collector — keeps
             // CPS + Prospect forms in lockstep. Activity-specific metadata
             // (responsible_agent_id, referred_by_*, score) is merged after.
@@ -7178,6 +7333,7 @@ My raw notes:
         moIcChanged,
         icToDob,
         biAutoFill,
+        applyPastedAppointment,
         contactSrcTag: _contactSrcTag,
         moPaymentMethodChanged,
         npoFillClosingPlans,

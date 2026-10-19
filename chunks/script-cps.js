@@ -1273,7 +1273,8 @@ const openCpsPasteModal = (prefix = 'cps') => {
             Paste the customer's bilingual reply below. The system will auto-fill
             <strong>Name</strong>, <strong>IC</strong>, <strong>Occupation</strong>,
             <strong>Phone</strong>, <strong>Email</strong> — and derive
-            <strong>Date of Birth</strong> and <strong>Gender</strong> from the IC.
+            <strong>Date of Birth</strong>, <strong>Gender</strong>, <strong>Title</strong> and <strong>Ming Gua</strong> from the IC,
+            plus the appointment <strong>date</strong>, <strong>time</strong> and <strong>venue</strong> if the message has them.
         </div>
         <textarea id="cps-paste-input" class="form-control" rows="10"
             style="font-family:inherit;font-size:13px;"
@@ -1312,7 +1313,7 @@ const _parseMalaysianIc = (ic) => {
     return { dob, gender };
 };
 
-const parseCpsPastedText = (prefix = 'cps') => {
+const parseCpsPastedText = async (prefix = 'cps') => {
     const ta = document.getElementById('cps-paste-input');
     if (!ta) return;
     const text = (ta.value || '').trim();
@@ -1343,6 +1344,9 @@ const parseCpsPastedText = (prefix = 'cps') => {
         fields[k] = (fields[k] || '').replace(/[。；;,，]\s*$/, '').trim();
     });
     if (fields.phone) fields.phone = fields.phone.replace(/[^\d+()]/g, '');
+    // Malaysian mobile → 017-6349438 / 011-23456789 (the form's own example style).
+    if (/^01\d{8,9}$/.test(fields.phone)) fields.phone = `${fields.phone.slice(0, 3)}-${fields.phone.slice(3)}`;
+    if (fields.email) fields.email = fields.email.toLowerCase();
     if (fields.ic)    fields.ic    = fields.ic.replace(/[^0-9A-Za-z\-]/g, '');
 
     const map = [
@@ -1375,6 +1379,8 @@ const parseCpsPastedText = (prefix = 'cps') => {
                 genderEl.value = parsed.gender;
                 derived++;
             }
+            const natEl = document.getElementById(`${prefix}-nationality`);
+            if (natEl && !natEl.value.trim()) natEl.value = 'Malaysian';
             if (app.biAutoFill) { try { app.biAutoFill(prefix, 'gender'); } catch (e) {} }
         }
     }
@@ -1387,8 +1393,15 @@ const parseCpsPastedText = (prefix = 'cps') => {
         return;
     }
     _hideCpsScanOverlay();
+    // Appointment date / time / venue (activity form only) — may ask about a
+    // backdated date, so it runs after the overlay is closed.
+    let appt = [];
+    if (prefix === 'cps' && app.applyPastedAppointment) {
+        try { appt = await app.applyPastedAppointment(text); } catch (e) { console.warn('paste appointment', e); }
+    }
     const extra = derived ? ` (+${derived} derived from IC)` : '';
-    UI.toast.success(`Auto-filled ${filled} field${filled === 1 ? '' : 's'}${extra}.`);
+    const apptNote = appt.length ? ` Appointment: ${appt.join(', ')}.` : '';
+    UI.toast.success(`Auto-filled ${filled} field${filled === 1 ? '' : 's'}${extra}.${apptNote}`);
 };
 
 const scanCpsForm = (prefix = 'cps') => {
