@@ -2815,6 +2815,10 @@ const openAddPurchaseModal = async (customerId) => {
                     <div class="form-group half"><label>Invoice No. <span class="required">*</span></label><input type="text" id="pur-inv" class="form-control" placeholder="Enter invoice number"></div>
                 </div>
                 <div class="form-row">
+                    <div class="form-group half"><label>Expected Ready (Collection) Date</label><input type="date" id="pur-ready" class="form-control">
+                        <small style="color:var(--gray-500);display:block;margin-top:4px;">When the custom item should be ready — the delivery board reminds the agent 30 days before.</small></div>
+                </div>
+                <div class="form-row">
                     <div class="form-group half"><label>Payment Status</label>
                         <select id="pur-status" class="form-control">
                             <option value="PENDING">Pending</option>
@@ -2996,6 +3000,10 @@ const savePurchase = async (customerId) => {
             UI.toast.error('Failed to save purchase: ' + (e?.message || e));
             return; // leave the modal open so the user can retry (no double-insert thanks to the guard)
         }
+
+        // One delivery item for the per-item delivery board (best effort).
+        const _readyVal = document.getElementById('pur-ready')?.value || '';
+        await (window._crmUtils.createDeliveryItem || (async () => {}))({ ...pur, ...createdRow, customer_id: customerId }, _readyVal);
 
         // Upload the redemption image (if any) now that we have the purchase id, and
         // store its resolvable public URL — the old code stored a fake placeholder
@@ -3215,6 +3223,7 @@ const _renderDeliveryListing = async () => {
                 date: cr.order_date || cr.closing_date || c.customer_since || '', method: cr.payment_method || '',
                 tenure: cr.installment_tenure || null, advance: !!cr.is_advance_package,
                 ringSize: cr.ring_size || '', payStatus: cr.payment_status || 'PAID',
+                crReady: _diReadyFromCr(cr),
             });
         }
     }
@@ -3236,6 +3245,17 @@ const _renderDeliveryListing = async () => {
                 if (!cur || it.due_date > cur) npoMatByCust.set(cust, it.due_date);
             }
         } catch (_) { /* npo tables absent / offline — leave empty */ }
+    }
+
+    // Per-item delivery: each line's items (or one virtual item until the order is
+    // opened), its expected ready date and how many items are already handed over.
+    const _diByLine = await _diLoadForLines(lines);
+    for (const l of lines) {
+        const its = _diByLine.get(_diKey(l.kind, l.id)) || [];
+        l.diTotal = its.length || 1;
+        l.diDone = its.length ? its.filter(r => r.status !== 'pending').length : (l.status === 'Delivered' ? 1 : 0);
+        const pendDates = its.filter(r => r.status === 'pending' && r.expected_ready_date).map(r => r.expected_ready_date).sort();
+        l.readyDate = its.length ? (pendDates[0] || its.map(r => r.expected_ready_date).filter(Boolean).sort().pop() || '') : (l.crReady || '');
     }
 
     // Derive payment type, maturity + production-readiness per line.
@@ -3289,6 +3309,7 @@ const _renderDeliveryListing = async () => {
         <th scope="col">Purchase Date</th>
         <th scope="col">Payment</th>
         <th scope="col">Maturity</th>
+        <th scope="col">Expected Ready</th>
         <th scope="col">Production</th>
         <th scope="col">Delivery Status</th>
         <th scope="col">Remarks</th>
@@ -3326,8 +3347,9 @@ const _renderDeliveryListing = async () => {
             <td style="white-space:nowrap;">${escapeHtml(l.date || '—')}</td>
             <td>${payBadge}</td>
             <td style="white-space:nowrap;">${l.inst ? escapeHtml(l.maturity || '—') : '<span style="color:var(--gray-400);">—</span>'}</td>
+            <td>${_diReadyCell(l.readyDate, l.diDone >= l.diTotal)}</td>
             <td>${prodBadge}</td>
-            <td>${statusSel}</td>
+            <td>${statusSel}<button class="btn-sm secondary" style="margin-top:4px;white-space:nowrap;" title="Items, handover date and photo proof" onclick="event.stopPropagation(); app.openDeliveryItems('${l.kind}', ${l.id}, ${l.customerId})"><i class="fas fa-box"></i> Items ${l.diDone}/${l.diTotal}</button></td>
             <td><input type="text" class="form-control" style="font-size:12px;padding:4px 6px;min-width:140px;" value="${escapeHtml(l.remarks)}" placeholder="Add remark…" onchange="app.saveDeliveryRemarks('${l.kind}', ${l.id}, ${l.customerId}, this.value)"></td>
             <td>${proofCell}</td>
         </tr>`;
@@ -3376,7 +3398,329 @@ const saveDeliveryRemarks = async (kind, id, customerId, value) => {
 };
 
 
+// ── Per-item delivery / pick-up (owner 2026-10-19) ───────────────────────────
+// One order can hold several custom-made items handed over on different days (or
+// together). Each item lives in public.delivery_items with its expected ready date
+// (the closing form's Collection Date), status pending → delivered | picked_up,
+// handover date and photo proof. A handover REQUIRES a date + at least one photo
+// (the table's check constraint enforces it too). Read/written straight through
+// supabase — no AppDataStore cache, so the board always shows the latest handover.
+const _DI_STATUS_LABEL = { pending: 'Pending', delivered: 'Delivered', picked_up: 'Picked up' };
+const _DI_MAX_PHOTOS = 10;
+const _diSb = () => window.supabase || window.supabaseClient || null;
+const _diIsDay = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
+// The Collection Date counts as a ready date only when it is AFTER the order date —
+// many records repeat the order date there.
+const _diReadyFromCr = (cr) => (cr && _diIsDay(cr.closing_date) && (!_diIsDay(cr.order_date) || cr.closing_date > cr.order_date)) ? cr.closing_date : '';
+const _diKey = (kind, id) => `${kind === 'purchase' ? 'p' : 'c'}:${id}`;
+let _diCtx = null; // { kind, id, customerId, title }
+
+// All items for the board's lines, keyed by line (scoped queries, 200 ids a call).
+const _diLoadForLines = async (lines) => {
+    const out = new Map();
+    const sb = _diSb();
+    if (!sb) return out;
+    const pIds = lines.filter(l => l.kind === 'purchase').map(l => l.id);
+    const cIds = lines.filter(l => l.kind !== 'purchase').map(l => l.id);
+    const pull = async (col, ids, kind) => {
+        for (let i = 0; i < ids.length; i += 200) {
+            const { data, error } = await sb.from('delivery_items').select('*').in(col, ids.slice(i, i + 200)).order('id');
+            if (error) throw error;
+            for (const r of data || []) {
+                const k = _diKey(kind, r[col]);
+                if (!out.has(k)) out.set(k, []);
+                out.get(k).push(r);
+            }
+        }
+    };
+    try {
+        if (pIds.length) await pull('purchase_id', pIds, 'purchase');
+        if (cIds.length) await pull('prospect_id', cIds, 'conversion');
+    } catch (e) { console.warn('[delivery] items load failed:', e); }
+    return out;
+};
+
+const _diReadyCell = (ready, allDone) => {
+    if (!ready) return '<span style="color:var(--gray-400);">—</span>';
+    const today = _custLocalDay();
+    const days = Math.round((new Date(ready + 'T00:00:00') - new Date(today + 'T00:00:00')) / 86400000);
+    let style = '', note = '';
+    if (!allDone && days < 0) { style = 'color:var(--error,#dc2626);font-weight:600;'; note = ` <span style="font-size:11px;">(${-days}d late)</span>`; }
+    else if (!allDone && days <= 30) { style = 'color:#b45309;font-weight:600;'; note = ` <span style="font-size:11px;">(in ${days}d)</span>`; }
+    return `<span style="white-space:nowrap;${style}">${escapeHtml(ready)}${note}</span>`;
+};
+
+// The order behind a board line: item text, ring size, ready date, title, status.
+const _diOrderInfo = async (kind, id, customerId) => {
+    const customer = await AppDataStore.getById('customers', customerId).catch(() => null);
+    const name = customer?.full_name || '';
+    if (kind === 'purchase') {
+        const p = await AppDataStore.getById('purchases', id);
+        let ready = '';
+        // Ready date = the matching closing record's Collection Date (by invoice).
+        try {
+            if (customer?.converted_from_prospect_id && String(p?.invoice || '').trim() && AppDataStore.getByIdFull) {
+                const pr = await AppDataStore.getByIdFull('prospects', customer.converted_from_prospect_id).catch(() => null);
+                const crs = [...(Array.isArray(pr?.closing_records_history) ? pr.closing_records_history : []), pr?.closing_record].filter(c => c && typeof c === 'object');
+                const inv = String(p.invoice).trim().toLowerCase();
+                ready = _diReadyFromCr(crs.find(c => String(c.invoice_number || '').trim().toLowerCase() === inv));
+            }
+        } catch (_) { /* no ready date */ }
+        return { item: p?.item || 'Item', ringSize: p?.ring_size || '', ready, invoice: p?.invoice || '', name, status: p?.delivery_status || 'Pending Delivery' };
+    }
+    const pr = await AppDataStore.getById('prospects', id);
+    const cr = pr?.closing_record || {};
+    return { item: cr.product || 'Item', ringSize: cr.ring_size || '', ready: _diReadyFromCr(cr), invoice: cr.invoice_number || '', name, status: cr.delivery_status || 'Pending Delivery' };
+};
+
+const _diFetchItems = async (kind, id) => {
+    const col = kind === 'purchase' ? 'purchase_id' : 'prospect_id';
+    const { data, error } = await _diSb().from('delivery_items').select('*').eq(col, id).order('id');
+    if (error) throw error;
+    return data || [];
+};
+
+const _diOpenInFlight = new Set();
+const openDeliveryItems = async (kind, id, customerId) => {
+    const sb = _diSb();
+    if (!sb) return UI.toast.error('Offline — cannot open delivery items right now');
+    const key = _diKey(kind, id);
+    if (_diOpenInFlight.has(key)) return;
+    _diOpenInFlight.add(key);
+    try {
+        const info = await _diOrderInfo(kind, id, customerId);
+        let items = await _diFetchItems(kind, id);
+        if (!items.length) {
+            // First time this order is opened: it becomes one item (split it below
+            // if the order holds several products).
+            const row = { customer_id: Number(customerId), item_name: String(info.item || 'Item').slice(0, 300), ring_size: info.ringSize || null,
+                expected_ready_date: info.ready || null, created_by: _state.cu?.id || null };
+            row[kind === 'purchase' ? 'purchase_id' : 'prospect_id'] = Number(id);
+            const { error } = await sb.from('delivery_items').insert(row);
+            if (error) throw error;
+            items = await _diFetchItems(kind, id);
+        }
+        _diCtx = { kind, id, customerId, title: `${info.name}${info.invoice ? ' · ' + info.invoice : ''}` };
+        UI.showModal('Delivery items', _diRenderItems(items), [
+            { label: '← Back to list', type: 'secondary', action: 'app.openDeliveryListing()' },
+        ], 'fullscreen');
+        (window.app.applyMobileTableLabels || (() => {}))();
+    } catch (e) {
+        UI.toast.error('Could not open delivery items: ' + (e?.message || e));
+    } finally {
+        _diOpenInFlight.delete(key);
+    }
+};
+
+const _diRenderItems = (items) => {
+    const today = _custLocalDay();
+    const pending = items.filter(r => r.status === 'pending');
+    const done = items.length - pending.length;
+    const canSplit = items.length === 1 && pending.length === 1 && /\+/.test(items[0].item_name);
+    const rows = items.map(r => {
+        const isPending = r.status === 'pending';
+        const photos = Array.isArray(r.photos) ? r.photos : [];
+        const photoLinks = photos.map((p, i) => `<a href="#" onclick="event.preventDefault();window._openAttachment&&window._openAttachment('${UI.escJsAttr(String(p))}')" style="margin-right:6px;white-space:nowrap;"><i class="fas fa-image"></i> ${i + 1}</a>`).join('');
+        const statusBadge = isPending
+            ? '<span class="score-badge" style="font-size:11px;background:#fef3c7;color:#92400e;">Pending</span>'
+            : `<span class="score-badge" style="font-size:11px;background:#dcfce7;color:#166534;"><i class="fas fa-check-circle"></i> ${_DI_STATUS_LABEL[r.status] || escapeHtml(r.status)}</span>`;
+        const dis = isPending ? '' : 'disabled';
+        const action = isPending
+            ? (items.length > 1 ? `<button class="btn-sm secondary" title="Remove this item" onclick="event.stopPropagation(); app.diDeleteItem(${r.id})"><i class="fas fa-trash"></i></button>` : '')
+            : `<button class="btn-sm secondary" title="Undo handover" onclick="event.stopPropagation(); app.diUndoHandover(${r.id})"><i class="fas fa-undo"></i> Undo</button>`;
+        return `<tr>
+            <td data-label="Pick">${isPending ? `<input type="checkbox" class="di-pick" value="${r.id}" aria-label="Select item for handover">` : ''}</td>
+            <td data-label="Item"><input type="text" class="form-control" style="font-size:12px;min-width:160px;" value="${escapeHtml(r.item_name)}" ${dis} onchange="app.diSaveField(${r.id}, 'item_name', this.value)"></td>
+            <td data-label="Qty"><input type="number" min="1" class="form-control" style="font-size:12px;width:64px;" value="${r.qty || 1}" ${dis} onchange="app.diSaveField(${r.id}, 'qty', this.value)"></td>
+            <td data-label="Ring size"><input type="text" class="form-control" style="font-size:12px;width:80px;" value="${escapeHtml(r.ring_size || '')}" ${dis} onchange="app.diSaveField(${r.id}, 'ring_size', this.value)"></td>
+            <td data-label="Expected ready"><input type="date" class="form-control" style="font-size:12px;" value="${escapeHtml(r.expected_ready_date || '')}" ${dis} onchange="app.diSaveField(${r.id}, 'expected_ready_date', this.value)"></td>
+            <td data-label="Status">${statusBadge}</td>
+            <td data-label="Handover date" style="white-space:nowrap;">${escapeHtml(r.handover_date || '—')}</td>
+            <td data-label="Photos">${photoLinks || '<span style="color:var(--gray-400);">—</span>'}</td>
+            <td data-label="Remarks"><input type="text" class="form-control" style="font-size:12px;min-width:120px;" value="${escapeHtml(r.remarks || '')}" placeholder="Remark…" onchange="app.diSaveField(${r.id}, 'remarks', this.value)"></td>
+            <td data-label="">${action}</td>
+        </tr>`;
+    }).join('');
+    const handover = pending.length ? `
+        <div style="border:1px solid var(--border,#e5e0d8);border-radius:8px;padding:12px;">
+            <div style="font-weight:600;margin-bottom:8px;"><i class="fas fa-box-open"></i> Hand over the ticked item(s)</div>
+            <div class="form-row">
+                <div class="form-group half"><label>Handover date <span class="required">*</span></label><input type="date" id="di-date" class="form-control" value="${today}" max="${today}"></div>
+                <div class="form-group half"><label>How</label>
+                    <select id="di-how" class="form-control"><option value="delivered">Delivered to customer</option><option value="picked_up">Customer picked up</option></select></div>
+            </div>
+            <div class="form-group"><label>Photo proof <span class="required">*</span> <span style="font-weight:400;color:var(--gray-500);font-size:12px;">(at least 1, max ${_DI_MAX_PHOTOS})</span></label>
+                <input type="file" id="di-photos" class="form-control" accept="image/*" multiple></div>
+            <div class="form-group"><label>Remark</label><input type="text" id="di-remark" class="form-control" placeholder="e.g. received by wife"></div>
+            <div id="di-status" style="font-size:12px;color:var(--primary);margin-bottom:6px;"></div>
+            <button class="btn primary" onclick="(async () => { await app.diHandover(); })()"><i class="fas fa-check"></i> Confirm handover</button>
+        </div>` : '<div style="color:#166534;font-weight:600;"><i class="fas fa-check-circle"></i> Every item in this order has been handed over.</div>';
+    return `<div id="di-panel">
+        <div style="margin-bottom:10px;"><strong>${escapeHtml(_diCtx?.title || '')}</strong>
+            <span style="margin-left:8px;font-size:12px;color:var(--gray-500);">${done}/${items.length} handed over</span></div>
+        <div class="prospects-table-container"><table class="prospects-table"><thead><tr>
+            <th scope="col"></th><th scope="col">Item</th><th scope="col">Qty</th><th scope="col">Ring size</th>
+            <th scope="col">Expected ready</th><th scope="col">Status</th><th scope="col">Handover date</th>
+            <th scope="col">Photos</th><th scope="col">Remarks</th><th scope="col"></th>
+        </tr></thead><tbody>${rows}</tbody></table></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 16px;">
+            <button class="btn btn-sm secondary" onclick="app.diAddItem()"><i class="fas fa-plus"></i> Add item</button>
+            ${canSplit ? `<button class="btn btn-sm secondary" onclick="app.diSplitItem(${items[0].id})"><i class="fas fa-cut"></i> Split into separate items</button>` : ''}
+        </div>
+        ${handover}
+    </div>`;
+};
+
+const _diRefresh = async () => {
+    if (!_diCtx) return [];
+    const items = await _diFetchItems(_diCtx.kind, _diCtx.id);
+    const panel = document.getElementById('di-panel');
+    if (panel) panel.outerHTML = _diRenderItems(items);
+    (window.app.applyMobileTableLabels || (() => {}))();
+    return items;
+};
+
+// Keep the order's own delivery status in step with its items: all handed over →
+// Delivered; an undo / new item on a Delivered order → back to Pending Delivery.
+const _diSyncOrderStatus = async (items) => {
+    if (!_diCtx || !items || !items.length) return;
+    const { kind, id, customerId } = _diCtx;
+    const allDone = items.every(r => r.status !== 'pending');
+    const info = await _diOrderInfo(kind, id, customerId);
+    const mode = kind === 'purchase' ? 'purchase' : 'conversion';
+    if (allDone && info.status !== 'Delivered') await _setDelivery(mode, id, customerId, 'Delivered');
+    else if (!allDone && info.status === 'Delivered') await _setDelivery(mode, id, customerId, 'Pending Delivery');
+};
+
+const diSaveField = async (itemId, field, value) => {
+    const allowed = ['item_name', 'qty', 'ring_size', 'expected_ready_date', 'remarks'];
+    if (!allowed.includes(field)) return;
+    let v = typeof value === 'string' ? value.trim() : value;
+    if (field === 'item_name' && !v) return UI.toast.error('Item name cannot be empty');
+    if (field === 'qty') { v = parseInt(v, 10); if (!(v > 0)) return UI.toast.error('Qty must be 1 or more'); }
+    if (field === 'expected_ready_date') { if (v && !_diIsDay(v)) return UI.toast.error('Invalid date'); v = v || null; }
+    if ((field === 'ring_size' || field === 'remarks') && !v) v = null;
+    const { error } = await _diSb().from('delivery_items').update({ [field]: v }).eq('id', itemId);
+    if (error) return UI.toast.error('Not saved: ' + error.message);
+    UI.toast.success('Saved');
+};
+
+const diAddItem = async () => {
+    if (!_diCtx) return;
+    const { kind, id, customerId } = _diCtx;
+    const items = await _diFetchItems(kind, id);
+    const row = { customer_id: Number(customerId), item_name: 'New item', expected_ready_date: items[0]?.expected_ready_date || null, created_by: _state.cu?.id || null };
+    row[kind === 'purchase' ? 'purchase_id' : 'prospect_id'] = Number(id);
+    const { error } = await _diSb().from('delivery_items').insert(row);
+    if (error) return UI.toast.error('Could not add item: ' + error.message);
+    await _diSyncOrderStatus(await _diRefresh());
+};
+
+// "圣智+ PR 6" → two items, both keeping the same ready date.
+const diSplitItem = async (itemId) => {
+    if (!_diCtx) return;
+    const sb = _diSb();
+    const items = await _diFetchItems(_diCtx.kind, _diCtx.id);
+    const src = items.find(r => String(r.id) === String(itemId));
+    if (!src || src.status !== 'pending') return;
+    const parts = src.item_name.split(/\s*\+\s*/).map(s => s.trim()).filter(Boolean);
+    if (parts.length < 2) return;
+    const { error: e1 } = await sb.from('delivery_items').update({ item_name: parts[0] }).eq('id', src.id);
+    if (e1) return UI.toast.error('Split failed: ' + e1.message);
+    const extra = parts.slice(1).map(name => ({ customer_id: src.customer_id, purchase_id: src.purchase_id, prospect_id: src.prospect_id,
+        item_name: name, expected_ready_date: src.expected_ready_date, created_by: _state.cu?.id || null }));
+    const { error: e2 } = await sb.from('delivery_items').insert(extra);
+    if (e2) return UI.toast.error('Split failed: ' + e2.message);
+    UI.toast.success(`Split into ${parts.length} items`);
+    await _diRefresh();
+};
+
+const diDeleteItem = async (itemId) => {
+    if (!_diCtx) return;
+    if (!confirm('Remove this item from the order?')) return;
+    const { error } = await _diSb().from('delivery_items').delete().eq('id', itemId).eq('status', 'pending');
+    if (error) return UI.toast.error('Could not remove: ' + error.message);
+    await _diSyncOrderStatus(await _diRefresh());
+};
+
+const diUndoHandover = async (itemId) => {
+    if (!_diCtx) return;
+    if (!confirm('Undo this handover? The photos stay on the item.')) return;
+    const { error } = await _diSb().from('delivery_items').update({ status: 'pending', handover_date: null, handed_over_by: null }).eq('id', itemId);
+    if (error) return UI.toast.error('Could not undo: ' + error.message);
+    await _diSyncOrderStatus(await _diRefresh());
+};
+
+let _diHandoverBusy = false;
+const diHandover = async () => {
+    if (!_diCtx || _diHandoverBusy) return;
+    const sb = _diSb();
+    const ids = Array.from(document.querySelectorAll('.di-pick:checked')).map(cb => Number(cb.value));
+    const date = document.getElementById('di-date')?.value || '';
+    const how = document.getElementById('di-how')?.value === 'picked_up' ? 'picked_up' : 'delivered';
+    const remark = (document.getElementById('di-remark')?.value || '').trim();
+    const files = Array.from(document.getElementById('di-photos')?.files || []).filter(f => f.type && f.type.startsWith('image/'));
+    if (!ids.length) return UI.toast.error('Tick the item(s) being handed over');
+    if (!_diIsDay(date)) return UI.toast.error('Handover date is required');
+    if (date > _custLocalDay()) return UI.toast.error('Handover date cannot be in the future');
+    if (!files.length) return UI.toast.error('Add at least one photo as proof of handover');
+    if (files.length > _DI_MAX_PHOTOS) return UI.toast.error(`Max ${_DI_MAX_PHOTOS} photos per handover`);
+    _diHandoverBusy = true;
+    const status = document.getElementById('di-status');
+    const uploaded = [];
+    let saved = 0;
+    try {
+        // Phone photos are often over the bucket's 5 MB limit — compress first.
+        if (!window.app.compressImageFile && typeof window._loadChunk === 'function') {
+            try { await window._loadChunk('chunks/script-prospects.min.js'); } catch (_) { /* raw file fallback */ }
+        }
+        const compress = window.app.compressImageFile || (f => Promise.resolve(f));
+        for (let i = 0; i < files.length; i++) {
+            if (status) status.textContent = `Uploading photo ${i + 1}/${files.length}…`;
+            const c = await compress(files[i]);
+            const safe = String(c.name || 'photo.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
+            const path = `delivery/${_diCtx.customerId}/${date}/${Date.now()}_${i}_${safe}`;
+            const { error } = await sb.storage.from('attachments').upload(path, c, { upsert: false, contentType: c.type || 'image/jpeg' });
+            if (error) throw error;
+            uploaded.push(path);
+        }
+        if (status) status.textContent = 'Saving…';
+        const items = await _diFetchItems(_diCtx.kind, _diCtx.id);
+        for (const itemId of ids) {
+            const cur = items.find(r => r.id === itemId);
+            if (!cur || cur.status !== 'pending') continue;
+            const patch = {
+                status: how, handover_date: date, handed_over_by: _state.cu?.id || null,
+                photos: [...(Array.isArray(cur.photos) ? cur.photos : []), ...uploaded],
+            };
+            if (remark) patch.remarks = cur.remarks ? `${cur.remarks} · ${remark}` : remark;
+            const { error } = await sb.from('delivery_items').update(patch).eq('id', itemId).eq('status', 'pending');
+            if (error) throw error;
+            saved++;
+        }
+        UI.toast.success(`${saved} item(s) marked ${_DI_STATUS_LABEL[how].toLowerCase()}`);
+        await _diSyncOrderStatus(await _diRefresh());
+    } catch (e) {
+        // Nothing saved → don't leave orphan photos in storage. (A partly-saved
+        // handover keeps them: the saved items point at those photos.)
+        if (uploaded.length && saved === 0) { try { await sb.storage.from('attachments').remove(uploaded); } catch (_) { /* best-effort */ } }
+        if (status) status.textContent = '';
+        UI.toast.error((saved ? `Only ${saved} item(s) saved: ` : 'Handover not saved: ') + (e?.message || e));
+        if (saved) await _diRefresh();
+    } finally {
+        _diHandoverBusy = false;
+    }
+};
+
+
     app.register('customers', {
+        openDeliveryItems,
+        diSaveField,
+        diAddItem,
+        diSplitItem,
+        diDeleteItem,
+        diUndoHandover,
+        diHandover,
         _setDelivery,
         _setDeliveryFromListing,
         _setDeliveryPayFilter,

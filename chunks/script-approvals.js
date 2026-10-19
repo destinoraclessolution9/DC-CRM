@@ -111,6 +111,9 @@
     // day: both put a backdated sale in the wrong week. So approval stops until an
     // order date is on the record, and lets the approver enter it right there.
     const _ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+    // Collection Date = when the custom item should be ready → the delivery item's
+    // expected ready date. Only when it is after the order date (many records repeat it).
+    const _readyDateOf = (cr) => (cr && _ISO_DAY.test(String(cr.closing_date || '')) && (!_ISO_DAY.test(String(cr.order_date || '')) || cr.closing_date > cr.order_date)) ? cr.closing_date : '';
     const _needsOrderDate = (cr) => !!cr && (parseFloat(cr.sale_amount ?? cr.amount) || 0) > 0 && !_ISO_DAY.test(String(cr.order_date || ''));
     const _askOrderDate = (kind, id, cr) => {
         const today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
@@ -507,7 +510,7 @@ const approveQueueEntry = async (entryId) => {
                         ...UI.purchasePaymentTerms(cr),
                         // Closing's invoice / order-form photo → the row's proof.
                         proof: cr.invoice_file || ''
-                    }, { label: 'new_sale approval', supersedePipelineFor: entry.prospect_id });
+                    }, { label: 'new_sale approval', supersedePipelineFor: entry.prospect_id, readyDate: _readyDateOf(cr) });
                     if (_res && _res.booked === false) {
                         try { UI.toast.info('This sale was already recorded — approving without adding a duplicate purchase.'); } catch (_) {}
                     }
@@ -694,7 +697,7 @@ const approveClosingRecord = async (prospectId) => {
                 payment_method: cr.payment_method || 'Cash',
                 ...UI.purchasePaymentTerms(cr),
                 proof: cr.invoice_file || ''
-            }, { label: 'additional sale approval', supersedePipelineFor: prospectId });
+            }, { label: 'additional sale approval', supersedePipelineFor: prospectId, readyDate: _readyDateOf(cr) });
             if (_res && _res.booked === false) {
                 try { UI.toast.info('This sale was already recorded — approving without adding a duplicate purchase.'); } catch (_) {}
             }
@@ -933,7 +936,7 @@ const approveProspectConversion = async (prospectId) => {
                 payment_method: cr?.payment_method || 'Cash',
                 ...UI.purchasePaymentTerms(cr),
                 proof: cr?.invoice_file || ''
-            }, { label: 'first-conversion sale', supersedePipelineFor: prospectId });
+            }, { label: 'first-conversion sale', supersedePipelineFor: prospectId, readyDate: _readyDateOf(cr) });
         } catch (saleErr) {
             console.error('[approveProspectConversion] sale booking failed', saleErr);
             try { UI.toast.error(`Customer created, but recording the RM ${saleAmount.toLocaleString()} sale failed — please add the purchase manually from the customer profile.`); } catch (_) {}

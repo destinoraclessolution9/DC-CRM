@@ -81,7 +81,7 @@ const NOTIF_INBOX_LIMIT = 30;
 const _NOTIF_KIND_ICON = {
     activity_created: '📅', activity_reminder: '⏰', daily_summary: '🌅',
     coagent_invite: '🤝', coagent_response: '✅', highlight: '🌟', test: '🔔',
-    activity_changed: '✏️', activity_cancelled: '🚫', sale_approval: '💰',
+    activity_changed: '✏️', activity_cancelled: '🚫', sale_approval: '💰', delivery_ready: '📦',
 };
 const _inboxSince = () => new Date(Date.now() - 30 * 86400000).toISOString();
 
@@ -161,6 +161,18 @@ const openSaleApprovalsFromBell = async () => {
     } catch (e) { console.warn('[notif] open sale approvals failed:', e); }
 };
 
+// "📦 Ready in N days" → the Product Delivery Listing (customers chunk, lazy).
+const openDeliveryFromBell = async () => {
+    try {
+        document.querySelector('.notif-panel')?.remove();
+        if (typeof window.app.openDeliveryListing !== 'function' && window._loadChunk) {
+            await window._loadChunk('chunks/script-customers.min.js');
+        }
+        if (typeof window.app.openDeliveryListing === 'function') await window.app.openDeliveryListing();
+        else await (window.app.navigateTo || (async () => {}))('customers');
+    } catch (e) { console.warn('[notif] open delivery listing failed:', e); }
+};
+
 // Open today's 每天一智 · Daily Wisdom popup (lazy chunk), even if already seen today.
 const openDailyWisdom = async () => {
     try {
@@ -182,6 +194,7 @@ const _inboxSectionHtml = (rows) => {
         // Morning summary carries today's Daily Wisdom — tapping opens the popup.
         const click = n.kind === 'daily_summary' ? 'app.openDailyWisdom()'
             : n.kind === 'sale_approval' ? 'app.openSaleApprovalsFromBell()'
+            : n.kind === 'delivery_ready' ? 'app.openDeliveryFromBell()'
             : `app.openNotifItem(${aid}, '${safeHash}')`;
         return `
             <div class="notif-item${unread ? ' notif-unread' : ''}" onclick="${click}" style="cursor:pointer;${unread ? 'background:var(--bg-elevated);' : ''}">
@@ -476,6 +489,14 @@ const _initNotifBell = () => {
             const rest = q.toString();
             history.replaceState(null, '', location.pathname + (rest ? '?' + rest : '') + location.hash);
             setTimeout(() => { openSaleApprovalsFromBell(); }, 600);
+        }
+        // "📦 Ready in N days" push opens ./index.html?delivery=1 — same one-shot flag.
+        const q2 = new URLSearchParams(location.search);
+        if (q2.get('delivery') === '1') {
+            q2.delete('delivery');
+            const rest2 = q2.toString();
+            history.replaceState(null, '', location.pathname + (rest2 ? '?' + rest2 : '') + location.hash);
+            setTimeout(() => { openDeliveryFromBell(); }, 600);
         }
     } catch (_) { /* best-effort deep link */ }
 
@@ -1629,6 +1650,7 @@ const applyCpsScanSelection = async () => {
         openNotifItem,
         openDailyWisdom,
         openSaleApprovalsFromBell,
+        openDeliveryFromBell,
         _initNotifBell,
         getViewPhase,
         calculateCustomerHealthScore,

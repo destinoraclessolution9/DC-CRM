@@ -721,8 +721,29 @@ const appLogic = (() => {
     // stale localStorage snapshot — deciding "already booked" from a stale mirror is
     // exactly the silent revenue loss this must never cause.
     const PIPELINE_INVOICE_PREFIX = 'PIPE-';
+    // One delivery item per booked sale (per-item delivery board, 2026-10-19), with
+    // the closing form's Collection Date as its expected ready date. Best effort and
+    // idempotent: an order that already has items is left alone; a failure never
+    // blocks the sale (the board creates the item on first open instead).
+    const createDeliveryItem = async (row, readyDate) => {
+        try {
+            if (!row || row.id == null || row.customer_id == null || row.is_agent_package) return;
+            const sb = window.supabase || window.supabaseClient;
+            if (!sb || typeof sb.from !== 'function') return;
+            const { data: have, error: e1 } = await sb.from('delivery_items').select('id').eq('purchase_id', row.id).limit(1);
+            if (e1 || (have && have.length)) return;
+            await sb.from('delivery_items').insert({
+                customer_id: Number(row.customer_id), purchase_id: Number(row.id),
+                item_name: String(row.item || 'Item').slice(0, 300), ring_size: row.ring_size || null,
+                expected_ready_date: /^\d{4}-\d{2}-\d{2}$/.test(String(readyDate || '')) ? readyDate : null,
+                created_by: window._appState?.cu?.id || null,
+            });
+        } catch (e) { console.warn('[delivery] item create skipped:', e); }
+    };
+
     Object.assign(window._crmUtils, {
         PIPELINE_INVOICE_PREFIX,
+        createDeliveryItem,
         bookPurchaseOnce: async (customerId, purchase, opts = {}) => {
             const label = opts.label || 'purchase';
             const _norm = (v) => String(v == null ? '' : v).trim().toLowerCase();
@@ -807,6 +828,7 @@ const appLogic = (() => {
                     console.warn(`[bookPurchaseOnce] reconciled pipeline placeholder into ${label}`, {
                         purchaseId: pipeRow.id, amountDelta: delta,
                     });
+                    await createDeliveryItem({ ...pipeRow, ..._patch, customer_id: customerId }, opts.readyDate);
                     return { booked: true, reconciled: true, row: { ...pipeRow, ..._patch } };
                 }
             }
@@ -814,6 +836,7 @@ const appLogic = (() => {
             const row = await AppDataStore.create('purchases', purchase);
             // Only move LTV when the row actually landed, so the two can never diverge.
             await window._crmUtils.adjustCustomerLtv(customerId, parseFloat(purchase?.amount) || 0, 1);
+            await createDeliveryItem({ ...purchase, ...(row || {}), customer_id: customerId }, opts.readyDate);
             return { booked: true, row };
         },
     });
