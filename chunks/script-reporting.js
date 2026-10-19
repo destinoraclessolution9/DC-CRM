@@ -3815,7 +3815,7 @@ const _hjBuild = async () => {
                 const cr = typeof p?.closing_record === 'string'
                     ? (() => { try { return JSON.parse(p.closing_record); } catch (_) { return null; } })()
                     : p?.closing_record;
-                const cd = cr?.closing_date;
+                const cd = cr?.order_date || cr?.closing_date; // sale date, not collection
                 if (!cd) return;
                 const t = new Date(cd).getTime();
                 if (Number.isFinite(t) && t >= t0 && t <= t1) closed++;

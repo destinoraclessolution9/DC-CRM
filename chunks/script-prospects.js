@@ -3884,7 +3884,7 @@ const buildClosingSalesLedger = async ({ prospect = null, customer = null, custo
     // Pass 2: date + amount for entries with no number match.
     matched.forEach(e => {
         if (e.p) return;
-        const d = _n(e.h.closing_date || e.h.order_date);
+        const d = _n(e.h.order_date || e.h.closing_date);
         if (d) e.p = _take(x => _n(x.date) === d && _m(x.amount) === _m(e.h.sale_amount));
     });
     matched.forEach(e => rows.push(e));
@@ -3909,7 +3909,7 @@ const buildClosingSalesLedger = async ({ prospect = null, customer = null, custo
         });
         files.forEach(f => orderForms.forEach(a => { if (a.file_url === f.path) usedPhotos.add(a.id); }));
         r.files = files;
-        r.date = r.p?.date || r.h?.closing_date || r.h?.order_date || (r.h?.approved_at ? String(r.h.approved_at).split('T')[0] : '');
+        r.date = r.p?.date || r.h?.order_date || r.h?.closing_date || (r.h?.approved_at ? String(r.h.approved_at).split('T')[0] : '');
     });
     rows.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
     const unlinked = orderForms.filter(a => !usedPhotos.has(a.id));
@@ -6743,7 +6743,7 @@ const _loadPurchasesHistory = async () => {
                     // Rows archived before the stamp fall back to the old chain.
                     agentId: h.credited_agent_id || h.lead_agent_id || p.responsible_agent_id,
                     agentName: agentMap[String(h.credited_agent_id || h.lead_agent_id || p.responsible_agent_id)] || '-',
-                    date: h.closing_date || (h.approved_at ? h.approved_at.split('T')[0] : ''),
+                    date: h.order_date || h.closing_date || (h.approved_at ? h.approved_at.split('T')[0] : ''),
                     invoiceNo: h.invoice_number || '-',
                     product: h.product || '-',
                     amount: parseFloat(h.sale_amount) || 0,
@@ -6765,7 +6765,7 @@ const _loadPurchasesHistory = async () => {
                     // Rows archived before the stamp fall back to the old chain.
                     agentId: h.credited_agent_id || h.lead_agent_id || p.responsible_agent_id,
                     agentName: agentMap[String(h.credited_agent_id || h.lead_agent_id || p.responsible_agent_id)] || '-',
-                    date: h.closing_date || (h.approved_at ? h.approved_at.split('T')[0] : ''),
+                    date: h.order_date || h.closing_date || (h.approved_at ? h.approved_at.split('T')[0] : ''),
                     invoiceNo: h.invoice_number || '-',
                     product: h.product || '-',
                     amount: parseFloat(h.sale_amount) || 0,

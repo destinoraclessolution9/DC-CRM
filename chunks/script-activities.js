@@ -3977,8 +3977,9 @@ My raw notes:
         });
         if (conversionRecord && String(conversionRecord.product || '').trim()) {
             const label = String(conversionRecord.product).trim();
-            const key = label.toLowerCase() + '|' + (conversionRecord.closing_date || '');
-            if (!seen.has(key)) out.push({ label, date: conversionRecord.closing_date || null, purchase_id: null, source: 'conversion', pending: false });
+            const _cd = conversionRecord.order_date || conversionRecord.closing_date || '';
+            const key = label.toLowerCase() + '|' + _cd;
+            if (!seen.has(key)) out.push({ label, date: _cd || null, purchase_id: null, source: 'conversion', pending: false });
         }
         return out;
     };

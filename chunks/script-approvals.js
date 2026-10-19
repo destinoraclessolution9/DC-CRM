@@ -208,7 +208,7 @@ const showApprovalDetail = async (entryId) => {
                         <div><span style="color:var(--gray-500);">Product:</span> ${escapeHtml(cr.product || '-')}</div>
                         <div><span style="color:var(--gray-500);">Amount:</span> <strong style="color:#166534;">RM ${saleAmount.toLocaleString()}</strong></div>
                         <div><span style="color:var(--gray-500);">Invoice:</span> ${escapeHtml(cr.invoice_number || '-')}</div>
-                        <div><span style="color:var(--gray-500);">Date:</span> ${escapeHtml(cr.closing_date || '-')}</div>
+                        <div><span style="color:var(--gray-500);">Order Date:</span> ${escapeHtml(cr.order_date || cr.closing_date || '-')}</div>
                     </div>
                 </div>
             ` : ''}`;
@@ -257,7 +257,7 @@ const showApprovalDetail = async (entryId) => {
                 <div><span style="color:var(--gray-500);">Sale Amount:</span> <strong style="color:#166534;">RM ${saleAmount.toLocaleString()}</strong></div>
                 <div><span style="color:var(--gray-500);">Payment:</span> ${escapeHtml(cr.payment_method || '-')}</div>
                 <div><span style="color:var(--gray-500);">Invoice:</span> ${escapeHtml(cr.invoice_number || '-')}</div>
-                <div><span style="color:var(--gray-500);">Closing Date:</span> ${escapeHtml(cr.closing_date || '-')}</div>
+                <div><span style="color:var(--gray-500);">Order Date:</span> ${escapeHtml(cr.order_date || cr.closing_date || '-')}</div>
                 ${cr.sales_idea ? `<div style="grid-column:1/-1;"><span style="color:var(--gray-500);">Sales Idea:</span> ${escapeHtml(cr.sales_idea)}</div>` : ''}
             </div>`;
     }
@@ -424,7 +424,7 @@ const approveQueueEntry = async (entryId) => {
                         country: UI.countryByCode(prospect.country).code,
                         status: 'active',
                         lifetime_value: 0,
-                        customer_since: cr.closing_date || cr.order_date || _localToday,
+                        customer_since: cr.order_date || cr.closing_date || _localToday,
                         converted_from_prospect_id: entry.prospect_id,
                         approved_by: _state.cu?.id || null,
                         approved_at: new Date().toISOString(),
@@ -438,7 +438,10 @@ const approveQueueEntry = async (entryId) => {
                     // closeDealWon path.
                     const _res = await _utils.bookPurchaseOnce(customer.id, {
                         customer_id: customer.id,
-                        date: cr.closing_date || _localToday,
+                        // ORDER date = the sale/invoice date. closing_date is the form's
+                        // "Collection Date" (when the item is picked up — can be months
+                        // later), so it is only a fallback for records with no order date.
+                        date: cr.order_date || cr.closing_date || _localToday,
                         invoice: cr.invoice_number || '',
                         item: cr.product || '',
                         amount: amt,
@@ -613,7 +616,7 @@ const approveClosingRecord = async (prospectId) => {
                 country: UI.countryByCode(prospect.country).code,
                 status: 'active',
                 lifetime_value: 0,
-                customer_since: cr.closing_date || cr.order_date || _localToday,
+                customer_since: cr.order_date || cr.closing_date || _localToday,
                 converted_from_prospect_id: prospectId,
                 approved_by: _state.cu?.id || null,
                 approved_at: new Date().toISOString(),
@@ -626,7 +629,7 @@ const approveClosingRecord = async (prospectId) => {
             // booked-by-pipeline cases that _convInFlight cannot see.
             const _res = await _utils.bookPurchaseOnce(customer.id, {
                 customer_id: customer.id,
-                date: cr.closing_date || cr.order_date || _localToday,
+                date: cr.order_date || cr.closing_date || _localToday, // order (sale) date first, see above
                 invoice: cr.invoice_number || '',
                 item: cr.product || '',
                 amount: saleAmount,
@@ -741,7 +744,7 @@ const showConversionApprovalModal = async (prospectId) => {
                         <div><span style="color:var(--gray-500);">Product:</span> ${escapeHtml(cr.product || '-')}</div>
                         <div><span style="color:var(--gray-500);">Amount:</span> <strong style="color:#166534;">RM ${saleAmount.toLocaleString()}</strong></div>
                         <div><span style="color:var(--gray-500);">Invoice:</span> ${escapeHtml(cr.invoice_number || '-')}</div>
-                        <div><span style="color:var(--gray-500);">Date:</span> ${escapeHtml(cr.closing_date || '-')}</div>
+                        <div><span style="color:var(--gray-500);">Order Date:</span> ${escapeHtml(cr.order_date || cr.closing_date || '-')}</div>
                     </div>
                 </div>
             ` : '<div style="color:var(--gray-400); font-size:13px; font-style:italic;">No closing record submitted yet.</div>'}
@@ -815,7 +818,7 @@ const approveProspectConversion = async (prospectId) => {
         country: UI.countryByCode(prospect.country).code,
         lifetime_value: 0,
         status: 'active',
-        customer_since: cr?.closing_date || _localToday,
+        customer_since: cr?.order_date || cr?.closing_date || _localToday,
         converted_from_prospect_id: prospectId,
         approved_by: _state.cu?.id,
         approved_at: now,
@@ -858,7 +861,7 @@ const approveProspectConversion = async (prospectId) => {
             // Durable duplicate guard + atomic LTV bump — see bookPurchaseOnce.
             await _utils.bookPurchaseOnce(newCustomerId, {
                 customer_id: newCustomerId,
-                date: cr?.closing_date || _localToday,
+                date: cr?.order_date || cr?.closing_date || _localToday, // order (sale) date, not collection
                 invoice: cr?.invoice_number || '',
                 item: cr?.product || '',
                 amount: saleAmount,

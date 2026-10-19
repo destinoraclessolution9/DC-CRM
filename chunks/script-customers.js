@@ -1501,7 +1501,7 @@ const renderPurchaseHistoryTab = async (customer, containerId = 'profile-tab-con
         totalPaid += amt;
         return `
             <tr style="background:#f0fdf4;">
-                <td>${escapeHtml(cr.closing_date || customer.customer_since || '-')}</td>
+                <td>${escapeHtml(cr.order_date || cr.closing_date || customer.customer_since || '-')}</td>
                 <td>${escapeHtml(cr.invoice_number || '-')}</td>
                 <td><strong>${escapeHtml(cr.product || '-')}</strong> <span style="font-size:11px;color:var(--gray-400);">(Conversion Sale)</span></td>
                 <td>${UI.formatCurrency(amt, { currency: _custCur })}</td>
@@ -3212,7 +3212,7 @@ const _renderDeliveryListing = async () => {
                 product: cr.product || '-', invoice: cr.invoice_number || '',
                 status: cr.delivery_status || 'Pending Delivery',
                 remarks: cr.delivery_remarks || '', proof: cr.invoice_file || '',
-                date: cr.closing_date || c.customer_since || '', method: cr.payment_method || '',
+                date: cr.order_date || cr.closing_date || c.customer_since || '', method: cr.payment_method || '',
                 tenure: cr.installment_tenure || null, advance: !!cr.is_advance_package,
                 ringSize: cr.ring_size || '', payStatus: cr.payment_status || 'PAID',
             });
