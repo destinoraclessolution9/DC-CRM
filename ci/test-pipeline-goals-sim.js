@@ -232,7 +232,7 @@ const as = (id) => { windowStub._appState.cu = USERS.find(u => u.id === id); };
   check('product open: PR6 deal text → Power Ring', byP('Power Ring').open, 20000);
   check('product weighted: PR6 at proposal 50%', byP('Power Ring').weighted, 10000);
   check('product open: unmatched deals grouped', byP('Other / not matched').openN, 2);
-  check('product weighted: Old 20% + X 80%', byP('Other / not matched').weighted, 10000 * 0.2 + 10000 * 0.8);
+  check('product weighted: Old 20% + X closing 90%', byP('Other / not matched').weighted, 10000 * 0.2 + 10000 * 0.9);
 
   src = app._plSourceStats(c, links, 'month', new Set(['102']));
   check('member filter restricts sales', src.reduce((s, x) => s + x.rm, 0), 30000);
@@ -330,6 +330,51 @@ const as = (id) => { windowStub._appState.cu = USERS.find(u => u.id === id); };
   check('transfer', app._plPayCategory('Offline Bank Transfer/ CC Machine'), 'Transfer');
   check('NPO', app._plPayCategory('NPO'), 'NPO installment');
   check('empty', app._plPayCategory(null), '');
+
+  // ── v8.4 lead grades + stage × grade probability ──
+  {
+    const custs = [
+      { id: 9001, full_name: 'VIP Wong', converted_from_prospect_id: 8001, responsible_agent_id: 101 },
+      { id: 9002, full_name: 'Mid Lee', converted_from_prospect_id: 8002, responsible_agent_id: 102 },
+      { id: 9003, full_name: 'Small Tan', converted_from_prospect_id: 8003, responsible_agent_id: 101 },
+    ];
+    const g = {
+      prospects: new Map([
+        ['5001', { id: 5001, referred_by_type: 'Customer', referred_by_id: 9001 }],   // VIP by customer id
+        ['5002', { id: 5002, referred_by_type: 'Customer', referred_by_id: 8002 }],   // mid by original prospect id
+        ['5003', { id: 5003, referred_by_type: 'Customer', referred_by_id: 9003 }],   // small customer
+        ['5004', { id: 5004, referred_by_type: 'Consultant', referred_by_id: 102 }],  // high closer
+        ['5005', { id: 5005, referred_by_type: 'Consultant', referred_by_id: 101 }],  // ordinary agent
+        ['5006', { id: 5006, referred_by_type: null }],                                // unknown
+        ['5007', { id: 5007, referred_by_type: 'Customer', referred_by_id: 8001, status: 'converted' }], // 2nd referral by VIP
+      ]),
+      custById: new Map(custs.map(c => [String(c.id), c])),
+      custByPid: new Map(custs.map(c => [String(c.converted_from_prospect_id), c])),
+      spendByCust: new Map([['9001', 65000], ['9002', 25000], ['9003', 3000]]),
+      highClosers: new Set(['102']),
+    };
+    app._plSetGradeCtxForTest(g);
+    const gr = (id) => app._plGradeOf(g.prospects.get(String(id)), g).grade;
+    check('grade VIP customer referral = A+', gr(5001), 'A+');
+    check('grade mid customer via prospect id = A', gr(5002), 'A');
+    check('grade small customer = B', gr(5003), 'B');
+    check('grade high-closer agent = A', gr(5004), 'A');
+    check('grade ordinary agent = B', gr(5005), 'B');
+    check('grade unknown = C', gr(5006), 'C');
+    check('prob A+ interested 40', app._plDealProb({ prospect_id: 5001, stage: 'interested' }), 40);
+    check('prob C interested 10', app._plDealProb({ prospect_id: 5006, stage: 'interested' }), 10);
+    check('prob B prescribed 80', app._plDealProb({ prospect_id: 5005, stage: 'prescribed' }), 80);
+    check('prob A+ prescribed 85', app._plDealProb({ prospect_id: 5001, stage: 'prescribed' }), 85);
+    check('prob B closing 90', app._plDealProb({ prospect_id: 5005, stage: 'closing' }), 90);
+    check('prob won 100 / lost 0', app._plDealProb({ prospect_id: 5005, stage: 'won' }) + app._plDealProb({ prospect_id: 5005, stage: 'lost' }), 100);
+    const vip = app._plVipList({ mode: 'company', scopeIds: new Set(), vipAsks: [{ customer_id: 9001, asked_at: '2026-10-01T00:00:00Z' }], users: USERS });
+    check('VIP list only RM50k+', vip.length, 1);
+    check('VIP referrals counted via both ids', vip[0] && vip[0].refs, 2);
+    check('VIP last asked', vip[0] && vip[0].lastAsk, '2026-10-01');
+    const vipScoped = app._plVipList({ mode: 'personal', scopeIds: new Set(['102']), vipAsks: [], users: USERS });
+    check('VIP list respects scope', vipScoped.length, 0);
+    app._plSetGradeCtxForTest(null);
+  }
 
   console.log(`pipeline-goals-sim: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

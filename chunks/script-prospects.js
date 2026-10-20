@@ -3667,6 +3667,8 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         audits = [...audits].sort((a, b) =>
             new Date(b.audit_date || 0) - new Date(a.audit_date || 0) || (b.id || 0) - (a.id || 0)
         );
+        // 🩺 Prescription lines (audit_prescriptions) — the solutions proposed after the audit.
+        const _rxAll = await _loadPrescriptions(pid);
 
         const renderAuditCard = (a) => {
             const beforePhotos = Array.isArray(a.before_photos) ? a.before_photos : [];
@@ -3715,7 +3717,9 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             };
 
             const fileLink = (url, name) => url
-                ? `<a href="#" onclick="event.preventDefault();window._openAttachment&&window._openAttachment('${UI.escJsAttr(String(url))}')" style="color:var(--primary);cursor:pointer;"><i class="fas fa-paperclip"></i> ${escapeHtml(name || 'View file')}</a>`
+                ? (String(url).startsWith('sbobj://')
+                    ? `<a href="#" onclick="event.preventDefault();app.openAuditFile('${UI.escJsAttr(String(url))}')" style="color:var(--primary);cursor:pointer;"><i class="fas fa-paperclip"></i> ${escapeHtml(name || 'View file')}</a>`
+                    : `<a href="#" onclick="event.preventDefault();window._openAttachment&&window._openAttachment('${UI.escJsAttr(String(url))}')" style="color:var(--primary);cursor:pointer;"><i class="fas fa-paperclip"></i> ${escapeHtml(name || 'View file')}</a>`)
                 : '<span style="color:var(--gray-400);font-style:italic;">Not uploaded</span>';
 
             return `
@@ -3755,6 +3759,8 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                             ${productBadges}
                             ${parsedProducts.remarks ? `<div style="font-size:12px;color:var(--gray-600);margin-top:6px;font-style:italic;">Remarks: ${escapeHtml(parsedProducts.remarks)}</div>` : ''}
                         </div>
+
+                        ${_prescriptionBlockHtml(pid, a.id, _rxAll.filter(r => String(r.audit_id) === String(a.id)))}
 
                         <div class="pv-sub" style="margin-top:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;">
                             <span><i class="fas fa-camera-retro"></i> Before Photos <span style="font-size:10px;color:var(--gray-400);">(${beforePhotos.length}/50)</span></span>
@@ -5860,6 +5866,183 @@ const _writeFengShuiAudits = async (prospectId, audits) => {
     AppDataStore.invalidateCache?.('prospects');
 };
 
+// ── 🩺 Audit Prescription ─────────────────────────────────────────────────
+// Lines live in audit_prescriptions (migrations/2026-10-20_audit_prescription_grades.sql).
+// A DB trigger keeps ONE pipeline deal per audit at stage 'prescribed' (80%):
+// amount = open Must + Recommended lines. Sales mark matching lines Bought.
+// No expiry — a prescription stays open until it is bought or declined.
+const RX_PRIORITY = { must: 'Must have', recommended: 'Recommended', optional: 'Optional' };
+const RX_STATUS = { proposed: 'Proposed', accepted: 'Accepted', bought: 'Bought ✓', declined: 'Declined' };
+const _rxSb = () => window.supabase || window.supabaseClient;
+const _loadPrescriptions = async (pid) => {
+    const sb = _rxSb();
+    if (!sb) return [];
+    try {
+        const { data, error } = await sb.from('audit_prescriptions').select('*').eq('prospect_id', pid).order('id', { ascending: true });
+        if (error) throw error;
+        return data || [];
+    } catch (e) { console.warn('[rx] load failed', e && e.message); return []; }
+};
+const _rxRM = (n) => 'RM ' + Math.round(Number(n) || 0).toLocaleString();
+const _prescriptionBlockHtml = (pid, auditId, rows) => {
+    const open = rows.filter(r => r.status === 'proposed' || r.status === 'accepted');
+    const openCore = open.filter(r => r.priority !== 'optional').reduce((a, r) => a + (Number(r.quoted_amount) || 0), 0);
+    const bought = rows.filter(r => r.status === 'bought').reduce((a, r) => a + (Number(r.quoted_amount) || 0), 0);
+    const total = rows.filter(r => r.status !== 'declined').reduce((a, r) => a + (Number(r.quoted_amount) || 0), 0);
+    const stColor = { proposed: '#B45309', accepted: '#1D4ED8', bought: '#047857', declined: '#6B7280' };
+    const body = rows.length ? rows.map(r => `
+        <div class="rx-line" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid #F3F4F6;${r.status === 'declined' ? 'opacity:.55;' : ''}">
+            <div style="flex:2;min-width:160px;">
+                <div style="font-weight:600;font-size:13px;">${escapeHtml(r.product)}${r.qty > 1 ? ` <span style="color:var(--gray-500);font-weight:400;">× ${Number(r.qty)}</span>` : ''}</div>
+                <div style="font-size:11px;color:var(--gray-500);">${escapeHtml(RX_PRIORITY[r.priority] || r.priority)}${r.notes ? ' · ' + escapeHtml(r.notes) : ''}</div>
+            </div>
+            <div style="font-weight:700;color:#059669;min-width:90px;text-align:right;">${_rxRM(r.quoted_amount)}</div>
+            <select class="form-control" style="width:auto;height:28px;font-size:11px;padding:0 6px;color:${stColor[r.status] || '#374151'};font-weight:600;" onclick="event.stopPropagation()" onchange="event.stopPropagation();app.setPrescriptionStatus(${Number(pid)},${Number(r.id)},this.value)">
+                ${Object.entries(RX_STATUS).map(([k, v]) => `<option value="${k}" ${k === r.status ? 'selected' : ''}>${v}</option>`).join('')}
+            </select>
+            <button class="btn-icon" onclick="event.stopPropagation();app.openPrescriptionModal(${Number(pid)},${Number(auditId)},${Number(r.id)})" title="Edit"><i class="fas fa-pen"></i></button>
+            <button class="btn-icon text-danger" onclick="event.stopPropagation();app.deletePrescriptionLine(${Number(pid)},${Number(r.id)})" title="Remove"><i class="fas fa-times"></i></button>
+        </div>`).join('')
+        : '<div style="font-size:12px;color:var(--gray-400);font-style:italic;padding:8px 0;">No solutions prescribed yet. Add each product you recommend with its quoted price.</div>';
+    return `
+        <div class="pv-sub" style="margin-top:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;">
+            <span>🩺 Prescription — proposed solutions
+                <span style="font-size:10px;font-weight:400;color:var(--gray-400);margin-left:6px;">Goes to the Pipeline at 80% until bought</span></span>
+            <button class="btn primary btn-sm" style="height:28px;font-size:11px;padding:0 10px;" onclick="event.stopPropagation();app.openPrescriptionModal(${Number(pid)},${Number(auditId)})"><i class="fas fa-plus"></i> Add solution</button>
+        </div>
+        <div style="background:#fff;border:1px solid #DDD6FE;border-radius:6px;padding:4px 10px;">
+            ${body}
+            ${rows.length ? `<div style="display:flex;gap:14px;flex-wrap:wrap;justify-content:flex-end;font-size:12px;padding:8px 0 4px;">
+                <span>Total <strong>${_rxRM(total)}</strong></span>
+                <span style="color:#047857;">Bought <strong>${_rxRM(bought)}</strong></span>
+                <span style="color:#B45309;">Still open (Must + Recommended) <strong>${_rxRM(openCore)}</strong></span>
+            </div>` : ''}
+        </div>`;
+};
+
+const openPrescriptionModal = async (pid, auditId, rxId = null) => {
+    let line = null;
+    if (rxId) {
+        const rows = await _loadPrescriptions(pid);
+        line = rows.find(r => Number(r.id) === Number(rxId)) || null;
+    }
+    let products = [];
+    try { products = (await AppDataStore.getAll('products') || []).filter(p => p.is_active !== false && p.name); } catch (_) { /* free text only */ }
+    const groups = new Map();
+    for (const p of products) {
+        const g = String(p.subcategory || p.category || 'Other').trim() || 'Other';
+        if (!groups.has(g)) groups.set(g, []);
+        groups.get(g).push(p);
+    }
+    const cur = line ? line.product : '';
+    const inCat = products.some(p => p.name === cur);
+    const opts = [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([g, list]) =>
+        `<optgroup label="${escapeHtml(g)}">${list.sort((a, b) => a.name.localeCompare(b.name)).map(p =>
+            `<option value="${escapeHtml(p.name)}" data-price="${Number(p.price) || ''}" data-pid="${p.id}" ${p.name === cur ? 'selected' : ''}>${escapeHtml(p.name)}${p.price ? ' — RM ' + Number(p.price).toLocaleString() : ''}</option>`).join('')}</optgroup>`).join('');
+    const f = 'class="form-control" style="width:100%;"';
+    const content = `
+    <div style="display:grid;gap:12px;">
+        <div class="form-group"><label>Solution / product *</label>
+            <select id="rx-product" ${f} onchange="app.rxProductChanged()">
+                <option value="">— pick from catalogue —</option>${opts}
+                <option value="__other" ${cur && !inCat ? 'selected' : ''}>Other (type below)</option>
+            </select>
+            <input type="text" id="rx-product-other" ${f} placeholder="Solution name" value="${cur && !inCat ? escapeHtml(cur) : ''}" style="width:100%;margin-top:6px;${cur && !inCat ? '' : 'display:none;'}">
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;">
+            <div class="form-group"><label>Qty</label><input type="number" min="1" step="1" id="rx-qty" ${f} value="${line ? Number(line.qty) : 1}" oninput="app.rxProductChanged(true)"></div>
+            <div class="form-group"><label>Quoted RM (total) *</label><input type="number" min="0" step="1" id="rx-amount" ${f} value="${line ? Number(line.quoted_amount) : ''}"></div>
+            <div class="form-group"><label>Priority</label><select id="rx-priority" ${f}>${Object.entries(RX_PRIORITY).map(([k, v]) => `<option value="${k}" ${(line ? line.priority : 'recommended') === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+        </div>
+        <div class="form-group"><label>Notes (why this solution)</label><input type="text" id="rx-notes" ${f} placeholder="e.g. main door faces NW — needs water element" value="${escapeHtml(line ? line.notes || '' : '')}"></div>
+    </div>`;
+    UI.showModal(rxId ? 'Edit Prescription Line' : 'Add Prescribed Solution', content, [
+        { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+        { label: 'Save', type: 'primary', action: `(async () => { await app.savePrescriptionLine(${Number(pid)},${Number(auditId)},${rxId ? Number(rxId) : 'null'}); })()` },
+    ]);
+};
+
+const rxProductChanged = (qtyOnly = false) => {
+    const sel = document.getElementById('rx-product');
+    const other = document.getElementById('rx-product-other');
+    const amt = document.getElementById('rx-amount');
+    const qty = Math.max(1, Number(document.getElementById('rx-qty')?.value) || 1);
+    if (!sel) return;
+    if (!qtyOnly && other) other.style.display = sel.value === '__other' ? '' : 'none';
+    const opt = sel.options[sel.selectedIndex];
+    const price = opt && opt.dataset ? Number(opt.dataset.price) : 0;
+    if (amt && price > 0) amt.value = price * qty;
+};
+
+const savePrescriptionLine = async (pid, auditId, rxId = null) => {
+    const v = (id) => (document.getElementById(id)?.value || '').trim();
+    const sel = v('rx-product');
+    const product = sel === '__other' ? v('rx-product-other') : sel;
+    const amount = Number(v('rx-amount'));
+    if (!product) { UI.toast.error('Pick the solution.'); return; }
+    if (!(amount >= 0) || v('rx-amount') === '') { UI.toast.error('Enter the quoted price.'); return; }
+    const opt = document.getElementById('rx-product');
+    const productId = sel !== '__other' && opt && opt.options[opt.selectedIndex] ? (Number(opt.options[opt.selectedIndex].dataset.pid) || null) : null;
+    const row = {
+        product, product_id: productId, qty: Math.max(1, Number(v('rx-qty')) || 1), quoted_amount: amount,
+        priority: v('rx-priority') || 'recommended', notes: v('rx-notes') || null, updated_at: new Date().toISOString(),
+    };
+    try {
+        const sb = _rxSb();
+        const res = rxId
+            ? await sb.from('audit_prescriptions').update(row).eq('id', rxId).select().maybeSingle()
+            : await sb.from('audit_prescriptions').insert({ ...row, prospect_id: pid, audit_id: auditId, created_by: _state.cu?.id || null }).select().maybeSingle();
+        if (res.error) throw res.error;
+        if (!res.data) throw new Error('no permission for this profile');
+        UI.hideModal();
+        UI.toast.success(rxId ? 'Prescription updated' : 'Solution added — it is now in the Pipeline at 80%');
+        await _refreshFengShuiTab(pid);
+    } catch (e) { UI.toast.error('Could not save: ' + (e && e.message ? e.message : e)); }
+};
+
+const setPrescriptionStatus = async (pid, rxId, status) => {
+    const row = { status, updated_at: new Date().toISOString() };
+    if (status === 'bought') row.bought_at = new Date().toISOString();
+    try {
+        const { data, error } = await _rxSb().from('audit_prescriptions').update(row).eq('id', rxId).select().maybeSingle();
+        if (error) throw error;
+        if (!data) throw new Error('no permission');
+        UI.toast.success('Updated');
+    } catch (e) { UI.toast.error('Could not update: ' + (e && e.message ? e.message : e)); }
+    await _refreshFengShuiTab(pid);
+};
+
+const deletePrescriptionLine = async (pid, rxId) => {
+    if (!confirm('Remove this solution from the prescription?')) return;
+    try {
+        const { error } = await _rxSb().from('audit_prescriptions').delete().eq('id', rxId);
+        if (error) throw error;
+        UI.toast.success('Removed');
+    } catch (e) { UI.toast.error('Could not remove: ' + (e && e.message ? e.message : e)); }
+    await _refreshFengShuiTab(pid);
+};
+
+// Audit report / layout plan → private 'audit-reports' bucket (25 MB, PDF/Word/images).
+// Stored as 'sbobj://audit-reports/<path>' and opened through a signed URL.
+const _uploadAuditFile = async (file, pathPrefix) => {
+    const sb = _rxSb();
+    if (!sb || !sb.storage) return _uploadFengShuiToBucket(file, `feng_shui_audits/${pathPrefix.replace('/', '_')}`);
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const path = `${pathPrefix}_${Date.now()}_${safeName}`;
+    const { error } = await sb.storage.from('audit-reports').upload(path, file, { upsert: false, contentType: file.type || undefined });
+    if (error) throw error;
+    return `sbobj://audit-reports/${path}`;
+};
+const openAuditFile = async (ref) => {
+    const m = /^sbobj:\/\/([^/]+)\/(.+)$/.exec(String(ref || ''));
+    if (!m) return;
+    try {
+        const { data, error } = await _rxSb().storage.from(m[1]).createSignedUrl(m[2], 3600);
+        if (error) throw error;
+        window.open(data.signedUrl, '_blank', 'noopener');
+    } catch (e) { UI.toast.error('Could not open file: ' + (e && e.message ? e.message : e)); }
+};
+
 const _refreshFengShuiTab = async (prospectId) => {
     const bodyEl = document.getElementById(`acc-body-fengshui-${prospectId}`);
     if (bodyEl) await switchProspectTab('fengshui', prospectId, null, bodyEl);
@@ -6015,7 +6198,7 @@ const deleteFengShuiAudit = async (prospectId, auditId) => {
 const uploadFengShuiFile = async (prospectId, auditId, fileType, fileInput) => {
     const file = fileInput?.files?.[0];
     if (!file) return;
-    if (file.size > 20 * 1024 * 1024) { UI.toast.error('File too large (max 20MB)'); return; }
+    if (file.size > 25 * 1024 * 1024) { UI.toast.error('File too large (max 25MB)'); return; }
 
     const prospect = await AppDataStore.getById('prospects', prospectId);
     if (!prospect) return;
@@ -6024,7 +6207,8 @@ const uploadFengShuiFile = async (prospectId, auditId, fileType, fileInput) => {
     if (idx === -1) { UI.toast.error('Audit not found'); return; }
 
     try {
-        const url = await _uploadFengShuiToBucket(file, `feng_shui_audits/${prospectId}_${auditId}_${fileType}`);
+        UI.toast.success('Uploading…');
+        const url = await _uploadAuditFile(file, `${prospectId}/${auditId}_${fileType}`);
         if (!url) { UI.toast.error('Upload failed'); return; }
         audits[idx][`${fileType}_url`] = url;
         audits[idx][`${fileType}_name`] = file.name;
@@ -7529,6 +7713,13 @@ const openPastRecordModal = async (...args) => {
         openEvoucherTemplateSetup,
         saveEvoucherTemplate,
         uploadFengShuiFile,
+        openPrescriptionModal,
+        rxProductChanged,
+        savePrescriptionLine,
+        setPrescriptionStatus,
+        deletePrescriptionLine,
+        openAuditFile,
+        _prescriptionBlockHtml,
         uploadFengShuiPhotos,
         uploadFengShuiSitePhotos,
         uploadHistoryInvoice,

@@ -297,6 +297,16 @@ const _state = windowStub._appState;
   await app.huijiSaveForEvent(123);
   check('readonly: no writes', calls.create.length + calls.update.length, before);
 
+  // 10 — 🩺 recommended visitors: solution ↔ prescription name matching
+  const nm = app._huijiNameMatch;
+  check('match: same name', nm('八大护法 Prosperity Power Ring', '八大护法 Prosperity Power Ring'), true);
+  check('match: Chinese half only', nm('八大护法', '八大护法 Prosperity Power Ring'), true);
+  check('match: English half only', nm('Prosperity Power Ring', '八大护法 Prosperity Power Ring'), true);
+  check('no match: single common word', nm('Power Ring', '八大护法 Prosperity Power Ring'), false);
+  check('no match: different product', nm('六曜指环 Support Power Ring', '八大护法 Prosperity Power Ring'), false);
+  check('no match: empty', nm('', 'x'), false);
+  check('recommend: no labels → empty', (await app.huijiRecommendVisitors([])).length, 0);
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error('HARNESS CRASH:', e); process.exit(1); });

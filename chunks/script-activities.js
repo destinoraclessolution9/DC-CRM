@@ -4244,6 +4244,8 @@ My raw notes:
                 <label style="font-weight:600;font-size:13px;">Solutions purchased — tick to verify 已购方案（打勾确认展示）</label>
                 <div id="huiji-solutions-list" style="display:flex;flex-direction:column;gap:4px;margin:6px 0;"></div>
                 <button type="button" class="btn btn-sm secondary" onclick="event.stopPropagation();app.huijiAddManualRow()"><i class="fas fa-plus"></i> Add solution manually</button>
+                <button type="button" class="btn btn-sm primary" style="margin-left:6px;" onclick="event.stopPropagation();app.huijiShowRecommended()">🩺 Who should visit this house?</button>
+                <div id="huiji-rx-recommend" style="margin-top:8px;"></div>
             </div>
             <div class="form-group" style="margin-top:10px;margin-bottom:0;">
                 <label>Private notes 备注 <span style="color:var(--gray-400);font-weight:normal;">(e.g. which room, story to tell)</span></label>
@@ -4377,6 +4379,91 @@ My raw notes:
 
     // Persist AFTER the event row saved. Must run while the modal DOM is still
     // open (reads checkboxes/notes). Failure never rolls back the event save.
+    // ── 🩺 Recommended visitors ────────────────────────────────────────────
+    // People whose audit prescription (or an open pipeline deal) names a
+    // solution this house already has — seeing it installed in a real home is
+    // the strongest close, so the agent should invite them to this 汇集.
+    // RLS scopes both tables, so each agent sees only their own people.
+    const _huijiCjk = (t) => (String(t || '').match(/[㐀-鿿]+/g) || []).join('');
+    const _huijiLatin = (t) => String(t || '').replace(/[㐀-鿿]+/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+    // "x names product y": x holds y's full name, its full Chinese half or its
+    // full English half. A generic fragment ("Power Ring") never matches.
+    const _huijiNames = (x, y) => {
+        const xl = x.toLowerCase();
+        if (xl.includes(y.toLowerCase())) return true;
+        const cy = _huijiCjk(y), ly = _huijiLatin(y);
+        if (cy.length >= 2 && x.includes(cy)) return true;
+        return ly.length >= 10 && ly.includes(' ') && xl.includes(ly) && !!cy;
+    };
+    // a = the house's solution label, b = the prescribed / deal product.
+    const _huijiNameMatch = (a, b) => {
+        const x = String(a || '').trim(), y = String(b || '').trim();
+        if (!x || !y) return false;
+        return _huijiNames(x, y);
+    };
+    const huijiRecommendVisitors = async (labels, ownerCustomerId = null) => {
+        const sols = (labels || []).map(l => String(l || '').trim()).filter(Boolean);
+        if (!sols.length) return [];
+        const sb = window.supabase || window.supabaseClient;
+        if (!sb) return [];
+        let rx = [], deals = [];
+        try {
+            const [a, b] = await Promise.all([
+                sb.from('audit_prescriptions').select('prospect_id,product,quoted_amount,status').in('status', ['proposed', 'accepted']).limit(2000),
+                sb.from('pipeline_deals').select('prospect_id,product,amount,stage,agent_id').in('stage', ['interested', 'proposal', 'prescribed', 'closing']).limit(2000),
+            ]);
+            rx = (a && a.data) || []; deals = (b && b.data) || [];
+        } catch (_) { return []; }
+        let ownerPid = null;
+        if (ownerCustomerId != null) {
+            try { const o = await AppDataStore.getById('customers', ownerCustomerId); ownerPid = o && o.converted_from_prospect_id; } catch (_) { /* keep null */ }
+        }
+        const byP = new Map();
+        const add = (pid, product, amount, prescribed) => {
+            if (pid == null || String(pid) === String(ownerPid)) return;
+            const hit = sols.find(l => _huijiNameMatch(l, product));
+            if (!hit) return;
+            const k = String(pid);
+            const e = byP.get(k) || { prospect_id: pid, products: new Set(), open: 0, prescribed: false };
+            e.products.add(product); e.open += Number(amount) || 0; e.prescribed = e.prescribed || prescribed;
+            byP.set(k, e);
+        };
+        rx.forEach(r => add(r.prospect_id, r.product, r.quoted_amount, true));
+        deals.forEach(d => { if (!byP.has(String(d.prospect_id)) || !byP.get(String(d.prospect_id)).prescribed) add(d.prospect_id, d.product, d.stage === 'prescribed' ? 0 : d.amount, d.stage === 'prescribed'); });
+        const list = [...byP.values()].sort((a, b) => (b.prescribed - a.prescribed) || (b.open - a.open)).slice(0, 30);
+        await Promise.all(list.map(async e => {
+            try {
+                const pr = await AppDataStore.getById('prospects', e.prospect_id);
+                e.name = pr ? (pr.full_name || pr.name || '') : '#' + e.prospect_id;
+                e.converted = !!(pr && pr.status === 'converted');
+            } catch (_) { e.name = '#' + e.prospect_id; }
+            e.products = [...e.products];
+        }));
+        return list;
+    };
+    const _huijiRecommendHtml = (list) => {
+        if (!list.length) return '<div style="font-size:12px;color:#6b7280;">No one has an open prescription or deal for these solutions yet.</div>';
+        return `<div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:8px 10px;">
+            <div style="font-weight:700;color:#5b21b6;font-size:13px;margin-bottom:4px;">🩺 Recommended to visit this house (${list.length})</div>
+            ${list.map(e => `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:4px 0;border-top:1px solid #ede9fe;font-size:12px;">
+                <a href="javascript:void(0)" onclick="event.stopPropagation();app.showProspectMenu(${Number(e.prospect_id)})" style="font-weight:600;color:#2563eb;">${escapeHtml(e.name || '')}</a>
+                ${e.prescribed ? '<span style="background:#ede9fe;color:#5b21b6;padding:0 6px;border-radius:8px;font-size:10px;">prescribed</span>' : '<span style="background:#f3f4f6;color:#374151;padding:0 6px;border-radius:8px;font-size:10px;">open deal</span>'}
+                ${e.converted ? '<span style="background:#ecfdf5;color:#047857;padding:0 6px;border-radius:8px;font-size:10px;">customer</span>' : ''}
+                <span style="color:#6b7280;">${e.products.map(x => escapeHtml(x)).join(', ')}</span>
+                ${e.open > 0 ? `<span style="margin-left:auto;font-weight:700;color:#059669;">RM ${Math.round(e.open).toLocaleString()}</span>` : ''}
+            </div>`).join('')}
+        </div>`;
+    };
+    const huijiShowRecommended = async () => {
+        const box = document.getElementById('huiji-rx-recommend');
+        if (!box) return;
+        const labels = huijiCollectSolutions().map(x => x.label);
+        if (!labels.length) { box.innerHTML = '<div style="font-size:12px;color:#b45309;">Tick the solutions this house has first.</div>'; return; }
+        box.innerHTML = '<div style="font-size:12px;color:#6b7280;">Looking…</div>';
+        const list = await huijiRecommendVisitors(labels, _state.huiji?.owner?.id);
+        box.innerHTML = _huijiRecommendHtml(list);
+    };
+
     const huijiSaveForEvent = async (eventId) => {
         const v = huijiValidateBeforeSave();
         if (!v.ok || !v.active || !eventId) return;
@@ -4396,6 +4483,9 @@ My raw notes:
                 await AppDataStore.create('event_huiji_details', payload);
             }
             AppDataStore.invalidateCache && AppDataStore.invalidateCache('event_huiji_details');
+            huijiRecommendVisitors((payload.solutions || []).map(x => x.label), payload.owner_customer_id).then(list => {
+                if (list.length) UI.toast.success(`🩺 ${list.length} of your people were prescribed what this house has — open the event to see who to invite`);
+            }).catch(() => {});
         } catch (err) {
             console.error('huiji briefing save failed:', err);
             UI.toast.error('Event saved, but the 汇集 briefing failed to save: ' + (err.message || 'unknown'));
@@ -4426,7 +4516,14 @@ My raw notes:
             <div class="info-row"><span class="info-label">House Owner:</span> <span><strong>${escapeHtml(ownerName)}</strong></span></div>
             ${sols.length ? `<div class="info-row" style="flex-direction:column;align-items:flex-start;gap:4px;"><span class="info-label">Verified solutions:</span><div>${sols.map(s => `<span style="display:inline-block;background:#ecfdf5;color:#047857;padding:2px 8px;border-radius:10px;font-size:12px;margin:2px 4px 2px 0;">${escapeHtml(s.label)}${s.date ? ` <span style="color:#6b7280;">· ${escapeHtml(s.date)}</span>` : ''}</span>`).join('')}</div></div>` : ''}
             ${row.notes ? `<div class="info-row"><span class="info-label">Notes:</span> <span style="white-space:pre-wrap;">${escapeHtml(row.notes)}</span></div>` : ''}
-            ${stories.length ? `<div class="info-row" style="flex-direction:column;align-items:flex-start;gap:4px;"><span class="info-label">🌱 改命后的进步:</span><div style="width:100%;">${stories.map(r => `<div style="font-size:12px;margin:3px 0;"><span style="color:#6b7280;">${escapeHtml(r.improve_date || '')}</span> ${r.solution ? `<span style="background:#ecfdf5;color:#047857;padding:0 6px;border-radius:8px;font-size:11px;">${escapeHtml(r.solution)}</span>` : ''} <span>${escapeHtml(r.story || '')}</span></div>`).join('')}</div></div>` : ''}`;
+            ${stories.length ? `<div class="info-row" style="flex-direction:column;align-items:flex-start;gap:4px;"><span class="info-label">🌱 改命后的进步:</span><div style="width:100%;">${stories.map(r => `<div style="font-size:12px;margin:3px 0;"><span style="color:#6b7280;">${escapeHtml(r.improve_date || '')}</span> ${r.solution ? `<span style="background:#ecfdf5;color:#047857;padding:0 6px;border-radius:8px;font-size:11px;">${escapeHtml(r.solution)}</span>` : ''} <span>${escapeHtml(r.story || '')}</span></div>`).join('')}</div></div>` : ''}
+            <div id="${slotId}-rx" style="margin-top:8px;"></div>`;
+        if (sols.length) {
+            huijiRecommendVisitors(sols.map(x => x.label), row.owner_customer_id).then(list => {
+                const box = document.getElementById(`${slotId}-rx`);
+                if (box && list.length) box.innerHTML = _huijiRecommendHtml(list);
+            }).catch(() => {});
+        }
     };
 
     const openCpsCreateEventModal = () => {
@@ -7431,6 +7528,9 @@ My raw notes:
         huijiValidateBeforeSave,
         huijiSaveForEvent,
         huijiFillBriefing,
+        huijiShowRecommended,
+        huijiRecommendVisitors,
+        _huijiNameMatch,
         buildPostMeetupNotesBlock,
         collectPostMeetupNotesData,
         applyPastedMinutes,

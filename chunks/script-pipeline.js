@@ -438,6 +438,17 @@ const _pipelineActivityMultiplier = (activity, categoryId, config, text) => {
 // referralsByProspect / purchasesByCustomer are optional pre-bucketed Maps (DE-QUAD:
 // O(1) lookup per prospect instead of re-scanning the whole array each call). When a
 // Map is present it wins; else fall back to the array .filter; else the network query.
+let _plHcCache = null;
+const _plHighCloserSet = async () => {
+    if (_plHcCache && Date.now() - _plHcCache.at < 10 * 60e3) return _plHcCache.set;
+    let set = new Set();
+    try {
+        const sb = window.supabase || window.supabaseClient;
+        if (sb) { const { data } = await sb.from('agent_labels').select('user_id,high_closer'); set = new Set((data || []).filter(r => r.high_closer).map(r => String(r.user_id))); }
+    } catch (_) { /* none */ }
+    _plHcCache = { at: Date.now(), set };
+    return set;
+};
 const checkReferralBonus = async (prospect, config, allReferrals, allPurchases, referralsByProspect, purchasesByCustomer) => {
     const windowDays = config.constants?.referral_customer_purchase_window_days || 180;
     const bonusPct = config.constants?.referral_customer_bonus_pct || 20;
@@ -479,6 +490,26 @@ const checkReferralBonus = async (prospect, config, allReferrals, allPurchases, 
         } catch (_) {}
     }
 
+    // Path C (v8.4): the prospect's own Referred By link (customer id, or the
+    // customer's original prospect id).
+    const _refType = String(prospect.referred_by_type || '').toLowerCase();
+    if (!referrerCustomerId && _refType === 'customer' && prospect.referred_by_id != null) {
+        try {
+            const all = await AppDataStore.getAll('customers');
+            const hit = (all || []).find(c => String(c.id) === String(prospect.referred_by_id) || String(c.converted_from_prospect_id) === String(prospect.referred_by_id));
+            if (hit) referrerCustomerId = hit.id;
+        } catch (_) { /* no customer link */ }
+    }
+    // ⚡ High Closer agent referral → +bonus (no customer needed).
+    if (!referrerCustomerId && (_refType === 'consultant' || _refType === 'agent') && prospect.referred_by_id != null) {
+        const hc = await _plHighCloserSet();
+        if (hc.has(String(prospect.referred_by_id))) {
+            result.applied = true;
+            result.bonusPct = config.constants?.referral_high_closer_bonus_pct ?? 15;
+            result.reason = 'Referred by a High Closer agent';
+            return result;
+        }
+    }
     if (!referrerCustomerId) {
         result.reason = 'No customer referrer';
         return result;
@@ -498,6 +529,19 @@ const checkReferralBonus = async (prospect, config, allReferrals, allPurchases, 
     } catch (_) {}
     if (!purchases.length) {
         result.reason = 'Referrer has no purchases';
+        return result;
+    }
+    // v8.4: the bonus scales with the referrer's lifetime spend (a RM50k
+    // customer's referral closes far more often than a RM2k one's).
+    const _spend = purchases.reduce((t, p) => t + (/cancel|refund|void/i.test(String(p.status || '')) ? 0 : (Number(p.amount) || 0)), 0);
+    if (_spend >= PL_VIP_SPEND) {
+        result.applied = true; result.bonusPct = config.constants?.referral_vip_bonus_pct ?? 25;
+        result.reason = `VIP referrer (lifetime RM${Math.round(_spend).toLocaleString()})`; result.referrerSpend = _spend;
+        return result;
+    }
+    if (_spend >= PL_MID_SPEND) {
+        result.applied = true; result.bonusPct = config.constants?.referral_mid_bonus_pct ?? 15;
+        result.reason = `Customer referrer (lifetime RM${Math.round(_spend).toLocaleString()})`; result.referrerSpend = _spend;
         return result;
     }
     const cutoffMs = Date.now() - windowDays * 24 * 60 * 60 * 1000;
@@ -4830,11 +4874,12 @@ const PL_DEAL_ROT_DAYS = 14;
 const PL_DEAL_STAGES = [
     { id: 'interested', label: 'Interested',      prob: 20, color: '#6B7280', bg: '#F3F4F6' },
     { id: 'proposal',   label: 'Proposal given',  prob: 50, color: '#B45309', bg: '#FEF3C7' },
-    { id: 'closing',    label: 'Closing',         prob: 80, color: '#B91C1C', bg: '#FEE2E2' },
+    { id: 'prescribed', label: '🩺 Prescribed',   prob: 80, color: '#6D28D9', bg: '#EDE9FE' },
+    { id: 'closing',    label: 'Closing',         prob: 90, color: '#B91C1C', bg: '#FEE2E2' },
     { id: 'won',        label: 'Won',             prob: 100, color: '#047857', bg: '#D1FAE5' },
     { id: 'lost',       label: 'Lost',            prob: 0,  color: '#4B5563', bg: '#E5E7EB' },
 ];
-const PL_DEAL_OPEN = new Set(['interested', 'proposal', 'closing']);
+const PL_DEAL_OPEN = new Set(['interested', 'proposal', 'prescribed', 'closing']);
 const PL_DEAL_SOURCES = [
     { id: 'customer_referral', label: 'Customer referral' },
     { id: 'agent_referral',    label: 'Agent / consultant referral' },
@@ -4845,6 +4890,81 @@ const PL_DEAL_SOURCES = [
     { id: 'social',            label: 'Social media / online' },
     { id: 'other',             label: 'Other' },
 ];
+// Lead grade (v8.4) — who referred this prospect:
+//   A+  a customer with lifetime spend >= PL_VIP_SPEND (VIP)
+//   A   a ⚡ High Closer agent, or a customer with spend >= PL_MID_SPEND
+//   B   any other agent / prospect / customer referral
+//   C   no source recorded
+// Deal probability = PL_GRADE_PROB[stage][grade] (editable here; calibrate later).
+const PL_VIP_SPEND = 50000;
+const PL_MID_SPEND = 20000;
+const PL_GRADE_PROB = {
+    interested: { 'A+': 40, A: 30, B: 20, C: 10 },
+    proposal:   { 'A+': 65, A: 55, B: 50, C: 40 },
+    prescribed: { 'A+': 85, A: 80, B: 80, C: 75 },
+    closing:    { 'A+': 95, A: 90, B: 90, C: 85 },
+};
+let _plGradeCtx = null;  // { prospects, custById, custByPid, spendByCust, highClosers }
+const _plBuildGradeCtx = async (purchases) => {
+    const [prospects, customers] = await Promise.all([
+        Promise.resolve(getVisibleProspects()).catch(() => []),
+        AppDataStore.getAll('customers').catch(() => []),
+    ]);
+    const custById = new Map(), custByPid = new Map(), spendByCust = new Map();
+    for (const c of (customers || [])) {
+        custById.set(String(c.id), c);
+        if (c.converted_from_prospect_id != null) custByPid.set(String(c.converted_from_prospect_id), c);
+    }
+    for (const p of (purchases || [])) {
+        const a = Number(p && p.amount) || 0;
+        if (a <= 0 || /cancel|refund|void/i.test(String(p.status || ''))) continue;
+        const c = p.customer_id != null ? custById.get(String(p.customer_id)) : custByPid.get(String(p.prospect_id));
+        if (!c) continue;
+        spendByCust.set(String(c.id), (spendByCust.get(String(c.id)) || 0) + a);
+    }
+    let highClosers = new Set();
+    try {
+        const sb = _plSb();
+        if (sb) {
+            const { data } = await sb.from('agent_labels').select('user_id,high_closer');
+            highClosers = new Set((data || []).filter(r => r.high_closer).map(r => String(r.user_id)));
+        }
+    } catch (_) { /* no labels */ }
+    return { prospects: new Map((prospects || []).map(p => [String(p.id), p])), custById, custByPid, spendByCust, highClosers };
+};
+const _plReferrerCustomer = (refId, g) => refId == null || !g ? null : (g.custById.get(String(refId)) || g.custByPid.get(String(refId)) || null);
+const _plGradeOf = (prospect, g = _plGradeCtx) => {
+    if (!prospect) return { grade: 'B', why: '' };
+    const t = String(prospect.referred_by_type || '').toLowerCase();
+    if (t === 'customer') {
+        const c = _plReferrerCustomer(prospect.referred_by_id, g);
+        const spend = c ? (g.spendByCust.get(String(c.id)) || 0) : 0;
+        if (spend >= PL_VIP_SPEND) return { grade: 'A+', why: `VIP referral (${c.full_name || 'customer'} spent RM${Math.round(spend / 1000)}k)` };
+        if (spend >= PL_MID_SPEND) return { grade: 'A', why: `Customer referral (spent RM${Math.round(spend / 1000)}k)` };
+        return { grade: 'B', why: 'Customer referral' };
+    }
+    if (t === 'consultant' || t === 'agent') {
+        if (g && prospect.referred_by_id != null && g.highClosers.has(String(prospect.referred_by_id))) return { grade: 'A', why: 'Referred by a ⚡ High Closer' };
+        return { grade: 'B', why: 'Agent referral' };
+    }
+    if (t === 'prospect') return { grade: 'B', why: 'Prospect referral' };
+    return { grade: 'C', why: 'No source recorded' };
+};
+const _plDealGrade = (d) => _plGradeOf(_plGradeCtx && _plGradeCtx.prospects.get(String(d.prospect_id)));
+const _plDealProb = (d) => {
+    if (d.stage === 'won') return 100;
+    if (d.stage === 'lost') return 0;
+    const row = PL_GRADE_PROB[d.stage];
+    if (!row || !_plGradeCtx) return _plStage(d.stage).prob;
+    return row[_plDealGrade(d).grade] ?? _plStage(d.stage).prob;
+};
+const _plGradeChip = (d) => {
+    const g = _plDealGrade(d);
+    const st = { 'A+': 'background:#FEF3C7;color:#92400E;', A: 'background:#DBEAFE;color:#1E40AF;', B: '', C: 'background:#FEE2E2;color:#B91C1C;' }[g.grade] || '';
+    const icon = g.grade === 'A+' ? '⭐' : g.grade === 'A' ? (/High Closer/.test(g.why) ? '⚡' : '💎') : g.grade === 'C' ? '⚠️' : '';
+    return `<span class="pld-chip" style="${st}" title="${esc(g.why)}">${icon} Grade ${g.grade} · ${_plDealProb(d)}%</span>`;
+};
+
 const _plStage = (id) => PL_DEAL_STAGES.find(s => s.id === id) || PL_DEAL_STAGES[0];
 const _plSourceLabel = (id) => (PL_DEAL_SOURCES.find(s => s.id === id) || {}).label || '';
 const _plSb = () => window.supabase || window.supabaseClient;
@@ -4919,7 +5039,7 @@ const _plDealsForMonth = (deals, ids, month) => {
 };
 const _plPipeStats = (deals) => {
     let open = 0, weighted = 0;
-    for (const d of deals) { const a = Number(d.amount) || 0; open += a; weighted += a * _plStage(d.stage).prob / 100; }
+    for (const d of deals) { const a = Number(d.amount) || 0; open += a; weighted += a * _plDealProb(d) / 100; }
     return { open, weighted, n: deals.length };
 };
 const _plCoverage = (open, gap) => gap <= 0 ? null : open / gap;
@@ -4943,6 +5063,9 @@ const _plLoadGoalCtx = async (allUsers) => {
         if (d.error) console.warn('[pipeline-goals] deals load failed', d.error.message);
     }
     const purchases = await AppDataStore.getAll('purchases').catch(() => []) || [];
+    try { _plGradeCtx = await _plBuildGradeCtx(purchases); } catch (_) { _plGradeCtx = null; }
+    let vipAsks = [];
+    try { const r = sb ? await sb.from('vip_referral_asks').select('customer_id,asked_at').order('asked_at', { ascending: false }).limit(1000) : null; vipAsks = (r && r.data) || []; } catch (_) { /* none */ }
     const goalRow = (uid, scope) => goals.find(r => String(r.user_id) === String(uid) && r.scope === scope);
     const goalFor = (u, scope) => {
         const r = goalRow(u.id, scope);
@@ -5004,7 +5127,7 @@ const _plLoadGoalCtx = async (allUsers) => {
     const today = _plYmd(new Date());
     const end = _plMonthEnd(month);
     const daysLeft = month === _plCurMonth() ? Math.max(0, Math.round((new Date(end) - new Date(today)) / 864e5) + 1) : (end < today ? 0 : null);
-    _plGoalCtx = { me, myLvl, month, users, goals, deals, purchases, mode, title, goal, scopeIds, members, unassigned, canEditGoals, won, pipe, gap, avgSale, daysLeft };
+    _plGoalCtx = { vipAsks, me, myLvl, month, users, goals, deals, purchases, mode, title, goal, scopeIds, members, unassigned, canEditGoals, won, pipe, gap, avgSale, daysLeft };
     return _plGoalCtx;
 };
 
@@ -5075,6 +5198,7 @@ const _plGoalBarHtml = (c) => {
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
                 ${monthNav}
                 ${c.canEditGoals ? `<button class="btn secondary btn-sm" onclick="app.openGoalEditModal()"><i class="fas fa-bullseye"></i> Edit goals</button>` : ''}
+                ${c.myLvl <= 2 ? `<button class="btn secondary btn-sm" onclick="app.openHighCloserModal()">⚡ High closers</button>` : ''}
             </div>
         </div>
         <div class="plg-bar" title="Green = won · light green = weighted forecast">
@@ -5090,11 +5214,121 @@ const _plGoalBarHtml = (c) => {
         </div>
         <div class="plg-advice">${advice}</div>
         ${teamHtml}
+        ${_plVipHtml(c)}
     </div>`;
 };
 
 // Payment status for a won deal's linked sale. Never shows the raw
 // payment_method text (it can contain a card number) — category only.
+// ⭐ VIP referral list — customers whose lifetime spend >= PL_VIP_SPEND, with
+// how many people they have referred and when someone last asked them.
+const _plVipList = (c) => {
+    const g = _plGradeCtx;
+    if (!g) return [];
+    const out = [];
+    for (const [cid, spend] of g.spendByCust) {
+        if (spend < PL_VIP_SPEND) continue;
+        const cust = g.custById.get(cid);
+        if (!cust) continue;
+        if (c.mode !== 'company' && !c.scopeIds.has(String(cust.responsible_agent_id))) continue;
+        const keys = new Set([String(cust.id), String(cust.converted_from_prospect_id)]);
+        let refs = 0;
+        for (const p of g.prospects.values()) {
+            if (String(p.referred_by_type || '').toLowerCase() === 'customer' && keys.has(String(p.referred_by_id))) refs++;
+        }
+        const ask = (c.vipAsks || []).find(a => String(a.customer_id) === cid);
+        const agent = c.users.find(u => String(u.id) === String(cust.responsible_agent_id));
+        out.push({ cust, spend, refs, lastAsk: ask ? String(ask.asked_at).slice(0, 10) : null, agent });
+    }
+    return out.sort((a, b) => (a.refs - b.refs) || (b.spend - a.spend));
+};
+const _plVipHtml = (c) => {
+    const list = _plVipList(c);
+    if (!list.length) return '';
+    const never = list.filter(v => v.refs === 0).length;
+    const rows = list.map(v => `
+        <tr>
+            <td><a href="javascript:void(0)" onclick="event.stopPropagation();app.showCustomerDetail(${Number(v.cust.id)})" style="font-weight:600;color:#2563EB;">${esc(v.cust.full_name || '')}</a></td>
+            <td>${_plRM(v.spend)}</td>
+            <td>${v.refs ? `${v.refs} referral${v.refs === 1 ? '' : 's'}` : '<span style="color:#B91C1C;font-weight:600;">none yet</span>'}</td>
+            <td class="plg-muted">${esc(v.agent ? (v.agent.full_name || v.agent.username || '') : '')}</td>
+            <td>${v.lastAsk ? `<span class="plg-muted">asked ${esc(v.lastAsk)}</span> ` : ''}<button class="btn secondary btn-sm" style="font-size:11px;padding:2px 8px;" onclick="event.stopPropagation();app.plVipAsked(${Number(v.cust.id)})">Asked ✓</button></td>
+        </tr>`).join('');
+    return `
+    <details class="plg-team" ${never ? 'open' : ''}>
+        <summary style="cursor:pointer;font-weight:700;">⭐ VIP customers (RM${PL_VIP_SPEND / 1000}k+): ${list.length} — <span style="color:${never ? '#B91C1C' : '#047857'};">${never} never referred anyone</span></summary>
+        <div class="plg-muted" style="margin:6px 0;">A referral from a VIP is Grade A+ — the highest closing chance. Ask them, then tap "Asked ✓".</div>
+        <div style="overflow-x:auto;"><table class="plg-table"><thead><tr><th>Customer</th><th>Lifetime spend</th><th>Referred</th><th>Agent</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+    </details>`;
+};
+const plVipAsked = async (customerId) => {
+    try {
+        const { error } = await _plSb().from('vip_referral_asks').insert({ customer_id: customerId, asked_by: _state.cu?.id || null });
+        if (error) throw error;
+        UI.toast.success('Logged — thank you for asking');
+        _plRenderGoalSections();
+    } catch (e) { UI.toast.error('Could not log: ' + (e && e.message ? e.message : e)); }
+};
+
+// ⚡ High Closer labels — referral conversion per referring agent; suggestion
+// when >= 10 leads and >= 2× the company rate. Super Admin confirms.
+const _plReferrerStats = () => {
+    const g = _plGradeCtx;
+    if (!g) return { rows: [], avg: 0 };
+    const by = new Map();
+    let leads = 0, conv = 0;
+    for (const p of g.prospects.values()) {
+        leads++; if (p.status === 'converted') conv++;
+        const t = String(p.referred_by_type || '').toLowerCase();
+        if ((t !== 'consultant' && t !== 'agent') || p.referred_by_id == null) continue;
+        const k = String(p.referred_by_id);
+        const e = by.get(k) || { leads: 0, conv: 0 };
+        e.leads++; if (p.status === 'converted') e.conv++;
+        by.set(k, e);
+    }
+    const avg = leads ? conv / leads : 0;
+    return { by, avg };
+};
+const openHighCloserModal = async () => {
+    const c = _plGoalCtx;
+    if (!c || c.myLvl > 2) return;
+    const { by, avg } = _plReferrerStats();
+    const agents = c.users.filter(_plUserActive).filter(u => { const l = _getUserLevel(u); return l >= 3 && l <= 12; });
+    const rows = agents.map(u => {
+        const st = by.get(String(u.id)) || { leads: 0, conv: 0 };
+        const rate = st.leads ? st.conv / st.leads : 0;
+        return { u, ...st, rate, suggest: st.leads >= 10 && rate >= 2 * avg, on: _plGradeCtx.highClosers.has(String(u.id)) };
+    }).sort((a, b) => (b.rate - a.rate) || (b.leads - a.leads));
+    const content = `
+    <p class="plg-muted" style="font-size:12px;">Leads an agent referred that became customers. Company average: <strong>${Math.round(avg * 100)}%</strong>. Referrals from a ⚡ High Closer are Grade A.</p>
+    <div style="max-height:55vh;overflow:auto;"><table class="plg-table" style="min-width:0;">
+        <thead><tr><th>⚡</th><th>Agent</th><th>Leads referred</th><th>Became customers</th><th>Rate</th></tr></thead>
+        <tbody>${rows.map(r => `<tr>
+            <td><input type="checkbox" class="pl-hc-input" data-uid="${r.u.id}" data-orig="${r.on ? 1 : 0}" ${r.on ? 'checked' : ''}></td>
+            <td>${esc(r.u.full_name || r.u.username || '')}${r.suggest && !r.on ? ' <span class="pld-chip" style="background:#DBEAFE;color:#1E40AF;">suggested</span>' : ''}</td>
+            <td>${r.leads}</td><td>${r.conv}</td>
+            <td style="font-weight:700;color:${r.rate >= 2 * avg && r.leads >= 10 ? '#047857' : '#374151'};">${r.leads ? Math.round(r.rate * 100) + '%' : '—'}</td>
+        </tr>`).join('')}</tbody>
+    </table></div>`;
+    UI.showModal('⚡ High Closers', content, [
+        { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+        { label: 'Save', type: 'primary', action: '(async () => { await app.saveHighClosers(); })()' },
+    ]);
+};
+const saveHighClosers = async () => {
+    const changed = [...document.querySelectorAll('.pl-hc-input')].filter(i => (i.checked ? '1' : '0') !== i.dataset.orig)
+        .map(i => ({ user_id: Number(i.dataset.uid), high_closer: i.checked, set_by: _state.cu?.id || null, updated_at: new Date().toISOString() }));
+    if (!changed.length) { UI.hideModal(); return; }
+    try {
+        const { error } = await _plSb().from('agent_labels').upsert(changed, { onConflict: 'user_id' });
+        if (error) throw error;
+        _plHcCache = null;
+        UI.hideModal();
+        UI.toast.success('High Closer labels saved');
+        _plRenderGoalSections();
+    } catch (e) { UI.toast.error('Could not save: ' + (e && e.message ? e.message : e)); }
+};
+
 const _plPayCategory = (m) => {
     const t = String(m || '').toLowerCase();
     if (!t) return '';
@@ -5127,7 +5361,7 @@ const _plDealCardHtml = (d, names, users) => {
     const pName = p ? (p.full_name || p.name || '') : `Prospect #${d.prospect_id}`;
     const owner = users.find(u => String(u.id) === String(d.agent_id));
     const isOpen = PL_DEAL_OPEN.has(d.stage);
-    const overdue = isOpen && d.expected_close_date && d.expected_close_date < today;
+    const overdue = isOpen && d.stage !== 'prescribed' && d.expected_close_date && d.expected_close_date < today;
     const lastTouch = [d.updated_at, p && p.last_activity_date].filter(Boolean).map(x => new Date(x).getTime()).reduce((a, b) => Math.max(a, b), 0);
     const idleDays = lastTouch ? Math.floor((Date.now() - lastTouch) / 864e5) : null;
     const rotting = isOpen && idleDays != null && idleDays >= PL_DEAL_ROT_DAYS;
@@ -5147,6 +5381,8 @@ const _plDealCardHtml = (d, names, users) => {
             ${owner && _plGoalCtx && _plGoalCtx.mode !== 'personal' ? `<span class="pld-chip">👤 ${esc(owner.full_name || owner.username || '')}</span>` : ''}
             ${d.auto_created && isOpen ? '<span class="pld-chip" style="background:#E0F2FE;color:#075985;" title="Added automatically from a warm prospect — open the pen to confirm product, amount and date">🤖 auto — check ✎</span>' : ''}
             ${d.stage === 'won' ? _plPaymentChip(d) : ''}
+            ${isOpen ? _plGradeChip(d) : ''}
+            ${d.audit_id ? '<span class="pld-chip" style="background:#EDE9FE;color:#5B21B6;" title="Created from a Feng Shui audit prescription — edit the lines on the profile">🩺 audit prescription</span>' : ''}
         </div>
         ${d.next_step ? `<div class="pld-next" style="${stepOverdue ? 'color:#B91C1C;' : ''}">➜ ${esc(d.next_step)}${d.next_step_date ? ` <span class="plg-muted">(${esc(d.next_step_date)})</span>` : ''}</div>` : (isOpen ? '<div class="pld-next" style="color:#B45309;">➜ No next step set</div>' : '')}
         ${d.stage === 'lost' && d.lost_reason ? `<div class="pld-next plg-muted">Lost: ${esc(d.lost_reason)}</div>` : ''}
@@ -5241,7 +5477,7 @@ const _PL_GOAL_CSS = `
 .plg-table th{text-align:left;font-size:11px;color:#6B7280;padding:6px 8px;border-bottom:2px solid #E5E7EB;}
 .plg-table td{padding:8px;border-bottom:1px solid #F3F4F6;}
 .plg-mrow{cursor:pointer;}.plg-mrow:hover,.plg-mrow.active{background:#EFF6FF;}
-.pld-board{display:grid;grid-template-columns:repeat(5,minmax(200px,1fr));gap:10px;overflow-x:auto;padding-bottom:4px;}
+.pld-board{display:grid;grid-template-columns:repeat(6,minmax(190px,1fr));gap:10px;overflow-x:auto;padding-bottom:4px;}
 .pld-col{background:#F9FAFB;border-radius:10px;padding:8px;min-width:200px;}
 .pld-col-head{display:flex;justify-content:space-between;gap:6px;font-size:12px;font-weight:700;padding:6px 4px 8px;flex-wrap:wrap;}
 .pld-card{background:white;border-radius:8px;padding:10px;margin-bottom:8px;box-shadow:0 1px 2px rgba(0,0,0,.08);border-left:3px solid transparent;}
@@ -5588,7 +5824,7 @@ const _plProductStats = (c, catalog, period, ids) => {
         if (!ids.has(String(d.agent_id)) || !PL_DEAL_OPEN.has(d.stage) || String(d.expected_close_date || '') > r.end) continue;
         const x = row(_plProductGroup(d.product, d.product_id, catalog));
         const a = Number(d.amount) || 0;
-        x.open += a; x.openN++; x.weighted += a * _plStage(d.stage).prob / 100;
+        x.open += a; x.openN++; x.weighted += a * _plDealProb(d) / 100;
     }
     return [...rows.values()].sort((a, b) => (b.rm + b.weighted) - (a.rm + a.weighted));
 };
@@ -5955,6 +6191,14 @@ const saveGoals = async () => {
         _plDealsBoardHtml,
         _plAutoSource,
         _plAutoDraftDeals,
+        openHighCloserModal,
+        saveHighClosers,
+        plVipAsked,
+        _plGradeOf,
+        _plDealProb,
+        _plBuildGradeCtx,
+        _plVipList,
+        _plSetGradeCtxForTest: (v) => { _plGradeCtx = v; },
         _plProductsInText,
         _plPayCategory,
         _plSetLastEnrichedForTest: (v) => { _lastEnriched = v; },
