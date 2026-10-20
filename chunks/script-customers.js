@@ -3306,7 +3306,8 @@ const _renderDeliveryListing = async () => {
     const cFull = _afterDelivered.filter(l => !l.inst).length;
     const cInst = _afterDelivered.filter(l => l.inst).length;
     const tab = (key, label, n) => `<button class="btn btn-sm ${_deliveryPayFilter === key ? 'primary' : 'secondary'}" onclick="app._setDeliveryPayFilter('${key}')">${label} (${n})</button>`;
-    const tabsHtml = `<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">${tab('all', 'All', cAll)}${tab('full', 'Full Payment', cFull)}${tab('installment', 'Installment', cInst)}</div>`;
+    const _advN = await _advOwedCount();
+    const tabsHtml = `<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">${tab('all', 'All', cAll)}${tab('full', 'Full Payment', cFull)}${tab('installment', 'Installment', cInst)}<button class="btn btn-sm secondary" style="margin-left:auto;" onclick="app.openAgentAdvances('owed')">🤝 Agent advances${_advN ? ` (${_advN} owed)` : ''}</button></div>`;
 
     if (!rows.length) {
         body.innerHTML = tabsHtml + `<div style="text-align:center;color:var(--gray-400);padding:32px;">${_deliveryShowDelivered ? 'No product lines found.' : 'No pending deliveries. 🎉'}</div>`;
@@ -3478,11 +3479,11 @@ const _diOrderInfo = async (kind, id, customerId) => {
                 ready = _diReadyFromCr(crs.find(c => String(c.invoice_number || '').trim().toLowerCase() === inv));
             }
         } catch (_) { /* no ready date */ }
-        return { item: p?.item || 'Item', ringSize: p?.ring_size || '', ready, invoice: p?.invoice || '', name, status: p?.delivery_status || 'Pending Delivery' };
+        return { item: p?.item || 'Item', ringSize: p?.ring_size || '', ready, invoice: p?.invoice || '', name, status: p?.delivery_status || 'Pending Delivery', agentId: p?.agent_id || customer?.responsible_agent_id || null };
     }
     const pr = await AppDataStore.getById('prospects', id);
     const cr = pr?.closing_record || {};
-    return { item: cr.product || 'Item', ringSize: cr.ring_size || '', ready: _diReadyFromCr(cr), invoice: cr.invoice_number || '', name, status: cr.delivery_status || 'Pending Delivery' };
+    return { item: cr.product || 'Item', ringSize: cr.ring_size || '', ready: _diReadyFromCr(cr), invoice: cr.invoice_number || '', name, status: cr.delivery_status || 'Pending Delivery', agentId: customer?.responsible_agent_id || pr?.responsible_agent_id || null };
 };
 
 const _diFetchItems = async (kind, id) => {
@@ -3512,7 +3513,8 @@ const openDeliveryItems = async (kind, id, customerId) => {
             if (error) throw error;
             items = await _diFetchItems(kind, id);
         }
-        _diCtx = { kind, id, customerId, title: `${info.name}${info.invoice ? ' · ' + info.invoice : ''}` };
+        _diCtx = { kind, id, customerId, title: `${info.name}${info.invoice ? ' · ' + info.invoice : ''}`, saleAgentId: info.agentId || null };
+        await _diLoadAdv(items);
         UI.showModal('Delivery items', _diRenderItems(items), [
             { label: '← Back to list', type: 'secondary', action: 'app.openDeliveryListing()' },
         ], 'fullscreen');
@@ -3539,14 +3541,14 @@ const _diRenderItems = (items) => {
         const dis = isPending ? '' : 'disabled';
         const action = isPending
             ? (items.length > 1 ? `<button class="btn-sm secondary" title="Remove this item" onclick="event.stopPropagation(); app.diDeleteItem(${r.id})"><i class="fas fa-trash"></i></button>` : '')
-            : `<button class="btn-sm secondary" title="Undo handover" onclick="event.stopPropagation(); app.diUndoHandover(${r.id})"><i class="fas fa-undo"></i> Undo</button>`;
+            : `<button class="btn-sm secondary" title="Undo handover" onclick="event.stopPropagation(); app.diUndoHandover(${r.id})"><i class="fas fa-undo"></i> Undo</button>${_diAdvAction(r)}`;
         return `<tr>
             <td data-label="Pick">${isPending ? `<input type="checkbox" class="di-pick" value="${r.id}" aria-label="Select item for handover">` : ''}</td>
             <td data-label="Item"><input type="text" class="form-control" style="font-size:12px;min-width:160px;" value="${escapeHtml(r.item_name)}" ${dis} onchange="app.diSaveField(${r.id}, 'item_name', this.value)"></td>
             <td data-label="Qty"><input type="number" min="1" class="form-control" style="font-size:12px;width:64px;" value="${r.qty || 1}" ${dis} onchange="app.diSaveField(${r.id}, 'qty', this.value)"></td>
             <td data-label="Ring size"><input type="text" class="form-control" style="font-size:12px;width:80px;" value="${escapeHtml(r.ring_size || '')}" ${dis} onchange="app.diSaveField(${r.id}, 'ring_size', this.value)"></td>
             <td data-label="Expected ready"><input type="date" class="form-control" style="font-size:12px;" value="${escapeHtml(r.expected_ready_date || '')}" ${dis} onchange="app.diSaveField(${r.id}, 'expected_ready_date', this.value)"></td>
-            <td data-label="Status">${statusBadge}</td>
+            <td data-label="Status">${statusBadge}${_diAdvLine(r)}</td>
             <td data-label="Handover date" style="white-space:nowrap;">${escapeHtml(r.handover_date || '—')}</td>
             <td data-label="Photos">${photoLinks || '<span style="color:var(--gray-400);">—</span>'}</td>
             <td data-label="Remarks"><input type="text" class="form-control" style="font-size:12px;min-width:120px;" value="${escapeHtml(r.remarks || '')}" placeholder="Remark…" onchange="app.diSaveField(${r.id}, 'remarks', this.value)"></td>
@@ -3561,6 +3563,7 @@ const _diRenderItems = (items) => {
                 <div class="form-group half"><label>How</label>
                     <select id="di-how" class="form-control"><option value="delivered">Delivered to customer</option><option value="picked_up">Customer picked up</option></select></div>
             </div>
+            ${_diSourceHtml(pending)}
             <div class="form-group"><label>Photo proof <span class="required">*</span> <span style="font-weight:400;color:var(--gray-500);font-size:12px;">(at least 1, max ${_DI_MAX_PHOTOS})</span></label>
                 <input type="file" id="di-photos" class="form-control" accept="image/*" multiple></div>
             <div class="form-group"><label>Remark</label><input type="text" id="di-remark" class="form-control" placeholder="e.g. received by wife"></div>
@@ -3586,6 +3589,7 @@ const _diRenderItems = (items) => {
 const _diRefresh = async () => {
     if (!_diCtx) return [];
     const items = await _diFetchItems(_diCtx.kind, _diCtx.id);
+    await _diLoadAdv(items);
     const panel = document.getElementById('di-panel');
     if (panel) panel.outerHTML = _diRenderItems(items);
     (window.app.applyMobileTableLabels || (() => {}))();
@@ -3673,6 +3677,12 @@ const diHandover = async () => {
     const remark = (document.getElementById('di-remark')?.value || '').trim();
     const files = Array.from(document.getElementById('di-photos')?.files || []).filter(f => f.type && f.type.startsWith('image/'));
     if (!ids.length) return UI.toast.error('Tick the item(s) being handed over');
+    const fromAgent = document.getElementById('di-source')?.value === 'agent';
+    const lenderId = fromAgent ? document.getElementById('di-lender')?.value : null;
+    if (fromAgent && !lenderId) return UI.toast.error("Pick whose stock it was");
+    if (fromAgent && ids.some(x => !(_diCtx.eligible && _diCtx.eligible.has(String(x))))) {
+        return UI.toast.error("Only calligraphy, artistic masterpieces and 财库 / 财托 can come from an agent's stock — untick the others");
+    }
     if (!_diIsDay(date)) return UI.toast.error('Handover date is required');
     if (date > _custLocalDay()) return UI.toast.error('Handover date cannot be in the future');
     if (!files.length) return UI.toast.error('Add at least one photo as proof of handover');
@@ -3710,7 +3720,12 @@ const diHandover = async () => {
             if (error) throw error;
             saved++;
         }
-        UI.toast.success(`${saved} item(s) marked ${_DI_STATUS_LABEL[how].toLowerCase()}`);
+        let lent = 0;
+        if (fromAgent && saved) {
+            try { lent = await _diCreateAdvances(ids, lenderId, date); }
+            catch (e) { UI.toast.error('Handed over, but the agent-stock record was not saved: ' + (e?.message || e) + " — use 🤝 Agent's stock on the item"); }
+        }
+        UI.toast.success(`${saved} item(s) marked ${_DI_STATUS_LABEL[how].toLowerCase()}${lent ? ` · 🤝 ${lent} from agent's stock (owed back)` : ''}`);
         await _diSyncOrderStatus(await _diRefresh());
     } catch (e) {
         // Nothing saved → don't leave orphan photos in storage. (A partly-saved
@@ -3724,9 +3739,235 @@ const diHandover = async () => {
     }
 };
 
+// ── 🤝 Agent stock advances (owner 2026-10-21) ───────────────────────────────
+// Calligraphy / Artistic Masterpieces / 财库·财托 only: an agent may hand the
+// customer a piece from THEIR OWN stock before the office piece arrives. The
+// customer handover is recorded as usual; public.delivery_advances keeps the
+// IOU (same piece back, item for item) until the LENDER ticks "returned to me".
+// The DB refuses rings / Feng Shui and a lend before the handover.
+const _advFmt = (d) => d ? new Date(String(d).slice(0, 10) + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+const _advUsers = async () => {
+    const all = await AppDataStore.getAll('users').catch(() => []) || [];
+    return all.filter(u => { const l = _getUserLevel(u); return l >= 3 && l <= 12 && !/inactive|deleted|resign|terminat/i.test(String(u.status || '')); })
+        .sort((a, b) => String(a.full_name || '').localeCompare(String(b.full_name || '')));
+};
+const _advUserName = (users, id) => { const u = users.find(x => String(x.id) === String(id)); return u ? (u.full_name || u.username || 'Agent') : 'Agent'; };
+
+// Eligible items + their advances, for the Items screen
+const _diLoadAdv = async (items) => {
+    if (!_diCtx) return;
+    const sb = _diSb();
+    const ids = items.map(r => r.id);
+    _diCtx.eligible = new Set();
+    _diCtx.adv = new Map();
+    if (!ids.length || !sb) return;
+    try {
+        const [el, ad] = await Promise.all([
+            sb.rpc('delivery_advance_eligible', { p_item_ids: ids }),
+            sb.from('delivery_advances').select('*').in('delivery_item_id', ids),
+        ]);
+        ((el && el.data) || []).forEach(x => _diCtx.eligible.add(String(typeof x === 'object' ? x.delivery_advance_eligible : x)));
+        ((ad && ad.data) || []).forEach(a => _diCtx.adv.set(String(a.delivery_item_id), a));
+    } catch (_) { /* no advance options */ }
+    if (!_diCtx.users) _diCtx.users = await _advUsers();
+};
+
+const _diAdvLine = (r) => {
+    const a = _diCtx && _diCtx.adv && _diCtx.adv.get(String(r.id));
+    if (!a) return '';
+    const who = escapeHtml(_advUserName(_diCtx.users || [], a.lender_agent_id));
+    if (a.status === 'returned') return `<div style="font-size:11px;color:#166534;margin-top:3px;">🤝 From ${who}'s stock · ✅ returned ${escapeHtml(_advFmt(a.returned_date))}</div>`;
+    const late = a.expected_back && a.expected_back < _custLocalDay();
+    return `<div style="font-size:11px;margin-top:3px;color:${late ? 'var(--error,#dc2626)' : '#92400e'};">🤝 From ${who}'s stock · owed back ~${escapeHtml(_advFmt(a.expected_back))}${late ? ' (late)' : ''}
+        <a href="javascript:void(0)" title="Remove (recorded by mistake)" onclick="event.stopPropagation();app.diAdvanceRemove(${Number(r.id)})" style="margin-left:4px;color:var(--gray-500);">✕</a></div>`;
+};
+
+const _diAdvAction = (r) => {
+    if (r.status === 'pending' || !_diCtx || !_diCtx.eligible || !_diCtx.eligible.has(String(r.id)) || _diCtx.adv.has(String(r.id))) return '';
+    return `<button class="btn-sm secondary" title="This piece came from an agent's own stock" onclick="event.stopPropagation(); app.diMarkAdvance(${r.id})">🤝 Agent's stock</button>`;
+};
+
+const _diSourceHtml = (pending) => {
+    if (!_diCtx || !_diCtx.eligible || !pending.some(r => _diCtx.eligible.has(String(r.id)))) return '';
+    const users = _diCtx.users || [];
+    const def = String(_diCtx.saleAgentId || _state.cu?.id || '');
+    return `
+        <div class="form-row">
+            <div class="form-group half"><label>Given from</label>
+                <select id="di-source" class="form-control" onchange="document.getElementById('di-lender-wrap').style.display=this.value==='agent'?'':'none'">
+                    <option value="office">🏢 Office stock</option>
+                    <option value="agent">🤝 Agent's own stock (office piece goes back to the agent)</option>
+                </select></div>
+            <div class="form-group half" id="di-lender-wrap" style="display:none;"><label>Whose stock?</label>
+                <select id="di-lender" class="form-control">${users.map(u => `<option value="${u.id}" ${String(u.id) === def ? 'selected' : ''}>${escapeHtml(u.full_name || u.username || '')}</option>`).join('')}</select></div>
+        </div>
+        <div style="font-size:11px;color:var(--gray-500);margin:-4px 0 8px;">Agent's stock is only for calligraphy, artistic masterpieces and 财库 / 财托.</div>`;
+};
+
+const _diCreateAdvances = async (itemIds, lenderId, givenDate) => {
+    const sb = _diSb();
+    let n = 0;
+    for (const itemId of itemIds) {
+        const { error } = await sb.from('delivery_advances').insert({ delivery_item_id: Number(itemId), lender_agent_id: Number(lenderId), given_date: givenDate, created_by: _state.cu?.id || null });
+        if (error) throw error;
+        n++;
+    }
+    return n;
+};
+
+// An item already handed over → "it came from an agent's stock" (also for
+// advances that happened before this feature existed)
+const diMarkAdvance = async (itemId) => {
+    if (!_diCtx) return;
+    const items = await _diFetchItems(_diCtx.kind, _diCtx.id);
+    const r = items.find(x => String(x.id) === String(itemId));
+    if (!r) return;
+    const users = _diCtx.users || await _advUsers();
+    const def = String(_diCtx.saleAgentId || _state.cu?.id || '');
+    const back = { kind: _diCtx.kind, id: _diCtx.id, customerId: _diCtx.customerId };
+    UI.showModal('🤝 From an agent\'s own stock', `
+        <p style="font-size:13px;margin:0 0 10px;"><strong>${escapeHtml(r.item_name)}</strong> was handed over on ${escapeHtml(_advFmt(r.handover_date))}. Record whose own stock it came from — the office piece goes back to them when it arrives.</p>
+        <div class="form-group"><label>Whose stock?</label>
+            <select id="adv-lender" class="form-control">${users.map(u => `<option value="${u.id}" ${String(u.id) === def ? 'selected' : ''}>${escapeHtml(u.full_name || u.username || '')}</option>`).join('')}</select></div>
+        <div class="form-group"><label>Date given</label><input type="date" id="adv-date" class="form-control" value="${escapeHtml(r.handover_date || _custLocalDay())}" max="${_custLocalDay()}"></div>`,
+        [{ label: 'Cancel', type: 'secondary', action: `app.openDeliveryItems('${back.kind}', ${Number(back.id)}, ${Number(back.customerId)})` },
+         { label: 'Save', type: 'primary', action: `(async () => { await app.diSaveAdvance(${Number(itemId)}, '${back.kind}', ${Number(back.id)}, ${Number(back.customerId)}); })()` }]);
+};
+const diSaveAdvance = async (itemId, kind, id, customerId) => {
+    const lender = document.getElementById('adv-lender')?.value;
+    const date = document.getElementById('adv-date')?.value;
+    if (!lender) return UI.toast.error('Pick whose stock it was');
+    if (!_diIsDay(date)) return UI.toast.error('Date given is required');
+    try {
+        await _diCreateAdvances([itemId], lender, date);
+        UI.toast.success('Recorded — the office piece now goes back to the agent');
+    } catch (e) {
+        return UI.toast.error('Not saved: ' + (e?.message || e));
+    }
+    await openDeliveryItems(kind, id, customerId);
+};
+const diAdvanceRemove = async (itemId) => {
+    if (!confirm('Remove this agent-stock record? (Only if it was recorded by mistake.)')) return;
+    const { error } = await _diSb().from('delivery_advances').delete().eq('delivery_item_id', itemId).eq('status', 'owed');
+    if (error) return UI.toast.error('Could not remove: ' + error.message);
+    UI.toast.success('Removed');
+    await _diRefresh();
+};
+
+// ── 🤝 Agent advances board ──
+let _advTab = 'owed';
+const _advOwedCount = async () => {
+    try {
+        const { count } = await _diSb().from('delivery_advances').select('id', { count: 'exact', head: true }).eq('status', 'owed');
+        return count || 0;
+    } catch (_) { return 0; }
+};
+const openAgentAdvances = async (tab) => {
+    if (tab) _advTab = tab;
+    const sb = _diSb();
+    if (!sb) return UI.toast.error('Offline — try again in a moment');
+    let rows = [];
+    try {
+        const { data, error } = await sb.from('delivery_advances').select('*,customers(full_name)').order('expected_back', { ascending: true }).limit(1000);
+        if (error) throw error;
+        rows = data || [];
+    } catch (e) {
+        return UI.toast.error('Could not load advances: ' + (e?.message || e));
+    }
+    const users = await AppDataStore.getAll('users').catch(() => []) || [];
+    const today = _custLocalDay();
+    const me = String(_state.cu?.id || '');
+    const isAdmin = _getUserLevel(_state.cu) <= 2;
+    const owed = rows.filter(a => a.status === 'owed');
+    const due = owed.filter(a => a.expected_back && a.expected_back <= today);
+    const shown = _advTab === 'returned' ? rows.filter(a => a.status === 'returned').reverse()
+        : _advTab === 'due' ? due : owed;
+    const tabBtn = (t, label, n) => `<button class="btn btn-sm ${_advTab === t ? 'primary' : 'secondary'}" onclick="app.openAgentAdvances('${t}')">${label} (${n})</button>`;
+    const list = shown.length ? `<div class="prospects-table-container"><table class="prospects-table"><thead><tr>
+            <th scope="col">Agent (lender)</th><th scope="col">Item</th><th scope="col">Customer</th><th scope="col">Given</th>
+            <th scope="col">Office piece due</th><th scope="col">Status</th><th scope="col"></th></tr></thead><tbody>${shown.map(a => {
+        const late = a.status === 'owed' && a.expected_back && a.expected_back < today;
+        const days = late ? Math.round((new Date(today + 'T00:00:00') - new Date(a.expected_back + 'T00:00:00')) / 864e5) : 0;
+        const canTick = a.status === 'owed' && (isAdmin || String(a.lender_agent_id) === me);
+        const st = a.status === 'returned'
+            ? `<span class="score-badge" style="font-size:11px;background:#dcfce7;color:#166534;">✅ Returned ${escapeHtml(_advFmt(a.returned_date))}</span>`
+            : (a.expected_back && a.expected_back <= today
+                ? `<span class="score-badge" style="font-size:11px;background:#fee2e2;color:#b91c1c;">🔴 Due back${days ? ` · ${days}d late` : ''}</span>`
+                : '<span class="score-badge" style="font-size:11px;background:#fef3c7;color:#92400e;">🟠 Owed</span>');
+        return `<tr>
+            <td data-label="Agent"><strong>${escapeHtml(_advUserName(users, a.lender_agent_id))}</strong>${a.sale_agent_id && String(a.sale_agent_id) !== String(a.lender_agent_id) ? `<div style="font-size:11px;color:var(--gray-500);">sale: ${escapeHtml(_advUserName(users, a.sale_agent_id))}</div>` : ''}</td>
+            <td data-label="Item">${escapeHtml(a.item_name || '')}</td>
+            <td data-label="Customer"><a href="javascript:void(0)" onclick="UI.hideModal(); app.showCustomerDetail(${Number(a.customer_id)})">${escapeHtml((a.customers && a.customers.full_name) || '—')}</a></td>
+            <td data-label="Given" style="white-space:nowrap;">${escapeHtml(_advFmt(a.given_date))}</td>
+            <td data-label="Office piece due" style="white-space:nowrap;${late ? 'color:var(--error,#dc2626);font-weight:600;' : ''}">${escapeHtml(_advFmt(a.expected_back))}</td>
+            <td data-label="Status">${st}</td>
+            <td data-label="">${canTick ? `<button class="btn-sm primary" onclick="app.advReturn(${Number(a.id)})">↩ Returned to me</button>` : ''}</td>
+        </tr>`;
+    }).join('')}</tbody></table></div>`
+        : `<div style="text-align:center;color:var(--gray-400);padding:28px;">${_advTab === 'returned' ? 'Nothing returned yet.' : 'No stock owed to agents. 🎉'}</div>`;
+    UI.showModal('🤝 Agent stock advances', `
+        <div style="font-size:13px;margin-bottom:8px;"><strong>${owed.length}</strong> piece${owed.length === 1 ? '' : 's'} owed back to agents${due.length ? ` · <span style="color:#b91c1c;font-weight:600;">${due.length} due now</span>` : ''}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">${tabBtn('owed', 'Owed', owed.length)}${tabBtn('due', 'Due back', due.length)}${tabBtn('returned', 'Returned', rows.length - owed.length)}</div>
+        ${list}
+        <div style="margin-top:10px;font-size:12px;color:var(--gray-500);">The agent ticks <strong>↩ Returned to me</strong> when the office piece is back in their hands. To record an advance that happened earlier: open the order's <strong>Items</strong> and tap <strong>🤝 Agent's stock</strong> on the handed-over piece.</div>`,
+        [{ label: '← Back to list', type: 'secondary', action: 'app.openDeliveryListing()' }], 'fullscreen');
+    (window.app.applyMobileTableLabels || (() => {}))();
+};
+
+const advReturn = (advId) => {
+    UI.showModal('↩ Office piece returned to me', `
+        <div class="form-group"><label>Date returned</label><input type="date" id="adv-ret-date" class="form-control" value="${_custLocalDay()}" max="${_custLocalDay()}"></div>
+        <div class="form-group"><label>Photo <span style="font-weight:400;color:var(--gray-500);font-size:12px;">(optional)</span></label><input type="file" id="adv-ret-photos" class="form-control" accept="image/*" multiple></div>
+        <div class="form-group"><label>Note</label><input type="text" id="adv-ret-note" class="form-control" placeholder="e.g. collected at office"></div>
+        <div id="adv-ret-status" style="font-size:12px;color:var(--primary);"></div>`,
+        [{ label: 'Cancel', type: 'secondary', action: 'app.openAgentAdvances()' },
+         { label: 'Confirm returned', type: 'primary', action: `(async () => { await app.advSaveReturn(${Number(advId)}); })()` }]);
+};
+const advSaveReturn = async (advId) => {
+    const sb = _diSb();
+    const date = document.getElementById('adv-ret-date')?.value;
+    const note = (document.getElementById('adv-ret-note')?.value || '').trim();
+    const files = Array.from(document.getElementById('adv-ret-photos')?.files || []).filter(f => f.type && f.type.startsWith('image/')).slice(0, _DI_MAX_PHOTOS);
+    if (!_diIsDay(date)) return UI.toast.error('Date returned is required');
+    const status = document.getElementById('adv-ret-status');
+    const uploaded = [];
+    try {
+        if (files.length && !window.app.compressImageFile && typeof window._loadChunk === 'function') {
+            try { await window._loadChunk('chunks/script-prospects.min.js'); } catch (_) { /* raw file fallback */ }
+        }
+        const compress = window.app.compressImageFile || (f => Promise.resolve(f));
+        for (let i = 0; i < files.length; i++) {
+            if (status) status.textContent = `Uploading photo ${i + 1}/${files.length}…`;
+            const c = await compress(files[i]);
+            const path = `delivery/advances/${advId}/${Date.now()}_${i}_${String(c.name || 'photo.jpg').replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+            const { error } = await sb.storage.from('attachments').upload(path, c, { upsert: false, contentType: c.type || 'image/jpeg' });
+            if (error) throw error;
+            uploaded.push(path);
+        }
+        const patch = { status: 'returned', returned_date: date, returned_by: _state.cu?.id || null };
+        if (uploaded.length) patch.return_photos = uploaded;
+        if (note) patch.note = note;
+        const { data, error } = await sb.from('delivery_advances').update(patch).eq('id', advId).eq('status', 'owed').select('id');
+        if (error) throw error;
+        if (!data || !data.length) throw new Error('Only the agent who lent the piece (or admin) can mark it returned');
+        UI.toast.success('Marked returned ✓');
+    } catch (e) {
+        if (uploaded.length) { try { await sb.storage.from('attachments').remove(uploaded); } catch (_) { /* best-effort */ } }
+        if (status) status.textContent = '';
+        return UI.toast.error('Not saved: ' + (e?.message || e));
+    }
+    await openAgentAdvances();
+};
+
 
     app.register('customers', {
         openDeliveryItems,
+        diMarkAdvance,
+        diSaveAdvance,
+        diAdvanceRemove,
+        openAgentAdvances,
+        advReturn,
+        advSaveReturn,
         diSaveField,
         diAddItem,
         diSplitItem,

@@ -25,6 +25,11 @@ const eq = (name, got, want) => {
 
 const today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
 
+const USERS = [
+    { id: 1, role: 'Level 1 Super Admin', full_name: 'Admin' },
+    { id: 5, role: 'Level 9 Consultant', full_name: 'Agent Lau' },
+    { id: 6, role: 'Level 9 Consultant', full_name: 'Agent Kim' },
+];
 // ── in-memory DB ──
 let DB, nextId, uploads, removed;
 const reset = () => {
@@ -55,16 +60,17 @@ const sb = {
             if (mode === 'update') {
                 for (const r of hit) {
                     const next = { ...r, ...payload };
-                    if (next.status !== 'pending' && (!next.handover_date || !(next.photos || []).length)) return { data: null, error: { message: 'violates check constraint delivery_items_handover_chk' } };
+                    if (t === 'delivery_items' && next.status !== 'pending' && (!next.handover_date || !(next.photos || []).length)) return { data: null, error: { message: 'violates check constraint delivery_items_handover_chk' } };
                     Object.assign(r, payload);
                 }
                 return { data: hit, error: null };
             }
             if (mode === 'delete') { DB[t] = rows.filter(r => !hit.includes(r)); return { data: hit, error: null }; }
+            if (mode === 'count') return { data: null, count: hit.length, error: null };
             return { data: hit.map(r => ({ ...r })).sort((a, b) => a.id - b.id), error: null };
         };
         const q = {
-            select: () => q, order: () => q, limit: () => q,
+            select: (_c, o) => { if (o && o.head) mode = 'count'; return q; }, order: () => q, limit: () => q,
             eq: (c, v) => { filters.push(['eq', c, v]); return q; },
             in: (c, v) => { filters.push(['in', c, v]); return q; },
             insert: (p) => { mode = 'insert'; payload = p; return q; },
@@ -73,6 +79,11 @@ const sb = {
             then: (res, rej) => Promise.resolve(run()).then(res, rej),
         };
         return q;
+    },
+    rpc: async (fn, args) => {
+        // mirrors delivery_advance_allowed: calligraphy / artistic / 财库·财托, never rings
+        if (fn === 'delivery_advance_eligible') return { data: (DB.delivery_items || []).filter(r => args.p_item_ids.includes(r.id) && /(元极大通|大满福|上龙柄|财库|calligraph)/i.test(r.item_name) && !/(ring|指环|\bpr\s?\d)/i.test(r.item_name)).map(r => r.id), error: null };
+        return { data: [], error: null };
     },
     storage: { from: () => ({
         upload: async (p) => { uploads.push(p); return { error: null }; },
@@ -95,7 +106,7 @@ const AppDataStore = {
     getById: async (t, id) => { const r = (DB[t] || []).find(x => String(x.id) === String(id)); return r ? { ...r } : null; },
     getByIdFull: async (t, id) => { const r = (DB[t] || []).find(x => String(x.id) === String(id)); return r ? { ...r } : null; },
     update: async (t, id, patch) => { const r = (DB[t] || []).find(x => String(x.id) === String(id)); if (r) Object.assign(r, patch); if (t === 'purchases' && patch.delivery_status) calls.statusSet.push(patch.delivery_status); return r; },
-    query: async () => [], getAll: async () => [], create: async (t, r) => r,
+    query: async () => [], getAll: async (t) => (t === 'users' ? USERS : []), create: async (t, r) => r,
 };
 const UI = {
     showModal: (title, content) => calls.modals.push({ title, content }), hideModal: () => {},
@@ -196,6 +207,80 @@ const items = () => DB.delivery_items.slice().sort((a, b) => a.id - b.id);
     sb.from = realFrom;
     eq('failed save removes the uploaded photo', [uploads.length, removed.length, items()[0].status], [1, 1, 'pending']);
 
+
+    // ── 🤝 agent stock advances ──
+    reset();
+    DB.purchases[0].item = '元极大通 + 六曜指环 Support Power Ring';
+    DB.purchases[0].agent_id = 6;
+    await app.openDeliveryItems('purchase', 1, 77);
+    await app.diSplitItem(items()[0].id);
+    const [cal, ring] = items().map(r => r.id);
+    await app.openDeliveryItems('purchase', 1, 77);
+    let m = calls.modals[calls.modals.length - 1].content;
+    eq('handover form offers "Given from" when an item can be lent', m.includes('id="di-source"'), true);
+    eq('lender defaults to the sale agent', /<option value="6" selected>Agent Kim/.test(m), true);
+    eq('lender list = staff L3–12 (no admin)', m.includes('>Admin<'), false);
+    // a ring ticked with agent's stock → refused, nothing saved
+    calls.toastErr.length = 0; uploads.length = 0;
+    PICKED = [cal, ring]; FORM = { 'di-date': { value: '2026-10-15' }, 'di-how': { value: 'delivered' }, 'di-photos': { files: [photo('c.jpg')] }, 'di-remark': { value: '' }, 'di-source': { value: 'agent' }, 'di-lender': { value: '5' } };
+    await app.diHandover();
+    eq('ring from agent stock refused', /Only calligraphy/.test(calls.toastErr.pop() || ''), true);
+    eq('refused → nothing handed over or uploaded', [items().every(r => r.status === 'pending'), uploads.length], [true, 0]);
+    // calligraphy from Agent Lau's stock
+    PICKED = [cal];
+    await app.diHandover();
+    eq('calligraphy handed over', items().find(r => r.id === cal).status, 'delivered');
+    eq('advance recorded for that item, lender + date', (DB.delivery_advances || []).map(a => [a.delivery_item_id, a.lender_agent_id, a.given_date]), [[cal, 5, '2026-10-15']]);
+    eq('toast mentions the advance', /from agent's stock/.test(calls.toastOk[calls.toastOk.length - 1] || ''), true);
+    // office stock → no advance
+    PICKED = [ring]; FORM['di-source'] = { value: 'office' };
+    await app.diHandover();
+    eq('office-stock handover adds no advance', (DB.delivery_advances || []).length, 1);
+    // items screen shows the IOU
+    DB.delivery_advances[0].status = 'owed'; DB.delivery_advances[0].expected_back = '2027-02-01';
+    await app.openDeliveryItems('purchase', 1, 77);
+    m = calls.modals[calls.modals.length - 1].content;
+    eq("item line: from Agent Lau's stock, owed back", m.includes("🤝 From Agent Lau's stock · owed back ~1 Feb 2027"), true);
+    eq('no "Agent stock" button on an item that already has one', m.includes(`app.diMarkAdvance(${cal})`), false);
+    eq('no "Agent stock" button on a ring', m.includes(`app.diMarkAdvance(${ring})`), false);
+    // record an earlier advance on a handed-over piece
+    DB.delivery_advances = [];
+    await app.openDeliveryItems('purchase', 1, 77);
+    m = calls.modals[calls.modals.length - 1].content;
+    eq('handed-over calligraphy without a record offers the button', m.includes(`app.diMarkAdvance(${cal})`), true);
+    await app.diMarkAdvance(cal);
+    FORM = { 'adv-lender': { value: '6' }, 'adv-date': { value: '2026-10-15' } };
+    await app.diSaveAdvance(cal, 'purchase', 1, 77);
+    eq('earlier advance saved', DB.delivery_advances.map(a => [a.delivery_item_id, a.lender_agent_id]), [[cal, 6]]);
+
+    // advances board + returned
+    DB.delivery_advances = [
+        { id: 900, delivery_item_id: cal, customer_id: 77, lender_agent_id: 5, sale_agent_id: 6, item_name: '元极大通', given_date: '2026-06-01', expected_back: '2026-09-01', status: 'owed', customers: { full_name: 'Tan Ah Kow' } },
+        { id: 901, delivery_item_id: 999, customer_id: 77, lender_agent_id: 6, sale_agent_id: 6, item_name: '大满福', given_date: '2026-10-01', expected_back: '2099-01-01', status: 'owed', customers: { full_name: 'Tan Ah Kow' } },
+        { id: 902, delivery_item_id: 998, customer_id: 77, lender_agent_id: 5, item_name: '上龙柄', given_date: '2026-01-01', expected_back: '2026-05-01', status: 'returned', returned_date: '2026-05-03', customers: { full_name: 'Tan Ah Kow' } },
+    ];
+    windowStub._appState.cu = { id: 5, role: 'Level 9 Consultant', full_name: 'Agent Lau' };
+    await app.openAgentAdvances('owed');
+    m = calls.modals[calls.modals.length - 1].content;
+    eq('board: 2 owed, 1 due now', [m.includes('<strong>2</strong> pieces owed'), m.includes('1 due now')], [true, true]);
+    eq('board: late shown in days', /Due back · \d+d late/.test(m), true);
+    eq('board: sale agent shown when someone else lent', m.includes('sale: Agent Kim'), true);
+    eq('board: lender can tick own advance', m.includes('app.advReturn(900)'), true);
+    eq("board: cannot tick someone else's", m.includes('app.advReturn(901)'), false);
+    await app.openAgentAdvances('due');
+    m = calls.modals[calls.modals.length - 1].content;
+    eq('due tab: only the late one', [m.includes('元极大通'), m.includes('大满福')], [true, false]);
+    await app.openAgentAdvances('returned');
+    eq('returned tab', calls.modals[calls.modals.length - 1].content.includes('✅ Returned 3 May 2026'), true);
+    FORM = { 'adv-ret-date': { value: '2026-10-16' }, 'adv-ret-photos': { files: [] }, 'adv-ret-note': { value: 'at office' }, 'adv-ret-status': { textContent: '' } };
+    await app.advSaveReturn(900);
+    const a900 = DB.delivery_advances.find(a => a.id === 900);
+    eq('returned with date + note, by me', [a900.status, a900.returned_date, a900.note, a900.returned_by], ['returned', '2026-10-16', 'at office', 5]);
+    FORM['adv-ret-date'] = { value: '' };
+    calls.toastErr.length = 0;
+    await app.advSaveReturn(901);
+    eq('return needs a date', calls.toastErr.pop(), 'Date returned is required');
+    windowStub._appState.cu = { id: 1, role: 'Level 1 Super Admin', full_name: 'Admin' };
     console.log(`test-delivery-items: ${pass} passed, ${fail} failed`);
     process.exit(fail ? 1 : 0);
 })().catch(e => { console.error('FAIL crashed: ' + (e && e.stack || e)); process.exit(1); });
