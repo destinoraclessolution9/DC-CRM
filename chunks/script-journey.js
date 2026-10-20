@@ -105,6 +105,10 @@
         hc_decision:         '💊 健康 — 决策阶段',
 
         // ── Post-purchase: 21-Step Customer Journey ──────────────────────────
+        // Steps 1–4 (order → ready → collect) are spawned by the DB autopilot
+        step01_order:            'Step 1 — 订单确认',
+        step03_ready:            'Step 3 — 准备领取',
+        step04_collect:          'Step 4 — 领取 + 拍照',
         step05_golden_path:      'Step 5 — 黄金大道',
         step06_exchange:         'Step 6 — 感恩交流',
         step07_spread:           'Step 7 — 传福',
@@ -155,7 +159,8 @@
         hc:      ['hc_post_cps','hc_invited_sharing','hc_post_sharing',
                   'hc_invited_launch','hc_post_launch','hc_invited_memberday',
                   'hc_post_memberday','hc_decision'],
-        post:    ['step05_golden_path','step06_exchange','step07_spread','step08_testimony',
+        post:    ['step01_order','step03_ready','step04_collect',
+                  'step05_golden_path','step06_exchange','step07_spread','step08_testimony',
                   'step09_intro','step10_ambassador_cand','step11_ambassador_path',
                   'step12_group_sharing','step13_ambassador','step14_blueprint',
                   'step15_new_product','step16_multi_product','step17_dc_meetup',

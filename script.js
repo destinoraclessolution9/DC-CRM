@@ -2771,6 +2771,8 @@ function _wireLoginBtn() {
             _loadChunkOnce('chunks/script-activities.min.js')
                 .then(() => { try { window.app?._autoSubscribePush?.(); } catch (_) { /* push subscribe is best-effort */ } })
                 .catch(() => {});
+            // Journey autopilot surfaces (📋 today's top 5, 🟣 Golden Road, 🧭 funnel)
+            _loadChunkOnce('chunks/script-autopilot.min.js').catch(() => {});
 
             // Force password change on first login
             if (profile.force_password_change) {
@@ -3519,6 +3521,8 @@ function _wireLoginBtn() {
         _loadChunkOnce('chunks/script-activities.min.js')
             .then(() => { try { window.app?._autoSubscribePush?.(); } catch (_) { /* push subscribe is best-effort */ } })
             .catch(() => {});
+        // Journey autopilot surfaces (📋 today's top 5, 🟣 Golden Road, 🧭 funnel)
+        _loadChunkOnce('chunks/script-autopilot.min.js').catch(() => {});
 
         // Route notification clicks to the correct view
         if ('serviceWorker' in navigator) {

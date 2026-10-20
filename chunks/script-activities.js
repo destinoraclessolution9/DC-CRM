@@ -7160,6 +7160,14 @@ My raw notes:
         //  same trigger mapping + stage advancement)
         _evaluateActivityJourneyRules(activity);
 
+        // === Journey autopilot (A): a CPS never ends with nothing next ===
+        if (activity.activity_type === 'CPS' && activity.prospect_id && !stayOpen) {
+            const _cpsName = _state.se?.name || '';
+            (window._loadChunk ? window._loadChunk('chunks/script-autopilot.min.js') : Promise.resolve())
+                .then(() => setTimeout(() => (window.app.apCpsNextStep || (() => {}))(activity.prospect_id, _cpsName), 900))
+                .catch(() => {});
+        }
+
         // === Auto-mark proposed solution as Purchased when closing activity has solution_sold ===
         // (extracted verbatim into _autoMarkProposedSolutionPurchased — fire-and-forget)
         _autoMarkProposedSolutionPurchased(activity);
