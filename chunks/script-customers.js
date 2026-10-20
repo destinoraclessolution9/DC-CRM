@@ -767,6 +767,7 @@ const showCustomerDetail = async (customerId) => {
                     <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin:6px 0 4px;min-width:0;">
                         <span style="font-size:22px;font-weight:700;line-height:1.3;word-break:break-word;">${escapeHtml(customer.full_name)}</span>
                     </div>
+                    ${customer.converted_from_prospect_id != null ? `<div data-fu-pid="${Number(customer.converted_from_prospect_id)}"></div>` : ''}
                     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 4px;">
                         ${/* Edits the CUSTOMER (2026-10-16). This used to open the linked
                               prospect's form for L1-2 only — the customer is now the one

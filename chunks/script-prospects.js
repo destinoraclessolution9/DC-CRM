@@ -2157,6 +2157,7 @@ const buildProspectDetailHeaderHtml = (prospect, cpsPhoto) => {
                     <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin:6px 0 8px;min-width:0;">
                         <span style="font-size:22px;font-weight:700;line-height:1.3;word-break:break-word;">${escapeHtml(prospect.full_name)}</span>${prospect.nickname ? `<span style="font-size:15px;font-weight:400;color:var(--gray-500);">"${escapeHtml(prospect.nickname)}"</span>` : ''}
                     </div>
+                    <div data-fu-pid="${Number(prospect.id)}"></div>
                     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 8px;">
                         <button title="Edit" aria-label="Edit prospect" onclick="app.editProspect(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--gray-500);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i></button><button title="Convert to Customer" aria-label="Convert to customer" onclick="app.convertToCustomer(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:none;background:var(--primary);color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'"><i class="fa-solid fa-user-check" aria-hidden="true"></i></button><button title="Meet-Up History" aria-label="Meet-up history" onclick="app.openMeetupHistoryModal(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--primary);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i></button><button title="Save to Phone Contacts" aria-label="Save to phone contacts" onclick="app.downloadProspectVCard(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--success);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-solid fa-address-book" aria-hidden="true"></i></button><button title="WhatsApp Prospect" aria-label="Open WhatsApp chat with prospect" onclick="app.openProspectWhatsApp(${prospect.id}, '${UI.escJsAttr(_evWaPhone(prospect.phone))}')" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:#25D366;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-brands fa-whatsapp" aria-hidden="true"></i></button>
                     </div>
@@ -6219,12 +6220,86 @@ const showPotentialBreakdown = async (pid) => {
         <p style="font-size:11px;color:var(--gray-400);margin-top:8px;">Each product counted once (prescription quote beats catalogue price); items already bought are removed. Updated ${row && row.open_potential_at ? escapeHtml(new Date(row.open_potential_at).toLocaleString('en-GB')) : '—'}.</p>`;
     UI.showModal(`💰 Open potential — ${row ? row.full_name || '' : ''}`, content, [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }]);
 };
+// 🎯 Follow-up line under the name on prospect + customer profiles: open
+// potential RM + product short codes + tier + next step. Data comes from
+// prospects.open_potential_* / potential_* (DB-maintained).
+const FU_TIER = {
+    commit: ['🟢', 'Commit', '#047857'], audit: ['🩺', 'Audit', '#6D28D9'], hot: ['🔥', 'Hot', '#B91C1C'],
+    new: ['🌱', 'New', '#2563EB'], cold: ['💤', 'Cold', '#6B7280'],
+};
+let _fuCodesP = null;
+const _fuCodes = () => {
+    if (_fuCodesP) return _fuCodesP;
+    _fuCodesP = (async () => {
+        const m = new Map();
+        try {
+            const { data } = await _rxSb().from('products').select('name,short_code,short_code_suggested');
+            (data || []).forEach(r => { const c = r.short_code || r.short_code_suggested; if (r.name && c) m.set(String(r.name).trim(), c); });
+        } catch (_) { /* names only */ }
+        return m;
+    })();
+    return _fuCodesP;
+};
+// Short code for a potential label: DC short code, "BJS·<category>" for a
+// Bujishu Catalogue item, else a trimmed name.
+const potentialCode = async (label) => {
+    const l = String(label || '').trim();
+    const codes = await _fuCodes();
+    if (codes.has(l)) return codes.get(l);
+    try {
+        if (window.app.bjcResolveLabel) {
+            const h = await window.app.bjcResolveLabel(l);
+            if (h) {
+                const parts = String(h.item.category || '').split('>').map(x => x.trim()).filter(Boolean);
+                return 'BJS·' + (parts[parts.length - 1] || 'Item').replace(/s$/, '').replace(/ & .*$/, '');
+            }
+        }
+    } catch (_) { /* fall through */ }
+    return l.length > 14 ? l.slice(0, 13) + '…' : l;
+};
+const _fuDate = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
+const fillFollowUpLine = async (pid) => {
+    const slots = [...document.querySelectorAll(`[data-fu-pid="${Number(pid)}"]`)];
+    if (!slots.length) return;
+    let r = null;
+    try {
+        const { data } = await _rxSb().from('prospects')
+            .select('open_potential_rm,open_potential_detail,potential_tier,potential_last_met,potential_next_booked,potential_is_repeat')
+            .eq('id', pid).maybeSingle();
+        r = data;
+    } catch (_) { /* hidden */ }
+    const rm = r ? Number(r.open_potential_rm) || 0 : 0;
+    let html = '';
+    if (rm > 0) {
+        const items = ((r.open_potential_detail && r.open_potential_detail.items) || []).filter(i => Number(i.price) > 0);
+        const top = await Promise.all(items.slice(0, 3).map(i => potentialCode(i.label)));
+        const more = Math.max(0, ((r.open_potential_detail && r.open_potential_detail.items) || []).length - top.length);
+        const t = FU_TIER[r.potential_tier] || FU_TIER.cold;
+        const next = r.potential_next_booked
+            ? `<span style="color:#047857;">📅 next ${escapeHtml(_fuDate(r.potential_next_booked))}</span>`
+            : '<span style="color:#B91C1C;font-weight:600;">⚠ nothing booked</span>';
+        html = `
+        <div class="fu-line" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 8px;padding:6px 10px;border-radius:8px;background:#FFFBEB;border:1px solid #FDE68A;font-size:13px;">
+            <strong style="color:#92400E;">🎯 Follow up: <span style="color:#047857;">RM ${Math.round(rm).toLocaleString()}</span></strong>
+            <span style="font-weight:600;">${top.map(c => escapeHtml(c)).join(' · ')}${more ? ` <span style="color:#9CA3AF;">+${more}</span>` : ''}</span>
+            <span style="color:${t[2]};font-weight:600;">${t[0]} ${t[1]}</span>
+            ${r.potential_is_repeat ? '<span title="Existing customer">🔁 repeat</span>' : ''}
+            ${r.potential_last_met ? `<span style="color:#6B7280;">met ${escapeHtml(_fuDate(r.potential_last_met))}</span>` : ''}
+            ${next}
+            <button type="button" class="btn secondary btn-sm" style="font-size:11px;padding:2px 8px;" onclick="event.stopPropagation();app.openActivityModal('', ${Number(pid)})">📅 Book follow-up</button>
+            <a href="javascript:void(0)" onclick="event.stopPropagation();app.showPotentialBreakdown(${Number(pid)})" style="font-size:11px;color:#92400E;">details</a>
+        </div>`;
+    }
+    for (const el of slots) { el.dataset.fuFilled = '1'; el.innerHTML = html; }
+};
 if (!window.__potObserver && typeof MutationObserver !== 'undefined' && document.body) {
     window.__potObserver = new MutationObserver(muts => {
         for (const mu of muts) for (const n of mu.addedNodes) {
             if (n.nodeType !== 1) continue;
             const els = n.matches && n.matches('[data-pot-pid]') ? [n] : (n.querySelectorAll ? n.querySelectorAll('[data-pot-pid]:not([data-pot-filled])') : []);
             for (const el of els) { if (!el.dataset.potFilled) { el.dataset.potFilled = '1'; fillPotentialBadge(el.dataset.potPid); } }
+            const fus = n.matches && n.matches('[data-fu-pid]') ? [n] : (n.querySelectorAll ? n.querySelectorAll('[data-fu-pid]:not([data-fu-filled])') : []);
+            for (const el of fus) { if (!el.dataset.fuFilled) { el.dataset.fuFilled = '1'; fillFollowUpLine(el.dataset.fuPid); } }
             if (n.querySelectorAll && n.querySelector('img[data-sbobj]:not([data-resolved])')) _fsaResolveThumbs(n);
         }
     });
@@ -6236,6 +6311,7 @@ const _refreshFengShuiTab = async (prospectId) => {
     if (bodyEl) await switchProspectTab('fengshui', prospectId, null, bodyEl);
     if (bodyEl) _fsaResolveThumbs(bodyEl);
     fillPotentialBadge(prospectId);
+    fillFollowUpLine(prospectId);
 };
 
 const _uploadFengShuiToBucket = async (file, pathPrefix) => {
@@ -6712,7 +6788,7 @@ const _offerCrProfileUpdate = async (prospectId, data, src) => {
 };
 
 const saveClosingRecord = async (prospectId) => {
-    const prospect = await AppDataStore.getById('prospects', prospectId);
+    const prospect = await _fsaLive(prospectId);
     const existingCr = prospect?.closing_record || {};
     // M3 (audit): never let "Save Draft" demote/overwrite a record that is already
     // submitted or approved (the editable form only renders for drafts, but a stale
@@ -6755,7 +6831,7 @@ const saveClosingRecord = async (prospectId) => {
 };
 
 const submitClosingRecord = async (prospectId) => {
-    const prospect = await AppDataStore.getById('prospects', prospectId);
+    const prospect = await _fsaLive(prospectId);
     const existingCr = prospect?.closing_record || {};
     // M3 (audit): don't re-submit / overwrite a record already submitted or approved.
     if (existingCr.status === 'submitted' || existingCr.status === 'approved') {
@@ -7030,7 +7106,7 @@ const saveClosingHistoryEntry = async (prospectId, index) => {
 };
 
 const saveClosingDeliveryStatus = async (prospectId) => {
-    const prospect = await AppDataStore.getById('prospects', prospectId);
+    const prospect = await _fsaLive(prospectId);
     if (!prospect?.closing_record) return UI.toast.error('No active closing record found');
     const statusEl = document.getElementById(`cr-active-status-${prospectId}`);
     const completedEl = document.getElementById(`cr-active-completed-${prospectId}`);
@@ -7054,7 +7130,7 @@ const saveClosingDeliveryStatus = async (prospectId) => {
 };
 
 const archiveAndNewClosingRecord = async (prospectId) => {
-    const prospect = await AppDataStore.getById('prospects', prospectId);
+    const prospect = await _fsaLive(prospectId);
     if (!prospect?.closing_record) return;
     const cr = prospect.closing_record;
     const existingHistory = Array.isArray(prospect.closing_records_history) ? prospect.closing_records_history : [];
@@ -7917,6 +7993,8 @@ const openPastRecordModal = async (...args) => {
         uploadFengShuiReportFiles,
         removeFengShuiReportFile,
         fillPotentialBadge,
+        fillFollowUpLine,
+        potentialCode,
         _fsaReportFilesHtml,
         showPotentialBreakdown,
         _prescriptionBlockHtml,

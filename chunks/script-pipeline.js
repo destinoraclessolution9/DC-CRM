@@ -5529,10 +5529,33 @@ const _plMountGoalSections = (allUsers) => {
     } catch (e) { console.warn('[pipeline-goals] mount failed', e && e.message); }
 };
 
-// 💰 Top potential — people with the most open potential RM (audit, meeting
-// notes, prescriptions, deals; prospects.open_potential_rm kept by the DB) in
-// this viewer's scope, flagged when no follow-up is booked.
+// 💼 Business Potential — every person with open potential RM (DB-kept
+// prospects.open_potential_rm) sits in ONE forecast tier (prospects.potential_tier):
+// Commit / Audit / Hot / New count toward the 90-day forecast, Cold is listed
+// to reactivate. Close % starts from defaults and switches to the team's real
+// per-tier rate once potential_snapshots hold 90+ days (potential_tier_rates()).
+// Like CRM forecast categories: Commit ≈ near-certain, the rest weighted,
+// best case = total (a ceiling, not a forecast).
+const PL_TIERS = [
+    { id: 'commit', icon: '🟢', label: 'Commit',  rule: 'Deal at Closing stage', pct: 90 },
+    { id: 'audit',  icon: '🩺', label: 'Audit',   rule: 'Feng Shui audit / prescription keyed ≤ 6 months', pct: 60 },
+    { id: 'hot',    icon: '🔥', label: 'Hot',     rule: 'Met ≤ 90 days + visited 汇集 / met 3+ times / VIP or ⚡ High-Closer referral, or 汇集 RSVP', pct: 35 },
+    { id: 'new',    icon: '🌱', label: 'New',     rule: 'CPS / first meeting — met ≤ 30 days', pct: 10 },
+    { id: 'cold',   icon: '💤', label: 'Cold',    rule: 'Outside every window — not in the forecast; reactivate', pct: 0 },
+];
 let _plTopPotMin = 0;
+let _plTierFilter = 'all';
+let _plTierRates = null;
+const _plLoadTierRates = async (sb) => {
+    if (_plTierRates) return _plTierRates;
+    const out = {};
+    try {
+        const { data } = await sb.rpc('potential_tier_rates');
+        (data || []).forEach(r => { if (Number(r.samples) >= 20) out[r.tier] = { rate: Number(r.rate), samples: Number(r.samples) }; });
+    } catch (_) { /* defaults */ }
+    _plTierRates = out;
+    return out;
+};
 const _plRenderTopPotential = async () => {
     const box = document.getElementById('pl-toppot-root');
     const c = _plGoalCtx;
@@ -5540,55 +5563,151 @@ const _plRenderTopPotential = async () => {
     if (!box || !c || !sb) return;
     try {
         const { data } = await sb.from('prospects')
-            .select('id,full_name,status,responsible_agent_id,open_potential_rm,open_potential_detail')
-            .gt('open_potential_rm', 0).order('open_potential_rm', { ascending: false }).limit(200);
-        let rows = (data || []).filter(r => c.mode === 'company' || c.scopeIds.has(String(r.responsible_agent_id)));
-        if (!rows.length) { box.innerHTML = ''; return; }
-        const total = rows.reduce((t, r) => t + (Number(r.open_potential_rm) || 0), 0);
-        const shown = rows.filter(r => Number(r.open_potential_rm) >= _plTopPotMin).slice(0, 25);
-        const ids = shown.map(r => r.id);
-        const today = _plYmd(new Date());
-        let booked = new Set(), custByPid = new Map();
-        if (ids.length) {
-            const [acts, custs] = await Promise.all([
-                sb.from('activities').select('prospect_id').in('prospect_id', ids).gte('activity_date', today).limit(1000),
-                sb.from('customers').select('id,converted_from_prospect_id').in('converted_from_prospect_id', ids).limit(1000),
+            .select('id,full_name,status,responsible_agent_id,open_potential_rm,open_potential_detail,potential_tier,potential_last_met,potential_next_booked,potential_is_repeat')
+            .gt('open_potential_rm', 0).order('open_potential_rm', { ascending: false }).limit(500);
+        const all = (data || []).filter(r => c.mode === 'company' || c.scopeIds.has(String(r.responsible_agent_id)));
+        const rates = await _plLoadTierRates(sb);
+        const pctOf = (t) => (rates[t.id] ? rates[t.id].rate : t.pct);
+        const agg = PL_TIERS.map(t => {
+            const rows = all.filter(r => (r.potential_tier || 'cold') === t.id);
+            const rm = rows.reduce((x, r) => x + (Number(r.open_potential_rm) || 0), 0);
+            return { t, n: rows.length, rm, exp: t.id === 'cold' ? 0 : rm * pctOf(t) / 100, unbooked: rows.filter(r => !r.potential_next_booked).length };
+        });
+        const total = agg.reduce((x, a) => x + a.rm, 0);
+        const forecastBase = agg.filter(a => a.t.id !== 'cold').reduce((x, a) => x + a.rm, 0);
+        const exp90 = agg.reduce((x, a) => x + a.exp, 0);
+        const unbooked = all.filter(r => !r.potential_next_booked).length;
+
+        // 💳 money still to collect: NPO instalments due in the next 90 days (scheduled);
+        // POP (Normal Installment) sales have no payment records in the CRM.
+        let npoDue = 0, npoN = 0, popN = 0;
+        try {
+            const today = _plYmd(new Date());
+            const until = _plYmd(new Date(Date.now() + 90 * 864e5));
+            const [inst, sales] = await Promise.all([
+                sb.from('npo_installments').select('sale_id,amount,status,due_date').neq('status', 'paid').lte('due_date', until).limit(2000),
+                sb.from('npo_sales').select('id,responsible_agent_id').limit(2000),
             ]);
-            booked = new Set(((acts && acts.data) || []).map(a => String(a.prospect_id)));
-            custByPid = new Map(((custs && custs.data) || []).map(x => [String(x.converted_from_prospect_id), x.id]));
+            const saleAgent = new Map(((sales && sales.data) || []).map(x => [String(x.id), x.responsible_agent_id]));
+            for (const i of ((inst && inst.data) || [])) {
+                const ag = saleAgent.get(String(i.sale_id));
+                if (c.mode !== 'company' && !c.scopeIds.has(String(ag))) continue;
+                npoDue += Number(i.amount) || 0; npoN++;
+            }
+            void today;
+            popN = (c.purchases || []).filter(x => /\bpop\b/i.test(String(x.payment_method || '')) && (c.mode === 'company' || c.scopeIds.has(String(x.agent_id)))).length;
+        } catch (_) { /* optional */ }
+
+        let rows = _plTierFilter === 'all' ? all : all.filter(r => (r.potential_tier || 'cold') === _plTierFilter);
+        rows = rows.filter(r => Number(r.open_potential_rm) >= _plTopPotMin).slice(0, 40);
+        const custByPid = new Map();
+        if (rows.length) {
+            try {
+                const { data: cs } = await sb.from('customers').select('id,converted_from_prospect_id').in('converted_from_prospect_id', rows.map(r => r.id)).limit(1000);
+                (cs || []).forEach(x => custByPid.set(String(x.converted_from_prospect_id), x.id));
+            } catch (_) { /* prospect links */ }
         }
-        const srcIcon = { audit: '🧭', prescription: '🩺', meeting: '📝', deal: '💼' };
-        const chip = (min, label) => `<button class="btn btn-sm ${_plTopPotMin === min ? 'primary' : 'secondary'}" style="font-size:11px;padding:2px 10px;" onclick="app.plTopPotFilter(${min})">${label}</button>`;
-        const rowHtml = (r) => {
-            const by = (r.open_potential_detail && r.open_potential_detail.by_source) || {};
-            const srcs = Object.keys(srcIcon).filter(k => Number(by[k]) > 0).map(k => `${srcIcon[k]} ${_plRM(by[k])}`).join(' · ');
-            const agent = c.users.find(u => String(u.id) === String(r.responsible_agent_id));
-            const cid = custByPid.get(String(r.id));
-            const open = cid != null ? `app.showCustomerDetail(${Number(cid)})` : `app.showProspectMenu(${Number(r.id)})`;
-            const rm = Number(r.open_potential_rm) || 0;
-            return `<tr>
-                <td><a href="javascript:void(0)" onclick="event.stopPropagation();${open}" style="font-weight:600;color:#2563EB;">${esc(r.full_name || '')}</a>${cid != null ? ' <span class="plg-muted">customer</span>' : ''}</td>
-                <td style="font-weight:700;color:${rm >= 100000 ? '#B91C1C' : rm >= 50000 ? '#D97706' : '#047857'};white-space:nowrap;">${_plRM(rm)}</td>
-                <td class="plg-muted" style="font-size:12px;">${srcs}</td>
-                <td class="plg-muted">${esc(agent ? (agent.full_name || agent.username || '') : '')}</td>
-                <td>${booked.has(String(r.id)) ? '<span style="color:#047857;font-size:12px;">✓ follow-up booked</span>' : '<span style="color:#B91C1C;font-weight:600;font-size:12px;">⚠ nothing booked</span>'}</td>
+        const codeOf = window.app.potentialCode || (async (l) => l);
+        const codes = await Promise.all(rows.map(async r => {
+            const items = ((r.open_potential_detail && r.open_potential_detail.items) || []).filter(i => Number(i.price) > 0).slice(0, 3);
+            return (await Promise.all(items.map(i => codeOf(i.label)))).join(' · ');
+        }));
+        const fmtD = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—';
+        const tierRow = (a) => {
+            const t = a.t, pct = pctOf(t);
+            const on = _plTierFilter === t.id;
+            return `<tr class="plg-mrow${on ? ' active' : ''}" onclick="app.plSetTierFilter('${t.id}')" title="${esc(t.rule)}">
+                <td><strong>${t.icon} ${t.label}</strong><div class="plg-muted">${esc(t.rule)}</div></td>
+                <td style="font-weight:700;">${_plRM(a.rm)}</td>
+                <td>${a.n}${a.unbooked ? ` <span style="color:#B91C1C;font-size:11px;">(${a.unbooked} unbooked)</span>` : ''}</td>
+                <td>${t.id === 'cold' ? '—' : `${pct}%${rates[t.id] ? ' <span class="plg-muted">yours</span>' : ''}`}</td>
+                <td style="font-weight:700;color:#047857;">${t.id === 'cold' ? '<span class="plg-muted">not counted</span>' : _plRM(a.exp)}</td>
             </tr>`;
         };
-        box.innerHTML = `
+        const tierChip = (id) => { const t = PL_TIERS.find(x => x.id === (id || 'cold')) || PL_TIERS[4]; return `${t.icon} ${t.label}`; };
+        const personRow = (r, i) => {
+            const cid = custByPid.get(String(r.id));
+            const open = cid != null ? `app.showCustomerDetail(${Number(cid)})` : `app.showProspectMenu(${Number(r.id)})`;
+            const agent = c.users.find(u => String(u.id) === String(r.responsible_agent_id));
+            const rm = Number(r.open_potential_rm) || 0;
+            return `<tr>
+                <td><a href="javascript:void(0)" onclick="event.stopPropagation();${open}" style="font-weight:600;color:#2563EB;">${esc(r.full_name || '')}</a>${r.potential_is_repeat ? ' <span title="Existing customer">🔁</span>' : ''}
+                    <div class="plg-muted">${esc(codes[i] || '')}</div></td>
+                <td style="font-weight:700;color:${rm >= 100000 ? '#B91C1C' : rm >= 50000 ? '#D97706' : '#047857'};white-space:nowrap;">${_plRM(rm)}</td>
+                <td style="white-space:nowrap;">${tierChip(r.potential_tier)}</td>
+                <td class="plg-muted" style="white-space:nowrap;">met ${fmtD(r.potential_last_met)}</td>
+                <td>${r.potential_next_booked ? `<span style="color:#047857;font-size:12px;">📅 ${fmtD(r.potential_next_booked)}</span>` : `<button class="btn primary btn-sm" style="font-size:11px;padding:2px 8px;" onclick="event.stopPropagation();app.openActivityModal('', ${Number(r.id)})">📅 Book</button>`}</td>
+                <td class="plg-muted">${esc(agent ? (agent.full_name || agent.username || '') : '')}</td>
+            </tr>`;
+        };
+        const chip = (min, label) => `<button class="btn btn-sm ${_plTopPotMin === min ? 'primary' : 'secondary'}" style="font-size:11px;padding:2px 10px;" onclick="app.plTopPotFilter(${min})">${label}</button>`;
+        const learning = Object.keys(rates).length ? '' : '<span class="plg-muted">Close % are starting defaults — they switch to your real rate per tier after 90 days of history.</span>';
+        box.innerHTML = all.length ? `
         <div class="plg-card">
             <div class="plg-head">
                 <div>
-                    <h2 class="plg-title">💰 Top potential — ${_plRM(total)} open across ${rows.length} people</h2>
-                    <div class="plg-muted">From audits, meeting notes (6 months), prescriptions and deals · each product counted once · already-bought removed</div>
+                    <h2 class="plg-title">💼 Business potential — next 90 days</h2>
+                    <div class="plg-muted">Each person counted once, in their highest tier · each product once · already-bought removed</div>
                 </div>
+                ${c.myLvl <= 2 ? '<button class="btn secondary btn-sm" onclick="app.openShortCodeModal()">🏷️ Product short codes</button>' : ''}
+            </div>
+            <div class="plg-tiles">
+                <div class="plg-tile"><div class="plg-tile-label">Total open potential</div><div class="plg-tile-value">${_plRM(total)}</div><div class="plg-tile-sub">${all.length} people · ceiling, not a forecast</div></div>
+                <div class="plg-tile"><div class="plg-tile-label">Expected next 90 days</div><div class="plg-tile-value" style="color:#047857;">${_plRM(exp90)}</div><div class="plg-tile-sub">from ${_plRM(forecastBase)} in Commit + Audit + Hot + New</div></div>
+                <div class="plg-tile"><div class="plg-tile-label">≈ Next 30 days</div><div class="plg-tile-value" style="color:#047857;">${_plRM(exp90 / 3)}</div><div class="plg-tile-sub">90-day expected spread evenly</div></div>
+                <div class="plg-tile"><div class="plg-tile-label">Nothing booked</div><div class="plg-tile-value" style="color:${unbooked ? '#B91C1C' : '#047857'};">${unbooked} of ${all.length}</div><div class="plg-tile-sub">book a follow-up for each</div></div>
+            </div>
+            <div style="overflow-x:auto;margin-top:12px;">
+                <table class="plg-table">
+                    <thead><tr><th>Tier</th><th>Open RM</th><th>People</th><th>Close %</th><th>Expected RM</th></tr></thead>
+                    <tbody>${agg.map(tierRow).join('')}</tbody>
+                </table>
+            </div>
+            <div class="plg-advice" style="background:#F0FDF4;color:#065F46;">💳 Money to collect (already sold): ${npoN ? `<strong>${_plRM(npoDue)}</strong> in ${npoN} NPO instalment${npoN === 1 ? '' : 's'} due within 90 days` : 'no NPO instalments due'}${popN ? ` · ${popN} Normal Installment (POP) sale${popN === 1 ? '' : 's'} — balances not tracked in the CRM` : ''}</div>
+            <div style="margin-top:8px;">${learning}</div>
+            <div class="plg-team-head" style="margin-top:14px;justify-content:space-between;">
+                <strong>${_plTierFilter === 'all' ? 'All tiers' : tierChip(_plTierFilter)} — biggest first ${_plTierFilter !== 'all' ? `<a href="javascript:void(0)" onclick="app.plSetTierFilter('all')" style="font-size:12px;margin-left:6px;">show all</a>` : ''}</strong>
                 <div style="display:flex;gap:6px;flex-wrap:wrap;">${chip(0, 'All')}${chip(50000, 'RM50k+')}${chip(100000, 'RM100k+')}${chip(300000, 'RM300k+')}</div>
             </div>
-            ${shown.length ? `<div style="overflow-x:auto;"><table class="plg-table"><thead><tr><th>Person</th><th>Open potential</th><th>From</th><th>Agent</th><th>Next step</th></tr></thead><tbody>${shown.map(rowHtml).join('')}</tbody></table></div>`
-                : `<div class="plg-muted">Nobody at ${_plRM(_plTopPotMin)}+ yet.</div>`}
-        </div>`;
-    } catch (e) { console.warn('[pipeline] top potential failed', e && e.message); box.innerHTML = ''; }
+            ${rows.length ? `<div style="overflow-x:auto;"><table class="plg-table"><thead><tr><th>Person · what to sell</th><th>Open RM</th><th>Tier</th><th>Last met</th><th>Next step</th><th>Agent</th></tr></thead><tbody>${rows.map(personRow).join('')}</tbody></table></div>`
+                : '<div class="plg-muted">No one in this filter.</div>'}
+        </div>` : '';
+    } catch (e) { console.warn('[pipeline] business potential failed', e && e.message); box.innerHTML = ''; }
 };
 const plTopPotFilter = (min) => { _plTopPotMin = Number(min) || 0; _plRenderTopPotential(); };
+const plSetTierFilter = (t) => { _plTierFilter = (_plTierFilter === t ? 'all' : t); _plRenderTopPotential(); };
+
+// 🏷️ Product short codes — approve the suggested code or type your own.
+const openShortCodeModal = async () => {
+    const sb = _plSb();
+    let rows = [];
+    try { const { data } = await sb.from('products').select('id,name,subcategory,short_code,short_code_suggested,is_active').order('subcategory').order('name'); rows = (data || []).filter(r => r.is_active !== false); } catch (_) { /* none */ }
+    const pending = rows.filter(r => !r.short_code).length;
+    const content = `
+        <p class="plg-muted" style="font-size:12px;">Short codes show on every profile's 🎯 follow-up line (e.g. <strong>RM 18,990 · PR6</strong>). ${pending} suggested code${pending === 1 ? '' : 's'} waiting for approval — edit any, then Save to approve all.</p>
+        <div style="max-height:55vh;overflow:auto;"><table class="plg-table" style="min-width:0;">
+            <thead><tr><th>Product</th><th>Short code</th></tr></thead>
+            <tbody>${rows.map(r => `<tr><td><div style="font-size:12px;">${esc(r.name)}</div><div class="plg-muted">${esc(r.subcategory || '')}</div></td>
+                <td><input class="form-control pl-sc-input" data-id="${r.id}" data-orig="${esc(r.short_code || '')}" value="${esc(r.short_code || r.short_code_suggested || '')}" maxlength="16" style="width:130px;${r.short_code ? '' : 'background:#FEF3C7;'}"></td></tr>`).join('')}</tbody>
+        </table></div>`;
+    UI.showModal('🏷️ Product short codes', content, [
+        { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+        { label: 'Save & approve', type: 'primary', action: '(async () => { await app.saveShortCodes(); })()' },
+    ]);
+};
+const saveShortCodes = async () => {
+    const sb = _plSb();
+    const changed = [...document.querySelectorAll('.pl-sc-input')].filter(i => i.value.trim() !== i.dataset.orig);
+    let ok = 0, bad = 0;
+    for (const i of changed) {
+        const { error } = await sb.from('products').update({ short_code: i.value.trim() || null }).eq('id', i.dataset.id);
+        if (error) bad++; else ok++;
+    }
+    UI.hideModal();
+    if (bad) UI.toast.error(`${bad} code${bad === 1 ? '' : 's'} could not be saved`);
+    UI.toast.success(`${ok} short code${ok === 1 ? '' : 's'} approved`);
+    _plRenderTopPotential();
+};
 
 const _plRenderGoalSections = async (allUsers) => {
     const g = document.getElementById('pl-goal-root');
@@ -6287,6 +6406,9 @@ const saveGoals = async () => {
         _plAutoDraftDeals,
         openHighCloserModal,
         plTopPotFilter,
+        plSetTierFilter,
+        openShortCodeModal,
+        saveShortCodes,
         saveHighClosers,
         plVipAsked,
         _plGradeOf,
