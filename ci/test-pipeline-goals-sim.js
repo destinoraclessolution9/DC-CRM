@@ -271,41 +271,57 @@ const as = (id) => { windowStub._appState.cu = USERS.find(u => u.id === id); };
   check('insert amount numeric', ins && ins.amount, 20000);
   check('success toast', calls.toastOk.pop(), 'Deal added');
 
-  // ── v8.2 auto-draft deals ──
+  {
+  // ── v8.3 auto-draft deals (buying-signal tiers) ──
   as(20); visibleIds = [20, 101, 102, 104];
   await app._plLoadGoalCtx(USERS);
-  CATALOG.push({ id: 90, name: 'PR6', subcategory: 'Power Ring', price: 18990 }, { id: 91, name: 'PR8', subcategory: 'Power Ring', price: 24990 }, { id: 92, name: 'PR4', subcategory: 'Power Ring', price: 12990 });
-  const mk = (id, agent, prob, extra) => ({ id, full_name: 'P' + id, responsible_agent_id: agent, referred_by_type: 'Customer', referred_by: 'Ref', _pipeline: { probability: prob, category: 'powerring', stage: null, action: '<b>Book</b> meeting', ...(extra || {}) } });
+  CATALOG.push(
+    { id: 90, name: '八大护法 Prosperity Power Ring', subcategory: 'Power Ring', price: 19990 },
+    { id: 91, name: '六曜指环 Support Power Ring', subcategory: 'Power Ring', price: 20980 },
+    { id: 92, name: 'PR4 Mini Power Ring', subcategory: 'Power Ring', price: 12990 });
+  const nowIso = new Date().toISOString();
+  const oldIso = new Date(Date.now() - 100 * 864e5).toISOString();
+  const mkA = (id, agent, e) => ({ id, full_name: 'P' + id, responsible_agent_id: agent, referred_by_type: 'Customer', referred_by: 'Ref', _pipeline: { probability: 20, category: 'powerring', noProductSignal: true, stage: null, action: '<b>Book</b> meeting', lastActivityDate: new Date(nowIso), ...e } });
   app._plSetLastEnrichedForTest([
-    mk(601, 101, 85),                              // eligible, hot → this month
-    mk(602, 102, 65),                              // eligible, warm → next month
-    mk(603, 101, 55),                              // below 60 → skip
-    mk(604, 101, 90, { noProductSignal: true }),   // no product signal → skip
-    mk(605, 999, 90),                              // owner not visible → skip
-    mk(501, 101, 90),                              // already has open deal (DEALS prospect 501) → skip
-    mk(606, 101, 90, { fromPotential: true }),     // declared only → skip
-    mk(607, 102, 95, { stage: 'closing' }),        // stage carried over
+    mkA(701, 101, { latestOppPotential: '[Products] 八大护法 Prosperity Power Ring | Remarks: wife keen' }),          // A: one product
+    mkA(702, 102, { latestOppPotential: '六曜指环 Support Power Ring, 八大护法 Prosperity Power Ring' }),              // A: two products summed
+    mkA(703, 101, { latestOppPotential: 'Something Ring only' }),                                                        // A: single common word must NOT match → falls through
+    mkA(704, 101, { probability: 45, noProductSignal: false }),                                                         // B: engine >=40 with signal
+    mkA(705, 101, { probability: 35, noProductSignal: false }),                                                         // below 40 → skip
+    mkA(706, 102, { fromPotential: true, potentialLevel: 'Hot' }),                                                      // C: hot, recent
+    mkA(707, 102, { fromPotential: true, potentialLevel: 'Hot', lastActivityDate: new Date(oldIso) }),                     // hot but stale → skip
+    mkA(708, 102, { fromPotential: true, potentialLevel: 'Warm' }),                                                     // warm → skip
+    mkA(709, 999, { latestOppPotential: '八大护法 Prosperity Power Ring' }),                                             // owner not visible → skip
+    mkA(501, 101, { latestOppPotential: '八大护法 Prosperity Power Ring' }),                                             // already has open deal → skip
   ]);
   calls.inserts.length = 0;
   app._plResetAutoDraftForTest();
-  const nAdded = await app._plAutoDraftDeals();
-  const autoRows = calls.inserts.filter(i => i.table === 'pipeline_deals').map(i => i.row);
-  check('auto-draft count', nAdded, 3);
-  check('auto-draft prospects', autoRows.map(r => r.prospect_id).join(','), '601,602,607');
-  check('auto-draft flagged', autoRows.every(r => r.auto_created === true && r.created_by === null), true);
-  check('auto-draft owner = prospect agent', autoRows[1] && autoRows[1].agent_id, 102);
-  check('auto-draft amount = catalogue median', autoRows[0] && autoRows[0].amount, 18990);
-  const thisEnd = (() => { const d = new Date(); const e = new Date(d.getFullYear(), d.getMonth() + 1, 0); return `${e.getFullYear()}-${String(e.getMonth() + 1).padStart(2, '0')}-${String(e.getDate()).padStart(2, '0')}`; })();
-  check('hot deal closes this month', autoRows[0] && autoRows[0].expected_close_date, thisEnd);
-  check('warm deal closes later', autoRows[1] && autoRows[1].expected_close_date > thisEnd, true);
-  check('stage carried from engine', autoRows[2] && autoRows[2].stage, 'closing');
-  check('source auto-filled', autoRows[0] && autoRows[0].source, 'customer_referral');
-  check('next step html stripped', autoRows[0] && autoRows[0].next_step, 'Book meeting');
+  const nAddedA = await app._plAutoDraftDeals();
+  const autoRowsA = calls.inserts.filter(i => i.table === 'pipeline_deals').map(i => i.row);
+  const dP = (id) => autoRowsA.find(r => r.prospect_id === id) || {};
+  check('auto-draft count', nAddedA, 4);
+  check('auto-draft order A,A,B,C', autoRowsA.map(r => r.prospect_id).join(','), '701,702,704,706');
+  check('tier A product from meeting note', dP(701).product, '八大护法 Prosperity Power Ring');
+  check('tier A price from catalogue', dP(701).amount, 19990);
+  check('tier A product_id set for single product', dP(701).product_id, 90);
+  check('tier A two products summed', dP(702).amount, 40970);
+  check('common word does not match', autoRowsA.some(r => r.prospect_id === 703), false);
+  check('tier B price = catalogue median', dP(704).amount, 19990);
+  check('tier C product to confirm', dP(706).product, 'Product to confirm');
+  check('tier C amount = avg sale', dP(706).amount > 0, true);
+  check('auto-draft flagged', autoRowsA.every(r => r.auto_created === true && r.created_by === null), true);
+  check('owner = prospect agent', dP(702).agent_id, 102);
+  const thisEndA = (() => { const d = new Date(); const e = new Date(d.getFullYear(), d.getMonth() + 1, 0); return `${e.getFullYear()}-${String(e.getMonth() + 1).padStart(2, '0')}-${String(e.getDate()).padStart(2, '0')}`; })();
+  check('recent activity closes this month', dP(701).expected_close_date, thisEndA);
+  check('hot draft closes next month', dP(706).expected_close_date > thisEndA, true);
+  check('source auto-filled', dP(701).source, 'customer_referral');
+  check('next step html stripped', dP(701).next_step, 'Book meeting');
   calls.inserts.length = 0;
-  const again = await app._plAutoDraftDeals();
-  check('auto-draft throttled on immediate rerun', again, 0);
+  check('auto-draft throttled on immediate rerun', await app._plAutoDraftDeals(), 0);
+  check('remarks stripped from label', app._plProductsInText('[Products] A B C | Remarks: x', []).label, 'A B C');
   CATALOG.splice(CATALOG.length - 3, 3);
 
+  }
   // ── v8.2 payment category never leaks card numbers ──
   check('card number + 31m → EPP (no digits shown)', app._plPayCategory('CIMB Master CC 5521-1540-0842-5476, 31m'), 'EPP');
   check('credit card → Card', app._plPayCategory('Credit Card'), 'Card');

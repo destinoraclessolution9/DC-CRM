@@ -5322,16 +5322,42 @@ const _plRenderDealSuggest = () => {
         `<button class="btn secondary btn-sm" onclick="app.openDealModal(null, ${Number(p.id)})">＋ ${esc(p.full_name || p.name || '')} <span class="plg-muted">${p._pipeline.probability}%</span></button>`).join('')}</div>`;
 };
 
-// Auto-draft deals: warm prospects (engine >= PL_AUTO_DRAFT_MIN_PROB with a
-// product signal) get a draft deal so nobody has to remember to add it.
-// Owner = the prospect's responsible agent (only when this viewer may write
-// for them). Skips prospects with ANY deal touched in the last 90 days. One open
-// auto draft per prospect is also enforced by a partial unique index.
-const PL_AUTO_DRAFT_MIN_PROB = 60;
-const PL_AUTO_DRAFT_MAX_PER_RUN = 15;
+// Auto-draft deals from the buying signals agents actually record. Live data
+// (2026-10-20) showed the score is capped at 45% for everyone (no proposals are
+// logged), so a probability threshold alone never fires. Tiers, in order:
+//   A. a meeting's opportunity_potential names catalogue products → that product,
+//      amount = sum of the named catalogue prices;
+//   B. engine score >= PL_AUTO_DRAFT_MIN_PROB with a product signal;
+//   C. agent-declared HOT potential with activity in the last 60 days →
+//      "Product to confirm" at the average real sale.
+// Owner = the prospect's responsible agent (only when this viewer may write for
+// them). Skips prospects with ANY deal touched in the last 90 days. One open auto
+// draft per prospect is also enforced by a partial unique index.
+const PL_AUTO_DRAFT_MIN_PROB = 40;
+const PL_AUTO_DRAFT_MAX_PER_RUN = 25;
+const PL_AUTO_HOT_RECENT_DAYS = 60;
 const _PL_CAT_PRODUCT_RX = {
     powerring: /power\s*ring|指环/i, fengshui: /fengshui|feng shui|风水/i, calligraphy: /画作|calligraph|artistic|woodwork/i,
     bujishu: /bujishu|满堂/i, formula: /formula/i,
+};
+// Catalogue products named inside free text ("[Products] A, B | Remarks: …").
+const _plProductsInText = (text, products) => {
+    const t = String(text || '').split(/\|\s*remarks/i)[0].replace(/^\s*\[products\]\s*/i, '').trim();
+    if (!t) return { label: '', matched: [] };
+    const low = t.toLowerCase();
+    const matched = products.filter(p => {
+        const n = String(p.name || '').trim();
+        if (n.length < 3) return false;
+        if (low.includes(n.toLowerCase())) return true;
+        // "六曜指环 Support Power Ring" — the full Chinese half or the full
+        // English half alone also counts (never a single common word).
+        const cjk = (n.match(/[㐀-鿿]+/g) || []).join('');
+        const latin = n.replace(/[㐀-鿿]+/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+        return (cjk.length >= 3 && low.includes(cjk)) || (latin.length >= 10 && latin.includes(' ') && low.includes(latin));
+    });
+    const seen = new Set();
+    const uniq = matched.filter(p => (seen.has(p.id) ? false : (seen.add(p.id), true)));
+    return { label: t.slice(0, 120), matched: uniq };
 };
 let _plAutoDraftAt = 0;
 const _plAutoDraftDeals = async () => {
@@ -5347,35 +5373,50 @@ const _plAutoDraftDeals = async () => {
     let cfg = null; try { cfg = await loadPipelineConfig(); } catch (_) { /* defaults below */ }
     const cats = (cfg && cfg.categories) || [];
     let products = [];
-    try { products = (await AppDataStore.getAll('products') || []).filter(p => p.is_active !== false && Number(p.price) > 0); } catch (_) { /* default amounts */ }
+    try { products = (await AppDataStore.getAll('products') || []).filter(p => p.is_active !== false && p.name); } catch (_) { /* default amounts */ }
+    const priced = products.filter(p => Number(p.price) > 0);
     const priceFor = (catId) => {
         const rx = _PL_CAT_PRODUCT_RX[catId];
-        const prices = rx ? products.filter(p => rx.test(`${p.subcategory || ''} ${p.category || ''} ${p.name || ''}`)).map(p => Number(p.price)).sort((a, b) => a - b) : [];
+        const prices = rx ? priced.filter(p => rx.test(`${p.subcategory || ''} ${p.category || ''} ${p.name || ''}`)).map(p => Number(p.price)).sort((a, b) => a - b) : [];
         if (prices.length) return prices[Math.floor(prices.length / 2)];
         const cat = cats.find(x => x.id === catId);
         return cat && cat.default_amount ? Number(cat.default_amount) : null;
     };
     const thisEnd = _plMonthEnd(_plCurMonth());
     const nextEnd = _plMonthEnd(_plShiftMonth(_plCurMonth(), 1));
-    const rows = [];
+    const daysSince = (d) => d ? (Date.now() - new Date(d).getTime()) / 864e5 : Infinity;
+    const tiers = [[], [], []];
     for (const p of _lastEnriched) {
-        if (rows.length >= PL_AUTO_DRAFT_MAX_PER_RUN) break;
         const e = p._pipeline || {};
-        if (!(e.probability >= PL_AUTO_DRAFT_MIN_PROB) || e.noProductSignal || e.fromPotential || !e.category) continue;
         if (recent.has(String(p.id)) || !canOwn(p.responsible_agent_id)) continue;
-        const amount = priceFor(e.category);
-        if (!(amount > 0)) continue;
-        const cat = cats.find(x => x.id === e.category);
+        const idle = daysSince(e.lastActivityDate);
         const src = _plAutoSource(p);
-        rows.push({
-            prospect_id: p.id, agent_id: p.responsible_agent_id, product: cat ? cat.name : e.category, amount,
-            expected_close_date: e.probability >= 80 ? thisEnd : nextEnd,
-            stage: e.stage === 'closing' ? 'closing' : e.stage === 'proposal' ? 'proposal' : 'interested',
+        const base = {
+            prospect_id: p.id, agent_id: p.responsible_agent_id,
             source: src.source || null, source_detail: src.detail || null,
+            stage: e.stage === 'closing' ? 'closing' : e.stage === 'proposal' ? 'proposal' : 'interested',
             next_step: String(e.latestNextAction || e.action || 'Follow up').replace(/<[^>]*>/g, '').slice(0, 140),
             auto_created: true, created_by: null, updated_at: new Date().toISOString(),
-        });
+        };
+        const opp = _plProductsInText(e.latestOppPotential, products);
+        if (opp.matched.length) {
+            const amt = opp.matched.reduce((a, m) => a + (Number(m.price) || 0), 0);
+            if (amt > 0) {
+                tiers[0].push({ ...base, product: opp.matched.map(m => m.name).join(', ').slice(0, 160), product_id: opp.matched.length === 1 ? opp.matched[0].id : null, amount: amt, expected_close_date: idle <= 14 ? thisEnd : nextEnd });
+                continue;
+            }
+        }
+        if (e.probability >= PL_AUTO_DRAFT_MIN_PROB && !e.noProductSignal && !e.fromPotential && e.category) {
+            const amount = priceFor(e.category);
+            const cat = cats.find(x => x.id === e.category);
+            if (amount > 0) { tiers[1].push({ ...base, product: cat ? cat.name : e.category, amount, expected_close_date: idle <= 14 ? thisEnd : nextEnd }); continue; }
+        }
+        const level = String(e.potentialLevel || p.potential_level || '').toLowerCase();
+        if (level === 'hot' && idle <= PL_AUTO_HOT_RECENT_DAYS) {
+            tiers[2].push({ ...base, product: 'Product to confirm', amount: Math.round(c.avgSale || 20000), expected_close_date: nextEnd, next_step: 'Confirm product and amount, then book the closing meeting' });
+        }
     }
+    const rows = [...tiers[0], ...tiers[1], ...tiers[2]].slice(0, PL_AUTO_DRAFT_MAX_PER_RUN);
     if (!rows.length) return 0;
     let added = 0;
     for (const r of rows) { // one by one: a unique-index clash on one row must not drop the rest
@@ -5383,7 +5424,7 @@ const _plAutoDraftDeals = async () => {
         if (!error) added++;
     }
     if (added) {
-        UI.toast.success(`Added ${added} draft deal${added === 1 ? '' : 's'} from warm prospects — check the 🤖 cards`);
+        UI.toast.success(`Added ${added} draft deal${added === 1 ? '' : 's'} from your prospects' buying signals — check the 🤖 cards`);
         _plRenderGoalSections();
     }
     return added;
@@ -5914,6 +5955,7 @@ const saveGoals = async () => {
         _plDealsBoardHtml,
         _plAutoSource,
         _plAutoDraftDeals,
+        _plProductsInText,
         _plPayCategory,
         _plSetLastEnrichedForTest: (v) => { _lastEnriched = v; },
         _plResetAutoDraftForTest: () => { _plAutoDraftAt = 0; },
