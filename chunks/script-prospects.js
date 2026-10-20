@@ -3364,6 +3364,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         `;
     }
     else if (tab === 'closing') {
+        if (!window.app.bjcAttachSelect && window._loadChunk) window._loadChunk('chunks/script-activities.min.js').catch(() => {});
         const cr = prospect.closing_record || null;
         const status = cr?.status || 'draft';
         const isManager = isSystemAdmin(_state.cu) || isMarketingManager(_state.cu);
@@ -5921,6 +5922,7 @@ const _prescriptionBlockHtml = (pid, auditId, rows) => {
 };
 
 const openPrescriptionModal = async (pid, auditId, rxId = null) => {
+    if (!window.app.bjcAttachSelect && window._loadChunk) window._loadChunk('chunks/script-activities.min.js').catch(() => {});
     let line = null;
     if (rxId) {
         const rows = await _loadPrescriptions(pid);
@@ -6071,6 +6073,7 @@ const _uploadFengShuiToBucket = async (file, pathPrefix) => {
 // date, title, key notes, and product selections (checkbox groups mirroring
 // Post-Meetup Notes exactly so the data format is reusable in the Potential tab).
 const openFengShuiAuditModal = async (prospectId, auditId) => {
+    if (!window.app.bjcMultiHtml && window._loadChunk) { try { await window._loadChunk('chunks/script-activities.min.js'); } catch (_) { /* picker optional */ } }
     const prospect = await AppDataStore.getById('prospects', prospectId);
     if (!prospect) { UI.toast.error('Prospect not found'); return; }
     const audits = _readFengShuiAudits(prospect);
@@ -6123,6 +6126,7 @@ const openFengShuiAuditModal = async (prospectId, auditId) => {
             <div style="border:1px solid var(--gray-300);border-radius:6px;padding:10px;max-height:220px;overflow-y:auto;background:#fafafa;">
                 ${productCheckboxes.length > 0 ? productCheckboxes.join('') : '<p style="color:var(--gray-400);font-size:12px;margin:0;">No products/items available in marketing list.</p>'}
             </div>
+            ${window.app.bjcMultiHtml ? window.app.bjcMultiHtml('fsa', 'fsa-products', (window.app.bjcSelectedFromText || (() => []))(existing?.products || '')) : ''}
             <textarea id="fsa-modal-product-remarks" class="form-control" rows="2" placeholder="Additional product remarks..." style="margin-top:6px;">${escapeHtml(parsedProducts.remarks || '')}</textarea>
             <div style="font-size:11px;color:var(--gray-400);margin-top:3px;"><i class="fas fa-link"></i> Linked to prospect profile → Potential &amp; Opportunities</div>
         </div>

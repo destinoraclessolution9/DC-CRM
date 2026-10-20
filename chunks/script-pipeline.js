@@ -5634,6 +5634,17 @@ const _plAutoDraftDeals = async () => {
             next_step: String(e.latestNextAction || e.action || 'Follow up').replace(/<[^>]*>/g, '').slice(0, 140),
             auto_created: true, created_by: null, updated_at: new Date().toISOString(),
         };
+        const _bjcLabels = window.app.bjcSelectedFromText ? window.app.bjcSelectedFromText(e.latestOppPotential) : [];
+        if (_bjcLabels.length && window.app.bjcResolveLabel) {
+            const hits = (await Promise.all(_bjcLabels.map(l => window.app.bjcResolveLabel(l)))).filter(Boolean);
+            const amt = hits.reduce((t, h) => t + (Number(h.opt ? h.opt.price_customer : h.item.price_customer) || 0), 0);
+            if (hits.length && amt > 0) {
+                tiers[0].push({ ...base, product: _bjcLabels.slice(0, 4).join(', ').slice(0, 160), amount: amt,
+                    catalog: 'bujishu', catalog_item_id: hits.length === 1 ? hits[0].item.id : null, catalog_option_id: hits.length === 1 && hits[0].opt ? hits[0].opt.id : null,
+                    expected_close_date: idle <= 14 ? thisEnd : nextEnd });
+                continue;
+            }
+        }
         const opp = _plProductsInText(e.latestOppPotential, products);
         if (opp.matched.length) {
             const amt = opp.matched.reduce((a, m) => a + (Number(m.price) || 0), 0);
@@ -5708,7 +5719,24 @@ const _PL_PRODUCT_KEYWORDS = [
     [/财库|财托|cai\s*ku|cai\s*tuo/i, 'Royal Woodwork Series'],
 ];
 const _plNormName = (s) => String(s || '').toLowerCase().replace(/[\s\-_,.:;()（）·，、]+/g, '');
+// Bujishu Catalogue labels → "Bujishu · <main category>" (filled from the
+// activities-chunk picker data before the insights render).
+let _plBjcGroups = null;
+const _plLoadBjcGroups = async () => {
+    if (_plBjcGroups) return _plBjcGroups;
+    try {
+        if (!window.app.bjcData && window._loadChunk) await window._loadChunk('chunks/script-activities.min.js');
+        const d = window.app.bjcData ? await window.app.bjcData() : null;
+        if (d && d.list.length) {
+            const m = new Map();
+            for (const [label, v] of d.byLabel) m.set(label, 'Bujishu · ' + (String(v.item.category || 'Others').split('>')[0].trim() || 'Others'));
+            _plBjcGroups = m;
+        }
+    } catch (_) { /* name grouping only */ }
+    return _plBjcGroups;
+};
 const _plProductGroup = (name, productId, catalog) => {
+    if (_plBjcGroups) { const g = _plBjcGroups.get(String(name || '').replace(/^\s*🛋️?\s*/, '').trim()); if (g) return g; }
     const list = catalog || [];
     if (productId != null) {
         const p = list.find(x => String(x.id) === String(productId));
@@ -5900,6 +5928,7 @@ const _plRenderInsights = async () => {
             const sales = c.purchases.filter(p => _plSaleOk(p) && c.scopeIds.has(String(p.agent_id)) && String(p.date || '').slice(0, 4) === year);
             let catalog = [];
             try { catalog = (await AppDataStore.getAll('products') || []).filter(p => p && p.name); } catch (_) { /* name-only grouping */ }
+            await _plLoadBjcGroups();
             _plInsightCache = { key, links: await _plLoadSaleLinks(sales), catalog };
         }
         box.innerHTML = _plInsightsHtml(c, _plInsightCache.links, _plInsightCache.catalog);
@@ -5925,6 +5954,7 @@ const _plAutoSource = (p) => {
 let _plDealModalProspect = null;
 
 const openDealModal = async (dealId = null, prospectId = null) => {
+    if (!window.app.bjcAttachSelect && window._loadChunk) window._loadChunk('chunks/script-activities.min.js').catch(() => {});
     const sb = _plSb();
     if (!sb) { UI.toast.error('Offline — deals need a connection.'); return; }
     let deal = null;

@@ -376,6 +376,26 @@ const as = (id) => { windowStub._appState.cu = USERS.find(u => u.id === id); };
     app._plSetGradeCtxForTest(null);
   }
 
+
+  // ── Bujishu Catalogue items in a meeting note → auto-draft deal with catalogue price ──
+  {
+    as(20); visibleIds = [20, 101, 102];
+    await app._plLoadGoalCtx(USERS);
+    const ITEM = { id: 2, name: 'Bloom Curtain', price_customer: 2599 };
+    const OPT = { id: 11, price_customer: 3299 };
+    app.bjcSelectedFromText = (t) => /\[Bujishu Catalogue\]/.test(t || '') ? ['Bloom Curtain · L5ft'] : [];
+    app.bjcResolveLabel = async (l) => l === 'Bloom Curtain · L5ft' ? { item: ITEM, opt: OPT } : null;
+    app._plSetLastEnrichedForTest([{ id: 801, full_name: 'B1', responsible_agent_id: 101, referred_by_type: 'Customer',
+      _pipeline: { probability: 20, noProductSignal: true, lastActivityDate: new Date(), latestOppPotential: '[Bujishu Catalogue] Bloom Curtain · L5ft', action: 'x' } }]);
+    calls.inserts.length = 0;
+    app._plResetAutoDraftForTest();
+    await app._plAutoDraftDeals();
+    const r = (calls.inserts.find(i => i.table === 'pipeline_deals') || {}).row || {};
+    check('bujishu draft: product label', r.product, 'Bloom Curtain · L5ft');
+    check('bujishu draft: option customer price', r.amount, 3299);
+    check('bujishu draft: catalogue ids', r.catalog === 'bujishu' && r.catalog_item_id === 2 && r.catalog_option_id === 11);
+    delete app.bjcSelectedFromText; delete app.bjcResolveLabel;
+  }
   console.log(`pipeline-goals-sim: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

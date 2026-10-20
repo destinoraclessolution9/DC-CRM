@@ -1784,6 +1784,7 @@ My raw notes:
                         <textarea id="${prefix}-opportunity-remarks" class="form-control" rows="2" placeholder="Additional remarks..." ${disabled}>${escapeHtml(parsedOpp.remarks || '')}</textarea>
                         ${voiceBtn(`${prefix}-opportunity-remarks`)}
                     </div>
+                    ${bjcMultiHtml(`${prefix}-opp`, `${prefix}-opp-items`, bjcSelectedFromText(a.opportunity_potential || ''), { readOnly })}
                     <div style="font-size:11px;color:var(--gray-400);margin-top:3px;"><i class="fas fa-link"></i> Linked to prospect profile → Potential &amp; Opportunities / Pipeline → Target to Sign</div>
                 </div>
                 <div class="form-group">
@@ -7491,7 +7492,294 @@ My raw notes:
         }
     };
 
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 🛋️ BUJISHU CATALOGUE PICKER (2026-10-20) — category first, then only that
+    // category's items, then size/colour. Used by every product-potential and
+    // sales picker. Two modes:
+    //   multi  — adds hidden checked checkboxes (name = the form's existing
+    //            checkbox name, data-group="Bujishu Catalogue") + visible chips,
+    //            so the existing serializer stores "[Bujishu Catalogue] a, b".
+    //   single — sets a <select> to a label option (data-price / data-bjc-*) and
+    //            fills the amount input with the customer price.
+    // Labels are cleaned the same way as SQL public.bjc_clean(): [ ] , | would
+    // break the "[Group] a, b | Remarks" text format. bjc_resolve() maps a label
+    // back to catalogue ids (migrations/2026-10-20_bujishu_catalog_links.sql).
+    // ═══════════════════════════════════════════════════════════════════════
+    const BJC_GROUP = 'Bujishu Catalogue';
+    const bjcClean = (t) => String(t || '').replace(/\[/g, '(').replace(/\]/g, ')').replace(/,/g, '，').replace(/\|/g, '/').replace(/\s+/g, ' ').trim();
+    const bjcLabel = (item, opt) => bjcClean(item && item.name) + (opt ? ' · ' + bjcClean(opt.option_label) : '');
+    let _bjcCache = null;
+    const bjcData = async () => {
+        if (_bjcCache) return _bjcCache;
+        const [items, opts] = await Promise.all([
+            AppDataStore.getAll('bujishu_catalog').catch(() => []),
+            AppDataStore.getAll('bujishu_catalog_options').catch(() => []),
+        ]);
+        const list = (items || []).filter(i => i && i.is_active !== false && i.name);
+        const optsBy = new Map();
+        for (const o of (opts || [])) {
+            const k = String(o.catalog_id);
+            if (!optsBy.has(k)) optsBy.set(k, []);
+            optsBy.get(k).push(o);
+        }
+        for (const arr of optsBy.values()) arr.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || (Number(a.price_customer) || 0) - (Number(b.price_customer) || 0));
+        const tree = new Map(); // main → { count, subs: Map(sub → items[]), direct: items[] }
+        for (const it of list) {
+            const parts = String(it.category || 'Others').split('>').map(s => s.trim()).filter(Boolean);
+            const main = parts[0] || 'Others', sub = parts.slice(1).join(' › ') || null;
+            if (!tree.has(main)) tree.set(main, { count: 0, subs: new Map(), direct: [] });
+            const node = tree.get(main);
+            node.count++;
+            if (sub) { if (!node.subs.has(sub)) node.subs.set(sub, []); node.subs.get(sub).push(it); }
+            else node.direct.push(it);
+        }
+        const byId = new Map(list.map(i => [String(i.id), i]));
+        const byLabel = new Map();
+        for (const it of list) {
+            byLabel.set(bjcLabel(it, null), { item: it, opt: null });
+            for (const o of (optsBy.get(String(it.id)) || [])) byLabel.set(bjcLabel(it, o), { item: it, opt: o });
+        }
+        const res = { list, optsBy, tree, byId, byLabel };
+        if (list.length) _bjcCache = res; // never memoize an empty read
+        return res;
+    };
+    // Exact item for a stored label (null when it is not a catalogue label).
+    const bjcResolveLabel = async (label) => {
+        const d = await bjcData();
+        return d.byLabel.get(bjcClean(String(label || '').replace(/^\s*🛋️?\s*/, ''))) || null;
+    };
+    // Labels saved under [Bujishu Catalogue] in a "[Group] a, b | Remarks: x" text.
+    const bjcSelectedFromText = (text) => {
+        const t = String(text || '');
+        const remarksAt = t.search(/\|\s*Remarks:/);
+        const items = remarksAt >= 0 ? t.slice(0, remarksAt) : t;
+        const m = new RegExp('\\[' + BJC_GROUP + '\\]\\s*([^[|]*)').exec(items);
+        return m ? m[1].split(',').map(s => s.trim()).filter(Boolean) : [];
+    };
+    const _bjcRM = (n) => 'RM ' + Math.round(Number(n) || 0).toLocaleString();
+    const _bjcPrice = (it) => {
+        const lo = Number(it.price_customer_min), hi = Number(it.price_customer_max);
+        if (lo > 0 && hi > 0 && hi !== lo) return `${_bjcRM(lo)}–${Math.round(hi).toLocaleString()}`;
+        return Number(it.price_customer) > 0 ? _bjcRM(it.price_customer) : '';
+    };
+    const _bjcState = new Map();
+    const _bjcSafe = (pfx) => String(pfx || '').replace(/[^a-zA-Z0-9_-]/g, '');
+
+    const _bjcChipHtml = (pfx, label) => {
+        const st = _bjcState.get(pfx) || {};
+        return `<span class="bjc-chip" data-label="${escapeHtml(label)}" style="display:inline-flex;align-items:center;gap:4px;background:#FEF3C7;color:#92400E;border-radius:12px;padding:2px 8px;font-size:12px;margin:2px;">
+            🛋️ ${escapeHtml(label)}
+            <input type="checkbox" name="${escapeHtml(st.name || '')}" value="${escapeHtml(label)}" data-group="${BJC_GROUP}" checked style="display:none">
+            ${st.readOnly ? '' : `<a href="javascript:void(0)" onclick="event.stopPropagation();app.bjcRemove('${pfx}',this)" style="color:#92400E;text-decoration:none;font-weight:700;">✕</a>`}
+        </span>`;
+    };
+    // Multi-select block for a potential form. `name` = the form's checkbox name.
+    const bjcMultiHtml = (pfx, name, selectedLabels = [], opts = {}) => {
+        pfx = _bjcSafe(pfx);
+        _bjcState.set(pfx, { mode: 'multi', name, readOnly: !!opts.readOnly });
+        const chips = (selectedLabels || []).map(l => _bjcChipHtml(pfx, l)).join('');
+        return `
+        <div class="bjc-wrap" id="${pfx}-bjc" style="margin-top:8px;border:1px solid #FDE68A;border-radius:8px;padding:8px 10px;background:#FFFBEB;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;">
+                <span style="font-weight:600;font-size:12px;color:#92400E;">🛋️ ${BJC_GROUP}</span>
+                ${opts.readOnly ? '' : `<button type="button" class="btn secondary btn-sm" style="font-size:11px;padding:2px 10px;" onclick="event.stopPropagation();app.bjcOpen('${pfx}')"><i class="fas fa-th-large"></i> Choose by category</button>`}
+            </div>
+            <div id="${pfx}-bjc-chips" style="margin-top:4px;">${chips}</div>
+            <div id="${pfx}-bjc-panel" style="display:none;margin-top:8px;"></div>
+        </div>`;
+    };
+    // Single-select: a button under a sales/deal <select>; picking sets it.
+    const bjcAttachSelect = (selectId, amountId) => {
+        const sel = document.getElementById(selectId);
+        if (!sel || sel.dataset.bjcWired) return false;
+        sel.dataset.bjcWired = '1';
+        const pfx = _bjcSafe('bjs-' + selectId);
+        _bjcState.set(pfx, { mode: 'single', selectId, amountId });
+        const html = `
+        <div class="bjc-wrap" id="${pfx}-bjc" style="margin-top:6px;">
+            <button type="button" class="btn secondary btn-sm" style="font-size:11px;padding:2px 10px;" onclick="event.stopPropagation();app.bjcOpen('${pfx}')">🛋️ Or pick from Bujishu Catalogue</button>
+            <div id="${pfx}-bjc-panel" style="display:none;margin-top:8px;border:1px solid #FDE68A;border-radius:8px;padding:8px 10px;background:#FFFBEB;"></div>
+        </div>`;
+        sel.insertAdjacentHTML('afterend', html);
+        return true;
+    };
+
+    const bjcOpen = async (pfx) => {
+        const panel = document.getElementById(`${pfx}-bjc-panel`);
+        if (!panel) return;
+        if (panel.style.display !== 'none') { panel.style.display = 'none'; return; }
+        panel.style.display = 'block';
+        panel.innerHTML = '<div style="font-size:12px;color:#6b7280;">Loading catalogue…</div>';
+        await bjcData();
+        bjcShow(pfx, 'cats');
+    };
+    const _bjcBtn = (label, count, onclick, extra = '') => `<button type="button" onclick="event.stopPropagation();${onclick}" style="border:1px solid #FCD34D;background:#fff;border-radius:8px;padding:8px 10px;font-size:12px;font-weight:600;color:#78350F;cursor:pointer;text-align:left;${extra}">${escapeHtml(label)} <span style="color:#B45309;font-weight:400;">${count}</span></button>`;
+    // view: 'cats' | 'subs' (main) | 'items' (main, sub|'' for direct) | 'opts' (itemId)
+    const bjcShow = async (pfx, view, a = null, b = null) => {
+        const panel = document.getElementById(`${pfx}-bjc-panel`);
+        const st = _bjcState.get(pfx);
+        if (!panel || !st) return;
+        const d = await bjcData();
+        const grid = (inner) => `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px;">${inner}</div>`;
+        const back = (onclick, label) => `<a href="javascript:void(0)" onclick="event.stopPropagation();${onclick}" style="font-size:12px;color:#92400E;">← ${escapeHtml(label)}</a>`;
+        const js = (v) => String(v).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        if (!d.list.length) { panel.innerHTML = '<div style="font-size:12px;color:#B91C1C;">Catalogue could not load.</div>'; return; }
+        if (view === 'cats') {
+            const mains = [...d.tree.entries()].sort((x, y) => y[1].count - x[1].count);
+            panel.innerHTML = `<div style="font-size:12px;color:#78350F;margin-bottom:6px;">Tap a category:</div>` +
+                grid(mains.map(([m, n]) => _bjcBtn(m, n.count, n.subs.size ? `app.bjcShow('${pfx}','subs','${escapeHtml(js(m))}')` : `app.bjcShow('${pfx}','items','${escapeHtml(js(m))}','')`)).join(''));
+            st.view = { view, a, b };
+            return;
+        }
+        if (view === 'subs') {
+            const n = d.tree.get(a);
+            if (!n) return bjcShow(pfx, 'cats');
+            const subs = [...n.subs.entries()].sort((x, y) => y[1].length - x[1].length);
+            panel.innerHTML = `<div style="display:flex;justify-content:space-between;margin-bottom:6px;">${back(`app.bjcShow('${pfx}','cats')`, 'All categories')}<strong style="font-size:12px;color:#78350F;">${escapeHtml(a)}</strong></div>` +
+                grid([...subs.map(([s, items]) => _bjcBtn(s, items.length, `app.bjcShow('${pfx}','items','${escapeHtml(js(a))}','${escapeHtml(js(s))}')`)),
+                      ...(n.direct.length ? [_bjcBtn('Other ' + a, n.direct.length, `app.bjcShow('${pfx}','items','${escapeHtml(js(a))}','')`)] : [])].join(''));
+            st.view = { view, a, b };
+            return;
+        }
+        if (view === 'items') {
+            const n = d.tree.get(a);
+            if (!n) return bjcShow(pfx, 'cats');
+            const items = (b ? n.subs.get(b) : n.direct) || [];
+            const title = b ? `${a} › ${b}` : a;
+            const backTo = n.subs.size ? `app.bjcShow('${pfx}','subs','${escapeHtml(js(a))}')` : `app.bjcShow('${pfx}','cats')`;
+            st.view = { view, a, b };
+            st.items = items;
+            panel.innerHTML = `
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
+                    ${back(backTo, n.subs.size ? a : 'All categories')}
+                    <strong style="font-size:12px;color:#78350F;">${escapeHtml(title)} (${items.length})</strong>
+                </div>
+                <input type="text" class="form-control" style="height:32px;font-size:12px;margin-bottom:6px;" placeholder="Search in ${escapeHtml(title)}…" oninput="app.bjcFilter('${pfx}',this.value)" onclick="event.stopPropagation()">
+                <div id="${pfx}-bjc-list" style="max-height:300px;overflow-y:auto;">${_bjcItemsHtml(pfx, items, d)}</div>`;
+            return;
+        }
+        if (view === 'opts') {
+            const it = d.byId.get(String(a));
+            if (!it) return bjcShow(pfx, 'cats');
+            const opts = d.optsBy.get(String(it.id)) || [];
+            const prev = st.view || {};
+            panel.innerHTML = `
+                <div style="margin-bottom:6px;">${back(`app.bjcShow('${pfx}','items','${escapeHtml(js(prev.a || ''))}','${escapeHtml(js(prev.b || ''))}')`, 'Back to list')}</div>
+                <div style="font-weight:600;font-size:13px;margin-bottom:6px;">${escapeHtml(it.name)}</div>
+                ${opts.map(o => `<div onclick="event.stopPropagation();app.bjcPick('${pfx}',${Number(it.id)},${Number(o.id)})" style="display:flex;justify-content:space-between;gap:8px;padding:8px;border-bottom:1px solid #FDE68A;cursor:pointer;font-size:12px;">
+                    <span>${escapeHtml(o.option_type ? o.option_type + ': ' : '')}${escapeHtml(o.option_label)}</span>
+                    <span style="white-space:nowrap;"><strong style="color:#059669;">${_bjcRM(o.price_customer)}</strong> <span style="color:#9CA3AF;">member ${_bjcRM(o.price_member)}</span></span>
+                </div>`).join('')}`;
+            return;
+        }
+    };
+    const _bjcItemsHtml = (pfx, items, d) => items.length ? items.map(it => {
+        const hasOpts = (d.optsBy.get(String(it.id)) || []).length > 0;
+        const click = hasOpts ? `app.bjcShow('${pfx}','opts',${Number(it.id)})` : `app.bjcPick('${pfx}',${Number(it.id)},null)`;
+        return `<div onclick="event.stopPropagation();${click}" style="display:flex;align-items:center;gap:8px;padding:6px;border-bottom:1px solid #FDE68A;cursor:pointer;">
+            ${it.photo_url ? `<img src="${escapeHtml(it.photo_url)}" loading="lazy" alt="" style="width:40px;height:40px;object-fit:cover;border-radius:6px;flex-shrink:0;">` : '<div style="width:40px;height:40px;border-radius:6px;background:#FDE68A;flex-shrink:0;"></div>'}
+            <div style="flex:1;min-width:0;">
+                <div style="font-size:12px;font-weight:600;overflow-wrap:anywhere;">${escapeHtml(it.name)}</div>
+                <div style="font-size:11px;color:#6b7280;">${escapeHtml(_bjcPrice(it))}${Number(it.price_member) > 0 && !hasOpts ? ` · member ${_bjcRM(it.price_member)}` : ''}${hasOpts ? ' · choose size/colour ▸' : ''}</div>
+            </div>
+        </div>`;
+    }).join('') : '<div style="font-size:12px;color:#9CA3AF;padding:8px;">No items.</div>';
+    const bjcFilter = async (pfx, q) => {
+        const st = _bjcState.get(pfx);
+        const box = document.getElementById(`${pfx}-bjc-list`);
+        if (!st || !box) return;
+        const d = await bjcData();
+        const words = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+        const items = (st.items || []).filter(it => { const t = `${it.name} ${it.options_summary || ''}`.toLowerCase(); return words.every(w => t.includes(w)); });
+        box.innerHTML = _bjcItemsHtml(pfx, items, d);
+    };
+    const bjcPick = async (pfx, itemId, optId) => {
+        const st = _bjcState.get(pfx);
+        const d = await bjcData();
+        const it = d.byId.get(String(itemId));
+        if (!st || !it) return;
+        const opt = optId != null ? (d.optsBy.get(String(itemId)) || []).find(o => Number(o.id) === Number(optId)) : null;
+        const label = bjcLabel(it, opt);
+        const price = Number(opt ? opt.price_customer : it.price_customer) || 0;
+        const member = Number(opt ? opt.price_member : it.price_member) || 0;
+        if (st.mode === 'multi') {
+            const chips = document.getElementById(`${pfx}-bjc-chips`);
+            if (chips && ![...chips.querySelectorAll('.bjc-chip')].some(c => c.dataset.label === label)) chips.insertAdjacentHTML('beforeend', _bjcChipHtml(pfx, label));
+            UI.toast.success(`Added: ${label}`);
+            bjcShow(pfx, 'items', (st.view || {}).a, (st.view || {}).b);
+            return;
+        }
+        const sel = document.getElementById(st.selectId);
+        if (sel) {
+            let o = [...sel.options].find(x => x.value === label);
+            if (!o) {
+                o = document.createElement('option');
+                o.value = label;
+                sel.appendChild(o);
+            }
+            o.textContent = `🛋️ ${label} — ${_bjcRM(price)}`;
+            o.dataset.price = price ? String(price) : '';
+            o.dataset.bjcId = String(it.id);
+            o.dataset.bjcOpt = opt ? String(opt.id) : '';
+            o.dataset.memberPrice = member ? String(member) : '';
+            sel.value = label;
+            sel.removeAttribute('data-pristine');
+            sel.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        const amt = st.amountId && document.getElementById(st.amountId);
+        // rx-product (price × qty) and pur-product set the amount in their own change handler.
+        if (/^(rx|pur)-product$/.test(st.selectId || '')) { const panel0 = document.getElementById(`${pfx}-bjc-panel`); if (panel0) panel0.style.display = 'none'; UI.toast.success(`${label} — customer ${_bjcRM(price)}${member ? ` (member ${_bjcRM(member)})` : ''}`); return; }
+        if (amt && price) { amt.value = price; amt.dispatchEvent(new Event('input', { bubbles: true })); }
+        const panel = document.getElementById(`${pfx}-bjc-panel`);
+        if (panel) panel.style.display = 'none';
+        UI.toast.success(`${label} — customer ${_bjcRM(price)}${member ? ` (member ${_bjcRM(member)})` : ''}`);
+    };
+    const bjcRemove = (pfx, a) => { const chip = a && a.closest('.bjc-chip'); if (chip) chip.remove(); };
+
+    // Auto-attach the single picker to sales / deal / prescription selects
+    // whenever they appear (modals render async, in several chunks).
+    const _BJC_SELECTS = [
+        [/^solution-sold$/, () => 'amount-closed'],
+        [/^(.+)-solution-sold$/, (m) => `${m[1]}-amount-closed`],
+        [/^cr-product$/, () => 'cr-amount'],
+        [/^pur-product$/, () => 'pur-amt'],
+        [/^pld-product$/, () => 'pld-amount'],
+        [/^rx-product$/, () => 'rx-amount'],
+    ];
+    const _bjcScan = (root) => {
+        if (!root || !root.querySelectorAll) return;
+        const sels = root.matches && root.matches('select[id]') ? [root] : root.querySelectorAll('select[id]');
+        for (const s of sels) {
+            if (s.dataset.bjcWired || s.disabled) continue;
+            for (const [rx, amt] of _BJC_SELECTS) {
+                const m = rx.exec(s.id);
+                if (m) { bjcAttachSelect(s.id, amt(m)); break; }
+            }
+        }
+    };
+    if (!window.__bjcObserver && typeof MutationObserver !== 'undefined' && document.body) {
+        window.__bjcObserver = new MutationObserver(muts => {
+            for (const mu of muts) for (const n of mu.addedNodes) if (n.nodeType === 1) _bjcScan(n);
+        });
+        window.__bjcObserver.observe(document.body, { childList: true, subtree: true });
+    }
+    // ═══════════════════ END BUJISHU CATALOGUE PICKER ═══════════════════
+
+    try { _bjcScan(document.body); } catch (_) { /* best-effort */ }
     app.register('activities', {
+        bjcData,
+        bjcMultiHtml,
+        bjcAttachSelect,
+        bjcOpen,
+        bjcShow,
+        bjcFilter,
+        bjcPick,
+        bjcRemove,
+        bjcSelectedFromText,
+        bjcResolveLabel,
+        bjcLabel,
+        bjcClean,
         openActivityModal,
         fillActivityForm,
         // typeSelect, setField — local vars inside fillActivityForm, not chunk-scope

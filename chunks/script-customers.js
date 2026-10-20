@@ -2759,6 +2759,7 @@ const _onPurchaseMethodChange = (val, customerId) => {
 };
 
 const openAddPurchaseModal = async (customerId) => {
+    if (!window.app.bjcAttachSelect && window._loadChunk) window._loadChunk('chunks/script-activities.min.js').catch(() => {});
     const customer = await AppDataStore.getById('customers', customerId);
     // getById can return null (RLS deny / offline / deleted id) — guard before deref.
     if (!customer) { UI.toast.error('Customer not found'); return; }
