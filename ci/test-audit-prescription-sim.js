@@ -65,6 +65,14 @@ const app = win.app;
   check('insert numbers', ins.quoted_amount === 18990 && ins.qty === 2);
   check('insert product id', ins.product_id, 9);
   check('insert created_by', ins.created_by, 101);
+  // audit report = PDF/Word and/or report photos (private bucket thumbnails)
+  const rf = app._fsaReportFilesHtml(77, { id: 9, report_files: [
+    { url: 'sbobj://audit-reports/77/9_report_1_a.pdf', name: '<b>report</b>.pdf', type: 'doc' },
+    { url: 'sbobj://audit-reports/77/9_report_2_p1.jpg', name: 'p1.jpg', type: 'image' } ] });
+  check('report: doc link escaped', rf.includes('&lt;b&gt;report&lt;/b&gt;.pdf') && !rf.includes('<b>report'));
+  check('report: photo thumbnail resolved later', rf.includes('data-sbobj="sbobj://audit-reports/77/9_report_2_p1.jpg"'));
+  check('report: remove buttons per file', (rf.match(/removeFengShuiReportFile\(77,9,/g) || []).length, 2);
+  check('report: none → empty', app._fsaReportFilesHtml(1, { id: 2 }), '');
   console.log(`audit-prescription-sim: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error('HARNESS CRASH:', e); process.exit(1); });

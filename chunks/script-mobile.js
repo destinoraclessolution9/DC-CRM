@@ -4097,6 +4097,7 @@
                 name:     (r) => String(r.full_name || '').toLowerCase(),
                 activity: (r) => _t(r.last_activity_date),
                 recent:   (r) => _t(r.updated_at || r.created_at),
+                potential: (r) => Number(((window.__potMap) || new Map()).get(String(r.converted_from_prospect_id != null && _mpTab === 'customers' ? r.converted_from_prospect_id : r.id)) || 0),
             };
             const [field, dir] = String(_mpSort || _MP_SORT_DEFAULT).split('_');
             const keyOf = keys[field] || keys.score;
@@ -4128,7 +4129,7 @@
                 <div class="mp-card-avatar">${_mhomeEsc(_mhomeInitials(c.full_name))}</div>
                 <div class="mp-card-text">
                     <div class="mp-card-name-row">
-                        <div class="mp-card-name">${_mhomeEsc(c.full_name || 'Unknown')}</div>
+                        <div class="mp-card-name">${_mhomeEsc(c.full_name || 'Unknown')}${c.converted_from_prospect_id != null ? `<span data-pot-chip="${Number(c.converted_from_prospect_id)}"></span>` : ''}</div>
                     </div>
                     <div class="mp-card-meta">
                         <span class="mp-chip" style="background:#ec4899;color:#fff;font-weight:700;">Customer</span>
@@ -4184,7 +4185,7 @@
                 <div class="mp-card-avatar">${_mhomeEsc(init)}</div>
                 <div class="mp-card-text">
                     <div class="mp-card-name-row">
-                        <div class="mp-card-name${(p.unable_to_serve || p.manual_grade === 'F') ? ' name-unable' : ''}">${_mhomeEsc(p.full_name || 'Unknown')}</div>
+                        <div class="mp-card-name${(p.unable_to_serve || p.manual_grade === 'F') ? ' name-unable' : ''}">${_mhomeEsc(p.full_name || 'Unknown')}<span data-pot-chip="${Number(p.id)}"></span></div>
                         ${mgDigit ? `<span class="mp-chip minggua">&lt;${mgDigit}&gt;</span>` : ''}
                         ${(refCounts && refCounts.total > 0) ? `<button class="mp-chip refcount" onclick="event.stopPropagation();app.mpOpenReferralTree(${refTreeId ?? 'null'},'${refTreeType}')" aria-label="View referral network">(${refCounts.direct}/${refCounts.total})</button>` : ''}
                         ${phone ? `<button class="mp-card-wa" onclick="event.stopPropagation();app.mhomeWa(${p.id ?? 'null'},'${phone}')" aria-label="WhatsApp"><i class="fab fa-whatsapp"></i></button>` : ''}
@@ -4359,6 +4360,7 @@
         // sort <select>, minus the two protection_* orders (see _mpRenderList).
         // 'recent_desc' preserves what this list used to do unconditionally.
         const sortOpts = [
+            ['potential_desc','💰 Potential (High → Low)'],
             ['score_desc','Score (High → Low)'],
             ['score_asc','Score (Low → High)'],
             ['name_asc','Name (A → Z)'],

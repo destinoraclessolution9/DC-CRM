@@ -271,6 +271,13 @@ const showProspectsView = async (container) => {
                         <select id="filter-agent" onchange="app.filterProspects()">
                             <option value="">All Agents</option>
                         </select>
+                        <select id="filter-potential" onchange="app.filterProspects()" title="Open potential (audit, meeting notes, prescriptions, deals) still to sell">
+                            <option value="">All Potential</option>
+                            <option value="1">💰 Any potential</option>
+                            <option value="50000">💰 RM50k+</option>
+                            <option value="100000">💰 RM100k+</option>
+                            <option value="300000">💰 RM300k+</option>
+                        </select>
                         <select id="filter-referral" onchange="app.filterProspects()" title="Filter by how the prospect was referred in. Older records may have a referrer without a type — they show under 'Referred (any)'.">
                             <option value="">All Referrals</option>
                             <option value="any">Referred (any)</option>
@@ -553,7 +560,7 @@ const buildProspectRowHtml = (p, ctx) => {
                     <input type="checkbox" data-pid="${p.id}" ${isSelected ? 'checked' : ''} onchange="app.toggleProspectSelect(${p.id})">
                 </td>
                 <td data-label="Name">
-                    <strong class="${(p.unable_to_serve || p.manual_grade === 'F') ? 'name-unable' : ''}">${escapeHtml(p.full_name || '(No Name)')}</strong>
+                    <strong class="${(p.unable_to_serve || p.manual_grade === 'F') ? 'name-unable' : ''}">${escapeHtml(p.full_name || '(No Name)')}</strong><span data-pot-chip="${Number(p.id)}"></span>
                     ${p.phone ? `<br><span style="font-size:12px;color:var(--text-secondary);">${escapeHtml(p.phone)}</span>` : ''}
                     ${p.unable_to_serve ? `<br><span class="badge-unable">Unable to Serve</span>` : ''}${p.manual_grade === 'F' ? `<br><span class="badge-unable">Dropped (F)</span>` : ''}
                 </td>
@@ -721,6 +728,12 @@ const renderProspectsTable = async () => {
     const statusFilter = document.getElementById('filter-status')?.value || '';
     const agentFilter = document.getElementById('filter-agent')?.value || '';
     const referralFilter = document.getElementById('filter-referral')?.value || '';
+    const potentialFilter = Number(document.getElementById('filter-potential')?.value || 0);
+    let _potMapF = null;
+    if (potentialFilter > 0) {
+        try { if (!window.app.potentialMap && window._loadChunk) await window._loadChunk('chunks/script-activities.min.js'); } catch (_) { /* no map */ }
+        _potMapF = window.app.potentialMap ? await window.app.potentialMap(true) : new Map();
+    }
     const includeDormantToggle = document.getElementById('filter-include-dormant')?.checked || false;
 
     // ── Instant skeleton paint (cold-load only) ────────────────────────
@@ -776,7 +789,7 @@ const renderProspectsTable = async () => {
     const _mktScoped = _mktScope !== window._crmUtils.ALL_COUNTRIES;
     // referralFilter is client-derived too (referred_by/_type aren't RPC params),
     // so it routes through the legacy client path like score/status filters.
-    const _pUnsupported = !!scoreFilter || !!statusFilter || !!referralFilter || !_sortColMap[_sortField] || _mktScoped;
+    const _pUnsupported = !!scoreFilter || !!statusFilter || !!referralFilter || potentialFilter > 0 || !_sortColMap[_sortField] || _mktScoped;
 
     // ── Phase 4.3 (#13): React-island render path (opt-in bundle + flag) ───────
     // Server-eligible only — same gate as the BFF/server path: table view, no
@@ -954,6 +967,10 @@ const renderProspectsTable = async () => {
     if (!_usedServerP) prospects = prospects.slice();
     if (!_usedServerP) prospects.sort((a, b) => {
         let valA, valB;
+        if (potentialFilter > 0 && _potMapF) {
+            const d = (_potMapF.get(String(b.id)) || 0) - (_potMapF.get(String(a.id)) || 0);
+            if (d) return d;
+        }
         if (_sortField === 'name') {
             valA = a.full_name || ''; valB = b.full_name || '';
             return _sortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
@@ -988,6 +1005,7 @@ const renderProspectsTable = async () => {
         if (scoreFilter && scoreFilter !== grade) continue;
         if (guaFilter && p.ming_gua !== guaFilter) continue;
         if (agentFilter && String(p.responsible_agent_id) !== agentFilter) continue;
+        if (potentialFilter > 0 && !(((_potMapF && _potMapF.get(String(p.id))) || 0) >= potentialFilter)) continue;
 
         if (referralFilter) {
             // 'any'/'none' key on the referrer NAME (318 live rows are legacy
@@ -1391,7 +1409,7 @@ const renderProspectCards = (pageProspects, userById, canReassign, activeAgents)
                 <div class="prospect-card-header">
                     <div class="prospect-card-avatar" style="background:${color};">${initials}</div>
                     <div style="flex:1;min-width:0;">
-                        <div class="prospect-card-name${(p.unable_to_serve || p.manual_grade === 'F') ? ' name-unable' : ''}">${escapeHtml(p.full_name || '(No Name)')}</div>
+                        <div class="prospect-card-name${(p.unable_to_serve || p.manual_grade === 'F') ? ' name-unable' : ''}">${escapeHtml(p.full_name || '(No Name)')}<span data-pot-chip="${Number(p.id)}"></span></div>
                         ${p.phone ? `<div class="prospect-card-phone">${escapeHtml(p.phone)}</div>` : ''}
                         ${p.unable_to_serve ? `<span class="badge-unable">Unable to Serve</span>` : ''}${p.manual_grade === 'F' ? `<span class="badge-unable">Dropped (F)</span>` : ''}
                     </div>
@@ -2129,6 +2147,7 @@ const buildProspectDetailHeaderHtml = (prospect, cpsPhoto) => {
                 <div style="flex:1;min-width:0;">
                     <div class="pv-hdr-meta">
                         <span>ID: P100${prospect.id}</span>
+                        <span data-pot-pid="${Number(prospect.id)}"></span>
                         ${prospect.unable_to_serve
                             ? `<span class="badge" style="background:#94a3b8;color:#fff;">Unable to Serve</span>`
                             : `<span class="badge success">Active</span>`}
@@ -3670,14 +3689,18 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         );
         // 🩺 Prescription lines (audit_prescriptions) — the solutions proposed after the audit.
         const _rxAll = await _loadPrescriptions(pid);
+        // 💰 price of each potential product (DC catalogue / Bujishu option price).
+        const _fsaPrice = await _fsaPriceLookup(audits);
 
         const renderAuditCard = (a) => {
             const beforePhotos = Array.isArray(a.before_photos) ? a.before_photos : [];
             const afterPhotos  = Array.isArray(a.after_photos)  ? a.after_photos  : [];
             const siteReviews  = Array.isArray(a.site_reviews)  ? a.site_reviews  : [];
             const parsedProducts = (window.app.parseSelectedItems || (() => []))(a.products || '');
+            const _potTotal = parsedProducts.selected.reduce((t, p) => t + (_fsaPrice(p) || 0), 0);
             const productBadges = parsedProducts.selected.length
-                ? parsedProducts.selected.map(p => `<span class="badge info" style="font-size:11px;margin:2px;">${escapeHtml(p)}</span>`).join('')
+                ? parsedProducts.selected.map(p => { const pr = _fsaPrice(p); return `<span class="badge info" style="font-size:11px;margin:2px;">${escapeHtml(p)} <strong style="color:#047857;">${pr ? 'RM ' + Math.round(pr).toLocaleString() : 'price?'}</strong></span>`; }).join('')
+                  + `<div style="margin-top:6px;font-size:13px;font-weight:700;color:#047857;">💰 Total potential RM ${Math.round(_potTotal).toLocaleString()}</div>`
                 : '<span style="color:var(--gray-400);font-size:12px;font-style:italic;">No products selected</span>';
 
             const renderPhotoRow = (photos, phase) => {
@@ -3744,9 +3767,10 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                             ${a.layout_plan_url ? `<button class="btn btn-sm" style="margin-left:4px;height:26px;font-size:11px;padding:0 8px;color:var(--error);background:transparent;border:1px solid var(--gray-200);" onclick="event.stopPropagation();app.removeFengShuiFile(${pid},${a.id},'layout_plan')"><i class="fas fa-times"></i></button>` : ''}
                         </span></div>
                         <div class="pv-row"><span class="pv-lbl">Audit Report</span><span class="pv-val">
+                            ${_fsaReportFilesHtml(pid, a)}
                             ${fileLink(a.audit_report_url, a.audit_report_name)}
                             <label for="fsa-report-${a.id}" class="btn secondary btn-sm" style="margin-left:8px;height:26px;font-size:11px;padding:0 8px;cursor:pointer;"><i class="fas fa-upload"></i> ${a.audit_report_url ? 'Replace' : 'Upload'}</label>
-                            <input id="fsa-report-${a.id}" type="file" accept=".doc,.docx,.pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf" style="display:none" onchange="event.stopPropagation();app.uploadFengShuiFile(${pid},${a.id},'audit_report',this)">
+                            <input id="fsa-report-${a.id}" type="file" multiple accept=".doc,.docx,.pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf,image/*" style="display:none" onchange="event.stopPropagation();app.uploadFengShuiReportFiles(${pid},${a.id},this)">
                             ${a.audit_report_url ? `<button class="btn btn-sm" style="margin-left:4px;height:26px;font-size:11px;padding:0 8px;color:var(--error);background:transparent;border:1px solid var(--gray-200);" onclick="event.stopPropagation();app.removeFengShuiFile(${pid},${a.id},'audit_report')"><i class="fas fa-times"></i></button>` : ''}
                         </span></div>
 
@@ -6052,9 +6076,166 @@ const openAuditFile = async (ref) => {
     } catch (e) { UI.toast.error('Could not open file: ' + (e && e.message ? e.message : e)); }
 };
 
+// 💰 Price of a potential product name: DC catalogue price, else the Bujishu
+// Catalogue option / item customer price (activities-chunk picker data).
+const _fsaPriceLookup = async (audits) => {
+    let products = [];
+    try { products = (await AppDataStore.getAll('products')) || []; } catch (_) { /* unpriced */ }
+    const dc = new Map(products.filter(p => p && p.name && Number(p.price) > 0).map(p => [String(p.name).trim(), Number(p.price)]));
+    const bjc = new Map();
+    const names = new Set();
+    for (const a of (audits || [])) {
+        const parsed = (window.app.parseSelectedItems || (() => ({ selected: [] })))(a.products || '');
+        (parsed.selected || []).forEach(n => { if (!dc.has(String(n).trim())) names.add(n); });
+    }
+    if (names.size) {
+        try {
+            if (!window.app.bjcResolveLabel && window._loadChunk) await window._loadChunk('chunks/script-activities.min.js');
+            if (window.app.bjcResolveLabel) {
+                for (const n of names) {
+                    const h = await window.app.bjcResolveLabel(n);
+                    if (h) bjc.set(n, Number(h.opt ? h.opt.price_customer : h.item.price_customer) || 0);
+                }
+            }
+        } catch (_) { /* unpriced */ }
+    }
+    return (name) => dc.get(String(name || '').trim()) || bjc.get(name) || 0;
+};
+
+// Audit report = PDF / Word files and/or up to 10 photos (pages of a paper report).
+const FSA_REPORT_MAX_PHOTOS = 10;
+const _fsaReportFilesHtml = (pid, a) => {
+    const files = Array.isArray(a.report_files) ? a.report_files : [];
+    if (!files.length) return '';
+    return `<div class="fsa-report-files" style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0;">${files.map((f, i) => {
+        const isImg = f.type === 'image';
+        const open = `app.openAuditFile('${UI.escJsAttr(String(f.url))}')`;
+        return `<span style="position:relative;display:inline-flex;align-items:center;gap:4px;border:1px solid var(--gray-200);border-radius:6px;padding:${isImg ? '0' : '4px 8px'};background:#fff;">
+            ${isImg
+                ? `<img data-sbobj="${escapeHtml(f.url)}" alt="Report page ${i + 1}" onclick="event.stopPropagation();${open}" style="width:56px;height:56px;object-fit:cover;border-radius:6px;cursor:pointer;background:#f3f4f6;">`
+                : `<a href="#" onclick="event.preventDefault();event.stopPropagation();${open}" style="color:var(--primary);font-size:12px;"><i class="fas fa-file-pdf"></i> ${escapeHtml(f.name || 'Report')}</a>`}
+            <button type="button" title="Remove" onclick="event.stopPropagation();app.removeFengShuiReportFile(${Number(pid)},${Number(a.id)},${i})" style="position:${isImg ? 'absolute' : 'static'};top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;border:none;background:#ef4444;color:#fff;font-size:10px;line-height:18px;cursor:pointer;padding:0;">✕</button>
+        </span>`;
+    }).join('')}</div>`;
+};
+// Signed URLs for private audit-report thumbnails rendered with data-sbobj.
+const _fsaResolveThumbs = async (root) => {
+    const imgs = [...(root || document).querySelectorAll('img[data-sbobj]:not([data-resolved])')];
+    for (const img of imgs) {
+        img.dataset.resolved = '1';
+        const m = /^sbobj:\/\/([^/]+)\/(.+)$/.exec(img.dataset.sbobj || '');
+        if (!m) continue;
+        try {
+            const { data } = await _rxSb().storage.from(m[1]).createSignedUrl(m[2], 3600);
+            if (data && data.signedUrl) img.src = data.signedUrl;
+        } catch (_) { /* thumbnail stays grey */ }
+    }
+};
+const uploadFengShuiReportFiles = async (prospectId, auditId, fileInput) => {
+    const files = Array.from(fileInput?.files || []);
+    if (!files.length) return;
+    const first = await _fsaLive(prospectId);
+    const a0 = _readFengShuiAudits(first).find(a => a.id === auditId);
+    if (!a0) { UI.toast.error('Audit not found'); return; }
+    const have = (Array.isArray(a0.report_files) ? a0.report_files : []).filter(f => f.type === 'image').length;
+    const images = files.filter(f => /^image\//.test(f.type || ''));
+    const docs = files.filter(f => !/^image\//.test(f.type || ''));
+    const room = Math.max(0, FSA_REPORT_MAX_PHOTOS - have);
+    if (images.length > room) UI.toast.error(`Up to ${FSA_REPORT_MAX_PHOTOS} report photos — ${images.length - room} not added`);
+    const added = [];
+    let failed = 0, n = 0;
+    const todo = [...docs, ...images.slice(0, room)];
+    for (const file of todo) {
+        n++;
+        if (todo.length > 2) UI.toast.success(`Uploading report ${n} of ${todo.length}…`);
+        const isImg = /^image\//.test(file.type || '');
+        let f = file;
+        try { if (isImg) f = await compressImageFile(file); } catch (_) { f = file; }
+        if (f.size > 25 * 1024 * 1024) { failed++; continue; }
+        try {
+            const url = await _uploadAuditFile(f, `${prospectId}/${auditId}_report`);
+            added.push({ url, name: file.name, type: isImg ? 'image' : 'doc', uploaded_at: new Date().toISOString() });
+        } catch (_) { failed++; }
+    }
+    if (!added.length) { UI.toast.error('Nothing uploaded'); return; }
+    // Re-read live right before writing (uploads can take a while).
+    const prospect = await _fsaLive(prospectId);
+    const audits = _readFengShuiAudits(prospect);
+    const idx = audits.findIndex(a => a.id === auditId);
+    if (idx === -1) { UI.toast.error('Audit not found'); return; }
+    audits[idx].report_files = [...(Array.isArray(audits[idx].report_files) ? audits[idx].report_files : []), ...added];
+    await _writeFengShuiAudits(prospectId, audits);
+    UI.toast.success(`${added.length} report file${added.length > 1 ? 's' : ''} uploaded${failed ? ` · ${failed} failed` : ''}`);
+    await _refreshFengShuiTab(prospectId);
+};
+const removeFengShuiReportFile = async (prospectId, auditId, index) => {
+    if (!confirm('Remove this report file?')) return;
+    const prospect = await _fsaLive(prospectId);
+    const audits = _readFengShuiAudits(prospect);
+    const idx = audits.findIndex(a => a.id === auditId);
+    if (idx === -1) return;
+    const list = Array.isArray(audits[idx].report_files) ? [...audits[idx].report_files] : [];
+    list.splice(index, 1);
+    audits[idx].report_files = list;
+    await _writeFengShuiAudits(prospectId, audits);
+    UI.toast.success('Removed');
+    await _refreshFengShuiTab(prospectId);
+};
+
+// 💰 Open-potential badge on prospect + customer profile headers. The number is
+// stored by the DB (prospects.open_potential_rm, migrations/2026-10-20_open_potential.sql).
+const _rmFmt = (n) => 'RM ' + Math.round(Number(n) || 0).toLocaleString();
+const fillPotentialBadge = async (pid) => {
+    const slots = [...document.querySelectorAll(`[data-pot-pid="${Number(pid)}"]`)];
+    if (!slots.length) return;
+    let row = null;
+    try {
+        const { data } = await _rxSb().from('prospects').select('open_potential_rm,open_potential_detail').eq('id', pid).maybeSingle();
+        row = data;
+    } catch (_) { /* hidden */ }
+    const rm = row ? Number(row.open_potential_rm) || 0 : 0;
+    for (const el of slots) {
+        el.dataset.potFilled = '1';
+        el.innerHTML = rm > 0
+            ? `<span class="badge" onclick="event.stopPropagation();app.showPotentialBreakdown(${Number(pid)})" title="Tap for breakdown" style="cursor:pointer;background:${rm >= 100000 ? '#B91C1C' : rm >= 50000 ? '#D97706' : '#047857'};color:#fff;">💰 Open potential ${_rmFmt(rm)}</span>`
+            : '';
+    }
+};
+const showPotentialBreakdown = async (pid) => {
+    let row = null;
+    try { const { data } = await _rxSb().from('prospects').select('full_name,open_potential_rm,open_potential_detail,open_potential_at').eq('id', pid).maybeSingle(); row = data; } catch (_) { /* none */ }
+    const d = (row && row.open_potential_detail) || {};
+    const by = d.by_source || {};
+    const srcLabel = { audit: '🧭 Feng Shui audit', prescription: '🩺 Prescription', meeting: '📝 Meeting notes (6 months)', deal: '💼 Deals' };
+    const items = Array.isArray(d.items) ? d.items : [];
+    const content = `
+        <div style="font-size:22px;font-weight:700;color:#047857;margin-bottom:8px;">${_rmFmt(row ? row.open_potential_rm : 0)}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">${Object.keys(srcLabel).filter(k => Number(by[k]) > 0).map(k => `<span class="badge info">${srcLabel[k]} ${_rmFmt(by[k])}</span>`).join('') || '<span style="color:var(--gray-400);">No open potential</span>'}</div>
+        <div style="max-height:50vh;overflow:auto;">
+            ${items.map(i => `<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--gray-100);font-size:13px;">
+                <span>${escapeHtml(i.label || '')} <span style="color:var(--gray-400);font-size:11px;">${escapeHtml(srcLabel[i.src] || i.src || '')}</span></span>
+                <strong style="white-space:nowrap;color:${Number(i.price) > 0 ? '#047857' : '#9CA3AF'};">${Number(i.price) > 0 ? _rmFmt(i.price) : 'price?'}</strong></div>`).join('')}
+        </div>
+        <p style="font-size:11px;color:var(--gray-400);margin-top:8px;">Each product counted once (prescription quote beats catalogue price); items already bought are removed. Updated ${row && row.open_potential_at ? escapeHtml(new Date(row.open_potential_at).toLocaleString('en-GB')) : '—'}.</p>`;
+    UI.showModal(`💰 Open potential — ${row ? row.full_name || '' : ''}`, content, [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }]);
+};
+if (!window.__potObserver && typeof MutationObserver !== 'undefined' && document.body) {
+    window.__potObserver = new MutationObserver(muts => {
+        for (const mu of muts) for (const n of mu.addedNodes) {
+            if (n.nodeType !== 1) continue;
+            const els = n.matches && n.matches('[data-pot-pid]') ? [n] : (n.querySelectorAll ? n.querySelectorAll('[data-pot-pid]:not([data-pot-filled])') : []);
+            for (const el of els) { if (!el.dataset.potFilled) { el.dataset.potFilled = '1'; fillPotentialBadge(el.dataset.potPid); } }
+            if (n.querySelectorAll && n.querySelector('img[data-sbobj]:not([data-resolved])')) _fsaResolveThumbs(n);
+        }
+    });
+    window.__potObserver.observe(document.body, { childList: true, subtree: true });
+}
+
 const _refreshFengShuiTab = async (prospectId) => {
     const bodyEl = document.getElementById(`acc-body-fengshui-${prospectId}`);
     if (bodyEl) await switchProspectTab('fengshui', prospectId, null, bodyEl);
+    if (bodyEl) _fsaResolveThumbs(bodyEl);
+    fillPotentialBadge(prospectId);
 };
 
 const _uploadFengShuiToBucket = async (file, pathPrefix) => {
@@ -6264,18 +6445,21 @@ const uploadFengShuiPhotos = async (prospectId, auditId, phase, fileInput) => {
     const toUpload = Array.from(files).slice(0, remaining);
     let uploaded = 0;
     try {
+        let failed = 0, n = 0;
         for (const file of toUpload) {
-            if (file.size > 5 * 1024 * 1024) {
-                UI.toast.error(`"${file.name}" too large (max 5MB) — skipped`);
-                continue;
-            }
-            const url = await _uploadFengShuiToBucket(file, `feng_shui_audits/${prospectId}_${auditId}_${phase}`);
-            if (url) {
-                existing.push({ url, remarks: '' });
-                uploaded++;
-            }
+            n++;
+            if (toUpload.length > 3 && (n === 1 || n % 5 === 0)) UI.toast.success(`Uploading ${n} of ${toUpload.length}…`);
+            // Phone photos are often 3–8 MB: shrink (≈1920px JPEG) instead of skipping.
+            let f = file;
+            try { if (/^image\//.test(file.type || '') ) f = await compressImageFile(file); } catch (_) { f = file; }
+            if (f.size > 5 * 1024 * 1024) { failed++; continue; }
+            try {
+                const url = await _uploadFengShuiToBucket(f, `feng_shui_audits/${prospectId}_${auditId}_${phase}`);
+                if (url) { existing.push({ url, remarks: '' }); uploaded++; } else failed++;
+            } catch (_) { failed++; }
         }
         if (uploaded === 0) { UI.toast.error('No photos uploaded'); return; }
+        if (failed) UI.toast.error(`${failed} photo${failed > 1 ? 's' : ''} could not be uploaded`);
         audits[idx][key] = existing;
         await _writeFengShuiAudits(prospectId, audits);
         UI.toast.success(`${uploaded} ${phase} photo${uploaded > 1 ? 's' : ''} uploaded`);
@@ -7730,6 +7914,11 @@ const openPastRecordModal = async (...args) => {
         setPrescriptionStatus,
         deletePrescriptionLine,
         openAuditFile,
+        uploadFengShuiReportFiles,
+        removeFengShuiReportFile,
+        fillPotentialBadge,
+        _fsaReportFilesHtml,
+        showPotentialBreakdown,
         _prescriptionBlockHtml,
         uploadFengShuiPhotos,
         uploadFengShuiSitePhotos,

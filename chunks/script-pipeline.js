@@ -5519,13 +5519,76 @@ const _plMountGoalSections = (allUsers) => {
         document.getElementById('pl-goal-root')?.remove();
         document.getElementById('pl-deals-root')?.remove();
         document.getElementById('pl-insights-root')?.remove();
+        document.getElementById('pl-toppot-root')?.remove();
         anchor.insertAdjacentHTML('beforebegin',
             '<div id="pl-goal-root"><div class="plg-card"><div class="skeleton" style="height:120px;border-radius:8px;"></div></div></div>' +
+            '<div id="pl-toppot-root"></div>' +
             '<div id="pl-deals-root"><div class="plg-card"><div class="skeleton" style="height:160px;border-radius:8px;"></div></div></div>' +
             '<div id="pl-insights-root"></div>');
         _plRenderGoalSections(allUsers);
     } catch (e) { console.warn('[pipeline-goals] mount failed', e && e.message); }
 };
+
+// 💰 Top potential — people with the most open potential RM (audit, meeting
+// notes, prescriptions, deals; prospects.open_potential_rm kept by the DB) in
+// this viewer's scope, flagged when no follow-up is booked.
+let _plTopPotMin = 0;
+const _plRenderTopPotential = async () => {
+    const box = document.getElementById('pl-toppot-root');
+    const c = _plGoalCtx;
+    const sb = _plSb();
+    if (!box || !c || !sb) return;
+    try {
+        const { data } = await sb.from('prospects')
+            .select('id,full_name,status,responsible_agent_id,open_potential_rm,open_potential_detail')
+            .gt('open_potential_rm', 0).order('open_potential_rm', { ascending: false }).limit(200);
+        let rows = (data || []).filter(r => c.mode === 'company' || c.scopeIds.has(String(r.responsible_agent_id)));
+        if (!rows.length) { box.innerHTML = ''; return; }
+        const total = rows.reduce((t, r) => t + (Number(r.open_potential_rm) || 0), 0);
+        const shown = rows.filter(r => Number(r.open_potential_rm) >= _plTopPotMin).slice(0, 25);
+        const ids = shown.map(r => r.id);
+        const today = _plYmd(new Date());
+        let booked = new Set(), custByPid = new Map();
+        if (ids.length) {
+            const [acts, custs] = await Promise.all([
+                sb.from('activities').select('prospect_id').in('prospect_id', ids).gte('activity_date', today).limit(1000),
+                sb.from('customers').select('id,converted_from_prospect_id').in('converted_from_prospect_id', ids).limit(1000),
+            ]);
+            booked = new Set(((acts && acts.data) || []).map(a => String(a.prospect_id)));
+            custByPid = new Map(((custs && custs.data) || []).map(x => [String(x.converted_from_prospect_id), x.id]));
+        }
+        const srcIcon = { audit: '🧭', prescription: '🩺', meeting: '📝', deal: '💼' };
+        const chip = (min, label) => `<button class="btn btn-sm ${_plTopPotMin === min ? 'primary' : 'secondary'}" style="font-size:11px;padding:2px 10px;" onclick="app.plTopPotFilter(${min})">${label}</button>`;
+        const rowHtml = (r) => {
+            const by = (r.open_potential_detail && r.open_potential_detail.by_source) || {};
+            const srcs = Object.keys(srcIcon).filter(k => Number(by[k]) > 0).map(k => `${srcIcon[k]} ${_plRM(by[k])}`).join(' · ');
+            const agent = c.users.find(u => String(u.id) === String(r.responsible_agent_id));
+            const cid = custByPid.get(String(r.id));
+            const open = cid != null ? `app.showCustomerDetail(${Number(cid)})` : `app.showProspectMenu(${Number(r.id)})`;
+            const rm = Number(r.open_potential_rm) || 0;
+            return `<tr>
+                <td><a href="javascript:void(0)" onclick="event.stopPropagation();${open}" style="font-weight:600;color:#2563EB;">${esc(r.full_name || '')}</a>${cid != null ? ' <span class="plg-muted">customer</span>' : ''}</td>
+                <td style="font-weight:700;color:${rm >= 100000 ? '#B91C1C' : rm >= 50000 ? '#D97706' : '#047857'};white-space:nowrap;">${_plRM(rm)}</td>
+                <td class="plg-muted" style="font-size:12px;">${srcs}</td>
+                <td class="plg-muted">${esc(agent ? (agent.full_name || agent.username || '') : '')}</td>
+                <td>${booked.has(String(r.id)) ? '<span style="color:#047857;font-size:12px;">✓ follow-up booked</span>' : '<span style="color:#B91C1C;font-weight:600;font-size:12px;">⚠ nothing booked</span>'}</td>
+            </tr>`;
+        };
+        box.innerHTML = `
+        <div class="plg-card">
+            <div class="plg-head">
+                <div>
+                    <h2 class="plg-title">💰 Top potential — ${_plRM(total)} open across ${rows.length} people</h2>
+                    <div class="plg-muted">From audits, meeting notes (6 months), prescriptions and deals · each product counted once · already-bought removed</div>
+                </div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">${chip(0, 'All')}${chip(50000, 'RM50k+')}${chip(100000, 'RM100k+')}${chip(300000, 'RM300k+')}</div>
+            </div>
+            ${shown.length ? `<div style="overflow-x:auto;"><table class="plg-table"><thead><tr><th>Person</th><th>Open potential</th><th>From</th><th>Agent</th><th>Next step</th></tr></thead><tbody>${shown.map(rowHtml).join('')}</tbody></table></div>`
+                : `<div class="plg-muted">Nobody at ${_plRM(_plTopPotMin)}+ yet.</div>`}
+        </div>`;
+    } catch (e) { console.warn('[pipeline] top potential failed', e && e.message); box.innerHTML = ''; }
+};
+const plTopPotFilter = (min) => { _plTopPotMin = Number(min) || 0; _plRenderTopPotential(); };
 
 const _plRenderGoalSections = async (allUsers) => {
     const g = document.getElementById('pl-goal-root');
@@ -5535,6 +5598,7 @@ const _plRenderGoalSections = async (allUsers) => {
         const c = await _plLoadGoalCtx(allUsers || (_plGoalCtx && _plGoalCtx.users));
         g.innerHTML = _plGoalBarHtml(c);
         d.innerHTML = await _plDealsBoardHtml(c);
+        _plRenderTopPotential();
         _plRenderDealSuggest();
         await _plRenderInsights();
     } catch (e) {
@@ -6222,6 +6286,7 @@ const saveGoals = async () => {
         _plAutoSource,
         _plAutoDraftDeals,
         openHighCloserModal,
+        plTopPotFilter,
         saveHighClosers,
         plVipAsked,
         _plGradeOf,

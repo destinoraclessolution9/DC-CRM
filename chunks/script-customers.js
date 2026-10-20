@@ -536,7 +536,7 @@ const renderCustomersTable = async () => {
 
         html += `
             <tr onclick="app.showCustomerDetail(${c.id})">
-                <td data-label="Name"><strong>${escapeHtml(c.full_name || '')}</strong></td>
+                <td data-label="Name"><strong>${escapeHtml(c.full_name || '')}</strong>${c.converted_from_prospect_id != null ? `<span data-pot-chip="${Number(c.converted_from_prospect_id)}"></span>` : ''}</td>
                 <td data-label="Lifetime Value">${UI.money(c.lifetime_value || 0, c.country)} <span style="color:var(--success); font-size:12px;"><i class="fas fa-caret-up"></i></span></td>
                 <td data-label="Customer Since">${escapeHtml(c.customer_since || '—')}</td>
                 <td data-label="Ming Gua">${escapeHtml(c.ming_gua || '—')}</td>
@@ -749,6 +749,7 @@ const showCustomerDetail = async (customerId) => {
             <div class="pv-hdr" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
                 <div style="flex:1;min-width:0;">
                     <div class="pv-hdr-meta">
+                        ${customer.converted_from_prospect_id != null ? `<span data-pot-pid="${Number(customer.converted_from_prospect_id)}"></span>` : ''}
                         <span>ID: C${customer.id}</span>
                         <span class="badge success">Customer</span>
                         ${renderHealthBadge(health)}

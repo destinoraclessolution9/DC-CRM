@@ -7766,9 +7766,48 @@ My raw notes:
     }
     // ═══════════════════ END BUJISHU CATALOGUE PICKER ═══════════════════
 
+
+    // ═════ 💰 open-potential chips on list rows (2026-10-20) ═════
+    // Lists render <span data-pot-chip="<prospect id>"></span> next to names;
+    // one small query (people with potential > 0, RLS-scoped) fills them all.
+    let _potMapAt = 0, _potMapP = null;
+    const potentialMap = async (force = false) => {
+        if (!force && _potMapP && Date.now() - _potMapAt < 60e3) return _potMapP;
+        _potMapAt = Date.now();
+        _potMapP = (async () => {
+            const sb = window.supabase || window.supabaseClient;
+            const m = new Map();
+            if (!sb) return m;
+            try {
+                const { data } = await sb.from('prospects').select('id,open_potential_rm').gt('open_potential_rm', 0).limit(5000);
+                (data || []).forEach(r => m.set(String(r.id), Number(r.open_potential_rm) || 0));
+            } catch (_) { /* no chips */ }
+            window.__potMap = m;
+            return m;
+        })();
+        return _potMapP;
+    };
+    const _potChipHtml = (rm) => rm > 0 ? `<span title="Open potential" style="display:inline-block;margin-left:6px;padding:0 6px;border-radius:8px;font-size:11px;font-weight:700;color:#fff;background:${rm >= 100000 ? '#B91C1C' : rm >= 50000 ? '#D97706' : '#047857'};">💰 RM ${rm >= 1000 ? Math.round(rm / 1000) + 'k' : Math.round(rm)}</span>` : '';
+    const fillPotentialChips = async (root) => {
+        const els = [...(root || document).querySelectorAll('[data-pot-chip]:not([data-pot-done])')];
+        if (!els.length) return;
+        const m = await potentialMap();
+        for (const el of els) { el.dataset.potDone = '1'; el.innerHTML = _potChipHtml(m.get(String(el.dataset.potChip)) || 0); }
+    };
+    if (!window.__potChipObserver && typeof MutationObserver !== 'undefined' && document.body) {
+        let _potTimer = null;
+        window.__potChipObserver = new MutationObserver(() => {
+            clearTimeout(_potTimer);
+            _potTimer = setTimeout(() => { if (document.querySelector('[data-pot-chip]:not([data-pot-done])')) fillPotentialChips(); }, 150);
+        });
+        window.__potChipObserver.observe(document.body, { childList: true, subtree: true });
+    }
+    try { potentialMap(); } catch (_) { /* best-effort warm-up */ }
     try { _bjcScan(document.body); } catch (_) { /* best-effort */ }
     app.register('activities', {
         bjcData,
+        potentialMap,
+        fillPotentialChips,
         bjcMultiHtml,
         bjcAttachSelect,
         bjcOpen,
