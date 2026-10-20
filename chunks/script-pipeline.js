@@ -5332,7 +5332,8 @@ const plShowTodoFor = async (idsCsv, label) => {
     const uName = (id) => { const u = users.find(x => String(x.id) === String(id)); return u ? (u.full_name || u.username || '') : ''; };
     const today = _plYmd(new Date());
     const body = rows.length ? rows.map(r => {
-        const late = r.due && String(r.due) < today;
+        // only kinds with a real deadline can be overdue ("book" / "cps" carry the last-met date)
+        const late = r.due && String(r.due) < today && ['collect', 'gr', 'touch', 'pop', 'advance'].includes(r.kind);
         const open = r.customer_id != null ? `app.showCustomerDetail(${Number(r.customer_id)})` : `app.showProspectDetail(${Number(r.prospect_id)})`;
         return `
         <div style="display:flex;gap:8px;align-items:flex-start;padding:8px 0;border-top:1px solid #F3F4F6;">
