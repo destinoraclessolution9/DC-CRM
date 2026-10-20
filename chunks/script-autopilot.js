@@ -7,6 +7,7 @@
  *   D  🟣 Golden Road 2/6 · ready ~15 Dec — under the 🎯 follow-up line on profiles
  *   A  "What's next?" after a CPS is saved — book · invite to an event · not interested · later
  *   G  🧭 Journey funnel — Pipeline page, under Where from / Which product
+ *   💳 POP collections — board, per-plan schedule, 💳 line on profiles
  *
  * Loaded right after login (script.js, next to the activities chunk). Every
  * surface is mounted by a MutationObserver, so it survives view re-renders,
@@ -75,6 +76,7 @@
         if (r.kind === 'collect' && r.ref_id != null && cid != null) return btn('📦 Items', `app.openDeliveryItems('purchase', ${Number(r.ref_id)}, ${cid})`);
         if ((r.kind === 'cps' || r.kind === 'book') && pid != null) return btn('📅 Book', `app.openActivityModal('', ${pid})`);
         if (r.kind === 'touch' && r.ref_id != null) return btn('✓ Done', `app.apTouchDone(${Number(r.ref_id)})`);
+        if (r.kind === 'pop' && r.ref_id != null) return btn('💳 Plan', `app.openPopPlan(${Number(r.ref_id)})`);
         return '';
     };
 
@@ -345,6 +347,193 @@
         apRenderFunnel();
     };
 
+    // ═════ 💳 POP collections (company-financed instalments) ═════
+    // Schedule rows live in pop_installments (built by the DB from each POP
+    // sale). The board is where the monthly card charges get ticked Paid /
+    // Failed; "assumed" = fell due before tracking began (counted collected).
+    const POP_STATUS = {
+        due:     ['Due', '#92400E', '#FEF3C7'],
+        paid:    ['Paid', '#065F46', '#D1FAE5'],
+        failed:  ['Failed', '#B91C1C', '#FEE2E2'],
+        waived:  ['Waived', '#6B7280', '#F3F4F6'],
+        assumed: ['Before tracking', '#6B7280', '#F3F4F6'],
+    };
+    const _maskCard = (s) => String(s || '').replace(/(?:\d[\s-]?){8,}/g, m => '••••' + m.replace(/\D/g, '').slice(-4)).slice(0, 34);
+    const _popChip = (st) => {
+        const c = POP_STATUS[st] || POP_STATUS.due;
+        return `<span style="display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:700;color:${c[1]};background:${c[2]};">${c[0]}</span>`;
+    };
+    let _popTab = 'month';
+    let _popRows = [];
+    const _popSelect = 'id,purchase_id,customer_id,agent_id,seq,due_date,amount,status,paid_date,note,customers(full_name),purchases(item,payment_method,epp_bank,epp_months,installment_tenure)';
+
+    const _popRowHtml = (i, opts = {}) => {
+        const name = (i.customers && i.customers.full_name) || '—';
+        const pu = i.purchases || {};
+        const n = pu.installment_tenure || pu.epp_months || '';
+        const card = _maskCard([pu.epp_bank, pu.payment_method].filter(Boolean).join(' · '));
+        const late = i.status === 'due' && i.due_date < _today();
+        const plan = opts.plan ? `, { plan: ${Number(opts.plan)} }` : '';
+        const b = (label, st, color) => `<button type="button" class="btn secondary btn-sm" style="font-size:11px;padding:2px 8px;${color ? 'color:' + color + ';' : ''}" onclick="event.stopPropagation();app.popMark(${Number(i.id)}, '${st}'${plan})">${label}</button>`;
+        const acts = (i.status === 'due' || i.status === 'failed')
+            ? b('✓ Paid', 'paid') + (i.status === 'due' ? b('✗ Failed', 'failed', '#B91C1C') : '')
+            : (i.status === 'paid' || i.status === 'waived') ? b('↺ Undo', 'due') : '';
+        const title = opts.plan
+            ? `#${Number(i.seq)}${n ? '/' + esc(n) : ''}`
+            : `<a href="javascript:void(0)" onclick="app.openPopPlan(${Number(i.purchase_id)})">${esc(name)}</a> <span style="color:var(--gray-500);font-weight:400;">${Number(i.seq)}${n ? '/' + esc(n) : ''}</span>`;
+        const sub = opts.plan ? '' : `<div style="font-size:11px;color:var(--gray-500);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(String(pu.item || '').slice(0, 40))}${card ? ' · ' + esc(card) : ''}</div>`;
+        return `
+        <div class="ap-pop-row" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:8px 0;border-top:1px solid var(--gray-100);">
+            <div style="flex:1 1 180px;min-width:0;">
+                <div style="font-weight:600;font-size:13px;">${title}</div>${sub}
+            </div>
+            <span style="font-size:12px;white-space:nowrap;${late ? 'color:#B91C1C;font-weight:600;' : ''}">${esc(_fmt(i.due_date))}${i.paid_date && i.status === 'paid' ? ' · paid ' + esc(_fmt(i.paid_date)) : ''}</span>
+            <strong style="font-size:13px;white-space:nowrap;">RM ${Number(i.amount || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}</strong>
+            ${_popChip(i.status)}
+            <span style="display:flex;gap:4px;">${acts}</span>
+        </div>`;
+    };
+
+    const popLoad = async (tab) => {
+        const sb = _sb();
+        if (!sb) return [];
+        const today = _today();
+        const d = new Date();
+        const mStart = _ymd(new Date(d.getFullYear(), d.getMonth(), 1));
+        const mEnd = _ymd(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+        let q = sb.from('pop_installments').select(_popSelect);
+        if (tab === 'month') q = q.in('status', ['due', 'failed', 'paid']).gte('due_date', mStart).lte('due_date', mEnd);
+        else if (tab === 'overdue') q = q.or(`status.eq.failed,and(status.eq.due,due_date.lt.${today})`);
+        else q = q.in('status', ['due', 'failed']).gte('due_date', today).lte('due_date', _ymd(new Date(Date.now() + 90 * 864e5)));
+        const { data, error } = await q.order('due_date').order('id').limit(1000);
+        if (error) throw error;
+        return data || [];
+    };
+
+    const openPopBoard = async (tab) => {
+        if (tab) _popTab = tab;
+        const sb = _sb();
+        if (!sb) return UI.toast.error('Offline — try again in a moment');
+        let sum = null;
+        try {
+            const [sres, rows] = await Promise.all([sb.rpc('pop_summary'), popLoad(_popTab)]);
+            sum = ((sres && sres.data) || [])[0] || null;
+            _popRows = rows;
+        } catch (e) {
+            return UI.toast.error('Could not load POP: ' + (e && e.message ? e.message : e));
+        }
+        const rm = (n) => 'RM ' + Math.round(Number(n) || 0).toLocaleString();
+        const tile = (label, val, sub, color) => `<div style="flex:1 1 130px;background:var(--gray-50);border-radius:10px;padding:8px 10px;">
+            <div style="font-size:11px;color:var(--gray-500);">${label}</div>
+            <div style="font-size:16px;font-weight:700;${color ? 'color:' + color + ';' : ''}">${val}</div>
+            ${sub ? `<div style="font-size:11px;color:var(--gray-500);">${sub}</div>` : ''}</div>`;
+        const tabBtn = (t, label) => `<button type="button" class="btn btn-sm ${_popTab === t ? 'primary' : 'secondary'}" style="font-size:12px;" onclick="app.openPopBoard('${t}')">${label}</button>`;
+        const open = _popRows.filter(i => i.status === 'due' || i.status === 'failed');
+        const body = `
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+                ${tile('Still to collect', rm(sum && sum.outstanding), `${Number(sum && sum.plans) || 0} plans`)}
+                ${tile('Due this month', rm(sum && sum.due_month), `${Number(sum && sum.due_month_n) || 0} charges`)}
+                ${tile('Overdue / failed', rm(sum && sum.overdue), `${Number(sum && sum.overdue_n) || 0} charges`, Number(sum && sum.overdue_n) ? '#B91C1C' : '')}
+                ${tile('Collected this month', rm(sum && sum.collected_month), '', '#047857')}
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:6px;">
+                ${tabBtn('month', 'This month')}${tabBtn('overdue', 'Overdue / failed')}${tabBtn('next', 'Next 90 days')}
+                ${open.length ? `<button type="button" class="btn secondary btn-sm" style="font-size:12px;margin-left:auto;" onclick="app.popMarkAll()">✓ Mark ${open.length} shown as paid</button>` : ''}
+            </div>
+            <div style="font-size:11px;color:var(--gray-500);margin-bottom:4px;">Tick each card charge after it runs. "Before tracking" = due before 20 Oct 2026, counted as collected.</div>
+            <div>${_popRows.length ? _popRows.map(i => _popRowHtml(i)).join('') : '<div style="padding:12px 0;color:var(--gray-500);font-size:13px;">Nothing here 🎉</div>'}</div>`;
+        UI.showModal('💳 POP collections', body, [{ label: 'Close', action: 'UI.hideModal()' }]);
+    };
+
+    const popMark = async (id, status, opts = {}) => {
+        const sb = _sb();
+        if (!sb) return UI.toast.error('Offline — try again in a moment');
+        try {
+            const { error } = await sb.from('pop_installments').update({ status }).eq('id', id);
+            if (error) throw error;
+            UI.toast.success(status === 'paid' ? 'Marked paid ✓' : status === 'failed' ? 'Marked failed — the agent sees it on their to-do' : 'Back to due');
+        } catch (e) {
+            UI.toast.error('Could not update: ' + (e && e.message ? e.message : e));
+            return false;
+        }
+        if (opts.plan) openPopPlan(opts.plan); else openPopBoard();
+        apRenderTop5(true);
+        return true;
+    };
+
+    const popMarkAll = async () => {
+        const ids = _popRows.filter(i => i.status === 'due' || i.status === 'failed').map(i => i.id);
+        if (!ids.length) return;
+        if (!window.confirm(`Mark ${ids.length} charge${ids.length === 1 ? '' : 's'} as paid?`)) return;
+        const sb = _sb();
+        try {
+            const { error } = await sb.from('pop_installments').update({ status: 'paid' }).in('id', ids);
+            if (error) throw error;
+            UI.toast.success(`${ids.length} marked paid ✓`);
+        } catch (e) {
+            UI.toast.error('Could not update: ' + (e && e.message ? e.message : e));
+        }
+        openPopBoard();
+        apRenderTop5(true);
+    };
+
+    // One plan's whole schedule (from the 💳 profile line or a board row)
+    const openPopPlan = async (purchaseId) => {
+        const sb = _sb();
+        if (!sb) return;
+        let rows = [];
+        try {
+            const { data, error } = await sb.from('pop_installments').select(_popSelect).eq('purchase_id', purchaseId).order('seq');
+            if (error) throw error;
+            rows = data || [];
+        } catch (e) {
+            return UI.toast.error('Could not load the plan: ' + (e && e.message ? e.message : e));
+        }
+        if (!rows.length) return UI.toast.info('No POP schedule for this sale');
+        const pu = rows[0].purchases || {};
+        const left = rows.filter(i => i.status === 'due' || i.status === 'failed').reduce((s, i) => s + (Number(i.amount) || 0), 0);
+        const done = rows.filter(i => i.status === 'paid' || i.status === 'assumed' || i.status === 'waived').length;
+        const head = `<div style="font-size:13px;margin-bottom:8px;"><strong>${esc((rows[0].customers && rows[0].customers.full_name) || '')}</strong> · ${esc(String(pu.item || '').slice(0, 50))}<br>
+            <span style="color:var(--gray-600);">${done}/${rows.length} paid · <strong>RM ${Math.round(left).toLocaleString()}</strong> left · ${esc(_maskCard([pu.epp_bank, pu.payment_method].filter(Boolean).join(' · ')))}</span></div>`;
+        const list = rows.map(i => _popRowHtml(i, { plan: purchaseId })).join('');
+        UI.showModal('💳 POP plan', head + list, [{ label: 'All POP', action: 'app.openPopBoard()' }, { label: 'Close', action: 'UI.hideModal()' }]);
+    };
+
+    // 💳 line under the 🎯 follow-up line on a customer profile
+    const apFillPopLine = async (slot) => {
+        const pid = Number(slot.dataset.fuPid);
+        const sb = _sb();
+        if (!pid || !sb) return;
+        let plans = [];
+        try {
+            const { data } = await sb.rpc('pop_person_plans', { p_pid: pid });
+            plans = (data || []).filter(p => Number(p.left_rm) > 0 || Number(p.failed) > 0);
+        } catch (_) { /* hidden */ }
+        document.querySelectorAll(`.ap-pop-line[data-pop-for="${pid}"]`).forEach(n => n.remove());
+        if (!plans.length) return;
+        const line = document.createElement('div');
+        line.className = 'ap-pop-line';
+        line.dataset.popFor = String(pid);
+        line.style.cssText = 'display:flex;flex-direction:column;gap:4px;margin:0 0 8px;padding:6px 10px;border-radius:8px;background:#ECFDF5;border:1px solid #A7F3D0;font-size:13px;';
+        line.innerHTML = plans.map(p => `
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;cursor:pointer;" onclick="event.stopPropagation();app.openPopPlan(${Number(p.purchase_id)})">
+                <strong style="color:#065F46;">💳 POP ${Number(p.done) || 0}/${Number(p.total) || 0}</strong>
+                <span>RM ${Math.round(Number(p.left_rm) || 0).toLocaleString()} left</span>
+                ${p.next_due ? `<span style="color:#6B7280;">next RM${Math.round(Number(p.next_amount) || 0)} ${esc(_fmt(p.next_due))}</span>` : ''}
+                ${Number(p.failed) ? `<span style="color:#B91C1C;font-weight:700;">⚠ ${Number(p.failed)} failed</span>` : ''}
+                <span style="color:#9CA3AF;font-size:11px;">${esc(String(p.item || '').slice(0, 24))}</span>
+            </div>`).join('');
+        slot.insertAdjacentElement('afterend', line);
+    };
+
+    // push link ./index.html?pop=1#pipeline → open the board
+    try {
+        if (/[?&]pop=1\b/.test(location.search)) {
+            history.replaceState(null, '', location.pathname + location.hash);
+            setTimeout(() => openPopBoard('month'), 2500);
+        }
+    } catch (_) { /* best-effort */ }
+
     // ═════ Mount everything on DOM changes ═════
     const _scan = () => {
         try { apMountTop5(); } catch (_) { /* best-effort */ }
@@ -352,6 +541,7 @@
         document.querySelectorAll('[data-fu-pid]:not([data-gr-done])').forEach(slot => {
             slot.dataset.grDone = '1';
             apFillGrLine(slot);
+            apFillPopLine(slot);
         });
     };
     if (!window.__apObserver && typeof MutationObserver !== 'undefined' && document.body) {
@@ -376,6 +566,11 @@
         apCpsInvite,
         apCpsInviteGo,
         apRenderFunnel,
+        openPopBoard,
+        openPopPlan,
+        popMark,
+        popMarkAll,
+        apFillPopLine,
     });
     console.log('[chunk] script-autopilot loaded');
 })();

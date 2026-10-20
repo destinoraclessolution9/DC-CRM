@@ -5578,9 +5578,9 @@ const _plRenderTopPotential = async () => {
         const exp90 = agg.reduce((x, a) => x + a.exp, 0);
         const unbooked = all.filter(r => !r.potential_next_booked).length;
 
-        // 💳 money still to collect: NPO instalments due in the next 90 days (scheduled);
-        // POP (Normal Installment) sales have no payment records in the CRM.
-        let npoDue = 0, npoN = 0, popN = 0;
+        // 💳 money still to collect: NPO instalments due in the next 90 days + POP
+        // card charges (pop_installments, scoped by pop_summary()).
+        let npoDue = 0, npoN = 0, popN = 0, pop = null;
         try {
             const today = _plYmd(new Date());
             const until = _plYmd(new Date(Date.now() + 90 * 864e5));
@@ -5595,7 +5595,9 @@ const _plRenderTopPotential = async () => {
                 npoDue += Number(i.amount) || 0; npoN++;
             }
             void today;
-            popN = (c.purchases || []).filter(x => /\bpop\b/i.test(String(x.payment_method || '')) && (c.mode === 'company' || c.scopeIds.has(String(x.agent_id)))).length;
+            const { data: ps } = await sb.rpc('pop_summary');
+            pop = (ps || [])[0] || null;
+            popN = pop ? Number(pop.plans) || 0 : 0;
         } catch (_) { /* optional */ }
 
         let rows = _plTierFilter === 'all' ? all : all.filter(r => (r.potential_tier || 'cold') === _plTierFilter);
@@ -5663,7 +5665,7 @@ const _plRenderTopPotential = async () => {
                     <tbody>${agg.map(tierRow).join('')}</tbody>
                 </table>
             </div>
-            <div class="plg-advice" style="background:#F0FDF4;color:#065F46;">💳 Money to collect (already sold): ${npoN ? `<strong>${_plRM(npoDue)}</strong> in ${npoN} NPO instalment${npoN === 1 ? '' : 's'} due within 90 days` : 'no NPO instalments due'}${popN ? ` · ${popN} Normal Installment (POP) sale${popN === 1 ? '' : 's'} — balances not tracked in the CRM` : ''}</div>
+            <div class="plg-advice" style="background:#F0FDF4;color:#065F46;">💳 Money to collect (already sold): ${npoN ? `<strong>${_plRM(npoDue)}</strong> in ${npoN} NPO instalment${npoN === 1 ? '' : 's'} due within 90 days` : 'no NPO instalments due'}${popN ? ` · POP <strong>${_plRM(Number(pop.due_90) || 0)}</strong> due within 90 days (${_plRM(Number(pop.outstanding) || 0)} left on ${popN} plan${popN === 1 ? '' : 's'}${Number(pop.overdue_n) ? `, <span style="color:#B91C1C;">${Number(pop.overdue_n)} overdue / failed</span>` : ''})` : ''} · <a href="javascript:void(0)" onclick="app.openPopBoard()" style="color:#065F46;font-weight:600;">💳 POP board</a></div>
             <div style="margin-top:8px;">${learning}</div>
             <div class="plg-team-head" style="margin-top:14px;justify-content:space-between;">
                 <strong>${_plTierFilter === 'all' ? 'All tiers' : tierChip(_plTierFilter)} — biggest first ${_plTierFilter !== 'all' ? `<a href="javascript:void(0)" onclick="app.plSetTierFilter('all')" style="font-size:12px;margin-left:6px;">show all</a>` : ''}</strong>

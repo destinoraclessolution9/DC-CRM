@@ -722,7 +722,8 @@ window.UI = (() => {
         const int = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : null; };
         const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
         if (c.payment_method === 'EPP') return { epp_bank: c.epp_bank || null, epp_months: int(c.epp_months) };
-        if (c.payment_method === 'POP') return { pop_down_payment: num(c.pop_down_payment) };
+        // POP: tenure + monthly feed the instalment schedule (pop_installments)
+        if (c.payment_method === 'POP') return { pop_down_payment: num(c.pop_down_payment), installment_tenure: int(c.pop_tenure), pop_monthly_amount: num(c.pop_monthly) };
         return {};
     };
     const toggleEppFields = (prefix, method) => {

@@ -274,6 +274,97 @@ const runTimers = async () => { while (timers.length) { const t = timers.shift()
   await app.apRenderFunnel('y');
   check('no CPS → message', fbox.innerHTML.includes('No CPS in this period'), true);
 
+  // ── 💳 POP collections ──────────────────────────────────────────────────
+  for (const fn of ['openPopBoard', 'openPopPlan', 'popMark', 'popMarkAll', 'apFillPopLine']) check('exports ' + fn, typeof app[fn], 'function');
+  const POPROWS = [
+    { id: 901, purchase_id: 70, customer_id: 9, seq: 3, due_date: '2026-10-25', amount: 499, status: 'due', customers: { full_name: 'Tan <i>Ah</i> Kow' }, purchases: { item: 'PR6', payment_method: 'Visa 4111 1111 1111 1234 (POP)', epp_bank: 'UOB', installment_tenure: 36 } },
+    { id: 902, purchase_id: 71, customer_id: 10, seq: 5, due_date: '2026-10-02', amount: 624.17, status: 'failed', customers: { full_name: 'Lim' }, purchases: { item: '上龙柄', payment_method: 'pre own 24 months', epp_months: 24 } },
+    { id: 903, purchase_id: 72, customer_id: 11, seq: 1, due_date: '2026-10-05', amount: 399, status: 'paid', paid_date: '2026-10-05', customers: { full_name: 'Ng' }, purchases: { item: 'X' } },
+  ];
+  rpcData.pop_summary = [{ outstanding: 115165, plans: 15, due_month: 6000, due_month_n: 12, overdue: 624.17, overdue_n: 1, failed_n: 1, collected_month: 399, due_90: 19000 }];
+  tableData.pop_installments = () => POPROWS;
+  modals.length = 0; calls.length = 0;
+  await app.openPopBoard('month');
+  const pb = modals[modals.length - 1];
+  check('board: title', pb && pb.t, '💳 POP collections');
+  check('board: summary rpc', calls.some(c => c.rpc === 'pop_summary'), true);
+  const pq = calls.find(c => c.table === 'pop_installments');
+  check('board month: statuses due/failed/paid', JSON.stringify(pq.ops.find(o => o[0] === 'in')), '["in","status",["due","failed","paid"]]');
+  check('board month: from 1st of month', JSON.stringify(pq.ops.find(o => o[0] === 'gte')), JSON.stringify(['gte', 'due_date', ymd.slice(0, 8) + '01']));
+  check('board: outstanding tile', pb.c.includes('RM 115,165'), true);
+  check('board: overdue tile red', pb.c.includes('color:#B91C1C;">RM 624'), true);
+  check('board: name escaped', pb.c.includes('Tan &lt;i&gt;Ah&lt;/i&gt; Kow'), true);
+  check('board: card number masked', pb.c.includes('4111') || pb.c.includes('1111 1111'), false);
+  check('board: card last 4 kept', pb.c.includes('••••1234'), true);
+  check('board: seq / tenure', pb.c.includes('3/36'), true);
+  check('board: due row has Paid + Failed', pb.c.includes("app.popMark(901, 'paid')") && pb.c.includes("app.popMark(901, 'failed')"), true);
+  check('board: failed row has Paid, no Failed', pb.c.includes("app.popMark(902, 'paid')") && !pb.c.includes("app.popMark(902, 'failed')"), true);
+  check('board: paid row has Undo', pb.c.includes("app.popMark(903, 'due')"), true);
+  check('board: bulk button counts open rows only', pb.c.includes('Mark 2 shown as paid'), true);
+  check('board: row opens plan', pb.c.includes('app.openPopPlan(70)'), true);
+  calls.length = 0;
+  await app.openPopBoard('overdue');
+  const oq = calls.find(c => c.table === 'pop_installments');
+  check('board overdue: failed or past due', JSON.stringify(oq.ops.find(o => o[0] === 'or')), JSON.stringify(['or', `status.eq.failed,and(status.eq.due,due_date.lt.${ymd})`]));
+
+  calls.length = 0; modals.length = 0;
+  await app.popMark(901, 'paid');
+  for (let k = 0; k < 6; k++) await flush();
+  const mu = calls.find(c => c.table === 'pop_installments' && c.ops[0][0] === 'update');
+  check('mark: update status only', JSON.stringify(mu && mu.ops[0][1]), '{"status":"paid"}');
+  check('mark: scoped to id', JSON.stringify(mu && mu.ops[1]), '["eq","id",901]');
+  check('mark: board re-opened', modals.length > 0 && modals[modals.length - 1].t, '💳 POP collections');
+
+  win.confirm = () => false;
+  calls.length = 0;
+  await app.popMarkAll();
+  check('bulk: cancelled → no update', calls.some(c => c.table === 'pop_installments' && c.ops[0] && c.ops[0][0] === 'update'), false);
+  win.confirm = () => true;
+  calls.length = 0;
+  await app.popMarkAll();
+  for (let k = 0; k < 6; k++) await flush();
+  const bu = calls.find(c => c.table === 'pop_installments' && c.ops[0] && c.ops[0][0] === 'update');
+  check('bulk: only open rows', JSON.stringify(bu && bu.ops[1]), '["in","id",[901,902]]');
+
+  for (let k = 0; k < 6; k++) await flush();
+  modals.length = 0;
+  await app.openPopPlan(70);
+  const pp = modals[modals.length - 1];
+  check('plan: title', pp && pp.t, '💳 POP plan');
+  check('plan: left = open rows', pp && pp.c.includes('RM 1,123'), true);
+  check('plan: buttons keep plan view', pp && pp.c.includes("app.popMark(901, 'paid', { plan: 70 })"), true);
+  check('plan: link back to board', pp && pp.b[0].action, 'app.openPopBoard()');
+
+  // 💳 line
+  rpcData.pop_person_plans = [
+    { purchase_id: 70, item: 'PR6', total: 36, done: 14, left_rm: 10978, next_due: '2026-11-13', next_amount: 499, failed: 1 },
+    { purchase_id: 73, item: 'Old', total: 24, done: 24, left_rm: 0, next_due: null, next_amount: null, failed: 0 },
+  ];
+  qsAll['.ap-pop-line[data-pop-for="55"]'] = [];
+  const ps = makeEl('div'); ps.dataset.fuPid = '55';
+  await app.apFillPopLine(ps);
+  const pl = ps.inserted[0] && ps.inserted[0].node;
+  check('pop line: inserted after slot', ps.inserted[0] && ps.inserted[0].pos, 'afterend');
+  check('pop line: n/N', pl && pl.innerHTML.includes('💳 POP 14/36'), true);
+  check('pop line: left', pl && pl.innerHTML.includes('RM 10,978 left'), true);
+  check('pop line: next charge', pl && pl.innerHTML.includes('next RM499 13 Nov'), true);
+  check('pop line: failed warning', pl && pl.innerHTML.includes('⚠ 1 failed'), true);
+  check('pop line: finished plan hidden', pl && pl.innerHTML.includes('openPopPlan(73)'), false);
+  rpcData.pop_person_plans = [{ purchase_id: 73, total: 24, done: 24, left_rm: 0, failed: 0 }];
+  const ps2 = makeEl('div'); ps2.dataset.fuPid = '56';
+  qsAll['.ap-pop-line[data-pop-for="56"]'] = [];
+  await app.apFillPopLine(ps2);
+  check('pop line: none when nothing left', ps2.inserted.length, 0);
+
+  // to-do row of kind pop → plan button
+  rpcData.journey_daily_todo = [{ kind: 'pop', icon: '💳', prospect_id: 5, customer_id: 9, name: 'Tan', why: 'POP 3/36 charge failed', rm: 10978, ref_id: 70 }];
+  byId.delete('ap-top5');
+  const w2 = makeEl('div'); const p2 = makeEl('div'); w2.parentNode = p2;
+  qsOne['.calendar-monthly-wrapper'] = w2;
+  app.apMountTop5();
+  await app.apRenderTop5(true);
+  check('todo pop → plan button', byId.get('ap-top5').innerHTML.includes('app.openPopPlan(70)'), true);
+
   console.log(`\njourney-autopilot sim: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
