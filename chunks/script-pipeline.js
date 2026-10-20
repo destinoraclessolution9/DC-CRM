@@ -5124,11 +5124,161 @@ const _plLoadGoalCtx = async (allUsers) => {
         m.gap = Math.max(0, g - m.won.rm);
         m.coverage = m.goal ? _plCoverage(m.pipe.open, m.gap) : null;
     }
+    // 📊 Monthly Review extras: open potential per agent + 📋 to-do counts / last activity
+    const review = { pot: new Map(), todo: new Map() };
+    if (sb && members.length) {
+        const rids = [...new Set(members.flatMap(m => [...m.ids]))].map(Number).filter(Boolean);
+        try {
+            const [pr, tc] = await Promise.all([
+                sb.from('prospects').select('responsible_agent_id,open_potential_rm').gt('open_potential_rm', 0).limit(5000),
+                sb.rpc('journey_todo_counts', { p_uids: rids }),
+            ]);
+            for (const r of ((pr && pr.data) || [])) {
+                const k = String(r.responsible_agent_id);
+                const o = review.pot.get(k) || { rm: 0, n: 0 };
+                o.rm += Number(r.open_potential_rm) || 0; o.n++;
+                review.pot.set(k, o);
+            }
+            for (const r of ((tc && tc.data) || [])) review.todo.set(String(r.agent_id), r);
+        } catch (_) { /* scoreboard shows — for these */ }
+    }
     const today = _plYmd(new Date());
     const end = _plMonthEnd(month);
     const daysLeft = month === _plCurMonth() ? Math.max(0, Math.round((new Date(end) - new Date(today)) / 864e5) + 1) : (end < today ? 0 : null);
-    _plGoalCtx = { vipAsks, me, myLvl, month, users, goals, deals, purchases, mode, title, goal, scopeIds, members, unassigned, canEditGoals, won, pipe, gap, avgSale, daysLeft };
+    _plGoalCtx = { vipAsks, me, myLvl, month, users, goals, deals, purchases, mode, title, goal, scopeIds, members, unassigned, canEditGoals, won, pipe, gap, avgSale, daysLeft, goalFor, review };
     return _plGoalCtx;
+};
+
+// ── 📊 Monthly Review scoreboard (2026-10-20) ─────────────────────────────
+// One block per team (goal RM500k) → tap to open each agent's RM100k row:
+// won · deals closing this month · gap · coverage · open potential · 📋 to-do
+// · last activity. Furthest behind first. Tap an agent → Deals board +
+// Business Potential below filter to them (same filter as before).
+let _plReviewOpen = null;   // Set of expanded team leader ids (null → defaults)
+const _plIsSG = (u) => String((u && u.country) || '').toUpperCase() === 'SG' || /(^|[\s-])SG\b/i.test(String((u && (u.full_name || u.username)) || ''));
+const _plStatus = (goal, won, pipe) => {
+    if (!goal) return { dot: '⚪', rank: 9, label: '—' };
+    const gap = Math.max(0, goal - won.rm);
+    if (gap <= 0) return { dot: '🟢', rank: 5, label: 'goal met' };
+    if (!pipe.n) return { dot: '🔴', rank: 0, label: 'no deals' };
+    const cov = pipe.open / gap;
+    if (cov >= PL_COVERAGE_TARGET) return { dot: '🟢', rank: 4, label: cov.toFixed(1) + '×' };
+    if (cov >= 1.5) return { dot: '🟠', rank: 2, label: cov.toFixed(1) + '×' };
+    return { dot: '🔴', rank: 1, label: cov.toFixed(1) + '×' };
+};
+const _plAgo = (d) => {
+    if (!d) return 'no activity';
+    const n = Math.round((new Date(_plYmd(new Date()) + 'T00:00:00') - new Date(String(d).slice(0, 10) + 'T00:00:00')) / 864e5);
+    return n <= 0 ? 'today' : n === 1 ? 'yesterday' : `${n} days ago`;
+};
+const _plPersonStats = (c, u, isLeader) => {
+    const ids = new Set([String(u.id)]);
+    const g = isLeader ? null : c.goalFor(u, 'personal');
+    const goal = g ? g.amount : 0;
+    const won = _plWonIn(c.purchases, ids, c.month);
+    const pipe = _plPipeStats(_plDealsForMonth(c.deals, ids, c.month));
+    return {
+        u, goal, won, pipe, isLeader, gap: Math.max(0, goal - won.rm), st: _plStatus(goal, won, pipe),
+        pot: (c.review && c.review.pot.get(String(u.id))) || null,
+        td: (c.review && c.review.todo.get(String(u.id))) || null,
+    };
+};
+const _plRmK = (n) => { const v = Number(n) || 0; return v >= 1000 ? 'RM' + Math.round(v / 1000) + 'k' : 'RM' + Math.round(v); };
+const _plReviewCells = (p) => `
+    <div class="plr-chips">
+        <span><em>Goal</em>${p.goal ? _plRM(p.goal) : '<span class="plg-muted">—</span>'}</span>
+        <span><em>Won</em><strong style="color:#047857;">${_plRM(p.won.rm)}</strong>${p.won.n ? ` <span class="plg-muted">${p.won.n}</span>` : ''}</span>
+        <span><em>Closing</em>${_plRM(p.pipe.open)} <span class="plg-muted">${p.pipe.n} deal${p.pipe.n === 1 ? '' : 's'}</span></span>
+        <span><em>Gap</em>${p.goal ? `<span style="color:${p.gap > 0 ? '#B91C1C' : '#047857'};">${_plRM(p.gap)}</span>` : '<span class="plg-muted">—</span>'}</span>
+        <span><em>Cover</em><strong style="color:${p.st.rank <= 1 ? '#B91C1C' : p.st.rank === 2 ? '#B45309' : p.st.rank <= 5 ? '#047857' : '#9CA3AF'};">${esc(p.st.label)}</strong></span>
+        <span><em>Potential</em>${p.pot ? `${_plRmK(p.pot.rm)} <span class="plg-muted">(${p.pot.n})</span>` : '<span class="plg-muted">—</span>'}</span>
+        <span><em>To-do</em>${p.td ? `${Number(p.td.todo_n) || 0}${Number(p.td.overdue_n) ? ` <span style="color:#B91C1C;font-weight:600;">(${Number(p.td.overdue_n)} ⏰)</span>` : ''}` : '<span class="plg-muted">—</span>'}</span>
+        <span><em>Last</em>${p.lastTxt != null ? p.lastTxt : (p.td ? esc(_plAgo(p.td.last_activity)) : '<span class="plg-muted">—</span>')}</span>
+    </div>`;
+const _plReviewHtml = (c) => {
+    if (!c.members.length) return '';
+    // teams: company → every leader's tree; team mode → my tree (always open)
+    const teams = c.mode === 'company'
+        ? c.members.map(m => ({ leader: m.user, ids: m.ids, goal: m.goal ? m.goal.amount : 0, nested: m.nested }))
+        : [{ leader: c.me, ids: c.scopeIds, goal: c.goal, nested: false }];
+    if (_plReviewOpen == null) _plReviewOpen = new Set();
+    const active = c.users.filter(_plUserActive);
+    const blocks = teams.map(t => {
+        const people = active
+            .filter(u => t.ids.has(String(u.id)) && (String(u.id) === String(t.leader.id) || _plIsAgentBand(u) || _plIsLeader(u)))
+            .map(u => _plPersonStats(c, u, String(u.id) === String(t.leader.id) ? !c.goalFor(u, 'personal') : _plIsLeader(u)))
+            .sort((a, b) => (a.isLeader - b.isLeader) || (a.st.rank - b.st.rank) || (b.gap - a.gap) || String(a.u.full_name || '').localeCompare(String(b.u.full_name || '')));
+        const won = _plWonIn(c.purchases, t.ids, c.month);
+        const pipe = _plPipeStats(_plDealsForMonth(c.deals, t.ids, c.month));
+        const st = _plStatus(t.goal, won, pipe);
+        const agents = people.filter(p => !p.isLeader);
+        const noDeal = agents.filter(p => !p.pipe.n && p.gap > 0).length;
+        const sum = (f) => people.reduce((s, p) => s + f(p), 0);
+        const pot = people.some(p => p.pot) ? { rm: sum(p => p.pot ? p.pot.rm : 0), n: sum(p => p.pot ? p.pot.n : 0) } : null;
+        const todoN = sum(p => p.td ? Number(p.td.todo_n) || 0 : 0);
+        const odN = sum(p => p.td ? Number(p.td.overdue_n) || 0 : 0);
+        const teamStats = { goal: t.goal, won, pipe, st, gap: Math.max(0, t.goal - won.rm), pot,
+            td: people.some(p => p.td) ? { todo_n: todoN, overdue_n: odN } : null,
+            lastTxt: `<span class="plg-muted">${agents.length} agent${agents.length === 1 ? '' : 's'}</span>` };
+        const lid = String(t.leader.id);
+        const open = c.mode !== 'company' || _plReviewOpen.has(lid);
+        const name = (t.leader.full_name || t.leader.username || '') + (_plIsSG(t.leader) ? ' 🇸🇬 Singapore' : '');
+        const rows = open ? people.map(p => {
+            const fid = String(p.u.id);
+            return `
+            <div class="plr-row plr-agent${_plDealAgentFilter === fid ? ' active' : ''}" onclick="app.plSetDealAgentFilter('${fid}')" title="Show ${esc(p.u.full_name || '')}'s deals and potential below">
+                <div class="plr-name">${p.st.dot} <strong>${esc(p.u.full_name || p.u.username || '')}</strong>${p.isLeader ? ' <span class="plg-muted">leader · own sales</span>' : ''}${!p.isLeader && !p.pipe.n && p.gap > 0 ? ' <span class="plr-flag">⚠ no deals</span>' : ''}</div>
+                ${_plReviewCells(p)}
+            </div>`;
+        }).join('') : '';
+        return {
+            rank: st.rank, gap: teamStats.gap,
+            html: `
+            <div class="plr-team${open ? ' open' : ''}">
+                <div class="plr-row plr-teamrow"${c.mode === 'company' ? ` onclick="app.plReviewToggle('${lid}')" title="${open ? 'Close' : 'Open each agent'}"` : ''}>
+                    <div class="plr-name">${c.mode === 'company' ? `<span class="plr-caret">${open ? '▾' : '▸'}</span> ` : ''}${st.dot} <strong>${t.nested ? '↳ ' : ''}${esc(name)}</strong>${c.mode === 'company' ? ' <span class="plg-muted">team</span>' : ''}${noDeal ? ` <span class="plr-flag">⚠ ${noDeal} no deals</span>` : ''}</div>
+                    ${_plReviewCells(teamStats)}
+                </div>
+                ${rows}
+                ${open && c.mode === 'company' ? `<div class="plr-foot"><a href="javascript:void(0)" onclick="app.plSetDealAgentFilter('team:${lid}')">${_plDealAgentFilter === 'team:' + lid ? '✓ Showing this team below' : "Show this team's deals and potential below ↓"}</a></div>` : ''}
+            </div>` };
+    }).sort((a, b) => (a.rank - b.rank) || (b.gap - a.gap));
+    return `
+    <div class="plg-team plr">
+        <div class="plg-team-head">
+            <strong>📊 Monthly review</strong>
+            <span class="plg-muted">${c.mode === 'company' ? 'Tap a team to see each agent' : 'Each agent'} · goal RM${PL_GOAL_DEFAULT_AGENT / 1000}k per agent · tap an agent to filter the deals below</span>
+            ${c.mode === 'team' && c.unassigned > 0 ? `<span class="plg-warn">⚠️ ${_plRM(c.unassigned)} of the team goal is not assigned to any agent — covered by you or new recruits.</span>` : ''}
+        </div>
+        <div class="plr-head"><span>${c.mode === 'company' ? 'Team / agent' : 'Agent'}</span><span>Goal</span><span>Won</span><span>Closing this month</span><span>Gap</span><span>Coverage</span><span>Open potential</span><span>📋 To-do</span><span>Last activity</span></div>
+        ${blocks.map(b => b.html).join('')}
+        <div class="plg-muted" style="margin-top:6px;">🟢 goal met or ≥ ${PL_COVERAGE_TARGET}× coverage · 🟠 1.5–${PL_COVERAGE_TARGET}× · 🔴 behind or no deals · coverage = deals closing this month ÷ gap · ⏰ = overdue to-dos</div>
+    </div>`;
+};
+const plReviewToggle = (leaderId) => {
+    const k = String(leaderId);
+    if (!_plReviewOpen) _plReviewOpen = new Set();
+    if (_plReviewOpen.has(k)) _plReviewOpen.delete(k); else _plReviewOpen.add(k);
+    const g = document.getElementById('pl-goal-root');
+    if (g && _plGoalCtx) g.innerHTML = _plGoalBarHtml(_plGoalCtx);
+};
+
+// "More detail" fold — everything below the Deals board + the old filters.
+const _plMoreKey = 'pl-more-open';
+const _plMoreOpen = () => { try { return localStorage.getItem(_plMoreKey) === '1'; } catch (_) { return false; } };
+const _plApplyMore = () => {
+    const on = _plMoreOpen();
+    document.body.classList.toggle('pl-compact', !on);
+    const t = document.getElementById('pl-more-toggle');
+    if (t) t.innerHTML = `
+        <button type="button" class="plr-more" onclick="app.plToggleMore()">
+            <span>${on ? '▾' : '▸'} ${on ? 'Hide' : 'More'} detail</span>
+            <span class="plg-muted">VIP customers · Where from · Which product · Journey funnel · Action plan · Focus list · all prospects</span>
+        </button>`;
+};
+const plToggleMore = () => {
+    try { localStorage.setItem(_plMoreKey, _plMoreOpen() ? '0' : '1'); } catch (_) { /* per-device convenience only */ }
+    _plApplyMore();
 };
 
 const _plGoalBarHtml = (c) => {
@@ -5156,38 +5306,7 @@ const _plGoalBarHtml = (c) => {
             <strong>${esc(_plMonthLabel(c.month))}</strong>
             <button class="btn-icon" onclick="app.plGoalShiftMonth(1)" title="Next month"><i class="fas fa-chevron-right"></i></button>
         </div>`;
-    let teamHtml = '';
-    if (c.members.length) {
-        const rows = c.members.map(m => {
-            const g = m.goal ? m.goal.amount : 0;
-            const covC = m.goal ? _plCovColor(m.coverage) : '#9CA3AF';
-            const covT = !m.goal ? '—' : m.coverage == null ? '✓' : `${m.coverage.toFixed(1)}×`;
-            const dot = !m.goal ? '⚪' : m.coverage == null || m.coverage >= PL_COVERAGE_TARGET ? '🟢' : m.coverage >= 1.5 ? '🟠' : '🔴';
-            const filterId = c.mode === 'company' ? 'team:' + m.user.id : String(m.user.id);
-            return `
-            <tr class="plg-mrow${_plDealAgentFilter === filterId ? ' active' : ''}" onclick="app.plSetDealAgentFilter('${filterId}')" title="Show this ${c.mode === 'company' ? 'team' : 'person'}'s deals">
-                <td>${dot} <strong>${m.nested ? '↳ ' : ''}${esc(m.label)}</strong>${c.mode === 'company' ? ` <span class="plg-muted">${m.size} members</span>` : ''}</td>
-                <td>${m.goal ? _plRM(g) + (m.goal.custom ? '' : ' <span class="plg-muted">default</span>') : '<span class="plg-muted">no personal goal</span>'}</td>
-                <td>${_plRM(m.won.rm)} <span class="plg-muted">${m.won.n} sale${m.won.n === 1 ? '' : 's'}</span></td>
-                <td>${_plRM(m.pipe.open)} <span class="plg-muted">${m.pipe.n} deal${m.pipe.n === 1 ? '' : 's'}</span></td>
-                <td style="color:${covC};font-weight:700;">${covT}</td>
-            </tr>`;
-        }).join('');
-        teamHtml = `
-        <div class="plg-team">
-            <div class="plg-team-head">
-                <strong>${c.mode === 'company' ? 'Teams' : 'Team members'}</strong>
-                ${c.mode === 'team' && c.unassigned > 0 ? `<span class="plg-warn">⚠️ ${_plRM(c.unassigned)} of the team goal is not assigned to any agent — covered by you or new recruits.</span>` : ''}
-            </div>
-            <div style="overflow-x:auto;">
-                <table class="plg-table">
-                    <thead><tr><th>${c.mode === 'company' ? 'Team' : 'Member'}</th><th>Goal</th><th>Won</th><th>Pipeline this month</th><th>Coverage</th></tr></thead>
-                    <tbody>${rows}</tbody>
-                </table>
-            </div>
-            <div class="plg-muted" style="margin-top:6px;">Tap a row to see their deals below. Coverage = pipeline ÷ remaining gap (healthy ≥ ${PL_COVERAGE_TARGET}×).</div>
-        </div>`;
-    }
+    const teamHtml = _plReviewHtml(c);
     return `
     <div class="plg-card">
         <div class="plg-head">
@@ -5214,7 +5333,7 @@ const _plGoalBarHtml = (c) => {
         </div>
         <div class="plg-advice">${advice}</div>
         ${teamHtml}
-        ${_plVipHtml(c)}
+        <div class="plg-vip-wrap">${_plVipHtml(c)}</div>
     </div>`;
 };
 
@@ -5502,11 +5621,36 @@ const _PL_GOAL_CSS = `
   .pld-col{min-width:0;}
 }`;
 
+const _PL_REVIEW_CSS = `
+.plr-head,.plr-row{display:grid;grid-template-columns:minmax(200px,1.7fr) repeat(8,minmax(66px,1fr));gap:6px;align-items:center;}
+.plr-head{font-size:11px;color:#6B7280;padding:6px 8px;border-bottom:2px solid #E5E7EB;}
+.plr-row{padding:8px;border-bottom:1px solid #F3F4F6;font-size:13px;cursor:pointer;}
+.plr-row:hover,.plr-row.active{background:#EFF6FF;}
+.plr-chips{display:contents;}
+.plr-chips em{display:none;}
+.plr-team{border:1px solid #E5E7EB;border-radius:10px;margin:8px 0;overflow:hidden;}
+.plr-teamrow{background:#F9FAFB;font-weight:600;}
+.plr-team.open .plr-teamrow{border-bottom:2px solid #E5E7EB;}
+.plr-agent .plr-name{padding-left:18px;}
+.plr-flag{display:inline-block;padding:0 6px;border-radius:8px;font-size:11px;font-weight:700;color:#B91C1C;background:#FEE2E2;}
+.plr-caret{display:inline-block;width:12px;color:#6B7280;}
+.plr-foot{padding:6px 8px 8px 26px;font-size:12px;}
+.plr-more{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;width:100%;text-align:left;margin:12px 0;padding:10px 14px;border:1px dashed #D1D5DB;border-radius:10px;background:#F9FAFB;cursor:pointer;font-weight:700;font-size:14px;}
+body.pl-compact #pl-header-controls,body.pl-compact #pl-insights-root,body.pl-compact #pl-funnel-root,
+body.pl-compact #pl-action-plan,body.pl-compact #pl-focus-section,body.pl-compact #pl-team-sections,
+body.pl-compact .plg-vip-wrap{display:none !important;}
+@media (max-width:760px){
+  .plr-head{display:none;}
+  .plr-row{display:block;}
+  .plr-chips{display:flex;flex-wrap:wrap;gap:3px 12px;margin-top:4px;font-size:12px;}
+  .plr-chips em{display:inline;font-style:normal;color:#6B7280;margin-right:3px;}
+  .plr-agent .plr-name{padding-left:0;}
+}`;
 const _plEnsureGoalCss = () => {
     if (document.getElementById('pl-goal-css')) return;
     const st = document.createElement('style');
     st.id = 'pl-goal-css';
-    st.textContent = _PL_GOAL_CSS;
+    st.textContent = _PL_GOAL_CSS + _PL_REVIEW_CSS;
     document.head.appendChild(st);
 };
 
@@ -5520,11 +5664,14 @@ const _plMountGoalSections = (allUsers) => {
         document.getElementById('pl-deals-root')?.remove();
         document.getElementById('pl-insights-root')?.remove();
         document.getElementById('pl-toppot-root')?.remove();
+        document.getElementById('pl-more-toggle')?.remove();
         anchor.insertAdjacentHTML('beforebegin',
             '<div id="pl-goal-root"><div class="plg-card"><div class="skeleton" style="height:120px;border-radius:8px;"></div></div></div>' +
             '<div id="pl-toppot-root"></div>' +
             '<div id="pl-deals-root"><div class="plg-card"><div class="skeleton" style="height:160px;border-radius:8px;"></div></div></div>' +
+            '<div id="pl-more-toggle"></div>' +
             '<div id="pl-insights-root"></div>');
+        _plApplyMore();
         _plRenderGoalSections(allUsers);
     } catch (e) { console.warn('[pipeline-goals] mount failed', e && e.message); }
 };
@@ -5565,7 +5712,9 @@ const _plRenderTopPotential = async () => {
         const { data } = await sb.from('prospects')
             .select('id,full_name,status,responsible_agent_id,open_potential_rm,open_potential_detail,potential_tier,potential_last_met,potential_next_booked,potential_is_repeat')
             .gt('open_potential_rm', 0).order('open_potential_rm', { ascending: false }).limit(500);
-        const all = (data || []).filter(r => c.mode === 'company' || c.scopeIds.has(String(r.responsible_agent_id)));
+        // follows the 📊 Monthly review / Deals filter (a team or one agent)
+        const fids = _plFilterIds(c);
+        const all = (data || []).filter(r => (c.mode === 'company' && _plDealAgentFilter === 'all') || fids.has(String(r.responsible_agent_id)));
         const rates = await _plLoadTierRates(sb);
         const pctOf = (t) => (rates[t.id] ? rates[t.id].rate : t.pct);
         const agg = PL_TIERS.map(t => {
@@ -6393,6 +6542,8 @@ const saveGoals = async () => {
         saveGoals,
         plGoalShiftMonth,
         plSetDealAgentFilter,
+        plReviewToggle,
+        plToggleMore,
         plSetDealView,
         plSetInsightPeriod,
         _plLoadGoalCtx,

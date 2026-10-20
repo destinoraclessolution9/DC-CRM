@@ -64,7 +64,7 @@ const calls = { inserts: [], toastErr: [], toastOk: [], custIn: [] };
 function builder(table) {
   const q = { table, filters: [], _op: 'select', _row: null };
   const api = {
-    select() { return api; }, order() { return api; }, limit() { return api; },
+    select() { return api; }, order() { return api; }, limit() { return api; }, gt(k) { q.gtF = k; return api; },
     eq(k, v) { q.filters.push([k, v]); return api; },
     in(k, vs) { q.inF = [k, vs.map(String)]; return api; },
     insert(row) { q._op = 'insert'; q._row = row; calls.inserts.push({ table, row }); return api; },
@@ -77,13 +77,18 @@ function builder(table) {
       if (table === 'pipeline_goals') data = GOALS.filter(g => q.filters.every(([k, v]) => String(g[k]) === String(v)));
       if (table === 'pipeline_deals') data = DEALS.slice();
       if (table === 'customers') { calls.custIn.push(q.inF[1].slice()); data = CUSTOMERS.filter(r => q.inF[1].includes(String(r.id))); }
-      if (table === 'prospects') data = LINK_PROSPECTS.filter(r => q.inF[1].includes(String(r.id)));
+      if (table === 'prospects') data = q.gtF ? POT_ROWS.slice() : LINK_PROSPECTS.filter(r => q.inF[1].includes(String(r.id)));
       return Promise.resolve({ data, error: null }).then(res, rej);
     },
   };
   return api;
 }
-const supabaseStub = { from: (t) => builder(t) };
+let POT_ROWS = [];
+let TODO_ROWS = [];
+const supabaseStub = { from: (t) => builder(t), rpc: async (fn, args) => {
+  calls.rpc = calls.rpc || []; calls.rpc.push([fn, args]);
+  return { data: fn === 'journey_todo_counts' ? TODO_ROWS.filter(r => (args.p_uids || []).includes(r.agent_id)) : [], error: null };
+} };
 
 const AppDataStore = {
   async getAll(t) { if (t === 'users') return USERS; if (t === 'purchases') return PURCHASES; if (t === 'products') return CATALOG; return []; },
@@ -395,6 +400,52 @@ const as = (id) => { windowStub._appState.cu = USERS.find(u => u.id === id); };
     check('bujishu draft: option customer price', r.amount, 3299);
     check('bujishu draft: catalogue ids', r.catalog === 'bujishu' && r.catalog_item_id === 2 && r.catalog_option_id === 11);
     delete app.bjcSelectedFromText; delete app.bjcResolveLabel;
+  }
+
+  // ── 📊 Monthly Review scoreboard ──
+  {
+    POT_ROWS = [{ responsible_agent_id: 101, open_potential_rm: 12000 }, { responsible_agent_id: 103, open_potential_rm: 5000 }, { responsible_agent_id: 103, open_potential_rm: 1000 }];
+    TODO_ROWS = [{ agent_id: 101, todo_n: 3, overdue_n: 2, last_activity: null }, { agent_id: 103, todo_n: 1, overdue_n: 0, last_activity: null }];
+    // Agent C: a RM45k sale but no deal → smaller gap than Agent A, still first (no deals = 🔴 first)
+    PURCHASES.push({ id: 99, agent_id: 103, date: '2026-11-20', amount: 45000, item: 'Book' });
+    as(1); calls.rpc = [];
+    let c = await app._plLoadGoalCtx(USERS);
+    const tc = (calls.rpc || []).find(r => r[0] === 'journey_todo_counts');
+    check('review: to-do counts fetched for every team member', tc && [101, 102, 103, 20, 10].every(id => tc[1].p_uids.includes(id)));
+    check('review: potential summed per agent', c.review.pot.get('103') && c.review.pot.get('103').rm, 6000);
+    let h = app._plGoalBarHtml(c);
+    check('review: scoreboard shown', h.includes('📊 Monthly review'));
+    check('review: old teams table gone', h.includes('<th>Team</th>'), false);
+    check('review: company teams collapsed by default', h.includes('Agent A'), false);
+    check('review: team rows toggle', h.includes("app.plReviewToggle('10')"));
+    const goalEl = { innerHTML: '' }; elements.set('pl-goal-root', goalEl);
+    app.plReviewToggle('10');
+    h = goalEl.innerHTML;
+    check('review: opened team lists its agents', h.includes('Agent A') && h.includes('Agent C'));
+    check('review: inactive agent hidden', h.includes('>Gone<'), false);
+    const iC = h.indexOf('>Agent C<'), iA = h.indexOf('>Agent A<'), iB = h.indexOf('>Agent B<'), iL = h.lastIndexOf('>Mgr Teh<');
+    check('review: no-deal agent first, then biggest gap, leaders last', iC > 0 && iC < iA && iA < iB && iB < iL);
+    check('review: no-deal flag', /Agent C<\/strong> <span class="plr-flag">⚠ no deals/.test(h));
+    check('review: coverage label 0.4× for Agent A', /Agent A[\s\S]*?0\.4×/.test(h));
+    check('review: overdue to-dos shown', /Agent A[\s\S]*?\(2 ⏰\)/.test(h));
+    check('review: open potential chip', /Agent A[\s\S]*?RM12k/.test(h));
+    check('review: agent row filters deals', h.includes("app.plSetDealAgentFilter('101')"));
+    check('review: team foot filters the team', h.includes("app.plSetDealAgentFilter('team:10')"));
+    check('review: leader shown as own sales, no goal', /Mgr Teh<\/strong> <span class="plg-muted">leader · own sales/.test(h));
+    check('review: team no-deal count', /Mgr Teh<\/strong> <span class="plg-muted">team<\/span> <span class="plr-flag">⚠ 1 no deals/.test(h));
+    check('review: agent goal RM100k', /Agent A[\s\S]*?RM 100,000|Agent A[\s\S]*?RM100,000/.test(h));
+    app.plReviewToggle('10');
+    check('review: toggles closed again', goalEl.innerHTML.includes('Agent A'), false);
+    USERS[3].country = 'SG';
+    c = await app._plLoadGoalCtx(USERS);
+    check('review: Singapore team labelled', app._plGoalBarHtml(c).includes('TL Solo 🇸🇬 Singapore'));
+    delete USERS[3].country;
+    as(20);
+    c = await app._plLoadGoalCtx(USERS);
+    h = app._plGoalBarHtml(c);
+    check('review: leader sees own team open', h.includes('Agent A') && h.includes('Agent B'));
+    check('review: leader view has no team caret', h.includes('plr-caret'), false);
+    POT_ROWS = []; TODO_ROWS = []; PURCHASES.pop();
   }
   console.log(`pipeline-goals-sim: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
