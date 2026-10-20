@@ -5093,6 +5093,33 @@ const _plGoalBarHtml = (c) => {
     </div>`;
 };
 
+// Payment status for a won deal's linked sale. Never shows the raw
+// payment_method text (it can contain a card number) — category only.
+const _plPayCategory = (m) => {
+    const t = String(m || '').toLowerCase();
+    if (!t) return '';
+    if (/\bnpo\b/.test(t)) return 'NPO installment';
+    if (/\bpop\b/.test(t)) return 'POP';
+    if (/epp|\d+\s*m\b|month/.test(t)) return 'EPP';
+    if (/cash/.test(t)) return 'Cash';
+    if (/transfer|bank|dcf|direct/.test(t)) return 'Transfer';
+    if (/\bcc\b|card|visa|master|credit|debit/.test(t)) return 'Card';
+    if (/full/.test(t)) return 'Full payment';
+    if (/import|manual/.test(t)) return 'Imported';
+    return 'Other';
+};
+const _plPaymentChip = (d) => {
+    const p = d.purchase_id != null && _plGoalCtx ? _plGoalCtx.purchases.find(x => String(x.id) === String(d.purchase_id)) : null;
+    if (!p) return '<span class="pld-chip" style="background:#FEF3C7;color:#92400E;">💳 sale not linked yet</span>';
+    const cat = _plPayCategory(p.payment_method);
+    const total = Number(p.amount) || 0;
+    const paid = Number(p.pop_down_payment) || 0;
+    if (cat === 'POP' && paid > 0 && paid < total) {
+        return `<span class="pld-chip" style="background:#FEF3C7;color:#92400E;">💳 POP · paid ${_plRM(paid)} · balance ${_plRM(total - paid)}</span>`;
+    }
+    return `<span class="pld-chip" style="background:#D1FAE5;color:#065F46;">💳 ${esc(cat || 'Paid')}${cat === 'NPO installment' ? '' : ' · paid'}</span>`;
+};
+
 const _plDealCardHtml = (d, names, users) => {
     const st = _plStage(d.stage);
     const today = _plYmd(new Date());
@@ -5118,6 +5145,8 @@ const _plDealCardHtml = (d, names, users) => {
             ${d.source ? `<span class="pld-chip" style="background:#EDE9FE;color:#5B21B6;">↪ ${esc(_plSourceLabel(d.source))}${d.source_detail ? ': ' + esc(d.source_detail) : ''}</span>` : '<span class="pld-chip" style="background:#FEF3C7;color:#92400E;">source?</span>'}
             ${rotting ? `<span class="pld-chip" style="background:#FEE2E2;color:#B91C1C;">⏳ idle ${idleDays}d</span>` : ''}
             ${owner && _plGoalCtx && _plGoalCtx.mode !== 'personal' ? `<span class="pld-chip">👤 ${esc(owner.full_name || owner.username || '')}</span>` : ''}
+            ${d.auto_created && isOpen ? '<span class="pld-chip" style="background:#E0F2FE;color:#075985;" title="Added automatically from a warm prospect — open the pen to confirm product, amount and date">🤖 auto — check ✎</span>' : ''}
+            ${d.stage === 'won' ? _plPaymentChip(d) : ''}
         </div>
         ${d.next_step ? `<div class="pld-next" style="${stepOverdue ? 'color:#B91C1C;' : ''}">➜ ${esc(d.next_step)}${d.next_step_date ? ` <span class="plg-muted">(${esc(d.next_step_date)})</span>` : ''}</div>` : (isOpen ? '<div class="pld-next" style="color:#B45309;">➜ No next step set</div>' : '')}
         ${d.stage === 'lost' && d.lost_reason ? `<div class="pld-next plg-muted">Lost: ${esc(d.lost_reason)}</div>` : ''}
@@ -5283,6 +5312,7 @@ const _plRenderGoalSections = async (allUsers) => {
 const _plRenderDealSuggest = () => {
     const box = document.getElementById('pl-deal-suggest');
     if (!box || !_lastEnriched || !_plGoalCtx) return;
+    _plAutoDraftDeals().catch(e => console.warn('[pipeline-goals] auto-draft failed', e && e.message));
     const withDeal = new Set(_plGoalCtx.deals.filter(d => PL_DEAL_OPEN.has(d.stage)).map(d => String(d.prospect_id)));
     const sug = _lastEnriched
         .filter(p => p._pipeline && p._pipeline.probability >= 50 && !withDeal.has(String(p.id)))
@@ -5290,6 +5320,73 @@ const _plRenderDealSuggest = () => {
     if (!sug.length) { box.innerHTML = ''; return; }
     box.innerHTML = `<div class="pld-sug"><strong>💡 Warm prospects with no deal yet:</strong>${sug.map(p =>
         `<button class="btn secondary btn-sm" onclick="app.openDealModal(null, ${Number(p.id)})">＋ ${esc(p.full_name || p.name || '')} <span class="plg-muted">${p._pipeline.probability}%</span></button>`).join('')}</div>`;
+};
+
+// Auto-draft deals: warm prospects (engine >= PL_AUTO_DRAFT_MIN_PROB with a
+// product signal) get a draft deal so nobody has to remember to add it.
+// Owner = the prospect's responsible agent (only when this viewer may write
+// for them). Skips prospects with ANY deal touched in the last 90 days. One open
+// auto draft per prospect is also enforced by a partial unique index.
+const PL_AUTO_DRAFT_MIN_PROB = 60;
+const PL_AUTO_DRAFT_MAX_PER_RUN = 15;
+const _PL_CAT_PRODUCT_RX = {
+    powerring: /power\s*ring|指环/i, fengshui: /fengshui|feng shui|风水/i, calligraphy: /画作|calligraph|artistic|woodwork/i,
+    bujishu: /bujishu|满堂/i, formula: /formula/i,
+};
+let _plAutoDraftAt = 0;
+const _plAutoDraftDeals = async () => {
+    if (!_lastEnriched || !_plGoalCtx || Date.now() - _plAutoDraftAt < 10 * 60e3) return 0;
+    _plAutoDraftAt = Date.now();
+    const sb = _plSb();
+    if (!sb) return 0;
+    const c = _plGoalCtx;
+    const cutoff = Date.now() - 90 * 864e5;
+    const recent = new Set(c.deals.filter(d => PL_DEAL_OPEN.has(d.stage) || new Date(d.updated_at || d.created_at || 0).getTime() > cutoff).map(d => String(d.prospect_id)));
+    const vis = await getVisibleUserIds(c.me).catch(() => []);
+    const canOwn = (aid) => aid != null && (vis === 'all' || (Array.isArray(vis) && vis.some(x => String(x) === String(aid))));
+    let cfg = null; try { cfg = await loadPipelineConfig(); } catch (_) { /* defaults below */ }
+    const cats = (cfg && cfg.categories) || [];
+    let products = [];
+    try { products = (await AppDataStore.getAll('products') || []).filter(p => p.is_active !== false && Number(p.price) > 0); } catch (_) { /* default amounts */ }
+    const priceFor = (catId) => {
+        const rx = _PL_CAT_PRODUCT_RX[catId];
+        const prices = rx ? products.filter(p => rx.test(`${p.subcategory || ''} ${p.category || ''} ${p.name || ''}`)).map(p => Number(p.price)).sort((a, b) => a - b) : [];
+        if (prices.length) return prices[Math.floor(prices.length / 2)];
+        const cat = cats.find(x => x.id === catId);
+        return cat && cat.default_amount ? Number(cat.default_amount) : null;
+    };
+    const thisEnd = _plMonthEnd(_plCurMonth());
+    const nextEnd = _plMonthEnd(_plShiftMonth(_plCurMonth(), 1));
+    const rows = [];
+    for (const p of _lastEnriched) {
+        if (rows.length >= PL_AUTO_DRAFT_MAX_PER_RUN) break;
+        const e = p._pipeline || {};
+        if (!(e.probability >= PL_AUTO_DRAFT_MIN_PROB) || e.noProductSignal || e.fromPotential || !e.category) continue;
+        if (recent.has(String(p.id)) || !canOwn(p.responsible_agent_id)) continue;
+        const amount = priceFor(e.category);
+        if (!(amount > 0)) continue;
+        const cat = cats.find(x => x.id === e.category);
+        const src = _plAutoSource(p);
+        rows.push({
+            prospect_id: p.id, agent_id: p.responsible_agent_id, product: cat ? cat.name : e.category, amount,
+            expected_close_date: e.probability >= 80 ? thisEnd : nextEnd,
+            stage: e.stage === 'closing' ? 'closing' : e.stage === 'proposal' ? 'proposal' : 'interested',
+            source: src.source || null, source_detail: src.detail || null,
+            next_step: String(e.latestNextAction || e.action || 'Follow up').replace(/<[^>]*>/g, '').slice(0, 140),
+            auto_created: true, created_by: null, updated_at: new Date().toISOString(),
+        });
+    }
+    if (!rows.length) return 0;
+    let added = 0;
+    for (const r of rows) { // one by one: a unique-index clash on one row must not drop the rest
+        const { error } = await sb.from('pipeline_deals').insert(r);
+        if (!error) added++;
+    }
+    if (added) {
+        UI.toast.success(`Added ${added} draft deal${added === 1 ? '' : 's'} from warm prospects — check the 🤖 cards`);
+        _plRenderGoalSections();
+    }
+    return added;
 };
 
 const plGoalShiftMonth = (delta) => { _plGoalMonth = _plShiftMonth(_plGoalMonth || _plCurMonth(), delta); _plRenderGoalSections(); };
@@ -5689,6 +5786,7 @@ const saveDeal = async (dealId = null) => {
         product, product_id: pSel === '__other' ? null : pid, amount, expected_close_date: close, stage, source,
         source_detail: v('pld-source-detail') || null, next_step: nextStep || null, next_step_date: v('pld-next-date') || null,
         updated_at: new Date().toISOString(),
+        auto_created: false, // a person has now checked it
     };
     if (document.getElementById('pld-lost')) row.lost_reason = v('pld-lost') || null;
     if (stage === 'won') row.won_at = new Date().toISOString();
@@ -5815,6 +5913,10 @@ const saveGoals = async () => {
         _plGoalBarHtml,
         _plDealsBoardHtml,
         _plAutoSource,
+        _plAutoDraftDeals,
+        _plPayCategory,
+        _plSetLastEnrichedForTest: (v) => { _lastEnriched = v; },
+        _plResetAutoDraftForTest: () => { _plAutoDraftAt = 0; },
         _plSetGoalMonthForTest: (m) => { _plGoalMonth = m; },
         loadPipelineConfig,
         savePipelineConfigJson,

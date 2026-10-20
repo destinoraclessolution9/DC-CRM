@@ -271,6 +271,50 @@ const as = (id) => { windowStub._appState.cu = USERS.find(u => u.id === id); };
   check('insert amount numeric', ins && ins.amount, 20000);
   check('success toast', calls.toastOk.pop(), 'Deal added');
 
+  // ── v8.2 auto-draft deals ──
+  as(20); visibleIds = [20, 101, 102, 104];
+  await app._plLoadGoalCtx(USERS);
+  CATALOG.push({ id: 90, name: 'PR6', subcategory: 'Power Ring', price: 18990 }, { id: 91, name: 'PR8', subcategory: 'Power Ring', price: 24990 }, { id: 92, name: 'PR4', subcategory: 'Power Ring', price: 12990 });
+  const mk = (id, agent, prob, extra) => ({ id, full_name: 'P' + id, responsible_agent_id: agent, referred_by_type: 'Customer', referred_by: 'Ref', _pipeline: { probability: prob, category: 'powerring', stage: null, action: '<b>Book</b> meeting', ...(extra || {}) } });
+  app._plSetLastEnrichedForTest([
+    mk(601, 101, 85),                              // eligible, hot → this month
+    mk(602, 102, 65),                              // eligible, warm → next month
+    mk(603, 101, 55),                              // below 60 → skip
+    mk(604, 101, 90, { noProductSignal: true }),   // no product signal → skip
+    mk(605, 999, 90),                              // owner not visible → skip
+    mk(501, 101, 90),                              // already has open deal (DEALS prospect 501) → skip
+    mk(606, 101, 90, { fromPotential: true }),     // declared only → skip
+    mk(607, 102, 95, { stage: 'closing' }),        // stage carried over
+  ]);
+  calls.inserts.length = 0;
+  app._plResetAutoDraftForTest();
+  const nAdded = await app._plAutoDraftDeals();
+  const autoRows = calls.inserts.filter(i => i.table === 'pipeline_deals').map(i => i.row);
+  check('auto-draft count', nAdded, 3);
+  check('auto-draft prospects', autoRows.map(r => r.prospect_id).join(','), '601,602,607');
+  check('auto-draft flagged', autoRows.every(r => r.auto_created === true && r.created_by === null), true);
+  check('auto-draft owner = prospect agent', autoRows[1] && autoRows[1].agent_id, 102);
+  check('auto-draft amount = catalogue median', autoRows[0] && autoRows[0].amount, 18990);
+  const thisEnd = (() => { const d = new Date(); const e = new Date(d.getFullYear(), d.getMonth() + 1, 0); return `${e.getFullYear()}-${String(e.getMonth() + 1).padStart(2, '0')}-${String(e.getDate()).padStart(2, '0')}`; })();
+  check('hot deal closes this month', autoRows[0] && autoRows[0].expected_close_date, thisEnd);
+  check('warm deal closes later', autoRows[1] && autoRows[1].expected_close_date > thisEnd, true);
+  check('stage carried from engine', autoRows[2] && autoRows[2].stage, 'closing');
+  check('source auto-filled', autoRows[0] && autoRows[0].source, 'customer_referral');
+  check('next step html stripped', autoRows[0] && autoRows[0].next_step, 'Book meeting');
+  calls.inserts.length = 0;
+  const again = await app._plAutoDraftDeals();
+  check('auto-draft throttled on immediate rerun', again, 0);
+  CATALOG.splice(CATALOG.length - 3, 3);
+
+  // ── v8.2 payment category never leaks card numbers ──
+  check('card number + 31m → EPP (no digits shown)', app._plPayCategory('CIMB Master CC 5521-1540-0842-5476, 31m'), 'EPP');
+  check('credit card → Card', app._plPayCategory('Credit Card'), 'Card');
+  check('POP', app._plPayCategory('POP'), 'POP');
+  check('cash', app._plPayCategory('Cash'), 'Cash');
+  check('transfer', app._plPayCategory('Offline Bank Transfer/ CC Machine'), 'Transfer');
+  check('NPO', app._plPayCategory('NPO'), 'NPO installment');
+  check('empty', app._plPayCategory(null), '');
+
   console.log(`pipeline-goals-sim: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
