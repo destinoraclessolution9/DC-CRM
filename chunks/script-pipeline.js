@@ -438,16 +438,21 @@ const _pipelineActivityMultiplier = (activity, categoryId, config, text) => {
 // referralsByProspect / purchasesByCustomer are optional pre-bucketed Maps (DE-QUAD:
 // O(1) lookup per prospect instead of re-scanning the whole array each call). When a
 // Map is present it wins; else fall back to the array .filter; else the network query.
+// Cache the PROMISE: every prospect row scores at once, so caching only the
+// resolved value fired one request per row (44 parallel calls on a cold load).
 let _plHcCache = null;
-const _plHighCloserSet = async () => {
-    if (_plHcCache && Date.now() - _plHcCache.at < 10 * 60e3) return _plHcCache.set;
-    let set = new Set();
-    try {
-        const sb = window.supabase || window.supabaseClient;
-        if (sb) { const { data } = await sb.from('agent_labels').select('user_id,high_closer'); set = new Set((data || []).filter(r => r.high_closer).map(r => String(r.user_id))); }
-    } catch (_) { /* none */ }
-    _plHcCache = { at: Date.now(), set };
-    return set;
+const _plHighCloserSet = () => {
+    if (_plHcCache && Date.now() - _plHcCache.at < 10 * 60e3) return _plHcCache.p;
+    const p = (async () => {
+        try {
+            const sb = window.supabase || window.supabaseClient;
+            if (!sb) return new Set();
+            const { data } = await sb.from('agent_labels').select('user_id,high_closer');
+            return new Set((data || []).filter(r => r.high_closer).map(r => String(r.user_id)));
+        } catch (_) { return new Set(); }
+    })();
+    _plHcCache = { at: Date.now(), p };
+    return p;
 };
 const checkReferralBonus = async (prospect, config, allReferrals, allPurchases, referralsByProspect, purchasesByCustomer) => {
     const windowDays = config.constants?.referral_customer_purchase_window_days || 180;
@@ -4949,14 +4954,7 @@ const _plBuildGradeCtx = async (purchases) => {
         if (!c) continue;
         spendByCust.set(String(c.id), (spendByCust.get(String(c.id)) || 0) + a);
     }
-    let highClosers = new Set();
-    try {
-        const sb = _plSb();
-        if (sb) {
-            const { data } = await sb.from('agent_labels').select('user_id,high_closer');
-            highClosers = new Set((data || []).filter(r => r.high_closer).map(r => String(r.user_id)));
-        }
-    } catch (_) { /* no labels */ }
+    const highClosers = await _plHighCloserSet();
     return { prospects: new Map((prospects || []).map(p => [String(p.id), p])), custById, custByPid, spendByCust, highClosers };
 };
 const _plReferrerCustomer = (refId, g) => refId == null || !g ? null : (g.custById.get(String(refId)) || g.custByPid.get(String(refId)) || null);
@@ -5537,6 +5535,7 @@ const saveHighClosers = async () => {
     if (!changed.length) { UI.hideModal(); return; }
     try {
         const { error } = await _plSb().from('agent_labels').upsert(changed, { onConflict: 'user_id' });
+        _plHcCache = null;
         if (error) throw error;
         _plHcCache = null;
         UI.hideModal();
