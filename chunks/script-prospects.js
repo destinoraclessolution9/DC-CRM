@@ -3661,7 +3661,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         const pid = prospect.id;
         let audits = [];
         try {
-            const src = prospect.feng_shui_audits;
+            const src = ((await AppDataStore.getByIdFull('prospects', prospect.id)) || prospect).feng_shui_audits;
             audits = Array.isArray(src) ? src : JSON.parse(src || '[]');
         } catch(_) { /* intentional: JSON.parse fallback — malformed/empty stays [] */ audits = []; }
         // Newest first
@@ -5855,6 +5855,13 @@ const deleteProductPurchaseRecord = async (prospectId, type, index) => {
 //     site_reviews [{ id, date, remarks, photos: [url] }] }
 // Product selections auto-flow into Potential & Opportunities (see potential tab
 // aggregation, which reads from prospect.feng_shui_audits[].products).
+// Audits are read-modify-write on prospects.feng_shui_audits (one JSON array).
+// ALWAYS read the live row: the cached copy can predate the last save, and
+// writing it back silently dropped/undid audits (and the screen showed a stale
+// count). Falls back to the cached row only when the live read fails (offline).
+const _fsaLive = async (prospectId) =>
+    (await AppDataStore.getByIdFull('prospects', prospectId)) || (await AppDataStore.getById('prospects', prospectId));
+
 const _readFengShuiAudits = (prospect) => {
     try {
         const src = prospect?.feng_shui_audits;
@@ -6074,7 +6081,7 @@ const _uploadFengShuiToBucket = async (file, pathPrefix) => {
 // Post-Meetup Notes exactly so the data format is reusable in the Potential tab).
 const openFengShuiAuditModal = async (prospectId, auditId) => {
     if (!window.app.bjcMultiHtml && window._loadChunk) { try { await window._loadChunk('chunks/script-activities.min.js'); } catch (_) { /* picker optional */ } }
-    const prospect = await AppDataStore.getById('prospects', prospectId);
+    const prospect = await _fsaLive(prospectId);
     if (!prospect) { UI.toast.error('Prospect not found'); return; }
     const audits = _readFengShuiAudits(prospect);
     const existing = auditId ? audits.find(a => a.id === auditId) : null;
@@ -6141,7 +6148,7 @@ const openFengShuiAuditModal = async (prospectId, auditId) => {
 };
 
 const saveFengShuiAudit = async (prospectId, auditId) => {
-    const prospect = await AppDataStore.getById('prospects', prospectId);
+    const prospect = await _fsaLive(prospectId);
     if (!prospect) { UI.toast.error('Prospect not found'); return; }
     const audits = _readFengShuiAudits(prospect);
 
@@ -6187,7 +6194,7 @@ const saveFengShuiAudit = async (prospectId, auditId) => {
 
 const deleteFengShuiAudit = async (prospectId, auditId) => {
     if (!confirm('Delete this feng shui audit? All uploaded files and photos will be unlinked (files remain in storage).')) return;
-    const prospect = await AppDataStore.getById('prospects', prospectId);
+    const prospect = await _fsaLive(prospectId);
     if (!prospect) return;
     const audits = _readFengShuiAudits(prospect).filter(a => a.id !== auditId);
     await _writeFengShuiAudits(prospectId, audits);
@@ -6204,7 +6211,7 @@ const uploadFengShuiFile = async (prospectId, auditId, fileType, fileInput) => {
     if (!file) return;
     if (file.size > 25 * 1024 * 1024) { UI.toast.error('File too large (max 25MB)'); return; }
 
-    const prospect = await AppDataStore.getById('prospects', prospectId);
+    const prospect = await _fsaLive(prospectId);
     if (!prospect) return;
     const audits = _readFengShuiAudits(prospect);
     const idx = audits.findIndex(a => a.id === auditId);
@@ -6227,7 +6234,7 @@ const uploadFengShuiFile = async (prospectId, auditId, fileType, fileInput) => {
 
 const removeFengShuiFile = async (prospectId, auditId, fileType) => {
     if (!confirm('Remove this file from the audit?')) return;
-    const prospect = await AppDataStore.getById('prospects', prospectId);
+    const prospect = await _fsaLive(prospectId);
     if (!prospect) return;
     const audits = _readFengShuiAudits(prospect);
     const idx = audits.findIndex(a => a.id === auditId);
@@ -6243,7 +6250,7 @@ const uploadFengShuiPhotos = async (prospectId, auditId, phase, fileInput) => {
     const files = fileInput?.files;
     if (!files || !files.length) return;
 
-    const prospect = await AppDataStore.getById('prospects', prospectId);
+    const prospect = await _fsaLive(prospectId);
     if (!prospect) return;
     const audits = _readFengShuiAudits(prospect);
     const idx = audits.findIndex(a => a.id === auditId);
@@ -6280,7 +6287,7 @@ const uploadFengShuiPhotos = async (prospectId, auditId, phase, fileInput) => {
 };
 
 const removeFengShuiPhoto = async (prospectId, auditId, phase, index) => {
-    const prospect = await AppDataStore.getById('prospects', prospectId);
+    const prospect = await _fsaLive(prospectId);
     if (!prospect) return;
     const audits = _readFengShuiAudits(prospect);
     const idx = audits.findIndex(a => a.id === auditId);
@@ -6296,7 +6303,7 @@ const removeFengShuiPhoto = async (prospectId, auditId, phase, index) => {
 };
 
 const updateFengShuiPhotoRemark = async (prospectId, auditId, phase, index, remarks) => {
-    const prospect = await AppDataStore.getById('prospects', prospectId);
+    const prospect = await _fsaLive(prospectId);
     if (!prospect) return;
     const audits = _readFengShuiAudits(prospect);
     const idx = audits.findIndex(a => a.id === auditId);
@@ -6311,7 +6318,7 @@ const updateFengShuiPhotoRemark = async (prospectId, auditId, phase, index, rema
 };
 
 const openFengShuiPhotosModal = async (prospectId, auditId, phase) => {
-    const prospect = await AppDataStore.getById('prospects', prospectId);
+    const prospect = await _fsaLive(prospectId);
     if (!prospect) return;
     const audits = _readFengShuiAudits(prospect);
     const audit = audits.find(a => a.id === auditId);
@@ -6337,7 +6344,7 @@ const openFengShuiPhotosModal = async (prospectId, auditId, phase) => {
 };
 
 const openFengShuiSitePhotosModal = async (prospectId, auditId, srId) => {
-    const prospect = await AppDataStore.getById('prospects', prospectId);
+    const prospect = await _fsaLive(prospectId);
     if (!prospect) return;
     const audits = _readFengShuiAudits(prospect);
     const audit = audits.find(a => a.id === auditId);
@@ -6361,7 +6368,7 @@ const openFengShuiSitePhotosModal = async (prospectId, auditId, srId) => {
 };
 
 const addFengShuiSiteReview = async (prospectId, auditId) => {
-    const prospect = await AppDataStore.getById('prospects', prospectId);
+    const prospect = await _fsaLive(prospectId);
     if (!prospect) return;
     const audits = _readFengShuiAudits(prospect);
     const idx = audits.findIndex(a => a.id === auditId);
@@ -6379,7 +6386,7 @@ const addFengShuiSiteReview = async (prospectId, auditId) => {
 };
 
 const updateFengShuiSiteReviewField = async (prospectId, auditId, siteId, field, value) => {
-    const prospect = await AppDataStore.getById('prospects', prospectId);
+    const prospect = await _fsaLive(prospectId);
     if (!prospect) return;
     const audits = _readFengShuiAudits(prospect);
     const idx = audits.findIndex(a => a.id === auditId);
@@ -6394,7 +6401,7 @@ const uploadFengShuiSitePhotos = async (prospectId, auditId, siteId, fileInput) 
     const files = fileInput?.files;
     if (!files || !files.length) return;
 
-    const prospect = await AppDataStore.getById('prospects', prospectId);
+    const prospect = await _fsaLive(prospectId);
     if (!prospect) return;
     const audits = _readFengShuiAudits(prospect);
     const idx = audits.findIndex(a => a.id === auditId);
@@ -6427,7 +6434,7 @@ const uploadFengShuiSitePhotos = async (prospectId, auditId, siteId, fileInput) 
 };
 
 const removeFengShuiSitePhoto = async (prospectId, auditId, siteId, index) => {
-    const prospect = await AppDataStore.getById('prospects', prospectId);
+    const prospect = await _fsaLive(prospectId);
     if (!prospect) return;
     const audits = _readFengShuiAudits(prospect);
     const idx = audits.findIndex(a => a.id === auditId);
@@ -6443,7 +6450,7 @@ const removeFengShuiSitePhoto = async (prospectId, auditId, siteId, index) => {
 
 const removeFengShuiSiteReview = async (prospectId, auditId, siteId) => {
     if (!confirm('Remove this site review entry?')) return;
-    const prospect = await AppDataStore.getById('prospects', prospectId);
+    const prospect = await _fsaLive(prospectId);
     if (!prospect) return;
     const audits = _readFengShuiAudits(prospect);
     const idx = audits.findIndex(a => a.id === auditId);
