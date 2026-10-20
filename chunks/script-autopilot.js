@@ -301,7 +301,7 @@
         const pct = (n, d) => d ? Math.round(n * 100 / d) + '%' : '—';
         const bars = FN_STEPS.map(([k, label], i) => {
             const prev = i ? tot[FN_STEPS[i - 1][0]] : tot.cps;
-            const w = tot.cps ? Math.max(3, Math.round(tot[k] * 100 / tot.cps)) : 0;
+            const w = tot.cps && tot[k] ? Math.max(3, Math.round(tot[k] * 100 / tot.cps)) : 0;
             const drop = i && prev ? Math.round((prev - tot[k]) * 100 / prev) : 0;
             return `
             <div style="display:grid;grid-template-columns:86px 1fr 92px;align-items:center;gap:8px;margin:3px 0;font-size:12px;">
