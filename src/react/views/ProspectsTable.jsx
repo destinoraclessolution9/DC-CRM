@@ -110,7 +110,7 @@ function Row({ p, meta, selected, onToggle }) {
                 <input type="checkbox" data-pid={p.id} checked={selected} onChange={() => onToggle(p.id)} />
             </td>
             <td data-label="Name">
-                <strong className={dropped ? 'name-unable' : ''}>{p.full_name || '(No Name)'}</strong>
+                <strong className={dropped ? 'name-unable' : ''}>{p.full_name || '(No Name)'}</strong><span data-pot-chip={String(p.id)} />
                 {p.phone ? <><br /><span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{p.phone}</span></> : null}
                 {p.unable_to_serve ? <><br /><span className="badge-unable">Unable to Serve</span></> : null}
                 {p.manual_grade === 'F' ? <><br /><span className="badge-unable">Dropped (F)</span></> : null}

@@ -112,7 +112,7 @@ function Row({ c, meta }) {
     const canEdit = canEditCustomers(meta) && linkedProspectId != null;
     return (
         <tr onClick={() => app().showCustomerDetail && app().showCustomerDetail(c.id)} style={{ cursor: 'pointer' }}>
-            <td data-label="Name"><strong>{c.full_name || ''}</strong></td>
+            <td data-label="Name"><strong>{c.full_name || ''}</strong>{c.converted_from_prospect_id != null ? <span data-pot-chip={String(c.converted_from_prospect_id)} /> : null}</td>
             <td data-label="Lifetime Value">
                 RM {(c.lifetime_value || 0).toLocaleString()}{' '}
                 <span style={{ color: 'var(--success)', fontSize: '12px' }}><i className="fas fa-caret-up"></i></span>
