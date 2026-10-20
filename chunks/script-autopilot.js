@@ -33,6 +33,7 @@
     const _ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const _today = () => _ymd(new Date());
     const _fmt = (d) => d ? new Date(String(d).slice(0, 10) + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
+    const _fmtY = (d) => d ? new Date(String(d).slice(0, 10) + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
     const _rmK = (rm) => {
         const n = Number(rm) || 0;
         return 'RM' + (n >= 1000 ? Math.round(n / 1000) + 'k' : Math.round(n));
@@ -387,7 +388,7 @@
             <div style="flex:1 1 180px;min-width:0;">
                 <div style="font-weight:600;font-size:13px;">${title}</div>${sub}
             </div>
-            <span style="font-size:12px;white-space:nowrap;${late ? 'color:#B91C1C;font-weight:600;' : ''}">${esc(_fmt(i.due_date))}${i.paid_date && i.status === 'paid' ? ' · paid ' + esc(_fmt(i.paid_date)) : ''}</span>
+            <span style="font-size:12px;white-space:nowrap;${late ? 'color:#B91C1C;font-weight:600;' : ''}">${esc(opts.plan ? _fmtY(i.due_date) : _fmt(i.due_date))}${i.paid_date && i.status === 'paid' ? ' · paid ' + esc(_fmt(i.paid_date)) : ''}</span>
             <strong style="font-size:13px;white-space:nowrap;">RM ${Number(i.amount || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}</strong>
             ${_popChip(i.status)}
             <span style="display:flex;gap:4px;">${acts}</span>
