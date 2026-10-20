@@ -49,7 +49,16 @@
     const _uploadCpsFormFile    = (...a) => (window.app._uploadCpsFormFile || (() => Promise.resolve()))(...a);
     // CPS health helpers — defined in script-cps.js, exported to window.app.
     const renderQuickHealthBadge       = (...a) => (window.app.renderQuickHealthBadge       || (() => ''))(...a);
-    const renderHealthBadge            = (...a) => (window.app.renderHealthBadge            || (() => ''))(...a);
+    // The real badge lives in the cps chunk; when that chunk isn't loaded yet the
+    // script.js lazy stub is async and returned a Promise → "[object Promise]" in
+    // the customer header. Render the same badge locally in that case.
+    const renderHealthBadge = (health) => {
+        const out = window.app.renderHealthBadge ? window.app.renderHealthBadge(health) : '';
+        if (out && typeof out.then !== 'function') return out;
+        if (!health || health.score == null) return '';
+        const bg = health.grade === 'green' ? '#10b981' : health.grade === 'yellow' ? '#f59e0b' : '#ef4444';
+        return `<span class="score-badge" style="background:${bg}; color:white;" title="Health Score: ${health.score}/100">${escapeHtml(health.label || '')} ${Number(health.score)}</span>`;
+    };
     const calculateCustomerHealthScore = (...a) => (window.app.calculateCustomerHealthScore || (() => 0))(...a);
     // Import / workflow helpers — defined in script-import.js and script-features2.js.
     const exportMarketingList          = (...a) => (window.app.exportMarketingList          || (() => Promise.resolve()))(...a);
