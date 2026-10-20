@@ -6215,6 +6215,11 @@ function _wireLoginBtn() {
                     // Mutations (create/update/delete/restore) still refresh
                     // immediately; only the post-nav revalidate flash is
                     // suppressed. Fresh data is picked up on the next nav.
+                    // A profile (prospect / customer detail) is open on top of this view:
+                    // rebuilding the list would replace the profile, so a save made inside it
+                    // (Feng Shui audit, prescription, notes…) looked like "nothing happened".
+                    // The profile refreshes its own sections; the list repaints on the next visit.
+                    if (_currentDetailView) return;
                     if (action === 'revalidate' && (Date.now() - _lastNavigatedAt) < _SWR_REFRESH_GUARD_MS) {
                         return;
                     }
