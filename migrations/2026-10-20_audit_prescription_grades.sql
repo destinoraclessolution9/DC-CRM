@@ -78,15 +78,18 @@ declare
     v_open numeric; v_bought int; v_declined int; v_total int; v_label text;
     v_deal record; v_agent bigint; v_src text; v_srcd text; v_ref text;
     v_end date := (date_trunc('month', (now() at time zone 'Asia/Kuala_Lumpur')::date) + interval '1 month - 1 day')::date;
-    v_last_purchase bigint; v_bought_amt numeric;
+    v_last_purchase bigint; v_bought_amt numeric; v_open_opt numeric;
 begin
     select coalesce(sum(quoted_amount) filter (where status in ('proposed','accepted') and priority in ('must','recommended')), 0),
            count(*) filter (where status = 'bought'), count(*) filter (where status = 'declined'), count(*),
            string_agg(product, ', ' order by (priority = 'must') desc, id) filter (where status in ('proposed','accepted')),
            max(purchase_id) filter (where status = 'bought'),
-           coalesce(sum(quoted_amount) filter (where status = 'bought'), 0)
-      into v_open, v_bought, v_declined, v_total, v_label, v_last_purchase, v_bought_amt
+           coalesce(sum(quoted_amount) filter (where status = 'bought'), 0),
+           coalesce(sum(quoted_amount) filter (where status in ('proposed','accepted') and priority = 'optional'), 0)
+      into v_open, v_bought, v_declined, v_total, v_label, v_last_purchase, v_bought_amt, v_open_opt
       from public.audit_prescriptions where prospect_id = p_prospect and audit_id = p_audit;
+    -- only Optional lines left open → they are the remaining potential
+    if v_open = 0 and v_open_opt > 0 then v_open := v_open_opt; end if;
 
     select * into v_deal from public.pipeline_deals
      where prospect_id = p_prospect and audit_id = p_audit and stage in ('interested','proposal','prescribed','closing')
@@ -114,12 +117,12 @@ begin
                     'Follow up the audit prescription', p_audit, null, now());
         end if;
     elsif v_deal.id is not null then
-        if v_bought > 0 then
+        if v_total = 0 then
+            delete from public.pipeline_deals where id = v_deal.id; -- every line removed
+        elsif v_bought > 0 then
             update public.pipeline_deals set stage = 'won', won_at = now(), amount = greatest(v_bought_amt, 0), purchase_id = coalesce(purchase_id, v_last_purchase), updated_at = now() where id = v_deal.id;
         elsif v_total > 0 and v_declined = v_total then
             update public.pipeline_deals set stage = 'lost', lost_reason = 'Prescription declined', updated_at = now() where id = v_deal.id;
-        else
-            update public.pipeline_deals set amount = 0, updated_at = now() where id = v_deal.id;
         end if;
     end if;
 end $$;
