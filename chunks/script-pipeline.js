@@ -1170,7 +1170,33 @@ const _runPipelineArchive = async (expiredItems, userId, actsByProspect) => {
 // of the prospect's activities via its own query (NOT the visibility-scoped
 // _actsByProspect bucket) so the badge value is identical on the focus list and the
 // system table for the same prospect, matching the legacy behaviour.
+// One batched load for every row (was 2 requests per prospect — 427 prospects
+// = 854 requests per Pipeline open, which starved the page). Cached 60s;
+// addPipelineNote clears it. Same RLS scope as the old per-row queries.
+let _plNoteCountsP = null;
+let _plNoteCountsAt = 0;
+const _plLoadNoteCounts = () => {
+    if (_plNoteCountsP && Date.now() - _plNoteCountsAt < 60e3) return _plNoteCountsP;
+    _plNoteCountsAt = Date.now();
+    _plNoteCountsP = (async () => {
+        const sb = window.supabase || window.supabaseClient;
+        if (!sb) return null;
+        const m = new Map();
+        const pull = async (table) => {
+            for (let from = 0; from < 100000; from += 1000) {
+                const { data, error } = await sb.from(table).select('prospect_id').not('prospect_id', 'is', null).range(from, from + 999);
+                if (error) throw error;
+                for (const r of (data || [])) { const k = String(r.prospect_id); m.set(k, (m.get(k) || 0) + 1); }
+                if (!data || data.length < 1000) break;
+            }
+        };
+        try { await Promise.all([pull('notes'), pull('activities')]); return m; } catch (_) { return null; }
+    })();
+    return _plNoteCountsP;
+};
 const getNoteCount = async (prospectId) => {
+    const counts = await _plLoadNoteCounts();
+    if (counts) return counts.get(String(prospectId)) || 0;
     const [notes, activities] = await Promise.all([
         AppDataStore.query('notes', { prospect_id: prospectId }),
         AppDataStore.query('activities', { prospect_id: prospectId }),
@@ -3947,6 +3973,7 @@ const addPipelineNote = async (prospectId) => {
         created_by: _state.cu?.id || 5
     });
     UI.toast.success('Note added.');
+    _plNoteCountsP = null;
     await showComments(prospectId);
     await refreshPipeline();
 };
@@ -5179,6 +5206,7 @@ const _plPersonStats = (c, u, isLeader) => {
     const pipe = _plPipeStats(_plDealsForMonth(c.deals, ids, c.month));
     return {
         u, goal, won, pipe, isLeader, gap: Math.max(0, goal - won.rm), st: _plStatus(goal, won, pipe),
+        ids: [String(u.id)], label: u.full_name || u.username || '',
         pot: (c.review && c.review.pot.get(String(u.id))) || null,
         td: (c.review && c.review.todo.get(String(u.id))) || null,
     };
@@ -5191,8 +5219,8 @@ const _plReviewCells = (p) => `
         <span><em>Closing</em>${_plRM(p.pipe.open)} <span class="plg-muted">${p.pipe.n} deal${p.pipe.n === 1 ? '' : 's'}</span></span>
         <span><em>Gap</em>${p.goal ? `<span style="color:${p.gap > 0 ? '#B91C1C' : '#047857'};">${_plRM(p.gap)}</span>` : '<span class="plg-muted">—</span>'}</span>
         <span><em>Cover</em><strong style="color:${p.st.rank <= 1 ? '#B91C1C' : p.st.rank === 2 ? '#B45309' : p.st.rank <= 5 ? '#047857' : '#9CA3AF'};">${esc(p.st.label)}</strong></span>
-        <span><em>Potential</em>${p.pot ? `${_plRmK(p.pot.rm)} <span class="plg-muted">(${p.pot.n})</span>` : '<span class="plg-muted">—</span>'}</span>
-        <span><em>To-do</em>${p.td ? `${Number(p.td.todo_n) || 0}${Number(p.td.overdue_n) ? ` <span style="color:#B91C1C;font-weight:600;">(${Number(p.td.overdue_n)} ⏰)</span>` : ''}` : '<span class="plg-muted">—</span>'}</span>
+        <span><em>Potential</em>${p.pot ? `<a href="javascript:void(0)" class="plr-link" title="See who and what" onclick="event.stopPropagation();app.plShowPotentialFor('${(p.ids || []).join(',')}', '${esc(String(p.label || '').replace(/'/g, ''))}')">${_plRmK(p.pot.rm)} <span class="plg-muted">(${p.pot.n})</span></a>` : '<span class="plg-muted">—</span>'}</span>
+        <span><em>To-do</em>${p.td ? (Number(p.td.todo_n) ? `<a href="javascript:void(0)" class="plr-link" title="See the to-do list" onclick="event.stopPropagation();app.plShowTodoFor('${(p.ids || []).join(',')}', '${esc(String(p.label || '').replace(/'/g, ''))}')">${Number(p.td.todo_n) || 0}${Number(p.td.overdue_n) ? ` <span style="color:#B91C1C;font-weight:600;">(${Number(p.td.overdue_n)} ⏰)</span>` : ''}</a>` : '0') : '<span class="plg-muted">—</span>'}</span>
         <span><em>Last</em>${p.lastTxt != null ? p.lastTxt : (p.td ? esc(_plAgo(p.td.last_activity)) : '<span class="plg-muted">—</span>')}</span>
     </div>`;
 const _plReviewHtml = (c) => {
@@ -5218,6 +5246,7 @@ const _plReviewHtml = (c) => {
         const todoN = sum(p => p.td ? Number(p.td.todo_n) || 0 : 0);
         const odN = sum(p => p.td ? Number(p.td.overdue_n) || 0 : 0);
         const teamStats = { goal: t.goal, won, pipe, st, gap: Math.max(0, t.goal - won.rm), pot,
+            ids: people.map(x => String(x.u.id)), label: (t.leader.full_name || t.leader.username || '') + "'s team",
             td: people.some(p => p.td) ? { todo_n: todoN, overdue_n: odN } : null,
             lastTxt: `<span class="plg-muted">${agents.length} agent${agents.length === 1 ? '' : 's'}</span>` };
         const lid = String(t.leader.id);
@@ -5255,6 +5284,74 @@ const _plReviewHtml = (c) => {
         <div class="plg-muted" style="margin-top:6px;">🟢 goal met or ≥ ${PL_COVERAGE_TARGET}× coverage · 🟠 1.5–${PL_COVERAGE_TARGET}× · 🔴 behind or no deals · coverage = deals closing this month ÷ gap · ⏰ = overdue to-dos</div>
     </div>`;
 };
+// 💰 Open potential behind a review cell: who, what (items + RM), tier, next step
+const plShowPotentialFor = async (idsCsv, label) => {
+    const ids = new Set(String(idsCsv || '').split(',').filter(Boolean));
+    const sb = _plSb();
+    if (!sb || !ids.size) return;
+    let rows = [];
+    try {
+        const { data, error } = await sb.from('prospects')
+            .select('id,full_name,responsible_agent_id,open_potential_rm,open_potential_detail,potential_tier,potential_last_met,potential_next_booked')
+            .gt('open_potential_rm', 0).in('responsible_agent_id', [...ids]).order('open_potential_rm', { ascending: false }).limit(300);
+        if (error) throw error;
+        rows = data || [];
+    } catch (e) { return UI.toast.error('Could not load: ' + (e && e.message ? e.message : e)); }
+    const users = (_plGoalCtx && _plGoalCtx.users) || [];
+    const uName = (id) => { const u = users.find(x => String(x.id) === String(id)); return u ? (u.full_name || u.username || '') : ''; };
+    const tierTxt = { commit: '🟢 Commit', audit: '🩺 Audit', hot: '🔥 Hot', new: '🌱 New', cold: '💤 Cold' };
+    const total = rows.reduce((t, r) => t + (Number(r.open_potential_rm) || 0), 0);
+    const body = rows.length ? rows.map(r => {
+        const items = ((r.open_potential_detail && r.open_potential_detail.items) || []);
+        const itemsTxt = items.map(i => `${esc(String(i.label || '').slice(0, 40))}${Number(i.price) > 0 ? ` <span class="plg-muted">${_plRmK(i.price)}</span>` : ''}`).join(' · ');
+        return `
+        <div style="padding:9px 0;border-top:1px solid #F3F4F6;">
+            <div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px;">
+                <a href="javascript:void(0)" onclick="UI.hideModal();app.showProspectDetail(${Number(r.id)})" style="font-weight:700;color:#2563EB;">${esc(r.full_name || '')}</a>
+                <strong style="color:#047857;">${_plRM(r.open_potential_rm)}</strong>
+            </div>
+            <div style="font-size:12px;margin-top:2px;">${itemsTxt || '<span class="plg-muted">—</span>'}</div>
+            <div class="plg-muted" style="margin-top:2px;">${tierTxt[r.potential_tier] || '—'}${r.potential_last_met ? ` · met ${esc(r.potential_last_met)}` : ''} · ${r.potential_next_booked ? `📅 next ${esc(r.potential_next_booked)}` : '<span style="color:#B91C1C;font-weight:600;">⚠ nothing booked</span>'}${ids.size > 1 ? ` · ${esc(uName(r.responsible_agent_id))}` : ''}</div>
+        </div>`;
+    }).join('') : '<div class="plg-muted" style="padding:12px 0;">No open potential.</div>';
+    UI.showModal(`💰 Open potential — ${label}`, `
+        <div style="margin-bottom:6px;"><strong>${_plRM(total)}</strong> across ${rows.length} ${rows.length === 1 ? 'person' : 'people'} · tap a name to open their profile</div>
+        ${body}`, [{ label: 'Close', action: 'UI.hideModal()' }]);
+};
+
+// 📋 To-do behind a review cell (the same list each agent sees as Today's top 5)
+const plShowTodoFor = async (idsCsv, label) => {
+    const ids = String(idsCsv || '').split(',').filter(Boolean).map(Number);
+    const sb = _plSb();
+    if (!sb || !ids.length) return;
+    let rows = [];
+    try {
+        const { data, error } = await sb.rpc('journey_todo_list', { p_uids: ids, p_limit: 50 });
+        if (error) throw error;
+        rows = data || [];
+    } catch (e) { return UI.toast.error('Could not load: ' + (e && e.message ? e.message : e)); }
+    const users = (_plGoalCtx && _plGoalCtx.users) || [];
+    const uName = (id) => { const u = users.find(x => String(x.id) === String(id)); return u ? (u.full_name || u.username || '') : ''; };
+    const today = _plYmd(new Date());
+    const body = rows.length ? rows.map(r => {
+        const late = r.due && String(r.due) < today;
+        const open = r.customer_id != null ? `app.showCustomerDetail(${Number(r.customer_id)})` : `app.showProspectDetail(${Number(r.prospect_id)})`;
+        return `
+        <div style="display:flex;gap:8px;align-items:flex-start;padding:8px 0;border-top:1px solid #F3F4F6;">
+            <span style="font-size:17px;">${esc(r.icon || '•')}</span>
+            <div style="flex:1;min-width:0;">
+                <a href="javascript:void(0)" onclick="UI.hideModal();${open}" style="font-weight:700;color:#2563EB;">${esc(r.name || '')}</a>
+                <span style="font-weight:700;color:#047857;margin-left:4px;">${_plRmK(r.rm)}</span>
+                <div style="font-size:12px;${late ? 'color:#B91C1C;' : ''}">${esc(r.why || '')}${late ? ' ⏰' : ''}</div>
+                ${ids.length > 1 ? `<div class="plg-muted">${esc(uName(r.agent_id))}</div>` : ''}
+            </div>
+        </div>`;
+    }).join('') : '<div class="plg-muted" style="padding:12px 0;">Nothing to do 🎉</div>';
+    UI.showModal(`📋 To-do — ${label}`, `
+        <div class="plg-muted" style="margin-bottom:6px;">Ranked by money × urgency · ⏰ = overdue · tap a name to open the profile</div>
+        ${body}`, [{ label: 'Close', action: 'UI.hideModal()' }]);
+};
+
 const plReviewToggle = (leaderId) => {
     const k = String(leaderId);
     if (!_plReviewOpen) _plReviewOpen = new Set();
@@ -5634,6 +5731,8 @@ const _PL_REVIEW_CSS = `
 .plr-agent .plr-name{padding-left:18px;}
 .plr-flag{display:inline-block;padding:0 6px;border-radius:8px;font-size:11px;font-weight:700;color:#B91C1C;background:#FEE2E2;}
 .plr-caret{display:inline-block;width:12px;color:#6B7280;}
+.plr-link{color:inherit;text-decoration:underline dotted;text-underline-offset:3px;}
+.plr-link:hover{color:#2563EB;}
 .plr-foot{padding:6px 8px 8px 26px;font-size:12px;}
 .plr-more{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;width:100%;text-align:left;margin:12px 0;padding:10px 14px;border:1px dashed #D1D5DB;border-radius:10px;background:#F9FAFB;cursor:pointer;font-weight:700;font-size:14px;}
 body.pl-compact #pl-header-controls,body.pl-compact #pl-insights-root,body.pl-compact #pl-funnel-root,
@@ -6543,6 +6642,8 @@ const saveGoals = async () => {
         plGoalShiftMonth,
         plSetDealAgentFilter,
         plReviewToggle,
+        plShowPotentialFor,
+        plShowTodoFor,
         plToggleMore,
         plSetDealView,
         plSetInsightPeriod,
