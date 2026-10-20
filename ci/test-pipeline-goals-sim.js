@@ -26,11 +26,12 @@ const USERS = [
   { id: 104, role: 'Level 9 Consultant', full_name: 'Gone', reporting_to: 20, status: 'inactive' },
 ];
 const PURCHASES = [
-  { id: 1, agent_id: 101, date: '2026-11-03', amount: 20000, item: 'Power Ring' },
+  { id: 1, agent_id: 101, date: '2026-11-03', amount: 20000, item: 'Power Ring', customer_id: 9001 },
   { id: 2, agent_id: 101, date: '2026-10-30', amount: 50000, item: 'x' },              // other month
   { id: 3, agent_id: 101, date: '2026-11-10', amount: 9000, status: 'CANCELLED' },     // cancelled
-  { id: 4, agent_id: 102, date: '2026-11-12', amount: 30000, item: 'Fengshui' },
-  { id: 5, agent_id: 20,  date: '2026-11-15', amount: 10000, item: 'Calligraphy' },    // leader's own
+  { id: 4, agent_id: 102, date: '2026-11-12', amount: 30000, item: '专案 Project Plan', prospect_id: 602, customer_id: 9003 },
+  { id: 5, agent_id: 20,  date: '2026-11-15', amount: 10000, item: 'TIAN ZHI XI 1', customer_id: 9003 },    // leader's own, untagged
+  { id: 8, agent_id: 101, date: '2026-03-15', amount: 40000, item: '六曜指环 Support Power Ring', customer_id: 9002 },  // YTD only
   { id: 6, agent_id: 103, date: '2026-11-15', amount: 5000, item: 'Book' },
   { id: 7, agent_id: 999, date: '2026-11-15', amount: 7000, item: 'Other team' },
 ];
@@ -40,16 +41,32 @@ const DEALS = [
   { id: 3, prospect_id: 503, agent_id: 101, product: 'Old', amount: 10000, expected_close_date: '2026-10-01', stage: 'interested' }, // overdue → counts
   { id: 4, prospect_id: 504, agent_id: 101, product: 'Done', amount: 99000, expected_close_date: '2026-11-02', stage: 'won' },      // not open
   { id: 5, prospect_id: 505, agent_id: 102, product: 'X', amount: 10000, expected_close_date: '2026-11-30', stage: 'closing' },
+  { id: 6, prospect_id: 506, agent_id: 102, product: 'Lost one', amount: 8000, expected_close_date: '2026-11-10', stage: 'lost', source: 'customer_referral', updated_at: '2026-11-11T03:00:00Z' },
+  { id: 7, prospect_id: 507, agent_id: 101, product: '六曜指环 Support Power Ring', product_id: 5, amount: 20000, expected_close_date: '2026-11-05', stage: 'won', source: 'event', purchase_id: 1, won_at: '2026-11-03T05:00:00Z' },
 ];
 let GOALS = [];
+// Where-from / Which-product fixtures (sale source via the customer hop).
+const CUSTOMERS = [
+  { id: 9001, referred_by_type: null, converted_from_prospect_id: 601 },  // source via converted prospect
+  { id: 9002, referred_by_type: 'Customer' },
+  { id: 9003, referred_by_type: null },                                   // untagged
+];
+const LINK_PROSPECTS = [{ id: 601, referred_by_type: 'Consultant' }, { id: 602, referred_by_type: 'Prospect' }];
+const CATALOG = [
+  { id: 5, name: '六曜指环 Support Power Ring', subcategory: 'Power Ring' },
+  { id: 6, name: '天至喜1 Tian Zhi Xi 1', subcategory: 'Calligraphy Adornment' },
+  { id: 7, name: '专案-排屋 Terrace House (Direct On)', subcategory: 'Fengshui Audit · 专案 Direct On' },
+  { id: 8, name: '灵活风水-公寓 Flexi Fengshui Condominium', subcategory: 'Fengshui Audit · 灵活 Flexi' },
+];
 const PROSPECTS = [{ id: 501, full_name: '<b>Evil</b> Tan', referred_by_type: 'Customer', referred_by: 'Mr Lim' }];
 
-const calls = { inserts: [], toastErr: [], toastOk: [] };
+const calls = { inserts: [], toastErr: [], toastOk: [], custIn: [] };
 function builder(table) {
   const q = { table, filters: [], _op: 'select', _row: null };
   const api = {
     select() { return api; }, order() { return api; }, limit() { return api; },
     eq(k, v) { q.filters.push([k, v]); return api; },
+    in(k, vs) { q.inF = [k, vs.map(String)]; return api; },
     insert(row) { q._op = 'insert'; q._row = row; calls.inserts.push({ table, row }); return api; },
     update(row) { q._op = 'update'; q._row = row; return api; },
     upsert(rows) { q._op = 'upsert'; q._row = rows; return api; },
@@ -59,6 +76,8 @@ function builder(table) {
       let data = [];
       if (table === 'pipeline_goals') data = GOALS.filter(g => q.filters.every(([k, v]) => String(g[k]) === String(v)));
       if (table === 'pipeline_deals') data = DEALS.slice();
+      if (table === 'customers') { calls.custIn.push(q.inF[1].slice()); data = CUSTOMERS.filter(r => q.inF[1].includes(String(r.id))); }
+      if (table === 'prospects') data = LINK_PROSPECTS.filter(r => q.inF[1].includes(String(r.id)));
       return Promise.resolve({ data, error: null }).then(res, rej);
     },
   };
@@ -67,7 +86,7 @@ function builder(table) {
 const supabaseStub = { from: (t) => builder(t) };
 
 const AppDataStore = {
-  async getAll(t) { if (t === 'users') return USERS; if (t === 'purchases') return PURCHASES; return []; },
+  async getAll(t) { if (t === 'users') return USERS; if (t === 'purchases') return PURCHASES; if (t === 'products') return CATALOG; return []; },
   async getById(t, id) { return t === 'prospects' ? PROSPECTS.find(p => String(p.id) === String(id)) || null : null; },
   async query() { return []; },
   async searchProspects() { return PROSPECTS; },
@@ -169,6 +188,69 @@ const as = (id) => { windowStub._appState.cu = USERS.find(u => u.id === id); };
   check('customer referral source', app._plAutoSource(PROSPECTS[0]).source, 'customer_referral');
   check('converted → repeat', app._plAutoSource({ status: 'converted' }).source, 'repeat_customer');
   check('consultant → agent referral', app._plAutoSource({ referred_by_type: 'Consultant' }).source, 'agent_referral');
+
+  // ── Where from / Which product ──
+  check('product: exact catalogue name', app._plProductGroup('六曜指环 Support Power Ring', null, CATALOG), 'Power Ring');
+  check('product: pinyin inside free text', app._plProductGroup('TIAN ZHI XI 1', null, CATALOG), 'Calligraphy Adornment');
+  check('product: keyword 专案', app._plProductGroup('专案 Project Plan', null, CATALOG), 'Fengshui Audit · 专案 Direct On');
+  check('product: keyword Pr 6 → Power Ring', app._plProductGroup('Pr 6', null, CATALOG), 'Power Ring');
+  check('product: Flexi keyword', app._plProductGroup('Flexi Fengshui Double story', null, CATALOG), 'Fengshui Audit · 灵活 Flexi');
+  check('product: product_id wins over text', app._plProductGroup('whatever', 6, CATALOG), 'Calligraphy Adornment');
+  check('product: imports grouped', app._plProductGroup('Imported / pre-system balance', null, CATALOG), 'Imported balance');
+  check('product: unknown → Other', app._plProductGroup('???', null, CATALOG), 'Other / not matched');
+
+  as(20);  // leader: team tree 20/101/102/104
+  c = await app._plLoadGoalCtx(USERS);
+  const tsales = PURCHASES.filter(p => c.scopeIds.has(String(p.agent_id)) && !/cancel/i.test(p.status || ''));
+  const links = await app._plLoadSaleLinks(tsales);
+  check('links: customer hop loaded', links.cust.has('9001') && links.pros.has('601'));
+  check('links: only in-scope customers fetched', calls.custIn.flat().sort().join(','), '9001,9002,9003');
+  let src = app._plSourceStats(c, links, 'month', c.scopeIds);
+  const bySrc = (k) => src.find(x => x.key === k) || {};
+  check('source: deal-linked sale uses the deal source', bySrc('event').rm, 20000);
+  check('source: no agent_referral when deal source wins', bySrc('agent_referral').rm === undefined);
+  check('source: prospect_id referred_by_type beats untagged customer', bySrc('prospect_referral').rm, 30000);
+  check('source: untagged sale → Not tagged', bySrc('unknown').rm, 10000);
+  check('source: Not tagged sorted last', src[src.length - 1].key, 'unknown');
+  check('source: lost deal counts in win rate', bySrc('customer_referral').lost, 1);
+  check('source: win rate 0/1', bySrc('customer_referral').winRate, 0);
+  check('source: event win rate 1/1', bySrc('event').winRate, 1);
+  check('source: avg deal', bySrc('prospect_referral').avg, 30000);
+  check('source: cancelled + other month excluded', src.reduce((s, x) => s + x.rm, 0), 60000);
+  // without the deal link, the customer → converted prospect hop gives Consultant
+  const noLink = { ...c, deals: c.deals.filter(d => d.id !== 7) };
+  check('source: customer → converted prospect hop', (app._plSourceStats(noLink, links, 'month', c.scopeIds).find(x => x.key === 'agent_referral') || {}).rm, 20000);
+  src = app._plSourceStats(c, links, 'ytd', c.scopeIds);
+  check('source YTD adds March customer referral', (src.find(x => x.key === 'customer_referral') || {}).rm, 40000);
+  check('source YTD: Oct sale (no customer) joins Not tagged', (src.find(x => x.key === 'unknown') || {}).rm, 60000);
+
+  const prod = app._plProductStats(c, CATALOG, 'month', c.scopeIds);
+  const byP = (k) => prod.find(x => x.key === k) || {};
+  check('product won: Power Ring via linked deal product_id', byP('Power Ring').rm, 20000);
+  check('product won: 专案', byP('Fengshui Audit · 专案 Direct On').rm, 30000);
+  check('product won: calligraphy (leader own)', byP('Calligraphy Adornment').rm, 10000);
+  check('product open: PR6 deal text → Power Ring', byP('Power Ring').open, 20000);
+  check('product weighted: PR6 at proposal 50%', byP('Power Ring').weighted, 10000);
+  check('product open: unmatched deals grouped', byP('Other / not matched').openN, 2);
+  check('product weighted: Old 20% + X 80%', byP('Other / not matched').weighted, 10000 * 0.2 + 10000 * 0.8);
+
+  src = app._plSourceStats(c, links, 'month', new Set(['102']));
+  check('member filter restricts sales', src.reduce((s, x) => s + x.rm, 0), 30000);
+
+  app._plSetInsightPeriodForTest('month');
+  let ih = app._plInsightsHtml(c, links, CATALOG);
+  check('insights html has both cards', ih.includes('id="pl-where-from"') && ih.includes('id="pl-which-product"'));
+  check('insights html warns untagged RM', ih.includes('has no source'));
+  check('insights html win rate 0/1', ih.includes('0% <span class="plg-muted">0/1</span>'));
+  app._plSetInsightPeriodForTest('ytd');
+  ih = app._plInsightsHtml(c, links, CATALOG);
+  check('insights ytd label', ih.includes('Jan–Nov 2026'));
+  app._plSetInsightPeriodForTest('month');
+
+  as(101);
+  c = await app._plLoadGoalCtx(USERS);
+  src = app._plSourceStats(c, links, 'month', c.scopeIds);
+  check('agent scope: only own sale', src.reduce((s, x) => s + x.rm, 0), 20000);
 
   // ── saveDeal validation + owner resolution ──
   const vals = {};

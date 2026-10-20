@@ -5229,6 +5229,7 @@ const _PL_GOAL_CSS = `
 .pld-empty{text-align:center;color:#D1D5DB;padding:12px;font-size:12px;}
 .pld-sug{display:flex;gap:6px;flex-wrap:wrap;align-items:center;background:#F0FDF4;border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12px;}
 .pld-sug button{font-size:11px;padding:3px 8px;}
+.pli-table{min-width:520px;}
 @media (max-width:768px){
   .plg-card{padding:14px;}
   .plg-tile-value{font-size:17px;}
@@ -5252,9 +5253,11 @@ const _plMountGoalSections = (allUsers) => {
         if (!anchor) return;
         document.getElementById('pl-goal-root')?.remove();
         document.getElementById('pl-deals-root')?.remove();
+        document.getElementById('pl-insights-root')?.remove();
         anchor.insertAdjacentHTML('beforebegin',
             '<div id="pl-goal-root"><div class="plg-card"><div class="skeleton" style="height:120px;border-radius:8px;"></div></div></div>' +
-            '<div id="pl-deals-root"><div class="plg-card"><div class="skeleton" style="height:160px;border-radius:8px;"></div></div></div>');
+            '<div id="pl-deals-root"><div class="plg-card"><div class="skeleton" style="height:160px;border-radius:8px;"></div></div></div>' +
+            '<div id="pl-insights-root"></div>');
         _plRenderGoalSections(allUsers);
     } catch (e) { console.warn('[pipeline-goals] mount failed', e && e.message); }
 };
@@ -5268,6 +5271,7 @@ const _plRenderGoalSections = async (allUsers) => {
         g.innerHTML = _plGoalBarHtml(c);
         d.innerHTML = await _plDealsBoardHtml(c);
         _plRenderDealSuggest();
+        await _plRenderInsights();
     } catch (e) {
         console.warn('[pipeline-goals] render failed', e && e.message);
         g.innerHTML = `<div class="plg-card"><div class="plg-muted">Goal section could not load. <a href="javascript:void(0)" onclick="app.refreshPipeline()">Retry</a></div></div>`;
@@ -5291,6 +5295,246 @@ const _plRenderDealSuggest = () => {
 const plGoalShiftMonth = (delta) => { _plGoalMonth = _plShiftMonth(_plGoalMonth || _plCurMonth(), delta); _plRenderGoalSections(); };
 const plSetDealAgentFilter = (id) => { _plDealAgentFilter = (_plDealAgentFilter === id ? 'all' : id); _plRenderGoalSections(); };
 const plSetDealView = (v) => { _plDealView = v; _plRenderGoalSections(); };
+
+// ── Where from + Which product (below the Deals board) ───────────────────
+// Sale source: a WON deal linked to the sale (purchase_id) wins; otherwise
+// the buyer's referred_by_type — purchase.prospect_id → prospect, else
+// customer_id → customer (or the prospect it was converted from). Most sales
+// carry only customer_id, so the customer hop is load-bearing.
+let _plInsightPeriod = 'month';   // 'month' | 'ytd'
+let _plInsightCache = null;       // { key, links, catalog }
+
+const _plSaleOk = (p) => p && p.agent_id != null && (Number(p.amount) || 0) > 0 && !/cancel|refund|void/i.test(String(p.status || ''));
+const _plRefTypeSource = (t) => {
+    const s = String(t || '').trim().toLowerCase();
+    if (s === 'customer') return 'customer_referral';
+    if (s === 'consultant' || s === 'agent') return 'agent_referral';
+    if (s === 'prospect') return 'prospect_referral';
+    return '';
+};
+const _plPeriodRange = (month, period) => ({ start: period === 'ytd' ? month.slice(0, 4) + '-01-01' : month + '-01', end: _plMonthEnd(month) });
+const _plInRange = (ymd, r) => { const d = String(ymd || '').slice(0, 10); return !!d && d >= r.start && d <= r.end; };
+
+// Same member filter as the Deals board (tap a Goal Bar row).
+const _plFilterIds = (c) => {
+    if (_plDealAgentFilter === 'all') return c.scopeIds;
+    return _plDealAgentFilter.startsWith('team:') ? _plTreeIds(c.users, _plDealAgentFilter.slice(5)) : new Set([_plDealAgentFilter]);
+};
+
+// purchases.item / deal.product → products.subcategory. Exact name, then the
+// catalogue's Chinese / pinyin name inside the free text, then keywords.
+const _PL_PRODUCT_KEYWORDS = [
+    [/imported|pre-system/i, 'Imported balance'],
+    [/power\s*ring|\bpr\s*\d|指环|班指/i, 'Power Ring'],
+    [/专案|project\s*plan|direct\s*on/i, '专案'],
+    [/灵活|flexi|plexi/i, '灵活'],
+    [/简易|simplif/i, '简易'],
+    [/商业|commercial/i, '商业'],
+    [/calligraphy|书法/i, 'Calligraphy Adornment'],
+    [/财库|财托|cai\s*ku|cai\s*tuo/i, 'Royal Woodwork Series'],
+];
+const _plNormName = (s) => String(s || '').toLowerCase().replace(/[\s\-_,.:;()（）·，、]+/g, '');
+const _plProductGroup = (name, productId, catalog) => {
+    const list = catalog || [];
+    if (productId != null) {
+        const p = list.find(x => String(x.id) === String(productId));
+        if (p && p.subcategory) return p.subcategory;
+    }
+    const raw = String(name || '').trim();
+    if (!raw) return 'Other / not matched';
+    const n = _plNormName(raw);
+    let best = null, bestLen = 0;
+    for (const p of list) {
+        if (!p.name || !p.subcategory) continue;
+        const pn = _plNormName(p.name);
+        const zh = (String(p.name).match(/^[㐀-鿿]+/) || [''])[0];
+        const en = _plNormName(String(p.name).replace(/^[^A-Za-z]*/, ''));
+        let len = 0;
+        if (pn === n) len = 1000;
+        else if (zh.length >= 2 && n.includes(zh)) len = zh.length * 2;
+        else if (en.length >= 6 && (n.includes(en) || (n.length >= 6 && en.includes(n)))) len = Math.min(en.length, n.length);
+        if (len > bestLen) { best = p; bestLen = len; }
+    }
+    if (best) return best.subcategory;
+    for (const [re, key] of _PL_PRODUCT_KEYWORDS) {
+        if (!re.test(raw)) continue;
+        const sub = list.find(x => x.subcategory && String(x.subcategory).includes(key));
+        return sub ? sub.subcategory : key;
+    }
+    return 'Other / not matched';
+};
+
+// Source lookups for the sales in scope (customers + prospects, RLS-scoped).
+const _plLoadSaleLinks = async (sales) => {
+    const sb = _plSb();
+    const links = { pros: new Map(), cust: new Map() };
+    if (!sb || !sales.length) return links;
+    const chunk = (arr) => { const out = []; for (let i = 0; i < arr.length; i += 200) out.push(arr.slice(i, i + 200)); return out; };
+    const custIds = [...new Set(sales.filter(p => p.customer_id != null).map(p => String(p.customer_id)))];
+    for (const ids of chunk(custIds)) {
+        const { data, error } = await sb.from('customers').select('id,full_name,referred_by_type,converted_from_prospect_id').in('id', ids);
+        if (!error) for (const r of data || []) links.cust.set(String(r.id), r);
+    }
+    const prosIds = [...new Set([
+        ...sales.map(p => p.prospect_id),
+        ...[...links.cust.values()].map(c => c.converted_from_prospect_id),
+    ].filter(x => x != null).map(String))];
+    for (const ids of chunk(prosIds)) {
+        const { data, error } = await sb.from('prospects').select('id,full_name,referred_by_type').in('id', ids);
+        if (!error) for (const r of data || []) links.pros.set(String(r.id), r);
+    }
+    return links;
+};
+
+const _plSaleSource = (p, links, dealByPurchase) => {
+    const d = dealByPurchase && dealByPurchase.get(String(p.id));
+    if (d && d.source) return d.source;
+    const pr = p.prospect_id != null ? links.pros.get(String(p.prospect_id)) : null;
+    let s = pr ? _plRefTypeSource(pr.referred_by_type) : '';
+    if (s) return s;
+    const cu = p.customer_id != null ? links.cust.get(String(p.customer_id)) : null;
+    if (cu) {
+        s = _plRefTypeSource(cu.referred_by_type);
+        if (!s && cu.converted_from_prospect_id != null) {
+            const cp = links.pros.get(String(cu.converted_from_prospect_id));
+            s = cp ? _plRefTypeSource(cp.referred_by_type) : '';
+        }
+    }
+    return s || 'unknown';
+};
+
+// Deals close in a period by won_at (won) / updated_at (lost).
+const _plDealClosedIn = (d, r) => _plInRange(d.stage === 'won' ? (d.won_at || d.updated_at) : d.updated_at, r);
+
+const _plSourceStats = (c, links, period, ids) => {
+    const r = _plPeriodRange(c.month, period);
+    const dealByPurchase = new Map(c.deals.filter(d => d.purchase_id != null).map(d => [String(d.purchase_id), d]));
+    const rows = new Map();
+    const row = (k) => { if (!rows.has(k)) rows.set(k, { key: k, rm: 0, n: 0, won: 0, lost: 0, open: 0, openN: 0 }); return rows.get(k); };
+    for (const p of c.purchases) {
+        if (!_plSaleOk(p) || !ids.has(String(p.agent_id)) || !_plInRange(p.date, r)) continue;
+        const x = row(_plSaleSource(p, links, dealByPurchase));
+        x.rm += Number(p.amount) || 0; x.n++;
+    }
+    for (const d of c.deals) {
+        if (!ids.has(String(d.agent_id))) continue;
+        const k = d.source || 'unknown';
+        if (PL_DEAL_OPEN.has(d.stage)) {
+            if (String(d.expected_close_date || '') <= r.end) { const x = row(k); x.open += Number(d.amount) || 0; x.openN++; }
+        } else if (_plDealClosedIn(d, r)) {
+            row(k)[d.stage === 'won' ? 'won' : 'lost']++;
+        }
+    }
+    const out = [...rows.values()].map(x => ({
+        ...x,
+        label: x.key === 'unknown' ? 'Not tagged' : (_plSourceLabel(x.key) || x.key),
+        avg: x.n ? x.rm / x.n : 0,
+        winRate: (x.won + x.lost) ? x.won / (x.won + x.lost) : null,
+    }));
+    out.sort((a, b) => (a.key === 'unknown') - (b.key === 'unknown') || b.rm - a.rm || b.open - a.open);
+    return out;
+};
+
+const _plProductStats = (c, catalog, period, ids) => {
+    const r = _plPeriodRange(c.month, period);
+    const rows = new Map();
+    const row = (k) => { if (!rows.has(k)) rows.set(k, { key: k, rm: 0, n: 0, open: 0, openN: 0, weighted: 0 }); return rows.get(k); };
+    const dealByPurchase = new Map(c.deals.filter(d => d.purchase_id != null).map(d => [String(d.purchase_id), d]));
+    for (const p of c.purchases) {
+        if (!_plSaleOk(p) || !ids.has(String(p.agent_id)) || !_plInRange(p.date, r)) continue;
+        const d = dealByPurchase.get(String(p.id));
+        const x = row(d && d.product_id != null ? _plProductGroup(d.product, d.product_id, catalog) : _plProductGroup(p.item, null, catalog));
+        x.rm += Number(p.amount) || 0; x.n++;
+    }
+    for (const d of c.deals) {
+        if (!ids.has(String(d.agent_id)) || !PL_DEAL_OPEN.has(d.stage) || String(d.expected_close_date || '') > r.end) continue;
+        const x = row(_plProductGroup(d.product, d.product_id, catalog));
+        const a = Number(d.amount) || 0;
+        x.open += a; x.openN++; x.weighted += a * _plStage(d.stage).prob / 100;
+    }
+    return [...rows.values()].sort((a, b) => (b.rm + b.weighted) - (a.rm + a.weighted));
+};
+
+const _plInsightsHtml = (c, links, catalog) => {
+    const ids = _plFilterIds(c);
+    const period = _plInsightPeriod;
+    const src = _plSourceStats(c, links, period, ids);
+    const prod = _plProductStats(c, catalog, period, ids);
+    const periodTxt = period === 'ytd' ? `Jan–${_plMonthLabel(c.month).split(' ')[0].slice(0, 3)} ${c.month.slice(0, 4)}` : _plMonthLabel(c.month);
+    const btn = (id, label) => `<button class="btn btn-sm ${period === id ? 'primary' : 'secondary'}" onclick="app.plSetInsightPeriod('${id}')">${label}</button>`;
+    const totalRM = src.reduce((s, x) => s + x.rm, 0);
+    const unk = src.find(x => x.key === 'unknown');
+    const pct = (v, t) => t > 0 ? Math.round(v / t * 100) + '%' : '—';
+    const srcRows = src.length ? src.map(x => `
+        <tr${x.key === 'unknown' ? ' style="color:#92400E;background:#FFFBEB;"' : ''}>
+            <td><strong>${esc(x.label)}</strong></td>
+            <td>${_plRM(x.rm)} <span class="plg-muted">${pct(x.rm, totalRM)}</span></td>
+            <td>${x.n}</td>
+            <td>${x.n ? _plRM(x.avg) : '—'}</td>
+            <td>${x.winRate == null ? '<span class="plg-muted">—</span>' : `${Math.round(x.winRate * 100)}% <span class="plg-muted">${x.won}/${x.won + x.lost}</span>`}</td>
+            <td>${x.openN ? `${_plRM(x.open)} <span class="plg-muted">${x.openN}</span>` : '<span class="plg-muted">—</span>'}</td>
+        </tr>`).join('') : `<tr><td colspan="6" class="plg-muted">No sales or deals in ${esc(periodTxt)}.</td></tr>`;
+    const prodRows = prod.length ? prod.map(x => `
+        <tr>
+            <td><strong>${esc(x.key)}</strong></td>
+            <td>${x.n ? `${_plRM(x.rm)} <span class="plg-muted">${x.n}</span>` : '<span class="plg-muted">—</span>'}</td>
+            <td>${x.openN ? `${_plRM(x.open)} <span class="plg-muted">${x.openN}</span>` : '<span class="plg-muted">—</span>'}</td>
+            <td>${x.openN ? _plRM(x.weighted) : '<span class="plg-muted">—</span>'}</td>
+            <td><strong>${_plRM(x.rm + x.weighted)}</strong></td>
+        </tr>`).join('') : `<tr><td colspan="5" class="plg-muted">No sales or deals in ${esc(periodTxt)}.</td></tr>`;
+    return `
+    <div class="plg-card" id="pl-where-from">
+        <div class="plg-head">
+            <div>
+                <h2 class="plg-title">📍 Where from</h2>
+                <div class="plg-muted">${esc(periodTxt)} · sales by the buyer's referral source (or the deal's source) · win rate = deals won ÷ (won + lost)</div>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">${btn('month', 'This month')}${btn('ytd', 'Year to date')}</div>
+        </div>
+        ${unk && unk.rm > 0 ? `<div class="plg-advice">⚠️ ${_plRM(unk.rm)} (${pct(unk.rm, totalRM)}) of sales has no source. Set <strong>Referred By</strong> on those customers so this view is complete.</div>` : ''}
+        <div style="overflow-x:auto;margin-top:10px;">
+            <table class="plg-table pli-table">
+                <thead><tr><th>Source</th><th>RM won</th><th>Sales</th><th>Avg deal</th><th>Win rate</th><th>Open pipeline</th></tr></thead>
+                <tbody>${srcRows}</tbody>
+            </table>
+        </div>
+    </div>
+    <div class="plg-card" id="pl-which-product">
+        <div class="plg-head">
+            <div>
+                <h2 class="plg-title">📦 Which product</h2>
+                <div class="plg-muted">${esc(periodTxt)} · won = sales · open = deals closing by ${esc(_plMonthEnd(c.month))} · weighted by stage (20/50/80%)</div>
+            </div>
+        </div>
+        <div style="overflow-x:auto;">
+            <table class="plg-table pli-table">
+                <thead><tr><th>Product group</th><th>RM won</th><th>Open</th><th>Weighted</th><th>Won + weighted</th></tr></thead>
+                <tbody>${prodRows}</tbody>
+            </table>
+        </div>
+    </div>`;
+};
+
+const _plRenderInsights = async () => {
+    const box = document.getElementById('pl-insights-root');
+    const c = _plGoalCtx;
+    if (!box || !c) return;
+    try {
+        const year = c.month.slice(0, 4);
+        const key = year + '|' + c.purchases.length + '|' + c.scopeIds.size;
+        if (!_plInsightCache || _plInsightCache.key !== key) {
+            const sales = c.purchases.filter(p => _plSaleOk(p) && c.scopeIds.has(String(p.agent_id)) && String(p.date || '').slice(0, 4) === year);
+            let catalog = [];
+            try { catalog = (await AppDataStore.getAll('products') || []).filter(p => p && p.name); } catch (_) { /* name-only grouping */ }
+            _plInsightCache = { key, links: await _plLoadSaleLinks(sales), catalog };
+        }
+        box.innerHTML = _plInsightsHtml(c, _plInsightCache.links, _plInsightCache.catalog);
+    } catch (e) {
+        console.warn('[pipeline-insights] render failed', e && e.message);
+        box.innerHTML = '';
+    }
+};
+const plSetInsightPeriod = (p) => { _plInsightPeriod = p === 'ytd' ? 'ytd' : 'month'; _plRenderInsights(); };
 
 // ── Deal modal ───────────────────────────────────────────────────────────
 const _plAutoSource = (p) => {
@@ -5560,7 +5804,14 @@ const saveGoals = async () => {
         plGoalShiftMonth,
         plSetDealAgentFilter,
         plSetDealView,
+        plSetInsightPeriod,
         _plLoadGoalCtx,
+        _plInsightsHtml,
+        _plSourceStats,
+        _plProductStats,
+        _plProductGroup,
+        _plLoadSaleLinks,
+        _plSetInsightPeriodForTest: (p) => { _plInsightPeriod = p; },
         _plGoalBarHtml,
         _plDealsBoardHtml,
         _plAutoSource,
