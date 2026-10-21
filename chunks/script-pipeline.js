@@ -6215,7 +6215,7 @@ const _plLoadSaleLinks = async (sales) => {
         ...[...links.cust.values()].map(c => c.converted_from_prospect_id),
     ].filter(x => x != null).map(String))];
     for (const ids of chunk(prosIds)) {
-        const { data, error } = await sb.from('prospects').select('id,full_name,referred_by_type').in('id', ids);
+        const { data, error } = await sb.from('prospects').select('id,full_name,referred_by_type,met_via').in('id', ids);
         if (!error) for (const r of data || []) links.pros.set(String(r.id), r);
     }
     return links;
@@ -6225,14 +6225,16 @@ const _plSaleSource = (p, links, dealByPurchase) => {
     const d = dealByPurchase && dealByPurchase.get(String(p.id));
     if (d && d.source) return d.source;
     const pr = p.prospect_id != null ? links.pros.get(String(p.prospect_id)) : null;
-    let s = pr ? _plRefTypeSource(pr.referred_by_type) : '';
+    // "How did we meet?" (prospects.met_via) wins over the referral type
+    const _met = (x) => (x && x.met_via && PL_DEAL_SOURCES.some(o => o.id === x.met_via)) ? x.met_via : '';
+    let s = pr ? (_met(pr) || _plRefTypeSource(pr.referred_by_type)) : '';
     if (s) return s;
     const cu = p.customer_id != null ? links.cust.get(String(p.customer_id)) : null;
     if (cu) {
         s = _plRefTypeSource(cu.referred_by_type);
         if (!s && cu.converted_from_prospect_id != null) {
             const cp = links.pros.get(String(cu.converted_from_prospect_id));
-            s = cp ? _plRefTypeSource(cp.referred_by_type) : '';
+            s = cp ? (_met(cp) || _plRefTypeSource(cp.referred_by_type)) : '';
         }
     }
     return s || 'unknown';
@@ -6378,6 +6380,7 @@ const _plAutoSource = (p) => {
     const t = String(p.referred_by_type || '').toLowerCase();
     const detail = p.referred_by || '';
     if (p.status === 'converted') return { source: 'repeat_customer', detail: '' };
+    if (p.met_via && PL_DEAL_SOURCES.some(s => s.id === p.met_via)) return { source: p.met_via, detail };   // "How did we meet?" wins
     if (t === 'customer') return { source: 'customer_referral', detail };
     if (t === 'consultant' || t === 'agent') return { source: 'agent_referral', detail };
     if (t === 'prospect') return { source: 'prospect_referral', detail };

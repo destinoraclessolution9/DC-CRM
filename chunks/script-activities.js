@@ -1210,9 +1210,28 @@
                     <label>Please specify relation</label>
                     <input type="text" id="${prefix}-relationship-other" class="form-control" placeholder="Specify relation..." value="${relOther ? esc(d.referral_relationship) : ''}" ${disabled}>
                 </div>
+                <div class="form-group">
+                    <label>How did we meet?</label>
+                    <select id="${prefix}-met-via" class="form-control" ${disabled}>
+                        <option value="">-- Select --</option>
+                        ${MET_VIA_OPTIONS.map(([v, l]) => `<option value="${v}" ${d.met_via === v ? 'selected' : ''}>${l}</option>`).join('')}
+                    </select>
+                </div>
             </div>
         `;
     };
+
+    // "How did we meet?" — same ids as the Pipeline's deal sources, so the
+    // Where-from view reads it directly (prospects.met_via).
+    const MET_VIA_OPTIONS = [
+        ['customer_referral', 'Referral from a customer'],
+        ['agent_referral', "Agent's own contact / consultant referral"],
+        ['prospect_referral', 'Referral from a prospect / friend'],
+        ['event', 'Event (汇集 / 分享会 / course)'],
+        ['cps_walkin', 'CPS booth / roadshow / walk-in'],
+        ['social', 'Social media / online'],
+        ['other', 'Other'],
+    ];
 
     // Collect all Basic Info fields from the DOM for saving. Used by both
     // saveProspect and saveActivity (CPS) so they stay in sync.
@@ -1263,6 +1282,7 @@
             spouse_name: d(`${prefix}-spouse`) || null,
             children: JSON.stringify(collectProspectChildren()),
             referral_relationship: rel === 'Other' ? (relOther || 'Other') : rel,
+            met_via: d(`${prefix}-met-via`) || null,
             life_chart_type: lifeChartType,
         };
     };
