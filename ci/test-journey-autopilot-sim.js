@@ -274,66 +274,132 @@ const runTimers = async () => { while (timers.length) { const t = timers.shift()
   await app.apRenderFunnel('y');
   check('no CPS → message', fbox.innerHTML.includes('No CPS in this period'), true);
 
-  // ── 💳 POP collections ──────────────────────────────────────────────────
-  for (const fn of ['openPopBoard', 'openPopPlan', 'popMark', 'popMarkAll', 'apFillPopLine']) check('exports ' + fn, typeof app[fn], 'function');
+  // ── 💳 POP — auto-deducted; lapsed months + manual receipts ──────────────
+  for (const fn of ['openPopBoard', 'openPopPlan', 'popMark', 'popPayManual', 'popSaveReceipt', 'popOpenReceipt', 'popUndoReceipt', 'popImportOpen', 'popImportPhoto', 'popImportPreview', 'popImportConfirm', 'apFillPopLine', 'apFillClosingPop']) check('exports ' + fn, typeof app[fn], 'function');
   const POPROWS = [
-    { id: 901, purchase_id: 70, customer_id: 9, seq: 3, due_date: '2026-10-25', amount: 499, status: 'due', customers: { full_name: 'Tan <i>Ah</i> Kow' }, purchases: { item: 'PR6', payment_method: 'Visa 4111 1111 1111 1234 (POP)', epp_bank: 'UOB', installment_tenure: 36 } },
-    { id: 902, purchase_id: 71, customer_id: 10, seq: 5, due_date: '2026-10-02', amount: 624.17, status: 'failed', customers: { full_name: 'Lim' }, purchases: { item: '上龙柄', payment_method: 'pre own 24 months', epp_months: 24 } },
-    { id: 903, purchase_id: 72, customer_id: 11, seq: 1, due_date: '2026-10-05', amount: 399, status: 'paid', paid_date: '2026-10-05', customers: { full_name: 'Ng' }, purchases: { item: 'X' } },
+    { id: 901, purchase_id: 70, customer_id: 9, seq: 3, due_date: '2026-10-05', amount: 499, status: 'lapsed', lapsed_at: '2026-10-12', customers: { full_name: 'Tan <i>Ah</i> Kow' }, purchases: { item: 'PR6', invoice: 'INV-7', payment_method: 'Visa 4111 1111 1111 1234 (POP)', epp_bank: 'UOB', installment_tenure: 36 } },
+    { id: 902, purchase_id: 71, customer_id: 10, seq: 5, due_date: '2026-10-08', amount: 624.17, status: 'auto', customers: { full_name: 'Lim Mei Ling' }, purchases: { item: '上龙柄', payment_method: 'pre own 24 months', epp_months: 24 } },
+    { id: 903, purchase_id: 72, customer_id: 11, seq: 1, due_date: '2026-09-05', amount: 399, status: 'paid_manual', paid_date: '2026-10-03', receipt_id: 55, customers: { full_name: 'Ng' }, purchases: { item: 'X' } },
+    { id: 904, purchase_id: 71, customer_id: 10, seq: 6, due_date: '2026-11-08', amount: 624.17, status: 'due', customers: { full_name: 'Lim Mei Ling' }, purchases: { item: '上龙柄', epp_months: 24 } },
   ];
-  rpcData.pop_summary = [{ outstanding: 115165, plans: 15, due_month: 6000, due_month_n: 12, overdue: 624.17, overdue_n: 1, failed_n: 1, collected_month: 399, due_90: 19000 }];
-  tableData.pop_installments = () => POPROWS;
+  rpcData.pop_summary = [{ outstanding: 115165, plans: 15, lapsed_rm: 499, lapsed_n: 1, receipts_n: 2, receipts_rm: 1050, to_come: 110000, due_90: 19000 }];
+  tableData.pop_installments = (q) => {
+    const st = (q.ops.find(o => o[0] === 'eq' && o[1] === 'status') || [])[2];
+    const pu = (q.ops.find(o => o[0] === 'eq' && o[1] === 'purchase_id') || [])[2];
+    let r = POPROWS.slice();
+    if (st) r = r.filter(x => x.status === st);
+    if (pu != null) r = r.filter(x => x.purchase_id === pu);
+    if (q.ops.some(o => o[0] === 'update')) return r.length ? [{ id: 1 }] : [{ id: 1 }];
+    return r;
+  };
+  tableData.pop_receipts = [{ id: 55, purchase_id: 72, amount: 1050, paid_date: '2026-10-03', bank_ref: 'MBB1', note: 'late fee', uploaded_by: 42, file_path: 'pop/receipts/72/r.jpg' }];
   modals.length = 0; calls.length = 0;
-  await app.openPopBoard('month');
+  await app.openPopBoard('lapsed');
   const pb = modals[modals.length - 1];
   check('board: title', pb && pb.t, '💳 POP collections');
   check('board: summary rpc', calls.some(c => c.rpc === 'pop_summary'), true);
   const pq = calls.find(c => c.table === 'pop_installments');
-  check('board month: statuses due/failed/paid', JSON.stringify(pq.ops.find(o => o[0] === 'in')), '["in","status",["due","failed","paid"]]');
-  check('board month: from 1st of month', JSON.stringify(pq.ops.find(o => o[0] === 'gte')), JSON.stringify(['gte', 'due_date', ymd.slice(0, 8) + '01']));
-  check('board: outstanding tile', pb.c.includes('RM 115,165'), true);
-  check('board: overdue tile red', pb.c.includes('color:#B91C1C;">RM 624'), true);
+  check('board lapsed tab: status = lapsed', JSON.stringify(pq.ops.find(o => o[0] === 'eq')), '["eq","status","lapsed"]');
+  check('board: lapsed tile red with count', pb.c.includes('color:#B91C1C;">RM 499') && pb.c.includes('1 charge<'), true);
+  check('board: receipts tile', pb.c.includes('📎 Receipts this month') && pb.c.includes('RM 1,050'), true);
+  check('board: still to come', pb.c.includes('RM 110,000'), true);
   check('board: name escaped', pb.c.includes('Tan &lt;i&gt;Ah&lt;/i&gt; Kow'), true);
-  check('board: card number masked', pb.c.includes('4111') || pb.c.includes('1111 1111'), false);
+  check('board: card number masked', pb.c.includes('1111 1111'), false);
   check('board: card last 4 kept', pb.c.includes('••••1234'), true);
-  check('board: seq / tenure', pb.c.includes('3/36'), true);
-  check('board: due row has Paid + Failed', pb.c.includes("app.popMark(901, 'paid')") && pb.c.includes("app.popMark(901, 'failed')"), true);
-  check('board: failed row has Paid, no Failed', pb.c.includes("app.popMark(902, 'paid')") && !pb.c.includes("app.popMark(902, 'failed')"), true);
-  check('board: paid row has Undo', pb.c.includes("app.popMark(903, 'due')"), true);
-  check('board: bulk button counts open rows only', pb.c.includes('Mark 2 shown as paid'), true);
-  check('board: row opens plan', pb.c.includes('app.openPopPlan(70)'), true);
-  calls.length = 0;
-  await app.openPopBoard('overdue');
-  const oq = calls.find(c => c.table === 'pop_installments');
-  check('board overdue: failed or past due', JSON.stringify(oq.ops.find(o => o[0] === 'or')), JSON.stringify(['or', `status.eq.failed,and(status.eq.due,due_date.lt.${ymd})`]));
+  check('board: invoice shown', pb.c.includes('INV-7'), true);
+  check('board: lapsed row → Paid manually + Not lapsed', pb.c.includes('app.popPayManual(70, 901)') && pb.c.includes("app.popMark(901, 'auto')"), true);
+  check('board: list + picture import buttons', pb.c.includes('app.popImportOpen()') && pb.c.includes('app.popImportOpen(true)'), true);
+  check('board: no monthly ticking text', /Tick each card charge/.test(pb.c), false);
+  await app.openPopBoard('manual');
+  const mq = calls.filter(c => c.table === 'pop_installments').pop();
+  check('manual tab: status = paid_manual', JSON.stringify(mq.ops.find(o => o[0] === 'eq')), '["eq","status","paid_manual"]');
+  const mb = modals[modals.length - 1].c;
+  check('manual row → receipt button', mb.includes('app.popOpenReceipt(55)'), true);
+  await app.openPopBoard('plans');
+  const ab = modals[modals.length - 1].c;
+  check('plans tab: one line per running plan', (ab.match(/app\.openPopPlan\(71\)/g) || []).length, 1);
+  check('plans tab: lapsed count on the plan', ab.includes('⚠ 1 lapsed'), true);
 
+  // mark lapsed / not lapsed
   calls.length = 0; modals.length = 0;
-  await app.popMark(901, 'paid');
+  await app.popMark(902, 'lapsed');
   for (let k = 0; k < 6; k++) await flush();
   const mu = calls.find(c => c.table === 'pop_installments' && c.ops[0][0] === 'update');
-  check('mark: update status only', JSON.stringify(mu && mu.ops[0][1]), '{"status":"paid"}');
-  check('mark: scoped to id', JSON.stringify(mu && mu.ops[1]), '["eq","id",901]');
+  check('mark: update status lapsed', JSON.stringify(mu && mu.ops[0][1]), '{"status":"lapsed"}');
+  check('mark: scoped to id', JSON.stringify(mu && mu.ops[1]), '["eq","id",902]');
   check('mark: board re-opened', modals.length > 0 && modals[modals.length - 1].t, '💳 POP collections');
 
-  win.confirm = () => false;
-  calls.length = 0;
-  await app.popMarkAll();
-  check('bulk: cancelled → no update', calls.some(c => c.table === 'pop_installments' && c.ops[0] && c.ops[0][0] === 'update'), false);
-  win.confirm = () => true;
-  calls.length = 0;
-  await app.popMarkAll();
-  for (let k = 0; k < 6; k++) await flush();
-  const bu = calls.find(c => c.table === 'pop_installments' && c.ops[0] && c.ops[0][0] === 'update');
-  check('bulk: only open rows', JSON.stringify(bu && bu.ops[1]), '["in","id",[901,902]]');
-
+  // plan view: auto month offers ⚠ Lapsed; receipts listed with view + undo
   for (let k = 0; k < 6; k++) await flush();
   modals.length = 0;
-  await app.openPopPlan(70);
+  await app.openPopPlan(72);
   const pp = modals[modals.length - 1];
   check('plan: title', pp && pp.t, '💳 POP plan');
-  check('plan: left = open rows', pp && pp.c.includes('RM 1,123'), true);
-  check('plan: buttons keep plan view', pp && pp.c.includes("app.popMark(901, 'paid', { plan: 70 })"), true);
-  check('plan: link back to board', pp && pp.b[0].action, 'app.openPopBoard()');
+  check('plan: receipts section', pp && pp.c.includes('📎 Manual payments (1)'), true);
+  check('plan: receipt amount + note + ref', pp && pp.c.includes('RM 1,050') && pp.c.includes('late fee') && pp.c.includes('ref MBB1'), true);
+  check('plan: uploader can undo', pp && pp.c.includes('app.popUndoReceipt(55, 72)'), true);
+  modals.length = 0;
+  await app.openPopPlan(71);
+  const pp2 = modals[modals.length - 1].c;
+  check('plan: auto month → ⚠ Lapsed button keeps plan view', pp2.includes("app.popMark(902, 'lapsed', { plan: 71 })"), true);
+  check('plan: next month (Nov, future) → no lapse button yet', pp2.includes('app.popMark(904,'), false);
+
+  // 💵 paid manually: needs ticked month + amount + date + file
+  modals.length = 0;
+  await app.popPayManual(70, 901);
+  const pm = modals[modals.length - 1];
+  check('pay: modal lists lapsed months, focus ticked', pm && /value="901"[^>]*checked/.test(pm.c), true);
+  check('pay: amount prefilled', pm && pm.c.includes('value="499.00"'), true);
+  qsAll['.pop-pay-pick:checked'] = [{ value: '901' }];
+  byId.set('pop-pay-amt', { value: '549' }); byId.set('pop-pay-date', { value: '2026-10-15' });
+  byId.set('pop-pay-file', { files: [] }); byId.set('pop-pay-ref', { value: 'MBB9' }); byId.set('pop-pay-note', { value: 'incl. late fee' });
+  toasts.length = 0;
+  await app.popSaveReceipt(70);
+  check('pay: receipt required', toasts.some(t => t[0] === 'err' && /Attach the receipt/.test(t[1])), true);
+  const uploads = [];
+  supabase.storage = { from: () => ({ upload: async (p) => { uploads.push(p); return { error: null }; }, remove: async () => ({ error: null }) }) };
+  byId.set('pop-pay-file', { files: [{ name: 'bank in.pdf', type: 'application/pdf', size: 20000 }] });
+  calls.length = 0;
+  await app.popSaveReceipt(70);
+  const rr = calls.find(c => c.rpc === 'pop_record_receipt');
+  check('pay: file uploaded under pop/receipts/<sale>/', /^pop\/receipts\/70\/\d+_bank_in\.pdf$/.test(uploads[0] || ''), true);
+  check('pay: rpc args', rr && JSON.stringify([rr.args.p_inst_ids, rr.args.p_amount, rr.args.p_paid_date, rr.args.p_bank_ref, rr.args.p_note, rr.args.p_file_path === uploads[0]]), JSON.stringify([[901], 549, '2026-10-15', 'MBB9', 'incl. late fee', true]));
+  byId.set('pop-pay-date', { value: '2999-01-01' });
+  toasts.length = 0;
+  await app.popSaveReceipt(70);
+  check('pay: future date refused', toasts.some(t => t[0] === 'err' && /not in the future/.test(t[1])), true);
+
+  // 📋 list import: matches name + month, preview, confirm
+  tableData.pop_installments = () => POPROWS.filter(x => ['auto', 'due', 'lapsed'].includes(x.status));
+  byId.set('pop-imp-text', { value: 'Lim Mei Ling   Oct 2026   RM624.17\nTAN AH KOW 10/2026\nNobody Here Nov\nlim mei ling 2026-11' });
+  const prev = makeEl('div'); prev.id = 'pop-imp-preview';
+  await app.popImportPreview();
+  const ph = prev.innerHTML;
+  check('import: Lim Oct matched to the auto charge', ph.includes('→ <strong>Lim Mei Ling</strong> · Oct 2026'), true);
+  check('import: Tan Oct already lapsed', ph.includes('already lapsed'), true);
+  check('import: unknown name flagged', ph.includes('no customer with a POP plan matches'), true);
+  check('import: Lim Nov (2026-11) matched to the Nov charge', ph.includes('→ <strong>Lim Mei Ling</strong> · Nov 2026'), true);
+  check('import: 2 of 4 matched', ph.includes('<strong>2</strong> of 4 lines'), true);
+  qsAll['.pop-imp-pick:checked'] = [{ value: '0' }, { value: '3' }];
+  calls.length = 0;
+  await app.popImportConfirm();
+  const iu = calls.find(c => c.table === 'pop_installments' && c.ops[0][0] === 'update');
+  check('import: marks the ticked charges lapsed', iu && JSON.stringify([iu.ops[0][1], iu.ops[1]]), JSON.stringify([{ status: 'lapsed' }, ['in', 'id', [902, 904]]]));
+  check('import: only auto/due can be marked', iu && JSON.stringify(iu.ops[2]), '["in","status",["auto","due"]]');
+
+  // DC Closing Record slot
+  tableData.pop_installments = () => [POPROWS[0], { ...POPROWS[2], purchase_id: 70 }, { id: 905, seq: 4, due_date: '2026-11-05', amount: 499, status: 'due' }];
+  tableData.pop_receipts = [{ id: 55, amount: 1050, paid_date: '2026-10-03', bank_ref: 'MBB1', note: 'late fee' }];
+  const cslot = makeEl('div'); cslot.dataset.popPurchase = '70';
+  await app.apFillClosingPop(cslot);
+  check('closing: POP block with counts', cslot.innerHTML.includes('💳 POP payments') && cslot.innerHTML.includes('1/3 paid'), true);
+  check('closing: lapsed flagged + opens itself', cslot.innerHTML.includes('⚠ 1 lapsed') && /<details[^>]*open/.test(cslot.innerHTML), true);
+  check('closing: receipt link', cslot.innerHTML.includes('app.popOpenReceipt(55)'), true);
+  check('closing: full schedule button', cslot.innerHTML.includes('app.openPopPlan(70)'), true);
+  tableData.pop_installments = () => [];
+  const cslot2 = makeEl('div'); cslot2.dataset.popPurchase = '80';
+  await app.apFillClosingPop(cslot2);
+  check('closing: not a POP sale → empty', cslot2.innerHTML, '');
 
   // 💳 line
   rpcData.pop_person_plans = [
@@ -347,8 +413,8 @@ const runTimers = async () => { while (timers.length) { const t = timers.shift()
   check('pop line: inserted after slot', ps.inserted[0] && ps.inserted[0].pos, 'afterend');
   check('pop line: n/N', pl && pl.innerHTML.includes('💳 POP 14/36'), true);
   check('pop line: left', pl && pl.innerHTML.includes('RM 10,978 left'), true);
-  check('pop line: next charge', pl && pl.innerHTML.includes('next RM499 13 Nov'), true);
-  check('pop line: failed warning', pl && pl.innerHTML.includes('⚠ 1 failed'), true);
+  check('pop line: lapsed shown instead of next charge', pl && pl.innerHTML.includes('next RM499'), false);
+  check('pop line: lapsed warning', pl && pl.innerHTML.includes('⚠ 1 lapsed'), true);
   check('pop line: finished plan hidden', pl && pl.innerHTML.includes('openPopPlan(73)'), false);
   rpcData.pop_person_plans = [{ purchase_id: 73, total: 24, done: 24, left_rm: 0, failed: 0 }];
   const ps2 = makeEl('div'); ps2.dataset.fuPid = '56';

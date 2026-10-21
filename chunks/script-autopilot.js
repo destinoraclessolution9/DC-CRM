@@ -7,7 +7,8 @@
  *   D  🟣 Golden Road 2/6 · ready ~15 Dec — under the 🎯 follow-up line on profiles
  *   A  "What's next?" after a CPS is saved — book · invite to an event · not interested · later
  *   G  🧭 Journey funnel — Pipeline page, under Where from / Which product
- *   💳 POP collections — board, per-plan schedule, 💳 line on profiles
+ *   💳 POP — auto-deducted; lapsed months + manual receipts (board, plan, profile line,
+ *      list / picture import, history on the DC Closing Record)
  *
  * Loaded right after login (script.js, next to the activities chunk). Every
  * surface is mounted by a MutationObserver, so it survives view re-renders,
@@ -348,67 +349,103 @@
         apRenderFunnel();
     };
 
-    // ═════ 💳 POP collections (company-financed instalments) ═════
-    // Schedule rows live in pop_installments (built by the DB from each POP
-    // sale). The board is where the monthly card charges get ticked Paid /
-    // Failed; "assumed" = fell due before tracking began (counted collected).
+    // ═════ 💳 POP — auto-deducted; only LAPSED charges + manual receipts ═════
+    // Monthly POP charges come off the customer's card automatically (status
+    // "auto" once the date passes). Only when the office reports a lapse does
+    // the agent mark it; the customer banks in and the agent uploads the
+    // receipt (one receipt may cover several months). Tracked from Oct 2026.
     const POP_STATUS = {
-        due:     ['Due', '#92400E', '#FEF3C7'],
-        paid:    ['Paid', '#065F46', '#D1FAE5'],
-        failed:  ['Failed', '#B91C1C', '#FEE2E2'],
-        waived:  ['Waived', '#6B7280', '#F3F4F6'],
-        assumed: ['Before tracking', '#6B7280', '#F3F4F6'],
+        due:         ['Upcoming', '#6B7280', '#F3F4F6'],
+        auto:        ['✅ Auto-deducted', '#065F46', '#D1FAE5'],
+        lapsed:      ['⚠ Lapsed', '#B91C1C', '#FEE2E2'],
+        paid_manual: ['💵 Paid manually', '#1E40AF', '#DBEAFE'],
+        waived:      ['Waived', '#6B7280', '#F3F4F6'],
+        assumed:     ['Before tracking', '#6B7280', '#F3F4F6'],
     };
     const _maskCard = (s) => String(s || '').replace(/(?:\d[\s-]?){8,}/g, m => '••••' + m.replace(/\D/g, '').slice(-4)).slice(0, 34);
     const _popChip = (st) => {
         const c = POP_STATUS[st] || POP_STATUS.due;
-        return `<span style="display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:700;color:${c[1]};background:${c[2]};">${c[0]}</span>`;
+        return `<span style="display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:700;color:${c[1]};background:${c[2]};white-space:nowrap;">${c[0]}</span>`;
     };
-    let _popTab = 'month';
+    const _popMonth = (d) => d ? new Date(String(d).slice(0, 10) + 'T00:00:00').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : '';
+    const _popRM = (n) => 'RM ' + Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
+    const _monthEnd = () => { const d = new Date(); return _ymd(new Date(d.getFullYear(), d.getMonth() + 1, 0)); };
+    let _popTab = 'lapsed';
     let _popRows = [];
-    const _popSelect = 'id,purchase_id,customer_id,agent_id,seq,due_date,amount,status,paid_date,note,customers(full_name),purchases(item,payment_method,epp_bank,epp_months,installment_tenure)';
+    const _popSelect = 'id,purchase_id,customer_id,agent_id,seq,due_date,amount,status,paid_date,lapsed_at,receipt_id,note,customers(full_name),purchases(item,payment_method,epp_bank,epp_months,installment_tenure,invoice)';
 
+    // actions on one month (plan → reopen that plan afterwards)
+    const _popActs = (i, plan) => {
+        const p = plan ? `, { plan: ${Number(plan)} }` : '';
+        const b = (label, js, color) => `<button type="button" class="btn secondary btn-sm" style="font-size:11px;padding:2px 8px;${color ? 'color:' + color + ';' : ''}" onclick="event.stopPropagation();${js}">${label}</button>`;
+        if (i.status === 'auto' || (i.status === 'due' && i.due_date <= _monthEnd())) return b('⚠ Lapsed', `app.popMark(${Number(i.id)}, 'lapsed'${p})`, '#B91C1C');
+        if (i.status === 'lapsed') return b('💵 Paid manually', `app.popPayManual(${Number(i.purchase_id)}, ${Number(i.id)})`, '#1E40AF')
+            + b('↺ Not lapsed', `app.popMark(${Number(i.id)}, '${i.due_date < _today() ? 'auto' : 'due'}'${p})`);
+        if (i.status === 'paid_manual' && i.receipt_id != null) return b('📎 Receipt', `app.popOpenReceipt(${Number(i.receipt_id)})`);
+        return '';
+    };
     const _popRowHtml = (i, opts = {}) => {
         const name = (i.customers && i.customers.full_name) || '—';
         const pu = i.purchases || {};
         const n = pu.installment_tenure || pu.epp_months || '';
         const card = _maskCard([pu.epp_bank, pu.payment_method].filter(Boolean).join(' · '));
-        const late = i.status === 'due' && i.due_date < _today();
-        const plan = opts.plan ? `, { plan: ${Number(opts.plan)} }` : '';
-        const b = (label, st, color) => `<button type="button" class="btn secondary btn-sm" style="font-size:11px;padding:2px 8px;${color ? 'color:' + color + ';' : ''}" onclick="event.stopPropagation();app.popMark(${Number(i.id)}, '${st}'${plan})">${label}</button>`;
-        const acts = (i.status === 'due' || i.status === 'failed')
-            ? b('✓ Paid', 'paid') + (i.status === 'due' ? b('✗ Failed', 'failed', '#B91C1C') : '')
-            : (i.status === 'paid' || i.status === 'waived') ? b('↺ Undo', 'due') : '';
         const title = opts.plan
             ? `#${Number(i.seq)}${n ? '/' + esc(n) : ''}`
             : `<a href="javascript:void(0)" onclick="app.openPopPlan(${Number(i.purchase_id)})">${esc(name)}</a> <span style="color:var(--gray-500);font-weight:400;">${Number(i.seq)}${n ? '/' + esc(n) : ''}</span>`;
-        const sub = opts.plan ? '' : `<div style="font-size:11px;color:var(--gray-500);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(String(pu.item || '').slice(0, 40))}${card ? ' · ' + esc(card) : ''}</div>`;
+        const sub = opts.plan ? '' : `<div style="font-size:11px;color:var(--gray-500);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(String(pu.item || '').slice(0, 40))}${pu.invoice ? ' · ' + esc(pu.invoice) : ''}${card ? ' · ' + esc(card) : ''}</div>`;
+        const extra = i.status === 'lapsed' && i.lapsed_at ? `<span style="font-size:11px;color:#B91C1C;">marked ${esc(_fmt(i.lapsed_at))}</span>`
+            : i.status === 'paid_manual' && i.paid_date ? `<span style="font-size:11px;color:#1E40AF;">paid ${esc(_fmt(i.paid_date))}</span>` : '';
         return `
         <div class="ap-pop-row" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:8px 0;border-top:1px solid var(--gray-100);">
             <div style="flex:1 1 180px;min-width:0;">
                 <div style="font-weight:600;font-size:13px;">${title}</div>${sub}
             </div>
-            <span style="font-size:12px;white-space:nowrap;${late ? 'color:#B91C1C;font-weight:600;' : ''}">${esc(opts.plan ? _fmtY(i.due_date) : _fmt(i.due_date))}${i.paid_date && i.status === 'paid' ? ' · paid ' + esc(_fmt(i.paid_date)) : ''}</span>
-            <strong style="font-size:13px;white-space:nowrap;">RM ${Number(i.amount || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}</strong>
-            ${_popChip(i.status)}
-            <span style="display:flex;gap:4px;">${acts}</span>
+            <span style="font-size:12px;white-space:nowrap;">${esc(_popMonth(i.due_date))}</span>
+            <strong style="font-size:13px;white-space:nowrap;">${_popRM(i.amount)}</strong>
+            ${_popChip(i.status)} ${extra}
+            <span style="display:flex;gap:4px;flex-wrap:wrap;">${_popActs(i, opts.plan)}</span>
         </div>`;
     };
 
     const popLoad = async (tab) => {
         const sb = _sb();
         if (!sb) return [];
-        const today = _today();
-        const d = new Date();
-        const mStart = _ymd(new Date(d.getFullYear(), d.getMonth(), 1));
-        const mEnd = _ymd(new Date(d.getFullYear(), d.getMonth() + 1, 0));
         let q = sb.from('pop_installments').select(_popSelect);
-        if (tab === 'month') q = q.in('status', ['due', 'failed', 'paid']).gte('due_date', mStart).lte('due_date', mEnd);
-        else if (tab === 'overdue') q = q.or(`status.eq.failed,and(status.eq.due,due_date.lt.${today})`);
-        else q = q.in('status', ['due', 'failed']).gte('due_date', today).lte('due_date', _ymd(new Date(Date.now() + 90 * 864e5)));
-        const { data, error } = await q.order('due_date').order('id').limit(1000);
+        if (tab === 'lapsed') q = q.eq('status', 'lapsed').order('due_date');
+        else if (tab === 'manual') q = q.eq('status', 'paid_manual').order('paid_date', { ascending: false });
+        else q = q.in('status', ['due', 'lapsed', 'auto']).order('due_date');
+        const { data, error } = await q.limit(3000);
         if (error) throw error;
         return data || [];
+    };
+
+    // All plans tab: one line per running plan
+    const _popPlansHtml = (rows) => {
+        const by = new Map();
+        for (const i of rows) {
+            const k = String(i.purchase_id);
+            if (!by.has(k)) by.set(k, { i, n: 0, left: 0, lapsed: 0, next: null });
+            const o = by.get(k);
+            o.n++;
+            if (i.status === 'due' || i.status === 'lapsed') o.left += Number(i.amount) || 0;
+            if (i.status === 'lapsed') o.lapsed++;
+            if (i.status === 'due' && (!o.next || i.due_date < o.next.due_date)) o.next = i;
+        }
+        const plans = [...by.values()].filter(o => o.left > 0).sort((a, b) => (b.lapsed - a.lapsed) || (b.left - a.left));
+        if (!plans.length) return '<div style="padding:12px 0;color:var(--gray-500);font-size:13px;">No running POP plans.</div>';
+        return plans.map(o => {
+            const pu = o.i.purchases || {};
+            return `
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:8px 0;border-top:1px solid var(--gray-100);cursor:pointer;" onclick="app.openPopPlan(${Number(o.i.purchase_id)})">
+                <div style="flex:1 1 180px;min-width:0;">
+                    <div style="font-weight:600;font-size:13px;color:#2563EB;">${esc((o.i.customers && o.i.customers.full_name) || '—')}</div>
+                    <div style="font-size:11px;color:var(--gray-500);">${esc(String(pu.item || '').slice(0, 40))}${pu.invoice ? ' · ' + esc(pu.invoice) : ''}</div>
+                </div>
+                <strong style="font-size:13px;white-space:nowrap;">${_popRM(o.left)} left</strong>
+                ${o.next ? `<span style="font-size:12px;color:var(--gray-500);white-space:nowrap;">next ${esc(_popMonth(o.next.due_date))}</span>` : ''}
+                ${o.lapsed ? `<span style="font-size:11px;font-weight:700;color:#B91C1C;">⚠ ${o.lapsed} lapsed</span>` : ''}
+            </div>`;
+        }).join('');
     };
 
     const openPopBoard = async (tab) => {
@@ -429,20 +466,25 @@
             <div style="font-size:16px;font-weight:700;${color ? 'color:' + color + ';' : ''}">${val}</div>
             ${sub ? `<div style="font-size:11px;color:var(--gray-500);">${sub}</div>` : ''}</div>`;
         const tabBtn = (t, label) => `<button type="button" class="btn btn-sm ${_popTab === t ? 'primary' : 'secondary'}" style="font-size:12px;" onclick="app.openPopBoard('${t}')">${label}</button>`;
-        const open = _popRows.filter(i => i.status === 'due' || i.status === 'failed');
+        const lapsedN = Number(sum && sum.lapsed_n) || 0;
+        const list = _popTab === 'plans' ? _popPlansHtml(_popRows)
+            : (_popRows.length ? _popRows.map(i => _popRowHtml(i)).join('')
+                : `<div style="padding:12px 0;color:var(--gray-500);font-size:13px;">${_popTab === 'lapsed' ? 'No lapsed charges 🎉' : 'No manual payments yet.'}</div>`);
         const body = `
             <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
-                ${tile('Still to collect', rm(sum && sum.outstanding), `${Number(sum && sum.plans) || 0} plans`)}
-                ${tile('Due this month', rm(sum && sum.due_month), `${Number(sum && sum.due_month_n) || 0} charges`)}
-                ${tile('Overdue / failed', rm(sum && sum.overdue), `${Number(sum && sum.overdue_n) || 0} charges`, Number(sum && sum.overdue_n) ? '#B91C1C' : '')}
-                ${tile('Collected this month', rm(sum && sum.collected_month), '', '#047857')}
+                ${tile('⚠ Lapsed — waiting', rm(sum && sum.lapsed_rm), `${lapsedN} charge${lapsedN === 1 ? '' : 's'}`, lapsedN ? '#B91C1C' : '')}
+                ${tile('📎 Receipts this month', String(Number(sum && sum.receipts_n) || 0), rm(sum && sum.receipts_rm))}
+                ${tile('Still to come (auto)', rm(sum && sum.to_come), `${Number(sum && sum.plans) || 0} plans`)}
             </div>
             <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:6px;">
-                ${tabBtn('month', 'This month')}${tabBtn('overdue', 'Overdue / failed')}${tabBtn('next', 'Next 90 days')}
-                ${open.length ? `<button type="button" class="btn secondary btn-sm" style="font-size:12px;margin-left:auto;" onclick="app.popMarkAll()">✓ Mark ${open.length} shown as paid</button>` : ''}
+                ${tabBtn('lapsed', `⚠ Lapsed (${lapsedN})`)}${tabBtn('manual', '📎 Paid manually')}${tabBtn('plans', 'All plans')}
+                <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;">
+                    <button type="button" class="btn secondary btn-sm" style="font-size:12px;" onclick="app.popImportOpen()">📋 Mark lapsed from a list</button>
+                    <button type="button" class="btn secondary btn-sm" style="font-size:12px;" onclick="app.popImportOpen(true)">📷 From a picture</button>
+                </span>
             </div>
-            <div style="font-size:11px;color:var(--gray-500);margin-bottom:4px;">Tick each card charge after it runs. "Before tracking" = due before 20 Oct 2026, counted as collected.</div>
-            <div>${_popRows.length ? _popRows.map(i => _popRowHtml(i)).join('') : '<div style="padding:12px 0;color:var(--gray-500);font-size:13px;">Nothing here 🎉</div>'}</div>`;
+            <div style="font-size:11px;color:var(--gray-500);margin-bottom:4px;">Charges are deducted from the card automatically. Only mark a month <strong>⚠ Lapsed</strong> when the office says it failed, then upload the customer's bank-in receipt with <strong>💵 Paid manually</strong>. Tracked from Oct 2026.</div>
+            <div>${list}</div>`;
         UI.showModal('💳 POP collections', body, [{ label: 'Close', action: 'UI.hideModal()' }]);
     };
 
@@ -450,9 +492,10 @@
         const sb = _sb();
         if (!sb) return UI.toast.error('Offline — try again in a moment');
         try {
-            const { error } = await sb.from('pop_installments').update({ status }).eq('id', id);
+            const { data, error } = await sb.from('pop_installments').update({ status }).eq('id', id).select('id');
             if (error) throw error;
-            UI.toast.success(status === 'paid' ? 'Marked paid ✓' : status === 'failed' ? 'Marked failed — the agent sees it on their to-do' : 'Back to due');
+            if (!data || !data.length) throw new Error('Not allowed for this customer');
+            UI.toast.success(status === 'lapsed' ? 'Marked lapsed — upload the receipt once the customer banks in' : 'Back to normal (auto-deducted)');
         } catch (e) {
             UI.toast.error('Could not update: ' + (e && e.message ? e.message : e));
             return false;
@@ -462,42 +505,266 @@
         return true;
     };
 
-    const popMarkAll = async () => {
-        const ids = _popRows.filter(i => i.status === 'due' || i.status === 'failed').map(i => i.id);
-        if (!ids.length) return;
-        if (!window.confirm(`Mark ${ids.length} charge${ids.length === 1 ? '' : 's'} as paid?`)) return;
+    // 💵 one receipt for one or more lapsed months of a sale
+    const popPayManual = async (purchaseId, focusId) => {
         const sb = _sb();
+        let rows = [];
         try {
-            const { error } = await sb.from('pop_installments').update({ status: 'paid' }).in('id', ids);
+            const { data, error } = await sb.from('pop_installments').select('id,seq,due_date,amount').eq('purchase_id', purchaseId).eq('status', 'lapsed').order('due_date');
             if (error) throw error;
-            UI.toast.success(`${ids.length} marked paid ✓`);
+            rows = data || [];
+        } catch (e) { return UI.toast.error('Could not load: ' + (e && e.message ? e.message : e)); }
+        if (!rows.length) return UI.toast.info('No lapsed months on this plan');
+        const focus = rows.some(r => String(r.id) === String(focusId)) ? String(focusId) : String(rows[0].id);
+        const sum = rows.filter(r => String(r.id) === focus).reduce((t, r) => t + (Number(r.amount) || 0), 0);
+        UI.showModal('💵 Paid manually (bank-in receipt)', `
+            <div style="font-size:13px;margin-bottom:6px;">Which lapsed month(s) does this receipt pay?</div>
+            ${rows.map(r => `<label style="display:flex;gap:8px;align-items:center;padding:4px 0;"><input type="checkbox" class="pop-pay-pick" value="${Number(r.id)}" data-amt="${Number(r.amount) || 0}" ${String(r.id) === focus ? 'checked' : ''}
+                onchange="(function(){var t=0;document.querySelectorAll('.pop-pay-pick:checked').forEach(function(c){t+=Number(c.dataset.amt)||0;});var a=document.getElementById('pop-pay-amt');if(a)a.value=t.toFixed(2);})()">
+                <span>${esc(_popMonth(r.due_date))} · #${Number(r.seq)} · ${_popRM(r.amount)}</span></label>`).join('')}
+            <div class="form-row" style="margin-top:8px;">
+                <div class="form-group half"><label>Amount paid (RM) <span class="required">*</span></label><input type="number" step="0.01" min="0" id="pop-pay-amt" class="form-control" value="${sum.toFixed(2)}"></div>
+                <div class="form-group half"><label>Date paid <span class="required">*</span></label><input type="date" id="pop-pay-date" class="form-control" value="${_today()}" max="${_today()}"></div>
+            </div>
+            <div class="form-group"><label>Receipt (photo or PDF) <span class="required">*</span></label><input type="file" id="pop-pay-file" class="form-control" accept="image/*,application/pdf"></div>
+            <div class="form-row">
+                <div class="form-group half"><label>Bank ref</label><input type="text" id="pop-pay-ref" class="form-control" placeholder="optional"></div>
+                <div class="form-group half"><label>Note</label><input type="text" id="pop-pay-note" class="form-control" placeholder="e.g. incl. RM50 late fee"></div>
+            </div>
+            <div id="pop-pay-status" style="font-size:12px;color:var(--primary);"></div>`,
+            [{ label: 'Cancel', action: `app.openPopPlan(${Number(purchaseId)})` },
+             { label: 'Save receipt', type: 'primary', action: `(async () => { await app.popSaveReceipt(${Number(purchaseId)}); })()` }]);
+    };
+    let _popPayBusy = false;
+    const popSaveReceipt = async (purchaseId) => {
+        if (_popPayBusy) return;
+        const sb = _sb();
+        const ids = [...document.querySelectorAll('.pop-pay-pick:checked')].map(c => Number(c.value));
+        const amount = Number(document.getElementById('pop-pay-amt')?.value);
+        const date = document.getElementById('pop-pay-date')?.value || '';
+        const file = (document.getElementById('pop-pay-file')?.files || [])[0];
+        const ref = (document.getElementById('pop-pay-ref')?.value || '').trim();
+        const note = (document.getElementById('pop-pay-note')?.value || '').trim();
+        if (!ids.length) return UI.toast.error('Tick the month(s) this receipt pays');
+        if (!(amount > 0)) return UI.toast.error('Enter the amount paid');
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > _today()) return UI.toast.error('Enter the date paid (not in the future)');
+        if (!file) return UI.toast.error('Attach the receipt (photo or PDF)');
+        _popPayBusy = true;
+        const status = document.getElementById('pop-pay-status');
+        let path = null;
+        try {
+            let f = file;
+            if (/^image\//.test(file.type)) {
+                if (!app.compressImageFile && typeof window._loadChunk === 'function') { try { await window._loadChunk('chunks/script-prospects.min.js'); } catch (_) { /* raw file */ } }
+                if (app.compressImageFile) f = await app.compressImageFile(file);
+            }
+            if (f.size > 5 * 1024 * 1024) throw new Error('File too large (max 5 MB)');
+            if (status) status.textContent = 'Uploading the receipt…';
+            path = `pop/receipts/${purchaseId}/${Date.now()}_${String(f.name || 'receipt').replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+            const { error: upErr } = await sb.storage.from('attachments').upload(path, f, { upsert: false, contentType: f.type || 'application/octet-stream' });
+            if (upErr) throw upErr;
+            const { error } = await sb.rpc('pop_record_receipt', { p_inst_ids: ids, p_paid_date: date, p_amount: amount, p_file_path: path, p_file_name: file.name || null, p_bank_ref: ref || null, p_note: note || null });
+            if (error) throw error;
+            UI.toast.success(`Receipt saved — ${ids.length} month${ids.length === 1 ? '' : 's'} paid manually`);
         } catch (e) {
-            UI.toast.error('Could not update: ' + (e && e.message ? e.message : e));
+            if (path) { try { await sb.storage.from('attachments').remove([path]); } catch (_) { /* best-effort */ } }
+            if (status) status.textContent = '';
+            _popPayBusy = false;
+            return UI.toast.error('Not saved: ' + (e && e.message ? e.message : e));
         }
-        openPopBoard();
+        _popPayBusy = false;
+        await openPopPlan(purchaseId);
         apRenderTop5(true);
     };
+    const popOpenReceipt = async (receiptId) => {
+        try {
+            const { data } = await _sb().from('pop_receipts').select('file_path').eq('id', receiptId).maybeSingle();
+            if (data && data.file_path && window._openAttachment) window._openAttachment(data.file_path);
+            else UI.toast.error('Receipt file not found');
+        } catch (e) { UI.toast.error('Could not open: ' + (e && e.message ? e.message : e)); }
+    };
+    const popUndoReceipt = async (receiptId, purchaseId) => {
+        if (!window.confirm('Undo this receipt? Its months go back to ⚠ Lapsed.')) return;
+        try {
+            const { error } = await _sb().rpc('pop_undo_receipt', { p_receipt_id: receiptId });
+            if (error) throw error;
+            UI.toast.success('Receipt undone');
+        } catch (e) { return UI.toast.error('Could not undo: ' + (e && e.message ? e.message : e)); }
+        await openPopPlan(purchaseId);
+    };
 
-    // One plan's whole schedule (from the 💳 profile line or a board row)
+    const _popReceiptsHtml = (receipts, rows, purchaseId) => {
+        if (!receipts.length) return '';
+        const me = String((_cu() && _cu().id) || '');
+        const isAdmin = _lvl() <= 2;
+        return `
+            <div style="margin-top:12px;font-weight:700;font-size:13px;">📎 Manual payments (${receipts.length})</div>
+            ${receipts.map(r => {
+                const months = rows.filter(i => String(i.receipt_id) === String(r.id)).map(i => _popMonth(i.due_date)).join(', ');
+                return `
+                <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:7px 0;border-top:1px solid var(--gray-100);font-size:12px;">
+                    <strong>${_popRM(r.amount)}</strong>
+                    <span>paid ${esc(_fmt(r.paid_date))}</span>
+                    ${months ? `<span style="color:var(--gray-500);">for ${esc(months)}</span>` : ''}
+                    ${r.bank_ref ? `<span style="color:var(--gray-500);">ref ${esc(r.bank_ref)}</span>` : ''}
+                    ${r.note ? `<span style="color:var(--gray-500);">· ${esc(r.note)}</span>` : ''}
+                    <span style="margin-left:auto;display:flex;gap:4px;">
+                        <button type="button" class="btn secondary btn-sm" style="font-size:11px;padding:2px 8px;" onclick="event.stopPropagation();app.popOpenReceipt(${Number(r.id)})">📎 View receipt</button>
+                        ${isAdmin || String(r.uploaded_by) === me ? `<button type="button" class="btn secondary btn-sm" style="font-size:11px;padding:2px 8px;" onclick="event.stopPropagation();app.popUndoReceipt(${Number(r.id)}, ${Number(purchaseId)})">↺ Undo</button>` : ''}
+                    </span>
+                </div>`;
+            }).join('')}`;
+    };
+
+    // One plan's whole schedule + receipts (from the 💳 profile line, a board row or the DC Closing Record)
     const openPopPlan = async (purchaseId) => {
         const sb = _sb();
         if (!sb) return;
-        let rows = [];
+        let rows = [], receipts = [];
         try {
-            const { data, error } = await sb.from('pop_installments').select(_popSelect).eq('purchase_id', purchaseId).order('seq');
-            if (error) throw error;
-            rows = data || [];
+            const [a, b] = await Promise.all([
+                sb.from('pop_installments').select(_popSelect).eq('purchase_id', purchaseId).order('seq'),
+                sb.from('pop_receipts').select('*').eq('purchase_id', purchaseId).order('paid_date'),
+            ]);
+            if (a.error) throw a.error;
+            rows = a.data || [];
+            receipts = (b && b.data) || [];
         } catch (e) {
             return UI.toast.error('Could not load the plan: ' + (e && e.message ? e.message : e));
         }
         if (!rows.length) return UI.toast.info('No POP schedule for this sale');
         const pu = rows[0].purchases || {};
-        const left = rows.filter(i => i.status === 'due' || i.status === 'failed').reduce((s, i) => s + (Number(i.amount) || 0), 0);
-        const done = rows.filter(i => i.status === 'paid' || i.status === 'assumed' || i.status === 'waived').length;
-        const head = `<div style="font-size:13px;margin-bottom:8px;"><strong>${esc((rows[0].customers && rows[0].customers.full_name) || '')}</strong> · ${esc(String(pu.item || '').slice(0, 50))}<br>
-            <span style="color:var(--gray-600);">${done}/${rows.length} paid · <strong>RM ${Math.round(left).toLocaleString()}</strong> left · ${esc(_maskCard([pu.epp_bank, pu.payment_method].filter(Boolean).join(' · ')))}</span></div>`;
+        const left = rows.filter(i => i.status === 'due' || i.status === 'lapsed').reduce((s, i) => s + (Number(i.amount) || 0), 0);
+        const done = rows.filter(i => ['auto', 'assumed', 'paid_manual', 'waived'].includes(i.status)).length;
+        const lapsed = rows.filter(i => i.status === 'lapsed').length;
+        const head = `<div style="font-size:13px;margin-bottom:8px;"><strong>${esc((rows[0].customers && rows[0].customers.full_name) || '')}</strong> · ${esc(String(pu.item || '').slice(0, 50))}${pu.invoice ? ' · ' + esc(pu.invoice) : ''}<br>
+            <span style="color:var(--gray-600);">${done}/${rows.length} paid · <strong>${_popRM(left)}</strong> left${lapsed ? ` · <span style="color:#B91C1C;font-weight:700;">⚠ ${lapsed} lapsed</span>` : ''} · ${esc(_maskCard([pu.epp_bank, pu.payment_method].filter(Boolean).join(' · ')))}</span></div>`;
         const list = rows.map(i => _popRowHtml(i, { plan: purchaseId })).join('');
-        UI.showModal('💳 POP plan', head + list, [{ label: 'All POP', action: 'app.openPopBoard()' }, { label: 'Close', action: 'UI.hideModal()' }]);
+        UI.showModal('💳 POP plan', head + list + _popReceiptsHtml(receipts, rows, purchaseId),
+            [{ label: 'All POP', action: 'app.openPopBoard()' }, { label: 'Close', action: 'UI.hideModal()' }]);
+    };
+
+    // ── 📋 / 📷 mark lapsed from the office's list (text or a picture of a table) ──
+    const _MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+    const _norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9㐀-鿿]+/g, ' ').trim();
+    // "Tan Ah Kow  Oct 2026  RM499" → { month: '2026-10', amount: 499 }
+    const _popLineMonth = (line, fallbackYear) => {
+        const t = String(line).toLowerCase();
+        let m = t.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*'?(\d{2,4})?/);
+        if (m) {
+            let y = m[2] ? Number(m[2]) : fallbackYear;
+            if (y < 100) y += 2000;
+            return `${y}-${String(_MONTHS.indexOf(m[1]) + 1).padStart(2, '0')}`;
+        }
+        m = t.match(/\b(20\d{2})[\/\-.](\d{1,2})\b/);
+        if (m) return `${m[1]}-${String(Number(m[2])).padStart(2, '0')}`;
+        m = t.match(/\b(\d{1,2})[\/\-.](20\d{2})\b/);
+        if (m) return `${m[2]}-${String(Number(m[1])).padStart(2, '0')}`;
+        m = String(line).match(/(\d{1,2})\s*月/);
+        if (m) return `${fallbackYear}-${String(Number(m[1])).padStart(2, '0')}`;
+        return null;
+    };
+    const _popLineAmount = (line) => {
+        const m = String(line).match(/rm\s*([\d,]+(?:\.\d{1,2})?)/i) || String(line).match(/\b(\d{2,3}(?:,\d{3})*\.\d{2})\b/);
+        return m ? Number(m[1].replace(/,/g, '')) : null;
+    };
+    let _popImport = { rows: [], plans: [] };
+    const popImportOpen = (fromPicture = false) => {
+        UI.showModal(fromPicture ? '📷 Mark lapsed from a picture' : '📋 Mark lapsed from a list', `
+            ${fromPicture ? `
+            <div class="form-group"><label>Picture of the office's list (photo or screenshot)</label>
+                <input type="file" id="pop-imp-file" class="form-control" accept="image/*" onchange="app.popImportPhoto(this)"></div>
+            <div id="pop-imp-read" style="font-size:12px;color:var(--primary);margin-bottom:6px;"></div>` : ''}
+            <div class="form-group"><label>${fromPicture ? 'Text read from the picture (check / fix it)' : 'Paste the office\'s list — one customer per line'}</label>
+                <textarea id="pop-imp-text" class="form-control" rows="6" placeholder="e.g.&#10;Tan Ah Kow   Oct 2026   RM499&#10;Lim Mei Ling  11/2026"></textarea></div>
+            <button type="button" class="btn secondary btn-sm" onclick="app.popImportPreview()">🔍 Preview matches</button>
+            <div id="pop-imp-preview" style="margin-top:10px;"></div>`,
+            [{ label: 'Cancel', action: 'app.openPopBoard()' },
+             { label: 'Mark ticked as lapsed', type: 'primary', action: '(async () => { await app.popImportConfirm(); })()' }]);
+    };
+    const popImportPhoto = async (input) => {
+        const file = input && input.files && input.files[0];
+        const out = document.getElementById('pop-imp-read');
+        if (!file) return;
+        if (out) out.textContent = 'Reading the picture…';
+        try {
+            const dataUrl = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
+            const [meta, b64] = String(dataUrl).split(',');
+            const mime = (meta.match(/data:(.*?);base64/) || [])[1] || file.type || 'image/jpeg';
+            const { data: res, error } = await _sb().functions.invoke('order-form-ocr', { body: { image_base64: b64, mime_type: mime, form_type: 'auto' } });
+            if (error) throw new Error(error.message || 'reader unavailable');
+            const text = String((res && res.raw_text) || '').trim();
+            if (!text) throw new Error('no text found');
+            const ta = document.getElementById('pop-imp-text');
+            if (ta) ta.value = text;
+            if (out) out.textContent = 'Read ✓ — check the text, then Preview.';
+            await popImportPreview();
+        } catch (e) {
+            if (out) out.textContent = "Couldn't read the picture (" + (e && e.message ? e.message : e) + ') — type or paste the names instead.';
+        }
+    };
+    const popImportPreview = async () => {
+        const sb = _sb();
+        const text = String(document.getElementById('pop-imp-text')?.value || '');
+        const lines = text.split(/\r?\n/).map(s => s.trim()).filter(s => s.length >= 3);
+        const box = document.getElementById('pop-imp-preview');
+        if (!lines.length) { if (box) box.innerHTML = '<div style="color:var(--gray-500);font-size:12px;">Nothing to match yet.</div>'; return; }
+        let inst = [];
+        try {
+            const { data, error } = await sb.from('pop_installments').select('id,purchase_id,customer_id,due_date,amount,status,customers(full_name)').in('status', ['auto', 'due', 'lapsed']).limit(5000);
+            if (error) throw error;
+            inst = data || [];
+        } catch (e) { if (box) box.innerHTML = `<div style="color:#B91C1C;">Could not load plans: ${esc(e && e.message ? e.message : e)}</div>`; return; }
+        const custs = new Map();
+        for (const i of inst) {
+            const n = i.customers && i.customers.full_name;
+            if (n && !custs.has(String(i.customer_id))) custs.set(String(i.customer_id), { id: i.customer_id, name: n, norm: _norm(n) });
+        }
+        const year = new Date().getFullYear();
+        _popImport.rows = lines.map(line => {
+            const ln = ' ' + _norm(line) + ' ';
+            // best = the longest customer name found in the line (or all its words)
+            let best = null;
+            for (const c of custs.values()) {
+                if (!c.norm) continue;
+                const words = c.norm.split(' ').filter(w => w.length >= 2);
+                const hit = ln.includes(' ' + c.norm + ' ') || (words.length >= 2 && words.every(w => ln.includes(' ' + w + ' ')));
+                if (hit && (!best || c.norm.length > best.norm.length)) best = c;
+            }
+            const month = _popLineMonth(line, year);
+            const amount = _popLineAmount(line);
+            if (!best) return { line, ok: false, why: 'no customer with a POP plan matches' };
+            const mine = inst.filter(i => String(i.customer_id) === String(best.id));
+            let pick = month ? mine.find(i => String(i.due_date).slice(0, 7) === month) : null;
+            if (!pick && !month) pick = mine.filter(i => i.status === 'auto').sort((a, b) => String(b.due_date).localeCompare(String(a.due_date)))[0];
+            if (!pick) return { line, ok: false, cust: best.name, why: month ? `no charge in ${month}` : 'no month found' };
+            if (pick.status === 'lapsed') return { line, ok: false, cust: best.name, inst: pick, why: 'already lapsed' };
+            return { line, ok: true, cust: best.name, inst: pick, amount };
+        });
+        const okN = _popImport.rows.filter(r => r.ok).length;
+        if (box) box.innerHTML = `
+            <div style="font-size:12px;margin-bottom:4px;"><strong>${okN}</strong> of ${_popImport.rows.length} line${_popImport.rows.length === 1 ? '' : 's'} matched · untick any that look wrong</div>
+            ${_popImport.rows.map((r, k) => `
+            <label style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-top:1px solid var(--gray-100);font-size:12px;">
+                <input type="checkbox" class="pop-imp-pick" value="${k}" ${r.ok ? 'checked' : 'disabled'}>
+                <span style="flex:1;min-width:0;"><span style="color:var(--gray-500);">${esc(r.line.slice(0, 80))}</span><br>
+                ${r.ok ? `→ <strong>${esc(r.cust)}</strong> · ${esc(_popMonth(r.inst.due_date))} · ${_popRM(r.inst.amount)}${r.amount && Math.abs(r.amount - Number(r.inst.amount)) > 1 ? ` <span style="color:#B45309;">(list says RM${r.amount})</span>` : ''}`
+                    : `<span style="color:#B91C1C;">✗ ${esc(r.why)}${r.cust ? ' — ' + esc(r.cust) : ''}</span>`}</span>
+            </label>`).join('')}`;
+    };
+    const popImportConfirm = async () => {
+        const picks = [...document.querySelectorAll('.pop-imp-pick:checked')].map(c => _popImport.rows[Number(c.value)]).filter(r => r && r.ok);
+        if (!picks.length) return UI.toast.error('Preview the list and tick at least one match');
+        const ids = [...new Set(picks.map(r => r.inst.id))];
+        try {
+            const { data, error } = await _sb().from('pop_installments').update({ status: 'lapsed' }).in('id', ids).in('status', ['auto', 'due']).select('id');
+            if (error) throw error;
+            const n = (data || []).length;
+            UI.toast.success(`${n} charge${n === 1 ? '' : 's'} marked lapsed${n < ids.length ? ` (${ids.length - n} not allowed / already changed)` : ''}`);
+        } catch (e) { return UI.toast.error('Not saved: ' + (e && e.message ? e.message : e)); }
+        _popImport = { rows: [], plans: [] };
+        await openPopBoard('lapsed');
+        apRenderTop5(true);
     };
 
     // 💳 line under the 🎯 follow-up line on a customer profile
@@ -520,18 +787,58 @@
             <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;cursor:pointer;" onclick="event.stopPropagation();app.openPopPlan(${Number(p.purchase_id)})">
                 <strong style="color:#065F46;">💳 POP ${Number(p.done) || 0}/${Number(p.total) || 0}</strong>
                 <span>RM ${Math.round(Number(p.left_rm) || 0).toLocaleString()} left</span>
-                ${p.next_due ? `<span style="color:#6B7280;">next RM${Math.round(Number(p.next_amount) || 0)} ${esc(_fmt(p.next_due))}</span>` : ''}
-                ${Number(p.failed) ? `<span style="color:#B91C1C;font-weight:700;">⚠ ${Number(p.failed)} failed</span>` : ''}
+                ${Number(p.failed) ? `<span style="color:#B91C1C;font-weight:700;">⚠ ${Number(p.failed)} lapsed</span>`
+                    : (p.next_due ? `<span style="color:#6B7280;">next RM${Math.round(Number(p.next_amount) || 0)} ${esc(_fmt(p.next_due))} (auto)</span>` : '')}
                 <span style="color:#9CA3AF;font-size:11px;">${esc(String(p.item || '').slice(0, 24))}</span>
             </div>`).join('');
         slot.insertAdjacentElement('afterend', line);
+    };
+
+    // 💳 POP history inside a sale on the DC Closing Record (slot data-pop-purchase)
+    const apFillClosingPop = async (slot) => {
+        const pu = Number(slot.dataset.popPurchase);
+        const sb = _sb();
+        if (!pu || !sb) return;
+        let rows = [], receipts = [];
+        try {
+            const [a, b] = await Promise.all([
+                sb.from('pop_installments').select('id,seq,due_date,amount,status,lapsed_at,paid_date,receipt_id').eq('purchase_id', pu).order('seq'),
+                sb.from('pop_receipts').select('*').eq('purchase_id', pu).order('paid_date'),
+            ]);
+            rows = (a && a.data) || [];
+            receipts = (b && b.data) || [];
+        } catch (_) { return; }
+        if (!rows.length) { slot.innerHTML = ''; return; }
+        const done = rows.filter(i => ['auto', 'assumed', 'paid_manual', 'waived'].includes(i.status)).length;
+        const left = rows.filter(i => i.status === 'due' || i.status === 'lapsed').reduce((s, i) => s + (Number(i.amount) || 0), 0);
+        const lapses = rows.filter(i => i.status === 'lapsed' || i.status === 'paid_manual');
+        const open = rows.filter(i => i.status === 'lapsed').length;
+        slot.innerHTML = `
+            <details style="margin:4px 12px 8px;border:1px solid #A7F3D0;border-radius:8px;background:#F0FDF4;" ${open ? 'open' : ''}>
+                <summary style="padding:6px 10px;cursor:pointer;font-size:12px;list-style:none;">
+                    <strong style="color:#065F46;">💳 POP payments</strong> · ${done}/${rows.length} paid · ${_popRM(left)} left
+                    ${open ? ` · <span style="color:#B91C1C;font-weight:700;">⚠ ${open} lapsed</span>` : ''}
+                    ${receipts.length ? ` · 📎 ${receipts.length} receipt${receipts.length === 1 ? '' : 's'}` : ''}
+                </summary>
+                <div style="padding:4px 10px 8px;font-size:12px;">
+                    ${lapses.length ? lapses.map(i => `
+                        <div style="display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;padding:4px 0;border-top:1px solid #D1FAE5;">
+                            <span>${esc(_popMonth(i.due_date))} · #${Number(i.seq)}</span><strong>${_popRM(i.amount)}</strong> ${_popChip(i.status)}
+                            ${i.lapsed_at ? `<span style="color:var(--gray-500);">lapsed ${esc(_fmt(i.lapsed_at))}</span>` : ''}
+                            ${i.paid_date ? `<span style="color:var(--gray-500);">paid ${esc(_fmt(i.paid_date))}</span>` : ''}
+                            ${i.receipt_id != null ? `<a href="javascript:void(0)" onclick="event.stopPropagation();app.popOpenReceipt(${Number(i.receipt_id)})">📎 receipt</a>` : ''}
+                        </div>`).join('') : '<div style="color:var(--gray-500);">No lapsed months — every charge auto-deducted so far.</div>'}
+                    ${receipts.length ? `<div style="margin-top:6px;color:var(--gray-600);">${receipts.map(r => `📎 ${_popRM(r.amount)} on ${esc(_fmt(r.paid_date))}${r.bank_ref ? ' · ref ' + esc(r.bank_ref) : ''}${r.note ? ' · ' + esc(r.note) : ''}`).join('<br>')}</div>` : ''}
+                    <button type="button" class="btn secondary btn-sm" style="font-size:11px;padding:2px 8px;margin-top:6px;" onclick="event.stopPropagation();app.openPopPlan(${pu})">Open full schedule</button>
+                </div>
+            </details>`;
     };
 
     // push link ./index.html?pop=1#pipeline → open the board
     try {
         if (/[?&]pop=1\b/.test(location.search)) {
             history.replaceState(null, '', location.pathname + location.hash);
-            setTimeout(() => openPopBoard('month'), 2500);
+            setTimeout(() => openPopBoard('lapsed'), 2500);
         }
     } catch (_) { /* best-effort */ }
 
@@ -539,6 +846,10 @@
     const _scan = () => {
         try { apMountTop5(); } catch (_) { /* best-effort */ }
         try { apMountFunnel(); } catch (_) { /* best-effort */ }
+        document.querySelectorAll('[data-pop-purchase]:not([data-pop-done])').forEach(slot => {
+            slot.dataset.popDone = '1';
+            apFillClosingPop(slot);
+        });
         document.querySelectorAll('[data-fu-pid]:not([data-gr-done])').forEach(slot => {
             slot.dataset.grDone = '1';
             apFillGrLine(slot);
@@ -570,7 +881,15 @@
         openPopBoard,
         openPopPlan,
         popMark,
-        popMarkAll,
+        popPayManual,
+        popSaveReceipt,
+        popOpenReceipt,
+        popUndoReceipt,
+        popImportOpen,
+        popImportPhoto,
+        popImportPreview,
+        popImportConfirm,
+        apFillClosingPop,
         apFillPopLine,
     });
     console.log('[chunk] script-autopilot loaded');

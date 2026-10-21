@@ -4031,12 +4031,14 @@ const buildClosingSalesLedger = async ({ prospect = null, customer = null, custo
                 <div style="font-size:13px;font-weight:700;color:var(--primary);white-space:nowrap;">${UI.formatCurrency(amt, { currency: r.p?.currency || _cur })}</div>
             </div>
             ${r.files.length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">${r.files.map(f => thumb(f)).join('')}</div>` : ''}`;
-        return body
+        // 💳 POP payments (lapses + manual receipts) for this sale — filled by the autopilot chunk
+        const popSlot = r.p ? `<div data-pop-purchase="${Number(r.p.id)}"></div>` : '';
+        return (body
             ? `<details style="border-bottom:1px solid #f3f4f6;">
                     <summary style="padding:8px 12px;cursor:pointer;list-style:none;">${summary}</summary>
                     <div style="padding:10px 12px;background:#fafafa;font-size:12px;border-top:1px solid #f3f4f6;">${body}</div>
                </details>`
-            : `<div style="padding:8px 12px;border-bottom:1px solid #f3f4f6;">${summary}</div>`;
+            : `<div style="padding:8px 12px;border-bottom:1px solid #f3f4f6;">${summary}</div>`) + popSlot;
     }).join('');
 
     const unlinkedHtml = unlinked.length ? `
