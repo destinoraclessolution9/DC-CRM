@@ -387,6 +387,15 @@ const runTimers = async () => { while (timers.length) { const t = timers.shift()
   check('import: marks the ticked charges lapsed', iu && JSON.stringify([iu.ops[0][1], iu.ops[1]]), JSON.stringify([{ status: 'lapsed' }, ['in', 'id', [902, 904]]]));
   check('import: only auto/due can be marked', iu && JSON.stringify(iu.ops[2]), '["in","status",["auto","due"]]');
 
+  // picture text arrives as ONE line for the whole table → split per customer
+  tableData.pop_installments = () => [...POPROWS, { id: 906, purchase_id: 73, customer_id: 12, seq: 2, due_date: '2026-10-10', amount: 300, status: 'auto', customers: { full_name: 'Ng' } }].filter(x => ['auto', 'due', 'lapsed'].includes(x.status));
+  byId.set('pop-imp-text', { value: 'Name Month Amount Lim Mei Ling Oct 2026 RM624.17 Ng Oct 2026 RM300' });
+  const prev2 = makeEl('div'); prev2.id = 'pop-imp-preview';
+  await app.popImportPreview();
+  check('import: one-line table split into a row per customer', (prev2.innerHTML.match(/class="pop-imp-pick"/g) || []).length, 2);
+  check('import: split row keeps its own month', prev2.innerHTML.includes('→ <strong>Lim Mei Ling</strong> · Oct 2026'), true);
+  check('import: short name "Ng" not taken from inside "Ling"', prev2.innerHTML.includes('→ <strong>Ng</strong> · Oct 2026 · RM 300'), true);
+
   // DC Closing Record slot
   tableData.pop_installments = () => [POPROWS[0], { ...POPROWS[2], purchase_id: 70 }, { id: 905, seq: 4, due_date: '2026-11-05', amount: 499, status: 'due' }];
   tableData.pop_receipts = [{ id: 55, amount: 1050, paid_date: '2026-10-03', bank_ref: 'MBB1', note: 'late fee' }];

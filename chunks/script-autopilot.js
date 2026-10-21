@@ -721,7 +721,23 @@
             if (n && !custs.has(String(i.customer_id))) custs.set(String(i.customer_id), { id: i.customer_id, name: n, norm: _norm(n) });
         }
         const year = new Date().getFullYear();
-        _popImport.rows = lines.map(line => {
+        // A picture's text often comes back as ONE line for the whole table —
+        // split a line wherever another customer's name starts.
+        // (normalised names hold only a-z, 0-9 and CJK \u2014 safe inside a RegExp;
+        //  whole words only, so "Ng" never matches inside "Ling")
+        const nameRx = [...custs.values()].filter(c => c.norm).map(c => ({ c, rx: new RegExp('(?<![a-z0-9])' + c.norm.split(' ').join('[^a-z0-9\\u3400-\\u9fff]+') + '(?![a-z0-9])', 'gi') }));
+        const segments = [];
+        for (const line of lines) {
+            const hits = [];
+            for (const { c, rx } of nameRx) for (const m of line.matchAll(rx)) hits.push({ at: m.index, len: m[0].length, c });
+            // keep the longest name at each position, drop names inside a longer one
+            hits.sort((x, y) => (x.at - y.at) || (y.len - x.len));
+            const keep = [];
+            for (const h of hits) { const last = keep[keep.length - 1]; if (!last || h.at >= last.at + last.len) keep.push(h); }
+            if (keep.length <= 1) { segments.push(line); continue; }
+            keep.forEach((h, k) => segments.push(line.slice(h.at, k + 1 < keep.length ? keep[k + 1].at : line.length).trim()));
+        }
+        _popImport.rows = segments.map(line => {
             const ln = ' ' + _norm(line) + ' ';
             // best = the longest customer name found in the line (or all its words)
             let best = null;
