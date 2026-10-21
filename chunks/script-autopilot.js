@@ -79,6 +79,7 @@
         if ((r.kind === 'cps' || r.kind === 'book') && pid != null) return btn('📅 Book', `app.openActivityModal('', ${pid})`);
         if (r.kind === 'touch' && r.ref_id != null) return btn('✓ Done', `app.apTouchDone(${Number(r.ref_id)})`);
         if (r.kind === 'pop' && r.ref_id != null) return btn('💳 Plan', `app.openPopPlan(${Number(r.ref_id)})`);
+        if (r.kind === 'minutes' && r.ref_id != null) return btn('📝 Minutes', `app.openPostMeetupNotesModal(${Number(r.ref_id)}, ${pid == null ? 'null' : pid})`);
         return '';
     };
 
@@ -178,7 +179,7 @@
 
     // Called by the activity save (activities chunk) for a NEW CPS. Waits for
     // any modal still open (the CPS-intake WhatsApp prompt) to close first.
-    const apCpsNextStep = async (pid, name = '') => {
+    const apCpsNextStep = async (pid, name = '', activityId = null) => {
         if (!pid) return;
         const t0 = Date.now();
         while (_modalOpen() && Date.now() - t0 < 120e3) await new Promise(r => setTimeout(r, 600));
@@ -195,6 +196,7 @@
             ${opt('🎟️', 'Invite to an event', '九星课 · 改命会 · 博物馆 · 汇集 …', `app.apCpsSet(${Number(pid)}, 'event')`)}
             ${opt('⏳', 'Decide later', 'They go on your daily to-do and Monday list', `app.apCpsSet(${Number(pid)}, 'later')`)}
             ${opt('🚫', 'Not interested', 'Stops reminders for them', `app.apCpsSet(${Number(pid)}, 'not_interested')`)}
+            ${activityId ? opt('🔁', "Didn't happen — reschedule", 'Opens the appointment to change the date', `UI.hideModal();app.editActivity(${Number(activityId)})`) : ''}
         `, [{ label: 'Close', action: `app.apCpsSet(${Number(pid)}, 'later')` }]);
     };
 
@@ -849,6 +851,21 @@
                 </div>
             </details>`;
     };
+
+    // push link ./index.html?minutes=<activity id>#calendar → that meeting's minutes form
+    try {
+        const _mm = location.search.match(/[?&]minutes=(\d+)/);
+        if (_mm) {
+            history.replaceState(null, '', location.pathname + location.hash);
+            setTimeout(async () => {
+                try {
+                    const { data: a } = await _sb().from('activities').select('id,prospect_id,customer_id').eq('id', Number(_mm[1])).maybeSingle();
+                    if (a) await app.openPostMeetupNotesModal(a.id, a.prospect_id || a.customer_id);
+                    else UI.toast.error('That appointment is no longer there');
+                } catch (_) { /* best-effort deep link */ }
+            }, 2500);
+        }
+    } catch (_) { /* best-effort */ }
 
     // push link ./index.html?pop=1#pipeline → open the board
     try {

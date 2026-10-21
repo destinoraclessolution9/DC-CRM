@@ -7005,6 +7005,18 @@
 
         UI.hideModal();
         UI.toast.success('Post-meetup notes saved');
+        // Journey autopilot (A): once a CPS / FTF that already happened has its
+        // minutes, ask "What's next?" (never when the appointment is first keyed in).
+        try {
+            const _act = await AppDataStore.getById('activities', activityId);
+            const _d = new Date(); const _todayStr = `${_d.getFullYear()}-${String(_d.getMonth() + 1).padStart(2, '0')}-${String(_d.getDate()).padStart(2, '0')}`;
+            if (_act && ['CPS', 'FTF'].includes(_act.activity_type) && _act.prospect_id && String(_act.activity_date || '') <= _todayStr) {
+                const _p = await AppDataStore.getById('prospects', _act.prospect_id).catch(() => null);
+                (window._loadChunk ? window._loadChunk('chunks/script-autopilot.min.js') : Promise.resolve())
+                    .then(() => setTimeout(() => (window.app.apCpsNextStep || (() => {}))(_act.prospect_id, (_p && _p.full_name) || '', activityId), 1200))
+                    .catch(() => {});
+            }
+        } catch (_) { /* best-effort prompt */ }
         if (prospectId) {
             // Entity may be a prospect or a customer — detect before routing.
             let isProspect = true;

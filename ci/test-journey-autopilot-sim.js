@@ -124,10 +124,11 @@ const runTimers = async () => { while (timers.length) { const t = timers.shift()
     { kind: 'cps', icon: '🆕', prospect_id: 11, customer_id: null, name: 'Tee', why: 'CPS 7 Oct · no 2nd meeting booked', rm: 5000, ref_id: null },
     { kind: 'touch', icon: '🧭', prospect_id: 12, customer_id: null, name: 'Wong', why: 'CPS跟进电话', rm: 3000, ref_id: 88 },
     { kind: 'gr', icon: '🟣', prospect_id: 13, customer_id: 14, name: 'Lim', why: 'Golden Road 2/6 · due 3 Nov', rm: 900, ref_id: 701 },
+    { kind: 'minutes', icon: '📝', prospect_id: 15, customer_id: null, name: 'Ooi', why: 'Fill the CPS minutes · 20 Oct (yesterday)', rm: 5000, ref_id: 4242 },
   ];
   const rows1 = await app.apTodo(true);
   check('todo rpc called with p_limit 5', JSON.stringify(calls.find(c => c.rpc === 'journey_daily_todo').args), '{"p_limit":5}');
-  check('todo returns rows', rows1.length, 4);
+  check('todo returns rows', rows1.length, 5);
   const n0 = calls.filter(c => c.rpc === 'journey_daily_todo').length;
   await app.apTodo();
   check('todo cached within 60s', calls.filter(c => c.rpc === 'journey_daily_todo').length, n0);
@@ -144,7 +145,7 @@ const runTimers = async () => { while (timers.length) { const t = timers.shift()
   check('desktop: inserted before the month grid', parent.inserted[0] && parent.inserted[0].before, wrapper);
   await flush(); await flush();
   const html = byId.get('ap-top5').innerHTML;
-  check('header shows top 4', html.includes("Today's top 4"), true);
+  check('header shows top 5', html.includes("Today's top 5"), true);
   check('name escaped', html.includes('Ng &lt;b&gt;Jing&lt;/b&gt;'), true);
   check('raw tag not injected', html.includes('<b>Jing'), false);
   check('RM shown in k', html.includes('RM22k'), true);
@@ -152,6 +153,7 @@ const runTimers = async () => { while (timers.length) { const t = timers.shift()
   check('cps → book meeting for prospect', html.includes("app.openActivityModal('', 11)"), true);
   check('touch → done button with touchpoint id', html.includes('app.apTouchDone(88)'), true);
   check('customer row opens customer', html.includes("app.apOpen('customer', 9)"), true);
+  check('minutes row → opens the minutes form of that meeting', html.includes('app.openPostMeetupNotesModal(4242, 15)'), true);
   check('prospect row opens prospect', html.includes("app.apOpen('prospect', 11)"), true);
   check('gr row has no action button', /Golden Road 2\/6[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/.test(html), true);
   app.apMountTop5();
@@ -192,6 +194,10 @@ const runTimers = async () => { while (timers.length) { const t = timers.shift()
   check('prompt body escapes name', m && m.c.includes('Tee &lt;x&gt;'), true);
   check('4 choices', m && ['meeting', 'event', 'later', 'not_interested'].every(s => m.c.includes(`app.apCpsSet(11, '${s}')`)), true);
   check('closing = later', m && m.b[0].action, "app.apCpsSet(11, 'later')");
+  check('no activity id → no reschedule option', m && m.c.includes('editActivity'), false);
+  modals.length = 0;
+  await app.apCpsNextStep(11, 'Tee', 777);
+  check('after minutes: reschedule option opens the appointment', modals[0] && modals[0].c.includes('app.editActivity(777)'), true);
 
   calls.length = 0; appCalls.length = 0; timers.length = 0; hidden = 0;
   await app.apCpsSet(11, 'meeting');

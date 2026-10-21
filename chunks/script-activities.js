@@ -7161,10 +7161,16 @@ My raw notes:
         _evaluateActivityJourneyRules(activity);
 
         // === Journey autopilot (A): a CPS never ends with nothing next ===
-        if (activity.activity_type === 'CPS' && activity.prospect_id && !stayOpen) {
+        // Only for a meeting that already happened AND has its minutes — an
+        // appointment keyed in ahead gets the 08:30 "fill the minutes" push instead.
+        const _apDay = new Date(); const _apToday = `${_apDay.getFullYear()}-${String(_apDay.getMonth() + 1).padStart(2, '0')}-${String(_apDay.getDate()).padStart(2, '0')}`;
+        const _apHasMinutes = !!(activity.note_key_points || activity.summary || activity.discussion_summary || activity.note_outcome
+            || (activity.meeting_minutes && Object.keys(activity.meeting_minutes).length));
+        if (['CPS', 'FTF'].includes(activity.activity_type) && activity.prospect_id && !stayOpen
+            && String(activity.activity_date || '') <= _apToday && _apHasMinutes) {
             const _cpsName = _state.se?.name || '';
             (window._loadChunk ? window._loadChunk('chunks/script-autopilot.min.js') : Promise.resolve())
-                .then(() => setTimeout(() => (window.app.apCpsNextStep || (() => {}))(activity.prospect_id, _cpsName), 900))
+                .then(() => setTimeout(() => (window.app.apCpsNextStep || (() => {}))(activity.prospect_id, _cpsName, savedActivity && savedActivity.id), 900))
                 .catch(() => {});
         }
 
