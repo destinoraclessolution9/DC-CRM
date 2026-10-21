@@ -187,6 +187,7 @@ function SystemRow({ row }) {
             <td style={{ padding: '14px 12px', fontSize: '13px', lineHeight: 1.5, maxWidth: '260px' }}>{row.action}</td>
             <td style={{ padding: '14px 12px' }}>
                 <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    <button className="btn primary btn-sm" style={{ padding: '4px 10px', fontSize: '11px' }} onClick={(e) => { e.stopPropagation(); call('openDealModal', null, row.prospectId); }} title="Create a deal with product, amount and close date"><i className="fas fa-briefcase"></i> Deal</button>
                     <button className="btn secondary btn-sm" style={{ padding: '4px 10px', fontSize: '11px' }} onClick={() => call('addToFocusList', row.prospectId)}><i className="fas fa-plus"></i> Add to Focus</button>
                     <button className="btn-icon" onClick={(e) => { e.stopPropagation(); call('showProspectMenu', row.prospectId); }} title="View"><i className="fas fa-eye"></i></button>
                     <button className="btn-icon" onClick={(e) => { e.stopPropagation(); call('showComments', row.prospectId); }} style={{ position: 'relative' }} title="Comments">
