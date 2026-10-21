@@ -386,6 +386,31 @@
         if (i.status === 'paid_manual' && i.receipt_id != null) return b('📎 Receipt', `app.popOpenReceipt(${Number(i.receipt_id)})`);
         return '';
     };
+    // ✎ amount (plan view only): unpaid months, optionally every later unpaid month too
+    const _popEditBtn = (i, plan) => (plan && ['due', 'auto', 'lapsed'].includes(i.status))
+        ? `<a href="javascript:void(0)" title="Change the amount" style="font-size:11px;margin-left:2px;" onclick="event.stopPropagation();app.popEditAmount(${Number(i.id)}, ${Number(plan)}, ${Number(i.seq)}, ${Number(i.amount) || 0})">✎</a>` : '';
+    const popEditAmount = (id, plan, seq, amount) => {
+        UI.showModal('✎ Change the POP amount', `
+            <div class="form-group"><label>Amount (RM)</label><input type="number" step="0.01" min="1" id="pop-amt-val" class="form-control" value="${Number(amount).toFixed(2)}"></div>
+            <label style="display:flex;gap:8px;align-items:center;font-size:13px;"><input type="checkbox" id="pop-amt-all" checked> Also change every later month that is not paid yet (#${Number(seq)} onward)</label>
+            <div style="font-size:11px;color:var(--gray-500);margin-top:6px;">Use this when the real card charge differs from the CRM (e.g. RM499 vs RM498.50).</div>`,
+            [{ label: 'Cancel', action: `app.openPopPlan(${Number(plan)})` },
+             { label: 'Save', type: 'primary', action: `(async () => { await app.popSaveAmount(${Number(id)}, ${Number(plan)}, ${Number(seq)}); })()` }]);
+    };
+    const popSaveAmount = async (id, plan, seq) => {
+        const v = Math.round(Number(document.getElementById('pop-amt-val')?.value) * 100) / 100;
+        const all = !!document.getElementById('pop-amt-all')?.checked;
+        if (!(v > 0)) return UI.toast.error('Enter an amount');
+        try {
+            let q = _sb().from('pop_installments').update({ amount: v, amount_edited: true });
+            q = all ? q.eq('purchase_id', plan).gte('seq', seq).in('status', ['due', 'auto', 'lapsed']) : q.eq('id', id);
+            const { data, error } = await q.select('id');
+            if (error) throw error;
+            if (!data || !data.length) throw new Error('Not allowed for this customer');
+            UI.toast.success(`Amount changed on ${data.length} month${data.length === 1 ? '' : 's'}`);
+        } catch (e) { return UI.toast.error('Not saved: ' + (e && e.message ? e.message : e)); }
+        await openPopPlan(plan);
+    };
     const _popRowHtml = (i, opts = {}) => {
         const name = (i.customers && i.customers.full_name) || '—';
         const pu = i.purchases || {};
@@ -403,7 +428,7 @@
                 <div style="font-weight:600;font-size:13px;">${title}</div>${sub}
             </div>
             <span style="font-size:12px;white-space:nowrap;">${esc(_popMonth(i.due_date))}</span>
-            <strong style="font-size:13px;white-space:nowrap;">${_popRM(i.amount)}</strong>
+            <strong style="font-size:13px;white-space:nowrap;">${_popRM(i.amount)}${_popEditBtn(i, opts.plan)}</strong>
             ${_popChip(i.status)} ${extra}
             <span style="display:flex;gap:4px;flex-wrap:wrap;">${_popActs(i, opts.plan)}</span>
         </div>`;
@@ -915,6 +940,8 @@
         openPopPlan,
         popMark,
         popPayManual,
+        popEditAmount,
+        popSaveAmount,
         popSaveReceipt,
         popOpenReceipt,
         popUndoReceipt,

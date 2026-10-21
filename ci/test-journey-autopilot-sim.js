@@ -344,11 +344,25 @@ const runTimers = async () => { while (timers.length) { const t = timers.shift()
   check('plan: receipts section', pp && pp.c.includes('📎 Manual payments (1)'), true);
   check('plan: receipt amount + note + ref', pp && pp.c.includes('RM 1,050') && pp.c.includes('late fee') && pp.c.includes('ref MBB1'), true);
   check('plan: uploader can undo', pp && pp.c.includes('app.popUndoReceipt(55, 72)'), true);
+  check('plan: no ✎ on a paid month', pp && pp.c.includes('app.popEditAmount(903'), false);
   modals.length = 0;
   await app.openPopPlan(71);
   const pp2 = modals[modals.length - 1].c;
   check('plan: auto month → ⚠ Lapsed button keeps plan view', pp2.includes("app.popMark(902, 'lapsed', { plan: 71 })"), true);
   check('plan: next month (Nov, future) → no lapse button yet', pp2.includes('app.popMark(904,'), false);
+  check('plan: ✎ amount on an unpaid month', pp2.includes('app.popEditAmount(902, 71, 5, 624.17)'), true);
+  check('plan: ✎ also on an upcoming month', pp2.includes('app.popEditAmount(904, 71, 6, 624.17)'), true);
+  byId.set('pop-amt-val', { value: '620' }); byId.set('pop-amt-all', { checked: true });
+  calls.length = 0;
+  await app.popSaveAmount(902, 71, 5);
+  const au = calls.find(c => c.table === 'pop_installments' && c.ops[0][0] === 'update');
+  check('amount: whole rest of plan, unpaid only, flagged edited', au && JSON.stringify([au.ops[0][1], au.ops[1], au.ops[2], au.ops[3]]),
+    JSON.stringify([{ amount: 620, amount_edited: true }, ['eq', 'purchase_id', 71], ['gte', 'seq', 5], ['in', 'status', ['due', 'auto', 'lapsed']]]));
+  byId.set('pop-amt-all', { checked: false });
+  calls.length = 0;
+  await app.popSaveAmount(902, 71, 5);
+  const au2 = calls.find(c => c.table === 'pop_installments' && c.ops[0][0] === 'update');
+  check('amount: just this month', au2 && JSON.stringify(au2.ops[1]), '["eq","id",902]');
 
   // 💵 paid manually: needs ticked month + amount + date + file
   modals.length = 0;
