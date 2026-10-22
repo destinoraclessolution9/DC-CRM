@@ -18,8 +18,10 @@ const ANON_KEY: string = Deno.env.get("SUPABASE_ANON_KEY") || "";
 // @ts-ignore
 const GEMINI_API_KEY: string = Deno.env.get("GEMINI_API_KEY") || "";
 
-const GEMINI_MODEL = "gemini-2.5-flash";
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+// Each model has its own quota on the key: when the first is used up (429),
+// the read falls through to the next instead of failing.
+const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-flash-lite-latest", "gemini-flash-latest"];
+const geminiUrl = (model: string) => `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
 // Only allow trusted image MIME types through to Gemini (mirror cps-form-ocr).
 const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"];
@@ -253,6 +255,19 @@ const RESPONSE_SCHEMA = {
 };
 
 async function callGemini(imageBase64: string, mimeType: string, hintFormType?: string) {
+  let last: unknown = null;
+  for (const model of GEMINI_MODELS) {
+    try { return await callGeminiModel(model, imageBase64, mimeType, hintFormType); }
+    catch (e: any) {
+      last = e;
+      if (!/^upstream_(429|503|404)$/.test(String(e?.message || e))) throw e;
+      console.warn(`[order-form-ocr] ${model} busy (${e.message}) — trying the next model`);
+    }
+  }
+  throw last;
+}
+
+async function callGeminiModel(model: string, imageBase64: string, mimeType: string, hintFormType?: string) {
   const promptWithHint = hintFormType && hintFormType !== "auto"
     ? `${EXTRACTION_PROMPT}\n\nHINT FROM CLIENT: The user pre-classified this as Template ${hintFormType}. Use that unless the photo clearly disagrees.`
     : EXTRACTION_PROMPT;
@@ -275,7 +290,7 @@ async function callGemini(imageBase64: string, mimeType: string, hintFormType?: 
     },
   };
 
-  const res = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
+  const res = await fetch(`${geminiUrl(model)}?key=${GEMINI_API_KEY}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -286,7 +301,7 @@ async function callGemini(imageBase64: string, mimeType: string, hintFormType?: 
   if (!res.ok) {
     const errText = await res.text();
     console.error(`[order-form-ocr] Gemini API error ${res.status}:`, errText.slice(0, 500));
-    throw new Error("upstream_error");
+    throw new Error(`upstream_${res.status}`);
   }
 
   const data = await res.json();
@@ -350,7 +365,11 @@ Deno.serve(async (req: Request) => {
     return json({ ok: true, form_type: detectedType, ...result });
   } catch (e: any) {
     // Log detail server-side; return only a generic error to the client (mirror cps-form-ocr).
-    console.error("[order-form-ocr] ocr failed:", String(e?.message || e));
-    return json({ ok: false, error: "ocr_failed" }, 500);
+    const msg = String(e?.message || e);
+    console.error("[order-form-ocr] ocr failed:", msg);
+    // Status code only (never the upstream body) so the phone can say what to do.
+    const busy = /^upstream_(429|503)$/.test(msg);
+    return json({ ok: false, error: "ocr_failed", code: msg.startsWith("upstream_") ? msg : "parse",
+      detail: busy ? "AI reader is busy right now — key the fields in" : "AI couldn't read this photo" }, busy ? 503 : 500);
   }
 });
