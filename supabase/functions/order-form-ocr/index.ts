@@ -17,11 +17,11 @@ const SERVICE_ROLE: string = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const ANON_KEY: string = Deno.env.get("SUPABASE_ANON_KEY") || "";
 // @ts-ignore
 const GEMINI_API_KEY: string = Deno.env.get("GEMINI_API_KEY") || "";
+// @ts-ignore
+const ANTHROPIC_API_KEY: string = Deno.env.get("ANTHROPIC_API_KEY") || "";
 
-// Each model has its own quota on the key: when the first is used up (429),
-// the read falls through to the next instead of failing.
-const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-flash-lite-latest", "gemini-flash-latest"];
-const geminiUrl = (model: string) => `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+// Gemini models in turn, then Claude when its key is set (quota fallbacks).
+import { readForm, readError } from "../_shared/form-reader.ts";
 
 // Only allow trusted image MIME types through to Gemini (mirror cps-form-ocr).
 const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"];
@@ -255,68 +255,16 @@ const RESPONSE_SCHEMA = {
 };
 
 async function callGemini(imageBase64: string, mimeType: string, hintFormType?: string) {
-  let last: unknown = null;
-  for (const model of GEMINI_MODELS) {
-    try { return await callGeminiModel(model, imageBase64, mimeType, hintFormType); }
-    catch (e: any) {
-      last = e;
-      if (!/^upstream_(429|503|404)$/.test(String(e?.message || e))) throw e;
-      console.warn(`[order-form-ocr] ${model} busy (${e.message}) — trying the next model`);
-    }
-  }
-  throw last;
-}
+  const prompt = hintFormType && hintFormType !== "auto"
+    ? `${EXTRACTION_PROMPT}
 
-async function callGeminiModel(model: string, imageBase64: string, mimeType: string, hintFormType?: string) {
-  const promptWithHint = hintFormType && hintFormType !== "auto"
-    ? `${EXTRACTION_PROMPT}\n\nHINT FROM CLIENT: The user pre-classified this as Template ${hintFormType}. Use that unless the photo clearly disagrees.`
+HINT FROM CLIENT: The user pre-classified this as Template ${hintFormType}. Use that unless the photo clearly disagrees.`
     : EXTRACTION_PROMPT;
-
-  const body = {
-    contents: [{
-      role: "user",
-      parts: [
-        { text: promptWithHint },
-        { inline_data: { mime_type: mimeType, data: imageBase64 } },
-      ],
-    }],
-    generationConfig: {
-      temperature: 0.1,
-      response_mime_type: "application/json",
-      response_schema: RESPONSE_SCHEMA,
-      // Reading a form is transcription, not reasoning: 2.5-flash "thinks" by
-      // default, which took a read to 24–30s (the phone gives up at 30s).
-      thinkingConfig: { thinkingBudget: 512 },
-    },
-  };
-
-  const res = await fetch(`${geminiUrl(model)}?key=${GEMINI_API_KEY}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  // Log upstream detail server-side only; throw a generic error so raw Gemini
-  // response fragments are never returned to the client (mirror cps-form-ocr).
-  if (!res.ok) {
-    const errText = await res.text();
-    console.error(`[order-form-ocr] Gemini API error ${res.status}:`, errText.slice(0, 500));
-    throw new Error(`upstream_${res.status}`);
-  }
-
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) {
-    console.error("[order-form-ocr] Gemini returned no text:", JSON.stringify(data).slice(0, 500));
-    throw new Error("upstream_error");
-  }
-
-  try {
-    return JSON.parse(text);
-  } catch (e) {
-    console.error("[order-form-ocr] Gemini returned non-JSON:", text.slice(0, 500));
-    throw new Error("upstream_error");
-  }
+  // Reading a form is transcription, not reasoning: 2.5-flash "thinks" by default,
+  // which took a read to 24–30s; 512 keeps full reads at ~11s (0 gave partial reads).
+  const { result, provider } = await readForm({ tag: "order-form-ocr", prompt, imageBase64, mimeType, schema: RESPONSE_SCHEMA, thinkingBudget: 512 });
+  console.log(`[order-form-ocr] read by ${provider}`);
+  return result;
 }
 
 // @ts-ignore
@@ -324,7 +272,7 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
   if (req.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405);
 
-  if (!GEMINI_API_KEY) return json({ ok: false, error: "gemini_key_not_configured" }, 500);
+  if (!GEMINI_API_KEY && !ANTHROPIC_API_KEY) return json({ ok: false, error: "ai_key_not_configured" }, 500);
 
   const auth = await requireAuth(req);
   if (!auth.ok) return json({ ok: false, error: auth.reason }, auth.status);
@@ -365,11 +313,9 @@ Deno.serve(async (req: Request) => {
     return json({ ok: true, form_type: detectedType, ...result });
   } catch (e: any) {
     // Log detail server-side; return only a generic error to the client (mirror cps-form-ocr).
-    const msg = String(e?.message || e);
-    console.error("[order-form-ocr] ocr failed:", msg);
+    console.error("[order-form-ocr] ocr failed:", String(e?.message || e));
     // Status code only (never the upstream body) so the phone can say what to do.
-    const busy = /^upstream_(429|503)$/.test(msg);
-    return json({ ok: false, error: "ocr_failed", code: msg.startsWith("upstream_") ? msg : "parse",
-      detail: busy ? "AI reader is busy right now — key the fields in" : "AI couldn't read this photo" }, busy ? 503 : 500);
+    const r = readError(e);
+    return json({ ok: false, error: "ocr_failed", code: r.code, detail: r.detail }, r.status);
   }
 });

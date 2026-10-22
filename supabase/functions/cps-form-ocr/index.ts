@@ -17,9 +17,11 @@ const SERVICE_ROLE: string = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const ANON_KEY: string = Deno.env.get("SUPABASE_ANON_KEY") || "";
 // @ts-ignore
 const GEMINI_API_KEY: string = Deno.env.get("GEMINI_API_KEY") || "";
+// @ts-ignore
+const ANTHROPIC_API_KEY: string = Deno.env.get("ANTHROPIC_API_KEY") || "";
 
-const GEMINI_MODEL = "gemini-2.5-flash";
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+// Gemini models in turn, then Claude when its key is set (quota fallbacks).
+import { readForm, readError } from "../_shared/form-reader.ts";
 
 // Only forward image MIME types we trust to Gemini.
 const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"];
@@ -154,46 +156,9 @@ const RESPONSE_SCHEMA = {
 };
 
 async function callGemini(imageBase64: string, mimeType: string) {
-  const body = {
-    contents: [{
-      role: "user",
-      parts: [
-        { text: EXTRACTION_PROMPT },
-        { inline_data: { mime_type: mimeType, data: imageBase64 } },
-      ],
-    }],
-    generationConfig: {
-      temperature: 0.1,
-      response_mime_type: "application/json",
-      response_schema: RESPONSE_SCHEMA,
-    },
-  };
-
-  const res = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    console.error(`[cps-form-ocr] Gemini API error ${res.status}:`, errText.slice(0, 500));
-    throw new Error("upstream_error");
-  }
-
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) {
-    console.error("[cps-form-ocr] Gemini returned no text:", JSON.stringify(data).slice(0, 500));
-    throw new Error("upstream_error");
-  }
-
-  try {
-    return JSON.parse(text);
-  } catch (e) {
-    console.error("[cps-form-ocr] Gemini returned non-JSON:", text.slice(0, 500));
-    throw new Error("upstream_error");
-  }
+  const { result, provider } = await readForm({ tag: "cps-form-ocr", prompt: EXTRACTION_PROMPT, imageBase64, mimeType, schema: RESPONSE_SCHEMA, thinkingBudget: 512 });
+  console.log(`[cps-form-ocr] read by ${provider}`);
+  return result;
 }
 
 // Convert a Blob/File to base64 (no data URL prefix).
@@ -213,7 +178,7 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
   if (req.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405);
 
-  if (!GEMINI_API_KEY) return json({ ok: false, error: "gemini_key_not_configured" }, 500);
+  if (!GEMINI_API_KEY && !ANTHROPIC_API_KEY) return json({ ok: false, error: "ai_key_not_configured" }, 500);
 
   const auth = await requireAuth(req);
   if (!auth.ok) return json({ ok: false, error: auth.reason }, auth.status);
@@ -259,6 +224,8 @@ Deno.serve(async (req: Request) => {
     return json({ ok: true, ...result });
   } catch (e: any) {
     console.error("[cps-form-ocr] ocr failed:", String(e?.message || e));
-    return json({ ok: false, error: "ocr_failed" }, 500);
+    // Status code only (never the upstream body) so the phone can say what to do.
+    const r = readError(e);
+    return json({ ok: false, error: "ocr_failed", code: r.code, detail: r.detail }, r.status);
   }
 });

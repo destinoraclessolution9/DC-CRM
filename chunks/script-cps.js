@@ -1415,7 +1415,7 @@ const scanCpsForm = (prefix = 'cps') => {
 };
 
 const handleCpsScanFile = async (input, prefix = 'cps') => {
-    const file = input.files && input.files[0];
+    let file = input.files && input.files[0];
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
@@ -1439,11 +1439,14 @@ const handleCpsScanFile = async (input, prefix = 'cps') => {
         <div style="text-align:center; padding:20px 0;">
             <i class="fas fa-spinner fa-spin" style="font-size:36px; color:#7c3aed; margin-bottom:14px;"></i>
             <p style="color:var(--gray-600); margin:0;">Reading the form, please wait…</p>
-            <p style="color:var(--gray-400); font-size:12px; margin-top:6px;">(usually 3–6 seconds)</p>
+            <p style="color:var(--gray-400); font-size:12px; margin-top:6px;">(usually about 10 seconds)</p>
         </div>
     `);
 
     try {
+        // Shrink on the phone first (~400 KB instead of 3–4 MB) — same as the order form.
+        if (!window.app.shrinkOrderFormPhoto && typeof window._loadChunk === 'function') { try { await window._loadChunk('chunks/script-activities.min.js'); } catch (_) { /* send as is */ } }
+        if (window.app.shrinkOrderFormPhoto) { try { file = await window.app.shrinkOrderFormPhoto(file); } catch (_) { /* send as is */ } }
         // Convert image to base64 (avoids multipart edge cases)
         const dataUrl = await new Promise((resolve, reject) => {
             const reader = new FileReader();
