@@ -28,7 +28,7 @@ begin
        j := j || jsonb_build_object('2_duplicate', 'ALLOWED (bad)');
  exception when others then j := j || jsonb_build_object('2_duplicate', 'refused: ' || sqlerrm); end;
  reset role;
- j := j || jsonb_build_object('2_case', (select row_to_json(x) from (select status, bank_account, amount_paid from sale_cancellations where id = cid) x));
+ j := j || jsonb_build_object('2_case', (select row_to_json(x) from (select status, bank_account, amount_paid, (select sum(amount) from pop_installments where purchase_id = PU and status in ('due','lapsed')) as pop_unpaid from sale_cancellations where id = cid) x));
  -- 3: reminder — acceptance not back after 14+ days (request 20 days ago → day 21 = multiple of 7)
  update sale_cancellations set requested_at = d - 21 where id = cid;
  j := j || jsonb_build_object('3_reminder_requested', queue_cancellation_reminders());

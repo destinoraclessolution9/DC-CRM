@@ -96,7 +96,11 @@ begin
     insert into public.sale_cancellations (purchase_id, customer_id, agent_id, requested_at, reason, bank_name, bank_account, account_holder,
                                            request_file, request_file_name, amount_paid, created_by, updated_by)
     values (p_purchase, v_cust, v_agent, p_requested_at, btrim(p_reason), btrim(p_bank_name), regexp_replace(btrim(p_bank_account), '\s+', '', 'g'),
-            btrim(p_account_holder), p_file, p_file_name, pu.amount, public.current_user_row_id(), public.current_user_row_id())
+            btrim(p_account_holder), p_file, p_file_name,
+            -- POP: only the months already charged count as paid
+            greatest(0, coalesce(pu.amount, 0) - coalesce((select sum(i.amount) from public.pop_installments i
+                where i.purchase_id = p_purchase and i.status in ('due', 'lapsed', 'waived')), 0)),
+            public.current_user_row_id(), public.current_user_row_id())
     returning id into v_id;
     return v_id;
 end $$;
