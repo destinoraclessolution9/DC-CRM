@@ -269,6 +269,9 @@ async function callGemini(imageBase64: string, mimeType: string, hintFormType?: 
       temperature: 0.1,
       response_mime_type: "application/json",
       response_schema: RESPONSE_SCHEMA,
+      // Reading a form is transcription, not reasoning: 2.5-flash "thinks" by
+      // default, which took a read to 24–30s (the phone gives up at 30s).
+      thinkingConfig: { thinkingBudget: 512 },
     },
   };
 

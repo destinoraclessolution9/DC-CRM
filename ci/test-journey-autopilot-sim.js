@@ -525,6 +525,33 @@ const runTimers = async () => { while (timers.length) { const t = timers.shift()
   await app.apRenderTop5(true);
   check('todo pop → plan button', byId.get('ap-top5').innerHTML.includes('app.openPopPlan(70)'), true);
 
+  // ── 📸 order-form photo attached after the closing ──────────────────────────
+  rpcData.journey_daily_todo = [{ kind: 'photo', icon: '📸', prospect_id: 31, customer_id: 32, name: 'Khor', why: 'Attach the order form photo · closed 22 Oct', rm: 12000, ref_id: 5151 }];
+  await app.apRenderTop5(true);
+  check('todo photo → attach button for that closing', byId.get('ap-top5').innerHTML.includes('app.ofAttachLater(5151, 31)'), true);
+  modals.length = 0;
+  app.ofAttachLater(5151, 31);
+  const ofm = modals[modals.length - 1];
+  check('attach later: modal with camera + file', ofm && ofm.c.includes('ofl-camera') && ofm.c.includes('app.ofAttachLaterSave(this, 5151, 31)'), true);
+  const ofUp = [];
+  supabase.storage = { from: () => ({ upload: async (p, f, o) => { ofUp.push([p, o]); return { error: ofUp.length === 1 ? new Error('network') : null }; }, remove: async () => ({ error: null }) }) };
+  byId.set('ofl-status', makeEl('div'));
+  calls.length = 0; toasts.length = 0;
+  await app.ofAttachLaterSave({ files: [{ name: 'form.jpg', type: 'image/jpeg', size: 300000 }], value: 'x' }, 5151, 31);
+  check('attach later: retried once after a failed upload', ofUp.length === 2 && ofUp[1][1].upsert === true, true);
+  check('attach later: stored under order_forms/<prospect>_', /^order_forms\/31_\d+_later_form\.jpg$/.test(ofUp[0][0]), true);
+  const ofIns = calls.find(c => c.table === 'prospect_attachments');
+  const ofRow = ofIns && (ofIns.ops.find(o => o[0] === 'insert') || [])[1];
+  check('attach later: row tagged with the closing activity', ofRow && JSON.stringify([ofRow.attachment_type, ofRow.prospect_id, ofRow.metadata.activity_id, ofRow.metadata.attached_later]), JSON.stringify(['order_form', 31, 5151, true]));
+  check('attach later: success toast', toasts.some(t => t[0] === 'ok' && /attached/.test(t[1])), true);
+  check('attach later: top 5 refreshed', calls.some(c => c.rpc === 'journey_daily_todo'), true);
+  supabase.storage = { from: () => ({ upload: async () => ({ error: new Error('offline') }), remove: async () => ({ error: null }) }) };
+  calls.length = 0;
+  await app.ofAttachLaterSave({ files: [{ name: 'f.jpg', type: 'image/jpeg', size: 1000 }], value: 'x' }, 5151, 31);
+  check('attach later: both tries fail → message, no row', byId.get('ofl-status').innerHTML.includes('Upload failed') && !calls.some(c => c.table === 'prospect_attachments'), true);
+  await app.ofAttachLaterSave({ files: [{ name: 'f.heic', type: 'image/heic', size: 1000 }], value: 'x' }, 5151, 31);
+  check('attach later: undecodable HEIC refused', byId.get('ofl-status').innerHTML.includes('JPG or PNG'), true);
+
   console.log(`\njourney-autopilot sim: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

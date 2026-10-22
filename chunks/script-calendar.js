@@ -6308,12 +6308,19 @@
             }
         }
 
-        // Require an Order Form photo when closing — covers the 3 PREON templates.
-        // Only enforced when the photo capture UI was rendered (i.e. linked to a prospect).
+        // Order Form photo when closing — covers the 3 PREON templates. Only asked
+        // when the photo capture UI was rendered (i.e. linked to a prospect). Owner
+        // 2026-10-22: a slow / failed upload must not block the sale — the agent may
+        // save now and attach later; a 📸 row stays in their Top 5 until it is added.
         if (isClosed && document.getElementById('mo-order-form-thumbs') && !(window.app.hasOrderFormPhoto || (() => false))('mo', activityId)) {
-            UI.toast.error('Please attach the Order Form photo for this sale before saving the closing.');
-            document.getElementById('mo-order-form-camera')?.parentElement?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            return;
+            const busy = (window.app.orderFormBusy || (() => null))('mo');
+            const msg = busy === 'uploading'
+                ? 'The order form photo is still uploading.\n\nSave the closing now? The upload keeps going in the background; if it does not finish, a 📸 reminder stays in your Top 5 until you attach it.'
+                : 'No order form photo is attached.\n\nSave the closing anyway and attach the photo later? A 📸 reminder stays in your Top 5 until it is added.';
+            if (!window.confirm(msg)) {
+                document.getElementById('mo-order-form-camera')?.parentElement?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                return;
+            }
         }
 
         // Upload the invoice file (if a new one was selected). The Meeting

@@ -3251,59 +3251,107 @@ My raw notes:
         Promise.resolve(p),
         new Promise((_, rej) => setTimeout(() => rej(new Error((label || 'request') + ' timed out — check your connection and try again.')), ms)),
     ]);
+    // Phone photos are 3–4 MB (4032×3024). Shrink to ≤1600px on the long side as a
+    // JPEG (~400 KB) before upload: ~8× less to send, and the AI reads it just as
+    // well (tested on live order forms 2026-10-22). Decoding through the browser
+    // also turns an iPhone HEIC into a JPEG where the phone can decode it.
+    const shrinkOrderFormPhoto = async (file, maxPx = 1600, quality = 0.85) => {
+        let src = null, w = 0, h = 0, url = null;
+        try {
+            if (typeof createImageBitmap === 'function') {
+                src = await createImageBitmap(file);
+                w = src.width; h = src.height;
+            }
+        } catch (_) { src = null; }
+        if (!src) {
+            url = URL.createObjectURL(file);
+            src = await new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve(img);
+                img.onerror = () => reject(new Error('Could not read this photo'));
+                img.src = url;
+            });
+            w = src.naturalWidth || src.width; h = src.naturalHeight || src.height;
+        }
+        try {
+            const s = Math.min(1, maxPx / Math.max(w, h || 1));
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, Math.round(w * s)); canvas.height = Math.max(1, Math.round(h * s));
+            canvas.getContext('2d').drawImage(src, 0, 0, canvas.width, canvas.height);
+            const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+            if (!blob) throw new Error('Could not compress this photo');
+            // A small JPEG already under the target stays as it is.
+            if (/^image\/jpe?g$/i.test(file.type || '') && s === 1 && file.size <= blob.size) return file;
+            return new File([blob], String(file.name || 'order_form').replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
+        } finally {
+            if (url) URL.revokeObjectURL(url);
+            try { if (src && src.close) src.close(); } catch (_) {}
+        }
+    };
+
+    // What the photo step is doing per form prefix: 'uploading' | 'reading' | null.
+    // The save gate reads it to explain why there is no photo yet.
+    const _orderFormBusy = {};
+    const orderFormBusy = (prefix) => _orderFormBusy[prefix] || null;
+
     const handleOrderFormFile = async (input, prefix, prospectId, activityId) => {
-        const file = input.files && input.files[0];
+        let file = input.files && input.files[0];
         if (!file) return;
-        // L4 (audit): accept only the formats the OCR edge function supports, so an
-        // iPhone HEIC isn't uploaded-then-rejected (leaving an orphan storage file).
-        if (!/^image\/(jpe?g|png|webp)$/i.test(file.type || '')) {
-            UI.toast.error('Please use a JPG, PNG or WEBP photo (HEIC is not supported — switch your camera to "Most Compatible").');
-            input.value = '';
-            return;
-        }
-        if (file.size > 8 * 1024 * 1024) {
-            UI.toast.error('Image too large. Use a photo under 8 MB.');
-            input.value = '';
-            return;
-        }
         if (!prospectId) {
             UI.toast.error('Order form photo requires a linked prospect.');
             input.value = '';
             return;
         }
 
-        const statusEl = document.getElementById(`${prefix}-order-form-status`);
+        const statusEl = () => document.getElementById(`${prefix}-order-form-status`);
         const formTypeSel = document.getElementById(`${prefix}-order-form-type`);
         const formTypeHint = formTypeSel ? (formTypeSel.value || 'auto') : 'auto';
 
         const setStatus = (bg, fg, html) => {
-            if (statusEl) {
-                statusEl.innerHTML = `<div style="padding:7px 11px;background:${bg};color:${fg};border-radius:6px;font-size:12px;display:flex;align-items:center;gap:6px;">${html}</div>`;
-            }
+            const el = statusEl();
+            if (el) el.innerHTML = `<div style="padding:7px 11px;background:${bg};color:${fg};border-radius:6px;font-size:12px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">${html}</div>`;
         };
+        const LATER = 'Try again, or save the closing now and attach the photo later from your 📋 Top 5.';
 
         try {
             const sb = window.supabase || window.supabaseClient;
             if (!sb || !sb.storage) throw new Error('Supabase storage not available (offline mode?)');
 
-            // 1. Upload photo to Supabase Storage
-            setStatus('#e3f2fd', '#1565c0', '<i class="fas fa-spinner fa-spin"></i> Uploading photo…');
+            // 0. Shrink on the phone (also converts HEIC where the browser can decode it)
+            _orderFormBusy[prefix] = 'uploading';
+            setStatus('#e3f2fd', '#1565c0', '<i class="fas fa-spinner fa-spin"></i> Preparing photo…');
+            try { file = await shrinkOrderFormPhoto(file); }
+            catch (e) {
+                // L4 (audit): the OCR edge function only takes JPG / PNG / WEBP.
+                if (!/^image\/(jpe?g|png|webp)$/i.test(file.type || '')) {
+                    throw new Error('This photo format can\'t be read — use a JPG or PNG (iPhone: Settings › Camera › Formats › Most Compatible).');
+                }
+            }
+            if (file.size > 8 * 1024 * 1024) throw new Error('Image too large. Use a photo under 8 MB.');
+
+            // 1. Upload — two tries, since a phone on mobile data often drops one
             const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
             const path = `order_forms/${prospectId}_${Date.now()}_${formTypeHint}_${safeName}`;
-            const { error: upErr } = await _ffRace(sb.storage.from('attachments').upload(path, file, { upsert: false, contentType: file.type }), 45000, 'Photo upload');
-            if (upErr) throw upErr;
+            const kb = Math.max(1, Math.round(file.size / 1024));
+            let upErr = null;
+            for (let attempt = 1; attempt <= 2; attempt++) {
+                setStatus('#e3f2fd', '#1565c0', `<i class="fas fa-spinner fa-spin"></i> Uploading photo (${kb} KB)${attempt > 1 ? ' — retrying…' : '…'}`);
+                try {
+                    const { error } = await _ffRace(sb.storage.from('attachments').upload(path, file, { upsert: attempt > 1, contentType: file.type }), 45000, 'Photo upload');
+                    upErr = error || null;
+                } catch (e) { upErr = e; }
+                if (!upErr) break;
+            }
+            if (upErr) throw new Error(`Photo didn't upload (${upErr.message || upErr}). ${LATER}`);
             // C2 (audit): keep the storage PATH (not a permanent public URL). Render
             // + open code re-signs it via resolveAttachmentSrc, so a private bucket
             // works and no public PII URL is ever persisted.
             const photoUrl = path;
 
             // H4 (audit): create the attachment row NOW — right after a successful
-            // upload and BEFORE the OCR call. Previously the row was written only
-            // after OCR succeeded, so an OCR outage aborted before the insert, left
-            // no thumbnail, and the required-photo gate blocked every closing. The
-            // photo record (and thus the ability to record the sale) must not depend
-            // on the OCR service being up. M1: tag the activity so a later sale for
-            // the same prospect can't satisfy its gate with this sale's photo.
+            // upload and BEFORE the OCR call — so the photo (and the ability to record
+            // the sale) never depends on the AI. M1: tag the activity so a later sale
+            // for the same prospect can't satisfy its gate with this sale's photo.
             let attachment = null;
             const _mkAttachment = async (extraMeta, conf) => {
                 const base = {
@@ -3338,8 +3386,13 @@ My raw notes:
             };
             attachment = await _mkAttachment(null, null);
 
-            // 2. base64 → edge function (best-effort auto-fill; failure no longer blocks the closing)
-            setStatus('#fef3c7', '#92400e', '<i class="fas fa-spinner fa-spin"></i> Reading order form with AI… (3–6s)');
+            // The photo is attached from here on: show it so Save works straight away,
+            // while the AI reads it in the background (it only fills EMPTY fields).
+            _renderOrderFormThumb({ prefix, photoUrl, detectedType: formTypeHint, attachmentId: attachment?.id || null, fields: {}, activityId: activityId || null });
+            _orderFormBusy[prefix] = 'reading';
+            setStatus('#ecfdf5', '#047857', '<i class="fas fa-check-circle"></i> Photo saved. <span style="color:#92400e;"><i class="fas fa-spinner fa-spin"></i> AI is reading it (~10s) — you can keep typing or save now.</span>');
+
+            // 2. base64 → edge function (best-effort auto-fill; never blocks the closing)
             let res = null, ocrErr = null;
             try {
                 const dataUrl = await new Promise((resolve, reject) => {
@@ -3353,19 +3406,17 @@ My raw notes:
                 if (!sb.functions) throw new Error('Supabase functions client not available');
                 const { data: _res, error } = await _ffRace(sb.functions.invoke('order-form-ocr', {
                     body: { image_base64: b64, mime_type: mime, form_type: formTypeHint },
-                }), 30000, 'AI read');
+                }), 45000, 'AI read');
                 if (error) throw new Error(error.message || 'Edge function call failed');
                 if (!_res || _res.ok === false) throw new Error(_res?.detail || _res?.error || 'OCR failed');
                 res = _res;
             } catch (e) { ocrErr = e; }
+            _orderFormBusy[prefix] = null;
+            // The form was saved / closed while the AI was reading → nothing to fill.
+            const formOpen = !!document.getElementById(`${prefix}-order-form-thumbs`);
 
             if (!res) {
-                // Photo is saved; render its thumbnail now so the required-photo gate
-                // passes and the closing can be recorded despite OCR being down.
-                // Tag it with the activity so M1's gate stays sale-scoped this session.
-                _renderOrderFormThumb({ prefix, photoUrl, detectedType: formTypeHint, attachmentId: attachment?.id || null, fields: {}, activityId: activityId || null });
-                setStatus('#fff8e1', '#8a6d00', `<i class="fas fa-exclamation-triangle"></i> Photo saved — auto-read unavailable (${escapeHtml(ocrErr?.message || 'OCR offline')}). Fill the fields manually.`);
-                UI.toast.info('Order form photo saved. AI auto-fill is unavailable right now — please key the fields in.');
+                setStatus('#fff8e1', '#8a6d00', `<i class="fas fa-check-circle" style="color:#047857;"></i> Photo saved — the AI couldn't read it (${escapeHtml(ocrErr?.message || 'OCR offline')}). Please key the fields in.`);
                 return;
             }
 
@@ -3394,6 +3445,7 @@ My raw notes:
             } else {
                 attachment = await _mkAttachment({ form_type: detectedType, prn_number: fields.prn_number || null, fields: _redactCardFields(fields), confidence, raw_text: rawText }, meanConf);
             }
+            if (!formOpen) return;
 
             _orderFormScanCache = {
                 prefix,
@@ -3407,19 +3459,21 @@ My raw notes:
                 rawText,
             };
 
-            if (statusEl) statusEl.innerHTML = '';
+            const st = statusEl(); if (st) st.innerHTML = '';
             renderOrderFormScanReview();
         } catch (err) {
+            _orderFormBusy[prefix] = null;
             console.error('Order form scan failed:', err);
             setStatus('#ffebee', '#b71c1c', `<i class="fas fa-exclamation-triangle"></i> ${escapeHtml(err.message || 'Scan failed')}`);
-            UI.toast.error('Order form scan failed: ' + (err.message || 'Unknown error'));
+            UI.toast.error(err.message || 'Order form photo failed');
         } finally {
             // Reset the input so re-selecting the same file fires onchange
             if (input) input.value = '';
         }
     };
 
-    const renderOrderFormScanReview = () => {
+    // force: the agent tapped "Review" — open the side-by-side even with conflicts.
+    const renderOrderFormScanReview = (force) => {
         if (!_orderFormScanCache) return;
         const { prefix, photoUrl, detectedType, fields, confidence, rawText } = _orderFormScanCache;
         const norm = v => (v == null ? '' : String(v).trim());
@@ -3475,8 +3529,20 @@ My raw notes:
         // No conflicts → nothing for the agent to decide: fill the empty fields
         // straight away and skip the review screen. The review only appears when the
         // photo DISAGREES with something already filled (never overwritten silently).
-        if (!rows.some(r => r.status === 'conflict')) {
+        const nConflict = rows.filter(r => r.status === 'conflict').length;
+        if (!nConflict) {
             applyOrderFormScanSelection(rows.filter(r => r.defaultChecked).map(r => r.idx));
+            return;
+        }
+        // The AI reads in the background while the agent types, so a disagreement
+        // must not pop up over their typing: fill the empty fields now and offer
+        // the review as a button (their own values stay until they choose).
+        if (force !== true) {
+            applyOrderFormScanSelection(rows.filter(r => r.defaultChecked).map(r => r.idx), true);
+            const st = document.getElementById(`${prefix}-order-form-status`);
+            if (st) st.innerHTML = `<div style="padding:7px 11px;background:#fff7ed;color:#9a3412;border-radius:6px;font-size:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span><i class="fas fa-info-circle"></i> AI filled the empty fields · ${nConflict} differ${nConflict === 1 ? 's' : ''} from what you typed (yours kept)</span>
+                <button type="button" class="btn secondary btn-sm" style="padding:2px 10px;font-size:12px;" onclick="app.renderOrderFormScanReview(true)">Review</button></div>`;
             return;
         }
 
@@ -3602,7 +3668,8 @@ My raw notes:
 
     // pickedIdx: ORDER_FORM_FIELD_MAP indexes to apply (auto-fill path); omitted →
     // read the ticked rows from the review screen.
-    const applyOrderFormScanSelection = async (pickedIdx) => {
+    // keep: leave the scan open for a later "Review" (background fill of empty fields).
+    const applyOrderFormScanSelection = async (pickedIdx, keep) => {
         if (!_orderFormScanCache) { UI.hideModal(); return; }
         const { prefix, fields } = _orderFormScanCache;
         const _auto = Array.isArray(pickedIdx);
@@ -3678,9 +3745,13 @@ My raw notes:
             }
         }
 
-        (window.app._hideCpsScanOverlay || (() => {}))();
-        _renderOrderFormThumb(_orderFormScanCache);
-        _orderFormScanCache = null;
+        if (keep !== true) {
+            (window.app._hideCpsScanOverlay || (() => {}))();
+            _renderOrderFormThumb(_orderFormScanCache);
+            _orderFormScanCache = null;
+            const st = document.getElementById(`${prefix}-order-form-status`);
+            if (st) st.innerHTML = '';
+        }
 
         if (applied > 0) {
             // Re-open the collapsed Customer Information so the new values are visible.
@@ -3706,6 +3777,8 @@ My raw notes:
         const prn = fields?.prn_number;
         const item = document.createElement('div');
         item.style.cssText = 'display:inline-flex;flex-direction:column;align-items:center;gap:2px;position:relative;';
+        // One thumbnail per photo: it is drawn on upload, then again once read.
+        item.setAttribute('data-photo', String(photoUrl));
         // M1: tag with the owning activity so hasOrderFormPhoto can require a photo
         // for THIS sale, not accept a prior sale's photo for the same prospect.
         item.setAttribute('data-activity-id', activityId != null ? String(activityId) : '');
@@ -3715,7 +3788,8 @@ My raw notes:
             ${prn ? `<div style="font-size:9px;color:var(--gray-400);">${escapeHtml(prn)}</div>` : ''}
             ${attachmentId ? `<button type="button" title="Remove" style="position:absolute;top:-6px;right:-6px;background:var(--error);color:white;border:none;border-radius:50%;width:20px;height:20px;font-size:10px;padding:0;cursor:pointer;" onclick="app.removeOrderFormAttachment(${attachmentId}, this.parentElement)"><i class="fas fa-times"></i></button>` : ''}
         `;
-        thumbWrap.appendChild(item);
+        const prev = Array.from(thumbWrap.children).find(el => el.getAttribute && el.getAttribute('data-photo') === String(photoUrl));
+        if (prev) thumbWrap.replaceChild(item, prev); else thumbWrap.appendChild(item);
         try { window._resolveAttachmentImages && window._resolveAttachmentImages(item); } catch (_) {}
     };
 
@@ -7919,6 +7993,8 @@ My raw notes:
         scanInvoiceWithAI,
         ORDER_FORM_FIELD_MAP,
         handleOrderFormFile,
+        shrinkOrderFormPhoto,
+        orderFormBusy,
         renderOrderFormScanReview,
         toggleOrderFormScanAll,
         dismissOrderFormScanReview,

@@ -80,6 +80,7 @@
         if ((r.kind === 'cps' || r.kind === 'book') && pid != null) return btn('📅 Book', `app.openActivityModal('', ${pid})`);
         if (r.kind === 'touch' && r.ref_id != null) return btn('✓ Done', `app.apTouchDone(${Number(r.ref_id)})`);
         if (r.kind === 'pop' && r.ref_id != null) return btn('💳 Plan', `app.openPopPlan(${Number(r.ref_id)})`);
+        if (r.kind === 'photo' && r.ref_id != null && pid != null) return btn('📸 Attach', `app.ofAttachLater(${Number(r.ref_id)}, ${pid})`);
         if (r.kind === 'minutes' && r.ref_id != null) return btn('📝 Minutes', `app.openPostMeetupNotesModal(${Number(r.ref_id)}, ${pid == null ? 'null' : pid})`);
         return '';
     };
@@ -1191,6 +1192,67 @@
     }
     setTimeout(_scan, 300);
 
+    // ── 📸 order-form photo attached after the closing was saved ─────────────
+    // Owner 2026-10-22: a slow / failed upload may not block a sale, so the closing
+    // can be saved without it; journey_todo_for then shows "📸 Attach" until a
+    // photo tagged with that closing activity exists.
+    let _ofLaterBusy = false;
+    const ofAttachLater = (activityId, prospectId) => {
+        _ofLaterBusy = false;
+        UI.showModal('📸 Attach the order form photo', `
+            <p style="font-size:13px;color:var(--gray-600);margin:0 0 10px;">The closing was saved without its signed order form. Take or choose the photo — it is filed under this sale.</p>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button type="button" class="btn primary btn-sm" onclick="document.getElementById('ofl-camera').click()"><i class="fas fa-camera"></i> Take Photo</button>
+                <button type="button" class="btn secondary btn-sm" onclick="document.getElementById('ofl-file').click()"><i class="fas fa-upload"></i> Choose File</button>
+            </div>
+            <input type="file" id="ofl-camera" accept="image/jpeg,image/png,image/webp" capture="environment" style="display:none;" onchange="app.ofAttachLaterSave(this, ${Number(activityId)}, ${Number(prospectId)})">
+            <input type="file" id="ofl-file" accept="image/jpeg,image/png,image/webp" style="display:none;" onchange="app.ofAttachLaterSave(this, ${Number(activityId)}, ${Number(prospectId)})">
+            <div id="ofl-status" style="margin-top:10px;font-size:12px;"></div>`,
+            [{ label: 'Close', action: 'UI.hideModal()' }]);
+    };
+    const ofAttachLaterSave = async (input, activityId, prospectId) => {
+        let file = input && input.files && input.files[0];
+        if (!file || _ofLaterBusy) return;
+        const sb = _sb();
+        const st = (t, c) => { const el = document.getElementById('ofl-status'); if (el) el.innerHTML = `<span style="color:${c || 'var(--gray-600)'};">${t}</span>`; };
+        _ofLaterBusy = true;
+        let path = null;
+        try {
+            st('<i class="fas fa-spinner fa-spin"></i> Preparing photo…');
+            if (!app.shrinkOrderFormPhoto && typeof window._loadChunk === 'function') { try { await window._loadChunk('chunks/script-activities.min.js'); } catch (_) { /* raw file */ } }
+            if (app.shrinkOrderFormPhoto) { try { file = await app.shrinkOrderFormPhoto(file); } catch (_) { /* send as is */ } }
+            if (!/^image\/(jpe?g|png|webp)$/i.test(file.type || '')) throw new Error('Use a JPG or PNG photo');
+            if (file.size > 8 * 1024 * 1024) throw new Error('Image too large (max 8 MB)');
+            const safe = String(file.name || 'order_form.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
+            path = `order_forms/${prospectId}_${Date.now()}_later_${safe}`;
+            let upErr = null;
+            for (let i = 1; i <= 2; i++) {
+                st(`<i class="fas fa-spinner fa-spin"></i> Uploading (${Math.max(1, Math.round(file.size / 1024))} KB)${i > 1 ? ' — retrying…' : '…'}`);
+                try { ({ error: upErr } = await sb.storage.from('attachments').upload(path, file, { upsert: i > 1, contentType: file.type })); }
+                catch (e) { upErr = e; }
+                if (!upErr) break;
+            }
+            if (upErr) throw new Error('Upload failed — ' + (upErr.message || upErr) + '. Check your connection and try again.');
+            const { error } = await sb.from('prospect_attachments').insert({
+                prospect_id: prospectId, attachment_type: 'order_form', file_url: path, filename: safe,
+                metadata: { form_type: 'auto', activity_id: activityId, attached_later: true, edited_by_agent: [] },
+                scanned_at: new Date().toISOString(),
+            });
+            if (error) throw error;
+            try { if (AppDataStore.invalidateCache) AppDataStore.invalidateCache('prospect_attachments'); } catch (_) {}
+            path = null;
+            UI.hideModal();
+            UI.toast.success('Order form photo attached ✓');
+            try { apRenderTop5(true); } catch (_) { /* card not on screen */ }
+        } catch (e) {
+            if (path) { try { await sb.storage.from('attachments').remove([path]); } catch (_) { /* best-effort */ } }
+            st('⚠ ' + esc(e && e.message ? e.message : String(e)), '#b91c1c');
+        } finally {
+            _ofLaterBusy = false;
+            if (input) input.value = '';
+        }
+    };
+
     app.register('autopilot', {
         apOpen,
         apTodo,
@@ -1230,6 +1292,8 @@
         popImportConfirm,
         apFillClosingPop,
         apFillPopLine,
+        ofAttachLater,
+        ofAttachLaterSave,
     });
     console.log('[chunk] script-autopilot loaded');
 })();
