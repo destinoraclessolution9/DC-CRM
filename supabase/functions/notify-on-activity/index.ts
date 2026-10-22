@@ -407,6 +407,21 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    // Birthday wish / gift logs (source='birthday_auto') are a record of a
+    // touch the agent JUST made from the calendar's 🎂 button — saved as a
+    // CALL for history and hidden from every calendar. Pushing them sent a
+    // "Today CALL · agent | name" right AFTER the WhatsApp tap (live
+    // 2026-10-22): the wrong way round, and it pointed at nothing on the
+    // calendar. The heads-up comes BEFORE, in the 08:30 morning summary.
+    if (String(record.source ?? "") === "birthday_auto") {
+      const skipBody = dryRun
+        ? { ok: true, dryRun: true, audience: "birthday_log", targets: [] }
+        : { ok: true, sent: 0, reason: "birthday_log" };
+      return new Response(JSON.stringify(skipBody), {
+        headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      });
+    }
+
     // Bulk historical entry guard: activities dated well in the past are data
     // entry (e.g. importing last year's CPS records), not news — notify no one.
     // activity_date is a Postgres DATE ("YYYY-MM-DD"), which new Date() parses

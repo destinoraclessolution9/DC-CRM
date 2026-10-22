@@ -443,11 +443,13 @@ Deno.serve(async (req: Request) => {
 
       // Today's activities. (The pre-2026-10-14 select asked for customer_name,
       // a column that never existed → 400 → no summary. Names come from ids.)
-      const allTodayActs: any[] = await pgSelectAll("activities",
-        "select=id,activity_title,activity_type,start_time,lead_agent_id,co_agents,venue,location_address,prospect_id,customer_id" +
+      // Birthday wish/gift logs are history, not the day's plan — dropped.
+      const allTodayActs: any[] = (await pgSelectAll("activities",
+        "select=id,activity_title,activity_type,start_time,lead_agent_id,co_agents,venue,location_address,prospect_id,customer_id,source" +
         `&activity_date=eq.${todayMYT}` +
         "&activity_type=neq.EVENT" +
-        "&or=(status.is.null,status.not.in.(cancelled,Cancelled))");
+        "&or=(status.is.null,status.not.in.(cancelled,Cancelled))"))
+        .filter((a: any) => a.source !== "birthday_auto");
 
       // Today's company-wide events (open/public only — visible to everyone).
       const allTodayEvents: any[] = await pgSelect("activities",
