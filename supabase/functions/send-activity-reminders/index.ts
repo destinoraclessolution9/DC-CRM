@@ -533,12 +533,7 @@ Deno.serve(async (req: Request) => {
         if (myActs.length === 0 && dedupedEvents.length === 0 && myBirthdays.length === 0 && !myAdminLine && !wisdom) continue;
 
         const bodyLines: string[] = [];
-        // Birthdays first: the lock screen shows only the top lines, and this is
-        // the heads-up to send the wish (it used to be last, cut off below the
-        // wisdom quote). Then wisdom; the rest follows.
-        if (myBirthdays.length > 0) {
-          bodyLines.push(`🎂 ${myBirthdays.slice(0, 4).join(", ")}${myBirthdays.length > 4 ? ` +${myBirthdays.length - 4} more` : ""}`);
-        }
+        // Wisdom first so it shows in the collapsed notification; the rest follows.
         if (wisdom) {
           bodyLines.push(wisdom.head);
           if (wisdom.quote) bodyLines.push(wisdom.quote);
@@ -561,8 +556,11 @@ Deno.serve(async (req: Request) => {
         if (myAdminLine) {
           bodyLines.push(`📊 Yesterday: ${myAdminLine.trim()}`);
         }
+        if (myBirthdays.length > 0) {
+          bodyLines.push(`🎂 ${myBirthdays.slice(0, 4).join(", ")}${myBirthdays.length > 4 ? ` +${myBirthdays.length - 4} more` : ""}`);
+        }
 
-        // Birthdays lead the title too — a long title is cut off on the lock screen.
+        // Birthdays lead the title — a long title is cut off on the lock screen.
         const titleParts: string[] = [];
         if (myBirthdays.length > 0) titleParts.push(`${myBirthdays.length} birthday${myBirthdays.length > 1 ? "s" : ""}`);
         if (myActs.length > 0) titleParts.push(`${myActs.length} activit${myActs.length > 1 ? "ies" : "y"}`);
