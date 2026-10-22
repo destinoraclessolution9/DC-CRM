@@ -416,6 +416,71 @@ const runTimers = async () => { while (timers.length) { const t = timers.shift()
   check('import: split row keeps its own month', prev2.innerHTML.includes('→ <strong>Lim Mei Ling</strong> · Oct 2026'), true);
   check('import: short name "Ng" not taken from inside "Ling"', prev2.innerHTML.includes('→ <strong>Ng</strong> · Oct 2026 · RM 300'), true);
 
+  // ── ❌ sale cancellations ────────────────────────────────────────────────
+  for (const fn of ['apFillClosingCxl', 'cxlRequestOpen', 'cxlRequestSave', 'cxlSignOpen', 'cxlCalc', 'cxlSignSave', 'cxlWithdraw', 'cxlUndoSign', 'cxlReopen', 'cxlCompleteOpen', 'cxlComplete', 'openCancellations']) check('exports ' + fn, typeof app[fn], 'function');
+  const CXL = { id: 31, purchase_id: 80, customer_id: 9, status: 'requested', requested_at: '2026-10-01', reason: 'Family <b>objection</b>', bank_name: 'Maybank', bank_account: '123456789012', account_holder: 'Tan', request_file: 'cancellations/80/req.pdf', amount_paid: 12000 };
+  // slot: no case + undelivered → request button
+  tableData.sale_cancellations = []; tableData.delivery_items = [{ id: 1, status: 'pending' }]; tableData.purchases = [{ status: 'COMPLETED', delivery_status: 'Pending Delivery' }];
+  let cs = makeEl('div'); cs.dataset.cxlPurchase = '80';
+  await app.apFillClosingCxl(cs);
+  check('cxl slot: request button when nothing delivered', cs.innerHTML.includes('app.cxlRequestOpen(80)'), true);
+  tableData.delivery_items = [{ id: 1, status: 'picked_up' }];
+  cs = makeEl('div'); cs.dataset.cxlPurchase = '80';
+  await app.apFillClosingCxl(cs);
+  check('cxl slot: delivered → no refund allowed', cs.innerHTML.includes('no refund is allowed') && !cs.innerHTML.includes('cxlRequestOpen'), true);
+  // requested case
+  tableData.delivery_items = [{ id: 1, status: 'pending' }];
+  tableData.sale_cancellations = [CXL];
+  cs = makeEl('div'); cs.dataset.cxlPurchase = '80';
+  await app.apFillClosingCxl(cs);
+  check('cxl slot: requested → sign + withdraw', cs.innerHTML.includes('app.cxlSignOpen(31)') && cs.innerHTML.includes('app.cxlWithdraw(31)'), true);
+  check('cxl slot: account masked', cs.innerHTML.includes('••••9012') && !/>123456789012</.test(cs.innerHTML), true);
+  check('cxl slot: reason escaped', cs.innerHTML.includes('Family &lt;b&gt;objection&lt;/b&gt;'), true);
+  check('cxl slot: request letter link', cs.innerHTML.includes('📎 Request letter'), true);
+  // refunding case
+  tableData.sale_cancellations = [{ ...CXL, status: 'refunding', signed_at: '2026-10-10', acceptance_file: 'cancellations/80/acc.pdf', admin_fee: 500, refund_total: 11500, refund_months: 6, first_refund_month: '2026-11-01' }];
+  cs = makeEl('div'); cs.dataset.cxlPurchase = '80';
+  await app.apFillClosingCxl(cs);
+  check('cxl slot: refunding → fully refunded + undo', cs.innerHTML.includes('app.cxlCompleteOpen(31)') && cs.innerHTML.includes('app.cxlUndoSign(31)'), true);
+  check('cxl slot: refund maths shown', cs.innerHTML.includes('RM 11,500') && cs.innerHTML.includes('6 months') && cs.innerHTML.includes('Apr 2027'), true);
+  check('cxl slot: both files linked', cs.innerHTML.includes('📎 Request letter') && cs.innerHTML.includes('📎 Signed acceptance'), true);
+
+  // request: validation + rpc args
+  const cxlForm = (o) => { for (const [k, v] of Object.entries(o)) byId.set(k, v); };
+  cxlForm({ 'cxl-date': { value: '2026-10-20' }, 'cxl-reason': { value: 'changed mind' }, 'cxl-bank': { value: 'Maybank' }, 'cxl-acct': { value: '1234 5678' }, 'cxl-holder': { value: 'Tan' }, 'cxl-file': { files: [] }, 'cxl-status': { textContent: '' } });
+  toasts.length = 0;
+  await app.cxlRequestSave(80);
+  check('cxl request: letter required', toasts.some(t => t[0] === 'err' && /request letter/.test(t[1])), true);
+  const cup = [];
+  supabase.storage = { from: () => ({ upload: async (p) => { cup.push(p); return { error: null }; }, remove: async () => ({ error: null }) }) };
+  byId.set('cxl-file', { files: [{ name: 'letter.pdf', type: 'application/pdf', size: 1000 }] });
+  calls.length = 0;
+  await app.cxlRequestSave(80);
+  const cr = calls.find(c => c.rpc === 'cancel_request');
+  check('cxl request: file under cancellations/<sale>/', /^cancellations\/80\/request_\d+_letter\.pdf$/.test(cup[0] || ''), true);
+  check('cxl request: rpc args', cr && JSON.stringify([cr.args.p_purchase, cr.args.p_reason, cr.args.p_bank_account, cr.args.p_file === cup[0]]), JSON.stringify([80, 'changed mind', '1234 5678', true]));
+  // sign: validation + rpc args
+  cxlForm({ 'cxs-date': { value: '2026-10-21' }, 'cxs-file': { files: [] }, 'cxs-paid': { value: '12000' }, 'cxs-fee': { value: '500' }, 'cxs-total': { value: '11500' }, 'cxs-months': { value: '6' }, 'cxs-first': { value: '2026-11' }, 'cxs-status': { textContent: '' } });
+  toasts.length = 0;
+  await app.cxlSignSave(31, 80);
+  check('cxl sign: acceptance required', toasts.some(t => t[0] === 'err' && /signed acceptance/.test(t[1])), true);
+  byId.set('cxs-file', { files: [{ name: 'signed.jpg', type: 'application/pdf', size: 1000 }] });
+  calls.length = 0;
+  await app.cxlSignSave(31, 80);
+  const sg = calls.find(c => c.rpc === 'cancel_sign');
+  check('cxl sign: rpc args', sg && JSON.stringify([sg.args.p_id, sg.args.p_admin_fee, sg.args.p_refund_total, sg.args.p_months, sg.args.p_first_month]), JSON.stringify([31, 500, 11500, 6, '2026-11-01']));
+  byId.set('cxs-months', { value: '0' });
+  toasts.length = 0;
+  await app.cxlSignSave(31, 80);
+  check('cxl sign: months 1–60', toasts.some(t => t[0] === 'err' && /refund months/.test(t[1])), true);
+  // list
+  tableData.sale_cancellations = [{ ...CXL, customers: { full_name: 'Tan' }, purchases: { item: 'PR', invoice: 'INV', amount: 12000 } }];
+  modals.length = 0;
+  await app.openCancellations('requested');
+  const cl = modals[modals.length - 1];
+  check('cxl list: title + tab counts', cl && cl.t === '❌ Cancellations & refunds' && cl.c.includes('Waiting for signature (1)'), true);
+  check('cxl list: withdrawn rows excluded by query', JSON.stringify(calls.filter(c => c.table === 'sale_cancellations').pop().ops.find(o => o[0] === 'neq')), '["neq","status","withdrawn"]');
+
   // DC Closing Record slot
   tableData.pop_installments = () => [POPROWS[0], { ...POPROWS[2], purchase_id: 70 }, { id: 905, seq: 4, due_date: '2026-11-05', amount: 499, status: 'due' }];
   tableData.pop_receipts = [{ id: 55, amount: 1050, paid_date: '2026-10-03', bank_ref: 'MBB1', note: 'late fee' }];

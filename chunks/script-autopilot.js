@@ -9,6 +9,7 @@
  *   G  🧭 Journey funnel — Pipeline page, under Where from / Which product
  *   💳 POP — auto-deducted; lapsed months + manual receipts (board, plan, profile line,
  *      list / picture import, history on the DC Closing Record)
+ *   ❌ Sale cancellations + refunds — block on the DC Closing Record + list
  *
  * Loaded right after login (script.js, next to the activities chunk). Every
  * surface is mounted by a MutationObserver, so it survives view re-renders,
@@ -900,10 +901,276 @@
         }
     } catch (_) { /* best-effort */ }
 
+    // ═════ ❌ Sale cancellations + refunds (owner 2026-10-22) ═════
+    // Request letter (reason + bank) → office letter → signed acceptance (sale
+    // cancelled on that date, POP still-to-come stopped) → refund over N months
+    // → "fully refunded" date. Every write is an RPC (cancel_*); the two files
+    // live in the private attachments bucket under cancellations/<sale>/.
+    const CXL_STATUS = {
+        requested: ['🟠 Waiting for signed acceptance', '#92400E', '#FEF3C7'],
+        refunding: ['🔵 Refunding', '#1E40AF', '#DBEAFE'],
+        completed: ['✅ Refund completed', '#065F46', '#D1FAE5'],
+        withdrawn: ['↩ Withdrawn', '#6B7280', '#F3F4F6'],
+    };
+    const _cxlChip = (st) => { const c = CXL_STATUS[st] || CXL_STATUS.requested; return `<span style="display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:700;color:${c[1]};background:${c[2]};white-space:nowrap;">${c[0]}</span>`; };
+    const _maskAcct = (s) => { const d = String(s || '').replace(/\D/g, ''); return d.length > 4 ? '••••' + d.slice(-4) : String(s || ''); };
+    const _addMonths = (ymd, n) => { const [y, m] = String(ymd).slice(0, 7).split('-').map(Number); const d = new Date(y, m - 1 + n, 1); return _ymd(d); };
+    const _cxlEnd = (x) => x.first_refund_month && x.refund_months ? _addMonths(x.first_refund_month, x.refund_months - 1) : null;
+    const _cxlFileLink = (path, label) => path ? `<a href="javascript:void(0)" onclick="event.stopPropagation();window._openAttachment&&window._openAttachment('${esc(String(path)).replace(/'/g, '&#39;')}')">📎 ${esc(label)}</a>` : '';
+    const _cxlUpload = async (purchaseId, file, kind) => {
+        let f = file;
+        if (/^image\//.test(file.type)) {
+            if (!app.compressImageFile && typeof window._loadChunk === 'function') { try { await window._loadChunk('chunks/script-prospects.min.js'); } catch (_) { /* raw */ } }
+            if (app.compressImageFile) f = await app.compressImageFile(file);
+        }
+        if (f.size > 5 * 1024 * 1024) throw new Error('File too large (max 5 MB)');
+        const path = `cancellations/${purchaseId}/${kind}_${Date.now()}_${String(f.name || kind).replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+        const { error } = await _sb().storage.from('attachments').upload(path, f, { upsert: false, contentType: f.type || 'application/octet-stream' });
+        if (error) throw error;
+        return path;
+    };
+    const _cxlRm = (n) => 'RM ' + Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
+
+    // the case summary + its actions (used by the DC Closing block and the list)
+    const _cxlCaseHtml = (x, opts = {}) => {
+        const b = (label, js, color) => `<button type="button" class="btn secondary btn-sm" style="font-size:11px;padding:2px 8px;${color ? 'color:' + color + ';' : ''}" onclick="event.stopPropagation();${js}">${label}</button>`;
+        const end = _cxlEnd(x);
+        const monthly = x.refund_total != null && x.refund_months ? Number(x.refund_total) / Number(x.refund_months) : null;
+        const late = x.status === 'refunding' && end && _today() > _ymd(new Date(Number(end.slice(0, 4)), Number(end.slice(5, 7)), 0));
+        const acts = x.status === 'requested'
+            ? b('✍ Signed acceptance received', `app.cxlSignOpen(${Number(x.id)})`, '#1E40AF') + b('↩ Withdrawn', `app.cxlWithdraw(${Number(x.id)})`)
+            : x.status === 'refunding'
+                ? b('✅ Fully refunded', `app.cxlCompleteOpen(${Number(x.id)})`, '#065F46') + b('↺ Undo signed', `app.cxlUndoSign(${Number(x.id)})`)
+                : x.status === 'completed' ? b('↺ Not finished', `app.cxlReopen(${Number(x.id)})`) : '';
+        return `
+            <div style="display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;">${_cxlChip(x.status)}
+                <span style="color:var(--gray-500);">requested ${esc(_fmt(x.requested_at))}</span>
+                ${x.signed_at ? `<span style="color:var(--gray-500);">· signed ${esc(_fmt(x.signed_at))} (sale cancelled)</span>` : ''}
+                ${x.refunded_at ? `<span style="color:#065F46;font-weight:600;">· fully refunded ${esc(_fmt(x.refunded_at))}</span>` : ''}
+                ${x.withdrawn_at ? `<span style="color:var(--gray-500);">· withdrawn ${esc(_fmt(x.withdrawn_at))}</span>` : ''}
+            </div>
+            <div style="margin-top:4px;">Reason: ${esc(x.reason || '')}</div>
+            <div style="color:var(--gray-600);">Bank: ${esc(x.bank_name || '')} · <span title="${esc(x.bank_account || '')}">${esc(_maskAcct(x.bank_account))}</span>
+                <a href="javascript:void(0)" onclick="event.stopPropagation();this.previousElementSibling.textContent=this.previousElementSibling.title;this.remove()" style="font-size:11px;">show</a>
+                · ${esc(x.account_holder || '')}</div>
+            ${x.refund_total != null ? `<div style="margin-top:2px;">Paid ${_cxlRm(x.amount_paid)} − admin fee ${_cxlRm(x.admin_fee)} = <strong>refund ${_cxlRm(x.refund_total)}</strong>
+                over ${Number(x.refund_months)} month${Number(x.refund_months) === 1 ? '' : 's'} (${esc(_popMonth(x.first_refund_month))} – ${esc(_popMonth(end))}${monthly != null ? ` · ≈ ${_cxlRm(monthly)} / month` : ''})
+                ${late ? ' <span style="color:#B91C1C;font-weight:700;">· past the expected end</span>' : ''}</div>` : ''}
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px;">${_cxlFileLink(x.request_file, 'Request letter')} ${_cxlFileLink(x.acceptance_file, 'Signed acceptance')}</div>
+            ${opts.noActions ? '' : `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;">${acts}</div>`}`;
+    };
+
+    // ❌ block under a sale on the DC Closing Record (slot data-cxl-purchase)
+    const apFillClosingCxl = async (slot) => {
+        const pu = Number(slot.dataset.cxlPurchase);
+        const sb = _sb();
+        if (!pu || !sb) return;
+        let cases = [], delivered = false, cancelled = false;
+        try {
+            const [a, b, c] = await Promise.all([
+                sb.from('sale_cancellations').select('*').eq('purchase_id', pu).order('id', { ascending: false }),
+                sb.from('delivery_items').select('id,status').eq('purchase_id', pu),
+                sb.from('purchases').select('status,delivery_status').eq('id', pu).maybeSingle(),
+            ]);
+            cases = (a && a.data) || [];
+            delivered = ((b && b.data) || []).some(r => r.status === 'delivered' || r.status === 'picked_up') || /^delivered/i.test(String((c && c.data && c.data.delivery_status) || ''));
+            cancelled = /cancel|refund|void/i.test(String((c && c.data && c.data.status) || ''));
+        } catch (_) { return; }
+        const open = cases.find(x => x.status !== 'withdrawn');
+        const old = cases.filter(x => x.status === 'withdrawn');
+        let inner;
+        if (open) inner = _cxlCaseHtml(open);
+        else if (cancelled) inner = '<span style="color:var(--gray-500);">This sale is cancelled.</span>';
+        else if (delivered) inner = '<span style="color:var(--gray-500);">❌ Cancellation not available — delivered, no refund is allowed.</span>';
+        else inner = `<button type="button" class="btn secondary btn-sm" style="font-size:11px;padding:2px 8px;color:#B91C1C;" onclick="event.stopPropagation();app.cxlRequestOpen(${pu})">❌ Request cancellation</button>`;
+        const oldHtml = old.length ? `<div style="margin-top:4px;color:var(--gray-500);font-size:11px;">${old.map(x => `↩ withdrawn request of ${esc(_fmt(x.requested_at))} ${_cxlFileLink(x.request_file, 'letter')}`).join(' · ')}</div>` : '';
+        const tone = open && open.status !== 'completed' ? '#FECACA' : '#E5E7EB';
+        slot.innerHTML = (open || old.length)
+            ? `<div style="margin:4px 12px 8px;padding:6px 10px;border:1px solid ${tone};border-radius:8px;background:${open && open.status !== 'completed' ? '#FEF2F2' : '#F9FAFB'};font-size:12px;">
+                   <strong style="color:#B91C1C;">❌ Cancellation</strong><div style="margin-top:4px;">${inner}</div>${oldHtml}</div>`
+            : `<div style="margin:0 12px 8px;font-size:12px;">${inner}</div>`;
+    };
+    const _cxlRefresh = () => {
+        document.querySelectorAll('[data-cxl-purchase]').forEach(s => apFillClosingCxl(s));
+        if (document.querySelector('#global-modal-overlay.active [data-cxl-list]')) openCancellations();
+    };
+
+    const cxlRequestOpen = async (purchaseId) => {
+        let pu = null;
+        try { const { data } = await _sb().from('purchases').select('item,invoice,amount,customers(full_name)').eq('id', purchaseId).maybeSingle(); pu = data; } catch (_) { /* header only */ }
+        UI.showModal('❌ Request cancellation', `
+            <div style="font-size:13px;margin-bottom:8px;"><strong>${esc((pu && pu.customers && pu.customers.full_name) || '')}</strong> · ${esc((pu && pu.item) || '')}${pu && pu.invoice ? ' · ' + esc(pu.invoice) : ''}${pu ? ' · ' + _cxlRm(pu.amount) : ''}</div>
+            <div class="form-group"><label>Date requested <span class="required">*</span></label><input type="date" id="cxl-date" class="form-control" value="${_today()}" max="${_today()}"></div>
+            <div class="form-group"><label>Reason <span class="required">*</span></label><textarea id="cxl-reason" class="form-control" rows="2" placeholder="As written in the customer's letter"></textarea></div>
+            <div class="form-row">
+                <div class="form-group half"><label>Bank name <span class="required">*</span></label><input type="text" id="cxl-bank" class="form-control" placeholder="e.g. Maybank"></div>
+                <div class="form-group half"><label>Account number <span class="required">*</span></label><input type="text" id="cxl-acct" class="form-control" inputmode="numeric"></div>
+            </div>
+            <div class="form-group"><label>Account holder <span class="required">*</span></label><input type="text" id="cxl-holder" class="form-control"></div>
+            <div class="form-group"><label>Customer's request letter (photo or PDF) <span class="required">*</span></label><input type="file" id="cxl-file" class="form-control" accept="image/*,application/pdf"></div>
+            <div id="cxl-status" style="font-size:12px;color:var(--primary);"></div>`,
+            [{ label: 'Cancel', action: 'UI.hideModal()' },
+             { label: 'Save request', type: 'primary', action: `(async () => { await app.cxlRequestSave(${Number(purchaseId)}); })()` }]);
+    };
+    let _cxlBusy = false;
+    const cxlRequestSave = async (purchaseId) => {
+        if (_cxlBusy) return;
+        const v = (id) => String(document.getElementById(id)?.value || '').trim();
+        const file = (document.getElementById('cxl-file')?.files || [])[0];
+        const date = v('cxl-date');
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > _today()) return UI.toast.error('Enter the request date (not in the future)');
+        if (!v('cxl-reason')) return UI.toast.error('Enter the reason');
+        if (!v('cxl-bank') || !v('cxl-acct') || !v('cxl-holder')) return UI.toast.error('Enter the bank name, account number and account holder');
+        if (!file) return UI.toast.error("Attach the customer's request letter");
+        _cxlBusy = true;
+        let path = null;
+        try {
+            const st = document.getElementById('cxl-status'); if (st) st.textContent = 'Uploading the letter…';
+            path = await _cxlUpload(purchaseId, file, 'request');
+            const { error } = await _sb().rpc('cancel_request', { p_purchase: purchaseId, p_requested_at: date, p_reason: v('cxl-reason'), p_bank_name: v('cxl-bank'),
+                p_bank_account: v('cxl-acct'), p_account_holder: v('cxl-holder'), p_file: path, p_file_name: file.name || null });
+            if (error) throw error;
+            UI.hideModal();
+            UI.toast.success('Cancellation request saved — waiting for the signed acceptance');
+        } catch (e) {
+            if (path) { try { await _sb().storage.from('attachments').remove([path]); } catch (_) { /* best-effort */ } }
+            UI.toast.error('Not saved: ' + (e && e.message ? e.message : e));
+        }
+        _cxlBusy = false;
+        _cxlRefresh();
+    };
+
+    const _cxlGet = async (id) => { const { data, error } = await _sb().from('sale_cancellations').select('*').eq('id', id).maybeSingle(); if (error) throw error; return data; };
+    const cxlSignOpen = async (id) => {
+        let x = null;
+        try { x = await _cxlGet(id); } catch (e) { return UI.toast.error('Could not load: ' + (e && e.message ? e.message : e)); }
+        if (!x) return;
+        const paid = Number(x.amount_paid) || 0;
+        UI.showModal('✍ Signed acceptance received', `
+            <div style="font-size:12px;color:var(--gray-600);margin-bottom:8px;">On the signing date the sale is <strong>cancelled</strong> (it stops counting toward goals and commission) and any POP charges still to come stop.</div>
+            <div class="form-row">
+                <div class="form-group half"><label>Date signed <span class="required">*</span></label><input type="date" id="cxs-date" class="form-control" value="${_today()}" min="${esc(x.requested_at)}" max="${_today()}"></div>
+                <div class="form-group half"><label>Signed acceptance (photo or PDF) <span class="required">*</span></label><input type="file" id="cxs-file" class="form-control" accept="image/*,application/pdf"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group half"><label>Amount paid (RM)</label><input type="number" step="0.01" min="0" id="cxs-paid" class="form-control" value="${paid.toFixed(2)}" oninput="app.cxlCalc()"></div>
+                <div class="form-group half"><label>Admin fee (RM)</label><input type="number" step="0.01" min="0" id="cxs-fee" class="form-control" value="0.00" oninput="app.cxlCalc()"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group half"><label>Refund total (RM) <span class="required">*</span></label><input type="number" step="0.01" min="0" id="cxs-total" class="form-control" value="${paid.toFixed(2)}" oninput="app.cxlCalc(true)"></div>
+                <div class="form-group half"><label>Number of months <span class="required">*</span></label><input type="number" min="1" max="60" id="cxs-months" class="form-control" value="6" oninput="app.cxlCalc(true)"></div>
+            </div>
+            <div class="form-group"><label>First refund month <span class="required">*</span></label><input type="month" id="cxs-first" class="form-control" value="${_addMonths(_today(), 1).slice(0, 7)}" oninput="app.cxlCalc(true)"></div>
+            <div id="cxs-sum" style="font-size:13px;font-weight:600;color:#1E40AF;"></div>
+            <div id="cxs-status" style="font-size:12px;color:var(--primary);"></div>`,
+            [{ label: 'Cancel', action: 'UI.hideModal()' },
+             { label: 'Save — cancel the sale', type: 'primary', action: `(async () => { await app.cxlSignSave(${Number(id)}, ${Number(x.purchase_id)}); })()` }]);
+        cxlCalc();
+    };
+    // refund = paid − fee (until the total is typed by hand); show the monthly split
+    let _cxlTotalTouched = false;
+    const cxlCalc = (fromTotal = false) => {
+        const n = (id) => Number(document.getElementById(id)?.value) || 0;
+        if (fromTotal === true && document.activeElement && document.activeElement.id === 'cxs-total') _cxlTotalTouched = true;
+        const tot = document.getElementById('cxs-total');
+        if (tot && !_cxlTotalTouched && !fromTotal) tot.value = Math.max(0, n('cxs-paid') - n('cxs-fee')).toFixed(2);
+        const months = Math.max(1, Math.round(n('cxs-months')) || 1);
+        const first = String(document.getElementById('cxs-first')?.value || '');
+        const sum = document.getElementById('cxs-sum');
+        if (sum) sum.textContent = first ? `≈ ${_cxlRm(n('cxs-total') / months)} a month × ${months} · ${_popMonth(first + '-01')} – ${_popMonth(_addMonths(first + '-01', months - 1))}` : '';
+    };
+    const cxlSignSave = async (id, purchaseId) => {
+        if (_cxlBusy) return;
+        const v = (k) => String(document.getElementById(k)?.value || '').trim();
+        const file = (document.getElementById('cxs-file')?.files || [])[0];
+        const date = v('cxs-date');
+        const total = Number(v('cxs-total')), months = Math.round(Number(v('cxs-months')));
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > _today()) return UI.toast.error('Enter the date signed (not in the future)');
+        if (!file) return UI.toast.error('Attach the signed acceptance');
+        if (!(total >= 0) || v('cxs-total') === '') return UI.toast.error('Enter the refund total');
+        if (!(months >= 1 && months <= 60)) return UI.toast.error('Enter the number of refund months (1–60)');
+        if (!/^\d{4}-\d{2}$/.test(v('cxs-first'))) return UI.toast.error('Pick the first refund month');
+        _cxlBusy = true;
+        let path = null;
+        try {
+            const st = document.getElementById('cxs-status'); if (st) st.textContent = 'Uploading the signed acceptance…';
+            path = await _cxlUpload(purchaseId, file, 'acceptance');
+            const { error } = await _sb().rpc('cancel_sign', { p_id: id, p_signed_at: date, p_file: path, p_file_name: file.name || null,
+                p_amount_paid: Number(v('cxs-paid')) || null, p_admin_fee: Number(v('cxs-fee')) || 0, p_refund_total: total, p_months: months, p_first_month: v('cxs-first') + '-01' });
+            if (error) throw error;
+            UI.hideModal();
+            UI.toast.success('Signed — the sale is cancelled and the refund plan is set');
+        } catch (e) {
+            if (path) { try { await _sb().storage.from('attachments').remove([path]); } catch (_) { /* best-effort */ } }
+            UI.toast.error('Not saved: ' + (e && e.message ? e.message : e));
+        }
+        _cxlBusy = false;
+        _cxlTotalTouched = false;
+        _cxlRefresh();
+        apRenderTop5(true);
+    };
+    const _cxlRpc = async (fn, args, ok) => {
+        try {
+            const { error } = await _sb().rpc(fn, args);
+            if (error) throw error;
+            UI.toast.success(ok);
+        } catch (e) { UI.toast.error('Not saved: ' + (e && e.message ? e.message : e)); }
+        _cxlRefresh();
+    };
+    const cxlWithdraw = (id) => { if (window.confirm('Mark this cancellation request as withdrawn? The sale stays as it is.')) return _cxlRpc('cancel_withdraw', { p_id: id, p_date: _today() }, 'Request withdrawn'); };
+    const cxlUndoSign = (id) => { if (window.confirm('Undo the signed acceptance? The sale, its POP charges and items come back; the case returns to "waiting for signed acceptance".')) return _cxlRpc('cancel_undo_sign', { p_id: id }, 'Signing undone — the sale is active again'); };
+    const cxlReopen = (id) => _cxlRpc('cancel_reopen', { p_id: id }, 'Back to refunding');
+    const cxlCompleteOpen = (id) => {
+        UI.showModal('✅ Full refund done', `
+            <div class="form-group"><label>Date the full refund was done</label><input type="date" id="cxc-date" class="form-control" value="${_today()}" max="${_today()}"></div>`,
+            [{ label: 'Cancel', action: 'UI.hideModal()' },
+             { label: 'Save', type: 'primary', action: `(async () => { UI.hideModal(); await app.cxlComplete(${Number(id)}, document.getElementById('cxc-date') ? document.getElementById('cxc-date').value : ''); })()` }]);
+    };
+    const cxlComplete = (id, date) => _cxlRpc('cancel_complete', { p_id: id, p_date: date || _today() }, 'Refund marked as completed');
+
+    // ❌ Cancellations list (Delivery board button / push link ?cxl=1)
+    let _cxlTab = 'requested';
+    const openCancellations = async (tab) => {
+        if (tab) _cxlTab = tab;
+        let rows = [];
+        try {
+            const { data, error } = await _sb().from('sale_cancellations').select('*,customers(full_name),purchases(item,invoice,amount)').neq('status', 'withdrawn').order('requested_at', { ascending: false }).limit(500);
+            if (error) throw error;
+            rows = data || [];
+        } catch (e) { return UI.toast.error('Could not load cancellations: ' + (e && e.message ? e.message : e)); }
+        const by = (s) => rows.filter(x => x.status === s);
+        const tabBtn = (t, label) => `<button type="button" class="btn btn-sm ${_cxlTab === t ? 'primary' : 'secondary'}" style="font-size:12px;" onclick="app.openCancellations('${t}')">${label} (${by(t).length})</button>`;
+        const shown = by(_cxlTab);
+        const due = by('refunding').filter(x => { const e = _cxlEnd(x); return e && _today() > _ymd(new Date(Number(e.slice(0, 4)), Number(e.slice(5, 7)), 0)); }).length;
+        const body = `<div data-cxl-list="1">
+            <div style="font-size:13px;margin-bottom:8px;"><strong>${by('requested').length}</strong> waiting for signed acceptance · <strong>${by('refunding').length}</strong> refunding${due ? ` · <span style="color:#B91C1C;font-weight:700;">${due} past the expected end</span>` : ''}</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">${tabBtn('requested', '🟠 Waiting for signature')}${tabBtn('refunding', '🔵 Refunding')}${tabBtn('completed', '✅ Completed')}</div>
+            ${shown.length ? shown.map(x => `
+                <div style="padding:9px 0;border-top:1px solid var(--gray-100);font-size:12px;">
+                    <div style="font-size:13px;"><a href="javascript:void(0)" onclick="UI.hideModal();app.showCustomerDetail(${Number(x.customer_id)})" style="font-weight:700;color:#2563EB;">${esc((x.customers && x.customers.full_name) || '—')}</a>
+                        · ${esc(String((x.purchases && x.purchases.item) || '').slice(0, 40))}${x.purchases && x.purchases.invoice ? ' · ' + esc(x.purchases.invoice) : ''} · ${_cxlRm(x.purchases && x.purchases.amount)}</div>
+                    ${_cxlCaseHtml(x)}
+                </div>`).join('') : '<div style="padding:12px 0;color:var(--gray-500);font-size:13px;">Nothing here.</div>'}
+            </div>`;
+        UI.showModal('❌ Cancellations & refunds', body, [{ label: 'Close', action: 'UI.hideModal()' }]);
+    };
+
+    // push link ./index.html?cxl=1#customers → the list
+    try {
+        if (/[?&]cxl=1\b/.test(location.search)) {
+            history.replaceState(null, '', location.pathname + location.hash);
+            setTimeout(() => openCancellations('requested'), 2500);
+        }
+    } catch (_) { /* best-effort */ }
+
     // ═════ Mount everything on DOM changes ═════
     const _scan = () => {
         try { apMountTop5(); } catch (_) { /* best-effort */ }
         try { apMountFunnel(); } catch (_) { /* best-effort */ }
+        document.querySelectorAll('[data-cxl-purchase]:not([data-cxl-done])').forEach(slot => {
+            slot.dataset.cxlDone = '1';
+            apFillClosingCxl(slot);
+        });
         document.querySelectorAll('[data-pop-purchase]:not([data-pop-done])').forEach(slot => {
             slot.dataset.popDone = '1';
             apFillClosingPop(slot);
@@ -940,6 +1207,18 @@
         openPopPlan,
         popMark,
         popPayManual,
+        apFillClosingCxl,
+        cxlRequestOpen,
+        cxlRequestSave,
+        cxlSignOpen,
+        cxlCalc,
+        cxlSignSave,
+        cxlWithdraw,
+        cxlUndoSign,
+        cxlReopen,
+        cxlCompleteOpen,
+        cxlComplete,
+        openCancellations,
         popEditAmount,
         popSaveAmount,
         popSaveReceipt,

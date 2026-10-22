@@ -4032,7 +4032,7 @@ const buildClosingSalesLedger = async ({ prospect = null, customer = null, custo
             </div>
             ${r.files.length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">${r.files.map(f => thumb(f)).join('')}</div>` : ''}`;
         // 💳 POP payments (lapses + manual receipts) for this sale — filled by the autopilot chunk
-        const popSlot = r.p ? `<div data-pop-purchase="${Number(r.p.id)}"></div>` : '';
+        const popSlot = r.p ? `<div data-pop-purchase="${Number(r.p.id)}"></div><div data-cxl-purchase="${Number(r.p.id)}"></div>` : '';
         return (body
             ? `<details style="border-bottom:1px solid #f3f4f6;">
                     <summary style="padding:8px 12px;cursor:pointer;list-style:none;">${summary}</summary>

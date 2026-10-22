@@ -3307,7 +3307,7 @@ const _renderDeliveryListing = async () => {
     const cInst = _afterDelivered.filter(l => l.inst).length;
     const tab = (key, label, n) => `<button class="btn btn-sm ${_deliveryPayFilter === key ? 'primary' : 'secondary'}" onclick="app._setDeliveryPayFilter('${key}')">${label} (${n})</button>`;
     const _advN = await _advOwedCount();
-    const tabsHtml = `<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">${tab('all', 'All', cAll)}${tab('full', 'Full Payment', cFull)}${tab('installment', 'Installment', cInst)}<button class="btn btn-sm secondary" style="margin-left:auto;" onclick="app.openAgentAdvances('owed')">🤝 Agent advances${_advN ? ` (${_advN} owed)` : ''}</button></div>`;
+    const tabsHtml = `<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">${tab('all', 'All', cAll)}${tab('full', 'Full Payment', cFull)}${tab('installment', 'Installment', cInst)}<button class="btn btn-sm secondary" style="margin-left:auto;" onclick="app.openAgentAdvances('owed')">🤝 Agent advances${_advN ? ` (${_advN} owed)` : ''}</button><button class="btn btn-sm secondary" onclick="app.openCancellations('requested')">❌ Cancellations</button></div>`;
 
     if (!rows.length) {
         body.innerHTML = tabsHtml + `<div style="text-align:center;color:var(--gray-400);padding:32px;">${_deliveryShowDelivered ? 'No product lines found.' : 'No pending deliveries. 🎉'}</div>`;
