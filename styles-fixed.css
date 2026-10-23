@@ -835,10 +835,9 @@ body {
 }
 
 .help-text {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--gray-500);
     margin-top: 8px;
-    font-style: italic;
 }
 
 .toggle-switch {
@@ -11573,15 +11572,16 @@ html, body {
 .form-compact .form-section .form-section { padding: 0; margin-bottom: 0; background: none; border: none; }
 .form-compact .form-row { gap: 10px; }
 .form-compact .form-group { margin-bottom: 8px; }
-.form-compact .form-group label { font-size: 12.5px; margin-bottom: 2px; color: var(--gray-500); white-space: nowrap; }
-.form-compact .form-control { padding: 6px 10px; }
+.form-compact .form-group label { font-size: 14px; font-weight: 500; margin-bottom: 4px; color: var(--gray-900); }
+.form-compact .form-control { padding: 8px 12px; min-height: 40px; }
 .form-compact textarea.form-control { padding: 8px 10px; }
-.form-compact .cps-scan-toolbar { margin-bottom: 8px !important; padding: 8px 10px !important; }
+.form-compact .cps-scan-toolbar { margin-bottom: 12px; }
 .form-compact .help-text { margin: 2px 0 0; }
 .form-compact .form-group .bi-chart-tick { display: inline-flex; margin-bottom: 0; align-items: center; gap: 3px; margin-left: auto; font-size: 11px; color: var(--gray-400); white-space: nowrap; cursor: pointer; }
 @media (max-width: 768px) {
     .form-compact input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
-    .form-compact select { min-height: 38px; }
+    .form-compact select,
+    .form-compact .form-control:not(textarea) { min-height: 44px; }
     .form-compact textarea { min-height: 64px !important; }
 }
 
@@ -11773,3 +11773,51 @@ html, body {
 .cr-status.draft { background: #F1F3F4; color: #5F6368; }
 .cr-status.submitted { background: #FEF3C7; color: #8A4B08; }
 .cr-status.approved { background: #E6F4EA; color: #146C43; }
+
+/* ── Quick Add Activity + shared intake block ─────────────────────────────
+   2026-10-23 neutral redesign, phase 3. Sections are separated by spacing
+   and a hairline, not tinted cards; headings are dark, not pink. The
+   scan/paste row and the co-agent / noticeboard panels share one quiet grey
+   surface (.form-subpanel). Save stays the only pink button. */
+.form-subpanel { background: var(--gray-100); border: 1px solid var(--gray-200); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; }
+
+.modal-box:has(.activity-modal-form) .modal-header { margin-bottom: 0; padding-bottom: 12px; border-bottom: 1px solid var(--gray-200); }
+.modal-box:has(.activity-modal-form) .modal-header h3 { font-size: 20px; font-weight: 600; color: var(--gray-900); }
+.modal-box:has(.activity-modal-form) .modal-close { width: 40px; height: 40px; border-radius: 8px; font-size: 24px; color: var(--gray-500); }
+.modal-box:has(.activity-modal-form) .modal-close:hover { background: var(--gray-100); color: var(--gray-900); }
+.modal-box:has(.activity-modal-form) .modal-content { margin-bottom: 0; }
+.modal-box:has(.activity-modal-form) .modal-footer { margin-top: 0; padding-top: 12px; border-top: 1px solid var(--gray-200); background: var(--bg-surface, #fff); }
+.modal-box:has(.activity-modal-form) .modal-footer .btn.primary { min-height: 44px; padding: 0 24px; font-size: 15px; justify-content: center; }
+@media (max-width: 768px) {
+    .modal-box.fullscreen:has(.activity-modal-form) .modal-footer .btn.primary { flex: 1; }
+}
+
+.activity-modal-form { padding-top: 16px; }
+.modal-box:not(.fullscreen) .activity-modal-form { max-height: min(70vh, 760px); }
+.activity-modal-form .form-section { background: none; border: none; border-top: 1px solid var(--gray-200); border-radius: 0; padding: 20px 0 4px; margin: 0; }
+.activity-modal-form .form-section .form-section { border-top: none; padding: 0; }
+.activity-modal-form .form-section h4 { font-size: 16px; font-weight: 600; color: var(--gray-900); margin: 0 0 12px; }
+.activity-modal-form .form-group label,
+.basic-info-block .form-group label { font-size: 14px; font-weight: 500; color: var(--gray-900); margin-bottom: 6px; white-space: normal; }
+
+/* Two columns only where there is room; one column on phones. */
+@media (max-width: 600px) {
+    .activity-modal-form .form-row,
+    .basic-info-block .form-row { flex-direction: column; gap: 0; }
+}
+
+/* Scan / paste / photo — secondary actions on a quiet surface */
+.cps-scan-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 14px; margin-bottom: 16px; background: var(--gray-100); border: 1px solid var(--gray-200); border-radius: 8px; }
+.cps-scan-text { flex: 1 1 220px; min-width: 0; }
+.cps-scan-title { font-size: 14px; font-weight: 600; color: var(--gray-900); }
+.cps-scan-sub { font-size: 13px; color: var(--gray-500); margin-top: 2px; }
+.cps-scan-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.cps-scan-actions .btn { white-space: nowrap; min-height: 40px; justify-content: center; }
+@media (max-width: 600px) {
+    .cps-scan-actions { width: 100%; }
+    .cps-scan-actions .btn { flex: 1; min-height: 44px; }
+}
+
+/* Assign Prospect + Customer Details sub-sections inside the intake block */
+.bi-subhead { font-size: 15px; font-weight: 600; color: var(--gray-900); margin: 4px 0 10px; }
+.bi-assign { margin-bottom: 20px; }

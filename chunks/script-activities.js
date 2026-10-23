@@ -239,7 +239,7 @@
                     </div>
                 </div>
                     
-                <div id="co-agent-section" style="display: none; background: #f0fdfa; padding: 12px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #ccfbf1;">
+                <div id="co-agent-section" class="form-subpanel" style="display: none;">
                     <div class="form-group">
                         <label>Search and Add Co-Agents</label>
                         <div class="co-agent-search" style="position:relative;">
@@ -973,20 +973,17 @@
         const clearHandler = readOnly ? '' : `onclick="app.clearBasicInfoReferrer('${prefix}')"`;
 
         const scanBtn = readOnly ? '' : `
-            <div class="cps-scan-toolbar" style="background:linear-gradient(135deg,#f5f3ff 0%,#ede9fe 100%);border:1px solid #ddd6fe;border-radius:10px;padding:12px 14px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-                <div style="display:flex;align-items:center;gap:10px;min-width:0;">
-                    <div style="width:36px;height:36px;background:#7c3aed;border-radius:8px;display:flex;align-items:center;justify-content:center;color:white;font-size:16px;flex-shrink:0;"><i class="fas fa-camera"></i></div>
-                    <div style="min-width:0;">
-                        <div style="font-weight:600;font-size:14px;color:#111827;">Scan or Paste CPS Form</div>
-                        <div style="font-size:12px;color:#6b7280;">Snap a photo of the form, or paste the customer's reply to auto-fill</div>
-                    </div>
+            <div class="cps-scan-toolbar">
+                <div class="cps-scan-text">
+                    <div class="cps-scan-title">Scan or Paste CPS Form</div>
+                    <div class="cps-scan-sub">Snap a photo of the form, or paste the customer's reply to auto-fill</div>
                 </div>
-                <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                    <button type="button" class="btn secondary btn-sm" style="white-space:nowrap;" onclick="app.openCpsPasteModal('${prefix}')">
-                        <i class="fas fa-paste"></i> Paste Info
+                <div class="cps-scan-actions">
+                    <button type="button" class="btn secondary btn-sm" onclick="app.openCpsPasteModal('${prefix}')">
+                        <i class="fas fa-paste" aria-hidden="true"></i> Paste Info
                     </button>
-                    <button type="button" class="btn primary btn-sm" style="white-space:nowrap;" onclick="app.scanCpsForm('${prefix}')">
-                        <i class="fas fa-camera"></i> Take Photo
+                    <button type="button" class="btn secondary btn-sm" onclick="app.scanCpsForm('${prefix}')">
+                        <i class="fas fa-camera" aria-hidden="true"></i> Take Photo
                     </button>
                 </div>
                 <input type="file" id="${prefix}-scan-input" accept="image/*" capture="environment" style="display:none;" onchange="app.handleCpsScanFile(this, '${prefix}')">
@@ -999,24 +996,26 @@
         // and only for L1–L5 leaders/admins in CREATE mode. Never on 'preview'
         // (read-only). For non-CPS forms the credit toggle stays hidden.
         const assignAgentBlock = readOnly ? '' : `
-            <div id="${prefix}-assign-wrap" class="form-group" style="display:none;background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:12px 14px;margin-bottom:16px;">
-                <label style="font-weight:600;display:block;margin-bottom:6px;color:#0c4a6e;"><i class="fas fa-user-check"></i> Assign this prospect to</label>
+            <div id="${prefix}-assign-wrap" class="form-group bi-assign" style="display:none;">
+                <div class="bi-subhead">Assign Prospect</div>
+                <label for="${prefix}-assign-agent">Assign this prospect to</label>
                 <select id="${prefix}-assign-agent" class="form-control"></select>
-                <div id="${prefix}-credit-wrap" style="margin-top:10px;display:none;">
-                    <label style="font-size:12px;color:#475569;display:block;margin-bottom:4px;">Who gets credit for this CPS meeting?</label>
-                    <select id="${prefix}-credit" class="form-control" style="font-size:13px;">
+                <div id="${prefix}-credit-wrap" style="margin-top:12px;display:none;">
+                    <label for="${prefix}-credit">Who gets credit for this CPS meeting?</label>
+                    <select id="${prefix}-credit" class="form-control">
                         <option value="me">Me — I ran the meeting (keep my CPS credit)</option>
                         <option value="agent">The assigned agent (give them the CPS credit)</option>
                         <option value="both">Both — I lead, agent added as co-agent</option>
                     </select>
                 </div>
-                <div style="font-size:11px;color:#0369a1;margin-top:6px;">They'll own this prospect &amp; its follow-ups. Keep <em>(me)</em> to own it yourself.</div>
+                <div class="help-text">They'll own this prospect &amp; its follow-ups. Keep <em>(me)</em> to own it yourself.</div>
             </div>`;
 
         return `
             <div class="form-section basic-info-block" data-prefix="${prefix}">
                 ${scanBtn}
                 ${assignAgentBlock}
+                ${prefix === 'cps' ? '<div class="bi-subhead">Customer Details</div>' : ''}
                 <div class="form-row">
                     <div class="form-group half">
                         <label>Title</label>
@@ -4095,16 +4094,16 @@ My raw notes:
 
                         ${type === 'EVENT' ? `
                         <!-- 📢 Noticeboard publishing — applies to whichever event (existing or new) is attached. -->
-                        <div class="form-group" style="padding: 10px 12px; background: #fdf2f8; border: 1px solid #fce7f3; border-radius: 8px;">
-                            <label style="font-weight:600; color:#be185d; display:flex; align-items:center; flex-wrap:wrap; gap:6px; cursor:pointer; white-space:normal; font-size:13.5px;">
+                        <div class="form-group form-subpanel">
+                            <label class="checkbox-label" style="display:flex; align-items:center; flex-wrap:wrap; gap:6px; cursor:pointer; white-space:normal; font-weight:600;">
                                 <input type="checkbox" id="activity-publish-noticeboard" checked onchange="app.toggleActivityNoticeboardFields()">
                                 📢 Publish to Noticeboard
-                                <span style="color:#6b7280; font-weight:normal; font-size:0.85rem;">(visible to L12/13/14 — untick to keep private)</span>
+                                <span class="help-text" style="margin:0; font-weight:normal;">(visible to L12/13/14 — untick to keep private)</span>
                             </label>
                             <div id="activity-noticeboard-fields" style="display:block; margin-top:10px;">
-                                <label style="font-size:0.9rem; color:#374151;">Event Poster</label>
+                                <label for="activity-poster-file">Event Poster</label>
                                 <input type="file" id="activity-poster-file" class="form-control" accept="image/*" style="margin-top:4px;">
-                                <small style="color:#6b7280; font-size:0.8rem;">Upload an image (max 5MB), or paste a URL below. Leave both blank to keep the event's existing poster.</small>
+                                <small class="help-text" style="display:block; margin-top:4px;">Upload an image (max 5MB), or paste a URL below. Leave both blank to keep the event's existing poster.</small>
                                 <input type="url" id="activity-poster-url" class="form-control" placeholder="https://… or Supabase storage path" style="margin-top:6px;">
                             </div>
                         </div>

@@ -5980,7 +5980,7 @@
                     </label>
                 </div>
             </div>
-            <div id="co-agent-section" style="display: ${hasCoAgents ? 'block' : 'none'}; background: #f0fdfa; padding: 12px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #ccfbf1;">
+            <div id="co-agent-section" class="form-subpanel" style="display: ${hasCoAgents ? 'block' : 'none'};">
                 <div class="form-group">
                     <label>Search and Add Co-Agents</label>
                     <div class="co-agent-search" style="position:relative;">
