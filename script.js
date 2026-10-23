@@ -147,7 +147,14 @@ window.Perf = window.Perf || (function () {
             }
             inflight.add(key);
             const btn = document.activeElement;
-            const isBtn = btn && (btn.tagName === 'BUTTON' || btn.tagName === 'A');
+            // ui.js's capture-phase click handler has usually already put a
+            // .btn into its loading state (disabled + spinner) before we run.
+            // Capturing that state and restoring it on release re-disabled the
+            // button for good after any validation error (toast → ui.js restores
+            // it → release stuck it again), so a focused Save could not be
+            // retried. ui.js owns that button's restore — leave it alone.
+            const uiLoading = !!(btn && btn.disabled && /fa-spinner/.test(btn.innerHTML || ''));
+            const isBtn = !uiLoading && btn && (btn.tagName === 'BUTTON' || btn.tagName === 'A');
             const prevDisabled = isBtn ? btn.disabled : null;
             // Preserve the full markup (icon children + label) so restore doesn't
             // strip Font Awesome <i> elements the way innerText assignment would.
