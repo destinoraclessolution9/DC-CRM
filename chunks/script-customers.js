@@ -690,66 +690,6 @@ const showCustomerDetail = async (customerId) => {
     const container = document.getElementById('content-viewport');
     container.innerHTML = `
         <div class="pv-wrap">
-            <style>
-                .pv-wrap{background:#fff;border-radius:12px;box-shadow:var(--shadow-md);overflow:hidden;padding-bottom:80px;}
-                .pv-back{padding:14px 16px 0;}
-                .pv-hdr{padding:12px 16px 16px;border-bottom:1px solid var(--gray-200);}
-                .pv-hdr h1{font-size:22px;font-weight:700;margin:6px 0 8px;line-height:1.2;}
-                .pv-hdr-meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px;color:var(--gray-500);}
-                .acc-container{display:flex;flex-direction:column;gap:4px;padding:8px;}
-                .acc-item{border:1px solid var(--gray-200);border-radius:10px;overflow:hidden;}
-                .acc-hdr{display:flex;justify-content:space-between;align-items:center;padding:9px 12px;cursor:pointer;background:var(--gray-50);font-weight:600;font-size:14px;user-select:none;-webkit-tap-highlight-color:transparent;gap:8px;}
-                .acc-hdr:active{opacity:.85;}
-                .acc-item.open>.acc-hdr{background:var(--primary);color:#fff;}
-                .acc-item.open>.acc-hdr .acc-chev{color:#fff;transform:rotate(180deg);}
-                .acc-chev{transition:transform .25s;color:var(--gray-500);flex-shrink:0;}
-                .acc-body{padding:10px 12px;background:#fff;}
-                .acc-loading{text-align:center;padding:14px;color:var(--gray-400);font-size:14px;}
-                .pv-row{display:flex;align-items:flex-start;padding:3px 0;border-bottom:none;font-size:13.5px;line-height:1.4;gap:8px;}
-                .pv-row:last-child{border-bottom:none;}
-                .pv-lbl{color:var(--gray-500);font-weight:500;min-width:108px;flex-shrink:0;}
-                .pv-val{flex:1;color:var(--gray-900);font-weight:500;word-break:break-word;}
-                .pv-sub{font-size:11px;font-weight:700;color:var(--primary);text-transform:uppercase;letter-spacing:.5px;margin:8px 0 2px;padding-top:0;border-top:none;}
-                .pv-sub:first-child{margin-top:0;padding-top:0;border-top:none;}
-                .pv-compact{padding:10px 14px;}
-                .pv-compact .pv-row{padding:3px 0;border-bottom:none;font-size:13.5px;line-height:1.4;}
-                .pv-compact .pv-lbl{min-width:108px;}
-                .pv-compact .pv-val{font-weight:500;color:var(--gray-900);}
-                .pv-compact .pv-sub{font-size:11px;margin:8px 0 2px;padding-top:0;border-top:none;color:var(--primary);}
-                .pv-compact .pv-sub:first-child{margin-top:0;}
-                .meet-section{margin-bottom:8px;}
-                .meet-lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--gray-400);margin-bottom:2px;}
-                .meet-txt{font-size:13px;color:var(--gray-700);line-height:1.5;white-space:pre-wrap;word-break:break-word;}
-                .mu-toolbar{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;}
-                .mu-fchips{display:flex;gap:6px;flex-wrap:wrap;}
-                .mu-fchip{border:1px solid var(--gray-300);background:#fff;color:var(--gray-500);border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;-webkit-tap-highlight-color:transparent;}
-                .mu-wrap[data-muf="all"] .mu-fchip[data-f="all"],.mu-wrap[data-muf="meetup"] .mu-fchip[data-f="meetup"],.mu-wrap[data-muf="event"] .mu-fchip[data-f="event"]{background:var(--primary);border-color:var(--primary);color:#fff;}
-                .mu-wrap[data-muf="meetup"] .mu-item[data-kind="event"]{display:none;}
-                .mu-wrap[data-muf="event"] .mu-item[data-kind="meetup"]{display:none;}
-                .mu-list{display:flex;flex-direction:column;gap:6px;}
-                .mu-item{border:1px solid var(--gray-200);border-radius:10px;background:var(--gray-50);overflow:hidden;}
-                .mu-item.open{background:#fff;border-color:var(--gray-300);}
-                .mu-row{width:100%;display:flex;align-items:center;gap:8px;padding:7px 10px;background:none;border:none;cursor:pointer;font-family:inherit;font-size:inherit;text-align:left;color:var(--gray-800);-webkit-tap-highlight-color:transparent;}
-                .mu-caret{color:var(--gray-400);font-size:11px;width:12px;flex-shrink:0;transition:transform .18s;}
-                .mu-item.open .mu-caret{transform:rotate(90deg);color:var(--primary);}
-                .mu-date{font-size:12px;color:var(--gray-500);font-variant-numeric:tabular-nums;flex-shrink:0;width:78px;}
-                .mu-tchip{font-size:10px;font-weight:800;letter-spacing:.05em;border-radius:6px;padding:3px 7px;background:var(--gray-100);color:var(--primary);flex-shrink:0;}
-                .mu-title{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;}
-                .mu-badges{display:flex;gap:5px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;}
-                .mu-badge{font-size:10.5px;font-weight:700;border-radius:10px;padding:2px 8px;white-space:nowrap;background:var(--gray-100);color:var(--gray-500);}
-                .mu-badge.ok{background:#dcfce7;color:#166534;}
-                .mu-badge.bad{background:#fee2e2;color:#991b1b;}
-                .mu-detail{display:none;padding:2px 14px 14px 32px;}
-                .mu-item.open .mu-detail{display:block;}
-                .mu-close-sub{margin-top:12px;padding-top:10px;border-top:1px dashed var(--gray-300);}
-                @media (max-width:520px){
-                    .mu-row{flex-wrap:wrap;row-gap:5px;}
-                    .mu-date{width:auto;}
-                    .mu-title{flex-basis:100%;order:6;padding-left:20px;box-sizing:border-box;white-space:normal;line-height:1.35;}
-                    .mu-badges{margin-left:auto;}
-                    .mu-detail{padding-left:14px;}
-                }
-            </style>
             <div class="pv-back">
                 <button class="btn secondary btn-sm" onclick="app.goBackFromDetail()">
                     <i class="fas fa-arrow-left"></i> Back to List

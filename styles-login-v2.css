@@ -1616,17 +1616,19 @@
    M14 — Mobile Prospects / Clients view
    ======================================================================= */
 @media (max-width: 768px) {
-    .content-viewport.mprospects-active { background:#FAF6F0; }
+    .content-viewport.mprospects-active { background:#F7F8FA; }
     .mp {
-        --mp-red:#C5252B; --mp-red-deep:#8B1A20; --mp-red-soft:#FCE7E7;
-        --mp-pink:#F9D5D5; --mp-pink-warm:#F4B1B1;
-        --mp-beige:#FAF6F0; --mp-beige-deep:#F2EAD8;
-        --mp-purple:#7C5CD9; --mp-purple-soft:#E9DEFB;
-        --mp-wood:#B8794A; --mp-wood-soft:#F0DCC2;
-        --mp-green:#1FA855;
-        --mp-ink:#2A1B17; --mp-ink-soft:#6B5A55; --mp-ink-mute:#9B8A85;
-        --mp-line:rgba(40,20,15,0.07);
-        --mp-shadow:0 6px 20px rgba(70,15,15,0.07);
+        /* Neutral palette (2026-10-23): names kept, values moved to the
+           shared tokens — "red" is the AA brand pink, "beige" the neutral canvas. */
+        --mp-red:#C2185B; --mp-red-deep:#A3134D; --mp-red-soft:#FCE8F1;
+        --mp-pink:#F8D7E6; --mp-pink-warm:#F1B3CF;
+        --mp-beige:#F7F8FA; --mp-beige-deep:#ECEEF1;
+        --mp-purple:#6B4FC8; --mp-purple-soft:#EEE9FB;
+        --mp-wood:#8A5A2E; --mp-wood-soft:#F3ECE3;
+        --mp-green:#146C43;
+        --mp-ink:#202124; --mp-ink-soft:#5F6368; --mp-ink-mute:#6B6F76;
+        --mp-line:#E3E5E8;
+        --mp-shadow:0 1px 3px rgba(16,24,40,0.06);
         padding:6px 14px 100px; background:var(--mp-beige); min-height:100%;
         font-family:'Inter','Noto Sans SC','PingFang SC','Microsoft YaHei',-apple-system,sans-serif;
         color:var(--mp-ink);

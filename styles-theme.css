@@ -26,53 +26,65 @@
     --gold:          #F48FB1;
     --gold-soft:     #F8BBD9;
 
-    /* Semantic */
-    --bg-app:        #FDF5F9;
+    /* Semantic — neutral foundation (2026-10-23 redesign). Pink is the
+       accent only: white/neutral surfaces, dark readable text. Ratios are
+       measured on #FFFFFF unless noted. */
+    --bg-app:        #F7F8FA;   /* app canvas behind white cards */
     --bg-surface:    #FFFFFF;
-    --bg-elevated:   #FFF0F7;
-    --bg-sunken:     #FAE4EF;
-    --bg-glass:      rgba(255, 245, 249, 0.80);
+    --bg-elevated:   #F5F6F8;   /* subtle grouping surface */
+    --bg-sunken:     #ECEEF1;
+    --bg-glass:      rgba(255, 255, 255, 0.88);
 
-    --text-primary:   #1A0A10;
-    --text-secondary: #6B3050;
-    --text-muted:     #9B6080;
-    --text-inverse:   #FFF5F9;
+    --text-primary:   #202124;  /* 16.1:1 */
+    --text-secondary: #5F6368;  /* 6.1:1, 5.6:1 on --bg-elevated */
+    --text-muted:     #6B6F76;  /* 5.1:1 — placeholders/hints; still AA */
+    --text-inverse:   #FFFFFF;
 
-    --border-soft:    rgba(232, 67, 147, 0.10);
-    --border-strong:  rgba(232, 67, 147, 0.20);
+    --border-soft:    #E3E5E8;  /* dividers, card outlines */
+    --border-strong:  #DADCE0;
+    --border-input:   #8C9199;  /* 3.2:1 — input outline meets non-text AA */
 
-    --accent:         var(--maroon);
-    --accent-hover:   var(--maroon-deep);
-    --accent-glow:    rgba(232, 67, 147, 0.22);
-    --accent-grad:    linear-gradient(135deg, #E84393 0%, #EC407A 50%, #F06292 100%);
-    --accent-grad-2:  linear-gradient(135deg, #AD1457 0%, #E84393 100%);
+    --accent:         var(--maroon);      /* #E84393 — focus, selected, icons */
+    --accent-strong:  var(--maroon-deep); /* #C2185B — fills behind white text (5.9:1), pink text */
+    --accent-hover:   #A3134D;
+    --accent-tint:    #FCE8F1;            /* selected-row / active-nav wash */
+    --accent-glow:    rgba(232, 67, 147, 0.25);
+    /* Gradients flattened to the solid accent — kept as gradients so the
+       background-clip:text brand wordmarks keep working. */
+    --accent-grad:    linear-gradient(0deg, #C2185B, #C2185B);
+    --accent-grad-2:  linear-gradient(0deg, #C2185B, #C2185B);
 
-    --success:        #2E7D5B;
-    --warning:        #C77700;
-    --danger:         #E84393;
-    --info:           #1F6FB2;
+    --success:        #146C43;
+    --warning:        #B26B00;
+    --danger:         #B3261E;
+    --info:           #1A5F96;
 
-    /* AA-compliant FOREGROUND (text / icon / glyph) status variants.
-       The raw status colors above are tuned for fills & borders; several
-       fail WCAG AA as text on light surfaces (--danger #E84393 ≈3.3:1,
-       --warning #C77700 ≈3.9:1). Use these *-text tokens for any status
-       label, icon or glyph rendered as foreground. Never put a status
-       message in the raw --danger/--warning color. */
-    --danger-text:    #C2185B;   /* ≈6.0:1 on #FFF, ≈5.7:1 on --bg-app */
-    --warning-text:   #8A5200;   /* ≈6.5:1 */
-    --success-text:   #1B6B47;   /* ≈6.2:1 */
-    --info-text:      #1A5F96;   /* ≈5.4:1 */
+    /* AA-compliant FOREGROUND (text / icon / glyph) status variants. Use
+       these for any status label, icon or glyph rendered as foreground. */
+    --danger-text:    #B3261E;   /* 6.5:1 */
+    --warning-text:   #8A4B08;   /* 6.8:1 */
+    --success-text:   #146C43;   /* 6.5:1 */
+    --info-text:      #1A5F96;   /* 6.7:1 */
 
-    --shadow-xs:      0 1px 2px rgba(232, 67, 147, 0.06);
-    --shadow-sm:      0 2px 6px rgba(232, 67, 147, 0.09);
-    --shadow-md:      0 6px 20px rgba(232, 67, 147, 0.12);
-    --shadow-lg:      0 18px 50px rgba(232, 67, 147, 0.16);
-    --shadow-glow:    0 0 0 3px rgba(232, 67, 147, 0.22);
+    --shadow-xs:      0 1px 2px rgba(16, 24, 40, 0.05);
+    --shadow-sm:      0 1px 3px rgba(16, 24, 40, 0.08);
+    --shadow-md:      0 1px 3px rgba(16, 24, 40, 0.06), 0 1px 2px rgba(16, 24, 40, 0.04);
+    --shadow-lg:      0 12px 32px rgba(16, 24, 40, 0.14);
+    --shadow-glow:    0 0 0 3px rgba(232, 67, 147, 0.25);   /* focus ring halo */
 
     --radius-sm:      6px;
-    --radius-md:      10px;
-    --radius-lg:      14px;
-    --radius-xl:      20px;
+    --radius-md:      8px;
+    --radius-lg:      12px;
+    --radius-xl:      16px;
+
+    /* Component dimensions */
+    --control-h:      40px;
+    --control-h-touch: 44px;
+    --fs-page-title:  22px;
+    --fs-section:     16px;
+    --fs-label:       14px;
+    --fs-body:        14px;
+    --fs-support:     13px;
 
     --font-display:   'Space Grotesk', 'Inter', sans-serif;
     --font-body:      'Inter', sans-serif;
@@ -96,8 +108,11 @@
 
     --border-soft:    rgba(255, 200, 200, 0.06);
     --border-strong:  rgba(255, 200, 200, 0.14);
+    --border-input:   rgba(255, 200, 200, 0.22);
 
     --accent:         #F06292;
+    --accent-strong:  #F06292;
+    --accent-tint:    rgba(240, 98, 146, 0.14);
     --accent-hover:   #F48FB1;
     --accent-glow:    rgba(240, 98, 146, 0.40);
     --accent-grad:    linear-gradient(135deg, #C2185B 0%, #E84393 50%, #F06292 100%);
@@ -125,7 +140,9 @@
 :root,
 [data-theme="light"],
 [data-theme="dark"] {
-    --primary:       var(--accent);
+    /* --primary is the AA pink (#C2185B light): used both as a fill behind
+       white text and as pink text, so it must clear 4.5:1 either way. */
+    --primary:       var(--accent-strong);
     --primary-dark:  var(--accent-hover);
     --secondary:     var(--wine);
     --white:         var(--bg-surface);
@@ -133,9 +150,14 @@
     --gray-100:      var(--bg-elevated);
     --gray-200:      var(--border-soft);
     --gray-300:      var(--border-strong);
+    /* 400/600/900 were never defined, so color:var(--gray-400) rules fell
+       back to inherited text. Map them so muted text is muted but still AA. */
+    --gray-400:      var(--text-muted);
     --gray-500:      var(--text-secondary);
+    --gray-600:      var(--text-secondary);
     --gray-700:      var(--text-primary);
     --gray-800:      var(--text-primary);
+    --gray-900:      var(--text-primary);
     --error:         var(--danger);
 
     /* ── UI-system foundation tokens (Phase 0) — theme-neutral ──
@@ -167,11 +189,7 @@ html, body {
 }
 
 [data-theme="light"] body {
-    background:
-        radial-gradient(1000px 500px at 0% -20%, rgba(244, 143, 177, 0.10), transparent 60%),
-        radial-gradient(800px 400px at 110% 0%, rgba(232, 67, 147, 0.06), transparent 60%),
-        var(--bg-app);
-    background-attachment: fixed;
+    background: var(--bg-app);
 }
 
 h1, h2, h3, h4 {
@@ -479,6 +497,12 @@ h1, h2, h3, h4 {
 }
 
 .sb-nav-item.active {
+    background: var(--accent-tint);
+    color: var(--accent-strong);
+    font-weight: 600;
+    box-shadow: inset 3px 0 0 var(--accent);
+}
+[data-theme="dark"] .sb-nav-item.active {
     background: var(--accent-grad);
     color: #fff;
     box-shadow: 0 3px 12px var(--accent-glow);
@@ -638,7 +662,7 @@ h1, h2, h3, h4 {
     background: var(--accent-grad);
     color: #fff;
     border: none;
-    box-shadow: 0 4px 14px rgba(232, 67, 147, 0.28);
+    box-shadow: var(--btn-primary-shadow, none);
 }
 
 /* Re-declare background here so the older styles-fixed.css `.btn.primary:hover`
@@ -646,10 +670,21 @@ h1, h2, h3, h4 {
    gradient. Without this the LOGIN button "loses" its red→orange gradient
    permanently after the first hover and stays a flat maroon afterwards. */
 .btn.primary:hover {
-    background: var(--accent-grad);
-    transform: translateY(-1px);
-    box-shadow: 0 8px 22px rgba(232, 67, 147, 0.40);
-    filter: brightness(1.05);
+    background: var(--btn-primary-hover-bg, var(--accent-grad));
+    transform: var(--btn-primary-hover-lift, none);
+    box-shadow: var(--btn-primary-hover-shadow, none);
+    filter: var(--btn-primary-hover-filter, none);
+}
+
+/* Light theme: flat, quiet buttons — one dominant primary, no glow or lift. */
+:root:not([data-theme="dark"]) {
+    --btn-primary-hover-bg: linear-gradient(0deg, var(--accent-hover), var(--accent-hover));
+}
+[data-theme="dark"] {
+    --btn-primary-shadow:       0 4px 14px rgba(232, 67, 147, 0.28);
+    --btn-primary-hover-lift:   translateY(-1px);
+    --btn-primary-hover-shadow: 0 8px 22px rgba(232, 67, 147, 0.40);
+    --btn-primary-hover-filter: brightness(1.05);
 }
 
 /* Same reason: keep the gradient visible while disabled / "Logging in…". */
@@ -663,16 +698,34 @@ h1, h2, h3, h4 {
 }
 
 .btn.secondary {
-    background: var(--bg-elevated);
+    background: var(--bg-surface);
     color: var(--text-primary);
-    border-color: var(--border-soft);
+    border-color: var(--border-strong);
 }
 
 .btn.secondary:hover {
-    background: var(--bg-sunken);
-    border-color: var(--accent);
-    color: var(--accent);
+    background: var(--bg-elevated);
+    border-color: var(--border-input);
+    color: var(--text-primary);
 }
+
+/* Destructive — outlined red, never confused with the pink primary.
+   `.btn.danger` / `.btn.error` were used in markup but had no rules. */
+.btn.danger,
+.btn.error {
+    background: var(--bg-surface);
+    color: var(--danger-text);
+    border-color: var(--danger);
+}
+.btn.danger:hover,
+.btn.error:hover {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: #fff;
+}
+
+.btn:disabled,
+.btn[disabled] { cursor: not-allowed; }
 
 .btn-icon:hover { color: var(--accent); }
 
@@ -689,7 +742,7 @@ h1, h2, h3, h4 {
 .calendar-days-header { background: var(--bg-elevated); border-bottom-color: var(--border-soft); }
 .calendar-cell        { border-color: var(--border-soft) !important; }
 .calendar-cell.today  {
-    background: linear-gradient(135deg, rgba(200, 16, 46, 0.06), rgba(201, 169, 97, 0.06));
+    background: var(--accent-tint);
     box-shadow: inset 0 0 0 1px var(--accent);
 }
 
@@ -781,9 +834,9 @@ input[type="tel"],
 input[type="url"],
 select,
 textarea {
-    background: var(--bg-elevated);
+    background: var(--bg-surface);
     color: var(--text-primary);
-    border: 1px solid var(--border-soft);
+    border: 1px solid var(--border-input);
     border-radius: var(--radius-md);
     transition: background-color 0.18s var(--ease), color 0.18s var(--ease), border-color 0.18s var(--ease), box-shadow 0.18s var(--ease), opacity 0.18s var(--ease), transform 0.18s var(--ease);
 }
@@ -798,6 +851,38 @@ input:focus, select:focus, textarea:focus {
 }
 
 input::placeholder, textarea::placeholder { color: var(--text-muted); }
+
+.form-control:hover:not(:focus):not(:disabled),
+select:hover:not(:focus):not(:disabled) { border-color: var(--text-secondary); }
+
+.form-control:disabled, .form-control[readonly],
+input:disabled, select:disabled, textarea:disabled {
+    background: var(--bg-elevated);
+    color: var(--text-secondary);   /* readable, not ghosted */
+    border-color: var(--border-strong);
+}
+
+/* Error state — border + the message text carry it, never colour alone. */
+.form-control.is-invalid,
+.form-control[aria-invalid="true"],
+.form-group.has-error .form-control { border-color: var(--danger); }
+.form-control.is-invalid:focus,
+.form-control[aria-invalid="true"]:focus { outline-color: var(--danger); box-shadow: 0 0 0 3px rgba(179, 38, 30, 0.18); }
+.field-error-msg { color: var(--danger-text); font-size: var(--fs-support); margin-top: 4px; }
+
+/* Dark theme keeps its original control surfaces (redesign is light-only). */
+[data-theme="dark"] .form-control,
+[data-theme="dark"] input[type="text"], [data-theme="dark"] input[type="email"],
+[data-theme="dark"] input[type="password"], [data-theme="dark"] input[type="number"],
+[data-theme="dark"] input[type="search"], [data-theme="dark"] input[type="date"],
+[data-theme="dark"] input[type="time"], [data-theme="dark"] input[type="datetime-local"],
+[data-theme="dark"] input[type="tel"], [data-theme="dark"] input[type="url"],
+[data-theme="dark"] select, [data-theme="dark"] textarea {
+    background: var(--bg-elevated);
+    border-color: var(--border-soft);
+}
+[data-theme="dark"] .btn.secondary { background: var(--bg-elevated); border-color: var(--border-soft); }
+[data-theme="dark"] .btn.secondary:hover { background: var(--bg-sunken); border-color: var(--accent); color: var(--accent); }
 
 /* ---------- Tables ---------- */
 table {
@@ -827,7 +912,7 @@ table tbody tr {
 }
 
 table tbody tr:hover {
-    background: linear-gradient(90deg, rgba(200, 16, 46, 0.04), transparent);
+    background: var(--bg-elevated);
     box-shadow: inset 3px 0 0 var(--accent);
 }
 
@@ -1145,8 +1230,8 @@ table td.num, table td.id, .mono { font-family: var(--font-mono); }
 }
 .cmdk-item.active,
 .cmdk-item:hover {
-    background: linear-gradient(90deg, rgba(200, 16, 46, 0.10), transparent);
-    color: var(--accent);
+    background: var(--accent-tint);
+    color: var(--accent-strong);
 }
 .cmdk-item.active .cmdk-icon,
 .cmdk-item:hover .cmdk-icon {
@@ -1286,7 +1371,7 @@ table td.num, table td.id, .mono { font-family: var(--font-mono); }
     position: absolute;
     right: -20px; top: -30px;
     width: 180px; height: 180px;
-    background: radial-gradient(circle, rgba(232,67,147,0.08) 0%, transparent 70%);
+    background: none;
     pointer-events: none;
 }
 
