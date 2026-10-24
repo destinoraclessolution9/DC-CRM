@@ -1069,6 +1069,10 @@
                             ${(window.UI.countries || []).map(c => `<option value="${c.code}" ${sel(d.country || window._crmUtils.cuHomeCountry(), c.code)}>${esc(c.name)} (${esc(c.symbol)})</option>`).join('')}
                         </select>
                     </div>
+                    <div class="form-group half">
+                        <label>IC Number</label>
+                        <input type="text" id="${prefix}-ic" class="form-control" value="${esc(d.ic_number)}" placeholder="e.g., 901212-10-1234" ${readOnly ? '' : `oninput="app.biAutoFill('${prefix}','ic')"`} ${disabled}>
+                    </div>
                 </div>
                 <div class="form-row bi-birth-row">
                     <div class="form-group half">
@@ -1093,10 +1097,6 @@
                             <option value="">-- Select --</option>
                             ${BASIC_INFO_MING_GUA.map(([v,l]) => `<option value="${v}" ${sel(d.ming_gua, v)}>${l}</option>`).join('')}
                         </select>
-                    </div>
-                    <div class="form-group half">
-                        <label>IC Number</label>
-                        <input type="text" id="${prefix}-ic" class="form-control" value="${esc(d.ic_number)}" placeholder="e.g., 901212-10-1234" ${readOnly ? '' : `oninput="app.biAutoFill('${prefix}','ic')"`} ${disabled}>
                     </div>
                 </div>
                 <div class="form-row">
