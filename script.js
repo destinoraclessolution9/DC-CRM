@@ -2359,7 +2359,7 @@ function _promptMfaCode(isRetry) {
             + '<input id="_mfa_code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" style="width:100%;padding:12px;font-size:20px;letter-spacing:6px;text-align:center;border:1px solid #d1d5db;border-radius:8px;margin-bottom:14px;" />'
             + '<div style="display:flex;gap:8px;">'
             + '<button id="_mfa_cancel" style="flex:1;padding:10px;border:1px solid #d1d5db;background:#fff;border-radius:8px;cursor:pointer;">Cancel</button>'
-            + '<button id="_mfa_verify" style="flex:1;padding:10px;border:none;background:#7c3aed;color:#fff;border-radius:8px;cursor:pointer;">Verify</button>'
+            + '<button id="_mfa_verify" style="flex:1;padding:10px;border:none;background:var(--primary);color:#fff;border-radius:8px;cursor:pointer;">Verify</button>'
             + '</div></div>';
         document.body.appendChild(ov);
         const done = (val) => { try { ov.remove(); } catch (_) {} resolve(val); };

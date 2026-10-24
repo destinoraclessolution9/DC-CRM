@@ -39,7 +39,7 @@ export function SearchPanelView({ onReady }) {
         }
     }, [onReady]);
 
-    const summaryStyle = { cursor: 'pointer', fontWeight: 600, color: '#8B0000', padding: '10px 0', listStyle: 'none', display: 'flex', alignItems: 'center', gap: '6px', userSelect: 'none' };
+    const summaryStyle = { cursor: 'pointer', fontWeight: 600, color: 'var(--gray-900)', padding: '10px 0', listStyle: 'none', display: 'flex', alignItems: 'center', gap: '6px', userSelect: 'none' };
 
     return (
         <>

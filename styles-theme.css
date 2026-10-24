@@ -159,6 +159,10 @@
     --gray-800:      var(--text-primary);
     --gray-900:      var(--text-primary);
     --error:         var(--danger);
+    /* Referenced by the Success Case Library styles but never defined, so
+       they fell back to hard-coded maroon (#7a0018 / #9b2335). */
+    --primary-400:   var(--accent);
+    --primary-600:   var(--accent-strong);
 
     /* ── UI-system foundation tokens (Phase 0) — theme-neutral ──
        Consumed by the new component library (vanilla UI.kit.* + React

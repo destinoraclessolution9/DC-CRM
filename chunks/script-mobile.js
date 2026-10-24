@@ -3289,7 +3289,7 @@
                     ? `<button onclick="event.stopPropagation();app.mcalTeamBirthdayWa('${p.id}')" aria-label="Send birthday WhatsApp" style="flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border:none;border-radius:50%;background:#25D366;color:#fff;font-size:17px;cursor:pointer;"><i class="fab fa-whatsapp"></i></button>`
                     : '';
                 return `
-                <div style="display:flex;align-items:center;gap:12px;padding:12px 10px;margin-bottom:6px;background:linear-gradient(90deg,#ECFDF5,#fff);border-radius:10px;border:1px solid #A7F3D0;">
+                <div style="display:flex;align-items:center;gap:12px;padding:12px 10px;margin-bottom:6px;background:#F1F8F3;border-radius:10px;border:1px solid #CDE9D6;">
                     <div style="font-size:26px;flex-shrink:0;">🎉</div>
                     <div style="flex:1;min-width:0;cursor:pointer;" onclick="app.showAgentDetail('${p.id}')">
                         <div style="font-size:15px;font-weight:700;color:#065F46;">${_mhomeEsc(p.full_name || '—')}</div>
@@ -3313,14 +3313,14 @@
             const _agentId = p.responsible_agent_id || p.lead_agent_id;
             const _agentName = _agentId ? (_mcalUserMap.get(String(_agentId)) || '') : '';
             const agentLine = _agentName
-                ? `<div style="font-size:10px;color:#9CA3AF;margin-top:1px;">- ${_mhomeEsc(_agentName)}</div>`
+                ? `<div style="font-size:12px;color:#5F6368;margin-top:1px;">- ${_mhomeEsc(_agentName)}</div>`
                 : '';
             return `
-                <div style="display:flex;align-items:center;gap:12px;padding:12px 10px;margin-bottom:6px;background:linear-gradient(90deg,#FDF2F8,#fff);border-radius:10px;border:1px solid #FBCFE8;">
+                <div style="display:flex;align-items:center;gap:12px;padding:12px 10px;margin-bottom:6px;background:#fff;border-radius:10px;border:1px solid #E3E5E8;">
                     <div style="font-size:26px;flex-shrink:0;">🎂</div>
                     <div style="flex:1;min-width:0;cursor:pointer;" onclick="app.mcalOpenPerson('${p.id}', ${_pIsCust})">
-                        <div style="font-size:15px;font-weight:700;color:#9D174D;">${_mhomeEsc(p.full_name || '—')}</div>
-                        <div style="font-size:12px;color:#BE185D;margin-top:2px;">Birthday${ageStr}</div>
+                        <div style="font-size:15px;font-weight:700;color:#202124;">${_mhomeEsc(p.full_name || '—')}</div>
+                        <div style="font-size:13px;color:#C2185B;margin-top:2px;">Birthday${ageStr}</div>
                         ${agentLine}
                     </div>
                     ${waBtn}
@@ -4121,7 +4121,7 @@
             const custRows = await AppDataStore.searchCustomers(searchTerm, { limit: 10 }).catch(() => []);
             if (_seq !== _mpRenderSeq) return;
             if (custRows.length) {
-                custMatchHtml = `<div style="font-size:12px;font-weight:700;color:#be185d;text-transform:uppercase;letter-spacing:.04em;margin:4px 4px 6px;"><i class="fas fa-user-check"></i> Already customers (${custRows.length})</div>`
+                custMatchHtml = `<div style="font-size:13px;font-weight:600;color:var(--mp-ink-soft,#5F6368);margin:4px 4px 6px;"><i class="fas fa-user-check" aria-hidden="true"></i> Already customers (${custRows.length})</div>`
                     + custRows.map(c => {
                         const agentName = c.responsible_agent_id ? (_mpAgentMap?.get(String(c.responsible_agent_id))?.name || '') : '';
                         return `
@@ -4132,7 +4132,7 @@
                         <div class="mp-card-name">${_mhomeEsc(c.full_name || 'Unknown')}${c.converted_from_prospect_id != null ? `<span data-pot-chip="${Number(c.converted_from_prospect_id)}"></span>` : ''}</div>
                     </div>
                     <div class="mp-card-meta">
-                        <span class="mp-chip" style="background:#ec4899;color:#fff;font-weight:700;">Customer</span>
+                        <span class="mp-chip" style="background:#E6F4EA;color:#146C43;font-weight:700;">Customer</span>
                         ${agentName ? `<span class="mp-chip agent">${_mhomeEsc(agentName)}</span>` : ''}
                     </div>
                 </div>

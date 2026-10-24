@@ -213,7 +213,7 @@ function CountTab({ data }) {
             <div style={cardStyle}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                     <h3 style={{ margin: 0, fontSize: '16px' }}>Record Physical Count</h3>
-                    <button type="button" className="btn small" style={{ background: '#7c3aed', color: 'white' }} onClick={() => call('stScanShelfAndCount')} title="Scan a shelf QR — system shows expected SKUs for that shelf"><i className="fas fa-qrcode"></i> Scan Shelf</button>
+                    <button type="button" className="btn small primary" onClick={() => call('stScanShelfAndCount')} title="Scan a shelf QR — system shows expected SKUs for that shelf"><i className="fas fa-qrcode"></i> Scan Shelf</button>
                 </div>
                 <div className="form-group" style={{ marginBottom: '10px' }}>
                     <label>Counter Name</label>
@@ -455,7 +455,7 @@ function ReconcileTab({ data }) {
                     <button className="btn secondary" onClick={() => call('stExportReconcile', 'csv')}><i className="fas fa-file-csv"></i> CSV</button>
                     <button className="btn secondary" onClick={() => call('stExportReconcile', 'xlsx')}><i className="fas fa-file-excel"></i> XLSX</button>
                     <button className="btn primary" onClick={() => call('stExportAdjustment')}><i className="fas fa-download"></i> Adjustment File</button>
-                    <button className="btn primary" style={{ background: '#7c3aed' }} onClick={() => act('stAcceptVariances')} title="Rewrite System Stock for this session so counted qty becomes the new baseline. Adjustment File is still exported for ERP sync."><i className="fas fa-check-double"></i> Accept Variances</button>
+                    <button className="btn primary" onClick={() => act('stAcceptVariances')} title="Rewrite System Stock for this session so counted qty becomes the new baseline. Adjustment File is still exported for ERP sync."><i className="fas fa-check-double"></i> Accept Variances</button>
                 </div>
             </div>
             <div style={{ ...cardStyle, padding: 0, overflow: 'auto', maxHeight: '600px' }}>

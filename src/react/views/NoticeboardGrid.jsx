@@ -85,7 +85,7 @@ export function NoticeboardGrid({ events = [], isAdmin = false }) {
         return (
             <div className="nb-empty">
                 <div className="nb-empty-emoji">📭</div>
-                <div style={{ fontSize: '1.15rem', fontWeight: 700, color: '#800020', marginBottom: '6px' }}>暂无活动 · No upcoming events</div>
+                <div style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--gray-900)', marginBottom: '6px' }}>暂无活动 · No upcoming events</div>
                 <div style={{ fontSize: '0.9rem' }}>{isAdmin ? 'Tap "Post Event" above to publish the first one.' : 'Check back soon — new events will appear here.'}</div>
             </div>
         );

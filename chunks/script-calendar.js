@@ -5873,7 +5873,7 @@
         // Show OCR-only spinner on top of any open view
         (window.app._showCpsScanOverlay || (() => {}))('Reading Form…', `
             <div style="text-align:center; padding:20px 0;">
-                <i class="fas fa-spinner fa-spin" style="font-size:36px; color:#7c3aed; margin-bottom:14px;"></i>
+                <i class="fas fa-spinner fa-spin" style="font-size:36px; color:var(--primary); margin-bottom:14px;"></i>
                 <p style="color:var(--gray-600); margin:0;">Reading the form, please wait…</p>
                 <p style="color:var(--gray-400); font-size:12px; margin-top:6px;">(usually about 10 seconds)</p>
             </div>

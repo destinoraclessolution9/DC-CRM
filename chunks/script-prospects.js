@@ -690,18 +690,18 @@ const _renderProspectSearchCustomerMatches = async (term) => {
     if (seq !== _custMatchSeq) return;
     const userById = new Map((users || []).map(u => [String(u.id), u]));
     host.innerHTML = `
-        <div style="background:#fdf2f8;border:1px solid #fbcfe8;border-radius:10px;padding:10px 12px;margin-bottom:12px;">
-            <div style="font-size:12px;font-weight:700;color:#be185d;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">
-                <i class="fas fa-user-check"></i> Already customers (${rows.length})
+        <div class="pv-notice" style="margin-bottom:12px;">
+            <div class="pv-notice-title" style="margin-bottom:6px;">
+                <i class="fas fa-user-check" aria-hidden="true"></i> Already customers (${rows.length})
             </div>
             ${rows.map(c => {
                 const agent = userById.get(String(c.responsible_agent_id));
-                return `<div onclick="app.showCustomerDetail(${Number(c.id)})" style="display:flex;align-items:center;gap:10px;padding:8px 6px;border-top:1px solid #fce7f3;cursor:pointer;" onmouseover="this.style.background='#fce7f3'" onmouseout="this.style.background=''">
-                    <span style="background:#ec4899;color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;">Customer</span>
+                return `<div onclick="app.showCustomerDetail(${Number(c.id)})" style="display:flex;align-items:center;gap:10px;padding:8px 6px;border-top:1px solid var(--gray-200);cursor:pointer;" onmouseover="this.style.background='var(--bg-surface)'" onmouseout="this.style.background=''">
+                    <span class="pv-chip is-success">Customer</span>
                     <strong style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(c.full_name || '-')}</strong>
                     <span style="color:var(--gray-500);font-size:13px;">${escapeHtml(c.phone || '')}</span>
                     <span style="color:var(--gray-500);font-size:13px;min-width:120px;text-align:right;">${escapeHtml(agent ? agent.full_name : '')}</span>
-                    <i class="fas fa-chevron-right" style="color:#be185d;"></i>
+                    <i class="fas fa-chevron-right" style="color:var(--gray-500);" aria-hidden="true"></i>
                 </div>`;
             }).join('')}
         </div>`;
