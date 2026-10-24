@@ -56,8 +56,8 @@
         const out = window.app.renderHealthBadge ? window.app.renderHealthBadge(health) : '';
         if (out && typeof out.then !== 'function') return out;
         if (!health || health.score == null) return '';
-        const bg = health.grade === 'green' ? '#10b981' : health.grade === 'yellow' ? '#f59e0b' : '#ef4444';
-        return `<span class="score-badge" style="background:${bg}; color:white;" title="Health Score: ${health.score}/100">${escapeHtml(health.label || '')} ${Number(health.score)}</span>`;
+        const cls = health.grade === 'green' ? 'is-success' : health.grade === 'yellow' ? 'is-warning' : 'is-danger';
+        return `<span class="pv-chip ${cls}" title="Health Score: ${Number(health.score)}/100"><i class="fas fa-heart-pulse" aria-hidden="true"></i> ${escapeHtml(health.label || '')} ${Number(health.score)}</span>`;
     };
     const calculateCustomerHealthScore = (...a) => (window.app.calculateCustomerHealthScore || (() => 0))(...a);
     // Import / workflow helpers — defined in script-import.js and script-features2.js.
@@ -641,19 +641,32 @@ const _LINKED_PROSPECT_SECTIONS = [
     ['bujishu',  'fas fa-gem',            'Bujishu Product Purchase History'],
     ['formula',  'fas fa-heartbeat',      'Formula Healthcare Product Purchase History'],
 ];
-const _linkedProspectSectionsHtml = (prospectId) => {
+const _linkedProspectSectionsHtml = (prospectId, tabs = null) => {
     if (prospectId == null) return '';
     const pid = Number(prospectId);
     if (!Number.isFinite(pid)) return '';
-    return _LINKED_PROSPECT_SECTIONS.map(([tab, icon, label]) => `
+    return _LINKED_PROSPECT_SECTIONS.filter(([tab]) => !tabs || tabs.includes(tab)).map(([tab, icon, label]) => `
                 <div class="acc-item" id="acc-${tab}-${pid}">
-                    <div class="acc-hdr" onclick="app.toggleAccordion('${tab}',${pid},this.parentElement)">
-                        <span><i class="${icon}"></i> ${label}</span>
-                        <i class="fas fa-chevron-down acc-chev"></i>
+                    <div class="acc-hdr" role="button" tabindex="0" aria-expanded="false" onclick="app.toggleAccordion('${tab}',${pid},this.parentElement);this.setAttribute('aria-expanded',this.parentElement.classList.contains('open'))" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">
+                        <span><i class="${icon}" aria-hidden="true"></i> ${label}</span>
+                        <i class="fas fa-chevron-down acc-chev" aria-hidden="true"></i>
                     </div>
                     <div class="acc-body" id="acc-body-${tab}-${pid}" style="display:none" data-loaded="false"></div>
                 </div>`).join('');
 };
+
+// One customer profile section. Ids (cust-acc-<key>-<id> / cust-acc-body-<key>-<id>)
+// are looked up by refreshes elsewhere — only order and grouping may change.
+const _cvAccItem = (key, cid, icon, title, open = false) => `
+                <div class="acc-item${open ? ' open' : ''}" id="cust-acc-${key}-${cid}">
+                    <div class="acc-hdr" role="button" tabindex="0" aria-expanded="${open}" onclick="app.toggleCustomerAccordion('${key}',${cid},this.parentElement);this.setAttribute('aria-expanded',this.parentElement.classList.contains('open'))" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">
+                        <span><i class="fas ${icon}" aria-hidden="true"></i> ${title}</span>
+                        <i class="fas fa-chevron-down acc-chev" aria-hidden="true"></i>
+                    </div>
+                    ${open
+                        ? `<div class="acc-body pv-compact" id="cust-acc-body-${key}-${cid}"><div class="acc-loading"><i class="fas fa-spinner fa-spin"></i> Loading…</div></div>`
+                        : `<div class="acc-body" id="cust-acc-body-${key}-${cid}" style="display:none" data-loaded="false"></div>`}
+                </div>`;
 
 const showCustomerDetail = async (customerId) => {
     // Snapshot originating view BEFORE any await — a concurrent navigateTo during
@@ -680,186 +693,80 @@ const showCustomerDetail = async (customerId) => {
 
     const health = await calculateCustomerHealthScore(customer);
 
-    const iconBtn = (title, icon, onclick, opts = {}) => {
-        const bg = opts.bg || '#fff';
-        const color = opts.color || 'var(--gray-500)';
-        const border = opts.border || '1px solid var(--gray-300)';
-        return `<button title="${title}" onclick="event.stopPropagation();${onclick}" style="width:24px;height:24px;border-radius:50%;border:${border};background:${bg};color:${color};cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'"><i class="${icon}"></i></button>`;
-    };
+    const actBtn = (title, icon, onclick, cls = '') =>
+        `<button class="pv-act${cls ? ' ' + cls : ''}" title="${title}" aria-label="${title}" onclick="event.stopPropagation();${onclick}"><i class="${icon}" aria-hidden="true"></i></button>`;
+    const cid = customer.id;
+    const lpid = customer.converted_from_prospect_id;
+    // Count badges are revealed below (display + text) — keep the ids.
+    const jnyBadge  = `<span id="cust-jny-badge-${cid}" class="acc-count is-danger" style="display:none;"></span>`;
+    const impBadge  = `<span id="cust-imp-badge-${cid}" class="acc-count is-success" style="display:none;"></span>`;
+    const hostBadge = `<span id="cust-host-badge-${cid}" class="acc-count" style="display:none;"></span>`;
 
     const container = document.getElementById('content-viewport');
     container.innerHTML = `
         <div class="pv-wrap">
             <div class="pv-back">
                 <button class="btn secondary btn-sm" onclick="app.goBackFromDetail()">
-                    <i class="fas fa-arrow-left"></i> Back to List
+                    <i class="fas fa-arrow-left" aria-hidden="true"></i> Back to List
                 </button>
             </div>
-            <div class="pv-hdr" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+            <div class="pv-hdr pv-hdr-flex">
                 <div style="flex:1;min-width:0;">
                     <div class="pv-hdr-meta">
-                        ${customer.converted_from_prospect_id != null ? `<span data-pot-pid="${Number(customer.converted_from_prospect_id)}"></span>` : ''}
-                        <span>ID: C${customer.id}</span>
-                        <span class="badge success">Customer</span>
+                        ${lpid != null ? `<span data-pot-pid="${Number(lpid)}"></span>` : ''}
+                        <span class="pv-id">ID: C${cid}</span>
+                        <span class="pv-chip is-success"><i class="fas fa-circle" aria-hidden="true" style="font-size:7px;"></i> Customer</span>
                         ${renderHealthBadge(health)}
-                        <span style="font-size:11px;color:var(--gray-400);"><i class="fas fa-lock"></i> Permanent</span>
+                        <span class="pv-chip"><i class="fas fa-lock" aria-hidden="true"></i> Permanent</span>
                     </div>
-                    <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin:6px 0 4px;min-width:0;">
-                        <span style="font-size:22px;font-weight:700;line-height:1.3;word-break:break-word;">${escapeHtml(customer.full_name)}</span>
-                    </div>
-                    ${customer.converted_from_prospect_id != null ? `<div data-fu-pid="${Number(customer.converted_from_prospect_id)}"></div>` : ''}
-                    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 4px;">
-                        ${/* Edits the CUSTOMER (2026-10-16). This used to open the linked
-                              prospect's form for L1-2 only — the customer is now the one
+                    <h1 class="pv-name">${escapeHtml(customer.full_name)}</h1>
+                    ${lpid != null ? `<div data-fu-pid="${Number(lpid)}"></div>` : ''}
+                    <div class="pv-actions">
+                        ${/* Edits the CUSTOMER (2026-10-16) — the customer is the one
                               editable record; a converted prospect's profile is frozen. */
-                          iconBtn('Edit', 'fas fa-edit', `app.openCustomerEditModal(${customer.id})`)}
-                        ${iconBtn('Add Purchase', 'fas fa-plus', `app.openAddPurchaseModal(${customer.id})`)}
-                        ${iconBtn('Refer a Friend', 'fas fa-user-plus', `app.openCustomerReferralModal(${customer.id})`)}
-                        ${/* Opens the customer's chat directly, matching the prospect detail header
-                              and the list rows. This used to open openSendWhatsAppModal — the Meta
-                              Business API composer — which is a different job (templates, logged
-                              sends) and is still reachable from the WhatsApp view. Agents wanting
-                              to message a customer were going through a modal to get to the chat.
-                              Number is normalized here so the onclick carries digits only; an empty
-                              string makes openWaChat toast instead of opening a broken wa.me link. */
-                          iconBtn('WhatsApp', 'fab fa-whatsapp', `app.openWaChat('${waPhone(customer.phone)}')`, {color:'#25d366'})}
-                        ${iconBtn('Portal Link', 'fas fa-external-link-alt', `app.sendPortalLink(${customer.id})`)}
-                        ${iconBtn('Recruit as Agent', 'fas fa-user-tie', `app.openRecruitModal(${customer.id})`, {bg:'#6b21a8',color:'#fff',border:'none'})}
+                          actBtn('Edit', 'fas fa-edit', `app.openCustomerEditModal(${cid})`)}
+                        ${actBtn('Add Purchase', 'fas fa-plus', `app.openAddPurchaseModal(${cid})`, 'is-primary')}
+                        ${actBtn('Refer a Friend', 'fas fa-user-plus', `app.openCustomerReferralModal(${cid})`)}
+                        ${/* Opens the customer's chat directly (not the Business API
+                              composer). Number normalized so the onclick carries digits
+                              only; an empty string makes openWaChat toast. */
+                          actBtn('WhatsApp', 'fab fa-whatsapp', `app.openWaChat('${waPhone(customer.phone)}')`, 'is-whatsapp')}
+                        ${actBtn('Portal Link', 'fas fa-external-link-alt', `app.sendPortalLink(${cid})`)}
+                        ${actBtn('Recruit as Agent', 'fas fa-user-tie', `app.openRecruitModal(${cid})`)}
                     </div>
-                    <div style="font-size:12px;color:var(--gray-500);margin-top:2px;">
+                    <div class="pv-since">
                         Customer since ${customer.customer_since || '-'}${customer.conversion_amount != null ? ` · Converted at ${UI.money(customer.conversion_amount, customer.country)}` : ''}
                     </div>
                 </div>
             </div>
 
-            <div class="acc-container" id="cust-acc-container-${customer.id}">
+            <div class="acc-container" id="cust-acc-container-${cid}">
+                <div class="acc-group-label">Overview</div>
+                ${_cvAccItem('info', cid, 'fa-info-circle', 'Basic Information', true)}
+                ${_cvAccItem('bank', cid, 'fa-university', 'Bank &amp; Payment')}
+                ${_cvAccItem('platforms', cid, 'fa-id-badge', 'Platform IDs')}
 
-                <!-- 1 Basic Information — open by default -->
-                <div class="acc-item open" id="cust-acc-info-${customer.id}">
-                    <div class="acc-hdr" onclick="app.toggleCustomerAccordion('info',${customer.id},this.parentElement)">
-                        <span><i class="fas fa-info-circle"></i> Basic Information</span>
-                        <i class="fas fa-chevron-down acc-chev"></i>
-                    </div>
-                    <div class="acc-body pv-compact" id="cust-acc-body-info-${customer.id}">
-                        <div class="acc-loading"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
-                    </div>
-                </div>
+                <div class="acc-group-label">Engagement</div>
+                ${_cvAccItem('activity', cid, 'fa-user-friends', 'Meet Ups &amp; Events')}
+                ${_cvAccItem('journey', cid, 'fa-route', `Journey Tracker ${jnyBadge}`)}
+                ${_cvAccItem('improvements', cid, 'fa-seedling', `改命后的进步 ${impBadge}`)}
+                ${/* 汇集接待 rows come from event_huiji_details, whose RLS already
+                      scopes to the viewer's own created events (managers L≤5 see all). */
+                  _cvAccItem('hosting', cid, 'fa-home', `汇集接待 Hosting ${hostBadge}`)}
 
-                <!-- 2 Bank & Payment -->
-                <div class="acc-item" id="cust-acc-bank-${customer.id}">
-                    <div class="acc-hdr" onclick="app.toggleCustomerAccordion('bank',${customer.id},this.parentElement)">
-                        <span><i class="fas fa-university"></i> Bank &amp; Payment</span>
-                        <i class="fas fa-chevron-down acc-chev"></i>
-                    </div>
-                    <div class="acc-body" id="cust-acc-body-bank-${customer.id}" style="display:none" data-loaded="false"></div>
-                </div>
+                <div class="acc-group-label">Relationships</div>
+                ${_cvAccItem('referrals', cid, 'fa-user-plus', 'Referrals Made')}
+                ${_cvAccItem('eligibility', cid, 'fa-user-tie', 'Agent Eligibility')}
 
-                <!-- 3 Platform IDs -->
-                <div class="acc-item" id="cust-acc-platforms-${customer.id}">
-                    <div class="acc-hdr" onclick="app.toggleCustomerAccordion('platforms',${customer.id},this.parentElement)">
-                        <span><i class="fas fa-id-badge"></i> Platform IDs</span>
-                        <i class="fas fa-chevron-down acc-chev"></i>
-                    </div>
-                    <div class="acc-body" id="cust-acc-body-platforms-${customer.id}" style="display:none" data-loaded="false"></div>
-                </div>
+                <div class="acc-group-label">Sales</div>
+                ${_cvAccItem('contracts', cid, 'fa-file-contract', 'Contracts')}
+                ${_cvAccItem('closing', cid, 'fa-handshake', 'DC Closing Record')}
+                ${_linkedProspectSectionsHtml(lpid, ['bujishu', 'formula', 'fengshui', 'forms'])}
 
-                <!-- 5 Referrals Made -->
-                <div class="acc-item" id="cust-acc-referrals-${customer.id}">
-                    <div class="acc-hdr" onclick="app.toggleCustomerAccordion('referrals',${customer.id},this.parentElement)">
-                        <span><i class="fas fa-user-plus"></i> Referrals Made</span>
-                        <i class="fas fa-chevron-down acc-chev"></i>
-                    </div>
-                    <div class="acc-body" id="cust-acc-body-referrals-${customer.id}" style="display:none" data-loaded="false"></div>
-                </div>
-
-                <!-- 6 Meet Ups & Events — merged timeline (absorbed the old
-                     separate "Events Attended" section 2026-08-16). Tab key
-                     stays 'activity': cust-acc-body-activity-* is the id the
-                     post-save refresh in chunks/script-activities.js looks up. -->
-                <div class="acc-item" id="cust-acc-activity-${customer.id}">
-                    <div class="acc-hdr" onclick="app.toggleCustomerAccordion('activity',${customer.id},this.parentElement)">
-                        <span><i class="fas fa-user-friends"></i> Meet Ups &amp; Events</span>
-                        <i class="fas fa-chevron-down acc-chev"></i>
-                    </div>
-                    <div class="acc-body" id="cust-acc-body-activity-${customer.id}" style="display:none" data-loaded="false"></div>
-                </div>
-
-                <!-- 8 Agent Eligibility -->
-                <div class="acc-item" id="cust-acc-eligibility-${customer.id}">
-                    <div class="acc-hdr" onclick="app.toggleCustomerAccordion('eligibility',${customer.id},this.parentElement)">
-                        <span><i class="fas fa-user-tie"></i> Agent Eligibility</span>
-                        <i class="fas fa-chevron-down acc-chev"></i>
-                    </div>
-                    <div class="acc-body" id="cust-acc-body-eligibility-${customer.id}" style="display:none" data-loaded="false"></div>
-                </div>
-
-                <!-- 9 Contracts -->
-                <div class="acc-item" id="cust-acc-contracts-${customer.id}">
-                    <div class="acc-hdr" onclick="app.toggleCustomerAccordion('contracts',${customer.id},this.parentElement)">
-                        <span><i class="fas fa-file-contract"></i> Contracts</span>
-                        <i class="fas fa-chevron-down acc-chev"></i>
-                    </div>
-                    <div class="acc-body" id="cust-acc-body-contracts-${customer.id}" style="display:none" data-loaded="false"></div>
-                </div>
-
-                <!-- DC Closing Record -->
-                <div class="acc-item" id="cust-acc-closing-${customer.id}">
-                    <div class="acc-hdr" onclick="app.toggleCustomerAccordion('closing',${customer.id},this.parentElement)">
-                        <span><i class="fas fa-handshake"></i> DC Closing Record</span>
-                        <i class="fas fa-chevron-down acc-chev"></i>
-                    </div>
-                    <div class="acc-body" id="cust-acc-body-closing-${customer.id}" style="display:none" data-loaded="false"></div>
-                </div>
-
-                ${_linkedProspectSectionsHtml(customer.converted_from_prospect_id)}
-
-                <!-- 10 Notes -->
-                <div class="acc-item" id="cust-acc-notes-${customer.id}">
-                    <div class="acc-hdr" onclick="app.toggleCustomerAccordion('notes',${customer.id},this.parentElement)">
-                        <span><i class="fas fa-sticky-note"></i> Notes</span>
-                        <i class="fas fa-chevron-down acc-chev"></i>
-                    </div>
-                    <div class="acc-body" id="cust-acc-body-notes-${customer.id}" style="display:none" data-loaded="false"></div>
-                </div>
-
-                <!-- 11 Tags -->
-                <div class="acc-item" id="cust-acc-tags-${customer.id}">
-                    <div class="acc-hdr" onclick="app.toggleCustomerAccordion('tags',${customer.id},this.parentElement)">
-                        <span><i class="fas fa-tags"></i> Tags</span>
-                        <i class="fas fa-chevron-down acc-chev"></i>
-                    </div>
-                    <div class="acc-body" id="cust-acc-body-tags-${customer.id}" style="display:none" data-loaded="false"></div>
-                </div>
-
-                <!-- 12 Journey Tracker -->
-                <div class="acc-item" id="cust-acc-journey-${customer.id}">
-                    <div class="acc-hdr" onclick="app.toggleCustomerAccordion('journey',${customer.id},this.parentElement)">
-                        <span><i class="fas fa-route" style="color:#7c3aed;"></i> Journey Tracker <span id="cust-jny-badge-${customer.id}" style="display:none;background:#dc2626;color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;margin-left:6px;vertical-align:middle;"></span></span>
-                        <i class="fas fa-chevron-down acc-chev"></i>
-                    </div>
-                    <div class="acc-body" id="cust-acc-body-journey-${customer.id}" style="display:none" data-loaded="false"></div>
-                </div>
-
-                <!-- 13 改命后的进步 (Improvement Log) -->
-                <div class="acc-item" id="cust-acc-improvements-${customer.id}">
-                    <div class="acc-hdr" onclick="app.toggleCustomerAccordion('improvements',${customer.id},this.parentElement)">
-                        <span><i class="fas fa-seedling" style="color:#16a34a;"></i> 改命后的进步 <span id="cust-imp-badge-${customer.id}" style="display:none;background:#16a34a;color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;margin-left:6px;vertical-align:middle;"></span></span>
-                        <i class="fas fa-chevron-down acc-chev"></i>
-                    </div>
-                    <div class="acc-body" id="cust-acc-body-improvements-${customer.id}" style="display:none" data-loaded="false"></div>
-                </div>
-
-                <!-- 14 汇集接待 (Huiji Hosting History) — rows come from
-                     event_huiji_details, whose RLS already scopes to the
-                     viewer's own created events (managers L≤5 see all). -->
-                <div class="acc-item" id="cust-acc-hosting-${customer.id}">
-                    <div class="acc-hdr" onclick="app.toggleCustomerAccordion('hosting',${customer.id},this.parentElement)">
-                        <span><i class="fas fa-home" style="color:#be185d;"></i> 汇集接待 Hosting <span id="cust-host-badge-${customer.id}" style="display:none;background:#be185d;color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;margin-left:6px;vertical-align:middle;"></span></span>
-                        <i class="fas fa-chevron-down acc-chev"></i>
-                    </div>
-                    <div class="acc-body" id="cust-acc-body-hosting-${customer.id}" style="display:none" data-loaded="false"></div>
-                </div>
-
+                <div class="acc-group-label">Notes &amp; lists</div>
+                ${_cvAccItem('notes', cid, 'fa-sticky-note', 'Notes')}
+                ${_cvAccItem('tags', cid, 'fa-tags', 'Tags')}
+                ${_linkedProspectSectionsHtml(lpid, ['names'])}
             </div>
         </div>
     `;
@@ -1125,7 +1032,7 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
                     <div style="font-size:13px;color:var(--gray-600);">Lifetime Value: <strong>${UI.money(_ltv, customer.country)}</strong></div>
                     <div style="font-size:13px;font-weight:600;color:#6b21a8;">${escapeHtml(_eligLabel)}</div>
                 </div>
-                ${_isAgentCust ? '' : `<button class="btn primary" style="width:100%;background:#6b21a8;border:none;" onclick="app.openRecruitModal(${customer.id})">Offer Agent Package</button>`}
+                ${_isAgentCust ? '' : `<button class="btn primary" style="width:100%;justify-content:center;" onclick="app.openRecruitModal(${customer.id})">Offer Agent Package</button>`}
             </div>
         `;
     }
@@ -2101,7 +2008,7 @@ const renderAgentEligibility = async (customer) => {
                 <div style="font-size:13px; font-weight:600; color:#6b21a8;">${escapeHtml(_eligLabel)}</div>
             </div>
 
-            ${_isAgentCust ? '' : `<button class="btn primary" style="width:100%; background:#6b21a8; border:none;" onclick="app.openRecruitModal(${customer.id})">Offer Agent Package</button>`}
+            ${_isAgentCust ? '' : `<button class="btn primary" style="width:100%;justify-content:center;" onclick="app.openRecruitModal(${customer.id})">Offer Agent Package</button>`}
         </div>
     `;
 };
@@ -2424,7 +2331,7 @@ const openCustomerEditModal = async (customerId) => {
     const content = `
         <div class="prospect-form form-compact">
             <input type="hidden" id="edit-customer-id" value="${Number(customer.id)}">
-            ${isManager ? '' : `<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 12px;font-size:12.5px;color:#92400e;margin-bottom:12px;"><i class="fas fa-user-check"></i> Changes are sent to a manager for approval before they show on the profile.</div>`}
+            ${isManager ? '' : `<div class="pv-notice is-warning"><div class="pv-notice-title" style="margin:0;"><i class="fas fa-user-check" aria-hidden="true"></i> Changes are sent to a manager for approval before they show on the profile.</div></div>`}
             <div class="form-section">
                 <h4>Basic Information</h4>
                 ${window.app.buildBasicInfoBlock('prospect', customer)}

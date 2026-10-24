@@ -11874,3 +11874,8 @@ html, body {
     .pv-name { font-size: 21px; }
     .pv-photo { width: 56px; height: 56px; }
 }
+
+/* Customer profile extras (redesign phase 5) */
+.pv-since { font-size: 13px; color: var(--gray-500); margin-top: 4px; }
+.acc-count { background: var(--gray-100); color: var(--gray-700); }
+.acc-count.is-success { background: #E6F4EA; color: #146C43; }

@@ -583,9 +583,10 @@ const calculateCustomerHealthScore = async (customer) => {
     return { score, grade, label };
 };
 
+// Customer profile header chip — tint + icon + label, not a solid colour pill.
 const renderHealthBadge = (health) => {
-    const bg = health.grade === 'green' ? '#10b981' : health.grade === 'yellow' ? '#f59e0b' : '#ef4444';
-    return `<span class="score-badge" style="background:${bg}; color:white;" title="Health Score: ${health.score}/100">${health.label} ${health.score}</span>`;
+    const cls = health.grade === 'green' ? 'is-success' : health.grade === 'yellow' ? 'is-warning' : 'is-danger';
+    return `<span class="pv-chip ${cls}" title="Health Score: ${health.score}/100"><i class="fas fa-heart-pulse" aria-hidden="true"></i> ${health.label} ${health.score}</span>`;
 };
 
 const renderQuickHealthBadge = (customer) => {
