@@ -1449,22 +1449,76 @@ const appLogic = (() => {
         }
     }, 500);
 
+    // Lunar month table, built from the Hong Kong Observatory conversion tables
+    // (ci/fixtures/hko-lunar-months.json). One entry per lunar year 1901–2099,
+    // 5 base-36 chars: bits 17+ = Chinese New Year as days after 21 Jan,
+    // bits 4–16 = month lengths by slot (1 = 30 days, 29 otherwise; the 闰 month
+    // has its own slot right after its month), bits 0–3 = leap month (0 = none).
+    // lunar-calendar.min.js is only a fallback outside this range: its own data
+    // is wrong in 1926/1935/1945/2007/2057/2089/2097, it counts the 闰 month as
+    // an extra month number, and its local-time maths gives fractional days.
+    const _LUNAR_FIRST_YEAR = 1901;
+    const _LUNAR_TABLE =
+        '2a42o1fuq80ofj921lf4149f40d3z81t38g0yphs04uua1ktuo0ro0m27n0w19upc0fv051vnps10zw006mc21o70w0xhyf2dk4g1fpzk0lz2t21y7416dls0ac0k1t7pc0yzyo08aw21lgrk0qfs624b0019uuo0foth1wf4w13xhc09q4z1nmvk0u2pj2aecw1f0s0' + // 1901–1940
+        '0hrjq1z64w16m5c0dmxg1tmww0ypao0554i1l45s0oc0n24b4w19vww0irad1vx9c11pw00azz71qyzk0t0t427l9s1f1b40klsm1z6mo16qlc0citw1tweo0y9i8013sj1ib3k0r5pj24bs019y8g0iwit1z86811hzk07kqc1nwds0twoo26w9c1c8gg0ko0m228pc' + // 1941–1980
+        '17bxc0dsno1tro0100re2d6qo1hm5c0mz4m24g9c1a8i80jjfp1zig014hgg06ixv1l3e80tx7s29rj41ccwg0lnyt21ok016ptc0aab81q9bk0vt8004oma1huow0ovh327olc1cqz40gdo51wcpc10z4g06k0k1l4k00tzu129zc01frkg0m8iu227j4178sw0d3hg' + // 1981–2020
+        '1q9uo0vuc004ppe1ks9s0nrdi24h8w19i280f5h11tq5s10zog06kir1nzww0u52j2agps1fjo00lz1y1z4xc13qnk08wc51qaxc0vwkg057he1ldls0ruc72507k19uts0fv111vu5c0y7o006tgj1oakw0xl482aqzk1fq000kkme1z52o13srk091041qg5s0ycnk' + // 2021–2060
+        '01a2b1hycw0obzr24b00171rk0fx5x1vwdc11is007nvo1nzj40ufdk2aeds1c7o00hsk61z68g16mxs09g7o1r0400yvmo05bgz1ihcw0op2f24bj419w0g0fy911w0tc11t1s09okk1kre80qe0o272k01c88g0ht2e1z8gw16s680d9p01qsls0vttc01t4i'; // 2061–2099
+
+    // { year, month, day, leap } for a solar date, or null outside the table.
+    const solarToLunarHko = (y, m, d) => {
+        const t = Date.UTC(y, m - 1, d);
+        for (const ly of [y, y - 1]) {
+            const i = ly - _LUNAR_FIRST_YEAR;
+            if (i < 0 || i * 5 >= _LUNAR_TABLE.length) continue;
+            const v = parseInt(_LUNAR_TABLE.substr(i * 5, 5), 36);
+            const start = Date.UTC(ly, 0, 21 + (v >> 17));
+            if (t < start) continue;
+            const leapMonth = v & 15;
+            let days = Math.round((t - start) / 864e5);
+            for (let slot = 0; slot < (leapMonth ? 13 : 12); slot++) {
+                const len = (v >> (4 + slot)) & 1 ? 30 : 29;
+                if (days < len) {
+                    const after = leapMonth > 0 && slot >= leapMonth;
+                    return { year: ly, month: after ? slot : slot + 1, day: days + 1, leap: after && slot === leapMonth };
+                }
+                days -= len;
+            }
+            return null;
+        }
+        return null;
+    };
+
+    // The library's lunarMonth is the month's SLOT in the year: in a leap year
+    // 2020 闰四月 comes back as 5 and the real 五月 as 6.
+    const lunarMonthFromSlot = (slot, leapMonth) => {
+        if (leapMonth > 0 && slot > leapMonth) {
+            return { month: slot - 1, leap: slot === leapMonth + 1 };
+        }
+        return { month: slot, leap: false };
+    };
+
+    // Format: YYYY-MM-DD (Lunar); a leap month adds 闰 → "2020-04-01 (Lunar 闰)"
     const convertSolarToLunar = (date) => {
         if (!date) return '';
         const parts = date.split('-');
         const year = parseInt(parts[0], 10);
         const month = parseInt(parts[1], 10);
         const day = parseInt(parts[2], 10);
+        const fmt = (y, m, d, leap) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')} (Lunar${leap ? ' 闰' : ''})`;
 
-        // Try all possible global names for the library
+        const hko = solarToLunarHko(year, month, day);
+        if (hko) return fmt(hko.year, hko.month, hko.day, hko.leap);
+
+        // Outside 1901–2099: fall back to the library
         const lib = window.LunarCalendar || window.lunarCalendar || window.Lunar;
 
         if (lib && typeof lib.solarToLunar === 'function') {
             try {
                 const lunar = lib.solarToLunar(year, month, day);
                 if (lunar && lunar.lunarYear) {
-                    // Format: YYYY-MM-DD (Lunar) – simple and clean
-                    return `${lunar.lunarYear}-${String(lunar.lunarMonth).padStart(2, '0')}-${String(lunar.lunarDay).padStart(2, '0')} (Lunar)`;
+                    const m = lunarMonthFromSlot(lunar.lunarMonth, lunar.lunarLeapMonth || 0);
+                    return fmt(lunar.lunarYear, m.month, Math.round(lunar.lunarDay), m.leap);
                 }
             } catch (e) {
                 console.warn('Lunar conversion error:', e);
