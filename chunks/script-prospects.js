@@ -1276,20 +1276,20 @@ const openProspectGradePicker = async (prospectId) => {
     const btn = (g) => {
         const m = GRADE_META[g];
         const active = g === current;
-        return `<button type="button" onclick="(async () => { await app.setProspectGrade(${prospectId}, '${g}'); })()" style="display:flex;flex-direction:column;align-items:center;gap:2px;padding:12px 6px;border-radius:10px;border:2px solid ${active ? m.color : 'var(--gray-300)'};background:${active ? m.color : '#fff'};color:${active ? '#fff' : 'var(--gray-800)'};cursor:pointer;transition:all .15s;">
-            <span style="font-size:20px;font-weight:700;line-height:1;">${g}</span>
-            <span style="font-size:12px;font-weight:600;">${m.label}</span>
-            <span style="font-size:10px;opacity:.85;">${m.sub}</span>
+        return `<button type="button" class="grade-opt${active ? ' is-active' : ''}" style="--g:${m.color};" aria-pressed="${active}" onclick="(async () => { await app.setProspectGrade(${prospectId}, '${g}'); })()">
+            <span class="grade-opt-letter">${g}${active ? ' <i class="fas fa-check" aria-hidden="true"></i>' : ''}</span>
+            <span class="grade-opt-label">${m.label}</span>
+            <span class="grade-opt-sub">${m.sub}</span>
         </button>`;
     };
     const content = `
         <div style="padding:4px 0;">
-            <p style="margin:0 0 14px;color:var(--gray-600);font-size:14px;">Grade <strong>${escapeHtml(prospect.full_name || 'this prospect')}</strong> — sets the follow-up rhythm. <span style="color:var(--gray-400);">F greys them out (off all reminders).</span></p>
-            <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;">
+            <p style="margin:0 0 14px;color:var(--gray-700);font-size:14px;">Grade <strong>${escapeHtml(prospect.full_name || 'this prospect')}</strong> — sets the follow-up rhythm. <span style="color:var(--gray-500);">F greys them out (off all reminders).</span></p>
+            <div class="grade-grid">
                 ${grades.map(btn).join('')}
             </div>
             <div style="text-align:center;margin-top:14px;">
-                <button type="button" onclick="(async () => { await app.setProspectGrade(${prospectId}, null); })()" style="padding:8px 18px;font-size:13px;border-radius:8px;border:1px solid var(--gray-300);background:#fff;color:var(--gray-500);cursor:pointer;" title="Clear grade">Clear grade</button>
+                <button type="button" class="btn secondary btn-sm" onclick="(async () => { await app.setProspectGrade(${prospectId}, null); })()" title="Clear grade">Clear grade</button>
             </div>
         </div>
     `;
@@ -7597,12 +7597,12 @@ const openReviveProspectModal = async (prospectId) => {
     const prospect = await AppDataStore.getById('prospects', prospectId);
     if (!prospect) return;
     UI.showModal('Revive Prospect Profile', `
-        <div style="margin-bottom:12px;padding:12px;background:#f1f5f9;border-radius:8px;border-left:4px solid #94a3b8;">
-            <div style="font-weight:600;color:#475569;font-size:13px;margin-bottom:4px;">Current reason (Unable to Serve):</div>
-            <div style="color:#64748b;font-size:13px;">${escapeHtml(prospect.unable_reason || '—')}</div>
+        <div class="pv-notice">
+            <div class="pv-notice-title">Current reason (Unable to Serve):</div>
+            <div class="pv-notice-line">${escapeHtml(prospect.unable_reason || '—')}</div>
         </div>
         <div class="form-group">
-            <label style="font-weight:600;">Revive Notes <span style="color:#9CA3AF;font-weight:400;">(why are you re-activating this profile?)</span></label>
+            <label for="revive-notes-input">Revive Notes <span style="color:var(--gray-500);font-weight:400;">(why are you re-activating this profile?)</span></label>
             <textarea id="revive-notes-input" class="form-control" rows="3" placeholder="e.g. Reconnected after 6 months, prospect now interested again..."></textarea>
         </div>
     `, [

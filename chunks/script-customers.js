@@ -886,8 +886,8 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
         container.innerHTML = `
             <div class="pv-sub">Contact</div>
             <div class="pv-row"><span class="pv-lbl">Full Name</span><span class="pv-val"><strong>${escapeHtml(customer.full_name)}</strong></span></div>
-            <div class="pv-row"><span class="pv-lbl">Phone</span><span class="pv-val">${escapeHtml(customer.phone || '-')} ${customer.phone ? '<button class="btn-icon" style="margin-left:4px;"><i class="fas fa-phone"></i></button>' : ''}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Email</span><span class="pv-val">${escapeHtml(customer.email || '-')} ${customer.email ? '<button class="btn-icon" style="margin-left:4px;"><i class="fas fa-envelope"></i></button>' : ''}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Phone</span><span class="pv-val">${escapeHtml(customer.phone || '-')}${customer.phone ? ` <a class="pv-inline-act" href="tel:${escapeHtml(String(customer.phone).replace(/[^\d+]/g, ''))}" aria-label="Call ${escapeHtml(customer.full_name || '')}"><i class="fas fa-phone" aria-hidden="true"></i></a>` : ''}</span></div>
+            <div class="pv-row"><span class="pv-lbl">Email</span><span class="pv-val">${escapeHtml(customer.email || '-')}${customer.email ? ` <a class="pv-inline-act" href="mailto:${escapeHtml(String(customer.email).trim())}" aria-label="Email ${escapeHtml(customer.full_name || '')}"><i class="fas fa-envelope" aria-hidden="true"></i></a>` : ''}</span></div>
             <div class="pv-sub">Identity</div>
             ${customer.title ? `<div class="pv-row"><span class="pv-lbl">Title</span><span class="pv-val">${escapeHtml(customer.title)}</span></div>` : ''}
             ${customer.nickname ? `<div class="pv-row"><span class="pv-lbl">Nickname</span><span class="pv-val">${escapeHtml(customer.nickname)}</span></div>` : ''}

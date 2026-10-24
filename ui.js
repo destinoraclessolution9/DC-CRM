@@ -233,7 +233,10 @@ window.UI = (() => {
         }
 
         const buttonsHtml = actions.map(btn => {
-            const btnClass = btn.type === 'primary' ? 'btn primary' : 'btn secondary';
+            // Delete/Remove buttons get the destructive style; a primary one keeps
+            // .primary so the click spinner + double-submit guard still apply.
+            const isDestructive = /^\W*(delete|remove)\b/i.test(String(btn.label || ''));
+            const btnClass = (btn.type === 'primary' ? 'btn primary' : 'btn secondary') + (isDestructive ? ' danger' : '');
             const action = (btn.action === 'UI.modal.hide()' || btn.action === 'UI.hideModal()') ? 'UI.hideModal()' : btn.action;
             const isCancel = action === 'UI.hideModal()' || /cancel|close|no\b|back/i.test(btn.label);
             const safeAction = String(action).replace(/"/g, '&quot;');

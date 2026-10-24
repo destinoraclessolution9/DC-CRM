@@ -724,6 +724,12 @@ h1, h2, h3, h4 {
     color: #fff;
 }
 
+/* Confirming a destructive action (primary + danger): filled red */
+.btn.primary.danger,
+.btn.primary.danger:hover,
+.btn.primary.danger:disabled { background: var(--danger); border-color: var(--danger); color: #fff; }
+.btn.primary.danger:hover { filter: brightness(0.92); }
+
 .btn:disabled,
 .btn[disabled] { cursor: not-allowed; }
 
