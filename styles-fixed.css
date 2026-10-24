@@ -11821,3 +11821,56 @@ html, body {
 /* Assign Prospect + Customer Details sub-sections inside the intake block */
 .bi-subhead { font-size: 15px; font-weight: 600; color: var(--gray-900); margin: 4px 0 10px; }
 .bi-assign { margin-bottom: 20px; }
+
+/* ── Profile header, section groups, notices (redesign phase 4) ──────────
+   Chips are neutral by default; colour only carries status and always has
+   text next to it. Convert-to-customer is the one pink action. */
+.pv-hdr-flex { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.pv-id { color: var(--gray-500); font-variant-numeric: tabular-nums; }
+.pv-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600; line-height: 1.5; background: var(--gray-100); color: var(--gray-700); border: 1px solid var(--gray-200); white-space: nowrap; }
+.pv-chip.is-success { background: #E6F4EA; color: #146C43; border-color: #CDE9D6; }
+.pv-chip.is-warning { background: #FEF3C7; color: #8A4B08; border-color: #FBE3A3; }
+.pv-chip.is-danger  { background: #FCE8E6; color: #B3261E; border-color: #F6CFCB; }
+.pv-chip.is-action { cursor: pointer; user-select: none; }
+.pv-chip.is-action:hover { border-color: var(--border-input, #8C9199); }
+.pv-chip.is-action:focus-visible { outline: 2px solid var(--accent, #E84393); outline-offset: 2px; }
+.pv-name { font-size: 24px; font-weight: 700; line-height: 1.25; color: var(--gray-900); margin: 10px 0 10px; word-break: break-word; }
+.pv-nick { font-size: 16px; font-weight: 400; color: var(--gray-500); }
+.pv-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 4px; }
+.pv-act { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--gray-300); background: var(--bg-surface, #fff); color: var(--gray-700); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; font-size: 15px; flex-shrink: 0; transition: background-color .15s, border-color .15s; }
+.pv-act:hover { background: var(--gray-100); border-color: var(--border-input, #8C9199); }
+.pv-act:focus-visible { outline: 2px solid var(--accent, #E84393); outline-offset: 2px; }
+.pv-act.is-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+.pv-act.is-primary:hover { background: var(--primary-dark); border-color: var(--primary-dark); }
+.pv-act.is-whatsapp { color: #128C4A; font-size: 17px; }
+.pv-photo { width: 64px; height: 64px; object-fit: cover; border-radius: 10px; border: 1px solid var(--gray-200); cursor: zoom-in; flex-shrink: 0; margin-top: 4px; }
+.pv-banner { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 16px; background: var(--gray-100); border-bottom: 1px solid var(--gray-200); color: var(--gray-900); font-size: 14px; }
+.pv-banner-reason { color: var(--gray-500); font-size: 13px; margin-left: 8px; }
+
+/* Section groups */
+.acc-group-label { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--gray-500); margin: 12px 4px 0; }
+.acc-group-label:first-child { margin-top: 2px; }
+.acc-count { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 1px 8px; border-radius: 10px; margin-left: 6px; vertical-align: middle; }
+.acc-count.is-warning { background: #FEF3C7; color: #8A4B08; }
+.acc-count.is-danger  { background: #FCE8E6; color: #B3261E; }
+.acc-sub { color: var(--gray-500); font-weight: 500; }
+
+/* Notices inside sections — light tint + left bar; the title carries the meaning */
+.pv-notice { background: var(--gray-100); border: 1px solid var(--gray-200); border-left: 3px solid var(--gray-300); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+.pv-notice-title { font-size: 13px; font-weight: 600; color: var(--gray-900); margin-bottom: 4px; }
+.pv-notice-line { font-size: 14px; color: var(--gray-900); line-height: 1.5; margin-bottom: 3px; }
+.pv-notice.is-danger  { background: #FDF3F2; border-color: #F6CFCB; border-left-color: #B3261E; }
+.pv-notice.is-danger  .pv-notice-title { color: #B3261E; }
+.pv-notice.is-warning { background: #FEF9EC; border-color: #FBE3A3; border-left-color: #B26B00; }
+.pv-notice.is-warning .pv-notice-title { color: #8A4B08; }
+.pv-notice.is-success { background: #F1F8F3; border-color: #CDE9D6; border-left-color: #146C43; }
+.pv-notice.is-success .pv-notice-title { color: #146C43; }
+.pv-notice.is-info    { background: #F1F6FC; border-color: #CFE0F3; border-left-color: #1A5F96; }
+.pv-notice.is-info    .pv-notice-title { color: #1A5F96; }
+.mu-brief.pv-notice { border-left-color: var(--accent, #E84393); }
+.mu-brief > summary { cursor: pointer; font-weight: 600; font-size: 14px; color: var(--gray-900); list-style: none; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.mu-brief > summary i { color: var(--gray-500); }
+@media (max-width: 480px) {
+    .pv-name { font-size: 21px; }
+    .pv-photo { width: 56px; height: 56px; }
+}

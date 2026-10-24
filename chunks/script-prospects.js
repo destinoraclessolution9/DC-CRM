@@ -2040,183 +2040,102 @@ const filterProspects = async () => {
 };
 
 const buildProspectDetailHeaderHtml = (prospect, cpsPhoto) => {
+    // Protection chip: only when a deadline exists (no deadline reads as 0 days).
+    const _protDays = prospect.protection_deadline ? calculateProtectionDays(prospect) : null;
+    const _protChip = _protDays === null ? ''
+        : _protDays > 7 ? `<span class="pv-chip" title="Protection period"><i class="fas fa-shield-alt" aria-hidden="true"></i> Protected · ${_protDays} days left</span>`
+        : _protDays > 0 ? `<span class="pv-chip is-warning" title="Protection period"><i class="fas fa-shield-alt" aria-hidden="true"></i> Protection ends in ${_protDays} day${_protDays === 1 ? '' : 's'}</span>`
+        : `<span class="pv-chip is-danger" title="Protection period"><i class="fas fa-shield-alt" aria-hidden="true"></i> Protection expired</span>`;
+    const _kb = `onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}"`;
     return `
         <div class="pv-wrap">
             <div class="pv-back">
                 <button class="btn secondary btn-sm" onclick="app.goBackFromDetail()">
-                    <i class="fas fa-arrow-left"></i> Back to List
+                    <i class="fas fa-arrow-left" aria-hidden="true"></i> Back to List
                 </button>
             </div>
             ${prospect.unable_to_serve ? `
-            <div style="background:#f1f5f9;border-bottom:2px solid #94a3b8;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+            <div class="pv-banner" role="status">
                 <div>
-                    <span style="font-weight:700;color:#475569;font-size:14px;">⛔ Unable to Serve</span>
-                    ${prospect.unable_reason ? `<span style="color:#64748b;font-size:13px;margin-left:8px;">${escapeHtml(prospect.unable_reason)}</span>` : ''}
+                    <strong>⛔ Unable to Serve</strong>
+                    ${prospect.unable_reason ? `<span class="pv-banner-reason">${escapeHtml(prospect.unable_reason)}</span>` : ''}
                 </div>
                 <button class="btn secondary btn-sm" onclick="app.openReviveProspectModal(${prospect.id})" style="flex-shrink:0;">
                     🔄 Revive Profile
                 </button>
             </div>` : ''}
-            <div class="pv-hdr" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;${prospect.unable_to_serve ? 'opacity:0.6;' : ''}">
+            <div class="pv-hdr pv-hdr-flex" style="${prospect.unable_to_serve ? 'opacity:0.6;' : ''}">
                 <div style="flex:1;min-width:0;">
                     <div class="pv-hdr-meta">
-                        <span>ID: P100${prospect.id}</span>
+                        <span class="pv-id">ID: P100${prospect.id}</span>
                         <span data-pot-pid="${Number(prospect.id)}"></span>
                         ${prospect.unable_to_serve
-                            ? `<span class="badge" style="background:#94a3b8;color:#fff;">Unable to Serve</span>`
-                            : `<span class="badge success">Active</span>`}
-                        <span class="badge info" onclick="event.stopPropagation();app.openProspectGradePicker(${prospect.id})" style="cursor:pointer;user-select:none;" title="Click to set grade">Grade ${prospect.manual_grade || '—'} <i class="fas fa-caret-down" style="font-size:10px;opacity:.7;"></i></span>
-                        <span class="badge" onclick="event.stopPropagation();app.openScoreAdjustmentModal('prospect',${prospect.id})" style="background:var(--primary);color:#fff;cursor:pointer;user-select:none;" title="Click to adjust score">⭐ ${prospect.score || 0} pts (${getScoreGrade(prospect.score || 0)}) <i class="fas fa-pen" style="font-size:9px;opacity:.8;margin-left:2px;"></i></span>
+                            ? `<span class="pv-chip">Unable to Serve</span>`
+                            : `<span class="pv-chip is-success"><i class="fas fa-circle" aria-hidden="true" style="font-size:7px;"></i> Active</span>`}
+                        <span class="pv-chip is-action" role="button" tabindex="0" ${_kb} onclick="event.stopPropagation();app.openProspectGradePicker(${prospect.id})" title="Click to set grade">Grade ${prospect.manual_grade || '—'} <i class="fas fa-caret-down" aria-hidden="true"></i></span>
+                        <span class="pv-chip is-action" role="button" tabindex="0" ${_kb} onclick="event.stopPropagation();app.openScoreAdjustmentModal('prospect',${prospect.id})" title="Click to adjust score"><i class="fas fa-star" aria-hidden="true" style="color:#B26B00;"></i> ${prospect.score || 0} pts (${getScoreGrade(prospect.score || 0)}) <i class="fas fa-pen" aria-hidden="true" style="font-size:10px;"></i></span>
+                        ${_protChip}
                     </div>
-                    <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin:6px 0 8px;min-width:0;">
-                        <span style="font-size:22px;font-weight:700;line-height:1.3;word-break:break-word;">${escapeHtml(prospect.full_name)}</span>${prospect.nickname ? `<span style="font-size:15px;font-weight:400;color:var(--gray-500);">"${escapeHtml(prospect.nickname)}"</span>` : ''}
-                    </div>
+                    <h1 class="pv-name">${escapeHtml(prospect.full_name)}${prospect.nickname ? ` <span class="pv-nick">"${escapeHtml(prospect.nickname)}"</span>` : ''}</h1>
                     <div data-fu-pid="${Number(prospect.id)}"></div>
-                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 8px;">
-                        <button title="Edit" aria-label="Edit prospect" onclick="app.editProspect(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--gray-500);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i></button><button title="Convert to Customer" aria-label="Convert to customer" onclick="app.convertToCustomer(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:none;background:var(--primary);color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'"><i class="fa-solid fa-user-check" aria-hidden="true"></i></button><button title="Meet-Up History" aria-label="Meet-up history" onclick="app.openMeetupHistoryModal(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--primary);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i></button><button title="Save to Phone Contacts" aria-label="Save to phone contacts" onclick="app.downloadProspectVCard(${prospect.id})" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:var(--success);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-solid fa-address-book" aria-hidden="true"></i></button><button title="WhatsApp Prospect" aria-label="Open WhatsApp chat with prospect" onclick="app.openProspectWhatsApp(${prospect.id}, '${UI.escJsAttr(_evWaPhone(prospect.phone))}')" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--gray-300);background:#fff;color:#25D366;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='#fff'"><i class="fa-brands fa-whatsapp" aria-hidden="true"></i></button>
+                    <div class="pv-actions">
+                        <button class="pv-act" title="Edit" aria-label="Edit prospect" onclick="app.editProspect(${prospect.id})"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i></button>
+                        <button class="pv-act is-primary" title="Convert to Customer" aria-label="Convert to customer" onclick="app.convertToCustomer(${prospect.id})"><i class="fa-solid fa-user-check" aria-hidden="true"></i></button>
+                        <button class="pv-act" title="Meet-Up History" aria-label="Meet-up history" onclick="app.openMeetupHistoryModal(${prospect.id})"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i></button>
+                        <button class="pv-act" title="Save to Phone Contacts" aria-label="Save to phone contacts" onclick="app.downloadProspectVCard(${prospect.id})"><i class="fa-solid fa-address-book" aria-hidden="true"></i></button>
+                        <button class="pv-act is-whatsapp" title="WhatsApp Prospect" aria-label="Open WhatsApp chat with prospect" onclick="app.openProspectWhatsApp(${prospect.id}, '${UI.escJsAttr(_evWaPhone(prospect.phone))}')"><i class="fa-brands fa-whatsapp" aria-hidden="true"></i></button>
                     </div>
                 </div>
-                ${cpsPhoto ? `<img loading="lazy" decoding="async" data-attach-src="${escapeHtml(String(cpsPhoto.url))}" onclick="event.stopPropagation();app.zoomCpsPhoto('${UI.escJsAttr(String(cpsPhoto.url))}')" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:2px solid var(--gray-200);cursor:zoom-in;flex-shrink:0;margin-top:4px;" title="CPS Photo — click to enlarge">` : ''}
+                ${cpsPhoto ? `<img class="pv-photo" loading="lazy" decoding="async" data-attach-src="${escapeHtml(String(cpsPhoto.url))}" onclick="event.stopPropagation();app.zoomCpsPhoto('${UI.escJsAttr(String(cpsPhoto.url))}')" alt="CPS form photo" title="CPS Photo — click to enlarge">` : ''}
             </div>
 `;
 };
 
+// One profile section (accordion item). Ids are load-bearing: acc-<key>-<id> /
+// acc-body-<key>-<id> are looked up by post-save refreshes in other chunks, so
+// only the order and grouping below may change — never the keys.
+const _pvAccItem = (key, pid, icon, title, open = false) => `
+                    <div class="acc-item${open ? ' open' : ''}" id="acc-${key}-${pid}">
+                        <div class="acc-hdr" role="button" tabindex="0" aria-expanded="${open}" onclick="app.toggleAccordion('${key}',${pid},this.parentElement);this.setAttribute('aria-expanded',this.parentElement.classList.contains('open'))" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">
+                            <span><i class="fas ${icon}" aria-hidden="true"></i> ${title}</span>
+                            <i class="fas fa-chevron-down acc-chev" aria-hidden="true"></i>
+                        </div>
+                        ${open
+                            ? `<div class="acc-body pv-compact" id="acc-body-${key}-${pid}" data-loaded="true"><div class="acc-loading"><i class="fas fa-spinner fa-spin"></i> Loading…</div></div>`
+                            : `<div class="acc-body" id="acc-body-${key}-${pid}" style="display:none" data-loaded="false"></div>`}
+                    </div>`;
+
 const buildProspectDetailTabsHtml = (prospect) => {
+    const pid = prospect.id;
+    // Count badges are revealed by showProspectDetail (display + text) — keep the ids.
+    const solBadge = `<span id="pending-sol-badge-${pid}" class="acc-count is-warning" style="display:none;"></span>`;
+    const jnyBadge = `<span id="jny-badge-${pid}" class="acc-count is-danger" style="display:none;"></span>`;
+    // Basic Information is open by default and loaded right after render (tab
+    // key 'info' — the life-chart tick refresh looks up acc-body-info-*).
+    // 'activity' is the merged Meet Ups & Events timeline.
     return `
-                <div class="acc-container" id="acc-container-${prospect.id}" ${prospect.unable_to_serve ? 'style="opacity:0.6;pointer-events:none;"' : ''}>
+                <div class="acc-container" id="acc-container-${pid}" ${prospect.unable_to_serve ? 'style="opacity:0.6;pointer-events:none;"' : ''}>
+                    <div class="acc-group-label">Overview</div>
+                    ${_pvAccItem('info', pid, 'fa-user', 'Basic Information', true)}
+                    ${_pvAccItem('nextactions', pid, 'fa-tasks', 'Next Actions')}
+                    ${_pvAccItem('protection', pid, 'fa-shield-alt', 'Protection Period')}
 
-                    <!-- ① Basic Information — open by default. Absorbed the old
-                         separate "Personal Details" section 2026-10-14; tab key
-                         stays 'info' (the life-chart tick refresh looks up
-                         acc-body-info-*). Loaded right after render. -->
-                    <div class="acc-item open" id="acc-info-${prospect.id}">
-                        <div class="acc-hdr" onclick="app.toggleAccordion('info',${prospect.id},this.parentElement)">
-                            <span><i class="fas fa-user"></i> Basic Information</span>
-                            <i class="fas fa-chevron-down acc-chev"></i>
-                        </div>
-                        <div class="acc-body pv-compact" id="acc-body-info-${prospect.id}" data-loaded="true"><div class="acc-loading"><i class="fas fa-spinner fa-spin"></i> Loading…</div></div>
-                    </div>
+                    <div class="acc-group-label">Engagement</div>
+                    ${_pvAccItem('activity', pid, 'fa-user-friends', 'Meet Ups &amp; Events')}
+                    ${_pvAccItem('journey', pid, 'fa-route', `Journey Tracker ${jnyBadge}`)}
+                    ${_pvAccItem('potential', pid, 'fa-bolt', `Potential &amp; Opportunities ${solBadge}`)}
 
-                    <!-- ③ Meet Ups & Events — merged timeline (absorbed the old
-                         separate "Activities and Events" section 2026-08-16).
-                         Tab key stays 'activity': acc-body-activity-* is the id
-                         several post-save refresh sites look up. -->
-                    <div class="acc-item" id="acc-activity-${prospect.id}">
-                        <div class="acc-hdr" onclick="app.toggleAccordion('activity',${prospect.id},this.parentElement)">
-                            <span><i class="fas fa-user-friends"></i> Meet Ups &amp; Events</span>
-                            <i class="fas fa-chevron-down acc-chev"></i>
-                        </div>
-                        <div class="acc-body" id="acc-body-activity-${prospect.id}" style="display:none" data-loaded="false"></div>
-                    </div>
+                    <div class="acc-group-label">Sales</div>
+                    ${_pvAccItem('closing', pid, 'fa-handshake', 'DC Closing Record')}
+                    ${_pvAccItem('bujishu', pid, 'fa-gem', 'Bujishu Product Purchase History')}
+                    ${_pvAccItem('formula', pid, 'fa-heartbeat', 'Formula Healthcare Product Purchase History')}
+                    ${_pvAccItem('fengshui', pid, 'fa-compass', 'Feng Shui Audit')}
+                    ${_pvAccItem('forms', pid, 'fa-clipboard-list', 'Customer Forms <span class="acc-sub">客户表格</span>')}
 
-                    <!-- ⑤ Potential & Opportunities -->
-                    <div class="acc-item" id="acc-potential-${prospect.id}">
-                        <div class="acc-hdr" onclick="app.toggleAccordion('potential',${prospect.id},this.parentElement)">
-                            <span><i class="fas fa-bolt"></i> Potential &amp; Opportunities <span id="pending-sol-badge-${prospect.id}" style="display:none;background:#f59e0b;color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;margin-left:6px;vertical-align:middle;"></span></span>
-                            <i class="fas fa-chevron-down acc-chev"></i>
-                        </div>
-                        <div class="acc-body" id="acc-body-potential-${prospect.id}" style="display:none" data-loaded="false"></div>
-                    </div>
-
-                    <!-- ⑥ Next Actions -->
-                    <div class="acc-item" id="acc-nextactions-${prospect.id}">
-                        <div class="acc-hdr" onclick="app.toggleAccordion('nextactions',${prospect.id},this.parentElement)">
-                            <span><i class="fas fa-tasks"></i> Next Actions</span>
-                            <i class="fas fa-chevron-down acc-chev"></i>
-                        </div>
-                        <div class="acc-body" id="acc-body-nextactions-${prospect.id}" style="display:none" data-loaded="false"></div>
-                    </div>
-
-                    <!-- ⑦ DC Closing Record -->
-                    <div class="acc-item" id="acc-closing-${prospect.id}">
-                        <div class="acc-hdr" onclick="app.toggleAccordion('closing',${prospect.id},this.parentElement)">
-                            <span><i class="fas fa-handshake"></i> DC Closing Record</span>
-                            <i class="fas fa-chevron-down acc-chev"></i>
-                        </div>
-                        <div class="acc-body" id="acc-body-closing-${prospect.id}" style="display:none" data-loaded="false"></div>
-                    </div>
-
-                    <!-- ⑦a Bujishu Product Purchase History -->
-                    <div class="acc-item" id="acc-bujishu-${prospect.id}">
-                        <div class="acc-hdr" onclick="app.toggleAccordion('bujishu',${prospect.id},this.parentElement)">
-                            <span><i class="fas fa-gem"></i> Bujishu Product Purchase History</span>
-                            <i class="fas fa-chevron-down acc-chev"></i>
-                        </div>
-                        <div class="acc-body" id="acc-body-bujishu-${prospect.id}" style="display:none" data-loaded="false"></div>
-                    </div>
-
-                    <!-- ⑦b Formula Healthcare Product Purchase History -->
-                    <div class="acc-item" id="acc-formula-${prospect.id}">
-                        <div class="acc-hdr" onclick="app.toggleAccordion('formula',${prospect.id},this.parentElement)">
-                            <span><i class="fas fa-heartbeat"></i> Formula Healthcare Product Purchase History</span>
-                            <i class="fas fa-chevron-down acc-chev"></i>
-                        </div>
-                        <div class="acc-body" id="acc-body-formula-${prospect.id}" style="display:none" data-loaded="false"></div>
-                    </div>
-
-                    <!-- ⑦d Feng Shui Audit -->
-                    <div class="acc-item" id="acc-fengshui-${prospect.id}">
-                        <div class="acc-hdr" onclick="app.toggleAccordion('fengshui',${prospect.id},this.parentElement)">
-                            <span><i class="fas fa-compass"></i> Feng Shui Audit</span>
-                            <i class="fas fa-chevron-down acc-chev"></i>
-                        </div>
-                        <div class="acc-body" id="acc-body-fengshui-${prospect.id}" style="display:none" data-loaded="false"></div>
-                    </div>
-
-                    <!-- ⑦d Customer Forms (Survey / CPS / APU) -->
-                    <div class="acc-item" id="acc-forms-${prospect.id}">
-                        <div class="acc-hdr" onclick="app.toggleAccordion('forms',${prospect.id},this.parentElement)">
-                            <span><i class="fas fa-clipboard-list"></i> Customer Forms <span style="color:#7C3AED;">客户表格</span></span>
-                            <i class="fas fa-chevron-down acc-chev"></i>
-                        </div>
-                        <div class="acc-body" id="acc-body-forms-${prospect.id}" style="display:none" data-loaded="false"></div>
-                    </div>
-
-                    <!-- ⑧ Notes -->
-                    <div class="acc-item" id="acc-notes-${prospect.id}">
-                        <div class="acc-hdr" onclick="app.toggleAccordion('notes',${prospect.id},this.parentElement)">
-                            <span><i class="fas fa-sticky-note"></i> Notes</span>
-                            <i class="fas fa-chevron-down acc-chev"></i>
-                        </div>
-                        <div class="acc-body" id="acc-body-notes-${prospect.id}" style="display:none" data-loaded="false"></div>
-                    </div>
-
-                    <!-- ⑨ Protection Period -->
-                    <div class="acc-item" id="acc-protection-${prospect.id}">
-                        <div class="acc-hdr" onclick="app.toggleAccordion('protection',${prospect.id},this.parentElement)">
-                            <span><i class="fas fa-shield-alt"></i> Protection Period</span>
-                            <i class="fas fa-chevron-down acc-chev"></i>
-                        </div>
-                        <div class="acc-body" id="acc-body-protection-${prospect.id}" style="display:none" data-loaded="false"></div>
-                    </div>
-
-                    <!-- ⑩ Tags -->
-                    <div class="acc-item" id="acc-tags-${prospect.id}">
-                        <div class="acc-hdr" onclick="app.toggleAccordion('tags',${prospect.id},this.parentElement)">
-                            <span><i class="fas fa-tags"></i> Tags</span>
-                            <i class="fas fa-chevron-down acc-chev"></i>
-                        </div>
-                        <div class="acc-body" id="acc-body-tags-${prospect.id}" style="display:none" data-loaded="false"></div>
-                    </div>
-
-                    <!-- ⑪ Name List -->
-                    <div class="acc-item" id="acc-names-${prospect.id}">
-                        <div class="acc-hdr" onclick="app.toggleAccordion('names',${prospect.id},this.parentElement)">
-                            <span><i class="fas fa-users"></i> Name List</span>
-                            <i class="fas fa-chevron-down acc-chev"></i>
-                        </div>
-                        <div class="acc-body" id="acc-body-names-${prospect.id}" style="display:none" data-loaded="false"></div>
-                    </div>
-
-                    <!-- ⑫ Journey Tracker -->
-                    <div class="acc-item" id="acc-journey-${prospect.id}">
-                        <div class="acc-hdr" onclick="app.toggleAccordion('journey',${prospect.id},this.parentElement)">
-                            <span><i class="fas fa-route" style="color:#7c3aed;"></i> Journey Tracker <span id="jny-badge-${prospect.id}" style="display:none;background:#dc2626;color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;margin-left:6px;vertical-align:middle;"></span></span>
-                            <i class="fas fa-chevron-down acc-chev"></i>
-                        </div>
-                        <div class="acc-body" id="acc-body-journey-${prospect.id}" style="display:none" data-loaded="false"></div>
-                    </div>
-
+                    <div class="acc-group-label">Notes &amp; lists</div>
+                    ${_pvAccItem('notes', pid, 'fa-sticky-note', 'Notes')}
+                    ${_pvAccItem('tags', pid, 'fa-tags', 'Tags')}
+                    ${_pvAccItem('names', pid, 'fa-users', 'Name List')}
                 </div>
         </div>
     `;
@@ -2387,13 +2306,13 @@ const meetupBriefHtml = (rows, opts = {}) => {
     const m = mm(last);
     const typeLabel = opts.typeLabel || {};
     const lastLabel = last.activity_type === 'EVENT_CLOSING' ? 'Event Closing' : (typeLabel[last.activity_type] || last.activity_type || 'Meet up');
-    const item = (lbl, val, action) => val ? `<div style="margin-bottom:9px;"><span style="display:block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--primary);margin-bottom:2px;">${lbl}</span><p style="margin:0;font-size:13px;line-height:1.55;white-space:pre-wrap;word-break:break-word;color:${action ? 'var(--primary)' : 'var(--gray-700)'};${action ? 'font-weight:500;' : ''}">${escapeHtml(String(val))}</p></div>` : '';
+    const item = (lbl, val, action) => val ? `<div class="msf"><span class="msf-lbl">${lbl}</span><p class="msf-txt${action ? ' action' : ''}">${escapeHtml(String(val))}</p></div>` : '';
     const viewCall = last._isAttendeeNote ? `app.viewAttendeePhotos(${Number(last._attendeeRowId)})` : `app.viewActivityPhotos(${Number(last.id)})`;
     const jump = opts.noJump ? '' : `<button type="button" class="btn btn-sm secondary" onclick="(function(b){var w=b.closest('.mu-wrap');if(!w)return;w.dataset.muf='all';var it=w.querySelector('.mu-item[data-muid=&quot;${meetupRowId(last)}&quot;]');if(it){it.classList.add('open');it.scrollIntoView({behavior:'smooth',block:'nearest'});}})(this)"><i class="fas fa-arrow-down"></i> Open this meet up</button>`;
     return `
-        <details class="mu-brief" open style="border:1px solid var(--gray-200);border-left:3px solid var(--primary);border-radius:10px;background:var(--gray-50);padding:8px 12px;margin-bottom:10px;">
+        <details class="mu-brief pv-notice" open>
             <summary style="cursor:pointer;font-weight:700;font-size:13px;color:var(--gray-800);list-style:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                <i class="fas fa-book-open" style="color:var(--primary);"></i> Before you meet · 见面前回顾
+                <i class="fas fa-book-open" aria-hidden="true"></i> Before you meet · 见面前回顾
                 <span style="font-weight:500;font-size:11.5px;color:var(--gray-500);">last: ${escapeHtml(last.activity_date || '—')} · ${escapeHtml(lastLabel)}${last.activity_title ? ` · ${escapeHtml(last.activity_title)}` : ''}</span>
             </summary>
             <div style="margin-top:8px;">
@@ -3213,27 +3132,27 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             <div class="pv-sub" style="margin-top:12px;">Deal Analysis from ${meetups.length} Meet Up${meetups.length !== 1 ? 's' : ''}${fengShuiAudits.length > 0 ? ` + ${fengShuiAudits.length} Feng Shui Audit${fengShuiAudits.length !== 1 ? 's' : ''}` : ''}</div>
 
             ${allPains.length > 0 ? `
-            <div style="background:#fff3f3;border-left:3px solid #ef4444;border-radius:0 8px 8px 0;padding:10px 12px;margin-bottom:8px;">
-                <div class="meet-lbl" style="color:#ef4444;margin-bottom:4px;"><i class="fas fa-exclamation-circle"></i> Pain Points / Core Problem</div>
-                ${allPains.map(p => `<div style="font-size:13px;color:var(--gray-700);margin-bottom:3px;">• ${escapeHtml(p)}</div>`).join('')}
+            <div class="pv-notice is-danger">
+                <div class="pv-notice-title"><i class="fas fa-exclamation-circle" aria-hidden="true"></i> Pain Points / Core Problem</div>
+                ${allPains.map(p => `<div class="pv-notice-line">• ${escapeHtml(p)}</div>`).join('')}
             </div>` : ''}
 
             ${allNeeds.length > 0 ? `
-            <div style="background:#fff8e1;border-left:3px solid #f59e0b;border-radius:0 8px 8px 0;padding:10px 12px;margin-bottom:8px;">
-                <div class="meet-lbl" style="color:#d97706;margin-bottom:4px;"><i class="fas fa-lightbulb"></i> Customer Needs / Interests</div>
-                ${allNeeds.map(n => `<div style="font-size:13px;color:var(--gray-700);margin-bottom:3px;">• ${escapeHtml(n)}</div>`).join('')}
+            <div class="pv-notice is-warning">
+                <div class="pv-notice-title"><i class="fas fa-lightbulb" aria-hidden="true"></i> Customer Needs / Interests</div>
+                ${allNeeds.map(n => `<div class="pv-notice-line">• ${escapeHtml(n)}</div>`).join('')}
             </div>` : ''}
 
             ${allSolutions.length > 0 ? `
-            <div style="background:#f0fdf4;border-left:3px solid #22c55e;border-radius:0 8px 8px 0;padding:10px 12px;margin-bottom:8px;">
-                <div class="meet-lbl" style="color:#16a34a;margin-bottom:4px;"><i class="fas fa-hand-holding-heart"></i> Solution Proposed / Opportunity</div>
-                ${allSolutions.map(s => `<div style="font-size:13px;color:var(--gray-700);margin-bottom:3px;">• ${escapeHtml(s)}</div>`).join('')}
+            <div class="pv-notice is-success">
+                <div class="pv-notice-title"><i class="fas fa-hand-holding-heart" aria-hidden="true"></i> Solution Proposed / Opportunity</div>
+                ${allSolutions.map(s => `<div class="pv-notice-line">• ${escapeHtml(s)}</div>`).join('')}
             </div>` : ''}
 
             ${allNextSteps.length > 0 ? `
-            <div style="background:#eff6ff;border-left:3px solid var(--primary);border-radius:0 8px 8px 0;padding:10px 12px;margin-bottom:8px;">
-                <div class="meet-lbl" style="color:var(--primary);margin-bottom:4px;"><i class="fas fa-arrow-right"></i> Next Steps to Close</div>
-                ${allNextSteps.map(s => `<div style="font-size:13px;color:var(--gray-700);margin-bottom:3px;">• ${escapeHtml(s)}</div>`).join('')}
+            <div class="pv-notice is-info">
+                <div class="pv-notice-title"><i class="fas fa-arrow-right" aria-hidden="true"></i> Next Steps to Close</div>
+                ${allNextSteps.map(s => `<div class="pv-notice-line">• ${escapeHtml(s)}</div>`).join('')}
             </div>` : ''}
 
             ${(dealCards.length === 0 && allNeeds.length === 0 && allSolutions.length === 0) ? '<p style="text-align:center;padding:12px;color:var(--gray-400);font-size:13px;">No deal analysis recorded yet. Add notes during meet ups or log a feng shui audit.</p>' : ''}
