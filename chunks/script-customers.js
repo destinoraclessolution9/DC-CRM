@@ -641,6 +641,20 @@ const _LINKED_PROSPECT_SECTIONS = [
     ['bujishu',  'fas fa-gem',            'Bujishu Product Purchase History'],
     ['formula',  'fas fa-heartbeat',      'Formula Healthcare Product Purchase History'],
 ];
+// Contracts renderer lives in the lazily-loaded forms chunk. It was called
+// without loading it (since the chunk split), so the section sat on
+// "Loading…" forever whenever the forms chunk hadn't been opened yet.
+const _renderCustomerContracts = async (customer, containerId) => {
+    if (!window.app.renderCustomerContractsTab && typeof window._loadChunk === 'function') {
+        try { await window._loadChunk('chunks/script-forms.min.js'); } catch (_) { /* intentional: handled below */ }
+    }
+    if (typeof window.app.renderCustomerContractsTab === 'function') {
+        return window.app.renderCustomerContractsTab(customer, ...(containerId ? [containerId] : []));
+    }
+    const el = containerId && document.getElementById(containerId);
+    if (el) el.innerHTML = '<p style="color:var(--gray-500);font-size:13px;">Could not load contracts. Please reload and try again.</p>';
+};
+
 const _linkedProspectSectionsHtml = (prospectId, tabs = null) => {
     if (prospectId == null) return '';
     const pid = Number(prospectId);
@@ -815,7 +829,7 @@ const switchProfileTab = async (btn, tabName, cId) => {
     else if (tabName === 'purchases') await renderPurchaseHistoryTab(customer);
     else if (tabName === 'activity') await renderCustomerActivityTab(customer);
     else if (tabName === 'referrals') await renderReferralsTab(customer);
-    else if (tabName === 'contracts') await (window.app.renderCustomerContractsTab || (() => {}))(customer);
+    else if (tabName === 'contracts') await _renderCustomerContracts(customer);
     else if (tabName === 'events') {
         // Legacy tab UI only — the accordion profile now shows events inside the
         // merged renderCustomerActivityTab timeline. event_attendees is the row
@@ -1037,7 +1051,7 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
         `;
     }
     else if (tab === 'contracts') {
-        await (window.app.renderCustomerContractsTab || (() => {}))(customer, container.id);
+        await _renderCustomerContracts(customer, container.id);
     }
     else if (tab === 'closing') {
         await window.app.renderCustomerClosingTab(customer, container);
