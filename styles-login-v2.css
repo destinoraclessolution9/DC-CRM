@@ -1739,7 +1739,9 @@
     .mp-fab {
         position:fixed; bottom:88px; right:18px; z-index:100;
         width:54px; height:54px; border-radius:50%; border:none;
-        background:var(--mp-red);
+        /* The button is rendered outside .mp (where --mp-red is defined), so
+           without the fallback the background resolved to transparent. */
+        background:var(--mp-red, #C2185B);
         color:#fff; font-size:22px; cursor:pointer;
         box-shadow:0 4px 12px rgba(16,24,40,0.18);
         display:flex; align-items:center; justify-content:center;

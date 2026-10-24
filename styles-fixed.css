@@ -10440,7 +10440,7 @@ input:checked+.slider:before {
 .today-activities-section h3 {
     font-size: 15px;
     font-weight: 700;
-    color: var(--primary);
+    color: var(--gray-900);
     margin: 0 0 12px;
     letter-spacing: 0.03em;
 }
