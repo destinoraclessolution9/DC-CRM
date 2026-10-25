@@ -769,7 +769,8 @@ const showCustomerDetail = async (customerId) => {
                   _cvAccItem('hosting', cid, 'fa-home', `汇集接待 Hosting ${hostBadge}`, false, 'engagement')}
                 ${_cvAccItem('notes', cid, 'fa-sticky-note', 'Notes', false, 'engagement')}
 
-                ${_cvAccItem('journey', cid, 'fa-route', 'Journey Tracker', false, 'opportunities')}
+                ${_cvAccItem('potential', cid, 'fa-bolt', 'Opportunities', false, 'opportunities')}
+                ${_cvAccItem('journey', cid, 'fa-route', 'Journey stage', false, 'opportunities')}
                 ${_linkedProspectSectionsHtml(lpid, ['fengshui'], 'opportunities')}
                 ${_cvAccItem('referrals', cid, 'fa-user-plus', 'Referrals Made', false, 'opportunities')}
                 ${_linkedProspectSectionsHtml(lpid, ['names'], 'opportunities')}
@@ -1090,6 +1091,18 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
                 <button class="btn-sm secondary" style="border-radius:20px;font-size:11px;" onclick="app.openAddTagModal(${customer.id},'customer')">+ Add Tag</button>
             </div>
         `;
+    }
+    else if (tab === 'potential') {
+        // Opportunities — open potential + deals live on the linked prospect;
+        // shared renderer in the prospects chunk.
+        if (!window.app.renderProfileOpportunities && typeof window._loadChunk === 'function') {
+            try { await window._loadChunk('chunks/script-prospects.min.js'); } catch (_) { /* handled below */ }
+        }
+        if (typeof window.app.renderProfileOpportunities !== 'function') {
+            container.innerHTML = '<p style="color:var(--gray-500);font-size:13px;">Could not load opportunities. Please reload and try again.</p>';
+            return;
+        }
+        await window.app.renderProfileOpportunities('customer', customer.id, customer.converted_from_prospect_id != null ? Number(customer.converted_from_prospect_id) : null, container);
     }
     else if (tab === 'tasks') {
         // Next up — the one task list, shared with the prospect profile

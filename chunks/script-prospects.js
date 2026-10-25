@@ -2487,6 +2487,109 @@ const pvAfterDealSave = async (prospectId) => {
         await _pvRefreshSection(kind, Number(rawId), 'potential').catch(() => {});
     }
 };
+// ── Opportunities — what could they buy, and how close (2026-10-25) ─────────
+// Open potential (prospects.open_potential_*, DB-maintained), deals
+// (pipeline_deals — never shown on the profile before) and the newest needs /
+// pain points / reaction, each from the meeting that holds it. A customer's
+// opportunities live on the prospect it was converted from.
+const _PV_DEAL_STAGE = { interested: 'Interested', proposal: 'Proposal given', prescribed: 'Prescribed', closing: 'Closing', won: 'Won', lost: 'Lost' };
+const _PV_POT_SRC = { audit: 'Feng shui audit', prescription: 'Prescription', meeting: 'Meeting notes', deal: 'Deal' };
+const renderProfileOpportunities = async (kind, id, pid, container) => {
+    if (!container) return;
+    if (pid == null) {
+        container.innerHTML = '<p class="tk-empty">No opportunities are tracked for this customer yet — deals and open potential start from a prospect record.</p>';
+        return;
+    }
+    const sb = _rxSb();
+    const _q = async (fn) => { try { const { data } = await fn(); return data; } catch (_) { return null; } };
+    const [pot, deals, notes, att, dealTasks] = await Promise.all([
+        _q(() => sb.from('prospects').select('open_potential_rm,open_potential_detail,open_potential_at,potential_tier,potential_level').eq('id', pid).maybeSingle()),
+        _q(() => sb.from('pipeline_deals').select('*').eq('prospect_id', pid).order('expected_close_date', { ascending: true })),
+        _q(() => {
+            let q = sb.from('activities').select('id,activity_type,activity_date,note_needs,note_pain_points,core_problem,opportunity_potential,meeting_minutes');
+            q = kind === 'customer' ? q.or(`customer_id.eq.${Number(id)},prospect_id.eq.${Number(pid)}`) : q.eq('prospect_id', Number(pid));
+            return q.order('activity_date', { ascending: false }).limit(80);
+        }),
+        (window.app.getProspectAttendeeNotes || (() => Promise.resolve([])))(kind === 'customer' ? id : pid, kind === 'customer' ? { attendeeType: 'customer' } : {}).catch(() => []),
+        _q(() => sb.from('journey_touchpoints').select('id,source_deal_id,status,due_date').not('source_deal_id', 'is', null).eq('prospect_id', pid)),
+    ]);
+    const k = `'${kind}', ${Number(id)}`;
+    const today = _pvTodayStr();
+
+    // ── Open potential
+    const rm = pot ? Number(pot.open_potential_rm) || 0 : 0;
+    const items = (pot && pot.open_potential_detail && Array.isArray(pot.open_potential_detail.items)) ? pot.open_potential_detail.items : [];
+    const tier = pot && FU_TIER[pot.potential_tier];
+    const potHtml = `
+        <div class="op-head">
+            <div><div class="pv-card-lbl">Open potential</div><div class="op-total">${rm > 0 ? _rmFmt(rm) : '—'}</div></div>
+            <div class="op-tags">
+                ${tier ? `<span class="pv-chip">${tier[0]} ${tier[1]}</span>` : ''}
+                ${pot && pot.potential_level ? `<span class="pv-chip" title="Rating from the CPS">CPS: ${escapeHtml(pot.potential_level)}</span>` : ''}
+            </div>
+        </div>
+        ${items.length ? `<div class="op-items">${items.map(i => `
+            <div class="op-item"><span>${escapeHtml(i.label || '')} <span class="op-src">${escapeHtml(_PV_POT_SRC[i.src] || i.src || '')}</span></span>
+            <strong class="${Number(i.price) > 0 ? '' : 'is-muted'}">${Number(i.price) > 0 ? _rmFmt(i.price) : 'price?'}</strong></div>`).join('')}</div>` : '<p class="tk-empty">Nothing open yet — products named in meeting notes, audits and deals add up here.</p>'}`;
+
+    // ── Deals
+    const taskByDeal = new Map((dealTasks || []).map(t => [String(t.source_deal_id), t]));
+    const dealRow = (d) => {
+        const t = taskByDeal.get(String(d.id));
+        const closeD = d.expected_close_date ? _pvDayDiff(today, d.expected_close_date) : null;
+        const stageCls = d.stage === 'won' ? 'is-success' : d.stage === 'closing' ? 'is-warning' : '';
+        let step = '';
+        if (d.next_step) {
+            const open = t && _PV_OPEN.includes(t.status);
+            const late = open && t.due_date && t.due_date < today;
+            step = `<div class="op-step">Next: ${escapeHtml(_pvNextActionText(d.next_step))}${t ? ` <span class="${late ? 'is-danger' : ''}">· ${open ? `task due ${escapeHtml(_pvFmtDay(t.due_date))}` : 'task done'}</span>` : (d.auto_created ? ' <span class="op-src">· draft — open to confirm</span>' : '')}</div>`;
+        }
+        return `
+            <button type="button" class="op-deal" onclick="app.pvOpenDeal(${Number(d.id)})">
+                <div class="op-deal-top"><span class="op-deal-name">${escapeHtml(d.product || 'Deal')}</span><strong>${_rmFmt(d.amount)}</strong></div>
+                <div class="tk-meta"><span class="pv-chip ${stageCls}">${escapeHtml(_PV_DEAL_STAGE[d.stage] || d.stage || '')}</span>
+                ${['won', 'lost'].includes(d.stage) ? '' : `<span class="${closeD != null && closeD < 0 ? 'is-danger' : ''}">close by ${escapeHtml(_pvFmtDay(d.expected_close_date))}</span>`}</div>
+                ${step}
+            </button>`;
+    };
+    const allDeals = deals || [];
+    const openDeals = allDeals.filter(d => !['won', 'lost'].includes(d.stage));
+    const closedDeals = allDeals.filter(d => ['won', 'lost'].includes(d.stage));
+    const dealsHtml = `
+        <div class="tk-toolbar op-sec">
+            <span class="tk-summary">Deals${openDeals.length ? ` · ${openDeals.length} open · ${_rmFmt(openDeals.reduce((n, d) => n + (Number(d.amount) || 0), 0))}` : ''}</span>
+            <button type="button" class="btn secondary btn-sm" onclick="app.pvNewDeal(${Number(pid)})"><i class="fas fa-plus" aria-hidden="true"></i> Deal</button>
+        </div>
+        ${openDeals.length ? openDeals.map(dealRow).join('') : '<p class="tk-empty">No open deals.</p>'}
+        ${closedDeals.length ? `<details class="tk-done"><summary>Show ${closedDeals.length} closed</summary>${closedDeals.map(dealRow).join('')}</details>` : ''}`;
+
+    // ── What we know — newest value of each, with the meeting it came from
+    const _ts = (x) => { const t = Date.parse(x || ''); return Number.isNaN(t) ? 0 : t; };
+    const sources = [
+        ...(notes || []).map(a => ({ ...a, _muid: meetupRowId(a) })),
+        ...(att || []).map(a => ({ ...a, _muid: meetupRowId(a), activity_type: 'Event' })),
+    ].sort((a, b) => _ts(b.activity_date) - _ts(a.activity_date));
+    const latest = (get) => { for (const a of sources) { const v = String(get(a) || '').trim(); if (v) return { v, a }; } return null; };
+    const facts = [
+        ['Needs', latest(a => a.note_needs)],
+        ['Pain points', latest(a => a.note_pain_points || a.core_problem)],
+        ['Their reaction', latest(a => meetupMinutesOf(a).reaction)],
+        ['Interested in', latest(a => a.opportunity_potential)],
+    ].filter(f => f[1]);
+    const knowHtml = facts.length ? `
+        <div class="tk-toolbar op-sec"><span class="tk-summary">What we know <span class="op-src">(latest)</span></span></div>
+        ${facts.map(([lbl, f]) => `
+            <div class="msf"><span class="msf-lbl">${lbl}</span><p class="msf-txt">${escapeHtml(f.v)}</p>
+            <button type="button" class="tk-src" onclick="app.pvOpenMeeting(${k}, '${escapeHtml(f.a._muid)}')">from ${escapeHtml(f.a.activity_type || 'meeting')} · ${escapeHtml(_pvFmtDay(f.a.activity_date))}</button></div>`).join('')}` : '';
+
+    container.innerHTML = potHtml + dealsHtml + knowHtml;
+};
+const pvNewDeal = async (prospectId) => {
+    try { if (window._loadChunk) await window._loadChunk('chunks/script-pipeline.min.js'); } catch (_) { /* handled below */ }
+    if (typeof window.app.openDealModal !== 'function') { UI.toast.error('Could not open deals. Please reload.'); return; }
+    await window.app.openDealModal(null, Number(prospectId));
+};
+
 // Open an uploaded document (stored as a data URL in documents.data).
 const pvOpenDocument = async (docId) => {
     let d = null;
@@ -2651,8 +2754,8 @@ const buildProspectDetailTabsHtml = (prospect) => {
                     ${_pvAccItem('activity', pid, 'fa-user-friends', 'Meet Ups &amp; Events', false, 'engagement')}
                     ${_pvAccItem('notes', pid, 'fa-sticky-note', 'Notes', false, 'engagement')}
 
-                    ${_pvAccItem('potential', pid, 'fa-bolt', `Potential &amp; Opportunities ${solBadge}`, false, 'opportunities')}
-                    ${_pvAccItem('journey', pid, 'fa-route', 'Journey Tracker', false, 'opportunities')}
+                    ${_pvAccItem('potential', pid, 'fa-bolt', `Opportunities ${solBadge}`, false, 'opportunities')}
+                    ${_pvAccItem('journey', pid, 'fa-route', 'Journey stage', false, 'opportunities')}
                     ${_pvAccItem('fengshui', pid, 'fa-compass', 'Feng Shui Audit', false, 'opportunities')}
                     ${_pvAccItem('names', pid, 'fa-users', 'Name List', false, 'opportunities')}
 
@@ -3625,84 +3728,11 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         `;
     }
     else if (tab === 'potential') {
-        const MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP','EVENT'];
-        const [allActivities, attendeeNotes] = await Promise.all([
-            AppDataStore.getActivitiesForProspect(prospectId, { limit: 500 }),
-            (window.app.getProspectAttendeeNotes || (() => Promise.resolve([])))(prospectId),
-        ]);
-        const meetups = [
-            ...allActivities.filter(a => MEETUP_TYPES.includes(a.activity_type)),
-            ...attendeeNotes,
-        ].sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
-
-        // Feng Shui Audit product selections flow into Solutions (same format as post-meetup notes)
-        const fengShuiAudits = _readFengShuiAudits(prospect);
-        const auditSolutions = fengShuiAudits
-            .map(a => a.products)
-            .filter(Boolean);
-        const auditNeeds = fengShuiAudits
-            .map(a => a.key_notes)
-            .filter(Boolean);
-
-        // Aggregate across all meetings (+ feng shui audits for solutions/needs)
-        const allPains = [...new Set(meetups.flatMap(a => [a.note_pain_points, a.core_problem].filter(Boolean)))];
-        const allNeeds = [...new Set([
-            ...meetups.flatMap(a => [a.note_needs, a.note_key_points].filter(Boolean)),
-            ...auditNeeds,
-        ])];
-        const allSolutions = [...new Set([
-            ...meetups.flatMap(a => [a.opportunity_potential, a.note_outcome].filter(Boolean)),
-            ...auditSolutions,
-        ])];
-
-        const dealCards = meetups.filter(a =>
-            a.note_pain_points || a.note_needs || a.note_key_points || a.core_problem ||
-            a.opportunity_potential || a.note_outcome || a.next_action || a.note_next_steps
-        );
-
-        container.innerHTML = `
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-                <div>
-                    <span class="badge ${(prospect.potential_level === 'High') ? 'success' : prospect.potential_level === 'Medium' ? 'warning' : prospect.potential_level === 'Low' ? 'secondary' : 'secondary'}" style="font-size:13px;">${prospect.potential_level || 'NOT SET'} POTENTIAL</span>
-                </div>
-                <div style="display:flex;gap:6px;align-items:center;">
-                    <button class="btn secondary btn-sm" onclick="app.openLatestMeetupNotes(${prospect.id})"><i class="fas fa-edit"></i> Edit Notes</button>
-                    <button class="btn secondary btn-sm" onclick="app.openEditPotentialModal(${prospect.id})" title="Edit Forecast"><i class="fas fa-cog"></i></button>
-                </div>
-            </div>
-            <div class="pv-row"><span class="pv-lbl">Close Prob.</span><span class="pv-val">${prospect.close_probability || 0}%</span></div>
-            <div class="progress-bar" style="margin-bottom:12px;">
-                <div class="progress-fill" style="width:${prospect.close_probability || 0}%;background:var(--${(prospect.close_probability || 0) >= 60 ? 'success' : (prospect.close_probability || 0) >= 30 ? 'warning' : 'danger'});"></div>
-            </div>
-            <div class="pv-row"><span class="pv-lbl">Est. Value</span><span class="pv-val">${prospect.estimated_value_min || prospect.estimated_value_max ? 'RM ' + (prospect.estimated_value_min || 0).toLocaleString() + ' – RM ' + (prospect.estimated_value_max || 0).toLocaleString() : '-'}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Budget</span><span class="pv-val">${escapeHtml(prospect.budget_range || '-')}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Timeline</span><span class="pv-val">${escapeHtml(prospect.decision_timeline || '-')}</span></div>
-            <div class="pv-row"><span class="pv-lbl">Decision Maker</span><span class="pv-val">${prospect.decision_maker === 'yes' ? 'Yes' : prospect.decision_maker === 'no' ? 'No' : 'Unknown'}</span></div>
-
-            ${(meetups.length > 0 || fengShuiAudits.length > 0) ? `
-            <div class="pv-sub" style="margin-top:12px;">Deal Analysis from ${meetups.length} Meet Up${meetups.length !== 1 ? 's' : ''}${fengShuiAudits.length > 0 ? ` + ${fengShuiAudits.length} Feng Shui Audit${fengShuiAudits.length !== 1 ? 's' : ''}` : ''}</div>
-
-            ${allPains.length > 0 ? `
-            <div class="pv-notice is-danger">
-                <div class="pv-notice-title"><i class="fas fa-exclamation-circle" aria-hidden="true"></i> Pain Points / Core Problem</div>
-                ${allPains.map(p => `<div class="pv-notice-line">• ${escapeHtml(p)}</div>`).join('')}
-            </div>` : ''}
-
-            ${allNeeds.length > 0 ? `
-            <div class="pv-notice is-warning">
-                <div class="pv-notice-title"><i class="fas fa-lightbulb" aria-hidden="true"></i> Customer Needs / Interests</div>
-                ${allNeeds.map(n => `<div class="pv-notice-line">• ${escapeHtml(n)}</div>`).join('')}
-            </div>` : ''}
-
-            ${allSolutions.length > 0 ? `
-            <div class="pv-notice is-success">
-                <div class="pv-notice-title"><i class="fas fa-hand-holding-heart" aria-hidden="true"></i> Solution Proposed / Opportunity</div>
-                ${allSolutions.map(s => `<div class="pv-notice-line">• ${escapeHtml(s)}</div>`).join('')}
-            </div>` : ''}
-
-            ${(dealCards.length === 0 && allNeeds.length === 0 && allSolutions.length === 0) ? '<p style="text-align:center;padding:12px;color:var(--gray-400);font-size:13px;">No deal analysis recorded yet. Add notes during meet ups or log a feng shui audit.</p>' : ''}
-            ` : '<p style="text-align:center;padding:20px;color:var(--gray-400);font-size:13px;">No meet ups or feng shui audits recorded yet.</p>'}
-        `;
+        // Opportunities (2026-10-25): open potential, deals and the latest needs
+        // — read from the records that own them. Replaces the old forecast
+        // fields (unused on every prospect) and the "Deal Analysis" that
+        // re-listed every meeting's notes.
+        await renderProfileOpportunities('prospect', prospectId, prospectId, container);
     }
     else if (tab === 'tasks') {
         // Next up — the one task list (journey_touchpoints). Replaces the old
@@ -8297,6 +8327,8 @@ const openPastRecordModal = async (...args) => {
         pvTaskSaveNew,
         pvTaskWhatsApp,
         pvOpenDeal,
+        pvNewDeal,
+        renderProfileOpportunities,
         pvOpenDocument,
         pvShowTab,
         pvAfterDealSave,

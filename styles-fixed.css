@@ -11788,6 +11788,23 @@ button.tk-src:hover { color: var(--gray-900); }
 .tk-done > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--gray-500); padding: 6px 0; }
 .tk-sheet-title { margin: 0 0 12px; font-weight: 600; color: var(--gray-900); }
 .tk-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+/* Opportunities — open potential, deals, what we know (2026-10-25) */
+.op-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.op-total { font-size: 22px; font-weight: 700; color: var(--gray-900); font-variant-numeric: tabular-nums; }
+.op-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.op-items { border-top: 1px solid var(--gray-200); }
+.op-item { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--gray-200); font-size: 14px; color: var(--gray-900); }
+.op-item strong { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.op-item strong.is-muted { color: var(--gray-400); font-weight: 500; }
+.op-src { font-size: 12px; color: var(--gray-500); font-weight: 400; }
+.msf > .tk-src { display: inline-block; margin-top: 2px; font-size: 12.5px; }
+.op-sec { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--gray-200); }
+.op-deal { display: block; width: 100%; margin: 0 0 8px; padding: 10px 12px; border: 1px solid var(--gray-200); border-radius: 10px; background: var(--bg-surface, #fff); font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.op-deal:hover { border-color: var(--gray-300); }
+.op-deal-top { display: flex; justify-content: space-between; gap: 12px; font-size: 14.5px; color: var(--gray-900); }
+.op-deal-name { font-weight: 600; min-width: 0; word-break: break-word; }
+.op-step { margin-top: 6px; font-size: 13px; line-height: 1.45; color: var(--gray-700); }
+.op-step .is-danger, .op-deal .is-danger { color: #B3261E; }
 /* A meeting's next action inside its timeline row */
 .mu-task { display: flex; align-items: flex-start; gap: 10px; margin: 4px 0 10px; padding: 10px 12px; border: 1px solid var(--gray-200); border-radius: 8px; background: var(--gray-50, #F8F9FA); }
 .mu-task > i { margin-top: 3px; color: var(--gray-500); }

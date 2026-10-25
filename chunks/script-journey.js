@@ -783,7 +783,9 @@
         if (!container) return;
         container.innerHTML = '<div style="text-align:center;padding:24px;color:var(--gray-400);"><i class="fas fa-spinner fa-spin"></i> Loading journey…</div>';
 
-        const touchpoints  = await AppDataStore.getJourneyTouchpoints(entityType, entityId);
+        // Meeting / deal / hand-added tasks share the table but are not journey
+        // steps — they live in the profile's Next up list (source_kind set).
+        const touchpoints  = (await AppDataStore.getJourneyTouchpoints(entityType, entityId)).filter(t => !t.source_kind);
         const stageLog     = await AppDataStore.getJourneyStageLog(entityType, entityId);
         const currentUser  = _cu();
         const canManage    = isTeamLeaderOrAbove(currentUser) || isSystemAdmin(currentUser);
@@ -852,10 +854,25 @@
                 .jny-track-tab.active{background:var(--primary);color:#fff;border-color:var(--primary);}
                 .jny-spawn-btn{display:flex;align-items:center;gap:6px;padding:10px 14px;border:1px dashed var(--gray-300);border-radius:10px;background:var(--gray-50);color:var(--gray-500);font-size:13px;cursor:pointer;width:100%;justify-content:center;margin-top:8px;transition:all .15s;}
                 .jny-spawn-btn:hover{border-color:var(--primary);color:var(--primary);background:#fff;}
+.jny-now{font-size:13.5px;color:var(--gray-700);margin-bottom:8px;}
+                .jny-now span{color:var(--gray-500);}
+                .jny-hint{font-size:13px;color:var(--gray-500);margin:2px 0 10px;}
+                .jny-link{padding:0;border:none;background:none;font:inherit;color:var(--gray-900);font-weight:600;text-decoration:underline;cursor:pointer;}
+                .jny-more{border-top:1px solid var(--gray-200);padding-top:8px;}
+                .jny-more > summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--gray-500);padding:6px 0 10px;}
                 .jny-mode-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:20px;font-size:11px;font-weight:600;background:var(--gray-100);color:var(--gray-600);margin-bottom:10px;}
             </style>
 
             <div class="jny-wrap">
+
+                <!-- Stage indicator (2026-10-25: the profile shows where the person
+                     is; the steps themselves are tasks in Next up) -->
+                <div class="jny-now">Now: <strong>${esc(STAGE_LABELS[currentStage] || currentStage)}</strong> <span>· ${esc(FOLLOW_MODE_LABEL[followMode] || followMode)}</span></div>
+                ${renderStageTimeline(touchpoints, currentStage, activeTrack)}
+                <div class="jny-hint">${(overdueCount + pendingCount) ? `${overdueCount + pendingCount === 1 ? '1 open step is' : `${overdueCount + pendingCount} open steps are`} in <button type="button" class="jny-link" onclick="app.pvGoToSection && app.pvGoToSection('${entityType}', ${entityId}, 'tasks')">Next up</button>.` : 'No open journey steps.'}</div>
+
+                <details class="jny-more">
+                <summary>All steps, follow mode &amp; history</summary>
 
                 <!-- Progress summary -->
                 <div class="jny-stats">
@@ -882,9 +899,6 @@
                 <div class="jny-mode-badge">${FOLLOW_MODE_LABEL[followMode] || followMode}
                     <span style="color:var(--gray-400);font-weight:400;">· 跟进模式</span>
                 </div>
-
-                <!-- Stage timeline — shows active product track or post-purchase steps -->
-                ${renderStageTimeline(touchpoints, currentStage, activeTrack)}
 
                 <!-- Track toggle tabs -->
                 <div class="jny-track-tabs">
@@ -936,6 +950,7 @@
                         </div>`).join('')}
                 </div>` : ''}
 
+                </details>
             </div>
         `);
     };
@@ -1126,7 +1141,7 @@
         document.querySelectorAll(`[id^="jny-tab-"][id$="-${entityId}"]`).forEach(b => b.classList.remove('active'));
         if (btnEl) btnEl.classList.add('active');
 
-        const touchpoints = await AppDataStore.getJourneyTouchpoints(entityType, entityId);
+        const touchpoints = (await AppDataStore.getJourneyTouchpoints(entityType, entityId)).filter(t => !t.source_kind);
         let filtered;
         if (track === 'annual') {
             filtered = touchpoints.filter(t => t.stage_name?.startsWith('annual_'));
