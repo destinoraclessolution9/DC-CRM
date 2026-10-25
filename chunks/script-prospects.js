@@ -2389,7 +2389,7 @@ const renderProfileTasks = async (kind, id, pid, container) => {
             <div class="tk-row${isOpen ? '' : ' is-done'}" data-tk="${Number(t.id)}">
                 <input type="checkbox" class="tk-cb" aria-label="Done" ${isOpen ? '' : 'checked'} onchange="app.pvTaskToggle(${Number(t.id)}, this.checked, ${k})">
                 <div class="tk-main">
-                    <div class="tk-title">${escapeHtml(t.title || 'Follow up')}</div>
+                    <div class="tk-title" title="Tap to show all" onclick="this.classList.toggle('is-open')">${escapeHtml(t.title || 'Follow up')}</div>
                     <div class="tk-meta"><span class="tk-due ${dueCls}">${escapeHtml(due)}</span>${src}${who}</div>
                 </div>
                 ${isOpen ? `${t.touchpoint_type === 'whatsapp_auto' ? `<button type="button" class="tk-act" title="Send WhatsApp" aria-label="Send WhatsApp" onclick="app.pvTaskWhatsApp(${Number(t.id)}, ${k})"><i class="fab fa-whatsapp" aria-hidden="true"></i></button>` : ''}

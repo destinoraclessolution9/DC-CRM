@@ -11777,7 +11777,10 @@ html, body {
 .tk-row:last-child { border-bottom: none; }
 .tk-cb { width: 20px; height: 20px; margin-top: 1px; flex-shrink: 0; accent-color: var(--success, #146C43); cursor: pointer; }
 .tk-main { flex: 1; min-width: 0; }
-.tk-title { font-size: 14.5px; line-height: 1.45; color: var(--gray-900); word-break: break-word; }
+.tk-title { font-size: 14.5px; line-height: 1.45; color: var(--gray-900); word-break: break-word; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; cursor: pointer; }
+/* Minutes-written next actions can run to a paragraph — two lines here, the
+   full words live in the meeting record (tap the title to show all). */
+.tk-title.is-open { display: block; -webkit-line-clamp: unset; }
 .tk-row.is-done .tk-title { color: var(--gray-500); text-decoration: line-through; }
 .tk-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 3px; font-size: 12.5px; color: var(--gray-500); }
 .tk-due { font-weight: 600; color: var(--gray-700); }
