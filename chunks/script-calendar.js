@@ -6124,27 +6124,10 @@
             UI.toast.error('Failed to save notes: ' + (err?.message || 'Unknown error'));
         }
 
-        // Navigate to prospect detail and open Potential & Opportunities + Next Actions
+        // Navigate to prospect detail and open Next up (the minutes' next action is now a task there)
         if (prospectId) {
             await (window.app.showProspectDetail || (() => {}))(prospectId);
-            // Wait for DOM to render, then expand and scroll to the two sections
-            setTimeout(async () => {
-                for (const tab of ['potential', 'nextactions']) {
-                    const itemEl = document.getElementById(`acc-${tab}-${prospectId}`);
-                    const bodyEl = document.getElementById(`acc-body-${tab}-${prospectId}`);
-                    if (itemEl && bodyEl && !itemEl.classList.contains('open')) {
-                        itemEl.classList.add('open');
-                        bodyEl.style.display = 'block';
-                        if (bodyEl.dataset.loaded === 'false') {
-                            bodyEl.dataset.loaded = 'true';
-                            await (window.app.switchProspectTab || (() => {}))(tab, prospectId, null, bodyEl);
-                        }
-                    }
-                }
-                // Scroll to Potential & Opportunities
-                const potentialEl = document.getElementById(`acc-potential-${prospectId}`);
-                if (potentialEl) potentialEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }, 400);
+            setTimeout(() => { (window.app.pvGoToSection || (() => {}))('prospect', prospectId, 'tasks'); }, 400);
         }
     };
 
@@ -7036,21 +7019,7 @@
             } catch (_) { /* intentional: lookup failed → treat as customer route */ isProspect = false; }
             if (isProspect) {
                 await (window.app.showProspectDetail || (() => {}))(prospectId);
-                setTimeout(async () => {
-                    for (const tab of ['potential', 'nextactions']) {
-                        const itemEl = document.getElementById(`acc-${tab}-${prospectId}`);
-                        const bodyEl = document.getElementById(`acc-body-${tab}-${prospectId}`);
-                        if (itemEl && bodyEl && !itemEl.classList.contains('open')) {
-                            itemEl.classList.add('open');
-                            bodyEl.style.display = 'block';
-                            if (bodyEl.dataset.loaded === 'false') {
-                                bodyEl.dataset.loaded = 'true';
-                                await (window.app.switchProspectTab || (() => {}))(tab, prospectId, null, bodyEl);
-                            }
-                        }
-                    }
-                    document.getElementById(`acc-potential-${prospectId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }, 400);
+                setTimeout(() => { (window.app.pvGoToSection || (() => {}))('prospect', prospectId, 'tasks'); }, 400);
             } else {
                 // The previous `typeof showCustomerDetail === 'function'` guard
                 // referenced a bare (undeclared) identifier that is ALWAYS
@@ -7132,6 +7101,7 @@
             next_action: fields.next_action,
             summary: fields.summary,
             post_event_updated_at: new Date().toISOString(),
+            ...(fields.next_action_due !== undefined ? { next_action_due: fields.next_action_due } : {}),
             post_event_updated_by: _state.cu?.id || null,
         };
         if (fields.meeting_minutes !== undefined) updates.meeting_minutes = fields.meeting_minutes;
@@ -7245,21 +7215,7 @@
                 return;
             }
             await (window.app.showProspectDetail || (() => {}))(prospectId);
-            setTimeout(async () => {
-                for (const tab of ['potential', 'nextactions']) {
-                    const itemEl = document.getElementById(`acc-${tab}-${prospectId}`);
-                    const bodyEl = document.getElementById(`acc-body-${tab}-${prospectId}`);
-                    if (itemEl && bodyEl && !itemEl.classList.contains('open')) {
-                        itemEl.classList.add('open');
-                        bodyEl.style.display = 'block';
-                        if (bodyEl.dataset.loaded === 'false') {
-                            bodyEl.dataset.loaded = 'true';
-                            await (window.app.switchProspectTab || (() => {}))(tab, prospectId, null, bodyEl);
-                        }
-                    }
-                }
-                document.getElementById(`acc-potential-${prospectId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }, 400);
+            setTimeout(() => { (window.app.pvGoToSection || (() => {}))('prospect', prospectId, 'tasks'); }, 400);
         }
     };
 

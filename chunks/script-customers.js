@@ -761,6 +761,7 @@ const showCustomerDetail = async (customerId) => {
             <div class="acc-container" id="cust-acc-container-${cid}">
                 <div class="acc-group-label">Overview</div>
                 ${_cvAccItem('info', cid, 'fa-info-circle', 'Basic Information', true)}
+                ${_cvAccItem('tasks', cid, 'fa-list-check', `Next up <span id="cust-tasks-badge-${cid}" class="acc-count" style="display:none;"></span>`)}
                 ${_cvAccItem('bank', cid, 'fa-university', 'Bank &amp; Payment')}
                 ${_cvAccItem('platforms', cid, 'fa-id-badge', 'Platform IDs')}
 
@@ -1098,6 +1099,18 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
                 <button class="btn-sm secondary" style="border-radius:20px;font-size:11px;" onclick="app.openAddTagModal(${customer.id},'customer')">+ Add Tag</button>
             </div>
         `;
+    }
+    else if (tab === 'tasks') {
+        // Next up — the one task list, shared with the prospect profile
+        // (prospects chunk). Includes tasks still keyed to the linked prospect.
+        if (!window.app.renderProfileTasks && typeof window._loadChunk === 'function') {
+            try { await window._loadChunk('chunks/script-prospects.min.js'); } catch (_) { /* handled below */ }
+        }
+        if (typeof window.app.renderProfileTasks !== 'function') {
+            container.innerHTML = '<p style="color:var(--gray-500);font-size:13px;">Could not load tasks. Please reload and try again.</p>';
+            return;
+        }
+        await window.app.renderProfileTasks('customer', customer.id, customer.converted_from_prospect_id != null ? Number(customer.converted_from_prospect_id) : null, container);
     }
     else if (tab === 'journey') {
         await window._loadChunk('chunks/script-journey.min.js');
@@ -2051,7 +2064,8 @@ const renderCustomerActivityTab = async (customer, containerId = 'profile-tab-co
     if (!window.app.meetupBriefHtml && typeof window._loadChunk === 'function') {
         try { await window._loadChunk('chunks/script-prospects.min.js'); } catch (_) { /* intentional: brief is optional */ }
     }
-    const [custActs, prospActs, allRegs, allEvents, attendeeRows] = await Promise.all([
+    const _lpid = customer.converted_from_prospect_id != null ? Number(customer.converted_from_prospect_id) : null;
+    const [custActs, prospActs, allRegs, allEvents, attendeeRows, taskMaps] = await Promise.all([
         AppDataStore.getActivitiesForCustomer(customer.id, { limit: 500 }),
         customer.converted_from_prospect_id
             ? AppDataStore.getActivitiesForProspect(customer.converted_from_prospect_id, { limit: 500 })
@@ -2061,7 +2075,12 @@ const renderCustomerActivityTab = async (customer, containerId = 'profile-tab-co
         (window.app.getProspectAttendeeNotes || (() => Promise.resolve([])))(
             customerId, { includeWithoutNotes: true, attendeeType: 'customer' }
         ),
+        // Each meeting's next action is ONE task now — the row shows its state.
+        (window.app.pvTaskMaps || (() => Promise.resolve(null)))('customer', customer.id, _lpid).catch(() => null),
     ]);
+    // Inside the profile the snapshot already says what happened last; the
+    // "Before you meet" brief stays for the Meet-Up History pop-up only.
+    const _inProfile = /^cust-acc-body-/.test(String(containerId || ''));
     const seenIds = new Set();
     const activities = [...custActs, ...prospActs]
         .filter(a => { if (seenIds.has(a.id)) return false; seenIds.add(a.id); return true; });
@@ -2152,7 +2171,7 @@ const renderCustomerActivityTab = async (customer, containerId = 'profile-tab-co
         ${_sec('Advisor Observations', _mmC(a).advisor, _pre)}
         ${_sec('Customer Reaction', _mmC(a).reaction, _pre)}
         ${_sec('Opportunity / Potential', a.opportunity_potential)}
-        ${_sec('Next Action', a.next_action, ' style="color:var(--primary);font-weight:500;"')}`;
+        ${(window.app.pvTaskLineHtml || ((x) => _sec('Next Action', x.next_action)))(a, taskMaps)}`;
 
     const _rowHtml = (a) => {
         const _atype = a.activity_type || a.type;
@@ -2233,7 +2252,7 @@ const renderCustomerActivityTab = async (customer, containerId = 'profile-tab-co
                 </div>
                 <button class="btn primary btn-sm" onclick="app.openActivityModal(null, 'customer', ${customer.id})">+ Log Activity</button>
             </div>
-            ${(window.app.meetupBriefHtml || (() => ''))(rows, { typeLabel: typeLabelC })}
+            ${_inProfile ? '' : (window.app.meetupBriefHtml || (() => ''))(rows, { typeLabel: typeLabelC })}
             ${rows.length > 0
                 ? `<div class="mu-list">${rows.map(_rowHtml).join('')}</div>`
                 : '<p style="color:var(--gray-400); font-size:13px;">No meet ups or events recorded yet.</p>'}
@@ -2255,6 +2274,11 @@ const renderCustomerActivityTab = async (customer, containerId = 'profile-tab-co
     container.innerHTML = html;
     // Inline discussion-paper thumbs → signed URLs (also inside modals).
     try { window._resolveAttachmentImages && setTimeout(() => window._resolveAttachmentImages(), 0); } catch (_) { /* best-effort */ }
+    // A re-render follows a save — the DB may have made or closed a task.
+    if (_inProfile) {
+        if (container.dataset.pvRendered && window.app.pvRefreshTasks) window.app.pvRefreshTasks('customer', customer.id).catch(() => {});
+        container.dataset.pvRendered = '1';
+    }
 };
 
 const renderCustomerTags = async (customer) => {

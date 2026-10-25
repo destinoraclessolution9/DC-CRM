@@ -2094,7 +2094,7 @@ const _pvSnapHtml = (kind, id, pid) => `
             : '<div class="pv-card is-loading" data-card="potential">'}
             <div class="pv-card-lbl">Open potential</div><div class="pv-card-val">—</div>
         ${pid != null ? '</button>' : '</div>'}
-        <button type="button" class="pv-card is-loading" data-card="next" onclick="app.pvGoToSection('${kind}', ${Number(id)}, 'journey')">
+        <button type="button" class="pv-card is-loading" data-card="next" onclick="app.pvGoToSection('${kind}', ${Number(id)}, 'tasks')">
             <div class="pv-card-lbl">Next follow-up</div><div class="pv-card-val">—</div>
         </button>
         <div class="pv-card pv-card-wide is-loading" data-card="last">
@@ -2103,19 +2103,23 @@ const _pvSnapHtml = (kind, id, pid) => `
     </div>
     ${pid != null ? `<div class="pv-attn"><div data-fu-pid="${Number(pid)}"></div></div>` : ''}`;
 
-// Open tasks for a person — the one task list (journey_touchpoints). A customer
+// Tasks for a person — the one task list (journey_touchpoints). A customer
 // also owns the tasks still keyed to the prospect it was converted from.
-const _pvOpenTasks = async (kind, id, pid) => {
+// statuses: null = every status.
+const _PV_OPEN = ['pending', 'overdue', 'snoozed'];
+const _pvTaskQuery = async (kind, id, pid, statuses = _PV_OPEN) => {
     const sb = _rxSb();
     if (!sb) return [];
     try {
-        let q = sb.from('journey_touchpoints').select('*').in('status', ['pending', 'overdue', 'snoozed']);
+        let q = sb.from('journey_touchpoints').select('*');
+        if (statuses) q = q.in('status', statuses);
         if (kind === 'customer') q = pid != null ? q.or(`customer_id.eq.${Number(id)},prospect_id.eq.${Number(pid)}`) : q.eq('customer_id', Number(id));
         else q = q.eq('prospect_id', Number(id));
-        const { data } = await q.order('due_date', { ascending: true }).limit(100);
+        const { data } = await q.order('due_date', { ascending: true }).limit(200);
         return data || [];
     } catch (_) { return []; }
 };
+const _pvOpenTasks = (kind, id, pid) => _pvTaskQuery(kind, id, pid, _PV_OPEN);
 // Meetings + attended events for a person, newest first (light rows).
 const _pvPersonRows = async (kind, id, pid) => {
     const att = (window.app.getProspectAttendeeNotes || (() => Promise.resolve([])));
@@ -2179,6 +2183,7 @@ const _pvFillPotential = async (pid) => {
 const fillProfileSnapshot = async ({ kind = 'prospect', id, pid = null } = {}) => {
     const root = document.querySelector(`.pv-snap[data-snap="${kind}:${Number(id)}"]`);
     if (!root) return;
+    _pvCtx[`${kind}:${id}`] = { ...(_pvCtx[`${kind}:${id}`] || {}), pid };
     const today = _pvTodayStr();
     // Agent name in the facts line.
     document.querySelectorAll('[data-pv-agent]:not([data-pv-filled])').forEach(async (el) => {
@@ -2190,6 +2195,7 @@ const fillProfileSnapshot = async ({ kind = 'prospect', id, pid = null } = {}) =
     else _pvCardSet(root, 'potential', '<div class="pv-card-lbl">Open potential</div><div class="pv-card-val is-muted">—</div><div class="pv-card-note">No open potential yet</div>');
 
     const [{ acts, attendees }, tasks] = await Promise.all([_pvPersonRows(kind, id, pid), _pvOpenTasks(kind, id, pid)]);
+    _pvTaskBadge(kind, id, tasks);
 
     // ── Next follow-up: an overdue task first, else the earliest of the next
     // booked meeting and the next open task.
@@ -2284,6 +2290,207 @@ const openProtectionSheet = async (prospectId) => {
     const el = document.getElementById('pv-prot-sheet');
     if (el) await switchProspectTab('protection', prospectId, null, el);
 };
+// ── Next up — the ONE task list on a profile (2026-10-25) ───────────────────
+// Rows are journey_touchpoints: a meeting's next action and a person-made deal
+// next step (linked by the DB, migrations/2026-10-25_profile_tasks.sql), journey
+// autopilot steps and hand-added tasks. Open tasks first; finished ones fold
+// away. Overdue comes from the due date (the status flag is not kept up).
+const _pvCtx = {}; // 'kind:id' → { pid } of the open profile
+const _pvPidOf = (kind, id) => {
+    const c = _pvCtx[`${kind}:${id}`];
+    if (c && c.pid !== undefined) return c.pid;
+    return kind === 'prospect' ? Number(id) : null;
+};
+const _pvDatePlus = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+// The stored next-action text as words ("A, B | Remarks: x" → "A, B — x").
+const _pvNextActionText = (s) => String(s || '').replace(/\s*\|\s*Remarks:\s*/g, ' — ').replace(/^—\s*/, '').trim();
+
+// Task lookups for the timeline: meeting id / attendee row id → its task.
+const pvTaskMaps = async (kind, id, pid) => {
+    const tasks = await _pvTaskQuery(kind, id, pid, null);
+    const byAct = new Map(), byAtt = new Map();
+    tasks.forEach(t => {
+        if (t.source_activity_id != null) byAct.set(String(t.source_activity_id), t);
+        if (t.source_attendee_id != null) byAtt.set(String(t.source_attendee_id), t);
+    });
+    return { byAct, byAtt };
+};
+// A meeting's next action inside its timeline row: the meeting's own words,
+// plus the state of the task they became. No live task (older than the
+// 90-day backfill) → the words only, as history.
+const pvTaskLineHtml = (a, maps) => {
+    const text = _pvNextActionText(a && (a.next_action || a.note_next_steps));
+    if (!text) return '';
+    const t = maps && (a._isAttendeeNote ? maps.byAtt.get(String(a._attendeeRowId)) : maps.byAct.get(String(a.id)));
+    if (!t) return `<div class="msf"><span class="msf-lbl">Next action</span><p class="msf-txt">${escapeHtml(text)}</p></div>`;
+    const open = _PV_OPEN.includes(t.status);
+    const today = _pvTodayStr();
+    const late = open && t.due_date && t.due_date < today;
+    const state = open ? `due ${_pvFmtDay(t.due_date)}` : (t.status === 'skipped' ? 'skipped' : 'done');
+    return `<div class="mu-task${open ? '' : ' is-done'}">
+        <i class="${open ? 'far fa-circle' : 'fas fa-check-circle'}" aria-hidden="true"></i>
+        <div><span class="msf-lbl">Next action · task</span><span class="mu-task-txt">${escapeHtml(text)}</span>
+        <span class="mu-task-due${late ? ' is-danger' : ''}">${escapeHtml(state)}</span></div></div>`;
+};
+
+const _pvTaskBadge = (kind, id, open) => {
+    const el = document.getElementById(kind === 'customer' ? `cust-tasks-badge-${id}` : `tasks-badge-${id}`);
+    if (!el) return;
+    const today = _pvTodayStr();
+    const late = open.filter(t => t.due_date && t.due_date < today).length;
+    el.className = `acc-count${late ? ' is-danger' : ''}`;
+    el.textContent = late ? `${late} overdue` : String(open.length);
+    el.style.display = open.length ? 'inline-block' : 'none';
+};
+
+const renderProfileTasks = async (kind, id, pid, container) => {
+    if (!container) return;
+    _pvCtx[`${kind}:${id}`] = { ...(_pvCtx[`${kind}:${id}`] || {}), pid };
+    const [tasks, rows] = await Promise.all([_pvTaskQuery(kind, id, pid, null), _pvPersonRows(kind, id, pid)]);
+    const today = _pvTodayStr();
+    const acts = new Map(rows.acts.map(a => [String(a.id), a]));
+    const atts = new Map(rows.attendees.map(a => [String(a._attendeeRowId), a]));
+    const open = tasks.filter(t => _PV_OPEN.includes(t.status)).sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)));
+    const cut = _pvDatePlus(-60);
+    const done = tasks.filter(t => !_PV_OPEN.includes(t.status) && String(t.completed_at || t.updated_at || '').slice(0, 10) >= cut)
+        .sort((a, b) => String(b.completed_at || b.updated_at || '').localeCompare(String(a.completed_at || a.updated_at || '')));
+    const me = _state.cu && _state.cu.id;
+    const others = [...new Set(tasks.map(t => t.assigned_to_id).filter(u => u != null && String(u) !== String(me)))];
+    const names = new Map(await Promise.all(others.map(async u => [String(u), ((await AppDataStore.getById('users', u).catch(() => null)) || {}).full_name || ''])));
+    const k = `'${kind}', ${Number(id)}`;
+    const row = (t) => {
+        const isOpen = _PV_OPEN.includes(t.status);
+        const d = t.due_date ? _pvDayDiff(today, t.due_date) : 0;
+        let due, dueCls = '';
+        if (!isOpen) due = t.status === 'skipped' ? 'Skipped' : `Done ${_pvFmtDay(t.completed_at || t.updated_at)}`;
+        else if (d < 0) { due = `Overdue · ${-d} day${d === -1 ? '' : 's'}`; dueCls = 'is-danger'; }
+        else if (d === 0) { due = 'Today'; dueCls = 'is-warning'; }
+        else if (d === 1) due = 'Tomorrow';
+        else due = _pvFmtDay(t.due_date);
+        let src;
+        if (t.source_activity_id != null) {
+            const a = acts.get(String(t.source_activity_id));
+            src = `<button type="button" class="tk-src" onclick="app.pvOpenMeeting(${k}, 'mu-${Number(t.source_activity_id)}')">from ${escapeHtml(a ? a.activity_type : 'meeting')}${a && a.activity_date ? ` · ${escapeHtml(_pvFmtDay(a.activity_date))}` : ''}</button>`;
+        } else if (t.source_attendee_id != null) {
+            const a = atts.get(String(t.source_attendee_id));
+            src = `<button type="button" class="tk-src" onclick="app.pvOpenMeeting(${k}, 'mu-att${Number(t.source_attendee_id)}')">from event${a && a.activity_date ? ` · ${escapeHtml(_pvFmtDay(a.activity_date))}` : ''}</button>`;
+        } else if (t.source_deal_id != null) {
+            src = `<button type="button" class="tk-src" onclick="app.pvOpenDeal(${Number(t.source_deal_id)})">from deal</button>`;
+        } else if (t.source_kind === 'manual') {
+            src = '<span class="tk-src">added by hand</span>';
+        } else {
+            const lbl = (window.app.STAGE_LABELS || {})[t.stage_name];
+            src = `<span class="tk-src">Journey${lbl ? ` · ${escapeHtml(String(lbl).replace(/^.*?—\s*/, ''))}` : ''}</span>`;
+        }
+        const who = t.assigned_to_id != null && names.get(String(t.assigned_to_id)) ? `<span class="tk-who">${escapeHtml(names.get(String(t.assigned_to_id)))}</span>` : '';
+        return `
+            <div class="tk-row${isOpen ? '' : ' is-done'}" data-tk="${Number(t.id)}">
+                <input type="checkbox" class="tk-cb" aria-label="Done" ${isOpen ? '' : 'checked'} onchange="app.pvTaskToggle(${Number(t.id)}, this.checked, ${k})">
+                <div class="tk-main">
+                    <div class="tk-title">${escapeHtml(t.title || 'Follow up')}</div>
+                    <div class="tk-meta"><span class="tk-due ${dueCls}">${escapeHtml(due)}</span>${src}${who}</div>
+                </div>
+                ${isOpen ? `${t.touchpoint_type === 'whatsapp_auto' ? `<button type="button" class="tk-act" title="Send WhatsApp" aria-label="Send WhatsApp" onclick="app.pvTaskWhatsApp(${Number(t.id)}, ${k})"><i class="fab fa-whatsapp" aria-hidden="true"></i></button>` : ''}
+                <button type="button" class="tk-act" title="Change date or skip" aria-label="Change date or skip" onclick="app.pvTaskReschedule(${Number(t.id)}, ${k})"><i class="far fa-calendar-alt" aria-hidden="true"></i></button>` : ''}
+            </div>`;
+    };
+    const late = open.filter(t => t.due_date && t.due_date < today).length;
+    container.innerHTML = `
+        <div class="tk-toolbar">
+            <span class="tk-summary">${open.length ? `${open.length} open${late ? ` · <span class="is-danger">${late} overdue</span>` : ''}` : 'Nothing open'}</span>
+            <button type="button" class="btn secondary btn-sm" onclick="app.pvTaskAdd(${k})"><i class="fas fa-plus" aria-hidden="true"></i> Add task</button>
+        </div>
+        ${open.length ? `<div class="tk-list">${open.map(row).join('')}</div>` : '<p class="tk-empty">No open tasks. Book the next meeting, or add a task.</p>'}
+        ${done.length ? `<details class="tk-done"><summary>Show ${done.length} done</summary><div class="tk-list">${done.map(row).join('')}</div></details>` : ''}`;
+    _pvTaskBadge(kind, id, open);
+};
+
+// Re-render Next up (when loaded) and the snapshot after any task change.
+const pvRefreshTasks = async (kind, id) => {
+    const pid = _pvPidOf(kind, id);
+    const body = document.getElementById(kind === 'customer' ? `cust-acc-body-tasks-${id}` : `acc-body-tasks-${id}`);
+    const jobs = [fillProfileSnapshot({ kind, id, pid })];
+    if (body && body.dataset.loaded !== 'false') jobs.push(renderProfileTasks(kind, id, pid, body));
+    await Promise.all(jobs.map(p => p.catch(() => {})));
+};
+const pvTaskToggle = async (tpId, done, kind, id) => {
+    const ok = await AppDataStore.updateTouchpointStatus(tpId, done ? 'done' : 'pending');
+    if (ok && done) UI.toast.success('Done ✓');
+    await pvRefreshTasks(kind, id);
+};
+const pvTaskReschedule = async (tpId, kind, id) => {
+    let t = null;
+    try { ({ data: t } = await _rxSb().from('journey_touchpoints').select('id,title,due_date').eq('id', tpId).maybeSingle()); } catch (_) { /* fields stay empty */ }
+    const chip = (label, n) => `<button type="button" class="btn secondary btn-sm" onclick="document.getElementById('tk-due').value='${_pvDatePlus(n)}'">${label}</button>`;
+    UI.showModal('Change date', `
+        <p class="tk-sheet-title">${escapeHtml((t && t.title) || '')}</p>
+        <div class="tk-chips">${chip('Tomorrow', 1)}${chip('In 3 days', 3)}${chip('Next week', 7)}</div>
+        <div class="form-group"><label for="tk-due">Due date</label><input type="date" id="tk-due" class="form-control" value="${escapeHtml(String((t && t.due_date) || _pvDatePlus(1)))}"></div>`,
+        [
+            { label: 'Skip this task', type: 'secondary', action: `(async () => { await app.pvTaskSet(${Number(tpId)}, 'skipped', null, '${kind}', ${Number(id)}); })()` },
+            { label: 'Save', type: 'primary', action: `(async () => { await app.pvTaskSet(${Number(tpId)}, 'pending', (document.getElementById('tk-due') || {}).value, '${kind}', ${Number(id)}); })()` },
+        ]);
+};
+const pvTaskSet = async (tpId, status, due, kind, id) => {
+    if (status === 'pending' && !/^\d{4}-\d{2}-\d{2}$/.test(due || '')) { UI.toast.error('Pick a date.'); return; }
+    const ok = await AppDataStore.updateTouchpointStatus(tpId, status, due ? { due_date: due } : {});
+    if (!ok) return;
+    UI.hideModal();
+    UI.toast.success(status === 'skipped' ? 'Skipped' : 'Date changed');
+    await pvRefreshTasks(kind, id);
+};
+const pvTaskAdd = (kind, id) => {
+    UI.showModal('Add a task', `
+        <div class="form-group"><label for="tk-new-title">What needs doing?</label><input id="tk-new-title" class="form-control" maxlength="180" placeholder="e.g. Send the PR3 quotation"></div>
+        <div class="form-group"><label for="tk-new-due">By when</label><input type="date" id="tk-new-due" class="form-control" value="${_pvDatePlus(7)}"></div>`,
+        [
+            { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
+            { label: 'Add task', type: 'primary', action: `(async () => { await app.pvTaskSaveNew('${kind}', ${Number(id)}); })()` },
+        ]);
+    setTimeout(() => { try { document.getElementById('tk-new-title').focus(); } catch (_) { /* focus is a nicety */ } }, 50);
+};
+const pvTaskSaveNew = async (kind, id) => {
+    const title = ((document.getElementById('tk-new-title') || {}).value || '').trim();
+    const due = (document.getElementById('tk-new-due') || {}).value || '';
+    if (!title) { UI.toast.error('Type what needs doing.'); return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) { UI.toast.error('Pick a date.'); return; }
+    const { error } = await _rxSb().rpc('task_add', { p_pid: kind === 'customer' ? null : Number(id), p_cid: kind === 'customer' ? Number(id) : null, p_title: title, p_due: due });
+    if (error) { UI.toast.error('Could not add the task: ' + (error.message || error)); return; }
+    UI.hideModal();
+    UI.toast.success('Task added');
+    await pvRefreshTasks(kind, id);
+};
+const pvTaskWhatsApp = async (tpId, kind, id) => {
+    try { if (!window.app.sendJourneyWhatsApp && window._loadChunk) await window._loadChunk('chunks/script-journey.min.js'); } catch (_) { /* handled below */ }
+    if (typeof window.app.sendJourneyWhatsApp !== 'function') { UI.toast.error('Could not load WhatsApp sending. Please reload.'); return; }
+    await window.app.sendJourneyWhatsApp(tpId, kind, id);
+    await pvRefreshTasks(kind, id);
+};
+// Re-render one loaded profile section in place.
+const _pvRefreshSection = async (kind, id, key) => {
+    const body = document.getElementById(kind === 'customer' ? `cust-acc-body-${key}-${id}` : `acc-body-${key}-${id}`);
+    if (!body || body.dataset.loaded === 'false') return;
+    if (kind === 'customer') await window.app.switchCustomerProfileTab(key, id, body);
+    else await switchProspectTab(key, id, null, body);
+};
+// A deal saved anywhere: refresh the profile on screen that owns it — the
+// prospect itself or the customer converted from it.
+const pvAfterDealSave = async (prospectId) => {
+    const pid = Number(prospectId);
+    for (const key of Object.keys(_pvCtx)) {
+        const [kind, rawId] = key.split(':');
+        if (!(key === `prospect:${pid}` || _pvCtx[key].pid === pid)) continue;
+        if (!document.querySelector(`.pv-snap[data-snap="${key}"]`)) continue;
+        await pvRefreshTasks(kind, Number(rawId));
+        await _pvRefreshSection(kind, Number(rawId), 'potential').catch(() => {});
+    }
+};
+const pvOpenDeal = async (dealId) => {
+    try { if (window._loadChunk) await window._loadChunk('chunks/script-pipeline.min.js'); } catch (_) { /* handled below */ }
+    if (typeof window.app.openDealModal !== 'function') { UI.toast.error('Could not open the deal. Please reload.'); return; }
+    await window.app.openDealModal(dealId);
+};
+
 if (!window.__pvMenuCloser && document.addEventListener) {
     // Close an open ⋯ menu on any tap outside it.
     window.__pvMenuCloser = true;
@@ -2381,7 +2588,7 @@ const buildProspectDetailTabsHtml = (prospect) => {
                 <div class="acc-container" id="acc-container-${pid}" ${prospect.unable_to_serve ? 'style="opacity:0.6;pointer-events:none;"' : ''}>
                     <div class="acc-group-label">Overview</div>
                     ${_pvAccItem('info', pid, 'fa-user', 'Basic Information', true)}
-                    ${_pvAccItem('nextactions', pid, 'fa-tasks', 'Next Actions')}
+                    ${_pvAccItem('tasks', pid, 'fa-list-check', `Next up <span id="tasks-badge-${pid}" class="acc-count" style="display:none;"></span>`)}
 
                     <div class="acc-group-label">Engagement</div>
                     ${_pvAccItem('activity', pid, 'fa-user-friends', 'Meet Ups &amp; Events')}
@@ -2971,7 +3178,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         // EVENT_TYPES are disjoint, so the merged list can never double-count.
         const MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP','EVENT_CLOSING'];
         const EVENT_TYPES = ['EVENT','AGENT_MEETING','AGENT_TRAINING','SITE'];
-        const [_prospectActs, allEvents, allRegs, _attendeeNotes] = await Promise.all([
+        const [_prospectActs, allEvents, allRegs, _attendeeNotes, _taskMaps] = await Promise.all([
             AppDataStore.getActivitiesForProspect(prospectId, { limit: 500 }),
             AppDataStore.getAll('events'),
             AppDataStore.getAll('event_registrations'),
@@ -2979,7 +3186,12 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             // show — a prospect who paid, got a ticket and turned up must
             // appear even before anyone types post-event notes.
             (window.app.getProspectAttendeeNotes || (() => Promise.resolve([])))(prospectId, { includeWithoutNotes: true }),
+            // Each meeting's next action is ONE task now — the row shows its state.
+            pvTaskMaps('prospect', prospectId, prospectId),
         ]);
+        // Inside the profile the snapshot already says what happened last; the
+        // "Before you meet" brief stays for the Meet-Up History pop-up only.
+        const _inProfile = /^acc-body-/.test(container.id || '');
         const meetups = _prospectActs.filter(a => MEETUP_TYPES.includes(a.activity_type));
         const eventsById = new Map((allEvents || []).map(e => [String(e.id), e]));
         const validEventIds = new Set(eventsById.keys());
@@ -3090,16 +3302,17 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 { lbl: 'Advisor Observations',    val: m.advisor },
                 { lbl: 'Customer Reaction',       val: m.reaction },
                 { lbl: 'Opportunity / Potential', val: a.opportunity_potential },
-                { lbl: 'Next Steps',              val: a.note_next_steps,  action: true },
-                { lbl: 'Next Action',             val: a.next_action,      action: true },
                 { lbl: 'Outcome',                 val: a.note_outcome },
             ].filter(f => f.val);
             // Core Problem mirrors Key Points (summary = key points) — skip the duplicate.
             const dedup = fields.filter(f => !(f.lbl === 'Core Problem' && f.val === a.note_key_points));
-            if (!dedup.length) return '';
+            // Next action (next_action / note_next_steps) = one task, shown once.
+            const task = pvTaskLineHtml(a, _taskMaps);
+            if (!dedup.length && !task) return '';
             return `<div class="meet-summary">
                 <div class="meet-summary-hdr"><i class="fas fa-file-alt"></i>&nbsp; Discussion Notes</div>
-                ${dedup.map(f => `<div class="msf"><span class="msf-lbl">${f.lbl}</span><p class="msf-txt${f.action ? ' action' : ''}">${_esc(f.val)}</p></div>`).join('')}
+                ${dedup.map(f => `<div class="msf"><span class="msf-lbl">${f.lbl}</span><p class="msf-txt">${_esc(f.val)}</p></div>`).join('')}
+                ${task}
             </div>`;
         };
         const _peopleHtml = (a) => `
@@ -3116,7 +3329,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             ${a.note_needs ? `<div class="meet-section"><div class="meet-lbl">Needs</div><div class="meet-txt">${escapeHtml(a.note_needs)}</div></div>` : ''}
             ${a.note_pain_points ? `<div class="meet-section"><div class="meet-lbl">Pain Points</div><div class="meet-txt">${escapeHtml(a.note_pain_points)}</div></div>` : ''}
             ${a.opportunity_potential ? `<div class="meet-section"><div class="meet-lbl">Opportunity / Potential</div><div class="meet-txt">${escapeHtml(a.opportunity_potential)}</div></div>` : ''}
-            ${a.next_action ? `<div class="meet-section"><div class="meet-lbl">Next Action</div><div class="meet-txt" style="color:var(--primary);font-weight:500;">${escapeHtml(a.next_action)}</div></div>` : ''}
+            ${pvTaskLineHtml(a, _taskMaps)}
             ${a.location_address ? `<div class="meet-section"><div class="meet-lbl">Location</div><div class="meet-txt">${escapeHtml(a.location_address)}</div></div>` : ''}`;
         const _attChip = (on, label) =>
             `<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:${on ? '#dcfce7' : 'var(--gray-100)'};color:${on ? '#166534' : 'var(--gray-500)'};">${on ? '✓' : '—'} ${label}</span>`;
@@ -3208,7 +3421,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 </div>`;
         };
 
-        const _briefHtml = () => meetupBriefHtml(rows, { typeLabel });
+        const _briefHtml = () => (_inProfile ? '' : meetupBriefHtml(rows, { typeLabel }));
 
         const nMeet = rows.filter(a => _kind(a) === 'meetup').length;
         const nEvent = rows.length - nMeet;
@@ -3243,6 +3456,12 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         // Inline discussion-paper thumbs → signed URLs (also when this renders
         // inside the Meet-Up History modal, outside #content-viewport).
         try { window._resolveAttachmentImages && setTimeout(() => window._resolveAttachmentImages(), 0); } catch (_) { /* best-effort */ }
+        // A re-render follows a save (minutes, new meet up) — the DB may have
+        // made or closed a task, so Next up and the snapshot follow.
+        if (_inProfile) {
+            if (container.dataset.pvRendered) pvRefreshTasks('prospect', prospectId).catch(() => {});
+            container.dataset.pvRendered = '1';
+        }
     }
     else if (tab === 'notes') {
         const notes = await AppDataStore.query('notes', { prospect_id: prospectId });
@@ -3366,7 +3585,6 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             ...meetups.flatMap(a => [a.opportunity_potential, a.note_outcome].filter(Boolean)),
             ...auditSolutions,
         ])];
-        const allNextSteps = [...new Set(meetups.flatMap(a => [a.next_action, a.note_next_steps].filter(Boolean)))];
 
         const dealCards = meetups.filter(a =>
             a.note_pain_points || a.note_needs || a.note_key_points || a.core_problem ||
@@ -3413,72 +3631,15 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 ${allSolutions.map(s => `<div class="pv-notice-line">• ${escapeHtml(s)}</div>`).join('')}
             </div>` : ''}
 
-            ${allNextSteps.length > 0 ? `
-            <div class="pv-notice is-info">
-                <div class="pv-notice-title"><i class="fas fa-arrow-right" aria-hidden="true"></i> Next Steps to Close</div>
-                ${allNextSteps.map(s => `<div class="pv-notice-line">• ${escapeHtml(s)}</div>`).join('')}
-            </div>` : ''}
-
             ${(dealCards.length === 0 && allNeeds.length === 0 && allSolutions.length === 0) ? '<p style="text-align:center;padding:12px;color:var(--gray-400);font-size:13px;">No deal analysis recorded yet. Add notes during meet ups or log a feng shui audit.</p>' : ''}
             ` : '<p style="text-align:center;padding:20px;color:var(--gray-400);font-size:13px;">No meet ups or feng shui audits recorded yet.</p>'}
         `;
     }
-    else if (tab === 'nextactions') {
-        const [_ownActs, _attendeeNotes] = await Promise.all([
-            AppDataStore.getActivitiesForProspect(prospectId, { limit: 500 }),
-            (window.app.getProspectAttendeeNotes || (() => Promise.resolve([])))(prospectId),
-        ]);
-        const activities = [..._ownActs, ..._attendeeNotes]
-            .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date) || ((b.id || 0) > (a.id || 0) ? 1 : -1));
-
-        // Collect action items: next_action field + note_next_steps field, deduplicated per activity
-        const actionItems = [];
-        for (const a of activities) {
-            if (a.next_action?.trim()) {
-                actionItems.push({ id: `${a.id}_na`, activityId: a.id, text: a.next_action.trim(), date: a.activity_date, type: a.activity_type, title: a.activity_title, source: 'Next Action' });
-            }
-            if (a.note_next_steps?.trim() && a.note_next_steps.trim() !== (a.next_action || '').trim()) {
-                actionItems.push({ id: `${a.id}_ns`, activityId: a.id, text: a.note_next_steps.trim(), date: a.activity_date, type: a.activity_type, title: a.activity_title, source: 'Next Steps' });
-            }
-        }
-
-        if (actionItems.length === 0) {
-            container.innerHTML = '<p style="text-align:center;padding:20px;color:var(--gray-400);">No next actions recorded yet. Add during meet ups via Next Action or Next Steps fields.</p>';
-            return;
-        }
-
-        const rows = actionItems.map(item => {
-            const _act = activities.find(a => String(a.id) === String(item.activityId));
-            const isDone = (item.id.endsWith('_na') ? _act?.next_action_done : _act?.note_next_steps_done)
-                || localStorage.getItem(`na_done_${prospectId}_${item.id}`) === '1';
-            return `
-                <div class="na-item${isDone ? ' done' : ''}" id="na-item-${item.id}">
-                    <input type="checkbox" class="na-cb" id="na-cb-${item.id}" ${isDone ? 'checked' : ''}
-                        onchange="app.toggleNextActionItem(${prospectId}, '${item.id}', this.checked)">
-                    <div style="flex:1;">
-                        <div class="na-text" id="na-text-${item.id}">${escapeHtml(item.text || '')}</div>
-                        <div style="font-size:11px;color:var(--gray-400);margin-top:2px;">${escapeHtml(item.date || '')} — ${item.type || 'Meeting'}${item.title ? ' · ' + escapeHtml(item.title) : ''} <span style="background:var(--gray-100);border-radius:3px;padding:1px 4px;">${item.source}</span></div>
-                    </div>
-                </div>
-            `;
-        }).join('');
-
-        const total = actionItems.length;
-        const done = actionItems.filter(item => {
-            const _act = activities.find(a => String(a.id) === String(item.activityId));
-            return (item.id.endsWith('_na') ? _act?.next_action_done : _act?.note_next_steps_done)
-                || localStorage.getItem(`na_done_${prospectId}_${item.id}`) === '1';
-        }).length;
-        container.innerHTML = `
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-                <span data-na-count style="font-size:13px;color:var(--gray-500);">${done} of ${total} completed</span>
-                <div class="progress-bar" style="flex:1;margin:0 12px;height:6px;">
-                    <div class="progress-fill" style="width:${total > 0 ? Math.round((done/total)*100) : 0}%;background:var(--success);transition:width 0.3s;"></div>
-                </div>
-                <span style="font-size:13px;font-weight:600;color:var(--success);">${total > 0 ? Math.round((done/total)*100) : 0}%</span>
-            </div>
-            ${rows}
-        `;
+    else if (tab === 'tasks') {
+        // Next up — the one task list (journey_touchpoints). Replaces the old
+        // "Next Actions" list that re-extracted next_action text from every
+        // meeting with no date, no owner and per-device ticks (2026-10-25).
+        await renderProfileTasks('prospect', prospectId, prospectId, container);
     }
     else if (tab === 'closing') {
         if (!window.app.bjcAttachSelect && window._loadChunk) window._loadChunk('chunks/script-activities.min.js').catch(() => {});
@@ -8072,6 +8233,18 @@ const openPastRecordModal = async (...args) => {
         pvFactsHtml: _pvFactsHtml,
         pvMenuHtml: _pvMenuHtml,
         pvSnapHtml: _pvSnapHtml,
+        renderProfileTasks,
+        pvRefreshTasks,
+        pvTaskToggle,
+        pvTaskReschedule,
+        pvTaskSet,
+        pvTaskAdd,
+        pvTaskSaveNew,
+        pvTaskWhatsApp,
+        pvOpenDeal,
+        pvAfterDealSave,
+        pvTaskMaps,
+        pvTaskLineHtml,
         potentialCode,
         _fsaReportFilesHtml,
         showPotentialBreakdown,

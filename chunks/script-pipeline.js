@@ -6548,6 +6548,9 @@ const saveDeal = async (dealId = null) => {
         UI.hideModal();
         UI.toast.success(dealId ? 'Deal updated' : 'Deal added');
         _plRenderGoalSections();
+        // Saved from a profile: its next step may now be a task, and the deal
+        // list / open potential there move with it.
+        try { if (window.app.pvAfterDealSave) window.app.pvAfterDealSave(pros.id); } catch (_) { /* best-effort */ }
     } catch (e) {
         UI.toast.error('Could not save deal: ' + (e && e.message ? e.message : e));
     }

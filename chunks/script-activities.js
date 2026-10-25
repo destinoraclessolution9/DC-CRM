@@ -1822,7 +1822,11 @@ My raw notes:
                         <textarea id="${prefix}-next-action-remarks" class="form-control" rows="2" placeholder="Additional remarks..." ${disabled}>${escapeHtml(rawNARemarksText)}</textarea>
                         ${voiceBtn(`${prefix}-next-action-remarks`)}
                     </div>
-                    <div style="font-size:11px;color:var(--gray-400);margin-top:3px;"><i class="fas fa-link"></i> Linked to prospect profile → Next Actions / Pipeline → Action Needed to Close Deal</div>
+                    <div style="display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap;">
+                        <label for="${prefix}-next-action-due" style="margin:0;font-weight:600;">By when</label>
+                        <input type="date" id="${prefix}-next-action-due" class="form-control" style="max-width:190px;" value="${escapeHtml(_nextActionDueDefault(a))}" ${disabled}>
+                    </div>
+                    <div style="font-size:11px;color:var(--gray-400);margin-top:3px;"><i class="fas fa-link"></i> Becomes one task in the profile's Next up list and the daily to-do — tick it there when done.</div>
                 </div>
                 ${opts.gradeContext ? `
                 <div class="form-group" style="border-top:1px solid var(--gray-200);padding-top:12px;margin-top:4px;">
@@ -1861,6 +1865,19 @@ My raw notes:
         `;
     };
 
+    // "By when" for the next action: the saved date, else 7 days after the meeting
+    // (or after today, when the minutes are written late). The DB turns the next
+    // action into ONE task due on this date (migrations/2026-10-25_profile_tasks.sql).
+    const _nextActionDueDefault = (a) => {
+        if (a && a.next_action_due) return String(a.next_action_due).slice(0, 10);
+        const now = new Date();
+        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        const base = a && a.activity_date && String(a.activity_date).slice(0, 10) > today ? String(a.activity_date).slice(0, 10) : today;
+        const d = new Date(base + 'T00:00:00');
+        d.setDate(d.getDate() + 7);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+
     // Collect Post-Meetup Notes values from the DOM using the block's prefix.
     // Uses the same serializer helpers as the legacy modal so stored shape is
     // unchanged — `opportunity_potential` and `next_action` remain the
@@ -1887,6 +1904,12 @@ My raw notes:
                 let result = items.join(', ');
                 if (remarks) result += (result ? ' | ' : '') + 'Remarks: ' + remarks;
                 return result;
+            })(),
+            // undefined (key dropped) on an old form without the field.
+            next_action_due: (() => {
+                const el = document.getElementById(`${prefix}-next-action-due`);
+                if (!el) return undefined;
+                return /^\d{4}-\d{2}-\d{2}$/.test(el.value || '') ? el.value : null;
             })(),
             meeting_minutes: _collectMeetingMinutes(prefix),
         };

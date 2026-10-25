@@ -267,7 +267,13 @@ function makeSandbox(store, attendeeRows, expectedAttendeeType, supabaseStub) {
     ] }) }) }) };
     const { sandbox, windowStub } = makeSandbox(makeStore('prospect'), ATTENDEE_ROWS_P, 'prospect', supabaseStub);
     vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'chunks', 'script-prospects.js'), 'utf8'), sandbox, { filename: 'script-prospects.js' });
-    const body = makeEl('acc-body-activity-55');
+    // 2026-10-25: inside the profile the snapshot covers "last meeting" — the
+    // brief renders only in the Meet-Up History pop-up (muh-modal-body-*).
+    const profileBody = makeEl('acc-body-activity-55');
+    await windowStub.app.switchProspectTab('activity', 55, null, profileBody);
+    check('M: no brief inside the profile', !profileBody.innerHTML.includes('Before you meet'));
+    check('M: next action shown once in its row (no live task → history line)', (profileBody.innerHTML.match(/博物馆/g) || []).length, 1);
+    const body = makeEl('muh-modal-body-55');
     await windowStub.app.switchProspectTab('activity', 55, null, body);
     const html = body.innerHTML;
     const brief = html.slice(html.indexOf('mu-brief'), html.indexOf('</details>'));
@@ -348,12 +354,15 @@ function makeSandbox(store, attendeeRows, expectedAttendeeType, supabaseStub) {
     // App order: prospects chunk (shared renderers) is present, then customers.
     vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'chunks', 'script-prospects.js'), 'utf8'), sandbox, { filename: 'script-prospects.js' });
     vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'chunks', 'script-customers.js'), 'utf8'), sandbox, { filename: 'script-customers.js' });
-    const body = makeEl('cust-acc-body-activity-77');
+    const profileBody = makeEl('cust-acc-body-activity-77');
     await windowStub.app.renderCustomerActivityTab(CUSTOMER, 'cust-acc-body-activity-77');
+    check('CM: no brief inside the customer profile', !profileBody.innerHTML.includes('Before you meet'));
+    const body = makeEl('muh-modal-body-c77');
+    await windowStub.app.renderCustomerActivityTab(CUSTOMER, 'muh-modal-body-c77');
     const html = body.innerHTML;
     const brief = html.slice(html.indexOf('mu-brief'), html.indexOf('</details>'));
     check('CM: enrichment queried own activity ids only (no att ids)', JSON.stringify(inCalls[0] || []), JSON.stringify(['20', '25', '22']));
-    check('CM: brief rendered on customer profile', html.includes('Before you meet'));
+    check('CM: brief rendered in the Meet-Up History pop-up', html.includes('Before you meet'));
     check('CM: brief = latest row with content (CALL 08-10)', brief.includes('last: 2026-08-10') && brief.includes('Called her'));
     check('CM: brief background escaped', brief.includes('退休夫妇 &lt;b&gt;x&lt;/b&gt;') && !html.includes('<b>x</b>'));
     check('CM: brief advisor/reaction/key points', brief.includes('调整大门') && brief.includes('很满意') && brief.includes('想换房'));

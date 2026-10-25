@@ -1427,6 +1427,8 @@
             ? document.getElementById(`cust-acc-body-journey-${entityId}`)
             : document.getElementById(`acc-body-journey-${entityId}`);
         if (bodyEl) await renderJourneyTab(entityType, entityId, bodyEl);
+        // Journey steps are tasks in the profile's Next up list + snapshot too.
+        try { if (window.app.pvRefreshTasks) await window.app.pvRefreshTasks(entityType, entityId); } catch (_) { /* best-effort */ }
     }
 
     // Open the specific prospect/customer behind a dashboard "due today" row.

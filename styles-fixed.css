@@ -11763,13 +11763,39 @@ html, body {
     .mu-detail { padding-left: 14px; }
 }
 
-/* Next actions */
-.na-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--gray-200); }
-.na-item:last-child { border-bottom: none; }
-.na-item input[type=checkbox] { width: 18px; height: 18px; margin-top: 1px; flex-shrink: 0; accent-color: var(--primary); cursor: pointer; }
-.na-item.done .na-text { text-decoration: line-through; color: var(--gray-500); }
-.na-text { font-size: 14px; color: var(--gray-900); flex: 1; }
-.na-meta { font-size: 12px; color: var(--gray-500); margin-top: 2px; }
+/* Next up — the one task list (2026-10-25) */
+.tk-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.tk-summary { font-size: 13px; font-weight: 600; color: var(--gray-700); }
+.tk-summary .is-danger, .tk-due.is-danger, .mu-task-due.is-danger { color: #B3261E; }
+.tk-due.is-warning { color: #8A4B08; }
+.tk-list { display: flex; flex-direction: column; }
+.tk-row { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--gray-200); }
+.tk-row:last-child { border-bottom: none; }
+.tk-cb { width: 20px; height: 20px; margin-top: 1px; flex-shrink: 0; accent-color: var(--success, #146C43); cursor: pointer; }
+.tk-main { flex: 1; min-width: 0; }
+.tk-title { font-size: 14.5px; line-height: 1.45; color: var(--gray-900); word-break: break-word; }
+.tk-row.is-done .tk-title { color: var(--gray-500); text-decoration: line-through; }
+.tk-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 3px; font-size: 12.5px; color: var(--gray-500); }
+.tk-due { font-weight: 600; color: var(--gray-700); }
+.tk-src { padding: 0; border: none; background: none; font: inherit; color: var(--gray-500); }
+button.tk-src { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+button.tk-src:hover { color: var(--gray-900); }
+.tk-who::before { content: '· '; }
+.tk-act { width: 36px; height: 36px; flex-shrink: 0; border: 1px solid var(--gray-200); border-radius: 8px; background: var(--bg-surface, #fff); color: var(--gray-500); cursor: pointer; }
+.tk-act:hover { color: var(--gray-900); border-color: var(--gray-300); }
+.tk-empty { margin: 8px 0 4px; font-size: 13.5px; color: var(--gray-500); }
+.tk-done { margin-top: 8px; }
+.tk-done > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--gray-500); padding: 6px 0; }
+.tk-sheet-title { margin: 0 0 12px; font-weight: 600; color: var(--gray-900); }
+.tk-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+/* A meeting's next action inside its timeline row */
+.mu-task { display: flex; align-items: flex-start; gap: 10px; margin: 4px 0 10px; padding: 10px 12px; border: 1px solid var(--gray-200); border-radius: 8px; background: var(--gray-50, #F8F9FA); }
+.mu-task > i { margin-top: 3px; color: var(--gray-500); }
+.mu-task.is-done > i { color: #146C43; }
+.mu-task .msf-lbl { margin-bottom: 2px; }
+.mu-task-txt { display: block; font-size: 14px; line-height: 1.5; color: var(--gray-900); word-break: break-word; }
+.mu-task.is-done .mu-task-txt { color: var(--gray-500); }
+.mu-task-due { display: inline-block; margin-top: 2px; font-size: 12.5px; font-weight: 600; color: var(--gray-700); }
 
 /* Closing record status */
 .cr-row { margin-bottom: 10px; }
