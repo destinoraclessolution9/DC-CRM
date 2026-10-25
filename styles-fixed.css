@@ -11948,6 +11948,25 @@ button.pv-card:focus-visible { outline: 2px solid var(--accent, #E84393); outlin
     .pv-attn { padding: 0 12px; }
 }
 
+/* Profile tabs — Engagement · Opportunities · Records · Details. Each section
+   carries data-pane; the container shows only the active tab's sections. */
+.pv-tabs { display: flex; gap: 4px; padding: 10px 16px 0; border-bottom: 1px solid var(--gray-200); overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.pv-tabs::-webkit-scrollbar { display: none; }
+.pv-tab { flex-shrink: 0; display: inline-flex; align-items: center; gap: 7px; min-height: 44px; padding: 0 14px; border: none; border-bottom: 2px solid transparent; margin-bottom: -1px; background: none; font: inherit; font-size: 14px; font-weight: 600; color: var(--gray-500); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.pv-tab i { font-size: 13px; }
+.pv-tab:hover { color: var(--gray-900); }
+.pv-tab[aria-selected="true"] { color: var(--gray-900); border-bottom-color: var(--accent, #E84393); }
+.pv-tab:focus-visible { outline: 2px solid var(--accent, #E84393); outline-offset: -2px; }
+.acc-container[data-tab="engagement"] > .acc-item[data-pane]:not([data-pane="engagement"]),
+.acc-container[data-tab="opportunities"] > .acc-item[data-pane]:not([data-pane="opportunities"]),
+.acc-container[data-tab="records"] > .acc-item[data-pane]:not([data-pane="records"]),
+.acc-container[data-tab="details"] > .acc-item[data-pane]:not([data-pane="details"]) { display: none; }
+@media (max-width: 420px) {
+    .pv-tabs { padding: 6px 8px 0; gap: 0; }
+    .pv-tab { padding: 0 10px; font-size: 13.5px; gap: 6px; }
+    .pv-tab i { display: none; }
+}
+
 /* Customer profile extras (redesign phase 5) */
 .pv-since { font-size: 13px; color: var(--gray-500); margin-top: 4px; }
 .acc-count { background: var(--gray-100); color: var(--gray-700); }

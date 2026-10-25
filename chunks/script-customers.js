@@ -638,8 +638,9 @@ const _LINKED_PROSPECT_SECTIONS = [
     ['forms',    'fas fa-clipboard-list', 'Customer Forms'],
     ['names',    'fas fa-users',          'Name List'],
     ['fengshui', 'fas fa-compass',        'Feng Shui Audit'],
-    ['bujishu',  'fas fa-gem',            'Bujishu Product Purchase History'],
-    ['formula',  'fas fa-heartbeat',      'Formula Healthcare Product Purchase History'],
+    ['bujishu',  'fas fa-gem',            'Bujishu purchases'],
+    ['formula',  'fas fa-heartbeat',      'Formula Healthcare purchases'],
+    ['docs',     'fas fa-folder',         'Documents'],
 ];
 // Contracts renderer lives in the lazily-loaded forms chunk. It was called
 // without loading it (since the chunk split), so the section sat on
@@ -655,12 +656,12 @@ const _renderCustomerContracts = async (customer, containerId) => {
     if (el) el.innerHTML = '<p style="color:var(--gray-500);font-size:13px;">Could not load contracts. Please reload and try again.</p>';
 };
 
-const _linkedProspectSectionsHtml = (prospectId, tabs = null) => {
+const _linkedProspectSectionsHtml = (prospectId, tabs = null, pane = '') => {
     if (prospectId == null) return '';
     const pid = Number(prospectId);
     if (!Number.isFinite(pid)) return '';
-    return _LINKED_PROSPECT_SECTIONS.filter(([tab]) => !tabs || tabs.includes(tab)).map(([tab, icon, label]) => `
-                <div class="acc-item" id="acc-${tab}-${pid}">
+    return (tabs || _LINKED_PROSPECT_SECTIONS.map(s => s[0])).map(t => _LINKED_PROSPECT_SECTIONS.find(s => s[0] === t)).filter(Boolean).map(([tab, icon, label]) => `
+                <div class="acc-item" id="acc-${tab}-${pid}"${pane ? ` data-pane="${pane}"` : ''}>
                     <div class="acc-hdr" role="button" tabindex="0" aria-expanded="false" onclick="app.toggleAccordion('${tab}',${pid},this.parentElement);this.setAttribute('aria-expanded',this.parentElement.classList.contains('open'))" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">
                         <span><i class="${icon}" aria-hidden="true"></i> ${label}</span>
                         <i class="fas fa-chevron-down acc-chev" aria-hidden="true"></i>
@@ -671,8 +672,8 @@ const _linkedProspectSectionsHtml = (prospectId, tabs = null) => {
 
 // One customer profile section. Ids (cust-acc-<key>-<id> / cust-acc-body-<key>-<id>)
 // are looked up by refreshes elsewhere — only order and grouping may change.
-const _cvAccItem = (key, cid, icon, title, open = false) => `
-                <div class="acc-item${open ? ' open' : ''}" id="cust-acc-${key}-${cid}">
+const _cvAccItem = (key, cid, icon, title, open = false, pane = '') => `
+                <div class="acc-item${open ? ' open' : ''}" id="cust-acc-${key}-${cid}"${pane ? ` data-pane="${pane}"` : ''}>
                     <div class="acc-hdr" role="button" tabindex="0" aria-expanded="${open}" onclick="app.toggleCustomerAccordion('${key}',${cid},this.parentElement);this.setAttribute('aria-expanded',this.parentElement.classList.contains('open'))" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">
                         <span><i class="fas ${icon}" aria-hidden="true"></i> ${title}</span>
                         <i class="fas fa-chevron-down acc-chev" aria-hidden="true"></i>
@@ -711,7 +712,6 @@ const showCustomerDetail = async (customerId) => {
     const cid = customer.id;
     const lpid = customer.converted_from_prospect_id;
     // Count badges are revealed below (display + text) — keep the ids.
-    const jnyBadge  = `<span id="cust-jny-badge-${cid}" class="acc-count is-danger" style="display:none;"></span>`;
     const impBadge  = `<span id="cust-imp-badge-${cid}" class="acc-count is-success" style="display:none;"></span>`;
     const hostBadge = `<span id="cust-host-badge-${cid}" class="acc-count" style="display:none;"></span>`;
 
@@ -758,49 +758,40 @@ const showCustomerDetail = async (customerId) => {
             </div>
             ${(window.app.pvSnapHtml || (() => ''))('customer', cid, lpid != null ? Number(lpid) : null)}
 
-            <div class="acc-container" id="cust-acc-container-${cid}">
-                <div class="acc-group-label">Overview</div>
-                ${_cvAccItem('info', cid, 'fa-info-circle', 'Basic Information', true)}
-                ${_cvAccItem('tasks', cid, 'fa-list-check', `Next up <span id="cust-tasks-badge-${cid}" class="acc-count" style="display:none;"></span>`)}
-                ${_cvAccItem('bank', cid, 'fa-university', 'Bank &amp; Payment')}
-                ${_cvAccItem('platforms', cid, 'fa-id-badge', 'Platform IDs')}
-
-                <div class="acc-group-label">Engagement</div>
-                ${_cvAccItem('activity', cid, 'fa-user-friends', 'Meet Ups &amp; Events')}
-                ${_cvAccItem('journey', cid, 'fa-route', `Journey Tracker ${jnyBadge}`)}
-                ${_cvAccItem('improvements', cid, 'fa-seedling', `改命后的进步 ${impBadge}`)}
+            ${/* Tabs — same four areas as the prospect profile (prospects chunk). */
+              (window.app.pvTabsHtml || (() => ''))('customer', cid)}
+            <div class="acc-container" id="cust-acc-container-${cid}" data-tab="engagement">
+                ${_cvAccItem('tasks', cid, 'fa-list-check', `Next up <span id="cust-tasks-badge-${cid}" class="acc-count" style="display:none;"></span>`, false, 'engagement')}
+                ${_cvAccItem('activity', cid, 'fa-user-friends', 'Meet Ups &amp; Events', false, 'engagement')}
+                ${_cvAccItem('improvements', cid, 'fa-seedling', `改命后的进步 ${impBadge}`, false, 'engagement')}
                 ${/* 汇集接待 rows come from event_huiji_details, whose RLS already
                       scopes to the viewer's own created events (managers L≤5 see all). */
-                  _cvAccItem('hosting', cid, 'fa-home', `汇集接待 Hosting ${hostBadge}`)}
+                  _cvAccItem('hosting', cid, 'fa-home', `汇集接待 Hosting ${hostBadge}`, false, 'engagement')}
+                ${_cvAccItem('notes', cid, 'fa-sticky-note', 'Notes', false, 'engagement')}
 
-                <div class="acc-group-label">Relationships</div>
-                ${_cvAccItem('referrals', cid, 'fa-user-plus', 'Referrals Made')}
-                ${_cvAccItem('eligibility', cid, 'fa-user-tie', 'Agent Eligibility')}
+                ${_cvAccItem('journey', cid, 'fa-route', 'Journey Tracker', false, 'opportunities')}
+                ${_linkedProspectSectionsHtml(lpid, ['fengshui'], 'opportunities')}
+                ${_cvAccItem('referrals', cid, 'fa-user-plus', 'Referrals Made', false, 'opportunities')}
+                ${_linkedProspectSectionsHtml(lpid, ['names'], 'opportunities')}
+                ${_cvAccItem('eligibility', cid, 'fa-user-tie', 'Agent Eligibility', false, 'opportunities')}
 
-                <div class="acc-group-label">Sales</div>
-                ${_cvAccItem('contracts', cid, 'fa-file-contract', 'Contracts')}
-                ${_cvAccItem('closing', cid, 'fa-handshake', 'DC Closing Record')}
-                ${_linkedProspectSectionsHtml(lpid, ['bujishu', 'formula', 'fengshui', 'forms'])}
+                ${_cvAccItem('closing', cid, 'fa-handshake', 'DC Closing Record', false, 'records')}
+                ${_linkedProspectSectionsHtml(lpid, ['bujishu', 'formula'], 'records')}
+                ${_cvAccItem('contracts', cid, 'fa-file-contract', 'Contracts', false, 'records')}
+                ${_linkedProspectSectionsHtml(lpid, ['forms', 'docs'], 'records')}
 
-                <div class="acc-group-label">Notes &amp; lists</div>
-                ${_cvAccItem('notes', cid, 'fa-sticky-note', 'Notes')}
-                ${_cvAccItem('tags', cid, 'fa-tags', 'Tags')}
-                ${_linkedProspectSectionsHtml(lpid, ['names'])}
+                ${_cvAccItem('info', cid, 'fa-info-circle', 'Basic Information', false, 'details')}
+                ${_cvAccItem('bank', cid, 'fa-university', 'Bank &amp; Payment', false, 'details')}
+                ${_cvAccItem('platforms', cid, 'fa-id-badge', 'Platform IDs', false, 'details')}
+                ${_cvAccItem('tags', cid, 'fa-tags', 'Tags', false, 'details')}
             </div>
         </div>
     `;
-    // Pre-load the Info accordion body (open by default)
-    await switchCustomerProfileTab('info', customerId, document.getElementById(`cust-acc-body-info-${customerId}`));
+    // Opens on Engagement: Next up + the timeline load now, every other section
+    // when its tab is first shown. (Overdue journey steps are counted in Next
+    // up — the Journey Tracker no longer carries its own badge.)
     (window.app.fillProfileSnapshot || (() => Promise.resolve()))({ kind: 'customer', id: cid, pid: lpid != null ? Number(lpid) : null }).catch(() => {});
-    // Async: populate journey overdue badge
-    AppDataStore.getJourneyTouchpoints('customer', customer.id).then(tps => {
-        const overdue = tps.filter(t => t.status === 'overdue').length;
-        const badge = document.getElementById(`cust-jny-badge-${customer.id}`);
-        if (badge && overdue > 0) {
-            badge.textContent = `${overdue} overdue`;
-            badge.style.display = 'inline';
-        }
-    }).catch(() => {});
+    (window.app.pvShowTab || (() => Promise.resolve()))('customer', cid, 'engagement').catch(() => {});
     // Async: populate 改命后的进步 count badge. id-only count — the full rows
     // (story bodies) are only fetched when the section is actually opened.
     AppDataStore.queryAdvanced('customer_improvements', { select: 'id', filters: { customer_id: customer.id }, limit: 1, countMode: 'exact' }).then(res => {

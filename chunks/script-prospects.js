@@ -2264,6 +2264,8 @@ const fillProfileSnapshot = async ({ kind = 'prospect', id, pid = null } = {}) =
 const pvGoToSection = async (kind, id, key) => {
     const itemEl = document.getElementById(kind === 'customer' ? `cust-acc-${key}-${id}` : `acc-${key}-${id}`);
     if (!itemEl) return null;
+    // Bring its tab forward first (a section in a hidden tab cannot be seen).
+    if (itemEl.dataset.pane && _pvContainerOf(kind, id)?.dataset.tab !== itemEl.dataset.pane) await pvShowTab(kind, id, itemEl.dataset.pane);
     if (!itemEl.classList.contains('open')) {
         if (kind === 'customer') await toggleCustomerAccordion(key, id, itemEl);
         else await toggleAccordion(key, id, itemEl);
@@ -2485,6 +2487,30 @@ const pvAfterDealSave = async (prospectId) => {
         await _pvRefreshSection(kind, Number(rawId), 'potential').catch(() => {});
     }
 };
+// Open an uploaded document (stored as a data URL in documents.data).
+const pvOpenDocument = async (docId) => {
+    let d = null;
+    try { ({ data: d } = await _rxSb().from('documents').select('filename,data,mime_type').eq('id', docId).maybeSingle()); } catch (_) { /* handled below */ }
+    if (!d || !d.data) { UI.toast.error('Could not open the document.'); return; }
+    try {
+        // Decode the data URL by hand (a fetch of data: can be blocked by CSP).
+        const m = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(String(d.data));
+        if (!m) throw new Error('bad data');
+        const raw = m[2] ? atob(m[3]) : decodeURIComponent(m[3]);
+        const bytes = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+        const url = URL.createObjectURL(new Blob([bytes], { type: m[1] || d.mime_type || 'application/octet-stream' }));
+        const a = document.createElement('a');
+        a.href = url;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        if (!/^(image\/|application\/pdf)/.test(d.mime_type || '')) a.download = String(d.filename || 'document').split('/').pop();
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (_) { UI.toast.error('Could not open the document.'); }
+};
 const pvOpenDeal = async (dealId) => {
     try { if (window._loadChunk) await window._loadChunk('chunks/script-pipeline.min.js'); } catch (_) { /* handled below */ }
     if (typeof window.app.openDealModal !== 'function') { UI.toast.error('Could not open the deal. Please reload.'); return; }
@@ -2565,8 +2591,8 @@ const buildProspectDetailHeaderHtml = (prospect, cpsPhoto) => {
 // One profile section (accordion item). Ids are load-bearing: acc-<key>-<id> /
 // acc-body-<key>-<id> are looked up by post-save refreshes in other chunks, so
 // only the order and grouping below may change — never the keys.
-const _pvAccItem = (key, pid, icon, title, open = false) => `
-                    <div class="acc-item${open ? ' open' : ''}" id="acc-${key}-${pid}">
+const _pvAccItem = (key, pid, icon, title, open = false, pane = '') => `
+                    <div class="acc-item${open ? ' open' : ''}" id="acc-${key}-${pid}"${pane ? ` data-pane="${pane}"` : ''}>
                         <div class="acc-hdr" role="button" tabindex="0" aria-expanded="${open}" onclick="app.toggleAccordion('${key}',${pid},this.parentElement);this.setAttribute('aria-expanded',this.parentElement.classList.contains('open'))" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">
                             <span><i class="fas ${icon}" aria-hidden="true"></i> ${title}</span>
                             <i class="fas fa-chevron-down acc-chev" aria-hidden="true"></i>
@@ -2576,36 +2602,68 @@ const _pvAccItem = (key, pid, icon, title, open = false) => `
                             : `<div class="acc-body" id="acc-body-${key}-${pid}" style="display:none" data-loaded="false"></div>`}
                     </div>`;
 
+// ── Profile tabs (2026-10-25) ────────────────────────────────────────────────
+// Four areas under the snapshot, organised by purpose, not by table:
+//   Engagement    — what is next and what happened (tasks, timeline, notes)
+//   Opportunities — what they could buy and how close (journey, deals, audits, referrals)
+//   Records       — what must be kept (sales, purchases, contracts, forms)
+//   Details       — who they are (basic information, bank, ids, tags)
+// Sections stay accordion items with their old ids; a tab only shows the
+// items whose data-pane matches. The first sections of a tab open themselves.
+const _PV_TABS = [
+    ['engagement', 'Engagement', 'fa-comments'],
+    ['opportunities', 'Opportunities', 'fa-chart-line'],
+    ['records', 'Records', 'fa-folder-open'],
+    ['details', 'Details', 'fa-id-card'],
+];
+const _PV_TAB_AUTO_OPEN = { engagement: ['tasks', 'activity'], opportunities: ['potential'], records: ['closing'], details: ['info'] };
+const _pvTabsHtml = (kind, id) => `
+    <div class="pv-tabs" role="tablist" aria-label="Profile sections">
+        ${_PV_TABS.map(([key, label, icon], i) => `<button type="button" role="tab" class="pv-tab" id="pv-tab-${kind}-${Number(id)}-${key}" data-tab="${key}" aria-selected="${i === 0}" onclick="app.pvShowTab('${kind}', ${Number(id)}, '${key}')"><i class="fas ${icon}" aria-hidden="true"></i> ${label}</button>`).join('')}
+    </div>`;
+const _pvContainerOf = (kind, id) => document.getElementById(kind === 'customer' ? `cust-acc-container-${id}` : `acc-container-${id}`);
+const pvShowTab = async (kind, id, tab, opts = {}) => {
+    const box = _pvContainerOf(kind, id);
+    if (!box || !_PV_TABS.some(t => t[0] === tab)) return;
+    box.dataset.tab = tab;
+    document.querySelectorAll(`[id^="pv-tab-${kind}-${Number(id)}-"]`).forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
+    if (opts.noAutoOpen) return;
+    for (const key of _PV_TAB_AUTO_OPEN[tab] || []) {
+        const item = document.getElementById(kind === 'customer' ? `cust-acc-${key}-${id}` : `acc-${key}-${id}`);
+        if (!item || item.classList.contains('open') || item.dataset.pvAuto) continue;
+        item.dataset.pvAuto = '1'; // auto-open once; a section the agent closes stays closed
+        if (kind === 'customer') await toggleCustomerAccordion(key, id, item);
+        else await toggleAccordion(key, id, item);
+    }
+};
+
 const buildProspectDetailTabsHtml = (prospect) => {
     const pid = prospect.id;
     // Count badges are revealed by showProspectDetail (display + text) — keep the ids.
     const solBadge = `<span id="pending-sol-badge-${pid}" class="acc-count is-warning" style="display:none;"></span>`;
-    const jnyBadge = `<span id="jny-badge-${pid}" class="acc-count is-danger" style="display:none;"></span>`;
-    // Basic Information is open by default and loaded right after render (tab
-    // key 'info' — the life-chart tick refresh looks up acc-body-info-*).
+    // 'info' (Basic Information) loads when Details opens — the life-chart tick
+    // refresh looks up acc-body-info-* and is harmless while it is unloaded.
     // 'activity' is the merged Meet Ups & Events timeline.
     return `
-                <div class="acc-container" id="acc-container-${pid}" ${prospect.unable_to_serve ? 'style="opacity:0.6;pointer-events:none;"' : ''}>
-                    <div class="acc-group-label">Overview</div>
-                    ${_pvAccItem('info', pid, 'fa-user', 'Basic Information', true)}
-                    ${_pvAccItem('tasks', pid, 'fa-list-check', `Next up <span id="tasks-badge-${pid}" class="acc-count" style="display:none;"></span>`)}
+                ${_pvTabsHtml('prospect', pid)}
+                <div class="acc-container" id="acc-container-${pid}" data-tab="engagement" ${prospect.unable_to_serve ? 'style="opacity:0.6;pointer-events:none;"' : ''}>
+                    ${_pvAccItem('tasks', pid, 'fa-list-check', `Next up <span id="tasks-badge-${pid}" class="acc-count" style="display:none;"></span>`, false, 'engagement')}
+                    ${_pvAccItem('activity', pid, 'fa-user-friends', 'Meet Ups &amp; Events', false, 'engagement')}
+                    ${_pvAccItem('notes', pid, 'fa-sticky-note', 'Notes', false, 'engagement')}
 
-                    <div class="acc-group-label">Engagement</div>
-                    ${_pvAccItem('activity', pid, 'fa-user-friends', 'Meet Ups &amp; Events')}
-                    ${_pvAccItem('journey', pid, 'fa-route', `Journey Tracker ${jnyBadge}`)}
-                    ${_pvAccItem('potential', pid, 'fa-bolt', `Potential &amp; Opportunities ${solBadge}`)}
+                    ${_pvAccItem('potential', pid, 'fa-bolt', `Potential &amp; Opportunities ${solBadge}`, false, 'opportunities')}
+                    ${_pvAccItem('journey', pid, 'fa-route', 'Journey Tracker', false, 'opportunities')}
+                    ${_pvAccItem('fengshui', pid, 'fa-compass', 'Feng Shui Audit', false, 'opportunities')}
+                    ${_pvAccItem('names', pid, 'fa-users', 'Name List', false, 'opportunities')}
 
-                    <div class="acc-group-label">Sales</div>
-                    ${_pvAccItem('closing', pid, 'fa-handshake', 'DC Closing Record')}
-                    ${_pvAccItem('bujishu', pid, 'fa-gem', 'Bujishu Product Purchase History')}
-                    ${_pvAccItem('formula', pid, 'fa-heartbeat', 'Formula Healthcare Product Purchase History')}
-                    ${_pvAccItem('fengshui', pid, 'fa-compass', 'Feng Shui Audit')}
-                    ${_pvAccItem('forms', pid, 'fa-clipboard-list', 'Customer Forms <span class="acc-sub">客户表格</span>')}
+                    ${_pvAccItem('closing', pid, 'fa-handshake', 'DC Closing Record', false, 'records')}
+                    ${_pvAccItem('bujishu', pid, 'fa-gem', 'Bujishu purchases', false, 'records')}
+                    ${_pvAccItem('formula', pid, 'fa-heartbeat', 'Formula Healthcare purchases', false, 'records')}
+                    ${_pvAccItem('forms', pid, 'fa-clipboard-list', 'Customer Forms <span class="acc-sub">客户表格</span>', false, 'records')}
+                    ${_pvAccItem('docs', pid, 'fa-folder', 'Documents', false, 'records')}
 
-                    <div class="acc-group-label">Notes &amp; lists</div>
-                    ${_pvAccItem('notes', pid, 'fa-sticky-note', 'Notes')}
-                    ${_pvAccItem('tags', pid, 'fa-tags', 'Tags')}
-                    ${_pvAccItem('names', pid, 'fa-users', 'Name List')}
+                    ${_pvAccItem('info', pid, 'fa-user', 'Basic Information', false, 'details')}
+                    ${_pvAccItem('tags', pid, 'fa-tags', 'Tags', false, 'details')}
                 </div>
         </div>
     `;
@@ -2710,19 +2768,11 @@ const showProspectDetail = async (prospectId) => {
     if (_isConvertedProspect(prospect)) {
         container.insertAdjacentHTML('afterbegin', `<div style="margin:0 0 10px;padding:10px 14px;border-radius:10px;background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;font-size:13px;font-weight:600;"><i class="fas fa-lock"></i> Converted to a customer — this prospect profile is frozen. Edits are made on the customer profile.</div>`);
     }
-    // Basic Information starts open — fill it now; every other accordion is collapsed.
-    const _infoBody = document.getElementById(`acc-body-info-${prospect.id}`);
-    if (_infoBody) switchProspectTab('info', prospect.id, null, _infoBody).catch(() => {});
+    // Opens on Engagement: Next up + the timeline load now, every other
+    // section when its tab is first shown. (Overdue journey steps are counted
+    // in Next up — the Journey Tracker no longer carries its own badge.)
     fillProfileSnapshot({ kind: 'prospect', id: prospect.id, pid: prospect.id }).catch(() => {});
-    // Async: populate journey overdue badge if touchpoints exist
-    AppDataStore.getJourneyTouchpoints('prospect', prospect.id).then(tps => {
-        const overdue = tps.filter(t => t.status === 'overdue').length;
-        const badge = document.getElementById(`jny-badge-${prospect.id}`);
-        if (badge && overdue > 0) {
-            badge.textContent = `${overdue} overdue`;
-            badge.style.display = 'inline';
-        }
-    }).catch(() => {});
+    pvShowTab('prospect', prospect.id, 'engagement').catch(() => {});
 };
 
 // One child as a profile line: "Name · b. 2012 · Male". Children are saved as
@@ -3484,14 +3534,33 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                     </div>
                 `).join('') : '<p style="text-align:center;padding:20px;color:var(--gray-400);">No notes yet.</p>'}
             </div>
-            <div style="margin-top:16px;border-top:1px solid var(--gray-200);padding-top:16px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-                    <span style="font-weight:600;font-size:14px;"><i class="fas fa-folder"></i> Documents</span>
-                    <button class="btn primary btn-sm" onclick="app.uploadProspectDocument(${prospect.id})"><i class="fas fa-upload"></i> Upload</button>
-                </div>
-                <p style="text-align:center;padding:16px;color:var(--gray-400);">No documents uploaded.</p>
-            </div>
         `;
+    }
+    else if (tab === 'docs') {
+        // Documents uploaded for this person (documents table, filename prefix
+        // prospect_<id>/ — uploadProspectDocument). Was a hard-coded "No
+        // documents uploaded" inside Notes that never listed anything.
+        let docs = [];
+        try {
+            const { data } = await _rxSb().from('documents').select('id,filename,size,mime_type,created_at')
+                .like('filename', `prospect_${Number(prospectId)}/%`).order('created_at', { ascending: false });
+            docs = data || [];
+        } catch (_) { /* list stays empty */ }
+        const kb = (n) => n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round((n || 0) / 1024))} KB`;
+        container.innerHTML = `
+            <div class="tk-toolbar">
+                <span class="tk-summary">${docs.length ? `${docs.length} document${docs.length === 1 ? '' : 's'}` : 'No documents yet'}</span>
+                <button class="btn secondary btn-sm" onclick="app.uploadProspectDocument(${Number(prospectId)})"><i class="fas fa-upload" aria-hidden="true"></i> Upload</button>
+            </div>
+            ${docs.map(d => `
+                <div class="tk-row">
+                    <i class="far fa-file-alt" aria-hidden="true" style="margin-top:3px;color:var(--gray-500);"></i>
+                    <div class="tk-main">
+                        <div class="tk-title">${escapeHtml(String(d.filename || '').replace(/^prospect_\d+\//, ''))}</div>
+                        <div class="tk-meta"><span>${escapeHtml(_pvFmtDay(d.created_at, true))}</span><span>${escapeHtml(kb(d.size))}</span></div>
+                    </div>
+                    <button type="button" class="tk-act" title="Open" aria-label="Open document" onclick="app.pvOpenDocument(${Number(d.id)})"><i class="fas fa-external-link-alt" aria-hidden="true"></i></button>
+                </div>`).join('')}`;
     }
     else if (tab === 'protection') {
         const daysLeft = calculateProtectionDays(prospect);
@@ -5640,24 +5709,9 @@ const saveEvoucherTemplate = async () => {
     }
 };
 
-const recordSalesClosure = (prospectId, activityId) => {
-    // Scroll/open the Closing Record accordion
-    const closingItem = document.getElementById(`acc-closing-${prospectId}`);
-    if (closingItem) {
-        if (!closingItem.classList.contains('open')) {
-            const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
-            if (bodyEl) {
-                closingItem.classList.add('open');
-                bodyEl.style.display = 'block';
-                if (bodyEl.dataset.loaded === 'false') {
-                    bodyEl.dataset.loaded = 'true';
-                    bodyEl.innerHTML = '<div class="acc-loading"><i class="fas fa-spinner fa-spin"></i> Loading…</div>';
-                    switchProspectTab('closing', prospectId, null, bodyEl);
-                }
-            }
-        }
-        closingItem.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
+const recordSalesClosure = async (prospectId, activityId) => {
+    // Open the Closing Record (Records tab) and bring it into view.
+    await pvGoToSection('prospect', prospectId, 'closing');
     UI.toast.success('Fill in the Closing Record below to record this sale');
 };
 
@@ -8233,6 +8287,7 @@ const openPastRecordModal = async (...args) => {
         pvFactsHtml: _pvFactsHtml,
         pvMenuHtml: _pvMenuHtml,
         pvSnapHtml: _pvSnapHtml,
+        pvTabsHtml: _pvTabsHtml,
         renderProfileTasks,
         pvRefreshTasks,
         pvTaskToggle,
@@ -8242,6 +8297,8 @@ const openPastRecordModal = async (...args) => {
         pvTaskSaveNew,
         pvTaskWhatsApp,
         pvOpenDeal,
+        pvOpenDocument,
+        pvShowTab,
         pvAfterDealSave,
         pvTaskMaps,
         pvTaskLineHtml,
