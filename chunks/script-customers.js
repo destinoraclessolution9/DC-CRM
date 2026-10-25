@@ -692,10 +692,11 @@ const showCustomerDetail = async (customerId) => {
         await navigateTo('prospects');
         return;
     }
-    // The linked-prospect sections (and the accordion toggles) are rendered by the
-    // prospects chunk — warm it so the first tap on a section isn't a no-op.
-    // _loadChunk is load-once (a cached promise), so this is free when it's warm.
-    if (customer.converted_from_prospect_id != null && typeof window._loadChunk === 'function') {
+    // The linked-prospect sections, the accordion toggles and the profile
+    // snapshot header are rendered by the prospects chunk — warm it so the first
+    // tap on a section isn't a no-op. _loadChunk is load-once (a cached promise),
+    // so this is free when it's warm.
+    if (typeof window._loadChunk === 'function') {
         try { await window._loadChunk('chunks/script-prospects.min.js'); } catch (_) { /* intentional: sections stay inert, profile still renders */ }
     }
     _state.pvd = _fromView;
@@ -707,8 +708,6 @@ const showCustomerDetail = async (customerId) => {
 
     const health = await calculateCustomerHealthScore(customer);
 
-    const actBtn = (title, icon, onclick, cls = '') =>
-        `<button class="pv-act${cls ? ' ' + cls : ''}" title="${title}" aria-label="${title}" onclick="event.stopPropagation();${onclick}"><i class="${icon}" aria-hidden="true"></i></button>`;
     const cid = customer.id;
     const lpid = customer.converted_from_prospect_id;
     // Count badges are revealed below (display + text) — keep the ids.
@@ -716,6 +715,9 @@ const showCustomerDetail = async (customerId) => {
     const impBadge  = `<span id="cust-imp-badge-${cid}" class="acc-count is-success" style="display:none;"></span>`;
     const hostBadge = `<span id="cust-host-badge-${cid}" class="acc-count" style="display:none;"></span>`;
 
+    // WhatsApp opens the customer's chat directly (not the Business API
+    // composer). The number is normalized so the onclick carries digits only;
+    // an empty string makes openWaChat toast.
     const container = document.getElementById('content-viewport');
     container.innerHTML = `
         <div class="pv-wrap">
@@ -727,32 +729,34 @@ const showCustomerDetail = async (customerId) => {
             <div class="pv-hdr pv-hdr-flex">
                 <div style="flex:1;min-width:0;">
                     <div class="pv-hdr-meta">
-                        ${lpid != null ? `<span data-pot-pid="${Number(lpid)}"></span>` : ''}
                         <span class="pv-id">ID: C${cid}</span>
                         <span class="pv-chip is-success"><i class="fas fa-circle" aria-hidden="true" style="font-size:7px;"></i> Customer</span>
                         ${renderHealthBadge(health)}
                         <span class="pv-chip"><i class="fas fa-lock" aria-hidden="true"></i> Permanent</span>
                     </div>
                     <h1 class="pv-name">${escapeHtml(customer.full_name)}</h1>
-                    ${lpid != null ? `<div data-fu-pid="${Number(lpid)}"></div>` : ''}
+                    ${(window.app.pvFactsHtml || (() => ''))(customer, [
+                        `<span class="pv-fact">Customer since ${escapeHtml(customer.customer_since || '-')}${customer.conversion_amount != null ? ` · ${escapeHtml(UI.money(customer.conversion_amount, customer.country))}` : ''}</span>`,
+                    ])}
                     <div class="pv-actions">
-                        ${/* Edits the CUSTOMER (2026-10-16) — the customer is the one
-                              editable record; a converted prospect's profile is frozen. */
-                          actBtn('Edit', 'fas fa-edit', `app.openCustomerEditModal(${cid})`)}
-                        ${actBtn('Add Purchase', 'fas fa-plus', `app.openAddPurchaseModal(${cid})`, 'is-primary')}
-                        ${actBtn('Refer a Friend', 'fas fa-user-plus', `app.openCustomerReferralModal(${cid})`)}
-                        ${/* Opens the customer's chat directly (not the Business API
-                              composer). Number normalized so the onclick carries digits
-                              only; an empty string makes openWaChat toast. */
-                          actBtn('WhatsApp', 'fab fa-whatsapp', `app.openWaChat('${waPhone(customer.phone)}')`, 'is-whatsapp')}
-                        ${actBtn('Portal Link', 'fas fa-external-link-alt', `app.sendPortalLink(${cid})`)}
-                        ${actBtn('Recruit as Agent', 'fas fa-user-tie', `app.openRecruitModal(${cid})`)}
-                    </div>
-                    <div class="pv-since">
-                        Customer since ${customer.customer_since || '-'}${customer.conversion_amount != null ? ` · Converted at ${UI.money(customer.conversion_amount, customer.country)}` : ''}
+                        <button class="btn primary btn-sm pv-cta" onclick="app.openActivityModal(null, 'customer', ${cid})"><i class="fas fa-calendar-plus" aria-hidden="true"></i> Book follow-up</button>
+                        <button class="pv-act is-whatsapp" title="WhatsApp" aria-label="Open WhatsApp chat with customer" onclick="event.stopPropagation();app.openWaChat('${waPhone(customer.phone)}')"><i class="fab fa-whatsapp" aria-hidden="true"></i></button>
+                        ${waPhone(customer.phone) ? `<a class="pv-act" href="tel:${escapeHtml(String(customer.phone || '').replace(/[^\d+]/g, ''))}" title="Call" aria-label="Call customer"><i class="fas fa-phone" aria-hidden="true"></i></a>` : ''}
+                        ${(window.app.pvMenuHtml || (() => ''))([
+                            ['fas fa-plus', 'Add purchase', `app.openAddPurchaseModal(${cid})`],
+                            ['fas fa-user-friends', 'Log a meet up', `app.openActivityModal(null, 'customer', ${cid})`],
+                            /* Edits the CUSTOMER (2026-10-16) — the customer is the one
+                               editable record; a converted prospect's profile is frozen. */
+                            ['fas fa-edit', 'Edit profile', `app.openCustomerEditModal(${cid})`],
+                            null,
+                            ['fas fa-user-plus', 'Refer a friend', `app.openCustomerReferralModal(${cid})`],
+                            ['fas fa-external-link-alt', 'Send portal link', `app.sendPortalLink(${cid})`],
+                            ['fas fa-user-tie', 'Recruit as agent', `app.openRecruitModal(${cid})`],
+                        ])}
                     </div>
                 </div>
             </div>
+            ${(window.app.pvSnapHtml || (() => ''))('customer', cid, lpid != null ? Number(lpid) : null)}
 
             <div class="acc-container" id="cust-acc-container-${cid}">
                 <div class="acc-group-label">Overview</div>
@@ -786,6 +790,7 @@ const showCustomerDetail = async (customerId) => {
     `;
     // Pre-load the Info accordion body (open by default)
     await switchCustomerProfileTab('info', customerId, document.getElementById(`cust-acc-body-info-${customerId}`));
+    (window.app.fillProfileSnapshot || (() => Promise.resolve()))({ kind: 'customer', id: cid, pid: lpid != null ? Number(lpid) : null }).catch(() => {});
     // Async: populate journey overdue badge
     AppDataStore.getJourneyTouchpoints('customer', customer.id).then(tps => {
         const overdue = tps.filter(t => t.status === 'overdue').length;

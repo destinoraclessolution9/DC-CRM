@@ -2039,14 +2039,271 @@ const filterProspects = async () => {
     await renderProspectsTable();
 };
 
+// ── Profile snapshot (2026-10-25 reorganisation) ─────────────────────────────
+// The top of the prospect AND customer profile answers "who is this, what is
+// it worth, what happened last, what is next" in one glance: name + chips, a
+// key-facts line, one action bar, and three cards (open potential · next
+// follow-up · last meeting). Every number is read from the record that owns
+// it — prospects.open_potential_* (DB-maintained), journey_touchpoints (the one
+// task list) and the activities / event_attendees rows — never copied.
+const _pvTodayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const _pvDayDiff = (from, to) => Math.round((Date.parse(to + 'T00:00:00') - Date.parse(from + 'T00:00:00')) / 86400000);
+const _pvFmtDay = (d, withYear = false) => {
+    const t = Date.parse(String(d || '').slice(0, 10) + 'T00:00:00');
+    if (Number.isNaN(t)) return '—';
+    return new Date(t).toLocaleDateString('en-GB', withYear ? { day: 'numeric', month: 'short', year: 'numeric' } : { day: 'numeric', month: 'short' });
+};
+const _pvAge = (dob) => {
+    const t = Date.parse(dob || '');
+    if (Number.isNaN(t)) return null;
+    const a = Math.floor((Date.now() - t) / 31557600000);
+    return a >= 0 && a < 130 ? a : null;
+};
+const _pvTel = (phone) => String(phone || '').replace(/[^\d+]/g, '');
+// Meetings for "last meeting": face-to-face kinds + attended events. Calls,
+// e-mails and WhatsApps are touches, not meetings.
+const _PV_MEETING_TYPES = ['CPS', 'FTF', 'FSA', 'GR', 'XG', 'SITE', 'EVENT', 'EVENT_CLOSING'];
+const _PV_BOOKABLE_TYPES = ['CPS', 'FTF', 'FSA', 'GR', 'XG', 'SITE', 'CALL', 'EVENT', 'EVENT_CLOSING'];
+
+// Key facts under the name. Agent name is filled after render ([data-pv-agent]).
+const _pvFactsHtml = (r, extra = []) => {
+    const parts = [];
+    const tel = _pvTel(r.phone);
+    if (tel) parts.push(`<a class="pv-fact" href="tel:${escapeHtml(tel)}"><i class="fas fa-phone" aria-hidden="true"></i> ${escapeHtml(r.phone)}</a>`);
+    const age = _pvAge(r.date_of_birth);
+    if (age != null) parts.push(`<span class="pv-fact">Age ${age}</span>`);
+    if (r.ming_gua) parts.push(`<span class="pv-fact">Ming Gua ${escapeHtml(String(r.ming_gua).replace(/^MG/i, ''))}</span>`);
+    parts.push(...extra);
+    if (r.responsible_agent_id != null) parts.push(`<span class="pv-fact" data-pv-agent="${Number(r.responsible_agent_id)}"><i class="fas fa-user-tie" aria-hidden="true"></i> …</span>`);
+    if (r.referred_by) parts.push(`<span class="pv-fact"><i class="fas fa-user-plus" aria-hidden="true"></i> Referred by ${escapeHtml(r.referred_by)}</span>`);
+    return parts.length ? `<div class="pv-facts">${parts.join('')}</div>` : '';
+};
+// ⋯ menu items: [icon, label, onclick] — a null entry draws a divider.
+const _pvMenuHtml = (items) => `
+    <details class="pv-more">
+        <summary class="pv-act" title="More actions" aria-label="More actions"><i class="fas fa-ellipsis-h" aria-hidden="true"></i></summary>
+        <div class="pv-menu" role="menu">
+            ${items.map(it => it ? `<button type="button" role="menuitem" onclick="this.closest('details').removeAttribute('open');${it[2]}"><i class="${it[0]}" aria-hidden="true"></i> ${it[1]}</button>` : '<hr>').join('')}
+        </div>
+    </details>`;
+// The three cards, empty until fillProfileSnapshot runs. kind: 'prospect' | 'customer'.
+const _pvSnapHtml = (kind, id, pid) => `
+    <div class="pv-snap" data-snap="${kind}:${Number(id)}">
+        ${pid != null
+            ? `<button type="button" class="pv-card is-loading" data-card="potential" data-pot-for="${Number(pid)}" onclick="app.showPotentialBreakdown(${Number(pid)})">`
+            : '<div class="pv-card is-loading" data-card="potential">'}
+            <div class="pv-card-lbl">Open potential</div><div class="pv-card-val">—</div>
+        ${pid != null ? '</button>' : '</div>'}
+        <button type="button" class="pv-card is-loading" data-card="next" onclick="app.pvGoToSection('${kind}', ${Number(id)}, 'journey')">
+            <div class="pv-card-lbl">Next follow-up</div><div class="pv-card-val">—</div>
+        </button>
+        <div class="pv-card pv-card-wide is-loading" data-card="last">
+            <div class="pv-card-lbl">Last meeting</div><div class="pv-card-val">—</div>
+        </div>
+    </div>
+    ${pid != null ? `<div class="pv-attn"><div data-fu-pid="${Number(pid)}"></div></div>` : ''}`;
+
+// Open tasks for a person — the one task list (journey_touchpoints). A customer
+// also owns the tasks still keyed to the prospect it was converted from.
+const _pvOpenTasks = async (kind, id, pid) => {
+    const sb = _rxSb();
+    if (!sb) return [];
+    try {
+        let q = sb.from('journey_touchpoints').select('*').in('status', ['pending', 'overdue', 'snoozed']);
+        if (kind === 'customer') q = pid != null ? q.or(`customer_id.eq.${Number(id)},prospect_id.eq.${Number(pid)}`) : q.eq('customer_id', Number(id));
+        else q = q.eq('prospect_id', Number(id));
+        const { data } = await q.order('due_date', { ascending: true }).limit(100);
+        return data || [];
+    } catch (_) { return []; }
+};
+// Meetings + attended events for a person, newest first (light rows).
+const _pvPersonRows = async (kind, id, pid) => {
+    const att = (window.app.getProspectAttendeeNotes || (() => Promise.resolve([])));
+    let acts = [], attendees = [];
+    try {
+        if (kind === 'customer') {
+            const [c, p, a] = await Promise.all([
+                AppDataStore.getActivitiesForCustomer(id, { limit: 500 }).catch(() => []),
+                pid != null ? AppDataStore.getActivitiesForProspect(pid, { limit: 500 }).catch(() => []) : [],
+                att(id, { includeWithoutNotes: true, attendeeType: 'customer' }).catch(() => []),
+            ]);
+            const seen = new Set();
+            acts = [...(c || []), ...(p || [])].filter(r => { const k = String(r.id); if (seen.has(k)) return false; seen.add(k); return true; });
+            attendees = a || [];
+        } else {
+            const [p, a] = await Promise.all([
+                AppDataStore.getActivitiesForProspect(id, { limit: 500 }).catch(() => []),
+                att(id, { includeWithoutNotes: true }).catch(() => []),
+            ]);
+            acts = p || [];
+            attendees = a || [];
+        }
+    } catch (_) { /* cards fall back to empty */ }
+    return { acts, attendees };
+};
+
+const _pvCardSet = (root, key, html) => {
+    const el = root && root.querySelector(`[data-card="${key}"]`);
+    if (!el) return;
+    el.classList.remove('is-loading');
+    el.innerHTML = html;
+};
+
+// Fills the open-potential card(s) for a prospect id (also the customer's
+// linked prospect). Called by the snapshot and after edits that move potential.
+const _pvFillPotential = async (pid) => {
+    const cards = [...document.querySelectorAll(`[data-card="potential"][data-pot-for="${Number(pid)}"]`)];
+    if (!cards.length) return;
+    let r = null;
+    try {
+        const { data } = await _rxSb().from('prospects').select('open_potential_rm,open_potential_detail,potential_tier,potential_is_repeat').eq('id', pid).maybeSingle();
+        r = data;
+    } catch (_) { /* card stays empty */ }
+    const rm = r ? Number(r.open_potential_rm) || 0 : 0;
+    let html = '<div class="pv-card-lbl">Open potential</div>';
+    if (rm > 0) {
+        const items = ((r.open_potential_detail && r.open_potential_detail.items) || []);
+        const priced = items.filter(i => Number(i.price) > 0);
+        const top = await Promise.all(priced.slice(0, 3).map(i => potentialCode(i.label)));
+        const more = Math.max(0, items.length - top.length);
+        const t = FU_TIER[r.potential_tier] || FU_TIER.cold;
+        html += `<div class="pv-card-val">${_rmFmt(rm)}</div>
+            <div class="pv-card-sub">${t[0]} ${t[1]}${r.potential_is_repeat ? ' · 🔁 repeat' : ''}</div>
+            ${top.length ? `<div class="pv-card-note">${top.map(c => escapeHtml(c)).join(' · ')}${more ? ` +${more}` : ''}</div>` : ''}`;
+    } else {
+        html += '<div class="pv-card-val is-muted">—</div><div class="pv-card-note">No open potential yet</div>';
+    }
+    cards.forEach(el => { el.classList.remove('is-loading'); el.innerHTML = html; });
+};
+
+const fillProfileSnapshot = async ({ kind = 'prospect', id, pid = null } = {}) => {
+    const root = document.querySelector(`.pv-snap[data-snap="${kind}:${Number(id)}"]`);
+    if (!root) return;
+    const today = _pvTodayStr();
+    // Agent name in the facts line.
+    document.querySelectorAll('[data-pv-agent]:not([data-pv-filled])').forEach(async (el) => {
+        el.dataset.pvFilled = '1';
+        const u = await AppDataStore.getById('users', el.dataset.pvAgent).catch(() => null);
+        el.innerHTML = `<i class="fas fa-user-tie" aria-hidden="true"></i> ${escapeHtml(u?.full_name || 'Unassigned')}`;
+    });
+    if (pid != null) _pvFillPotential(pid);
+    else _pvCardSet(root, 'potential', '<div class="pv-card-lbl">Open potential</div><div class="pv-card-val is-muted">—</div><div class="pv-card-note">No open potential yet</div>');
+
+    const [{ acts, attendees }, tasks] = await Promise.all([_pvPersonRows(kind, id, pid), _pvOpenTasks(kind, id, pid)]);
+
+    // ── Next follow-up: an overdue task first, else the earliest of the next
+    // booked meeting and the next open task.
+    const booked = acts.filter(a => a.activity_date && String(a.activity_date).slice(0, 10) >= today && _PV_BOOKABLE_TYPES.includes(a.activity_type) && !a.is_closed)
+        .sort((a, b) => String(a.activity_date).localeCompare(String(b.activity_date)))[0] || null;
+    const openTasks = tasks.slice().sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)));
+    const overdue = openTasks.filter(t => t.due_date && t.due_date < today);
+    let pick = null;
+    if (overdue.length) pick = { task: overdue[0] };
+    else if (booked && (!openTasks[0] || String(booked.activity_date).slice(0, 10) <= openTasks[0].due_date)) pick = { act: booked };
+    else if (openTasks[0]) pick = { task: openTasks[0] };
+    let nextHtml = '<div class="pv-card-lbl">Next follow-up</div>';
+    if (pick && pick.task) {
+        const t = pick.task;
+        const d = _pvDayDiff(today, t.due_date);
+        const state = d < 0 ? [`Overdue · ${-d} day${d === -1 ? '' : 's'}`, 'is-danger'] : d === 0 ? ['Due today', 'is-warning'] : [`In ${d} day${d === 1 ? '' : 's'}`, ''];
+        nextHtml += `<div class="pv-card-val">${escapeHtml(_pvFmtDay(t.due_date))}</div>
+            <div class="pv-card-sub ${state[1]}">${state[0]}</div>
+            <div class="pv-card-note">${escapeHtml(t.title || 'Follow up')}</div>`;
+    } else if (pick && pick.act) {
+        const a = pick.act;
+        nextHtml += `<div class="pv-card-val">${escapeHtml(_pvFmtDay(a.activity_date))}</div>
+            <div class="pv-card-sub is-success">Booked · ${escapeHtml(a.activity_type || '')}</div>
+            ${a.activity_title ? `<div class="pv-card-note">${escapeHtml(a.activity_title)}</div>` : ''}`;
+    } else {
+        nextHtml += '<div class="pv-card-val is-muted">—</div><div class="pv-card-sub is-warning">Nothing booked</div>';
+    }
+    const restOpen = openTasks.length - (pick && pick.task ? 1 : 0);
+    if (restOpen > 0) nextHtml += `<div class="pv-card-more">+${restOpen} more open task${restOpen === 1 ? '' : 's'}</div>`;
+    _pvCardSet(root, 'next', nextHtml);
+
+    // ── Last meeting: newest past meeting or attended event.
+    const past = acts.filter(a => a.activity_date && String(a.activity_date).slice(0, 10) <= today && _PV_MEETING_TYPES.includes(a.activity_type));
+    const went = attendees.filter(a => a.attended || a.attendance_status === 'Attended' || a.attendance_status === 'Late');
+    const _ts = (d) => { const t = Date.parse(d || ''); return Number.isNaN(t) ? 0 : t; };
+    const last = [...past, ...went].sort((a, b) => (_ts(b.activity_date) - _ts(a.activity_date)) || String(b.id).localeCompare(String(a.id)))[0] || null;
+    let lastHtml;
+    if (!last) {
+        lastHtml = '<div class="pv-card-lbl">Last meeting</div><div class="pv-card-val is-muted">—</div><div class="pv-card-note">No meetings recorded yet</div>';
+    } else {
+        // The light activity rows carry no minutes — read this one row fresh.
+        let full = last;
+        if (!last._isAttendeeNote && last.id != null && !Number.isNaN(Number(last.id))) {
+            try {
+                const { data } = await _rxSb().from('activities').select('id,note_key_points,summary,meeting_minutes,outcome').eq('id', last.id).maybeSingle();
+                if (data) full = { ...last, ...data };
+            } catch (_) { /* summary stays short */ }
+        }
+        const m = meetupMinutesOf(full);
+        const summary = String(full.note_key_points || full.summary || m.background || m.advisor || '').replace(/\s+/g, ' ').trim();
+        const outcome = MEETUP_OUTCOME_LABEL[full.outcome] || '';
+        // A closing paired with its event attendance renders as ONE timeline row
+        // (the attendee row) — open that one.
+        const pair = last.activity_type === 'EVENT_CLOSING' ? attendees.find(a => a.closing_activity_id != null && String(a.closing_activity_id) === String(last.id)) : null;
+        const muid = meetupRowId(pair || last);
+        const type = last._isAttendeeNote ? 'Event' : (last.activity_type === 'EVENT_CLOSING' ? 'Event closing' : last.activity_type);
+        lastHtml = `<div class="pv-card-lbl">Last meeting · ${escapeHtml(_pvFmtDay(last.activity_date, true))}</div>
+            <div class="pv-card-title">${escapeHtml(type || '')}${last.activity_title ? ` · ${escapeHtml(last.activity_title)}` : ''}</div>
+            ${outcome || summary ? `<div class="pv-card-note is-3">${outcome ? `<strong>${escapeHtml(outcome)}.</strong> ` : ''}${escapeHtml(summary.slice(0, 260))}</div>` : '<div class="pv-card-note is-muted">No minutes yet</div>'}
+            <div class="pv-card-acts"><button type="button" class="btn secondary btn-sm" onclick="app.pvOpenMeeting('${kind}', ${Number(id)}, '${escapeHtml(muid)}')"><i class="fas fa-file-alt" aria-hidden="true"></i> Open meeting</button></div>`;
+    }
+    _pvCardSet(root, 'last', lastHtml);
+};
+
+// Open (and load) one profile section and bring it into view.
+const pvGoToSection = async (kind, id, key) => {
+    const itemEl = document.getElementById(kind === 'customer' ? `cust-acc-${key}-${id}` : `acc-${key}-${id}`);
+    if (!itemEl) return null;
+    if (!itemEl.classList.contains('open')) {
+        if (kind === 'customer') await toggleCustomerAccordion(key, id, itemEl);
+        else await toggleAccordion(key, id, itemEl);
+    }
+    itemEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return document.getElementById(kind === 'customer' ? `cust-acc-body-${key}-${id}` : `acc-body-${key}-${id}`);
+};
+// "Open meeting" on the Last-meeting card: open the timeline and expand that row.
+const pvOpenMeeting = async (kind, id, muid) => {
+    const bodyEl = await pvGoToSection(kind, id, 'activity');
+    if (!bodyEl) return;
+    const row = bodyEl.querySelector(`.mu-item[data-muid="${String(muid).replace(/[^a-zA-Z0-9-]/g, '')}"]`);
+    if (!row) return;
+    const wrap = row.closest('.mu-wrap');
+    if (wrap) wrap.dataset.muf = 'all';
+    row.classList.add('open');
+    row.querySelector('.mu-row')?.setAttribute('aria-expanded', 'true');
+    setTimeout(() => row.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+};
+// Protection details + Extend / Transfer / Reassign, from the header chip.
+const openProtectionSheet = async (prospectId) => {
+    UI.showModal('Protection period', '<div id="pv-prot-sheet"><div class="acc-loading"><i class="fas fa-spinner fa-spin"></i> Loading…</div></div>',
+        [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }]);
+    const el = document.getElementById('pv-prot-sheet');
+    if (el) await switchProspectTab('protection', prospectId, null, el);
+};
+if (!window.__pvMenuCloser && document.addEventListener) {
+    // Close an open ⋯ menu on any tap outside it.
+    window.__pvMenuCloser = true;
+    document.addEventListener('click', (e) => {
+        document.querySelectorAll('details.pv-more[open]').forEach(d => { if (!d.contains(e.target)) d.removeAttribute('open'); });
+    });
+}
+
 const buildProspectDetailHeaderHtml = (prospect, cpsPhoto) => {
     // Protection chip: only when a deadline exists (no deadline reads as 0 days).
+    // Tap → details + Extend / Transfer / Reassign (was its own section).
     const _protDays = prospect.protection_deadline ? calculateProtectionDays(prospect) : null;
-    const _protChip = _protDays === null ? ''
-        : _protDays > 7 ? `<span class="pv-chip" title="Protection period"><i class="fas fa-shield-alt" aria-hidden="true"></i> Protected · ${_protDays} days left</span>`
-        : _protDays > 0 ? `<span class="pv-chip is-warning" title="Protection period"><i class="fas fa-shield-alt" aria-hidden="true"></i> Protection ends in ${_protDays} day${_protDays === 1 ? '' : 's'}</span>`
-        : `<span class="pv-chip is-danger" title="Protection period"><i class="fas fa-shield-alt" aria-hidden="true"></i> Protection expired</span>`;
     const _kb = `onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}"`;
+    const _protAttrs = `role="button" tabindex="0" ${_kb} onclick="event.stopPropagation();app.openProtectionSheet(${prospect.id})" title="Protection period — tap for details"`;
+    const _protChip = _protDays === null ? ''
+        : _protDays > 7 ? `<span class="pv-chip is-action" ${_protAttrs}><i class="fas fa-shield-alt" aria-hidden="true"></i> Protected · ${_protDays} days</span>`
+        : _protDays > 0 ? `<span class="pv-chip is-action is-warning" ${_protAttrs}><i class="fas fa-shield-alt" aria-hidden="true"></i> Protection ends in ${_protDays} day${_protDays === 1 ? '' : 's'}</span>`
+        : `<span class="pv-chip is-action is-danger" ${_protAttrs}><i class="fas fa-shield-alt" aria-hidden="true"></i> Protection expired</span>`;
+    const pid = Number(prospect.id);
+    const tel = _pvTel(prospect.phone);
     return `
         <div class="pv-wrap">
             <div class="pv-back">
@@ -2068,7 +2325,6 @@ const buildProspectDetailHeaderHtml = (prospect, cpsPhoto) => {
                 <div style="flex:1;min-width:0;">
                     <div class="pv-hdr-meta">
                         <span class="pv-id">ID: P100${prospect.id}</span>
-                        <span data-pot-pid="${Number(prospect.id)}"></span>
                         ${prospect.unable_to_serve
                             ? `<span class="pv-chip">Unable to Serve</span>`
                             : `<span class="pv-chip is-success"><i class="fas fa-circle" aria-hidden="true" style="font-size:7px;"></i> Active</span>`}
@@ -2077,17 +2333,25 @@ const buildProspectDetailHeaderHtml = (prospect, cpsPhoto) => {
                         ${_protChip}
                     </div>
                     <h1 class="pv-name">${escapeHtml(prospect.full_name)}${prospect.nickname ? ` <span class="pv-nick">"${escapeHtml(prospect.nickname)}"</span>` : ''}</h1>
-                    <div data-fu-pid="${Number(prospect.id)}"></div>
+                    ${_pvFactsHtml(prospect)}
                     <div class="pv-actions">
-                        <button class="pv-act" title="Edit" aria-label="Edit prospect" onclick="app.editProspect(${prospect.id})"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i></button>
-                        <button class="pv-act is-primary" title="Convert to Customer" aria-label="Convert to customer" onclick="app.convertToCustomer(${prospect.id})"><i class="fa-solid fa-user-check" aria-hidden="true"></i></button>
-                        <button class="pv-act" title="Meet-Up History" aria-label="Meet-up history" onclick="app.openMeetupHistoryModal(${prospect.id})"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i></button>
-                        <button class="pv-act" title="Save to Phone Contacts" aria-label="Save to phone contacts" onclick="app.downloadProspectVCard(${prospect.id})"><i class="fa-solid fa-address-book" aria-hidden="true"></i></button>
-                        <button class="pv-act is-whatsapp" title="WhatsApp Prospect" aria-label="Open WhatsApp chat with prospect" onclick="app.openProspectWhatsApp(${prospect.id}, '${UI.escJsAttr(_evWaPhone(prospect.phone))}')"><i class="fa-brands fa-whatsapp" aria-hidden="true"></i></button>
+                        <button class="btn primary btn-sm pv-cta" onclick="app.openActivityModal('', ${pid})"><i class="fas fa-calendar-plus" aria-hidden="true"></i> Book follow-up</button>
+                        <button class="pv-act is-whatsapp" title="WhatsApp" aria-label="Open WhatsApp chat with prospect" onclick="app.openProspectWhatsApp(${pid}, '${UI.escJsAttr(_evWaPhone(prospect.phone))}')"><i class="fa-brands fa-whatsapp" aria-hidden="true"></i></button>
+                        ${tel ? `<a class="pv-act" href="tel:${escapeHtml(tel)}" title="Call" aria-label="Call prospect"><i class="fas fa-phone" aria-hidden="true"></i></a>` : ''}
+                        ${_pvMenuHtml([
+                            ['fas fa-plus', 'Add meet up', `app.openActivityModal('', ${pid})`],
+                            ['fa-solid fa-pen-to-square', 'Edit profile', `app.editProspect(${pid})`],
+                            ['fa-solid fa-user-check', 'Convert to customer', `app.convertToCustomer(${pid})`],
+                            null,
+                            ['fa-solid fa-book-open', 'Before you meet (brief)', `app.openMeetupHistoryModal(${pid})`],
+                            ['fa-solid fa-address-book', 'Save to phone contacts', `app.downloadProspectVCard(${pid})`],
+                            ['fas fa-shield-alt', 'Protection period', `app.openProtectionSheet(${pid})`],
+                        ])}
                     </div>
                 </div>
                 ${cpsPhoto ? `<img class="pv-photo" loading="lazy" decoding="async" data-attach-src="${escapeHtml(String(cpsPhoto.url))}" onclick="event.stopPropagation();app.zoomCpsPhoto('${UI.escJsAttr(String(cpsPhoto.url))}')" alt="CPS form photo" title="CPS Photo — click to enlarge">` : ''}
             </div>
+            ${_pvSnapHtml('prospect', pid, pid)}
 `;
 };
 
@@ -2118,7 +2382,6 @@ const buildProspectDetailTabsHtml = (prospect) => {
                     <div class="acc-group-label">Overview</div>
                     ${_pvAccItem('info', pid, 'fa-user', 'Basic Information', true)}
                     ${_pvAccItem('nextactions', pid, 'fa-tasks', 'Next Actions')}
-                    ${_pvAccItem('protection', pid, 'fa-shield-alt', 'Protection Period')}
 
                     <div class="acc-group-label">Engagement</div>
                     ${_pvAccItem('activity', pid, 'fa-user-friends', 'Meet Ups &amp; Events')}
@@ -2243,6 +2506,7 @@ const showProspectDetail = async (prospectId) => {
     // Basic Information starts open — fill it now; every other accordion is collapsed.
     const _infoBody = document.getElementById(`acc-body-info-${prospect.id}`);
     if (_infoBody) switchProspectTab('info', prospect.id, null, _infoBody).catch(() => {});
+    fillProfileSnapshot({ kind: 'prospect', id: prospect.id, pid: prospect.id }).catch(() => {});
     // Async: populate journey overdue badge if touchpoints exist
     AppDataStore.getJourneyTouchpoints('prospect', prospect.id).then(tps => {
         const overdue = tps.filter(t => t.status === 'overdue').length;
@@ -6092,40 +6356,14 @@ const potentialCode = async (label) => {
     } catch (_) { /* fall through */ }
     return l.length > 14 ? l.slice(0, 13) + '…' : l;
 };
-const _fuDate = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
+// The [data-fu-pid] slot under the profile snapshot. The old 🎯 follow-up box
+// that lived here repeated the potential RM / tier / next-booked already shown
+// on the snapshot cards (2026-10-25), so the slot now only anchors the 🟣
+// Golden Road and 💳 POP lines the autopilot chunk inserts after it — and a
+// call here refreshes the open-potential card instead.
 const fillFollowUpLine = async (pid) => {
-    const slots = [...document.querySelectorAll(`[data-fu-pid="${Number(pid)}"]`)];
-    if (!slots.length) return;
-    let r = null;
-    try {
-        const { data } = await _rxSb().from('prospects')
-            .select('open_potential_rm,open_potential_detail,potential_tier,potential_last_met,potential_next_booked,potential_is_repeat')
-            .eq('id', pid).maybeSingle();
-        r = data;
-    } catch (_) { /* hidden */ }
-    const rm = r ? Number(r.open_potential_rm) || 0 : 0;
-    let html = '';
-    if (rm > 0) {
-        const items = ((r.open_potential_detail && r.open_potential_detail.items) || []).filter(i => Number(i.price) > 0);
-        const top = await Promise.all(items.slice(0, 3).map(i => potentialCode(i.label)));
-        const more = Math.max(0, ((r.open_potential_detail && r.open_potential_detail.items) || []).length - top.length);
-        const t = FU_TIER[r.potential_tier] || FU_TIER.cold;
-        const next = r.potential_next_booked
-            ? `<span style="color:#047857;">📅 next ${escapeHtml(_fuDate(r.potential_next_booked))}</span>`
-            : '<span style="color:#B91C1C;font-weight:600;">⚠ nothing booked</span>';
-        html = `
-        <div class="fu-line" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 8px;padding:6px 10px;border-radius:8px;background:#FFFBEB;border:1px solid #FDE68A;font-size:13px;">
-            <strong style="color:#92400E;">🎯 Follow up: <span style="color:#047857;">RM ${Math.round(rm).toLocaleString()}</span></strong>
-            <span style="font-weight:600;">${top.map(c => escapeHtml(c)).join(' · ')}${more ? ` <span style="color:#9CA3AF;">+${more}</span>` : ''}</span>
-            <span style="color:${t[2]};font-weight:600;">${t[0]} ${t[1]}</span>
-            ${r.potential_is_repeat ? '<span title="Existing customer">🔁 repeat</span>' : ''}
-            ${r.potential_last_met ? `<span style="color:#6B7280;">met ${escapeHtml(_fuDate(r.potential_last_met))}</span>` : ''}
-            ${next}
-            <button type="button" class="btn secondary btn-sm" style="font-size:11px;padding:2px 8px;" onclick="event.stopPropagation();app.openActivityModal('', ${Number(pid)})">📅 Book follow-up</button>
-            <a href="javascript:void(0)" onclick="event.stopPropagation();app.showPotentialBreakdown(${Number(pid)})" style="font-size:11px;color:#92400E;">details</a>
-        </div>`;
-    }
-    for (const el of slots) { el.dataset.fuFilled = '1'; el.innerHTML = html; }
+    document.querySelectorAll(`[data-fu-pid="${Number(pid)}"]`).forEach(el => { el.dataset.fuFilled = '1'; });
+    await _pvFillPotential(pid);
 };
 if (!window.__potObserver && typeof MutationObserver !== 'undefined' && document.body) {
     window.__potObserver = new MutationObserver(muts => {
@@ -6133,8 +6371,6 @@ if (!window.__potObserver && typeof MutationObserver !== 'undefined' && document
             if (n.nodeType !== 1) continue;
             const els = n.matches && n.matches('[data-pot-pid]') ? [n] : (n.querySelectorAll ? n.querySelectorAll('[data-pot-pid]:not([data-pot-filled])') : []);
             for (const el of els) { if (!el.dataset.potFilled) { el.dataset.potFilled = '1'; fillPotentialBadge(el.dataset.potPid); } }
-            const fus = n.matches && n.matches('[data-fu-pid]') ? [n] : (n.querySelectorAll ? n.querySelectorAll('[data-fu-pid]:not([data-fu-filled])') : []);
-            for (const el of fus) { if (!el.dataset.fuFilled) { el.dataset.fuFilled = '1'; fillFollowUpLine(el.dataset.fuPid); } }
             if (n.querySelectorAll && n.querySelector('img[data-sbobj]:not([data-resolved])')) _fsaResolveThumbs(n);
         }
     });
@@ -7829,6 +8065,13 @@ const openPastRecordModal = async (...args) => {
         removeFengShuiReportFile,
         fillPotentialBadge,
         fillFollowUpLine,
+        fillProfileSnapshot,
+        pvGoToSection,
+        pvOpenMeeting,
+        openProtectionSheet,
+        pvFactsHtml: _pvFactsHtml,
+        pvMenuHtml: _pvMenuHtml,
+        pvSnapHtml: _pvSnapHtml,
         potentialCode,
         _fsaReportFilesHtml,
         showPotentialBreakdown,
