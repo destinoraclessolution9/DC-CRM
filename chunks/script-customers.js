@@ -2254,7 +2254,7 @@ const renderCustomerActivityTab = async (customer, containerId = 'profile-tab-co
                     <button type="button" class="mu-fchip" data-f="meetup" onclick="this.closest('.mu-wrap').dataset.muf='meetup'">Meet Ups (${nMeet})</button>
                     <button type="button" class="mu-fchip" data-f="event" onclick="this.closest('.mu-wrap').dataset.muf='event'">Events (${nEvent})</button>
                 </div>
-                <button class="btn primary btn-sm" onclick="app.openActivityModal(null, 'customer', ${customer.id})">+ Log Activity</button>
+                <button class="btn secondary btn-sm" onclick="app.openActivityModal(null, 'customer', ${customer.id})">+ Log Activity</button>
             </div>
             ${_inProfile ? '' : (window.app.meetupBriefHtml || (() => ''))(rows, { typeLabel: typeLabelC })}
             ${rows.length > 0

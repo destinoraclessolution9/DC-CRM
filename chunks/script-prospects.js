@@ -3588,7 +3588,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                     </div>
                     <div style="display:flex;gap:8px;flex-wrap:wrap;">
                         <button class="btn secondary btn-sm" onclick="app.openPastRecordModal(${prospect.id})" title="Log a historical meet up for an old customer"><i class="fas fa-history"></i> Past Record</button>
-                        <button class="btn primary btn-sm" onclick="app.openActivityModal('', ${prospect.id})"><i class="fas fa-plus"></i> Add</button>
+                        <button class="btn secondary btn-sm" onclick="app.openActivityModal('', ${prospect.id})"><i class="fas fa-plus"></i> Add</button>
                     </div>
                 </div>
                 ${_briefHtml()}

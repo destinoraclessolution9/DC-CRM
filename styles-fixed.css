@@ -11682,18 +11682,21 @@ html, body {
 .pv-hdr h1 { font-size: 22px; font-weight: 700; margin: 6px 0 8px; line-height: 1.2; }
 .pv-hdr-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--gray-500); }
 
-/* Sections (accordion) */
-.acc-container { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
-.acc-item { border: 1px solid var(--gray-200); border-radius: 10px; overflow: hidden; background: var(--bg-surface, #fff); }
-.acc-hdr { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 48px; padding: 10px 16px; cursor: pointer; background: var(--bg-surface, #fff); color: var(--gray-900); font-weight: 600; font-size: 15px; user-select: none; -webkit-tap-highlight-color: transparent; transition: background-color .15s; }
-.acc-hdr > span > i:first-child { color: var(--gray-500); width: 18px; text-align: center; margin-right: 4px; }
-.acc-hdr:hover { background: var(--gray-100); }
+/* Sections (accordion) — 2026-10-25: flat rows split by a hairline inside the
+   tab, not a stack of bordered cards; an open section is shown by its body
+   and the turned chevron, no coloured bar (pink is for actions + the tab). */
+.acc-container { display: flex; flex-direction: column; gap: 0; padding: 0 16px 8px; }
+.acc-item { border: none; border-bottom: 1px solid var(--gray-200); border-radius: 0; background: var(--bg-surface, #fff); }
+.acc-item:last-child { border-bottom: none; }
+.acc-hdr { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 52px; padding: 12px 4px; cursor: pointer; background: var(--bg-surface, #fff); color: var(--gray-900); font-weight: 600; font-size: 15.5px; user-select: none; -webkit-tap-highlight-color: transparent; transition: background-color .15s; }
+.acc-hdr > span > i:first-child { color: var(--gray-500); width: 18px; text-align: center; margin-right: 6px; }
+.acc-hdr:hover { background: var(--gray-50, #F8F9FA); }
 .acc-hdr:active { background: var(--gray-100); }
 .acc-hdr:focus-visible { outline: 2px solid var(--accent, #E84393); outline-offset: -2px; }
-.acc-item.open > .acc-hdr { background: var(--bg-surface, #fff); color: var(--gray-900); box-shadow: inset 3px 0 0 var(--accent, #E84393); border-bottom: 1px solid var(--gray-200); }
-.acc-item.open > .acc-hdr .acc-chev { color: var(--primary); transform: rotate(180deg); }
-.acc-chev { transition: transform .25s; color: var(--gray-500); flex-shrink: 0; }
-.acc-body { padding: 12px 16px 16px; background: var(--bg-surface, #fff); }
+.acc-item.open > .acc-hdr { background: var(--bg-surface, #fff); color: var(--gray-900); }
+.acc-item.open > .acc-hdr .acc-chev { color: var(--gray-700); transform: rotate(180deg); }
+.acc-chev { transition: transform .25s; color: var(--gray-400); flex-shrink: 0; }
+.acc-body { padding: 0 4px 18px; background: var(--bg-surface, #fff); }
 .acc-loading { text-align: center; padding: 14px; color: var(--gray-400); font-size: 14px; }
 
 /* Label / value rows */
@@ -11702,12 +11705,12 @@ html, body {
 .pv-val { flex: 1; min-width: 0; color: var(--gray-900); font-weight: 500; word-break: break-word; }
 .pv-sub { font-size: 13px; font-weight: 600; color: var(--gray-900); margin: 14px 0 4px; padding-top: 12px; border-top: 1px solid var(--gray-200); }
 .pv-sub:first-child { margin-top: 0; padding-top: 0; border-top: none; }
-.pv-compact { padding: 12px 16px 16px; }
+.pv-compact { padding: 0 4px 18px; }
 @media (max-width: 480px) {
     .pv-lbl { min-width: 96px; }
-    .acc-hdr { padding: 10px 14px; }
-    .acc-body, .pv-compact { padding: 10px 14px 14px; }
-    .acc-container { padding: 8px; }
+    .acc-hdr { padding: 12px 2px; }
+    .acc-body, .pv-compact { padding: 0 2px 16px; }
+    .acc-container { padding: 0 12px 8px; }
 }
 
 /* Meet-up cards + minutes */
@@ -11717,15 +11720,16 @@ html, body {
 .meet-date { font-size: 12px; color: var(--gray-500); }
 .meet-section { margin-bottom: 8px; }
 .meet-lbl { font-size: 12px; font-weight: 600; color: var(--gray-500); margin-bottom: 2px; }
-.meet-txt { font-size: 14px; color: var(--gray-900); line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.meet-txt { font-size: 15px; color: var(--gray-900); line-height: 1.6; white-space: pre-wrap; word-break: break-word; max-width: 72ch; }
 .meet-actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
 .meet-photos { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
 .meet-summary { padding: 10px 0 4px; border-top: 1px solid var(--gray-200); margin-top: 2px; }
 .meet-summary-hdr { font-size: 12px; font-weight: 600; color: var(--gray-500); margin-bottom: 10px; }
-.msf { margin-bottom: 10px; }
+.msf { margin-bottom: 14px; }
 .msf:last-child { margin-bottom: 4px; }
-.msf-lbl { display: block; font-size: 12px; font-weight: 600; color: var(--gray-500); margin-bottom: 3px; }
-.msf-txt { margin: 0; font-size: 14px; line-height: 1.6; color: var(--gray-900); white-space: pre-wrap; word-break: break-word; }
+.msf-lbl { display: block; font-size: 12.5px; font-weight: 600; color: var(--gray-500); margin-bottom: 4px; }
+/* Full minutes are read here — comfortable size, line length capped. */
+.msf-txt { margin: 0; font-size: 15px; line-height: 1.65; color: var(--gray-900); white-space: pre-wrap; word-break: break-word; max-width: 72ch; }
 .msf-txt.action { color: var(--primary); font-weight: 600; }
 .msf-empty { font-size: 13px; color: var(--gray-500); font-style: italic; text-align: center; padding: 4px 0 10px; }
 
@@ -11735,7 +11739,7 @@ html, body {
 .mu-fchip { border: 1px solid var(--gray-300); background: var(--bg-surface, #fff); color: var(--gray-700); border-radius: 20px; padding: 6px 14px; min-height: 32px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; -webkit-tap-highlight-color: transparent; }
 .mu-wrap[data-muf="all"] .mu-fchip[data-f="all"],
 .mu-wrap[data-muf="meetup"] .mu-fchip[data-f="meetup"],
-.mu-wrap[data-muf="event"] .mu-fchip[data-f="event"] { background: var(--primary); border-color: var(--primary); color: #fff; }
+.mu-wrap[data-muf="event"] .mu-fchip[data-f="event"] { background: var(--gray-900); border-color: var(--gray-900); color: #fff; }
 .mu-wrap[data-muf="meetup"] .mu-item[data-kind="event"] { display: none; }
 .mu-wrap[data-muf="event"] .mu-item[data-kind="meetup"] { display: none; }
 .mu-list { display: flex; flex-direction: column; gap: 6px; }
@@ -11752,7 +11756,7 @@ html, body {
 .mu-badge { font-size: 11.5px; font-weight: 600; border-radius: 10px; padding: 2px 8px; white-space: nowrap; background: var(--gray-100); color: var(--gray-700); }
 .mu-badge.ok { background: #E6F4EA; color: #146C43; }
 .mu-badge.bad { background: #FCE8E6; color: #B3261E; }
-.mu-detail { display: none; padding: 2px 14px 14px 32px; }
+.mu-detail { display: none; padding: 4px 16px 16px 32px; }
 .mu-item.open .mu-detail { display: block; }
 .mu-close-sub { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--gray-300); }
 @media (max-width: 520px) {
@@ -11957,6 +11961,12 @@ button.pv-card:focus-visible { outline: 2px solid var(--accent, #E84393); outlin
 .pv-card.is-loading .pv-card-val { color: var(--gray-300); }
 .pv-attn { padding: 0 16px; }
 .pv-attn:has(.ap-gr-line, .ap-pop-line) { padding-top: 12px; border-bottom: 1px solid var(--gray-200); }
+/* 🟣 Golden Road / 💳 POP status rows (autopilot chunk) — neutral, the
+   lapsed / overdue words keep their own red. */
+.pv-attn-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 10px; padding: 8px 12px; border: 1px solid var(--gray-200); border-radius: 8px; background: var(--bg-surface, #fff); font-size: 13.5px; color: var(--gray-700); }
+.pv-attn-line.is-stack { flex-direction: column; align-items: stretch; gap: 4px; }
+.pv-attn-line strong { color: var(--gray-900); }
+.pv-attn-dot { color: var(--gray-300); }
 @media (max-width: 760px) {
     .pv-snap { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; padding: 12px; }
     .pv-card { padding: 10px 12px; }

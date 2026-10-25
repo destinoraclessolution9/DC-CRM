@@ -164,15 +164,16 @@
         if (!g || !g.total) return;
         const item = String(g.item || '').replace(/\s*\/.*$/, '');
         const short = item.length > 28 ? item.slice(0, 27) + '…' : item;
-        const parts = [`<strong style="color:#6D28D9;">🟣 Golden Road ${Number(g.done) || 0}/${Number(g.total)}</strong>`];
+        const parts = [`<strong>🟣 Golden Road ${Number(g.done) || 0}/${Number(g.total)}</strong>`];
         if (g.collected) parts.push('<span style="color:#047857;font-weight:600;">✅ collected</span>');
         else if (g.ready_date) parts.push(`<span>${esc(short)} ready ~${esc(_fmt(g.ready_date))}</span>`);
         if (!g.collected && g.next_due) parts.push(`<span style="color:#6B7280;">next GR ${esc(_fmt(g.next_due))}</span>`);
         const line = document.createElement('div');
         line.className = 'ap-gr-line';
         line.dataset.grFor = String(pid);
-        line.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 8px;padding:6px 10px;border-radius:8px;background:#F5F3FF;border:1px solid #DDD6FE;font-size:13px;';
-        line.innerHTML = parts.join('<span style="color:#C4B5FD;">·</span>');
+        // Neutral status row under the profile snapshot (styles-fixed.css .pv-attn-line).
+        line.classList.add('pv-attn-line');
+        line.innerHTML = parts.join('<span class="pv-attn-dot">·</span>');
         slot.insertAdjacentElement('afterend', line);
     };
 
@@ -827,10 +828,10 @@
         const line = document.createElement('div');
         line.className = 'ap-pop-line';
         line.dataset.popFor = String(pid);
-        line.style.cssText = 'display:flex;flex-direction:column;gap:4px;margin:0 0 8px;padding:6px 10px;border-radius:8px;background:#ECFDF5;border:1px solid #A7F3D0;font-size:13px;';
+        line.classList.add('pv-attn-line', 'is-stack');
         line.innerHTML = plans.map(p => `
             <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;cursor:pointer;" onclick="event.stopPropagation();app.openPopPlan(${Number(p.purchase_id)})">
-                <strong style="color:#065F46;">💳 POP ${Number(p.done) || 0}/${Number(p.total) || 0}</strong>
+                <strong>💳 POP ${Number(p.done) || 0}/${Number(p.total) || 0}</strong>
                 <span>RM ${Math.round(Number(p.left_rm) || 0).toLocaleString()} left</span>
                 ${Number(p.failed) ? `<span style="color:#B91C1C;font-weight:700;">⚠ ${Number(p.failed)} lapsed</span>`
                     : (p.next_due ? `<span style="color:#6B7280;">next RM${Math.round(Number(p.next_amount) || 0)} ${esc(_fmt(p.next_due))} (auto)</span>` : '')}
