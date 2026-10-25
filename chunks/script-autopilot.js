@@ -169,10 +169,9 @@
         else if (g.ready_date) parts.push(`<span>${esc(short)} ready ~${esc(_fmt(g.ready_date))}</span>`);
         if (!g.collected && g.next_due) parts.push(`<span style="color:#6B7280;">next GR ${esc(_fmt(g.next_due))}</span>`);
         const line = document.createElement('div');
-        line.className = 'ap-gr-line';
-        line.dataset.grFor = String(pid);
         // Neutral status row under the profile snapshot (styles-fixed.css .pv-attn-line).
-        line.classList.add('pv-attn-line');
+        line.className = 'ap-gr-line pv-attn-line';
+        line.dataset.grFor = String(pid);
         line.innerHTML = parts.join('<span class="pv-attn-dot">·</span>');
         slot.insertAdjacentElement('afterend', line);
     };
@@ -826,9 +825,8 @@
         document.querySelectorAll(`.ap-pop-line[data-pop-for="${pid}"]`).forEach(n => n.remove());
         if (!plans.length) return;
         const line = document.createElement('div');
-        line.className = 'ap-pop-line';
+        line.className = 'ap-pop-line pv-attn-line is-stack';
         line.dataset.popFor = String(pid);
-        line.classList.add('pv-attn-line', 'is-stack');
         line.innerHTML = plans.map(p => `
             <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;cursor:pointer;" onclick="event.stopPropagation();app.openPopPlan(${Number(p.purchase_id)})">
                 <strong>💳 POP ${Number(p.done) || 0}/${Number(p.total) || 0}</strong>

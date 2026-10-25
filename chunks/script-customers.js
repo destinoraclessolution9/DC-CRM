@@ -791,8 +791,8 @@ const showCustomerDetail = async (customerId) => {
     // Opens on Engagement: Next up + the timeline load now, every other section
     // when its tab is first shown. (Overdue journey steps are counted in Next
     // up — the Journey Tracker no longer carries its own badge.)
-    (window.app.fillProfileSnapshot || (() => Promise.resolve()))({ kind: 'customer', id: cid, pid: lpid != null ? Number(lpid) : null }).catch(() => {});
-    (window.app.pvShowTab || (() => Promise.resolve()))('customer', cid, 'engagement').catch(() => {});
+    Promise.resolve((window.app.fillProfileSnapshot || (() => {}))({ kind: 'customer', id: cid, pid: lpid != null ? Number(lpid) : null })).catch(() => {});
+    Promise.resolve((window.app.pvShowTab || (() => {}))('customer', cid, 'engagement')).catch(() => {});
     // Async: populate 改命后的进步 count badge. id-only count — the full rows
     // (story bodies) are only fetched when the section is actually opened.
     AppDataStore.queryAdvanced('customer_improvements', { select: 'id', filters: { customer_id: customer.id }, limit: 1, countMode: 'exact' }).then(res => {
