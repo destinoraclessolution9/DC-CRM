@@ -1044,6 +1044,9 @@
    Brand palette: red / pink / beige / purple / wood
    ======================================================================= */
 /* page background swap to beige when home view is active */
+/* Calendar day list: the action buttons row scrolls sideways, no scrollbar */
+.mcal-ds-acts::-webkit-scrollbar { display: none; }
+
 .content-viewport.mhome-active {
     background: #FAF6F0;
 }

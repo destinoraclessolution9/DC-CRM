@@ -3347,9 +3347,11 @@
             const _entityId = a.prospect_id || a.customer_id;
             const _isMeetup = _MCAL_MEETUP_TYPES.includes(type) && !!_entityId;
             const _pill = (kind, icon, label, bg, fg) =>
-                `<button onclick="event.stopPropagation();app.mcalActivityAction('${kind}', ${Number(a.id)}, ${_entityId ? Number(_entityId) : 'null'})" style="display:inline-flex;align-items:center;gap:4px;height:26px;padding:0 10px;border:none;border-radius:13px;background:${bg};color:${fg};font-size:11px;font-weight:600;cursor:pointer;"><i class="fas ${icon}" style="font-size:10px;"></i>${label}</button>`;
+                `<button onclick="event.stopPropagation();app.mcalActivityAction('${kind}', ${Number(a.id)}, ${_entityId ? Number(_entityId) : 'null'})" style="display:inline-flex;align-items:center;gap:4px;flex-shrink:0;white-space:nowrap;height:28px;padding:0 10px;border:none;border-radius:14px;background:${bg};color:${fg};font-size:11.5px;font-weight:600;cursor:pointer;"><i class="fas ${icon}" style="font-size:10px;"></i>${label}</button>`;
+            // One full-width row under the card (owner 2026-10-26): all four
+            // fit on a phone; a very narrow screen scrolls it sideways, never wraps.
             const actionRow = owned
-                ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:7px;">
+                ? `<div class="mcal-ds-acts" style="display:flex;flex-wrap:nowrap;gap:6px;margin-top:8px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;">
                         ${_pill('edit', 'fa-pen', 'Edit', '#FEF3C7', '#B45309')}
                         ${_entityId ? _pill('brief', 'fa-book-open', 'Brief', '#FCE7F3', '#BE185D') : ''}
                         ${_isMeetup ? _pill('minutes', 'fa-sticky-note', 'Minutes', '#E0E7FF', '#4338CA') : ''}
@@ -3357,15 +3359,17 @@
                    </div>`
                 : '';
             return `
-                <div style="display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--gray-100);cursor:pointer;" onclick="app.mcalOpenEvent('${a.id}', ${_pArg}, ${_cArg});">
-                    <div style="min-width:42px;font-size:13px;font-weight:600;color:var(--gray-700);">${_mhomeEsc(time)}</div>
-                    <span class="mcal-evt ${color}" style="white-space:nowrap;font-size:11px;padding:2px 7px;border-radius:4px;flex-shrink:0;">${_mhomeEsc(type)}</span>
-                    <div style="flex:1;min-width:0;">
-                        <div style="font-size:14px;font-weight:500;color:var(--gray-800);">${_mhomeEsc(name)}</div>
-                        ${venue ? `<div style="font-size:12px;color:var(--gray-500);margin-top:2px;"><i class="fas fa-map-marker-alt" style="font-size:10px;margin-right:3px;"></i>${_mhomeEsc(venue)}</div>` : ''}
-                        ${actionRow}
+                <div class="mcal-ds-row" style="padding:11px 0;border-bottom:1px solid var(--gray-100);cursor:pointer;" onclick="app.mcalOpenEvent('${a.id}', ${_pArg}, ${_cArg});">
+                    <div style="display:flex;align-items:flex-start;gap:10px;">
+                        <div style="min-width:42px;font-size:13px;line-height:20px;font-weight:600;color:var(--gray-700);">${_mhomeEsc(time)}</div>
+                        <span class="mcal-evt ${color}" style="white-space:nowrap;font-size:11px;line-height:16px;padding:1px 7px;margin-top:1px;border-radius:4px;flex-shrink:0;">${_mhomeEsc(type)}</span>
+                        <div style="flex:1;min-width:0;">
+                            <div style="font-size:14px;line-height:20px;font-weight:500;color:var(--gray-800);">${_mhomeEsc(name)}</div>
+                            ${venue ? `<div style="font-size:12px;color:var(--gray-500);margin-top:2px;"><i class="fas fa-map-marker-alt" style="font-size:10px;margin-right:3px;"></i>${_mhomeEsc(venue)}</div>` : ''}
+                        </div>
+                        <i class="fas fa-chevron-right" style="color:var(--gray-300);font-size:12px;line-height:20px;flex-shrink:0;"></i>
                     </div>
-                    <i class="fas fa-chevron-right" style="color:var(--gray-300);font-size:12px;flex-shrink:0;"></i>
+                    ${actionRow}
                 </div>`;
         }).join('');
 
