@@ -1747,7 +1747,11 @@ My raw notes:
         const legacyText = String(a.next_action || '').replace(/\s*\|\s*Remarks:\s*/g, ' — ').replace(/^—\s*/, '').trim();
         const steps = savedSteps && savedSteps.length ? savedSteps
             : (legacyText ? [{ text: legacyText, type: 'other', due: _nextActionDueDefault(a) }] : [{ text: '', type: 'call', due: _nextActionDueDefault(a) }]);
-        _minutesSteps.set(prefix, { events: opts.upcomingEvents || [], defaultDue: _nextActionDueDefault(a) });
+        // Classes for "not on the calendar yet": the standard list + any class an
+        // event topic already uses (the waiting list matches sessions by these).
+        const classes = [...new Set([...EVENT_CATEGORIES, ...(opts.events || []).flatMap(e => parseEventCategories(e.categories))]
+            .map(c => String(c || '').trim()).filter(Boolean))];
+        _minutesSteps.set(prefix, { events: opts.upcomingEvents || [], classes, defaultDue: _nextActionDueDefault(a) });
 
         const voiceBtn = (targetId) => readOnly ? '' : `<button type="button" class="btn-icon" onclick="app.openVoiceRecorder('${targetId}', 'activity', null)" title="Record voice note" style="color:var(--gray-500);"><i class="fas fa-microphone"></i></button>`;
         const textBox = (id, label, val, placeholder, rows = 2) => `
@@ -1873,6 +1877,8 @@ My raw notes:
         const type = _PMF_STEP_TYPES.some(t => t[0] === r.type) ? r.type : 'other';
         const dis = readOnly ? 'disabled' : '';
         const evOpts = (ctx.events || []).map(e => `<option value="${Number(e.id)}" data-event="${Number(e.event_id) || ''}" ${String(r.event_activity_id) === String(e.id) ? 'selected' : ''}>${escapeHtml(e.activity_title || 'Event')} · ${escapeHtml(_pmfDay(e.activity_date))}</option>`).join('');
+        // No session yet → wait for the class; invited when one is added (class_waitlist).
+        const classOpts = (ctx.classes || []).map(c => `<option value="cat:${escapeHtml(c)}" ${!r.event_activity_id && r.event_category === c ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('');
         return `
             <div class="pmf-step" data-type="${type}">
                 <div class="pmf-step-top">
@@ -1881,7 +1887,9 @@ My raw notes:
                     ${readOnly ? '' : '<button type="button" class="pmf-step-x" aria-label="Remove this step" onclick="app.pmfRemoveStep(this)">&times;</button>'}
                 </div>
                 <select class="form-control pmf-step-event" aria-label="Which event" ${dis} onchange="app.pmfStepEvent(this)">
-                    <option value="">${ctx.events && ctx.events.length ? 'Pick the event…' : 'No events on the calendar in the next 60 days'}</option>${evOpts}
+                    <option value="">Pick a session or a class…</option>
+                    ${evOpts ? `<optgroup label="On the calendar">${evOpts}</optgroup>` : ''}
+                    ${classOpts ? `<optgroup label="Not on the calendar yet — wait for the class">${classOpts}</optgroup>` : ''}
                 </select>
                 <input type="text" class="form-control pmf-step-text" maxlength="180" placeholder="What needs doing? e.g. Follow up on the RM18,990 package" value="${escapeHtml(r.text || '')}" ${dis}>
                 <label class="pmf-step-book"><input type="checkbox" class="pmf-step-bookcb" ${dis}> Book it in the calendar after saving</label>
@@ -1908,16 +1916,20 @@ My raw notes:
         const row = sel.closest('.pmf-step');
         const txt = row && row.querySelector('.pmf-step-text');
         const opt = sel.selectedOptions && sel.selectedOptions[0];
-        if (txt && opt && sel.value && !txt.value.trim()) txt.value = `Invite to ${opt.textContent.split(' · ')[0]}`;
+        if (txt && opt && sel.value && !txt.value.trim()) {
+            txt.value = sel.value.startsWith('cat:') ? `Waiting for ${sel.value.slice(4)}` : `Invite to ${opt.textContent.split(' · ')[0]}`;
+        }
     };
     // The steps as stored on the meeting (activities / event_attendees.next_actions).
     const _pmfCollectSteps = (prefix) => [...document.querySelectorAll(`#${prefix}-steplist .pmf-step`)].map(el => {
         const type = el.querySelector('.pmf-step-type').value;
         const due = el.querySelector('.pmf-step-due').value;
         const evSel = el.querySelector('.pmf-step-event');
-        const evId = type === 'event' && evSel && evSel.value ? Number(evSel.value) : null;
+        const evVal = type === 'event' && evSel ? String(evSel.value || '') : '';
+        const evId = evVal && !evVal.startsWith('cat:') ? Number(evVal) : null;
         const row = { text: el.querySelector('.pmf-step-text').value.trim(), type, due: /^\d{4}-\d{2}-\d{2}$/.test(due) ? due : null };
         if (evId) { row.event_activity_id = evId; row.event_id = Number(evSel.selectedOptions[0].dataset.event) || null; }
+        if (evVal.startsWith('cat:')) row.event_category = evVal.slice(4);
         if (type === 'meetup' && el.querySelector('.pmf-step-bookcb')?.checked) row._book = true;
         return row;
     }).filter(r => r.text);

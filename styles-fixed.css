@@ -11894,6 +11894,17 @@ details[open] > summary.pmf-h::after { content: '▾'; }
     .modal-box:has(.pmf) .modal-footer .btn.primary { order: 2 !important; width: auto !important; flex: 1 1 auto; }
 }
 
+/* 🎟️ Recommended to attend — class waiting list on the event screen */
+.cw-sec { margin-top: 14px; padding: 12px; border: 1px solid var(--gray-200); border-radius: 10px; background: var(--gray-50, #F8F9FA); }
+.cw-sec h4 { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; font-size: 14.5px; }
+.cw-count { display: inline-block; min-width: 22px; padding: 1px 7px; border-radius: 10px; background: var(--gray-900); color: #fff; font-size: 12px; text-align: center; }
+.cw-sub { font-size: 12.5px; color: var(--gray-500); margin-bottom: 8px; }
+.cw-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--gray-200); }
+.cw-main { flex: 1; min-width: 0; }
+.cw-name { font-weight: 600; color: var(--gray-900); }
+.cw-meta { font-size: 12.5px; color: var(--gray-500); }
+.cw-hidden { padding-top: 8px; border-top: 1px solid var(--gray-200); font-size: 12.5px; color: var(--gray-500); }
+
 /* Opportunities — open potential, deals, what we know (2026-10-25) */
 .op-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
 .op-total { font-size: 22px; font-weight: 700; color: var(--gray-900); font-variant-numeric: tabular-nums; }

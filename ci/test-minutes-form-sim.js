@@ -83,7 +83,7 @@ const app = windowStub.app;
 
 const OPTS = {
   products: [{ name: 'Power Ring PR3', price: 18990 }, { name: '个人风水基础课', price: 380 }],
-  bujishu: [{ name: '旺床 King', price: 6800 }], formula: [], events: [],
+  bujishu: [{ name: '旺床 King', price: 6800 }], formula: [], events: [{ categories: '["福气分享会"]' }],
   gradeContext: { current: 'C' }, allowNoStep: true, withPeople: true,
   upcomingEvents: [{ id: 701, event_id: 91, activity_title: '九星课 <b>Nov</b>', activity_date: '2026-11-04' }],
 };
@@ -112,6 +112,8 @@ const OPTS = {
   check('people step present', html.includes('id="pmn-step-4"') && html.includes('People they recommended'));
   check('ChatGPT paste kept', html.includes('id="pmn-minutes-paste"'));
   check('old event-checkbox list gone', !html.includes('pmn-na-items') && !html.includes('next-action-remarks'));
+  check('class waiting option group', html.includes('Not on the calendar yet') && html.includes('value="cat:个人风水基础课"'));
+  check('classes in use by topics are offered', html.includes('value="cat:福气分享会"'));
 }
 // ── builder: old single next action → one row; nothing → one empty row ─────
 {
@@ -138,13 +140,15 @@ const OPTS = {
     fakeRow({ type: 'event', text: 'Invite to 九星课', due: '2026-11-03', event: '701', eventId: 91 }),
     fakeRow({ type: 'meetup', text: 'Meet wife', due: '2026-11-05', book: true }),
     fakeRow({ type: 'other', text: '   ', due: '2026-11-06' }),
+    fakeRow({ type: 'event', text: 'Waiting for 个人风水基础课', due: '2026-11-07', event: 'cat:个人风水基础课' }),
   ];
   people = [fakeRow({ name: 'Tan Ah Kow', rel: 'Friend', phone: '0123', voucher: true }), fakeRow({ name: '', rel: 'Friend' }), fakeRow({ name: 'Lee', rel: '', voucher: false })];
   const d = app.collectPostMeetupNotesData('pmn');
-  check('collect: three steps (blank row dropped)', d.next_actions.length, 3);
+  check('collect: four steps (blank row dropped)', d.next_actions.length, 4);
+  check('collect: class wait has a category, no session', d.next_actions[3].event_category === '个人风水基础课' && !('event_activity_id' in d.next_actions[3]));
   check('collect: event step keeps its session', d.next_actions[1].event_activity_id === 701 && d.next_actions[1].event_id === 91);
   check('collect: booking flag never stored', d.next_actions.every(r => !('_book' in r)));
-  check('collect: summary text for old screens', d.next_action, 'Call him; Invite to 九星课; Meet wife');
+  check('collect: summary text for old screens', d.next_action, 'Call him; Invite to 九星课; Meet wife; Waiting for 个人风水基础课');
   check('collect: first step due', d.next_action_due, '2026-11-01');
   check('collect: result', d.outcome, 'neutral');
   const fu = app.collectMinutesFollowUps('pmn');

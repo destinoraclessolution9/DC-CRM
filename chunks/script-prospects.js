@@ -2653,7 +2653,19 @@ const renderProfileOpportunities = async (kind, id, pid, container) => {
             <div class="msf"><span class="msf-lbl">${lbl}</span><p class="msf-txt">${escapeHtml(f.v)}</p>
             <button type="button" class="tk-src" onclick="app.pvOpenMeeting(${k}, '${escapeHtml(f.a._muid)}')">from ${escapeHtml(f.a.activity_type || 'meeting')} · ${escapeHtml(_pvFmtDay(f.a.activity_date))}</button></div>`).join('')}` : '';
 
-    container.innerHTML = potHtml + dealsHtml + knowHtml;
+    // ── Waiting for a class (class_waitlist): recommended before a session existed
+    let waits = [];
+    try {
+        let q = sb.from('class_waitlist').select('id,category,status,created_at,invited_activity_id').in('status', ['waiting', 'invited']);
+        q = kind === 'customer' ? q.or(`customer_id.eq.${Number(id)},prospect_id.eq.${Number(pid)}`) : q.eq('prospect_id', Number(pid));
+        const { data } = await q.order('created_at', { ascending: false });
+        waits = data || [];
+    } catch (_) { /* line stays hidden */ }
+    const waitHtml = waits.length ? `
+        <div class="tk-toolbar op-sec"><span class="tk-summary">Classes recommended</span></div>
+        ${waits.map(w => `<div class="op-item"><span>🎟️ ${escapeHtml(w.category)}</span><span class="op-src">${w.status === 'invited' ? 'invited' : `waiting since ${escapeHtml(_pvFmtDay(w.created_at))}`}</span></div>`).join('')}` : '';
+
+    container.innerHTML = potHtml + dealsHtml + waitHtml + knowHtml;
 };
 const pvNewDeal = async (prospectId) => {
     try { if (window._loadChunk) await window._loadChunk('chunks/script-pipeline.min.js'); } catch (_) { /* handled below */ }

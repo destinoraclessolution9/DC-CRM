@@ -5051,6 +5051,54 @@
         return cached();
     };
 
+    // ── 🎟️ Recommended to attend (class waiting list, 2026-10-26) ───────────
+    // People an agent recommended for this session's class before any session
+    // existed. Names only for people the viewer may see; the rest are counted
+    // under the agent who recommended them.
+    const _cwFill = async (activityId) => {
+        const box = document.getElementById(`cw-rec-${activityId}`);
+        const sb = window.supabase || window.supabaseClient;
+        if (!box || !sb) return;
+        let rows = [];
+        try { const { data } = await sb.rpc('class_waitlist_for_session', { p_activity: Number(activityId) }); rows = data || []; } catch (_) { /* section stays empty */ }
+        if (!rows.length) { box.innerHTML = ''; return; }
+        const seen = rows.filter(r => r.can_invite && r.person_name);
+        const hidden = rows.filter(r => !(r.can_invite && r.person_name));
+        const byAgent = {};
+        hidden.forEach(r => { const k = r.recommended_by_name || 'another agent'; byAgent[k] = (byAgent[k] || 0) + 1; });
+        const fmt = (d) => { const t = Date.parse(String(d || '') + 'T00:00:00'); return Number.isNaN(t) ? '' : new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }); };
+        box.innerHTML = `
+            <div class="cw-sec">
+                <h4>🎟️ Recommended to attend <span class="cw-count">${rows.length}</span></h4>
+                <div class="cw-sub">Waiting for this class since an earlier meeting — invite them before the seats go.</div>
+                ${seen.map(r => `
+                <div class="cw-row">
+                    <div class="cw-main">
+                        <div class="cw-name">${esc(r.person_name)}</div>
+                        <div class="cw-meta">${esc(r.category)} · by ${esc(r.recommended_by_name || '—')} · since ${esc(fmt(r.since))}</div>
+                    </div>
+                    <button type="button" class="btn secondary btn-sm" onclick="event.stopPropagation();app.cwInvite(${Number(r.entry_id)}, ${Number(activityId)}, this)"><i class="fas fa-user-plus"></i> Invite</button>
+                </div>`).join('')}
+                ${Object.entries(byAgent).map(([n, c]) => `<div class="cw-hidden">${c} more waiting · recommended by ${esc(n)} — they have the invite task</div>`).join('')}
+            </div>`;
+    };
+    const cwInvite = async (entryId, activityId, btn) => {
+        const sb = window.supabase || window.supabaseClient;
+        if (!sb) return;
+        if (btn) { btn.disabled = true; btn.textContent = 'Inviting…'; }
+        try {
+            const { data, error } = await sb.rpc('class_wait_invite', { p_entry: Number(entryId), p_activity: Number(activityId) });
+            if (error) throw error;
+            if (!data) throw new Error('They are no longer waiting for this class.');
+            UI.toast.success('Invited ✓ — added to this session');
+            AppDataStore.invalidateCache && AppDataStore.invalidateCache('event_attendees');
+            await viewActivityDetails(activityId);
+        } catch (e) {
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-user-plus"></i> Invite'; }
+            UI.toast.error('Could not invite: ' + (e && e.message ? e.message : e));
+        }
+    };
+
     const viewActivityDetails = async (activityId) => {
         // Hot cache hit: activity is in the yesterday→today+7 window pre-warmed by
         // the last renderCalendar(). Skip the network round-trip entirely so the
@@ -5259,6 +5307,7 @@
                     <div style="margin-top:10px; text-align:right;">
                         <button class="btn-add-slot" onclick="app.showAddAttendeeSearch('${activity.event_id}', '${activityId}')"><i class="fas fa-user-plus"></i> + Add Attendee</button>
                     </div>
+                    <div id="cw-rec-${Number(activityId)}"></div>
                 </div>
             `;
 
@@ -5389,6 +5438,7 @@
 
         UI.showModal('Activity Details', content, []);
         if (document.getElementById('esm-body')) _esmFill();
+        if (document.getElementById(`cw-rec-${Number(activityId)}`)) _cwFill(activityId);
 
         // 汇集 briefing (async fill; RLS-scoped — the slot stays hidden for
         // viewers who are neither the event creator nor management L≤5).
@@ -8139,6 +8189,8 @@
         renderDayView,
         todo,
         viewActivityDetails,
+        cwInvite,
+        cwFill: _cwFill,
         openActivityRepairModal,
         repairSearchEntities,
         repairActivityRelink,
