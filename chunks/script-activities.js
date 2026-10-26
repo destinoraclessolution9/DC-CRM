@@ -1603,7 +1603,6 @@ My raw notes:
 
         _pmfSyncChips(prefix);
         pmfRenderProducts(prefix);
-        pmfRefreshSteps(prefix);
         const filled = rows.filter(r => r.icon === '✓').length;
         const color = { '✓': '#16a34a', '⚠': '#d97706', '–': 'var(--gray-400)' };
         resEl.innerHTML = `
@@ -1713,14 +1712,6 @@ My raw notes:
             _minutesCtx.set(prefix, { existing: mm, pending: {} });
             _minutesPendingPhotos.set(prefix, []);
         }
-        const mmTextarea = (key, label, placeholder) => `
-                <div class="form-group">
-                    <label>${label}</label>
-                    <div style="display:flex;gap:8px;">
-                        <textarea id="${prefix}-${key}" class="form-control" rows="2" placeholder="${placeholder}" ${disabled}>${escapeHtml((mm && mm[key]) || '')}</textarea>
-                        ${readOnly ? '' : `<button class="btn-icon" onclick="app.openVoiceRecorder('${prefix}-${key}', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>`}
-                    </div>
-                </div>`;
         const products = opts.products || [];
         const bujishuItems = opts.bujishu || [];
         const formulaItems = opts.formula || [];
@@ -1753,14 +1744,10 @@ My raw notes:
             .map(c => String(c || '').trim()).filter(Boolean))];
         _minutesSteps.set(prefix, { events: opts.upcomingEvents || [], classes, defaultDue: _nextActionDueDefault(a) });
 
-        const voiceBtn = (targetId) => readOnly ? '' : `<button type="button" class="btn-icon" onclick="app.openVoiceRecorder('${targetId}', 'activity', null)" title="Record voice note" style="color:var(--gray-500);"><i class="fas fa-microphone"></i></button>`;
         const textBox = (id, label, val, placeholder, rows = 2) => `
                 <div class="form-group">
                     <label for="${prefix}-${id}">${label}</label>
-                    <div class="pmf-textrow">
-                        <textarea id="${prefix}-${id}" class="form-control" rows="${rows}" placeholder="${placeholder}" ${disabled}>${escapeHtml(val || '')}</textarea>
-                        ${voiceBtn(`${prefix}-${id}`)}
-                    </div>
+                    <textarea id="${prefix}-${id}" class="form-control" rows="${rows}" placeholder="${placeholder}" ${disabled}>${escapeHtml(val || '')}</textarea>
                 </div>`;
         const OUTCOMES = [['positive', '👍', 'Positive'], ['neutral', '😐', 'Neutral'], ['negative', '👎', 'Negative'], ['not_interested', '🚫', 'Not interested']];
         const GRADES = [['A', 'Closing soon', '~3 days'], ['B', 'Has potential', '~10 days'], ['C', '50 / 50', '~21 days'], ['D', 'Far', '~30 days'], ['F', 'Give up', 'stops reminders']];
@@ -1771,13 +1758,7 @@ My raw notes:
         const hasNotes = !!(a.note_needs || a.note_pain_points || (mm && (mm.reaction || mm.background || mm.advisor)) || a.note_key_points);
 
         return `
-            <div class="post-meetup-notes-block pmf" data-prefix="${prefix}" oninput="app.pmfRefreshSteps('${prefix}')" onchange="app.pmfRefreshSteps('${prefix}')">
-                <nav class="pmf-steps" aria-label="Form steps">
-                    <button type="button" data-step="1" onclick="app.pmfGoStep('${prefix}', 1)"><b>1</b> Outcome</button>
-                    <button type="button" data-step="2" onclick="app.pmfGoStep('${prefix}', 2)"><b>2</b> Next steps</button>
-                    <button type="button" data-step="3" onclick="app.pmfGoStep('${prefix}', 3)"><b>3</b> Notes</button>
-                    ${opts.withPeople ? `<button type="button" data-step="4" onclick="app.pmfGoStep('${prefix}', 4)"><b>4</b> People</button>` : ''}
-                </nav>
+            <div class="post-meetup-notes-block pmf" data-prefix="${prefix}">
                 ${readOnly ? '' : `
                 <details class="pmf-paste">
                     <summary><i class="fas fa-paste" aria-hidden="true"></i> Have ChatGPT minutes? Paste them to fill this form</summary>
@@ -1849,7 +1830,7 @@ My raw notes:
                     </div>
                 </section>
 
-                <details class="pmf-sec pmf-fold" id="${prefix}-step-3"${hasNotes ? ' open' : ''}>
+                <details class="pmf-sec pmf-fold" id="${prefix}-step-3"${hasNotes ? ' open' : ''}${readOnly ? '' : ` ontoggle="app.pmfFoldOpened(this, '${prefix}')"`}>
                     <summary class="pmf-h"><b>3</b> Notes <span class="pmf-opt">short · optional</span></summary>
                     ${textBox('reaction', 'Their reaction', mm && mm.reaction, 'e.g. Skeptical at first, warmed up when we discussed his wife')}
                     ${textBox('pain-points', 'Objections / pain points', a.note_pain_points, 'What worries them, what stops them')}
@@ -1902,14 +1883,12 @@ My raw notes:
         list.insertAdjacentHTML('beforeend', _pmfStepRowHtml(prefix, row || { type: 'call', due: ctx.defaultDue }));
         const el = list.lastElementChild;
         if (!row) { try { el.querySelector('.pmf-step-text').focus(); } catch (_) { /* focus is a nicety */ } }
-        pmfRefreshSteps(prefix);
         return el;
     };
     const pmfRemoveStep = (btn) => {
         const row = btn.closest('.pmf-step');
         const block = btn.closest('.pmf');
         if (row) row.remove();
-        if (block) pmfRefreshSteps(block.dataset.prefix);
     };
     const pmfStepType = (sel) => { const row = sel.closest('.pmf-step'); if (row) row.dataset.type = sel.value; };
     const pmfStepEvent = (sel) => {
@@ -1970,7 +1949,6 @@ My raw notes:
                     : 'Sets how often you are reminded to follow up. Today\'s result is about this meeting; this is about the person.';
             }
         }
-        pmfRefreshSteps(prefix);
     };
 
     // Products: search the hidden checkboxes, tick on pick, show chips + RM total.
@@ -1989,7 +1967,6 @@ My raw notes:
         pmfRenderProducts(prefix);
         const s = document.getElementById(`${prefix}-opp-search`);
         if (on && s) { s.value = ''; pmfProductSearch(prefix, ''); }
-        pmfRefreshSteps(prefix);
     };
     const pmfProductSearch = (prefix, q) => {
         const box = document.getElementById(`${prefix}-opp-suggest`);
@@ -2002,19 +1979,15 @@ My raw notes:
             : '<div class="pmf-suggest-none">Not found — add it under “Something not in the list?”</div>';
     };
 
-    // Step bar: a tick on each step that has something in it.
-    const pmfRefreshSteps = (prefix) => {
-        const block = document.querySelector(`.pmf[data-prefix="${prefix}"]`);
-        if (!block) return;
-        const v = (id) => ((document.getElementById(`${prefix}-${id}`) || {}).value || '').trim();
-        const done = {
-            1: !!v('outcome-type') || (!document.getElementById(`${prefix}-outcome-type`) && _pmfOppBoxes(prefix).some(b => b.checked)),
-            2: _pmfCollectSteps(prefix).length > 0 || !!v('no-step'),
-            3: ['reaction', 'pain-points', 'needs', 'key-points', 'background', 'advisor'].some(id => v(id)),
-            4: !!block.querySelector('.pmf-person-name') && [...block.querySelectorAll('.pmf-person-name')].some(i => i.value.trim()),
-        };
-        block.querySelectorAll('.pmf-steps button[data-step]').forEach(b => b.classList.toggle('is-done', !!done[b.dataset.step]));
+    // Opening a folded section (③ Notes, ④ People) scrolls its fields into
+    // view; ④ starts with one empty name row so there is something to fill.
+    const pmfFoldOpened = (el, prefix) => {
+        if (!el || !el.open) return;
+        if (el.id === `${prefix}-step-4` && !el.querySelector('.pmf-person')) pmfAddPerson(prefix, { focus: false });
+        // an instant jump: smooth scrolling stalls in a background / low-power tab
+        setTimeout(() => { try { el.scrollIntoView({ block: 'start' }); } catch (_) { el.scrollIntoView(); } }, 30);
     };
+    // Save-time validation jumps back to the step that needs attention.
     const pmfGoStep = (prefix, n) => {
         const el = document.getElementById(`${prefix}-step-${n}`);
         if (!el) return;
@@ -2024,7 +1997,6 @@ My raw notes:
     const pmfInit = (prefix) => {
         pmfRenderProducts(prefix);
         _pmfSyncChips(prefix);
-        pmfRefreshSteps(prefix);
     };
 
     // ④ People they recommended — Name List (APU) straight from the minutes.
@@ -2046,25 +2018,22 @@ My raw notes:
             </div>`;
     };
     const pmfPeopleHtml = (prefix) => `
-                <details class="pmf-sec pmf-fold" id="${prefix}-step-4">
+                <details class="pmf-sec pmf-fold" id="${prefix}-step-4" ontoggle="app.pmfFoldOpened(this, '${prefix}')">
                     <summary class="pmf-h"><b>4</b> People they recommended <span class="pmf-opt">Name List · e-CPS voucher</span></summary>
                     <div class="pmf-people" id="${prefix}-people"></div>
                     <button type="button" class="btn secondary btn-sm pmf-add" onclick="app.pmfAddPerson('${prefix}')"><i class="fas fa-plus"></i> Add name</button>
                     <label class="pmf-apu"><input type="checkbox" id="${prefix}-apu-after"> Upload the APU form photo after saving</label>
                     <div class="pmf-hint">Names go to their Name List; each ticked voucher is made at once, ready to WhatsApp from the Name List.</div>
                 </details>`;
-    const pmfAddPerson = (prefix) => {
+    const pmfAddPerson = (prefix, opts = {}) => {
         const box = document.getElementById(`${prefix}-people`);
         if (!box) return;
         box.insertAdjacentHTML('beforeend', _pmfPersonRowHtml(prefix));
-        try { box.lastElementChild.querySelector('.pmf-person-name').focus(); } catch (_) { /* focus is a nicety */ }
-        pmfRefreshSteps(prefix);
+        if (opts.focus !== false) { try { box.lastElementChild.querySelector('.pmf-person-name').focus(); } catch (_) { /* focus is a nicety */ } }
     };
     const pmfRemovePerson = (btn) => {
         const row = btn.closest('.pmf-person');
-        const block = btn.closest('.pmf');
         if (row) row.remove();
-        if (block) pmfRefreshSteps(block.dataset.prefix);
     };
     const _pmfCollectPeople = (prefix) => [...document.querySelectorAll(`#${prefix}-people .pmf-person`)].map(el => ({
         full_name: el.querySelector('.pmf-person-name').value.trim(),
@@ -8220,7 +8189,7 @@ My raw notes:
         pmfToggleProduct,
         pmfProductSearch,
         pmfRenderProducts,
-        pmfRefreshSteps,
+        pmfFoldOpened,
         pmfGoStep,
         pmfInit,
         pmfAddPerson,

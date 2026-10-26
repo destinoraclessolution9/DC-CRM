@@ -11807,11 +11807,6 @@ button.tk-src:hover { color: var(--gray-900); }
 /* Post-Meetup Notes form (2026-10-26) — ① Outcome ② Next steps ③ Notes ④ People.
    Chips over dropdowns, short boxes over essays; Save is the one strong button. */
 .pmf { display: flex; flex-direction: column; gap: 4px; }
-.pmf-steps { position: sticky; top: -16px; z-index: 5; display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 0 10px; margin-top: -8px; background: var(--bg-surface, #fff); border-bottom: 1px solid var(--gray-200); }
-.pmf-steps button { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 12px; border: 1px solid var(--gray-200); border-radius: 17px; background: var(--bg-surface, #fff); font: inherit; font-size: 13px; font-weight: 600; color: var(--gray-700); cursor: pointer; }
-.pmf-steps button b { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--gray-100); font-size: 11.5px; }
-.pmf-steps button.is-done b { background: #146C43; color: #fff; font-size: 0; }
-.pmf-steps button.is-done b::before { content: '✓'; font-size: 11px; }
 .pmf-paste { margin: 8px 0 4px; border: 1px dashed var(--gray-300); border-radius: 10px; }
 .pmf-paste > summary { cursor: pointer; padding: 10px 12px; font-size: 13.5px; font-weight: 600; color: var(--gray-700); list-style: none; }
 .pmf-paste > summary::-webkit-details-marker { display: none; }
@@ -11859,7 +11854,6 @@ details[open] > summary.pmf-h::after { content: '▾'; }
 .pmf-more { margin-top: 8px; }
 .pmf-more > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--gray-500); padding: 4px 0; }
 .pmf-more[open] > summary { margin-bottom: 8px; }
-.pmf-textrow { display: flex; gap: 8px; }
 .pmf-steplist { display: flex; flex-direction: column; gap: 10px; }
 .pmf-step { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--gray-200); border-radius: 10px; background: var(--gray-50, #F8F9FA); }
 .pmf-step-top { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 36px; gap: 8px; align-items: center; }

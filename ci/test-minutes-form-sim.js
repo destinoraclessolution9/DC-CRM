@@ -95,7 +95,9 @@ const OPTS = {
     next_actions: [{ text: 'Follow up <img src=x>', type: 'call', due: '2026-11-01' }, { text: 'Invite', type: 'event', due: '2026-11-03', event_activity_id: 701 }],
     meeting_minutes: { reaction: 'Keen' }, note_pain_points: 'Price',
   }, OPTS);
-  check('four steps in the bar', (html.match(/data-step="\d"/g) || []).length, 4);
+  check('no step button bar', !html.includes('pmf-steps') && !html.includes('data-step='));
+  check('no microphone buttons', !html.includes('openVoiceRecorder') && !html.includes('fa-microphone'));
+  check('People opens itself ready to fill', html.includes(`id="pmn-step-4" ontoggle="app.pmfFoldOpened(this, 'pmn')"`));
   check('result chips + required mark', html.includes('How did today go?') && html.includes('required') && (html.match(/data-group="outcome"/g) || []).length === 1);
   check('saved result in the hidden input + chip on', html.includes('id="pmn-outcome-type" value="positive"') && /pmf-chip is-on" data-v="positive"/.test(html));
   check('grade chips A-F, current C on', ['A', 'B', 'C', 'D', 'F'].every(g => html.includes(`data-v="${g}"`)) && /pmf-chip is-on" data-v="C"/.test(html));
@@ -122,7 +124,7 @@ const OPTS = {
   const empty = app.buildPostMeetupNotesBlock('pmn', { activity_date: '2026-10-25' }, { ...OPTS, gradeContext: null, allowNoStep: false, withPeople: false, noOutcome: true });
   check('fresh form starts with one empty call row', (empty.match(/class="pmf-step" data-type="call"/g) || []).length, 1);
   check('attendee form: no result chips, no grade, no people', !empty.includes('How did today go?') && !empty.includes('How hot') && !empty.includes('pmn-step-4'));
-  check('step bar has three steps without people', (empty.match(/data-step="\d"/g) || []).length, 3);
+  check('notes fold scrolls into view when opened', empty.includes(`id="pmn-step-3" ontoggle="app.pmfFoldOpened(this, 'pmn')"`));
 }
 // ── read-only preview ──────────────────────────────────────────────────────
 {
