@@ -289,6 +289,20 @@ const flush = () => new Promise(r => setImmediate(r));
     check('task line: no task → history words only', hist.includes('Long ago') && !hist.includes('mu-task'));
     check('task line: attendee row by attendee id', app.pvTaskLineHtml({ id: 'att9', _isAttendeeNote: true, _attendeeRowId: 9, next_action: 'Book FSA' }, maps).includes('mu-task'));
     check('task line: nothing when no next action', app.pvTaskLineHtml({ id: 11 }, maps), '');
+
+    // Several next steps (2026-10-26): one line each, matched to its task by row number.
+    const multiMaps = { byAct: new Map([['20', [
+      { id: 91, source_activity_id: 20, source_seq: 1, status: 'done', due_date: iso(-1) },
+      { id: 92, source_activity_id: 20, source_seq: 2, status: 'pending', due_date: iso(-2), title: '🤝 Meet wife' },
+    ]]]), byAtt: new Map() };
+    const multi = app.pvTaskLineHtml({ id: 20, next_actions: [{ text: 'Call him', type: 'call' }, { text: 'Meet wife', type: 'meetup' }] }, multiMaps);
+    check('steps: one line per step with its icon', multi.includes('📞 Call him') && multi.includes('🤝 Meet wife'));
+    check('steps: each line shows its own task state', /Call him[\s\S]*?>done</.test(multi) && /Meet wife[\s\S]*?is-danger/.test(multi));
+    const sum = app.pvMeetingSummaryHtml({ id: 20, outcome: 'positive', opportunity_potential: '[Products] Power Ring PR3, 个人风水基础课, Course X' }, multiMaps);
+    check('summary: result + 2 products + more', sum.includes('👍 Positive') && sum.includes('Power Ring PR3 · 个人风水基础课') && sum.includes('+1'));
+    check('summary: next OPEN step, overdue in red', sum.includes('→ 🤝 Meet wife') && sum.includes('mu-sum-next is-danger'));
+    check('summary: old free-text result still shown', app.pvMeetingSummaryHtml({ id: 1, outcome: 'Good <b>' }, multiMaps).includes('Good &lt;b&gt;'));
+    check('summary: nothing to show → empty', app.pvMeetingSummaryHtml({ id: 1 }, multiMaps), '');
   }
 
   // ═══ Opportunities ═════════════════════════════════════════════════════════

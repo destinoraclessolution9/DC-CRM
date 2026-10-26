@@ -2355,6 +2355,28 @@ const pvTaskMaps = async (kind, id, pid) => {
 // A meeting's next action inside its timeline row: the meeting's own words,
 // plus the state of the task they became. No live task (older than the
 // 90-day backfill) → the words only, as history.
+// One-line summary under a collapsed timeline row (2026-10-26): result ·
+// products · the next open step — so a row only needs opening for the full notes.
+const _PV_RESULT_CHIP = { positive: ['👍', 'Positive', 'ok'], neutral: ['😐', 'Neutral', ''], negative: ['👎', 'Negative', 'bad'], not_interested: ['🚫', 'Not interested', 'bad'] };
+const pvMeetingSummaryHtml = (a, maps) => {
+    if (!a) return '';
+    const parts = [];
+    const r = _PV_RESULT_CHIP[a.outcome];
+    if (r) parts.push(`<span class="mu-sum-res ${r[2]}">${r[0]} ${r[1]}</span>`);
+    else if (a.outcome) parts.push(`<span class="mu-sum-res">${escapeHtml(String(a.outcome))}</span>`); // older free-text results
+    const names = [];
+    const re = /\[([^\]]+)\]\s*([^[|]*)/g;
+    let m;
+    while ((m = re.exec(String(a.opportunity_potential || ''))) !== null) names.push(...m[2].split(',').map(x => x.trim()).filter(Boolean));
+    if (names.length) parts.push(`<span class="mu-sum-prod">${names.slice(0, 2).map(n => escapeHtml(n.length > 22 ? n.slice(0, 21) + '…' : n)).join(' · ')}${names.length > 2 ? ` +${names.length - 2}` : ''}</span>`);
+    const tasks = (maps && (a._isAttendeeNote ? maps.byAtt.get(String(a._attendeeRowId)) : maps.byAct.get(String(a.id)))) || [];
+    const next = tasks.filter(t => _PV_OPEN.includes(t.status)).sort((x, y) => String(x.due_date).localeCompare(String(y.due_date)))[0];
+    if (next) {
+        const late = next.due_date && next.due_date < _pvTodayStr();
+        parts.push(`<span class="mu-sum-next${late ? ' is-danger' : ''}">→ ${escapeHtml(String(next.title || '').slice(0, 48))} · ${escapeHtml(_pvFmtDay(next.due_date))}</span>`);
+    }
+    return parts.length ? `<span class="mu-sum">${parts.join('')}</span>` : '';
+};
 const _PV_STEP_ICON = { call: '📞', meetup: '🤝', event: '🎟️', whatsapp: '💬', other: '📝' };
 const pvTaskLineHtml = (a, maps) => {
     if (!a) return '';
@@ -3619,6 +3641,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                         <span class="mu-tchip">${escapeHtml(_chip(a))}</span>
                         <span class="mu-title">${title}</span>
                         <span class="mu-badges">${badges.join('')}</span>
+                        ${pvMeetingSummaryHtml(a, _taskMaps)}
                     </button>
                     <div class="mu-detail">${detail}</div>
                 </div>`;
@@ -8386,6 +8409,7 @@ const openPastRecordModal = async (...args) => {
         pvAfterDealSave,
         pvTaskMaps,
         pvTaskLineHtml,
+        pvMeetingSummaryHtml,
         potentialCode,
         _fsaReportFilesHtml,
         showPotentialBreakdown,

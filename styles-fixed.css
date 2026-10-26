@@ -11757,6 +11757,15 @@ html, body {
 .mu-badge.ok { background: #E6F4EA; color: #146C43; }
 .mu-badge.bad { background: #FCE8E6; color: #B3261E; }
 .mu-detail { display: none; padding: 4px 16px 16px 32px; }
+/* Collapsed-row summary: result · products · next open step */
+.mu-row { flex-wrap: wrap; }
+.mu-sum { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 4px 12px; padding-left: 20px; font-size: 12.5px; color: var(--gray-500); }
+.mu-sum-res { font-weight: 600; color: var(--gray-700); }
+.mu-sum-res.ok { color: #146C43; }
+.mu-sum-res.bad { color: #B3261E; }
+.mu-sum-prod { color: var(--gray-700); }
+.mu-sum-next { color: var(--gray-700); }
+.mu-sum-next.is-danger { color: #B3261E; }
 .mu-item.open .mu-detail { display: block; }
 .mu-close-sub { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--gray-300); }
 @media (max-width: 520px) {

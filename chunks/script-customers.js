@@ -2192,7 +2192,6 @@ const renderCustomerActivityTab = async (customer, containerId = 'profile-tab-co
             badges.push(`<span class="mu-badge ${st === 'attended' || st === 'late' ? 'ok' : st === 'no show' ? 'bad' : ''}">${st === 'attended' ? '✓ ' : st === 'late' ? '⏰ ' : ''}${st}</span>`);
         }
         if (a.is_closed || (a._closing && a._closing.is_closed)) badges.push(`<span class="mu-badge ok"><i class="fas fa-handshake"></i> Sale Closed</span>`);
-        if (a.outcome) badges.push(`<span class="mu-badge ok">${escapeHtml(_OUTCOME_C[a.outcome] || a.outcome)}</span>`);
         const _nPhotos = Array.isArray(a.photo_urls) ? a.photo_urls.length : 0;
         if (_nPhotos) badges.push(`<span class="mu-badge"><i class="fas fa-camera"></i> ${_nPhotos}</span>`);
 
@@ -2232,6 +2231,8 @@ const renderCustomerActivityTab = async (customer, containerId = 'profile-tab-co
                     <span class="mu-tchip">${escapeHtml(_chip(a))}</span>
                     <span class="mu-title">${escapeHtml(title)}</span>
                     <span class="mu-badges">${badges.join('')}</span>
+                    ${window.app.pvMeetingSummaryHtml ? window.app.pvMeetingSummaryHtml(a, taskMaps)
+                        : (a.outcome ? `<span class="mu-badge ok">${escapeHtml(_OUTCOME_C[a.outcome] || a.outcome)}</span>` : '')}
                 </button>
                 <div class="mu-detail">${detail}</div>
             </div>`;
