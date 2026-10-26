@@ -5245,10 +5245,10 @@
                 // Compact 3-line row (name · checks · small buttons) — styled by
                 // .att-row in styles-fixed.css so a long attendance list fits on a phone.
                 return `
-                    <div class="info-row att-row">
+                    <div class="info-row att-row" data-att-entity="${esc(String(entityId))}">
                         <div class="att-head">
                             ${_ownView
-                                ? `<strong class="att-name att-link" onclick="event.stopPropagation();app.showAttendeeDetails(${entityId},'${UI.escJsAttr(String(att.attendee_type||'prospect'))}')">${esc(name)}</strong>`
+                                ? `<strong class="att-name att-link" onclick="event.stopPropagation();app.showAttendeeDetails(${entityId},'${UI.escJsAttr(String(att.attendee_type||'prospect'))}', ${Number(activity.id)})">${esc(name)}</strong>`
                                 : `<strong class="att-name">${esc(name)}</strong>`}
                             <span class="att-chip">${esc(att.attendee_type || 'prospect')}</span>
                             <span class="att-by">by ${esc(agentName)}</span>

@@ -5357,31 +5357,105 @@ My raw notes:
         }
     };
 
-    const showAttendeeDetails = async (entityId, type) => {
+    // Attendee pop-up (event name list). Each value has a copy icon and "Copy
+    // all" gives one tab-separated row for Google Sheets (owner 2026-10-26).
+    // Opened from an event, Close / × / Escape / phone Back return to that
+    // event at its name list instead of dropping to the calendar.
+    let _attVals = [];
+    let _attHist = false;        // a history entry was pushed for the pop-up
+    let _attAfterPop = null;     // what to do once that entry is popped
+    const _attLeave = (fn) => {
+        if (!_attHist) { fn(); return; }
+        _attHist = false;
+        _attAfterPop = fn;
+        try { history.back(); } catch (_) { /* no history */ }
+        setTimeout(() => { if (_attAfterPop) { const f = _attAfterPop; _attAfterPop = null; f(); } }, 500);
+    };
+    if (!window.__attPopListener) {
+        window.__attPopListener = true;
+        window.addEventListener('popstate', () => {
+            if (_attAfterPop) { const f = _attAfterPop; _attAfterPop = null; f(); return; }
+            if (_attHist && document.querySelector('#global-modal-overlay.active .att-pop')) { _attHist = false; UI.closeModal(); }
+        });
+    }
+    const _copyText = async (text) => {
+        try { await navigator.clipboard.writeText(text); return true; } catch (_) { /* fall back below */ }
+        try {
+            const ta = document.createElement('textarea');
+            ta.value = text; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
+            document.body.appendChild(ta); ta.select();
+            const ok = document.execCommand('copy');
+            ta.remove();
+            return ok;
+        } catch (_) { return false; }
+    };
+    const _attFlash = (btn) => {
+        if (!btn) return;
+        const i = btn.querySelector('i');
+        if (i) { i.className = 'fas fa-check'; setTimeout(() => { i.className = 'far fa-copy'; }, 1200); }
+    };
+    const attCopy = async (idx, btn) => {
+        const v = _attVals[idx];
+        if (!v) return;
+        if (await _copyText(v)) { _attFlash(btn); UI.toast.success('Copied'); } else UI.toast.error('Could not copy — press and hold the text instead');
+    };
+    // One row, tab-separated, so a paste into one Google Sheets cell fills the
+    // next cells. An all-digit IC gets a leading ' so Sheets keeps it as text
+    // (leading zeros of 2000s ICs survive); the ' is hidden in the sheet.
+    const attCopyAll = async (btn) => {
+        const cells = _attVals.map((v, i) => (i === 1 && /^\d+$/.test(v) ? `'${v}` : v).replace(/[\t\r\n]+/g, ' '));
+        if (await _copyText(cells.join('\t'))) { _attFlash(btn); UI.toast.success('Copied — paste into one cell in Google Sheets'); }
+        else UI.toast.error('Could not copy');
+    };
+    // Back to the event at the attendee list, the person's row highlighted.
+    const _attBackToEvent = async (activityId, entityId) => {
+        try { await app.viewActivityDetails(activityId); } catch (e) { console.warn('[attendee] back to event', e); return; }
+        setTimeout(() => {
+            const row = document.querySelector(`#global-modal-overlay [data-att-entity="${String(entityId)}"]`);
+            if (!row) return;
+            try { row.scrollIntoView({ block: 'center' }); } catch (_) { /* old browser */ }
+            row.style.transition = 'background-color .6s';
+            row.style.backgroundColor = '#FEF9C3';
+            setTimeout(() => { row.style.backgroundColor = ''; }, 1400);
+        }, 80);
+    };
+    const attOpenProfile = (type, entityId) => {
+        UI.hideModal();
+        _attLeave(() => app[type === 'customer' ? 'showCustomerDetail' : 'showProspectDetail'](entityId));
+    };
+
+    const showAttendeeDetails = async (entityId, type, fromActivityId = null) => {
         if (!entityId) { UI.toast.error('No profile available'); return; }
         const table = type === 'customer' ? 'customers' : 'prospects';
         const person = await AppDataStore.getById(table, entityId);
         if (!person) { UI.toast.error('Profile not found'); return; }
         const agent = person.responsible_agent_id ? await AppDataStore.getById('users', person.responsible_agent_id) : null;
-        const row = (label, value) => `
-            <div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--border,#e5e0d8);">
-                <span style="width:140px;font-size:12px;color:var(--gray-400);flex-shrink:0;">${escapeHtml(label)}</span>
-                <span style="font-size:13px;font-weight:500;">${escapeHtml(value || '—')}</span>
+        const fields = [
+            ['Name', person.full_name], ['IC Number', person.ic_number], ['Email', person.email],
+            ['Date of Birth', person.date_of_birth], ['Lunar Date of Birth', person.lunar_birth],
+            ['Occupation', person.occupation], ['Agent', agent?.full_name],
+        ];
+        _attVals = fields.map(f => String(f[1] == null ? '' : f[1]).trim());
+        const row = ([label], i) => `
+            <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border,#e5e0d8);min-height:36px;">
+                <span style="width:120px;font-size:12px;color:var(--gray-400);flex-shrink:0;">${escapeHtml(label)}</span>
+                <span style="flex:1;min-width:0;font-size:13px;font-weight:500;overflow-wrap:anywhere;">${escapeHtml(_attVals[i] || '—')}</span>
+                ${_attVals[i] ? `<button type="button" onclick="app.attCopy(${i}, this)" aria-label="Copy ${escapeHtml(label)}" title="Copy" style="flex-shrink:0;width:32px;height:32px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--gray-200,#e5e7eb);border-radius:8px;background:#fff;color:var(--gray-600,#4b5563);cursor:pointer;"><i class="far fa-copy" aria-hidden="true"></i></button>` : '<span style="width:32px;flex-shrink:0;"></span>'}
             </div>`;
         const content = `
-            <div style="padding:4px 0;">
-                ${row('Name', person.full_name)}
-                ${row('IC Number', person.ic_number)}
-                ${row('Email', person.email)}
-                ${row('Date of Birth', person.date_of_birth)}
-                ${row('Lunar Date of Birth', person.lunar_birth)}
-                ${row('Occupation', person.occupation)}
-                ${row('Agent', agent?.full_name)}
+            <div class="att-pop" style="padding:4px 0;">
+                ${fields.map(row).join('')}
+                <button type="button" class="btn secondary" style="width:100%;margin-top:12px;" onclick="app.attCopyAll(this)"><i class="far fa-copy" aria-hidden="true"></i> Copy all for Google Sheet</button>
             </div>`;
+        const back = fromActivityId ? () => _attLeave(() => _attBackToEvent(fromActivityId, entityId)) : null;
         UI.showModal(person.full_name || 'Attendee Details', content, [
-            { label: 'View Full Profile', type: 'primary', action: `UI.hideModal(); app.${type === 'customer' ? 'showCustomerDetail' : 'showProspectDetail'}(${entityId})` },
+            { label: 'View Full Profile', type: 'primary', action: `app.attOpenProfile('${type === 'customer' ? 'customer' : 'prospect'}', ${Number(entityId)})` },
             { label: 'Close', type: 'secondary', action: 'UI.hideModal()' }
-        ]);
+        ], '', { onClose: back });
+        // Phone Back closes the pop-up (→ the event) instead of leaving the page.
+        if (fromActivityId && !_attHist) {
+            try { history.pushState({ crmAttPop: 1 }, ''); _attHist = true; } catch (_) { /* no history */ }
+        }
     };
 
     const goToProspectEventNotes = async (entityId, eventId, entityType, activityDate) => {
@@ -8293,6 +8367,12 @@ My raw notes:
         toggleAttendeeLate,
         toggleLifeChartType,
         showAttendeeDetails,
+        attCopy,
+        attCopyAll,
+        attOpenProfile,
+        attCopy,
+        attCopyAll,
+        attOpenProfile,
         goToProspectEventNotes,
         showAddAttendeeSearch,
         showAddConsultantSearch,

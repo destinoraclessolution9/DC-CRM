@@ -202,6 +202,11 @@ window.UI = (() => {
 
     // --- Modals ---
     let _modalPreviousFocus = null;
+    // Optional "where to go back to" for the open modal (2026-10-26): the ×
+    // button, Escape and a dismiss-style footer button run it after closing —
+    // e.g. a person pop-up opened from an event returns to that event. Any
+    // other hideModal() (a button that moves on somewhere else) drops it.
+    let _modalOnClose = null;
     const _FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
     const _trapFocus = (e) => {
@@ -218,11 +223,12 @@ window.UI = (() => {
                 if (document.activeElement === last) { e.preventDefault(); first.focus(); }
             }
         }
-        if (e.key === 'Escape') { e.preventDefault(); hideModal(); }
+        if (e.key === 'Escape') { e.preventDefault(); closeModal(); }
     };
 
-    const showModal = (title, contentHtml, actions = [], size = '') => {
+    const showModal = (title, contentHtml, actions = [], size = '', opts = {}) => {
         _modalPreviousFocus = document.activeElement;
+        _modalOnClose = (opts && typeof opts.onClose === 'function') ? opts.onClose : null;
 
         let overlay = document.getElementById('global-modal-overlay');
         if (!overlay) {
@@ -237,8 +243,8 @@ window.UI = (() => {
             // .primary so the click spinner + double-submit guard still apply.
             const isDestructive = /^\W*(delete|remove)\b/i.test(String(btn.label || ''));
             const btnClass = (btn.type === 'primary' ? 'btn primary' : 'btn secondary') + (isDestructive ? ' danger' : '');
-            const action = (btn.action === 'UI.modal.hide()' || btn.action === 'UI.hideModal()') ? 'UI.hideModal()' : btn.action;
-            const isCancel = action === 'UI.hideModal()' || /cancel|close|no\b|back/i.test(btn.label);
+            const action = (btn.action === 'UI.modal.hide()' || btn.action === 'UI.hideModal()') ? 'UI.closeModal()' : btn.action;
+            const isCancel = action === 'UI.closeModal()' || /cancel|close|no\b|back/i.test(btn.label);
             const safeAction = String(action).replace(/"/g, '&quot;');
             return `<button class="${btnClass}" ${isCancel ? 'data-no-load' : ''} onclick="${safeAction}">${btn.label}</button>`;
         }).join('');
@@ -251,7 +257,7 @@ window.UI = (() => {
             <div class="${modalBoxClass}" role="dialog" aria-modal="true" aria-labelledby="${titleId}">
                 <div class="modal-header">
                     <h3 id="${titleId}">${safeTitle}</h3>
-                    <button class="modal-close" onclick="UI.hideModal()" aria-label="Close dialog">&times;</button>
+                    <button class="modal-close" onclick="UI.closeModal()" aria-label="Close dialog">&times;</button>
                 </div>
                 <div class="modal-content">
                     ${contentHtml}
@@ -274,6 +280,7 @@ window.UI = (() => {
     };
 
     const hideModal = () => {
+        _modalOnClose = null;
         _endAllBtnLoads();
         document.removeEventListener('keydown', _trapFocus);
         const overlay = document.getElementById('global-modal-overlay');
@@ -302,6 +309,13 @@ window.UI = (() => {
             try { _modalPreviousFocus.focus(); } catch (_) {}
             _modalPreviousFocus = null;
         }
+    };
+
+    // Dismiss (× / Escape / Close): hide, then go back where the modal said.
+    const closeModal = () => {
+        const back = _modalOnClose;
+        hideModal();
+        if (back) { try { back(); } catch (e) { console.warn('[modal] onClose', e); } }
     };
 
     // --- Confirm dialog ---
@@ -738,6 +752,7 @@ window.UI = (() => {
         toast,
         showModal,
         hideModal,
+        closeModal,
         confirm,
         confirmHtml,
         formatDate,
