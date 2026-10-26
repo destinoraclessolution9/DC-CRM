@@ -1059,8 +1059,7 @@ const switchCustomerProfileTab = async (tab, customerId, container) => {
         container.innerHTML = `
             <div class="add-note-section">
                 <textarea id="customer-note-text" class="form-control" rows="3" placeholder="Add a new note..."></textarea>
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
-                    <button class="btn-icon" onclick="app.openVoiceRecorder('customer-note-text', 'customer', ${customer.id})" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                <div style="display:flex;justify-content:flex-end;align-items:center;margin-top:8px;">
                     <button class="btn primary btn-sm" onclick="app.addCustomerNote(${customer.id})">Add Note</button>
                 </div>
             </div>
@@ -1230,8 +1229,7 @@ const renderBasicBankTab = async (customer, containerId = 'profile-tab-content')
             <h4 style="font-size:16px; font-weight:600; margin-bottom:16px; color:var(--primary);"><i class="fas fa-sticky-note"></i> Internal Notes</h4>
             <div class="add-note-section">
                 <textarea id="customer-note-text" class="form-control" rows="3" placeholder="Add a new note..."></textarea>
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
-                    <button class="btn-icon" onclick="app.openVoiceRecorder('customer-note-text', 'customer', ${customer.id})" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                <div style="display:flex; justify-content:flex-end; align-items:center; margin-top:8px;">
                     <button class="btn primary btn-sm" onclick="app.addCustomerNote(${customer.id})">Add Note</button>
                 </div>
             </div>

@@ -3706,8 +3706,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         container.innerHTML = `
             <div class="add-note-section">
                 <textarea id="new-note-text" class="form-control" rows="3" placeholder="Add a new note..."></textarea>
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
-                    <button class="btn-icon" onclick="app.openVoiceRecorder('new-note-text', 'prospect', ${prospect.id})" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>
+                <div style="display:flex;justify-content:flex-end;align-items:center;margin-top:8px;">
                     <button class="btn primary btn-sm" onclick="app.addNote(${prospect.id})">Add Note</button>
                 </div>
             </div>
