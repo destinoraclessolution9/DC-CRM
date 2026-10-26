@@ -2097,14 +2097,14 @@ const renderCustomerActivityTab = async (customer, containerId = 'profile-tab-co
     const _ownIdsNum = activities.map(a => a.id).filter(id => id != null && !Number.isNaN(Number(id)));
     if (_sb && _ownIdsNum.length) {
         try {
-            const _cols = 'id,photo_urls,meeting_minutes,note_key_points,note_needs,note_pain_points,next_action,opportunity_potential,outcome';
+            const _cols = 'id,photo_urls,meeting_minutes,note_key_points,note_needs,note_pain_points,next_action,next_actions,opportunity_potential,outcome';
             let { data: _fd, error: _fe } = await _sb.from('activities').select(_cols).in('id', _ownIdsNum);
             if (_fe) ({ data: _fd } = await _sb.from('activities').select('id,photo_urls').in('id', _ownIdsNum));
             const _fm = new Map((_fd || []).map(r => [String(r.id), r]));
             activities.forEach(a => {
                 const r = _fm.get(String(a.id));
                 if (!r) return;
-                ['photo_urls', 'meeting_minutes', 'note_key_points', 'note_needs', 'note_pain_points', 'next_action', 'opportunity_potential', 'outcome']
+                ['photo_urls', 'meeting_minutes', 'note_key_points', 'note_needs', 'note_pain_points', 'next_action', 'next_actions', 'opportunity_potential', 'outcome']
                     .forEach(k => { if (r[k] != null && r[k] !== '' && !(Array.isArray(r[k]) && !r[k].length)) a[k] = r[k]; });
             });
         } catch (_) { /* intentional: optional enrichment — rows still render */ }

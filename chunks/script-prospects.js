@@ -2343,29 +2343,45 @@ const _pvNextActionText = (s) => String(s || '').replace(/\s*\|\s*Remarks:\s*/g,
 // Task lookups for the timeline: meeting id / attendee row id → its task.
 const pvTaskMaps = async (kind, id, pid) => {
     const tasks = await _pvTaskQuery(kind, id, pid, null);
+    // source id → its tasks, by row number (source_seq; 0 = an old single next action)
     const byAct = new Map(), byAtt = new Map();
+    const add = (m, k, t) => { if (!m.has(k)) m.set(k, []); m.get(k).push(t); };
     tasks.forEach(t => {
-        if (t.source_activity_id != null) byAct.set(String(t.source_activity_id), t);
-        if (t.source_attendee_id != null) byAtt.set(String(t.source_attendee_id), t);
+        if (t.source_activity_id != null) add(byAct, String(t.source_activity_id), t);
+        if (t.source_attendee_id != null) add(byAtt, String(t.source_attendee_id), t);
     });
     return { byAct, byAtt };
 };
 // A meeting's next action inside its timeline row: the meeting's own words,
 // plus the state of the task they became. No live task (older than the
 // 90-day backfill) → the words only, as history.
+const _PV_STEP_ICON = { call: '📞', meetup: '🤝', event: '🎟️', whatsapp: '💬', other: '📝' };
 const pvTaskLineHtml = (a, maps) => {
-    const text = _pvNextActionText(a && (a.next_action || a.note_next_steps));
-    if (!text) return '';
-    const t = maps && (a._isAttendeeNote ? maps.byAtt.get(String(a._attendeeRowId)) : maps.byAct.get(String(a.id)));
-    if (!t) return `<div class="msf"><span class="msf-lbl">Next action</span><p class="msf-txt">${escapeHtml(text)}</p></div>`;
-    const open = _PV_OPEN.includes(t.status);
+    if (!a) return '';
+    const tasks = (maps && (a._isAttendeeNote ? maps.byAtt.get(String(a._attendeeRowId)) : maps.byAct.get(String(a.id)))) || [];
     const today = _pvTodayStr();
-    const late = open && t.due_date && t.due_date < today;
-    const state = open ? `due ${_pvFmtDay(t.due_date)}` : (t.status === 'skipped' ? 'skipped' : 'done');
-    return `<div class="mu-task${open ? '' : ' is-done'}">
+    const line = (text, t, icon = '') => {
+        if (!t) return `<div class="mu-task is-hist"><i class="far fa-circle" aria-hidden="true"></i><div><span class="mu-task-txt">${icon ? `${icon} ` : ''}${escapeHtml(text)}</span></div></div>`;
+        const open = _PV_OPEN.includes(t.status);
+        const late = open && t.due_date && t.due_date < today;
+        const state = open ? `due ${_pvFmtDay(t.due_date)}` : (t.status === 'skipped' ? 'skipped' : 'done');
+        return `<div class="mu-task${open ? '' : ' is-done'}">
         <i class="${open ? 'far fa-circle' : 'fas fa-check-circle'}" aria-hidden="true"></i>
-        <div><span class="msf-lbl">Next action · task</span><span class="mu-task-txt">${escapeHtml(text)}</span>
+        <div><span class="mu-task-txt">${icon ? `${icon} ` : ''}${escapeHtml(text)}</span>
         <span class="mu-task-due${late ? ' is-danger' : ''}">${escapeHtml(state)}</span></div></div>`;
+    };
+    // The list form (2026-10-26): one line per step, each with its own task.
+    const steps = Array.isArray(a.next_actions) ? a.next_actions.filter(r => r && r.text) : null;
+    if (steps && steps.length) {
+        return `<div class="msf"><span class="msf-lbl">Next steps</span>${steps.map((r, i) =>
+            line(r.text, tasks.find(t => Number(t.source_seq) === i + 1), _PV_STEP_ICON[r.type] || '')).join('')}</div>`;
+    }
+    const text = _pvNextActionText(a.next_action || a.note_next_steps);
+    if (!text) return '';
+    const t = tasks.find(x => !Number(x.source_seq)) || tasks[0];
+    // No live task (older than the 90-day backfill) → the words only, as history.
+    if (!t) return `<div class="msf"><span class="msf-lbl">Next action</span><p class="msf-txt">${escapeHtml(text)}</p></div>`;
+    return `<div class="msf"><span class="msf-lbl">Next action · task</span>${line(text, t)}</div>`;
 };
 
 const _pvTaskBadge = (kind, id, open) => {
@@ -3348,6 +3364,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                     <div style="font-size:13px;color:var(--gray-600);">
                         <span style="margin-right:12px;"><i class="fas fa-user-tag" style="color:var(--gray-400);margin-right:4px;"></i>${escapeHtml(n.relation || '')}</span>
                         ${n.date_of_birth ? `<span><i class="fas fa-birthday-cake" style="color:var(--gray-400);margin-right:4px;"></i>${escapeHtml(n.date_of_birth)}</span>` : ''}
+                        ${n.phone ? `<a href="tel:${escapeHtml(String(n.phone).replace(/[^\d+]/g, ''))}" style="margin-left:12px;color:inherit;"><i class="fas fa-phone" style="color:var(--gray-400);margin-right:4px;"></i>${escapeHtml(n.phone)}</a>` : ''}
                     </div>
                     ${n.notes ? `<div style="font-size:13px;color:var(--gray-500);margin-top:6px;font-style:italic;">${escapeHtml(n.notes)}</div>` : ''}
                 </div>
@@ -3397,7 +3414,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
         const _sb = window.supabase || window.supabaseClient;
         const freshMap = {};
         if (_sb) {
-            const _cols = 'id,photo_urls,meeting_minutes,note_key_points,note_needs,note_pain_points,next_action,opportunity_potential,outcome';
+            const _cols = 'id,photo_urls,meeting_minutes,note_key_points,note_needs,note_pain_points,next_action,next_actions,opportunity_potential,outcome';
             try {
                 let { data: _pd, error: _pe } = await _sb.from('activities').select(_cols).eq('prospect_id', prospectId);
                 if (_pe) ({ data: _pd } = await _sb.from('activities').select('id,photo_urls').eq('prospect_id', prospectId));
@@ -3408,7 +3425,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             const r = freshMap[String(a.id)];
             if (!r) return;
             if (r.photo_urls?.length) a.photo_urls = r.photo_urls;
-            ['meeting_minutes', 'note_key_points', 'note_needs', 'note_pain_points', 'next_action', 'opportunity_potential', 'outcome']
+            ['meeting_minutes', 'note_key_points', 'note_needs', 'note_pain_points', 'next_action', 'next_actions', 'opportunity_potential', 'outcome']
                 .forEach(k => { if (r[k] != null && r[k] !== '') a[k] = r[k]; });
         };
         meetups.forEach(_enrich);

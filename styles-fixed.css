@@ -11795,6 +11795,96 @@ button.tk-src:hover { color: var(--gray-900); }
 .tk-done > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--gray-500); padding: 6px 0; }
 .tk-sheet-title { margin: 0 0 12px; font-weight: 600; color: var(--gray-900); }
 .tk-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+/* Post-Meetup Notes form (2026-10-26) — ① Outcome ② Next steps ③ Notes ④ People.
+   Chips over dropdowns, short boxes over essays; Save is the one strong button. */
+.pmf { display: flex; flex-direction: column; gap: 4px; }
+.pmf-steps { position: sticky; top: -16px; z-index: 5; display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 0 10px; margin-top: -8px; background: var(--bg-surface, #fff); border-bottom: 1px solid var(--gray-200); }
+.pmf-steps button { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 12px; border: 1px solid var(--gray-200); border-radius: 17px; background: var(--bg-surface, #fff); font: inherit; font-size: 13px; font-weight: 600; color: var(--gray-700); cursor: pointer; }
+.pmf-steps button b { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--gray-100); font-size: 11.5px; }
+.pmf-steps button.is-done b { background: #146C43; color: #fff; font-size: 0; }
+.pmf-steps button.is-done b::before { content: '✓'; font-size: 11px; }
+.pmf-paste { margin: 8px 0 4px; border: 1px dashed var(--gray-300); border-radius: 10px; }
+.pmf-paste > summary { cursor: pointer; padding: 10px 12px; font-size: 13.5px; font-weight: 600; color: var(--gray-700); list-style: none; }
+.pmf-paste > summary::-webkit-details-marker { display: none; }
+.pmf-paste > summary i { color: var(--gray-500); margin-right: 6px; }
+.pmf-paste-body { padding: 0 12px 12px; }
+.pmf-paste-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; font-size: 12px; color: var(--gray-500); }
+.pmf-sec { padding: 14px 0 6px; border-bottom: 1px solid var(--gray-200); scroll-margin-top: 60px; }
+.pmf-sec:last-of-type { border-bottom: none; }
+.pmf-h { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-size: 16px; font-weight: 600; color: var(--gray-900); }
+.pmf-h b { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: var(--gray-900); color: #fff; font-size: 12.5px; }
+summary.pmf-h { cursor: pointer; list-style: none; }
+summary.pmf-h::-webkit-details-marker { display: none; }
+summary.pmf-h::after { content: '▸'; margin-left: auto; color: var(--gray-400); }
+details[open] > summary.pmf-h::after { content: '▾'; }
+.pmf-opt { font-size: 12.5px; font-weight: 500; color: var(--gray-500); }
+.pmf-field { margin-bottom: 16px; }
+.pmf-label { font-size: 14px; font-weight: 600; color: var(--gray-900); margin-bottom: 8px; }
+.pmf-req { font-size: 11.5px; font-weight: 600; color: #B3261E; margin-left: 4px; }
+.pmf-hint { font-size: 12.5px; color: var(--gray-500); margin-top: 6px; line-height: 1.45; }
+.pmf-link { padding: 0; border: none; background: none; font: inherit; font-weight: 700; color: var(--gray-900); text-decoration: underline; cursor: pointer; }
+.pmf-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.pmf-chip { min-height: 40px; padding: 0 14px; border: 1px solid var(--gray-300); border-radius: 20px; background: var(--bg-surface, #fff); font: inherit; font-size: 14px; color: var(--gray-900); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.pmf-chip:hover { border-color: var(--border-input, #8C9199); }
+.pmf-chip.is-on { background: var(--gray-900); border-color: var(--gray-900); color: #fff; }
+.pmf-grades { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.pmf-grades .pmf-chip { display: flex; flex-direction: column; align-items: center; gap: 1px; min-height: 64px; padding: 6px 4px; border-radius: 10px; line-height: 1.2; }
+.pmf-grades .pmf-chip b { font-size: 17px; }
+.pmf-grades .pmf-chip span { font-size: 11.5px; font-weight: 600; }
+.pmf-grades .pmf-chip small { font-size: 10.5px; opacity: .75; }
+.pmf-search { position: relative; }
+.pmf-search > i { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--gray-400); font-size: 13px; pointer-events: none; }
+.pmf-search > input { padding-left: 34px; }
+.pmf-suggest { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20; background: var(--bg-surface, #fff); border-radius: 10px; box-shadow: 0 10px 28px rgba(15, 23, 42, .14); overflow: hidden; }
+.pmf-suggest:empty { display: none; }
+.pmf-suggest button { display: flex; justify-content: space-between; gap: 10px; width: 100%; min-height: 42px; padding: 8px 12px; border: none; border-bottom: 1px solid var(--gray-100); background: none; font: inherit; font-size: 14px; color: var(--gray-900); text-align: left; cursor: pointer; }
+.pmf-suggest button:hover { background: var(--gray-50, #F8F9FA); }
+.pmf-suggest small { color: var(--gray-500); white-space: nowrap; }
+.pmf-suggest-none { padding: 10px 12px; font-size: 13px; color: var(--gray-500); }
+.pmf-prodchips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.pmf-prodchips:empty { display: none; }
+.pmf-pchip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 4px 4px 12px; border: 1px solid var(--gray-300); border-radius: 16px; font-size: 13.5px; color: var(--gray-900); background: var(--gray-50, #F8F9FA); }
+.pmf-pchip small { color: var(--gray-500); }
+.pmf-pchip button { width: 24px; height: 24px; border: none; border-radius: 50%; background: none; color: var(--gray-500); font-size: 16px; line-height: 1; cursor: pointer; }
+.pmf-ptotal { margin-left: 4px; font-size: 13.5px; font-weight: 700; color: var(--gray-900); }
+.pmf-more { margin-top: 8px; }
+.pmf-more > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--gray-500); padding: 4px 0; }
+.pmf-more[open] > summary { margin-bottom: 8px; }
+.pmf-textrow { display: flex; gap: 8px; }
+.pmf-steplist { display: flex; flex-direction: column; gap: 10px; }
+.pmf-step { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--gray-200); border-radius: 10px; background: var(--gray-50, #F8F9FA); }
+.pmf-step-top { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 36px; gap: 8px; align-items: center; }
+.pmf-step-x { width: 36px; height: 36px; border: none; border-radius: 8px; background: none; color: var(--gray-500); font-size: 20px; cursor: pointer; }
+.pmf-step-x:hover { background: var(--gray-100); color: var(--gray-900); }
+.pmf-step-event, .pmf-step-book { display: none; }
+.pmf-step[data-type="event"] .pmf-step-event { display: block; }
+.pmf-step[data-type="meetup"] .pmf-step-book { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--gray-700); }
+.pmf-add { margin-top: 10px; }
+.pmf-people { display: flex; flex-direction: column; gap: 10px; }
+.pmf-person { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--gray-200); border-radius: 10px; background: var(--gray-50, #F8F9FA); }
+.pmf-person-top { display: grid; grid-template-columns: minmax(0, 1fr) 36px; gap: 8px; align-items: center; }
+.pmf-person-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.pmf-person-ev, .pmf-apu { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--gray-700); }
+.pmf-apu { margin-top: 12px; }
+.pmf-nostep { margin-top: 14px; }
+.pmf-photos { margin-top: 14px; }
+.pmf-photos label i { color: var(--gray-500); }
+.pmf-thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.pmf-thumbs img { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid var(--gray-200); cursor: zoom-in; }
+/* Footer: Cancel is a quiet text link, Save the strong button */
+.modal-box:has(.pmf) .modal-footer .btn.secondary { background: none; border-color: transparent; color: var(--gray-500); box-shadow: none; }
+.modal-box:has(.pmf) .modal-footer .btn.secondary:hover { color: var(--gray-900); text-decoration: underline; }
+.modal-box:has(.pmf) .modal-footer .btn.primary { min-width: 140px; min-height: 44px; font-size: 15px; }
+@media (max-width: 768px) {
+    .pmf-grades { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .pmf-step-top { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 36px; }
+    /* styles-mobile.css stacks every modal footer full-width (!important);
+       this form keeps one row: a small Cancel link, then a wide Save. */
+    .modal-box:has(.pmf) .modal-footer { flex-direction: row !important; align-items: center; }
+    .modal-box:has(.pmf) .modal-footer .btn.secondary { order: 1 !important; width: auto !important; flex: 0 0 auto; padding: 0 12px; }
+    .modal-box:has(.pmf) .modal-footer .btn.primary { order: 2 !important; width: auto !important; flex: 1 1 auto; }
+}
+
 /* Opportunities — open potential, deals, what we know (2026-10-25) */
 .op-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
 .op-total { font-size: 22px; font-weight: 700; color: var(--gray-900); font-variant-numeric: tabular-nums; }

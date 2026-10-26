@@ -1424,6 +1424,7 @@
     const _minutesCtx = new Map();            // prefix → { existing, pending }
     const _minutesPendingPhotos = new Map();  // prefix → File[] (queued until Save)
     const _minutesThumbUrls = new Map();      // prefix → objectURLs to revoke
+    const _minutesSteps = new Map();          // prefix → { events, defaultDue } for next-step rows
 
     const MINUTES_PROMPT = `You are the DC Team's Meeting Minutes Assistant. I will give you messy raw meeting notes (Chinese, English or mixed). Organise them into the standard "DC Meeting Minutes".
 
@@ -1573,7 +1574,20 @@ My raw notes:
             _flashField(document.getElementById(boxId));
             row(sectionKey, r.leftovers.length && !r.matched.length ? '⚠' : '✓', label, parts.join(' · '), r.matched.length ? boxId : remarksId);
         };
-        tickList('nextActions', 'Next Actions', `${prefix}-na-items`, `${prefix}-na-box`, `${prefix}-next-action-remarks`);
+        // Next actions → one step row each (rows already there are kept).
+        {
+            const items = (p.sections.nextActions || []).map(x => String(x).trim()).filter(Boolean);
+            const list = document.getElementById(`${prefix}-steplist`);
+            if (!items.length) row('nextActions', '–', 'Next steps', 'not in minutes', `${prefix}-steplist`);
+            else if (list) {
+                const have = _pmfCollectSteps(prefix).map(r => r.text);
+                [...list.querySelectorAll('.pmf-step')].forEach(el => { if (!el.querySelector('.pmf-step-text').value.trim()) el.remove(); });
+                const guess = (t) => /电话|call|打给/i.test(t) ? 'call' : /whatsapp|wa|讯息|信息/i.test(t) ? 'whatsapp' : /课|会|博物馆|汇集|event|class|museum/i.test(t) ? 'event' : /见面|约|meet|ftf|cps|fsa/i.test(t) ? 'meetup' : 'other';
+                let added = 0;
+                items.filter(t => !have.includes(t)).forEach(t => { pmfAddStep(prefix, { text: t, type: guess(t) === 'event' ? 'other' : guess(t) }); added++; });
+                row('nextActions', '✓', 'Next steps', added ? `${added} step(s) added — check the type and date` : 'already there', `${prefix}-steplist`);
+            }
+        }
         tickList('opportunities', 'Potential & Opportunities', `${prefix}-opp-items`, `${prefix}-opp-box`, `${prefix}-opportunity-remarks`);
 
         const gEl = document.getElementById(`${prefix}-grade`);
@@ -1587,6 +1601,9 @@ My raw notes:
             row('grade', '⚠', 'Grade', `Couldn't read "${escapeHtml(String(p.sections.grade).slice(0, 30))}"`, gEl ? gid : '');
         }
 
+        _pmfSyncChips(prefix);
+        pmfRenderProducts(prefix);
+        pmfRefreshSteps(prefix);
         const filled = rows.filter(r => r.icon === '✓').length;
         const color = { '✓': '#16a34a', '⚠': '#d97706', '–': 'var(--gray-400)' };
         resEl.innerHTML = `
@@ -1612,6 +1629,7 @@ My raw notes:
             id = key === 'outcome' ? `${prefix}-outcome-type` : `${prefix}-grade`;
             const el = document.getElementById(id);
             if (el) el.value = val;
+            _pmfSyncChips(prefix);
         } else {
             const field = key === '__all' ? 'key-points' : (_MINUTES_TEXT_FIELDS.find(f => f[0] === key) || [])[1];
             if (!field) return;
@@ -1706,163 +1724,360 @@ My raw notes:
         const products = opts.products || [];
         const bujishuItems = opts.bujishu || [];
         const formulaItems = opts.formula || [];
-        const events = opts.events || [];
         const _parseSelectedItems = (window.app && window.app.parseSelectedItems) || ((t) => ({ selected: [], remarks: t || '' }));
         const parsedOpp = opts.parsedOpp || _parseSelectedItems(a.opportunity_potential || '');
-        const parsedNA = opts.parsedNA || _parseSelectedItems(a.next_action || '');
 
-        const cb = (name, value, group, selectedArr) => {
-            const checked = selectedArr.includes(value) ? 'checked' : '';
-            const groupAttr = group ? ` data-group="${escapeHtml(group)}"` : '';
-            return `<label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;cursor:pointer;font-size:13px;padding:3px 8px;border-radius:4px;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background=''">
-                <input type="checkbox" name="${prefix}-${name}" value="${escapeHtml(value)}"${groupAttr} ${checked} ${disabled}> ${escapeHtml(value)}
-            </label>`;
+        // Products discussed: every option stays a hidden checkbox (name
+        // `${prefix}-opp-items`, data-group) so the stored text format, the
+        // ChatGPT paste ticks and the Bujishu picker are unchanged — the agent
+        // only sees a search box and chips. data-price feeds the RM total.
+        const priced = (name, value, group, price) => {
+            const checked = parsedOpp.selected.includes(value) ? 'checked' : '';
+            return `<input type="checkbox" name="${prefix}-${name}" value="${escapeHtml(value)}" data-group="${escapeHtml(group)}"${Number(price) > 0 ? ` data-price="${Number(price)}"` : ''} ${checked} ${disabled}>`;
         };
-
         const oppCheckboxes = [
-            ...(products.length ? [`<div style="font-weight:600;font-size:12px;color:var(--primary);margin-bottom:4px;border-bottom:1px solid var(--gray-200);padding-bottom:3px;">Products</div>`] : []),
-            ...products.map(p => cb('opp-items', p.name, 'Products', parsedOpp.selected)),
-            ...(bujishuItems.length ? [`<div style="font-weight:600;font-size:12px;color:var(--primary);margin:8px 0 4px;border-bottom:1px solid var(--gray-200);padding-bottom:3px;">Bujishu</div>`] : []),
-            ...bujishuItems.map(b => cb('opp-items', b.name, 'Bujishu', parsedOpp.selected)),
-            ...(formulaItems.length ? [`<div style="font-weight:600;font-size:12px;color:var(--primary);margin:8px 0 4px;border-bottom:1px solid var(--gray-200);padding-bottom:3px;">Formula</div>`] : []),
-            ...formulaItems.map(f => cb('opp-items', f.name, 'Formula', parsedOpp.selected)),
+            ...products.map(p => priced('opp-items', p.name, 'Products', p.price)),
+            ...bujishuItems.map(b => priced('opp-items', b.name, 'Bujishu', b.price)),
+            ...formulaItems.map(f => priced('opp-items', f.name, 'Formula', f.price)),
         ];
-        // Next Actions options: canonical EVENT_CATEGORIES + custom "Others" categories from events.
-        // Saved selections are parsed directly from the raw string (avoids group-marker mismatch).
-        const naCategories = new Set(EVENT_CATEGORIES);
-        events.forEach(e => parseEventCategories(e.categories).forEach(c => c && naCategories.add(c)));
-        const rawNAFull = a.next_action || '';
-        const rawNARemarksMatch = rawNAFull.match(/ \| Remarks: ([\s\S]*)$/);
-        const rawNARemarksText = rawNARemarksMatch ? rawNARemarksMatch[1].trim() : '';
-        const rawNAItemsPart = rawNARemarksMatch ? rawNAFull.slice(0, rawNAFull.lastIndexOf(' | Remarks:')) : rawNAFull;
-        const savedNAArr = rawNAItemsPart.split(',').map(s => s.trim()).filter(Boolean);
-        const naOthers = savedNAArr.filter(s => !naCategories.has(s));
-        const naOthersText = naOthers.join(', ').replace(/"/g, '&quot;');
-        const hasNaOthers = naOthers.length > 0;
-        const naCheckboxes = Array.from(naCategories).map(cat => cb('na-items', cat, '', savedNAArr));
 
-        // Voice-recorder button only makes sense in the editable context.
-        const voiceBtn = (targetId) => readOnly ? '' : `<button class="btn-icon" onclick="app.openVoiceRecorder('${targetId}', 'activity', null)" title="Record voice note" style="color:var(--primary);"><i class="fas fa-microphone"></i></button>`;
+        // Next steps: the saved list, else the old single next action as one
+        // row, else one empty row to start from.
+        const savedSteps = Array.isArray(a.next_actions) ? a.next_actions.filter(r => r && (r.text || r.event_activity_id)) : null;
+        const legacyText = String(a.next_action || '').replace(/\s*\|\s*Remarks:\s*/g, ' — ').replace(/^—\s*/, '').trim();
+        const steps = savedSteps && savedSteps.length ? savedSteps
+            : (legacyText ? [{ text: legacyText, type: 'other', due: _nextActionDueDefault(a) }] : [{ text: '', type: 'call', due: _nextActionDueDefault(a) }]);
+        _minutesSteps.set(prefix, { events: opts.upcomingEvents || [], defaultDue: _nextActionDueDefault(a) });
+
+        const voiceBtn = (targetId) => readOnly ? '' : `<button type="button" class="btn-icon" onclick="app.openVoiceRecorder('${targetId}', 'activity', null)" title="Record voice note" style="color:var(--gray-500);"><i class="fas fa-microphone"></i></button>`;
+        const textBox = (id, label, val, placeholder, rows = 2) => `
+                <div class="form-group">
+                    <label for="${prefix}-${id}">${label}</label>
+                    <div class="pmf-textrow">
+                        <textarea id="${prefix}-${id}" class="form-control" rows="${rows}" placeholder="${placeholder}" ${disabled}>${escapeHtml(val || '')}</textarea>
+                        ${voiceBtn(`${prefix}-${id}`)}
+                    </div>
+                </div>`;
+        const OUTCOMES = [['positive', '👍', 'Positive'], ['neutral', '😐', 'Neutral'], ['negative', '👎', 'Negative'], ['not_interested', '🚫', 'Not interested']];
+        const GRADES = [['A', 'Closing soon', '~3 days'], ['B', 'Has potential', '~10 days'], ['C', '50 / 50', '~21 days'], ['D', 'Far', '~30 days'], ['F', 'Give up', 'stops reminders']];
+        const curGrade = opts.gradeContext ? (opts.gradeContext.current || '') : '';
+        const chip = (group, value, label, on) =>
+            `<button type="button" class="pmf-chip${on ? ' is-on' : ''}" data-v="${value}" ${disabled} onclick="app.pmfPick('${prefix}', '${group}', '${value}')">${label}</button>`;
+        const existingPhotos = Array.isArray(a.photo_urls) ? a.photo_urls : [];
+        const hasNotes = !!(a.note_needs || a.note_pain_points || (mm && (mm.reaction || mm.background || mm.advisor)) || a.note_key_points);
 
         return `
-            <div class="post-meetup-notes-block" data-prefix="${prefix}">
+            <div class="post-meetup-notes-block pmf" data-prefix="${prefix}" oninput="app.pmfRefreshSteps('${prefix}')" onchange="app.pmfRefreshSteps('${prefix}')">
+                <nav class="pmf-steps" aria-label="Form steps">
+                    <button type="button" data-step="1" onclick="app.pmfGoStep('${prefix}', 1)"><b>1</b> Outcome</button>
+                    <button type="button" data-step="2" onclick="app.pmfGoStep('${prefix}', 2)"><b>2</b> Next steps</button>
+                    <button type="button" data-step="3" onclick="app.pmfGoStep('${prefix}', 3)"><b>3</b> Notes</button>
+                    ${opts.withPeople ? `<button type="button" data-step="4" onclick="app.pmfGoStep('${prefix}', 4)"><b>4</b> People</button>` : ''}
+                </nav>
                 ${readOnly ? '' : `
-                <div style="border:1.5px dashed var(--primary);border-radius:10px;padding:10px 12px;margin-bottom:14px;background:var(--gray-50);">
-                    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
-                        <label for="${prefix}-minutes-paste" style="margin:0;font-weight:700;"><i class="fas fa-paste" style="color:var(--primary);"></i> Paste ChatGPT minutes · 粘贴会议记录</label>
-                        <button type="button" class="btn secondary btn-sm" onclick="app.copyMinutesPrompt()" title="Copy the prompt agents paste into ChatGPT"><i class="fas fa-copy"></i> Copy ChatGPT prompt</button>
-                    </div>
-                    <textarea id="${prefix}-minutes-paste" class="form-control" rows="3" placeholder="Paste the whole ChatGPT minutes here — the form below fills itself." onpaste="setTimeout(function(){app.applyPastedMinutes('${prefix}')},0)"></textarea>
-                    <div style="display:flex;gap:8px;margin-top:6px;align-items:center;flex-wrap:wrap;">
-                        <button type="button" class="btn primary btn-sm" onclick="app.applyPastedMinutes('${prefix}')"><i class="fas fa-wand-magic-sparkles"></i> Fill form</button>
-                        <span style="font-size:11px;color:var(--gray-400);">Text already in a field is kept — you choose to add or replace.</span>
-                    </div>
-                    <div id="${prefix}-minutes-result"></div>
-                </div>`}
-                <div class="form-group">
-                    <label>Meeting Result:</label>
-                    <select id="${prefix}-outcome-type" class="form-control" ${disabled}>
-                        <option value="" ${!a.outcome ? 'selected' : ''}>— How did it go? —</option>
-                        <option value="positive" ${a.outcome === 'positive' ? 'selected' : ''}>👍 Positive — moving forward</option>
-                        <option value="neutral" ${a.outcome === 'neutral' ? 'selected' : ''}>😐 Neutral</option>
-                        <option value="negative" ${a.outcome === 'negative' ? 'selected' : ''}>👎 Negative — cooled off</option>
-                        <option value="not_interested" ${a.outcome === 'not_interested' ? 'selected' : ''}>🚫 Not interested — stop pitching</option>
-                    </select>
-                    <div style="font-size:11px;color:var(--gray-400);margin-top:3px;"><i class="fas fa-link"></i> Feeds the pipeline: negative results subtract score; "Not interested" pauses the prospect for the cool-off period.</div>
-                </div>
-                ${mmTextarea('background', 'Customer Background · 客户背景:', 'Family, career, background…')}
-                <div class="form-group">
-                    <label>Key Points Discussed:</label>
-                    <div style="display:flex;gap:8px;">
-                        <textarea id="${prefix}-key-points" class="form-control" rows="2" placeholder="Main discussion points..." ${disabled}>${escapeHtml(a.note_key_points || '')}</textarea>
-                        ${voiceBtn(`${prefix}-key-points`)}
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>Customer Needs/Interests:</label>
-                    <div style="display:flex;gap:8px;">
-                        <textarea id="${prefix}-needs" class="form-control" rows="2" placeholder="What are they looking for?" ${disabled}>${escapeHtml(a.note_needs || '')}</textarea>
-                        ${voiceBtn(`${prefix}-needs`)}
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>Pain Points:</label>
-                    <div style="display:flex;gap:8px;">
-                        <textarea id="${prefix}-pain-points" class="form-control" rows="2" placeholder="Dislikes or problems to solve..." ${disabled}>${escapeHtml(a.note_pain_points || '')}</textarea>
-                        ${voiceBtn(`${prefix}-pain-points`)}
-                    </div>
-                </div>
-                ${mmTextarea('advisor', 'Advisor Observations &amp; Suggestions · 顾问观察与建议:', 'Advice given, reasons, timeline…')}
-                ${mmTextarea('reaction', 'Customer Reaction &amp; DC Records · 客户反应与DC记录:', 'How they reacted, classes/events joined…')}
-                <div class="form-group">
-                    <label>Potential &amp; Opportunities:</label>
-                    <div id="${prefix}-opp-box" style="border:1px solid var(--gray-300);border-radius:6px;padding:10px;max-height:180px;overflow-y:auto;background:#fafafa;">
-                        ${oppCheckboxes.length > 0 ? oppCheckboxes.join('') : '<p style="color:var(--gray-400);font-size:12px;margin:0;">No products/items available.</p>'}
-                    </div>
-                    <div style="display:flex;gap:8px;margin-top:6px;">
-                        <textarea id="${prefix}-opportunity-remarks" class="form-control" rows="2" placeholder="Additional remarks..." ${disabled}>${escapeHtml(parsedOpp.remarks || '')}</textarea>
-                        ${voiceBtn(`${prefix}-opportunity-remarks`)}
-                    </div>
-                    ${bjcMultiHtml(`${prefix}-opp`, `${prefix}-opp-items`, bjcSelectedFromText(a.opportunity_potential || ''), { readOnly })}
-                    <div style="font-size:11px;color:var(--gray-400);margin-top:3px;"><i class="fas fa-link"></i> Linked to prospect profile → Potential &amp; Opportunities / Pipeline → Target to Sign</div>
-                </div>
-                <div class="form-group">
-                    <label>Next Actions:</label>
-                    <div id="${prefix}-na-box" style="border:1px solid var(--gray-300);border-radius:6px;padding:10px;max-height:180px;overflow-y:auto;background:#fafafa;">
-                        ${naCheckboxes.join('')}
-                        <label style="display:flex;align-items:center;gap:6px;margin-bottom:4px;cursor:${readOnly ? 'default' : 'pointer'};font-size:13px;padding:3px 8px;border-radius:4px;" ${!readOnly ? `onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background=''"` : ''}>
-                            <input type="checkbox" id="${prefix}-na-others-cb" ${hasNaOthers ? 'checked' : ''} ${disabled} ${!readOnly ? `onchange="(function(el){var b=document.getElementById('${prefix}-na-others-box');b.style.display=el.checked?'block':'none';if(el.checked)document.getElementById('${prefix}-na-others-input').focus();})(this)"` : ''}>
-                            Others
-                        </label>
-                        <div id="${prefix}-na-others-box" style="display:${hasNaOthers ? 'block' : 'none'};padding:0 8px 4px;">
-                            <input type="text" id="${prefix}-na-others-input" class="form-control" placeholder="Type custom categories, separate with commas" value="${naOthersText}" ${disabled} style="font-size:13px;">
+                <details class="pmf-paste">
+                    <summary><i class="fas fa-paste" aria-hidden="true"></i> Have ChatGPT minutes? Paste them to fill this form</summary>
+                    <div class="pmf-paste-body">
+                        <div class="pmf-paste-bar">
+                            <button type="button" class="btn secondary btn-sm" onclick="app.copyMinutesPrompt()"><i class="fas fa-copy"></i> Copy ChatGPT prompt</button>
+                            <span>Text already in a field is kept — you choose to add or replace.</span>
                         </div>
+                        <textarea id="${prefix}-minutes-paste" class="form-control" rows="3" placeholder="Paste the whole ChatGPT minutes here" onpaste="setTimeout(function(){app.applyPastedMinutes('${prefix}')},0)"></textarea>
+                        <button type="button" class="btn secondary btn-sm" style="margin-top:6px;" onclick="app.applyPastedMinutes('${prefix}')"><i class="fas fa-wand-magic-sparkles"></i> Fill form</button>
+                        <div id="${prefix}-minutes-result"></div>
                     </div>
-                    <div style="display:flex;gap:8px;margin-top:6px;">
-                        <textarea id="${prefix}-next-action-remarks" class="form-control" rows="2" placeholder="Additional remarks..." ${disabled}>${escapeHtml(rawNARemarksText)}</textarea>
-                        ${voiceBtn(`${prefix}-next-action-remarks`)}
-                    </div>
-                    <div style="display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap;">
-                        <label for="${prefix}-next-action-due" style="margin:0;font-weight:600;">By when</label>
-                        <input type="date" id="${prefix}-next-action-due" class="form-control" style="max-width:190px;" value="${escapeHtml(_nextActionDueDefault(a))}" ${disabled}>
-                    </div>
-                    <div style="font-size:11px;color:var(--gray-400);margin-top:3px;"><i class="fas fa-link"></i> Becomes one task in the profile's Next up list and the daily to-do — tick it there when done.</div>
-                </div>
-                ${opts.gradeContext ? `
-                <div class="form-group" style="border-top:1px solid var(--gray-200);padding-top:12px;margin-top:4px;">
-                    <label>Grade / 等级 <span style="font-weight:normal;color:var(--text-secondary);">— 会面后评估，决定跟进节奏</span></label>
-                    <select id="${prefix}-grade" class="form-control" data-current="${escapeHtml(opts.gradeContext.current || '')}" ${disabled}>
-                        <option value="" ${!opts.gradeContext.current ? 'selected' : ''}>— 未评估 / Not yet graded —</option>
-                        <option value="A" ${opts.gradeContext.current === 'A' ? 'selected' : ''}>A · 即将成交，立即跟进 (~3天)</option>
-                        <option value="B" ${opts.gradeContext.current === 'B' ? 'selected' : ''}>B · 有潜力，需要时间 (~10天)</option>
-                        <option value="C" ${opts.gradeContext.current === 'C' ? 'selected' : ''}>C · 一半一半 (~21天)</option>
-                        <option value="D" ${opts.gradeContext.current === 'D' ? 'selected' : ''}>D · 很远 (~30天)</option>
-                        <option value="F" ${opts.gradeContext.current === 'F' ? 'selected' : ''}>F · 放弃，不再跟进</option>
-                    </select>
-                    <p style="color:var(--gray-400);font-size:11px;margin-top:4px;"><i class="fas fa-info-circle"></i> 见面后根据客户意向评级 — 决定跟进节奏 (A最快 ~3天 → D最慢 ~30天，F停止跟进).</p>
-                </div>` : ''}
-                ${(() => {
-                    const existingPhotos = Array.isArray(a.photo_urls) ? a.photo_urls : [];
-                    const thumbs = existingPhotos.map(url => `
-                        <div style="position:relative;flex-shrink:0;">
-                            <img loading="lazy" data-attach-src="${escapeHtml(String(url))}" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" style="height:64px;width:64px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-200);cursor:zoom-in;" onclick="window._openAttachment && window._openAttachment('${UI.escJsAttr(String(url))}')">
-                        </div>`).join('');
-                    return `
-                <div class="form-group" id="${prefix}-photo-section" data-existing="${escapeHtml(JSON.stringify(existingPhotos))}" style="border-top:1px solid var(--gray-200);padding-top:12px;margin-top:4px;">
-                    <label style="display:flex;align-items:center;gap:6px;"><i class="fas fa-camera" style="color:var(--primary);"></i> Discussion Papers</label>
-                    ${existingPhotos.length > 0 ? `
-                    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;padding:8px;background:#f9fafb;border-radius:6px;border:1px solid var(--gray-200);">
-                        ${thumbs}
+                </details>`}
+
+                <section class="pmf-sec" id="${prefix}-step-1">
+                    <h4 class="pmf-h"><b>1</b> Outcome</h4>
+                    ${opts.noOutcome ? '' : `
+                    <div class="pmf-field">
+                        <div class="pmf-label">How did today go? <span class="pmf-req">required</span></div>
+                        <input type="hidden" id="${prefix}-outcome-type" value="${escapeHtml(a.outcome || '')}">
+                        <div class="pmf-chips" data-group="outcome">${OUTCOMES.map(([v, e, l]) => chip('outcome', v, `${e} ${l}`, a.outcome === v)).join('')}</div>
+                        <div class="pmf-hint">Scores this meeting in the pipeline. “Not interested” pauses them for 60 days.</div>
+                    </div>`}
+                    ${opts.gradeContext ? `
+                    <div class="pmf-field">
+                        <div class="pmf-label">How hot is this person now?</div>
+                        <input type="hidden" id="${prefix}-grade" value="${escapeHtml(curGrade)}" data-current="${escapeHtml(curGrade)}">
+                        <div class="pmf-chips pmf-grades" data-group="grade">${GRADES.map(([g, l, d]) => chip('grade', g, `<b>${g}</b><span>${l}</span><small>${d}</small>`, curGrade === g)).join('')}</div>
+                        <div class="pmf-hint" id="${prefix}-grade-hint">Sets how often you are reminded to follow up. Today's result is about this meeting; this is about the person.</div>
                     </div>` : ''}
-                    ${!readOnly ? `
-                    <input type="file" id="${prefix}-photo-files" class="form-control" accept="image/*" multiple style="font-size:13px;" onchange="app.addMinutesPhotos('${prefix}', this)">
-                    <div id="${prefix}-photo-pending"></div>
-                    <p style="color:var(--gray-400);font-size:11px;margin-top:4px;"><i class="fas fa-info-circle"></i> Add as many photos as you need — pick again to add more. Every photo is kept on this meet up and shown on the prospect profile.</p>
-                    ` : (existingPhotos.length === 0 ? '<p style="color:var(--gray-400);font-size:13px;">No discussion photos attached.</p>' : '')}
-                </div>`;
-                })()}
+                    <div class="pmf-field">
+                        <div class="pmf-label">Products discussed</div>
+                        <div class="pmf-search">
+                            <i class="fas fa-search" aria-hidden="true"></i>
+                            <input type="search" id="${prefix}-opp-search" class="form-control" placeholder="Search a product, course or Formula item…" autocomplete="off" ${disabled} oninput="app.pmfProductSearch('${prefix}', this.value)" onfocus="app.pmfProductSearch('${prefix}', this.value)">
+                            <div class="pmf-suggest" id="${prefix}-opp-suggest"></div>
+                        </div>
+                        <div class="pmf-prodchips" id="${prefix}-opp-chips"></div>
+                        <div id="${prefix}-opp-box" hidden>${oppCheckboxes.join('')}</div>
+                        ${bjcMultiHtml(`${prefix}-opp`, `${prefix}-opp-items`, bjcSelectedFromText(a.opportunity_potential || ''), { readOnly })}
+                        <details class="pmf-more"${parsedOpp.remarks ? ' open' : ''}>
+                            <summary>Something not in the list?</summary>
+                            <textarea id="${prefix}-opportunity-remarks" class="form-control" rows="2" placeholder="Other products / remarks" ${disabled}>${escapeHtml(parsedOpp.remarks || '')}</textarea>
+                        </details>
+                        <div class="pmf-hint">Adds to their open potential on the profile.</div>
+                    </div>
+                </section>
+
+                <section class="pmf-sec" id="${prefix}-step-2">
+                    <h4 class="pmf-h"><b>2</b> Next steps</h4>
+                    <div class="pmf-steplist" id="${prefix}-steplist">${steps.map(r => _pmfStepRowHtml(prefix, r, readOnly)).join('')}</div>
+                    ${readOnly ? '' : `<button type="button" class="btn secondary btn-sm pmf-add" onclick="app.pmfAddStep('${prefix}')"><i class="fas fa-plus"></i> Add next step</button>`}
+                    <div class="pmf-hint">Each step becomes its own task in Next up and the daily to-do.</div>
+                    ${opts.allowNoStep ? `
+                    <div class="pmf-field pmf-nostep">
+                        <div class="pmf-label">No next step yet?</div>
+                        <input type="hidden" id="${prefix}-no-step" value="">
+                        <div class="pmf-chips" data-group="nostep">
+                            ${chip('nostep', 'later', '⏳ Decide later', false)}
+                            ${chip('nostep', 'not_interested', '🚫 Not interested', false)}
+                        </div>
+                    </div>` : ''}
+                    <div class="form-group pmf-photos" id="${prefix}-photo-section" data-existing="${escapeHtml(JSON.stringify(existingPhotos))}">
+                        <label><i class="fas fa-camera" aria-hidden="true"></i> Discussion papers</label>
+                        ${existingPhotos.length ? `<div class="pmf-thumbs">${existingPhotos.map(url => `<img loading="lazy" data-attach-src="${escapeHtml(String(url))}" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" alt="Discussion paper" onclick="window._openAttachment && window._openAttachment('${UI.escJsAttr(String(url))}')">`).join('')}</div>` : ''}
+                        ${readOnly ? (existingPhotos.length ? '' : '<p class="pmf-hint">No discussion photos attached.</p>') : `
+                        <input type="file" id="${prefix}-photo-files" class="form-control" accept="image/*" multiple onchange="app.addMinutesPhotos('${prefix}', this)">
+                        <div id="${prefix}-photo-pending"></div>`}
+                    </div>
+                </section>
+
+                <details class="pmf-sec pmf-fold" id="${prefix}-step-3"${hasNotes ? ' open' : ''}>
+                    <summary class="pmf-h"><b>3</b> Notes <span class="pmf-opt">short · optional</span></summary>
+                    ${textBox('reaction', 'Their reaction', mm && mm.reaction, 'e.g. Skeptical at first, warmed up when we discussed his wife')}
+                    ${textBox('pain-points', 'Objections / pain points', a.note_pain_points, 'What worries them, what stops them')}
+                    ${textBox('needs', 'Needs', a.note_needs, 'What they are looking for')}
+                    <details class="pmf-more"${(mm && (mm.background || mm.advisor)) || a.note_key_points ? ' open' : ''}>
+                        <summary>Detailed notes</summary>
+                        ${textBox('key-points', 'Key points discussed', a.note_key_points, 'Main discussion points', 3)}
+                        ${textBox('background', 'Customer background · 客户背景', mm && mm.background, 'Family, career, background')}
+                        ${textBox('advisor', 'Advisor observations · 顾问观察与建议', mm && mm.advisor, 'Advice given, reasons, timeline')}
+                    </details>
+                </details>
+                ${opts.withPeople ? pmfPeopleHtml(prefix) : ''}
+                ${readOnly ? '' : `<img alt="" hidden src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" onload="app.pmfInit('${prefix}')">`}
             </div>
         `;
+    };
+
+    // ── Post-Meetup form behaviour (2026-10-26 redesign) ────────────────────
+    // Chips write hidden inputs (${prefix}-outcome-type / -grade / -no-step)
+    // that the save path and the ChatGPT paste already read by id.
+    const _PMF_STEP_TYPES = [['call', '📞 Call'], ['meetup', '🤝 Meet up'], ['event', '🎟️ Event invite'], ['whatsapp', '💬 WhatsApp'], ['other', '📝 Other']];
+    const _pmfDay = (d) => { const t = Date.parse(String(d || '').slice(0, 10) + 'T00:00:00'); return Number.isNaN(t) ? '' : new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }); };
+    const _pmfStepRowHtml = (prefix, r = {}, readOnly = false) => {
+        const ctx = _minutesSteps.get(prefix) || { events: [], defaultDue: '' };
+        const type = _PMF_STEP_TYPES.some(t => t[0] === r.type) ? r.type : 'other';
+        const dis = readOnly ? 'disabled' : '';
+        const evOpts = (ctx.events || []).map(e => `<option value="${Number(e.id)}" data-event="${Number(e.event_id) || ''}" ${String(r.event_activity_id) === String(e.id) ? 'selected' : ''}>${escapeHtml(e.activity_title || 'Event')} · ${escapeHtml(_pmfDay(e.activity_date))}</option>`).join('');
+        return `
+            <div class="pmf-step" data-type="${type}">
+                <div class="pmf-step-top">
+                    <select class="form-control pmf-step-type" aria-label="Type" ${dis} onchange="app.pmfStepType(this)">${_PMF_STEP_TYPES.map(([v, l]) => `<option value="${v}" ${v === type ? 'selected' : ''}>${l}</option>`).join('')}</select>
+                    <input type="date" class="form-control pmf-step-due" aria-label="By when" value="${escapeHtml(String(r.due || ctx.defaultDue || '').slice(0, 10))}" ${dis}>
+                    ${readOnly ? '' : '<button type="button" class="pmf-step-x" aria-label="Remove this step" onclick="app.pmfRemoveStep(this)">&times;</button>'}
+                </div>
+                <select class="form-control pmf-step-event" aria-label="Which event" ${dis} onchange="app.pmfStepEvent(this)">
+                    <option value="">${ctx.events && ctx.events.length ? 'Pick the event…' : 'No events on the calendar in the next 60 days'}</option>${evOpts}
+                </select>
+                <input type="text" class="form-control pmf-step-text" maxlength="180" placeholder="What needs doing? e.g. Follow up on the RM18,990 package" value="${escapeHtml(r.text || '')}" ${dis}>
+                <label class="pmf-step-book"><input type="checkbox" class="pmf-step-bookcb" ${dis}> Book it in the calendar after saving</label>
+            </div>`;
+    };
+    const pmfAddStep = (prefix, row = null) => {
+        const list = document.getElementById(`${prefix}-steplist`);
+        if (!list) return null;
+        const ctx = _minutesSteps.get(prefix) || {};
+        list.insertAdjacentHTML('beforeend', _pmfStepRowHtml(prefix, row || { type: 'call', due: ctx.defaultDue }));
+        const el = list.lastElementChild;
+        if (!row) { try { el.querySelector('.pmf-step-text').focus(); } catch (_) { /* focus is a nicety */ } }
+        pmfRefreshSteps(prefix);
+        return el;
+    };
+    const pmfRemoveStep = (btn) => {
+        const row = btn.closest('.pmf-step');
+        const block = btn.closest('.pmf');
+        if (row) row.remove();
+        if (block) pmfRefreshSteps(block.dataset.prefix);
+    };
+    const pmfStepType = (sel) => { const row = sel.closest('.pmf-step'); if (row) row.dataset.type = sel.value; };
+    const pmfStepEvent = (sel) => {
+        const row = sel.closest('.pmf-step');
+        const txt = row && row.querySelector('.pmf-step-text');
+        const opt = sel.selectedOptions && sel.selectedOptions[0];
+        if (txt && opt && sel.value && !txt.value.trim()) txt.value = `Invite to ${opt.textContent.split(' · ')[0]}`;
+    };
+    // The steps as stored on the meeting (activities / event_attendees.next_actions).
+    const _pmfCollectSteps = (prefix) => [...document.querySelectorAll(`#${prefix}-steplist .pmf-step`)].map(el => {
+        const type = el.querySelector('.pmf-step-type').value;
+        const due = el.querySelector('.pmf-step-due').value;
+        const evSel = el.querySelector('.pmf-step-event');
+        const evId = type === 'event' && evSel && evSel.value ? Number(evSel.value) : null;
+        const row = { text: el.querySelector('.pmf-step-text').value.trim(), type, due: /^\d{4}-\d{2}-\d{2}$/.test(due) ? due : null };
+        if (evId) { row.event_activity_id = evId; row.event_id = Number(evSel.selectedOptions[0].dataset.event) || null; }
+        if (type === 'meetup' && el.querySelector('.pmf-step-bookcb')?.checked) row._book = true;
+        return row;
+    }).filter(r => r.text);
+    // What the save path does AFTER saving (event registration, booking, the
+    // person's next-step status) — read before the form closes.
+    const collectMinutesFollowUps = (prefix) => {
+        if (!document.getElementById(`${prefix}-steplist`)) return null;
+        return {
+            steps: _pmfCollectSteps(prefix),
+            noStep: (document.getElementById(`${prefix}-no-step`) || {}).value || '',
+            people: _pmfCollectPeople(prefix),
+            apuAfter: !!(document.getElementById(`${prefix}-apu-after`) || {}).checked,
+        };
+    };
+
+    const _pmfSyncChips = (prefix) => {
+        const block = document.querySelector(`.pmf[data-prefix="${prefix}"]`);
+        if (!block) return;
+        const map = { outcome: `${prefix}-outcome-type`, grade: `${prefix}-grade`, nostep: `${prefix}-no-step` };
+        Object.entries(map).forEach(([group, id]) => {
+            const v = (document.getElementById(id) || {}).value || '';
+            block.querySelectorAll(`.pmf-chips[data-group="${group}"] .pmf-chip`).forEach(c => c.classList.toggle('is-on', c.dataset.v === v));
+        });
+    };
+    const pmfPick = (prefix, group, value) => {
+        const id = group === 'outcome' ? `${prefix}-outcome-type` : group === 'grade' ? `${prefix}-grade` : `${prefix}-no-step`;
+        const el = document.getElementById(id);
+        if (!el) return;
+        // the no-step reason toggles off on a second tap
+        el.value = group === 'nostep' && el.value === value ? '' : value;
+        _pmfSyncChips(prefix);
+        if (group === 'outcome') {
+            const g = document.getElementById(`${prefix}-grade`);
+            const hint = document.getElementById(`${prefix}-grade-hint`);
+            if (g && hint) {
+                hint.innerHTML = value === 'not_interested' && g.value !== 'F'
+                    ? `Not interested — move them to <b>F</b> (stop reminders)? <button type="button" class="pmf-link" onclick="app.pmfPick('${prefix}', 'grade', 'F')">Set F</button>`
+                    : 'Sets how often you are reminded to follow up. Today\'s result is about this meeting; this is about the person.';
+            }
+        }
+        pmfRefreshSteps(prefix);
+    };
+
+    // Products: search the hidden checkboxes, tick on pick, show chips + RM total.
+    const _pmfOppBoxes = (prefix) => [...document.querySelectorAll(`input[name="${prefix}-opp-items"]`)];
+    const pmfRenderProducts = (prefix) => {
+        const box = document.getElementById(`${prefix}-opp-chips`);
+        if (!box) return;
+        const picked = _pmfOppBoxes(prefix).filter(b => b.checked && b.dataset.group !== 'Bujishu Catalogue');
+        const total = picked.reduce((n, b) => n + (Number(b.dataset.price) || 0), 0);
+        box.innerHTML = picked.length ? `${picked.map(b => `<span class="pmf-pchip">${escapeHtml(b.value)}${Number(b.dataset.price) > 0 ? ` <small>RM ${Math.round(Number(b.dataset.price)).toLocaleString()}</small>` : ''}<button type="button" aria-label="Remove ${escapeHtml(b.value)}" onclick="app.pmfToggleProduct('${prefix}', this.dataset.v, false)" data-v="${escapeHtml(b.value)}">&times;</button></span>`).join('')}
+            ${total > 0 ? `<span class="pmf-ptotal">≈ RM ${Math.round(total).toLocaleString()}</span>` : ''}` : '';
+    };
+    const pmfToggleProduct = (prefix, value, on) => {
+        const b = _pmfOppBoxes(prefix).find(x => x.value === value && x.dataset.group !== 'Bujishu Catalogue');
+        if (b) b.checked = !!on;
+        pmfRenderProducts(prefix);
+        const s = document.getElementById(`${prefix}-opp-search`);
+        if (on && s) { s.value = ''; pmfProductSearch(prefix, ''); }
+        pmfRefreshSteps(prefix);
+    };
+    const pmfProductSearch = (prefix, q) => {
+        const box = document.getElementById(`${prefix}-opp-suggest`);
+        if (!box) return;
+        const term = String(q || '').trim().toLowerCase();
+        if (!term) { box.innerHTML = ''; return; }
+        const hits = _pmfOppBoxes(prefix).filter(b => b.dataset.group !== 'Bujishu Catalogue' && !b.checked && b.value.toLowerCase().includes(term)).slice(0, 8);
+        box.innerHTML = hits.length
+            ? hits.map(b => `<button type="button" data-v="${escapeHtml(b.value)}" onclick="app.pmfToggleProduct('${prefix}', this.dataset.v, true)"><span>${escapeHtml(b.value)}</span><small>${escapeHtml(b.dataset.group || '')}${Number(b.dataset.price) > 0 ? ` · RM ${Math.round(Number(b.dataset.price)).toLocaleString()}` : ''}</small></button>`).join('')
+            : '<div class="pmf-suggest-none">Not found — add it under “Something not in the list?”</div>';
+    };
+
+    // Step bar: a tick on each step that has something in it.
+    const pmfRefreshSteps = (prefix) => {
+        const block = document.querySelector(`.pmf[data-prefix="${prefix}"]`);
+        if (!block) return;
+        const v = (id) => ((document.getElementById(`${prefix}-${id}`) || {}).value || '').trim();
+        const done = {
+            1: !!v('outcome-type') || (!document.getElementById(`${prefix}-outcome-type`) && _pmfOppBoxes(prefix).some(b => b.checked)),
+            2: _pmfCollectSteps(prefix).length > 0 || !!v('no-step'),
+            3: ['reaction', 'pain-points', 'needs', 'key-points', 'background', 'advisor'].some(id => v(id)),
+            4: !!block.querySelector('.pmf-person-name') && [...block.querySelectorAll('.pmf-person-name')].some(i => i.value.trim()),
+        };
+        block.querySelectorAll('.pmf-steps button[data-step]').forEach(b => b.classList.toggle('is-done', !!done[b.dataset.step]));
+    };
+    const pmfGoStep = (prefix, n) => {
+        const el = document.getElementById(`${prefix}-step-${n}`);
+        if (!el) return;
+        if (el.tagName === 'DETAILS') el.open = true;
+        try { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_) { el.scrollIntoView(); }
+    };
+    const pmfInit = (prefix) => {
+        pmfRenderProducts(prefix);
+        _pmfSyncChips(prefix);
+        pmfRefreshSteps(prefix);
+    };
+
+    // ④ People they recommended — Name List (APU) straight from the minutes.
+    // Each name goes to the prospect's Name List (names table) and, when ticked,
+    // gets its e-CPS voucher from the same generator the profile's Add Name uses.
+    const _pmfPersonRowHtml = (prefix) => {
+        const rel = (window.app.buildRelationOptions || (() => ['Friend', 'Family', 'Spouse', 'Colleague', 'Business Partner'].map(v => `<option value="${v}">${v}</option>`).join('')))('');
+        return `
+            <div class="pmf-person">
+                <div class="pmf-person-top">
+                    <input type="text" class="form-control pmf-person-name" maxlength="120" placeholder="Full name" aria-label="Full name">
+                    <button type="button" class="pmf-step-x" aria-label="Remove this person" onclick="app.pmfRemovePerson(this)">&times;</button>
+                </div>
+                <div class="pmf-person-grid">
+                    <select class="form-control pmf-person-rel" aria-label="Relation"><option value="">Relation…</option>${rel}</select>
+                    <input type="tel" class="form-control pmf-person-phone" maxlength="30" placeholder="Phone (optional)" aria-label="Phone">
+                </div>
+                <label class="pmf-person-ev"><input type="checkbox" class="pmf-person-voucher" checked> Make the e-CPS voucher</label>
+            </div>`;
+    };
+    const pmfPeopleHtml = (prefix) => `
+                <details class="pmf-sec pmf-fold" id="${prefix}-step-4">
+                    <summary class="pmf-h"><b>4</b> People they recommended <span class="pmf-opt">Name List · e-CPS voucher</span></summary>
+                    <div class="pmf-people" id="${prefix}-people"></div>
+                    <button type="button" class="btn secondary btn-sm pmf-add" onclick="app.pmfAddPerson('${prefix}')"><i class="fas fa-plus"></i> Add name</button>
+                    <label class="pmf-apu"><input type="checkbox" id="${prefix}-apu-after"> Upload the APU form photo after saving</label>
+                    <div class="pmf-hint">Names go to their Name List; each ticked voucher is made at once, ready to WhatsApp from the Name List.</div>
+                </details>`;
+    const pmfAddPerson = (prefix) => {
+        const box = document.getElementById(`${prefix}-people`);
+        if (!box) return;
+        box.insertAdjacentHTML('beforeend', _pmfPersonRowHtml(prefix));
+        try { box.lastElementChild.querySelector('.pmf-person-name').focus(); } catch (_) { /* focus is a nicety */ }
+        pmfRefreshSteps(prefix);
+    };
+    const pmfRemovePerson = (btn) => {
+        const row = btn.closest('.pmf-person');
+        const block = btn.closest('.pmf');
+        if (row) row.remove();
+        if (block) pmfRefreshSteps(block.dataset.prefix);
+    };
+    const _pmfCollectPeople = (prefix) => [...document.querySelectorAll(`#${prefix}-people .pmf-person`)].map(el => ({
+        full_name: el.querySelector('.pmf-person-name').value.trim(),
+        relation: el.querySelector('.pmf-person-rel').value || 'Other',
+        phone: el.querySelector('.pmf-person-phone').value.trim() || null,
+        voucher: !!el.querySelector('.pmf-person-voucher').checked,
+    })).filter(p => p.full_name);
+    // After the minutes are saved: write the names, make their vouchers.
+    const pmfSavePeople = async (prefix, prospectId, followUps) => {
+        const people = (followUps && followUps.people) || [];
+        if (!people.length || !prospectId) return 0;
+        try { if (!window.app.generateEvoucherForName && window._loadChunk) await window._loadChunk('chunks/script-prospects.min.js'); } catch (_) { /* vouchers skipped below */ }
+        let added = 0, vouchers = 0;
+        for (const p of people) {
+            try {
+                const created = await AppDataStore.create('names', { prospect_id: Number(prospectId), relation: p.relation, full_name: p.full_name, phone: p.phone, date_of_birth: null, notes: null });
+                added++;
+                if (p.voucher && created && created.id && window.app.generateEvoucherForName) {
+                    const v = await window.app.generateEvoucherForName(Number(prospectId), p.full_name, created.id, { silent: true }).catch(() => null);
+                    if (v) vouchers++;
+                }
+            } catch (e) { UI.toast.error(`Could not add ${p.full_name}: ${e && e.message ? e.message : e}`); }
+        }
+        if (added) UI.toast.success(`${added} name${added === 1 ? '' : 's'} added to the Name List${vouchers ? ` · ${vouchers} e-CPS voucher${vouchers === 1 ? '' : 's'} ready` : ''}`);
+        return added;
     };
 
     // "By when" for the next action: the saved date, else 7 days after the meeting
@@ -1893,23 +2108,17 @@ My raw notes:
             note_needs: document.getElementById(`${prefix}-needs`)?.value || '',
             note_pain_points: document.getElementById(`${prefix}-pain-points`)?.value || '',
             opportunity_potential: (window.app.serializeMultiSelectToText || (() => ''))(`${prefix}-opp-items`, `${prefix}-opportunity-remarks`),
-            next_action: (() => {
-                const items = Array.from(document.querySelectorAll(`input[name="${prefix}-na-items"]:checked`)).map(c => c.value);
-                const othersCb = document.getElementById(`${prefix}-na-others-cb`);
-                const othersInput = document.getElementById(`${prefix}-na-others-input`);
-                if (othersCb?.checked && othersInput?.value?.trim()) {
-                    othersInput.value.split(',').map(s => s.trim()).filter(Boolean).forEach(c => { if (!items.includes(c)) items.push(c); });
-                }
-                const remarks = document.getElementById(`${prefix}-next-action-remarks`)?.value?.trim() || '';
-                let result = items.join(', ');
-                if (remarks) result += (result ? ' | ' : '') + 'Remarks: ' + remarks;
-                return result;
-            })(),
-            // undefined (key dropped) on an old form without the field.
-            next_action_due: (() => {
-                const el = document.getElementById(`${prefix}-next-action-due`);
-                if (!el) return undefined;
-                return /^\d{4}-\d{2}-\d{2}$/.test(el.value || '') ? el.value : null;
+            // Next steps: the list is the record (each row = one task, DB
+            // trigger); next_action / next_action_due keep a plain summary for
+            // the screens and reports that read the old single field.
+            ...(() => {
+                if (!document.getElementById(`${prefix}-steplist`)) return {};
+                const rows = _pmfCollectSteps(prefix).map(({ _book, ...r }) => r);
+                return {
+                    next_actions: rows,
+                    next_action: rows.map(r => r.text).join('; '),
+                    next_action_due: rows.length ? rows[0].due : null,
+                };
             })(),
             meeting_minutes: _collectMeetingMinutes(prefix),
         };
@@ -7990,6 +8199,21 @@ My raw notes:
         huijiRecommendVisitors,
         _huijiNameMatch,
         buildPostMeetupNotesBlock,
+        collectMinutesFollowUps,
+        pmfAddStep,
+        pmfRemoveStep,
+        pmfStepType,
+        pmfStepEvent,
+        pmfPick,
+        pmfToggleProduct,
+        pmfProductSearch,
+        pmfRenderProducts,
+        pmfRefreshSteps,
+        pmfGoStep,
+        pmfInit,
+        pmfAddPerson,
+        pmfRemovePerson,
+        pmfSavePeople,
         collectPostMeetupNotesData,
         applyPastedMinutes,
         minutesFieldAction,

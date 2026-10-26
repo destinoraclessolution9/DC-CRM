@@ -6819,6 +6819,24 @@
         try { await window._loadChunk('chunks/script-activities.min.js'); } catch (_) { /* bail if lazy chunk fails to load */ }
     };
 
+    // Event sessions in the next 60 days — the "Event invite" next-step picker
+    // (same list the CPS "What's next?" invite uses; agent meetings left out).
+    const _upcomingEventSessions = async () => {
+        const sb = window.supabase || window.supabaseClient;
+        if (!sb) return [];
+        const d = new Date();
+        const ymd = (x) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+        const until = new Date(d.getTime() + 60 * 864e5);
+        try {
+            const { data } = await sb.from('activities').select('id,activity_title,activity_date,event_id')
+                .eq('activity_type', 'EVENT').gte('activity_date', ymd(d)).lte('activity_date', ymd(until))
+                .not('event_id', 'is', null).order('activity_date').limit(40);
+            return (data || []).filter(a => !/代理会议/.test(a.activity_title || ''));
+        } catch (_) { return []; }
+    };
+    // Phones: the notes form is a full-screen sheet (desktop keeps the dialog).
+    const _notesSheetSize = () => (window.innerWidth <= 768 ? 'fullscreen' : '');
+
     const openPostMeetupNotesModal = async (activityId, prospectId) => {
         await _ensureActivitiesChunk();
         let activity = (await _lookupActivityRobust(activityId)) || {};
@@ -6830,11 +6848,12 @@
         if (_fresh) { activity = { ...activity, ..._fresh }; _patchActivityPin(activityId, _fresh); }
 
         // Fetch product/event data for the multi-select checkbox groups.
-        const [products, bujishu, formula, events] = await Promise.all([
+        const [products, bujishu, formula, events, upcomingEvents] = await Promise.all([
             AppDataStore.getAll('products').then(r => r.filter(p => p.is_active !== false)),
             AppDataStore.getAll('bujishu').then(r => r.filter(b => b.is_active !== false)),
             AppDataStore.getAll('formula').then(r => r.filter(f => f.is_active !== false)),
             AppDataStore.getAll('events').then(r => r.filter(e => e.is_active !== false && e.status !== 'inactive')),
+            _upcomingEventSessions(),
         ]);
 
         // Grade picker (set AFTER the meeting): grade/cadence is a prospect-only
@@ -6848,23 +6867,41 @@
             } catch (_) { /* lookup failed → omit grade picker */ }
         }
 
-        const content = (window.app.buildPostMeetupNotesBlock || (() => ''))('pmn', activity, { products, bujishu, formula, events, gradeContext });
+        // allowNoStep / withPeople: prospect-only ("Decide later / Not interested"
+        // sets the prospect's next-step status; the Name List hangs off a prospect).
+        const content = (window.app.buildPostMeetupNotesBlock || (() => ''))('pmn', activity, {
+            products, bujishu, formula, events, gradeContext, upcomingEvents,
+            allowNoStep: !!gradeContext, withPeople: !!gradeContext,
+        });
         UI.showModal('📝 Post-Meetup Notes', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Save', type: 'primary', action: `(async () => { await app.savePostMeetupNotes(${activityId}, ${prospectId}); })()` }
-        ]);
+        ], _notesSheetSize());
         // Existing discussion-paper thumbs live in the modal (outside the
         // #content-viewport observer) → resolve their signed URLs explicitly.
         try { window._resolveAttachmentImages && setTimeout(() => window._resolveAttachmentImages(), 0); } catch (_) { /* best-effort */ }
     };
 
     const savePostMeetupNotes = async (activityId, prospectId) => {
+        // How did today go? is required (one tap; the pipeline scores it).
+        const _oc = document.getElementById('pmn-outcome-type');
+        if (_oc && !_oc.value) {
+            UI.toast.error('Pick how today went (step 1) before saving.');
+            (window.app.pmfGoStep || (() => {}))('pmn', 1);
+            return;
+        }
+        const _badEvent = [...document.querySelectorAll('#pmn-steplist .pmf-step[data-type="event"]')]
+            .some(r => !r.querySelector('.pmf-step-event')?.value && r.querySelector('.pmf-step-text')?.value.trim());
+        if (_badEvent) { UI.toast.error('Pick which event for the "Event invite" step.'); (window.app.pmfGoStep || (() => {}))('pmn', 2); return; }
         // Disable Save immediately to prevent double-submit while upload/write runs.
         const _saveBtn = document.querySelector('.modal-footer .btn.primary');
         if (_saveBtn) { _saveBtn.disabled = true; _saveBtn.textContent = 'Saving…'; }
 
         await _ensureActivitiesChunk();
         const updates = (window.app.collectPostMeetupNotesData || (() => ({})))('pmn');
+        // After-save work (event invites, booking, next-step status, names) is
+        // read now — the form is gone once the modal closes.
+        const _followUps = (window.app.collectMinutesFollowUps || (() => null))('pmn');
         // Single client reference used by both the photo upload and the row update.
         const sb = window.supabase || window.supabaseClient;
 
@@ -6998,12 +7035,52 @@
 
         UI.hideModal();
         UI.toast.success('Post-meetup notes saved');
+        // Next steps decided in the form: register event invites and set the
+        // prospect's next-step status. The old "What's next?" pop-up only
+        // appears when the form left both the steps and the reason empty.
+        let _bookDue = null;
+        let _decided = false;
+        let _peopleAdded = 0;
+        let _apuAfter = false;
+        try {
+            const _act0 = await AppDataStore.getById('activities', activityId);
+            const _pid = _act0 && _act0.prospect_id;
+            const _pRow = _pid ? await AppDataStore.getById('prospects', _pid).catch(() => null) : null;
+            if (_followUps && _pRow) {
+                const steps = _followUps.steps || [];
+                const status = steps.some(r => r.type === 'event') ? 'event' : steps.some(r => r.type === 'meetup') ? 'meeting'
+                    : steps.length ? 'later' : (_followUps.noStep || null);
+                if (status && sb) {
+                    _decided = true;
+                    try { await sb.rpc('set_cps_next_step', { p_pid: Number(_pid), p_step: status }); } catch (e) { console.warn('set_cps_next_step failed:', e); }
+                }
+                for (const r of steps.filter(x => x.type === 'event' && x.event_activity_id)) {
+                    try {
+                        const { data: dup } = await sb.from('event_attendees').select('id').eq('activity_id', r.event_activity_id)
+                            .eq('attendee_type', 'prospect').eq('entity_id', _pid).limit(1);
+                        if (!dup || !dup.length) {
+                            await AppDataStore.create('event_attendees', {
+                                event_id: r.event_id, activity_id: r.event_activity_id, attendee_id: _pid, entity_id: _pid,
+                                entity_name: _pRow.full_name || '', attendee_type: 'prospect', attendance_status: 'Registered',
+                                added_by_agent_id: _state.cu ? _state.cu.id : null, added_by_name: _state.cu ? (_state.cu.full_name || '') : '',
+                                created_at: new Date().toISOString(),
+                            });
+                            UI.toast.success('Invited to the event ✓');
+                        }
+                    } catch (e) { UI.toast.error('Could not add them to the event: ' + (e && e.message ? e.message : e)); }
+                }
+                const book = steps.find(x => x._book);
+                if (book) _bookDue = book.due || '';
+                if (window.app.pmfSavePeople) _peopleAdded = await window.app.pmfSavePeople('pmn', _pid, _followUps);
+                _apuAfter = !!_followUps.apuAfter;
+            }
+        } catch (e) { console.warn('minutes follow-ups failed:', e); }
         // Journey autopilot (A): once a CPS / FTF that already happened has its
         // minutes, ask "What's next?" (never when the appointment is first keyed in).
         try {
             const _act = await AppDataStore.getById('activities', activityId);
             const _d = new Date(); const _todayStr = `${_d.getFullYear()}-${String(_d.getMonth() + 1).padStart(2, '0')}-${String(_d.getDate()).padStart(2, '0')}`;
-            if (_act && ['CPS', 'FTF'].includes(_act.activity_type) && _act.prospect_id && String(_act.activity_date || '') <= _todayStr) {
+            if (!_decided && _act && ['CPS', 'FTF'].includes(_act.activity_type) && _act.prospect_id && String(_act.activity_date || '') <= _todayStr) {
                 const _p = await AppDataStore.getById('prospects', _act.prospect_id).catch(() => null);
                 (window._loadChunk ? window._loadChunk('chunks/script-autopilot.min.js') : Promise.resolve())
                     .then(() => setTimeout(() => (window.app.apCpsNextStep || (() => {}))(_act.prospect_id, (_p && _p.full_name) || '', activityId), 1200))
@@ -7019,7 +7096,21 @@
             } catch (_) { /* intentional: lookup failed → treat as customer route */ isProspect = false; }
             if (isProspect) {
                 await (window.app.showProspectDetail || (() => {}))(prospectId);
-                setTimeout(() => { (window.app.pvGoToSection || (() => {}))('prospect', prospectId, 'tasks'); }, 400);
+                // New names → the Name List (their vouchers are there to share); else Next up.
+                setTimeout(() => { (window.app.pvGoToSection || (() => {}))('prospect', prospectId, _peopleAdded ? 'names' : 'tasks'); }, 400);
+                if (_apuAfter && _bookDue === null) setTimeout(() => { try { app.uploadAPUForm(null, Number(prospectId)); } catch (_) { /* best-effort */ } }, 900);
+                // "Book it in the calendar after saving" on a Meet up step.
+                if (_bookDue !== null) {
+                    setTimeout(() => {
+                        try {
+                            app.openActivityModal('', Number(prospectId));
+                            setTimeout(() => {
+                                const d = document.getElementById('activity-date');
+                                if (d && _bookDue) { d.value = _bookDue; d.dispatchEvent(new Event('change', { bubbles: true })); }
+                            }, 400);
+                        } catch (_) { /* best-effort */ }
+                    }, 700);
+                }
             } else {
                 // The previous `typeof showCustomerDetail === 'function'` guard
                 // referenced a bare (undeclared) identifier that is ALWAYS
@@ -7067,6 +7158,8 @@
             note_pain_points: attendee.note_pain_points || '',
             opportunity_potential: attendee.opportunity_potential || '',
             next_action: attendee.next_action || '',
+            next_actions: Array.isArray(attendee.next_actions) ? attendee.next_actions : null,
+            next_action_due: attendee.next_action_due || null,
             summary: attendee.summary || '',
             // Discussion-paper photos live on the ATTENDEE row (per-person), not
             // the shared activity. Seed them so existing thumbs render and the
@@ -7078,11 +7171,14 @@
         };
 
         const attendeeName = attendee.entity_name || 'Attendee';
-        const content = (window.app.buildPostMeetupNotesBlock || (() => ''))('pmn', seedActivity, { products, bujishu, formula, events });
-        UI.showModal(`📝 Post-Event Notes — ${escapeHtml(attendeeName)}`, content, [
+        // The attendee row has no meeting-result column → no result chips here.
+        const content = (window.app.buildPostMeetupNotesBlock || (() => ''))('pmn', seedActivity, {
+            products, bujishu, formula, events, upcomingEvents: await _upcomingEventSessions(), noOutcome: true,
+        });
+        UI.showModal(`📝 Post-Event Notes — ${attendeeName}`, content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Save', type: 'primary', action: `(async () => { await app.saveAttendeePostEventNotes(${attendeeId}, ${activityId}, ${prospectId}); })()` }
-        ]);
+        ], _notesSheetSize());
         try { window._resolveAttachmentImages && setTimeout(() => window._resolveAttachmentImages(), 0); } catch (_) { /* best-effort */ }
     };
 
@@ -7102,6 +7198,7 @@
             summary: fields.summary,
             post_event_updated_at: new Date().toISOString(),
             ...(fields.next_action_due !== undefined ? { next_action_due: fields.next_action_due } : {}),
+            ...(fields.next_actions !== undefined ? { next_actions: fields.next_actions } : {}),
             post_event_updated_by: _state.cu?.id || null,
         };
         if (fields.meeting_minutes !== undefined) updates.meeting_minutes = fields.meeting_minutes;
@@ -7443,6 +7540,7 @@
                 note_pain_points: att.note_pain_points || '',
                 opportunity_potential: att.opportunity_potential || '',
                 next_action: att.next_action || '',
+                next_actions: Array.isArray(att.next_actions) ? att.next_actions : null,
                 summary: att.summary || '',
                 // Per-attendee discussion papers — surfaced so Meet Up History
                 // and the events tab can render a photo button for this note.
