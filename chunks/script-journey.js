@@ -109,7 +109,7 @@
         step01_order:            'Step 1 — 订单确认',
         step03_ready:            'Step 3 — 准备领取',
         step04_collect:          'Step 4 — 领取 + 拍照',
-        step05_golden_path:      'Step 5 — 黄金大道',
+        step05_golden_path:      'Step 5 — 黄金一路',
         step06_exchange:         'Step 6 — 感恩交流',
         step07_spread:           'Step 7 — 传福',
         step08_testimony:        'Step 8 — 见证',
