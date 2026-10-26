@@ -134,6 +134,127 @@
         apRenderTop5();
     };
 
+    // ═════ 🌱 立春 / 🌙 冬至 — festival wishes (2026-10-26) ═════
+    // On the festival day (+3 catch-up days) festival_wish_list returns the
+    // signed-in agent's customers + active prospects with the message ready.
+    // The CRM sends nothing itself: tap → WhatsApp opens → the row ticks.
+    let _festRows = null;      // rows of the open festival, [] when none
+    let _festDay = '';         // local date the rows were fetched for
+    let _festP = null;
+    let _festAll = false;
+    const apFestLoad = (force = false) => {
+        if (!force && _festP && _festDay === _today()) return _festP;
+        _festDay = _today();
+        _festP = (async () => {
+            const sb = _sb();
+            if (!sb) return [];
+            try {
+                const { data, error } = await sb.rpc('festival_wish_list', {});
+                if (error) throw error;
+                _festRows = data || [];
+            } catch (e) {
+                console.warn('[autopilot] festival', e && e.message);
+                _festRows = [];
+                setTimeout(() => { _festP = null; }, 60e3);   // try again in a minute
+            }
+            return _festRows;
+        })();
+        return _festP;
+    };
+
+    const _festHtml = (rows) => {
+        const f = rows[0];
+        const icon = f.label === '立春' ? '🌱' : '🌙';
+        const sent = rows.filter(r => r.sent).length;
+        const todo = rows.filter(r => !r.sent);
+        const shown = _festAll ? rows : todo.slice(0, 5);
+        const list = shown.map((r, i) => {
+            const idx = rows.indexOf(r);
+            return `
+            <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-top:${i ? '1px solid var(--gray-100)' : 'none'};">
+                <div style="flex:1;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${r.sent ? 'color:var(--gray-500);' : 'font-weight:600;'}">
+                    ${esc(r.name || '')}${r.customer_id != null ? ' <span style="font-size:10px;font-weight:600;color:#047857;background:#ECFDF5;padding:1px 6px;border-radius:8px;">Customer</span>' : ''}
+                </div>
+                ${r.sent
+                    ? '<span style="font-size:12px;color:#047857;white-space:nowrap;">✓ Sent</span>'
+                    : `<button type="button" class="btn btn-sm" style="font-size:12px;padding:4px 10px;background:#25D366;border-color:#25D366;color:#fff;white-space:nowrap;" onclick="event.stopPropagation();app.apFestWa(${idx})" aria-label="Send ${esc(f.label)} WhatsApp to ${esc(r.name || '')}"><i class="fab fa-whatsapp" aria-hidden="true"></i> Send</button>`}
+            </div>`;
+        }).join('');
+        const more = rows.length > 5 || sent
+            ? `<button type="button" class="btn secondary btn-sm" style="font-size:12px;margin-top:6px;" onclick="app.apFestToggle()">${_festAll ? 'Show only not sent' : `Show all ${rows.length}`}</button>`
+            : '';
+        return `
+            <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:6px;">
+                <strong style="font-size:15px;">${icon} ${esc(f.label)} — wish your people</strong>
+                <span style="font-size:12px;color:var(--gray-600);white-space:nowrap;">${sent} / ${rows.length} sent</span>
+            </div>
+            ${todo.length ? '' : `<div style="font-size:13px;color:#047857;margin-bottom:4px;">All done — everyone has your ${esc(f.label)} wishes 🎉</div>`}
+            ${list}${more}`;
+    };
+
+    const apRenderFestival = () => {
+        const el = document.getElementById('ap-festival');
+        if (!el) return;
+        if (!_festRows || !_festRows.length) { el.remove(); return; }
+        el.innerHTML = _festHtml(_festRows);
+    };
+
+    const apMountFestival = async () => {
+        if (document.getElementById('ap-festival')) return;
+        const rows = await apFestLoad();
+        if (!rows || !rows.length) return;
+        const anchor = _top5Anchor();
+        if (!anchor || document.getElementById('ap-festival')) return;
+        const box = document.createElement('div');
+        box.id = 'ap-festival';
+        box.style.cssText = 'background:#fff;border:1px solid #BBF7D0;border-left:4px solid #16A34A;border-radius:12px;padding:12px 14px;margin:0 0 12px;box-shadow:0 1px 2px rgba(0,0,0,.04);';
+        const top5 = document.getElementById('ap-top5');
+        anchor.parentNode.insertBefore(box, top5 && top5.parentNode === anchor.parentNode ? top5 : anchor);
+        apRenderFestival();
+    };
+
+    const apFestToggle = () => { _festAll = !_festAll; apRenderFestival(); };
+
+    const _festStandalone = () => {
+        try {
+            return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+                || window.navigator.standalone === true;
+        } catch (_) { return false; }
+    };
+
+    const apFestWa = async (idx) => {
+        const r = _festRows && _festRows[idx];
+        if (!r) return;
+        const utils = window._crmUtils || {};
+        const num = typeof utils.waPhone === 'function' ? utils.waPhone(r.phone) : String(r.phone || '').replace(/\D/g, '');
+        if (!num) { UI.toast.error('No usable phone number for ' + (r.name || 'this person')); return; }
+        const text = String(r.message || '').replace(/\{name\}/g, r.name || '');
+        // Tick first: a standalone app hands the page over to WhatsApp.
+        r.sent = true;
+        apRenderFestival();
+        const sb = _sb();
+        const mark = sb ? sb.rpc('festival_wish_mark', {
+            p_day: r.festival_day, p_prospect_id: r.prospect_id, p_customer_id: r.customer_id,
+        }) : null;
+        const url = `https://wa.me/${num}?text=${encodeURIComponent(text)}`;
+        // Same rules as the mobile home: same-window in an installed app (keeps
+        // the ?text), new tab in a browser ('noopener' returns null — no fallback).
+        if (_festStandalone()) {
+            try { await Promise.race([mark, new Promise(res => setTimeout(res, 1200))]); } catch (_) { /* tick retried below */ }
+            window.location.href = url;
+            return;
+        }
+        window.open(url, '_blank', 'noopener');
+        try {
+            const { data, error } = await mark;
+            if (error || data === false) throw error || new Error('not marked');
+        } catch (e) {
+            r.sent = false;
+            apRenderFestival();
+            UI.toast.error('WhatsApp opened, but the tick did not save. Tap Send again after sending.');
+        }
+    };
+
     const apTouchDone = async (id) => {
         const sb = _sb();
         if (!sb) return UI.toast.error('Offline — try again in a moment');
@@ -1166,6 +1287,7 @@
     // ═════ Mount everything on DOM changes ═════
     const _scan = () => {
         try { apMountTop5(); } catch (_) { /* best-effort */ }
+        try { apMountFestival(); } catch (_) { /* best-effort */ }
         try { apMountFunnel(); } catch (_) { /* best-effort */ }
         document.querySelectorAll('[data-cxl-purchase]:not([data-cxl-done])').forEach(slot => {
             slot.dataset.cxlDone = '1';
@@ -1257,6 +1379,11 @@
         apTodo,
         apMountTop5,
         apRenderTop5,
+        apFestLoad,
+        apMountFestival,
+        apRenderFestival,
+        apFestToggle,
+        apFestWa,
         apFillGrLine,
         apTouchDone,
         apCpsNextStep,

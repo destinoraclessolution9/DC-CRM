@@ -552,6 +552,60 @@ const runTimers = async () => { while (timers.length) { const t = timers.shift()
   await app.ofAttachLaterSave({ files: [{ name: 'f.heic', type: 'image/heic', size: 1000 }], value: 'x' }, 5151, 31);
   check('attach later: undecodable HEIC refused', byId.get('ofl-status').innerHTML.includes('JPG or PNG'), true);
 
+  // ── 🌱 立春 / 🌙 冬至 festival wishes ───────────────────────────────────────
+  const opened = [];
+  win.open = (u, t, f) => { opened.push([u, t, f]); return null; };
+  win._crmUtils.waPhone = (p) => { const d = String(p || '').replace(/\D/g, ''); return d ? (d.startsWith('0') ? '6' + d : d) : ''; };
+  const MSG = '嗨 {name}！【立春】到了';
+  rpcData.festival_wish_list = [
+    { festival_day: '2027-02-04', label: '立春', message: MSG, prospect_id: null, customer_id: 9, name: 'Ng <b>Jing</b>', phone: '012-3456789', sent: false },
+    { festival_day: '2027-02-04', label: '立春', message: MSG, prospect_id: 5, customer_id: null, name: 'Tee', phone: '+60 11-222 3333', sent: false },
+    { festival_day: '2027-02-04', label: '立春', message: MSG, prospect_id: 6, customer_id: null, name: 'Wong', phone: '019', sent: true },
+  ];
+  rpcData.festival_wish_mark = () => true;
+  byId.delete('ap-festival'); byId.delete('ap-top5');
+  qsOne['.calendar-monthly-wrapper'] = wrapper; wrapper.parentNode = parent; parent.inserted.length = 0;
+  win.innerWidth = 1280;
+  await app.apFestLoad(true);
+  await app.apMountFestival();
+  const fstBox = byId.get('ap-festival');
+  check('festival: card mounted above the calendar', !!fstBox && parent.inserted.some(x => x.node === fstBox && x.before === wrapper), true);
+  check('festival: header + sent count', fstBox.innerHTML.includes('🌱 立春 — wish your people') && fstBox.innerHTML.includes('1 / 3 sent'), true);
+  check('festival: name escaped, customer chip', fstBox.innerHTML.includes('Ng &lt;b&gt;Jing&lt;/b&gt;') && fstBox.innerHTML.includes('>Customer<'), true);
+  check('festival: only not-sent rows by default', fstBox.innerHTML.includes('app.apFestWa(0)') && fstBox.innerHTML.includes('app.apFestWa(1)') && !fstBox.innerHTML.includes('Wong'), true);
+  app.apFestToggle();
+  check('festival: show all lists the sent one ticked', fstBox.innerHTML.includes('Wong') && fstBox.innerHTML.includes('✓ Sent'), true);
+  app.apFestToggle();
+  const nMount = parent.inserted.length;
+  await app.apMountFestival();
+  check('festival: mounted once', parent.inserted.length, nMount);
+
+  calls.length = 0; opened.length = 0;
+  await app.apFestWa(0);
+  check('festival: WhatsApp opened with the full name in the message', opened[0] && opened[0][0], 'https://wa.me/60123456789?text=' + encodeURIComponent('嗨 Ng <b>Jing</b>！【立春】到了'));
+  const mk = calls.find(c => c.rpc === 'festival_wish_mark');
+  check('festival: tick saved for that customer + day', mk && JSON.stringify(mk.args), JSON.stringify({ p_day: '2027-02-04', p_prospect_id: null, p_customer_id: 9 }));
+  check('festival: row ticked, count moves', fstBox.innerHTML.includes('2 / 3 sent') && !fstBox.innerHTML.includes('app.apFestWa(0)'), true);
+
+  rpcData.festival_wish_mark = () => false;   // e.g. no longer their person
+  toasts.length = 0;
+  await app.apFestWa(1);
+  check('festival: tick refused → row back + message', fstBox.innerHTML.includes('app.apFestWa(1)') && toasts.some(t => t[0] === 'err' && /did not save/.test(t[1])), true);
+  rpcData.festival_wish_mark = () => true;
+  await app.apFestWa(1);
+  check('festival: all sent → done line', fstBox.innerHTML.includes('All done') && fstBox.innerHTML.includes('3 / 3 sent'), true);
+
+  // no festival → no card, and the empty answer is cached for the day
+  rpcData.festival_wish_list = [];
+  byId.delete('ap-festival'); calls.length = 0;
+  await app.apFestLoad(true);
+  await app.apMountFestival(); await app.apMountFestival();
+  check('festival: no festival → no card', byId.has('ap-festival'), false);
+  check('festival: list asked once per day', calls.filter(c => c.rpc === 'festival_wish_list').length, 1);
+  rpcData.festival_wish_list = new Error('521');
+  await app.apFestLoad(true);
+  check('festival: error → no card, retry queued', byId.has('ap-festival') === false && timers.some(t => t.ms === 60e3), true);
+
   console.log(`\njourney-autopilot sim: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
