@@ -20,7 +20,7 @@ function check(name, got, want = true) {
 
 // ─── DOM stub: ids + the step / person rows the collectors walk ─────────────
 const byId = new Map();
-let rows = [], people = [];
+let rows = [], people = [], oppBoxes = [];
 const el = (id, props = {}) => { const e = { id, value: '', checked: false, dataset: {}, style: {}, innerHTML: '', ...props }; if (id) byId.set(id, e); return e; };
 const field = (v, extra = {}) => ({ value: v, checked: false, selectedOptions: [], ...extra });
 const fakeRow = (o) => ({
@@ -45,6 +45,7 @@ const document = {
     if (/-steplist \.pmf-step$/.test(sel)) return rows;
     if (/-people \.pmf-person$/.test(sel)) return people;
     if (/^input\[name="pmn-opp-items"\]:checked$/.test(sel)) return [{ value: 'Power Ring PR3', dataset: { group: 'Products' } }];
+    if (/^input\[name="pmn-opp-items"\]$/.test(sel)) return oppBoxes;
     return [];
   },
 };
@@ -193,6 +194,40 @@ const OPTS = {
   check('save: single line untouched', d.note_pain_points, 'just one');
   check('save: remembers what the paste filled', d.meeting_minutes.pasted.keyPoints === '1. 想了解PR3\n2. 太太决定布局' && d.meeting_minutes.pasted.advisor === '先做家居审计');
   check('save: hand-edited field not claimed by the paste', !('background' in d.meeting_minutes.pasted));
+}
+// ── Potential from minutes with no 潜在机会 section (Gredgory, 2026-10-26) ──
+{
+  const box = (v, price) => ({ value: v, checked: false, dataset: { group: 'Products', price: String(price) } });
+  oppBoxes = [box('六曜指环 Support Power Ring', 18990), box('文昌指环 Wisdom Power Ring', 18990), box('五福指环 Five Star Power Ring', 18990), box('大满福 Da Man Fu', 3000)];
+  ['pmn-minutes-result', 'pmn-opp-box', 'pmn-opp-chips', 'pmn-background', 'pmn-key-points', 'pmn-advisor', 'pmn-reaction'].forEach(id => el(id));
+  el('pmn-opportunity-remarks', { value: '' });
+  rows = [];
+  el('pmn-minutes-paste', { value: [
+    '客户会面纪要', '客户来源： 米香传福', '客户行业： 理发业',
+    '客户背景', '客户主要从事理发行业，由米香介绍传福而来。',
+    '会面重点', '客户个性较急。', '已向客户介绍 Powering 6 与 Powering 4 配套，报价为 RM21,990。',
+    '顾问观察与建议', '客户未来仍有跟进机会。',
+    '客户反应与 DC 相关记录', '客户曾传福三人：', 'Chen Siau Yee — 客户太太',
+    '后续跟进', '跟进客户本人： 了解其对 RM21,990 的 Powering 6 与 Powering 4 配套的考虑进度。',
+    '顾问备注： 目前对上次会面的部分细节记忆不完整。',
+  ].join('\n') });
+  app.applyPastedMinutes('pmn');
+  const res = byId.get('pmn-minutes-result').innerHTML;
+  check('no potential section: rings found from Powering 6 / 4', oppBoxes.filter(b => b.checked).map(b => b.value).join('|'), '六曜指环 Support Power Ring|文昌指环 Wisdom Power Ring');
+  check('no potential section: flagged for checking', res.includes('Found in the notes — please check'));
+  check('quoted RM line kept once in remarks', byId.get('pmn-opportunity-remarks').value, '已向客户介绍 Powering 6 与 Powering 4 配套，报价为 RM21,990。');
+  check('chips show the two rings + total', /六曜指环[\s\S]*文昌指环[\s\S]*RM 37,980/.test(byId.get('pmn-opp-chips').innerHTML));
+  check('source + industry kept in background', byId.get('pmn-background').value.startsWith('1. 客户来源：米香传福\n2. 客户行业：理发业'));
+  check('"客户反应与 DC 相关记录" is the reaction section', byId.get('pmn-reaction').value.includes('Chen Siau Yee'));
+  check('顾问备注 goes to advisor, not a next step', byId.get('pmn-advisor').value.includes('记忆不完整'));
+  // a 潜在机会 section with a ring code ticks the ring, no leftover
+  oppBoxes.forEach(b => { b.checked = false; });
+  byId.get('pmn-opportunity-remarks').value = '';
+  byId.get('pmn-minutes-paste').value = '6. 潜在机会与产品 (Potential & Opportunities)\n- PR5\n- 大满福';
+  app.applyPastedMinutes('pmn');
+  check('section: PR5 + 大满福 ticked', oppBoxes.filter(b => b.checked).map(b => b.value).join('|'), '五福指环 Five Star Power Ring|大满福 Da Man Fu');
+  check('section: bare ring code not copied into remarks', byId.get('pmn-opportunity-remarks').value, '');
+  oppBoxes = [];
 }
 check('ChatGPT prompt asks for one numbered point per line', /numbered points, ONE point per line/.test(fs.readFileSync(path.join(__dirname, '..', 'chunks', 'script-activities.js'), 'utf8')));
 

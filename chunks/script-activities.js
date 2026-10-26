@@ -1564,6 +1564,18 @@ My raw notes:
             if (!items || !items.length) { row(sectionKey, '–', label, 'not in minutes', boxId); return; }
             const boxes = Array.from(document.querySelectorAll(`input[name="${name}"]`));
             const r = H.matchMinutesItems(items, boxes.map(b => b.value));
+            // Ring short codes ("Powering 6", "PR4") name a catalog ring too.
+            if (typeof H.ringAliasesIn === 'function') {
+                items.forEach(it => {
+                    const rings = H.ringAliasesIn(it, boxes.map(b => b.value));
+                    if (!rings.length) return;
+                    rings.forEach(n => { if (!r.matched.includes(n)) r.matched.push(n); });
+                    const li = r.leftovers.indexOf(it);
+                    // keep the line in remarks only when it says more than the code
+                    const rest = String(it).replace(/(?:power\s*-?\s*rings?|powering|\bpr)\s*-?\s*(?:\d|h(?:ealth)?)\b/gi, '').replace(/[\s,，、.。+&与和]/g, '');
+                    if (li >= 0) { r.leftovers.splice(li, 1); if (rest.length >= 2) r.extra.push(it); }
+                });
+            }
             let ticked = 0;
             boxes.forEach(b => { if (r.matched.includes(b.value) && !b.checked) { b.checked = true; ticked++; } });
             const toRemarks = _appendLines(remarksId, [...r.leftovers, ...r.extra]);
@@ -1590,7 +1602,29 @@ My raw notes:
                 row('nextActions', '✓', 'Next steps', added ? `${added} step(s) added — check the type and date` : 'already there', `${prefix}-steplist`);
             }
         }
-        tickList('opportunities', 'Potential & Opportunities', `${prefix}-opp-items`, `${prefix}-opp-box`, `${prefix}-opportunity-remarks`);
+        if ((p.sections.opportunities || []).length || typeof H.findMinutesProducts !== 'function') {
+            tickList('opportunities', 'Potential & Opportunities', `${prefix}-opp-items`, `${prefix}-opp-box`, `${prefix}-opportunity-remarks`);
+        } else {
+            // No "潜在机会与产品" section (ChatGPT's own layout): take the products
+            // named anywhere in the minutes, plus the line with the quoted RM.
+            const boxes = Array.from(document.querySelectorAll(`input[name="${prefix}-opp-items"]`));
+            const f = H.findMinutesProducts(text, boxes.map(b => b.value));
+            let ticked = 0;
+            boxes.forEach(b => { if (f.matched.includes(b.value) && !b.checked) { b.checked = true; ticked++; } });
+            const quoted = _appendLines(`${prefix}-opportunity-remarks`, f.quotes);
+            if (quoted) {
+                const rm = document.getElementById(`${prefix}-opportunity-remarks`);
+                const d = rm && rm.closest ? rm.closest('details') : null;
+                if (d) d.open = true;
+            }
+            if (!f.matched.length) row('opportunities', '–', 'Potential & Opportunities', 'no product named in the minutes', `${prefix}-opp-box`);
+            else {
+                _flashField(document.getElementById(`${prefix}-opp-box`));
+                row('opportunities', '⚠', 'Potential & Opportunities',
+                    `Found in the notes — please check: ${escapeHtml(f.matched.slice(0, 3).join(', '))}${f.matched.length > 3 ? '…' : ''}${ticked < f.matched.length ? ` (${f.matched.length - ticked} already)` : ''}${quoted ? ' · quoted price kept in remarks' : ''}`,
+                    `${prefix}-opp-box`);
+            }
+        }
 
         const gEl = document.getElementById(`${prefix}-grade`);
         const gid = `${prefix}-grade`;

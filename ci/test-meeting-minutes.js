@@ -164,5 +164,28 @@ eq('format: a short paragraph is left as written', h.formatMinutePoints('a；b�
 eq('format: idempotent', h.formatMinutePoints(h.formatMinutePoints('- x\n- y')), '1. x\n2. y');
 eq('format: one point untouched', h.formatMinutePoints('  just one  '), 'just one');
 
+// ── ChatGPT's own layout + ring short codes (Gredgory, 2026-10-26) ──────────
+const own = h.parseMeetingMinutes(['客户会面纪要', '客户来源： 米香传福', '客户行业： 理发业', '客户背景', '理发行业',
+  '会面重点', '已向客户介绍 Powering 6 与 Powering 4 配套，报价为 RM21,990。', '顾问观察与建议', '仍有跟进机会',
+  '客户反应与 DC 相关记录', 'Zyon Tay', '后续跟进', '跟进客户本人', '顾问备注： 记忆不完整'].join('\n'));
+eq('own: preamble facts lead the background', own.sections.background, '客户来源：米香传福\n客户行业：理发业\n理发行业');
+eq('own: spaced "客户反应与 DC 相关记录" header', own.sections.reaction, 'Zyon Tay');
+eq('own: 顾问备注 → advisor', own.sections.advisor, '仍有跟进机会\n记忆不完整');
+eq('own: next steps without the note', own.sections.nextActions, ['跟进客户本人']);
+eq('own: title line alone is not a fact', h.parseMeetingMinutes('客户会面纪要\n客户背景\nx').sections.background, 'x');
+eq('preamble ignored when nothing else is recognised', h.parseMeetingMinutes('客户来源： 米香').recognized, false);
+
+const RINGS = ['一星指环 Power Ring One', '三才禄存 Trinity Power Ring', '五福指环 Five Star Power Ring', '六曜指环 Support Power Ring',
+  '七巧增缘 Destiny Power Ring', '八大护法 Prosperity Power Ring', '紫贵右弼 Nine Star Power Ring', '文昌指环 Wisdom Power Ring',
+  '掌权班指 Authority Power Ring', '健康指环 Health Power Ring', '大满福 Da Man Fu', '文昌图 Kui Xing Wen Chang Tu 2'];
+eq('ring codes', RINGS.map(h.ringCodeOf), ['PR1', 'PR3', 'PR5', 'PR6', 'PR7', 'PR8', 'PR9', 'PR4', 'PR2', 'PRH', null, null]);
+eq('alias: Powering 6 / Power Ring 4 / PR 2 / PRH', h.ringAliasesIn('Powering 6, Power Ring 4, PR 2 与 PRH', RINGS),
+  ['六曜指环 Support Power Ring', '文昌指环 Wisdom Power Ring', '掌权班指 Authority Power Ring', '健康指环 Health Power Ring']);
+eq('alias: PR10 / PRA / April are not rings', h.ringAliasesIn('PR10 PRA April 6', RINGS), []);
+const fp = h.findMinutesProducts('会面重点\n已介绍 Powering 6 与 Powering 4 配套，报价为 RM21,990。\n跟进 RM21,990 的 Powering 6\n也谈到大满福', RINGS);
+eq('find: rings + catalog name anywhere', fp.matched, ['六曜指环 Support Power Ring', '文昌指环 Wisdom Power Ring', '大满福 Da Man Fu']);
+eq('find: one quote line per amount', fp.quotes, ['已介绍 Powering 6 与 Powering 4 配套，报价为 RM21,990。']);
+eq('find: nothing named → nothing', h.findMinutesProducts('客户个性较急。报价 RM500', RINGS), { matched: [], quotes: [] });
+
 console.log(`meeting-minutes: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

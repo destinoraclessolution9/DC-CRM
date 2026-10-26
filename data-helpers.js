@@ -228,7 +228,7 @@
         { key: 'background',    list: false, kw: ['客户背景', 'customer background', 'client background', 'background'] },
         { key: 'keyPoints',     list: false, kw: ['会面重点', '会议重点', '见面重点', 'meeting key points', 'key points discussed', 'key points'] },
         { key: 'advisor',       list: false, kw: ['顾问观察与建议', '顾问观察', '顾问建议', 'advisor observations & suggestions', 'advisor observations and suggestions', 'advisor observations', 'advisor observation', 'advisor suggestions', 'advisor'] },
-        { key: 'reaction',      list: false, kw: ['客户反应与dc记录', '客户反应', 'dc记录', 'customer reaction & dc records', 'customer reaction and dc records', 'customer reaction', 'dc records', 'reaction'] },
+        { key: 'reaction',      list: false, kw: ['客户反应与dc相关记录', '客户反应与dc记录', '客户反应', 'dc相关记录', 'dc记录', 'customer reaction & dc records', 'customer reaction and dc records', 'customer reaction', 'dc records', 'reaction'] },
         { key: 'nextActions',   list: true,  kw: ['后续跟进与下一步行动', '后续跟进', '下一步行动', '下一步', 'next actions', 'next action', 'next steps', 'follow up', 'follow-up'] },
         { key: 'opportunities', list: true,  kw: ['潜在机会与产品', '潜在机会', 'potential & opportunities', 'potential and opportunities', 'potential & opportunity', 'opportunities', 'opportunity', 'products'] },
         { key: 'grade',         list: false, kw: ['客户评级', '评级', '等级', 'grade'] },
@@ -236,6 +236,7 @@
     const _HDR_DECOR = /^\s*(?:#{1,6}\s*|\*\*|【|(?:\d{1,2}|[一二三四五六七八九十])\s*[.、)）]\s*)/;
     const _BULLET = /^\s*(?:[-•·▪●◦]|\*(?!\*))\s*/;
     const _PLACEHOLDER = /^\s*(?:\[[^\]]*\]|(?:action|product|item)\s*\d+|-{3,}.*|.*output format (?:start|end).*)\s*$/i;
+    const _ADVISOR_NOTE = /^\s*(?:顾问备注|顧問備註|advisor'?s? notes?)\s*[:：]\s*(.*)$/i;
     const _stripDecor = (s) => String(s)
         .replace(/^\s*#{1,6}\s*/, '').replace(/\*\*/g, '').replace(/[【】]/g, '')
         .replace(/^\s*(?:\d{1,2}|[一二三四五六七八九十])\s*[.、)）]\s*/, '')
@@ -252,16 +253,20 @@
         const rest = ci >= 0 ? body.slice(ci + 1).trim() : '';
         if (!head || head.length > 70) return null;
         const lower = head.toLowerCase();
+        // Spaces between Chinese and Latin ("客户反应与 DC 相关记录") don't count.
+        const tight = lower.replace(/\s+/g, '');
         for (const sec of MINUTES_SECTIONS) {
             const kws = sec.kw.slice().sort((a, b) => b.length - a.length);
-            const hit = kws.find(k => lower.includes(k));
+            const hit = kws.find(k => lower.includes(k) || (/[㐀-鿿]/.test(k) && tight.includes(k.replace(/\s+/g, ''))));
             if (!hit) continue;
             // Residue = what's left after removing the section's own words and the
             // bilingual "(English name)" — a real header is (almost) nothing else.
             let residue = lower.replace(/[(（][^)）]*[)）]/g, '');
+            if (/[㐀-鿿]/.test(hit)) residue = residue.replace(/\s+/g, '');
             for (const k of kws) residue = residue.split(k).join('');
             residue = residue.replace(/[\s与和及&/,，、.。:：\-–—]|and/g, '');
-            if (!decorated && !lower.startsWith(hit) && !lower.replace(/[(（][^)）]*[)）]/g, '').trim().endsWith(hit)) return null;
+            const plain = /[㐀-鿿]/.test(hit) ? tight : lower;
+            if (!decorated && !plain.startsWith(hit) && !plain.replace(/[(（][^)）]*[)）]/g, '').trim().endsWith(hit)) return null;
             if (residue.length > (decorated ? 6 : 1)) return null;
             if (seen.has(sec.key)) return null; // second "header" of a seen section = content
             return { key: sec.key, rest };
@@ -295,9 +300,19 @@
         const lines = String(text || '').replace(/\r\n?/g, '\n').split('\n');
         const seen = new Set();
         const buf = {};
+        const pre = [];   // "客户来源： 米香传福" lines before the first header
         let cur = null;
         for (const raw of lines) {
             if (!raw.trim()) continue;
+            // "顾问备注： …" anywhere = more advisor notes, never a next step.
+            const note = raw.replace(/\*\*/g, '').match(_ADVISOR_NOTE);
+            if (note && !_BULLET.test(raw)) {
+                cur = 'advisor';
+                seen.add(cur);
+                buf[cur] = buf[cur] || [];
+                if (note[1].trim()) buf[cur].push({ text: note[1].trim(), bullet: false });
+                continue;
+            }
             const hdr = _minutesHeader(raw, seen);
             if (hdr) {
                 cur = hdr.key;
@@ -306,12 +321,19 @@
                 if (hdr.rest && !_PLACEHOLDER.test(hdr.rest)) buf[cur].push({ text: hdr.rest, bullet: false });
                 continue;
             }
-            if (!cur) continue; // preamble before the first header
+            if (!cur) {     // preamble: keep "Label: value" facts for the background
+                const lv = raw.replace(/\*\*/g, '').trim().match(/^([^:：\s][^:：]{0,11})[:：]\s*(\S.*)$/);
+                if (lv && !_PLACEHOLDER.test(lv[2])) pre.push(`${lv[1].trim()}：${lv[2].trim()}`);
+                continue;
+            }
             if (_PLACEHOLDER.test(raw.replace(_BULLET, ''))) continue;
             const bullet = _BULLET.test(raw) || /^\s*\d{1,2}[.)、]\s+/.test(raw);
             const t = raw.replace(_BULLET, '').replace(/^\s*\d{1,2}[.)、]\s+/, '').replace(/\*\*/g, '').trim();
             if (!t || _PLACEHOLDER.test(t)) continue;
             buf[cur].push({ text: t, bullet });
+        }
+        if (pre.length && Object.keys(buf).length) {
+            buf.background = [...pre.map(t => ({ text: t, bullet: false })), ...(buf.background || [])];
         }
         for (const sec of MINUTES_SECTIONS) {
             const items = buf[sec.key];
@@ -372,6 +394,51 @@
             if (n.length - longest >= 2) extra.push(item);
         }
         return { matched, leftovers, extra };
+    }
+
+    // Power Ring short codes, as in the weekly report (PD "PR6x1"): the number
+    // is the numeral the Chinese name starts with (六曜指环 → PR6); 文昌 = PR4,
+    // 掌权 = PR2, 健康 = PRH. Agents write "Powering 6", "Power Ring 4", "PR 6".
+    const _RING_CODE = { '文昌': 'PR4', '掌权': 'PR2', '掌權': 'PR2', '健康': 'PRH' };
+    const _CN_NUM = { '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9 };
+    const _EN_NUM = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9 };
+    function ringCodeOf(name) {
+        const s = String(name || '');
+        if (!/power\s*ring|指环|指環|班指/i.test(s)) return null;
+        const zh = s.replace(/^\s+/, '');
+        for (const k of Object.keys(_RING_CODE)) if (zh.startsWith(k)) return _RING_CODE[k];
+        if (_CN_NUM[zh[0]]) return 'PR' + _CN_NUM[zh[0]];
+        const e = s.match(/\b(one|two|three|four|five|six|seven|eight|nine)\b/i);
+        return e ? 'PR' + _EN_NUM[e[1].toLowerCase()] : null;
+    }
+    const _RING_ALIAS = /(?:power\s*-?\s*rings?|powering|\bpr)\s*-?\s*(\d(?!\d)|h(?:ealth)?\b)/gi;
+    // Ring codes written in a line → the catalog names they stand for.
+    function ringAliasesIn(text, candidates) {
+        const codes = new Set();
+        String(text || '').replace(_RING_ALIAS, (_, n) => { codes.add('PR' + (/^\d$/.test(n) ? n : 'H')); return _; });
+        if (!codes.size) return [];
+        return Array.from(new Set((candidates || []).map(String))).filter(c => codes.has(ringCodeOf(c)));
+    }
+
+    // Minutes with no "潜在机会与产品" section: find the products anywhere in
+    // the text (catalog names or ring codes). Only confident hits are returned —
+    // nothing else is guessed. `quotes` = the lines that name a product AND an
+    // RM amount (e.g. "介绍 Powering 6 与 Powering 4 配套，报价为 RM21,990"),
+    // kept so the quoted price is not lost.
+    function findMinutesProducts(text, candidates) {
+        const matched = [];
+        const quotes = [];
+        const amounts = new Set();   // one line per quoted amount
+        const lines = String(text || '').replace(/\r\n?/g, '\n').split('\n').map(l => l.trim()).filter(Boolean);
+        for (const line of lines) {
+            const hits = [...ringAliasesIn(line, candidates), ...matchMinutesItems([line], candidates).matched];
+            hits.forEach(h => { if (!matched.includes(h)) matched.push(h); });
+            const rm = (line.match(/RM\s*\d[\d,]*(?:\.\d+)?/gi) || []).map(a => a.replace(/[\s,]/g, '').toUpperCase());
+            if (!hits.length || !rm.length || rm.every(a => amounts.has(a))) continue;
+            rm.forEach(a => amounts.add(a));
+            quotes.push(line.replace(_BULLET, '').replace(/^\s*\d{1,2}[.)、]\s+/, '').replace(/\*\*/g, '').trim());
+        }
+        return { matched, quotes };
     }
 
     // ── Prospect → customer profile copy (2026-10-16) ─────────────────────────
@@ -462,7 +529,7 @@
         return pts.map((p, i) => `${i + 1}. ${p}`).join('\n');
     }
 
-    const api = { classifyQueueError, extractUnknownCol, isSchemaError, isAbortError, snapshotsDiffer, buildReferralCounts, parseMeetingMinutes, matchMinutesItems, splitMinutePoints, formatMinutePoints, PROSPECT_PROFILE_FIELDS, customerFieldsFromProspect, customerBackfillPatch };
+    const api = { classifyQueueError, extractUnknownCol, isSchemaError, isAbortError, snapshotsDiffer, buildReferralCounts, parseMeetingMinutes, matchMinutesItems, ringCodeOf, ringAliasesIn, findMinutesProducts, splitMinutePoints, formatMinutePoints, PROSPECT_PROFILE_FIELDS, customerFieldsFromProspect, customerBackfillPatch };
     // Browser global (loaded before data.js). Also export for Node tests.
     if (typeof window !== 'undefined') window._dataHelpers = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
