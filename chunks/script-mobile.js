@@ -827,7 +827,7 @@
         // User-scoped: the snapshot embeds the rendered home-dashboard HTML (people /
         // refill cards) for THIS user, so on a shared device it must not be served to
         // the next account (mirrors the other mhome-*-${uid} keys below).
-        const _mhomeSnapKey = `mhome-snap-${String(_state.cu?.id || 'anon')}-${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
+        const _mhomeSnapKey = `mhome-snap-v2-${String(_state.cu?.id || 'anon')}-${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
         let _mhomeCached;
         try {
             const _snapRaw = localStorage.getItem(_mhomeSnapKey);
@@ -838,14 +838,7 @@
             }
         } catch(_) { /* intentional: corrupt/missing snapshot falls back to scaffold */ }
         const _mhomeInitBody = _mhomeCached || `
-                <div class="mhome-ai-card"><div class="mhome-ai-top" style="min-height:160px;">
-                    <span class="mhome-arc"></span>
-                    <span class="mhome-orb o1"></span><span class="mhome-orb o2"></span><span class="mhome-orb o3"></span>
-                    <div class="mhome-ai-head">
-                        <div class="mhome-ai-icon"><i class="fas fa-wand-magic-sparkles"></i></div>
-                        <div><div class="mhome-ai-title">AI Assistant</div><div class="mhome-ai-sub">Loading today's snapshot…</div></div>
-                    </div>
-                </div></div>`;
+                <div class="mh-card mh-loading"><div class="mh-sec-title">Today</div><div class="mh-muted">Loading your day…</div></div>`;
 
         // Full-JSX home body opt-in (SW-108). Captured ONCE here so the choice
         // is stable across this view's async flow. When on, the island renders
@@ -1026,6 +1019,36 @@
               .then(rows => { cachedUsers = rows; _mhomeLsSet(_mhomeUsersKey, cachedUsers); _mhomePerf('bg:users:done'); _mhomeRepaint(); })
               .catch(() => {});
         }
+        // ── Today redesign (2026-10-26): goal line, "Do today", tomorrow ──
+        // Same progressive pattern: cached (short TTL) → paint → refresh → repaint.
+        const _mhomeGoalKey = 'mhome-goal-v1-' + _mhomeUid;
+        const _mhomeTodoKey = 'mhome-todo-v1-' + _mhomeUid;
+        let cachedGoal = _mhomeForce ? null : _mhomeLsGet(_mhomeGoalKey, 10 * 60 * 1000);
+        let cachedTodo = _mhomeForce ? null : _mhomeLsGet(_mhomeTodoKey, 5 * 60 * 1000);
+        let tomorrowCount = null;
+        const _hsb = window.supabase || window.supabaseClient;
+        if (!cachedGoal && _hsb) {
+            Promise.resolve(_hsb.rpc('home_goal')).then(({ data, error }) => {
+                if (error || !data) return;
+                cachedGoal = data; _mhomeLsSet(_mhomeGoalKey, data); _mhomeRepaint();
+            }).catch(() => {});
+        }
+        _mhomeTodoReload = async () => {
+            const rows = await _mhomeLoadTodo();
+            if (rows) { cachedTodo = rows; _mhomeLsSet(_mhomeTodoKey, rows); }
+            _mhomeRepaint();
+        };
+        if (!cachedTodo) _mhomeTodoReload().catch(() => {});
+        {
+            const _tomStr = `${tom.getFullYear()}-${String(tom.getMonth() + 1).padStart(2, '0')}-${String(tom.getDate()).padStart(2, '0')}`;
+            AppDataStore.queryAdvanced('activities', {
+                filters: { activity_date: _tomStr }, select: 'id,lead_agent_id,co_agents,activity_type,source',
+                limit: 200, offset: 0, countMode: null,
+            }).then(r => {
+                tomorrowCount = (r?.data || []).filter(a => a.activity_type !== 'EVENT_CLOSING' && a.source !== 'birthday_auto' && _mhIsMine(a)).length;
+                _mhomeRepaint();
+            }).catch(() => {});
+        }
         // Ensure downstream code that reads these never gets undefined.
         cachedDrafts  = cachedDrafts  || [];
         cachedRefills = cachedRefills || [];
@@ -1062,8 +1085,6 @@
         allPeople = allPeople || [];
         cachedUsers = cachedUsers || [];
         cachedCustomers = cachedCustomers || [];
-        const _pendNum = '<i class="fas fa-spinner fa-spin" style="font-size:11px;opacity:.55"></i>';
-        const personMap = new Map(allPeople.map(p => [String(p.id), p]));
         // Match the desktop follow-up predicate (script-calendar.js:1381): a draft
         // with a null agent_id is treated as belonging to the current user, so
         // null-owned/imported drafts are not hidden from non-admins.
@@ -1111,49 +1132,6 @@
         // missing when the wish was sent from here).
         _mhomeBdayList = birthdays;
         if (birthdays.length) { try { _mcalWarmBdayPosters(); } catch (_) { /* warm is best-effort */ } }
-        const refills = cachedRefills;
-
-        const apptCount = activities.length;
-        const followCount = visibleDrafts.length;
-        const bdayCount = peoplePending ? _pendNum : birthdays.length;
-        const refillCount = refills.length;
-
-        const oldestDraft = [...visibleDrafts].sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''))[0];
-        const draftPerson = (d) => {
-            if (!d) return null;
-            if (d.prospect_id) return personMap.get(String(d.prospect_id));
-            if (d.customer_id) return personMap.get(String(d.customer_id));
-            return null;
-        };
-        const oldestPerson = draftPerson(oldestDraft);
-        const suggestedName = oldestPerson?.full_name || (birthdays[0]?.full_name) || '—';
-        const suggestedAction = oldestPerson
-            ? `app.mhomeWa(${oldestPerson.id ?? 'null'}, '${UI.escJsAttr(oldestPerson.phone || '')}')`
-            : (birthdays[0]
-                // Birthday suggestion → the FULL wish flow (greeting + poster +
-                // log), not a bare chat open with an empty message box.
-                ? `app.mhomeBirthdayWa(${birthdays[0].id ?? 'null'}, ${!!birthdays[0].role})`
-                : `app.navigateTo('calendar')`);
-
-        const scheduleRows = activities.slice(0, 4).map(a => {
-            const personId = a.prospect_id || a.customer_id;
-            const person = personId ? personMap.get(String(personId)) : null;
-            const time = (a.start_time || '00:00').slice(0, 5);
-            const title = a.activity_type || 'Activity';
-            // M10 (audit): default render path — mask non-owned client names/notes
-            // (mirrors the buildHomeIslandData site so the two stay at parity).
-            const sub = _mcalOwned(a) ? (person ? person.full_name : (a.notes || a.title || '—')) : '—';
-            return `
-                <div class="mhome-sched-row" onclick="app.navigateTo('calendar')">
-                    <div class="mhome-sched-time">${_mhomeEsc(time)}</div>
-                    <div class="mhome-sched-text">
-                        <div class="mhome-sched-t1">${_mhomeEsc(title)}</div>
-                        <div class="mhome-sched-t2">${_mhomeEsc(sub)}</div>
-                    </div>
-                    <div class="mhome-sched-act"><i class="${_mhomeIcon(title)}"></i></div>
-                </div>`;
-        }).join('') || `<div class="mhome-sched-empty">No activities scheduled today.</div>`;
-
         // Days since last contact (best-effort using activity_date if a draft links to a person)
         const daysAgo = (dateLike) => {
             if (!dateLike) return null;
@@ -1161,148 +1139,73 @@
             if (isNaN(t)) return null;
             return Math.floor((Date.now() - t) / 86400000);
         };
-        const _attBuild = () => {
-            const rows = [];
-            // The curated daily list, inline & front-and-centre: the first few "who to follow up
-            // today" drafts (already deduped + capped upstream by the dispatchers), each with a
-            // one-tap WhatsApp. The full list stays behind View All.
-            const _reasonLabel = (t) => ({
-                re_engagement: '该跟进了', cust_checkin: '老客户问候', apu_ack: '推荐名单致谢',
-                appointment_reminder: '预约提醒', voucher_unredeemed: '电子券待使用', birthday: '生日祝福'
-            }[t] || '跟进提醒');
-            const _agentMap = new Map((cachedUsers || []).map(u => [String(u.id), u.full_name]));
-            for (const fd of visibleDrafts.slice(0, 5)) {
-                const fp = draftPerson(fd);
-                const nm = fd.prospect_name || fp?.full_name || 'Unknown';
-                const od = daysAgo(fd.due_date);
-                const sub = (od != null && od > 0) ? `逾期 ${od} 天` : '今天';
-                const phone = UI.escJsAttr(fp?.phone || fd.phone || '');
-                const _pid = fp?.id ?? fd.prospect_id ?? fd.customer_id ?? null;
-                const _isCust = !!fd.customer_id;
-                const _agId = fp?.responsible_agent_id || fp?.lead_agent_id;
-                const _agent = _agId ? (_agentMap.get(String(_agId)) || '') : '';
-                rows.push(`
-                <div class="mhome-att-row followup" id="mhome-fu-${fd.id}">
-                    <div class="mhome-att-avatar">${_mhomeEsc(_mhomeInitials(nm))}</div>
-                    <div class="mhome-att-text"${_pid != null ? ` style="cursor:pointer;" onclick="app.mcalOpenPerson('${_pid}', ${_isCust})"` : ''}>
-                        <div class="mhome-att-name">${_mhomeEsc(nm)}${_agent ? ` <span style="font-size:10px;color:#9CA3AF;font-weight:400;">· ${_mhomeEsc(_agent)}</span>` : ''}</div>
-                        <div class="mhome-att-need">${_mhomeEsc(_reasonLabel(fd.trigger_type))}</div>
-                        <div class="mhome-att-sub">${_mhomeEsc(sub)}</div>
-                    </div>
-                    <button class="mhome-att-btn wa" onclick="event.stopPropagation();app.mhomeFollowupWa(${fd.id}, '${_pid}', '${phone}', ${_isCust})">
-                        <i class="fab fa-whatsapp"></i> WhatsApp
-                    </button>
-                </div>`);
-            }
-            const bday = birthdays[0];
-            if (bday) {
-                const isToday = _staffMD(bday) === todayMD;
-                const isAgent = !!bday.role;
-                rows.push(`
-                <div class="mhome-att-row birthday">
-                    <div class="mhome-att-avatar"><i class="fas fa-gift"></i></div>
-                    <div class="mhome-att-text">
-                        <div class="mhome-att-name">${_mhomeEsc(bday.full_name || '—')}${isAgent ? ' <span style="font-size:10px;color:var(--gray-400);">Agent</span>' : ''}</div>
-                        <div class="mhome-att-need">${isToday ? 'Birthday today' : 'Birthday tomorrow'}</div>
-                        <div class="mhome-att-sub">Send your wishes</div>
-                    </div>
-                    <button class="mhome-att-btn wish" onclick="app.mhomeBirthdayWa(${bday.id ?? 'null'}, ${isAgent})">
-                        <i class="fas fa-heart"></i> Send Wish
-                    </button>
-                </div>`);
-            }
-            if (rows.length === 0) return '';
-            return `
-            <div class="mhome-card">
-                <div class="mhome-card-head">
-                    <div class="mhome-card-title"><span class="ico purple"><i class="fas fa-list-check"></i></span> Today's Follow-ups</div>
-                    <button class="mhome-card-link" onclick="app.mhomeOpenFollowups()">${visibleDrafts.length > 5 ? `View All (${visibleDrafts.length})` : 'View All'} ›</button>
-                </div>
-                ${rows.join('')}
-            </div>`;
-        };
-
-        const overdueFollowups = visibleDrafts.filter(d => (d.due_date || '') < todayStr).length;
-
         // ── Compose body ─────────────────────────────────────────
         const body = document.getElementById('mhome-body');
         if (!body) return;
         // Track so we can save snapshot after render
         const _mhomeSaveSnap = (html) => { try { localStorage.setItem(_mhomeSnapKey, JSON.stringify({ ts: Date.now(), val: html })); } catch(_) { /* intentional: snapshot persistence is best-effort */ } };
+        // ── New Home (2026-10-26): goal · Today · Do today · birthdays · actions
+        const _isCustRow = (p) => !!p._isCustomer;
+        const _pById = new Map(allPeople.filter(p => !_isCustRow(p)).map(p => [String(p.id), p]));
+        const _cById = new Map(allPeople.filter(_isCustRow).map(p => [String(p.id), p]));
+        cachedCustomers.forEach(c => { if (!_cById.has(String(c.id))) _cById.set(String(c.id), c); });
+        const _who = (a) => (a.customer_id ? _cById.get(String(a.customer_id)) : null) || (a.prospect_id ? _pById.get(String(a.prospect_id)) : null);
+        const _today = (actResult.data || [])
+            .filter(a => a.activity_type !== 'EVENT_CLOSING' && a.source !== 'birthday_auto' && _mhIsMine(a))
+            .sort((x, y) => String(x.start_time || '99').localeCompare(String(y.start_time || '99')));
+        const _hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        // NEXT = the first one not yet started (an hour's grace for one in progress).
+        const _graceT = (() => { const d = new Date(Date.now() - 60 * 60000); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; })();
+        const _next = _today.find(a => !a.start_time || String(a.start_time).slice(0, 5) >= _graceT) || null;
+        const _todayHtml = _mhTodayHtml(_today, _next, _who, _hhmm, tomorrowCount);
+
+        // Do today: the money-ranked journey list + any other follow-up due.
+        const _reason = (t) => ({
+            re_engagement: '该跟进了', cust_checkin: '老客户问候', apu_ack: '推荐名单致谢',
+            appointment_reminder: '预约提醒', voucher_unredeemed: '电子券待使用',
+        }[t] || '跟进提醒');
+        const _draftRows = visibleDrafts.filter(d => d.trigger_type !== 'birthday').map(d => {
+            const fp = d.customer_id ? _cById.get(String(d.customer_id)) : (d.prospect_id ? _pById.get(String(d.prospect_id)) : null);
+            const od = daysAgo(d.due_date);
+            return {
+                kind: 'draft', icon: '💬', name: d.prospect_name || fp?.full_name || 'Unknown',
+                why: _reason(d.trigger_type) + ((od != null && od > 0) ? ` · ${od} days overdue` : ' · today'),
+                draftId: d.id, pid: fp?.id ?? d.prospect_id ?? d.customer_id ?? null, isCust: !!d.customer_id, phone: fp?.phone || d.phone || '',
+            };
+        });
+        _mhDoRows = [...(cachedTodo || []), ..._draftRows];
+        const _doHtml = `
+        <div class="mh-card" id="mhome-do">
+            <div class="mh-sec-head">
+                <div class="mh-sec-title">Do today</div>
+                ${_mhDoRows.length > 5 ? `<button class="mh-link" onclick="app.mhomeOpenDoToday()">See all ${_mhDoRows.length} ›</button>` : ''}
+            </div>
+            ${cachedTodo == null && !_draftRows.length
+                ? '<div class="mh-muted">Loading…</div>'
+                : (_mhDoRows.length ? _mhDoRows.slice(0, 5).map((r, i) => _mhDoRowHtml(r, i)).join('') : '<div class="mh-muted">Nothing urgent today 🎉</div>')}
+        </div>`;
+
+        // Birthdays: one line, only today / tomorrow.
+        const _bdToday = birthdays.filter(b => _staffMD(b) === todayMD);
+        const _bdTom = birthdays.filter(b => _staffMD(b) !== todayMD);
+        const _bdNames = (arr) => arr.slice(0, 2).map(b => b.full_name || '—').join(', ') + (arr.length > 2 ? ` +${arr.length - 2}` : '');
+        const _bdHtml = birthdays.length ? `
+        <button class="mh-bday" onclick="${birthdays.length === 1 ? `app.mhomeBirthdayWa(${birthdays[0].id ?? 'null'}, ${!!birthdays[0].role})` : 'app.mhomeOpenBirthdays()'}">
+            <span class="mh-bday-ico">🎂</span>
+            <span class="mh-bday-text">${_bdToday.length ? `Today: ${_mhomeEsc(_bdNames(_bdToday))}` : ''}${_bdToday.length && _bdTom.length ? ' · ' : ''}${_bdTom.length ? `Tomorrow: ${_mhomeEsc(_bdNames(_bdTom))}` : ''}</span>
+            <span class="mh-bday-go">Send wishes ›</span>
+        </button>` : '';
+
         body.innerHTML = `
-        <div class="mhome-ai-card">
-            <div class="mhome-ai-top">
-                <span class="mhome-arc"></span>
-                <span class="mhome-orb o1"></span><span class="mhome-orb o2"></span><span class="mhome-orb o3"></span>
-                <span class="mhome-ring r1"></span><span class="mhome-ring r2"></span>
-                <span class="mhome-spk s1">✦</span><span class="mhome-spk s2">✧</span><span class="mhome-spk s3">✦</span>
-                <span class="mhome-spk s4">✦</span><span class="mhome-spk s5">✧</span><span class="mhome-spk s6">✦</span><span class="mhome-spk s7">✧</span>
-                <span class="mhome-dot d1"></span><span class="mhome-dot d2"></span><span class="mhome-dot d3"></span>
-                <span class="mhome-cross c1">＋</span><span class="mhome-cross c2">＋</span>
-                <div class="mhome-ai-head">
-                    <div class="mhome-ai-icon"><i class="fas fa-wand-magic-sparkles"></i></div>
-                    <div>
-                        <div class="mhome-ai-title">AI Assistant</div>
-                        <div class="mhome-ai-sub">Here's what's happening today.</div>
-                    </div>
-                </div>
-                <div class="mhome-ai-stats">
-                    <div class="mhome-ai-stat ais-red">
-                        <div class="mhome-ai-stat-ico"><i class="far fa-calendar"></i></div>
-                        <div class="mhome-ai-stat-num">${apptCount}</div>
-                        <div class="mhome-ai-stat-lbl">Appointments</div>
-                    </div>
-                    <div class="mhome-ai-stat ais-purple">
-                        <div class="mhome-ai-stat-ico"><i class="fas fa-check"></i></div>
-                        <div class="mhome-ai-stat-num">${followCount}</div>
-                        <div class="mhome-ai-stat-lbl">Follow-ups</div>
-                    </div>
-                    <div class="mhome-ai-stat ais-pink">
-                        <div class="mhome-ai-stat-ico"><i class="fas fa-cake-candles"></i></div>
-                        <div class="mhome-ai-stat-num">${bdayCount}</div>
-                        <div class="mhome-ai-stat-lbl">Birthday</div>
-                    </div>
-                    <div class="mhome-ai-stat ais-wood">
-                        <div class="mhome-ai-stat-ico"><i class="fas fa-prescription-bottle-medical"></i></div>
-                        <div class="mhome-ai-stat-num">${refillCount}</div>
-                        <div class="mhome-ai-stat-lbl">Refill Due</div>
-                    </div>
-                </div>
-            </div>
-            <div class="mhome-ai-bot">
-                <div class="mhome-ai-bot-text">
-                    <div class="mhome-ai-bot-l1">Suggested next action</div>
-                    <div class="mhome-ai-bot-l2">${_mhomeEsc(suggestedName === '—' ? 'All caught up' : 'Follow up with ' + suggestedName)}</div>
-                </div>
-                <button class="mhome-ai-bot-btn" onclick="${suggestedAction}">
-                    <i class="fab fa-whatsapp"></i> Send Message
-                </button>
-            </div>
-        </div>
-
-        <div class="mhome-card">
-            <div class="mhome-card-head">
-                <div class="mhome-card-title"><span class="ico"><i class="far fa-calendar"></i></span> Today's Schedule</div>
-                <button class="mhome-card-link" onclick="app.navigateTo('calendar')">View Calendar ›</button>
-            </div>
-            <div class="mhome-sched">${scheduleRows}</div>
-        </div>
-
-        ${_attBuild()}
-
-        <div class="mhome-tiles">
-            <button class="mhome-tile red" onclick="app.mhomeOpenFollowups()">
-                <div class="mhome-tile-ico"><i class="fas fa-user-clock"></i></div>
-                <div class="mhome-tile-lbl">Overdue Follow-ups</div>
-                <div class="mhome-tile-num">${overdueFollowups}</div>
-                <div class="mhome-tile-arrow"><i class="fas fa-chevron-right"></i></div>
-            </button>
-            <button class="mhome-tile wood" onclick="app.mhomeOpenRefills()">
-                <div class="mhome-tile-ico"><i class="fas fa-prescription-bottle-medical"></i></div>
-                <div class="mhome-tile-lbl">Refills Due</div>
-                <div class="mhome-tile-num">${refillCount}</div>
-                <div class="mhome-tile-arrow"><i class="fas fa-chevron-right"></i></div>
-            </button>
+        ${_mhGoalHtml(cachedGoal)}
+        ${_todayHtml}
+        ${_doHtml}
+        ${_bdHtml}
+        <div class="mh-actions">
+            <button onclick="app.mcalAddMeetUp('${todayStr}')"><i class="fas fa-calendar-plus"></i><span>Meet Up</span></button>
+            <button onclick="app.openAddProspectModal()"><i class="fas fa-user-plus"></i><span>Prospect</span></button>
+            <button onclick="app.mhomeRecordSale()"><i class="fas fa-file-invoice-dollar"></i><span>Record Sale</span></button>
+            <button onclick="app.toggleSearchPanel()"><i class="fas fa-search"></i><span>Search</span></button>
         </div>`;
         // Only persist a complete render — never cache the partial pending state.
         if (!peoplePending) _mhomeSaveSnap(body.innerHTML);
@@ -1842,6 +1745,234 @@
     // _composeBody / buildHomeIslandData so mhomeBirthdayWa can resolve the
     // person from an id-only onclick outside the calendar view.
     let _mhomeBdayList = [];
+
+    // ── Home "Today" helpers (2026-10-26) ───────────────────────────────────
+    let _mhDoRows = [];            // Do-today rows of the last paint (sheet + taps)
+    let _mhomeTodoReload = null;   // set by showMobileHomeView: refetch + repaint
+    // My own day: activities I lead or co-run (managers L1–L2 see everyone's).
+    const _mhIsMine = (a) => {
+        const cu = _state.cu;
+        if (!cu || cu.id == null) return false;
+        if (getUserLevel(cu) <= 2) return true;
+        if (a.lead_agent_id != null && String(a.lead_agent_id) === String(cu.id)) return true;
+        return Array.isArray(a.co_agents) && a.co_agents.some(c => c && c.id != null && String(c.id) === String(cu.id));
+    };
+    const _mhRM = (n) => 'RM' + Math.round(Number(n) || 0).toLocaleString('en-MY');
+    const _mhRMk = (n) => {
+        const v = Number(n) || 0;
+        const short = (x, unit) => 'RM' + (Math.round(x * 10) / 10).toString().replace(/\.0$/, '') + unit;
+        return v >= 1e6 ? short(v / 1e6, 'M') : v >= 1000 ? short(v / 1000, 'k') : _mhRM(v);
+    };
+    // Goal line: me (+ team for leaders / company for L1–L2). Tap → Pipeline.
+    const _mhGoalHtml = (g) => {
+        if (!g) return '<div class="mh-goal mh-muted">This month · loading…</div>';
+        const line = (label, x) => {
+            if (!x) return '';
+            const won = Number(x.won) || 0;
+            const t = Number(x.target) || 0;
+            const pct = t > 0 ? Math.min(100, Math.round(won * 100 / t)) : null;
+            return `
+            <div class="mh-goal-row">
+                <span class="mh-goal-lbl">${label}</span>
+                <span class="mh-goal-won">${_mhRM(won)}</span>
+                ${t > 0 ? `<span class="mh-goal-of">/ ${_mhRMk(t)}</span><span class="mh-goal-pct">${pct}%</span>` : `<span class="mh-goal-of">${Number(x.n) || 0} sale${Number(x.n) === 1 ? '' : 's'}</span>`}
+            </div>
+            ${t > 0 ? `<div class="mh-bar"><i style="width:${pct}%"></i></div>` : ''}`;
+        };
+        const meLine = (g.me && (Number(g.me.target) > 0 || Number(g.me.won) > 0)) ? line('This month', g.me) : '';
+        return `<button class="mh-goal" onclick="app.navigateTo('pipeline')" aria-label="This month's sales — open Pipeline">
+            ${meLine}${line('Team', g.team)}${line('Company', g.company)}
+        </button>`;
+    };
+    const _mhMeetPills = (a, eid, past) => {
+        const isMeet = _MCAL_MEETUP_TYPES.includes(a.activity_type) && !!eid;
+        const pill = (kind, icon, label, cls) => `<button class="mh-pill ${cls}" onclick="event.stopPropagation();app.mcalActivityAction('${kind}', ${Number(a.id)}, ${eid ? Number(eid) : 'null'})"><i class="fas ${icon}"></i>${label}</button>`;
+        if (past) return isMeet ? pill('minutes', 'fa-sticky-note', 'Minutes', 'min') : '';
+        return `${eid ? pill('brief', 'fa-book-open', 'Brief', 'brief') : ''}${isMeet ? pill('minutes', 'fa-sticky-note', 'Minutes', 'min') + pill('closing', 'fa-clipboard-check', 'Closing', 'close') : ''}`;
+    };
+    const _mhTodayHtml = (list, next, who, hhmm, tomorrowCount) => {
+        const title = (a) => { const p = who(a); return (p && p.full_name) || a.activity_title || a.activity_type || '—'; };
+        const venue = (a) => a.venue_name || a.venue || a.location_address || '';
+        const open = (a) => `app.mcalOpenEvent('${a.id}', ${a.prospect_id || 'null'}, ${a.customer_id || 'null'})`;
+        const tom = tomorrowCount == null ? '' : `<div class="mh-tom">Tomorrow: ${tomorrowCount ? `${tomorrowCount} meet-up${tomorrowCount === 1 ? '' : 's'}` : 'nothing booked yet'}</div>`;
+        let inner;
+        if (!list.length) {
+            inner = `<div class="mh-muted">Nothing booked today. <button class="mh-link" onclick="app.mcalAddMeetUp('${_mhomeToday()}')">+ Meet Up</button></div>`;
+        } else {
+            inner = list.map(a => {
+                const eid = a.prospect_id || a.customer_id;
+                const t = String(a.start_time || '').slice(0, 5);
+                if (a === next) {
+                    return `
+                <div class="mh-next" onclick="${open(a)}">
+                    <div class="mh-next-top"><span class="mh-next-tag">NEXT</span><span class="mh-next-time">${_mhomeEsc(t || 'Today')}</span><span class="mcal-evt ${_mcalColorForType(a.activity_type)} mh-type">${_mhomeEsc(a.activity_type || '')}</span></div>
+                    <div class="mh-next-name">${_mhomeEsc(title(a))}</div>
+                    ${venue(a) ? `<div class="mh-next-venue"><i class="fas fa-map-marker-alt"></i> ${_mhomeEsc(venue(a))}</div>` : ''}
+                    <div class="mh-pills">${_mhMeetPills(a, eid, false)}</div>
+                </div>`;
+                }
+                const past = !!t && t < hhmm;
+                return `
+                <div class="mh-row${past ? ' past' : ''}" onclick="${open(a)}">
+                    <span class="mh-row-time">${_mhomeEsc(t || '—')}</span>
+                    <span class="mcal-evt ${_mcalColorForType(a.activity_type)} mh-type">${_mhomeEsc(a.activity_type || '')}</span>
+                    <span class="mh-row-name">${_mhomeEsc(title(a))}</span>
+                    ${past ? _mhMeetPills(a, eid, true) : ''}
+                </div>`;
+            }).join('');
+        }
+        return `
+        <div class="mh-card">
+            <div class="mh-sec-head">
+                <div class="mh-sec-title">Today</div>
+                <button class="mh-link" onclick="app.navigateTo('calendar')">Calendar ›</button>
+            </div>
+            ${inner}
+            ${tom}
+        </div>`;
+    };
+    // One Do-today row: icon · name · the reason · one button that does it.
+    const _mhDoRowHtml = (r, i) => {
+        const kind = r.customer_id != null ? 'customer' : 'prospect';
+        const id = r.customer_id != null ? r.customer_id : r.prospect_id;
+        let btn = '';
+        if (r.kind === 'draft') {
+            btn = `<button class="mh-do-btn wa" onclick="event.stopPropagation();app.mhomeFollowupWa(${r.draftId}, '${r.pid}', '${UI.escJsAttr(r.phone || '')}', ${!!r.isCust});setTimeout(()=>app.mhomeTodoRefresh&&app.mhomeTodoRefresh(),400)" aria-label="WhatsApp"><i class="fab fa-whatsapp"></i></button>`;
+        } else if (r.kind === 'touch' && r.ref_id != null) {
+            btn = /whatsapp/i.test(r.tp_type || '')
+                ? `<button class="mh-do-btn wa" onclick="event.stopPropagation();app.mhomeTodoWa(${Number(r.ref_id)})" aria-label="Send WhatsApp"><i class="fab fa-whatsapp"></i></button>`
+                : `<button class="btn secondary btn-sm mh-do-act" onclick="event.stopPropagation();app.mhomeTodoDone(${Number(r.ref_id)})">✓ Done</button>`;
+        } else if (typeof window.app.apTodoActionHtml === 'function') {
+            btn = window.app.apTodoActionHtml(r).replace('class="btn secondary btn-sm"', 'class="btn secondary btn-sm mh-do-act"');
+        }
+        const openJs = r.kind === 'draft'
+            ? (r.pid != null ? `app.mcalOpenPerson('${r.pid}', ${!!r.isCust})` : '')
+            : (id != null ? `app.apOpen('${kind}', ${Number(id)})` : '');
+        return `
+            <div class="mh-do-row${i ? '' : ' first'}"${openJs ? ` onclick="${openJs}"` : ''}>
+                <span class="mh-do-ico">${_mhomeEsc(r.icon || '•')}</span>
+                <div class="mh-do-text">
+                    <div class="mh-do-name">${_mhomeEsc(r.name || '')}</div>
+                    <div class="mh-do-why">${_mhomeEsc(r.why || '')}</div>
+                </div>
+                ${btn}
+            </div>`;
+    };
+    // journey_daily_todo (money × urgency, one row per person) + each journey
+    // step's type, so a WhatsApp step gets a WhatsApp button.
+    const _mhomeLoadTodo = async () => {
+        const sb = window.supabase || window.supabaseClient;
+        if (!sb) return null;
+        try {
+            const { data, error } = await sb.rpc('journey_daily_todo', { p_limit: 30 });
+            if (error) throw error;
+            const rows = data || [];
+            const tpIds = rows.filter(r => r.kind === 'touch' && r.ref_id != null).map(r => r.ref_id);
+            if (tpIds.length) {
+                const { data: tps } = await sb.from('journey_touchpoints').select('id,touchpoint_type').in('id', tpIds);
+                const m = new Map((tps || []).map(t => [String(t.id), t.touchpoint_type]));
+                rows.forEach(r => { if (r.kind === 'touch') r.tp_type = m.get(String(r.ref_id)) || ''; });
+            }
+            return rows;
+        } catch (e) {
+            console.warn('[mhome] do-today', e && e.message);
+            return null;
+        }
+    };
+    const mhomeTodoRefresh = () => { if (typeof _mhomeTodoReload === 'function') _mhomeTodoReload().catch(() => {}); };
+    const mhomeOpenDoToday = () => {
+        UI.showModal('Do today', _mhomeSheetScroll(_mhDoRows.length
+            ? _mhDoRows.map((r, i) => _mhDoRowHtml(r, i)).join('')
+            : '<div class="mh-muted">Nothing urgent today 🎉</div>'), _mhomeSheetBtns);
+    };
+    const _mhStandalone = () => {
+        try { return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true; }
+        catch (_) { return false; }
+    };
+    // A journey WhatsApp step: open WhatsApp with its message, mark it done.
+    const mhomeTodoWa = async (tpId) => {
+        const sb = window.supabase || window.supabaseClient;
+        try {
+            const { data: tp, error } = await sb.from('journey_touchpoints')
+                .select('id,title,message_template,prospect_id,customer_id').eq('id', tpId).maybeSingle();
+            if (error || !tp) throw error || new Error('step not found');
+            const person = tp.customer_id ? await AppDataStore.getById('customers', tp.customer_id)
+                : (tp.prospect_id ? await AppDataStore.getById('prospects', tp.prospect_id) : null);
+            const num = _mhomeWaPhone(person && person.phone);
+            if (!num) { UI.toast.error('No phone number — opening the profile'); if (person) mcalOpenPerson(person.id, !!tp.customer_id).catch(() => {}); return; }
+            const text = String(tp.message_template || tp.title || '').replace(/\{name\}/g, (person && person.full_name) || '');
+            const done = sb.from('journey_touchpoints')
+                .update({ status: 'done', completed_at: new Date().toISOString(), completed_by_id: _state.cu ? _state.cu.id : null })
+                .eq('id', tpId);
+            const url = `https://wa.me/${num}?text=${encodeURIComponent(text)}`;
+            if (_mhStandalone()) {
+                // the installed app hands the page to WhatsApp — save the tick first
+                try { await Promise.race([done, new Promise(r => setTimeout(r, 1200))]); } catch (_) { /* retried on next load */ }
+                window.location.href = url;
+                return;
+            }
+            window.open(url, '_blank', 'noopener');
+            const { error: e2 } = await done;
+            if (e2) UI.toast.error('WhatsApp opened, but the step was not ticked: ' + e2.message);
+            mhomeTodoRefresh();
+        } catch (e) {
+            UI.toast.error('Could not open this WhatsApp: ' + ((e && e.message) || e));
+        }
+    };
+    const mhomeTodoDone = async (tpId) => {
+        if (typeof window.app.apTouchDone === 'function') await window.app.apTouchDone(tpId);
+        mhomeTodoRefresh();
+    };
+    const mhomeOpenBirthdays = () => {
+        const rows = (_mhomeBdayList || []).map(b => `
+            <div class="mh-do-row">
+                <span class="mh-do-ico">🎂</span>
+                <div class="mh-do-text"><div class="mh-do-name">${_mhomeEsc(b.full_name || '—')}${b.role ? ' <span class="mh-muted">Agent</span>' : ''}</div>
+                    <div class="mh-do-why">${_staffMD(b) === _mhomeToday().slice(5) ? 'Birthday today' : 'Birthday tomorrow'}</div></div>
+                <button class="mh-do-btn wish" onclick="app.mhomeBirthdayWa(${b.id ?? 'null'}, ${!!b.role})" aria-label="Send wish"><i class="fas fa-heart"></i></button>
+            </div>`).join('');
+        UI.showModal('Birthdays', _mhomeSheetScroll(rows || '<div class="mh-muted">No birthdays today or tomorrow.</div>'), _mhomeSheetBtns);
+    };
+    // Record Sale: a sale is recorded on the meeting it came from (Closing),
+    // so pick one of my meet-ups from the last 14 days.
+    const mhomeRecordSale = async () => {
+        UI.showModal('Record Sale', _mhomeSheetLoading, _mhomeSheetBtns);
+        const me = _state.cu && _state.cu.id;
+        const t = _mhomeToday();
+        const from = (() => { const d = new Date(); d.setDate(d.getDate() - 14); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
+        let acts = [];
+        try {
+            const sb = window.supabase || window.supabaseClient;
+            const { data } = await sb.from('activities')
+                .select('id,activity_type,activity_date,start_time,prospect_id,customer_id,activity_title')
+                .eq('lead_agent_id', me).gte('activity_date', from).lte('activity_date', t)
+                .in('activity_type', ['CPS', 'FTF', 'FSA', 'GR', 'XG'])
+                .order('activity_date', { ascending: false }).limit(60);
+            acts = (data || []).filter(a => a.prospect_id || a.customer_id);
+        } catch (_) { /* empty list below */ }
+        const pIds = [...new Set(acts.filter(a => a.prospect_id).map(a => a.prospect_id))];
+        const cIds = [...new Set(acts.filter(a => !a.prospect_id && a.customer_id).map(a => a.customer_id))];
+        const [pp, cc] = await Promise.all([
+            pIds.length ? AppDataStore.queryAdvanced('prospects', { scopeField: 'id', scopeValues: pIds, select: 'id,full_name', countMode: null, limit: pIds.length }).catch(() => ({ data: [] })) : { data: [] },
+            cIds.length ? AppDataStore.queryAdvanced('customers', { scopeField: 'id', scopeValues: cIds, select: 'id,full_name', countMode: null, limit: cIds.length }).catch(() => ({ data: [] })) : { data: [] },
+        ]);
+        const pn = new Map((pp.data || []).map(x => [String(x.id), x.full_name]));
+        const cn = new Map((cc.data || []).map(x => [String(x.id), x.full_name]));
+        const head = '<p class="mh-muted" style="margin:0 0 8px;">A sale is recorded on the meeting it came from. Pick the meeting:</p>';
+        const list = acts.length ? acts.map(a => {
+            const eid = a.prospect_id || a.customer_id;
+            const nm = (a.prospect_id ? pn.get(String(a.prospect_id)) : cn.get(String(a.customer_id))) || a.activity_title || '—';
+            const d = new Date(String(a.activity_date).slice(0, 10) + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+            return `
+            <div class="mh-do-row">
+                <span class="mcal-evt ${_mcalColorForType(a.activity_type)} mh-type">${_mhomeEsc(a.activity_type)}</span>
+                <div class="mh-do-text"><div class="mh-do-name">${_mhomeEsc(nm)}</div><div class="mh-do-why">${_mhomeEsc(d)}${a.start_time ? ' · ' + _mhomeEsc(String(a.start_time).slice(0, 5)) : ''}</div></div>
+                <button class="btn primary btn-sm mh-do-act" onclick="app.mcalActivityAction('closing', ${Number(a.id)}, ${Number(eid)})"><i class="fas fa-clipboard-check"></i> Closing</button>
+            </div>`;
+        }).join('') : `<div class="mh-muted">No meet-ups in the last 14 days. Add the meeting first, then use its Closing.</div>
+            <button class="btn primary" style="margin-top:10px;width:100%;" onclick="UI.hideModal();app.mcalAddMeetUp('${t}')">+ Meet Up</button>`;
+        UI.showModal('Record Sale', _mhomeSheetScroll(head + list), _mhomeSheetBtns);
+    };
     // Clipboard image-write requires PNG on Chrome (image/jpeg throws). Normalize
     // any uploaded format → PNG at warm time (off the tap gesture), and DOWNSCALE
     // big uploads: the admin posters are ~1.8 MB / full-res, and writing that to
@@ -4621,6 +4752,12 @@
         mhomeBirthdayWa,
         mhomeFollowupWa,
         mhomeOpenFollowups,
+        mhomeOpenDoToday,
+        mhomeTodoWa,
+        mhomeTodoDone,
+        mhomeTodoRefresh,
+        mhomeOpenBirthdays,
+        mhomeRecordSale,
         mhomeOpenRefills,
         showMobileCalendarView,
         showMobileCalendarWeek,

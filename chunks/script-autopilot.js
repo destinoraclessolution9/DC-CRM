@@ -124,6 +124,8 @@
     const apMountTop5 = () => {
         const lv = _lvl();
         if (!(lv >= 3 && lv <= 12)) return;
+        // The phone Home has the same list built in ("Do today", 2026-10-26).
+        if (_isMobile()) return;
         const anchor = _top5Anchor();
         if (!anchor || document.getElementById('ap-top5')) return;
         const box = document.createElement('div');
@@ -1379,6 +1381,7 @@
         apTodo,
         apMountTop5,
         apRenderTop5,
+        apTodoActionHtml: _todoAction,
         apFestLoad,
         apMountFestival,
         apRenderFestival,

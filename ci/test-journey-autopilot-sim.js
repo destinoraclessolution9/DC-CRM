@@ -172,7 +172,9 @@ const runTimers = async () => { while (timers.length) { const t = timers.shift()
   const mbody = makeEl('div'); const mparent = makeEl('div'); mbody.parentNode = mparent; mbody.id = 'mhome-body';
   rpcData.journey_daily_todo = [];
   app.apMountTop5();
-  check('mobile: inserted before #mhome-body', mparent.inserted[0] && mparent.inserted[0].before, mbody);
+  // the phone Home has its own "Do today" list now (2026-10-26) — no card
+  check('mobile: no top-5 card (Home has Do today)', mparent.inserted.length === 0 && !byId.has('ap-top5'), true);
+  check('row buttons shared with the Home', typeof app.apTodoActionHtml === 'function' && app.apTodoActionHtml({ kind: 'cps', prospect_id: 11 }).includes("app.openActivityModal('', 11)"), true);
   win.innerWidth = 1280;
 
   // touch done
