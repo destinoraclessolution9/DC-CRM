@@ -2377,6 +2377,16 @@ const pvMeetingSummaryHtml = (a, maps) => {
     }
     return parts.length ? `<span class="mu-sum">${parts.join('')}</span>` : '';
 };
+// Notes as numbered points (2026-10-26): a field with two or more points
+// (its lines, inline numbers or sentences — data-helpers splitMinutePoints)
+// shows as a numbered list; a single point stays a plain line. Older notes
+// saved as one paragraph read as points too — display only.
+const pvPointsHtml = (text, cls = 'msf-txt') => {
+    const split = (window._dataHelpers && window._dataHelpers.splitMinutePoints) || (() => []);
+    const pts = split(text);
+    if (pts.length >= 2) return `<ol class="pv-points">${pts.map(p => `<li>${escapeHtml(p)}</li>`).join('')}</ol>`;
+    return `<p class="${cls}">${escapeHtml(String(text == null ? '' : text))}</p>`;
+};
 const _PV_STEP_ICON = { call: '📞', meetup: '🤝', event: '🎟️', whatsapp: '💬', other: '📝' };
 const pvTaskLineHtml = (a, maps) => {
     if (!a) return '';
@@ -2650,7 +2660,7 @@ const renderProfileOpportunities = async (kind, id, pid, container) => {
     const knowHtml = facts.length ? `
         <div class="tk-toolbar op-sec"><span class="tk-summary">What we know <span class="op-src">(latest)</span></span></div>
         ${facts.map(([lbl, f]) => `
-            <div class="msf"><span class="msf-lbl">${lbl}</span><p class="msf-txt">${escapeHtml(f.v)}</p>
+            <div class="msf"><span class="msf-lbl">${lbl}</span>${pvPointsHtml(f.v)}
             <button type="button" class="tk-src" onclick="app.pvOpenMeeting(${k}, '${escapeHtml(f.a._muid)}')">from ${escapeHtml(f.a.activity_type || 'meeting')} · ${escapeHtml(_pvFmtDay(f.a.activity_date))}</button></div>`).join('')}` : '';
 
     // ── Waiting for a class (class_waitlist): recommended before a session existed
@@ -3013,7 +3023,7 @@ const meetupBriefHtml = (rows, opts = {}) => {
     const m = mm(last);
     const typeLabel = opts.typeLabel || {};
     const lastLabel = last.activity_type === 'EVENT_CLOSING' ? 'Event Closing' : (typeLabel[last.activity_type] || last.activity_type || 'Meet up');
-    const item = (lbl, val, action) => val ? `<div class="msf"><span class="msf-lbl">${lbl}</span><p class="msf-txt${action ? ' action' : ''}">${escapeHtml(String(val))}</p></div>` : '';
+    const item = (lbl, val, action) => val ? `<div class="msf"><span class="msf-lbl">${lbl}</span>${action ? `<p class="msf-txt action">${escapeHtml(String(val))}</p>` : pvPointsHtml(val)}</div>` : '';
     const viewCall = last._isAttendeeNote ? `app.viewAttendeePhotos(${Number(last._attendeeRowId)})` : `app.viewActivityPhotos(${Number(last.id)})`;
     const jump = opts.noJump ? '' : `<button type="button" class="btn btn-sm secondary" onclick="(function(b){var w=b.closest('.mu-wrap');if(!w)return;w.dataset.muf='all';var it=w.querySelector('.mu-item[data-muid=&quot;${meetupRowId(last)}&quot;]');if(it){it.classList.add('open');it.scrollIntoView({behavior:'smooth',block:'nearest'});}})(this)"><i class="fas fa-arrow-down"></i> Open this meet up</button>`;
     return `
@@ -3548,7 +3558,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             if (!dedup.length && !task) return '';
             return `<div class="meet-summary">
                 <div class="meet-summary-hdr"><i class="fas fa-file-alt"></i>&nbsp; Discussion Notes</div>
-                ${dedup.map(f => `<div class="msf"><span class="msf-lbl">${f.lbl}</span><p class="msf-txt">${_esc(f.val)}</p></div>`).join('')}
+                ${dedup.map(f => `<div class="msf"><span class="msf-lbl">${f.lbl}</span>${pvPointsHtml(f.val)}</div>`).join('')}
                 ${task}
             </div>`;
         };
@@ -3559,12 +3569,12 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                 return `${icon} ${escapeHtml(c.name || '')}`;
             }).join(' &nbsp; ')}</div></div>` : ''}`;
         const _eventFieldsHtml = (a) => `
-            ${_mm(a).background ? `<div class="meet-section"><div class="meet-lbl">Customer Background</div><div class="meet-txt" style="white-space:pre-wrap;">${escapeHtml(_mm(a).background)}</div></div>` : ''}
-            ${a.summary || a.note_key_points ? `<div class="meet-section"><div class="meet-lbl">Key Points</div><div class="meet-txt">${escapeHtml(a.summary || a.note_key_points)}</div></div>` : ''}
-            ${_mm(a).advisor ? `<div class="meet-section"><div class="meet-lbl">Advisor Observations</div><div class="meet-txt" style="white-space:pre-wrap;">${escapeHtml(_mm(a).advisor)}</div></div>` : ''}
-            ${_mm(a).reaction ? `<div class="meet-section"><div class="meet-lbl">Customer Reaction</div><div class="meet-txt" style="white-space:pre-wrap;">${escapeHtml(_mm(a).reaction)}</div></div>` : ''}
-            ${a.note_needs ? `<div class="meet-section"><div class="meet-lbl">Needs</div><div class="meet-txt">${escapeHtml(a.note_needs)}</div></div>` : ''}
-            ${a.note_pain_points ? `<div class="meet-section"><div class="meet-lbl">Pain Points</div><div class="meet-txt">${escapeHtml(a.note_pain_points)}</div></div>` : ''}
+            ${_mm(a).background ? `<div class="meet-section"><div class="meet-lbl">Customer Background</div>${pvPointsHtml(_mm(a).background, 'meet-txt')}</div>` : ''}
+            ${a.summary || a.note_key_points ? `<div class="meet-section"><div class="meet-lbl">Key Points</div>${pvPointsHtml(a.summary || a.note_key_points, 'meet-txt')}</div>` : ''}
+            ${_mm(a).advisor ? `<div class="meet-section"><div class="meet-lbl">Advisor Observations</div>${pvPointsHtml(_mm(a).advisor, 'meet-txt')}</div>` : ''}
+            ${_mm(a).reaction ? `<div class="meet-section"><div class="meet-lbl">Customer Reaction</div>${pvPointsHtml(_mm(a).reaction, 'meet-txt')}</div>` : ''}
+            ${a.note_needs ? `<div class="meet-section"><div class="meet-lbl">Needs</div>${pvPointsHtml(a.note_needs, 'meet-txt')}</div>` : ''}
+            ${a.note_pain_points ? `<div class="meet-section"><div class="meet-lbl">Pain Points</div>${pvPointsHtml(a.note_pain_points, 'meet-txt')}</div>` : ''}
             ${a.opportunity_potential ? `<div class="meet-section"><div class="meet-lbl">Opportunity / Potential</div><div class="meet-txt">${escapeHtml(a.opportunity_potential)}</div></div>` : ''}
             ${pvTaskLineHtml(a, _taskMaps)}
             ${a.location_address ? `<div class="meet-section"><div class="meet-lbl">Location</div><div class="meet-txt">${escapeHtml(a.location_address)}</div></div>` : ''}`;
@@ -8420,6 +8430,7 @@ const openPastRecordModal = async (...args) => {
         pvAfterDealSave,
         pvTaskMaps,
         pvTaskLineHtml,
+        pvPointsHtml,
         pvMeetingSummaryHtml,
         potentialCode,
         _fsaReportFilesHtml,

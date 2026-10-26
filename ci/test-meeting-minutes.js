@@ -149,5 +149,20 @@ eq('match: unknown product → leftover', m2.leftovers, ['一块玉']);
 eq('match: two products in one line', h.matchMinutesItems(['简易 Simple Plan、大满福 Da Man Fu'], products).matched, ['简易 Simple Plan', '大满福 Da Man Fu']);
 eq('match: empty inputs', h.matchMinutesItems([], products), { matched: [], leftovers: [], extra: [] });
 
+// ── numbered points (2026-10-26) ─────────────────────────────────────────
+eq('points: chinese paragraph → sentences', h.splitMinutePoints('客户已婚，有两个孩子。在Puchong经营印刷生意，最近销售下滑；希望改善事业运。'),
+  ['客户已婚，有两个孩子。', '在Puchong经营印刷生意，最近销售下滑', '希望改善事业运。']);
+eq('points: inline numbering', h.splitMinutePoints('1. 想了解PR3 2. 太太决定房子布局 3. 预算约RM18,990'), ['想了解PR3', '太太决定房子布局', '预算约RM18,990']);
+eq('points: full-width brackets', h.splitMinutePoints('（1）背景良好（2）对九星课有兴趣'), ['背景良好', '对九星课有兴趣']);
+eq('points: bullet lines', h.splitMinutePoints('- 第一点\n• 第二点\n3) 第三点'), ['第一点', '第二点', '第三点']);
+eq('points: short note stays one', h.splitMinutePoints('Short note only'), ['Short note only']);
+eq('points: times / prices / decimals not split', h.splitMinutePoints('时间 10:30 见面，价格 3.5 万，日期 2026.10'), ['时间 10:30 见面，价格 3.5 万，日期 2026.10']);
+eq('points: empty', h.splitMinutePoints('  '), []);
+eq('format: numbered lines', h.formatMinutePoints('先了解客户的家庭和事业背景；再向她介绍九星风水基础课的内容；最后约好下次见面时间，带太太一起来讨论房子布局。'),
+  '1. 先了解客户的家庭和事业背景\n2. 再向她介绍九星风水基础课的内容\n3. 最后约好下次见面时间，带太太一起来讨论房子布局。');
+eq('format: a short paragraph is left as written', h.formatMinutePoints('a；b；c'), 'a；b；c');
+eq('format: idempotent', h.formatMinutePoints(h.formatMinutePoints('- x\n- y')), '1. x\n2. y');
+eq('format: one point untouched', h.formatMinutePoints('  just one  '), 'just one');
+
 console.log(`meeting-minutes: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

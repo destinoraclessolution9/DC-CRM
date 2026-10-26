@@ -2160,7 +2160,8 @@ const renderCustomerActivityTab = async (customer, containerId = 'profile-tab-co
     };
     const _attChip = (on, label) =>
         `<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:${on ? '#dcfce7' : 'var(--gray-100)'};color:${on ? '#166534' : 'var(--gray-500)'};">${on ? '✓' : '—'} ${label}</span>`;
-    const _sec = (lbl, val, extra) => val ? `<div class="meet-section"><div class="meet-lbl">${lbl}</div><div class="meet-txt"${extra || ''}>${escapeHtml(val)}</div></div>` : '';
+    // Notes read as numbered points (shared renderer, prospects chunk).
+    const _sec = (lbl, val, extra) => val ? `<div class="meet-section"><div class="meet-lbl">${lbl}</div>${window.app.pvPointsHtml ? window.app.pvPointsHtml(val, 'meet-txt') : `<div class="meet-txt"${extra || ''}>${escapeHtml(val)}</div>`}</div>` : '';
     const _mmC = (a) => (window.app.meetupMinutesOf || (() => ({})))(a);
     const _photosC = (a, viewCall) => (window.app.meetupPhotoStripHtml || (() => ''))(a, viewCall);
     const _OUTCOME_C = { positive: '👍 Positive', neutral: '😐 Neutral', negative: '👎 Negative', not_interested: '🚫 Not interested' };

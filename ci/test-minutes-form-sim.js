@@ -79,6 +79,8 @@ const sandbox = {
 sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'chunks', 'script-activities.js'), 'utf8'), sandbox, { filename: 'script-activities.js' });
+// the real minutes parser + points formatter (window._dataHelpers)
+vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'data-helpers.js'), 'utf8'), sandbox, { filename: 'data-helpers.js' });
 const app = windowStub.app;
 
 const OPTS = {
@@ -163,6 +165,36 @@ const OPTS = {
   byId.delete('pmn-steplist');
   check('collect: old form without the list leaves next steps alone', !('next_actions' in app.collectPostMeetupNotesData('pmn')));
 }
+
+// ── edited ChatGPT paste re-fills only its own fields; notes saved as points ──
+{
+  const html = app.buildPostMeetupNotesBlock('pmn', { activity_date: '2026-10-25', meeting_minutes: { raw: 'OLD PASTE', pasted: { keyPoints: '1. a\n2. b' } } }, OPTS);
+  check('saved paste comes back for editing', html.includes('>OLD PASTE</textarea>') && html.includes('Edit the pasted ChatGPT minutes'));
+  el('pmn-minutes-result');
+  el('pmn-key-points', { value: '1. a\n2. b' });            // still what the last paste put there
+  el('pmn-background', { value: 'typed by hand' });         // changed by the agent
+  el('pmn-advisor', { value: '' });                         // empty
+  el('pmn-reaction', { value: '积极' });                     // already equal to the paste
+  el('pmn-minutes-paste', { value: [
+    '1. 客户背景 (Customer Background)', '- 新背景', '2. 会面重点 (Meeting Key Points)', '- 想了解PR3', '- 太太决定布局',
+    '3. 顾问观察与建议 (Advisor Observations & Suggestions)', '- 先做家居审计', '4. 客户反应与DC记录 (Customer Reaction & DC Records)', '- 积极',
+  ].join('\n') });
+  app.applyPastedMinutes('pmn');
+  check('refill: pasted field follows the edited paste, as points', byId.get('pmn-key-points').value, '1. 想了解PR3\n2. 太太决定布局');
+  check('refill: hand-edited field is kept', byId.get('pmn-background').value, 'typed by hand');
+  check('refill: hand-edited field is asked about', byId.get('pmn-minutes-result').innerHTML.includes('You changed this field'));
+  check('refill: empty field filled', byId.get('pmn-advisor').value, '先做家居审计');
+  check('refill: equal field untouched', byId.get('pmn-reaction').value, '积极');
+  // saving: what the paste filled is remembered; hand-typed lines are numbered
+  el('pmn-needs', { value: 'line one\nline two' });
+  el('pmn-pain-points', { value: 'just one' });
+  const d = app.collectPostMeetupNotesData('pmn');
+  check('save: hand-typed lines numbered', d.note_needs, '1. line one\n2. line two');
+  check('save: single line untouched', d.note_pain_points, 'just one');
+  check('save: remembers what the paste filled', d.meeting_minutes.pasted.keyPoints === '1. 想了解PR3\n2. 太太决定布局' && d.meeting_minutes.pasted.advisor === '先做家居审计');
+  check('save: hand-edited field not claimed by the paste', !('background' in d.meeting_minutes.pasted));
+}
+check('ChatGPT prompt asks for one numbered point per line', /numbered points, ONE point per line/.test(fs.readFileSync(path.join(__dirname, '..', 'chunks', 'script-activities.js'), 'utf8')));
 
 console.log(`\nminutes-form: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -434,7 +434,35 @@
         return patch;
     }
 
-    const api = { classifyQueueError, extractUnknownCol, isSchemaError, isAbortError, snapshotsDiffer, buildReferralCounts, parseMeetingMinutes, matchMinutesItems, PROSPECT_PROFILE_FIELDS, customerFieldsFromProspect, customerBackfillPatch };
+    // ── Minutes as numbered points (2026-10-26, owner) ──────────────────────
+    // A notes field reads best as "1. … 2. … 3. …". splitMinutePoints breaks a
+    // field into points: its own lines (bullets / numbers stripped), else an
+    // inline numbering ("1. a 2. b", "1）a", "（1）a"), else — for a long
+    // paragraph — its sentences (。！？；). Nothing is dropped or reworded.
+    const _POINT_LEAD = /^\s*(?:[-•*·▪●]\s*|（\d{1,2}）\s*|\(\d{1,2}\)\s*|\d{1,2}\s*[.)、）]\s*)/;
+    function splitMinutePoints(text) {
+        const raw = String(text == null ? '' : text).replace(/\r\n?/g, '\n').trim();
+        if (!raw) return [];
+        let parts = raw.split('\n').map(s => s.trim()).filter(Boolean);
+        if (parts.length === 1) {
+            const one = parts[0];
+            const inline = one.split(/\s*(?:（\d{1,2}）|\(\d{1,2}\)|(?<![\d.,:])\d{1,2}[.)、）](?![\d])(?=\s*\S))\s*/).map(s => s.trim()).filter(Boolean);
+            if (inline.length >= 2) parts = inline;
+            else if (one.length > 40) {
+                const sent = (one.match(/[^。！？；;!?]+[。！？；;!?]*/g) || [one]).map(s => s.trim()).filter(Boolean);
+                if (sent.length >= 2) parts = sent;
+            }
+        }
+        return parts.map(s => s.replace(_POINT_LEAD, '').replace(/[；;]\s*$/, '').trim()).filter(Boolean);
+    }
+    // "1. …\n2. …" when there are two or more points; a single point stays as written.
+    function formatMinutePoints(text) {
+        const pts = splitMinutePoints(text);
+        if (pts.length < 2) return String(text == null ? '' : text).trim();
+        return pts.map((p, i) => `${i + 1}. ${p}`).join('\n');
+    }
+
+    const api = { classifyQueueError, extractUnknownCol, isSchemaError, isAbortError, snapshotsDiffer, buildReferralCounts, parseMeetingMinutes, matchMinutesItems, splitMinutePoints, formatMinutePoints, PROSPECT_PROFILE_FIELDS, customerFieldsFromProspect, customerBackfillPatch };
     // Browser global (loaded before data.js). Also export for Node tests.
     if (typeof window !== 'undefined') window._dataHelpers = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

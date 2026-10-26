@@ -1428,10 +1428,11 @@ Rules:
 2. DO NOT invent information, analyse fortune, or add conclusions that are not in my notes.
 3. If a section is not mentioned, keep its header and leave it empty (do not write "No data").
 4. Keep customer facts, advisor observations and next actions separate.
-5. Next Actions and Products: ONE item per line, using the exact class / event / product name (e.g. 个人风水基础课, 博物馆, 简易风水-排屋 Simplified Fengshui Terrace House).
-6. Grade: exactly one letter — A (closing soon), B (has potential, needs time), C (50/50), D (far), F (give up).
-7. Meeting Result: exactly one of — Positive / Neutral / Negative / Not interested.
-8. Output EXACTLY the format below. No text before or after it.
+5. Write every section as numbered points, ONE point per line (1. 2. 3.) — never one long paragraph.
+6. Next Actions and Products: ONE item per line, using the exact class / event / product name (e.g. 个人风水基础课, 博物馆, 简易风水-排屋 Simplified Fengshui Terrace House).
+7. Grade: exactly one letter — A (closing soon), B (has potential, needs time), C (50/50), D (far), F (give up).
+8. Meeting Result: exactly one of — Positive / Neutral / Negative / Not interested.
+9. Output EXACTLY the format below. No text before or after it.
 
 1. 客户背景 (Customer Background)
 -
@@ -1508,8 +1509,9 @@ My raw notes:
         const H = window._dataHelpers;
         if (!text.trim()) { resEl.innerHTML = `<p style="font-size:12px;color:var(--gray-500);margin:8px 0 0;">Paste the ChatGPT minutes first.</p>`; return; }
         if (!H || typeof H.parseMeetingMinutes !== 'function') { UI.toast.error('Please reload the page and try again'); return; }
-        const ctx = _minutesCtx.get(prefix) || { existing: null, pending: {} };
+        const ctx = _minutesCtx.get(prefix) || { existing: null, pending: {}, filled: {} };
         ctx.pending = {};
+        ctx.filled = ctx.filled || {};
         _minutesCtx.set(prefix, ctx);
         const p = H.parseMeetingMinutes(text);
         const rows = [];
@@ -1540,16 +1542,21 @@ My raw notes:
             }
         }
 
+        // Each section lands as numbered points. A field that still holds what
+        // an earlier paste put there (or nothing) follows the edited paste; a
+        // field the agent changed by hand is kept and asked about.
+        const _pts = (H.formatMinutePoints || ((t) => t));
         for (const [key, field, label] of _MINUTES_TEXT_FIELDS) {
             const id = `${prefix}-${field}`;
             const el = document.getElementById(id);
-            const val = p.sections[key];
+            const val = p.sections[key] ? _pts(p.sections[key]) : '';
             if (!el) continue;
             if (!val) { row(key, '–', label, 'not in minutes', id); continue; }
             const cur = el.value.trim();
-            if (!cur) { el.value = val; _flashField(el); row(key, '✓', label, 'filled', id); }
-            else if (cur.includes(val.trim())) row(key, '✓', label, 'already there', id);
-            else { ctx.pending[key] = val; row(key, '⚠', label, 'Kept existing text', id, `${act(key, 'append', 'Add below')} ${act(key, 'replace', 'Replace')}`); }
+            const prev = (ctx.filled[key] || '').trim();
+            if (cur === val.trim()) row(key, '✓', label, 'already there', id);
+            else if (!cur || (prev && cur === prev)) { el.value = val; ctx.filled[key] = val; _flashField(el); row(key, '✓', label, cur ? 'updated from your edit' : 'filled', id); }
+            else { ctx.pending[key] = val; row(key, '⚠', label, 'You changed this field — kept', id, `${act(key, 'replace', 'Use minutes')} ${act(key, 'append', 'Add below')}`); }
         }
 
         const tickList = (sectionKey, label, name, boxId, remarksId) => {
@@ -1632,6 +1639,7 @@ My raw notes:
             if (!el) return;
             const cur = el.value.replace(/\s+$/, '');
             el.value = (mode === 'replace' || !cur) ? val : `${cur}\n${val}`;
+            if (mode === 'replace' || !cur) ctx.filled[key] = val;
         }
         delete ctx.pending[key];
         const msg = document.querySelector(`#${prefix}-mrow-${key} .mrow-msg`);
@@ -1704,7 +1712,7 @@ My raw notes:
         // Fresh form → fresh paste state + empty photo queue for this prefix.
         const mm = (a.meeting_minutes && typeof a.meeting_minutes === 'object') ? a.meeting_minutes : null;
         if (!readOnly) {
-            _minutesCtx.set(prefix, { existing: mm, pending: {} });
+            _minutesCtx.set(prefix, { existing: mm, pending: {}, filled: (mm && mm.pasted && typeof mm.pasted === 'object') ? { ...mm.pasted } : {} });
             _minutesPendingPhotos.set(prefix, []);
         }
         const products = opts.products || [];
@@ -1756,13 +1764,13 @@ My raw notes:
             <div class="post-meetup-notes-block pmf" data-prefix="${prefix}">
                 ${readOnly ? '' : `
                 <details class="pmf-paste">
-                    <summary><i class="fas fa-paste" aria-hidden="true"></i> Have ChatGPT minutes? Paste them to fill this form</summary>
+                    <summary><i class="fas fa-paste" aria-hidden="true"></i> ${mm && mm.raw ? 'Edit the pasted ChatGPT minutes — Fill form updates only the fields they filled' : 'Have ChatGPT minutes? Paste them to fill this form'}</summary>
                     <div class="pmf-paste-body">
                         <div class="pmf-paste-bar">
                             <button type="button" class="btn secondary btn-sm" onclick="app.copyMinutesPrompt()"><i class="fas fa-copy"></i> Copy ChatGPT prompt</button>
                             <span>Text already in a field is kept — you choose to add or replace.</span>
                         </div>
-                        <textarea id="${prefix}-minutes-paste" class="form-control" rows="3" placeholder="Paste the whole ChatGPT minutes here" onpaste="setTimeout(function(){app.applyPastedMinutes('${prefix}')},0)"></textarea>
+                        <textarea id="${prefix}-minutes-paste" class="form-control" rows="${mm && mm.raw ? 8 : 3}" placeholder="Paste the whole ChatGPT minutes here" onpaste="setTimeout(function(){app.applyPastedMinutes('${prefix}')},0)">${escapeHtml((mm && mm.raw) || '')}</textarea>
                         <button type="button" class="btn secondary btn-sm" style="margin-top:6px;" onclick="app.applyPastedMinutes('${prefix}')"><i class="fas fa-wand-magic-sparkles"></i> Fill form</button>
                         <div id="${prefix}-minutes-result"></div>
                     </div>
@@ -2073,16 +2081,18 @@ My raw notes:
     // Uses the same serializer helpers as the legacy modal so stored shape is
     // unchanged — `opportunity_potential` and `next_action` remain the
     // checkbox-list + remarks text format the rest of the app already parses.
+    // Two or more lines in a notes box are saved as "1. … 2. …".
+    const _numbered = (v) => ((window._dataHelpers && window._dataHelpers.formatMinutePoints) || ((t) => t))(v || '');
     const collectPostMeetupNotesData = (prefix) => {
-        const keyPoints = document.getElementById(`${prefix}-key-points`)?.value || '';
+        const keyPoints = _numbered(document.getElementById(`${prefix}-key-points`)?.value || '');
         return {
             note_key_points: keyPoints,
             summary: keyPoints,
             // v7 pipeline signal — typed outcome; undefined when unset so the
             // JSON payload drops the key instead of clobbering a stored value.
             outcome: document.getElementById(`${prefix}-outcome-type`)?.value || undefined,
-            note_needs: document.getElementById(`${prefix}-needs`)?.value || '',
-            note_pain_points: document.getElementById(`${prefix}-pain-points`)?.value || '',
+            note_needs: _numbered(document.getElementById(`${prefix}-needs`)?.value || ''),
+            note_pain_points: _numbered(document.getElementById(`${prefix}-pain-points`)?.value || ''),
             opportunity_potential: (window.app.serializeMultiSelectToText || (() => ''))(`${prefix}-opp-items`, `${prefix}-opportunity-remarks`),
             // Next steps: the list is the record (each row = one task, DB
             // trigger); next_action / next_action_due keep a plain summary for
@@ -2105,14 +2115,18 @@ My raw notes:
     const _collectMeetingMinutes = (prefix) => {
         if (!document.getElementById(`${prefix}-background`)) return undefined;
         const g = (id) => (document.getElementById(`${prefix}-${id}`)?.value || '').trim();
-        const prev = (_minutesCtx.get(prefix) || {}).existing || null;
-        const background = g('background'), advisor = g('advisor'), reaction = g('reaction');
+        const ctx = _minutesCtx.get(prefix) || {};
+        const prev = ctx.existing || null;
+        const background = _numbered(g('background')), advisor = _numbered(g('advisor')), reaction = _numbered(g('reaction'));
         const pasted = g('minutes-paste');
         const raw = pasted || (prev && prev.raw) || '';
         if (!background && !advisor && !reaction && !raw) return prev ? null : undefined;
         return {
             v: 1, raw, background, advisor, reaction,
             source: pasted ? 'paste' : ((prev && prev.source) || 'manual'),
+            // what the paste put in each field — a later "Fill form" on an
+            // edited paste updates only fields that still hold this
+            pasted: ctx.filled && Object.keys(ctx.filled).length ? { ...ctx.filled } : ((prev && prev.pasted) || undefined),
             updated_at: new Date().toISOString(),
         };
     };
