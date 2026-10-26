@@ -2285,6 +2285,39 @@ const pvOpenMeeting = async (kind, id, muid) => {
     row.querySelector('.mu-row')?.setAttribute('aria-expanded', 'true');
     setTimeout(() => row.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
 };
+// "Details" beside the name (2026-10-26, owner): Basic Information in a
+// pop-up without leaving the current tab. Filled by the SAME renderers as the
+// Details tab, so the two can never differ. Body ids pv-details-body-<id> are
+// looked up by the life-chart tick (activities chunk) to refresh in place.
+const _pvDetailsBtnHtml = (kind, id) =>
+    ` <button type="button" class="pv-details-btn" onclick="event.stopPropagation();app.pvShowDetails('${kind}', ${Number(id)})" aria-label="Show details"><i class="fas fa-id-card" aria-hidden="true"></i> Details</button>`;
+const pvShowDetails = async (kind, id) => {
+    const isCust = kind === 'customer';
+    const rec = await AppDataStore.getById(isCust ? 'customers' : 'prospects', id).catch(() => null);
+    const key = isCust ? `c${Number(id)}` : `${Number(id)}`;
+    const loading = '<div class="acc-loading"><i class="fas fa-spinner fa-spin"></i> Loading…</div>';
+    const body = isCust
+        ? `<div id="pv-details-body-${key}">${loading}</div>
+           <div class="pv-sub">Bank &amp; Payment</div><div id="pv-details-bank-${key}">${loading}</div>
+           <div class="pv-sub">Platform IDs</div><div id="pv-details-plat-${key}">${loading}</div>`
+        : `<div id="pv-details-body-${key}">${loading}</div>`;
+    const edit = isCust ? `app.openCustomerEditModal(${Number(id)})` : `app.editProspect(${Number(id)})`;
+    UI.showModal((rec && rec.full_name) || 'Details', `<div class="pv-details-pop pv-compact">${body}</div>`, [
+        { label: 'Close', type: 'secondary', action: 'UI.hideModal()' },
+        { label: 'Edit', type: 'primary', action: `UI.hideModal();${edit}` },
+    ], window.innerWidth <= 768 ? 'fullscreen' : undefined);
+    const el = (sfx) => document.getElementById(`pv-details-${sfx}-${key}`);
+    if (isCust) {
+        await window.app.switchCustomerProfileTab('info', id, el('body'));
+        await Promise.all([
+            window.app.switchCustomerProfileTab('bank', id, el('bank')),
+            window.app.switchCustomerProfileTab('platforms', id, el('plat')),
+        ].map(p => Promise.resolve(p).catch(() => {})));
+    } else {
+        await switchProspectTab('info', id, null, el('body'));
+    }
+};
+
 // Protection details + Extend / Transfer / Reassign, from the header chip.
 const openProtectionSheet = async (prospectId) => {
     UI.showModal('Protection period', '<div id="pv-prot-sheet"><div class="acc-loading"><i class="fas fa-spinner fa-spin"></i> Loading…</div></div>',
@@ -2668,7 +2701,7 @@ const buildProspectDetailHeaderHtml = (prospect, cpsPhoto) => {
                         <span class="pv-chip is-action" role="button" tabindex="0" ${_kb} onclick="event.stopPropagation();app.openScoreAdjustmentModal('prospect',${prospect.id})" title="Click to adjust score"><i class="fas fa-star" aria-hidden="true" style="color:#B26B00;"></i> ${prospect.score || 0} pts (${getScoreGrade(prospect.score || 0)}) <i class="fas fa-pen" aria-hidden="true" style="font-size:10px;"></i></span>
                         ${_protChip}
                     </div>
-                    <h1 class="pv-name">${escapeHtml(prospect.full_name)}${prospect.nickname ? ` <span class="pv-nick">"${escapeHtml(prospect.nickname)}"</span>` : ''}</h1>
+                    <h1 class="pv-name">${escapeHtml(prospect.full_name)}${prospect.nickname ? ` <span class="pv-nick">"${escapeHtml(prospect.nickname)}"</span>` : ''}${_pvDetailsBtnHtml('prospect', pid)}</h1>
                     ${_pvFactsHtml(prospect)}
                     <div class="pv-actions">
                         <button class="btn primary btn-sm pv-cta" onclick="app.openActivityModal('', ${pid})"><i class="fas fa-calendar-plus" aria-hidden="true"></i> Book follow-up</button>
@@ -8318,6 +8351,8 @@ const openPastRecordModal = async (...args) => {
         pvMenuHtml: _pvMenuHtml,
         pvSnapHtml: _pvSnapHtml,
         pvTabsHtml: _pvTabsHtml,
+        pvDetailsBtnHtml: _pvDetailsBtnHtml,
+        pvShowDetails,
         renderProfileTasks,
         pvRefreshTasks,
         pvTaskToggle,

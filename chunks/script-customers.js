@@ -734,7 +734,7 @@ const showCustomerDetail = async (customerId) => {
                         ${renderHealthBadge(health)}
                         <span class="pv-chip"><i class="fas fa-lock" aria-hidden="true"></i> Permanent</span>
                     </div>
-                    <h1 class="pv-name">${escapeHtml(customer.full_name)}</h1>
+                    <h1 class="pv-name">${escapeHtml(customer.full_name)}${(window.app.pvDetailsBtnHtml || (() => ''))('customer', cid)}</h1>
                     ${(window.app.pvFactsHtml || (() => ''))(customer, [
                         `<span class="pv-fact">Customer since ${escapeHtml(customer.customer_since || '-')}${customer.conversion_amount != null ? ` · ${escapeHtml(UI.money(customer.conversion_amount, customer.country))}` : ''}</span>`,
                     ])}

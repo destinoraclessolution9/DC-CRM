@@ -5090,8 +5090,10 @@ My raw notes:
         if (!writeOk) {
             UI.toast.error('Failed to save life chart type — please try again');
             // Re-render to revert the checkbox to its actual persisted state
-            const bodyEl = document.getElementById(`acc-body-info-${prospectId}`);
-            if (bodyEl) await switchProspectTab('info', prospectId, null, bodyEl);
+            // (the Details tab and the Details pop-up beside the name).
+            for (const bodyEl of [`acc-body-info-${prospectId}`, `pv-details-body-${prospectId}`].map(id => document.getElementById(id)).filter(Boolean)) {
+                await switchProspectTab('info', prospectId, null, bodyEl);
+            }
             return;
         }
 
@@ -5101,8 +5103,7 @@ My raw notes:
         // silently reverts to its old state ("tick doesn't stick").
         AppDataStore.invalidateCache('prospects');
         UI.toast.success('Life chart type updated');
-        const bodyEl = document.getElementById(`acc-body-info-${prospectId}`);
-        if (bodyEl) {
+        for (const bodyEl of [`acc-body-info-${prospectId}`, `pv-details-body-${prospectId}`].map(id => document.getElementById(id)).filter(Boolean)) {
             bodyEl.querySelectorAll('input[type="checkbox"]').forEach(chk => {
                 const oc = chk.getAttribute('onchange') || '';
                 const row = chk.closest('.pv-row');

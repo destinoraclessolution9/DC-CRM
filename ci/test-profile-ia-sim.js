@@ -203,6 +203,7 @@ const flush = () => new Promise(r => setImmediate(r));
     check('header: Book follow-up is the primary action', /btn primary btn-sm pv-cta" onclick="app\.openActivityModal\('', 55\)"/.test(html));
     check('header: protection chip opens the sheet', html.includes('app.openProtectionSheet(55)'));
     check('header: key facts (age, ming gua)', html.includes('Ming Gua 6') && /Age \d+/.test(html));
+    check('header: Details button beside the name', /<h1 class="pv-name">[^]*?app\.pvShowDetails\('prospect', 55\)[^]*?<\/h1>/.test(html));
 
     const next = dom.card('prospect:55', 'next').innerHTML;
     check('next card: overdue task beats the booked FTF', next.includes('Overdue · 2 days') && next.includes('call his wife'));
@@ -235,6 +236,18 @@ const flush = () => new Promise(r => setImmediate(r));
     check('next card: nothing booked', dom.card('prospect:55', 'next').innerHTML.includes('Nothing booked'));
     check('last card: event closing opens its attendee row', dom.card('prospect:55', 'last').innerHTML.includes("'mu-att9'"));
     ACTS.splice(0, ACTS.length, ...saved);
+  }
+
+  // ═══ Details pop-up beside the name ═══════════════════════════════════════
+  {
+    const { dom, app, sandbox } = makeSandbox();
+    let modal = null;
+    sandbox.UI.showModal = (title, html, actions, size) => { modal = { title, html, actions, size }; dom.el('pv-details-body-55'); };
+    await app.pvShowDetails('prospect', PID);
+    check('details: pop-up titled with the name (raw, showModal escapes)', modal && modal.title, PROSPECT.full_name);
+    check('details: body id the life-chart tick refreshes', modal && modal.html.includes('id="pv-details-body-55"'));
+    check('details: Edit opens the prospect edit form', !!(modal && modal.actions.some(a => a.label === 'Edit' && a.action.includes('app.editProspect(55)'))));
+    check('details: filled by the Basic Information renderer', /Ming Gua/.test(dom.document.getElementById('pv-details-body-55').innerHTML));
   }
 
   // ═══ Next up ═══════════════════════════════════════════════════════════════
