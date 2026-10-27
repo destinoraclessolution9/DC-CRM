@@ -1,5 +1,5 @@
 // ci/test-pipeline-capture.js — the 2026-10-27 pipeline-capture build, client side:
-//   * 传福者 board rendering (reporting chunk _cfBodyHtml): ranking, period,
+//   * 传福大使 board rendering (reporting chunk _cfBodyHtml): ranking, period,
 //     promote / remove for leaders only, the typed-referrer link list.
 //   * Pipeline draft deals: ring codes ("PR6", "Powering 4") name catalogue rings.
 //   * CPS form "Introduced by (client)": a client referrer fills it, the
@@ -74,7 +74,7 @@ const R = loadChunk('chunks/script-reporting.js', ['_cfBodyHtml', '_cfRange', '_
 const PL = loadChunk('chunks/script-pipeline.js', ['_plProductsInText']);
 const A = loadChunk('chunks/script-activities.js', ['selectReferrer', 'selectIntroducer', 'setIntroducerOwn', 'clearIntroducer']);
 
-// ── 传福者 board ────────────────────────────────────────────────────────────
+// ── 传福大使 board ────────────────────────────────────────────────────────────
 const data = {
     sum: { cps_total: 117, from_clients: 47, agent_only: 70, own_contact: 0 },
     rows: [
@@ -87,7 +87,7 @@ const data = {
 let h = R._cfBodyHtml(data);
 ok('board: headline shows the agent-only gap', h.includes('117 CPS') && h.includes('<b>47</b> from clients') && h.includes('70 with no client recorded'));
 ok('board: ranked, this year hides people with no CPS this year', h.indexOf('LIM MIN QI') < h.indexOf('Meng') && !h.includes('Old Referrer'));
-ok('board: name escaped, member badge', h.includes('Low &lt;b&gt;Meng&lt;/b&gt; Yee') && h.includes('⭐ 传福者'));
+ok('board: name escaped, member badge', h.includes('Low &lt;b&gt;Meng&lt;/b&gt; Yee') && h.includes('⭐ 传福大使'));
 ok('board: sales shown as RM', h.includes('RM22,980'));
 ok('board: opens the right record', h.includes('app.showProspectDetail(11)') && h.includes('app.showCustomerDetail(22)'));
 ok('board: leader can promote / remove', h.includes("app.cfPromote('p:11', true)") && h.includes("app.cfPromote('c:22', false)"));

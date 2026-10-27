@@ -445,7 +445,7 @@
         _state.scon = [];
         _state.se = null;
         _state.sr = null;
-        _state.si = null;   // introduced by (client) — 传福者
+        _state.si = null;   // introduced by (client) — 传福大使
         window._cpsDuplicateConfirmed = false;
 
         // Pre-fetch lookup data BEFORE building the template (safer than await inside template literals).
@@ -1203,7 +1203,7 @@
                 </div>
                 ${prefix === 'cps' ? `
                 <div class="form-group">
-                    <label>Introduced by (client) <span style="font-weight:400;color:var(--gray-500);">· 传福者 who brought them</span></label>
+                    <label>Introduced by (client) <span style="font-weight:400;color:var(--gray-500);">· 传福大使 who brought them</span></label>
                     <div style="position:relative;">
                         <input type="text" id="${prefix}-introducer" class="form-control" placeholder="Search the customer / prospect who introduced them…" oninput="app.debounceCall('${prefix}-introducer', () => app.searchIntroducers(), 250)" ${disabled}>
                         <div id="${prefix}-introducer-results" class="search-results-dropdown" style="display:none;position:absolute;z-index:1000;background:white;border:1px solid #ddd;border-radius:4px;width:100%;max-height:280px;overflow-y:auto;box-shadow:0 4px 8px rgba(0,0,0,0.1);"></div>
@@ -6168,9 +6168,9 @@ My raw notes:
 
     const searchReferrers = () => _runReferrerSearch('cps', 'selectReferrer');
 
-    // ── Introduced by (client) — 传福者 (owner 2026-10-27) ─────────────────────
+    // ── Introduced by (client) — 传福大使 (owner 2026-10-27) ─────────────────────
     // "Referred By" is often the agent; this records the CLIENT who brought the
-    // person, so the 传福者 board can count who really brings the CPS. A client
+    // person, so the 传福大使 board can count who really brings the CPS. A client
     // referrer fills it by itself; an agent referrer needs it (or "agent's own
     // contact").
     const _introBadge = () => {
@@ -6987,7 +6987,7 @@ My raw notes:
                 UI.toast.error('A referrer is required. All appointments must be by recommendation. Search and select the person who referred this prospect.');
                 return;
             }
-            // An agent as referrer: say which client introduced them (传福者),
+            // An agent as referrer: say which client introduced them (传福大使),
             // or that it is the agent's own contact.
             if (_state.sr.type === 'Consultant' && !_state.si) {
                 UI.toast.error('Who introduced this person? Pick the client under "Introduced by (client)", or tap "Agent\'s own contact".');

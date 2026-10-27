@@ -190,7 +190,7 @@
                      self-injects after #kpi-stats-grid there (People Met pattern). -->
                 <div id="name-list-section" style="margin-top:24px;"></div>
 
-                <!-- 传福者 — who brings the CPS (owner ask 2026-10-27). Filled by
+                <!-- 传福大使 — who brings the CPS (owner ask 2026-10-27). Filled by
                      renderChuanfuSection; self-injects in the React shell. -->
                 <div id="chuanfu-section" style="margin-top:24px;"></div>
 
@@ -3781,11 +3781,11 @@ const nlExpand = (tableKey) => {
     if (_nlLast) { const el = document.getElementById('nl-body'); if (el) el.innerHTML = _nlBodyHtml(_nlLast); }
 };
 
-// ========== 传福者 — WHO BRINGS THE CPS (owner ask 2026-10-27) ==========
+// ========== 传福大使 — WHO BRINGS THE CPS (owner ask 2026-10-27) ==========
 // Every client who introduced people (prospects.introduced_by, else a client
 // "Referred By"), ranked by CPS brought in the period: all people referred,
 // how many became customers, their sales, last CPS. Top referrers can be
-// promoted to 传福者. Below: referrers typed as plain text, to link to the
+// promoted to 传福大使. Below: referrers typed as plain text, to link to the
 // real record. Data: chuanfu_board / chuanfu_summary / referrer_unlinked
 // (migrations/2026-10-27_chuanfu_board.sql — scoped to the viewer's team).
 let _cfOpen = (() => { try { return localStorage.getItem('fs_cf_open') === '1'; } catch (_) { return false; } })();
@@ -3834,7 +3834,7 @@ const _cfBodyHtml = (d) => {
         <div class="cf-row">
             <span class="cf-rank">${i + 1}</span>
             <div class="cf-who">
-                <a href="javascript:void(0)" onclick="${_cfOpenPerson(r.person_key)}">${escapeHtml(r.name || '—')}</a>${r.is_member ? ' <span class="cf-badge">⭐ 传福者</span>' : ''}
+                <a href="javascript:void(0)" onclick="${_cfOpenPerson(r.person_key)}">${escapeHtml(r.name || '—')}</a>${r.is_member ? ' <span class="cf-badge">⭐ 传福大使</span>' : ''}
                 <div class="cf-sub">${escapeHtml(r.agent || '')}${r.last_cps ? ` · last CPS ${escapeHtml(new Date(r.last_cps + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }))}` : ''}</div>
             </div>
             <div class="cf-nums">
@@ -3845,7 +3845,7 @@ const _cfBodyHtml = (d) => {
             </div>
             ${canEdit ? (r.is_member
                 ? `<button type="button" class="btn btn-sm secondary cf-act" onclick="app.cfPromote('${escapeHtml(r.person_key)}', false)">Remove ⭐</button>`
-                : `<button type="button" class="btn btn-sm primary cf-act" onclick="app.cfPromote('${escapeHtml(r.person_key)}', true)">Promote to 传福者</button>`) : ''}
+                : `<button type="button" class="btn btn-sm primary cf-act" onclick="app.cfPromote('${escapeHtml(r.person_key)}', true)">Promote to 传福大使</button>`) : ''}
         </div>`).join('') : '<div class="cf-empty">No client referrals in this period yet.</div>';
     const more = rows.length > 15 ? `<button type="button" class="btn btn-sm secondary" style="margin-top:8px;" onclick="app.cfToggleAll()">${_cfShowAll ? 'Show top 15' : `Show all ${rows.length}`}</button>` : '';
     let link = '';
@@ -3894,7 +3894,7 @@ const renderChuanfuSection = async () => {
     container.innerHTML = `
         <div class="kpi-card">
             <h3 class="kpi-card-title" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;" onclick="app.cfToggle()">
-                <span>🤝 传福者 — who brings the CPS
+                <span>🤝 传福大使 — who brings the CPS
                     <span style="font-weight:400;color:var(--gray-400);font-size:13px;">client referrers ranked · promote the top ones</span>
                 </span>
                 <span style="font-size:13px;color:var(--primary,#0D9488);white-space:nowrap;">${_cfOpen ? '▲ Hide' : '▼ Open'}</span>
@@ -3915,7 +3915,7 @@ const cfPromote = async (key, on) => {
     const sb = window.supabase || window.supabaseClient;
     const { data, error } = await sb.rpc('chuanfu_promote', { p_key: key, p_on: !!on });
     if (error || data === false) { UI.toast.error('Could not update: ' + ((error && error.message) || 'not allowed')); return; }
-    UI.toast.success(on ? '⭐ Promoted to 传福者' : 'Removed from 传福者');
+    UI.toast.success(on ? '⭐ Promoted to 传福大使' : 'Removed from 传福大使');
     await _cfRefresh();
 };
 const cfLink = async (i, kind, id) => {
