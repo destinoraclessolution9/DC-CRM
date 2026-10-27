@@ -7207,6 +7207,7 @@
             note_needs: attendee.note_needs || '',
             note_pain_points: attendee.note_pain_points || '',
             opportunity_potential: attendee.opportunity_potential || '',
+            quoted_prices: attendee.quoted_prices || null,
             next_action: attendee.next_action || '',
             next_actions: Array.isArray(attendee.next_actions) ? attendee.next_actions : null,
             next_action_due: attendee.next_action_due || null,
@@ -7252,6 +7253,7 @@
             post_event_updated_by: _state.cu?.id || null,
         };
         if (fields.meeting_minutes !== undefined) updates.meeting_minutes = fields.meeting_minutes;
+        if (fields.quoted_prices !== undefined) updates.quoted_prices = fields.quoted_prices;
 
         const sb = window.supabase || window.supabaseClient;
 

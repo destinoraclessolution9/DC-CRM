@@ -73,6 +73,7 @@ const appStub = {
 const windowStub = { _appState: { cu: { id: 1, role: 'Level 1' } }, _crmUtils, app: appStub, _loadChunk: async () => {}, addEventListener: () => {}, location: { hostname: 'localhost' } };
 const sandbox = {
   window: windowStub, document, AppDataStore: {}, UI, app: appStub, console,
+  CSS: { escape: (v) => String(v).replace(/["\\]/g, '\\$&') },
   setTimeout: () => 0, clearTimeout: () => {}, localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
   navigator: { userAgent: 'node-sim' }, URL, Blob: function () {}, FileReader: function () {}, FormData: function () {},
   fetch: async () => ({ ok: false, json: async () => ({}) }),
@@ -227,6 +228,32 @@ const OPTS = {
   app.applyPastedMinutes('pmn');
   check('section: PR5 + 大满福 ticked', oppBoxes.filter(b => b.checked).map(b => b.value).join('|'), '五福指环 Five Star Power Ring|大满福 Da Man Fu');
   check('section: bare ring code not copied into remarks', byId.get('pmn-opportunity-remarks').value, '');
+  oppBoxes = [];
+}
+// ── Quoted RM per product (2026-10-27) ─────────────────────────────────────
+{
+  const box = (v, price) => ({ value: v, checked: true, dataset: { group: 'Products', ...(price ? { price: String(price) } : {}) } });
+  oppBoxes = [box('六曜指环 Support Power Ring', 18990), box('专案-排屋 Terrace House (Direct On)', 0)];
+  // the form seeds saved quotes from the activity row
+  app.buildPostMeetupNotesBlock('pmq', { activity_date: '2026-10-27', quoted_prices: { '六曜指环 Support Power Ring': 15000 } }, OPTS);
+  el('pmq-opp-chips');
+  const q = (sel) => sel;
+  oppBoxes.forEach(b => b);
+  document.querySelectorAll = ((orig) => (sel) => (/^input\[name="pmq-opp-items"\]/.test(sel) ? oppBoxes : orig(sel)))(document.querySelectorAll);
+  app.pmfRenderProducts('pmq');
+  const h1 = byId.get('pmq-opp-chips').innerHTML;
+  check('quote: one row per product with a Quoted RM box', (h1.match(/class="pmf-prow/g) || []).length === 2 && h1.includes('Quoted RM'));
+  check('quote: saved quote shown, list price kept as reference', h1.includes('value="15000"') && h1.includes('list RM 18,990'));
+  check('quote: a plan with no list price asks for one', /pmf-prow need[\s\S]*专案-排屋/.test(h1) && h1.includes('1 need a quoted RM'));
+  check('quote: total uses the quote', h1.includes('RM 15,000'));
+  el('pmq-opp-total');
+  app.pmfSetQuote('pmq', '专案-排屋 Terrace House (Direct On)', 'RM58,980');
+  check('quote: typing a quote updates the total only', byId.get('pmq-opp-total').innerHTML.includes('RM 73,980') && !byId.get('pmq-opp-total').innerHTML.includes('need'));
+  app.pmfSetQuote('pmq', '六曜指环 Support Power Ring', '');
+  const d = app.collectPostMeetupNotesData('pmq');
+  check('quote: saved per product (cleared one falls back to list)', JSON.stringify(d.quoted_prices), JSON.stringify({ '专案-排屋 Terrace House (Direct On)': 58980 }));
+  oppBoxes.forEach(b => { b.checked = false; });
+  check('quote: nothing ticked → null (clears old quotes)', app.collectPostMeetupNotesData('pmq').quoted_prices, null);
   oppBoxes = [];
 }
 check('ChatGPT prompt asks for one numbered point per line', /numbered points, ONE point per line/.test(fs.readFileSync(path.join(__dirname, '..', 'chunks', 'script-activities.js'), 'utf8')));

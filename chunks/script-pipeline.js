@@ -701,7 +701,10 @@ const calcPipelineEntry = async (prospect, prospectActivities, prefetched) => {
         // MUST copy before sort: prospectActivities is a SHARED bucket from _actsByProspect (perf de-quad). In-place sort would corrupt other prospects' lookups.
         const sorted = [...prospectActivities].sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
         lastActivityDate = new Date(sorted[0].activity_date);
-        latestOppPotential = sorted.find(a => a.opportunity_potential?.trim())?.opportunity_potential || '';
+        const _oppAct = sorted.find(a => a.opportunity_potential?.trim());
+        latestOppPotential = _oppAct?.opportunity_potential || '';
+        // that meeting's quoted RM per product (2026-10-27) — used by the draft deals
+        _plLatestQuotes.set(String(prospect.id), (_oppAct && _oppAct.quoted_prices && typeof _oppAct.quoted_prices === 'object') ? _oppAct.quoted_prices : null);
         latestNextAction = sorted.find(a => a.next_action?.trim())?.next_action || '';
     }
     const daysSinceLast = lastActivityDate
@@ -6010,11 +6013,17 @@ const _PL_CAT_PRODUCT_RX = {
     bujishu: /bujishu|满堂/i, formula: /formula/i,
 };
 // Catalogue products named inside free text ("[Products] A, B | Remarks: …").
+// prospect id → { product: quoted RM } of the meeting that named the products
+const _plLatestQuotes = new Map();
 const _plProductsInText = (text, products) => {
     const t = String(text || '').split(/\|\s*remarks/i)[0].replace(/^\s*\[products\]\s*/i, '').trim();
     if (!t) return { label: '', matched: [] };
     const low = t.toLowerCase();
+    // "PR6" / "Powering 4" name a catalogue ring too (data-helpers ring codes)
+    const H = window._dataHelpers || {};
+    const ringNames = new Set(typeof H.ringAliasesIn === 'function' ? H.ringAliasesIn(t, products.map(p => p.name)) : []);
     const matched = products.filter(p => {
+        if (ringNames.has(p.name)) return true;
         const n = String(p.name || '').trim();
         if (n.length < 3) return false;
         if (low.includes(n.toLowerCase())) return true;
@@ -6080,7 +6089,8 @@ const _plAutoDraftDeals = async () => {
         }
         const opp = _plProductsInText(e.latestOppPotential, products);
         if (opp.matched.length) {
-            const amt = opp.matched.reduce((a, m) => a + (Number(m.price) || 0), 0);
+            const q = _plLatestQuotes.get(String(p.id)) || {};
+            const amt = opp.matched.reduce((a, m) => a + (Number(q[m.name]) || Number(m.price) || 0), 0);
             if (amt > 0) {
                 tiers[0].push({ ...base, product: opp.matched.map(m => m.name).join(', ').slice(0, 160), product_id: opp.matched.length === 1 ? opp.matched[0].id : null, amount: amt, expected_close_date: idle <= 14 ? thisEnd : nextEnd });
                 continue;

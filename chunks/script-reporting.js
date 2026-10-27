@@ -190,6 +190,10 @@
                      self-injects after #kpi-stats-grid there (People Met pattern). -->
                 <div id="name-list-section" style="margin-top:24px;"></div>
 
+                <!-- 传福者 — who brings the CPS (owner ask 2026-10-27). Filled by
+                     renderChuanfuSection; self-injects in the React shell. -->
+                <div id="chuanfu-section" style="margin-top:24px;"></div>
+
                 <!-- 汇集 → Closing conversion (owner ask 2026-08-15). Filled by
                      renderHuijiConversionSection; self-injects in the React
                      shell (Name List pattern). -->
@@ -1471,6 +1475,7 @@
             renderActivityAttendanceDetails().catch(e => console.warn('renderActivityAttendanceDetails failed:', e)),
             renderPeopleMetSection().catch(e => console.warn('renderPeopleMetSection failed:', e)),
             renderNameListSection().catch(e => console.warn('renderNameListSection failed:', e)),
+            renderChuanfuSection().catch(e => console.warn('renderChuanfuSection failed:', e)),
             renderHuijiConversionSection().catch(e => console.warn('renderHuijiConversionSection failed:', e)),
             // Hierarchical target comparison runs in the same parallel batch.
             // Wrapped so a render failure doesn't reject the whole Promise.all.
@@ -3774,6 +3779,153 @@ const nlTab = (key) => { _nlTab = key; if (_nlLast) { const el = document.getEle
 const nlExpand = (tableKey) => {
     if (_nlExpanded.has(tableKey)) _nlExpanded.delete(tableKey); else _nlExpanded.add(tableKey);
     if (_nlLast) { const el = document.getElementById('nl-body'); if (el) el.innerHTML = _nlBodyHtml(_nlLast); }
+};
+
+// ========== 传福者 — WHO BRINGS THE CPS (owner ask 2026-10-27) ==========
+// Every client who introduced people (prospects.introduced_by, else a client
+// "Referred By"), ranked by CPS brought in the period: all people referred,
+// how many became customers, their sales, last CPS. Top referrers can be
+// promoted to 传福者. Below: referrers typed as plain text, to link to the
+// real record. Data: chuanfu_board / chuanfu_summary / referrer_unlinked
+// (migrations/2026-10-27_chuanfu_board.sql — scoped to the viewer's team).
+let _cfOpen = (() => { try { return localStorage.getItem('fs_cf_open') === '1'; } catch (_) { return false; } })();
+let _cfPeriod = 'year';
+let _cfShowAll = false;
+let _cfLinkOpen = false;
+let _cfLast = null;
+
+const _cfRange = (period) => {
+    const d = new Date();
+    const ymd = (x) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+    if (period === 'quarter') return [ymd(new Date(d.getFullYear(), Math.floor(d.getMonth() / 3) * 3, 1)), ymd(d)];
+    if (period === 'year') return [ymd(new Date(d.getFullYear(), 0, 1)), ymd(d)];
+    return [null, null];
+};
+const _cfRM = (n) => 'RM' + Math.round(Number(n) || 0).toLocaleString('en-MY');
+const _cfLoad = async () => {
+    const sb = window.supabase || window.supabaseClient;
+    if (!sb) return null;
+    const [from, to] = _cfRange(_cfPeriod);
+    const [b, s, u] = await Promise.all([
+        sb.rpc('chuanfu_board', { p_from: from, p_to: to }),
+        sb.rpc('chuanfu_summary', { p_from: from, p_to: to }),
+        isTeamLeaderOrAbove() ? sb.rpc('referrer_unlinked', { p_limit: 200 }) : Promise.resolve({ data: [] }),
+    ]);
+    if (b.error) throw b.error;
+    return { rows: b.data || [], sum: (s.data || [])[0] || null, unlinked: u.data || [] };
+};
+const _cfOpenPerson = (key) => {
+    const m = /^([cp]):(\d+)$/.exec(String(key || ''));
+    if (!m) return '';
+    return m[1] === 'c' ? `app.showCustomerDetail(${m[2]})` : `app.showProspectDetail(${m[2]})`;
+};
+const _cfBodyHtml = (d) => {
+    const canEdit = isTeamLeaderOrAbove();
+    const chip = (k, label) => `<button type="button" class="cf-chip${_cfPeriod === k ? ' on' : ''}" onclick="app.cfPeriod('${k}')">${label}</button>`;
+    const s = d.sum;
+    const head = `
+        <div class="cf-bar">
+            <div class="cf-chips">${chip('quarter', 'This quarter')}${chip('year', 'This year')}${chip('all', 'All time')}</div>
+            ${s ? `<div class="cf-sum">${s.cps_total} CPS · <b>${s.from_clients}</b> from clients · <span class="${s.agent_only ? 'cf-warn' : ''}">${s.agent_only} with no client recorded</span>${s.own_contact ? ` · ${s.own_contact} agent's own` : ''}</div>` : ''}
+        </div>`;
+    const rows = d.rows.filter(r => _cfPeriod === 'all' ? r.referred_total > 0 : r.cps_period > 0);
+    const shown = _cfShowAll ? rows : rows.slice(0, 15);
+    const list = shown.length ? shown.map((r, i) => `
+        <div class="cf-row">
+            <span class="cf-rank">${i + 1}</span>
+            <div class="cf-who">
+                <a href="javascript:void(0)" onclick="${_cfOpenPerson(r.person_key)}">${escapeHtml(r.name || '—')}</a>${r.is_member ? ' <span class="cf-badge">⭐ 传福者</span>' : ''}
+                <div class="cf-sub">${escapeHtml(r.agent || '')}${r.last_cps ? ` · last CPS ${escapeHtml(new Date(r.last_cps + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }))}` : ''}</div>
+            </div>
+            <div class="cf-nums">
+                <span title="CPS in this period"><b>${_cfPeriod === 'all' ? r.referred_total : r.cps_period}</b><small>CPS</small></span>
+                <span title="People referred, all time"><b>${r.referred_total}</b><small>referred</small></span>
+                <span title="Became customers"><b>${r.became_customers}</b><small>customers</small></span>
+                <span title="Their sales"><b>${Number(r.sales_rm) > 0 ? _cfRM(r.sales_rm) : '—'}</b><small>sales</small></span>
+            </div>
+            ${canEdit ? (r.is_member
+                ? `<button type="button" class="btn btn-sm secondary cf-act" onclick="app.cfPromote('${escapeHtml(r.person_key)}', false)">Remove ⭐</button>`
+                : `<button type="button" class="btn btn-sm primary cf-act" onclick="app.cfPromote('${escapeHtml(r.person_key)}', true)">Promote to 传福者</button>`) : ''}
+        </div>`).join('') : '<div class="cf-empty">No client referrals in this period yet.</div>';
+    const more = rows.length > 15 ? `<button type="button" class="btn btn-sm secondary" style="margin-top:8px;" onclick="app.cfToggleAll()">${_cfShowAll ? 'Show top 15' : `Show all ${rows.length}`}</button>` : '';
+    let link = '';
+    if (canEdit && d.unlinked.length) {
+        const total = d.unlinked.reduce((n, u) => n + (Number(u.people) || 0), 0);
+        link = `
+        <div class="cf-link">
+            <button type="button" class="cf-link-head" onclick="app.cfToggleLink()">
+                <span>🔗 Referrers typed as text — link them (${d.unlinked.length} names · ${total} people)</span><span>${_cfLinkOpen ? '▲' : '▼'}</span>
+            </button>
+            ${_cfLinkOpen ? `<p class="cf-sub" style="margin:6px 0 8px;">These were typed by hand, so they are not counted for anyone. Link each to the right person — every prospect with that exact text is updated.</p>
+            ${d.unlinked.map((u, i) => {
+                const sug = Array.isArray(u.suggestions) ? u.suggestions : [];
+                return `
+                <div class="cf-urow">
+                    <div class="cf-who"><b>${escapeHtml(u.ref_text)}</b> <span class="cf-sub">× ${u.people}</span>
+                        <div class="cf-sub">${escapeHtml(u.examples || '')}</div></div>
+                    <div class="cf-sugs">${sug.length ? sug.map(x => `<button type="button" class="btn btn-sm secondary" onclick="app.cfLink(${i}, '${escapeHtml(x.kind)}', ${Number(x.id)})">${escapeHtml(x.name)} <small>${escapeHtml(x.kind === 'Consultant' ? 'agent' : x.kind.toLowerCase())}</small></button>`).join('') : '<span class="cf-sub">no likely match — fix it on the prospect</span>'}</div>
+                </div>`;
+            }).join('')}` : ''}
+        </div>`;
+    }
+    return head + `<div class="cf-list">${list}</div>` + more + link;
+};
+const _cfPaint = () => { const el = document.getElementById('cf-body'); if (el && _cfLast) el.innerHTML = _cfBodyHtml(_cfLast); };
+const _cfRefresh = async () => {
+    const el = document.getElementById('cf-body');
+    if (!el) return;
+    if (!_cfLast) el.innerHTML = '<div class="cf-empty"><i class="fas fa-spinner fa-spin"></i> Loading…</div>';
+    try { _cfLast = await _cfLoad(); _cfPaint(); }
+    catch (e) { el.innerHTML = `<div class="cf-empty">Could not load: ${escapeHtml((e && e.message) || String(e))}</div>`; }
+};
+const renderChuanfuSection = async () => {
+    let container = document.getElementById('chuanfu-section');
+    if (!container) {
+        // React shell: self-inject after the Name List (or the KPI grid)
+        const after = document.getElementById('name-list-section') || document.getElementById('kpi-stats-grid');
+        const root = after?.parentNode || document.querySelector('.kpi-dashboard');
+        if (!root) return;
+        container = document.createElement('div');
+        container.id = 'chuanfu-section';
+        container.style.marginTop = '24px';
+        if (after && after.nextSibling) root.insertBefore(container, after.nextSibling);
+        else root.appendChild(container);
+    }
+    container.innerHTML = `
+        <div class="kpi-card">
+            <h3 class="kpi-card-title" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;" onclick="app.cfToggle()">
+                <span>🤝 传福者 — who brings the CPS
+                    <span style="font-weight:400;color:var(--gray-400);font-size:13px;">client referrers ranked · promote the top ones</span>
+                </span>
+                <span style="font-size:13px;color:var(--primary,#0D9488);white-space:nowrap;">${_cfOpen ? '▲ Hide' : '▼ Open'}</span>
+            </h3>
+            <div id="cf-body" ${_cfOpen ? '' : 'style="display:none;"'}></div>
+        </div>`;
+    if (_cfOpen) await _cfRefresh();
+};
+const cfToggle = () => {
+    _cfOpen = !_cfOpen;
+    try { localStorage.setItem('fs_cf_open', _cfOpen ? '1' : '0'); } catch (_) { /* private mode */ }
+    renderChuanfuSection();
+};
+const cfPeriod = (p) => { _cfPeriod = p; _cfShowAll = false; _cfLast = null; _cfRefresh(); };
+const cfToggleAll = () => { _cfShowAll = !_cfShowAll; _cfPaint(); };
+const cfToggleLink = () => { _cfLinkOpen = !_cfLinkOpen; _cfPaint(); };
+const cfPromote = async (key, on) => {
+    const sb = window.supabase || window.supabaseClient;
+    const { data, error } = await sb.rpc('chuanfu_promote', { p_key: key, p_on: !!on });
+    if (error || data === false) { UI.toast.error('Could not update: ' + ((error && error.message) || 'not allowed')); return; }
+    UI.toast.success(on ? '⭐ Promoted to 传福者' : 'Removed from 传福者');
+    await _cfRefresh();
+};
+const cfLink = async (i, kind, id) => {
+    const u = _cfLast && _cfLast.unlinked[i];
+    if (!u) return;
+    const sb = window.supabase || window.supabaseClient;
+    const { data, error } = await sb.rpc('referrer_link', { p_text: u.ref_text, p_kind: kind, p_id: id });
+    if (error) { UI.toast.error('Could not link: ' + error.message); return; }
+    UI.toast.success(`Linked ${data || 0} prospect${data === 1 ? '' : 's'}`);
+    await _cfRefresh();
 };
 
 // ========== 汇集 → CLOSING CONVERSION (owner ask 2026-08-15) ==========
@@ -7422,6 +7574,13 @@ const exportKPIReport = async (format) => {
         wrFigureInput,
         // Name List — Who to Focus
         nlToggle,
+        renderChuanfuSection,
+        cfToggle,
+        cfPeriod,
+        cfToggleAll,
+        cfToggleLink,
+        cfPromote,
+        cfLink,
         nlTab,
         nlExpand,
         nlWhy,

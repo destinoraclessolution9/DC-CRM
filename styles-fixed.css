@@ -11855,6 +11855,48 @@ details[open] > summary.pmf-h::after { content: '▾'; }
 .pmf-pchip small { color: var(--gray-500); }
 .pmf-pchip button { width: 24px; height: 24px; border: none; border-radius: 50%; background: none; color: var(--gray-500); font-size: 16px; line-height: 1; cursor: pointer; }
 .pmf-ptotal { margin-left: 4px; font-size: 13.5px; font-weight: 700; color: var(--gray-900); }
+/* one row per product: name + list price · quoted RM · remove (2026-10-27) */
+.pmf-prodchips:has(.pmf-prow) { display: block; }
+.pmf-prow { display: flex; align-items: center; gap: 8px; padding: 6px 4px 6px 10px; margin-bottom: 6px; border: 1px solid var(--gray-300); border-radius: 10px; background: var(--gray-50, #F8F9FA); }
+.pmf-prow.need { border-color: #F59E0B; background: #FFFBEB; }
+.pmf-pname { flex: 1; min-width: 0; font-size: 13.5px; color: var(--gray-900); overflow-wrap: anywhere; }
+.pmf-pname small { color: var(--gray-500); white-space: nowrap; }
+.pmf-quote { display: flex; flex-direction: column; flex-shrink: 0; margin: 0; }
+.pmf-quote span { font-size: 10.5px; color: var(--gray-500); line-height: 1.2; }
+.pmf-quote input { width: 92px; height: 32px; padding: 0 8px; border: 1px solid var(--gray-300); border-radius: 8px; font-size: 14px; background: #fff; }
+.pmf-prow.need .pmf-quote input { border-color: #F59E0B; }
+.pmf-prow button { width: 28px; height: 28px; flex-shrink: 0; border: none; border-radius: 50%; background: none; color: var(--gray-500); font-size: 18px; line-height: 1; cursor: pointer; }
+.pmf-ptotal b { font-weight: 700; }
+.pmf-pmiss { font-weight: 600; color: #B45309; }
+/* 传福者 board (Reports, 2026-10-27) */
+.cf-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.cf-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.cf-chip { height: 30px; padding: 0 12px; border: 1px solid var(--gray-300); border-radius: 15px; background: #fff; font-size: 12.5px; cursor: pointer; }
+.cf-chip.on { background: var(--gray-900); color: #fff; border-color: var(--gray-900); }
+.cf-sum { font-size: 12.5px; color: var(--gray-600); }
+.cf-warn { color: #B45309; font-weight: 600; }
+.cf-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--gray-100); }
+.cf-rank { width: 22px; flex-shrink: 0; text-align: right; font-weight: 700; color: var(--gray-400); }
+.cf-who { flex: 1; min-width: 140px; }
+.cf-who a { font-weight: 600; color: var(--gray-900); text-decoration: none; }
+.cf-sub { font-size: 11.5px; color: var(--gray-500); }
+.cf-badge { font-size: 11px; font-weight: 600; color: #B45309; background: #FEF3C7; padding: 1px 6px; border-radius: 8px; white-space: nowrap; }
+.cf-nums { display: flex; gap: 14px; flex-shrink: 0; }
+.cf-nums span { display: flex; flex-direction: column; align-items: flex-end; min-width: 44px; }
+.cf-nums b { font-size: 14px; color: var(--gray-900); }
+.cf-nums small { font-size: 10.5px; color: var(--gray-500); }
+.cf-act { flex-shrink: 0; white-space: nowrap; }
+.cf-empty { padding: 14px 0; color: var(--gray-500); font-size: 13px; }
+.cf-link { margin-top: 14px; border-top: 1px solid var(--gray-200); padding-top: 10px; }
+.cf-link-head { display: flex; justify-content: space-between; width: 100%; background: none; border: none; padding: 4px 0; font-size: 13.5px; font-weight: 600; color: var(--gray-800); cursor: pointer; text-align: left; gap: 8px; }
+.cf-urow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--gray-100); }
+.cf-sugs { display: flex; flex-wrap: wrap; gap: 6px; }
+.cf-sugs small { color: var(--gray-500); margin-left: 3px; }
+@media (max-width: 768px) {
+    .cf-row { flex-wrap: wrap; }
+    .cf-nums { width: 100%; justify-content: space-between; padding-left: 32px; }
+    .cf-act { margin-left: 32px; }
+}
 .pmf-more { margin-top: 8px; }
 .pmf-more > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--gray-500); padding: 4px 0; }
 .pmf-more[open] > summary { margin-bottom: 8px; }

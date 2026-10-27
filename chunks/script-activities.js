@@ -445,6 +445,7 @@
         _state.scon = [];
         _state.se = null;
         _state.sr = null;
+        _state.si = null;   // introduced by (client) — 传福者
         window._cpsDuplicateConfirmed = false;
 
         // Pre-fetch lookup data BEFORE building the template (safer than await inside template literals).
@@ -1200,6 +1201,16 @@
                         </select>
                     </div>
                 </div>
+                ${prefix === 'cps' ? `
+                <div class="form-group">
+                    <label>Introduced by (client) <span style="font-weight:400;color:var(--gray-500);">· 传福者 who brought them</span></label>
+                    <div style="position:relative;">
+                        <input type="text" id="${prefix}-introducer" class="form-control" placeholder="Search the customer / prospect who introduced them…" oninput="app.debounceCall('${prefix}-introducer', () => app.searchIntroducers(), 250)" ${disabled}>
+                        <div id="${prefix}-introducer-results" class="search-results-dropdown" style="display:none;position:absolute;z-index:1000;background:white;border:1px solid #ddd;border-radius:4px;width:100%;max-height:280px;overflow-y:auto;box-shadow:0 4px 8px rgba(0,0,0,0.1);"></div>
+                    </div>
+                    <div id="${prefix}-introducer-info" style="margin-top:6px;"></div>
+                    <button type="button" class="btn btn-sm secondary" style="margin-top:6px;" onclick="app.setIntroducerOwn()" ${disabled}>Agent's own contact</button>
+                </div>` : ''}
                 <div id="${prefix}-relationship-other-div" class="form-group" style="display:${relOther ? 'block' : 'none'};margin-top:10px;">
                     <label>Please specify relation</label>
                     <input type="text" id="${prefix}-relationship-other" class="form-control" placeholder="Specify relation..." value="${relOther ? esc(d.referral_relationship) : ''}" ${disabled}>
@@ -1747,6 +1758,7 @@ My raw notes:
         const mm = (a.meeting_minutes && typeof a.meeting_minutes === 'object') ? a.meeting_minutes : null;
         if (!readOnly) {
             _minutesCtx.set(prefix, { existing: mm, pending: {}, filled: (mm && mm.pasted && typeof mm.pasted === 'object') ? { ...mm.pasted } : {} });
+            _pmfQuotes.set(prefix, (a.quoted_prices && typeof a.quoted_prices === 'object') ? { ...a.quoted_prices } : {});
             _minutesPendingPhotos.set(prefix, []);
         }
         const products = opts.products || [];
@@ -1988,15 +2000,56 @@ My raw notes:
         }
     };
 
-    // Products: search the hidden checkboxes, tick on pick, show chips + RM total.
+    // Products: search the hidden checkboxes, tick on pick, show one row per
+    // product with its list price and the QUOTED RM (owner 2026-10-27). The
+    // quote is what counts toward the open potential / deal; a plan with no
+    // single list price (专案, 商业, 灵活…) asks for one.
+    const _pmfQuotes = new Map();   // prefix → { "<product as ticked>": RM }
     const _pmfOppBoxes = (prefix) => [...document.querySelectorAll(`input[name="${prefix}-opp-items"]`)];
+    const _pmfQuoteOf = (prefix, name) => {
+        const v = Number(String(((_pmfQuotes.get(prefix) || {})[name]) ?? '').replace(/[^\d.]/g, ''));
+        return v > 0 ? v : 0;
+    };
+    const _pmfTotalHtml = (prefix, picked) => {
+        const total = picked.reduce((n, b) => n + (_pmfQuoteOf(prefix, b.value) || Number(b.dataset.price) || 0), 0);
+        const missing = picked.filter(b => !_pmfQuoteOf(prefix, b.value) && !(Number(b.dataset.price) > 0)).length;
+        return `${total > 0 ? `Total ≈ <b>RM ${Math.round(total).toLocaleString()}</b>` : ''}${missing ? ` <span class="pmf-pmiss">· ${missing} need a quoted RM</span>` : ''}`;
+    };
     const pmfRenderProducts = (prefix) => {
         const box = document.getElementById(`${prefix}-opp-chips`);
         if (!box) return;
         const picked = _pmfOppBoxes(prefix).filter(b => b.checked && b.dataset.group !== 'Bujishu Catalogue');
-        const total = picked.reduce((n, b) => n + (Number(b.dataset.price) || 0), 0);
-        box.innerHTML = picked.length ? `${picked.map(b => `<span class="pmf-pchip">${escapeHtml(b.value)}${Number(b.dataset.price) > 0 ? ` <small>RM ${Math.round(Number(b.dataset.price)).toLocaleString()}</small>` : ''}<button type="button" aria-label="Remove ${escapeHtml(b.value)}" onclick="app.pmfToggleProduct('${prefix}', this.dataset.v, false)" data-v="${escapeHtml(b.value)}">&times;</button></span>`).join('')}
-            ${total > 0 ? `<span class="pmf-ptotal">≈ RM ${Math.round(total).toLocaleString()}</span>` : ''}` : '';
+        box.innerHTML = picked.length ? `${picked.map(b => {
+            const list = Number(b.dataset.price) > 0 ? Number(b.dataset.price) : 0;
+            const q = _pmfQuoteOf(prefix, b.value);
+            return `<div class="pmf-prow${!list && !q ? ' need' : ''}">
+                <span class="pmf-pname">${escapeHtml(b.value)}${list ? ` <small>list RM ${Math.round(list).toLocaleString()}</small>` : ''}</span>
+                <label class="pmf-quote"><span>Quoted RM</span><input type="text" inputmode="numeric" data-v="${escapeHtml(b.value)}" value="${q ? q : ''}" placeholder="${list ? Math.round(list) : 'needed'}" oninput="app.pmfSetQuote('${prefix}', this.dataset.v, this.value)"></label>
+                <button type="button" aria-label="Remove ${escapeHtml(b.value)}" onclick="app.pmfToggleProduct('${prefix}', this.dataset.v, false)" data-v="${escapeHtml(b.value)}">&times;</button>
+            </div>`;
+        }).join('')}
+            <div class="pmf-ptotal" id="${prefix}-opp-total">${_pmfTotalHtml(prefix, picked)}</div>` : '';
+    };
+    // Typing a quote only refreshes the total (the row keeps focus).
+    const pmfSetQuote = (prefix, name, value) => {
+        const q = _pmfQuotes.get(prefix) || {};
+        const n = Number(String(value || '').replace(/[^\d.]/g, ''));
+        if (n > 0) q[name] = Math.round(n * 100) / 100; else delete q[name];
+        _pmfQuotes.set(prefix, q);
+        const picked = _pmfOppBoxes(prefix).filter(b => b.checked && b.dataset.group !== 'Bujishu Catalogue');
+        const t = document.getElementById(`${prefix}-opp-total`);
+        if (t) t.innerHTML = _pmfTotalHtml(prefix, picked);
+        const row = document.querySelector(`#${prefix}-opp-chips input[data-v="${CSS.escape(name)}"]`);
+        const box = row && row.closest('.pmf-prow');
+        const b = picked.find(x => x.value === name);
+        if (box) box.classList.toggle('need', !(n > 0) && !(b && Number(b.dataset.price) > 0));
+    };
+    // { product: RM } for the ticked products that have a quote; null = none.
+    const _pmfCollectQuotes = (prefix) => {
+        const picked = _pmfOppBoxes(prefix).filter(b => b.checked);
+        const out = {};
+        picked.forEach(b => { const q = _pmfQuoteOf(prefix, b.value); if (q) out[b.value] = q; });
+        return Object.keys(out).length ? out : null;
     };
     const pmfToggleProduct = (prefix, value, on) => {
         const b = _pmfOppBoxes(prefix).find(x => x.value === value && x.dataset.group !== 'Bujishu Catalogue');
@@ -2128,6 +2181,8 @@ My raw notes:
             note_needs: _numbered(document.getElementById(`${prefix}-needs`)?.value || ''),
             note_pain_points: _numbered(document.getElementById(`${prefix}-pain-points`)?.value || ''),
             opportunity_potential: (window.app.serializeMultiSelectToText || (() => ''))(`${prefix}-opp-items`, `${prefix}-opportunity-remarks`),
+            // the quoted RM per ticked product (beats the list price in the potential)
+            ...(document.getElementById(`${prefix}-opp-chips`) ? { quoted_prices: _pmfCollectQuotes(prefix) } : {}),
             // Next steps: the list is the record (each row = one task, DB
             // trigger); next_action / next_action_due keep a plain summary for
             // the screens and reports that read the old single field.
@@ -6052,9 +6107,9 @@ My raw notes:
     // "Use '<typed>' as referrer (not in system)" so an agent is never stuck.
     const _REF_KIND_ORDER = ['Customer', 'Prospect', 'Consultant'];
     let _refSearchSeq = 0;
-    const _runReferrerSearch = async (prefix, selectFn) => {
-        const input = document.getElementById(`${prefix}-referrer`);
-        const resultsDiv = document.getElementById(`${prefix}-referrer-results`);
+    const _runReferrerSearch = async (prefix, selectFn, field = 'referrer', kinds = _REF_KIND_ORDER) => {
+        const input = document.getElementById(`${prefix}-${field}`);
+        const resultsDiv = document.getElementById(`${prefix}-${field}-results`);
         if (!resultsDiv) return;
         const raw = (input?.value || '').trim();
         if (raw.length < 2) { resultsDiv.style.display = 'none'; return; }
@@ -6084,7 +6139,7 @@ My raw notes:
 
         const head = (label) => `<div style="padding:4px 10px;font-size:11px;font-weight:600;color:#6b7280;background:#f9fafb;border-bottom:1px solid #e5e7eb;text-transform:uppercase;letter-spacing:0.05em;">${label}</div>`;
         let html = '';
-        _REF_KIND_ORDER.forEach(kind => {
+        kinds.forEach(kind => {
             const list = rows.filter(r => r.kind === kind);
             if (!list.length) return;
             html += head(kind === 'Customer' ? 'Customers' : kind === 'Prospect' ? 'Prospects' : 'Consultants');
@@ -6113,9 +6168,34 @@ My raw notes:
 
     const searchReferrers = () => _runReferrerSearch('cps', 'selectReferrer');
 
+    // ── Introduced by (client) — 传福者 (owner 2026-10-27) ─────────────────────
+    // "Referred By" is often the agent; this records the CLIENT who brought the
+    // person, so the 传福者 board can count who really brings the CPS. A client
+    // referrer fills it by itself; an agent referrer needs it (or "agent's own
+    // contact").
+    const _introBadge = () => {
+        const si = _state.si;
+        if (!si) return '';
+        const label = si.type === 'Own' ? "Agent's own contact" : `${si.type ? escapeHtml(si.type) + ': ' : 'Not in system: '}<strong>${escapeHtml(si.name || '')}</strong>`;
+        return `<div class="selected-entity-badge"><span>${label}</span><button class="btn btn-sm secondary" onclick="app.clearIntroducer()">Clear</button></div>`;
+    };
+    const _introPaint = () => {
+        const info = document.getElementById('cps-introducer-info');
+        if (info) info.innerHTML = _introBadge();
+        const res = document.getElementById('cps-introducer-results');
+        if (res) res.style.display = 'none';
+        const input = document.getElementById('cps-introducer');
+        if (input) input.value = '';
+    };
+    const searchIntroducers = () => _runReferrerSearch('cps', 'selectIntroducer', 'introducer', ['Customer', 'Prospect']);
+    const selectIntroducer = (id, name, type) => { _state.si = { id: id ?? null, name, type: type || null }; _introPaint(); };
+    const setIntroducerOwn = () => { _state.si = { id: null, name: "Agent's own contact", type: 'Own' }; _introPaint(); };
+    const clearIntroducer = () => { _state.si = null; _introPaint(); };
+
     const selectReferrer = (id, name, type) => {
         // id/type are null/'' for a typed "not in system" referrer.
         _state.sr = { id: id ?? null, name, type: type || null };
+        if ((type === 'Customer' || type === 'Prospect') && !_state.si) { _state.si = { id: id ?? null, name, type }; _introPaint(); }
         const infoDiv = document.getElementById('cps-referrer-info');
         if (infoDiv) infoDiv.innerHTML = _referrerBadge(type, name, 'clearSelectedReferrer');
         const results = document.getElementById('cps-referrer-results');
@@ -6907,6 +6987,14 @@ My raw notes:
                 UI.toast.error('A referrer is required. All appointments must be by recommendation. Search and select the person who referred this prospect.');
                 return;
             }
+            // An agent as referrer: say which client introduced them (传福者),
+            // or that it is the agent's own contact.
+            if (_state.sr.type === 'Consultant' && !_state.si) {
+                UI.toast.error('Who introduced this person? Pick the client under "Introduced by (client)", or tap "Agent\'s own contact".');
+                const f = document.getElementById('cps-introducer');
+                if (f) { try { f.scrollIntoView({ block: 'center' }); f.focus(); } catch (_) { /* best-effort */ } }
+                return;
+            }
 
             if (!name || !phone) {
                 UI.toast.error('Name and Phone are required for CPS.');
@@ -7099,6 +7187,9 @@ My raw notes:
                 referred_by_id: _state.sr?.id || null,
                 referred_by_type: _state.sr?.type || null,
                 referred_by: _state.sr?.name || document.getElementById('cps-referrer')?.value || '',
+                introduced_by_id: _state.si?.id || null,
+                introduced_by_type: _state.si?.type || null,
+                introduced_by: _state.si?.name || null,
             };
 
             let prospect;
@@ -8304,6 +8395,7 @@ My raw notes:
         pmfStepEvent,
         pmfPick,
         pmfToggleProduct,
+        pmfSetQuote,
         pmfProductSearch,
         pmfRenderProducts,
         pmfFoldOpened,
@@ -8393,6 +8485,10 @@ My raw notes:
         renderAttendees,
         updateLunarBirth,
         searchReferrers,
+        searchIntroducers,
+        selectIntroducer,
+        setIntroducerOwn,
+        clearIntroducer,
         selectReferrer,
         clearSelectedReferrer,
         searchConsultants,
