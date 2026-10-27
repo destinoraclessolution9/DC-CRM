@@ -4403,6 +4403,13 @@ const buildClosingSalesLedger = async ({ prospect = null, customer = null, custo
         : `<img data-attach-src="${escapeHtml(String(f.path))}" src="${_ORDER_FORM_THUMB_PX}" alt="${escapeHtml(f.label)}" title="${escapeHtml(f.label)}" onclick="event.preventDefault();event.stopPropagation();window._openAttachment&&window._openAttachment('${UI.escJsAttr(String(f.path))}')" style="width:${size}px;height:${size}px;border-radius:6px;object-fit:cover;cursor:pointer;border:1px solid #e5e7eb;background:#f9fafb;flex-shrink:0;">`;
 
     const _pill = (bg, fg, html) => `<span style="background:${bg};color:${fg};border-radius:4px;padding:1px 7px;font-size:10px;font-weight:600;white-space:nowrap;">${html}</span>`;
+    // 📦 Mark delivered (owner 2026-10-27): the same Items / handover screen as
+    // the Product Delivery Listing, opened straight from this sale.
+    const _markDeliveredBtn = (r) => {
+        const cid = r.p && (r.p.customer_id || (customer && customer.id));
+        if (!r.p || !cid || /^(delivered|cancelled)$/i.test(String(r.p.delivery_status || '').trim())) return '';
+        return `<button type="button" class="btn secondary btn-sm" style="margin-top:8px;font-size:12px;padding:4px 10px;" onclick="event.preventDefault();event.stopPropagation();app.pvMarkDelivered(${Number(r.p.id)}, ${Number(cid)})"><i class="fas fa-box-open"></i> Mark delivered</button>`;
+    };
     const deliveryBadge = (r) => {
         if (r.h?.case_completed) return _pill('#dcfce7', '#166534', '<i class="fas fa-check-circle"></i> Completed');
         if (r.p) {
@@ -4481,7 +4488,8 @@ const buildClosingSalesLedger = async ({ prospect = null, customer = null, custo
                 </div>
                 <div style="font-size:13px;font-weight:700;color:var(--primary);white-space:nowrap;">${UI.formatCurrency(amt, { currency: r.p?.currency || _cur })}</div>
             </div>
-            ${r.files.length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">${r.files.map(f => thumb(f)).join('')}</div>` : ''}`;
+            ${r.files.length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">${r.files.map(f => thumb(f)).join('')}</div>` : ''}
+            ${_markDeliveredBtn(r)}`;
         // 💳 POP payments (lapses + manual receipts) for this sale — filled by the autopilot chunk
         const popSlot = r.p ? `<div data-pop-purchase="${Number(r.p.id)}"></div><div data-cxl-purchase="${Number(r.p.id)}"></div>` : '';
         return (body
@@ -4508,6 +4516,21 @@ const buildClosingSalesLedger = async ({ prospect = null, customer = null, custo
             ${rows.length ? `<div style="padding:8px 12px;display:flex;justify-content:space-between;font-size:12px;background:#fafafa;border-top:1px solid #e5e7eb;"><span style="font-weight:600;color:var(--gray-600);">Total · ${rows.length} sale${rows.length > 1 ? 's' : ''}</span><strong style="color:var(--primary);">${UI.formatCurrency(total, { currency: _cur })}</strong></div>` : ''}
             ${unlinkedHtml}
         </div>`;
+};
+// 📦 Mark delivered → the delivery Items screen (customers chunk); Close
+// comes back here and the closing record shows the new status.
+const pvMarkDelivered = async (purchaseId, customerId) => {
+    try { if (!window.app.openDeliveryItems && window._loadChunk) await window._loadChunk('chunks/script-customers.min.js'); } catch (_) { /* checked below */ }
+    if (typeof window.app.openDeliveryItems !== 'function') { UI.toast.error('Could not open the delivery items. Please reload.'); return; }
+    await window.app.openDeliveryItems('purchase', purchaseId, customerId, { from: 'profile' });
+};
+// Re-render every DC Closing Record on screen (customer or prospect profile).
+const pvRefreshClosing = async () => {
+    for (const el of document.querySelectorAll('[id^="cust-acc-body-closing-"], [id^="acc-body-closing-"]')) {
+        const cust = el.id.startsWith('cust-');
+        const id = el.id.replace(cust ? 'cust-acc-body-closing-' : 'acc-body-closing-', '');
+        try { await _pvRefreshSection(cust ? 'customer' : 'prospect', id, 'closing'); } catch (_) { /* best-effort */ }
+    }
 };
 // Resolve the private-bucket thumbnails after the ledger HTML is in the DOM.
 const _resolveLedgerThumbs = (container) => {
@@ -8342,6 +8365,8 @@ const openPastRecordModal = async (...args) => {
         removeTagFromCustomer,
         removeTagFromProspect,
         renderCustomerClosingTab,
+        pvMarkDelivered,
+        pvRefreshClosing,
         renderProspectCards,
         renderProspectsTable,
         saveAPUForm,

@@ -109,7 +109,7 @@ const AppDataStore = {
     query: async () => [], getAll: async (t) => (t === 'users' ? USERS : []), create: async (t, r) => r,
 };
 const UI = {
-    showModal: (title, content) => calls.modals.push({ title, content }), hideModal: () => {},
+    showModal: (title, content, actions) => calls.modals.push({ title, content, actions }), hideModal: () => { calls.hidden = (calls.hidden || 0) + 1; },
     toast: { success: (m) => calls.toastOk.push(m), error: (m) => calls.toastErr.push(m), info: () => {} },
     escJsAttr: (s) => String(s), currencyForCountry: () => 'MYR', countryByCode: () => ({ code: 'MY', symbol: 'RM' }),
 };
@@ -280,6 +280,21 @@ const items = () => DB.delivery_items.slice().sort((a, b) => a.id - b.id);
     calls.toastErr.length = 0;
     await app.advSaveReturn(901);
     eq('return needs a date', calls.toastErr.pop(), 'Date returned is required');
+    // ── 📦 Mark delivered from a profile's DC Closing Record (2026-10-27) ──
+    reset();
+    await app.openDeliveryItems('purchase', 1, 77);
+    eq('from the listing: Back to list', calls.modals[calls.modals.length - 1].actions[0].action, 'app.openDeliveryListing()');
+    await app.openDeliveryItems('purchase', 1, 77, { from: 'profile' });
+    const pm = calls.modals[calls.modals.length - 1];
+    eq('from a profile: Close instead of Back to list', [pm.actions[0].label, pm.actions[0].action], ['Close', 'app.diClose()']);
+    let refreshed = 0; appStub.pvRefreshClosing = () => { refreshed++; };
+    calls.hidden = 0;
+    app.diClose();
+    eq('Close: hides and refreshes the closing record', [calls.hidden, refreshed], [1, 1]);
+    await app.openDeliveryItems('purchase', 1, 77);
+    app.diClose();
+    eq('listing context: no profile refresh', refreshed, 1);
+
     windowStub._appState.cu = { id: 1, role: 'Level 1 Super Admin', full_name: 'Admin' };
     console.log(`test-delivery-items: ${pass} passed, ${fail} failed`);
     process.exit(fail ? 1 : 0);

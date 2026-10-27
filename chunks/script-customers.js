@@ -3388,7 +3388,7 @@ const _diFetchItems = async (kind, id) => {
 };
 
 const _diOpenInFlight = new Set();
-const openDeliveryItems = async (kind, id, customerId) => {
+const openDeliveryItems = async (kind, id, customerId, opts = {}) => {
     const sb = _diSb();
     if (!sb) return UI.toast.error('Offline — cannot open delivery items right now');
     const key = _diKey(kind, id);
@@ -3407,10 +3407,13 @@ const openDeliveryItems = async (kind, id, customerId) => {
             if (error) throw error;
             items = await _diFetchItems(kind, id);
         }
-        _diCtx = { kind, id, customerId, title: `${info.name}${info.invoice ? ' · ' + info.invoice : ''}`, saleAgentId: info.agentId || null };
+        _diCtx = { kind, id, customerId, title: `${info.name}${info.invoice ? ' · ' + info.invoice : ''}`, saleAgentId: info.agentId || null,
+            from: opts && opts.from === 'profile' ? 'profile' : 'list' };
         await _diLoadAdv(items);
         UI.showModal('Delivery items', _diRenderItems(items), [
-            { label: '← Back to list', type: 'secondary', action: 'app.openDeliveryListing()' },
+            _diCtx.from === 'profile'
+                ? { label: 'Close', type: 'secondary', action: 'app.diClose()' }
+                : { label: '← Back to list', type: 'secondary', action: 'app.openDeliveryListing()' },
         ], 'fullscreen');
         (window.app.applyMobileTableLabels || (() => {}))();
     } catch (e) {
@@ -3551,6 +3554,13 @@ const diDeleteItem = async (itemId) => {
     const { error } = await _diSb().from('delivery_items').delete().eq('id', itemId).eq('status', 'pending');
     if (error) return UI.toast.error('Could not remove: ' + error.message);
     await _diSyncOrderStatus(await _diRefresh());
+};
+
+// Opened from a profile's DC Closing Record: close and show the new status there.
+const diClose = () => {
+    const fromProfile = _diCtx && _diCtx.from === 'profile';
+    UI.hideModal();
+    if (fromProfile && typeof window.app.pvRefreshClosing === 'function') window.app.pvRefreshClosing();
 };
 
 const diUndoHandover = async (itemId) => {
@@ -3856,6 +3866,7 @@ const advSaveReturn = async (advId) => {
 
     app.register('customers', {
         openDeliveryItems,
+        diClose,
         diMarkAdvance,
         diSaveAdvance,
         diAdvanceRemove,
