@@ -5213,7 +5213,7 @@
         const open = row.customer_id ? `app.showCustomerDetail(${Number(row.customer_id)})` : `app.showProspectDetail(${Number(row.prospect_id)})`;
         const grp = row.grp === 'strong' ? '<span class="inv-chip inv-chip-strong">Strong</span>'
             : row.grp === 'potential' ? '<span class="inv-chip">Potential</span>'
-            : row.grp === 'manual' ? '<span class="inv-chip">Added</span>'
+            : row.grp === 'manual' ? `<span class="inv-chip inv-chip-added">${String(row.added_by) === String(_state.cu?.id) ? 'Added by you' : 'Added by ' + esc(row.added_by_name || 'a colleague')}</span>`
             : `<span class="inv-chip inv-chip-warn">Needs a look · ${esc(_INV_REVIEW[row.review_reason] || row.review_reason || '')}</span>`;
         const warns = (row.warnings || []).map(w => _INV_WARN[w] || w);
         const score = row.fit != null ? `<span class="inv-score" title="Fit = matches this event · Engaged = recent contact · Ready = open quote / audit / deal">Fit ${row.fit} · Engaged ${row.engagement ?? 0} · Ready ${row.readiness ?? 0}</span>` : '';
@@ -5222,7 +5222,9 @@
                 <div class="inv-main">
                     <div class="inv-name"><a href="javascript:void(0)" onclick="event.stopPropagation();${open}">${esc(row.name || '—')}</a>
                         <span class="inv-chip">${row.is_customer ? 'Customer' : 'Prospect'}</span>${grp}</div>
-                    ${(row.reasons || []).length ? `<ul class="inv-why">${_invReasonsHtml(row)}</ul>` : '<div class="inv-why-none">Added by hand — no recorded evidence yet</div>'}
+                    ${row.add_note || (row.reasons || []).length
+                        ? `<ul class="inv-why">${row.add_note ? `<li class="inv-note">📝 ${esc(row.add_note)}</li>` : ''}${_invReasonsHtml(row)}</ul>`
+                        : '<div class="inv-why-none">Added by hand — no recorded evidence yet</div>'}
                     ${warns.length ? `<div class="inv-warn">⚠ ${warns.map(esc).join(' · ')}</div>` : ''}
                     ${score}
                 </div>
@@ -5233,20 +5235,34 @@
 
     const _invFunnel = (agents) => {
         const t = (k) => agents.reduce((s, a) => s + Number(a[k] || 0), 0);
-        return `<div class="inv-funnel"><span><b>${t('suggested')}</b> suggested</span><span><b>${t('sent')}</b> sent</span><span><b>${t('replied')}</b> replied</span><span><b>${t('coming')}</b> coming</span><span><b>${t('came')}</b> came</span></div>`;
+        return `<div class="inv-funnel"><span><b>${t('suggested')}</b> suggested${t('added') ? ` + <b>${t('added')}</b> added` : ''}</span><span><b>${t('sent')}</b> sent</span><span><b>${t('replied')}</b> replied</span><span><b>${t('coming')}</b> coming</span><span><b>${t('came')}</b> came</span></div>`;
     };
+
+    // "+ Add a person": the agent's own picks go on the same list (owner
+    // 2026-10-28: the CRM proposes and reminds, the agent can also add).
+    const _invAddBoxHtml = (aid) => `
+        <div class="inv-addbox" id="inv-addbox-${aid}" hidden>
+            <input type="text" class="form-control" id="inv-add-note-${aid}" maxlength="200" placeholder="Why invite? (optional) — e.g. talked about moving house">
+            <input type="search" class="form-control inv-add-q" id="inv-add-q-${aid}" placeholder="Type a name to find the person" oninput="app.invAddSearch(${aid}, this.value)">
+            <div class="inv-add-res" id="inv-add-res-${aid}"></div>
+        </div>`;
+    const _invAddBtn = (aid) => `<button type="button" class="btn btn-sm secondary inv-add-btn" onclick="event.stopPropagation();app.invToggleAdd(${aid})"><i class="fas fa-user-plus"></i> Add a person</button>`;
 
     const _invHtml = (aid, d) => {
         const objs = d.objectives || [];
-        if (!objs.length) {
+        const rows = d.rows || [];
+        if (!objs.length && !rows.length) {
             if (d.past || !d.can_set) return '';
             return `<div class="inv-sec inv-empty">
                 <h4>🎯 What is this event for?</h4>
-                <div class="inv-sub">Pick its purpose — e.g. 风水 · Decide + Upgrade (换天心). Each agent then gets their best ${Number(d.slots) || 9} people to invite, with the reasons.</div>
-                <button type="button" class="btn btn-sm primary" onclick="event.stopPropagation();app.invOpenObjectives(${aid})">Set the purpose</button>
+                <div class="inv-sub">Pick its purpose — e.g. 风水 · Decide + Upgrade (换天心). Each agent then gets their best ${Number(d.slots) || 9} people to invite, with the reasons. Agents can also add their own.</div>
+                <div class="inv-form-btns">
+                    <button type="button" class="btn btn-sm primary" onclick="event.stopPropagation();app.invOpenObjectives(${aid})">Set the purpose</button>
+                    ${_invAddBtn(aid)}
+                </div>
+                ${_invAddBoxHtml(aid)}
             </div>`;
         }
-        const rows = d.rows || [];
         const mine = rows.filter(r => r.mine);
         const team = rows.filter(r => !r.mine);
         const byAgent = {};
@@ -5259,26 +5275,28 @@
                 <h4>✨ Who to invite</h4>
                 ${d.can_set ? `<button type="button" class="btn btn-sm secondary" onclick="event.stopPropagation();app.invOpenObjectives(${aid})">Edit purpose</button>` : ''}
             </div>
-            <div class="inv-objs">${objs.map(o => `<span class="inv-obj">🎯 ${esc(_invObjLabel(o))}</span>`).join('')}</div>
+            ${objs.length ? `<div class="inv-objs">${objs.map(o => `<span class="inv-obj">🎯 ${esc(_invObjLabel(o))}</span>`).join('')}</div>`
+                : '<div class="inv-sub">No purpose set yet — only people added by hand.</div>'}
             ${_invFunnel(d.agents || [])}
-            ${mine.length ? `<div class="inv-group">
-                <div class="inv-group-h">Your ${mine.filter(r => r.grp !== 'review').length} to invite${myOpen && !d.past ? ` · ${myOpen} not invited yet` : ''}</div>
+            <div class="inv-group">
+                <div class="inv-group-head">
+                    <div class="inv-group-h">${mine.length ? `Your ${mine.filter(r => r.grp !== 'review').length} to invite${myOpen && !d.past ? ` · ${myOpen} not invited yet` : ''}` : (d.past ? '' : 'Add someone to invite')}</div>
+                    ${d.past ? '' : _invAddBtn(aid)}
+                </div>
+                ${d.past ? '' : _invAddBoxHtml(aid)}
                 ${mine.map(r => _invRowHtml(aid, r, d.past)).join('')}
-            </div>` : (d.past || team.length ? '' : '<div class="inv-sub">No names for you on this event — none of your people match its purpose yet.</div>')}
+                ${!mine.length && !d.past && !team.length && objs.length ? '<div class="inv-sub">None of your people match this purpose yet — add your own above.</div>' : ''}
+            </div>
             ${Object.keys(byAgent).sort().map(name => {
                 const s = agentStat(name);
                 return `<details class="inv-agent">
-                    <summary><span class="inv-agent-n">${esc(name)}</span><span class="inv-agent-s">${Number(s.suggested || 0)} suggested · ${Number(s.sent || 0)} sent · ${Number(s.replied || 0)} replied · ${Number(s.coming || 0)} coming${Number(s.review || 0) ? ` · ${Number(s.review)} need a look` : ''}</span></summary>
+                    <summary><span class="inv-agent-n">${esc(name)}</span><span class="inv-agent-s">${Number(s.suggested || 0)} suggested${Number(s.added || 0) ? ` + ${Number(s.added)} added` : ''} · ${Number(s.sent || 0)} sent · ${Number(s.replied || 0)} replied · ${Number(s.coming || 0)} coming${Number(s.review || 0) ? ` · ${Number(s.review)} need a look` : ''}</span></summary>
                     ${byAgent[name].map(r => _invRowHtml(aid, r, d.past)).join('')}
                 </details>`;
             }).join('')}
             ${!team.length && (d.agents || []).filter(a => a.agent_id !== d.me).length ? `<div class="inv-counts">${(d.agents || []).filter(a => a.agent_id !== d.me).map(a =>
-                `<div><span>${esc(a.agent_name || '—')}</span><span>${Number(a.suggested || 0)} suggested · ${Number(a.sent || 0)} sent · ${Number(a.coming || 0)} coming</span></div>`).join('')}</div>` : ''}
+                `<div><span>${esc(a.agent_name || '—')}</span><span>${Number(a.suggested || 0)} suggested${Number(a.added || 0) ? ` + ${Number(a.added)} added` : ''} · ${Number(a.sent || 0)} sent · ${Number(a.coming || 0)} coming</span></div>`).join('')}</div>` : ''}
             ${held.length ? `<div class="inv-held">Held back: ${held.map(([k, n]) => `${n} ${esc(_INV_HELD[k] || k)}`).join(' · ')}</div>` : ''}
-            ${d.past ? '' : `<div class="inv-add">
-                <input type="search" class="form-control inv-add-q" id="inv-add-q-${aid}" placeholder="Add someone the list missed — type a name" oninput="app.invAddSearch(${aid}, this.value)">
-                <div class="inv-add-res" id="inv-add-res-${aid}"></div>
-            </div>`}
         </div>`;
     };
 
@@ -5401,21 +5419,39 @@
                 const box = document.getElementById(`inv-add-res-${Number(aid)}`);
                 if (!box) return;
                 box.innerHTML = rows.length ? rows.map(r => `
-                    <button type="button" class="inv-add-row" onclick="event.stopPropagation();app.invAdd(${Number(aid)}, '${r.kind}', ${Number(r.id)})">
+                    <button type="button" class="inv-add-row" onclick="event.stopPropagation();app.invAdd(${Number(aid)}, '${r.kind}', ${Number(r.id)}, false)">
                         <span>${esc(r.name || '—')}</span><span class="inv-chip">${r.kind === 'customer' ? 'Customer' : 'Prospect'}</span><span class="inv-add-plus">+ Add</span>
                     </button>`).join('') : '<div class="inv-sub">No one found</div>';
             } catch (e) { console.warn('[invite] search failed:', e); }
         }, 300);
     };
-    const invAdd = async (aid, kind, id) => {
+    const invToggleAdd = (aid) => {
+        const box = document.getElementById(`inv-addbox-${Number(aid)}`);
+        if (!box) return;
+        box.hidden = !box.hidden;
+        if (!box.hidden) document.getElementById(`inv-add-q-${Number(aid)}`)?.focus();
+    };
+    // force = "Add anyway" after a warning (recent decline / invited twice this month).
+    const invAdd = async (aid, kind, id, force = false) => {
         const sb = _invSb();
         if (!sb) return;
+        const note = (document.getElementById(`inv-add-note-${Number(aid)}`)?.value || '').trim();
         try {
-            const { error } = await sb.rpc('event_invite_add', {
+            const { data, error } = await sb.rpc('event_invite_add', {
                 p_activity: Number(aid), p_prospect: kind === 'prospect' ? Number(id) : null, p_customer: kind === 'customer' ? Number(id) : null,
+                p_note: note || null, p_force: !!force,
             });
             if (error) throw error;
-            UI.toast.success('Added to the list');
+            if (data && data.ok === false && data.warn) {
+                const res = document.getElementById(`inv-add-res-${Number(aid)}`);
+                if (res) res.innerHTML = `<div class="inv-add-warn">⚠ ${esc(data.message || '')}
+                    <div class="inv-form-btns">
+                        <button type="button" class="btn btn-sm primary" onclick="event.stopPropagation();app.invAdd(${Number(aid)}, '${kind === 'customer' ? 'customer' : 'prospect'}', ${Number(id)}, true)">Add anyway</button>
+                        <button type="button" class="btn btn-sm secondary" onclick="event.stopPropagation();document.getElementById('inv-add-res-${Number(aid)}').innerHTML=''">Cancel</button>
+                    </div></div>`;
+                return;
+            }
+            UI.toast.success(data && data.registered ? 'Added — already registered, marked Coming' : 'Added to your list');
             await _invFill(aid, false);
         } catch (e) { UI.toast.error(e && e.message ? e.message : String(e)); }
     };
@@ -8643,6 +8679,7 @@
         invFormSave,
         invAddSearch,
         invAdd,
+        invToggleAdd,
         invOpenObjectives,
         invObjLineChanged,
         invSaveObjectives,

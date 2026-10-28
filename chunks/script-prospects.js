@@ -2195,9 +2195,78 @@ const _pvFillInvitePrefs = async (kind, id) => {
         if (error || !data) return;
         el.innerHTML = `<span class="pv-invpref-l">🎯 Event invites</span>
             <label><input type="checkbox" ${data.do_not_invite ? 'checked' : ''} onchange="app.pvSetInvitePref('${kind}', ${Number(id)}, 'do_not_invite', this.checked)"> Do not invite</label>
-            <label><input type="checkbox" ${data.prefers_call ? 'checked' : ''} onchange="app.pvSetInvitePref('${kind}', ${Number(id)}, 'prefers_call', this.checked)"> Prefers a call (no WhatsApp)</label>`;
+            <label><input type="checkbox" ${data.prefers_call ? 'checked' : ''} onchange="app.pvSetInvitePref('${kind}', ${Number(id)}, 'prefers_call', this.checked)"> Prefers a call (no WhatsApp)</label>
+            <button type="button" class="btn secondary" onclick="event.stopPropagation();app.pvInviteToEvent('${kind}', ${Number(id)})">🎯 Invite to an event</button>`;
     } catch (_) { /* the line just stays empty */ }
 };
+// 🎯 Invite to an event (2026-10-28, owner): agents think person-first — "I just
+// met her, invite her to Saturday". Upcoming sessions (60 days) + this person's
+// invites; adding goes through event_invite_add like the event screen (note,
+// Do not invite refused, recent decline / monthly limit → "Add anyway").
+const _PVI_DECLINE = { no_time: '没时间', away: '出国/生病/家里事', not_interested: '没兴趣', budget: '太贵', has_it: '已经有了', stop: '不要再邀请', other: 'other' };
+const _pviDate = (d) => { const t = Date.parse(String(d || '') + 'T00:00:00'); return Number.isNaN(t) ? '' : new Date(t).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }); };
+const _pviState = (i) => i.attended ? 'Came ✓' : i.no_show ? 'No-show'
+    : i.reply === 'coming' ? 'Coming ✓' : i.reply === 'declined' ? `Not coming · ${_PVI_DECLINE[i.decline_reason] || i.decline_reason || ''}`
+    : i.reply === 'no_reply' ? 'No reply' : i.state === 'sent' ? 'Sent ✓' : 'To invite';
+const pvInviteToEvent = async (kind, id) => {
+    const sb = window.supabase || window.supabaseClient;
+    if (!sb) return;
+    const keepNote = document.getElementById('pvi-note')?.value || '';
+    let d;
+    try {
+        const { data, error } = await sb.rpc('event_invite_person', kind === 'customer' ? { p_customer: Number(id) } : { p_prospect: Number(id) });
+        if (error) throw error;
+        d = data || { invites: [], sessions: [] };
+    } catch (e) { UI.toast.error('Could not load events: ' + (e.message || e)); return; }
+    const invites = d.invites || [], sessions = d.sessions || [];
+    const sessRow = (s) => `
+        <div class="inv-pick-row">
+            <div class="inv-pick-main">
+                <div class="inv-pick-t">${escapeHtml(s.title || 'Event')}</div>
+                <div class="inv-pick-m">${escapeHtml(_pviDate(s.date))}${s.time ? ' · ' + escapeHtml(s.time) : ''}${s.purpose ? ' · 🎯 ' + escapeHtml(s.purpose) : ''}</div>
+                <div class="inv-pick-warn" id="pvi-w-${Number(s.activity_id)}"></div>
+            </div>
+            ${s.registered ? '<span class="inv-pick-st">Registered ✓</span>'
+              : s.on_list ? '<span class="inv-pick-st">On the list</span>'
+              : `<button type="button" class="btn btn-sm primary" onclick="event.stopPropagation();app.pvInviteAdd('${kind}', ${Number(id)}, ${Number(s.activity_id)}, false)">Invite</button>`}
+        </div>`;
+    const invRow = (i) => `
+        <div class="inv-pick-row">
+            <div class="inv-pick-main">
+                <div class="inv-pick-t">${escapeHtml(i.title || 'Event')}</div>
+                <div class="inv-pick-m">${escapeHtml(_pviDate(i.date))} · ${i.source === 'manual' ? 'added by hand' : 'suggested by the CRM'}</div>
+            </div>
+            <span class="inv-pick-st">${escapeHtml(_pviState(i))}</span>
+        </div>`;
+    UI.showModal('🎯 Invite to an event', `
+        <div class="inv-pick">
+            <input type="text" class="form-control" id="pvi-note" maxlength="200" placeholder="Why invite? (optional) — e.g. talked about moving house" value="${escapeHtml(keepNote)}">
+            ${invites.length ? `<div><div class="inv-pick-h">Invites so far</div>${invites.map(invRow).join('')}</div>` : ''}
+            <div><div class="inv-pick-h">Upcoming events · next 60 days</div>
+                ${sessions.length ? sessions.map(sessRow).join('') : '<div class="inv-pick-m">No events on the calendar in the next 60 days.</div>'}</div>
+        </div>`, [{ label: 'Close', type: 'secondary', action: 'UI.closeModal()' }]);
+};
+const pvInviteAdd = async (kind, id, activityId, force) => {
+    const sb = window.supabase || window.supabaseClient;
+    if (!sb) return;
+    const note = (document.getElementById('pvi-note')?.value || '').trim();
+    try {
+        const { data, error } = await sb.rpc('event_invite_add', {
+            p_activity: Number(activityId), p_prospect: kind === 'customer' ? null : Number(id), p_customer: kind === 'customer' ? Number(id) : null,
+            p_note: note || null, p_force: !!force,
+        });
+        if (error) throw error;
+        if (data && data.ok === false && data.warn) {
+            const w = document.getElementById(`pvi-w-${Number(activityId)}`);
+            if (w) w.innerHTML = `⚠ ${escapeHtml(data.message || '')}
+                <button type="button" class="btn btn-sm secondary" onclick="event.stopPropagation();app.pvInviteAdd('${kind === 'customer' ? 'customer' : 'prospect'}', ${Number(id)}, ${Number(activityId)}, true)">Add anyway</button>`;
+            return;
+        }
+        UI.toast.success(data && data.registered ? 'Already registered — marked Coming' : 'Added to the invite list');
+        await pvInviteToEvent(kind, id);
+    } catch (e) { UI.toast.error(e && e.message ? e.message : String(e)); }
+};
+
 const pvSetInvitePref = async (kind, id, field, on) => {
     const sb = window.supabase || window.supabaseClient;
     if (!sb || !['do_not_invite', 'prefers_call'].includes(field)) return;
@@ -8458,6 +8527,8 @@ const openPastRecordModal = async (...args) => {
         fillFollowUpLine,
         fillProfileSnapshot,
         pvSetInvitePref,
+        pvInviteToEvent,
+        pvInviteAdd,
         pvGoToSection,
         pvOpenMeeting,
         openProtectionSheet,

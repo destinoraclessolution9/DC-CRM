@@ -3714,11 +3714,13 @@ const _nlResultsHtml = () => {
         escapeHtml(r.date || ''),
         `<a href="javascript:void(0)" onclick="app.viewActivityDetails(${Number(r.activity_id)})" style="color:var(--primary,#0D9488);text-decoration:none;font-weight:600;">${escapeHtml(r.title || '—')}</a><div style="font-size:11px;color:var(--gray-400);">${escapeHtml((r.objectives || []).join(' · ').replace(/:/g, ' · '))}</div>`,
         Object.entries(r.reasons || {}).map(([k, n]) => `${escapeHtml(NL_DECLINE[k] || k)} ${n}`).join(' · ') || '—',
-        `${r.suggested}`, `${r.sent}`, `${r.coming}`, `${r.came}`, `${r.closed}`,
+        `${r.suggested}`, `${r.added || 0}`, `${r.sent}`, `${r.coming}`,
+        `${r.came}${r.came ? `<div style="font-size:11px;color:var(--gray-400);">CRM ${r.came_crm || 0} · agent ${r.came_added || 0}</div>` : ''}`,
+        `${r.closed}${r.closed ? `<div style="font-size:11px;color:var(--gray-400);">CRM ${r.closed_crm || 0} · agent ${r.closed_added || 0}</div>` : ''}`,
     ]);
     return `
-        ${_nlStrip('Past 120 days · a sale counts only when its closing is linked to the attendee · declined reasons decide who is invited again')}
-        ${_nlTable('results', ['Date', 'Event', 'Not coming because', 'Suggested', 'Sent', 'Coming', 'Came', 'Closed'], rows, 'No event has used ✨ Who to invite yet — set an event\'s purpose on its event screen.', 3)}`;
+        ${_nlStrip('Past 120 days · Suggested = picked by the CRM · Added = agents own picks · a sale counts only when its closing is linked to the attendee · declined reasons decide who is invited again')}
+        ${_nlTable('results', ['Date', 'Event', 'Not coming because', 'Suggested', 'Added', 'Sent', 'Coming', 'Came', 'Closed'], rows, 'No event has used ✨ Who to invite yet — set an event\'s purpose on its event screen.', 3)}`;
 };
 
 const _nlLoadAsync = async () => {
@@ -4185,8 +4187,9 @@ const nlCsv = () => {
         rows = (_nlSmartRows || []).filter(r => (r.fit || 0) >= 50).map(r => [r.name, r.customer_id ? 'Customer' : 'Prospect', _nlSmart.line, _nlSmart.goal, r.grp,
             r.fit, r.engagement, r.readiness, (r.reasons || []).map(x => x.t + (x.d ? ' ' + x.d : '')).join(' | '), (r.warnings || []).join(' '), r.last_touch || '', r.agent_name || '']);
     } else if (_nlTab === 'results') {
-        headers = ['Date', 'Event', 'Purpose', 'Suggested', 'Sent', 'Replied', 'Coming', 'Declined', 'Came', 'No-show', 'Closed', 'Declined because'];
-        rows = (_nlResults || []).map(r => [r.date, r.title, (r.objectives || []).join(' + '), r.suggested, r.sent, r.replied, r.coming, r.declined, r.came, r.no_show, r.closed,
+        headers = ['Date', 'Event', 'Purpose', 'Suggested (CRM)', 'Added (agents)', 'Sent', 'Replied', 'Coming', 'Declined', 'Came', 'Came · CRM', 'Came · agent', 'No-show', 'Closed', 'Closed · CRM', 'Closed · agent', 'Declined because'];
+        rows = (_nlResults || []).map(r => [r.date, r.title, (r.objectives || []).join(' + '), r.suggested, r.added || 0, r.sent, r.replied, r.coming, r.declined,
+            r.came, r.came_crm || 0, r.came_added || 0, r.no_show, r.closed, r.closed_crm || 0, r.closed_added || 0,
             Object.entries(r.reasons || {}).map(([k, n]) => `${k} ${n}`).join(' | ')]);
     } else {
         headers = ['Name', 'P/C', 'Category', 'Mentions', 'Tick', 'Event', 'Talk', 'Profile', 'Last Mention', 'Grade', 'Agent'];

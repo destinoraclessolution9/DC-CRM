@@ -117,5 +117,23 @@ check('held-back counts', fullHtml.includes('2 already registered') && fullHtml.
 check('add-person box on an upcoming event', fullHtml.includes('inv-add-q-1'), true);
 check('no add-person box after the event', T._invHtml(1, { ...full, past: true }).includes('inv-add-q-1'), false);
 
+// ── agents add their own people (2026-10-28) ──────────────────────────────
+check('"Add a person" button on an upcoming event', fullHtml.includes('app.invToggleAdd(1)'), true);
+check('the add box asks "Why invite?"', fullHtml.includes('inv-add-note-1') && fullHtml.includes('Why invite?'), true);
+check('no add button after the event', T._invHtml(1, { ...full, past: true }).includes('invToggleAdd'), false);
+const manual = { ...base, grp: 'manual', source: 'manual', reasons: [], added_by: 7, add_note: 'talked about <moving> house' };
+const mineAdd = T._invRowHtml(1, manual, false);
+check('own add → "Added by you"', mineAdd.includes('Added by you'), true);
+check('why-note shown first, escaped', mineAdd.includes('📝 talked about &lt;moving&gt; house') && !mineAdd.includes('<moving>'), true);
+check('note replaces "no recorded evidence"', mineAdd.includes('no recorded evidence'), false);
+check('leader add → "Added by <leader>"', T._invRowHtml(1, { ...manual, added_by: 3, added_by_name: 'Lai Sow Lian' }, false).includes('Added by Lai Sow Lian'), true);
+check('no note, no evidence → says so', T._invRowHtml(1, { ...manual, add_note: null }, false).includes('no recorded evidence'), true);
+const addedFull = { ...full, agents: [{ agent_id: 7, agent_name: 'Agent Seven', suggested: 9, added: 2, sent: 0, replied: 0, coming: 0, came: 0 }], rows: [{ ...manual, mine: true }] };
+check('funnel shows "+ 2 added"', T._invHtml(1, addedFull).includes('+ <b>2</b> added'), true);
+const noPurposeRows = { ...noPurpose, rows: [{ ...manual, mine: true }], agents: [], me: 7 };
+const npHtml = T._invHtml(1, noPurposeRows);
+check('no purpose but people added → list still shows', npHtml.includes('No purpose set yet') && npHtml.includes('inv-row-5'), true);
+check('no purpose, nobody yet → set purpose + add buttons', T._invHtml(1, noPurpose).includes('Set the purpose') && T._invHtml(1, noPurpose).includes('invToggleAdd'), true);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
