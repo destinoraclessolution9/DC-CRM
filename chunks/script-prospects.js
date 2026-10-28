@@ -2101,7 +2101,8 @@ const _pvSnapHtml = (kind, id, pid) => `
             <div class="pv-card-lbl">Last meeting</div><div class="pv-card-val">—</div>
         </div>
     </div>
-    ${pid != null ? `<div class="pv-attn"><div data-fu-pid="${Number(pid)}"></div></div>` : ''}`;
+    ${pid != null ? `<div class="pv-attn"><div data-fu-pid="${Number(pid)}"></div></div>` : ''}
+    <div class="pv-invpref" data-invpref="${kind}:${Number(id)}"></div>`;
 
 // Tasks for a person — the one task list (journey_touchpoints). A customer
 // also owns the tasks still keyed to the prospect it was converted from.
@@ -2180,6 +2181,31 @@ const _pvFillPotential = async (pid) => {
     cards.forEach(el => { el.classList.remove('is-loading'); el.innerHTML = html; });
 };
 
+// Event invitations (2026-10-28): "Do not invite" keeps the person out of every
+// ✨ Who to invite list (also set by the reply "不要再邀请我"); "Prefers a call"
+// shows Call instead of WhatsApp. Read straight from the table — the cached
+// light select does not carry these two columns.
+const _pvFillInvitePrefs = async (kind, id) => {
+    const el = document.querySelector(`[data-invpref="${kind}:${Number(id)}"]`);
+    const sb = window.supabase || window.supabaseClient;
+    if (!el || !sb) return;
+    try {
+        const { data, error } = await sb.from(kind === 'customer' ? 'customers' : 'prospects')
+            .select('do_not_invite,prefers_call').eq('id', Number(id)).maybeSingle();
+        if (error || !data) return;
+        el.innerHTML = `<span class="pv-invpref-l">🎯 Event invites</span>
+            <label><input type="checkbox" ${data.do_not_invite ? 'checked' : ''} onchange="app.pvSetInvitePref('${kind}', ${Number(id)}, 'do_not_invite', this.checked)"> Do not invite</label>
+            <label><input type="checkbox" ${data.prefers_call ? 'checked' : ''} onchange="app.pvSetInvitePref('${kind}', ${Number(id)}, 'prefers_call', this.checked)"> Prefers a call (no WhatsApp)</label>`;
+    } catch (_) { /* the line just stays empty */ }
+};
+const pvSetInvitePref = async (kind, id, field, on) => {
+    const sb = window.supabase || window.supabaseClient;
+    if (!sb || !['do_not_invite', 'prefers_call'].includes(field)) return;
+    const { error } = await sb.from(kind === 'customer' ? 'customers' : 'prospects').update({ [field]: !!on }).eq('id', Number(id));
+    if (error) { UI.toast.error('Could not save: ' + error.message); _pvFillInvitePrefs(kind, id); return; }
+    UI.toast.success(field === 'do_not_invite' ? (on ? 'Will not be suggested for events' : 'Can be suggested for events again') : (on ? 'Call instead of WhatsApp' : 'WhatsApp is fine'));
+};
+
 const fillProfileSnapshot = async ({ kind = 'prospect', id, pid = null } = {}) => {
     const root = document.querySelector(`.pv-snap[data-snap="${kind}:${Number(id)}"]`);
     if (!root) return;
@@ -2191,6 +2217,7 @@ const fillProfileSnapshot = async ({ kind = 'prospect', id, pid = null } = {}) =
         const u = await AppDataStore.getById('users', el.dataset.pvAgent).catch(() => null);
         el.innerHTML = `<i class="fas fa-user-tie" aria-hidden="true"></i> ${escapeHtml(u?.full_name || 'Unassigned')}`;
     });
+    _pvFillInvitePrefs(kind, id);
     if (pid != null) _pvFillPotential(pid);
     else _pvCardSet(root, 'potential', '<div class="pv-card-lbl">Open potential</div><div class="pv-card-val is-muted">—</div><div class="pv-card-note">No open potential yet</div>');
 
@@ -8430,6 +8457,7 @@ const openPastRecordModal = async (...args) => {
         fillPotentialBadge,
         fillFollowUpLine,
         fillProfileSnapshot,
+        pvSetInvitePref,
         pvGoToSection,
         pvOpenMeeting,
         openProtectionSheet,

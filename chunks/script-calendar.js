@@ -1156,6 +1156,9 @@
     // prospects/customers based on solution category, interest, and eligibility tier.
     // Tiers: active (CPS ≤180d) | engaged (>180d + 3+ events) | returning (same category last year) | customer
     const dispatchProactiveEventInvites = async () => {
+        // Retired 2026-10-28 (owner): ~1,550 drafts in 6 months, ~2% sent. Each
+        // event now gives every agent their best names under ✨ Who to invite.
+        if (!window.__legacyEventInviteDrafts) return;
         const templates = await loadFollowUpTemplates();
         const eventTriggers = templates.filter(t =>
             t.trigger_category === 'after_cps' && t.is_active && (t.event_keywords || '').trim()
@@ -1344,6 +1347,7 @@
     //   2. Have NOT already attended a PAST event with the same title (future bookings are ignored)
     const dispatchOnNewCalendarEvent = async (calActivity) => {
         if (!calActivity?.event_id) return;
+        if (!window.__legacyEventInviteDrafts) return;   // retired 2026-10-28 — see dispatchProactiveEventInvites
 
         const today    = new Date();
         const todayStr = _localDateStr(today);
@@ -5099,6 +5103,440 @@
         }
     };
 
+    // ── ✨ Who to invite (event invite engine, 2026-10-28, owner) ───────────
+    // The event topic says what it is FOR: 1–2 objectives, each a product line
+    // + a goal (+ optional focus products). The database (event_invite_refresh)
+    // gives each agent their best N people (owner: 9) with the reasons; the
+    // agent invites, taps Sent ✓, then records the reply. A decline needs a
+    // reason — it decides when that person is suggested again for an event with
+    // the same purpose. Agent sees own names, upline sees the team, everyone
+    // else counts per agent — event_invite_list enforces it, not this screen.
+    const _INV_GOALS = [
+        ['introduce', 'Introduce 认识', 'People who have never bought this line — new friends, customers of another line'],
+        ['decide', 'Decide 成交', 'Discussed, quoted, audited or keep coming to these events — not bought yet'],
+        ['upgrade', 'Upgrade 升级', 'Already own the step below (e.g. 灵活 → 专案 → 换天心)'],
+        ['service', 'Service 服务', 'Already own it — care, fixing, collection, 黄金一路'],
+        ['comeback', 'Come back 回流', 'Interested or bought before, no contact for 6+ months'],
+    ];
+    const _INV_DECLINE = [
+        ['no_time', '没时间 · no time / date clash'],
+        ['away', '出国 / 生病 / 家里事 · away, sick, family'],
+        ['not_interested', '对这个没兴趣 · not interested in this topic'],
+        ['budget', '太贵 · budget'],
+        ['has_it', '已经有了 · already has it'],
+        ['stop', '不要再邀请我 · stop inviting me'],
+        ['other', 'Other (type it)'],
+    ];
+    const _INV_REMOVE = [
+        ['not_fit', 'Not a fit for this event'],
+        ['handled', 'Already handled / invited another way'],
+        ['wrong_objective', 'Wrong event purpose'],
+        ['missing_info', 'Missing information'],
+        ['other', 'Other (type it)'],
+    ];
+    const _INV_WARN = {
+        only_events: 'Only event attendance recorded', no_notes: 'Meetings have no notes',
+        no_phone: 'No phone in CRM', no_contact_6m: 'No contact for 6+ months', agent_inactive: 'Agent inactive — moved to the upline',
+    };
+    const _INV_HELD = {
+        registered: 'already registered', do_not_invite: 'do not invite', unable_to_serve: 'unable to serve', grade_f: 'dropped (F)',
+        cooldown: 'in cooldown', paused: 'paused after a decline', complete: 'already have it', limit: 'invited twice this month',
+    };
+    const _INV_REVIEW = {
+        no_agent: 'No agent', said_not_interested: 'Said not interested before', no_time_3x: '“No time” 3 times in a row',
+        no_show_2x: 'No-show twice', no_reply_2x: 'No reply twice',
+    };
+    const _invLabel = (list, key) => (list.find(x => x[0] === key) || [key, key])[1];
+    const _invData = {};   // activityId → last event_invite_list payload
+    const _invSb = () => window.supabase || window.supabaseClient;
+    const _invShortDate = (d) => { const t = Date.parse(String(d || '') + 'T00:00:00'); return Number.isNaN(t) ? '' : new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }); };
+    const _invObjLabel = (o) => `${o.line_label || o.line} · ${_invLabel(_INV_GOALS, o.goal)}${(o.focus_names || []).length ? ' · ' + o.focus_names.map(n => String(n).split(' ')[0]).join(', ') : ''}`;
+
+    // WhatsApp text from the template in invite_config (owner can change it).
+    const _invMessage = (d, row, agentName) => {
+        const t = Date.parse(String(d.session_date || '') + 'T00:00:00');
+        const dt = Number.isNaN(t) ? null : new Date(t);
+        const wk = dt ? '星期' + '日一二三四五六'[dt.getDay()] : '';
+        const time = String(d.start_time || '').slice(0, 5);
+        let msg = String(d.message || 'Hi {name}，诚邀您出席《{event}》！日期：{date}（{weekday}）{time}，地点：{venue}。— {agent}');
+        if (!d.venue) msg = msg.replace(/[，,]?\s*地点[:：]\s*\{venue\}/, '');
+        if (!time) msg = msg.replace(/\s*\{time\}/, '');
+        return msg
+            .replace(/\{name\}/g, row.name || '')
+            .replace(/\{event\}/g, d.event_title || '')
+            .replace(/\{date\}/g, dt ? `${dt.getMonth() + 1}月${dt.getDate()}日` : '')
+            .replace(/\{weekday\}/g, wk)
+            .replace(/\{time\}/g, time)
+            .replace(/\{venue\}/g, d.venue || '')
+            .replace(/\{agent\}/g, agentName || '');
+    };
+    // Same normalisation as the other WhatsApp buttons (+ Singapore 65xxxxxxxx).
+    const _invWaPhone = (raw) => {
+        let p = String(raw || '').replace(/[^0-9]/g, '');
+        if (!p) return '';
+        if (p.startsWith('0')) p = '60' + p.slice(1);
+        if (!p.startsWith('60') && !(p.startsWith('65') && p.length === 10) && p.length <= 10) p = '60' + p;
+        return p;
+    };
+
+    const _invReasonsHtml = (row) => (row.reasons || []).slice(0, 2).map(r => {
+        const when = r.d ? ` <span class="inv-when">${esc(_invShortDate(r.d))}</span>` : '';
+        const link = r.ref === 'act' && r.id ? ` onclick="event.stopPropagation();app.viewActivityDetails(${Number(r.id)})" role="button" tabindex="0" title="Open the record"` : '';
+        return `<li${link ? ' class="inv-link"' : ''}${link}>${esc(r.t || '')}${when}</li>`;
+    }).join('');
+
+    const _invActionsHtml = (aid, row, past) => {
+        const id = Number(row.id);
+        const undo = `<button type="button" class="btn btn-sm secondary" onclick="event.stopPropagation();app.invAct(${id}, ${aid}, 'undo')">Undo</button>`;
+        if (row.state === 'removed') return `<span class="inv-st inv-st-off">Not suitable · ${esc(_invLabel(_INV_REMOVE, row.removed_reason))}${row.removed_note ? ' — ' + esc(row.removed_note) : ''}</span>${past || row.removed_reason === 'excluded' ? '' : undo}`;
+        if (row.reply === 'declined') return `<span class="inv-st inv-st-no">Not coming · ${esc(_invLabel(_INV_DECLINE, row.decline_reason))}${row.reply_note ? ' — ' + esc(row.reply_note) : ''}</span>${past ? '' : undo}`;
+        if (row.reply === 'coming') {
+            if (row.attended) return '<span class="inv-st inv-st-ok">Came ✓</span>';
+            if (row.no_show) return '<span class="inv-st inv-st-no">No-show</span>';
+            return '<span class="inv-st inv-st-ok">Coming ✓ · registered</span>';
+        }
+        if (row.reply === 'no_reply') return '<span class="inv-st inv-st-off">No reply</span>';
+        if (past) return `<span class="inv-st inv-st-off">${row.sent_at ? 'Sent · no reply recorded' : 'Not invited'}</span>`;
+        const replyBtns = `<button type="button" class="btn btn-sm primary" onclick="event.stopPropagation();app.invAct(${id}, ${aid}, 'coming')">Coming</button>
+            <button type="button" class="btn btn-sm secondary" onclick="event.stopPropagation();app.invForm(${id}, ${aid}, 'decline')">Not coming</button>`;
+        if (row.state === 'sent') return `<span class="inv-st">Sent ✓ ${esc(_invShortDate(String(row.sent_at || '').slice(0, 10)))}</span>${replyBtns}`;
+        const tel = String(row.phone || '').replace(/[^\d+]/g, '');
+        const contact = row.prefers_call || !_invWaPhone(row.phone)
+            ? (tel ? `<a class="btn btn-sm secondary" href="tel:${esc(tel)}" onclick="event.stopPropagation();app.invAct(${id}, ${aid}, 'prepared', {channel:'call'})"><i class="fas fa-phone"></i> Call</a>` : '')
+            : `<button type="button" class="btn btn-sm secondary" onclick="event.stopPropagation();app.invWhatsApp(${id}, ${aid})"><i class="fab fa-whatsapp"></i> WhatsApp</button>`;
+        return `${contact}
+            <button type="button" class="btn btn-sm ${row.prepared_at ? 'primary' : 'secondary'}" onclick="event.stopPropagation();app.invAct(${id}, ${aid}, 'sent')">Sent ✓</button>
+            <button type="button" class="btn btn-sm secondary inv-more" onclick="event.stopPropagation();app.invForm(${id}, ${aid}, 'more')" aria-label="More">⋯</button>`;
+    };
+
+    const _invRowHtml = (aid, row, past) => {
+        const open = row.customer_id ? `app.showCustomerDetail(${Number(row.customer_id)})` : `app.showProspectDetail(${Number(row.prospect_id)})`;
+        const grp = row.grp === 'strong' ? '<span class="inv-chip inv-chip-strong">Strong</span>'
+            : row.grp === 'potential' ? '<span class="inv-chip">Potential</span>'
+            : row.grp === 'manual' ? '<span class="inv-chip">Added</span>'
+            : `<span class="inv-chip inv-chip-warn">Needs a look · ${esc(_INV_REVIEW[row.review_reason] || row.review_reason || '')}</span>`;
+        const warns = (row.warnings || []).map(w => _INV_WARN[w] || w);
+        const score = row.fit != null ? `<span class="inv-score" title="Fit = matches this event · Engaged = recent contact · Ready = open quote / audit / deal">Fit ${row.fit} · Engaged ${row.engagement ?? 0} · Ready ${row.readiness ?? 0}</span>` : '';
+        return `
+            <div class="inv-row${row.state === 'removed' || row.reply === 'declined' ? ' is-closed' : ''}" id="inv-row-${Number(row.id)}">
+                <div class="inv-main">
+                    <div class="inv-name"><a href="javascript:void(0)" onclick="event.stopPropagation();${open}">${esc(row.name || '—')}</a>
+                        <span class="inv-chip">${row.is_customer ? 'Customer' : 'Prospect'}</span>${grp}</div>
+                    ${(row.reasons || []).length ? `<ul class="inv-why">${_invReasonsHtml(row)}</ul>` : '<div class="inv-why-none">Added by hand — no recorded evidence yet</div>'}
+                    ${warns.length ? `<div class="inv-warn">⚠ ${warns.map(esc).join(' · ')}</div>` : ''}
+                    ${score}
+                </div>
+                <div class="inv-acts">${_invActionsHtml(aid, row, past)}</div>
+                <div class="inv-form" id="inv-form-${Number(row.id)}"></div>
+            </div>`;
+    };
+
+    const _invFunnel = (agents) => {
+        const t = (k) => agents.reduce((s, a) => s + Number(a[k] || 0), 0);
+        return `<div class="inv-funnel"><span><b>${t('suggested')}</b> suggested</span><span><b>${t('sent')}</b> sent</span><span><b>${t('replied')}</b> replied</span><span><b>${t('coming')}</b> coming</span><span><b>${t('came')}</b> came</span></div>`;
+    };
+
+    const _invHtml = (aid, d) => {
+        const objs = d.objectives || [];
+        if (!objs.length) {
+            if (d.past || !d.can_set) return '';
+            return `<div class="inv-sec inv-empty">
+                <h4>🎯 What is this event for?</h4>
+                <div class="inv-sub">Pick its purpose — e.g. 风水 · Decide + Upgrade (换天心). Each agent then gets their best ${Number(d.slots) || 9} people to invite, with the reasons.</div>
+                <button type="button" class="btn btn-sm primary" onclick="event.stopPropagation();app.invOpenObjectives(${aid})">Set the purpose</button>
+            </div>`;
+        }
+        const rows = d.rows || [];
+        const mine = rows.filter(r => r.mine);
+        const team = rows.filter(r => !r.mine);
+        const byAgent = {};
+        team.forEach(r => { const k = r.agent_name || '—'; (byAgent[k] = byAgent[k] || []).push(r); });
+        const agentStat = (name) => (d.agents || []).find(a => (a.agent_name || '—') === name) || {};
+        const held = d.summary && d.summary.excluded ? Object.entries(d.summary.excluded).filter(([, n]) => n > 0) : [];
+        const myOpen = mine.filter(r => r.state === 'suggested' && r.grp !== 'review').length;
+        return `<div class="inv-sec">
+            <div class="inv-head">
+                <h4>✨ Who to invite</h4>
+                ${d.can_set ? `<button type="button" class="btn btn-sm secondary" onclick="event.stopPropagation();app.invOpenObjectives(${aid})">Edit purpose</button>` : ''}
+            </div>
+            <div class="inv-objs">${objs.map(o => `<span class="inv-obj">🎯 ${esc(_invObjLabel(o))}</span>`).join('')}</div>
+            ${_invFunnel(d.agents || [])}
+            ${mine.length ? `<div class="inv-group">
+                <div class="inv-group-h">Your ${mine.filter(r => r.grp !== 'review').length} to invite${myOpen && !d.past ? ` · ${myOpen} not invited yet` : ''}</div>
+                ${mine.map(r => _invRowHtml(aid, r, d.past)).join('')}
+            </div>` : (d.past ? '' : '<div class="inv-sub">No names for you on this event — none of your people match its purpose yet.</div>')}
+            ${Object.keys(byAgent).sort().map(name => {
+                const s = agentStat(name);
+                return `<details class="inv-agent">
+                    <summary><span class="inv-agent-n">${esc(name)}</span><span class="inv-agent-s">${Number(s.suggested || 0)} suggested · ${Number(s.sent || 0)} sent · ${Number(s.replied || 0)} replied · ${Number(s.coming || 0)} coming${Number(s.review || 0) ? ` · ${Number(s.review)} need a look` : ''}</span></summary>
+                    ${byAgent[name].map(r => _invRowHtml(aid, r, d.past)).join('')}
+                </details>`;
+            }).join('')}
+            ${!team.length && (d.agents || []).filter(a => a.agent_id !== d.me).length ? `<div class="inv-counts">${(d.agents || []).filter(a => a.agent_id !== d.me).map(a =>
+                `<div><span>${esc(a.agent_name || '—')}</span><span>${Number(a.suggested || 0)} suggested · ${Number(a.sent || 0)} sent · ${Number(a.coming || 0)} coming</span></div>`).join('')}</div>` : ''}
+            ${held.length ? `<div class="inv-held">Held back: ${held.map(([k, n]) => `${n} ${esc(_INV_HELD[k] || k)}`).join(' · ')}</div>` : ''}
+            ${d.past ? '' : `<div class="inv-add">
+                <input type="search" class="form-control inv-add-q" id="inv-add-q-${aid}" placeholder="Add someone the list missed — type a name" oninput="app.invAddSearch(${aid}, this.value)">
+                <div class="inv-add-res" id="inv-add-res-${aid}"></div>
+            </div>`}
+        </div>`;
+    };
+
+    const _invFill = async (activityId, refresh = true) => {
+        const aid = Number(activityId);
+        const box = document.getElementById(`inv-sec-${aid}`);
+        const sb = _invSb();
+        if (!box || !sb) return;
+        try {
+            if (refresh) await sb.rpc('event_invite_refresh', { p_activity: aid });
+            const { data, error } = await sb.rpc('event_invite_list', { p_activity: aid });
+            if (error) throw error;
+            const host = document.getElementById(`inv-sec-${aid}`);
+            if (!host) return;
+            if (!data) { host.innerHTML = ''; return; }
+            _invData[aid] = data;
+            host.innerHTML = _invHtml(aid, data);
+            // Waiting-list people are inside this list once the event has a purpose.
+            if ((data.objectives || []).length) { const cw = document.getElementById(`cw-rec-${aid}`); if (cw) cw.innerHTML = ''; }
+        } catch (e) {
+            console.warn('[invite] list failed:', e);
+            box.innerHTML = '';
+        }
+    };
+    const _invHasPurpose = (aid) => !!(_invData[Number(aid)] && (_invData[Number(aid)].objectives || []).length);
+
+    const invAct = async (id, aid, action, data = {}) => {
+        const sb = _invSb();
+        if (!sb) return;
+        const payload = action === 'coming' ? { reply: 'coming' } : (data || {});
+        const rpcAction = action === 'coming' ? 'reply' : action;
+        try {
+            const { error } = await sb.rpc('event_invite_act', { p_id: Number(id), p_action: rpcAction, p_data: payload });
+            if (error) throw error;
+            if (action === 'coming') { UI.toast.success('Coming ✓ — added to the attendee list'); AppDataStore.invalidateCache && AppDataStore.invalidateCache('event_attendees'); }
+            if (action === 'prepared') return;   // the tel: / WhatsApp link does the rest
+            if (action === 'coming') { await viewActivityDetails(aid); return; }
+            await _invFill(aid, false);
+        } catch (e) {
+            UI.toast.error(e && e.message ? e.message : String(e));
+        }
+    };
+
+    const invWhatsApp = async (id, aid) => {
+        const d = _invData[Number(aid)];
+        const row = d && (d.rows || []).find(r => Number(r.id) === Number(id));
+        if (!row) return;
+        const phone = _invWaPhone(row.phone);
+        if (!phone) { UI.toast.error('No phone number on file'); return; }
+        const msg = _invMessage(d, row, _state.cu?.full_name || '');
+        window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
+        // Prepared ≠ sent: the agent confirms with Sent ✓ after pressing send in WhatsApp.
+        await invAct(id, aid, 'prepared', { channel: 'whatsapp' });
+        const btn = document.querySelector(`#inv-row-${Number(id)} .inv-acts .btn:nth-child(2)`);
+        if (btn) { btn.classList.remove('secondary'); btn.classList.add('primary'); }
+        UI.toast.info('After you press send in WhatsApp, tap Sent ✓');
+    };
+
+    // Inline forms under a row: 'decline' (reply = not coming), 'remove' (not
+    // suitable) and 'more' (invited in person / not suitable).
+    const invForm = (id, aid, kind) => {
+        const box = document.getElementById(`inv-form-${Number(id)}`);
+        if (!box) return;
+        if (box.dataset.kind === kind && box.innerHTML) { box.innerHTML = ''; box.dataset.kind = ''; return; }
+        box.dataset.kind = kind;
+        if (kind === 'more') {
+            box.innerHTML = `<div class="inv-form-in">
+                <div class="inv-sub">Invited in person or by call?</div>
+                <div class="inv-form-btns">
+                    <button type="button" class="btn btn-sm primary" onclick="event.stopPropagation();app.invAct(${Number(id)}, ${Number(aid)}, 'coming')">Coming</button>
+                    <button type="button" class="btn btn-sm secondary" onclick="event.stopPropagation();app.invForm(${Number(id)}, ${Number(aid)}, 'decline')">Not coming</button>
+                    <button type="button" class="btn btn-sm secondary" onclick="event.stopPropagation();app.invForm(${Number(id)}, ${Number(aid)}, 'remove')">Not suitable</button>
+                </div></div>`;
+            return;
+        }
+        const opts = kind === 'decline' ? _INV_DECLINE : _INV_REMOVE;
+        box.innerHTML = `<div class="inv-form-in">
+            <label class="inv-sub" for="inv-r-${Number(id)}">${kind === 'decline' ? 'Why not coming? (needed — it decides when they are invited again)' : 'Why not suitable?'}</label>
+            <select class="form-control" id="inv-r-${Number(id)}" onchange="document.getElementById('inv-again-${Number(id)}').hidden = !(this.value === 'other' && ${kind === 'decline'})">
+                <option value="">— pick a reason —</option>
+                ${opts.map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}
+            </select>
+            <input type="text" class="form-control" id="inv-n-${Number(id)}" placeholder="Note (optional)" maxlength="200">
+            <label class="inv-again" id="inv-again-${Number(id)}" hidden><input type="checkbox" id="inv-a-${Number(id)}" checked> Invite again to the next similar event</label>
+            <div class="inv-form-btns">
+                <button type="button" class="btn btn-sm primary" onclick="event.stopPropagation();app.invFormSave(${Number(id)}, ${Number(aid)}, '${kind}')">Save</button>
+                <button type="button" class="btn btn-sm secondary" onclick="event.stopPropagation();app.invForm(${Number(id)}, ${Number(aid)}, '${kind}')">Cancel</button>
+            </div></div>`;
+    };
+    const invFormSave = async (id, aid, kind) => {
+        const reason = document.getElementById(`inv-r-${Number(id)}`)?.value || '';
+        const note = (document.getElementById(`inv-n-${Number(id)}`)?.value || '').trim();
+        if (!reason) { UI.toast.error('Please pick a reason'); return; }
+        if (reason === 'other' && !note) { UI.toast.error('Please type the reason'); return; }
+        if (kind === 'decline') {
+            if (reason === 'stop' && !confirm('Mark this person "Do not invite"? They will not be suggested for any event again (the upline can undo it on their profile).')) return;
+            await invAct(id, aid, 'reply', { reply: 'declined', reason, note, reinvite: !!document.getElementById(`inv-a-${Number(id)}`)?.checked });
+        } else {
+            await invAct(id, aid, 'remove', { reason, note });
+        }
+    };
+
+    let _invAddTimer = null;
+    const invAddSearch = (aid, q) => {
+        clearTimeout(_invAddTimer);
+        const res = document.getElementById(`inv-add-res-${Number(aid)}`);
+        if (!res) return;
+        const term = String(q || '').trim();
+        if (term.length < 2) { res.innerHTML = ''; return; }
+        _invAddTimer = setTimeout(async () => {
+            try {
+                const [ps, cs] = await Promise.all([
+                    AppDataStore.searchProspects(term, { limit: 6 }).catch(() => []),
+                    AppDataStore.searchCustomers ? AppDataStore.searchCustomers(term, { limit: 6 }).catch(() => []) : [],
+                ]);
+                const rows = [
+                    ...(cs || []).slice(0, 6).map(c => ({ kind: 'customer', id: c.id, name: c.full_name })),
+                    ...(ps || []).filter(p => p.status !== 'converted').slice(0, 6).map(p => ({ kind: 'prospect', id: p.id, name: p.full_name })),
+                ];
+                const box = document.getElementById(`inv-add-res-${Number(aid)}`);
+                if (!box) return;
+                box.innerHTML = rows.length ? rows.map(r => `
+                    <button type="button" class="inv-add-row" onclick="event.stopPropagation();app.invAdd(${Number(aid)}, '${r.kind}', ${Number(r.id)})">
+                        <span>${esc(r.name || '—')}</span><span class="inv-chip">${r.kind === 'customer' ? 'Customer' : 'Prospect'}</span><span class="inv-add-plus">+ Add</span>
+                    </button>`).join('') : '<div class="inv-sub">No one found</div>';
+            } catch (e) { console.warn('[invite] search failed:', e); }
+        }, 300);
+    };
+    const invAdd = async (aid, kind, id) => {
+        const sb = _invSb();
+        if (!sb) return;
+        try {
+            const { error } = await sb.rpc('event_invite_add', {
+                p_activity: Number(aid), p_prospect: kind === 'prospect' ? Number(id) : null, p_customer: kind === 'customer' ? Number(id) : null,
+            });
+            if (error) throw error;
+            UI.toast.success('Added to the list');
+            await _invFill(aid, false);
+        } catch (e) { UI.toast.error(e && e.message ? e.message : String(e)); }
+    };
+
+    // ── 🎯 Purpose picker (saved on the event topic; every session uses it) ──
+    let _invLinesCache = null;
+    let _invProductsCache = null;
+    const _invHead = (name) => {
+        const h = String(name || '').trim().split(' ')[0].replace(/[（(].*$/, '').replace(/[0-9０-９]+$/, '').toLowerCase();
+        return /[一-龥].*[一-龥]/.test(h) || h.length >= 4 ? h : '';
+    };
+    // Starting suggestion from the title / categories: which line, which
+    // products are named (天心 → 换天心), and "upgrade" words. Always editable.
+    const _invSuggest = (text, lines, products) => {
+        const t = String(text || '').toLowerCase();
+        const focus = products.filter(p => {
+            const h = _invHead(p.name);
+            if (!h) return false;
+            if (t.includes(h)) return true;
+            for (let i = 0; i + 2 <= t.length; i++) {
+                const bi = t.slice(i, i + 2);
+                if (/^[一-龥]{2}$/.test(bi) && !['分享', '讲座', '课程', '老板', '每月', '主题', '活动', '交流', '汇集', '汇聚'].includes(bi) && h.includes(bi)) return true;
+            }
+            return false;
+        });
+        const lineOf = (p) => (lines.find(l => (l.subcategories || []).includes(p.subcategory)) || {}).key;
+        let line = focus.length ? lineOf(focus[0]) : null;
+        if (!line) {
+            const hit = lines.find(l => l.key !== 'general' && [...(l.event_keywords || []), ...(l.keywords || [])].some(k => k && t.includes(String(k).toLowerCase())));
+            line = hit ? hit.key : 'general';
+        }
+        const upgrade = /升级|换天心|天心|upgrade/.test(t);
+        const focusIds = focus.filter(p => lineOf(p) === line).map(p => p.id);
+        if (line === 'general') return [{ line, goal: 'introduce', focus: [] }];
+        return upgrade ? [{ line, goal: 'decide', focus: focusIds }, { line, goal: 'upgrade', focus: focusIds }] : [{ line, goal: 'decide', focus: focusIds }];
+    };
+    const _invObjRowHtml = (i, o, lines, products) => {
+        const line = (lines.find(l => l.key === (o && o.line)) || {});
+        const prods = products.filter(p => (line.subcategories || []).includes(p.subcategory));
+        const focus = new Set(((o && o.focus) || []).map(Number));
+        return `<div class="inv-obj-row" data-i="${i}">
+            <div class="inv-obj-n">${i === 0 ? 'Main purpose' : 'Second purpose (optional)'}</div>
+            <select class="form-control" id="inv-o-line-${i}" onchange="app.invObjLineChanged(${i})">
+                ${i === 1 ? '<option value="">— none —</option>' : ''}
+                ${lines.map(l => `<option value="${esc(l.key)}" ${o && o.line === l.key ? 'selected' : ''}>${esc(l.label)}</option>`).join('')}
+            </select>
+            <div class="inv-goals">
+                ${_INV_GOALS.map(([k, l, help]) => `<label class="inv-goal"><input type="radio" name="inv-o-goal-${i}" value="${k}" ${o && o.goal === k ? 'checked' : ''}>
+                    <span><b>${esc(l)}</b><small>${esc(help)}</small></span></label>`).join('')}
+            </div>
+            <details class="inv-focus" ${focus.size ? 'open' : ''}>
+                <summary>Focus products (optional)${focus.size ? ` · ${focus.size} picked` : ''}</summary>
+                <div class="inv-focus-list" id="inv-o-focus-${i}">
+                    ${prods.length ? prods.map(p => `<label><input type="checkbox" value="${Number(p.id)}" ${focus.has(Number(p.id)) ? 'checked' : ''}> ${esc(p.name)}</label>`).join('') : '<div class="inv-sub">No catalogue products in this line</div>'}
+                </div>
+            </details>
+        </div>`;
+    };
+    const invOpenObjectives = async (aid) => {
+        const sb = _invSb();
+        const d = _invData[Number(aid)];
+        if (!sb || !d) return;
+        try {
+            if (!_invLinesCache) {
+                const r = await sb.from('invite_lines').select('key,label,subcategories,keywords,event_keywords').eq('active', true).order('sort');
+                if (r.error) throw r.error;
+                _invLinesCache = r.data || [];
+            }
+            if (!_invProductsCache) {
+                const r = await sb.from('products').select('id,name,subcategory,is_active').order('name');
+                _invProductsCache = (r.data || []).filter(p => p.is_active !== false);
+            }
+        } catch (e) { UI.toast.error('Could not load the purposes: ' + (e.message || e)); return; }
+        const lines = _invLinesCache, products = _invProductsCache;
+        let cats = '';
+        try { const c = JSON.parse(d.categories || '[]'); cats = Array.isArray(c) ? c.join(' ') : String(d.categories || ''); } catch (_) { cats = String(d.categories || ''); }
+        const objs = (d.objectives || []).length ? d.objectives : _invSuggest(`${d.event_title || ''} ${cats}`, lines, products);
+        const suggested = !(d.objectives || []).length;
+        const content = `<div class="inv-objform" data-aid="${Number(aid)}">
+            <div class="inv-sub">${esc(d.event_title || '')} — the purpose is saved on the event, so every session of it uses the same one.
+                ${suggested ? '<br><b>Suggested from the title — check it.</b>' : ''}</div>
+            ${_invObjRowHtml(0, objs[0], lines, products)}
+            ${_invObjRowHtml(1, objs[1] || null, lines, products)}
+            <label class="inv-slots">Names per agent <input type="number" class="form-control" id="inv-o-slots" min="1" max="20" value="${Number(d.slots) || 9}"></label>
+        </div>`;
+        UI.showModal('🎯 What is this event for?', content, [
+            { label: 'Back', type: 'secondary', action: `app.viewActivityDetails(${Number(aid)})` },
+            { label: 'Save & suggest names', type: 'primary', action: `(async () => { await app.invSaveObjectives(${Number(aid)}); })()` },
+        ]);
+    };
+    const invObjLineChanged = (i) => {
+        const lines = _invLinesCache || [], products = _invProductsCache || [];
+        const key = document.getElementById(`inv-o-line-${i}`)?.value || '';
+        const row = document.querySelector(`.inv-obj-row[data-i="${i}"]`);
+        if (!row) return;
+        const goal = row.querySelector(`input[name="inv-o-goal-${i}"]:checked`)?.value || (key ? 'decide' : '');
+        row.outerHTML = _invObjRowHtml(i, key ? { line: key, goal, focus: [] } : null, lines, products);
+    };
+    const invSaveObjectives = async (aid) => {
+        const sb = _invSb();
+        const d = _invData[Number(aid)];
+        if (!sb || !d) return;
+        const objs = [];
+        for (const i of [0, 1]) {
+            const line = document.getElementById(`inv-o-line-${i}`)?.value || '';
+            if (!line) continue;
+            const goal = document.querySelector(`input[name="inv-o-goal-${i}"]:checked`)?.value || '';
+            if (!goal) { UI.toast.error(`Pick a goal for the ${i === 0 ? 'main' : 'second'} purpose`); return; }
+            const focus = [...document.querySelectorAll(`#inv-o-focus-${i} input:checked`)].map(x => Number(x.value));
+            objs.push({ line, goal, focus });
+        }
+        if (!objs.length) { UI.toast.error('Pick at least one purpose'); return; }
+        const slots = Number(document.getElementById('inv-o-slots')?.value || 9);
+        try {
+            const { error } = await sb.rpc('event_invite_set_objectives', { p_event: Number(d.event_id), p_objs: objs, p_slots: slots });
+            if (error) throw error;
+            UI.toast.success('Saved — names suggested for each agent');
+            await viewActivityDetails(aid);
+        } catch (e) { UI.toast.error(e && e.message ? e.message : String(e)); }
+    };
+
     const viewActivityDetails = async (activityId) => {
         // Hot cache hit: activity is in the yesterday→today+7 window pre-warmed by
         // the last renderCalendar(). Skip the network round-trip entirely so the
@@ -5388,7 +5826,9 @@
                 </div>`;
             }
 
-            attendeeHtml = prospectSection + agentSection + rolesSection + mediaSection;
+            const inviteSection = activity.activity_type === 'EVENT' && activity.event_id
+                ? `<div class="detail-section inv-host" id="inv-sec-${Number(activityId)}"></div>` : '';
+            attendeeHtml = inviteSection + prospectSection + agentSection + rolesSection + mediaSection;
         }
 
         // Resolve consultant + lead agent names in parallel before we build
@@ -5438,7 +5878,10 @@
 
         UI.showModal('Activity Details', content, []);
         if (document.getElementById('esm-body')) _esmFill();
-        if (document.getElementById(`cw-rec-${Number(activityId)}`)) _cwFill(activityId);
+        // ✨ Who to invite first; the 🎟️ waiting list only shows when the event has no purpose yet.
+        if (document.getElementById(`inv-sec-${Number(activityId)}`)) {
+            _invFill(activityId).finally(() => { if (!_invHasPurpose(activityId) && document.getElementById(`cw-rec-${Number(activityId)}`)) _cwFill(activityId); });
+        } else if (document.getElementById(`cw-rec-${Number(activityId)}`)) _cwFill(activityId);
 
         // 汇集 briefing (async fill; RLS-scoped — the slot stays hidden for
         // viewers who are neither the event creator nor management L≤5).
@@ -8193,6 +8636,16 @@
         viewActivityDetails,
         cwInvite,
         cwFill: _cwFill,
+        invFill: _invFill,
+        invAct,
+        invWhatsApp,
+        invForm,
+        invFormSave,
+        invAddSearch,
+        invAdd,
+        invOpenObjectives,
+        invObjLineChanged,
+        invSaveObjectives,
         openActivityRepairModal,
         repairSearchEntities,
         repairActivityRelink,

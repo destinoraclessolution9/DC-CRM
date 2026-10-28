@@ -3567,15 +3567,25 @@ let _nlTab = 'referral';
 let _nlLast = null;
 const _nlExpanded = new Set();
 
+// 招商 / 风水 / Power Ring / 财库 tabs → 🎯 Smart lists (2026-10-28, owner): the
+// same engine as the event screen's ✨ Who to invite, any line × goal, scoped
+// in the database to your own people (or your team as an upline).
 const NL_TABS = [
     ['referral', '🔗', 'Top Referral'],
     ['coverage', '🤝', 'Meet-Up Coverage'],
-    ['recruit', '🤝', '招商'],
-    ['fengshui', '🧭', '风水'],
-    ['ring', '💍', 'Power Ring'],
-    ['caiku', '🖼️', '财库'],
+    ['smart', '🎯', 'Smart lists'],
+    ['results', '📈', 'Event results'],
     ['audited', '📋', 'Audited'],
 ];
+const NL_GOALS = [
+    ['decide', 'Decide 成交'], ['upgrade', 'Upgrade 升级'], ['introduce', 'Introduce 认识'],
+    ['service', 'Service 服务'], ['comeback', 'Come back 回流'],
+];
+const NL_DECLINE = { no_time: '没时间', away: '出国/生病/家里事', not_interested: '没兴趣', budget: '太贵', has_it: '已经有了', stop: '不要再邀请', other: 'other' };
+let _nlSmart = { line: 'fengshui', goal: 'decide' };
+let _nlLines = null;
+let _nlSmartRows = null;
+let _nlResults = null;
 
 const _nlStrip = (text) => `<div style="font-size:12px;color:var(--gray-500);margin:2px 0 12px;">${text}</div>`;
 const _nlChipHtml = (n, label, onclick) => `
@@ -3665,34 +3675,6 @@ const _nlTabCoverage = (d) => {
         ${_nlTable('cov-prosp', ['Prospect', 'Status', 'Meet', 'Class', 'CPS', 'Call', 'WA', 'Total', 'Last Touch', 'Agent'], prospRows, 'No prospects met in the past 90 days.')}`;
 };
 
-const _nlTabTopic = (d, topicKey) => {
-    const topic = NL_TOPICS[topicKey];
-    const list = d.topics[topicKey];
-    const counts = { A: 0, B: 0, C: 0 };
-    list.forEach(r => counts[r.cat]++);
-    const rows = list.map(r => [
-        `${_nlNameLink(r)}${r.profile ? ' <span title="Interest on profile" style="color:#854f0b;font-size:11px;">★</span>' : ''} <span style="font-size:10px;color:var(--gray-400);">${r.type === 'c' ? 'C' : 'P'}</span>${topicKey === 'ring' && r.owns ? ' <span style="background:#e6f1fb;color:#0c447c;font-size:10px;padding:0 6px;border-radius:8px;">Owns 1</span>' : ''}`,
-        _nlCatBadge(r.cat),
-        `<a href="javascript:void(0)" onclick="app.nlWhy('${topicKey}','${String(r.key).replace(/'/g, '')}')" style="color:var(--primary,#0D9488);font-weight:600;text-decoration:none;">${_nlFmtW(r.total)} 🔍</a>`,
-        _nlFmtW(r.tick), _nlFmtW(r.event), _nlFmtW(r.talk),
-        r.last || (r.profile ? 'profile' : '—'),
-        r.grade ? escapeHtml(r.grade) : '—',
-        escapeHtml(r.agentName),
-    ]);
-    const note = {
-        recruit: 'DC 招商会 attendance/ticks + 招商 talk',
-        fengshui: 'audited people are on the Audited tab instead',
-        ring: 'owners of 2+ rings excluded — "Owns 1" can still buy the 2nd',
-        caiku: 'explicit 财库 signals only · buyers of CAI KU Painting excluded — your promo-ready list',
-    }[topicKey] || '';
-    return `
-        ${_nlStrip(`Window: Past 365 days · A = 5+ mentions · B = 2-4 · C = 1 · one activity counts once · 汇集 attended = 1.5 · ${note}`)}
-        <div style="display:flex;gap:8px;margin-bottom:10px;font-size:12px;">
-            <span>${_nlCatBadge('A')} ${counts.A}</span><span>${_nlCatBadge('B')} ${counts.B}</span><span>${_nlCatBadge('C')} ${counts.C}</span>
-        </div>
-        ${_nlTable('topic-' + topicKey, ['Name', 'Cat', 'Mentions', 'Tick', 'Event', 'Talk', 'Last Mention', 'Grade', 'Agent'], rows, `Nobody has a ${topic.label} signal in the past 365 days.`, 2)}`;
-};
-
 const _nlTabAudited = (d) => {
     const rows = d.audited.map(r => [_nlNameLink(r), escapeHtml(r.services), r.date || '—', escapeHtml(r.agentName)]);
     return `
@@ -3700,24 +3682,102 @@ const _nlTabAudited = (d) => {
         ${_nlTable('audited', ['Customer', 'Type of Audit Service', 'Audit Date', 'Agent'], rows, 'No audited customers yet.', 2)}`;
 };
 
+// 🎯 Smart lists — invite_smart_list(line, goal): Strong / Potential people
+// with their reasons. Filled after render (async), cached per line × goal.
+const _nlSmartHtml = () => {
+    const lines = _nlLines || [];
+    const sel = (id, opts, cur) => `<select class="form-control" id="${id}" style="width:auto;min-width:150px;font-size:13px;" onchange="app.nlSmartSet()">${opts.map(([k, l]) => `<option value="${escapeHtml(k)}" ${k === cur ? 'selected' : ''}>${escapeHtml(l)}</option>`).join('')}</select>`;
+    const rows = (_nlSmartRows || []).filter(r => (r.fit || 0) >= 50).map(r => [
+        `<a href="javascript:void(0)" onclick="${r.customer_id ? `app.showCustomerDetail(${Number(r.customer_id)})` : `app.showProspectDetail(${Number(r.prospect_id)})`}" style="color:var(--primary,#0D9488);text-decoration:none;font-weight:600;">${escapeHtml(r.name || '—')}</a> <span style="font-size:10px;color:var(--gray-400);">${r.customer_id ? 'C' : 'P'}</span>`,
+        r.grp === 'strong' ? '<span style="background:var(--gray-900);color:#fff;font-size:11px;padding:0 7px;border-radius:9px;">Strong</span>' : '<span style="font-size:11px;">Potential</span>',
+        `${r.fit}`, `${r.engagement}`, `${r.readiness}`,
+        (r.reasons || []).slice(0, 2).map(x => escapeHtml(x.t) + (x.d ? ` <span style="color:var(--gray-400);">${escapeHtml(x.d)}</span>` : '')).join('<br>') + ((r.warnings || []).length ? `<br><span style="color:#92400e;font-size:11px;">⚠ ${escapeHtml(r.warnings.join(', ').replace(/_/g, ' '))}</span>` : ''),
+        r.last_touch || '—',
+        escapeHtml(r.agent_name || '—'),
+    ]);
+    return `
+        ${_nlStrip('Same rules as ✨ Who to invite on an event · Fit = matches the purpose · Engaged = recent contact · Ready = open quote / audit / deal · your own people (or your team)')}
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+            ${sel('nl-smart-line', lines.map(l => [l.key, l.label]), _nlSmart.line)}
+            ${sel('nl-smart-goal', NL_GOALS, _nlSmart.goal)}
+        </div>
+        <div id="nl-smart-table">${_nlSmartRows === null
+            ? '<div style="text-align:center;padding:18px;color:var(--gray-400);"><i class="fas fa-spinner fa-spin"></i> Finding people…</div>'
+            : _nlTable('smart', ['Name', 'Group', 'Fit', 'Engaged', 'Ready', 'Why', 'Last contact', 'Agent'], rows, 'Nobody matches this line and goal yet.', 2)}</div>`;
+};
+
+// 📈 Event results — event_invite_results(120): per session suggested → sent →
+// coming → came → closed (closed = a closing linked to that attendee row).
+const _nlResultsHtml = () => {
+    if (_nlResults === null) return '<div style="text-align:center;padding:18px;color:var(--gray-400);"><i class="fas fa-spinner fa-spin"></i> Loading results…</div>';
+    const rows = _nlResults.map(r => [
+        escapeHtml(r.date || ''),
+        `<a href="javascript:void(0)" onclick="app.viewActivityDetails(${Number(r.activity_id)})" style="color:var(--primary,#0D9488);text-decoration:none;font-weight:600;">${escapeHtml(r.title || '—')}</a><div style="font-size:11px;color:var(--gray-400);">${escapeHtml((r.objectives || []).join(' · ').replace(/:/g, ' · '))}</div>`,
+        `${r.suggested}`, `${r.sent}`, `${r.coming}`, `${r.came}`, `${r.closed}`,
+        Object.entries(r.reasons || {}).map(([k, n]) => `${escapeHtml(NL_DECLINE[k] || k)} ${n}`).join(' · ') || '—',
+    ]);
+    return `
+        ${_nlStrip('Past 120 days · a sale counts only when its closing is linked to the attendee · declined reasons decide who is invited again')}
+        ${_nlTable('results', ['Date', 'Event', 'Suggested', 'Sent', 'Coming', 'Came', 'Closed', 'Not coming because'], rows, 'No event has used ✨ Who to invite yet — set an event\'s purpose on its event screen.', 2)}`;
+};
+
+const _nlLoadAsync = async () => {
+    const sb = window.supabase || window.supabaseClient;
+    if (!sb) return;
+    try {
+        if (_nlTab === 'smart') {
+            if (!_nlLines) {
+                const r = await sb.from('invite_lines').select('key,label').eq('active', true).order('sort');
+                _nlLines = r.data || [];
+                const el = document.getElementById('nl-body');
+                if (el && _nlLast && _nlTab === 'smart') el.innerHTML = _nlBodyHtml(_nlLast);
+            }
+            if (_nlSmartRows === null) {
+                const { data, error } = await sb.rpc('invite_smart_list', { p_line: _nlSmart.line, p_goal: _nlSmart.goal });
+                if (error) throw error;
+                _nlSmartRows = data || [];
+                const el = document.getElementById('nl-body');
+                if (el && _nlLast && _nlTab === 'smart') el.innerHTML = _nlBodyHtml(_nlLast);
+            }
+        } else if (_nlTab === 'results' && _nlResults === null) {
+            const { data, error } = await sb.rpc('event_invite_results', { p_days: 120 });
+            if (error) throw error;
+            _nlResults = data || [];
+            const el = document.getElementById('nl-body');
+            if (el && _nlLast && _nlTab === 'results') el.innerHTML = _nlBodyHtml(_nlLast);
+        }
+    } catch (e) {
+        console.warn('[namelist] smart / results failed:', e);
+        const box = document.getElementById(_nlTab === 'smart' ? 'nl-smart-table' : 'nl-body');
+        if (box) box.innerHTML = `<p style="padding:14px;color:var(--gray-400);font-size:13px;">Could not load — please retry. (${escapeHtml(e && e.message || 'unknown error')})</p>`;
+    }
+};
+const nlSmartSet = () => {
+    _nlSmart = { line: document.getElementById('nl-smart-line')?.value || _nlSmart.line, goal: document.getElementById('nl-smart-goal')?.value || _nlSmart.goal };
+    _nlSmartRows = null;
+    const box = document.getElementById('nl-smart-table');
+    if (box) box.innerHTML = '<div style="text-align:center;padding:18px;color:var(--gray-400);"><i class="fas fa-spinner fa-spin"></i> Finding people…</div>';
+    _nlLoadAsync();
+};
+
 const _nlBodyHtml = (d) => {
     const counts = {
         referral: d.referral.agents.length + d.referral.clients.length,
         coverage: d.coverage.custNotMet.length,
-        recruit: d.topics.recruit.length,
-        fengshui: d.topics.fengshui.length,
-        ring: d.topics.ring.length,
-        caiku: d.topics.caiku.length,
+        smart: _nlSmartRows ? _nlSmartRows.filter(r => (r.fit || 0) >= 50).length : '',
+        results: _nlResults ? _nlResults.length : '',
         audited: d.audited.length,
     };
     const tabs = NL_TABS.map(([key, icon, label]) => `
         <button onclick="app.nlTab('${key}')" style="border:1px solid ${_nlTab === key ? 'var(--primary,#0D9488)' : 'var(--border,#e5e0d8)'};background:${_nlTab === key ? 'var(--primary,#0D9488)' : 'var(--gray-50,#f7f4ed)'};color:${_nlTab === key ? '#fff' : 'var(--gray-600,#5f5e5a)'};border-radius:16px;padding:5px 12px;font-size:12px;cursor:pointer;white-space:nowrap;">
             ${icon} ${label} <span style="font-weight:700;">${counts[key]}</span>
         </button>`).join('');
+    if (!NL_TABS.some(t => t[0] === _nlTab)) _nlTab = 'referral';
     const body = _nlTab === 'referral' ? _nlTabReferral(d)
         : _nlTab === 'coverage' ? _nlTabCoverage(d)
-        : _nlTab === 'audited' ? _nlTabAudited(d)
-        : _nlTabTopic(d, _nlTab);
+        : _nlTab === 'smart' ? _nlSmartHtml()
+        : _nlTab === 'results' ? _nlResultsHtml()
+        : _nlTabAudited(d);
     return `
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 10px;">${tabs}</div>
         ${body}
@@ -3735,6 +3795,7 @@ const _nlRenderBody = async () => {
         _nlLast = d;
         const el = document.getElementById('nl-body');
         if (el) el.innerHTML = _nlBodyHtml(d);
+        if (_nlTab === 'smart' || _nlTab === 'results') _nlLoadAsync();
     } catch (e) {
         console.warn('[namelist] build failed:', e);
         const el = document.getElementById('nl-body');
@@ -3761,7 +3822,7 @@ const renderNameListSection = async () => {
         <div class="kpi-card">
             <h3 class="kpi-card-title" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;" onclick="app.nlToggle()">
                 <span>📇 Name List — Who to Focus
-                    <span style="font-weight:400;color:var(--gray-400);font-size:13px;">7 lists · referrals · 90-day coverage · 招商 · 风水 · Power Ring · 财库 · audits</span>
+                    <span style="font-weight:400;color:var(--gray-400);font-size:13px;">referrals · 90-day coverage · 🎯 smart lists (风水 · Power Ring · 书法 · 财库 · 招商 …) · event results · audits</span>
                 </span>
                 <span style="font-size:13px;color:var(--primary,#0D9488);white-space:nowrap;">${_nlOpen ? '▲ Hide' : '▼ Open'}</span>
             </h3>
@@ -3775,7 +3836,11 @@ const nlToggle = () => {
     try { localStorage.setItem('fs_nl_open', _nlOpen ? '1' : '0'); } catch (_) { /* private mode */ }
     renderNameListSection();
 };
-const nlTab = (key) => { _nlTab = key; if (_nlLast) { const el = document.getElementById('nl-body'); if (el) el.innerHTML = _nlBodyHtml(_nlLast); } };
+const nlTab = (key) => {
+    _nlTab = key;
+    if (_nlLast) { const el = document.getElementById('nl-body'); if (el) el.innerHTML = _nlBodyHtml(_nlLast); }
+    if (key === 'smart' || key === 'results') _nlLoadAsync();
+};
 const nlExpand = (tableKey) => {
     if (_nlExpanded.has(tableKey)) _nlExpanded.delete(tableKey); else _nlExpanded.add(tableKey);
     if (_nlLast) { const el = document.getElementById('nl-body'); if (el) el.innerHTML = _nlBodyHtml(_nlLast); }
@@ -4072,36 +4137,6 @@ const hjToggle = () => {
     renderHuijiConversionSection();
 };
 
-// Drill-down: why is this person on the list — every counted activity with the
-// signal that matched (tick name / event category / keyword), so a Category A
-// row is always verifiable.
-const nlWhy = (topicKey, personKey) => {
-    if (!_nlLast) return;
-    const row = (_nlLast.topics[topicKey] || []).find(r => r.key === personKey);
-    if (!row) return;
-    const howBadge = (h) => h.how === 'tick' ? '<span style="background:#fbeaf0;color:#72243e;font-size:11px;padding:0 6px;border-radius:8px;">tick</span>'
-        : h.how === 'event' ? '<span style="background:#e6f1fb;color:#0c447c;font-size:11px;padding:0 6px;border-radius:8px;">event</span>'
-        : h.how === 'profile' ? '<span style="background:#faeeda;color:#633806;font-size:11px;padding:0 6px;border-radius:8px;">profile ★</span>'
-        : '<span style="background:var(--gray-100,#f1ede3);color:var(--gray-600);font-size:11px;padding:0 6px;border-radius:8px;">talk</span>';
-    const lines = row.ev.map(h => `<tr>
-        <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100,#f1ede3);white-space:nowrap;color:var(--gray-500);">${h.d || '—'}</td>
-        <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100,#f1ede3);white-space:nowrap;">${escapeHtml(h.t)}</td>
-        <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100,#f1ede3);">${howBadge(h)} ${escapeHtml(String(h.what || ''))}${h.w && h.w !== 1 ? ` <span style="background:#fdf0e3;color:#8a4a08;font-size:11px;padding:0 6px;border-radius:8px;font-weight:700;">×${_nlFmtW(h.w)}</span>` : ''}</td>
-    </tr>`).join('');
-    UI.showModal(`${NL_TOPICS[topicKey].icon} ${escapeHtml(row.name)} — ${_nlFmtW(row.total)} mention${row.total === 1 ? '' : 's'}`, `
-        <div style="font-size:12px;color:var(--gray-500);margin-bottom:8px;">Category ${row.cat} · Tick ${_nlFmtW(row.tick)} · Event ${_nlFmtW(row.event)} · Talk ${_nlFmtW(row.talk)}${row.profile ? ' · Profile ★' : ''} — each activity counts once even if several signals match inside it; attended 汇集 counts 1.5.</div>
-        <div style="max-height:50vh;overflow:auto;border:1px solid var(--border,#e5e0d8);border-radius:6px;">
-            <table style="width:100%;border-collapse:collapse;font-size:12.5px;">
-                <thead><tr>
-                    <th style="padding:6px 8px;text-align:left;font-weight:600;color:var(--gray-500);border-bottom:1px solid var(--border,#e5e0d8);">Date</th>
-                    <th style="padding:6px 8px;text-align:left;font-weight:600;color:var(--gray-500);border-bottom:1px solid var(--border,#e5e0d8);">Activity</th>
-                    <th style="padding:6px 8px;text-align:left;font-weight:600;color:var(--gray-500);border-bottom:1px solid var(--border,#e5e0d8);">Signal</th>
-                </tr></thead><tbody>${lines}</tbody>
-            </table>
-        </div>`,
-        [{ label: 'Close', type: 'secondary', action: 'UI.hideModal();' }]);
-};
-
 // Repeat chip drill-down (owner 2026-08-10): "10 met twice, 3 met 3x, 5 met 4x"
 // — physical meet-ups only (calls/WhatsApp deliberately excluded).
 const nlRepeatDetail = () => {
@@ -4145,6 +4180,14 @@ const nlCsv = () => {
     } else if (_nlTab === 'audited') {
         headers = ['Customer', 'Type of Audit Service', 'Audit Date', 'Agent'];
         rows = d.audited.map(r => [r.name, r.services, r.date, r.agentName]);
+    } else if (_nlTab === 'smart') {
+        headers = ['Name', 'P/C', 'Line', 'Goal', 'Group', 'Fit', 'Engaged', 'Ready', 'Why', 'Warnings', 'Last contact', 'Agent'];
+        rows = (_nlSmartRows || []).filter(r => (r.fit || 0) >= 50).map(r => [r.name, r.customer_id ? 'Customer' : 'Prospect', _nlSmart.line, _nlSmart.goal, r.grp,
+            r.fit, r.engagement, r.readiness, (r.reasons || []).map(x => x.t + (x.d ? ' ' + x.d : '')).join(' | '), (r.warnings || []).join(' '), r.last_touch || '', r.agent_name || '']);
+    } else if (_nlTab === 'results') {
+        headers = ['Date', 'Event', 'Purpose', 'Suggested', 'Sent', 'Replied', 'Coming', 'Declined', 'Came', 'No-show', 'Closed', 'Declined because'];
+        rows = (_nlResults || []).map(r => [r.date, r.title, (r.objectives || []).join(' + '), r.suggested, r.sent, r.replied, r.coming, r.declined, r.came, r.no_show, r.closed,
+            Object.entries(r.reasons || {}).map(([k, n]) => `${k} ${n}`).join(' | ')]);
     } else {
         headers = ['Name', 'P/C', 'Category', 'Mentions', 'Tick', 'Event', 'Talk', 'Profile', 'Last Mention', 'Grade', 'Agent'];
         rows = (d.topics[_nlTab] || []).map(r => [r.name, r.type === 'c' ? 'Customer' : 'Prospect', r.cat, r.total, r.tick, r.event, r.talk, r.profile ? 'yes' : '', r.last, r.grade, r.agentName]);
@@ -7574,6 +7617,7 @@ const exportKPIReport = async (format) => {
         wrFigureInput,
         // Name List — Who to Focus
         nlToggle,
+        nlSmartSet,
         renderChuanfuSection,
         cfToggle,
         cfPeriod,
@@ -7583,7 +7627,6 @@ const exportKPIReport = async (format) => {
         cfLink,
         nlTab,
         nlExpand,
-        nlWhy,
         nlRepeatDetail,
         nlCsv,
         // 汇集 → Closing conversion
