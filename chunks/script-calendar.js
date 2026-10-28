@@ -5264,7 +5264,7 @@
             ${mine.length ? `<div class="inv-group">
                 <div class="inv-group-h">Your ${mine.filter(r => r.grp !== 'review').length} to invite${myOpen && !d.past ? ` · ${myOpen} not invited yet` : ''}</div>
                 ${mine.map(r => _invRowHtml(aid, r, d.past)).join('')}
-            </div>` : (d.past ? '' : '<div class="inv-sub">No names for you on this event — none of your people match its purpose yet.</div>')}
+            </div>` : (d.past || team.length ? '' : '<div class="inv-sub">No names for you on this event — none of your people match its purpose yet.</div>')}
             ${Object.keys(byAgent).sort().map(name => {
                 const s = agentStat(name);
                 return `<details class="inv-agent">

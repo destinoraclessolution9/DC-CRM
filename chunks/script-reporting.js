@@ -3690,10 +3690,10 @@ const _nlSmartHtml = () => {
     const rows = (_nlSmartRows || []).filter(r => (r.fit || 0) >= 50).map(r => [
         `<a href="javascript:void(0)" onclick="${r.customer_id ? `app.showCustomerDetail(${Number(r.customer_id)})` : `app.showProspectDetail(${Number(r.prospect_id)})`}" style="color:var(--primary,#0D9488);text-decoration:none;font-weight:600;">${escapeHtml(r.name || '—')}</a> <span style="font-size:10px;color:var(--gray-400);">${r.customer_id ? 'C' : 'P'}</span>`,
         r.grp === 'strong' ? '<span style="background:var(--gray-900);color:#fff;font-size:11px;padding:0 7px;border-radius:9px;">Strong</span>' : '<span style="font-size:11px;">Potential</span>',
-        `${r.fit}`, `${r.engagement}`, `${r.readiness}`,
         (r.reasons || []).slice(0, 2).map(x => escapeHtml(x.t) + (x.d ? ` <span style="color:var(--gray-400);">${escapeHtml(x.d)}</span>` : '')).join('<br>') + ((r.warnings || []).length ? `<br><span style="color:#92400e;font-size:11px;">⚠ ${escapeHtml(r.warnings.join(', ').replace(/_/g, ' '))}</span>` : ''),
         r.last_touch || '—',
         escapeHtml(r.agent_name || '—'),
+        `${r.fit}`, `${r.engagement}`, `${r.readiness}`,
     ]);
     return `
         ${_nlStrip('Same rules as ✨ Who to invite on an event · Fit = matches the purpose · Engaged = recent contact · Ready = open quote / audit / deal · your own people (or your team)')}
@@ -3703,7 +3703,7 @@ const _nlSmartHtml = () => {
         </div>
         <div id="nl-smart-table">${_nlSmartRows === null
             ? '<div style="text-align:center;padding:18px;color:var(--gray-400);"><i class="fas fa-spinner fa-spin"></i> Finding people…</div>'
-            : _nlTable('smart', ['Name', 'Group', 'Fit', 'Engaged', 'Ready', 'Why', 'Last contact', 'Agent'], rows, 'Nobody matches this line and goal yet.', 2)}</div>`;
+            : _nlTable('smart', ['Name', 'Group', 'Why', 'Last contact', 'Agent', 'Fit', 'Engaged', 'Ready'], rows, 'Nobody matches this line and goal yet.', 5)}</div>`;
 };
 
 // 📈 Event results — event_invite_results(120): per session suggested → sent →
@@ -3713,12 +3713,12 @@ const _nlResultsHtml = () => {
     const rows = _nlResults.map(r => [
         escapeHtml(r.date || ''),
         `<a href="javascript:void(0)" onclick="app.viewActivityDetails(${Number(r.activity_id)})" style="color:var(--primary,#0D9488);text-decoration:none;font-weight:600;">${escapeHtml(r.title || '—')}</a><div style="font-size:11px;color:var(--gray-400);">${escapeHtml((r.objectives || []).join(' · ').replace(/:/g, ' · '))}</div>`,
-        `${r.suggested}`, `${r.sent}`, `${r.coming}`, `${r.came}`, `${r.closed}`,
         Object.entries(r.reasons || {}).map(([k, n]) => `${escapeHtml(NL_DECLINE[k] || k)} ${n}`).join(' · ') || '—',
+        `${r.suggested}`, `${r.sent}`, `${r.coming}`, `${r.came}`, `${r.closed}`,
     ]);
     return `
         ${_nlStrip('Past 120 days · a sale counts only when its closing is linked to the attendee · declined reasons decide who is invited again')}
-        ${_nlTable('results', ['Date', 'Event', 'Suggested', 'Sent', 'Coming', 'Came', 'Closed', 'Not coming because'], rows, 'No event has used ✨ Who to invite yet — set an event\'s purpose on its event screen.', 2)}`;
+        ${_nlTable('results', ['Date', 'Event', 'Not coming because', 'Suggested', 'Sent', 'Coming', 'Came', 'Closed'], rows, 'No event has used ✨ Who to invite yet — set an event\'s purpose on its event screen.', 3)}`;
 };
 
 const _nlLoadAsync = async () => {

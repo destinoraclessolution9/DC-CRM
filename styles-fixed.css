@@ -11986,6 +11986,7 @@ details[open] > summary.pmf-h::after { content: '▾'; }
 .inv-form-in { display: grid; gap: 6px; padding: 8px 10px; border-radius: 8px; background: var(--bg-surface, #fff); border: 1px solid var(--gray-200); }
 .inv-form-btns { display: flex; gap: 6px; flex-wrap: wrap; }
 .inv-again { font-size: 12.5px; display: flex; gap: 6px; align-items: center; }
+.inv-again[hidden] { display: none; }
 .inv-agent { border-top: 1px solid var(--gray-200); }
 .inv-agent > summary { cursor: pointer; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; padding: 9px 0; font-size: 13px; list-style: none; }
 .inv-agent > summary::-webkit-details-marker { display: none; }
