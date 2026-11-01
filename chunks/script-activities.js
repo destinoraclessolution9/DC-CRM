@@ -433,9 +433,11 @@
         `;
     };
 
-    // prospects.source of a friend added with the New Friend button on an event
-    // (moving forward only: old names did CPS and are never tagged).
+    // 🌱 New Friends are in the system with no CPS done: added with the New Friend
+    // button on an event (prospects.source), or their CPS was cancelled with no next
+    // date (cps_cancelled_on). Moving forward only: old names did CPS and have neither.
     const NEW_FRIEND_SOURCE = 'event_new_friend';
+    const _isNewFriend = (p) => !!p && (p.source === NEW_FRIEND_SOURCE || !!p.cps_cancelled_on);
 
     const openActivityModal = async (prefillDate = null, prospectId = null, activity = null) => {
         // Local date parts, not toISOString() (UTC) — the latter returns yesterday for
@@ -494,7 +496,9 @@
         // If prospectId is provided, pre-select it and pre-fill CPS fields
         if (prospectId) {
             setTimeout(async () => {
-                const prospect = await AppDataStore.getById('prospects', prospectId);
+                // The full row: the light one has no cps_cancelled_on / introduced_by.
+                const prospect = (AppDataStore.getByIdFull ? await AppDataStore.getByIdFull('prospects', prospectId) : null)
+                    || await AppDataStore.getById('prospects', prospectId);
                 if (prospect) {
                     _state.se = { id: prospectId, type: 'Prospect' };
                     const infoDiv = document.getElementById('selected-entity-info');
@@ -538,7 +542,8 @@
                             setF('cps-relationship', prospect.referral_relationship);
                             // 🌱 A New Friend's referrer is already on file; the CPS
                             // save needs it picked, so don't make the agent search again.
-                            if (prospect.source === NEW_FRIEND_SOURCE && prospect.referred_by) {
+                            if (_isNewFriend(prospect) && prospect.referred_by) {
+                                if (prospect.introduced_by) selectIntroducer(prospect.introduced_by_id, prospect.introduced_by, prospect.introduced_by_type);
                                 selectReferrer(prospect.referred_by_id ?? null, prospect.referred_by, prospect.referred_by_type || null);
                             }
                             try { biAutoFill('cps', 'ic'); } catch (e) {}
@@ -7084,7 +7089,7 @@ My raw notes:
                         // The full row: "fill the blanks" below must see every column.
                         const _p = (AppDataStore.getByIdFull ? await AppDataStore.getByIdFull('prospects', _pid) : null)
                             || await AppDataStore.getById('prospects', _pid);
-                        if (!_p || _p.source !== NEW_FRIEND_SOURCE || _p.status === 'converted') continue;
+                        if (!_isNewFriend(_p) || _p.status === 'converted') continue;
                         if (String(_pid) !== String(hardDuplicate?.id) && normalize(_p.full_name) !== normName && normalize(_p.phone) !== normalize(phone)) continue;
                         const _vis = await _utils.getVisibleUserIds?.(_state.cu);
                         if (_vis === 'all' || (Array.isArray(_vis) && _vis.map(String).includes(String(_p.responsible_agent_id)))) {

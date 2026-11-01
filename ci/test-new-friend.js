@@ -67,17 +67,32 @@ const mobile = read('chunks/script-mobile.js');
     check('came twice is shown', b[2].includes('×2'));
     check('no event shows a dash', b[4], '—');
     check('waiting days', a[3], '2d');
-    for (const [state, label] of [['came', 'Came'], ['coming', 'Coming'], ['no_show', 'No show'], ['unmarked', 'Not marked']]) {
+    for (const [state, label] of [['came', 'Came'], ['coming', 'Coming'], ['no_show', 'No show'], ['unmarked', 'Not marked'], ['cps_cancelled', 'CPS cancelled']]) {
         check(`status ${state}`, sandbox.status({ state, came_n: 1 }), label);
     }
+    check('came count only for people who came', sandbox.status({ state: 'cps_cancelled', came_n: 2 }), 'CPS cancelled');
+
+    vm.runInContext(`_nlFriends = [
+        { prospect_id: 13, name: 'Cat', phone: '0123456789', agent_name: 'Agent A', brought_by: 'Ref', session_id: 5, event_title: '汇集', event_date: '2026-10-31', came_n: 1, state: 'cps_cancelled', cps_booked: null, days_waiting: 3, cancelled_cps_date: '2026-11-01', cancel_reason: 'Emergency', cancel_note: '<i>family</i>' },
+        { prospect_id: 14, name: 'Dan', phone: '', agent_name: 'Agent A', brought_by: null, session_id: null, event_title: null, event_date: null, came_n: 0, state: 'cps_cancelled', cps_booked: null, days_waiting: 0, cancelled_cps_date: '2026-11-01', cancel_reason: 'Sick', cancel_note: null },
+    ]`, sandbox);
+    const c = JSON.parse(sandbox.render().replace(/^[\s\S]*?<\/strip>\s*/, ''));
+    check('list says where they came from', c.headers[4], 'From');
+    check('cancelled: shows the CPS date', c.rows[0][4].includes('CPS 1 Nov'));
+    check('cancelled: shows the reason', c.rows[0][4].includes('Emergency'));
+    check('cancelled: note is escaped', c.rows[0][4].includes('&lt;i&gt;family') && !c.rows[0][4].includes('<i>family'));
+    check('cancelled beats the event they came to', c.rows[0][4].includes('app.viewActivityDetails'), false);
+    check('cancelled with no note: no stray dot', c.rows[1][4].includes('Sick') && !c.rows[1][4].includes('Sick ·'));
+    check('cancelled: Book CPS is there', c.rows[1][1].includes(`app.openActivityModal('', 14)`));
 }
 
 // ── A New Friend's CPS lands on their own record ────────────────────────────
 {
     const block = slice(activities, 'try {\n                    const _ids = [_state.se?.type', 'if (hardDuplicate && !_newFriendCps) {');
+    const _isNewFriend = vm.runInNewContext(slice(activities, "const NEW_FRIEND_SOURCE = 'event_new_friend';", 'const openActivityModal = async') + '; _isNewFriend');
     const go = async (o) => {
         const sandbox = {
-            NEW_FRIEND_SOURCE: 'event_new_friend', console: { warn() {} },
+            _isNewFriend, console: { warn() {} },
             _state: { se: o.se || null, cu: { id: 7 } },
             hardDuplicate: o.hardDuplicate, phone: o.phone || '0123456789',
             normName: (o.name || 'Ann Lee').toLowerCase().replace(/\s+/g, ''),
@@ -90,6 +105,7 @@ const mobile = read('chunks/script-mobile.js');
     };
     const nf ={ id: 1, full_name: 'Ann Lee', phone: '0123456789', source: 'event_new_friend', status: 'active', responsible_agent_id: 7 };
     const old = { id: 2, full_name: 'Ann Lee', phone: '0123456789', source: null, status: 'active', responsible_agent_id: 7 };
+    const cancelled = { id: 3, full_name: 'Ann Lee', phone: '0123456789', source: 'form_intake_old', cps_cancelled_on: '2026-11-01', status: 'active', responsible_agent_id: 7 };
 
     (async () => {
         let r = await go({ se: { type: 'Prospect', id: 1 }, hardDuplicate: null, people: { 1: nf } });
@@ -102,6 +118,12 @@ const mobile = read('chunks/script-mobile.js');
         check('phone corrected in the form: still the same person', r.nf && r.id, 1);
         r = await go({ se: { type: 'Prospect', id: 1 }, hardDuplicate: null, name: 'Bob Tan', phone: '0111111111', people: { 1: nf } });
         check('form retyped as someone else: a different person', r.nf, false);
+        r = await go({ se: { type: 'Prospect', id: 3 }, hardDuplicate: { id: 3, __src: 'prospects' }, people: { 3: cancelled } });
+        check('cancelled CPS, opened for them: reused, not refused as a duplicate', r.nf && r.id, 3);
+        r = await go({ hardDuplicate: { id: 3, __src: 'prospects' }, people: { 3: cancelled } });
+        check('cancelled CPS, typed into a blank form: reused', r.nf && r.id, 3);
+        r = await go({ hardDuplicate: { id: 3, __src: 'prospects' }, vis: ['99'], people: { 3: cancelled } });
+        check('cancelled CPS, another team: poaching guard stays', r.nf, false);
         r = await go({ hardDuplicate: { id: 2, __src: 'prospects' }, people: { 2: old } });
         check('old name: duplicate rules unchanged', r.nf, false);
         r = await go({ se: { type: 'Prospect', id: 2 }, hardDuplicate: null, people: { 2: old } });
@@ -153,7 +175,8 @@ const mobile = read('chunks/script-mobile.js');
         check('form carries the session', prospects.includes('id="prospect-new-friend-session" value="${escapeHtml(opts.newFriendSession'));
         check('save tags the prospect', /data\.source = 'event_new_friend';\s+data\.source_id = Number\(_nfSession\);/.test(prospects));
         check('tag only in the create path', prospects.indexOf("data.source = 'event_new_friend'") > prospects.indexOf("data.pipeline_stage       = 'new'"));
-        check('New Friend referrer is prefilled', /prospect\.source === NEW_FRIEND_SOURCE && prospect\.referred_by/.test(activities));
+        check('New Friend referrer is prefilled', /_isNewFriend\(prospect\) && prospect\.referred_by/.test(activities));
+        check('prefill reads the full row', /const prospect = \(AppDataStore\.getByIdFull \? await AppDataStore\.getByIdFull\('prospects', prospectId\)/.test(activities));
         check('CPS makes the missing referral row', activities.includes('(!_recoveredProspect || _newFriendCps) && _state.sr?.id != null'));
         check('desktop filter routes to the client path', /_pUnsupported = [^\n]*newFriendFilter/.test(prospects));
         check('desktop filter narrows the rows', prospects.includes('if (_nfIds && !_nfIds.has(String(p.id))) continue;'));
@@ -163,6 +186,52 @@ const mobile = read('chunks/script-mobile.js');
         check('mobile filter dropped on Customers', /tab === 'customers'\) \{[^\n]*_mpFilters\.newFriend = ''/.test(mobile));
         check('tab is on the Name List', /\['newfriends', '🌱', 'New Friends'\]/.test(reporting));
         check('tab has a CSV', reporting.includes("_nlTab === 'newfriends') {\n        headers ="));
+
+        // ── 🚫 Cancel CPS ──
+        const calendar = read('chunks/script-calendar.js');
+        const cc = slice(calendar, 'const CPS_CANCEL_REASONS =', 'const deleteActivity = async');
+        const calls = [];
+        const ccBox = {
+            escapeHtml, calls, console,
+            document: { elements: {}, getElementById(id) { return this.elements[id] || null; }, querySelector() { return null; } },
+            window: { supabase: { rpc: async (name, args) => { calls.push(['rpc', name, args]); return ccBox.rpcResult; } }, app: { mcalRefreshActiveView: async () => calls.push(['refresh']) } },
+            rpcResult: { error: null },
+            UI: { showModal: (t, body, buttons) => { ccBox.modal = { t, body, buttons }; }, hideModal: () => calls.push(['hide']), toast: { error: (m) => calls.push(['err', m]), success: (m) => calls.push(['ok', m]) } },
+            AppDataStore: { _evictPrimedRow: (t, id) => calls.push(['evict', t, id]), invalidateCache: (t) => calls.push(['invalidate', t]), emit: (e, d) => calls.push(['emit', e, d]) },
+            renderCalendar: async () => {}, renderTodayActivities: async () => {},
+        };
+        vm.createContext(ccBox);
+        vm.runInContext(cc + '\nthis.happened = _cpsHappened; this.open = openCancelCps; this.confirm = confirmCancelCps;', ccBox);
+        check('a fresh booking can be cancelled', ccBox.happened({ meeting_minutes: null }), false);
+        check('a booking summary is not proof', ccBox.happened({ summary: 'booked via Ann' }), false);
+        for (const [k, v] of [['note_key_points', 'x'], ['note_needs', 'x'], ['note_pain_points', 'x'], ['note_outcome', 'x'], ['next_action', 'x'], ['is_closing', true], ['completed_at', '2026-11-01'], ['meeting_minutes', { advisor: 'x' }]]) {
+            check(`${k} means it happened`, ccBox.happened({ [k]: v }));
+        }
+        ccBox.open(55);
+        check('form lists every reason', ['emergency', 'sick', 'clash', 'unreachable', 'changed_mind', 'other'].every(v => ccBox.modal.body.includes(`value="${v}"`)));
+        check('form points to Edit for a new date', ccBox.modal.body.includes('<strong>Edit</strong>'));
+        check('Back returns to the CPS', ccBox.modal.buttons[0].action.includes('app.viewActivityDetails(55)'));
+        ccBox.document.elements = { 'cps-cancel-reason': { value: '' }, 'cps-cancel-note': { value: '  ' } };
+        await ccBox.confirm(55);
+        check('no reason: nothing sent', calls.some(c => c[0] === 'rpc'), false);
+        check('no reason: told so', calls.some(c => c[0] === 'err' && /reason/.test(c[1])));
+        calls.length = 0;
+        ccBox.document.elements['cps-cancel-reason'].value = 'emergency';
+        ccBox.rpcResult = { error: { message: 'This CPS has minutes or a closing, so it cannot be cancelled' } };
+        await ccBox.confirm(55);
+        check('server refusal shown', calls.some(c => c[0] === 'err' && /cannot be cancelled/.test(c[1])));
+        check('server refusal keeps the form and the cache', calls.some(c => ['hide', 'invalidate'].includes(c[0])), false);
+        calls.length = 0;
+        ccBox.rpcResult = { error: null };
+        await ccBox.confirm(55);
+        const rpc = calls.find(c => c[0] === 'rpc');
+        check('sends the reason', !!rpc && rpc[1] === 'cps_cancel' && rpc[2].p_activity === 55 && rpc[2].p_reason === 'emergency');
+        check('blank note sends nothing', rpc && rpc[2].p_note, null);
+        check('clears this device', calls.some(c => c[0] === 'evict') && calls.some(c => c[0] === 'invalidate' && c[1] === 'activities') && calls.some(c => c[0] === 'emit' && c[2].action === 'delete'));
+        check('phone calendar refreshed', calls.some(c => c[0] === 'refresh'));
+        check('button on the CPS pop-up', calendar.includes('app.openCancelCps(${activityId})') && calendar.includes('${_cancelCpsBtn}'));
+        check('button hidden once it happened', /activity\.activity_type === 'CPS' && activity\.prospect_id && !_cpsHappened\(activity\)/.test(calendar));
+        check('both functions registered', /openCancelCps,\s+confirmCancelCps,/.test(calendar));
 
         console.log(`test-new-friend: ${pass} passed, ${fail} failed`);
         process.exit(fail ? 1 : 0);

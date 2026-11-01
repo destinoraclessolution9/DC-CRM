@@ -5006,6 +5006,9 @@
                                 ? `<button class="act-action-btn act-btn-doc" onclick="app.uploadCPSForm(${activityId}, ${activity.prospect_id})"><span class="act-icon"><i class="fas fa-file-upload"></i></span><span class="act-label">Upload CPS</span></button>
                                    <button class="act-action-btn act-btn-doc" onclick="app.uploadAPUForm(${activityId}, ${activity.prospect_id})"><span class="act-icon"><i class="fas fa-file-alt"></i></span><span class="act-label">APU</span></button>`
                                 : '';
+                            const _cancelCpsBtn = (activity.activity_type === 'CPS' && activity.prospect_id && !_cpsHappened(activity))
+                                ? `<button class="act-action-btn act-btn-edit" onclick="app.openCancelCps(${activityId})"><span class="act-icon"><i class="fas fa-ban"></i></span><span class="act-label">Cancel CPS</span></button>`
+                                : '';
                             const _outcomeBtn = (_isMeetup && _entityId)
                                 ? `<button class="act-action-btn act-btn-outcome" onclick="(async () => { await app.openMeetingOutcomeModal(${activityId}); })()"><span class="act-icon"><i class="fas fa-clipboard-check"></i></span><span class="act-label">Closing</span></button>`
                                 : '';
@@ -5027,6 +5030,7 @@
                             ${_outcomeBtn}
                             ${_notesBtn}
                             ${_liveBtn}
+                            ${_cancelCpsBtn}
                             <button class="act-action-btn act-action-delete" onclick="(async () => { await app.deleteActivity(${activityId}); })()"><i class="fas fa-trash-alt"></i> Delete</button>`;
                         })()}
                     </div>
@@ -8335,6 +8339,60 @@
         await (window.app.openActivityModal || (() => {}))(null, null, activity);
     };
 
+    // 🚫 Cancel CPS (2026-11-01, owner): called off with no next date, so the CPS
+    // never happened and the person goes to 🌱 New Friends. The server (cps_cancel)
+    // keeps the reason, removes the CPS and checks all of this again, plus the CPS
+    // form, which isn't on the activity row.
+    const CPS_CANCEL_REASONS = [['emergency', 'Emergency'], ['sick', 'Sick'], ['clash', 'Schedule clash'],
+        ['unreachable', "Can't reach"], ['changed_mind', 'Changed mind'], ['other', 'Other']];
+    const _cpsHappened = (a) => {
+        const mm = a.meeting_minutes || {};
+        return !!(a.note_key_points || a.note_needs || a.note_pain_points || a.note_outcome || a.next_action
+            || a.is_closing || a.completed_at || mm.background || mm.advisor || mm.reaction);
+    };
+    const openCancelCps = (activityId) => {
+        UI.showModal('🚫 Cancel CPS', `
+            <p style="margin:0 0 12px;font-size:14px;">This removes the CPS from the calendar and the CPS count, and moves the person to 🌱 New Friends so nobody forgets to book again. Got a new date? Use <strong>Edit</strong> instead.</p>
+            <div class="form-group">
+                <label>Reason <span class="required">*</span></label>
+                <select id="cps-cancel-reason" class="form-control">
+                    <option value="">-- Select --</option>
+                    ${CPS_CANCEL_REASONS.map(([v, l]) => `<option value="${v}">${escapeHtml(l)}</option>`).join('')}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Note</label>
+                <textarea id="cps-cancel-note" class="form-control" rows="2" placeholder="Optional"></textarea>
+            </div>`, [
+            { label: 'Back', type: 'secondary', action: `app.viewActivityDetails(${activityId})` },
+            { label: 'Cancel CPS', type: 'primary', action: `(async () => { await app.confirmCancelCps(${activityId}); })()` },
+        ]);
+    };
+    const confirmCancelCps = async (activityId) => {
+        const reason = document.getElementById('cps-cancel-reason')?.value;
+        if (!reason) { UI.toast.error('Please pick a reason'); return; }
+        const note = document.getElementById('cps-cancel-note')?.value?.trim() || null;
+        try {
+            const { error } = await (window.supabase || window.supabaseClient).rpc('cps_cancel', { p_activity: activityId, p_reason: reason, p_note: note });
+            if (error) throw error;
+        } catch (err) {
+            UI.toast.error(err?.message || 'Could not cancel the CPS');
+            return;
+        }
+        // The server removed the row: drop this device's copies, same as a delete.
+        AppDataStore._evictPrimedRow('activities', activityId);
+        AppDataStore.invalidateCache('activities');
+        AppDataStore.emit('dataChanged', { action: 'delete', table: 'activities', id: activityId });
+        UI.hideModal();
+        UI.toast.success('CPS cancelled. Moved to New Friends.');
+        if (document.querySelector('.calendar-view-container')) {
+            await renderCalendar();
+            await renderTodayActivities();
+        } else if (window.app.mcalRefreshActiveView) {
+            await window.app.mcalRefreshActiveView();
+        }
+    };
+
     const deleteActivity = async (activityId) => {
         UI.showModal('Confirm Delete',
             '<p>Are you sure you want to delete this activity? This action cannot be undone.</p>',
@@ -8721,6 +8779,8 @@
         editActivity,
         deleteActivity,
         confirmDeleteActivity,
+        openCancelCps,
+        confirmCancelCps,
         markActivityComplete,
         postMeetupNotes,
         openMeetupHistoryModal,

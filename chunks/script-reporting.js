@@ -3726,15 +3726,22 @@ const _nlResultsHtml = () => {
         ${_nlTable('results', ['Date', 'Event', 'Not coming because', 'Suggested', 'Added', 'Sent', 'Coming', 'Came', 'Closed'], rows, 'No event has used ✨ Who to invite yet — set an event\'s purpose on its event screen.', 3)}`;
 };
 
-// 🌱 New Friends — new_friend_list(): added with the New Friend button on an
-// event and no CPS yet. Moving forward only (old names did CPS and are never
-// tagged). Book CPS opens the CPS form for that same person; everyone leaves
-// this list by themselves once a CPS has happened, they buy, or are graded F.
-const NL_NF_STATE = { came: 'Came', coming: 'Coming', no_show: 'No show', unmarked: 'Not marked' };
+// 🌱 New Friends — new_friend_list(): no CPS yet, either added with the New Friend
+// button on an event or their CPS was cancelled with no next date. Moving forward
+// only (old names did CPS and are never listed). Book CPS opens the CPS form for
+// that same person; everyone leaves this list by themselves once a CPS has
+// happened, they buy, or are graded F.
+const NL_NF_STATE = { came: 'Came', coming: 'Coming', no_show: 'No show', unmarked: 'Not marked', cps_cancelled: 'CPS cancelled' };
 const _nlDay = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
 const _nlNfStatus = (r) => {
     const label = NL_NF_STATE[r.state] || '—';
-    return r.came_n > 1 ? `${label} ×${r.came_n}` : label;
+    return r.came_n > 1 && r.state === 'came' ? `${label} ×${r.came_n}` : label;
+};
+const _nlNfFrom = (r) => {
+    const small = (t) => `<div style="font-size:11px;color:var(--gray-400);">${escapeHtml(t)}</div>`;
+    if (r.cancel_reason) return `CPS ${escapeHtml(_nlDay(r.cancelled_cps_date))}${small([r.cancel_reason, r.cancel_note].filter(Boolean).join(' · '))}`;
+    if (!r.session_id) return '—';
+    return `<a href="javascript:void(0)" onclick="app.viewActivityDetails(${Number(r.session_id)})" style="color:inherit;text-decoration:none;">${escapeHtml(r.event_title || 'Event')}</a>${small(_nlDay(r.event_date))}`;
 };
 const _nlNewFriendsHtml = () => {
     if (_nlFriendsErr) return `<p style="padding:14px;color:var(--gray-400);font-size:13px;">Could not load — please retry. (${escapeHtml(_nlFriendsErr)})</p>`;
@@ -3748,16 +3755,14 @@ const _nlNewFriendsHtml = () => {
             `${r.cps_booked ? '' : `<button class="btn primary btn-sm" onclick="app.openActivityModal('', ${Number(r.prospect_id)})">Book CPS</button>`}${wa ? ` <button class="btn secondary btn-sm" aria-label="WhatsApp" onclick="window._crmUtils.openWaChat('${wa}')"><i class="fab fa-whatsapp"></i></button>` : ''}`,
             `${escapeHtml(_nlNfStatus(r))}${r.cps_booked ? `<div style="font-size:11px;color:var(--primary,#0D9488);">CPS booked ${escapeHtml(_nlDay(r.cps_booked))}</div>` : ''}`,
             `${r.days_waiting}d`,
-            r.session_id
-                ? `<a href="javascript:void(0)" onclick="app.viewActivityDetails(${Number(r.session_id)})" style="color:inherit;text-decoration:none;">${escapeHtml(r.event_title || 'Event')}</a><div style="font-size:11px;color:var(--gray-400);">${escapeHtml(_nlDay(r.event_date))}</div>`
-                : '—',
+            _nlNfFrom(r),
             escapeHtml(r.brought_by || '—'),
             escapeHtml(r.agent_name || '—'),
         ];
     });
     return `
-        ${_nlStrip('Came to an event but no CPS yet · added with the New Friend button on the event · leaves this list once a CPS is done, they buy, or they are graded F')}
-        ${_nlTable('newfriends', ['Name', '', 'Status', 'Waiting', 'Event', 'Brought by', 'Agent'], rows, 'No new friends waiting for a CPS. On an event: + Add Attendee → New Friend.', 9)}`;
+        ${_nlStrip('No CPS yet · came to an event as a New Friend, or their CPS was cancelled with no next date · leaves this list once a CPS is done, they buy, or they are graded F')}
+        ${_nlTable('newfriends', ['Name', '', 'Status', 'Waiting', 'From', 'Brought by', 'Agent'], rows, 'No new friends waiting for a CPS. On an event: + Add Attendee → New Friend.', 9)}`;
 };
 const _nlLoadFriends = async () => {
     const sb = window.supabase || window.supabaseClient;
@@ -4238,8 +4243,8 @@ const nlCsv = () => {
                 ...d.coverage.custNotMet.map(r => ['NOT contacted 90d', r.name, '', 0, 0, 0, 0, 0, 0, r.last || '', r.days === null ? '365+' : r.days, r.agentName]),
                 ...d.coverage.prospMet.map(r => ['Prospect met', r.name, r.hot ? 'Hot' : r.firstMet ? 'First met' : 'Ongoing', r.meet, r.cls, r.cps, r.call, r.wa, _nlFmtW(r.w), r.last, '', r.agentName])];
     } else if (_nlTab === 'newfriends') {
-        headers = ['Name', 'Event', 'Event Date', 'Brought by', 'Agent', 'Status', 'CPS booked', 'Days waiting'];
-        rows = (_nlFriends || []).map(r => [r.name, r.event_title, r.event_date, r.brought_by, r.agent_name, _nlNfStatus(r), r.cps_booked, r.days_waiting]);
+        headers = ['Name', 'Event', 'Event Date', 'CPS cancelled', 'Reason', 'Note', 'Brought by', 'Agent', 'Status', 'CPS booked', 'Days waiting'];
+        rows = (_nlFriends || []).map(r => [r.name, r.event_title, r.event_date, r.cancelled_cps_date, r.cancel_reason, r.cancel_note, r.brought_by, r.agent_name, _nlNfStatus(r), r.cps_booked, r.days_waiting]);
     } else if (_nlTab === 'audited') {
         headers = ['Customer', 'Type of Audit Service', 'Audit Date', 'Agent'];
         rows = d.audited.map(r => [r.name, r.services, r.date, r.agentName]);

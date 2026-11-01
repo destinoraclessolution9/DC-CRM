@@ -205,6 +205,30 @@ async function main() {
         check('one record only', ben.n === 1, ben);
         check('no duplicate block', !ben.toasts.some(t => /Duplicate blocked/.test(t)), ben.toasts);
 
+        console.log('\nA cancelled CPS, booked again');
+        await page.evaluate(() => {
+            window.__db.prospects.push({ id: 503, full_name: 'Gail Cancelled', phone: '0199999999', status: 'active', responsible_agent_id: 1, referred_by: 'Lee Referrer', referred_by_id: 700, referred_by_type: 'Customer', referral_relationship: 'Friend', source: 'form_intake_old', cps_cancelled_on: '2026-11-01' });
+            window.__db.activities.push({ id: 802, activity_type: 'CALL', prospect_id: 503, activity_date: '2026-10-30' });
+            window.__db.referrals.push({ id: 900, referrer_id: 700, referred_prospect_id: 503 });
+            window.UI.hideModal(); window.__toasts.length = 0;
+        });
+        await page.evaluate(() => window.app.openActivityModal('', 503));
+        await page.waitForFunction(() => document.getElementById('cps-name')?.value === 'Gail Cancelled', { timeout: 8000 });
+        await sleep(600);
+        check('referrer already picked', await page.evaluate(() => window._appState.sr?.name === 'Lee Referrer'));
+        await saveCps();
+        await sleep(1200);
+        const gail = await page.evaluate(() => ({
+            cps: window.__db.activities.filter(a => a.activity_type === 'CPS' && a.prospect_id === 503).length,
+            people: window.__db.prospects.filter(p => p.full_name === 'Gail Cancelled').length,
+            refs: window.__db.referrals.filter(r => r.referred_prospect_id === 503).length,
+            source: window.__db.prospects.find(p => p.id === 503).source, toasts: window.__toasts,
+        }));
+        check('CPS saved on the same person', gail.cps === 1 && gail.people === 1, gail);
+        check('no duplicate block', !gail.toasts.some(t => /Duplicate blocked/.test(t)), gail.toasts);
+        check('their referral is not made twice', gail.refs === 1, gail.refs);
+        check('where the record came from is kept', gail.source === 'form_intake_old', gail.source);
+
         console.log('\nAn old name keeps the old duplicate rule');
         await page.evaluate(() => { window.UI.hideModal(); window.__toasts.length = 0; });
         await page.evaluate(() => window.app.openActivityModal('', 500));
