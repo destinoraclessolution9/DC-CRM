@@ -433,6 +433,10 @@
         `;
     };
 
+    // prospects.source of a friend added with the New Friend button on an event
+    // (moving forward only: old names did CPS and are never tagged).
+    const NEW_FRIEND_SOURCE = 'event_new_friend';
+
     const openActivityModal = async (prefillDate = null, prospectId = null, activity = null) => {
         // Local date parts, not toISOString() (UTC) — the latter returns yesterday for
         // Malaysia (UTC+8) between 00:00 and 08:00 local, mis-bucketing the KPI record.
@@ -532,6 +536,11 @@
                             setF('cps-postal', prospect.postal_code);
                             setF('cps-referrer', prospect.referred_by);
                             setF('cps-relationship', prospect.referral_relationship);
+                            // 🌱 A New Friend's referrer is already on file; the CPS
+                            // save needs it picked, so don't make the agent search again.
+                            if (prospect.source === NEW_FRIEND_SOURCE && prospect.referred_by) {
+                                selectReferrer(prospect.referred_by_id ?? null, prospect.referred_by, prospect.referred_by_type || null);
+                            }
                             try { biAutoFill('cps', 'ic'); } catch (e) {}
                             clearInterval(cpsInterval);
                         } else if (++attempts >= 12) {
@@ -5560,7 +5569,7 @@ My raw notes:
             <div id="add-att-name" style="margin-top:8px;font-weight:600;color:var(--primary);min-height:20px;"></div>
             <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border,#e5e0d8);">
                 <div style="font-size:12px;color:var(--gray-400);margin-bottom:6px;">New person not in system?</div>
-                <button class="btn secondary btn-sm" onclick="app.showFTFAttendeeForm()" style="width:100%;">➕ First Time Friend (New Prospect)</button>
+                <button class="btn secondary btn-sm" onclick="app.showFTFAttendeeForm()" style="width:100%;">➕ New Friend (not yet CPS)</button>
             </div>
         `;
         UI.showModal('Add Attendee', content, [
@@ -5841,7 +5850,7 @@ My raw notes:
                 const matches = Array.from(seen.values()).slice(0, 10);
 
                 if (matches.length === 0) {
-                    setState('<div style="padding:10px 12px;color:#9CA3AF;font-size:12px;">No matches in database. Use “First Time Friend” below to add as new prospect.</div>');
+                    setState('<div style="padding:10px 12px;color:#9CA3AF;font-size:12px;">No matches in database. Use “New Friend” below if they have not done CPS.</div>');
                     return;
                 }
 
@@ -5928,7 +5937,7 @@ My raw notes:
             observer.observe(overlay, { attributes: true, attributeFilter: ['class'] });
         }
 
-        openProspectModal(); // opens the full Add New Prospect form
+        openProspectModal(null, { newFriendSession: activityId }); // the full Add New Prospect form, tagged 🌱
     };
 
     const confirmAddAttendee = async () => {
@@ -6977,6 +6986,7 @@ My raw notes:
             // REUSE it here instead of blocking the retry — otherwise a failed save
             // can never be completed.
             let _recoveredProspect = null;
+            let _newFriendCps = false; // the person is a 🌱 New Friend already in the system
             const name = document.getElementById('cps-name')?.value;
             const phone = document.getElementById('cps-phone')?.value;
             const relation = document.getElementById('cps-relationship')?.value;
@@ -7063,7 +7073,27 @@ My raw notes:
                     return false;
                 });
 
-                if (hardDuplicate) {
+                // 🌱 A New Friend is already in the system when their CPS happens. The
+                // CPS form normally creates the person, so without this their CPS is
+                // refused as a duplicate or makes a second record. Same person = the
+                // form was opened for them, or name + phone / IC match them. Another
+                // team's New Friend stays blocked by the poaching guard below.
+                try {
+                    const _ids = [_state.se?.type === 'Prospect' ? _state.se.id : null, hardDuplicate?.__src === 'prospects' ? hardDuplicate.id : null].filter(v => v != null);
+                    for (const _pid of _ids) {
+                        const _p = await AppDataStore.getById('prospects', _pid);
+                        if (!_p || _p.source !== NEW_FRIEND_SOURCE || _p.status === 'converted') continue;
+                        if (String(_pid) !== String(hardDuplicate?.id) && normalize(_p.full_name) !== normName && normalize(_p.phone) !== normalize(phone)) continue;
+                        const _vis = await _utils.getVisibleUserIds?.(_state.cu);
+                        if (_vis === 'all' || (Array.isArray(_vis) && _vis.map(String).includes(String(_p.responsible_agent_id)))) {
+                            _recoveredProspect = _p;
+                            _newFriendCps = true;
+                        }
+                        break;
+                    }
+                } catch (e) { console.warn('CPS: New Friend check failed', e); }
+
+                if (hardDuplicate && !_newFriendCps) {
                     // Orphan recovery: a hard-duplicate that is owned WITHIN the current
                     // user's visible scope AND has no activity yet is almost certainly an
                     // orphan from a prior partial CPS save (prospect created, activity never
@@ -7196,6 +7226,36 @@ My raw notes:
             if (_recoveredProspect) {
                 // Reuse the orphan from the prior partial save — no duplicate prospect row.
                 prospect = _recoveredProspect;
+                // 🌱 Their details get filled in at the CPS: keep what was typed for
+                // anything still blank (never overwrite what is on file), and start
+                // CPS protection now, same as a person born at a CPS.
+                if (_newFriendCps) {
+                    const _blank = (v) => v == null || v === '' || v === '[]';
+                    const _patch = {
+                        cps_assignment_date: prospectData.cps_assignment_date,
+                        protection_deadline: prospectData.protection_deadline,
+                    };
+                    for (const [k, v] of Object.entries(basic)) {
+                        if (k !== 'country' && !_blank(v) && _blank(prospect[k])) _patch[k] = v;
+                    }
+                    if (_state.sr) {
+                        _patch.referred_by_id = prospectData.referred_by_id;
+                        _patch.referred_by_type = prospectData.referred_by_type;
+                        _patch.referred_by = prospectData.referred_by;
+                    }
+                    if (_state.si) {
+                        _patch.introduced_by_id = prospectData.introduced_by_id;
+                        _patch.introduced_by_type = prospectData.introduced_by_type;
+                        _patch.introduced_by = prospectData.introduced_by;
+                    }
+                    if (_isOnBehalf) _patch.responsible_agent_id = _assignedAgentId;
+                    try {
+                        await AppDataStore.update('prospects', prospect.id, _patch);
+                    } catch (err) {
+                        UI.toast.error('Failed to update the New Friend: ' + (err.message || 'Unknown error'));
+                        return;
+                    }
+                }
             } else {
                 try {
                     prospect = await AppDataStore.create('prospects', prospectData);
@@ -7219,13 +7279,16 @@ My raw notes:
 
             // Auto-create referral record from CPS activity. Skipped on the recovery
             // path — the orphan's referral was already created by the prior attempt, so
-            // re-creating it (with a fresh Date.now() id) would duplicate it.
+            // re-creating it (with a fresh Date.now() id) would duplicate it. A New
+            // Friend has none yet: Add Prospect doesn't make one, their CPS does.
             const _srType = (_state.sr?.type || '').toLowerCase();
             const _refType = _srType === 'consultant' ? 'user' : _srType === 'customer' ? 'customer' : 'prospect';
             // A typed "not in system" referrer has no id — there is nothing to link.
-            if (!_recoveredProspect && _state.sr?.id != null) {
+            if ((!_recoveredProspect || _newFriendCps) && _state.sr?.id != null) {
                 try {
-                    await AppDataStore.create('referrals', {
+                    const _hasReferral = _newFriendCps
+                        && (await AppDataStore.query('referrals', { referred_prospect_id: prospect.id })).length > 0;
+                    if (!_hasReferral) await AppDataStore.create('referrals', {
                         id: Date.now(),
                         referrer_id: _state.sr.id,
                         referrer_type: _refType,

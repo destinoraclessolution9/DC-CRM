@@ -286,6 +286,10 @@ const showProspectsView = async (container) => {
                             <option value="Customer">By Customer</option>
                             <option value="none">Not referred</option>
                         </select>
+                        <select id="filter-new-friend" onchange="app.filterProspects()" title="Friends added at an event with the New Friend button who have not done CPS yet">
+                            <option value="">All Prospects</option>
+                            <option value="1">🌱 New Friend (no CPS yet)</option>
+                        </select>
                         <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text-secondary);cursor:pointer;user-select:none;" title="By default, prospects inactive for 500+ days are hidden. Type a name/phone in the search box to find them, or check this to load them all.">
                             <input type="checkbox" id="filter-include-dormant" onchange="app.filterProspects()" style="margin:0;">
                             Include dormant (500+ days)
@@ -734,6 +738,21 @@ const renderProspectsTable = async () => {
         try { if (!window.app.potentialMap && window._loadChunk) await window._loadChunk('chunks/script-activities.min.js'); } catch (_) { /* no map */ }
         _potMapF = window.app.potentialMap ? await window.app.potentialMap(true) : new Map();
     }
+    // 🌱 The same list as Reports → Name List: the database decides who is still a
+    // New Friend, because a row alone can't say whether a CPS has happened.
+    const newFriendFilter = !!document.getElementById('filter-new-friend')?.value;
+    let _nfIds = null;
+    if (newFriendFilter) {
+        try {
+            const { data, error } = await (window.supabase || window.supabaseClient).rpc('new_friend_list');
+            if (error) throw error;
+            _nfIds = new Set((data || []).map(r => String(r.prospect_id)));
+        } catch (e) {
+            console.warn('new_friend_list failed:', e);
+            UI.toast.error('Could not load New Friends. Please retry.');
+            _nfIds = new Set();
+        }
+    }
     const includeDormantToggle = document.getElementById('filter-include-dormant')?.checked || false;
 
     // ── Instant skeleton paint (cold-load only) ────────────────────────
@@ -789,7 +808,7 @@ const renderProspectsTable = async () => {
     const _mktScoped = _mktScope !== window._crmUtils.ALL_COUNTRIES;
     // referralFilter is client-derived too (referred_by/_type aren't RPC params),
     // so it routes through the legacy client path like score/status filters.
-    const _pUnsupported = !!scoreFilter || !!statusFilter || !!referralFilter || potentialFilter > 0 || !_sortColMap[_sortField] || _mktScoped;
+    const _pUnsupported = !!scoreFilter || !!statusFilter || !!referralFilter || newFriendFilter || potentialFilter > 0 || !_sortColMap[_sortField] || _mktScoped;
 
     // ── Phase 4.3 (#13): React-island render path (opt-in bundle + flag) ───────
     // Server-eligible only — same gate as the BFF/server path: table view, no
@@ -1006,6 +1025,7 @@ const renderProspectsTable = async () => {
         if (guaFilter && p.ming_gua !== guaFilter) continue;
         if (agentFilter && String(p.responsible_agent_id) !== agentFilter) continue;
         if (potentialFilter > 0 && !(((_potMapF && _potMapF.get(String(p.id))) || 0) >= potentialFilter)) continue;
+        if (_nfIds && !_nfIds.has(String(p.id))) continue;
 
         if (referralFilter) {
             // 'any'/'none' key on the referrer NAME (318 live rows are legacy
@@ -1650,7 +1670,8 @@ const updateProspectFilterBadge = () => {
     const status = document.getElementById('filter-status')?.value || '';
     const agent  = document.getElementById('filter-agent')?.value || '';
     const referral = document.getElementById('filter-referral')?.value || '';
-    const count  = [score, gua, status, agent, referral].filter(Boolean).length;
+    const newFriend = document.getElementById('filter-new-friend')?.value || '';
+    const count  = [score, gua, status, agent, referral, newFriend].filter(Boolean).length;
     const existing = btn.querySelector('.filter-count-badge');
     if (existing) existing.remove();
     if (count > 0) {
@@ -1666,7 +1687,7 @@ const sortProspectsBySelect = async (val) => {
     await renderProspectsTable();
 };
 
-const openProspectModal = async (prospectId = null) => {
+const openProspectModal = async (prospectId = null, opts = {}) => {
     // The form body (buildBasicInfoBlock) + its handlers (searchBasicInfoReferrers,
     // collectBasicInfoData, prefillProspectChildren) are owned by the activities chunk
     // and referenced synchronously below. If that chunk hasn't loaded yet the template's
@@ -1721,6 +1742,7 @@ const openProspectModal = async (prospectId = null) => {
     const content = `
         <div class="prospect-form form-compact">
             <input type="hidden" id="edit-prospect-id" value="${prospectId || ''}">
+            <input type="hidden" id="prospect-new-friend-session" value="${escapeHtml(opts.newFriendSession || '')}">
             <div class="form-section">
                 <h4>Basic Information</h4>
                 ${(window.app.buildBasicInfoBlock || (() => ''))('prospect', prospect)}
@@ -1728,7 +1750,7 @@ const openProspectModal = async (prospectId = null) => {
         </div>
     `;
 
-    UI.showModal(isEdit ? 'Edit Prospect' : 'Add New Prospect', content, [
+    UI.showModal(isEdit ? 'Edit Prospect' : opts.newFriendSession ? '🌱 Add New Friend (not yet CPS)' : 'Add New Prospect', content, [
         { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
         { label: isEdit ? 'Update Prospect' : 'Create Prospect', type: 'primary', action: '(async () => { await app.saveProspect(); })()' }
     ], window.matchMedia('(max-width: 768px)').matches ? 'fullscreen' : ''); // full screen on phones
@@ -1971,6 +1993,13 @@ const saveProspect = async () => {
             data.cps_assignment_date  = new Date().toISOString().split('T')[0];
             data.pipeline_stage       = 'new';
             data.created_at = new Date().toISOString();
+            // 🌱 Added with the New Friend button on an event: the only way onto the
+            // New Friends list (old names did CPS and are never tagged).
+            const _nfSession = document.getElementById('prospect-new-friend-session')?.value;
+            if (_nfSession) {
+                data.source = 'event_new_friend';
+                data.source_id = Number(_nfSession);
+            }
             const newProspect = await AppDataStore.create('prospects', data);
             // Phase 3 — trail: log the key-on-behalf handover so it's queryable
             // alongside real reassignments. Best-effort; never blocks the save.

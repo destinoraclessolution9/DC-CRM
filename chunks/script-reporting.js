@@ -3573,6 +3573,7 @@ const _nlExpanded = new Set();
 const NL_TABS = [
     ['referral', '🔗', 'Top Referral'],
     ['coverage', '🤝', 'Meet-Up Coverage'],
+    ['newfriends', '🌱', 'New Friends'],
     ['smart', '🎯', 'Smart lists'],
     ['results', '📈', 'Event results'],
     ['audited', '📋', 'Audited'],
@@ -3586,8 +3587,10 @@ let _nlSmart = { line: 'fengshui', goal: 'decide' };
 let _nlLines = null;
 let _nlSmartRows = null;
 let _nlResults = null;
+let _nlFriends = null;
+let _nlFriendsErr = '';
 
-const _nlStrip = (text) => `<div style="font-size:12px;color:var(--gray-500);margin:2px 0 12px;">${text}</div>`;
+const _nlStrip =(text) => `<div style="font-size:12px;color:var(--gray-500);margin:2px 0 12px;">${text}</div>`;
 const _nlChipHtml = (n, label, onclick) => `
     <div style="flex:1;min-width:150px;background:var(--gray-50,#f7f4ed);border:1px solid var(--border,#e5e0d8);border-radius:8px;padding:12px 14px;${onclick ? 'cursor:pointer;' : ''}" ${onclick ? `onclick="${onclick}"` : ''}>
         <div style="font-size:26px;font-weight:700;line-height:1;">${n}${onclick ? ' <span style="font-size:12px;color:var(--primary,#0D9488);">🔍</span>' : ''}</div>
@@ -3723,6 +3726,55 @@ const _nlResultsHtml = () => {
         ${_nlTable('results', ['Date', 'Event', 'Not coming because', 'Suggested', 'Added', 'Sent', 'Coming', 'Came', 'Closed'], rows, 'No event has used ✨ Who to invite yet — set an event\'s purpose on its event screen.', 3)}`;
 };
 
+// 🌱 New Friends — new_friend_list(): added with the New Friend button on an
+// event and no CPS yet. Moving forward only (old names did CPS and are never
+// tagged). Book CPS opens the CPS form for that same person; everyone leaves
+// this list by themselves once a CPS has happened, they buy, or are graded F.
+const NL_NF_STATE = { came: 'Came', coming: 'Coming', no_show: 'No show', unmarked: 'Not marked' };
+const _nlDay = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
+const _nlNfStatus = (r) => {
+    const label = NL_NF_STATE[r.state] || '—';
+    return r.came_n > 1 ? `${label} ×${r.came_n}` : label;
+};
+const _nlNewFriendsHtml = () => {
+    if (_nlFriendsErr) return `<p style="padding:14px;color:var(--gray-400);font-size:13px;">Could not load — please retry. (${escapeHtml(_nlFriendsErr)})</p>`;
+    if (_nlFriends === null) return '<div style="text-align:center;padding:18px;color:var(--gray-400);"><i class="fas fa-spinner fa-spin"></i> Loading new friends…</div>';
+    const rows = _nlFriends.map(r => {
+        const wa = window._crmUtils.waPhone(r.phone);
+        return [
+            `<a href="javascript:void(0)" onclick="app.showProspectDetail(${Number(r.prospect_id)})" style="color:var(--primary,#0D9488);text-decoration:none;font-weight:600;">${escapeHtml(r.name || '—')}</a>`,
+            r.session_id
+                ? `<a href="javascript:void(0)" onclick="app.viewActivityDetails(${Number(r.session_id)})" style="color:inherit;text-decoration:none;">${escapeHtml(r.event_title || 'Event')}</a><div style="font-size:11px;color:var(--gray-400);">${escapeHtml(_nlDay(r.event_date))}</div>`
+                : '—',
+            escapeHtml(r.brought_by || '—'),
+            escapeHtml(r.agent_name || '—'),
+            `${escapeHtml(_nlNfStatus(r))}${r.cps_booked ? `<div style="font-size:11px;color:var(--primary,#0D9488);">CPS booked ${escapeHtml(_nlDay(r.cps_booked))}</div>` : ''}`,
+            `${r.days_waiting}d`,
+            `${r.cps_booked ? '' : `<button class="btn primary btn-sm" onclick="app.openActivityModal('', ${Number(r.prospect_id)})">Book CPS</button>`}${wa ? ` <button class="btn secondary btn-sm" aria-label="WhatsApp" onclick="window._crmUtils.openWaChat('${wa}')"><i class="fab fa-whatsapp"></i></button>` : ''}`,
+        ];
+    });
+    return `
+        ${_nlStrip('Came to an event but no CPS yet · added with the New Friend button on the event · leaves this list once a CPS is done, they buy, or they are graded F')}
+        ${_nlTable('newfriends', ['Name', 'Event', 'Brought by', 'Agent', 'Status', 'Waiting', ''], rows, 'No new friends waiting for a CPS. On an event: + Add Attendee → New Friend.', 5)}`;
+};
+const _nlLoadFriends = async () => {
+    const sb = window.supabase || window.supabaseClient;
+    if (!sb) return;
+    try {
+        const { data, error } = await sb.rpc('new_friend_list');
+        if (error) throw error;
+        _nlFriends = data || [];
+        _nlFriendsErr = '';
+    } catch (e) {
+        console.warn('[namelist] new friends failed:', e);
+        _nlFriendsErr = (e && e.message) || 'unknown error';
+    }
+    const n = document.getElementById('nl-tab-n-newfriends');
+    if (n) n.textContent = _nlFriends ? _nlFriends.length : '';
+    const el = document.getElementById('nl-body');
+    if (el && _nlLast && _nlTab === 'newfriends') el.innerHTML = _nlBodyHtml(_nlLast);
+};
+
 const _nlLoadAsync = async () => {
     const sb = window.supabase || window.supabaseClient;
     if (!sb) return;
@@ -3766,17 +3818,19 @@ const _nlBodyHtml = (d) => {
     const counts = {
         referral: d.referral.agents.length + d.referral.clients.length,
         coverage: d.coverage.custNotMet.length,
+        newfriends: _nlFriends ? _nlFriends.length : '',
         smart: _nlSmartRows ? _nlSmartRows.filter(r => (r.fit || 0) >= 50).length : '',
         results: _nlResults ? _nlResults.length : '',
         audited: d.audited.length,
     };
     const tabs = NL_TABS.map(([key, icon, label]) => `
         <button onclick="app.nlTab('${key}')" style="border:1px solid ${_nlTab === key ? 'var(--primary,#0D9488)' : 'var(--border,#e5e0d8)'};background:${_nlTab === key ? 'var(--primary,#0D9488)' : 'var(--gray-50,#f7f4ed)'};color:${_nlTab === key ? '#fff' : 'var(--gray-600,#5f5e5a)'};border-radius:16px;padding:5px 12px;font-size:12px;cursor:pointer;white-space:nowrap;">
-            ${icon} ${label} <span style="font-weight:700;">${counts[key]}</span>
+            ${icon} ${label} <span id="nl-tab-n-${key}" style="font-weight:700;">${counts[key]}</span>
         </button>`).join('');
     if (!NL_TABS.some(t => t[0] === _nlTab)) _nlTab = 'referral';
     const body = _nlTab === 'referral' ? _nlTabReferral(d)
         : _nlTab === 'coverage' ? _nlTabCoverage(d)
+        : _nlTab === 'newfriends' ? _nlNewFriendsHtml()
         : _nlTab === 'smart' ? _nlSmartHtml()
         : _nlTab === 'results' ? _nlResultsHtml()
         : _nlTabAudited(d);
@@ -3798,6 +3852,7 @@ const _nlRenderBody = async () => {
         const el = document.getElementById('nl-body');
         if (el) el.innerHTML = _nlBodyHtml(d);
         if (_nlTab === 'smart' || _nlTab === 'results') _nlLoadAsync();
+        _nlLoadFriends(); // always: the count on the tab is the reminder
     } catch (e) {
         console.warn('[namelist] build failed:', e);
         const el = document.getElementById('nl-body');
@@ -3824,7 +3879,7 @@ const renderNameListSection = async () => {
         <div class="kpi-card">
             <h3 class="kpi-card-title" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;" onclick="app.nlToggle()">
                 <span>📇 Name List — Who to Focus
-                    <span style="font-weight:400;color:var(--gray-400);font-size:13px;">referrals · 90-day coverage · 🎯 smart lists (风水 · Power Ring · 书法 · 财库 · 招商 …) · event results · audits</span>
+                    <span style="font-weight:400;color:var(--gray-400);font-size:13px;">referrals · 90-day coverage · 🌱 new friends · 🎯 smart lists (风水 · Power Ring · 书法 · 财库 · 招商 …) · event results · audits</span>
                 </span>
                 <span style="font-size:13px;color:var(--primary,#0D9488);white-space:nowrap;">${_nlOpen ? '▲ Hide' : '▼ Open'}</span>
             </h3>
@@ -3842,6 +3897,7 @@ const nlTab = (key) => {
     _nlTab = key;
     if (_nlLast) { const el = document.getElementById('nl-body'); if (el) el.innerHTML = _nlBodyHtml(_nlLast); }
     if (key === 'smart' || key === 'results') _nlLoadAsync();
+    if (key === 'newfriends') _nlLoadFriends(); // fresh: a CPS just booked leaves the list
 };
 const nlExpand = (tableKey) => {
     if (_nlExpanded.has(tableKey)) _nlExpanded.delete(tableKey); else _nlExpanded.add(tableKey);
@@ -4179,6 +4235,9 @@ const nlCsv = () => {
         rows = [...d.coverage.custMet.map(r => ['Customer contacted', r.name, r.tag, r.meet, r.cls, r.cps, r.call, r.wa, _nlFmtW(r.w), r.last, '', r.agentName]),
                 ...d.coverage.custNotMet.map(r => ['NOT contacted 90d', r.name, '', 0, 0, 0, 0, 0, 0, r.last || '', r.days === null ? '365+' : r.days, r.agentName]),
                 ...d.coverage.prospMet.map(r => ['Prospect met', r.name, r.hot ? 'Hot' : r.firstMet ? 'First met' : 'Ongoing', r.meet, r.cls, r.cps, r.call, r.wa, _nlFmtW(r.w), r.last, '', r.agentName])];
+    } else if (_nlTab === 'newfriends') {
+        headers = ['Name', 'Event', 'Event Date', 'Brought by', 'Agent', 'Status', 'CPS booked', 'Days waiting'];
+        rows = (_nlFriends || []).map(r => [r.name, r.event_title, r.event_date, r.brought_by, r.agent_name, _nlNfStatus(r), r.cps_booked, r.days_waiting]);
     } else if (_nlTab === 'audited') {
         headers = ['Customer', 'Type of Audit Service', 'Audit Date', 'Agent'];
         rows = d.audited.map(r => [r.name, r.services, r.date, r.agentName]);

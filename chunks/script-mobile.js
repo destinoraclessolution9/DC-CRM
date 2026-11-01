@@ -3983,6 +3983,7 @@
         scoreMax: '',         // numeric
         pipelineStage: '',    // prospects only
         referral: '',         // prospects only: any | none | Consultant | Prospect | Customer
+        newFriend: '',        // prospects only: '1' = 🌱 added at an event, no CPS yet
     };
     const _mpHasActiveFilters = () => Object.values(_mpFilters).some(v => v !== '' && v != null);
     const _mpActiveFilterCount = () => Object.values(_mpFilters).filter(v => v !== '' && v != null).length;
@@ -4217,6 +4218,20 @@
                 return String(r.referred_by_type || '').trim() === F.referral;
             });
         }
+        if (F.newFriend && _mpTab !== 'customers') {
+            // Same list as desktop + Reports → Name List: the database decides who
+            // is still a New Friend. A failed read shows nobody, never everybody.
+            try {
+                const { data, error } = await (window.supabase || window.supabaseClient).rpc('new_friend_list');
+                if (error) throw error;
+                const ids = new Set((data || []).map(r => String(r.prospect_id)));
+                rows = rows.filter(r => ids.has(String(r.id)));
+            } catch (e) {
+                console.warn('new_friend_list failed:', e);
+                UI.toast.error('Could not load New Friends. Please retry.');
+                rows = [];
+            }
+        }
 
         // Sort — user-selectable via the filter sheet, defaulting to the same
         // Score (High → Low) the desktop table opens on. Ties break on `id desc`,
@@ -4363,7 +4378,7 @@
             const customerStatuses = new Set(['active','inactive']);
             const validStatuses = tab === 'customers' ? customerStatuses : prospectStatuses;
             if (_mpFilters.status && !validStatuses.has(_mpFilters.status)) _mpFilters.status = '';
-            if (tab === 'customers') { _mpFilters.pipelineStage = ''; _mpFilters.referral = ''; }
+            if (tab === 'customers') { _mpFilters.pipelineStage = ''; _mpFilters.referral = ''; _mpFilters.newFriend = ''; }
         }
         _mpTab = tab;
         _mpPage = 1;
@@ -4562,6 +4577,13 @@
                     </select>
                 </div>
                 <div class="mp-filter-group">
+                    <label for="mpf-new-friend">New Friend</label>
+                    <select id="mpf-new-friend" class="form-control">
+                        ${[['', 'All Prospects'], ['1', '🌱 New Friend (no CPS yet)']]
+                            .map(([v, l]) => `<option value="${v}" ${_mpFilters.newFriend === v ? 'selected' : ''}>${l}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="mp-filter-group">
                     <label for="mpf-pipeline">Pipeline Stage</label>
                     <select id="mpf-pipeline" class="form-control">
                         <option value="">All Stages</option>
@@ -4590,6 +4612,7 @@
             scoreMax: v('mpf-score-max'),
             pipelineStage: v('mpf-pipeline'),
             referral: v('mpf-referral'),
+            newFriend: v('mpf-new-friend'),
         };
         // Sort lives outside _mpFilters (it narrows nothing, so it must not
         // reach the badge) — read it here and restart paging on any change.
@@ -4605,7 +4628,7 @@
     };
 
     const mpClearFilters = async () => {
-        _mpFilters = { status: '', agentId: '', mingGua: '', scoreMin: '', scoreMax: '', pipelineStage: '', referral: '' };
+        _mpFilters = { status: '', agentId: '', mingGua: '', scoreMin: '', scoreMax: '', pipelineStage: '', referral: '', newFriend: '' };
         _mpSort = _MP_SORT_DEFAULT;
         _mpPage = 1;
         UI.hideModal();
