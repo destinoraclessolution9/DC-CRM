@@ -7081,7 +7081,9 @@ My raw notes:
                 try {
                     const _ids = [_state.se?.type === 'Prospect' ? _state.se.id : null, hardDuplicate?.__src === 'prospects' ? hardDuplicate.id : null].filter(v => v != null);
                     for (const _pid of _ids) {
-                        const _p = await AppDataStore.getById('prospects', _pid);
+                        // The full row: "fill the blanks" below must see every column.
+                        const _p = (AppDataStore.getByIdFull ? await AppDataStore.getByIdFull('prospects', _pid) : null)
+                            || await AppDataStore.getById('prospects', _pid);
                         if (!_p || _p.source !== NEW_FRIEND_SOURCE || _p.status === 'converted') continue;
                         if (String(_pid) !== String(hardDuplicate?.id) && normalize(_p.full_name) !== normName && normalize(_p.phone) !== normalize(phone)) continue;
                         const _vis = await _utils.getVisibleUserIds?.(_state.cu);

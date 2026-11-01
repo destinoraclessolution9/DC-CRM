@@ -105,6 +105,23 @@ begin
     -- booked rows sort last
     if ((v_rows -> (jsonb_array_length(v_rows) - 1)) ->> 'prospect_id')::bigint = v_booked then v_pass := v_pass + 1;
     else v_fail := v_fail + 1; v_msgs := v_msgs || 'booked sorts last'::text; end if;
+    -- the writes the screens make, under the agent's own login (RLS + triggers)
+    begin
+        insert into public.prospects (id, full_name, phone, status, responsible_agent_id, referred_by, source, source_id, pipeline_stage)
+        values (990000000003032, 'TEST nf own login (Claude)', '+60990000003032', 'active', v_agent, 'TEST Referrer', 'event_new_friend', v_past, 'new');
+        insert into public.event_attendees (id, event_id, activity_id, attendee_id, entity_id, entity_name, attendee_type, attendance_status, created_at)
+        values (990000000003052, v_topic, v_past, 990000000003032, 990000000003032, 'T', 'prospect', 'Registered', now());
+        update public.prospects set ic_number = '900101145678', cps_assignment_date = v_today, protection_deadline = v_today + 30
+         where id = 990000000003032;
+        insert into public.activities (id, activity_type, activity_title, activity_date, prospect_id, lead_agent_id, visibility)
+        values (990000000003064, 'CPS', 'TEST CPS own login', v_today, 990000000003032, v_agent, 'closed');
+        select count(*) into v_n from public.prospects where id = 990000000003032 and source = 'event_new_friend' and source_id = v_past and ic_number = '900101145678';
+        if v_n = 1 then v_pass := v_pass + 1; else v_fail := v_fail + 1; v_msgs := v_msgs || 'tag not saved under agent login'::text; end if;
+        select count(*) into v_n from public.new_friend_list() x where x.prospect_id = 990000000003032;
+        if v_n = 0 then v_pass := v_pass + 1; else v_fail := v_fail + 1; v_msgs := v_msgs || 'still listed after own CPS'::text; end if;
+    exception when others then
+        v_fail := v_fail + 1; v_msgs := v_msgs || ('agent writes refused: ' || sqlerrm);
+    end;
     execute 'reset role';
 
     -- ── the leader sees the agent's people, another team does not ──
