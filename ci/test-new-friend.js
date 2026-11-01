@@ -57,15 +57,16 @@ const mobile = read('chunks/script-mobile.js');
     const [a, b] = t.rows;
     check('name is escaped', a[0].includes('&lt;b&gt;Ann') && !a[0].includes('<b>Ann'));
     check('name opens the profile', a[0].includes('app.showProspectDetail(11)'));
-    check('event links to the session', a[1].includes('app.viewActivityDetails(5)'));
-    check('Book CPS opens the CPS form for that person', a[6].includes(`app.openActivityModal('', 11)`));
-    check('WhatsApp uses the normalised phone', a[6].includes(`openWaChat('60123456789')`));
-    check('a booked CPS hides Book CPS', b[6].includes('Book CPS'), false);
-    check('no phone, no WhatsApp button', b[6].includes('WhatsApp'), false);
-    check('booked date is shown', b[4].includes('CPS booked'));
-    check('came twice is shown', b[4].includes('×2'));
-    check('no event shows a dash', b[1], '—');
-    check('waiting days', a[5], '2d');
+    check('event links to the session', a[4].includes('app.viewActivityDetails(5)'));
+    check('Book CPS sits right after the name, never off screen', t.headers[1] === '' && a[1].includes('Book CPS'));
+    check('Book CPS opens the CPS form for that person', a[1].includes(`app.openActivityModal('', 11)`));
+    check('WhatsApp uses the normalised phone', a[1].includes(`openWaChat('60123456789')`));
+    check('a booked CPS hides Book CPS', b[1].includes('Book CPS'), false);
+    check('no phone, no WhatsApp button', b[1].includes('WhatsApp'), false);
+    check('booked date is shown', b[2].includes('CPS booked'));
+    check('came twice is shown', b[2].includes('×2'));
+    check('no event shows a dash', b[4], '—');
+    check('waiting days', a[3], '2d');
     for (const [state, label] of [['came', 'Came'], ['coming', 'Coming'], ['no_show', 'No show'], ['unmarked', 'Not marked']]) {
         check(`status ${state}`, sandbox.status({ state, came_n: 1 }), label);
     }

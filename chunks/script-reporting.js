@@ -3743,19 +3743,21 @@ const _nlNewFriendsHtml = () => {
         const wa = window._crmUtils.waPhone(r.phone);
         return [
             `<a href="javascript:void(0)" onclick="app.showProspectDetail(${Number(r.prospect_id)})" style="color:var(--primary,#0D9488);text-decoration:none;font-weight:600;">${escapeHtml(r.name || '—')}</a>`,
+            // Right after the name: on a phone or a narrow window the table scrolls
+            // sideways and the last column would be off screen.
+            `${r.cps_booked ? '' : `<button class="btn primary btn-sm" onclick="app.openActivityModal('', ${Number(r.prospect_id)})">Book CPS</button>`}${wa ? ` <button class="btn secondary btn-sm" aria-label="WhatsApp" onclick="window._crmUtils.openWaChat('${wa}')"><i class="fab fa-whatsapp"></i></button>` : ''}`,
+            `${escapeHtml(_nlNfStatus(r))}${r.cps_booked ? `<div style="font-size:11px;color:var(--primary,#0D9488);">CPS booked ${escapeHtml(_nlDay(r.cps_booked))}</div>` : ''}`,
+            `${r.days_waiting}d`,
             r.session_id
                 ? `<a href="javascript:void(0)" onclick="app.viewActivityDetails(${Number(r.session_id)})" style="color:inherit;text-decoration:none;">${escapeHtml(r.event_title || 'Event')}</a><div style="font-size:11px;color:var(--gray-400);">${escapeHtml(_nlDay(r.event_date))}</div>`
                 : '—',
             escapeHtml(r.brought_by || '—'),
             escapeHtml(r.agent_name || '—'),
-            `${escapeHtml(_nlNfStatus(r))}${r.cps_booked ? `<div style="font-size:11px;color:var(--primary,#0D9488);">CPS booked ${escapeHtml(_nlDay(r.cps_booked))}</div>` : ''}`,
-            `${r.days_waiting}d`,
-            `${r.cps_booked ? '' : `<button class="btn primary btn-sm" onclick="app.openActivityModal('', ${Number(r.prospect_id)})">Book CPS</button>`}${wa ? ` <button class="btn secondary btn-sm" aria-label="WhatsApp" onclick="window._crmUtils.openWaChat('${wa}')"><i class="fab fa-whatsapp"></i></button>` : ''}`,
         ];
     });
     return `
         ${_nlStrip('Came to an event but no CPS yet · added with the New Friend button on the event · leaves this list once a CPS is done, they buy, or they are graded F')}
-        ${_nlTable('newfriends', ['Name', 'Event', 'Brought by', 'Agent', 'Status', 'Waiting', ''], rows, 'No new friends waiting for a CPS. On an event: + Add Attendee → New Friend.', 5)}`;
+        ${_nlTable('newfriends', ['Name', '', 'Status', 'Waiting', 'Event', 'Brought by', 'Agent'], rows, 'No new friends waiting for a CPS. On an event: + Add Attendee → New Friend.', 9)}`;
 };
 const _nlLoadFriends = async () => {
     const sb = window.supabase || window.supabaseClient;
