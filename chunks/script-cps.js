@@ -1272,7 +1272,7 @@ const openCpsPasteModal = (prefix = 'cps') => {
 5. 邮箱 Email: sample@example.com`;
     const contentHtml = `
         <div style="margin-bottom:10px;color:var(--gray-600);font-size:13px;line-height:1.5;">
-            Paste the customer's bilingual reply below. The system will auto-fill
+            Paste the customer's reply below, with or without labels. The system will auto-fill
             <strong>Name</strong>, <strong>IC</strong>, <strong>Occupation</strong>,
             <strong>Phone</strong>, <strong>Email</strong> — and derive
             <strong>Date of Birth</strong>, <strong>Gender</strong>, <strong>Title</strong> and <strong>Ming Gua</strong> from the IC,
@@ -1282,7 +1282,8 @@ const openCpsPasteModal = (prefix = 'cps') => {
             style="font-family:inherit;font-size:13px;"
             placeholder="${placeholder.replace(/"/g, '&quot;')}"></textarea>
         <div style="margin-top:8px;font-size:11px;color:var(--gray-400);">
-            Also accepts variants like "电话", "Tel", "手机", "Mobile", "E-mail", "身份证", etc.
+            Plain lines work too: name, IC, job, phone and email, in any order.
+            A guessed Name or Occupation is marked for you to check.
         </div>
     `;
     _showCpsScanOverlay('Paste Customer Info', contentHtml, [
@@ -1315,6 +1316,88 @@ const _parseMalaysianIc = (ic) => {
     return { dob, gender };
 };
 
+// ─── Paste Info with no labels (2026-11-02) ──────────────────────────
+// Agents also paste bare lines, e.g. "Ngui Kok Feng / 831001105005 / TCM /
+// 0108244914 / kokfeng@gmail.com". Labels are read first, as before. A field
+// still blank is then found by its shape: has @ = Email; 12 digits = IC
+// (letters + digits = passport, same box); starts 01 / 03 / +60 = Phone; the
+// first plain line of words = Name, the next one = Occupation. Name and
+// Occupation are only guesses: they come back in `guessed`, and the caller
+// fills them into empty boxes only. With no IC, phone or email anywhere
+// nothing is guessed, so a chat sentence still reads as "nothing found".
+// No look-behind in these patterns: older iPhones can't parse it.
+const _PASTE_LABEL = /^(?:(?:姓\s*名|身\s*[分份](?:\s*[号证码])+|职\s*业|工\s*作|联\s*络\s*号?\s*码|电\s*话|手\s*机|邮\s*箱|电\s*邮|(?:full\s*)?name|nama|nric|i\/?c(?:\s*no\.?)?|occupation|job|pekerjaan|phone(?:\s*no\.?)?|tel(?:ephone)?|mobile|h\/?p|no\.?\s*(?:tel|h\/?p)|contact(?:\s*(?:no\.?|number))?|e[-\s]?mail|emel)(?![a-z])\s*)+[:：]?\s*/i;
+const _PASTE_CHATTER = /基本资料|basic information|请填|谢谢|你好|您好|我的|以下|如下|^(?:hi|hello|hai|hey|dear|thanks?|thank you|tq)\b|\b(?:my|is|are|am|please|pls|here|below|details?|info|regards|have a|see you)\b|[?!？！]/i;
+const _PASTE_NOT_NAME = /^(?:(?:mon|tue|tues|wed(?:nes)?|thu|thur|thurs|fri|sat(?:ur)?|sun)(?:day)?\.?|today|tomorrow|tonight|(?:星期|礼拜|禮拜|周)[一二三四五六日天]|今天|明天|后天|今晚)$|\b(?:jalan|jln|lorong|persiaran|lebuh|taman|tmn|wisma|menara)\b/i;
+// isApptLine(piece) → true for the appointment's date / time / venue line
+// (app.pasteApptLineTest, activity chunk), which is never a name or a job.
+const _readPastedFields = (text, isApptLine = () => false) => {
+    // A value stops at the line end, and a label left blank ("Occupation:")
+    // stays blank instead of taking the next line.
+    const grab = (re) => {
+        const m = text.match(re);
+        return m && m[1] ? m[1].trim() : '';
+    };
+    const fields = {
+        name:       grab(/(?:姓\s*名|Name)\s*[:：][ \t]*([^\r\n]+)/i),
+        ic:         grab(/(?:身\s*[分份](?:\s*[号证码])+|IC(?:\s*No\.?)?|NRIC)\s*[:：][ \t]*([^\r\n]+)/i),
+        occupation: grab(/(?:职\s*业|工\s*作|Occupation|Job)\s*[:：][ \t]*([^\r\n]+)/i),
+        phone:      grab(/(?:联\s*络\s*号?\s*码|电\s*话|手\s*机|Phone(?:\s*no\.?)?|Tel(?:ephone)?|Mobile|Contact\s*(?:no\.?|number))\s*[:：][ \t]*([^\r\n]+)/i),
+        email:      grab(/(?:邮\s*箱|电\s*邮|Email|E[-\s]?mail)\s*[:：][ \t]*([^\s,;，；]+)/i),
+    };
+    Object.keys(fields).forEach(k => {
+        fields[k] = fields[k].replace(/[。；;,，]\s*$/, '').trim();
+    });
+
+    const guessed = [];
+    if (!Object.values(fields).every(Boolean)) {
+        const known = new Set(Object.values(fields).filter(Boolean));
+        // Each match is cut out and leaves a line break, which also splits a
+        // one-line paste ("Ngui Kok Feng 831001105005 TCM …") into its parts.
+        let s = text.replace(/https?:\/\/\S+/gi, '\n');
+        const take = (re, use) => { s = s.replace(re, (all, pre, m) => (use(m) === false ? all : `${pre}\n`)); };
+        take(/(^|[\s,;，；:：<>()])([^\s,;，；:：<>()]+@[^\s,;，；:：<>()]+\.[a-z]{2,})/gi, (m) => { if (!fields.email) fields.email = m; });
+        // "60 1x…" with no real birth date in it is a phone, not an IC.
+        take(/(^|[^\d+])(\d{6}[- ]?\d{2}[- ]?\d{4})(?!\d)/g, (m) => {
+            if (/^601/.test(m) && !_parseMalaysianIc(m)) return false;
+            if (!fields.ic) fields.ic = m;
+        });
+        take(/(^|[^\d+])((?:\+?60[ -]?|0)(?:1\d[ -]?\d{3,4}|[3-9]\d?[ -]?\d{3,4})[ -]?\d{4})(?!\d)/g, (m) => { if (!fields.phone) fields.phone = m; });
+        take(/(^|[^A-Za-z0-9])([A-Z]{1,2}\d{6,9})(?![A-Za-z0-9])/g, (m) => { if (!fields.ic) fields.ic = m; });
+
+        if (fields.ic || fields.phone || fields.email) {
+            const pieces = s.split(/\r?\n|[,，;；\t|]|\s+\/\s+/)
+                .map(p => p.trim().replace(/^\d{1,2}\s*[.)、．]/, '').replace(/^[^\p{L}\p{N}]+/u, '')
+                    .replace(_PASTE_LABEL, '').replace(/[\s.。,，;；]+$/, ''))
+                .filter(p => p && /\p{L}/u.test(p) && !/[:：]/.test(p) && !known.has(p)
+                    && !_PASTE_CHATTER.test(p) && !_PASTE_NOT_NAME.test(p) && !isApptLine(p));
+            const ni = fields.name ? -1 : pieces.findIndex(p => !/\d/.test(p) && p.length <= 40 && p.split(/\s+/).length <= 7);
+            if (ni >= 0) { fields.name = pieces[ni]; guessed.push('name'); }
+            if (fields.name && !fields.occupation) {
+                const job = pieces.slice(ni + 1).find(p => p.length <= 60 && p !== fields.name);
+                if (job) { fields.occupation = job; guessed.push('occupation'); }
+            }
+        }
+    }
+
+    if (fields.phone) fields.phone = fields.phone.replace(/[^\d+()]/g, '');
+    // Malaysian mobile → 017-6349438 / 011-23456789 (the form's own example style).
+    if (/^01\d{8,9}$/.test(fields.phone)) fields.phone = `${fields.phone.slice(0, 3)}-${fields.phone.slice(3)}`;
+    if (fields.email) fields.email = fields.email.toLowerCase();
+    if (fields.ic)    fields.ic    = fields.ic.replace(/[^0-9A-Za-z\-]/g, '');
+    return { fields, guessed };
+};
+
+// Amber line under a box Paste Info guessed; it goes once the agent edits the box.
+const _markPasteGuess = (el) => {
+    const note = document.createElement('div');
+    note.className = 'paste-guess-note';
+    note.style.cssText = 'font-size:12px;margin-top:4px;color:var(--warning-text,#8A4B08);';
+    note.textContent = 'Guessed from the paste, please check';
+    el.insertAdjacentElement('afterend', note);
+    el.addEventListener('input', () => note.remove(), { once: true });
+};
+
 const parseCpsPastedText = async (prefix = 'cps') => {
     const ta = document.getElementById('cps-paste-input');
     if (!ta) return;
@@ -1324,46 +1407,23 @@ const parseCpsPastedText = async (prefix = 'cps') => {
         return;
     }
 
-    // Tolerates ":" or "：", leading numbering ("1.", "1)", "-"), spacing
-    // inside Chinese labels, and either Chinese or English keyword.
-    const grab = (re) => {
-        const m = text.match(re);
-        return m && m[1] ? m[1].trim() : '';
-    };
+    let isApptLine;
+    if (app.pasteApptLineTest) { try { isApptLine = await app.pasteApptLineTest(); } catch (e) {} }
+    const { fields, guessed } = _readPastedFields(text, isApptLine);
 
-    // Value captures use [^\r\n]+ so they never spill into the next labelled
-    // line — important for numeric IC/Phone where "3." or "5." prefixes on
-    // following lines would otherwise glue onto the value.
-    const fields = {
-        name:       grab(/(?:姓\s*名|Name)\s*[:：]\s*([^\r\n]+)/i),
-        ic:         grab(/(?:身\s*[分份](?:\s*[号证码])+|IC(?:\s*No\.?)?|NRIC)\s*[:：]\s*([^\r\n]+)/i),
-        occupation: grab(/(?:职\s*业|工\s*作|Occupation|Job)\s*[:：]\s*([^\r\n]+)/i),
-        phone:      grab(/(?:联\s*络\s*号?\s*码|电\s*话|手\s*机|Phone(?:\s*no\.?)?|Tel(?:ephone)?|Mobile|Contact\s*(?:no\.?|number))\s*[:：]\s*([^\r\n]+)/i),
-        email:      grab(/(?:邮\s*箱|电\s*邮|Email|E[-\s]?mail)\s*[:：]\s*([^\s,;，；]+)/i),
-    };
-
-    Object.keys(fields).forEach(k => {
-        fields[k] = (fields[k] || '').replace(/[。；;,，]\s*$/, '').trim();
-    });
-    if (fields.phone) fields.phone = fields.phone.replace(/[^\d+()]/g, '');
-    // Malaysian mobile → 017-6349438 / 011-23456789 (the form's own example style).
-    if (/^01\d{8,9}$/.test(fields.phone)) fields.phone = `${fields.phone.slice(0, 3)}-${fields.phone.slice(3)}`;
-    if (fields.email) fields.email = fields.email.toLowerCase();
-    if (fields.ic)    fields.ic    = fields.ic.replace(/[^0-9A-Za-z\-]/g, '');
-
-    const map = [
-        ['name',       'name'],
-        ['ic',         'ic'],
-        ['occupation', 'occupation'],
-        ['phone',      'phone'],
-        ['email',      'email'],
-    ];
     let filled = 0;
-    map.forEach(([key, suffix]) => {
-        if (fields[key]) {
-            _writeCpsField(prefix, suffix, fields[key]);
-            filled++;
+    const toCheck = [];
+    ['name', 'ic', 'occupation', 'phone', 'email'].forEach(key => {
+        const el = document.getElementById(`${prefix}-${key}`);
+        if (el?.nextElementSibling?.classList.contains('paste-guess-note')) el.nextElementSibling.remove();
+        if (!fields[key]) return;
+        if (guessed.includes(key)) {
+            // A guess never replaces what is already in the box.
+            if (_readCpsField(prefix, key)) return;
+            if (el) { _markPasteGuess(el); toCheck.push(key === 'name' ? 'Name' : 'Occupation'); }
         }
+        _writeCpsField(prefix, key, fields[key]);
+        filled++;
     });
 
     // Derive DOB + Gender from a Malaysian IC if one was supplied and the
@@ -1403,7 +1463,8 @@ const parseCpsPastedText = async (prefix = 'cps') => {
     }
     const extra = derived ? ` (+${derived} derived from IC)` : '';
     const apptNote = appt.length ? ` Appointment: ${appt.join(', ')}.` : '';
-    UI.toast.success(`Auto-filled ${filled} field${filled === 1 ? '' : 's'}${extra}.${apptNote}`);
+    const checkNote = toCheck.length ? ` Please check ${toCheck.join(' and ')}.` : '';
+    UI.toast.success(`Auto-filled ${filled} field${filled === 1 ? '' : 's'}${extra}.${apptNote}${checkNote}`);
 };
 
 const scanCpsForm = (prefix = 'cps') => {

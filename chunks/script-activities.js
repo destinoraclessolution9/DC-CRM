@@ -2441,9 +2441,11 @@ My raw notes:
         let mt;
         if ((mt = s.match(/\b(20\d\d)-(\d{1,2})-(\d{1,2})\b/))) return _ymd(+mt[1], +mt[2], +mt[3]);
         if ((mt = s.match(/(?:(20\d\d)\s*年\s*)?(\d{1,2})\s*月\s*(\d{1,2})\s*[日号號]?/))) return pick(mt[1], +mt[2], +mt[3]);
+        // Month and day must sit on one line, and never inside a longer number:
+        // a name ending "May" / "Jun" followed by a "2." line or a phone is not a date.
         const mon = '(jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\\.?';
-        if ((mt = s.match(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+${mon}(?:,?\\s+(\\d{4}))?`, 'i')))) return pick(mt[3], _MONTHS[mt[2].toLowerCase()], +mt[1]);
-        if ((mt = s.match(new RegExp(`\\b${mon}\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(\\d{4}))?`, 'i')))) return pick(mt[3], _MONTHS[mt[1].toLowerCase()], +mt[2]);
+        if ((mt = s.match(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?[ \\t]+${mon}(?:,?[ \\t]+(\\d{4})(?!\\d))?`, 'i')))) return pick(mt[3], _MONTHS[mt[2].toLowerCase()], +mt[1]);
+        if ((mt = s.match(new RegExp(`\\b${mon}[ \\t]+(\\d{1,2})(?:st|nd|rd|th)?(?!\\d)(?:,?[ \\t]+(\\d{4})(?!\\d))?`, 'i')))) return pick(mt[3], _MONTHS[mt[1].toLowerCase()], +mt[2]);
         if ((mt = s.match(/(?:^|[^\d\/])(\d{1,2})\/(\d{1,2})(?:\/(\d{2}|\d{4}))?(?![\d\/])/))) return pick(mt[3], +mt[2], +mt[1]);
         return '';
     };
@@ -2575,6 +2577,17 @@ My raw notes:
             }
         }
         return filled;
+    };
+    // Paste Info's name guess (script-cps.js) skips the appointment's own lines:
+    // a date, a time, or a line that IS a saved venue name or other name. Only
+    // the whole line counts, so a person called "Monalisa" stays a name.
+    const pasteApptLineTest = async () => {
+        let terms = [];
+        try {
+            terms = (await _getVenuesCached()).flatMap(v => [v.name, ...String(v.aliases || '').split(',')])
+                .map(x => _normText(x).trim()).filter(Boolean);
+        } catch (_) { terms = []; }
+        return (line) => !!(parseApptDate(line) || parseApptTime(line) || terms.includes(_normText(line).trim()));
     };
     const gatherContactPrefill = async ({ prospect = null, closingRecord = null } = {}) => {
         const fields = {}, src = {};
@@ -8565,6 +8578,7 @@ My raw notes:
         icToDob,
         biAutoFill,
         applyPastedAppointment,
+        pasteApptLineTest,
         contactSrcTag: _contactSrcTag,
         moPaymentMethodChanged,
         npoFillClosingPlans,
