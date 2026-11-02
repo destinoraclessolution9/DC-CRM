@@ -77,12 +77,21 @@ global.window._crmUtils = {
 
 // ── Data fixtures, swapped per test ─────────────────────────────────────────
 let ACTIVITIES = [], PROSPECTS = [], USERS = [], CUSTOMERS = [];
+// Live 2026-11-02: getAll('prospects') timed out (closing_record photos) and served
+// [] — referrers must come from the targeted queryPaged read, not the whole table.
+let GETALL_PROSPECTS_EMPTY = false, PAGED_THROWS = false, PAGED_SELECTS = [];
 global.AppDataStore = {
     getAll: async (t) => (t === 'activities' ? ACTIVITIES
-        : t === 'prospects' ? PROSPECTS
+        : t === 'prospects' ? (GETALL_PROSPECTS_EMPTY ? [] : PROSPECTS)
         : t === 'users' ? USERS
         : t === 'customers' ? CUSTOMERS
         : []),
+    queryPaged: async (t, opts = {}) => {
+        if (PAGED_THROWS) throw new Error('Supabase fetch timed out (forced)');
+        PAGED_SELECTS.push(opts.select);
+        const ids = ((opts.filters || {}).id || []).map(String);
+        return t === 'prospects' ? PROSPECTS.filter(p => ids.includes(String(p.id))) : [];
+    },
     getActivitiesInRange: async (from, to) =>
         ACTIVITIES.filter(a => !a.activity_date || (a.activity_date >= from && a.activity_date <= to)),
     getById: async () => null,
@@ -357,6 +366,28 @@ eq('React receives the chips as an array, not a pre-joined string', jsxParts,
     ['👤 1 agent referrer', '🤝 1 client referrer']);
 ok('every React chip appears verbatim in the legacy sub-line',
     jsxParts.every(p => cpsCard.subHtml.includes(p)), `parts: ${jsxParts.join(' | ')}`);
+
+// ── 12. Live 2026-11-02: the whole-table prospects read failed and served [] ──
+// CF must still find the referrers (it reads only the CPS prospects), and a failed
+// lookup must reject so the weekly report leaves CF blank instead of writing 0.
+reset();
+GETALL_PROSPECTS_EMPTY = true;
+cps({ id: 31, name: 'Customer A', type: 'Customer' });
+cps({ id: 31, name: 'Customer A', type: 'Customer' });
+cps({ id: 32, name: 'Customer B', type: 'Customer' });
+cps(agentRef(11, 'Agent'));
+PAGED_SELECTS = [];
+eq('CF ignores the empty whole-table read', await T.getCFHeadcount(FROM, TO), 2);
+eq('split ignores the empty whole-table read', await T.getCPSReferrerSplit(FROM, TO), { agents: 1, clients: 2, unattributed: 0 });
+ok('lookup selects only the referrer columns (never closing_record)',
+    PAGED_SELECTS.length > 0 && PAGED_SELECTS.every(s => !/closing_record/.test(s) && /referred_by_type/.test(s)), PAGED_SELECTS.join(' | '));
+ok('drill-down still names the referrers', (await T.buildCFHeadcountDetails(FROM, TO)).includes('Customer A'));
+PAGED_THROWS = true;
+let threw = false;
+try { await T.getCFHeadcount(FROM, TO); } catch (_) { threw = true; }
+ok('a failed lookup rejects (weekly report leaves CF blank, never 0)', threw);
+PAGED_THROWS = false;
+GETALL_PROSPECTS_EMPTY = false;
 
 }
 

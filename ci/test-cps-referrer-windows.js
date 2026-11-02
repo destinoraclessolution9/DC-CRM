@@ -89,6 +89,11 @@ global.AppDataStore = {
         RANGE_FETCHES++;
         return ACTIVITIES.filter(a => !a.activity_date || (a.activity_date >= from && a.activity_date <= to));
     },
+    // CPS referrers are read by id (only the sessions' prospects), not via getAll.
+    queryPaged: async (t, opts = {}) => {
+        const ids = ((opts.filters || {}).id || []).map(String);
+        return t === 'prospects' ? PROSPECTS.filter(p => ids.includes(String(p.id))) : [];
+    },
     getById: async () => null,
     query: async () => [],
 };
@@ -310,12 +315,12 @@ reset();
 reset();
 {
     cps(agentRef(1, 'A'), daysAgo(5));
-    const realGetAll = global.AppDataStore.getAll;
-    global.AppDataStore.getAll = async (t) => { if (t === 'prospects') throw new Error('boom'); return realGetAll(t); };
+    const realPaged = global.AppDataStore.queryPaged;
+    global.AppDataStore.queryPaged = async (t) => { if (t === 'prospects') throw new Error('boom'); return []; };
     let threw = false;
     try { await T.getCPSReferrerWindows(); } catch (_) { threw = true; }
     ok('a read failure propagates rather than returning junk', threw);
-    global.AppDataStore.getAll = realGetAll;
+    global.AppDataStore.queryPaged = realPaged;
     // try/catch so a poisoned cache reports a clean FAIL here rather than throwing
     // out of the whole suite.
     let w = null, replayErr = null;

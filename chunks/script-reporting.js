@@ -1652,13 +1652,15 @@
             // Who brought the CPS sessions, split agent vs client. Computed
             // ALONGSIDE the kpi_* RPCs rather than inside them, so the card's two
             // head-counts appear whether or not those server aggregates exist —
-            // no migration needed to ship this.
-            getCPSReferrerSplit(from, to),
+            // no migration needed to ship this. Both referrer reads throw when the
+            // prospect lookup fails; caught HERE so only these figures drop to 0
+            // instead of the whole dashboard failing.
+            getCPSReferrerSplit(from, to).catch(e => { console.warn('[reports] CPS referrers failed:', e && e.message); return { agents: 0, clients: 0, unattributed: 0 }; }),
             // Rolling 90d/365d referrer head-counts for the momentum line ABOVE the
             // headline. Ignores from/to by design (see getCPSReferrerWindows) and is
             // promise-cached, so the parallel current+previous calculateKPIs calls
             // share one 365-day read rather than racing into two.
-            getCPSReferrerWindows(),
+            getCPSReferrerWindows().catch(() => ({ agents90: 0, agents365: 0, clients90: 0, clients365: 0 })),
             // Rolling 365-day New Customers for the "this period / 365d" line. Ignores
             // from/to by design and is promise-cached, so the parallel current+previous
             // calculateKPIs calls share one computation.
@@ -1850,17 +1852,35 @@ const _cpsReferrerOf = (p) => {
 //
 // These are head-counts, NOT a partition of cpsCount: one agent who referred
 // three people is 3 sessions but 1 head. The numbers are not expected to sum.
+// The prospects behind a set of CPS sessions, keyed by String(id) — ONLY those rows
+// and ONLY the referrer columns. getAll('prospects') also pulls closing_record, whose
+// inline photos can push the whole-table read past its 8 s timeout; it then falls
+// back to an empty list, every referrer reads "not recorded" and CF silently shows 0
+// (owner 2026-11-02: CF 3 on one device, 0 on a fresh login). This read throws on
+// failure instead, so the weekly report leaves CF blank rather than writing 0.
+const _CPS_REF_COLS = 'id,full_name,referred_by,referred_by_id,referred_by_type';
+const _cpsProspectMap = async (activities) => {
+    if (typeof AppDataStore.hasLiveSession === 'function' && !AppDataStore.hasLiveSession()) {
+        throw new Error('CPS referrers: no live session'); // anon reads come back RLS-empty
+    }
+    const ids = [...new Set(activities
+        .filter(a => a.activity_type === 'CPS' && a.prospect_id != null && a.prospect_id !== '')
+        .map(a => String(a.prospect_id)))];
+    const map = {};
+    for (let i = 0; i < ids.length; i += 150) { // keep each id list well inside the URL limit
+        const rows = await AppDataStore.queryPaged('prospects', { select: _CPS_REF_COLS, filters: { id: ids.slice(i, i + 150) } });
+        rows.forEach(p => { map[String(p.id)] = p; });
+    }
+    return map;
+};
+
 const getCPSReferrerSplit = async (from, to) => {
     const needUsers = _currentRoleFilter !== 'All';
-    const [activities, prospects] = await Promise.all([
-        _reportActsInRange(from, to, 'getCPSReferrerSplit'),
-        AppDataStore.getAll('prospects'),
-    ]);
+    const activities = await _reportActsInRange(from, to, 'getCPSReferrerSplit');
+    const prospMap = await _cpsProspectMap(activities);
     const users = needUsers ? await AppDataStore.getAll('users') : [];
     const userMap = {};
     users.forEach(u => { userMap[u.id] = u; });
-    const prospMap = {};
-    prospects.forEach(p => { prospMap[String(p.id)] = p; });
 
     const agents = new Set();
     const clients = new Set();
@@ -1954,15 +1974,11 @@ const getCPSReferrerWindows = () => _cachedWindow('cpsReferrers', async () => {
         const from90 = _rollingFrom(_CPS_WINDOW_RECENT_DAYS, today);
 
         const needUsers = _currentRoleFilter !== 'All';
-        const [activities, prospects] = await Promise.all([
-            _reportActsInRange(from365, to, 'getCPSReferrerWindows'),
-            AppDataStore.getAll('prospects'),
-        ]);
+        const activities = await _reportActsInRange(from365, to, 'getCPSReferrerWindows');
+        const prospMap = await _cpsProspectMap(activities);
         const users = needUsers ? await AppDataStore.getAll('users') : [];
         const userMap = {};
         users.forEach(u => { userMap[u.id] = u; });
-        const prospMap = {};
-        prospects.forEach(p2 => { prospMap[String(p2.id)] = p2; });
 
         // Maps not Sets — the drill-down lists WHO, and .size is the same head-count.
         const agents365 = new Map(), clients365 = new Map();
@@ -4633,14 +4649,13 @@ const _cpsSessionScan = async (from, to) => {
     // Date-windowed read (was getAll('activities') — a whole-table scan on every
     // drill-down click).
     const activities = await _reportActsInRange(from, to, '_cpsSessionScan');
-    const [users, customers, prospects] = await Promise.all([
+    const [users, customers, prospMap] = await Promise.all([
         AppDataStore.getAll('users'),
         AppDataStore.getAll('customers'),
-        AppDataStore.getAll('prospects')
+        _cpsProspectMap(activities),
     ]);
     const userMap = {}; users.forEach(u => { userMap[u.id] = u; });
     const custMap = {}; customers.forEach(c => { custMap[c.id] = c; });
-    const prospMap = {}; prospects.forEach(p => { prospMap[p.id] = p; });
     const rows = [];
     // key → { name, isAgent, sessions }. Keyed exactly as getCPSReferrerSplit
     // keys its Sets, so the distinct row counts below MUST equal the card chips.
@@ -4655,7 +4670,7 @@ const _cpsSessionScan = async (from, to) => {
         }
         const agentName = userMap[a.lead_agent_id]?.full_name || 'Unknown';
         const cust = a.customer_id ? custMap[a.customer_id] : null;
-        const prosp = a.prospect_id ? prospMap[a.prospect_id] : null;
+        const prosp = a.prospect_id ? prospMap[String(a.prospect_id)] : null;
         const entityName = cust?.full_name || prosp?.full_name || a.customer_name || '—';
         const ref = _cpsReferrerOf(prosp);
         if (ref) {
