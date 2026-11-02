@@ -13,9 +13,8 @@
  *      app's onclick-driven UI across the canonical (non-minified) sources.
  *   2. Builds the global set of REGISTERED app methods from every registration
  *      form (app.register / Object.assign(window.app) / direct window.app.x =
- *      assignments / the main IIFE return object), using brace-balanced parsing
- *      (same approach as ci/audit.js + ci/snapshot.js, extended to also capture
- *      `key: value` entries, not only shorthand `key,` entries).
+ *      assignments / the main IIFE return object), reading the blocks with
+ *      ci/registration-keys.js (the same reader ci/audit.js + ci/snapshot.js use).
  *   3. Reports DEAD handlers (referenced inside an inline on*="..." attribute but
  *      NOT registered anywhere) and WARN ambiguous cases (referenced only as a
  *      bare `app.x(` outside any inline handler — could be a real JS call site or
@@ -38,6 +37,7 @@
 'use strict';
 const fs   = require('fs');
 const path = require('path');
+const { extractBalanced, topLevelKeys, registeredKeys } = require('./registration-keys');
 
 const ROOT    = path.resolve(__dirname, '..');
 const VERBOSE = process.argv.includes('--verbose');
@@ -79,66 +79,6 @@ function stripLineComment(line) {
   return line.slice(0, m.index + m[1].length);
 }
 
-// ── Brace-balanced object-literal extractor ─────────────────────────────────
-// Given source text and the index of the `{` that opens an object literal, return
-// the substring of that object's body (between the matching braces). String- and
-// comment-aware so braces inside strings/regex/comments don't unbalance the count.
-function extractBalanced(src, openIdx) {
-  let depth = 0, i = openIdx;
-  let inStr = null;      // current string/template quote char, or null
-  let inLineC = false, inBlockC = false;
-  const start = openIdx + 1;
-  for (; i < src.length; i++) {
-    const c = src[i], p = src[i - 1];
-    if (inLineC) { if (c === '\n') inLineC = false; continue; }
-    if (inBlockC) { if (c === '*' && src[i + 1] === '/') { inBlockC = false; i++; } continue; }
-    if (inStr) {
-      if (c === '\\') { i++; continue; }           // escaped char
-      if (c === inStr) inStr = null;
-      continue;
-    }
-    if (c === '/' && src[i + 1] === '/') { inLineC = true; i++; continue; }
-    if (c === '/' && src[i + 1] === '*') { inBlockC = true; i++; continue; }
-    if (c === '"' || c === "'" || c === '`') { inStr = c; continue; }
-    if (c === '{') depth++;
-    else if (c === '}') { depth--; if (depth === 0) return src.slice(start, i); }
-  }
-  return src.slice(start); // unbalanced — return rest (defensive)
-}
-
-// Extract the registered key names from an object-literal body. Captures BOTH
-// shorthand entries (`foo,` / `foo`) and `key: value` entries (`foo: bar,`).
-// Skips spread (`...x`), computed keys (`[expr]:`), and string keys we can't trust
-// as identifiers. Only top-level keys matter; nested object braces are stripped by
-// re-balancing, but for our registration blocks the keys are flat, so a line-wise
-// scan of `^<indent><ident>[:,]` is sufficient and robust.
-function keysFromObjectBody(body) {
-  const keys = new Set();
-  // Match an identifier that begins a property: at line start (allowing leading
-  // whitespace) followed by either `:` (key: value) or `,`/end-of-line (shorthand).
-  const re = /(?:^|\n)\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*(?::|,|$)/g;
-  let m;
-  while ((m = re.exec(body)) !== null) keys.add(m[1]);
-  return keys;
-}
-
-// Find all `<head>(` registration object-literals for a given head regex and add
-// their keys to `registered`. headRe must capture the position just before `{`.
-function collectFromBlocks(src, registered, source, kind) {
-  // Locate each occurrence of the block head, then brace-balance from its `{`.
-  const heads = {
-    register: /(?:window\.)?app\.register\(\s*['"][^'"]*['"]\s*,\s*\{/g,
-    objassign: /Object\.assign\(\s*window\.app\s*,\s*\{/g,
-  }[kind];
-  let m;
-  while ((m = heads.exec(src)) !== null) {
-    const openIdx = src.indexOf('{', m.index);
-    if (openIdx < 0) continue;
-    const body = extractBalanced(src, openIdx);
-    for (const k of keysFromObjectBody(body)) registered.add(k);
-  }
-}
-
 // Direct assignments: `window.app.NAME =` or `app.NAME =` (not `==`/`===`).
 // Excludes `app.register =` style internals are fine to include (harmless).
 function collectFromAssignments(src, registered) {
@@ -165,7 +105,7 @@ function collectMainReturn(scriptSrc, registered) {
   for (let i = 0; i < retLine; i++) charIdx += lines[i].length + 1;
   const openIdx = scriptSrc.indexOf('{', charIdx);
   const body = extractBalanced(scriptSrc, openIdx);
-  for (const k of keysFromObjectBody(body)) registered.add(k);
+  for (const k of topLevelKeys(body)) registered.add(k);
   return true;
 }
 
@@ -216,8 +156,7 @@ function main() {
   let scriptReturnFound = false;
   for (const rel of files) {
     const src = fs.readFileSync(path.join(ROOT, rel), 'utf8');
-    collectFromBlocks(src, registered, rel, 'register');
-    collectFromBlocks(src, registered, rel, 'objassign');
+    for (const k of registeredKeys(src)) registered.add(k);
     collectFromAssignments(src, registered);
     if (rel === 'script.js') {
       scriptReturnFound = collectMainReturn(src, registered);

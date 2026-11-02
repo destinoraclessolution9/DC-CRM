@@ -10,6 +10,7 @@
 'use strict';
 const fs   = require('fs');
 const path = require('path');
+const { registeredKeys } = require('./registration-keys');
 
 const ROOT   = path.resolve(__dirname, '..');
 const script = fs.readFileSync(path.join(ROOT, 'script.js'), 'utf8');
@@ -32,15 +33,7 @@ const allChunkExports = new Set();
 
 chunkFiles.forEach(cf => {
   const src  = fs.readFileSync(path.join(chunkDir, cf), 'utf8');
-  // Use matchAll + take last match so inline comments like
-  // "// Object.assign(window.app, { ... })" don't shadow the real one.
-  // Match BOTH the legacy Object.assign(window.app, {...}) export and the new
-  // ownership-registry form app.register('domain', {...}) (#1 god-object).
-  const allMatches = [...src.matchAll(/(?:Object\.assign\(window\.app|(?:window\.)?app\.register\(\s*['"][^'"]*['"])\s*,\s*\{([^}]+)\}/gs)];
-  const m = allMatches.length ? allMatches[allMatches.length - 1] : null;
-  if (!m) return;
-
-  const keys = [...m[1].matchAll(/([a-zA-Z_$][a-zA-Z0-9_$]*),/g)].map(x => x[1]);
+  const keys = registeredKeys(src);
   exported += keys.length;
   keys.forEach(k => allChunkExports.add(k));
 
@@ -169,14 +162,17 @@ const manifestMatch = html.match(/window\.__ASSET_MANIFEST\s*=\s*(\{[^;]+\})/);
 if (manifestMatch) {
   const manifest = JSON.parse(manifestMatch[1]);
   const chunkKeys = Object.keys(manifest).filter(k => k.startsWith('chunks/'));
-  chunkKeys.forEach(k => {
-    const hashed = manifest[k];
-    const fp = path.join(ROOT, hashed);
-    if (!fs.existsSync(fp)) {
-      console.error(`MANIFEST  ${hashed} listed in manifest but file missing`);
+  const missing = chunkKeys.map(k => manifest[k]).filter(h => !fs.existsSync(path.join(ROOT, h)));
+  // Hashed chunks are gitignored build output, so a fresh checkout has none of
+  // them: that is "not built yet", not a broken manifest. Some missing is real.
+  if (missing.length && missing.length === chunkKeys.length) {
+    console.log('MANIFEST  no hashed chunks on disk (not built yet) — check skipped');
+  } else {
+    missing.forEach(h => {
+      console.error(`MANIFEST  ${h} listed in manifest but file missing`);
       issues++;
-    }
-  });
+    });
+  }
 }
 
 // ── Summary ────────────────────────────────────────────────────────────────

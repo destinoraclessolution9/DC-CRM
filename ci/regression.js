@@ -27,17 +27,10 @@ const warn  = (msg) => { console.warn('  WARN  ' + msg); };
 const fail  = (msg) => { console.error('  FAIL  ' + msg); fails++; };
 const pass  = (msg) => { console.log ('  PASS  ' + msg); };
 
-// ── Step 1: Ghost-call + manifest audit ────────────────────────────────────
-console.log('\n── Step 1: Ghost-call audit ──────────────────────────────');
-try {
-  execSync(`node "${path.join(__dirname,'audit.js')}"`, { stdio: 'inherit' });
-  pass('audit.js clean');
-} catch {
-  fail('audit.js reported issues (see above)');
-}
-
-// ── Step 2: Build check ────────────────────────────────────────────────────
-console.log('\n── Step 2: Build check ───────────────────────────────────');
+// ── Step 1: Build check ────────────────────────────────────────────────────
+// Runs before the audit: the audit's manifest check needs the hashed chunks this
+// step writes, and only build.mjs brings index.html's manifest up to date.
+console.log('\n── Step 1: Build check ───────────────────────────────────');
 try {
   const out = execSync(`node "${path.join(ROOT,'build.mjs')}"`, { cwd: ROOT }).toString();
   const hasError = /error/i.test(out) && !/\[WARNING\]/.test(out);
@@ -48,6 +41,15 @@ try {
   }
 } catch (e) {
   fail('build.mjs threw: ' + e.message.slice(0, 100));
+}
+
+// ── Step 2: Ghost-call + manifest audit ────────────────────────────────────
+console.log('\n── Step 2: Ghost-call audit ──────────────────────────────');
+try {
+  execSync(`node "${path.join(__dirname,'audit.js')}"`, { stdio: 'inherit' });
+  pass('audit.js clean');
+} catch {
+  fail('audit.js reported issues (see above)');
 }
 
 // ── Step 3: Snapshot comparison ────────────────────────────────────────────

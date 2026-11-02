@@ -14,6 +14,7 @@
 const fs   = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { registeredKeys } = require('./registration-keys');
 
 const ROOT = path.resolve(__dirname, '..');
 const save = process.argv.includes('--save');
@@ -63,14 +64,7 @@ const chunkFiles = fs.readdirSync(chunkDir)
 
 const chunks = chunkFiles.map(cf => {
   const src  = fs.readFileSync(path.join(chunkDir, cf), 'utf8');
-  // Take the LAST export-block match so inline comments don't shadow the real one.
-  // Matches both Object.assign(window.app, {...}) and app.register('domain', {...}) (#1).
-  const all  = [...src.matchAll(/(?:Object\.assign\(window\.app|(?:window\.)?app\.register\(\s*['"][^'"]*['"])\s*,\s*\{([^}]+)\}/gs)];
-  const m    = all.length ? all[all.length - 1] : null;
-  const keys = m
-    ? [...m[1].matchAll(/([a-zA-Z_$][a-zA-Z0-9_$]*),/g)].map(x => x[1])
-    : [];
-  return { file: cf, lines: src.split('\n').length, exports: keys };
+  return { file: cf, lines: src.split('\n').length, exports: registeredKeys(src) };
 });
 
 // ── Manifest ───────────────────────────────────────────────────────────────

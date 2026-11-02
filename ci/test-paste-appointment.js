@@ -15,7 +15,8 @@ const eq = (name, got, want) => {
     fail++;
     console.error(`FAIL ${name}\n  got:  ${JSON.stringify(got)}\n  want: ${JSON.stringify(want)}`);
 };
-const act = fs.readFileSync(path.join(ROOT, 'chunks/script-activities.js'), 'utf8');
+// Slice markers below assume LF; a Windows checkout has CRLF on disk.
+const act = fs.readFileSync(path.join(ROOT, 'chunks/script-activities.js'), 'utf8').replace(/\r\n/g, '\n');
 const slice = (decl, end = '\n    };') => {
     const start = act.indexOf(decl);
     if (start === -1) throw new Error('not found: ' + decl);

@@ -36,7 +36,8 @@ const ok = (name, cond, detail) => {
 };
 const eq = (name, got, want) => ok(name, got === want, `got:  ${JSON.stringify(got)}\n  want: ${JSON.stringify(want)}`);
 
-const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
+// Slice markers below assume LF; a Windows checkout has CRLF on disk.
+const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
 
 // Slice `const <name> = <expr>;` out of a source file and eval the expression.
 const sliceArrow = (src, decl, endMarker) => {
@@ -136,10 +137,22 @@ const ttlStart = activitiesSrc.indexOf('<select id="${prefix}-title"');
 ok('title <select> found in buildBasicInfoBlock', ttlStart !== -1);
 const ttlTpl = activitiesSrc.slice(ttlStart, activitiesSrc.indexOf('</select>', ttlStart) + '</select>'.length);
 
+// The title list is grouped since 2026-10-14 and BASIC_INFO_TITLES derives from it;
+// _biTitle reads through _BI_TITLE_MAP, so the whole chain is sliced in order.
+const BASIC_INFO_TITLE_GROUPS = sliceArrow(activitiesSrc, '    const BASIC_INFO_TITLE_GROUPS = ', '\n    ];');
+const BASIC_INFO_TITLES = sliceArrow(activitiesSrc, '    const BASIC_INFO_TITLES = ', '));');
+const _BI_TITLE_KEY = sliceArrow(activitiesSrc, '    const _BI_TITLE_KEY = ', '.trim();');
+const _BI_TITLE_MAP = sliceArrow(activitiesSrc, '    const _BI_TITLE_MAP = ', '));');
 const _biTitle = sliceArrow(activitiesSrc, '    const _biTitle = ', '\n    };');
-const BASIC_INFO_TITLES = sliceArrow(activitiesSrc, '    const BASIC_INFO_TITLES = ', '];');
 ok('_biTitle is declared in chunks/script-activities.js', typeof _biTitle === 'function');
-eq('BASIC_INFO_TITLES is the canonical set', (BASIC_INFO_TITLES || []).join('|'), 'Mr.|Ms.|Mrs.|Dr.');
+eq('BASIC_INFO_TITLES is the canonical set', (BASIC_INFO_TITLES || []).join('|'),
+    "Mr.|Mrs.|Miss|Ms.|Sir|Madam|Dr.|Tun|Toh Puan|Tan Sri|Puan Sri|Datuk|Dato'|Datin|Dato' Sri|Datin Sri|Tuan|Haji|Hajjah|Syed|Sharifah|YB|YAB");
+
+// The select is built inside an IIFE that resolves the stored title first; those
+// lines are sliced too, so `t` and `tOther` are the shipped ones.
+const ttlDecl = activitiesSrc.slice(
+    activitiesSrc.indexOf('const t = _biTitle(d.title);'),
+    activitiesSrc.lastIndexOf('return `', ttlStart));
 
 const renderTitle = (storedTitle) => {
     const prefix = 'prospect';
@@ -147,7 +160,7 @@ const renderTitle = (storedTitle) => {
     const d = { title: storedTitle };
     const sel = (v, opt) => v === opt ? 'selected' : '';
     const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-    return eval('`' + ttlTpl + '`');
+    return eval(ttlDecl + '`' + ttlTpl + '`');
 };
 
 for (const [stored, want, label] of [

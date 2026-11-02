@@ -14,6 +14,16 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
+// The fixtures are dated around October 2026 ("next month" = Nov) and the chunk
+// reads the real clock (_today, _monthEnd), so the sim runs at one fixed moment.
+// Otherwise its verdict changes as the calendar moves past the fixture dates.
+const RealDate = Date;
+const SIM_NOW = new RealDate(2026, 9, 21, 9, 0, 0).getTime();
+globalThis.Date = class extends RealDate {
+  constructor(...args) { if (args.length) super(...args); else super(SIM_NOW); }
+  static now() { return SIM_NOW; }
+};
+
 let pass = 0, fail = 0;
 function check(name, got, want = true) {
   if (got === want) { pass++; return; }
