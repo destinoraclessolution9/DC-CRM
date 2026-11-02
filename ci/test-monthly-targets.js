@@ -28,6 +28,15 @@
 const fs = require('fs');
 const path = require('path');
 
+// The fixtures are all YEAR (2026) and the targets modal opens on the current
+// year, so the test runs at one fixed moment instead of failing every January.
+const RealDate = Date;
+const TEST_NOW = new RealDate(2026, 7, 6, 9, 0, 0).getTime();
+globalThis.Date = class extends RealDate {
+    constructor(...args) { if (args.length) super(...args); else super(TEST_NOW); }
+    static now() { return TEST_NOW; }
+};
+
 let pass = 0, fail = 0;
 const eq = (name, got, want) => {
     const g = JSON.stringify(got), w = JSON.stringify(want);
