@@ -280,9 +280,10 @@ const run = async () => {
     let report = await runGenerate();
     eq('R1 balance block byte-identical to old algorithm', balBlock(report), oldBalSection(balDate, OPENING));
     ok('R1 egg section present', report.includes('KINGEGGS'));
-    // Week column sums the two source groups (4 + 3). The Month column is 0 here
-    // because the fixture run's run_at is in a previous month — existing,
-    // unrelated behaviour, pinned so a future change to it is deliberate.
+    // Week column sums the two source groups (4 + 3). The Month column is the
+    // fixture run's own month (July 2026), not today's — it used to read 0 here
+    // because the run is from an earlier month (fixed 2026-11-02, see
+    // ci/test-boss-report-cross-month.js).
     ok('R1 wholesales week column sums its source groups',
         /^KL Kepong \+ SG Puchong & Sunway - 7 \/ \d+ \/ N\/A$/m.test(report),
         report.split('________________________________________')[1]);
@@ -495,8 +496,8 @@ const run = async () => {
     loadBoth(SALES_ROWS, TRACK_ROWS);
     report = await runGenerate();
     eq('W1 combined-source line matches the hardcoded behaviour',
-        wsLine(report, 'KL Kepong + SG Puchong & Sunway'), 'KL Kepong + SG Puchong & Sunway - 7 / 0 / N/A');
-    eq('W1 single-source line', wsLine(report, 'KL Cheras'), 'KL Cheras - 2 / 0 / N/A');
+        wsLine(report, 'KL Kepong + SG Puchong & Sunway'), 'KL Kepong + SG Puchong & Sunway - 7 / 7 / N/A');
+    eq('W1 single-source line', wsLine(report, 'KL Cheras'), 'KL Cheras - 2 / 2 / N/A');
     ok('W1 no unassigned banner when every key is on a line',
         el('br-ws-unassigned').style.display === 'none', el('br-ws-unassigned').innerHTML);
 
@@ -510,7 +511,7 @@ const run = async () => {
     loadBoth(SALES_ROWS, TRACK_ROWS);
     report = await runGenerate();
     eq('W2 renamed line sums its new source keys (2 + 1)',
-        wsLine(report, 'KL Cheras & Ampang'), 'KL Cheras & Ampang - 3 / 0 / N/A');
+        wsLine(report, 'KL Cheras & Ampang'), 'KL Cheras & Ampang - 3 / 3 / N/A');
     ok('W2 old label gone', !report.includes('\nKL Cheras - '));
 
     // 8c. An egg-run group on NO line is surfaced, not silently dropped.
@@ -551,7 +552,7 @@ const run = async () => {
     loadBoth(SALES_ROWS, TRACK_ROWS);
     report = await runGenerate();
     eq('W5 DB target reaches the report (was localStorage-only → N/A)',
-        wsLine(report, 'KL Kepong + SG Puchong & Sunway'), 'KL Kepong + SG Puchong & Sunway - 7 / 0 / 400');
+        wsLine(report, 'KL Kepong + SG Puchong & Sunway'), 'KL Kepong + SG Puchong & Sunway - 7 / 7 / 400');
 
     // 8e. Editor: validation, stable key on rename, and the write gate.
     store.clear();
@@ -601,7 +602,7 @@ const run = async () => {
     loadBoth(SALES_ROWS, TRACK_ROWS);
     report = await runGenerate();
     eq('W10 falls back to the hardcoded five when the table is absent',
-        wsLine(report, 'KL Kepong + SG Puchong & Sunway'), 'KL Kepong + SG Puchong & Sunway - 7 / 0 / N/A');
+        wsLine(report, 'KL Kepong + SG Puchong & Sunway'), 'KL Kepong + SG Puchong & Sunway - 7 / 7 / N/A');
     eq('W10 all five lines present',
         report.split('________________________________________')[1].trim().split('\n').length - 1, 5);
 

@@ -488,7 +488,13 @@
         try { const r = localStorage.getItem('br_manual_last'); return r ? JSON.parse(r) : {}; } catch { return {}; }
     };
 
-    const _brMonthKey  = () => { const n=new Date(); return `${n.getFullYear()}_${String(n.getMonth()+1).padStart(2,'0')}`; };
+    const _brMonthKeyOf = (d) => `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`;
+    const _brMonthKey  = () => _brMonthKeyOf(new Date());
+    // '2026_10' → 'October 2026' (same wording the report always printed).
+    const _brMonthLabel = (mk) => {
+        const [y, m] = String(mk).split('_').map(Number);
+        return new Date(y, m - 1, 1).toLocaleString('default', { month:'long', year:'numeric' });
+    };
     const _brMonthBounds = () => {
         const n = new Date();
         const y = n.getFullYear(), m = String(n.getMonth()+1).padStart(2,'0');
@@ -1051,39 +1057,48 @@
         }
     };
 
-    // Month-to-date cartons per by_group key: the latest run per week_start_date
-    // whose run_at falls in month `mk`. Shared by brGenerate and the format preview.
-    const _brMonthByGroup = async (run, mk) => {
-        let monthByGroup = {};
+    // A run's week: week_start_date, or the run itself for a legacy row without one.
+    const _brWeekKey = (r) => r.week_start_date || `#${r.id}`;
+
+    // The month the selected run reports into, and that month's cartons per
+    // by_group key. Shared by brGenerate and the format preview.
+    //
+    // The month follows the RUN, not today: the 31/10 run generated on 2 Nov
+    // still closes October (Month total + October target), so the last month's
+    // final number is not lost when the report is made after month-end.
+    // A week belongs to the month it was FIRST committed in — a week committed
+    // again after month-end (a correction) replaces that week's numbers in its
+    // own month instead of being counted a second time in the new month.
+    // Within the month the latest run per week counts.
+    const _brRunMonth = async (run) => {
+        const own = run?.run_at ? _brMonthKeyOf(new Date(run.run_at)) : _brMonthKey();
         try {
-            const allRuns = (await AppDataStore.query('egg_run_history', {})||[]);
-            const monthRuns = allRuns.filter(r => {
-                if (!r.run_at) return false;
-                const d = new Date(r.run_at);
-                return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}` === mk;
-            });
+            const allRuns = (await AppDataStore.query('egg_run_history', {})||[]).filter(r => r.run_at);
+            const firstAt = {};
+            for (const r of allRuns.concat(run?.run_at ? [run] : [])) {
+                const w = _brWeekKey(r), t = new Date(r.run_at).getTime();
+                if (!(w in firstAt) || t < firstAt[w]) firstAt[w] = t;
+            }
+            const monthOf = (r) => _brMonthKeyOf(new Date(firstAt[_brWeekKey(r)]));
+            const mk = run?.run_at ? monthOf(run) : own;
             const latestPerWeek = {};
-            for (const r of monthRuns) {
-                const w = r.week_start_date;
+            for (const r of allRuns) {
+                if (monthOf(r) !== mk) continue;
+                const w = _brWeekKey(r);
                 if (!latestPerWeek[w] || new Date(r.run_at) > new Date(latestPerWeek[w].run_at)) latestPerWeek[w] = r;
             }
             // The SELECTED run is authoritative for its own week: force the Month column to
             // use it (not merely the latest run of that week) so Week and Month never disagree
             // for the run being reported. Without this, picking an older run for a week that
             // also has a newer run showed the old number in Week but the newer one in Month.
-            // GUARD: only when the selected run's run_at is in THIS month (mk) — otherwise
-            // selecting a prior-month run would inject its cartons into the current
-            // month-to-date total (month-scoped by the monthRuns filter above), over-counting
-            // the Month column. (audit boss-report:500 — "both need" the selected run reflected.)
-            const _selRunMk = run.run_at
-                ? `${new Date(run.run_at).getFullYear()}_${String(new Date(run.run_at).getMonth() + 1).padStart(2, '0')}`
-                : null;
-            if (run.week_start_date && _selRunMk === mk) latestPerWeek[run.week_start_date] = run;
+            // Its week is in `mk` by construction, so this never leaks into another month.
+            if (run?.run_at) latestPerWeek[_brWeekKey(run)] = run;
+            const monthByGroup = {};
             for (const r of Object.values(latestPerWeek)) {
                 for (const [g, q] of Object.entries(r.totals?.by_group||{})) monthByGroup[g]=(monthByGroup[g]||0)+q;
             }
-        } catch(e) { monthByGroup = { ...(run.totals?.by_group || {}) }; }
-        return monthByGroup;
+            return { mk, monthByGroup };
+        } catch(e) { return { mk: own, monthByGroup: { ...(run?.totals?.by_group || {}) } }; }
     };
 
     const _brWsData = (wsGroups, byGroup, monthByGroup, tgts) => wsGroups.map(g => {
@@ -1149,12 +1164,11 @@
         const sectionsState = await _brLoadSections();
 
         // ── WHOLESALES (read from by_group in stored totals) ──
-        const mk = _brMonthKey();
-        const now2 = new Date();
-        const monthLabel = now2.toLocaleString('default', { month:'long', year:'numeric' });
+        // Month, target and title are the selected run's month, not today's.
+        const { mk, monthByGroup } = await _brRunMonth(run);
+        const monthLabel = _brMonthLabel(mk);
         const tgts = await _brLoadTargets(mk);
         const byGroup = totals.by_group || {};
-        const monthByGroup = await _brMonthByGroup(run, mk);
 
         // Wholesale lines come from the catalog (was a 4th hardcoded copy, and the
         // only one carrying the source_keys mapping).
@@ -2009,15 +2023,14 @@
         return true;
     };
 
-    // Data the preview renders: the newest egg run, this month's targets, the
+    // Data the preview renders: the newest egg run, that run's month targets, the
     // balance boxes as typed with nothing sold, and typed manual values (or a
     // ‹value› placeholder so an empty field still shows its line format).
     const _brPreviewData = async () => {
         const run = (_brRuns && _brRuns[0]) || { totals: {}, run_at: new Date().toISOString() };
-        const mk = _brMonthKey();
         const catalog = await _brLoadCatalog();
+        const { mk, monthByGroup } = await _brRunMonth(run);
         const tgts = await _brLoadTargets(mk);
-        const monthByGroup = await _brMonthByGroup(run, mk);
         const hasSkus = Object.keys(catalog?.skus || {}).length > 0;
         const opening = _brGetBals();
         const rows = _brBalGroups(catalog).map(g => {
@@ -2028,7 +2041,7 @@
         return {
             runDate: run.run_at ? _brFmtDate(run.run_at) : '??/??/??',
             today: _brFmtDate(new Date()),
-            monthLabel: new Date().toLocaleString('default', { month: 'long', year: 'numeric' }),
+            monthLabel: _brMonthLabel(mk),
             totals: run.totals || {},
             ws: _brWsData(_brWsGroups(catalog), run.totals?.by_group || {}, monthByGroup, tgts),
             balance: hasSkus ? { state: 'ok', rows } : { state: 'noskus' },
@@ -2197,7 +2210,7 @@
             </div>`;
         const preview = `
             <div style="font-weight:600;font-size:13px;margin:4px 0 6px;">Preview</div>
-            <div style="font-size:11px;color:var(--gray-500);margin-bottom:6px;">Newest egg run, this month's targets, the balance boxes with nothing sold, and ‹value› for blank manual fields.</div>
+            <div style="font-size:11px;color:var(--gray-500);margin-bottom:6px;">Newest egg run and its month's targets, the balance boxes with nothing sold, and ‹value› for blank manual fields.</div>
             <pre id="br-sec-preview" style="white-space:pre-wrap;word-break:break-word;background:#fff;border:1px solid var(--gray-200);border-radius:8px;padding:12px;font-size:12px;max-height:50vh;overflow:auto;margin:0;">${escapeHtml(_brPreviewText(_brDraftList()))}</pre>`;
         if (_brCatUI.secDraft) return writableWarn + _brSecFormHtml(_brCatUI.secDraft) + preview;
         const secs = list.filter(s => s.type !== 'settings');
