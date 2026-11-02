@@ -6669,7 +6669,13 @@
         }
     };
 
-    const openMeetingOutcomeModal = async (activityId) => {
+    // Where a sale goes depends on the live closing record, not a cached copy.
+    const _freshProspect = async (id) => (await AppDataStore.getByIdFull('prospects', id).catch(() => null))
+        || await AppDataStore.getById('prospects', id);
+
+    // opts.newSale: "Record another sale" (clean form on this appointment).
+    // opts.continueDraft: adopt the unfinished draft from another appointment.
+    const openMeetingOutcomeModal = async (activityId, opts = {}) => {
         // The Meeting Outcome body is built by buildMeetingOutcomeBlock(), which
         // lives in the activities chunk. On mobile that chunk isn't loaded when a
         // prospect activity is tapped, so the builder fell back to (() => '') and
@@ -6682,27 +6688,44 @@
         const activity = (await _lookupActivityRobust(activityId)) || {};
         const products = (await AppDataStore.getAll('products')).filter(p => p.is_active !== false);
 
-        // When linked to a prospect, prefill from closing_record → activity → prospect.
-        // The shared builder handles the merging; we just hand it the raw rows.
+        // A prospect has one closing slot but many appointments: this appointment's
+        // form may only show this appointment's sale. meetingOutcomeView decides.
         let prospect = null;
-        let closingRecord = {};
+        let view = { mode: 'form', closingRecord: {}, earlierSale: null, rejected: null };
         if (activity.prospect_id) {
-            prospect = await AppDataStore.getById('prospects', activity.prospect_id);
-            closingRecord = prospect?.closing_record || {};
+            prospect = await _freshProspect(activity.prospect_id);
+            const queueRows = await AppDataStore.query('approval_queue', { prospect_id: activity.prospect_id, approval_type: 'new_sale' }).catch(() => []);
+            view = window._dataHelpers.meetingOutcomeView({
+                activity, slot: prospect?.closing_record, history: prospect?.closing_records_history, queueRows,
+                newSale: opts.newSale, continueDraft: opts.continueDraft,
+            });
+        }
+        // No Cancel button (the ✕ closes it); full screen on phones like Quick Add Activity.
+        const _size = window.matchMedia('(max-width: 768px)').matches ? 'fullscreen' : '';
+
+        if (view.mode === 'sales') {
+            UI.showModal('📝 Meeting Outcome', window.app.buildMeetingSalesBlock(activity, { prospect, sales: view.sales, rejected: view.rejected }), [
+                { label: '<i class="fas fa-plus"></i> Record another sale', type: 'primary', action: `(async () => { await app.openMeetingOutcomeModal(${activityId}, { newSale: true }); })()` }
+            ], _size);
+            return;
         }
 
         // Customer Information auto-fill from every known source (profile, customer
-        // record, last closing, earlier order-form photos, DOB from IC).
+        // record, last closing, earlier order-form photos, DOB from IC). The person is
+        // the same for every sale, so the slot still feeds this whoever's sale it is.
         let prefill = null;
         if (prospect && window.app.gatherContactPrefill) {
-            try { prefill = await window.app.gatherContactPrefill({ prospect, closingRecord }); }
+            try { prefill = await window.app.gatherContactPrefill({ prospect, closingRecord: prospect.closing_record || {} }); }
             catch (e) { console.warn('[meeting outcome] contact prefill failed:', e); }
         }
-        const content = (window.app.buildMeetingOutcomeBlock || (() => ''))('mo', activity, { products, prospect, closingRecord, prefill });
-        // No Cancel button (the ✕ closes it); full screen on phones like Quick Add Activity.
+        const content = (window.app.buildMeetingOutcomeBlock || (() => ''))('mo', activity, {
+            products, prospect, prefill, closingRecord: view.closingRecord, earlierSale: view.earlierSale,
+            rejected: view.rejected, newSale: !!opts.newSale,
+        });
+        const _saveArg = opts.newSale ? ', { newSale: true }' : (opts.continueDraft ? ', { continueDraft: true }' : '');
         UI.showModal('📝 Meeting Outcome', content, [
-            { label: 'Save', type: 'primary', action: `(async () => { await app.saveMeetingOutcome(${activityId}); })()` }
-        ], window.matchMedia('(max-width: 768px)').matches ? 'fullscreen' : '');
+            { label: 'Save', type: 'primary', action: `(async () => { await app.saveMeetingOutcome(${activityId}${_saveArg}); })()` }
+        ], _size);
 
         // C2: the modal renders outside #content-viewport, so resolve any
         // data-attach-src photo thumbnails in it (post-meetup papers) to signed URLs.
@@ -6710,10 +6733,10 @@
 
         // Backup load of existing order-form photos — the inline <img onload> trick
         // in the closing block also triggers this, but if CSP blocks data URIs the
-        // explicit call here still fires.
-        if (activity.prospect_id) {
+        // explicit call here still fires. A new sale starts with none.
+        if (activity.prospect_id && !opts.newSale) {
             setTimeout(() => {
-                try { (window.app.loadOrderFormThumbnails || (() => {}))('mo', activity.prospect_id); } catch (e) { console.warn(e); }
+                try { (window.app.loadOrderFormThumbnails || (() => {}))('mo', activity.prospect_id, activity.id); } catch (e) { console.warn(e); }
             }, 0);
         }
     };
@@ -6732,7 +6755,10 @@
     // status:'draft' / npo_sale_id:null and mint duplicate npo_sales orders +
     // duplicate approval_queue entries. Set synchronously before any await.
     let _moSaving = false;
-    const saveMeetingOutcome = async (activityId) => {
+    // NPO order already created for a queued sale whose queue row then failed to save,
+    // so tapping Save again reuses it (same job as the closing-record stamp, H1 below).
+    const _moQueuedNpo = new Map();
+    const saveMeetingOutcome = async (activityId, opts = {}) => {
         if (_moSaving) { try { UI.toast.info('Saving… please wait.'); } catch (_) {} return; }
         _moSaving = true;
         // Safety net: if the save stalls (degraded backend), inform the user after 30s.
@@ -6760,6 +6786,7 @@
         // Where each Customer Information value came from (profile / photo / IC …) —
         // read now, while the form is still in the DOM, for the profile-update offer.
         const _moSrc = (window.app.readContactSources || (() => ({})))('mo');
+        const _moPhotos = (window.app.orderFormThumbFiles || (() => []))('mo');
         let _wbProspectId = null;
         const isClosed = mo.is_closing;
 
@@ -6829,6 +6856,32 @@
                 }
                 UI.toast.error('Please enter the Credit Card Expiry (MM/YY) — required when the installment is charged to a credit card.');
                 return;
+            }
+        }
+
+        // Where this sale goes, decided BEFORE anything is written. When another sale
+        // holds the prospect's closing record, this one goes straight to the approval
+        // queue. The queue has no draft stage, so the sale must be complete now.
+        let _moRoute = 'slot';
+        if (isClosed) {
+            const _a0 = await _lookupActivityRobust(activityId);
+            const _p0 = _a0?.prospect_id ? await _freshProspect(_a0.prospect_id) : null;
+            const _dh = window._dataHelpers;
+            if (_p0) _moRoute = _dh.closingSaveRoute(_p0.closing_record, _a0, opts);
+            if (_moRoute === 'locked') {
+                UI.toast.error('This sale is already with the manager and cannot change here. Close this form and use Record another sale for a new one.');
+                return;
+            }
+            if (_moRoute === 'queue') {
+                if (!mo.solution_sold || !mo.invoice_number || !(mo.full_name ?? _p0.full_name)) {
+                    UI.toast.error('This sale goes straight to approval, so Product, Invoice Number and Full Name are needed.');
+                    document.getElementById(mo.solution_sold ? 'mo-invoice-number' : 'mo-solution-sold')?.focus();
+                    return;
+                }
+                if (_dh.isSameSale(_p0.closing_record, { product: mo.solution_sold, sale_amount: mo.amount_closed, invoice_number: mo.invoice_number })) {
+                    UI.toast.error('This is the same sale as the earlier one (same product, amount and invoice). It is already recorded.');
+                    return;
+                }
             }
         }
 
@@ -6947,8 +7000,8 @@
         // When the activity is linked to a prospect AND the user marked the
         // case as closed, write the same fields through to the prospect's
         // closing_record JSONB so the data lands on the DC Closing Record tab.
-        // We refuse to overwrite a record that's already submitted/approved
-        // so we don't sneak edits past the manager approval flow.
+        // We never overwrite a record that's already submitted/approved: a sale
+        // that finds the slot taken goes to the approval queue instead (_moRoute).
         let crSyncStatus = 'none';
         // Tracks whether the NPO order (sale/items/installments) failed to materialise so the
         // final toast can warn the agent instead of showing an unqualified success — otherwise
@@ -6958,18 +7011,20 @@
             const activity = await AppDataStore.getById('activities', activityId);
             if (activity?.prospect_id) {
                 _wbProspectId = activity.prospect_id;
-                const prospect = await AppDataStore.getById('prospects', activity.prospect_id);
-                const existingCR = prospect?.closing_record || null;
+                const prospect = await _freshProspect(activity.prospect_id);
+                // A queued sale starts clean: nothing of the sale in the slot carries over.
+                const existingCR = _moRoute === 'queue' ? null : (prospect?.closing_record || null);
                 // One photo does everything: the Meeting Outcome form has no separate invoice
                 // upload any more, so THIS appointment's first order-form photo becomes the
                 // closing record's invoice. Matched on metadata.activity_id so another sale's
-                // photo for the same prospect can never be picked up.
+                // photo for the same prospect can never be picked up — and for another sale on
+                // the same appointment, only the photos in this form.
                 let _ofFile = null, _ofName = null;
                 if (!invoice_file) {
                     try {
                         const _ofs = await _dbRace(AppDataStore.query('prospect_attachments', { prospect_id: activity.prospect_id, attachment_type: 'order_form' }), 10000, 'order-form lookup');
                         const _mine = (Array.isArray(_ofs) ? _ofs : [])
-                            .filter(r => r && r.file_url && String(r.metadata?.activity_id ?? '') === String(activityId))
+                            .filter(r => r && r.file_url && String(r.metadata?.activity_id ?? '') === String(activityId) && (!opts.newSale || _moPhotos.includes(r.file_url)))
                             .sort((x, y) => String(x.scanned_at || x.created_at || '').localeCompare(String(y.scanned_at || y.created_at || '')) || (Number(x.id) - Number(y.id)));
                         if (_mine.length) {
                             _ofFile = _mine[0].file_url;
@@ -7011,7 +7066,7 @@
                         npo_tenure:        paymentMethod === 'NPO' ? (mo.npo_tenure        || '') : '',
                         npo_note:          paymentMethod === 'NPO' ? (mo.npo_note          || '') : '',
                         npo_products:      paymentMethod === 'NPO' ? (Array.isArray(mo.npo_products) ? mo.npo_products : []) : [],
-                        npo_sale_id:       (existingCR && existingCR.npo_sale_id) || null,
+                        npo_sale_id:       (existingCR && existingCR.npo_sale_id) || (_moRoute === 'queue' && _moQueuedNpo.get(String(activityId))) || null,
                         // Credit-card-installment flag + expiry (POP/NPO only). Expiry is YYYY-MM;
                         // stored on the closing record so the DC Closing Record tab shows it and the
                         // card-renewal reminder can re-derive its due date. We store ONLY the expiry —
@@ -7103,7 +7158,10 @@
                                     // skips re-creating the sale — was: the stamp lived only in-memory
                                     // on newCR, so a failed persist made the next save mint a duplicate
                                     // npo_sales + full schedule → double PORT count.
-                                    try {
+                                    // A queued sale must NOT stamp the slot: that record is another sale.
+                                    if (_moRoute === 'queue') {
+                                        _moQueuedNpo.set(String(activityId), saleId);
+                                    } else try {
                                         await _dbRace(sb.rpc('set_closing_record_field', {
                                             p_prospect_id: activity.prospect_id,
                                             p_key: 'npo_sale_id',
@@ -7167,10 +7225,10 @@
                         // fields, refuses to overwrite a submitted/approved record, and checks
                         // the caller is management / on the prospect / the lead agent of an
                         // activity linked to it.
-                        let _rpcDone = false;
+                        let _rpcDone = _moRoute === 'queue';
                         try {
                             const _sb = window.supabase || window.supabaseClient;
-                            if (_sb?.rpc) {
+                            if (_sb?.rpc && !_rpcDone) {
                                 const { data: _r, error: _e } = await _dbRace(_sb.rpc('submit_closing_record', {
                                     p_prospect_id: activity.prospect_id,
                                     p_closing_record: newCR,
@@ -7181,10 +7239,12 @@
                                     _rpcDone = true;
                                     AppDataStore.invalidateCache && AppDataStore.invalidateCache('prospects');
                                 } else if (_r && _r.reason === 'locked') {
-                                    // Already submitted/approved — same outcome as the client's
-                                    // own draft check; don't fall through and overwrite it.
+                                    // Another sale reached the slot first (second device, or a
+                                    // read that was a moment old). Never overwrite it, and never
+                                    // drop this sale: it queues behind, or the form stays open.
                                     _rpcDone = true;
-                                    crSyncStatus = 'locked';
+                                    if (hasRequiredFields) _moRoute = 'queue';
+                                    else crSyncStatus = 'locked';
                                 }
                             }
                         } catch (_rpcErr) {
@@ -7208,10 +7268,34 @@
                             }
                             await AppDataStore.update('prospects', activity.prospect_id, prospectUpdates);
                         }
-                        if (crSyncStatus !== 'locked') crSyncStatus = hasRequiredFields ? 'submitted' : 'synced';
+                        if (_moRoute === 'queue') crSyncStatus = 'queued';
+                        else if (crSyncStatus !== 'locked') crSyncStatus = hasRequiredFields ? 'submitted' : 'synced';
                     } catch (e) {
                         console.warn('Failed to sync closing_record:', e);
                         crSyncStatus = 'failed';
+                    }
+
+                    // A queued sale exists ONLY as this queue row until it is approved. A
+                    // manager's closing normally skips the queue (they approve from the DC
+                    // Closing Record tab), but this sale is not there, so it always gets a row.
+                    if (crSyncStatus === 'queued') {
+                        try {
+                            await AppDataStore.create('approval_queue', {
+                                approval_type: 'new_sale',
+                                status: 'pending',
+                                prospect_id: activity.prospect_id,
+                                customer_id: null,
+                                submitted_by: _state.cu?.id,
+                                submitted_at: new Date().toISOString(),
+                                snapshot_before: null,
+                                snapshot_after: { ...newCR, sale_amount: saleAmount, prospect_name: prospect?.full_name },
+                                description: `Another sale RM ${saleAmount.toLocaleString()} for ${prospect?.full_name || 'prospect'}`
+                            });
+                            _moQueuedNpo.delete(String(activityId));
+                        } catch (qe) {
+                            console.warn('Failed to queue the sale:', qe);
+                            crSyncStatus = 'queue_failed';
+                        }
                     }
 
                     // Create approval_queue entries for non-managers — only if the
@@ -7276,6 +7360,17 @@
             }
         }
 
+        // The sale reached neither the closing record nor the queue: keep the form open
+        // with what was typed, so nothing is lost and Save can be tapped again.
+        if (crSyncStatus === 'queue_failed') {
+            UI.toast.error('This sale did not reach the manager. Check your connection and tap Save again.');
+            return;
+        }
+        if (crSyncStatus === 'locked') {
+            UI.toast.error('Another sale is waiting for approval, so this one must go straight to approval. Add the Product and Invoice Number, then tap Save again.');
+            return;
+        }
+
         UI.hideModal();
         // Surface an NPO-order failure regardless of the closing-record status: the closing
         // still saved (by design), but the npo_sales/items/installments rows were NOT created,
@@ -7286,8 +7381,8 @@
         else if (crSyncStatus === 'submitted_with_conversion') UI.toast.success('✓ Submitted to manager for approval — sale ≥ RM 2,000 also requested customer conversion');
         else if (crSyncStatus === 'submitted_no_queue')   UI.toast.error('Closing saved but approval queue write failed — please retry from the prospect profile');
         else if (crSyncStatus === 'submitted')            UI.toast.success('✓ Submitted to manager for approval');
+        else if (crSyncStatus === 'queued')               UI.toast.success('✓ Sent to manager for approval, separate from the earlier sale');
         else if (crSyncStatus === 'synced')               UI.toast.success('Saved as draft (fill product, amount, invoice & full name to auto-submit for approval)');
-        else if (crSyncStatus === 'locked')               UI.toast.success('Activity saved (closing record locked — not overwritten)');
         else if (crSyncStatus === 'failed')               UI.toast.error('Activity saved but closing record sync failed — retry from the prospect profile');
         else                                              UI.toast.success('Meeting outcome saved');
         if (document.querySelector('.calendar-view-container')) { await renderCalendar(); await renderTodayActivities(); }

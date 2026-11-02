@@ -529,7 +529,86 @@
         return pts.map((p, i) => `${i + 1}. ${p}`).join('\n');
     }
 
-    const api = { classifyQueueError, extractUnknownCol, isSchemaError, isAbortError, snapshotsDiffer, buildReferralCounts, parseMeetingMinutes, matchMinutesItems, ringCodeOf, ringAliasesIn, findMinutesProducts, splitMinutePoints, formatMinutePoints, PROSPECT_PROFILE_FIELDS, customerFieldsFromProspect, customerBackfillPatch };
+    // ── One closing slot, many appointments (owner 2026-11-02) ──────────────
+    // prospects.closing_record holds ONE sale, but a client can buy at several
+    // appointments. These decide which sale an appointment owns (so its form never
+    // shows another sale's data) and where a new sale goes when the slot is taken:
+    // the approval queue, whose snapshot_after is a full copy of the sale.
+    const _saleText = (v) => String(v == null ? '' : v).trim().toLowerCase();
+    const _saleCents = (v) => Math.round((parseFloat(v) || 0) * 100);
+    const _isLockedSale = (cr) => !!cr && (cr.status === 'submitted' || cr.status === 'approved');
+
+    function closingHasSale(cr) {
+        return !!(cr && (cr.product || cr.invoice_number || _saleCents(cr.sale_amount) > 0));
+    }
+    // Amount must match; product / invoice are compared when both sides have one.
+    function isSameSale(a, b) {
+        if (!closingHasSale(a) || !closingHasSale(b)) return false;
+        if (_saleCents(a.sale_amount) !== _saleCents(b.sale_amount)) return false;
+        const agree = (k) => { const x = _saleText(a[k]), y = _saleText(b[k]); return !x || !y || x === y; };
+        return agree('invoice_number') && agree('product');
+    }
+    // Is this queue row's sale the one in the slot? A row with no sale on it
+    // (RLS-trimmed snapshot) counts as the slot's, as it always did.
+    function queueRowIsSlotSale(slot, snapshot) {
+        return !closingHasSale(snapshot) || isSameSale(slot, snapshot);
+    }
+    function closingBelongsToActivity(cr, activity) {
+        if (!closingHasSale(cr) || !activity) return false;
+        if (cr.closing_activity_id != null) return String(cr.closing_activity_id) === String(activity.id);
+        // Closings keyed on the DC Closing Record tab (or before 2026-10-14) carry no
+        // appointment id: match the sale that was mirrored onto the activity row.
+        if (!activity.is_closing) return false;
+        const inv = _saleText(cr.invoice_number);
+        if (inv && inv === _saleText(activity.invoice_number)) return true;
+        const cents = _saleCents(cr.sale_amount);
+        return cents > 0 && cents === _saleCents(activity.amount_closed ?? activity.closing_amount);
+    }
+    // What the Meeting Outcome modal shows for one appointment:
+    //   mode 'sales' → its finished sales, read-only (a new one is a clean form)
+    //   mode 'form'  → the form; closingRecord is its own draft, a sale the manager
+    //                  sent back (its queue row is the full copy), or {} when blank
+    //   earlierSale  → another sale holding the slot: a notice, never a prefill
+    //   rejected     → its latest queue row, when the manager rejected it
+    function meetingOutcomeView({ activity, slot: rawSlot, history, queueRows, newSale, continueDraft } = {}) {
+        const a = activity || {};
+        // A row already approved means the sale is done, even if the record never left
+        // 'submitted' (an approval that read a stale copy of the prospect left it behind).
+        const slotDone = _isLockedSale(rawSlot) && (queueRows || []).some(r => r && r.approval_type === 'new_sale' && r.status === 'approved' && isSameSale(r.snapshot_after, rawSlot));
+        const slot = slotDone ? { ...rawSlot, status: 'approved' } : rawSlot;
+        const hasSlotSale = closingHasSale(slot);
+        const slotMine = closingBelongsToActivity(slot, a);
+        if (continueDraft && hasSlotSale && !_isLockedSale(slot)) return { mode: 'form', closingRecord: slot, earlierSale: null, rejected: null };
+
+        const rows = (queueRows || [])
+            .filter(r => r && r.approval_type === 'new_sale' && closingBelongsToActivity(r.snapshot_after, a))
+            .sort((x, y) => String(x.submitted_at || '').localeCompare(String(y.submitted_at || '')));
+        const last = rows[rows.length - 1];
+        const rejected = last && last.status === 'rejected'
+            ? { ...last.snapshot_after, reject_reason: last.reject_reason || '' } : null;
+        if (newSale) return { mode: 'form', closingRecord: rejected || {}, earlierSale: hasSlotSale ? slot : null, rejected };
+        if (slotMine && !_isLockedSale(slot)) return { mode: 'form', closingRecord: slot, earlierSale: null, rejected };
+
+        const sales = [];
+        const add = (s, state) => { if (!sales.some(x => isSameSale(x, s))) sales.push({ ...s, sale_state: state }); };
+        (Array.isArray(history) ? history : []).filter(h => closingBelongsToActivity(h, a)).forEach(h => add(h, 'approved'));
+        if (slotMine) add(slot, slot.status === 'approved' ? 'approved' : 'pending');
+        rows.filter(r => r.status === 'pending').forEach(r => add(r.snapshot_after, 'pending'));
+        if (sales.length) return { mode: 'sales', sales, rejected };
+        return { mode: 'form', closingRecord: rejected || {}, earlierSale: hasSlotSale ? slot : null, rejected };
+    }
+    // Where a save goes: 'slot' (the prospect's closing record), 'queue' (another
+    // sale holds the slot) or 'locked' (this appointment's own sale is already with
+    // the manager, so only a stale form can get here).
+    function closingSaveRoute(slot, activity, { newSale, continueDraft } = {}) {
+        if (!closingHasSale(slot)) return 'slot';
+        if (newSale) return 'queue';
+        if (continueDraft && !_isLockedSale(slot)) return 'slot';
+        if (closingBelongsToActivity(slot, activity)) return _isLockedSale(slot) ? 'locked' : 'slot';
+        return 'queue';
+    }
+
+    const api = { classifyQueueError, extractUnknownCol, isSchemaError, isAbortError, snapshotsDiffer, buildReferralCounts, parseMeetingMinutes, matchMinutesItems, ringCodeOf, ringAliasesIn, findMinutesProducts, splitMinutePoints, formatMinutePoints, PROSPECT_PROFILE_FIELDS, customerFieldsFromProspect, customerBackfillPatch, closingHasSale, isSameSale, queueRowIsSlotSale, closingBelongsToActivity, meetingOutcomeView, closingSaveRoute };
     // Browser global (loaded before data.js). Also export for Node tests.
     if (typeof window !== 'undefined') window._dataHelpers = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

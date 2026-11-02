@@ -2742,15 +2742,69 @@ My raw notes:
         UI.toast.success(`Profile updated (${picked.length} field${picked.length > 1 ? 's' : ''})`);
     };
 
+    // One line describing a sale: product · amount · invoice.
+    const _saleLine = (s, prospect) => {
+        const amt = parseFloat(s?.sale_amount) || 0;
+        return [
+            s?.product ? escapeHtml(s.product) : '',
+            amt ? UI.formatCurrency(amt, { currency: window._crmUtils.recordCurrency(prospect) }) : '',
+            s?.invoice_number ? `Invoice ${escapeHtml(s.invoice_number)}` : '',
+        ].filter(Boolean).join(' · ');
+    };
+    const _moNotice = (bg, border, color, html) =>
+        `<div style="margin:0 0 10px;padding:8px 12px;border-radius:8px;background:${bg};border:1px solid ${border};color:${color};font-size:12px;line-height:1.45;">${html}</div>`;
+    const _rejectedNotice = (r, prospect, inList) => r ? _moNotice('#fef2f2', '#fecaca', '#991b1b',
+        `<i class="fas fa-times-circle"></i> The manager sent ${inList ? `back a sale from this appointment (${_saleLine(r, prospect)})` : 'this sale back'}${r.reject_reason ? `: <strong>${escapeHtml(r.reject_reason)}</strong>` : ''}. ${inList ? 'Tap Record another sale to fix it and send it again.' : 'Fix it and save to send it again.'}`) : '';
+
+    // "Record another sale" reuses the appointment, but its activity row still
+    // carries the last sale's fields — the new form must not start from them.
+    const _NO_SALE_FIELDS = {
+        is_closing: true, solution_sold: '', payment_method: '', amount_closed: null, closing_amount: null,
+        invoice_number: '', collection_date: '', pop_monthly_amount: null, pop_tenure: null, pop_down_payment: null,
+        npo_plan_id: '', npo_tier_amount: null, npo_first_payment: null, npo_monthly: null, npo_tenure: null,
+        npo_note: null, npo_products: null, cc_installment: false, cc_expiry: '',
+    };
+
+    // The sales this appointment already closed. Read-only: a sale with the manager
+    // or approved can't change here, and a new one starts on a clean form.
+    const buildMeetingSalesBlock = (activity, { prospect = null, sales = [], rejected = null } = {}) => {
+        const states = {
+            pending:  ['#fef3c7', '#92400e', '<i class="fas fa-clock"></i> Waiting for approval'],
+            approved: ['#dcfce7', '#166534', '<i class="fas fa-check-circle"></i> Approved'],
+        };
+        const card = (s) => {
+            const [bg, fg, label] = states[s.sale_state] || states.pending;
+            const facts = [
+                UI.paymentMethodLabel(s.payment_method) ? escapeHtml(UI.paymentMethodLabel(s.payment_method)) : '',
+                s.order_date ? `Order date ${escapeHtml(s.order_date)}` : '',
+            ].filter(Boolean).join(' · ');
+            return `
+                <div style="border:1px solid var(--gray-200);border-radius:10px;padding:10px 12px;margin-bottom:8px;">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+                        <div style="min-width:0;font-weight:600;color:var(--gray-800);word-break:break-word;">${_saleLine(s, prospect) || 'Sale'}</div>
+                        <span style="flex-shrink:0;background:${bg};color:${fg};border-radius:6px;padding:2px 8px;font-size:11px;font-weight:600;white-space:nowrap;">${label}</span>
+                    </div>
+                    ${facts ? `<div style="font-size:12px;color:var(--gray-500);margin-top:4px;">${facts}</div>` : ''}
+                    ${s.invoice_file ? `<a href="#" onclick="event.preventDefault();window._openAttachment&&window._openAttachment('${UI.escJsAttr(String(s.invoice_file))}')" style="display:inline-block;margin-top:6px;font-size:12px;font-weight:600;color:var(--primary);"><i class="fas fa-paperclip"></i> ${escapeHtml(s.invoice_file_name || 'View order form')}</a>` : ''}
+                </div>`;
+        };
+        return `
+            <div class="meeting-outcome-block form-compact" data-prefix="mo">
+                ${activity?.prospect_id ? `<div style="font-size:11px;color:var(--gray-500);margin-bottom:8px;"><i class="fas fa-link"></i> Linked to <strong>${escapeHtml(prospect?.full_name || 'prospect')}</strong> → DC Closing Record</div>` : ''}
+                ${_rejectedNotice(rejected, prospect, true)}
+                <h4 style="margin:0 0 8px;">✅ Sale${sales.length > 1 ? 's' : ''} from this appointment</h4>
+                ${sales.map(card).join('')}
+                <p style="font-size:12px;color:var(--gray-500);margin:8px 0 0;">Did the client buy something else? Use <strong>Record another sale</strong> — it starts a clean form.</p>
+            </div>`;
+    };
+
     const buildMeetingOutcomeBlock = (prefix, activity = {}, opts = {}) => {
-        const a = activity || {};
+        const a = opts.newSale ? { ...activity, ..._NO_SALE_FIELDS } : (activity || {});
         const readOnly = prefix === 'preview';
         const disabled = readOnly ? 'disabled' : '';
         const products = opts.products || [];
         const prospect = opts.prospect || null;
         const cr = opts.closingRecord || a.closing_record || {};
-        const crStatus = cr.status || 'draft';
-        const crLocked = (crStatus === 'submitted' || crStatus === 'approved');
         const hasProspect = !!a.prospect_id || !!prospect || readOnly;
 
         const selectedProduct = cr.product || a.solution_sold || '';
@@ -2838,10 +2892,12 @@ My raw notes:
                 <i class="fas fa-link"></i> Linked to <strong>${escapeHtml(prospect?.full_name || 'prospect')}</strong> → DC Closing Record
             </div>` : '';
 
-        const lockedNotice = crLocked ? `
-            <div style="margin-bottom:14px;padding:8px 12px;border-radius:8px;background:#e3f2fd;border:1px solid #2196f3;color:#1565c0;font-size:12px;">
-                <i class="fas fa-lock"></i> Closing record is <strong>${escapeHtml(crStatus)}</strong> — activity fields will be saved, but the locked closing record won't be overwritten.
-            </div>` : '';
+        // Another sale holds the prospect's closing record: say so, never prefill from
+        // it. This form is a new sale and goes to approval on its own.
+        const _es = opts.earlierSale || null;
+        const earlierSaleNotice = !_es ? '' : (_es.status === 'submitted' || _es.status === 'approved')
+            ? _moNotice('#e3f2fd', '#90caf9', '#1565c0', `<i class="fas fa-info-circle"></i> <strong>This is a new sale.</strong> The earlier sale (${_saleLine(_es, prospect)}) ${_es.status === 'approved' ? 'is approved' : 'is waiting for approval'}. This one goes to approval on its own and does not change it.`)
+            : _moNotice('#fff8e1', '#ffe082', '#8a6d00', `<i class="fas fa-pen"></i> There is an unfinished draft from another appointment (${_saleLine(_es, prospect)}). <a href="#" onclick="event.preventDefault();(async()=>{await app.openMeetingOutcomeModal(${a.id},{continueDraft:true});})()" style="font-weight:600;color:var(--primary);">Continue that draft</a>, or fill this form for a new sale.`);
 
         // Customer Information — every field pre-filled from the best known source
         // (tagged "from profile" / "from last closing" / …). When all six are known
@@ -2920,7 +2976,7 @@ My raw notes:
         return `
             <div class="meeting-outcome-block form-compact" data-prefix="${prefix}">
                 ${linkBadge}
-                ${lockedNotice}
+                ${_rejectedNotice(opts.rejected, prospect)}
                 <div class="form-section">
                 <h4>✅ Outcome</h4>
                 <div class="form-group" style="margin-bottom:4px;">
@@ -2941,6 +2997,7 @@ My raw notes:
                 </div>
                 </div>
                 <div id="${prefix}-closing-fields" style="display:${isClosingChecked ? 'block' : 'none'};">
+                    ${earlierSaleNotice}
                     ${!readOnly && a.prospect_id ? `
                     <div style="margin:0 0 10px;padding:10px 12px;background:linear-gradient(135deg,#fef3c7 0%,#fde68a 100%);border:2px dashed #f59e0b;border-radius:10px;">
                         <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px;">
@@ -2964,9 +3021,9 @@ My raw notes:
                             <input type="file" id="${prefix}-order-form-camera" accept="image/jpeg,image/png,image/webp" capture="environment" style="display:none;" onchange="(async()=>{ try{ await app.handleOrderFormFile(this,'${prefix}',${a.prospect_id},${a.id}); }catch(e){ console.error(e); } })()">
                             <input type="file" id="${prefix}-order-form-file" accept="image/jpeg,image/png,image/webp" style="display:none;" onchange="(async()=>{ try{ await app.handleOrderFormFile(this,'${prefix}',${a.prospect_id},${a.id}); }catch(e){ console.error(e); } })()">
                         </div>
-                        <div id="${prefix}-order-form-thumbs" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;"></div>
+                        <div id="${prefix}-order-form-thumbs" data-invoice-file="${escapeHtml(cr.invoice_file || '')}" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;"></div>
                         <div id="${prefix}-order-form-status" style="margin-top:6px;"></div>
-                        <img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="" style="display:none;" onload="window.app && app.loadOrderFormThumbnails && app.loadOrderFormThumbnails('${prefix}',${a.prospect_id})">
+                        ${opts.newSale ? '' : `<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="" style="display:none;" onload="window.app && app.loadOrderFormThumbnails && app.loadOrderFormThumbnails('${prefix}',${a.prospect_id},${a.id})">`}
                     </div>
                     ` : ''}
                     ${customerInfoSection}
@@ -4122,15 +4179,21 @@ My raw notes:
         try { window._resolveAttachmentImages && window._resolveAttachmentImages(item); } catch (_) {}
     };
 
-    const loadOrderFormThumbnails = async (prefix, prospectId) => {
+    // Only this appointment's photos: another sale's order form must not sit in this
+    // form, where its ✕ would delete that sale's photo. The sale's own invoice file
+    // counts too, for photos from before they were tagged with an appointment.
+    const loadOrderFormThumbnails = async (prefix, prospectId, activityId) => {
         if (!prospectId) return;
         const thumbWrap = document.getElementById(`${prefix}-order-form-thumbs`);
         if (!thumbWrap) return;
+        const invoiceFile = thumbWrap.dataset?.invoiceFile || '';
         try {
             const rows = await AppDataStore.query('prospect_attachments', { prospect_id: prospectId, attachment_type: 'order_form' });
             thumbWrap.innerHTML = '';
             (rows || []).forEach(row => {
                 const meta = row.metadata || {};
+                if (activityId != null && String(meta.activity_id ?? '') !== String(activityId)
+                    && !(invoiceFile && row.file_url === invoiceFile)) return;
                 _renderOrderFormThumb({
                     prefix,
                     photoUrl: row.file_url,
@@ -4171,6 +4234,10 @@ My raw notes:
             return a === want || a == null || a === '';
         });
     };
+    // The photos on screen, read at save time: a second sale on the same appointment
+    // must take its own photo as its invoice, not the first sale's.
+    const orderFormThumbFiles = (prefix) => Array.from(document.getElementById(`${prefix}-order-form-thumbs`)?.children || [])
+        .map(el => el.getAttribute('data-photo')).filter(Boolean);
 
     // Standard Functions page — Level 1 only. Shows a read-only preview of
     // each reusable block so admins can see the canonical field set that
@@ -8488,6 +8555,7 @@ My raw notes:
         removeMinutesPendingPhoto,
         getMinutesPendingPhotos,
         buildMeetingOutcomeBlock,
+        buildMeetingSalesBlock,
         collectMeetingOutcomeData,
         gatherContactPrefill,
         readContactSources,
@@ -8514,6 +8582,7 @@ My raw notes:
         loadOrderFormThumbnails,
         removeOrderFormAttachment,
         hasOrderFormPhoto,
+        orderFormThumbFiles,
         showStandardFunctionsView,
         updateActivityForm,
         calculateDuration,

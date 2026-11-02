@@ -125,28 +125,34 @@
             { label: 'Save Order Date & Approve', type: 'primary', action: `(async () => { await app.saveOrderDateAndApprove('${kind}', '${String(id).replace(/[^0-9]/g, '')}'); })()` },
         ]);
     };
-    // Write the order date onto every copy the approval paths read (the prospect's
-    // live closing_record + its pending sale/conversion queue snapshots), then retry.
+    // Write the order date onto every copy of THIS sale the approval paths read (the
+    // prospect's live closing_record + its pending queue snapshots), then retry. A
+    // second sale can be queued on the same prospect: its copies keep their own date.
     const saveOrderDateAndApprove = async (kind, id) => {
         if (!(await _canApprove())) return UI.toast.error('Not permitted');
         const od = document.getElementById('apr-order-date')?.value || '';
         if (!_ISO_DAY.test(od)) return UI.toast.error('Please pick the Order Date');
         try {
             let prospectId = id;
+            let sale = null;
             if (kind === 'queue') {
                 const entry = await AppDataStore.getById('approval_queue', id);
                 if (!entry) return UI.toast.error('Entry not found');
                 prospectId = entry.prospect_id;
+                sale = entry.snapshot_after;
                 await AppDataStore.update('approval_queue', id, { snapshot_after: { ...(entry.snapshot_after || {}), order_date: od } });
             }
             if (prospectId != null) {
                 const prospect = await AppDataStore.getById('prospects', prospectId);
-                if (prospect?.closing_record && typeof prospect.closing_record === 'object') {
-                    await AppDataStore.update('prospects', prospectId, { closing_record: { ...prospect.closing_record, order_date: od } });
+                const slot = prospect?.closing_record;
+                const target = sale || slot;
+                if (slot && typeof slot === 'object' && window._dataHelpers.queueRowIsSlotSale(slot, target)) {
+                    await AppDataStore.update('prospects', prospectId, { closing_record: { ...slot, order_date: od } });
                 }
                 const pend = (await AppDataStore.query('approval_queue', { prospect_id: prospectId }).catch(() => [])) || [];
                 for (const q of pend) {
                     if (q.status !== 'pending' || !_APPROVER_TYPES.has(q.approval_type) || String(q.id) === String(id)) continue;
+                    if (q.approval_type === 'new_sale' && !window._dataHelpers.queueRowIsSlotSale(target, q.snapshot_after)) continue;
                     if (q.snapshot_after && typeof q.snapshot_after === 'object') {
                         await AppDataStore.update('approval_queue', q.id, { snapshot_after: { ...q.snapshot_after, order_date: od } });
                     }
@@ -417,14 +423,40 @@ const approveQueueEntry = async (entryId) => {
             }
         }
     } else if (entry.approval_type === 'new_sale') {
-        let prospect = await AppDataStore.getById('prospects', entry.prospect_id);
+        let prospect = await _fullProspectRow(await AppDataStore.getById('prospects', entry.prospect_id));
+        // A prospect has one closing slot. A second sale waits here in the queue with
+        // its own copy, so every step below acts on THIS sale, never just "the slot".
+        const _thisSale = entry.snapshot_after || {};
+        const _inSlot = window._dataHelpers.queueRowIsSlotSale(prospect?.closing_record, _thisSale);
+        const _notCustomer = !!prospect && prospect.status !== 'converted' && prospect.conversion_status !== 'approved';
+        // Queued sale, client not a customer yet. The customer is created from the first
+        // sale, so that goes first: the conversion below would book the OTHER sale and
+        // close this row unbooked. With the slot clear, this sale converts on its own
+        // when it qualifies; a smaller one is archived below, like any small first sale.
+        if (_notCustomer && !_inSlot) {
+            if (prospect.closing_record?.status === 'submitted') {
+                UI.toast.error('Approve the earlier sale for this client first. This one is queued behind it.');
+                return;
+            }
+            if ((parseFloat(_thisSale.sale_amount) || 0) >= 2000) {
+                await approveProspectConversion(entry.prospect_id, { sale: _thisSale });
+                prospect = await AppDataStore.getById('prospects', entry.prospect_id);
+                if (prospect?.status !== 'converted') return; // conversion failed — it already showed the error
+                await AppDataStore.update('approval_queue', entryId, { status: 'approved', reviewed_by: _state.cu?.id, reviewed_at: now });
+                UI.hideModal();
+                UI.toast.success('Approved — customer created and sale recorded.');
+                await renderApprovalQueue();
+                await (window.app.renderCustomersTable || (async () => {}))();
+                return;
+            }
+        }
         // First sale of a prospect who is not a customer yet: the sale is booked by
         // the paired conversion. Approving this row on its own used to archive the
         // closing record WITHOUT booking it — if the conversion was approved after
         // that, it found no closing record and the sale was lost. So approve the
         // conversion here (it books the sale and archives the record), then close
         // this row.
-        if (prospect && prospect.status !== 'converted' && prospect.conversion_status !== 'approved') {
+        if (_notCustomer && _inSlot) {
             let pendingConv = null;
             try {
                 const rows = await AppDataStore.query('approval_queue', { prospect_id: entry.prospect_id });
@@ -520,12 +552,23 @@ const approveQueueEntry = async (entryId) => {
                 }
             }
         }
-        if (prospect?.closing_record?.status === 'submitted') {
+        const existingHistory = Array.isArray(prospect?.closing_records_history) ? prospect.closing_records_history : [];
+        if (!_inSlot) {
+            // Queued behind the slot: this row is the only copy, so it goes straight to
+            // history and the slot stays as it is. Skipped when the sale is already there
+            // (its slot copy was approved from the DC Closing Record tab).
+            if (prospect && !existingHistory.some(h => window._dataHelpers.isSameSale(h, _thisSale))) {
+                const { prospect_name: _pn, ...sale } = _thisSale;
+                await AppDataStore.update('prospects', entry.prospect_id, {
+                    closing_records_history: [...existingHistory, { ...sale, status: 'approved', approved_at: now,
+                        credited_agent_id: sale.credited_agent_id ?? prospect.responsible_agent_id ?? null }]
+                });
+            }
+        } else if (prospect?.closing_record?.status === 'submitted') {
             // Freeze who was credited, so the L1 Purchases History ledger stops
             // reading a live owner (parity with purchases.agent_id).
             const approvedCr = { ...prospect.closing_record, status: 'approved', approved_at: now,
                 credited_agent_id: prospect.closing_record.credited_agent_id ?? prospect.responsible_agent_id ?? null };
-            const existingHistory = Array.isArray(prospect.closing_records_history) ? prospect.closing_records_history : [];
             await AppDataStore.update('prospects', entry.prospect_id, {
                 closing_record: null,
                 closing_records_history: [...existingHistory, approvedCr]
@@ -605,8 +648,10 @@ const confirmRejectQueueEntry = async (entryId) => {
     }
 
     if (entry.approval_type === 'new_sale') {
-        const prospect = await AppDataStore.getById('prospects', entry.prospect_id);
-        if (prospect?.closing_record?.status === 'submitted') {
+        const prospect = await _fullProspectRow(await AppDataStore.getById('prospects', entry.prospect_id));
+        // A queued sale's row is the sale: rejecting it must not send the OTHER sale
+        // in the slot back to draft.
+        if (prospect?.closing_record?.status === 'submitted' && window._dataHelpers.queueRowIsSlotSale(prospect.closing_record, entry.snapshot_after)) {
             await AppDataStore.update('prospects', entry.prospect_id, {
                 closing_record: { ...prospect.closing_record, status: 'draft', rejected_at: new Date().toISOString(), reject_reason: reason }
             });
@@ -631,7 +676,7 @@ const approveClosingRecord = async (prospectId) => {
     // not be able to self-approve their own sale by calling app.approveClosingRecord
     // directly. The UI only renders the approve control at L<=4.
     if (!(await _canApprove())) return UI.toast.error('Not permitted');
-    const prospect = await AppDataStore.getById('prospects', prospectId);
+    const prospect = await _fullProspectRow(await AppDataStore.getById('prospects', prospectId));
     if (!prospect?.closing_record) return UI.toast.error('No closing record found');
     if (_needsOrderDate(prospect.closing_record)) return _askOrderDate('closing', prospectId, prospect.closing_record);
     const isAlreadyConverted = prospect.status === 'converted' || prospect.conversion_status === 'approved';
@@ -818,15 +863,17 @@ const showConversionApprovalModal = async (prospectId) => {
     ]);
 };
 
-const approveProspectConversion = async (prospectId) => {
+// opts.sale: convert on a sale queued in approval_queue instead of the closing record
+// (its row is the only copy; the slot is left as it is).
+const approveProspectConversion = async (prospectId, opts = {}) => {
     if (!(await _canApprove())) return UI.toast.error('Not permitted');
     // Bug #7 layer 1: synchronous in-flight guard. Set BEFORE the first await so a
     // rapid second invocation (double-click / queue+modal race) is dropped instead
     // of racing to create a duplicate customer.
     // Order Date gate first — before the in-flight lock, so the approver can fix it and retry.
     {
-        const _p0 = await AppDataStore.getById('prospects', prospectId);
-        if (_p0 && _p0.status !== 'converted' && _p0.conversion_status !== 'approved' && _needsOrderDate(_p0.closing_record)) {
+        const _p0 = await _fullProspectRow(await AppDataStore.getById('prospects', prospectId));
+        if (!opts.sale && _p0 && _p0.status !== 'converted' && _p0.conversion_status !== 'approved' && _needsOrderDate(_p0.closing_record)) {
             return _askOrderDate('conversion', prospectId, _p0.closing_record);
         }
     }
@@ -834,7 +881,9 @@ const approveProspectConversion = async (prospectId) => {
     if (_convInFlight.has(_convKey)) return;
     _convInFlight.add(_convKey);
     try {
-    const prospect = await AppDataStore.getById('prospects', prospectId);
+    // Live row, never the cache: a stale copy without the new closing record would
+    // convert with no sale, or leave the record stuck on 'submitted' after approval.
+    const prospect = await _fullProspectRow(await AppDataStore.getById('prospects', prospectId));
     if (!prospect) return;
     // Bug #7 layer 2: persisted already-converted guard. If this prospect already
     // became a customer, do NOT create a second customer / double the lifetime_value.
@@ -843,7 +892,7 @@ const approveProspectConversion = async (prospectId) => {
         UI.hideModal();
         return;
     }
-    const cr = prospect.closing_record;
+    const cr = opts.sale || prospect.closing_record;
     const saleAmount = parseFloat(cr?.sale_amount) || 0;
     const now = new Date().toISOString();
     // Local calendar date (Malaysia UTC+8) — toISOString() gives the UTC day, which is
@@ -867,7 +916,7 @@ const approveProspectConversion = async (prospectId) => {
     if (cr) {
         const existingHistory = Array.isArray(prospect.closing_records_history) ? prospect.closing_records_history : [];
         updatedFields.closing_records_history = [...existingHistory, { ...cr, status: 'approved', approved_at: now }];
-        updatedFields.closing_record = null;
+        if (!opts.sale) updatedFields.closing_record = null;
     }
     await AppDataStore.update('prospects', prospectId, updatedFields);
     _state.phc = null;
@@ -964,8 +1013,10 @@ const approveProspectConversion = async (prospectId) => {
         }
         // The paired new_sale row: its sale was just booked above (from the same
         // closing record), so close it too instead of leaving a dead entry that
-        // re-approving would do nothing with.
-        const pairedSale = (queueRows || []).find(e => e.prospect_id == prospectId && e.approval_type === 'new_sale' && e.status === 'pending');
+        // re-approving would do nothing with. Only THAT sale's row: a sale queued
+        // behind it is still waiting and must stay pending.
+        const pairedSale = (queueRows || []).find(e => e.prospect_id == prospectId && e.approval_type === 'new_sale' && e.status === 'pending'
+            && window._dataHelpers.queueRowIsSlotSale(cr, e.snapshot_after));
         if (pairedSale && saleAmount > 0) {
             await AppDataStore.update('approval_queue', pairedSale.id, {
                 status: 'approved',

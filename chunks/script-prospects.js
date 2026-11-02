@@ -4468,6 +4468,18 @@ const buildClosingSalesLedger = async ({ prospect = null, customer = null, custo
         return m || {};
     };
 
+    // Sales queued behind the closing record exist only in the approval queue until
+    // approved, so list them here or they would look lost. (RLS: approvers + submitter.)
+    let queuedSales = [];
+    if (pid != null) {
+        try {
+            const rows = await AppDataStore.query('approval_queue', { prospect_id: pid, approval_type: 'new_sale', status: 'pending' });
+            const _dh = window._dataHelpers;
+            const done = [prospect?.closing_record, ...(Array.isArray(prospect?.closing_records_history) ? prospect.closing_records_history : [])];
+            queuedSales = (rows || []).map(r => r.snapshot_after).filter(s => _dh.closingHasSale(s) && !done.some(d => _dh.isSameSale(d, s)));
+        } catch (e) { console.warn('[closing ledger] queued-sale fetch failed:', e); }
+    }
+
     // History entries keep their ORIGINAL index — saveClosingHistoryEntry /
     // uploadHistoryInvoice address them by it.
     const history = (Array.isArray(prospect?.closing_records_history) ? prospect.closing_records_history : [])
@@ -4637,7 +4649,12 @@ const buildClosingSalesLedger = async ({ prospect = null, customer = null, custo
                 <span><i class="fas fa-receipt"></i> Sales (${rows.length})</span>
                 ${customerMode && customer ? `<button class="btn primary btn-sm" style="font-size:12px;" onclick="event.stopPropagation();app.openAddPurchaseModal(${customer.id})"><i class="fas fa-plus"></i> Add Purchase</button>` : ''}
             </div>
-            ${rowHtml || `<div style="padding:14px;text-align:center;color:var(--gray-400);font-size:12px;font-style:italic;">No sales recorded yet.</div>`}
+            ${queuedSales.length ? `
+            <div style="padding:8px 12px;background:#eff6ff;border-bottom:1px solid #e5e7eb;font-size:12px;color:#1e40af;">
+                <div style="font-weight:600;margin-bottom:2px;"><i class="fas fa-clock"></i> Waiting for approval (${queuedSales.length})</div>
+                ${queuedSales.map(s => `<div>${[s.product ? escapeHtml(s.product) : '', UI.formatCurrency(parseFloat(s.sale_amount) || 0, { currency: _cur }), s.invoice_number ? 'Invoice ' + escapeHtml(s.invoice_number) : ''].filter(Boolean).join(' · ')}</div>`).join('')}
+            </div>` : ''}
+            ${rowHtml || (queuedSales.length ? '' : `<div style="padding:14px;text-align:center;color:var(--gray-400);font-size:12px;font-style:italic;">No sales recorded yet.</div>`)}
             ${rows.length ? `<div style="padding:8px 12px;display:flex;justify-content:space-between;font-size:12px;background:#fafafa;border-top:1px solid #e5e7eb;"><span style="font-weight:600;color:var(--gray-600);">Total · ${rows.length} sale${rows.length > 1 ? 's' : ''}</span><strong style="color:var(--primary);">${UI.formatCurrency(total, { currency: _cur })}</strong></div>` : ''}
             ${unlinkedHtml}
         </div>`;
