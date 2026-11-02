@@ -100,5 +100,38 @@ eq('snap-nonarray', h.snapshotsDiffer(null, []), true);
   eq('bf-empty', Object.keys(h.customerBackfillPatch({ full_name: 'A' }, { full_name: 'B' })).length, 0);
 }
 
+// Inline files in closing_record / closing_records_history (2026-11-02): the data
+// layer finds every base64 data URL, uploads it, and swaps in the storage path.
+{
+  const jpg = 'data:image/jpeg;base64,' + Buffer.from('JPEGBYTES').toString('base64');
+  const pdf = 'data:application/pdf;base64,' + Buffer.from('%PDF-1.4').toString('base64');
+  const cr = { status: 'approved', invoice_file: 'invoices/1_a.jpg', delivery_proof: jpg,
+    pre2025_purchases: [{ product: 'Ring', attachment_data: pdf }, { product: 'B', attachment_data: null }] };
+  const hist = [{ invoice_file: jpg, n: 3 }, { invoice_file: 'https://x/y.png' }];
+  const found = h.findInlineFiles([cr, hist]);
+  eq('find-count-dedup', found.length, 2);
+  eq('find-jpg', found.includes(jpg), true);
+  eq('find-pdf', found.includes(pdf), true);
+  eq('find-none-paths', h.findInlineFiles({ a: 'invoices/x.jpg', b: ['https://q/data:x'], c: 5, d: null }).length, 0);
+  eq('find-not-text-data', h.findInlineFiles('data:text/plain,hello').length, 0);
+  const swaps = new Map([[jpg, 'closing-files/9_1_inline_1.jpg'], [pdf, 'closing-files/9_2_inline_2.pdf']]);
+  const cr2 = h.swapInlineFiles(cr, swaps);
+  eq('swap-delivery', cr2.delivery_proof, 'closing-files/9_1_inline_1.jpg');
+  eq('swap-nested', cr2.pre2025_purchases[0].attachment_data, 'closing-files/9_2_inline_2.pdf');
+  eq('swap-keeps-path', cr2.invoice_file, 'invoices/1_a.jpg');
+  eq('swap-keeps-null', cr2.pre2025_purchases[1].attachment_data, null);
+  eq('swap-keeps-other', cr2.status, 'approved');
+  eq('swap-copy', cr.delivery_proof, jpg);
+  const hist2 = h.swapInlineFiles(hist, swaps);
+  eq('swap-array', Array.isArray(hist2) && hist2[0].invoice_file === 'closing-files/9_1_inline_1.jpg' && hist2[0].n === 3, true);
+  const d = h.decodeInlineFile(jpg);
+  eq('decode-mime', d.mime, 'image/jpeg');
+  eq('decode-ext', d.ext, '.jpg');
+  eq('decode-bytes', Buffer.from(d.bytes).toString(), 'JPEGBYTES');
+  eq('decode-pdf-ext', h.decodeInlineFile(pdf).ext, '.pdf');
+  eq('decode-jpg-alias', h.decodeInlineFile('data:image/jpg;base64,QQ==').mime, 'image/jpeg');
+  eq('decode-not-dataurl', h.decodeInlineFile('invoices/x.jpg'), null);
+}
+
 console.log(`\ndata-helpers-test: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

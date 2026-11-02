@@ -628,7 +628,48 @@
             }));
     }
 
-    const api = { classifyQueueError, extractUnknownCol, isSchemaError, isAbortError, snapshotsDiffer, buildReferralCounts, parseMeetingMinutes, matchMinutesItems, ringCodeOf, ringAliasesIn, findMinutesProducts, splitMinutePoints, formatMinutePoints, PROSPECT_PROFILE_FIELDS, customerFieldsFromProspect, customerBackfillPatch, closingHasSale, isSameSale, queueRowIsSlotSale, closingBelongsToActivity, meetingOutcomeView, closingSaveRoute, closingsOutsideQueue };
+    // ── Inline files (base64 data: URLs) inside JSON columns ──────────────────
+    // prospects.closing_record / closing_records_history once embedded proof
+    // photos and PDFs as data URLs. Four of them (15 MB, 2026-11-02) made the
+    // whole-table prospects read take 89 s, so every getAll('prospects') timed
+    // out to an empty list. The data layer uses these to move any such string to
+    // Storage and keep only the path.
+    const _INLINE_FILE_RE = /^data:([a-z0-9.+\/-]+);base64,/i;
+    const _INLINE_FILE_EXT = { 'image/jpeg': '.jpg', 'image/jpg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif', 'application/pdf': '.pdf' };
+    // Every distinct data URL string nested anywhere in `value` (objects/arrays).
+    function findInlineFiles(value, out = []) {
+        if (typeof value === 'string') {
+            if (_INLINE_FILE_RE.test(value) && !out.includes(value)) out.push(value);
+        } else if (Array.isArray(value)) {
+            value.forEach(v => findInlineFiles(v, out));
+        } else if (value && typeof value === 'object') {
+            Object.keys(value).forEach(k => findInlineFiles(value[k], out));
+        }
+        return out;
+    }
+    // A copy of `value` with each string that is a key of `swaps` (a Map) replaced.
+    function swapInlineFiles(value, swaps) {
+        if (typeof value === 'string') return swaps.has(value) ? swaps.get(value) : value;
+        if (Array.isArray(value)) return value.map(v => swapInlineFiles(v, swaps));
+        if (value && typeof value === 'object') {
+            const out = {};
+            Object.keys(value).forEach(k => { out[k] = swapInlineFiles(value[k], swaps); });
+            return out;
+        }
+        return value;
+    }
+    // data URL → { mime, ext, bytes: Uint8Array }, or null when it isn't one.
+    function decodeInlineFile(str) {
+        const m = _INLINE_FILE_RE.exec(String(str || ''));
+        if (!m) return null;
+        const mime = m[1].toLowerCase() === 'image/jpg' ? 'image/jpeg' : m[1].toLowerCase();
+        const bin = atob(String(str).slice(m[0].length).replace(/\s+/g, ''));
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        return { mime, ext: _INLINE_FILE_EXT[mime] || '.bin', bytes };
+    }
+
+    const api = { classifyQueueError, extractUnknownCol, isSchemaError, isAbortError, snapshotsDiffer, buildReferralCounts, parseMeetingMinutes, matchMinutesItems, ringCodeOf, ringAliasesIn, findMinutesProducts, splitMinutePoints, formatMinutePoints, PROSPECT_PROFILE_FIELDS, customerFieldsFromProspect, customerBackfillPatch, closingHasSale, isSameSale, queueRowIsSlotSale, closingBelongsToActivity, meetingOutcomeView, closingSaveRoute, closingsOutsideQueue, findInlineFiles, swapInlineFiles, decodeInlineFile };
     // Browser global (loaded before data.js). Also export for Node tests.
     if (typeof window !== 'undefined') window._dataHelpers = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

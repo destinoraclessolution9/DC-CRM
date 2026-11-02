@@ -2670,6 +2670,7 @@ class DataStore {
     }
 
     async update(tableName, id, updates) {
+        updates = await this._offloadInlineClosingFiles(tableName, id, updates);
         let updateData = { ...updates };
         let lastError = null; // remember the final server error to decide throw-vs-queue below
         // Capture pre-update snapshot for audit diff. Best-effort: if the
@@ -4087,6 +4088,48 @@ class DataStore {
             console.warn('[storage] delete exception for', objectPath, e?.message);
             return false;
         }
+    }
+
+    // Upload one closing-record file (invoice, delivery proof, purchase
+    // attachment) to the private `attachments` bucket and return its storage
+    // PATH. closing_record / closing_records_history keep only paths — readers
+    // open them via window._openAttachment (signed URL). Never inline the file
+    // as a data URL: 4 such files (15 MB) once made every whole-table prospects
+    // read time out (2026-11-02). Throws with a readable message on failure.
+    async uploadClosingFile(file, folder, prospectId) {
+        if (!file) throw new Error('No file selected');
+        const sb = window.supabase;
+        if (!sb || !sb.storage) throw new Error('File storage is offline — attach the file again when you are back online.');
+        const safeName = String(file.name || 'file').replace(/[^a-zA-Z0-9._-]/g, '_');
+        const path = `${folder}/${prospectId ? prospectId + '_' : ''}${Date.now()}_${safeName}`;
+        const { error } = await this._timedFetch(
+            sb.storage.from('attachments').upload(path, file, { upsert: false, contentType: file.type || undefined }),
+            45000
+        );
+        if (error) throw new Error('File upload failed: ' + (error.message || error));
+        return path;
+    }
+
+    // Safety net behind uploadClosingFile: a data URL still headed into a
+    // prospect's closing_record / closing_records_history (an old offline
+    // fallback, or a stale cached row spread back over a save) is uploaded and
+    // swapped for its path before the write. Throws if an upload fails, so the
+    // inline file is never written.
+    async _offloadInlineClosingFiles(tableName, id, updates) {
+        const h = window._dataHelpers;
+        if (tableName !== 'prospects' || !updates || !h || !h.findInlineFiles) return updates;
+        const cols = ['closing_record', 'closing_records_history'].filter(c => updates[c] != null);
+        const found = h.findInlineFiles(cols.map(c => updates[c]));
+        if (!found.length) return updates;
+        const swaps = new Map();
+        for (let i = 0; i < found.length; i++) {
+            const f = h.decodeInlineFile(found[i]);
+            const file = new File([f.bytes], `inline_${i + 1}${f.ext}`, { type: f.mime });
+            swaps.set(found[i], await this.uploadClosingFile(file, 'closing-files', id));
+        }
+        const out = { ...updates };
+        cols.forEach(c => { out[c] = h.swapInlineFiles(updates[c], swaps); });
+        return out;
     }
 
     // Given a public URL produced by `getPublicUrl`, extract the object path

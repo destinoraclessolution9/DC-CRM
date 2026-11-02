@@ -4119,8 +4119,8 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
                     </div>
                     <div style="margin-bottom:10px;">
                         <label style="font-size:11px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Delivery Proof / Photo Attachment</label>
-                        ${d.delivery_proof ? `<div style="margin-bottom:5px;"><a href="${safeUrl(d.delivery_proof)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> ${escapeHtml(d.delivery_proof_name||'View proof')}</a> <span style="color:var(--gray-400);font-size:11px;">(upload new to replace)</span></div>` : ''}
-                        <input type="file" id="cr-active-proof-${prospect.id}" accept="image/*,application/pdf" style="font-size:11px;width:100%;" onchange="(function(el){var f=el.files[0];if(!f)return;var r=new FileReader();r.onload=function(e){el.dataset.b64=e.target.result;el.dataset.fname=f.name;};r.readAsDataURL(f);})(this)">
+                        ${d.delivery_proof ? `<div style="margin-bottom:5px;">${invoiceLink(d.delivery_proof, `<i class="fas fa-paperclip"></i> ${escapeHtml(d.delivery_proof_name||'View proof')}`, 'color:var(--primary);font-size:12px;')} <span style="color:var(--gray-400);font-size:11px;">(upload new to replace)</span></div>` : ''}
+                        <input type="file" id="cr-active-proof-${prospect.id}" accept="image/*,application/pdf" style="font-size:11px;width:100%;">
                     </div>
                     <div style="margin-bottom:10px;">
                         <label style="font-size:11px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Remarks</label>
@@ -4586,8 +4586,8 @@ const buildClosingSalesLedger = async ({ prospect = null, customer = null, custo
             </div>
             <div style="margin-bottom:8px;">
                 <label style="font-size:11px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Delivery Proof Attachment</label>
-                ${h.delivery_proof ? `<div style="margin-bottom:4px;"><a href="${safeUrl(h.delivery_proof)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);font-size:12px;"><i class="fas fa-paperclip"></i> ${escapeHtml(h.delivery_proof_name||'View proof')}</a> <span style="color:var(--gray-400);font-size:11px;">(upload new to replace)</span></div>` : ''}
-                <input type="file" id="crh-proof-${pid}-${hi}" accept="image/*,application/pdf" style="font-size:11px;width:100%;" onchange="(function(el){var f=el.files[0];if(!f)return;var r=new FileReader();r.onload=function(e){el.dataset.b64=e.target.result;el.dataset.fname=f.name;};r.readAsDataURL(f);})(this)">
+                ${h.delivery_proof ? `<div style="margin-bottom:4px;">${invoiceLink(h.delivery_proof, `<i class="fas fa-paperclip"></i> ${escapeHtml(h.delivery_proof_name||'View proof')}`, 'color:var(--primary);font-size:12px;')} <span style="color:var(--gray-400);font-size:11px;">(upload new to replace)</span></div>` : ''}
+                <input type="file" id="crh-proof-${pid}-${hi}" accept="image/*,application/pdf" style="font-size:11px;width:100%;">
             </div>
             <div style="margin-bottom:8px;">
                 <label style="font-size:11px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Remarks</label>
@@ -5119,6 +5119,17 @@ const compressImageFile = (file) => new Promise((resolve, reject) => {
     };
     reader.readAsDataURL(file);
 });
+
+// Closing-record files (delivery proofs, purchase attachments) go to Storage;
+// the record keeps only the path. Phone photos are shrunk first — the
+// attachments bucket refuses files over 5 MB.
+const _uploadClosingProof = async (file, folder, prospectId) => {
+    let f = file;
+    if (/^image\//.test(file.type || '') && file.size > 1024 * 1024) {
+        try { f = await compressImageFile(file); } catch (_) { /* upload the original */ }
+    }
+    return AppDataStore.uploadClosingFile(f, folder, prospectId);
+};
 
 const saveActivityPhoto = async (activityId) => {
     const input = document.getElementById('activity-photo-upload');
@@ -6060,27 +6071,10 @@ const gatherClosingFormData = async (existingCr = {}) => {
     if (file && file.size > 8 * 1024 * 1024) {
         throw new Error('Invoice file too large (max 8 MB).');
     } else if (file) {
-        const sb = window.supabase || window.supabaseClient;
-        if (sb && sb.storage) {
-            const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-            const path = `invoices/${Date.now()}_${safeName}`;
-            const { error: upErr } = await sb.storage.from('attachments').upload(path, file, { upsert: false, contentType: file.type });
-            if (upErr) throw new Error('Invoice upload failed: ' + upErr.message);
-            // C2 (audit): store the storage PATH, not a permanent public URL.
-            invoice_file = path;
-        } else if (file.size > 512 * 1024) {
-            // M6 (audit): don't embed a multi-MB data-URI into closing_record JSONB.
-            throw new Error('Storage offline — invoice too large to save. Re-attach when back online.');
-        } else {
-            // Fallback to Base64 only for small files when storage is unavailable.
-            invoice_file = await new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = e => resolve(e.target.result);
-                reader.onerror = () => reject(reader.error);
-                reader.readAsDataURL(file);
-            });
-        }
-        if (invoice_file) invoice_file_name = file.name;
+        // C2 (audit): store the storage PATH — never a public URL, and never an
+        // embedded data URI (M6; inline files made prospects list reads time out).
+        invoice_file = await _uploadClosingProof(file, 'invoices', null);
+        invoice_file_name = file.name;
     }
 
     return {
@@ -6190,29 +6184,12 @@ const addPrePurchaseRow = async (prospectId) => {
     };
 
     if (file) {
-        const sb = window.supabase || window.supabaseClient;
-        if (sb && sb.storage) {
-            try {
-                const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-                const path = `pre2025_purchases/${prospectId}_${Date.now()}_${safeName}`;
-                const { error: upErr } = await sb.storage.from('attachments').upload(path, file, { upsert: false, contentType: file.type });
-                if (upErr) throw upErr;
-                const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
-                await saveRow(urlData?.publicUrl || null, file.name);
-            } catch (err) {
-                UI.toast.error('Attachment upload failed: ' + (err.message || 'Unknown error'));
-            }
-        } else {
-            const reader = new FileReader();
-            // Surface async-save failures in the base64 fallback (was an unhandled
-            // rejection — user got no error toast and the row silently failed to save).
-            reader.onload = async (e) => {
-                try { await saveRow(e.target.result, file.name); }
-                catch (err) { UI.toast.error('Failed to save record: ' + (err.message || 'Unknown error')); }
-            };
-            reader.onerror = () => UI.toast.error('Could not read the selected file');
-            reader.readAsDataURL(file);
-        }
+        // Storage path only — never an inline data URL (see _uploadClosingProof).
+        let path;
+        try { path = await _uploadClosingProof(file, 'pre2025_purchases', prospectId); }
+        catch (err) { UI.toast.error('Attachment upload failed: ' + (err.message || 'Unknown error')); return; }
+        try { await saveRow(path, file.name); }
+        catch (err) { UI.toast.error('Failed to save record: ' + (err.message || 'Unknown error')); }
     } else {
         await saveRow(null, null);
     }
@@ -6242,28 +6219,11 @@ const addPrePurchaseAttachment = async (prospectId, index, fileInput) => {
         await _refreshCustClosingAfterProspectSave(prospectId);
     };
 
-    const sb = window.supabase || window.supabaseClient;
-    if (sb && sb.storage) {
-        try {
-            const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-            const path = `pre2025_purchases/${prospectId}_${Date.now()}_${safeName}`;
-            const { error: upErr } = await sb.storage.from('attachments').upload(path, file, { upsert: false, contentType: file.type });
-            if (upErr) throw upErr;
-            const { data: urlData } = sb.storage.from('attachments').getPublicUrl(path);
-            await saveAttachment(urlData?.publicUrl || null, file.name);
-        } catch (err) {
-            UI.toast.error('Attachment upload failed: ' + (err.message || 'Unknown error'));
-        }
-    } else {
-        const reader = new FileReader();
-        // Surface async-save failures in the base64 fallback (was an unhandled rejection).
-        reader.onload = async (e) => {
-            try { await saveAttachment(e.target.result, file.name); }
-            catch (err) { UI.toast.error('Failed to save attachment: ' + (err.message || 'Unknown error')); }
-        };
-        reader.onerror = () => UI.toast.error('Could not read the selected file');
-        reader.readAsDataURL(file);
-    }
+    let path;
+    try { path = await _uploadClosingProof(file, 'pre2025_purchases', prospectId); }
+    catch (err) { UI.toast.error('Attachment upload failed: ' + (err.message || 'Unknown error')); return; }
+    try { await saveAttachment(path, file.name); }
+    catch (err) { UI.toast.error('Failed to save attachment: ' + (err.message || 'Unknown error')); }
 };
 
 const deletePrePurchaseRecord = async (prospectId, index) => {
@@ -6426,14 +6386,11 @@ const addProductPurchaseRow = async (prospectId, type) => {
     };
 
     if (file) {
-        const reader = new FileReader();
-        // Surface async-save failures in the base64 fallback (was an unhandled rejection).
-        reader.onload = async (e) => {
-            try { await saveRow(e.target.result, file.name); }
-            catch (err) { UI.toast.error('Failed to save record: ' + (err.message || 'Unknown error')); }
-        };
-        reader.onerror = () => UI.toast.error('Could not read the selected file');
-        reader.readAsDataURL(file);
+        let path;
+        try { path = await _uploadClosingProof(file, _productPurchaseKey(type), prospectId); }
+        catch (err) { UI.toast.error('Attachment upload failed: ' + (err.message || 'Unknown error')); return; }
+        try { await saveRow(path, file.name); }
+        catch (err) { UI.toast.error('Failed to save record: ' + (err.message || 'Unknown error')); }
     } else {
         await saveRow(null, null);
     }
@@ -6442,26 +6399,23 @@ const addProductPurchaseRow = async (prospectId, type) => {
 const addProductPurchaseAttachment = async (prospectId, type, index, fileInput) => {
     const file = fileInput?.files[0];
     if (!file) return;
-    const reader = new FileReader();
-    // Surface async-save failures (was an unhandled rejection with no user feedback).
-    reader.onload = async (e) => {
-        try {
-            const prospect = await AppDataStore.getById('prospects', prospectId);
-            if (!prospect) return UI.toast.error('Prospect not found');
-            const records = _readProductPurchases(prospect, type);
-            if (records[index]) {
-                records[index].attachment_name = file.name;
-                records[index].attachment_data = e.target.result;
-            }
-            await _writeProductPurchases(prospectId, prospect, type, records);
-            UI.toast.success('Attachment saved');
-            await _refreshProductPurchaseTab(prospectId, type);
-        } catch (err) {
-            UI.toast.error('Failed to save attachment: ' + (err.message || 'Unknown error'));
+    let path;
+    try { path = await _uploadClosingProof(file, _productPurchaseKey(type), prospectId); }
+    catch (err) { UI.toast.error('Attachment upload failed: ' + (err.message || 'Unknown error')); return; }
+    try {
+        const prospect = await AppDataStore.getById('prospects', prospectId);
+        if (!prospect) return UI.toast.error('Prospect not found');
+        const records = _readProductPurchases(prospect, type);
+        if (records[index]) {
+            records[index].attachment_name = file.name;
+            records[index].attachment_data = path;
         }
-    };
-    reader.onerror = () => UI.toast.error('Could not read the selected file');
-    reader.readAsDataURL(file);
+        await _writeProductPurchases(prospectId, prospect, type, records);
+        UI.toast.success('Attachment saved');
+        await _refreshProductPurchaseTab(prospectId, type);
+    } catch (err) {
+        UI.toast.error('Failed to save attachment: ' + (err.message || 'Unknown error'));
+    }
 };
 
 const deleteProductPurchaseRecord = async (prospectId, type, index) => {
@@ -7593,53 +7547,14 @@ const uploadHistoryInvoice = async (prospectId, historyIndex) => {
     if (historyIndex < 0 || historyIndex >= history.length) return UI.toast.error('Record not found');
 
     if (file.size > 8 * 1024 * 1024) return UI.toast.error('Invoice file too large (max 8 MB).');
-    let invoice_file = null;
     const invoice_file_name = file.name;
-    try {
-        const sb = window.supabase || window.supabaseClient;
-        if (sb && sb.storage) {
-            const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-            const path = `invoices/${Date.now()}_${safeName}`;
-            const { error: upErr } = await sb.storage
-                .from('attachments')
-                .upload(path, file, { upsert: false, contentType: file.type });
-            if (upErr) throw upErr;
-            // C2 (audit): store the storage PATH, not a permanent public URL.
-            invoice_file = path;
-        }
-        if (!invoice_file && file.size <= 512 * 1024) {
-            // M6 (audit): only small files fall back to an embedded data-URI.
-            invoice_file = await new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = e => resolve(e.target.result);
-                reader.onerror = () => reject(reader.error);
-                reader.readAsDataURL(file);
-            });
-        }
-    } catch (e) {
+    // C2 (audit): store the storage PATH — never a public URL or an embedded data
+    // URI. If the upload fails nothing is written over the existing attachment.
+    let invoice_file;
+    try { invoice_file = await _uploadClosingProof(file, 'invoices', null); }
+    catch (e) {
         console.warn('uploadHistoryInvoice: storage upload failed:', e);
-        if (file.size > 512 * 1024) {
-            UI.toast.error('Upload failed and file is too large to embed offline: ' + (e.message || e));
-            return;
-        }
-        try {
-            invoice_file = await new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = e2 => resolve(e2.target.result);
-                reader.onerror = () => reject(reader.error);
-                reader.readAsDataURL(file);
-            });
-        } catch (e2) {
-            UI.toast.error('Upload failed: ' + (e.message || e));
-            return;
-        }
-    }
-
-    // Storage was offline AND the file was too large to embed (512KB–8MB) — nothing
-    // was saved. Bail with an error instead of writing invoice_file:null over any
-    // existing attachment and (worse) toasting success.
-    if (!invoice_file) {
-        return UI.toast.error('Invoice not saved — storage is offline and the file is too large to store locally. Retry when back online.');
+        return UI.toast.error('Invoice not saved — ' + (e.message || e));
     }
 
     history[historyIndex] = { ...history[historyIndex], invoice_file, invoice_file_name };
@@ -7668,9 +7583,11 @@ const saveClosingHistoryEntry = async (prospectId, index) => {
         case_completed: completedEl?.checked ?? (history[hi].case_completed || false),
         delivery_remarks: remarksEl?.value ?? (history[hi].delivery_remarks || '')
     };
-    if (proofEl?.dataset.b64) {
-        updates.delivery_proof = proofEl.dataset.b64;
-        updates.delivery_proof_name = proofEl.dataset.fname || 'proof';
+    const proofFile = proofEl?.files?.[0];
+    if (proofFile) {
+        try { updates.delivery_proof = await _uploadClosingProof(proofFile, 'delivery-proofs', prospectId); }
+        catch (e) { return UI.toast.error(e.message || 'Proof upload failed'); }
+        updates.delivery_proof_name = proofFile.name;
     }
     history[index] = { ...history[index], ...updates };
     await AppDataStore.update('prospects', prospectId, { closing_records_history: history });
@@ -7692,9 +7609,11 @@ const saveClosingDeliveryStatus = async (prospectId) => {
         case_completed: completedEl?.checked ?? (prospect.closing_record.case_completed || false),
         delivery_remarks: remarksEl?.value ?? (prospect.closing_record.delivery_remarks || '')
     };
-    if (proofEl?.dataset.b64) {
-        updates.delivery_proof = proofEl.dataset.b64;
-        updates.delivery_proof_name = proofEl.dataset.fname || 'proof';
+    const proofFile = proofEl?.files?.[0];
+    if (proofFile) {
+        try { updates.delivery_proof = await _uploadClosingProof(proofFile, 'delivery-proofs', prospectId); }
+        catch (e) { return UI.toast.error(e.message || 'Proof upload failed'); }
+        updates.delivery_proof_name = proofFile.name;
     }
     await AppDataStore.update('prospects', prospectId, {
         closing_record: { ...prospect.closing_record, ...updates }

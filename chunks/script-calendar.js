@@ -6917,35 +6917,13 @@
             UI.toast.error('Invoice file too large (max 8 MB). Save proceeded without it — attach a smaller file.');
         } else if (_moFile) {
             try {
-                const sb = window.supabase || window.supabaseClient;
-                if (sb && sb.storage) {
-                    const safeName = _moFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-                    const path = `invoices/${Date.now()}_${safeName}`;
-                    const { error: upErr } = await _dbRace(sb.storage
-                        .from('attachments')
-                        .upload(path, _moFile, { upsert: false, contentType: _moFile.type }), 30000, 'invoice upload');
-                    if (upErr) throw upErr;
-                    // C2 (audit): persist the storage PATH, not a permanent public URL.
-                    // Render code re-signs it via resolveAttachmentSrc so a private
-                    // bucket keeps working and no public PII URL is stored.
-                    invoice_file = path;
-                } else {
-                    // Storage unavailable — fall back to base64 ONLY for small files.
-                    // M6 (audit): a multi-MB data-URI embedded in the prospect's
-                    // closing_record JSONB bloats every subsequent prospect update and
-                    // poisons the SWR/delta-sync payload — cap it hard.
-                    if (_moFile.size > 512 * 1024) {
-                        UI.toast.error('Storage offline — invoice not saved (file too large to embed). Re-attach when back online.');
-                    } else {
-                        invoice_file = await new Promise((resolve, reject) => {
-                            const reader = new FileReader();
-                            reader.onload = e => resolve(e.target.result);
-                            reader.onerror = () => reject(reader.error);
-                            reader.readAsDataURL(_moFile);
-                        });
-                    }
-                }
-                if (invoice_file) invoice_file_name = _moFile.name;
+                // C2 (audit): persist the storage PATH, not a permanent public URL.
+                // Render code re-signs it via resolveAttachmentSrc so a private
+                // bucket keeps working and no public PII URL is stored. Never an
+                // embedded data URI (M6): inline files in closing_record made every
+                // whole-table prospects read time out (2026-11-02).
+                invoice_file = await _dbRace(AppDataStore.uploadClosingFile(_moFile, 'invoices', null), 30000, 'invoice upload');
+                invoice_file_name = _moFile.name;
             } catch (e) {
                 console.warn('saveMeetingOutcome: invoice upload failed:', e);
                 UI.toast.error('Invoice upload failed: ' + (e.message || e));
