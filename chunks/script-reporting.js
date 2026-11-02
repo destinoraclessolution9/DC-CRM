@@ -275,56 +275,65 @@
     // persisted to localStorage per user (reset automatically when the week rolls
     // over). Rendered by id so it works in BOTH the legacy and React shell paths.
 
-    // Most recent Monday (today if today is Monday, else the Monday just passed) —
-    // i.e. the Monday this report is SENT ON.
-    const _wrMostRecentMonday = () => {
-        const d = new Date();
-        const day = d.getDay();                 // 0 Sun … 6 Sat
-        const back = (day === 0) ? 6 : (day - 1);
-        d.setDate(d.getDate() - back);
-        d.setHours(0, 0, 0, 0);
-        return d;
+    // ── Report weeks (owner 2026-11-02) ───────────────────────────────────────
+    // A week never crosses into the next month: Mon 26 Oct – Sun 1 Nov used to be
+    // "W4 October" and counted 1 Nov in October. Each month is cut into Mon–Sun
+    // blocks that stop at the month's end, and a first or last block shorter than
+    // 4 days joins the block beside it — so every week is 4–10 days, every day sits
+    // in exactly one week, and W1 always holds the 1st (Nov 2026: W1 1–8 … W4 23–30).
+    const _wrMonthWeeks = (y, m) => {
+        const first = new Date(y, m, 1);
+        y = first.getFullYear(); m = first.getMonth(); // m may be -1 / 12
+        const last = new Date(y, m + 1, 0).getDate();
+        const blocks = [];
+        for (let s = 1; s <= last;) {
+            const e = Math.min(s + (7 - new Date(y, m, s).getDay()) % 7, last); // to Sunday
+            blocks.push([s, e]);
+            s = e + 1;
+        }
+        if (blocks[0][1] - blocks[0][0] < 3) blocks.splice(0, 2, [1, blocks[1][1]]);
+        const n = blocks.length;
+        if (blocks[n - 1][1] - blocks[n - 1][0] < 3) blocks.splice(n - 2, 2, [blocks[n - 2][0], last]);
+        const month = first.toLocaleString('en-US', { month: 'long' });
+        return blocks.map(([a, b], i) => ({
+            from: toLocalDateStr(new Date(y, m, a)), to: toLocalDateStr(new Date(y, m, b)),
+            label: `W${i + 1} ${month} ${y}`,
+        }));
     };
-    // The week the report COVERS = the just-finished week (Mon→Sun ending last
-    // Sunday). A report sent on a Monday summarises the week that just ended, so we
-    // step back from the send-Monday: start = send-Monday − 7 days, end = send-Monday
-    // − 1 day (the most recent Sunday). On Mon 2026-06-29 → 2026-06-22 .. 2026-06-28.
-    const _wrReportWeekRange = () => {
-        const sendMon = _wrMostRecentMonday();
-        const monday = new Date(sendMon); monday.setDate(sendMon.getDate() - 7); monday.setHours(0, 0, 0, 0);
-        const sunday = new Date(sendMon); sunday.setDate(sendMon.getDate() - 1); sunday.setHours(0, 0, 0, 0);
-        return { monday, sunday };
+    // The report week holding date `d`.
+    const _wrWeekOf = (d) => {
+        const s = toLocalDateStr(d);
+        return _wrMonthWeeks(d.getFullYear(), d.getMonth()).find(w => w.from <= s && s <= w.to);
     };
-    // "W{n} {Month} {Year}" of the COVERED (just-finished) week — n is the ordinal
-    // week of the month (ceil(date/7)).
-    const _weeklyReportLabel = () => {
-        const { monday: m } = _wrReportWeekRange();
-        const wk = Math.ceil(m.getDate() / 7);
-        const month = m.toLocaleString('en-US', { month: 'long' });
-        return `W${wk} ${month} ${m.getFullYear()}`;
+    // The latest report week that ended before `today` — a Monday send reports it.
+    // A week that ends mid-week (W4 Nov ends Mon 30 Nov) is ready the day after.
+    const _wrLastFinishedWeek = (today = new Date()) => {
+        const t = toLocalDateStr(today);
+        return [..._wrMonthWeeks(today.getFullYear(), today.getMonth() - 1),
+            ..._wrMonthWeeks(today.getFullYear(), today.getMonth())].filter(w => w.to < t).pop();
     };
 
     // ── Report date range (owner 2026-10-15) ──────────────────────────────────
     // The report used to be locked to last week. It now covers any From → To range;
-    // on open it defaults to the last full week (Mon–Sun). Every getter already takes
+    // on open it defaults to the last finished report week. Every getter already takes
     // (from, to), so only the window source changed. _wrGen bumps on each range
     // change so a slow getter from the PREVIOUS range can never write into the new one.
     const _wrDefaultRange = () => {
-        const { monday, sunday } = _wrReportWeekRange();
-        return { from: toLocalDateStr(monday), to: toLocalDateStr(sunday) };
+        const w = _wrLastFinishedWeek();
+        return { from: w.from, to: w.to };
     };
     let _wrRange = null; // { from, to } YYYY-MM-DD — set on first render
     let _wrGen = 0;
     const _wrCurRange = () => _wrRange || _wrDefaultRange();
     const _wrParseDate = (s) => { const [y, m, d] = String(s).split('-').map(Number); return new Date(y, m - 1, d); };
-    // Label follows the dates: an exact Mon–Sun week keeps "W1 October 2026", a whole
+    // Label follows the dates: an exact report week keeps "W1 October 2026", a whole
     // calendar month reads "October 2026", anything else "5 Oct – 18 Oct 2026".
     const _wrLabelFor = (from, to) => {
         const a = _wrParseDate(from), b = _wrParseDate(to);
         const longMon = (d) => d.toLocaleString('en-US', { month: 'long' });
         const short = (d) => `${d.getDate()} ${d.toLocaleString('en-US', { month: 'short' })}`;
-        const days = Math.round((b - a) / 86400000);
-        if (a.getDay() === 1 && days === 6) return `W${Math.ceil(a.getDate() / 7)} ${longMon(a)} ${a.getFullYear()}`;
+        const wk = _wrWeekOf(a);
+        if (wk && wk.from === from && wk.to === to) return wk.label;
         const lastDay = new Date(a.getFullYear(), a.getMonth() + 1, 0).getDate();
         if (a.getDate() === 1 && b.getFullYear() === a.getFullYear() && b.getMonth() === a.getMonth() && b.getDate() === lastDay) {
             return `${longMon(a)} ${a.getFullYear()}`;
@@ -335,16 +344,15 @@
             : `${short(a)} ${a.getFullYear()} – ${short(b)} ${b.getFullYear()}`;
     };
     const _WR_PRESETS = [
-        ['last_week', 'Last week (Mon–Sun)'], ['this_week', 'This week'], ['last_7', 'Last 7 days'],
+        ['last_week', 'Last week'], ['this_week', 'This week'], ['last_7', 'Last 7 days'],
         ['this_month', 'This month'], ['last_month', 'Last month'], ['dashboard', 'Same as dashboard filter'],
     ];
     const _wrPresetRange = (key) => {
         const today = new Date(); today.setHours(0, 0, 0, 0);
         const add = (x, n) => { const y = new Date(x); y.setDate(y.getDate() + n); return y; };
-        const thisMon = add(today, -((today.getDay() + 6) % 7));
         switch (key) {
             case 'last_week':  return _wrDefaultRange();
-            case 'this_week':  return { from: toLocalDateStr(thisMon), to: toLocalDateStr(add(thisMon, 6)) };
+            case 'this_week':  { const w = _wrWeekOf(today); return { from: w.from, to: w.to }; }
             case 'last_7':     return { from: toLocalDateStr(add(today, -6)), to: toLocalDateStr(today) };
             case 'this_month': return { from: toLocalDateStr(new Date(today.getFullYear(), today.getMonth(), 1)), to: toLocalDateStr(new Date(today.getFullYear(), today.getMonth() + 1, 0)) };
             case 'last_month': return { from: toLocalDateStr(new Date(today.getFullYear(), today.getMonth() - 1, 1)), to: toLocalDateStr(new Date(today.getFullYear(), today.getMonth(), 0)) };
@@ -648,6 +656,14 @@
     const _buildWeeklyReportSection = () => {
         const _r = _wrCurRange();
         const week = escapeHtml(_wrLabelFor(_r.from, _r.to));
+        // When this week isn't a plain Mon–Sun (it stops at the month's end or takes
+        // in the 1st), say which dates it covers and when its report is ready.
+        const _now = _wrWeekOf(new Date());
+        const _nf = _wrParseDate(_now.from), _nt = _wrParseDate(_now.to);
+        const _ready = new Date(_nt); _ready.setDate(_nt.getDate() + 1);
+        const _day = (d) => `${d.toLocaleString('en-US', { weekday: 'short' })} ${d.getDate()} ${d.toLocaleString('en-US', { month: 'short' })}`;
+        const weekHint = (_nf.getDay() === 1 && _nt.getDay() === 0) ? '' :
+            `<p class="wr-note wr-hint"><i class="fas fa-circle-info"></i> This week is <strong>${escapeHtml(_now.label)}</strong> (${_nf.getDate()} ${_nf.toLocaleString('en-US', { month: 'short' })} – ${_nt.getDate()} ${_nt.toLocaleString('en-US', { month: 'short' })}), so its report is ready on ${_day(_ready)}.</p>`;
         const sectionsHtml = _WR_SECTIONS.map((sec) => {
             const rows = sec.rows.map(_wrRow).join('');
             let footer = '';
@@ -685,6 +701,7 @@
         .weekly-report-card .wr-labelrow{display:flex;align-items:center;gap:8px;margin:2px 0 6px;font-size:12.5px;font-weight:600;color:var(--gray-600,#4b5563);}
         @media (max-width:640px){.weekly-report-card .wr-range{width:100%;}.weekly-report-card .wr-range label{flex:1 1 45%;}.weekly-report-card .wr-range label .wr-date{flex:1;min-width:0;}.weekly-report-card #wr-preset{flex:1 1 100%;}.weekly-report-card .wr-labelrow .wr-week{flex:1;min-width:0;}}
         .weekly-report-card .wr-note{font-size:12.5px;color:var(--gray-500,#6b7280);margin:0 0 16px;}
+        .weekly-report-card .wr-hint{margin-top:-10px;color:var(--gray-700,#374151);}
         .weekly-report-card .wr-body{display:grid;grid-template-columns:minmax(280px,1fr) minmax(260px,0.9fr);gap:22px;align-items:start;}
         .weekly-report-card .wr-form{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;}
         .weekly-report-card .wr-section{border:1px solid var(--gray-200,#e5e7eb);border-radius:10px;padding:10px 12px;background:var(--gray-50,#f9fafb);}
@@ -724,7 +741,8 @@
                 <input type="text" id="wr-week-label" class="wr-week" value="${week}"
                        aria-label="Report label" oninput="this.dataset.wrLabelManual='1';app.recalcWeeklyReport()">
             </div>
-            <p class="wr-note">Pick the dates (opens on last week, Mon–Sun). Every figure fills in automatically for that range — type over any cell, then <strong>Copy report</strong>. The label follows the dates unless you edit it, the two section <em>Totals</em> add up live, and each date range keeps its own draft.</p>
+            <p class="wr-note">Pick the dates (opens on last week; a week never runs past the month's end). Every figure fills in automatically for that range — type over any cell, then <strong>Copy report</strong>. The label follows the dates unless you edit it, the two section <em>Totals</em> add up live, and each date range keeps its own draft.</p>
+            ${weekHint}
             <div class="wr-body">
                 <div class="wr-form">${sectionsHtml}</div>
                 <div class="wr-preview-wrap">
@@ -872,7 +890,7 @@
     // list in script-activities.js / script-marketing.js (note 汇聚-专案 uses 聚 while
     // the 汇集-* siblings use 集 — both stored exactly as written here).
     //
-    // Window = the COVERED (just-finished) week (Mon→Sun ending last Sunday), matching
+    // Window = the report's From → To (opens on the last finished report week), matching
     // the auto label — NOT the dashboard's active time filter. Scope globals
     // (_visibleUserIds / _currentRoleFilter) are already set by refreshKPIDashboard.
     const _wrAutoFill = async () => {
@@ -1013,7 +1031,7 @@
     const renderWeeklyReport = () => {
         const el = document.getElementById('weekly-monday-report');
         if (!el || el.dataset.built === '1') return;
-        _wrRange = _wrDefaultRange(); // default on open: last full week (owner 2026-10-15)
+        _wrRange = _wrDefaultRange(); // default on open: last finished report week
         _wrGen++;
         el.innerHTML = _buildWeeklyReportSection();
         el.dataset.built = '1';
