@@ -173,7 +173,7 @@ begin
     perform public.new_friend_daily();
     select count(*) into v_n from public.journey_touchpoints where prospect_id = v_p and source_kind = 'new_friend';
     if v_n = 1 then v_pass := v_pass + 1; else v_fail := v_fail + 1; v_msgs := v_msgs || ('one task only ' || v_n); end if;
-    select count(*) into v_n from public.journey_todo_for(v_agent) t where t.prospect_id = v_p;
+    select count(*) into v_n from public.journey_todo_for(v_agent, 500) t where t.prospect_id = v_p;
     if v_n >= 1 then v_pass := v_pass + 1; else v_fail := v_fail + 1; v_msgs := v_msgs || 'not in do today'::text; end if;
 
     -- ── booking again: task closes, row shows booked ──

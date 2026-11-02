@@ -79,7 +79,7 @@ begin
     select count(*) into v_n from public.journey_touchpoints where source_kind = 'new_friend' and prospect_id = v_came;
     if v_n = 1 then v_pass := v_pass + 1; else v_fail := v_fail + 1; v_msgs := v_msgs || ('second run ' || v_n); end if;
     -- the task reaches Do today
-    select count(*) into v_n from public.journey_todo_for(v_agent) t where t.prospect_id = v_came;
+    select count(*) into v_n from public.journey_todo_for(v_agent, 500) t where t.prospect_id = v_came;
     if v_n >= 1 then v_pass := v_pass + 1; else v_fail := v_fail + 1; v_msgs := v_msgs || ('not in do today ' || v_n); end if;
 
     -- ── as the agent ──

@@ -201,7 +201,7 @@ const mobile = read('chunks/script-mobile.js');
             renderCalendar: async () => {}, renderTodayActivities: async () => {},
         };
         vm.createContext(ccBox);
-        vm.runInContext(cc + '\nthis.happened = _cpsHappened; this.open = openCancelCps; this.confirm = confirmCancelCps;', ccBox);
+        vm.runInContext(cc + '\nthis.happened = _cpsHappened; this.ended = _cpsCancelEnded; this.open = openCancelCps; this.confirm = confirmCancelCps;', ccBox);
         check('a fresh booking can be cancelled', ccBox.happened({ meeting_minutes: null }), false);
         check('a booking summary is not proof', ccBox.happened({ summary: 'booked via Ann' }), false);
         for (const [k, v] of [['note_key_points', 'x'], ['note_needs', 'x'], ['note_pain_points', 'x'], ['note_outcome', 'x'], ['next_action', 'x'], ['is_closing', true], ['completed_at', '2026-11-01'], ['meeting_minutes', { advisor: 'x' }]]) {
@@ -232,6 +232,54 @@ const mobile = read('chunks/script-mobile.js');
         check('button on the CPS pop-up', calendar.includes('app.openCancelCps(${activityId})') && calendar.includes('${_cancelCpsBtn}'));
         check('button hidden once it happened', /activity\.activity_type === 'CPS' && activity\.prospect_id && !_cpsHappened\(activity\)/.test(calendar));
         check('both functions registered', /openCancelCps,\s+confirmCancelCps,/.test(calendar));
+
+        // ── 🔒 Cancel lock: 1 Nov → last day 14 Nov, by the Malaysia calendar ──
+        const at = (iso) => vm.runInContext(`Date.now = () => ${Date.parse(iso)}`, ccBox);
+        at('2026-11-14T15:59:00Z');
+        check('last day 23:59 Malaysia: open', ccBox.ended({ activity_date: '2026-11-01' }), null);
+        at('2026-11-14T16:00:00Z');
+        check('next day 00:00 Malaysia: locked', ccBox.ended({ activity_date: '2026-11-01' }), '14 Nov');
+        check('a CPS from day 13 is open', ccBox.ended({ activity_date: '2026-11-02' }), null);
+        check('future CPS open', ccBox.ended({ activity_date: '2026-12-25' }), null);
+        check('date with a time part', ccBox.ended({ activity_date: '2026-11-01T00:00:00' }), '14 Nov');
+        at('2027-02-01T00:00:00Z');
+        check('over a month end', ccBox.ended({ activity_date: '2026-11-25' }), '8 Dec');
+        check('over a year end', ccBox.ended({ activity_date: '2026-12-25' }), '7 Jan');
+        check('no date: not locked', ccBox.ended({ activity_date: null }), null);
+        check('bad date: not locked', ccBox.ended({ activity_date: 'soon' }), null);
+        const greyBtn = calendar.match(/_cpsCancelEndedOn\s*\? `([^`]*)`/)?.[1] || '';
+        check('locked button says why', greyBtn.includes("UI.toast.info('Cancel period ended on ${_cpsCancelEndedOn}')"));
+        check('locked button opens no form', !greyBtn.includes('openCancelCps'));
+        check('locked button is marked disabled', greyBtn.includes('aria-disabled="true"') && greyBtn.includes('not-allowed'));
+
+        // A refused date is not saved on this device either.
+        const sat = slice(calendar, 'const saveActivityTiming = async', 'const openPostMeetupModal = async');
+        const satLog = [];
+        const satBox = {
+            console, JSON,
+            _state: {}, refusal: '',
+            document: {
+                querySelector: () => null,
+                getElementById: (id) => ({ 'edit-timing-date': { value: '2026-12-01' }, 'edit-timing-start': { value: '15:00' }, 'edit-timing-end': { value: '16:00' } }[id] || null),
+            },
+            localStorage: { getItem: () => JSON.stringify([{ id: 9 }]), setItem: (k) => satLog.push('stored ' + k) },
+            AppDataStore: { getById: async () => ({ id: 9 }), update: async () => { throw new Error(satBox.refusal); } },
+            UI: { hideModal: () => satLog.push('hide'), toast: { error: (m) => satLog.push('err ' + m), success: (m) => satLog.push('ok ' + m), warning: (m) => satLog.push('warn ' + m) } },
+        };
+        vm.createContext(satBox);
+        vm.runInContext(sat + '\nthis.save = saveActivityTiming;', satBox);
+        satBox.refusal = "This CPS is past its cancel period, so its date and type can't be changed. Ask an admin to fix a wrong date.";
+        await satBox.save(9);
+        check('refusal shown', satLog.some(l => l.startsWith('err This CPS is past its cancel period')), true);
+        check('refusal keeps the form open', satLog.includes('hide'), false);
+        check('refusal stores nothing', satLog.some(l => l.startsWith('stored')), false);
+        check('refusal claims no save', satLog.some(l => /^(ok|warn)/.test(l)), false);
+        satLog.length = 0;
+        satBox.refusal = 'something else';
+        await satBox.save(9);
+        check('any other failure still keeps the device copy', satLog.some(l => l.startsWith('stored')), true);
+        const activitiesSrc = read('chunks/script-activities.js');
+        check('full Edit form shows a refusal', /try \{\s+await AppDataStore\.update\('activities', activityId, \{ \.\.\.activity, \.\.\.updatedData \}\);\s+\} catch \(e\) \{\s+UI\.toast\.error/.test(activitiesSrc));
 
         console.log(`test-new-friend: ${pass} passed, ${fail} failed`);
         process.exit(fail ? 1 : 0);

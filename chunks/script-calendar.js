@@ -5006,8 +5006,11 @@
                                 ? `<button class="act-action-btn act-btn-doc" onclick="app.uploadCPSForm(${activityId}, ${activity.prospect_id})"><span class="act-icon"><i class="fas fa-file-upload"></i></span><span class="act-label">Upload CPS</span></button>
                                    <button class="act-action-btn act-btn-doc" onclick="app.uploadAPUForm(${activityId}, ${activity.prospect_id})"><span class="act-icon"><i class="fas fa-file-alt"></i></span><span class="act-label">APU</span></button>`
                                 : '';
+                            const _cpsCancelEndedOn = _cpsCancelEnded(activity);
                             const _cancelCpsBtn = (activity.activity_type === 'CPS' && activity.prospect_id && !_cpsHappened(activity))
-                                ? `<button class="act-action-btn act-btn-edit" onclick="app.openCancelCps(${activityId})"><span class="act-icon"><i class="fas fa-ban"></i></span><span class="act-label">Cancel CPS</span></button>`
+                                ? (_cpsCancelEndedOn
+                                    ? `<button class="act-action-btn act-btn-edit" aria-disabled="true" style="opacity:.45;cursor:not-allowed;" onclick="UI.toast.info('Cancel period ended on ${_cpsCancelEndedOn}')"><span class="act-icon"><i class="fas fa-ban"></i></span><span class="act-label">Cancel CPS</span></button>`
+                                    : `<button class="act-action-btn act-btn-edit" onclick="app.openCancelCps(${activityId})"><span class="act-icon"><i class="fas fa-ban"></i></span><span class="act-label">Cancel CPS</span></button>`)
                                 : '';
                             const _outcomeBtn = (_isMeetup && _entityId)
                                 ? `<button class="act-action-btn act-btn-outcome" onclick="(async () => { await app.openMeetingOutcomeModal(${activityId}); })()"><span class="act-icon"><i class="fas fa-clipboard-check"></i></span><span class="act-label">Closing</span></button>`
@@ -6572,6 +6575,8 @@
         try {
             await AppDataStore.update('activities', activityId, updates);
         } catch (e) {
+            // The server refused a locked CPS's date: a copy on this device would only hide that.
+            if (/past its cancel period/.test(e?.message)) { UI.toast.error(e.message); return; }
             // Fallback: update localStorage directly for local-only activities
             const key = 'fs_crm_activities';
             const all = JSON.parse(localStorage.getItem(key) || '[]');
@@ -8349,6 +8354,17 @@
         const mm = a.meeting_minutes || {};
         return !!(a.note_key_points || a.note_needs || a.note_pain_points || a.note_outcome || a.next_action
             || a.is_closing || a.completed_at || mm.background || mm.advisor || mm.reaction);
+    };
+    // 🔒 Cancel lock (2026-11-02, owner): a CPS can be cancelled up to 13 days after
+    // its date (1 Nov → last day 14 Nov), by the Malaysia calendar. cps_cancel checks
+    // the same. Returns the last day once it has passed, else null.
+    const _cpsCancelEnded = (a) => {
+        const last = new Date(`${String(a.activity_date).slice(0, 10)}T00:00:00Z`);
+        if (isNaN(last)) return null;
+        last.setUTCDate(last.getUTCDate() + 13);
+        const today = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+        if (today <= last.toISOString().slice(0, 10)) return null;
+        return last.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
     };
     const openCancelCps = (activityId) => {
         UI.showModal('🚫 Cancel CPS', `

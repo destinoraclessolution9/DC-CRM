@@ -330,6 +330,100 @@ async function main() {
         check('clearing brings everyone back', /Eve Regular/i.test(await listText()));
         await phone.close();
 
+        console.log('\nCPS cancel lock');
+        const myDay = `new Date(Date.now() + (8 - 24 * DAYS) * 3600000).toISOString().slice(0, 10)`;
+        const seedCps = (pg) => pg.evaluate(async (expr) => {
+            const day = (n) => new Function('DAYS', `return ${expr}`)(n);
+            await window._loadChunk('chunks/script-calendar.min.js');
+            window.__db.prospects.push({ id: 520, full_name: 'Lock Person', phone: '0170000000', status: 'active', responsible_agent_id: 1 });
+            window.__db.activities.push(
+                { id: 901, activity_type: 'CPS', prospect_id: 520, activity_date: day(20), start_time: '15:00', end_time: '16:00', lead_agent_id: 1, activity_title: 'CPS locked' },
+                { id: 902, activity_type: 'CPS', prospect_id: 520, activity_date: day(13), start_time: '15:00', end_time: '16:00', lead_agent_id: 1, activity_title: 'CPS last day' },
+                { id: 903, activity_type: 'CPS', prospect_id: 520, activity_date: day(40), start_time: '15:00', end_time: '16:00', lead_agent_id: 1, activity_title: 'CPS real', note_key_points: 'talked' });
+            window.__lockedLast = new Date(`${day(20)}T00:00:00Z`);
+            window.__lockedLast.setUTCDate(window.__lockedLast.getUTCDate() + 13);
+            window.__lockedLast = window.__lockedLast.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+        }, myDay);
+        const cancelBtn = (pg) => pg.evaluate(() => {
+            const b = [...document.querySelectorAll('#global-modal-overlay .act-action-btn')].find(x => x.textContent.includes('Cancel CPS'));
+            return b ? { disabled: b.getAttribute('aria-disabled'), opacity: Number(getComputedStyle(b).opacity), cursor: getComputedStyle(b).cursor } : null;
+        });
+        const tapCancel = (pg) => pg.evaluate(() => {
+            window.__toasts.length = 0;
+            [...document.querySelectorAll('#global-modal-overlay .act-action-btn')].find(x => x.textContent.includes('Cancel CPS')).click();
+        });
+        const toastsNow = (pg) => pg.evaluate(() => window.__toasts.slice());
+        const openDetails = async (pg, id) => { await pg.evaluate((i) => window.app.viewActivityDetails(i), id); await sleep(700); };
+
+        await seedCps(page);
+        await openDetails(page, 901);
+        const locked = await cancelBtn(page);
+        check('locked: button still there', !!locked, locked);
+        check('locked: greyed', locked && locked.disabled === 'true' && locked.opacity < 0.6 && locked.cursor === 'not-allowed', locked);
+        await tapCancel(page);
+        await sleep(300);
+        const lockedLast = await page.evaluate(() => window.__lockedLast);
+        check('locked: tap says the day', (await toastsNow(page)).includes(`info: Cancel period ended on ${lockedLast}`), await toastsNow(page));
+        check('locked: no cancel form', !(await page.evaluate(() => !!document.getElementById('cps-cancel-reason'))));
+        await shot('8-cps-locked');
+        await openDetails(page, 902);
+        const open = await cancelBtn(page);
+        check('day 13: button open', open && open.disabled === null && open.opacity > 0.9, open);
+        await tapCancel(page);
+        await sleep(300);
+        check('day 13: cancel form opens', await page.evaluate(() => !!document.getElementById('cps-cancel-reason')));
+        await openDetails(page, 903);
+        check('with minutes: no button', (await cancelBtn(page)) === null);
+
+        // The server refuses a date change: both Edit forms say so and keep the form.
+        const refusal = "This CPS is past its cancel period, so its date and type can't be changed. Ask an admin to fix a wrong date.";
+        await page.evaluate((m) => {
+            localStorage.setItem('fs_crm_activities', JSON.stringify([{ id: 901, activity_type: 'CPS' }]));
+            window.__update = window.AppDataStore.update;
+            window.AppDataStore.update = async () => { throw new Error(m); };
+            window.__toasts.length = 0;
+        }, refusal);
+        await page.evaluate(() => window.app.editActivityTiming(901));
+        await sleep(500);
+        await page.evaluate(() => { document.getElementById('edit-timing-date').value = '2030-01-01'; });
+        await page.evaluate(() => window.app.saveActivityTiming(901));
+        await sleep(300);
+        check('Edit: refusal shown', (await toastsNow(page)).includes(`error: ${refusal}`), await toastsNow(page));
+        check('Edit: form stays open', await page.evaluate(() => !!document.getElementById('edit-timing-date')));
+        check('Edit: nothing kept on this device', await page.evaluate(() => JSON.parse(localStorage.getItem('fs_crm_activities'))[0].activity_date === undefined));
+        await page.evaluate(() => { window.UI.hideModal(); window.__toasts.length = 0; });
+        await page.evaluate(() => window.app.editActivity(901));
+        await sleep(1200);
+        await page.evaluate(() => window.app.updateActivity(901));
+        await sleep(300);
+        check('full Edit: refusal shown', (await toastsNow(page)).includes(`error: ${refusal}`), await toastsNow(page));
+        check('full Edit: no success message', !(await toastsNow(page)).some(t => /^success/.test(t)), await toastsNow(page));
+        await page.evaluate(() => { window.AppDataStore.update = window.__update; localStorage.removeItem('fs_crm_activities'); window.UI.hideModal(); });
+
+        const lockPhone = await browser.newPage();
+        lockPhone.on('pageerror', e => pageErrors.push(e.message));
+        await lockPhone.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
+        await lockPhone.setRequestInterception(true);
+        lockPhone.on('request', r => (/supabase\.co|vercel|posthog/.test(r.url()) ? r.abort() : r.continue()));
+        await lockPhone.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await sleep(4000);
+        await lockPhone.evaluate(() => {
+            document.getElementById('login-container')?.style.setProperty('display', 'none');
+            const shell = document.getElementById('app-shell');
+            if (shell) { shell.style.display = 'flex'; shell.style.visibility = 'visible'; }
+            window._appState.cu = { id: 1, username: 'admin', full_name: 'System Admin', role: 'Level 1 Super Admin', status: 'active', email: 'admin@example.test' };
+        });
+        await lockPhone.evaluate(installStore);
+        await seedCps(lockPhone);
+        await openDetails(lockPhone, 901);
+        const phoneLocked = await cancelBtn(lockPhone);
+        check('phone: greyed', phoneLocked && phoneLocked.disabled === 'true' && phoneLocked.opacity < 0.6, phoneLocked);
+        await tapCancel(lockPhone);
+        await sleep(300);
+        check('phone: tap says the day', (await toastsNow(lockPhone)).some(t => t.startsWith('info: Cancel period ended on')), await toastsNow(lockPhone));
+        if (SHOTS) await lockPhone.screenshot({ path: path.join(SHOTS, '9-phone-cps-locked.png') });
+        await lockPhone.close();
+
         const real = pageErrors.filter(e => !/supabase|Failed to fetch|fetch/i.test(e));
         check('no page errors', real.length === 0, real.slice(0, 3));
     } finally {

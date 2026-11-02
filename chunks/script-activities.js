@@ -806,7 +806,12 @@
         updatedData.customer_id = null;
     }
 
-    await AppDataStore.update('activities', activityId, { ...activity, ...updatedData });
+    try {
+        await AppDataStore.update('activities', activityId, { ...activity, ...updatedData });
+    } catch (e) {
+        UI.toast.error(e?.message || 'Could not save the activity');
+        return;
+    }
     // Write the edit into the calendar's pinned / hot copies too. Without this,
     // reopening the same activity in this tab showed the PRE-edit values (every
     // field), and saving again silently reverted the first edit.
