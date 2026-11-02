@@ -1,9 +1,9 @@
 /**
  * Phase 0 (#10) — data-layer contract tests.
  *
- * Locks the offline-queue + sync classification logic in data.js — the exact
- * code behind the 2026-06-11 cache-wipe incident and the FK-retry fix. Runs in
- * a sandboxed VM with minimal browser stubs (no live Supabase needed).
+ * Locks the offline-queue + sync classification logic in data.js + data-helpers.js
+ * — the exact code behind the 2026-06-11 cache-wipe incident and the FK-retry fix.
+ * Runs in a sandboxed VM with minimal browser stubs (no live Supabase needed).
  *
  *   node --test tests/contract/
  */
@@ -57,9 +57,13 @@ function loadDataStore() {
     crypto: winTarget.crypto, fetch: winTarget.fetch,
     structuredClone: (x) => JSON.parse(JSON.stringify(x)),
   };
-  const code = readFileSync(fileURLToPath(new URL('../../data.js', import.meta.url)), 'utf8');
   vm.createContext(sandbox);
-  vm.runInContext(code, sandbox, { filename: 'data.js' });
+  // Same order as index.html: data.js delegates its pure classifiers to
+  // window._dataHelpers, which data-helpers.js has to set first.
+  for (const file of ['data-helpers.js', 'data.js']) {
+    const code = readFileSync(fileURLToPath(new URL(`../../${file}`, import.meta.url)), 'utf8');
+    vm.runInContext(code, sandbox, { filename: file });
+  }
   return win.AppDataStore;
 }
 

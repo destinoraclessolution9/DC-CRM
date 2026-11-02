@@ -10,10 +10,12 @@
     "noEmit": true,
     "strict": true,
     "noImplicitAny": false,
+    "useUnknownInCatchVariables": false,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "types": []
   },
+  "$comment_catch": "strict alone types catch (e) as unknown, which rejects a correct `e && e.name` check in plain JS. Un-annotated JS stays any here, same stance as noImplicitAny.",
   "$comment_include": "Scoped to the typed surface. e2e specs are type-checked by Playwright's own runner (it provides @playwright/test + node types); contract tests run under node --test.",
   "include": [
     "types/**/*.d.ts",
