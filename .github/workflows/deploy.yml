@@ -43,6 +43,10 @@ jobs:
     name: Post-deploy smoke (homepage + auth health)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # GitHub refuses the whole file if `secrets` appears in an `if:`, so the Slack
+    # step below tests this env copy instead.
+    env:
+      OPS_SLACK_WEBHOOK: ${{ secrets.OPS_SLACK_WEBHOOK }}
 
     steps:
       # Vercel build + CDN propagate window. A plain sleep is sufficient here —
@@ -103,12 +107,10 @@ jobs:
 
       # ── Alerting on failure ────────────────────────────────────────────────
       # If a Slack/ops webhook secret is configured, POST a one-line alert.
-      # The `secrets.OPS_SLACK_WEBHOOK != ''` guard means this step is simply
+      # The `env.OPS_SLACK_WEBHOOK != ''` guard means this step is simply
       # skipped (not errored) when the secret is absent — see the echo step below.
       - name: Notify Slack on failure
-        if: ${{ failure() && secrets.OPS_SLACK_WEBHOOK != '' }}
-        env:
-          OPS_SLACK_WEBHOOK: ${{ secrets.OPS_SLACK_WEBHOOK }}
+        if: ${{ failure() && env.OPS_SLACK_WEBHOOK != '' }}
         run: |
           set -euo pipefail
           RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
@@ -138,7 +140,9 @@ jobs:
     name: Gated production promotion (dispatch + secret only)
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    if: ${{ github.event_name == 'workflow_dispatch' && secrets.VERCEL_PROD_DEPLOY_HOOK != '' }}
+    # A job-level `if:` can read neither secrets nor env, so the secret is checked
+    # inside the step: with no hook set this job stays a no-op.
+    if: ${{ github.event_name == 'workflow_dispatch' }}
 
     steps:
       - name: Trigger Vercel production deploy hook
@@ -146,6 +150,10 @@ jobs:
           VERCEL_PROD_DEPLOY_HOOK: ${{ secrets.VERCEL_PROD_DEPLOY_HOOK }}
         run: |
           set -euo pipefail
+          if [ -z "$VERCEL_PROD_DEPLOY_HOOK" ]; then
+            echo "VERCEL_PROD_DEPLOY_HOOK is not set — nothing to promote."
+            exit 0
+          fi
           echo "Triggering a GATED production build via the Vercel Deploy Hook."
           echo "(This path is only active when Vercel auto-deploy is OFF — see docs/devops/CICD.md option B.)"
           curl -fsS -X POST "$VERCEL_PROD_DEPLOY_HOOK"

@@ -42,11 +42,25 @@ jobs:
       # Dump BOTH public and auth schemas so agents, MFA devices, and login
       # history can be restored. The auth schema is what makes a restored copy
       # usable — without it the DB loads but nobody can log in.
+      #
+      # Connects through Supabase's session pooler. The direct host
+      # (db.<ref>.supabase.co) has IPv6 records only and GitHub's runners have no
+      # IPv6, so pg_dump could not reach it (weekly failures from 2026-04-26).
+      # Take the pooler host from the Management API
+      # (/v1/projects/{ref}/config/database/pooler), not from memory: aws-0 in this
+      # region answers "tenant/user not found", aws-1 is the real one. Port 5432 is
+      # session mode; pg_dump can't run on transaction mode (6543). PG* variables
+      # instead of a URL, so a password with URL-special characters stays intact.
       - name: Dump Supabase database (public + auth schemas)
         env:
-          DB_URL: postgresql://postgres:${{ secrets.SUPABASE_DB_PASSWORD }}@db.remuwhxvzkzjtgbzqjaa.supabase.co:5432/postgres
+          PGHOST: aws-1-ap-south-1.pooler.supabase.com
+          PGPORT: 5432
+          PGUSER: postgres.remuwhxvzkzjtgbzqjaa
+          PGDATABASE: postgres
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGSSLMODE: require
         run: |
-          pg_dump "$DB_URL" \
+          pg_dump \
             --schema=public \
             --schema=auth \
             --no-owner \
@@ -172,7 +186,20 @@ jobs:
           echo "$GPG_PASSPHRASE" | gpg --batch --yes --passphrase-fd 0 \
             --decrypt "$FILE" > restore.sql
           head -20 restore.sql
-          psql -h localhost -U postgres -d restoretest -v ON_ERROR_STOP=1 -f restore.sql
+          # A dump of two schemas leaves out what Supabase provides around them, and
+          # a plain postgres image has none of it: the roles the RLS policies name,
+          # uuid_generate_v4() in `extensions`, gin_trgm_ops in public. pg_trgm has
+          # to stay in public, so the dump's DROP/CREATE SCHEMA "public" is removed.
+          psql -h localhost -U postgres -d restoretest -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE anon NOLOGIN;
+          CREATE ROLE authenticated NOLOGIN;
+          CREATE SCHEMA extensions;
+          CREATE EXTENSION "uuid-ossp" SCHEMA extensions;
+          CREATE EXTENSION pgcrypto SCHEMA extensions;
+          CREATE EXTENSION pg_trgm SCHEMA public;
+          SQL
+          grep -vxE 'DROP SCHEMA IF EXISTS "public";|CREATE SCHEMA "public";' restore.sql \
+            | psql -h localhost -U postgres -d restoretest -v ON_ERROR_STOP=1
           psql -h localhost -U postgres -d restoretest -c "select count(*) from public.users;"
           psql -h localhost -U postgres -d restoretest -c "select count(*) from auth.users;"
 

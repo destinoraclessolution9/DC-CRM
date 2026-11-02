@@ -38,6 +38,10 @@ jobs:
     name: Probe homepage + Supabase auth
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # GitHub refuses the whole file if `secrets` appears in an `if:`, so the Slack
+    # step below tests this env copy instead.
+    env:
+      OPS_SLACK_WEBHOOK: ${{ secrets.OPS_SLACK_WEBHOOK }}
 
     steps:
       # ── Check A: homepage must answer 200 ──────────────────────────────────
@@ -93,12 +97,10 @@ jobs:
 
       # ── Alerting on failure ────────────────────────────────────────────────
       # If a Slack/ops webhook secret is configured, POST a one-line alert.
-      # The `secrets.OPS_SLACK_WEBHOOK != ''` guard means this step is simply
+      # The `env.OPS_SLACK_WEBHOOK != ''` guard means this step is simply
       # skipped (not errored) when the secret is absent — see the echo step below.
       - name: Notify Slack on failure
-        if: ${{ failure() && secrets.OPS_SLACK_WEBHOOK != '' }}
-        env:
-          OPS_SLACK_WEBHOOK: ${{ secrets.OPS_SLACK_WEBHOOK }}
+        if: ${{ failure() && env.OPS_SLACK_WEBHOOK != '' }}
         run: |
           set -euo pipefail
           RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
