@@ -607,8 +607,28 @@
         if (closingBelongsToActivity(slot, activity)) return _isLockedSale(slot) ? 'locked' : 'slot';
         return 'queue';
     }
+    // Sales waiting in a closing slot that no pending queue row stands for, so the
+    // Manager Approval Queue never listed them (owner 2026-11-02): a manager's own
+    // submit writes no row, July's rows were lost to an RLS bug, and an approval that
+    // read a stale prospect left its slot on 'submitted'. Each item is
+    // { prospect, sale, approvedRow }: approvedRow is set when this sale was already
+    // approved and only the filing is left.
+    function closingsOutsideQueue(prospects, queueRows) {
+        const rows = (queueRows || []).filter(Boolean);
+        const same = (r, p) => String(r.prospect_id) === String(p.id);
+        return (prospects || [])
+            .filter(p => p && p.closing_record && p.closing_record.status === 'submitted')
+            .filter(p => !rows.some(r => r.status === 'pending' && same(r, p) && (r.approval_type === 'new_customer'
+                || (r.approval_type === 'new_sale' && queueRowIsSlotSale(p.closing_record, r.snapshot_after)))))
+            .map(p => ({
+                prospect: p,
+                sale: p.closing_record,
+                approvedRow: rows.find(r => r.status === 'approved' && r.approval_type === 'new_sale' && same(r, p)
+                    && isSameSale(r.snapshot_after, p.closing_record)) || null,
+            }));
+    }
 
-    const api = { classifyQueueError, extractUnknownCol, isSchemaError, isAbortError, snapshotsDiffer, buildReferralCounts, parseMeetingMinutes, matchMinutesItems, ringCodeOf, ringAliasesIn, findMinutesProducts, splitMinutePoints, formatMinutePoints, PROSPECT_PROFILE_FIELDS, customerFieldsFromProspect, customerBackfillPatch, closingHasSale, isSameSale, queueRowIsSlotSale, closingBelongsToActivity, meetingOutcomeView, closingSaveRoute };
+    const api = { classifyQueueError, extractUnknownCol, isSchemaError, isAbortError, snapshotsDiffer, buildReferralCounts, parseMeetingMinutes, matchMinutesItems, ringCodeOf, ringAliasesIn, findMinutesProducts, splitMinutePoints, formatMinutePoints, PROSPECT_PROFILE_FIELDS, customerFieldsFromProspect, customerBackfillPatch, closingHasSale, isSameSale, queueRowIsSlotSale, closingBelongsToActivity, meetingOutcomeView, closingSaveRoute, closingsOutsideQueue };
     // Browser global (loaded before data.js). Also export for Node tests.
     if (typeof window !== 'undefined') window._dataHelpers = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

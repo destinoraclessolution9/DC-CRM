@@ -163,9 +163,44 @@
         }
         UI.hideModal();
         if (kind === 'queue') await approveQueueEntry(id);
-        else if (kind === 'closing') await approveClosingRecord(id);
+        else if (kind === 'closing') { await approveClosingRecord(id); await renderApprovalQueue(); }
         else if (kind === 'conversion') await approveProspectConversion(id);
     };
+
+    // ── Sales waiting outside the queue (owner 2026-11-02) ──────────────────
+    // The queue lists approval_queue rows, but a sale can sit in a closing slot with
+    // no pending row (see closingsOutsideQueue in data-helpers.js); those were only
+    // approvable from the client's DC Closing Record tab. Both lists are read live,
+    // and only for the few submitted slots: a cached copy of either side would show
+    // a sale twice, or one already approved.
+    const _slotsAwaitingApproval = async () => {
+        const sb = window.supabase;
+        if (!sb?.from) return [];
+        const { data: prospects, error } = await sb.from('prospects')
+            .select('id,full_name,status,conversion_status,responsible_agent_id,closing_record')
+            .eq('closing_record->>status', 'submitted').limit(500);
+        if (error || !Array.isArray(prospects) || !prospects.length) return [];
+        const { data: rows, error: qErr } = await sb.from('approval_queue')
+            .select('id,prospect_id,approval_type,status,snapshot_after,reviewed_by,reviewed_at')
+            .in('prospect_id', prospects.map(p => p.id));
+        // Without the rows a queued sale can't be told apart: list none rather than twice.
+        if (qErr || !Array.isArray(rows)) return [];
+        return window._dataHelpers.closingsOutsideQueue(prospects, rows);
+    };
+    const _slotIsCustomer = (w) => w.prospect.status === 'converted' || w.prospect.conversion_status === 'approved';
+    const _slotDay = (iso) => iso ? new Date(iso).toLocaleDateString('en-MY', { day: 'numeric', month: 'short' }) : '';
+    // What the sale is, short enough for the queue's Description column (it cuts
+    // off at about 33 characters), so the part that matters leads.
+    const _slotSaleText = (w) => {
+        const amt = 'RM ' + (parseFloat(w.sale.sale_amount) || 0).toLocaleString();
+        if (w.approvedRow) return `Approved ${_slotDay(w.approvedRow.reviewed_at)}, not filed yet`;
+        return `New sale ${amt}${_slotIsCustomer(w) ? '' : ' + new customer'}`;
+    };
+    const _slotName = (w) => w.prospect.full_name || w.sale.full_name || 'client';
+    const _slotAgentId = (w) => w.sale.submitted_by || w.prospect.responsible_agent_id;
+    // `from` is 'panel' when the action came from the Sales-to-approve pop-up, which
+    // is reopened afterwards (like approveFromSalePanel).
+    const _fromArg = (from) => from === 'panel' ? ", 'panel'" : '';
 
 const renderApprovalQueue = async () => {
     const tbody = document.getElementById('approval-queue-body');
@@ -197,41 +232,60 @@ const renderApprovalQueue = async () => {
         .filter(e => e.approval_type !== 'info_update' || e.customer_id != null || convertedIds.has(String(e.prospect_id)))
         .filter(e => !_isGrantedApproverOnly() || _APPROVER_TYPES.has(e.approval_type))
         .sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at));
+    // Failure-isolated too: the queue rows still show if this read fails.
+    const waiting = await _slotsAwaitingApproval().catch((e) => {
+        console.warn('[renderApprovalQueue] waiting sales not loaded:', e?.message || e);
+        return [];
+    });
 
     const countEl = document.getElementById('approval-queue-count');
-    if (countEl) countEl.textContent = pending.length;
+    if (countEl) countEl.textContent = pending.length + waiting.length;
 
-    if (pending.length === 0) {
+    if (pending.length === 0 && waiting.length === 0) {
         tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:24px; color:var(--gray-400);"><i class="fas fa-check-circle" style="margin-right:6px;"></i>No pending approvals</td></tr>';
         return;
     }
 
-    let html = '';
-    for (const entry of pending) {
-        const agentName = userMap.get(String(entry.submitted_by))?.full_name || 'Unknown';
-        const name = entry.snapshot_after?.full_name || '-';
-        const typeConfig = {
-            new_customer: { label: 'New Customer', icon: 'fa-user-plus', bg: '#dbeafe', color: '#1e40af' },
-            info_update: { label: 'Info Update', icon: 'fa-edit', bg: '#fef3c7', color: '#92400e' },
-            new_sale: { label: 'New Sale', icon: 'fa-dollar-sign', bg: '#d1fae5', color: '#065f46' }
-        };
-        const tc = typeConfig[entry.approval_type] || { label: entry.approval_type, icon: 'fa-question', bg: '#f3f4f6', color: '#374151' };
-        const dateStr = entry.submitted_at ? new Date(entry.submitted_at).toLocaleDateString('en-MY', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
-
-        html += `<tr>
+    const typeConfig = {
+        new_customer: { label: 'New Customer', icon: 'fa-user-plus', bg: '#dbeafe', color: '#1e40af' },
+        info_update: { label: 'Info Update', icon: 'fa-edit', bg: '#fef3c7', color: '#92400e' },
+        new_sale: { label: 'New Sale', icon: 'fa-dollar-sign', bg: '#d1fae5', color: '#065f46' }
+    };
+    const dateOf = (iso) => iso ? new Date(iso).toLocaleDateString('en-MY', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
+    const row = ({ type, name, agentId, at, description, actions }) => {
+        const tc = typeConfig[type] || { label: type, icon: 'fa-question', bg: '#f3f4f6', color: '#374151' };
+        return `<tr>
             <td><span style="background:${tc.bg}; color:${tc.color}; padding:3px 10px; border-radius:6px; font-size:12px; font-weight:600; white-space:nowrap;"><i class="fas ${tc.icon}" style="margin-right:4px;"></i>${escapeHtml(tc.label)}</span></td>
             <td><strong>${escapeHtml(name)}</strong></td>
-            <td>${escapeHtml(agentName)}</td>
-            <td style="font-size:12px; white-space:nowrap;">${dateStr}</td>
-            <td style="max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px;">${escapeHtml(entry.description || '-')}</td>
-            <td onclick="event.stopPropagation()">
+            <td>${escapeHtml(userMap.get(String(agentId))?.full_name || 'Unknown')}</td>
+            <td style="font-size:12px; white-space:nowrap;">${dateOf(at)}</td>
+            <td style="max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px;" title="${escapeHtml(description)}">${escapeHtml(description)}</td>
+            <td onclick="event.stopPropagation()">${actions}</td>
+        </tr>`;
+    };
+    const items = pending.map(entry => ({ at: entry.submitted_at, html: row({
+        // A sale queued from the Meeting Outcome carries only prospect_name.
+        type: entry.approval_type, name: entry.snapshot_after?.full_name || entry.snapshot_after?.prospect_name || '-', agentId: entry.submitted_by,
+        at: entry.submitted_at, description: entry.description || '-',
+        actions: `
                 <button class="btn-icon" title="View Details" onclick="event.stopPropagation();app.showApprovalDetail(${entry.id})"><i class="fas fa-eye"></i></button>
                 <button class="btn-icon" title="Approve" style="color:#16a34a;" onclick="event.stopPropagation();app.approveQueueEntry(${entry.id})"><i class="fas fa-check-circle"></i></button>
-                <button class="btn-icon" title="Reject" style="color:#dc2626;" onclick="event.stopPropagation();app.rejectQueueEntry(${entry.id})"><i class="fas fa-times-circle"></i></button>
-            </td>
-        </tr>`;
+                <button class="btn-icon" title="Reject" style="color:#dc2626;" onclick="event.stopPropagation();app.rejectQueueEntry(${entry.id})"><i class="fas fa-times-circle"></i></button>`,
+    }) }));
+    for (const w of waiting) {
+        const pid = String(w.prospect.id).replace(/[^0-9]/g, '');
+        items.push({ at: w.sale.submitted_at, html: row({
+            type: 'new_sale', name: w.prospect.full_name || '-', agentId: _slotAgentId(w),
+            at: w.sale.submitted_at, description: _slotSaleText(w),
+            // An approved sale only needs filing: no Reject, the purchase is already booked.
+            actions: `
+                <button class="btn-icon" title="View Details" onclick="event.stopPropagation();app.showClosingApprovalDetail(${pid})"><i class="fas fa-eye"></i></button>
+                <button class="btn-icon" title="${w.approvedRow ? 'File it (no second purchase is added)' : 'Approve'}" style="color:#16a34a;" onclick="event.stopPropagation();app.approveWaitingClosing(${pid})"><i class="fas fa-check-circle"></i></button>
+                ${w.approvedRow ? '' : `<button class="btn-icon" title="Reject" style="color:#dc2626;" onclick="event.stopPropagation();app.rejectWaitingClosing(${pid})"><i class="fas fa-times-circle"></i></button>`}`,
+        }) });
     }
-    tbody.innerHTML = html;
+    items.sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
+    tbody.innerHTML = items.map(i => i.html).join('');
     } catch (e) {
         console.warn('[renderApprovalQueue] non-fatal — approval queue load failed:', e?.message || e);
         try { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--gray-400);">Approval queue temporarily unavailable — refresh to retry</td></tr>'; } catch (_) { /* intentional: even the fallback DOM write failed — nothing more to do */ }
@@ -678,7 +732,7 @@ const approveClosingRecord = async (prospectId) => {
     if (!(await _canApprove())) return UI.toast.error('Not permitted');
     const prospect = await _fullProspectRow(await AppDataStore.getById('prospects', prospectId));
     if (!prospect?.closing_record) return UI.toast.error('No closing record found');
-    if (_needsOrderDate(prospect.closing_record)) return _askOrderDate('closing', prospectId, prospect.closing_record);
+    if (_needsOrderDate(prospect.closing_record)) { _askOrderDate('closing', prospectId, prospect.closing_record); return 'needs-order-date'; }
     const isAlreadyConverted = prospect.status === 'converted' || prospect.conversion_status === 'approved';
     if (isAlreadyConverted) {
         // In-flight guard (audit data-integrity): this additional-sale branch creates a
@@ -767,22 +821,26 @@ const approveClosingRecord = async (prospectId) => {
     await (window.app._refreshCustClosingAfterProspectSave || (async () => {}))(prospectId);
 };
 
-const rejectClosingRecord = async (prospectId) => {
+// opts.reason: shown to the agent on the sale they get back (the Meeting Outcome form).
+const rejectClosingRecord = async (prospectId, opts = {}) => {
     // Authz (audit security-authz): manager-only — mirrors approveClosingRecord. This
     // mutates a teammate's prospect (closing_record back to 'draft' + rejected_at), and
     // the handler lives on window.app where RLS does not stop a same-team write, so an
     // L5 team leader (never shown reject controls) could bounce a sale from the console.
     if (!(await _canApprove())) return UI.toast.error('Not permitted');
-    const prospect = await AppDataStore.getById('prospects', prospectId);
+    // Live row: a cached copy could send back a sale someone approved meanwhile.
+    const prospect = await _fullProspectRow(await AppDataStore.getById('prospects', prospectId));
     if (!prospect?.closing_record) return UI.toast.error('No closing record found');
     const cr = prospect.closing_record;
+    if (cr.status !== 'submitted') return UI.toast.error('This sale is no longer waiting for approval.');
     await AppDataStore.update('prospects', prospectId, {
-        closing_record: { ...cr, status: 'draft', rejected_at: new Date().toISOString() }
+        closing_record: { ...cr, status: 'draft', rejected_at: new Date().toISOString(), reject_reason: opts.reason || '' }
     });
     UI.toast.success('Record sent back to agent for revision');
     const bodyEl = document.getElementById(`acc-body-closing-${prospectId}`);
     if (bodyEl) await window.app.switchProspectTab('closing', prospectId, null, bodyEl);
     await (window.app._refreshCustClosingAfterProspectSave || (async () => {}))(prospectId);
+    return true;
 };
 
 const requestProspectConversion = async (prospectId) => {
@@ -1117,31 +1175,129 @@ const openSaleApprovals = async () => {
     // conversion row when its sale row is also pending (approving either books it).
     const saleProspects = new Set(pending.filter(e => e.approval_type === 'new_sale').map(e => String(e.prospect_id)));
     const shown = pending.filter(e => e.approval_type === 'new_sale' || !saleProspects.has(String(e.prospect_id)));
-    const card = (e) => {
-        const snap = e.snapshot_after || {};
-        const amt = parseFloat(e.approval_type === 'new_sale' ? snap.sale_amount : snap.closing_record?.sale_amount) || 0;
-        const client = snap.prospect_name || snap.full_name || '-';
-        const agent = userMap.get(String(e.submitted_by))?.full_name || 'Unknown';
-        const when = e.submitted_at ? new Date(e.submitted_at).toLocaleDateString('en-MY', { day: 'numeric', month: 'short' }) : '';
-        const label = e.approval_type === 'new_sale' ? 'Sale' : 'New customer';
-        return `
+    const waiting = await _slotsAwaitingApproval().catch(() => []);
+    const card = ({ client, amt, label, agentId, at, product, details, reject, approve }) => `
             <div style="border:1px solid var(--gray-200,#e5e7eb); border-radius:10px; padding:12px; margin-bottom:10px;">
                 <div style="display:flex; justify-content:space-between; gap:8px; align-items:baseline;">
                     <strong style="font-size:15px;">${escapeHtml(client)}</strong>
                     <strong style="color:#166534; white-space:nowrap;">${amt ? 'RM ' + amt.toLocaleString() : ''}</strong>
                 </div>
-                <div style="font-size:12px; color:var(--gray-500,#6b7280); margin:4px 0 10px;">${escapeHtml(label)} · ${escapeHtml(agent)} · ${escapeHtml(when)}${snap.product ? ' · ' + escapeHtml(snap.product) : ''}</div>
+                <div style="font-size:12px; color:var(--gray-500,#6b7280); margin:4px 0 10px;">${escapeHtml(label)} · ${escapeHtml(userMap.get(String(agentId))?.full_name || 'Unknown')} · ${escapeHtml(_slotDay(at))}${product ? ' · ' + escapeHtml(product) : ''}</div>
                 <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                    <button class="btn secondary" style="flex:1; min-width:84px;" onclick="event.stopPropagation(); app.showApprovalDetail(${e.id})"><i class="fas fa-eye"></i> Details</button>
-                    <button class="btn secondary" style="flex:1; min-width:84px; color:#dc2626;" onclick="event.stopPropagation(); app.rejectQueueEntry(${e.id})"><i class="fas fa-times-circle"></i> Reject</button>
-                    <button class="btn primary" style="flex:1; min-width:84px;" onclick="event.stopPropagation(); (async () => { await app.approveFromSalePanel(${e.id}); })()"><i class="fas fa-check-circle"></i> Approve</button>
+                    <button class="btn secondary" style="flex:1; min-width:84px;" onclick="event.stopPropagation(); ${details}"><i class="fas fa-eye"></i> Details</button>
+                    ${reject ? `<button class="btn secondary" style="flex:1; min-width:84px; color:#dc2626;" onclick="event.stopPropagation(); ${reject}"><i class="fas fa-times-circle"></i> Reject</button>` : ''}
+                    <button class="btn primary" style="flex:1; min-width:84px;" onclick="event.stopPropagation(); (async () => { await ${approve}; })()"><i class="fas fa-check-circle"></i> ${reject ? 'Approve' : 'File it'}</button>
                 </div>
             </div>`;
-    };
-    UI.showModal(`Sales to approve (${shown.length})`, shown.length
-        ? `<div style="max-height:65vh; overflow:auto;">${shown.map(card).join('')}</div>`
+    const items = shown.map(e => {
+        const snap = e.snapshot_after || {};
+        return { at: e.submitted_at, html: card({
+            client: snap.prospect_name || snap.full_name || '-',
+            amt: parseFloat(e.approval_type === 'new_sale' ? snap.sale_amount : snap.closing_record?.sale_amount) || 0,
+            label: e.approval_type === 'new_sale' ? 'Sale' : 'New customer',
+            agentId: e.submitted_by, at: e.submitted_at, product: snap.product,
+            details: `app.showApprovalDetail(${e.id})`, reject: `app.rejectQueueEntry(${e.id})`, approve: `app.approveFromSalePanel(${e.id})`,
+        }) };
+    });
+    for (const w of waiting) {
+        const pid = String(w.prospect.id).replace(/[^0-9]/g, '');
+        items.push({ at: w.sale.submitted_at, html: card({
+            client: w.prospect.full_name || '-', amt: parseFloat(w.sale.sale_amount) || 0,
+            label: w.approvedRow ? `Sale · approved ${_slotDay(w.approvedRow.reviewed_at)}, not filed yet` : (_slotIsCustomer(w) ? 'Sale' : 'Sale + new customer'),
+            agentId: _slotAgentId(w), at: w.sale.submitted_at, product: w.sale.product,
+            details: `app.showClosingApprovalDetail(${pid}, 'panel')`,
+            reject: w.approvedRow ? '' : `app.rejectWaitingClosing(${pid}, 'panel')`,
+            approve: `app.approveWaitingClosing(${pid}, 'panel')`,
+        }) });
+    }
+    items.sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
+    UI.showModal(`Sales to approve (${items.length})`, items.length
+        ? `<div style="max-height:65vh; overflow:auto;">${items.map(i => i.html).join('')}</div>`
         : '<div style="text-align:center; padding:24px; color:var(--gray-400);"><i class="fas fa-check-circle" style="margin-right:6px;"></i>Nothing waiting for approval</div>',
         [{ label: 'Close', type: 'secondary', action: 'UI.hideModal()' }]);
+};
+
+// A sale waiting outside the queue: what it is, and the same Approve / Reject the
+// client's DC Closing Record tab has.
+const showClosingApprovalDetail = async (prospectId, from) => {
+    if (!(await _canApprove())) return UI.toast.error('Not permitted');
+    const w = (await _slotsAwaitingApproval().catch(() => [])).find(x => String(x.prospect.id) === String(prospectId));
+    if (!w) return UI.toast.error('This sale is no longer waiting for approval.');
+    const cr = w.sale;
+    const getAgentName = window.app.getAgentName || (() => Promise.resolve(''));
+    const agentName = await getAgentName(_slotAgentId(w));
+    const banner = w.approvedRow
+        ? `<div style="background:#fef3c7; border:1px solid #fcd34d; border-radius:8px; padding:12px; font-size:13px; color:#92400e;">
+                <i class="fas fa-exclamation-triangle" style="margin-right:6px;"></i>
+                Approved on ${escapeHtml(_slotDay(w.approvedRow.reviewed_at))}${w.approvedRow.reviewed_by ? ' by <strong>' + escapeHtml(await getAgentName(w.approvedRow.reviewed_by)) + '</strong>' : ''} and the purchase is recorded, but the closing record was never filed. <strong>File it</strong> to finish: no second purchase is added.
+            </div>`
+        : `<div style="background:#d1fae5; border:1px solid #6ee7b7; border-radius:8px; padding:12px; font-size:13px; color:#065f46;">
+                <i class="fas fa-dollar-sign" style="margin-right:6px;"></i>
+                Sale submitted by <strong>${escapeHtml(agentName || 'the agent')}</strong> from the DC Closing Record. ${_slotIsCustomer(w) ? 'Approving records the sale on the customer.' : 'Approving creates the customer and records the sale.'}
+            </div>`;
+    const pid = String(w.prospect.id).replace(/[^0-9]/g, '');
+    UI.showModal('Approval Details', `
+        <div style="display:flex; flex-direction:column; gap:14px;">
+            ${banner}
+            <div style="font-size:13px; display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                <div><span style="color:var(--gray-500);">Client:</span> <strong>${escapeHtml(w.prospect.full_name || '-')}</strong></div>
+                <div><span style="color:var(--gray-500);">Product:</span> ${escapeHtml(cr.product || '-')}</div>
+                <div><span style="color:var(--gray-500);">Sale Amount:</span> <strong style="color:#166534;">RM ${(parseFloat(cr.sale_amount) || 0).toLocaleString()}</strong></div>
+                <div><span style="color:var(--gray-500);">Payment:</span> ${escapeHtml(cr.payment_method || '-')}</div>
+                <div><span style="color:var(--gray-500);">Invoice:</span> ${escapeHtml(cr.invoice_number || '-')}</div>
+                <div><span style="color:var(--gray-500);">Order Date:</span> ${escapeHtml(cr.order_date || '-')}</div>
+                <div><span style="color:var(--gray-500);">Collection Date:</span> ${escapeHtml(cr.closing_date || '-')}</div>
+                ${cr.sales_idea ? `<div style="grid-column:1/-1;"><span style="color:var(--gray-500);">Sales Idea:</span> ${escapeHtml(cr.sales_idea)}</div>` : ''}
+            </div>
+            <div style="font-size:12px; color:var(--gray-400); border-top:1px solid var(--gray-100); padding-top:8px;">
+                Submitted: ${cr.submitted_at ? new Date(cr.submitted_at).toLocaleString('en-MY') : '-'} | By: ${escapeHtml(agentName || '-')}
+            </div>
+        </div>
+    `, [
+        ...(w.approvedRow ? [] : [{ label: '<i class="fas fa-times-circle"></i> Reject', type: 'secondary', action: `(async () => { await app.rejectWaitingClosing(${pid}${_fromArg(from)}); })()` }]),
+        { label: `<i class="fas fa-check-circle"></i> ${w.approvedRow ? 'File it' : 'Approve'}`, type: 'primary', action: `(async () => { await app.approveWaitingClosing(${pid}${_fromArg(from)}); })()` }
+    ]);
+};
+
+const approveWaitingClosing = async (prospectId, from) => {
+    const res = await approveClosingRecord(prospectId);
+    // Order Date prompt is showing — leave it up; saving it finishes the approval.
+    if (res === 'needs-order-date') return res;
+    UI.hideModal();
+    await renderApprovalQueue();
+    await (window.app.renderCustomersTable || (async () => {}))();
+    if (from === 'panel') await openSaleApprovals();
+    return res;
+};
+
+const rejectWaitingClosing = async (prospectId, from) => {
+    if (!(await _canApprove())) return UI.toast.error('Not permitted');
+    const w = (await _slotsAwaitingApproval().catch(() => [])).find(x => String(x.prospect.id) === String(prospectId));
+    if (!w || w.approvedRow) return UI.toast.error('This sale is no longer waiting for approval.');
+    const pid = String(w.prospect.id).replace(/[^0-9]/g, '');
+    UI.showModal('Reject Approval', `
+        <div style="display:flex; flex-direction:column; gap:12px;">
+            <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:12px; font-size:13px; color:#991b1b;">
+                <i class="fas fa-exclamation-circle" style="margin-right:6px;"></i>
+                You are rejecting: <strong>${escapeHtml(_slotSaleText(w))} for ${escapeHtml(_slotName(w))}</strong>. It goes back to the agent to fix.
+            </div>
+            <div class="form-group">
+                <label>Reason for rejection</label>
+                <textarea id="reject-reason" class="form-control" rows="3" placeholder="Explain why this is being rejected..." style="width:100%;"></textarea>
+            </div>
+        </div>
+    `, [
+        { label: 'Cancel', type: 'secondary', action: from === 'panel' ? '(async () => { await app.openSaleApprovals(); })()' : 'UI.hideModal()' },
+        { label: '<i class="fas fa-times"></i> Confirm Reject', type: 'primary', action: `(async () => { await app.confirmRejectWaitingClosing(${pid}${_fromArg(from)}); })()` }
+    ]);
+};
+
+const confirmRejectWaitingClosing = async (prospectId, from) => {
+    const reason = document.getElementById('reject-reason')?.value?.trim() || '';
+    if (await rejectClosingRecord(prospectId, { reason }) !== true) return;
+    UI.hideModal();
+    await renderApprovalQueue();
+    if (from === 'panel') await openSaleApprovals();
 };
 
 // Approve from the pop-up, then reopen it on the remaining items.
@@ -1167,5 +1323,9 @@ const approveFromSalePanel = async (entryId) => {
         requestProspectConversion,
         showApprovalDetail,
         showConversionApprovalModal,
+        showClosingApprovalDetail,
+        approveWaitingClosing,
+        rejectWaitingClosing,
+        confirmRejectWaitingClosing,
     });
 })();
